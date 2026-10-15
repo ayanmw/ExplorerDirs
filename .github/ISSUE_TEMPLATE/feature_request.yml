@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest a user workflow or capability
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow and problem
+      description: Describe what you are trying to do and where the current flow breaks.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired result
+    validations:
+      required: true
