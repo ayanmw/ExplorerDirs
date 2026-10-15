@@ -7,6 +7,10 @@ namespace ExplorerDirs.App;
 
 public partial class PaneControl : UserControl
 {
+    // The Details column header is one Shell focus stop; arrow keys move among columns.
+    private const int ColumnHeaderStop = 9;
+    private const int FileStopWithoutHeader = 9;
+    private const int FileStopWithHeader = 10;
     private readonly Stack<TabSettings> _closedTabs = new();
     private readonly Func<ViewState> _newTabView;
 
@@ -54,6 +58,37 @@ public partial class PaneControl : UserControl
     public void GoBack() => Current?.Browser.GoBack();
     public void GoForward() => Current?.Browser.GoForward();
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
+    internal int FocusStopCount => Current?.Browser.HasColumnHeader() == true ? 11 : 10;
+
+    internal int CurrentFocusStop()
+    {
+        UIElement[] controls = [BackButton, ForwardButton, UpButton, RefreshButton,
+            Address, GoButton, NewTabButton, CloseTabButton];
+        for (var index = 0; index < controls.Length; index++)
+            if (controls[index].IsKeyboardFocusWithin) return index;
+        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused) return 8;
+        if (Current?.Browser.HasNativeFocus() == true)
+            return Current.Browser.IsColumnHeaderFocused() ? ColumnHeaderStop : FocusStopCount - 1;
+        return -1;
+    }
+
+    internal bool FocusStop(int stop)
+    {
+        UIElement? target = stop switch
+        {
+            0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
+            4 => Address, 5 => GoButton, 6 => NewTabButton, 7 => CloseTabButton,
+            8 => Tabs.SelectedItem as TabItem,
+            _ => null
+        };
+        if (target is not null) return target.Focus();
+        if (stop == ColumnHeaderStop && FocusStopCount == 11)
+            return Current?.Browser.FocusColumnHeader() == true;
+        if (stop == FileStopWithoutHeader && FocusStopCount == 10 ||
+            stop == FileStopWithHeader && FocusStopCount == 11)
+            return FocusCurrentView();
+        return false;
+    }
     public void FocusAddress()
     {
         Address.Focus();

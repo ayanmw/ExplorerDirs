@@ -2,7 +2,7 @@ namespace ExplorerDirs.App;
 
 internal enum ExplorerShortcut
 {
-    None, Parent, Back, Forward, NextPane, PreviousPane, Address,
+    None, Parent, Back, Forward, NextFocusStop, PreviousFocusStop, Address,
     NewTab, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab,
     Refresh, ToggleMaximize
 }
@@ -17,8 +17,8 @@ internal static class KeyboardShortcuts
         (0x26, 1) => ExplorerShortcut.Parent,        // Alt+Up
         (0x25, 1) => ExplorerShortcut.Back,          // Alt+Left
         (0x27, 1) => ExplorerShortcut.Forward,       // Alt+Right
-        (0x09, 0) => ExplorerShortcut.NextPane,      // Tab
-        (0x09, 4) => ExplorerShortcut.PreviousPane,  // Shift+Tab
+        (0x09, 0) => ExplorerShortcut.NextFocusStop,      // Tab
+        (0x09, 4) => ExplorerShortcut.PreviousFocusStop,  // Shift+Tab
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
         (0x4c, 2) => ExplorerShortcut.Address,       // Ctrl+L
         (0x54, 2) => ExplorerShortcut.NewTab,

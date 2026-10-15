@@ -9,8 +9,9 @@
 - A tab header supports middle-click and left-button double-click to close. Keep at least one tab in each pane.
 - Layout switching stays in the top menu and toolbar; do not add layout choices to file-view or tab-header context menus.
 - Route normal file-view keyboard shortcuts through the hosted Shell view. Keep file operations in Shell interfaces rather than duplicating copy/paste logic in WPF.
-- Keep navigation history independent for each tab by using ExplorerBrowser's travel log. Backspace and Alt+Up open the parent folder; Alt+Left/Right navigate history. Tab and Shift+Tab cycle only visible file panes, while Ctrl+Tab cycles tabs in the active pane. Restore file-view focus after layout changes; preserve address-bar editing shortcuts.
+- Keep navigation history independent for each tab by using ExplorerBrowser's travel log. Backspace and Alt+Up open the parent folder; Alt+Left/Right navigate history. Tab and Shift+Tab traverse each visible pane's navigation buttons, address, selected tab header, Details column header when present, and file items in exact reverse order; then wrap to the next/previous pane. Ctrl+Tab cycles tabs in the active pane. Restore file-view focus after layout changes; preserve address-bar editing shortcuts.
 - File operations and Shell confirmation dialogs must return keyboard focus to the active tab's actual file-content HWND. Do not treat the outer Shell view HWND as the file list, and do not steal focus from an address box, toolbar control, another pane, or another application.
+- After a Shell file operation, verify both the Win32 content focus and the Shell item focus. If Windows leaves no foreground window while this app is still active, reassert this app's foreground focus; never take foreground focus from another application. Keep existing multi-selection when restoring a focused item.
 
 ## Source, development, and releases
 

@@ -5,15 +5,15 @@
         <DockPanel>
             <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="4">
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                    <Button Content="←" ToolTip="后退 (Alt+左箭头)" Click="Back_Click" Width="28"/>
-                    <Button Content="→" ToolTip="前进 (Alt+右箭头)" Click="Forward_Click" Width="28" Margin="2,0,0,0"/>
-                    <Button Content="↑" ToolTip="上级目录 (Backspace / Alt+上箭头)" Click="Up_Click" Width="28" Margin="2,0,0,0"/>
-                    <Button Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
+                    <Button x:Name="BackButton" Content="←" ToolTip="后退 (Alt+左箭头)" Click="Back_Click" Width="28"/>
+                    <Button x:Name="ForwardButton" Content="→" ToolTip="前进 (Alt+右箭头)" Click="Forward_Click" Width="28" Margin="2,0,0,0"/>
+                    <Button x:Name="UpButton" Content="↑" ToolTip="上级目录 (Backspace / Alt+上箭头)" Click="Up_Click" Width="28" Margin="2,0,0,0"/>
+                    <Button x:Name="RefreshButton" Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Content="转到" Click="Go_Click" Margin="4,0,0,0" Padding="8,2"/>
-                    <Button Content="+" ToolTip="新建标签页" Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
-                    <Button Content="×" ToolTip="关闭标签页" Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
+                    <Button x:Name="GoButton" Content="转到" Click="Go_Click" Margin="4,0,0,0" Padding="8,2"/>
+                    <Button x:Name="NewTabButton" Content="+" ToolTip="新建标签页" Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
+                    <Button x:Name="CloseTabButton" Content="×" ToolTip="关闭标签页" Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
                 </StackPanel>
                 <TextBox x:Name="Address" KeyDown="Address_KeyDown" MinWidth="80" Margin="6,0,0,0"
                          VerticalContentAlignment="Center"/>

@@ -19,13 +19,20 @@ try
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
     Check(KeyboardShortcuts.Resolve(0x27, 1) == ExplorerShortcut.Forward, "Alt+Right goes forward");
-    Check(KeyboardShortcuts.Resolve(0x09, 0) == ExplorerShortcut.NextPane &&
-          KeyboardShortcuts.Resolve(0x09, 4) == ExplorerShortcut.PreviousPane,
-          "Tab and Shift+Tab switch panes");
+    Check(KeyboardShortcuts.Resolve(0x09, 0) == ExplorerShortcut.NextFocusStop &&
+          KeyboardShortcuts.Resolve(0x09, 4) == ExplorerShortcut.PreviousFocusStop,
+          "Tab and Shift+Tab traverse pane focus stops");
     Check(KeyboardShortcuts.NextPane(3, 4, false) == 0 &&
           KeyboardShortcuts.NextPane(0, 4, true) == 3 &&
           KeyboardShortcuts.NextPane(0, 1, false) == 0,
           "visible pane focus wraps");
+    var focusStops = new[] { 11, 10, 11, 10 };
+    Check(FocusTraversal.Move(0, 9, focusStops, false) == (0, 10) &&
+          FocusTraversal.Move(0, 10, focusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, focusStops, true) == (0, 10) &&
+          FocusTraversal.Move(0, 0, focusStops, true) == (3, 9) &&
+          FocusTraversal.Move(2, -1, focusStops, true) == (2, 10),
+          "forward and reverse tab order includes Details header and wraps panes");
     Check(KeyboardShortcuts.Resolve(0x08, 2) == ExplorerShortcut.None,
           "Ctrl+Backspace remains available to text controls");
     store.Save(state);

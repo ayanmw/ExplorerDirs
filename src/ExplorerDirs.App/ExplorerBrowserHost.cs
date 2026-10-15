@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -27,6 +28,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private const int ShellPaste = 0x701A;
     private const int ShellUndo = 0x701B;
     private const int ShellSelectAll = 0x7021;
+    private static readonly string? FocusTracePath = Environment.GetEnvironmentVariable("EXPLORER_DIRS_FOCUS_TRACE");
     private IExplorerBrowser? _browser;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
@@ -124,6 +126,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override bool TranslateAcceleratorCore(ref MSG msg, ModifierKeys modifiers)
     {
+        if (FocusTracePath is not null && msg.message is 0x0100 or 0x0104 && IsTraceKey(msg.wParam.ToInt64()))
+            Trace($"translate key={msg.wParam.ToInt64():X} mods={modifiers} focus={FocusClass()} hwnd={GetFocus()} item={FolderFocusState()}");
         if (_browser is null || _viewWindow == IntPtr.Zero ||
             (msg.message != 0x0100 && msg.message != 0x0104))
             return base.TranslateAcceleratorCore(ref msg, modifiers);
@@ -162,7 +166,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 Marshal.StructureToPtr(nativeMessage, pointer, false);
-                if (((IShellView)viewObject).TranslateAccelerator(pointer) == 0)
+                var shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
+                if (FocusTracePath is not null && IsTraceKey(msg.wParam.ToInt64()))
+                    Trace($"shell result={shellResult:X8} focus={FocusClass()} item={FolderFocusState()}");
+                if (shellResult == 0)
                 {
                     QueueFocusRestoreAfterFileKey(msg, modifiers);
                     return true;
@@ -185,6 +192,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (command != 0)
             {
                 SendMessage(_viewWindow, WmCommand, (IntPtr)command, IntPtr.Zero);
+                Trace($"fallback command={command:X} focus={FocusClass()}");
                 QueueFocusRestore();
                 return true;
             }
@@ -206,8 +214,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
         var target = FindContentFocusWindow();
         if (target == IntPtr.Zero) return false;
+        Trace($"focus-view before={FocusClass()} target={target}");
         _focusWhenReady = false;
         var focused = GetFocus();
+        if (focused != IntPtr.Zero && IsChild(_viewWindow, focused) &&
+            WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase))
+            return true; // Shell rename field owns its editing keys and focus.
         if (focused != target && !IsChild(target, focused))
             SetFocus(target);
         var iid = ShellViewId;
@@ -216,8 +228,109 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try { ((IShellView)viewObject).UIActivate(2); } // SVUIA_ACTIVATE_FOCUS
             finally { Marshal.ReleaseComObject(viewObject); }
         }
+        FocusFolderItem();
         focused = GetFocus();
+        Trace($"focus-view after={FocusClass()} hwnd={focused}");
         return focused == target || IsChild(target, focused);
+    }
+
+    public bool HasNativeFocus()
+    {
+        var focused = GetFocus();
+        return focused != IntPtr.Zero && _viewWindow != IntPtr.Zero &&
+            (focused == _viewWindow || IsChild(_viewWindow, focused));
+    }
+
+    public bool HasColumnHeader() => FindColumnHeader() is not null;
+
+    public bool IsColumnHeaderFocused()
+    {
+        if (!HasNativeFocus()) return false;
+        try
+        {
+            var element = AutomationElement.FocusedElement;
+            return element?.Current.ControlType == ControlType.SplitButton &&
+                TreeWalker.ControlViewWalker.GetParent(element)?.Current.ControlType == ControlType.Header;
+        }
+        catch (ElementNotAvailableException) { return false; }
+        catch (COMException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    public bool FocusColumnHeader()
+    {
+        if (!IsVisible) return false;
+        var header = FindColumnHeader();
+        if (header is null) return false;
+        try
+        {
+            header.SetFocus();
+            return IsColumnHeaderFocused();
+        }
+        catch (ElementNotAvailableException) { return false; }
+        catch (COMException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    private AutomationElement? FindColumnHeader()
+    {
+        var content = FindContentFocusWindow();
+        if (content == IntPtr.Zero) return null;
+        try
+        {
+            var root = AutomationElement.FromHandle(content);
+            var group = root.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Header));
+            return group?.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.SplitButton));
+        }
+        catch (ElementNotAvailableException) { return null; }
+        catch (COMException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private void FocusFolderItem()
+    {
+        if (_browser is null) return;
+        try
+        {
+            if (AutomationElement.FocusedElement?.Current.ControlType == ControlType.ListItem)
+                return;
+        }
+        catch (ElementNotAvailableException) { }
+        catch (COMException) { }
+        catch (InvalidOperationException) { }
+        var iid = FolderViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return;
+        try
+        {
+            var view = (IFolderView)viewObject;
+            if (view.GetFocusedItem(out var index) >= 0 && index >= 0)
+            {
+                var hr = view.SelectItem(index, 0x11); // SVSI_SELECT | SVSI_FOCUSED: preserve other selections.
+                if (hr >= 0) FocusSelectedAutomationItem();
+                if (FocusTracePath is not null)
+                    Trace($"focus-item index={index} result={hr:X8} foreground={GetForegroundWindow()} focus={FocusClass()} item={FolderFocusState()}");
+            }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private void FocusSelectedAutomationItem()
+    {
+        var content = FindContentFocusWindow();
+        if (content == IntPtr.Zero) return;
+        try
+        {
+            var root = AutomationElement.FromHandle(content);
+            var selected = root.FindFirst(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
+                new PropertyCondition(SelectionItemPattern.IsSelectedProperty, true)));
+            selected?.SetFocus();
+        }
+        catch (ElementNotAvailableException) { }
+        catch (COMException) { }
+        catch (InvalidOperationException) { }
     }
 
     private IntPtr FindContentFocusWindow()
@@ -257,13 +370,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void RestoreContentFocusIfNeeded()
     {
-        if (MayRestoreFocus?.Invoke() != true || Window.GetWindow(this)?.IsActive != true ||
+        var window = Window.GetWindow(this);
+        if (MayRestoreFocus?.Invoke() != true || window?.IsActive != true ||
             !IsVisible || _viewWindow == IntPtr.Zero)
             return;
+        // Shell file-operation windows can close with no foreground HWND while
+        // WPF still regards this window as active. Reassert only in that gap.
+        if (GetForegroundWindow() == IntPtr.Zero)
+            SetForegroundWindow(new WindowInteropHelper(window).Handle);
         var focused = GetFocus();
         var target = FindContentFocusWindow();
-        if (target != IntPtr.Zero && focused != target && !IsChild(target, focused) &&
-            (focused == IntPtr.Zero || focused == _viewWindow || !IsChild(_viewWindow, focused)))
+        Trace($"restore-check focus={FocusClass()} target={target}");
+        if (target != IntPtr.Zero && !IsColumnHeaderFocused() &&
+            (focused == target || IsChild(target, focused) || focused == IntPtr.Zero ||
+                focused == _viewWindow || !IsChild(_viewWindow, focused)))
             FocusView();
     }
 
@@ -534,6 +654,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         try
         {
+            if (message == 0x0100 && IsTraceKey(wParam.ToInt64()))
+                Trace($"native key={wParam.ToInt64():X} hwnd={hwnd} class={WindowClass(hwnd)} focus={FocusClass()}");
+            if (message is 0x0007 or 0x0008)
+                Trace($"native focus-message={message:X} hwnd={hwnd} class={WindowClass(hwnd)} next={wParam}");
             switch (message)
             {
                 case 0x0007: // WM_SETFOCUS
@@ -641,6 +765,41 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
     }
 
+    private static bool IsTraceKey(long key) => key is 0x09 or 0x25 or 0x26 or 0x27 or 0x28 or 0x43 or 0x56 or 0x2E or 0x0D;
+
+    private static string FocusClass() => WindowClass(GetFocus());
+
+    private string FolderFocusState()
+    {
+        if (_browser is null) return "unavailable";
+        var iid = FolderViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return "no-view";
+        try
+        {
+            var view = (IFolderView)viewObject;
+            var focused = view.GetFocusedItem(out var focusIndex) >= 0 ? focusIndex.ToString() : "none";
+            var marked = view.GetSelectionMarkedItem(out var markedIndex) >= 0 ? markedIndex.ToString() : "none";
+            var selected = view.ItemCount(1, out var count) >= 0 ? count.ToString() : "unknown";
+            return $"focused:{focused},marked:{marked},selected:{selected}";
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private static string WindowClass(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return "none";
+        var name = new StringBuilder(80);
+        GetClassName(hwnd, name, name.Capacity);
+        return name.ToString();
+    }
+
+    private static void Trace(string message)
+    {
+        if (string.IsNullOrEmpty(FocusTracePath)) return;
+        try { File.AppendAllText(FocusTracePath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}"); }
+        catch { /* Diagnostic output must not affect file operations. */ }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
@@ -726,6 +885,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         [PreserveSig] int Item(int index, out IntPtr pidl);
         [PreserveSig] int ItemCount(uint flags, out int count);
         [PreserveSig] int Items(uint flags, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object array);
+        [PreserveSig] int GetSelectionMarkedItem(out int index);
+        [PreserveSig] int GetFocusedItem(out int index);
+        [PreserveSig] int GetItemPosition(IntPtr pidl, IntPtr point);
+        [PreserveSig] int GetSpacing(IntPtr point);
+        [PreserveSig] int GetDefaultSpacing(IntPtr point);
+        [PreserveSig] int GetAutoArrange();
+        [PreserveSig] int SelectItem(int index, uint flags);
     }
 
     [ComImport, Guid("B63EA76D-1F85-456F-A19C-48159EFA858B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -769,6 +935,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr hwnd);
     [DllImport("user32.dll")]

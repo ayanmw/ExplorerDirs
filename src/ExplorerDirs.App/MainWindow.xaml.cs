@@ -228,8 +228,8 @@ public partial class MainWindow : Window
             case ExplorerShortcut.Parent: source.GoParent(); break;
             case ExplorerShortcut.Back: source.GoBack(); break;
             case ExplorerShortcut.Forward: source.GoForward(); break;
-            case ExplorerShortcut.NextPane: FocusRelativePane(false); break;
-            case ExplorerShortcut.PreviousPane: FocusRelativePane(true); break;
+            case ExplorerShortcut.NextFocusStop: MoveFocus(false); break;
+            case ExplorerShortcut.PreviousFocusStop: MoveFocus(true); break;
             case ExplorerShortcut.Address: source.FocusAddress(); break;
             case ExplorerShortcut.NewTab: source.NewTab(); source.FocusCurrentView(); break;
             case ExplorerShortcut.CloseTab: source.CloseCurrentTab(); source.FocusCurrentView(); break;
@@ -245,14 +245,18 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private void FocusRelativePane(bool reverse)
+    private void MoveFocus(bool reverse)
     {
         var count = LayoutPreset.Find(_layout).Slots.Length;
         var index = Array.IndexOf(_panes, ActivePane);
-        var next = KeyboardShortcuts.NextPane(index < 0 ? 0 : index, count, reverse);
-        SetActivePane(_panes[next]);
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => ActivePane.FocusCurrentView()));
+        var stops = _panes.Take(count).Select(pane => pane.FocusStopCount).ToArray();
+        var current = (Pane: Math.Clamp(index, 0, count - 1), Stop: ActivePane.CurrentFocusStop());
+        for (var attempt = 0; attempt < stops.Sum(); attempt++)
+        {
+            current = FocusTraversal.Move(current.Pane, current.Stop, stops, reverse);
+            SetActivePane(_panes[current.Pane]);
+            if (ActivePane.FocusStop(current.Stop)) return;
+        }
     }
 
     private void NewTab_Click(object sender, RoutedEventArgs e) => ActivePane.NewTab();
