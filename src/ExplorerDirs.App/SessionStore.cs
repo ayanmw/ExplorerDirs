@@ -7,9 +7,14 @@ internal sealed record SessionState(int Layout, List<List<string>> Panes);
 
 internal sealed class SessionStore
 {
+#if DEBUG
+    private const string ProfileDirectory = "ExplorerDirs.Dev";
+#else
+    private const string ProfileDirectory = "ExplorerDirs";
+#endif
     private readonly string _path = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ExplorerDirs", "session.json");
+        ProfileDirectory, "session.json");
 
     public SessionState? Load()
     {

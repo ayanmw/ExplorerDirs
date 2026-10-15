@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace ExplorerDirs.App;
@@ -14,12 +16,19 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly SessionStore _sessionStore = new();
     private readonly EnvironmentRefresh _environmentRefresh = new();
+    private readonly Dictionary<int, Button> _layoutButtons = [];
+    private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
     private int _layout = 4;
     private bool _initializing = true;
 
     public MainWindow()
     {
         InitializeComponent();
+#if DEBUG
+        Title = "Explorer Dirs · 开发调试";
+#else
+        Title = "Explorer Dirs · Preview 0.2.1";
+#endif
         var state = _sessionStore.Load();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
@@ -29,11 +38,12 @@ public partial class MainWindow : Window
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => ActivePane = pane;
+            pane.LayoutRequested += (_, layoutId) => SetLayout(layoutId);
         }
 
         ActivePane = _panes[0];
-        _layout = state?.Layout is 1 or 2 or 4 ? state.Layout : 4;
-        LayoutSelector.SelectedIndex = _layout == 1 ? 0 : _layout == 2 ? 1 : 2;
+        _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
+        BuildLayoutControls();
         BuildLayout();
         _initializing = false;
         _saveTimer.Tick += (_, _) =>
@@ -47,13 +57,59 @@ public partial class MainWindow : Window
 
     private PaneControl ActivePane { get; set; }
 
-    private void LayoutSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void BuildLayoutControls()
     {
-        if (_initializing || LayoutSelector.SelectedItem is not ComboBoxItem item ||
-            !int.TryParse(item.Tag?.ToString(), out var layout))
-            return;
+        foreach (var preset in LayoutPreset.All)
+        {
+            var menuItem = new MenuItem { Header = preset.Name, IsCheckable = true };
+            menuItem.Click += (_, _) => SetLayout(preset.Id);
+            LayoutMenu.Items.Add(menuItem);
+            _layoutMenuItems[preset.Id] = menuItem;
 
-        _layout = layout;
+            var button = new Button
+            {
+                Content = CreateLayoutIcon(preset),
+                ToolTip = preset.Name,
+                Width = 34,
+                Height = 28,
+                Margin = new Thickness(1, 0, 1, 0)
+            };
+            button.Click += (_, _) => SetLayout(preset.Id);
+            LayoutButtons.Children.Add(button);
+            _layoutButtons[preset.Id] = button;
+        }
+    }
+
+    private static Grid CreateLayoutIcon(LayoutPreset preset)
+    {
+        var icon = new Grid { Width = 22, Height = 18 };
+        for (var row = 0; row < preset.Rows; row++)
+            icon.RowDefinitions.Add(new RowDefinition());
+        for (var column = 0; column < preset.Columns; column++)
+            icon.ColumnDefinitions.Add(new ColumnDefinition());
+        foreach (var slot in preset.Slots)
+        {
+            var panel = new Border
+            {
+                BorderBrush = Brushes.SteelBlue,
+                BorderThickness = new Thickness(1),
+                Background = Brushes.AliceBlue,
+                Margin = new Thickness(1)
+            };
+            Grid.SetRow(panel, slot.Row);
+            Grid.SetColumn(panel, slot.Column);
+            Grid.SetRowSpan(panel, slot.RowSpan);
+            Grid.SetColumnSpan(panel, slot.ColumnSpan);
+            icon.Children.Add(panel);
+        }
+        return icon;
+    }
+
+    private void SetLayout(int id)
+    {
+        if (_layout == id)
+            return;
+        _layout = LayoutPreset.Find(id).Id;
         BuildLayout();
         ScheduleSave();
     }
@@ -63,23 +119,57 @@ public partial class MainWindow : Window
         PaneGrid.Children.Clear();
         PaneGrid.RowDefinitions.Clear();
         PaneGrid.ColumnDefinitions.Clear();
-        var columns = _layout == 1 ? 1 : 2;
-        var rows = _layout == 4 ? 2 : 1;
-        for (var col = 0; col < columns; col++)
+        var layout = LayoutPreset.Find(_layout);
+        for (var col = 0; col < layout.Columns; col++)
             PaneGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        for (var row = 0; row < rows; row++)
+        for (var row = 0; row < layout.Rows; row++)
             PaneGrid.RowDefinitions.Add(new RowDefinition());
-        for (var index = 0; index < _layout; index++)
+        for (var index = 0; index < layout.Slots.Length; index++)
         {
             var pane = _panes[index];
-            Grid.SetColumn(pane, index % columns);
-            Grid.SetRow(pane, index / columns);
+            var slot = layout.Slots[index];
+            Grid.SetColumn(pane, slot.Column);
+            Grid.SetRow(pane, slot.Row);
+            Grid.SetColumnSpan(pane, slot.ColumnSpan);
+            Grid.SetRowSpan(pane, slot.RowSpan);
             PaneGrid.Children.Add(pane);
         }
 
         if (!PaneGrid.Children.Contains(ActivePane))
             ActivePane = _panes[0];
+        foreach (var preset in LayoutPreset.All)
+        {
+            _layoutMenuItems[preset.Id].IsChecked = preset.Id == _layout;
+            _layoutButtons[preset.Id].Background = preset.Id == _layout ? Brushes.LightSteelBlue : SystemColors.ControlBrush;
+        }
     }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        if (control && e.Key == Key.T && shift)
+            ActivePane.ReopenClosedTab();
+        else if (control && e.Key == Key.T)
+            ActivePane.NewTab();
+        else if (control && e.Key == Key.K)
+            ActivePane.DuplicateCurrentTab();
+        else if (control && e.Key == Key.W)
+            ActivePane.CloseCurrentTab();
+        else if (e.Key == Key.F5)
+            ActivePane.RefreshCurrent();
+        else
+            return;
+        e.Handled = true;
+    }
+
+    private void NewTab_Click(object sender, RoutedEventArgs e) => ActivePane.NewTab();
+    private void DuplicateTab_Click(object sender, RoutedEventArgs e) => ActivePane.DuplicateCurrentTab();
+    private void CloseTab_Click(object sender, RoutedEventArgs e) => ActivePane.CloseCurrentTab();
+    private void CloseOtherTabs_Click(object sender, RoutedEventArgs e) => ActivePane.CloseOtherTabs();
+    private void ReopenTab_Click(object sender, RoutedEventArgs e) => ActivePane.ReopenClosedTab();
+    private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void RefreshEnvironment_Click(object sender, RoutedEventArgs e) => RefreshEnvironment();
 
