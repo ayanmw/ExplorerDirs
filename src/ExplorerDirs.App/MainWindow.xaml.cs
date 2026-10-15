@@ -14,11 +14,14 @@ public partial class MainWindow : Window
     private const int WmSettingChange = 0x001A;
     private readonly PaneControl[] _panes = new PaneControl[4];
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly DispatcherTimer _viewPollTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly SessionStore _sessionStore = new();
     private readonly EnvironmentRefresh _environmentRefresh = new();
     private readonly Dictionary<int, Button> _layoutButtons = [];
     private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
+    private readonly Dictionary<uint, MenuItem> _defaultViewMenuItems = [];
     private int _layout = 4;
+    private uint _defaultViewMode = 4;
     private bool _initializing = true;
 
     public MainWindow()
@@ -30,21 +33,24 @@ public partial class MainWindow : Window
         Title = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
 #endif
         var state = _sessionStore.Load();
+        _defaultViewMode = state?.DefaultViewMode ?? 4;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
         {
-            var paths = state?.Panes.ElementAtOrDefault(index);
-            var pane = new PaneControl(paths is { Count: > 0 } ? paths : [home]);
+            var tabs = state?.Panes.ElementAtOrDefault(index);
+            var pane = new PaneControl(tabs is { Count: > 0 } ? tabs :
+                [new TabSettings(home, ViewState.Default(_defaultViewMode))],
+                () => ViewState.Default(_defaultViewMode));
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => ActivePane = pane;
             pane.Activated += (_, _) => ActivePane = pane;
-            pane.LayoutRequested += (_, layoutId) => SetLayout(layoutId);
         }
 
         ActivePane = _panes[0];
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
         BuildLayoutControls();
+        BuildDefaultViewOptions();
         BuildLayout();
         _initializing = false;
         _saveTimer.Tick += (_, _) =>
@@ -52,8 +58,10 @@ public partial class MainWindow : Window
             _saveTimer.Stop();
             SaveSession();
         };
+        _viewPollTimer.Tick += (_, _) => SaveSession();
+        _viewPollTimer.Start();
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowHook);
-        Closing += (_, _) => SaveSession();
+        Closing += (_, _) => { _viewPollTimer.Stop(); SaveSession(); };
     }
 
     private PaneControl ActivePane { get; set; }
@@ -78,6 +86,27 @@ public partial class MainWindow : Window
             button.Click += (_, _) => SetLayout(preset.Id);
             LayoutButtons.Children.Add(button);
             _layoutButtons[preset.Id] = button;
+        }
+    }
+
+    private void BuildDefaultViewOptions()
+    {
+        foreach (var (mode, name) in new (uint Mode, string Name)[]
+        {
+            (4, "详细信息"), (3, "列表"), (2, "小图标"),
+            (1, "图标"), (6, "平铺"), (8, "内容")
+        })
+        {
+            var item = new MenuItem { Header = name, IsCheckable = true, IsChecked = mode == _defaultViewMode };
+            item.Click += (_, _) =>
+            {
+                _defaultViewMode = mode;
+                foreach (var option in _defaultViewMenuItems)
+                    option.Value.IsChecked = option.Key == mode;
+                ScheduleSave();
+            };
+            DefaultViewMenu.Items.Add(item);
+            _defaultViewMenuItems[mode] = item;
         }
     }
 
@@ -231,7 +260,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            _sessionStore.Save(new SessionState(_layout, _panes.Select(p => p.Paths.ToList()).ToList()));
+            _sessionStore.Save(new SessionState(_layout, _defaultViewMode,
+                _panes.Select(p => p.SnapshotTabs().ToList()).ToList()));
         }
         catch (Exception ex)
         {

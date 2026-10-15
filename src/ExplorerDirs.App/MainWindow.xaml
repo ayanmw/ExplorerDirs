@@ -22,6 +22,10 @@
                 <MenuItem Header="刷新当前目录" InputGestureText="F5" Click="RefreshCurrent_Click"/>
             </MenuItem>
             <MenuItem Header="工具(_O)">
+                <MenuItem Header="选项">
+                    <MenuItem x:Name="DefaultViewMenu" Header="新建标签默认查看"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="刷新环境变量" Click="RefreshEnvironment_Click"/>
                 <MenuItem Header="在当前目录打开命令行" Click="OpenTerminal_Click"/>
             </MenuItem>

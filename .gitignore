@@ -6,3 +6,5 @@
 *.tmp
 /releases/*
 !/releases/README.md
+/profile/
+/src/.state/

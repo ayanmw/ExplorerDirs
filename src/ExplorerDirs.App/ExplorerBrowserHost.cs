@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using System.IO;
+using System.Text;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 
@@ -13,7 +15,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid BrowserClassId = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
+    private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
+    private const uint WmCommand = 0x0111;
+    // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
+    private const int ShellCut = 0x7018;
+    private const int ShellCopy = 0x7019;
+    private const int ShellPaste = 0x701A;
+    private const int ShellUndo = 0x701B;
+    private const int ShellSelectAll = 0x7021;
     private IExplorerBrowser? _browser;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
@@ -23,6 +33,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
+    private bool _hasNavigated;
+    private ViewState _viewState;
 
     public string CurrentPath { get; private set; }
     public event EventHandler<string>? Navigated;
@@ -30,13 +42,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler<string>? MenuError;
     public event EventHandler? Activated;
     public Func<string?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
-    public Func<IReadOnlyList<MenuAction>>? LayoutCommands { get; set; }
 
     public sealed record MenuAction(string Label, Action Action);
 
-    public ExplorerBrowserHost(string initialPath)
+    public ExplorerBrowserHost(string initialPath, ViewState initialView)
     {
         CurrentPath = initialPath;
+        _viewState = initialView.Copy();
         _subclassProc = ViewWindowProc;
     }
 
@@ -53,10 +65,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var browserType = Type.GetTypeFromCLSID(BrowserClassId, true)!;
             _browser = (IExplorerBrowser)Activator.CreateInstance(browserType)!;
             var rect = ClientRect();
-            var settings = new FolderSettings { ViewMode = 4, Flags = 0 }; // FVM_DETAILS
+            var settings = new FolderSettings { ViewMode = _viewState.Mode, Flags = 0 };
             Check(_browser.Initialize(_hostWindow, ref rect, ref settings));
-            Check(_browser.SetOptions(0x40)); // EBO_NOBORDER, no extra Explorer frames
-            Check(_browser.SetPropertyBag("ExplorerDirs.FolderView"));
+            Check(_browser.SetOptions(0x40 | 0x80)); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE
             Check(_browser.Advise(this, out _cookie));
             _advised = true;
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
@@ -94,6 +105,65 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
+    protected override bool TranslateAcceleratorCore(ref MSG msg, ModifierKeys modifiers)
+    {
+        if (_browser is null || _viewWindow == IntPtr.Zero ||
+            (msg.message != 0x0100 && msg.message != 0x0104))
+            return base.TranslateAcceleratorCore(ref msg, modifiers);
+
+        var focused = GetFocus();
+        if (focused == IntPtr.Zero || (focused != _viewWindow && !IsChild(_viewWindow, focused)))
+            return base.TranslateAcceleratorCore(ref msg, modifiers);
+        var focusedClass = new StringBuilder(128);
+        GetClassName(focused, focusedClass, focusedClass.Capacity);
+        if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
+            return base.TranslateAcceleratorCore(ref msg, modifiers);
+
+        var iid = ShellViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0)
+            return base.TranslateAcceleratorCore(ref msg, modifiers);
+        try
+        {
+            var nativeMessage = new NativeMessage
+            {
+                Hwnd = msg.hwnd,
+                Message = msg.message,
+                WParam = msg.wParam,
+                LParam = msg.lParam,
+                Time = (uint)msg.time,
+                PointX = msg.pt_x,
+                PointY = msg.pt_y
+            };
+            var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMessage>());
+            try
+            {
+                Marshal.StructureToPtr(nativeMessage, pointer, false);
+                if (((IShellView)viewObject).TranslateAccelerator(pointer) == 0)
+                    return true;
+            }
+            finally { Marshal.FreeHGlobal(pointer); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+        if (modifiers == ModifierKeys.Control && msg.message == 0x0100)
+        {
+            var command = msg.wParam.ToInt64() switch
+            {
+                0x41 => ShellSelectAll, // Ctrl+A
+                0x43 => ShellCopy,      // Ctrl+C
+                0x56 => ShellPaste,     // Ctrl+V
+                0x58 => ShellCut,       // Ctrl+X
+                0x5A => ShellUndo,      // Ctrl+Z
+                _ => 0
+            };
+            if (command != 0)
+            {
+                SendMessage(_viewWindow, WmCommand, (IntPtr)command, IntPtr.Zero);
+                return true;
+            }
+        }
+        return base.TranslateAcceleratorCore(ref msg, modifiers);
+    }
+
     public void Navigate(string path)
     {
         path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
@@ -109,6 +179,94 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try { Check(_browser.BrowseToIDList(pidl, 0)); }
         finally { Marshal.FreeCoTaskMem(pidl); }
     }
+
+    public ViewState CaptureViewState()
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return _viewState.Copy();
+        try
+        {
+            var mode = _viewState.Mode;
+            var iconSize = _viewState.IconSize;
+            if (GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var currentMode, out var currentSize) >= 0)
+            {
+                mode = currentMode;
+                iconSize = currentSize;
+            }
+
+            var sorts = _viewState.SortColumns.ToList();
+            if (GetMethod<GetSortColumnCountDelegate>(view, 26)(view, out var count) >= 0 && count is >= 0 and <= 16)
+            {
+                if (count == 0) sorts.Clear();
+                else
+                {
+                    var columns = new NativeSortColumn[count];
+                    if (GetMethod<GetSortColumnsDelegate>(view, 28)(view, columns, count) >= 0)
+                        sorts = columns.Select(column => new SortColumnState(
+                            new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToList();
+                }
+            }
+
+            var group = _viewState.GroupKey;
+            var ascending = _viewState.GroupAscending;
+            if (GetMethod<GetGroupByDelegate>(view, 18)(view, out var groupKey, out var groupAscending) >= 0)
+            {
+                group = groupKey.FormatId != Guid.Empty
+                    ? new PropertyKeyState(groupKey.FormatId, groupKey.PropertyId) : null;
+                ascending = groupAscending != 0;
+            }
+            _viewState = new ViewState(mode, iconSize, sorts, group, ascending);
+            return _viewState.Copy();
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private void ApplyViewState()
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return;
+        try
+        {
+            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode, _viewState.IconSize);
+            if (modeResult < 0)
+                MenuError?.Invoke(this, $"查看方式未能恢复：0x{modeResult:X8}");
+            if (_viewState.SortColumns.Count > 0)
+            {
+                var columns = _viewState.SortColumns.Select(sort => new NativeSortColumn
+                {
+                    Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
+                    Direction = sort.Direction
+                }).ToArray();
+                var sortResult = GetMethod<SetSortColumnsDelegate>(view, 27)(view, columns, columns.Length);
+                if (sortResult < 0)
+                    MenuError?.Invoke(this, $"排序方式未能恢复：0x{sortResult:X8}");
+            }
+            var group = _viewState.GroupKey is { } savedGroup
+                ? new NativePropertyKey { FormatId = savedGroup.FormatId, PropertyId = savedGroup.PropertyId }
+                : default;
+            var groupResult = GetMethod<SetGroupByDelegate>(view, 17)(view, ref group, _viewState.GroupAscending ? 1 : 0);
+            if (groupResult < 0)
+                MenuError?.Invoke(this, $"分组方式未能恢复：0x{groupResult:X8}");
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private IntPtr GetFolderView2Pointer()
+    {
+        if (_browser is null) return IntPtr.Zero;
+        var iid = FolderView2Id;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return IntPtr.Zero;
+        try
+        {
+            var unknown = Marshal.GetIUnknownForObject(viewObject);
+            try { return Marshal.QueryInterface(unknown, in iid, out var pointer) >= 0 ? pointer : IntPtr.Zero; }
+            finally { Marshal.Release(unknown); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
     public void Refresh()
     {
@@ -144,7 +302,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _browser = null;
     }
 
-    int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl) => 0;
+    int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
+    {
+        if (_hasNavigated)
+        {
+            try { CaptureViewState(); }
+            catch (Exception ex) { MenuError?.Invoke(this, $"读取视图配置失败：{ex.Message}"); }
+        }
+        return 0;
+    }
     int IExplorerBrowserEvents.OnViewCreated(IntPtr view)
     {
         try
@@ -171,8 +337,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!string.IsNullOrWhiteSpace(path))
                 {
                     CurrentPath = path;
+                    _hasNavigated = true;
                     try { AttachCurrentViewWindow(); }
                     catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
+                    Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+                    {
+                        if (CurrentPath != path) return;
+                        try { ApplyViewState(); }
+                        catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
+                    }));
                     Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                     {
                         if (CurrentPath == path) Navigated?.Invoke(this, path);
@@ -286,8 +459,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (menu == IntPtr.Zero || CustomCommands is null) return;
         var selectedPath = GetSelectedPath();
         var commands = CustomCommands(selectedPath);
-        var layouts = LayoutCommands?.Invoke() ?? [];
-        if (commands.Count == 0 && layouts.Count == 0) return;
+        if (commands.Count == 0) return;
 
         var id = (ushort)0xE000;
         var entries = new List<(ushort Id, string Label)>();
@@ -295,23 +467,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             _menuActions[id] = command.Action;
             entries.Add((id++, command.Label));
-        }
-        if (layouts.Count > 0)
-        {
-            var submenu = CreatePopupMenu();
-            if (submenu != IntPtr.Zero)
-            {
-                foreach (var command in layouts)
-                {
-                    _menuActions[id] = command.Action;
-                    AppendMenu(submenu, 0, id++, command.Label);
-                }
-                for (var index = entries.Count - 1; index >= 0; index--)
-                    InsertMenu(menu, 0, 0x400, entries[index].Id, entries[index].Label);
-                InsertMenu(menu, (uint)entries.Count, 0x400 | 0x10, (nuint)submenu, "布局");
-                InsertMenu(menu, (uint)(entries.Count + 1), 0x400 | 0x800, 0, null);
-                return;
-            }
         }
         for (var index = entries.Count - 1; index >= 0; index--)
             InsertMenu(menu, 0, 0x400, entries[index].Id, entries[index].Label);
@@ -360,6 +515,37 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
     private struct FolderSettings { public uint ViewMode, Flags; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePropertyKey { public Guid FormatId; public uint PropertyId; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeSortColumn { public NativePropertyKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMessage
+    {
+        public IntPtr Hwnd;
+        public int Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public int PointX;
+        public int PointY;
+        public uint Private;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetViewModeAndIconSizeDelegate(IntPtr instance, out uint mode, out int iconSize);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetViewModeAndIconSizeDelegate(IntPtr instance, uint mode, int iconSize);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSortColumnCountDelegate(IntPtr instance, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetSortColumnsDelegate(IntPtr instance, [Out] NativeSortColumn[] columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetSortColumnsDelegate(IntPtr instance, [In] NativeSortColumn[] columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetGroupByDelegate(IntPtr instance, out NativePropertyKey key, out int ascending);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetGroupByDelegate(IntPtr instance, ref NativePropertyKey key, int ascending);
 
     [ComImport, Guid("DFD3B6B5-C10C-4BE9-85F6-A66969F402F6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IExplorerBrowser
@@ -448,14 +634,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumChildWindows(IntPtr parent, EnumWindowProc callback, IntPtr data);
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr CreatePopupMenu();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool AppendMenu(IntPtr menu, uint flags, nuint id, string text);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maximum);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateWindowEx(uint extendedStyle, string className, string title, uint style,

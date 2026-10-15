@@ -7,7 +7,8 @@ namespace ExplorerDirs.App;
 
 public partial class PaneControl : UserControl
 {
-    private readonly Stack<string> _closedPaths = new();
+    private readonly Stack<TabSettings> _closedTabs = new();
+    private readonly Func<ViewState> _newTabView;
 
     private sealed class TabState
     {
@@ -17,30 +18,38 @@ public partial class PaneControl : UserControl
     }
 
     public event EventHandler? StateChanged;
-    public event EventHandler<int>? LayoutRequested;
     public event EventHandler? Activated;
 
-    public PaneControl(IEnumerable<string> paths)
+    internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView)
     {
         InitializeComponent();
-        foreach (var path in paths)
-            AddTab(Directory.Exists(path) ? path : Home, false);
+        _newTabView = newTabView;
+        foreach (var tab in tabs)
+            AddTab(Directory.Exists(tab.Path) ? tab.Path : Home, tab.View, false);
         if (Tabs.Items.Count == 0)
-            AddTab(Home, false);
+            AddTab(Home, _newTabView(), false);
         Tabs.SelectedIndex = 0;
     }
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
-    public IReadOnlyList<string> Paths => Tabs.Items.Cast<TabItem>()
-        .Select(tab => ((TabState)tab.Tag).Path).ToArray();
+    internal IReadOnlyList<TabSettings> SnapshotTabs() => Tabs.Items.Cast<TabItem>()
+        .Select(tab =>
+        {
+            var state = (TabState)tab.Tag;
+            return new TabSettings(state.Path, state.Browser.CaptureViewState());
+        }).ToArray();
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
-    public void NewTab() => AddTab(Home);
-    public void DuplicateCurrentTab() => AddTab(CurrentPath);
+    public void NewTab() => AddTab(Home, _newTabView());
+    public void DuplicateCurrentTab()
+    {
+        if (Current is { } state)
+            AddTab(state.Path, state.Browser.CaptureViewState());
+    }
     public void RefreshCurrent() => Current?.Browser.Refresh();
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
-    public void ReopenClosedTab() { if (_closedPaths.TryPop(out var path)) AddTab(path); }
+    public void ReopenClosedTab() { if (_closedTabs.TryPop(out var tab)) AddTab(tab.Path, tab.View); }
 
     public void CloseOtherTabs()
     {
@@ -52,9 +61,9 @@ public partial class PaneControl : UserControl
         }
     }
 
-    private void AddTab(string path, bool select = true)
+    private void AddTab(string path, ViewState? view = null, bool select = true)
     {
-        var browser = new ExplorerBrowserHost(path);
+        var browser = new ExplorerBrowserHost(path, view ?? _newTabView());
         var tab = new TabItem { Content = browser };
         var state = new TabState { Tab = tab, Browser = browser, Path = path };
         tab.Tag = state;
@@ -62,9 +71,9 @@ public partial class PaneControl : UserControl
         {
             var actions = new List<ExplorerBrowserHost.MenuAction>();
             if (selectedPath is not null && Directory.Exists(selectedPath))
-                actions.Add(new("在新标签页中打开", () => AddTab(selectedPath)));
+                actions.Add(new("在新标签页中打开", () => AddTab(selectedPath, _newTabView())));
             actions.Add(new("新建标签页", NewTab));
-            actions.Add(new("复制当前标签", () => AddTab(state.Path)));
+            actions.Add(new("复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState())));
             actions.Add(new("关闭当前标签", () => CloseTab(state)));
             actions.Add(new("关闭其他标签", () =>
             {
@@ -76,9 +85,6 @@ public partial class PaneControl : UserControl
                 () => Clipboard.SetText(selectedPath ?? state.Path)));
             return actions;
         };
-        browser.LayoutCommands = () => LayoutPreset.All.Select(preset =>
-            new ExplorerBrowserHost.MenuAction(preset.Name,
-                () => LayoutRequested?.Invoke(this, preset.Id))).ToArray();
         browser.Navigated += (_, navigatedPath) =>
         {
             state.Path = navigatedPath;
@@ -96,7 +102,7 @@ public partial class PaneControl : UserControl
         };
         browser.MenuError += (_, message) =>
         {
-            if (Current == state) Status.Text = $"菜单扩展失败：{message}";
+            if (Current == state) Status.Text = $"Shell 视图：{message}";
         };
         browser.Activated += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
         UpdateTabHeader(state);
@@ -136,7 +142,7 @@ public partial class PaneControl : UserControl
     {
         var menu = new ContextMenu();
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
-        AddMenuItem(menu, "复制当前标签", () => AddTab(state.Path), "Ctrl+K");
+        AddMenuItem(menu, "复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState()), "Ctrl+K");
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
         menu.Items.Add(new Separator());
         AddMenuItem(menu, "关闭标签页", () => CloseTab(state), "Ctrl+W");
@@ -145,21 +151,7 @@ public partial class PaneControl : UserControl
             Tabs.SelectedItem = state.Tab;
             CloseOtherTabs();
         });
-        menu.Items.Add(new Separator());
-        AddLayoutSubmenu(menu);
         return menu;
-    }
-
-    private void AddLayoutSubmenu(ContextMenu menu)
-    {
-        var layout = new MenuItem { Header = "布局" };
-        foreach (var preset in LayoutPreset.All)
-        {
-            var item = new MenuItem { Header = preset.Name };
-            item.Click += (_, _) => LayoutRequested?.Invoke(this, preset.Id);
-            layout.Items.Add(item);
-        }
-        menu.Items.Add(layout);
     }
 
     private static void AddMenuItem(ContextMenu menu, string header, Action action, string? shortcut = null)
@@ -172,12 +164,12 @@ public partial class PaneControl : UserControl
     private void CloseTab(TabState state)
     {
         if (Tabs.Items.Count <= 1) return;
-        _closedPaths.Push(state.Path);
-        while (_closedPaths.Count > 20)
+        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CaptureViewState()));
+        while (_closedTabs.Count > 20)
         {
-            var recent = _closedPaths.Take(20).Reverse().ToArray();
-            _closedPaths.Clear();
-            foreach (var path in recent) _closedPaths.Push(path);
+            var recent = _closedTabs.Take(20).Reverse().ToArray();
+            _closedTabs.Clear();
+            foreach (var tab in recent) _closedTabs.Push(tab);
         }
         Tabs.Items.Remove(state.Tab);
         state.Browser.Dispose();
