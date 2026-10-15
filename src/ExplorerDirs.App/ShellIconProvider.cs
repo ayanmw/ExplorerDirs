@@ -1,8 +1,6 @@
-using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -63,13 +61,4 @@ internal static class ShellIconProvider
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr icon);
-}
-
-public sealed class FileIconConverter : IValueConverter
-{
-    public object? Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
-        value is FileEntry entry ? ShellIconProvider.GetIcon(entry.FullPath, entry.IsDirectory) : null;
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
-        throw new NotSupportedException();
 }

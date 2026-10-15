@@ -27,7 +27,7 @@ public partial class MainWindow : Window
 #if DEBUG
         Title = "Explorer Dirs · 开发调试";
 #else
-        Title = "Explorer Dirs · Preview 0.2.1";
+        Title = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
 #endif
         var state = _sessionStore.Load();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -38,6 +38,7 @@ public partial class MainWindow : Window
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => ActivePane = pane;
+            pane.Activated += (_, _) => ActivePane = pane;
             pane.LayoutRequested += (_, layoutId) => SetLayout(layoutId);
         }
 
