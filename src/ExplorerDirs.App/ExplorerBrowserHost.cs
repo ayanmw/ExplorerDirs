@@ -32,6 +32,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
     private readonly SubclassProc _subclassProc;
+    private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
+    {
+        Interval = TimeSpan.FromMilliseconds(250)
+    };
     private bool _menuPrepared;
     private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
@@ -39,6 +43,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _hasNavigated;
     private bool _focusWhenReady;
     private bool _restoreFocusAfterNavigation;
+    private IntPtr _lastContentFocusWindow;
     private ViewState _viewState;
 
     public string CurrentPath { get; private set; }
@@ -48,6 +53,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler? Activated;
     public Func<string?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
+    public Func<bool>? MayRestoreFocus { get; set; }
 
     public sealed record MenuAction(string Label, Action Action);
 
@@ -56,6 +62,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         CurrentPath = initialPath;
         _viewState = initialView.Copy();
         _subclassProc = ViewWindowProc;
+        _focusRestoreTimer.Tick += (_, _) =>
+        {
+            _focusRestoreTimer.Stop();
+            RestoreContentFocusIfNeeded();
+        };
     }
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
@@ -152,7 +163,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 Marshal.StructureToPtr(nativeMessage, pointer, false);
                 if (((IShellView)viewObject).TranslateAccelerator(pointer) == 0)
+                {
+                    QueueFocusRestoreAfterFileKey(msg, modifiers);
                     return true;
+                }
             }
             finally { Marshal.FreeHGlobal(pointer); }
         }
@@ -171,9 +185,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (command != 0)
             {
                 SendMessage(_viewWindow, WmCommand, (IntPtr)command, IntPtr.Zero);
+                QueueFocusRestore();
                 return true;
             }
         }
+        QueueFocusRestoreAfterFileKey(msg, modifiers);
         return base.TranslateAcceleratorCore(ref msg, modifiers);
     }
 
@@ -188,17 +204,67 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return true;
         }
 
+        var target = FindContentFocusWindow();
+        if (target == IntPtr.Zero) return false;
         _focusWhenReady = false;
+        var focused = GetFocus();
+        if (focused != target && !IsChild(target, focused))
+            SetFocus(target);
         var iid = ShellViewId;
         if (_browser.GetCurrentView(ref iid, out var viewObject) >= 0)
         {
             try { ((IShellView)viewObject).UIActivate(2); } // SVUIA_ACTIVATE_FOCUS
             finally { Marshal.ReleaseComObject(viewObject); }
         }
+        focused = GetFocus();
+        return focused == target || IsChild(target, focused);
+    }
+
+    private IntPtr FindContentFocusWindow()
+    {
+        if (_viewWindow == IntPtr.Zero) return IntPtr.Zero;
+        if (_lastContentFocusWindow != IntPtr.Zero && IsWindow(_lastContentFocusWindow) &&
+            IsChild(_viewWindow, _lastContentFocusWindow))
+            return _lastContentFocusWindow;
+
+        IntPtr content = IntPtr.Zero;
+        IntPtr list = IntPtr.Zero;
+        EnumChildWindows(_viewWindow, (child, _) =>
+        {
+            var name = new StringBuilder(64);
+            GetClassName(child, name, name.Capacity);
+            if (name.ToString() == "DirectUIHWND") content = child;
+            else if (name.ToString() == "SysListView32") list = child;
+            return true;
+        }, IntPtr.Zero);
+        return content != IntPtr.Zero ? content : list != IntPtr.Zero ? list : _viewWindow;
+    }
+
+    private void QueueFocusRestoreAfterFileKey(MSG msg, ModifierKeys modifiers)
+    {
+        var key = msg.wParam.ToInt64();
+        if ((modifiers == ModifierKeys.Control && key is 0x41 or 0x43 or 0x56 or 0x58 or 0x5A) ||
+            (modifiers == ModifierKeys.Shift && key == 0x2E))
+            QueueFocusRestore();
+    }
+
+    private void QueueFocusRestore()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(RestoreContentFocusIfNeeded));
+        _focusRestoreTimer.Stop();
+        _focusRestoreTimer.Start();
+    }
+
+    private void RestoreContentFocusIfNeeded()
+    {
+        if (MayRestoreFocus?.Invoke() != true || Window.GetWindow(this)?.IsActive != true ||
+            !IsVisible || _viewWindow == IntPtr.Zero)
+            return;
         var focused = GetFocus();
-        if (focused != _viewWindow && !IsChild(_viewWindow, focused))
-            SetFocus(_viewWindow);
-        return true;
+        var target = FindContentFocusWindow();
+        if (target != IntPtr.Zero && focused != target && !IsChild(target, focused) &&
+            (focused == IntPtr.Zero || focused == _viewWindow || !IsChild(_viewWindow, focused)))
+            FocusView();
     }
 
     public bool GoParent() => BrowseRelative(BrowseParent);
@@ -344,6 +410,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DisposeBrowser()
     {
+        _focusRestoreTimer.Stop();
         if (_browser is null) return;
         DetachViewWindow();
         if (_advised) { _browser.Unadvise(_cookie); _advised = false; }
@@ -459,6 +526,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             RemoveWindowSubclass(hwnd, _subclassProc, 1);
         _subclassedWindows.Clear();
         _viewWindow = IntPtr.Zero;
+        _lastContentFocusWindow = IntPtr.Zero;
         _menuActions.Clear();
     }
 
@@ -469,6 +537,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             switch (message)
             {
                 case 0x0007: // WM_SETFOCUS
+                    var focusedClass = new StringBuilder(64);
+                    GetClassName(hwnd, focusedClass, focusedClass.Capacity);
+                    if (focusedClass.ToString() is "DirectUIHWND" or "SysListView32")
+                        _lastContentFocusWindow = hwnd;
+                    Activated?.Invoke(this, EventArgs.Empty);
+                    break;
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
@@ -697,6 +771,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr GetFocus();
     [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsChild(IntPtr parent, IntPtr child);

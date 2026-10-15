@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private int _layout = 4;
     private uint _defaultViewMode = 4;
     private bool _initializing = true;
+    private bool _fileViewFocusDesired;
 
     public MainWindow()
     {
@@ -46,8 +47,13 @@ public partial class MainWindow : Window
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => SetActivePane(pane);
-            pane.Activated += (_, _) => SetActivePane(pane);
+            pane.Activated += (_, _) =>
+            {
+                SetActivePane(pane);
+                _fileViewFocusDesired = true;
+            };
             pane.ShortcutRequested += ExecuteShortcut;
+            pane.MayRestoreFileFocus = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired && IsActive;
         }
 
         ActivePane = _panes[0];
@@ -65,6 +71,16 @@ public partial class MainWindow : Window
         };
         _viewPollTimer.Tick += (_, _) => SaveSession();
         _viewPollTimer.Start();
+        PreviewGotKeyboardFocus += (_, e) =>
+        {
+            if (e.NewFocus is TextBoxBase or ButtonBase or MenuItem or TabItem)
+                _fileViewFocusDesired = false;
+        };
+        Activated += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            if (_fileViewFocusDesired && IsActive)
+                ActivePane.FocusCurrentView();
+        }));
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowHook);
         Closing += (_, _) => { _viewPollTimer.Stop(); SaveSession(); };
     }

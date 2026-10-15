@@ -20,6 +20,7 @@ public partial class PaneControl : UserControl
     public event EventHandler? StateChanged;
     public event EventHandler? Activated;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
+    internal Func<bool>? MayRestoreFileFocus { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView)
     {
@@ -122,6 +123,7 @@ public partial class PaneControl : UserControl
         };
         browser.Activated += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
         browser.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
+        browser.MayRestoreFocus = () => Current == state && IsVisible && MayRestoreFileFocus?.Invoke() == true;
         UpdateTabHeader(state);
         tab.PreviewMouseRightButtonDown += (_, _) => Tabs.SelectedItem = tab;
         tab.ContextMenu = CreateTabContextMenu(state);
