@@ -18,6 +18,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private const uint WmCommand = 0x0111;
+    private const uint BrowseParent = 0x2000;
+    private const uint BrowseBack = 0x4000;
+    private const uint BrowseForward = 0x8000;
     // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
     private const int ShellCut = 0x7018;
     private const int ShellCopy = 0x7019;
@@ -34,6 +37,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private uint _cookie;
     private bool _advised;
     private bool _hasNavigated;
+    private bool _focusWhenReady;
+    private bool _restoreFocusAfterNavigation;
     private ViewState _viewState;
 
     public string CurrentPath { get; private set; }
@@ -42,6 +47,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler<string>? MenuError;
     public event EventHandler? Activated;
     public Func<string?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
+    public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
 
     public sealed record MenuAction(string Label, Action Action);
 
@@ -119,6 +125,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
             return base.TranslateAcceleratorCore(ref msg, modifiers);
 
+        if (msg.message == 0x0100 || msg.message == 0x0104)
+        {
+            var shortcut = KeyboardShortcuts.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers);
+            if (shortcut != ExplorerShortcut.None && ShortcutHandler?.Invoke(shortcut) == true)
+                return true;
+        }
+
         var iid = ShellViewId;
         if (_browser.GetCurrentView(ref iid, out var viewObject) < 0)
             return base.TranslateAcceleratorCore(ref msg, modifiers);
@@ -162,6 +175,43 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
         }
         return base.TranslateAcceleratorCore(ref msg, modifiers);
+    }
+
+    protected override bool TabIntoCore(TraversalRequest request) => FocusView();
+
+    public bool FocusView()
+    {
+        if (!IsVisible) return false;
+        if (_browser is null || _viewWindow == IntPtr.Zero)
+        {
+            _focusWhenReady = true;
+            return true;
+        }
+
+        _focusWhenReady = false;
+        var iid = ShellViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) >= 0)
+        {
+            try { ((IShellView)viewObject).UIActivate(2); } // SVUIA_ACTIVATE_FOCUS
+            finally { Marshal.ReleaseComObject(viewObject); }
+        }
+        var focused = GetFocus();
+        if (focused != _viewWindow && !IsChild(_viewWindow, focused))
+            SetFocus(_viewWindow);
+        return true;
+    }
+
+    public bool GoParent() => BrowseRelative(BrowseParent);
+    public bool GoBack() => BrowseRelative(BrowseBack);
+    public bool GoForward() => BrowseRelative(BrowseForward);
+
+    private bool BrowseRelative(uint flag)
+    {
+        if (_browser is null) return false;
+        var hr = _browser.BrowseToIDList(IntPtr.Zero, flag);
+        if (hr < 0 && hr != unchecked((int)0x80004005))
+            NavigationFailed?.Invoke(this, $"目录导航失败：0x{hr:X8}");
+        return hr >= 0;
     }
 
     public void Navigate(string path)
@@ -304,6 +354,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
     {
+        var focused = GetFocus();
+        _restoreFocusAfterNavigation = _viewWindow != IntPtr.Zero &&
+            (focused == _viewWindow || IsChild(_viewWindow, focused));
         if (_hasNavigated)
         {
             try { CaptureViewState(); }
@@ -345,6 +398,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         if (CurrentPath != path) return;
                         try { ApplyViewState(); }
                         catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
+                        if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
+                            FocusView();
+                        _restoreFocusAfterNavigation = false;
                     }));
                     Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                     {
@@ -639,6 +695,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hwnd);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsChild(IntPtr parent, IntPtr child);

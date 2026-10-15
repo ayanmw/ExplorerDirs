@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<int, Button> _layoutButtons = [];
     private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
     private readonly Dictionary<uint, MenuItem> _defaultViewMenuItems = [];
+    private readonly Dictionary<int, int> _lastFocusedPaneByLayout = [];
     private int _layout = 4;
     private uint _defaultViewMode = 4;
     private bool _initializing = true;
@@ -43,8 +45,9 @@ public partial class MainWindow : Window
                 () => ViewState.Default(_defaultViewMode));
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
-            pane.GotKeyboardFocus += (_, _) => ActivePane = pane;
-            pane.Activated += (_, _) => ActivePane = pane;
+            pane.GotKeyboardFocus += (_, _) => SetActivePane(pane);
+            pane.Activated += (_, _) => SetActivePane(pane);
+            pane.ShortcutRequested += ExecuteShortcut;
         }
 
         ActivePane = _panes[0];
@@ -52,6 +55,8 @@ public partial class MainWindow : Window
         BuildLayoutControls();
         BuildDefaultViewOptions();
         BuildLayout();
+        Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+            new Action(() => ActivePane.FocusCurrentView()));
         _initializing = false;
         _saveTimer.Tick += (_, _) =>
         {
@@ -65,6 +70,14 @@ public partial class MainWindow : Window
     }
 
     private PaneControl ActivePane { get; set; }
+
+    private void SetActivePane(PaneControl pane)
+    {
+        ActivePane = pane;
+        var index = Array.IndexOf(_panes, pane);
+        if (index >= 0 && index < LayoutPreset.Find(_layout).Slots.Length)
+            _lastFocusedPaneByLayout[_layout] = index;
+    }
 
     private void BuildLayoutControls()
     {
@@ -139,8 +152,11 @@ public partial class MainWindow : Window
     {
         if (_layout == id)
             return;
+        _lastFocusedPaneByLayout[_layout] = Array.IndexOf(_panes, ActivePane);
         _layout = LayoutPreset.Find(id).Id;
         BuildLayout();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+            new Action(() => ActivePane.FocusCurrentView()));
         ScheduleSave();
     }
 
@@ -165,7 +181,10 @@ public partial class MainWindow : Window
             PaneGrid.Children.Add(pane);
         }
 
-        if (!PaneGrid.Children.Contains(ActivePane))
+        var remembered = _lastFocusedPaneByLayout.GetValueOrDefault(_layout, -1);
+        if (remembered >= 0 && remembered < layout.Slots.Length)
+            ActivePane = _panes[remembered];
+        else if (!PaneGrid.Children.Contains(ActivePane))
             ActivePane = _panes[0];
         foreach (var preset in LayoutPreset.All)
         {
@@ -176,21 +195,48 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-        if (control && e.Key == Key.T && shift)
-            ActivePane.ReopenClosedTab();
-        else if (control && e.Key == Key.T)
-            ActivePane.NewTab();
-        else if (control && e.Key == Key.K)
-            ActivePane.DuplicateCurrentTab();
-        else if (control && e.Key == Key.W)
-            ActivePane.CloseCurrentTab();
-        else if (e.Key == Key.F5)
-            ActivePane.RefreshCurrent();
-        else
+        if (Keyboard.FocusedElement is MenuItem) return;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var shortcut = KeyboardShortcuts.Resolve(KeyInterop.VirtualKeyFromKey(key), (int)Keyboard.Modifiers);
+        if (shortcut == ExplorerShortcut.Parent && Keyboard.FocusedElement is TextBoxBase)
             return;
-        e.Handled = true;
+        e.Handled = ExecuteShortcut(ActivePane, shortcut);
+    }
+
+    private bool ExecuteShortcut(PaneControl source, ExplorerShortcut shortcut)
+    {
+        if (shortcut == ExplorerShortcut.None) return false;
+        SetActivePane(source);
+        switch (shortcut)
+        {
+            case ExplorerShortcut.Parent: source.GoParent(); break;
+            case ExplorerShortcut.Back: source.GoBack(); break;
+            case ExplorerShortcut.Forward: source.GoForward(); break;
+            case ExplorerShortcut.NextPane: FocusRelativePane(false); break;
+            case ExplorerShortcut.PreviousPane: FocusRelativePane(true); break;
+            case ExplorerShortcut.Address: source.FocusAddress(); break;
+            case ExplorerShortcut.NewTab: source.NewTab(); source.FocusCurrentView(); break;
+            case ExplorerShortcut.CloseTab: source.CloseCurrentTab(); source.FocusCurrentView(); break;
+            case ExplorerShortcut.DuplicateTab: source.DuplicateCurrentTab(); source.FocusCurrentView(); break;
+            case ExplorerShortcut.ReopenTab: source.ReopenClosedTab(); source.FocusCurrentView(); break;
+            case ExplorerShortcut.NextTab: source.SelectRelativeTab(false); break;
+            case ExplorerShortcut.PreviousTab: source.SelectRelativeTab(true); break;
+            case ExplorerShortcut.Refresh: source.RefreshCurrent(); break;
+            case ExplorerShortcut.ToggleMaximize:
+                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+                break;
+        }
+        return true;
+    }
+
+    private void FocusRelativePane(bool reverse)
+    {
+        var count = LayoutPreset.Find(_layout).Slots.Length;
+        var index = Array.IndexOf(_panes, ActivePane);
+        var next = KeyboardShortcuts.NextPane(index < 0 ? 0 : index, count, reverse);
+        SetActivePane(_panes[next]);
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+            new Action(() => ActivePane.FocusCurrentView()));
     }
 
     private void NewTab_Click(object sender, RoutedEventArgs e) => ActivePane.NewTab();

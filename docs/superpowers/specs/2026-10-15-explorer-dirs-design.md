@@ -19,6 +19,7 @@
 - `MainWindow` 从同一组布局定义生成顶部菜单和快捷图标，管理活动窗格、环境刷新入口和会话保存调度。布局定义目前包括单窗格、双窗格（横/竖）、三窗格（两式）和四窗格。
 - `PaneControl` 管理一个窗格内的标签、地址栏和导航；各窗格互不共享标签状态。标签操作通过顶部菜单、快捷按钮、右键菜单及键盘快捷键进入，中键或双击标签标题可关闭。
 - `ExplorerBrowserHost` 为每个标签承载 Windows Shell 视图，新标签默认详细信息，可在工具 → 选项修改。Shell 视图负责目录枚举、文件/空白处命中、图标、文件关联和查看/排序/分组/新建/属性等原生菜单。宿主在原生菜单最前面插入标签和路径命令；布局只在顶部菜单与图标中。WPF 键盘消息先通过 `IShellView::TranslateAccelerator` 转发，未处理的 Ctrl+A/C/V/X/Z 映射到 Shell 视图原生命令；实际文件快捷键仍需 GUI 验收。右键扩展仍在本进程内运行。
+- 原生文件视图聚焦时，宿主先识别应用级导航/标签/窗格按键，再把其他键交给 Shell。每标签复用 ExplorerBrowser 的 TravelLog，`BrowseToIDList` 使用 `SBSP_NAVIGATEBACK` / `SBSP_NAVIGATEFORWARD` / `SBSP_PARENT`。Backspace 与 Alt+↑ 走父目录；Alt+←/→ 走历史。`HwndHost.TabIntoCore` 和 `IShellView::UIActivate` 负责进入原生文件视图；Tab / Shift+Tab 在可见窗格间循环。`MainWindow` 按布局记忆活动窗格，并在布局切换后恢复视图焦点。快捷键范围和人工验收见 `docs/keyboard-shortcuts.md`。
 - `ShellIconProvider` 仅为项目自己的标签标题取文件夹图标并释放本机图标句柄；文件视图内的图标由 Shell 绘制。
 - `SessionStore` 将全局布局、默认新标签查看方式和各标签路径、查看模式、图标大小、排序列及分组写入便携 INI，使用临时文件加覆盖移动避免半写入。发布版各版本共享项目根目录 `profile/ExplorerDirs.ini`；复制单个发布目录时使用其自身 `profile/`；Debug 写入 `src/.state/ExplorerDirs.ini`。首次启动从旧 JSON 单向迁移布局和路径，保留旧文件。Shell 视图使用 `EBO_NOPERSISTVIEWSTATE`，不再调用 `SetPropertyBag` 保存自身状态到注册表。
 - `EnvironmentRefresh` 合并 Windows 机器和用户持久化变量（PATH 按机器后用户拼接），收到 `WM_SETTINGCHANGE` 的 `Environment` 通知或手动触发时刷新本进程。直接创建的 `cmd.exe` 继承更新值。已有进程和通过文件关联启动的程序不在此承诺内。

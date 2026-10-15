@@ -5,7 +5,9 @@
         <DockPanel>
             <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="4">
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                    <Button Content="↑" ToolTip="上级目录" Click="Up_Click" Width="28"/>
+                    <Button Content="←" ToolTip="后退 (Alt+左箭头)" Click="Back_Click" Width="28"/>
+                    <Button Content="→" ToolTip="前进 (Alt+右箭头)" Click="Forward_Click" Width="28" Margin="2,0,0,0"/>
+                    <Button Content="↑" ToolTip="上级目录 (Backspace / Alt+上箭头)" Click="Up_Click" Width="28" Margin="2,0,0,0"/>
                     <Button Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">

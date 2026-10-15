@@ -9,6 +9,7 @@
 - A tab header supports middle-click and left-button double-click to close. Keep at least one tab in each pane.
 - Layout switching stays in the top menu and toolbar; do not add layout choices to file-view or tab-header context menus.
 - Route normal file-view keyboard shortcuts through the hosted Shell view. Keep file operations in Shell interfaces rather than duplicating copy/paste logic in WPF.
+- Keep navigation history independent for each tab by using ExplorerBrowser's travel log. Backspace and Alt+Up open the parent folder; Alt+Left/Right navigate history. Tab and Shift+Tab cycle only visible file panes, while Ctrl+Tab cycles tabs in the active pane. Restore file-view focus after layout changes; preserve address-bar editing shortcuts.
 
 ## Source, development, and releases
 

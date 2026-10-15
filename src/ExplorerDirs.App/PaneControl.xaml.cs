@@ -19,6 +19,7 @@ public partial class PaneControl : UserControl
 
     public event EventHandler? StateChanged;
     public event EventHandler? Activated;
+    internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView)
     {
@@ -48,6 +49,21 @@ public partial class PaneControl : UserControl
             AddTab(state.Path, state.Browser.CaptureViewState());
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
+    public void GoParent() => Current?.Browser.GoParent();
+    public void GoBack() => Current?.Browser.GoBack();
+    public void GoForward() => Current?.Browser.GoForward();
+    public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
+    public void FocusAddress()
+    {
+        Address.Focus();
+        Address.SelectAll();
+    }
+    public void SelectRelativeTab(bool reverse)
+    {
+        if (Tabs.Items.Count < 2) return;
+        Tabs.SelectedIndex = KeyboardShortcuts.NextPane(Tabs.SelectedIndex, Tabs.Items.Count, reverse);
+        FocusCurrentView();
+    }
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
     public void ReopenClosedTab() { if (_closedTabs.TryPop(out var tab)) AddTab(tab.Path, tab.View); }
 
@@ -105,6 +121,7 @@ public partial class PaneControl : UserControl
             if (Current == state) Status.Text = $"Shell 视图：{message}";
         };
         browser.Activated += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
+        browser.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
         UpdateTabHeader(state);
         tab.PreviewMouseRightButtonDown += (_, _) => Tabs.SelectedItem = tab;
         tab.ContextMenu = CreateTabContextMenu(state);
@@ -191,13 +208,17 @@ public partial class PaneControl : UserControl
         Address.Text = state.Path;
         Status.Text = "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
+        if (IsLoaded)
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+                new Action(() => { if (IsVisible) FocusCurrentView(); }));
     }
 
     private void Up_Click(object sender, RoutedEventArgs e)
     {
-        var parent = Directory.GetParent(CurrentPath);
-        if (parent is not null) Navigate(parent.FullName);
+        GoParent();
     }
+    private void Back_Click(object sender, RoutedEventArgs e) => GoBack();
+    private void Forward_Click(object sender, RoutedEventArgs e) => GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshCurrent();
     private void Go_Click(object sender, RoutedEventArgs e) => Navigate(Address.Text);
     private void Address_KeyDown(object sender, KeyEventArgs e)
