@@ -16,5 +16,6 @@
     <Compile Include="../ExplorerDirs.App/FavoritesStore.cs" Link="FavoritesStore.cs" />
     <Compile Include="../ExplorerDirs.App/TabReorder.cs" Link="TabReorder.cs" />
     <Compile Include="../ExplorerDirs.App/TabHeaderPanel.cs" Link="TabHeaderPanel.cs" />
+    <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
   </ItemGroup>
 </Project>

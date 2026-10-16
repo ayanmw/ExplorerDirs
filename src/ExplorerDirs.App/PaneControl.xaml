@@ -12,12 +12,21 @@
                     <Button x:Name="RefreshButton" Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="GoButton" Content="转到" Click="Go_Click" Margin="4,0,0,0" Padding="8,2"/>
+                    <Button x:Name="GoButton" Content="编辑" ToolTip="编辑地址或转到" Click="Go_Click"
+                            LostKeyboardFocus="GoButton_LostKeyboardFocus" Margin="4,0,0,0" Padding="8,2"/>
                     <Button x:Name="NewTabButton" Content="+" ToolTip="新建标签页" Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
                     <Button x:Name="CloseTabButton" Content="×" ToolTip="关闭标签页" Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
                 </StackPanel>
-                <TextBox x:Name="Address" KeyDown="Address_KeyDown" MinWidth="80" Margin="6,0,0,0"
-                         VerticalContentAlignment="Center"/>
+                <Grid MinWidth="80" Margin="6,0,0,0">
+                    <ScrollViewer x:Name="BreadcrumbScroll" HorizontalScrollBarVisibility="Hidden"
+                                  VerticalScrollBarVisibility="Disabled" Focusable="False"
+                                  PreviewMouseWheel="BreadcrumbScroll_PreviewMouseWheel">
+                        <StackPanel x:Name="BreadcrumbButtons" Orientation="Horizontal"/>
+                    </ScrollViewer>
+                    <TextBox x:Name="Address" KeyDown="Address_KeyDown"
+                             LostKeyboardFocus="Address_LostKeyboardFocus"
+                             Visibility="Collapsed" VerticalContentAlignment="Center"/>
+                </Grid>
             </DockPanel>
             <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"/>
             <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged"

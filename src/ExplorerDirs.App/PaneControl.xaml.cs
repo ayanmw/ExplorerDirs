@@ -20,6 +20,8 @@ public partial class PaneControl : UserControl
     private Point _dragStart;
     private TabItem? _draggedTab;
     private string? _dragToken;
+    private bool _addressEditing;
+    private bool _addressNavigationPending;
 
     private sealed class TabState
     {
@@ -42,6 +44,7 @@ public partial class PaneControl : UserControl
         if (Tabs.Items.Count == 0)
             AddTab(Home, _newTabView(), false);
         Tabs.SelectedIndex = 0;
+        RenderBreadcrumb(CurrentPath);
     }
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -87,10 +90,11 @@ public partial class PaneControl : UserControl
         UIElement? target = stop switch
         {
             0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
-            4 => Address, 5 => GoButton, 6 => NewTabButton, 7 => CloseTabButton,
+            4 => null, 5 => GoButton, 6 => NewTabButton, 7 => CloseTabButton,
             8 => Tabs.SelectedItem as TabItem,
             _ => null
         };
+        if (stop == 4) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (target is not null) return target.Focus();
         if (stop == ColumnHeaderStop && FocusStopCount == 11)
             return Current?.Browser.FocusColumnHeader() == true;
@@ -101,6 +105,14 @@ public partial class PaneControl : UserControl
     }
     public void FocusAddress()
     {
+        if (!_addressEditing)
+        {
+            Address.Text = CurrentPath;
+            _addressEditing = true;
+            BreadcrumbScroll.Visibility = Visibility.Collapsed;
+            Address.Visibility = Visibility.Visible;
+            GoButton.Content = "转到";
+        }
         Address.Focus();
         Address.SelectAll();
     }
@@ -155,14 +167,31 @@ public partial class PaneControl : UserControl
             UpdateTabHeader(state);
             if (Current == state)
             {
-                Address.Text = navigatedPath;
+                var restoreFocus = _addressNavigationPending &&
+                    (Address.IsKeyboardFocusWithin || GoButton.IsKeyboardFocused);
+                RenderBreadcrumb(navigatedPath);
+                if (!_addressEditing || _addressNavigationPending)
+                {
+                    Address.Text = navigatedPath;
+                    ShowBreadcrumb();
+                }
+                _addressNavigationPending = false;
                 Status.Text = "Shell 视图";
+                if (restoreFocus)
+                {
+                    Activated?.Invoke(this, EventArgs.Empty);
+                    RestoreFileFocusWhenActive();
+                }
             }
             StateChanged?.Invoke(this, EventArgs.Empty);
         };
         browser.NavigationFailed += (_, message) =>
         {
-            if (Current == state) Status.Text = message;
+            if (Current == state)
+            {
+                _addressNavigationPending = false;
+                Status.Text = message;
+            }
         };
         browser.MenuError += (_, message) =>
         {
@@ -275,7 +304,11 @@ public partial class PaneControl : UserControl
             Status.Text = "正在检查目录…";
             Current?.Browser.Navigate(path);
         }
-        catch (Exception ex) { Status.Text = $"无法打开目录：{ex.Message}"; }
+        catch (Exception ex)
+        {
+            _addressNavigationPending = false;
+            Status.Text = $"无法打开目录：{ex.Message}";
+        }
     }
 
     private void Tabs_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -395,7 +428,10 @@ public partial class PaneControl : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        _addressNavigationPending = false;
         Address.Text = state.Path;
+        RenderBreadcrumb(state.Path);
+        ShowBreadcrumb();
         Status.Text = "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
@@ -441,6 +477,68 @@ public partial class PaneControl : UserControl
             right.IsEnabled = scroll.HorizontalOffset + scroll.ViewportWidth < scroll.ExtentWidth - 0.5;
     }
 
+    private void RenderBreadcrumb(string path)
+    {
+        BreadcrumbButtons.Children.Clear();
+        Button? last = null;
+        foreach (var segment in BreadcrumbPath.Build(path))
+        {
+            if (BreadcrumbButtons.Children.Count > 0)
+                BreadcrumbButtons.Children.Add(new TextBlock
+                {
+                    Text = "›", Margin = new Thickness(2, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center
+                });
+            var button = new Button
+            {
+                Content = new TextBlock { Text = segment.Label },
+                ToolTip = segment.Path,
+                Focusable = false,
+                IsTabStop = false,
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 0, 4, 0)
+            };
+            button.Click += (_, _) =>
+            {
+                Activated?.Invoke(this, EventArgs.Empty);
+                Navigate(segment.Path);
+                RestoreFileFocusWhenActive();
+            };
+            BreadcrumbButtons.Children.Add(button);
+            last = button;
+        }
+        if (last is { } lastButton)
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                if (BreadcrumbButtons.Children.Contains(lastButton)) lastButton.BringIntoView();
+            }));
+    }
+
+    private void ShowBreadcrumb()
+    {
+        _addressEditing = false;
+        Address.Visibility = Visibility.Collapsed;
+        BreadcrumbScroll.Visibility = Visibility.Visible;
+        GoButton.Content = "编辑";
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+            new Action(() => { if (!_addressEditing) BreadcrumbScroll.ScrollToRightEnd(); }));
+    }
+
+    private void RestoreFileFocusWhenActive()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            if (MayRestoreFileFocus?.Invoke() == true) FocusCurrentView();
+        }));
+    }
+
+    private void BreadcrumbScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (BreadcrumbScroll.ExtentWidth <= BreadcrumbScroll.ViewportWidth) return;
+        BreadcrumbScroll.ScrollToHorizontalOffset(BreadcrumbScroll.HorizontalOffset - e.Delta / 120.0 * 90);
+        e.Handled = true;
+    }
+
     private void Up_Click(object sender, RoutedEventArgs e)
     {
         GoParent();
@@ -448,10 +546,44 @@ public partial class PaneControl : UserControl
     private void Back_Click(object sender, RoutedEventArgs e) => GoBack();
     private void Forward_Click(object sender, RoutedEventArgs e) => GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshCurrent();
-    private void Go_Click(object sender, RoutedEventArgs e) => Navigate(Address.Text);
+    private void Go_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_addressEditing) { FocusAddress(); return; }
+        _addressNavigationPending = true;
+        Navigate(Address.Text);
+    }
+
     private void Address_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter) { Navigate(Address.Text); e.Handled = true; }
+        if (e.Key == Key.Enter)
+        {
+            _addressNavigationPending = true;
+            Navigate(Address.Text);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            _addressNavigationPending = false;
+            Address.Text = CurrentPath;
+            ShowBreadcrumb();
+            Activated?.Invoke(this, EventArgs.Empty);
+            RestoreFileFocusWhenActive();
+            e.Handled = true;
+        }
+    }
+
+    private void Address_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!_addressEditing || ReferenceEquals(e.NewFocus, GoButton)) return;
+        Address.Text = CurrentPath;
+        ShowBreadcrumb();
+    }
+
+    private void GoButton_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!_addressEditing || ReferenceEquals(e.NewFocus, Address)) return;
+        Address.Text = CurrentPath;
+        ShowBreadcrumb();
     }
     private void NewTab_Click(object sender, RoutedEventArgs e) => NewTab();
     private void CloseTab_Click(object sender, RoutedEventArgs e) => CloseCurrentTab();

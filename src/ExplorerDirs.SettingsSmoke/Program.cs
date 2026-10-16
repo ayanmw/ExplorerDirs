@@ -235,6 +235,21 @@ try
     layoutThread.Join();
     if (layoutFailure is not null) throw layoutFailure;
 
+    var driveCrumbs = BreadcrumbPath.Build(@"C:\Users\marvin");
+    Check(driveCrumbs.Count == 3 && driveCrumbs[0] == new BreadcrumbSegment("C:", @"C:\") &&
+          driveCrumbs[1] == new BreadcrumbSegment("Users", @"C:\Users") &&
+          driveCrumbs[2] == new BreadcrumbSegment("marvin", @"C:\Users\marvin"),
+          "drive breadcrumbs navigate to each directory level");
+    var networkCrumbs = BreadcrumbPath.Build(@"\\server\share\docs\2026");
+    Check(networkCrumbs.Count == 3 &&
+          Path.TrimEndingDirectorySeparator(networkCrumbs[0].Path) == @"\\server\share" &&
+          networkCrumbs[0].Label == @"\\server\share" &&
+          networkCrumbs[2].Path == @"\\server\share\docs\2026",
+          "UNC breadcrumbs keep the server and share as one root");
+    Check(BreadcrumbPath.Build(@"C:\").Count == 1 &&
+          BreadcrumbPath.Build(@"folder\child").Count == 1,
+          "root and relative paths do not gain misleading extra segments");
+
     var favoritesIni = Path.Combine(root, "Favorites.ini");
     var favoritesStore = new FavoritesStore(favoritesIni);
     Check(favoritesStore.Load().Count == 0, "missing favorites profile starts empty");
