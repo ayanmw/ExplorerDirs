@@ -21,6 +21,7 @@ internal static class KeyboardShortcuts
         (0x09, 4) => ExplorerShortcut.PreviousFocusStop,  // Shift+Tab
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
         (0x4c, 2) => ExplorerShortcut.Address,       // Ctrl+L
+        (0x73, 0) => ExplorerShortcut.Address,       // F4: select the address field.
         (0x54, 2) => ExplorerShortcut.NewTab,
         (0x54, 6) => ExplorerShortcut.ReopenTab,
         (0x57, 2) => ExplorerShortcut.CloseTab,

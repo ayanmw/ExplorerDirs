@@ -117,6 +117,8 @@ try
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
     Check(KeyboardShortcuts.Resolve(0x27, 1) == ExplorerShortcut.Forward, "Alt+Right goes forward");
+    Check(KeyboardShortcuts.Resolve(0x73, 0) == ExplorerShortcut.Address,
+          "F4 selects the editable address field as in current File Explorer");
     Check(KeyboardShortcuts.Resolve(0x09, 0) == ExplorerShortcut.NextFocusStop &&
           KeyboardShortcuts.Resolve(0x09, 4) == ExplorerShortcut.PreviousFocusStop,
           "Tab and Shift+Tab traverse pane focus stops");
