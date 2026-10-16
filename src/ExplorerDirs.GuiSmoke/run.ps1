@@ -100,6 +100,22 @@ function Find-Control([IntPtr]$mainWindow, [string]$automationId,
     return $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Find-ShellItem([IntPtr]$mainWindow, [string]$displayName) {
+    $window = [Windows.Automation.AutomationElement]::FromHandle($mainWindow)
+    $itemType = [Windows.Automation.OrCondition]::new(
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [Windows.Automation.ControlType]::ListItem),
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [Windows.Automation.ControlType]::DataItem))
+    $condition = [Windows.Automation.AndCondition]::new(
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::NameProperty, $displayName),
+        $itemType)
+    return $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
 function Invoke-TestButton([Diagnostics.Process]$app, [IntPtr]$mainWindow,
     [string]$automationId) {
     Assert-TestForeground $app $mainWindow
@@ -117,7 +133,8 @@ function Invoke-Layout([Diagnostics.Process]$app, [IntPtr]$mainWindow, [int]$lay
     Wait-Until { (Get-Content -LiteralPath $iniPath -Raw) -match "(?m)^Layout=$layout\s*$" } "saved layout $layout"
 }
 
-function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
+function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow,
+    [Collections.IDictionary]$measurements) {
     Invoke-TestButton $app $mainWindow 'OpenCurrentDirectorySearch'
     Assert-TestForeground $app $mainWindow
     $queryBox = Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit)
@@ -130,6 +147,7 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
         [Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue($searchToken)
     Assert-TestForeground $app $mainWindow
+    $searchWatch = [Diagnostics.Stopwatch]::StartNew()
     Invoke-TestButton $app $mainWindow 'PaneSearchSubmit'
 
     Wait-Until {
@@ -137,6 +155,7 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
         $status = Find-Control $mainWindow 'PaneStatus' ([Windows.Automation.ControlType]::Text)
         $null -ne $status -and $status.Current.Name -eq "搜索结果：$searchToken"
     } 'Shell search navigation' 20000
+    $measurements.SearchSubmitToStatusMs = [Math]::Round($searchWatch.Elapsed.TotalMilliseconds, 1)
 
     Wait-Until {
         Assert-TestForeground $app $mainWindow
@@ -150,6 +169,7 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
         }
         return $false
     } 'Shell search result item' 20000
+    $measurements.SearchSubmitToResultMs = [Math]::Round($searchWatch.Elapsed.TotalMilliseconds, 1)
 
     Invoke-TestButton $app $mainWindow 'PaneSearchClose'
     Wait-Until {
@@ -161,12 +181,25 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
 }
 
 $app = $null
+$measurements = [ordered]@{
+    SchemaVersion = 1
+    Status = 'failed'
+    ExecutableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    StartToWindowMs = $null
+    StartToFirstFileItemMs = $null
+    DirectoryUpToItemMs = $null
+    DirectoryBackToItemMs = $null
+    SearchSubmitToStatusMs = $null
+    SearchSubmitToResultMs = $null
+}
 try {
+    $startupWatch = [Diagnostics.Stopwatch]::StartNew()
     $app = Start-Process -FilePath $exe -PassThru
     Wait-Until {
         $app.Refresh()
         -not $app.HasExited -and $app.MainWindowHandle -ne [IntPtr]::Zero
     } 'isolated Explorer Dirs window'
+    $measurements.StartToWindowMs = [Math]::Round($startupWatch.Elapsed.TotalMilliseconds, 1)
     $mainWindow = $app.MainWindowHandle
     [uint32]$owner = 0
     [ExplorerDirsSmokeForeground]::GetWindowThreadProcessId($mainWindow, [ref]$owner) | Out-Null
@@ -174,12 +207,38 @@ try {
         throw 'Unexpected test window ownership or title.'
     }
     Assert-TestForeground $app $mainWindow
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $null -ne (Find-ShellItem $mainWindow $searchName)
+    } 'first file item in the initial directory' 20000
+    $measurements.StartToFirstFileItemMs = [Math]::Round($startupWatch.Elapsed.TotalMilliseconds, 1)
+    $directoryWatch = [Diagnostics.Stopwatch]::StartNew()
+    Invoke-TestButton $app $mainWindow 'PaneGoParent'
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $null -ne (Find-ShellItem $mainWindow 'files')
+    } 'parent directory item' 20000
+    $measurements.DirectoryUpToItemMs = [Math]::Round($directoryWatch.Elapsed.TotalMilliseconds, 1)
+    $directoryWatch.Restart()
+    Invoke-TestButton $app $mainWindow 'PaneGoBack'
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $null -ne (Find-ShellItem $mainWindow $searchName)
+    } 'returned directory item' 20000
+    $measurements.DirectoryBackToItemMs = [Math]::Round($directoryWatch.Elapsed.TotalMilliseconds, 1)
     Invoke-Layout $app $mainWindow 4
     Invoke-Layout $app $mainWindow 1
-    Test-Search $app $mainWindow
+    Test-Search $app $mainWindow $measurements
+    $measurements.Status = 'passed'
     Write-Output "Layout toolbar, isolated INI save, and Shell search result: PASS ($runRoot)"
 }
 finally {
+    try {
+        $performanceJson = $measurements | ConvertTo-Json -Depth 3
+        [IO.File]::WriteAllText((Join-Path $runRoot 'performance.json'), $performanceJson,
+            [Text.UTF8Encoding]::new($false))
+    }
+    catch { Write-Warning 'Could not save the isolated timing record.' }
     if ($null -ne $app) {
         $app.Refresh()
         if (-not $app.HasExited) {
