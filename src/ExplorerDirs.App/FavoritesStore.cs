@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Text;
 
 namespace ExplorerDirs.App;
@@ -28,7 +29,7 @@ internal sealed class FavoritesStore
         {
             var values = new Dictionary<int, string>();
             var count = -1;
-            var version = -1;
+            BigInteger version = -1;
             var inSection = false;
             complete = true;
             _lastSeenContent = File.ReadAllText(_path);
@@ -49,12 +50,12 @@ internal sealed class FavoritesStore
                 var value = line[(equals + 1)..].Trim();
                 if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedVersion))
+                    if (!BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedVersion))
                         complete = false;
                     else
                     {
                         if (version >= 0) complete = false;
-                        version = Math.Max(version, parsedVersion);
+                        version = BigInteger.Max(version, parsedVersion);
                     }
                 }
                 else if (key.Equals("Count", StringComparison.OrdinalIgnoreCase))

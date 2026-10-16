@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 
 namespace ExplorerDirs.App;
 
@@ -23,7 +24,7 @@ internal sealed class UiPreferencesStore
         var complete = true;
         var inAppearance = false;
         var seenAppearance = false;
-        var version = -1;
+        BigInteger version = -1;
         bool? compact = null;
         try
         {
@@ -45,12 +46,12 @@ internal sealed class UiPreferencesStore
                 var value = line[(equals + 1)..].Trim();
                 if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+                    if (!BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
                         complete = false;
                     else
                     {
                         if (version >= 0) complete = false;
-                        version = Math.Max(version, parsed);
+                        version = BigInteger.Max(version, parsed);
                     }
                 }
                 else if (key.Equals("Compact", StringComparison.OrdinalIgnoreCase))

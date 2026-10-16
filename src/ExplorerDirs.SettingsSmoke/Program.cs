@@ -838,6 +838,15 @@ try
     catch (IOException) { }
     Check(File.ReadAllText(uiIni).Contains("FormatVersion=2", StringComparison.Ordinal),
         "future appearance file stays untouched");
+    const string hugeVersion = "999999999999999999999999999999999999";
+    var hugeUiContent = uiContent.Replace("FormatVersion=1",
+        $"FormatVersion={hugeVersion}{Environment.NewLine}FormatVersion=1", StringComparison.Ordinal);
+    File.WriteAllText(uiIni, hugeUiContent);
+    Check(!uiStore.Load() && uiStore.LoadWarning is not null,
+        "oversized future appearance version is protected even with a later version one");
+    try { uiStore.Save(false); throw new Exception("oversized future appearance format was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(uiIni) == hugeUiContent, "oversized future appearance file stays untouched");
     File.WriteAllText(uiIni, uiContent.Replace("Compact=true", "Compact=broken", StringComparison.Ordinal));
     Check(!uiStore.Load() && uiStore.LoadWarning is not null &&
           Directory.GetFiles(root, "UiPreferences.ini.invalid-*.bak").Length == 1,
@@ -869,6 +878,14 @@ try
           "future pinned tab format is protected");
     try { pinsStore.Save([]); throw new Exception("future pinned tab format was overwritten"); }
     catch (IOException) { }
+    var hugePinsContent = pinsContent.Replace("FormatVersion=1",
+        $"FormatVersion={hugeVersion}{Environment.NewLine}FormatVersion=1", StringComparison.Ordinal);
+    File.WriteAllText(pinsIni, hugePinsContent);
+    Check(pinsStore.Load().Count == 0 && pinsStore.LoadWarning is not null,
+          "oversized future pinned tab version is protected even with a later version one");
+    try { pinsStore.Save([]); throw new Exception("oversized future pinned tabs format was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(pinsIni) == hugePinsContent, "oversized future pinned tabs file stays untouched");
     File.WriteAllText(pinsIni, pinsContent.Replace("Count=1", "Count=2", StringComparison.Ordinal));
     Check(pinsStore.Load().Count == 1 && pinsStore.LoadWarning is not null,
           "pinned tab recovery remains readable");
@@ -933,6 +950,14 @@ try
     }
     catch (IOException) { }
     Check(File.ReadAllText(favoritesIni) == futureFavorites, "newer favorites profile stays untouched");
+    var hugeFavorites = favoriteContent.Replace("FormatVersion=1",
+        $"FormatVersion={hugeVersion}{Environment.NewLine}FormatVersion=1", StringComparison.Ordinal);
+    File.WriteAllText(favoritesIni, hugeFavorites);
+    Check(favoritesStore.Load().Count == 0 && favoritesStore.LoadWarning is not null,
+          "oversized future favorites version is protected even with a later version one");
+    try { favoritesStore.Save([@"C:\new"]); throw new Exception("oversized future favorites was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(favoritesIni) == hugeFavorites, "oversized future favorites file stays untouched");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally

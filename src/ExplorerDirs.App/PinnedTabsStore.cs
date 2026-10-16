@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Text;
 
 namespace ExplorerDirs.App;
@@ -27,7 +28,7 @@ internal sealed class PinnedTabsStore
         var complete = true;
         var inPins = false;
         var seenPins = false;
-        var version = -1;
+        BigInteger version = -1;
         var count = -1;
         var rawEntries = new Dictionary<int, string>();
         try
@@ -50,8 +51,8 @@ internal sealed class PinnedTabsStore
                 var value = line[(equals + 1)..].Trim();
                 if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
-                    else { if (version >= 0) complete = false; version = Math.Max(version, parsed); }
+                    if (!BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
+                    else { if (version >= 0) complete = false; version = BigInteger.Max(version, parsed); }
                 }
                 else if (key.Equals("Count", StringComparison.OrdinalIgnoreCase))
                 {
