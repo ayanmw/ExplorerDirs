@@ -187,6 +187,22 @@ try
     catch (IOException) { }
     Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
 
+    var duplicateFutureIni = Path.Combine(root, "duplicate-future.ini");
+    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=1",
+        "FormatVersion=2" + Environment.NewLine + "FormatVersion=1", StringComparison.Ordinal);
+    File.WriteAllText(duplicateFutureIni, duplicateFutureProfile);
+    var duplicateFutureStore = new SessionStore(duplicateFutureIni, Path.Combine(root, "missing-legacy.json"));
+    Check(duplicateFutureStore.Load() is null && duplicateFutureStore.LoadWarning is not null,
+        "a newer duplicate format version must not be interpreted as version one");
+    try
+    {
+        duplicateFutureStore.Save(state);
+        throw new Exception("duplicated newer format was overwritten");
+    }
+    catch (IOException) { }
+    Check(File.ReadAllText(duplicateFutureIni) == duplicateFutureProfile,
+        "duplicated newer format stays untouched");
+
     var crashLogs = new CrashLog(Path.Combine(root, "crash-logs"));
     Exception simulatedCrash;
     try { throw new InvalidOperationException(@"PRIVATE_PATH_C:\Users\marvin\secret.txt"); }

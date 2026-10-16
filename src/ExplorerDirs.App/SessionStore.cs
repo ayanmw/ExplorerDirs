@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 
@@ -184,8 +185,10 @@ internal sealed class SessionStore
     private static ProfileParseResult ParseProfile(string content)
     {
         var complete = true;
+        var newerFormatSeen = false;
         var sections = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, string>? current = null;
+        string? currentSection = null;
         foreach (var rawLine in content.Split('\n'))
         {
             var line = rawLine.Trim().TrimStart('\uFEFF');
@@ -193,6 +196,7 @@ internal sealed class SessionStore
             if (line.StartsWith('[') && line.EndsWith(']'))
             {
                 var name = line[1..^1].Trim();
+                currentSection = name;
                 if (sections.TryGetValue(name, out var existing))
                 {
                     complete = false;
@@ -205,15 +209,21 @@ internal sealed class SessionStore
             if (current is not null && equals > 0)
             {
                 var key = line[..equals].Trim();
+                var value = line[(equals + 1)..].Trim();
+                if (currentSection?.Equals("General", StringComparison.OrdinalIgnoreCase) == true &&
+                    key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase) &&
+                    BigInteger.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture,
+                        out var declaredVersion) && declaredVersion > 1)
+                    newerFormatSeen = true;
                 if (current.ContainsKey(key)) complete = false;
-                current[key] = line[(equals + 1)..].Trim();
+                current[key] = value;
             }
             else complete = false;
         }
 
         sections.TryGetValue("General", out var general);
         var version = general is null ? 0 : GetInt(general, "FormatVersion", 0);
-        if (version > 1) return new ProfileParseResult(null, false, true);
+        if (newerFormatSeen || version > 1) return new ProfileParseResult(null, false, true);
         if (version != 1) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
