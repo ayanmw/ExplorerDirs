@@ -7,7 +7,8 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'releases'))
 $project = Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj'
-$staging = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot ('.staging-' + $Version + '-' + $PID)))
+$staging = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot (
+    '.staging-' + $Version + '-' + [Guid]::NewGuid().ToString('N'))))
 $destination = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot $Version))
 $buildOutput = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ('src\ExplorerDirs.App\bin\publish-build\' + $Version)))
 
@@ -20,6 +21,9 @@ foreach ($path in @($staging, $destination)) {
 
 if (Test-Path -LiteralPath $destination) {
     throw "Release already exists: $destination"
+}
+if (Test-Path -LiteralPath $staging) {
+    throw "Publish staging already exists: $staging"
 }
 
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
@@ -41,5 +45,8 @@ Set-Content -LiteralPath (Join-Path $staging 'SHA256.txt') -Value ("ExplorerDirs
     'DirectoryArgument=true',
     "ExecutableSha256=$hash"
 ), [Text.UTF8Encoding]::new($false))
-Move-Item -LiteralPath $staging -Destination $destination
+if (Test-Path -LiteralPath $destination) {
+    throw "Release appeared during publishing; staging files were left at $staging"
+}
+[IO.Directory]::Move($staging, $destination)
 Write-Output $destination
