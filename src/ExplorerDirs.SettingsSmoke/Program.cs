@@ -125,6 +125,51 @@ try
     Check(crashLogs.TryWrite(CrashEventKind.AppDomainUnhandled, simulatedCrash) is null &&
           Directory.GetFiles(Path.Combine(root, "crash-logs"), "*.json").Length == 1,
           "the same managed exception is logged once");
+
+    var machineVariables = new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["TOOLS"] = new(@"C:\new-tools", false),
+        ["Path"] = new(@"C:\Windows\System32;%TOOLS%", true),
+        ["LINK"] = new(@"%TOOLS%\bin", true),
+        ["PLAIN"] = new(@"%TOOLS%\literal", false),
+        ["MISSING_LINK"] = new(@"%DELETED%\bin", true)
+    };
+    var userVariables = new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Path"] = new(@"%PATH%;C:\user-bin", true),
+        ["USER_TOOL"] = new(@"%TOOLS%\user", true)
+    };
+    var oldProcess = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["TOOLS"] = @"C:\old-tools",
+        ["DELETED"] = @"C:\stale",
+        ["USERPROFILE"] = @"C:\Users\example"
+    };
+    var refreshPlan = EnvironmentRefresh.BuildPlan(machineVariables, userVariables, oldProcess,
+        ["TOOLS", "Path", "DELETED"]);
+    Check(refreshPlan.Values["LINK"] == @"C:\new-tools\bin" &&
+          refreshPlan.Values["USER_TOOL"] == @"C:\new-tools\user",
+          "expandable values use the fresh persisted snapshot");
+    Check(refreshPlan.Values["Path"] == @"C:\Windows\System32;C:\new-tools;C:\user-bin",
+          "machine and user PATH combine without stale or duplicate machine segments");
+    Check(refreshPlan.Values["PLAIN"] == @"%TOOLS%\literal" &&
+          refreshPlan.Values["MISSING_LINK"] == @"%DELETED%\bin",
+          "plain registry strings stay literal and deleted names do not use stale process values");
+    Check(refreshPlan.Removed.Contains("DELETED", StringComparer.OrdinalIgnoreCase),
+          "deleted persisted variable is removed from the process");
+    var normalUserVariables = new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Path"] = new(@"C:\user-bin", false),
+        ["FROM_PROCESS"] = new(@"%USERPROFILE%\Documents", true)
+    };
+    var normalPathPlan = EnvironmentRefresh.BuildPlan(machineVariables, normalUserVariables,
+        oldProcess, ["TOOLS", "Path", "DELETED"]);
+    Check(normalPathPlan.Values["Path"] == @"C:\Windows\System32;C:\new-tools;C:\user-bin" &&
+          normalPathPlan.Values["FROM_PROCESS"] == @"C:\Users\example\Documents",
+          "ordinary user PATH appends and process-only references remain available");
+
+    // This affects only the short-lived console test process; no persistent registry values are changed.
+    Check(new EnvironmentRefresh().Reload() > 0, "live Windows environment snapshot can be refreshed");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally
