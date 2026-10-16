@@ -323,7 +323,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (view.GetFocusedItem(out var index) >= 0 && index >= 0)
             {
                 var hr = view.SelectItem(index, 0x11); // SVSI_SELECT | SVSI_FOCUSED: preserve other selections.
-                if (hr >= 0) FocusSelectedAutomationItem();
+                // UIA tree order does not identify Shell's focused item when several
+                // items are selected. Let IFolderView keep that focus in multi-select.
+                if (hr >= 0 && view.ItemCount(1, out var selectedCount) >= 0 && selectedCount == 1)
+                    FocusSelectedAutomationItem();
                 if (FocusTracePath is not null)
                     Trace($"focus-item index={index} result={hr:X8} foreground={GetForegroundWindow()} focus={FocusClass()} item={FolderFocusState()}");
             }
