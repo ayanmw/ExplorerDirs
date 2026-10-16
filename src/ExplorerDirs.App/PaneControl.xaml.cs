@@ -22,6 +22,7 @@ public partial class PaneControl : UserControl
     private string? _dragToken;
     private bool _addressEditing;
     private bool _addressNavigationPending;
+    private bool _compactMode;
 
     private sealed class TabState
     {
@@ -116,6 +117,35 @@ public partial class PaneControl : UserControl
         Address.Focus();
         Address.SelectAll();
     }
+
+    internal void SetCompactMode(bool compact)
+    {
+        _compactMode = compact;
+        RootBorder.Margin = new Thickness(compact ? 1 : 3);
+        NavigationRow.Margin = new Thickness(compact ? 2 : 4);
+        AddressHost.Margin = new Thickness(compact ? 3 : 6, 0, 0, 0);
+        Status.Margin = compact ? new Thickness(4, 1, 4, 1) : new Thickness(6, 3, 6, 3);
+        if (compact) Status.FontSize = 11;
+        else Status.ClearValue(TextBlock.FontSizeProperty);
+        var navigationWidth = compact ? 24 : 28;
+        BackButton.Width = navigationWidth;
+        ForwardButton.Width = navigationWidth;
+        UpButton.Width = navigationWidth;
+        RefreshButton.Width = navigationWidth;
+        NewTabButton.Width = navigationWidth;
+        CloseTabButton.Width = navigationWidth;
+        GoButton.Padding = compact ? new Thickness(4, 0, 4, 0) : new Thickness(8, 2, 8, 2);
+        GoButton.Margin = new Thickness(compact ? 2 : 4, 0, 0, 0);
+        NewTabButton.Margin = new Thickness(compact ? 4 : 8, 0, 0, 0);
+        CloseTabButton.Margin = new Thickness(compact ? 2 : 4, 0, 0, 0);
+        foreach (var tab in _tabOrder)
+        {
+            if (compact) tab.Padding = new Thickness(4, 1, 4, 1);
+            else tab.ClearValue(Control.PaddingProperty);
+        }
+        foreach (var button in BreadcrumbButtons.Children.OfType<Button>())
+            button.Padding = new Thickness(compact ? 2 : 4, 0, compact ? 2 : 4, 0);
+    }
     public void SelectRelativeTab(bool reverse)
     {
         if (_tabOrder.Count < 2 || Tabs.SelectedItem is not TabItem selectedTab) return;
@@ -141,6 +171,7 @@ public partial class PaneControl : UserControl
     {
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView());
         var tab = new TabItem { Content = browser };
+        if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Tab = tab, Browser = browser, Path = path };
         tab.Tag = state;
         browser.CustomCommands = selectedPath =>
@@ -496,7 +527,7 @@ public partial class PaneControl : UserControl
                 IsTabStop = false,
                 Background = System.Windows.Media.Brushes.Transparent,
                 BorderThickness = new Thickness(0),
-                Padding = new Thickness(4, 0, 4, 0)
+                Padding = new Thickness(_compactMode ? 2 : 4, 0, _compactMode ? 2 : 4, 0)
             };
             button.Click += (_, _) =>
             {

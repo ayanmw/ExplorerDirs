@@ -21,6 +21,7 @@
             <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>
             <MenuItem Header="视图(_V)">
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
+                <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
                 <Separator/>
                 <MenuItem Header="刷新当前目录" InputGestureText="F5" Click="RefreshCurrent_Click"/>
             </MenuItem>
@@ -34,7 +35,7 @@
             </MenuItem>
         </Menu>
         <ToolBarTray DockPanel.Dock="Top">
-            <ToolBar>
+            <ToolBar x:Name="MainToolBar">
                 <TextBlock Text="布局" VerticalAlignment="Center" Margin="4,0"/>
                 <StackPanel x:Name="LayoutButtons" Orientation="Horizontal"/>
                 <Separator/>

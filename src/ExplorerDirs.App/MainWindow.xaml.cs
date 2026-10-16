@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly SessionStore _sessionStore = new();
     private readonly FavoritesStore _favoritesStore;
     private readonly List<string> _favorites;
+    private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly EnvironmentRefresh _environmentRefresh = new();
     private readonly Dictionary<int, Button> _layoutButtons = [];
     private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
@@ -26,6 +27,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<int, int> _lastFocusedPaneByLayout = [];
     private int _layout = 4;
     private uint _defaultViewMode = 4;
+    private bool _compactMode;
     private bool _initializing = true;
     private bool _fileViewFocusDesired;
 
@@ -45,6 +47,12 @@ public partial class MainWindow : Window
         if (_favoritesStore.LoadWarning is { } favoritesWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? favoritesWarning : $"{EnvironmentStatus.Text} {favoritesWarning}";
+        _uiPreferencesStore = new UiPreferencesStore(Path.Combine(
+            Path.GetDirectoryName(_sessionStore.Path)!, "UiPreferences.ini"));
+        _compactMode = _uiPreferencesStore.Load();
+        if (_uiPreferencesStore.LoadWarning is { } appearanceWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? appearanceWarning : $"{EnvironmentStatus.Text} {appearanceWarning}";
         _defaultViewMode = state?.DefaultViewMode ?? 4;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
@@ -70,6 +78,7 @@ public partial class MainWindow : Window
         BuildLayoutControls();
         BuildDefaultViewOptions();
         BuildLayout();
+        ApplyCompactMode();
         Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
             new Action(() => ActivePane.FocusCurrentView()));
         _initializing = false;
@@ -146,6 +155,37 @@ public partial class MainWindow : Window
             DefaultViewMenu.Items.Add(item);
             _defaultViewMenuItems[mode] = item;
         }
+    }
+
+    private void CompactMode_Click(object sender, RoutedEventArgs e)
+    {
+        var next = CompactModeMenu.IsChecked;
+        try
+        {
+            _uiPreferencesStore.Save(next);
+            _compactMode = next;
+            ApplyCompactMode();
+            EnvironmentStatus.Text = next ? "已启用紧凑布局。" : "已恢复标准布局间距。";
+        }
+        catch (Exception ex)
+        {
+            CompactModeMenu.IsChecked = _compactMode;
+            EnvironmentStatus.Text = $"外观配置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ApplyCompactMode()
+    {
+        CompactModeMenu.IsChecked = _compactMode;
+        PaneGrid.Margin = _compactMode ? new Thickness(1, 0, 1, 1) : new Thickness(5, 2, 5, 5);
+        if (_compactMode) MainToolBar.Padding = new Thickness(1, 0, 1, 0);
+        else MainToolBar.ClearValue(Control.PaddingProperty);
+        foreach (var button in _layoutButtons.Values)
+        {
+            button.Width = _compactMode ? 30 : 34;
+            button.Height = _compactMode ? 24 : 28;
+        }
+        foreach (var pane in _panes) pane.SetCompactMode(_compactMode);
     }
 
     private static Grid CreateLayoutIcon(LayoutPreset preset)

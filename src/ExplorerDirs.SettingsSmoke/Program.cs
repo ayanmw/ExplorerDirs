@@ -283,6 +283,32 @@ try
           BreadcrumbPath.Build(@"folder\child").Count == 1,
           "root and relative paths do not gain misleading extra segments");
 
+    var uiIni = Path.Combine(root, "UiPreferences.ini");
+    var uiStore = new UiPreferencesStore(uiIni);
+    Check(!uiStore.Load() && uiStore.LoadWarning is null, "missing appearance profile uses normal spacing");
+    uiStore.Save(true);
+    Check(uiStore.Load() && uiStore.LoadWarning is null, "compact spacing round-trips in portable INI");
+    var uiContent = File.ReadAllText(uiIni);
+    File.AppendAllText(uiIni, "; edited elsewhere" + Environment.NewLine);
+    try { uiStore.Save(false); throw new Exception("external appearance edit was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(uiIni).Contains("edited elsewhere", StringComparison.Ordinal),
+        "external appearance changes remain untouched");
+    File.WriteAllText(uiIni, uiContent.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal));
+    Check(!uiStore.Load() && uiStore.LoadWarning is not null,
+        "future appearance format is protected");
+    try { uiStore.Save(false); throw new Exception("future appearance format was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(uiIni).Contains("FormatVersion=2", StringComparison.Ordinal),
+        "future appearance file stays untouched");
+    File.WriteAllText(uiIni, uiContent.Replace("Compact=true", "Compact=broken", StringComparison.Ordinal));
+    Check(!uiStore.Load() && uiStore.LoadWarning is not null &&
+          Directory.GetFiles(root, "UiPreferences.ini.invalid-*.bak").Length == 1,
+          "invalid appearance file is backed up before recovery");
+    uiStore.Save(false);
+    Check(!uiStore.Load() && uiStore.LoadWarning is null,
+          "recovered appearance settings can be saved cleanly");
+
     var favoritesIni = Path.Combine(root, "Favorites.ini");
     var favoritesStore = new FavoritesStore(favoritesIni);
     Check(favoritesStore.Load().Count == 0, "missing favorites profile starts empty");
