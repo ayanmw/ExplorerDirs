@@ -155,13 +155,15 @@ try
           KeyboardShortcuts.Resolve(0x45, 2) == ExplorerShortcut.Search &&
           KeyboardShortcuts.Resolve(0x46, 2) == ExplorerShortcut.Search,
           "F3 and Ctrl+E/F focus current-directory search");
-    var searchFocusStops = new[] { 13, 12, 11, 10 };
+    var searchFocusStops = new[] { 14, 13, 11, 10 };
     Check(FocusTraversal.Move(0, 7, searchFocusStops, false) == (0, 8) &&
           FocusTraversal.Move(0, 8, searchFocusStops, false) == (0, 9) &&
           FocusTraversal.Move(0, 9, searchFocusStops, false) == (0, 10) &&
+          FocusTraversal.Move(0, 10, searchFocusStops, false) == (0, 11) &&
+          FocusTraversal.Move(0, 11, searchFocusStops, true) == (0, 10) &&
           FocusTraversal.Move(0, 10, searchFocusStops, true) == (0, 9) &&
-          FocusTraversal.Move(0, 12, searchFocusStops, false) == (1, 0) &&
-          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 12),
+          FocusTraversal.Move(0, 13, searchFocusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 13),
           "visible search controls extend each pane's reversible Tab order");
     var searchScope = Path.Combine(root, "search scope & 中文");
     Directory.CreateDirectory(searchScope);

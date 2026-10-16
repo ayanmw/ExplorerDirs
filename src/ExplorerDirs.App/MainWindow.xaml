@@ -45,6 +45,7 @@
                 <Button Content="▣＋" ToolTip="复制当前标签 (Ctrl+K)" Click="DuplicateTab_Click" Width="42"/>
                 <Button Content="×" ToolTip="关闭标签页 (Ctrl+W)" Click="CloseTab_Click" Width="32"/>
                 <Button Content="⌕" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
+                        AutomationProperties.AutomationId="OpenCurrentDirectorySearch"
                         Click="SearchCurrent_Click" Width="32"/>
                 <Separator/>
                 <Button Content="↻ 环境" ToolTip="刷新本程序环境变量" Click="RefreshEnvironment_Click"/>

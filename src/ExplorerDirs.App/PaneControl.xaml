@@ -33,12 +33,19 @@
                 <TextBlock DockPanel.Dock="Left" Text="搜索当前目录" VerticalAlignment="Center" Margin="2,0,6,0"/>
                 <Button x:Name="CloseSearchButton" DockPanel.Dock="Right" Content="×"
                         ToolTip="返回目录并关闭搜索" Width="28" Margin="4,0,0,0"
+                        AutomationProperties.AutomationId="PaneSearchClose"
                         Click="CloseSearch_Click"/>
+                <Button x:Name="SearchSubmitButton" DockPanel.Dock="Right" Content="搜索"
+                        ToolTip="搜索当前目录" Width="52" Margin="4,0,0,0"
+                        AutomationProperties.AutomationId="PaneSearchSubmit"
+                        Click="SearchSubmit_Click"/>
                 <TextBox x:Name="SearchBox" ToolTip="输入关键词后按 Enter 搜索；Esc 返回目录"
-                         AutomationProperties.Name="搜索当前目录" KeyDown="SearchBox_KeyDown"
+                         AutomationProperties.Name="搜索当前目录" AutomationProperties.AutomationId="PaneSearchQuery"
+                         KeyDown="SearchBox_KeyDown"
                          VerticalContentAlignment="Center"/>
             </DockPanel>
-            <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"/>
+            <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"
+                       AutomationProperties.AutomationId="PaneStatus"/>
             <DockPanel>
                 <TabControl x:Name="Tabs" DockPanel.Dock="Top" SelectionChanged="Tabs_SelectionChanged"
                             PreviewKeyDown="Tabs_PreviewKeyDown"

@@ -78,13 +78,13 @@ public partial class PaneControl : UserControl
     public void GoForward() => Current?.Browser.GoForward();
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
     internal bool IsShellRenameEditorFocused => Current?.Browser.IsRenameEditorFocused() == true;
-    private int SearchStopCount => SearchBar.Visibility == Visibility.Visible ? 2 : 0;
+    private int SearchStopCount => SearchBar.Visibility == Visibility.Visible ? 3 : 0;
     private int HeaderStop => TabHeaderStop + SearchStopCount + 1;
     internal int FocusStopCount => HeaderStop + (Current?.Browser.HasColumnHeader() == true ? 2 : 1);
-    internal IReadOnlyList<int> MajorFocusStops => SearchStopCount == 2
+    internal IReadOnlyList<int> MajorFocusStops => SearchStopCount == 3
         ? Current?.Browser.HasColumnHeader() == true
-            ? [4, TabHeaderStop, TabHeaderStop + 2, HeaderStop, FocusStopCount - 1]
-            : [4, TabHeaderStop, TabHeaderStop + 2, FocusStopCount - 1]
+            ? [4, TabHeaderStop, TabHeaderStop + 3, HeaderStop, FocusStopCount - 1]
+            : [4, TabHeaderStop, TabHeaderStop + 3, FocusStopCount - 1]
         : Current?.Browser.HasColumnHeader() == true
             ? [4, TabHeaderStop, HeaderStop, FocusStopCount - 1]
             : [4, TabHeaderStop, FocusStopCount - 1];
@@ -95,10 +95,11 @@ public partial class PaneControl : UserControl
             Address, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
-        if (SearchStopCount == 2)
+        if (SearchStopCount == 3)
         {
             if (SearchBox.IsKeyboardFocusWithin) return TabHeaderStop;
-            if (CloseSearchButton.IsKeyboardFocusWithin) return TabHeaderStop + 1;
+            if (SearchSubmitButton.IsKeyboardFocusWithin) return TabHeaderStop + 1;
+            if (CloseSearchButton.IsKeyboardFocusWithin) return TabHeaderStop + 2;
         }
         if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused) return TabHeaderStop + SearchStopCount;
         if (Current?.Browser.HasNativeFocus() == true)
@@ -116,10 +117,11 @@ public partial class PaneControl : UserControl
         };
         if (stop == 4) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (target is not null) return target.Focus();
-        if (SearchStopCount == 2)
+        if (SearchStopCount == 3)
         {
             if (stop == TabHeaderStop) return SearchBox.Focus();
-            if (stop == TabHeaderStop + 1) return CloseSearchButton.Focus();
+            if (stop == TabHeaderStop + 1) return SearchSubmitButton.Focus();
+            if (stop == TabHeaderStop + 2) return CloseSearchButton.Focus();
         }
         if (stop == TabHeaderStop + SearchStopCount)
             return (Tabs.SelectedItem as TabItem)?.Focus() == true;
@@ -142,11 +144,7 @@ public partial class PaneControl : UserControl
     {
         if (e.Key == Key.Enter)
         {
-            if (Current is { } state && !string.IsNullOrWhiteSpace(SearchBox.Text))
-            {
-                Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
-                state.Browser.Search(SearchBox.Text);
-            }
+            SubmitSearch();
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
@@ -154,6 +152,15 @@ public partial class PaneControl : UserControl
             CloseSearch();
             e.Handled = true;
         }
+    }
+
+    private void SearchSubmit_Click(object sender, RoutedEventArgs e) => SubmitSearch();
+
+    private void SubmitSearch()
+    {
+        if (Current is not { } state || string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+        Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
+        state.Browser.Search(SearchBox.Text);
     }
 
     private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearch();

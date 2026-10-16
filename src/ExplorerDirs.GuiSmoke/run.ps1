@@ -21,6 +21,9 @@ if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
 $appDirectory = Join-Path $runRoot 'app'
 $testDirectory = Join-Path $runRoot 'files'
 New-Item -ItemType Directory -Path $appDirectory, $testDirectory -Force | Out-Null
+$searchToken = 'ExplorerDirsSmoke' + [Guid]::NewGuid().ToString('N')
+$searchName = "$searchToken.txt"
+[IO.File]::WriteAllText((Join-Path $testDirectory $searchName), 'isolated search proof')
 
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
     --configuration Release --self-contained false --output $appDirectory
@@ -86,26 +89,70 @@ function Assert-TestForeground([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
     }
 }
 
-function Find-LayoutButton([IntPtr]$mainWindow, [int]$layout) {
+function Find-Control([IntPtr]$mainWindow, [string]$automationId,
+    [Windows.Automation.ControlType]$controlType) {
     $window = [Windows.Automation.AutomationElement]::FromHandle($mainWindow)
     $condition = [Windows.Automation.AndCondition]::new(
         [Windows.Automation.PropertyCondition]::new(
-            [Windows.Automation.AutomationElement]::AutomationIdProperty, "Layout$layout"),
+            [Windows.Automation.AutomationElement]::AutomationIdProperty, $automationId),
         [Windows.Automation.PropertyCondition]::new(
-            [Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))
+            [Windows.Automation.AutomationElement]::ControlTypeProperty, $controlType))
     return $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
-function Invoke-Layout([Diagnostics.Process]$app, [IntPtr]$mainWindow, [int]$layout) {
+function Invoke-TestButton([Diagnostics.Process]$app, [IntPtr]$mainWindow,
+    [string]$automationId) {
     Assert-TestForeground $app $mainWindow
-    $button = Find-LayoutButton $mainWindow $layout
-    if ($null -eq $button) { throw "Layout $layout toolbar button was not found." }
+    $button = Find-Control $mainWindow $automationId ([Windows.Automation.ControlType]::Button)
+    if ($null -eq $button) { throw "Test button $automationId was not found." }
     Assert-TestForeground $app $mainWindow
     $pattern = [Windows.Automation.InvokePattern]$button.GetCurrentPattern(
         [Windows.Automation.InvokePattern]::Pattern)
     $pattern.Invoke()
     Assert-TestForeground $app $mainWindow
+}
+
+function Invoke-Layout([Diagnostics.Process]$app, [IntPtr]$mainWindow, [int]$layout) {
+    Invoke-TestButton $app $mainWindow "Layout$layout"
     Wait-Until { (Get-Content -LiteralPath $iniPath -Raw) -match "(?m)^Layout=$layout\s*$" } "saved layout $layout"
+}
+
+function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
+    Invoke-TestButton $app $mainWindow 'OpenCurrentDirectorySearch'
+    Assert-TestForeground $app $mainWindow
+    $queryBox = Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit)
+    if ($null -eq $queryBox) { throw 'Pane search input was not found.' }
+    Assert-TestForeground $app $mainWindow
+    $value = [Windows.Automation.ValuePattern]$queryBox.GetCurrentPattern(
+        [Windows.Automation.ValuePattern]::Pattern)
+    $value.SetValue($searchToken)
+    Assert-TestForeground $app $mainWindow
+    Invoke-TestButton $app $mainWindow 'PaneSearchSubmit'
+
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $status = Find-Control $mainWindow 'PaneStatus' ([Windows.Automation.ControlType]::Text)
+        $null -ne $status -and $status.Current.Name -eq "搜索结果：$searchToken"
+    } 'Shell search navigation' 20000
+
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $window = [Windows.Automation.AutomationElement]::FromHandle($mainWindow)
+        foreach ($displayName in @($searchName, $searchToken)) {
+            $condition = [Windows.Automation.PropertyCondition]::new(
+                [Windows.Automation.AutomationElement]::NameProperty, $displayName)
+            if ($null -ne $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)) {
+                return $true
+            }
+        }
+        return $false
+    } 'Shell search result item' 20000
+
+    Invoke-TestButton $app $mainWindow 'PaneSearchClose'
+    Wait-Until {
+        Assert-TestForeground $app $mainWindow
+        $null -eq (Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit))
+    } 'search bar to close'
 }
 
 $app = $null
@@ -124,7 +171,8 @@ try {
     Assert-TestForeground $app $mainWindow
     Invoke-Layout $app $mainWindow 4
     Invoke-Layout $app $mainWindow 1
-    Write-Output "Layout toolbar and isolated INI save: PASS ($runRoot)"
+    Test-Search $app $mainWindow
+    Write-Output "Layout toolbar, isolated INI save, and Shell search result: PASS ($runRoot)"
 }
 finally {
     if ($null -ne $app) {
