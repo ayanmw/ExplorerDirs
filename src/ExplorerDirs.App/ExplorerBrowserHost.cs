@@ -690,38 +690,46 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (_location.IsSearchActive) return _viewState.Copy();
         var view = GetFolderView2Pointer();
-        if (view == IntPtr.Zero) return _viewState.Copy();
+        if (view == IntPtr.Zero)
+        {
+            if (_hasNavigated) ViewCaptureFailed = true;
+            return _viewState.Copy();
+        }
         try
         {
-            var mode = _viewState.Mode;
-            var iconSize = _viewState.IconSize;
-            if (GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var currentMode, out var currentSize) >= 0)
+            var modeResult = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var iconSize);
+            if (modeResult < 0)
             {
-                mode = currentMode;
-                iconSize = currentSize;
+                ViewCaptureFailed = true;
+                return _viewState.Copy();
             }
 
-            var sorts = _viewState.SortColumns.ToList();
-            if (GetMethod<GetSortColumnCountDelegate>(view, 26)(view, out var count) >= 0 && count is >= 0 and <= 16)
+            var countResult = GetMethod<GetSortColumnCountDelegate>(view, 26)(view, out var count);
+            if (countResult < 0 || count is < 0 or > 16)
             {
-                if (count == 0) sorts.Clear();
-                else
-                {
-                    var columns = new NativeSortColumn[count];
-                    if (GetMethod<GetSortColumnsDelegate>(view, 28)(view, columns, count) >= 0)
-                        sorts = columns.Select(column => new SortColumnState(
-                            new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToList();
-                }
+                ViewCaptureFailed = true;
+                return _viewState.Copy();
             }
 
-            var group = _viewState.GroupKey;
-            var ascending = _viewState.GroupAscending;
-            if (GetMethod<GetGroupByDelegate>(view, 18)(view, out var groupKey, out var groupAscending) >= 0)
+            var columns = new NativeSortColumn[count];
+            if (count > 0 && GetMethod<GetSortColumnsDelegate>(view, 28)(view, columns, count) < 0)
             {
-                group = groupKey.FormatId != Guid.Empty
-                    ? new PropertyKeyState(groupKey.FormatId, groupKey.PropertyId) : null;
-                ascending = groupAscending != 0;
+                ViewCaptureFailed = true;
+                return _viewState.Copy();
             }
+
+            var groupResult = GetMethod<GetGroupByDelegate>(view, 18)(view, out var groupKey, out var groupAscending);
+            if (groupResult < 0)
+            {
+                ViewCaptureFailed = true;
+                return _viewState.Copy();
+            }
+
+            var sorts = columns.Select(column => new SortColumnState(
+                new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToList();
+            var group = groupKey.FormatId != Guid.Empty
+                ? new PropertyKeyState(groupKey.FormatId, groupKey.PropertyId) : null;
+            var ascending = groupAscending != 0;
             _viewState = new ViewState(mode, iconSize, sorts, group, ascending);
             ViewCaptureFailed = false;
             return _viewState.Copy();

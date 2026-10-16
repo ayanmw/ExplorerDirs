@@ -85,7 +85,24 @@ public partial class PaneControl : UserControl
     public void DuplicateCurrentTab()
     {
         if (Current is { } state)
-            AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned);
+            DuplicateTab(state);
+    }
+    private void DuplicateTab(TabState state)
+    {
+        try
+        {
+            var view = state.Browser.CaptureViewState();
+            if (state.Browser.ViewCaptureFailed)
+            {
+                Status.Text = "视图配置暂时不可读取，未复制标签。";
+                return;
+            }
+            AddTab(state.Path, view, pinned: state.IsPinned);
+        }
+        catch (Exception ex)
+        {
+            Status.Text = $"复制标签失败：{ex.Message}";
+        }
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
     public void NavigateTo(string path) => Navigate(path);
@@ -279,7 +296,7 @@ public partial class PaneControl : UserControl
             if (selectedItem is { IsFileSystemFolder: true })
                 actions.Add(new("在新标签页中打开", () => AddTab(selectedItem.Path, _newTabView())));
             actions.Add(new("新建标签页", NewTab));
-            actions.Add(new("复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned)));
+            actions.Add(new("复制当前标签", () => DuplicateTab(state)));
             actions.Add(new(state.IsPinned ? "取消固定当前标签" : "固定当前标签", () => TogglePinned(state)));
             if (!state.IsPinned) actions.Add(new("关闭当前标签", () => CloseTab(state)));
             actions.Add(new("关闭其他标签", () =>
@@ -419,7 +436,7 @@ public partial class PaneControl : UserControl
     {
         var menu = new ContextMenu();
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
-        AddMenuItem(menu, "复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned), "Ctrl+K");
+        AddMenuItem(menu, "复制当前标签", () => DuplicateTab(state), "Ctrl+K");
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
         menu.Items.Add(new Separator());
         var pinItem = new MenuItem { Header = "固定标签", IsCheckable = true };
