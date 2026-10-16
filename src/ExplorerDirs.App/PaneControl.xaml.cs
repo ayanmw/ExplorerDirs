@@ -38,7 +38,7 @@ public partial class PaneControl : UserControl
     internal Func<bool>? MayRestoreFileFocus { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
-        IReadOnlySet<int>? pinnedIndices = null)
+        IReadOnlySet<int>? pinnedIndices = null, int selectedTabIndex = 0)
     {
         InitializeComponent();
         _newTabView = newTabView;
@@ -47,12 +47,14 @@ public partial class PaneControl : UserControl
             AddTab(tab.Path, tab.View, false, pinnedIndices?.Contains(tabIndex++) == true);
         if (Tabs.Items.Count == 0)
             AddTab(Home, _newTabView(), false);
-        Tabs.SelectedIndex = 0;
+        Tabs.SelectedItem = _tabOrder[Math.Clamp(selectedTabIndex, 0, _tabOrder.Count - 1)];
         RenderBreadcrumb(CurrentPath);
     }
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
+    internal int SelectedTabIndex => Tabs.SelectedItem is TabItem tab
+        ? Math.Max(0, _tabOrder.IndexOf(tab)) : 0;
     internal IReadOnlyList<TabSettings> SnapshotTabs()
     {
         CaptureVisibleViewState();
@@ -649,6 +651,7 @@ public partial class PaneControl : UserControl
         SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
         Status.Text = state.Browser.SearchQuery is { } query ? $"搜索结果：{query}" : "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
+        StateChanged?.Invoke(this, EventArgs.Empty);
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if (Current != state) return;

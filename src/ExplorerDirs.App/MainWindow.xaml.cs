@@ -71,7 +71,8 @@ public partial class MainWindow : Window
                 [new TabSettings(home, ViewState.Default(_defaultViewMode))];
             var pane = new PaneControl(initialTabs,
                 () => ViewState.Default(_defaultViewMode),
-                PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index));
+                PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
+                state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0);
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => SetActivePane(pane);
@@ -84,8 +85,8 @@ public partial class MainWindow : Window
             pane.MayRestoreFileFocus = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired && IsActive;
         }
 
-        ActivePane = _panes[0];
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
+        ActivePane = _panes[Math.Clamp(state?.ActivePane ?? 0, 0, _panes.Length - 1)];
         BuildLayoutControls();
         BuildDefaultViewOptions();
         BuildLayout();
@@ -137,10 +138,12 @@ public partial class MainWindow : Window
 
     private void SetActivePane(PaneControl pane)
     {
+        var changed = !ReferenceEquals(ActivePane, pane);
         ActivePane = pane;
         var index = Array.IndexOf(_panes, pane);
         if (index >= 0 && index < LayoutPreset.Find(_layout).Slots.Length)
             _lastFocusedPaneByLayout[_layout] = index;
+        if (changed) ScheduleSave();
     }
 
     private void BuildLayoutControls()
@@ -477,7 +480,9 @@ public partial class MainWindow : Window
         try
         {
             _sessionStore.Save(new SessionState(_layout, _defaultViewMode,
-                _panes.Select(p => p.SnapshotTabs().ToList()).ToList()));
+                _panes.Select(p => p.SnapshotTabs().ToList()).ToList(),
+                Array.IndexOf(_panes, ActivePane),
+                _panes.Select(p => p.SelectedTabIndex).ToArray()));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
         }
         catch (Exception ex)

@@ -34,7 +34,8 @@ internal sealed record ViewState(
 }
 
 internal sealed record TabSettings(string Path, ViewState View);
-internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<TabSettings>> Panes);
+internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<TabSettings>> Panes,
+    int ActivePane = 0, IReadOnlyList<int>? ActiveTabIndices = null);
 
 internal sealed class SessionStore
 {
@@ -151,12 +152,15 @@ internal sealed class SessionStore
         builder.AppendLine("FormatVersion=1");
         builder.AppendLine($"Layout={state.Layout}");
         builder.AppendLine($"DefaultViewMode={state.DefaultViewMode}");
+        builder.AppendLine($"ActivePane={Math.Clamp(state.ActivePane, 0, 3)}");
         for (var paneIndex = 0; paneIndex < 4; paneIndex++)
         {
             var tabs = state.Panes.ElementAtOrDefault(paneIndex) ?? [];
             builder.AppendLine();
             builder.AppendLine($"[Pane{paneIndex}]");
             builder.AppendLine($"TabCount={tabs.Count}");
+            builder.AppendLine($"ActiveTab={Math.Clamp(state.ActiveTabIndices?.ElementAtOrDefault(paneIndex) ?? 0,
+                0, Math.Max(0, tabs.Count - 1))}");
             for (var tabIndex = 0; tabIndex < tabs.Count; tabIndex++)
             {
                 var tab = tabs[tabIndex];
@@ -227,7 +231,9 @@ internal sealed class SessionStore
         if (version != 1) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
+        var activePane = ReadOptionalInt(general, "ActivePane", 0, 0, 3, ref complete);
         var panes = new List<List<TabSettings>>();
+        var activeTabs = new List<int>();
         for (var paneIndex = 0; paneIndex < 4; paneIndex++)
         {
             var tabs = new List<TabSettings>();
@@ -302,11 +308,19 @@ internal sealed class SessionStore
                 tabs.Add(new TabSettings(path, view));
             }
             panes.Add(tabs);
+            activeTabs.Add(ReadOptionalInt(pane, "ActiveTab", 0, 0, Math.Max(0, tabs.Count - 1),
+                ref complete));
         }
         if (version != 1 && panes.All(pane => pane.Count == 0))
             return new ProfileParseResult(null, false, false);
-        return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes), complete, false);
+        return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes,
+            activePane, activeTabs), complete, false);
     }
+
+    private static int ReadOptionalInt(Dictionary<string, string>? values, string key, int fallback,
+        int minimum, int maximum, ref bool complete) =>
+        values is null || !values.ContainsKey(key) ? fallback :
+            ReadRequiredInt(values, key, fallback, minimum, maximum, ref complete);
 
     private static int ReadRequiredInt(Dictionary<string, string>? values, string key, int fallback,
         int minimum, int maximum, ref bool complete)

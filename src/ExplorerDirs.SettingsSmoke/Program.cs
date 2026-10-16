@@ -419,6 +419,31 @@ try
     Check(loaded.Panes[0][0].View.SortColumns[0] == first.View.SortColumns[0], "sort key and direction");
     Check(loaded.Panes[0][0].View.GroupKey == groupKey && !loaded.Panes[0][0].View.GroupAscending, "group key and direction");
     Check(loaded.Panes[0][1].View.Mode == 6 && loaded.Panes[0][1].View.GroupKey is null, "independent tab state");
+    var activeSelection = state with { ActivePane = 1, ActiveTabIndices = [1, 0, 0, 0] };
+    var selectedProfile = SessionStore.Render(activeSelection);
+    var selectedSession = SessionStore.Parse(selectedProfile) ?? throw new Exception("active tabs did not parse");
+    Check(selectedSession.ActivePane == 1 && selectedSession.ActiveTabIndices?.SequenceEqual([1, 0, 0, 0]) == true,
+        "active pane and displayed tab positions round-trip in the portable session");
+    var oldSelectionProfile = selectedProfile.Replace("ActivePane=1" + Environment.NewLine, string.Empty,
+        StringComparison.Ordinal).Replace("ActiveTab=1" + Environment.NewLine, string.Empty,
+        StringComparison.Ordinal).Replace("ActiveTab=0" + Environment.NewLine, string.Empty,
+        StringComparison.Ordinal);
+    var oldSelectionIni = Path.Combine(root, "old-selection.ini");
+    File.WriteAllText(oldSelectionIni, oldSelectionProfile);
+    var oldSelectionStore = new SessionStore(oldSelectionIni, Path.Combine(root, "missing-legacy.json"));
+    var oldSelection = oldSelectionStore.Load() ?? throw new Exception("older session format did not load");
+    Check(oldSelectionStore.LoadWarning is null && oldSelection.ActivePane == 0 &&
+          oldSelection.ActiveTabIndices?.All(index => index == 0) == true,
+        "older session without selection fields remains complete and selects first tabs");
+    var badSelectionIni = Path.Combine(root, "bad-selection.ini");
+    File.WriteAllText(badSelectionIni,
+        selectedProfile.Replace("ActiveTab=1", "ActiveTab=99", StringComparison.Ordinal));
+    var badSelectionStore = new SessionStore(badSelectionIni, Path.Combine(root, "missing-legacy.json"));
+    var selectionRecovered = badSelectionStore.Load() ?? throw new Exception("damaged active tab did not recover");
+    Check(selectionRecovered.Panes[0].Count == 2 && selectionRecovered.ActiveTabIndices?[0] == 0 &&
+          badSelectionStore.LoadWarning is not null &&
+          Directory.GetFiles(root, "bad-selection.ini.invalid-*.bak").Length == 1,
+        "invalid active tab falls back without losing tabs and backs up the source INI");
     var lastWrite = File.GetLastWriteTimeUtc(ini);
     store.Save(state);
     Check(File.GetLastWriteTimeUtc(ini) == lastWrite, "unchanged settings avoid write");

@@ -25,7 +25,7 @@
 - `ShellIconProvider` 仅为项目自己的标签标题取文件夹图标并释放本机图标句柄；文件视图内的图标由 Shell 绘制。
 - 新建文件夹通过当前 `IShellView` 的背景 `IContextMenu` 执行 Shell 的 `NewFolder` 命令；文件菜单和工具栏也可触发该操作。Ctrl+Shift+N 只作为本程序局部快捷键，不能覆盖其他程序注册的全局热键；不安装全局键盘钩子。隔离 GUI 布局冒烟脚本须显式授权、使用独立测试配置和 UI Automation 按钮调用，不注入系统按键、不移动鼠标、不改剪贴板、不强制窗口置前；每次调用前核对前台进程，焦点转移立即停止交互。实际执行须等用户留出空闲桌面。
 - 自动重命名不再在 UI 线程先后执行 `Directory.EnumerateDirectories`。固定本地盘在调用 Shell 命令前短时启动 `FileSystemWatcher`，只记录直接子目录的创建通知；最多等待约 1.4 秒，只有唯一候选与 Shell 当前焦点路径一致才请求 `IShellView::SelectItem` 进入编辑。监听失败、多个候选、焦点变化或导航离开时停止，避免误改已有目录；网络和非固定盘只执行 Shell 命令。观察器可通过本地临时目录做无窗口测试，Shell 焦点和自动重命名仍需 GUI 验收。[微软 Created 事件说明](https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemwatcher.created?view=net-10.0)指出事件可能重复；[Error 事件说明](https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemwatcher.error?view=net-10.0)说明缓冲区或远程连接可能失效。
-- `SessionStore` 将全局布局、默认新标签查看方式和各标签路径、查看模式、图标大小、排序列及分组写入便携 INI，使用临时文件加覆盖移动避免半写入。发布版各版本共享项目根目录 `profile/ExplorerDirs.ini`；复制单个发布目录时使用其自身 `profile/`；Debug 写入 `src/.state/ExplorerDirs.ini`。首次启动从旧 JSON 单向迁移布局和路径，保留旧文件。加载时校验标签数量与区段完整性；损坏时先备份原文件，再恢复可解析标签并在窗口状态栏提示。无法备份或遇到高版本格式时禁止覆盖原文件；即使重复的 `FormatVersion=1` 跟在较新版本号后面，也保留高版本保护。Shell 视图使用 `EBO_NOPERSISTVIEWSTATE`，不再调用 `SetPropertyBag` 保存自身状态到注册表。
+- `SessionStore` 将全局布局、活动窗格、默认新标签查看方式和各窗格按显示顺序选中的标签，以及各标签路径、查看模式、图标大小、排序列及分组写入便携 INI，使用临时文件加覆盖移动避免半写入。切换标签或活动窗格触发延迟保存；旧 INI 缺少活动位置字段时默认首个且不视为损坏。发布版各版本共享项目根目录 `profile/ExplorerDirs.ini`；复制单个发布目录时使用其自身 `profile/`；Debug 写入 `src/.state/ExplorerDirs.ini`。首次启动从旧 JSON 单向迁移布局和路径，保留旧文件。加载时校验标签数量与区段完整性；损坏时先备份原文件，再恢复可解析标签并在窗口状态栏提示。无法备份或遇到高版本格式时禁止覆盖原文件；即使重复的 `FormatVersion=1` 跟在较新版本号后面，也保留高版本保护。Shell 视图使用 `EBO_NOPERSISTVIEWSTATE`，不再调用 `SetPropertyBag` 保存自身状态到注册表。
 - `CrashLog` 在配置目录下写托管异常 JSON 报告，只记录异常类型、HRESULT 和不含源码路径的调用方法；不序列化异常消息、`Data`、当前文件路径或环境变量。同一异常对象只写一次，日志写入失败不能掩盖原异常。原生 Shell 扩展故障仍需独立的进程隔离或 Windows 故障报告方案。
 - 独立只读脚本 `scripts/crash-summary.ps1` 用 `Get-WinEvent` 查询最近的 Windows `Application Error` 1000 事件，可选择 Explorer Dirs 或 Q-Dir。解析 XML 中的应用名、版本、模块名、异常码、程序路径和进程身份；本项目只以路径判断“项目内发布版 / 源码测试版 / 其他副本”，Q-Dir 仅标记为对标程序。报告分别给出事件数与进程 ID 加创建时间去重的进程数；缺少完整身份时不猜测合并。输出不保留路径或进程身份。`abrupt-*.json` 标记只属于本项目且另行计数，不能视为已证实的崩溃；模块名也不能直接证明 Shell 扩展致因。[微软 Get-WinEvent 示例](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/get-winevent?view=powershell-5.1)、[应用崩溃事件说明](https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-application-service-crashing-behavior)。
 - 当前 ExplorerBrowser 宿主仍与 Shell 扩展同进程，原生崩溃无法仅靠 `CrashLog` 捕获。[可靠性隔离与恢复设计](../../reliability-isolation-design.md)按“真实窗口基线与转储 → 有界整窗恢复原型 → 必要时的窗格进程隔离原型”安排验证；不把 WER 已加载模块清单当作致因证据。当前无转储且 GUI 未验收，未启用自动重启或改变 Shell 宿主架构。
@@ -55,7 +55,7 @@ Shell 视图已提供系统文件操作菜单与键盘行为。先验收复制�
 
 - 布局切换不销毁隐藏窗格；目录慢或不可读时由 Shell 视图处理，真实网络盘和无权限目录仍需人工验收。
 - 每次路径/标签/布局变化延迟保存会话，另每 3 秒轮询原生视图变化；异常关闭后应恢复最近一次已保存状态。复制标签先抓取原生视图的实时设置。
-- INI 格式带版本号，并支持旧 JSON 单向迁移；损坏配置备份与恢复仍待实现。
+- INI 格式带版本号，支持旧 JSON 单向迁移；损坏配置先备份再恢复可解析标签，实际窗口提示仍待验收。
 - 第一阶段只支持普通路径；网络盘、Shell 虚拟目录、长路径和重解析点需要明确验收样例。
 - 系统入口接管须提供退出与恢复方法，并在独立里程碑中测试；不修改 `explorer.exe` 或登录 Shell。
 - 可使用构建发布到 `releases/<version>/`，每个目录不可覆盖；发布脚本使用唯一暂存目录和拒绝覆盖的同卷目录移动，目标目录若并发出现则失败并保留暂存文件。`src/` 中的二进制只供开发和调试。原生 Shell 菜单及第三方扩展在进程内执行，异常隔离和菜单消息的人工验收仍待完成。
