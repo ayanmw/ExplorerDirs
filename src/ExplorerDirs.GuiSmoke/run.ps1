@@ -122,6 +122,9 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
     Assert-TestForeground $app $mainWindow
     $queryBox = Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit)
     if ($null -eq $queryBox) { throw 'Pane search input was not found.' }
+    if (-not $queryBox.Current.HasKeyboardFocus) {
+        throw 'Opening pane search did not focus its input.'
+    }
     Assert-TestForeground $app $mainWindow
     $value = [Windows.Automation.ValuePattern]$queryBox.GetCurrentPattern(
         [Windows.Automation.ValuePattern]::Pattern)
@@ -151,8 +154,10 @@ function Test-Search([Diagnostics.Process]$app, [IntPtr]$mainWindow) {
     Invoke-TestButton $app $mainWindow 'PaneSearchClose'
     Wait-Until {
         Assert-TestForeground $app $mainWindow
-        $null -eq (Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit))
-    } 'search bar to close'
+        $status = Find-Control $mainWindow 'PaneStatus' ([Windows.Automation.ControlType]::Text)
+        $null -eq (Find-Control $mainWindow 'PaneSearchQuery' ([Windows.Automation.ControlType]::Edit)) -and
+            $null -ne $status -and $status.Current.Name -eq 'Shell 视图'
+    } 'search to return to the directory'
 }
 
 $app = $null

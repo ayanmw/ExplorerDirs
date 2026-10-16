@@ -20,6 +20,7 @@ public partial class PaneControl : UserControl
     private string? _dragToken;
     private bool _addressEditing;
     private bool _addressNavigationPending;
+    private TabState? _searchCloseFocusPending;
     private bool _compactMode;
 
     private sealed class TabState
@@ -28,6 +29,7 @@ public partial class PaneControl : UserControl
         public required ExplorerBrowserHost Browser { get; init; }
         public required string Path { get; set; }
         public bool IsPinned { get; set; }
+        public bool SearchRequestPending { get; set; }
     }
 
     public event EventHandler? StateChanged;
@@ -134,6 +136,7 @@ public partial class PaneControl : UserControl
     public void FocusSearch()
     {
         if (Current is not { } state) return;
+        if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         SearchBar.Visibility = Visibility.Visible;
         SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
         SearchBox.Focus();
@@ -159,6 +162,8 @@ public partial class PaneControl : UserControl
     private void SubmitSearch()
     {
         if (Current is not { } state || string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+        state.SearchRequestPending = true;
+        if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
         state.Browser.Search(SearchBox.Text);
     }
@@ -167,9 +172,14 @@ public partial class PaneControl : UserControl
 
     private void CloseSearch()
     {
-        if (Current is { } state && state.Browser.SearchQuery is not null)
+        if (Current is not { } state) return;
+        _searchCloseFocusPending = state.SearchRequestPending || state.Browser.SearchQuery is not null
+            ? state : null;
+        state.SearchRequestPending = false;
+        if (_searchCloseFocusPending is not null)
             state.Browser.Navigate(state.Path);
         SearchBar.Visibility = Visibility.Collapsed;
+        Activated?.Invoke(this, EventArgs.Empty);
         RestoreFileFocusWhenActive();
     }
     public void FocusAddress()
@@ -263,6 +273,9 @@ public partial class PaneControl : UserControl
         };
         browser.Navigated += (_, navigatedPath) =>
         {
+            state.SearchRequestPending = false;
+            var restoreSearchCloseFocus = ReferenceEquals(_searchCloseFocusPending, state);
+            if (restoreSearchCloseFocus) _searchCloseFocusPending = null;
             state.Path = navigatedPath;
             UpdateTabHeader(state);
             if (Current == state)
@@ -279,15 +292,16 @@ public partial class PaneControl : UserControl
                 SearchBar.Visibility = Visibility.Collapsed;
                 Status.Text = "Shell 视图";
                 if (restoreFocus)
-                {
                     Activated?.Invoke(this, EventArgs.Empty);
+                if (restoreFocus || restoreSearchCloseFocus)
                     RestoreFileFocusWhenActive();
-                }
             }
             StateChanged?.Invoke(this, EventArgs.Empty);
         };
         browser.SearchNavigated += (_, query) =>
         {
+            state.SearchRequestPending = false;
+            if (ReferenceEquals(_searchCloseFocusPending, state)) return;
             state.Path = browser.CurrentPath;
             UpdateTabHeader(state);
             StateChanged?.Invoke(this, EventArgs.Empty);
@@ -305,6 +319,9 @@ public partial class PaneControl : UserControl
         };
         browser.NavigationFailed += (_, message) =>
         {
+            state.SearchRequestPending = false;
+            if (ReferenceEquals(_searchCloseFocusPending, state))
+                _searchCloseFocusPending = null;
             if (Current == state)
             {
                 _addressNavigationPending = false;
@@ -413,6 +430,7 @@ public partial class PaneControl : UserControl
     private void CloseTab(TabState state)
     {
         if (state.IsPinned || Tabs.Items.Count <= 1 || !Tabs.Items.Contains(state.Tab)) return;
+        if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         if (ReferenceEquals(_dragCandidate, state.Tab)) _dragCandidate = null;
         var closingIndex = _tabOrder.IndexOf(state.Tab);
         var adjacent = state.Tab.IsSelected
