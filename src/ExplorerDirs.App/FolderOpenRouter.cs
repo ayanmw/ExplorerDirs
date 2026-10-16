@@ -14,6 +14,9 @@ internal enum FolderForwardResult { Accepted, Rejected, Unavailable, Uncertain }
 internal sealed class FolderOpenRouter : IDisposable
 {
     private const int MaximumPathBytes = 128 * 1024;
+    // The launcher's second forwarding attempt waits two seconds; release a
+    // connected client that stops sending before that attempt expires.
+    private static readonly TimeSpan RequestReadTimeout = TimeSpan.FromSeconds(1);
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private readonly string _pipeName;
     private readonly FileStream _ownership;
@@ -117,6 +120,7 @@ internal sealed class FolderOpenRouter : IDisposable
                     }
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
+                catch (OperationCanceledException) { /* An incomplete client request timed out. */ }
                 catch (ObjectDisposedException) when (_stop.IsCancellationRequested) { break; }
                 catch (IOException) { /* A disconnected client must not stop later requests. */ }
                 if (_stop.IsCancellationRequested) break;
@@ -129,14 +133,17 @@ internal sealed class FolderOpenRouter : IDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream server, CancellationToken stop)
     {
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        readDeadline.CancelAfter(RequestReadTimeout);
         var header = new byte[4];
-        await server.ReadExactlyAsync(header, stop).ConfigureAwait(false);
+        await server.ReadExactlyAsync(header, readDeadline.Token).ConfigureAwait(false);
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
         var accepted = false;
         if (length is > 0 and <= MaximumPathBytes)
         {
             var payload = new byte[length];
-            await server.ReadExactlyAsync(payload, stop).ConfigureAwait(false);
+            readDeadline.CancelAfter(RequestReadTimeout);
+            await server.ReadExactlyAsync(payload, readDeadline.Token).ConfigureAwait(false);
             try
             {
                 var path = Utf8.GetString(payload);

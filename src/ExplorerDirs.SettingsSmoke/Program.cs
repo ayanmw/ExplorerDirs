@@ -1,5 +1,6 @@
 using ExplorerDirs.App;
 using System.IO;
+using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -65,6 +66,25 @@ try
     }
     Check(routedPaths.Count == 6 && routedPaths[0] == routedPath,
           "only valid absolute folder requests reach the window callback");
+    var stalledProfile = Path.Combine(root, "router-stalled", "ExplorerDirs.ini");
+    using (var stalledRouter = FolderOpenRouter.TryStart(stalledProfile,
+               _ => Task.FromResult(true)) ?? throw new Exception("stalled router did not start"))
+    using (var stalledClient = new NamedPipeClientStream(".", FolderOpenRouter.PipeName(stalledProfile),
+               PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+    {
+        stalledClient.Connect(2000); // Connect, then never send the request header.
+        Check(FolderOpenRouter.TryForwardAsync(stalledProfile, routedPath, TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted,
+              "a connected client that sends no request cannot block later folder launches indefinitely");
+        using var partialClient = new NamedPipeClientStream(".", FolderOpenRouter.PipeName(stalledProfile),
+            PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        partialClient.Connect(2000);
+        partialClient.Write(new byte[] { 8, 0, 0, 0 }); // Claim a path but send no payload.
+        partialClient.Flush();
+        Check(FolderOpenRouter.TryForwardAsync(stalledProfile, routedPath, TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted,
+              "an incomplete directory payload cannot block later folder launches indefinitely");
+    }
     var startingProfile = Path.Combine(root, "router-starting", "ExplorerDirs.ini");
     var windowReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
     using (var startingRouter = FolderOpenRouter.TryStart(startingProfile, async _ =>
