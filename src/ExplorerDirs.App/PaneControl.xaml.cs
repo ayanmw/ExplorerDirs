@@ -8,12 +8,18 @@ namespace ExplorerDirs.App;
 
 public partial class PaneControl : UserControl
 {
+    private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
     private const int ColumnHeaderStop = 9;
     private const int FileStopWithoutHeader = 9;
     private const int FileStopWithHeader = 10;
     private readonly Stack<TabSettings> _closedTabs = new();
+    private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
+    private TabItem? _dragCandidate;
+    private Point _dragStart;
+    private TabItem? _draggedTab;
+    private string? _dragToken;
 
     private sealed class TabState
     {
@@ -40,7 +46,7 @@ public partial class PaneControl : UserControl
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
-    internal IReadOnlyList<TabSettings> SnapshotTabs() => Tabs.Items.Cast<TabItem>()
+    internal IReadOnlyList<TabSettings> SnapshotTabs() => _tabOrder
         .Select(tab =>
         {
             var state = (TabState)tab.Tag;
@@ -100,8 +106,10 @@ public partial class PaneControl : UserControl
     }
     public void SelectRelativeTab(bool reverse)
     {
-        if (Tabs.Items.Count < 2) return;
-        Tabs.SelectedIndex = KeyboardShortcuts.NextPane(Tabs.SelectedIndex, Tabs.Items.Count, reverse);
+        if (_tabOrder.Count < 2 || Tabs.SelectedItem is not TabItem selectedTab) return;
+        var selected = _tabOrder.IndexOf(selectedTab);
+        if (selected < 0) return;
+        Tabs.SelectedItem = _tabOrder[KeyboardShortcuts.NextPane(selected, _tabOrder.Count, reverse)];
         FocusCurrentView();
     }
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
@@ -164,9 +172,19 @@ public partial class PaneControl : UserControl
         browser.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
         browser.MayRestoreFocus = () => Current == state && IsVisible && MayRestoreFileFocus?.Invoke() == true;
         UpdateTabHeader(state);
+        tab.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            _dragCandidate = e.ClickCount == 1 ? tab : null;
+            _dragStart = e.GetPosition(Tabs);
+        };
         tab.PreviewMouseRightButtonDown += (_, _) => Tabs.SelectedItem = tab;
+        tab.AllowDrop = true;
+        tab.DragOver += Tab_DragOver;
+        tab.Drop += Tab_Drop;
         tab.ContextMenu = CreateTabContextMenu(state);
         Tabs.Items.Add(tab);
+        _tabOrder.Add(tab);
+        TabHeaderPanel.SetOrder(tab, _tabOrder.Count - 1);
         if (select) Tabs.SelectedItem = tab;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -229,7 +247,12 @@ public partial class PaneControl : UserControl
 
     private void CloseTab(TabState state)
     {
-        if (Tabs.Items.Count <= 1) return;
+        if (Tabs.Items.Count <= 1 || !Tabs.Items.Contains(state.Tab)) return;
+        if (ReferenceEquals(_dragCandidate, state.Tab)) _dragCandidate = null;
+        var closingIndex = _tabOrder.IndexOf(state.Tab);
+        var adjacent = state.Tab.IsSelected
+            ? _tabOrder[closingIndex + 1 < _tabOrder.Count ? closingIndex + 1 : closingIndex - 1]
+            : null;
         _closedTabs.Push(new TabSettings(state.Path, state.Browser.CaptureViewState()));
         while (_closedTabs.Count > 20)
         {
@@ -238,6 +261,9 @@ public partial class PaneControl : UserControl
             foreach (var tab in recent) _closedTabs.Push(tab);
         }
         Tabs.Items.Remove(state.Tab);
+        _tabOrder.Remove(state.Tab);
+        UpdateTabOrders();
+        if (adjacent is not null) Tabs.SelectedItem = adjacent;
         state.Browser.Dispose();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -250,6 +276,120 @@ public partial class PaneControl : UserControl
             Current?.Browser.Navigate(path);
         }
         catch (Exception ex) { Status.Text = $"无法打开目录：{ex.Message}"; }
+    }
+
+    private void Tabs_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragCandidate is not { } candidate) return;
+        if (e.LeftButton != MouseButtonState.Pressed || !Tabs.Items.Contains(candidate))
+        {
+            _dragCandidate = null;
+            return;
+        }
+        var point = e.GetPosition(Tabs);
+        if (Math.Abs(point.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(point.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        _dragCandidate = null;
+        _draggedTab = candidate;
+        _dragToken = Guid.NewGuid().ToString("N");
+        var data = new DataObject();
+        data.SetData(TabDragFormat, _dragToken);
+        try { DragDrop.DoDragDrop(candidate, data, DragDropEffects.Move); }
+        finally
+        {
+            _draggedTab = null;
+            _dragToken = null;
+        }
+    }
+
+    private void Tabs_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => _dragCandidate = null;
+
+    private void Tabs_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None || Keyboard.FocusedElement is not TabItem focused) return;
+        var index = _tabOrder.IndexOf(focused);
+        if (index < 0) return;
+        var next = e.Key switch
+        {
+            Key.Left => KeyboardShortcuts.NextPane(index, _tabOrder.Count, true),
+            Key.Right => KeyboardShortcuts.NextPane(index, _tabOrder.Count, false),
+            Key.Home => 0,
+            Key.End => _tabOrder.Count - 1,
+            _ => -1
+        };
+        if (next < 0) return;
+        Tabs.SelectedItem = _tabOrder[next];
+        _tabOrder[next].Focus();
+        e.Handled = true;
+    }
+
+    private bool IsOwnTabDrag(IDataObject data)
+    {
+        if (_draggedTab is null || _dragToken is null || !Tabs.Items.Contains(_draggedTab)) return false;
+        try
+        {
+            return data.GetDataPresent(TabDragFormat) &&
+                string.Equals(data.GetData(TabDragFormat) as string, _dragToken, StringComparison.Ordinal);
+        }
+        catch (Exception) { return false; }
+    }
+
+    private void Tab_DragOver(object sender, DragEventArgs e)
+    {
+        if (sender is not TabItem || !IsOwnTabDrag(e.Data))
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+        if (TabHeaderScroll is not { } scroll) return;
+        var point = e.GetPosition(scroll);
+        if (point.X < 20)
+            scroll.ScrollToHorizontalOffset(Math.Max(0, scroll.HorizontalOffset - 18));
+        else if (point.X > scroll.ViewportWidth - 20)
+            scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset + 18);
+    }
+
+    private void Tab_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+        ReorderTab(source, target, e.GetPosition(target).X >= target.ActualWidth / 2);
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+    }
+
+    private void ReorderTab(TabItem source, TabItem target, bool after)
+    {
+        var original = _tabOrder.ToArray();
+        var sourceIndex = Array.IndexOf(original, source);
+        var targetIndex = Array.IndexOf(original, target);
+        if (sourceIndex < 0 || targetIndex < 0) return;
+        var reordered = TabReorder.Move(original, sourceIndex, targetIndex, after).ToArray();
+        if (original.SequenceEqual(reordered)) return;
+
+        _tabOrder.Clear();
+        _tabOrder.AddRange(reordered);
+        UpdateTabOrders();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            source.BringIntoView();
+            UpdateTabScrollButtons();
+        }));
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateTabOrders()
+    {
+        for (var index = 0; index < _tabOrder.Count; index++)
+            TabHeaderPanel.SetOrder(_tabOrder[index], index);
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)

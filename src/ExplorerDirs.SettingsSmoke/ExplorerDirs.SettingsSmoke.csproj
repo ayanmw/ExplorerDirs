@@ -4,6 +4,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
@@ -13,5 +14,7 @@
     <Compile Include="../ExplorerDirs.App/EnvironmentRefresh.cs" Link="EnvironmentRefresh.cs" />
     <Compile Include="../ExplorerDirs.App/DirectoryNavigationGate.cs" Link="DirectoryNavigationGate.cs" />
     <Compile Include="../ExplorerDirs.App/FavoritesStore.cs" Link="FavoritesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/TabReorder.cs" Link="TabReorder.cs" />
+    <Compile Include="../ExplorerDirs.App/TabHeaderPanel.cs" Link="TabHeaderPanel.cs" />
   </ItemGroup>
 </Project>

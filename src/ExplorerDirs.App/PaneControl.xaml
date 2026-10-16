@@ -1,6 +1,7 @@
 <UserControl x:Class="ExplorerDirs.App.PaneControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ExplorerDirs.App">
     <Border BorderBrush="#999" BorderThickness="1" Margin="3">
         <DockPanel>
             <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="4">
@@ -19,10 +20,13 @@
                          VerticalContentAlignment="Center"/>
             </DockPanel>
             <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"/>
-            <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged">
+            <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged"
+                        PreviewKeyDown="Tabs_PreviewKeyDown"
+                        PreviewMouseMove="Tabs_PreviewMouseMove"
+                        PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
                 <TabControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal"/>
+                        <local:TabHeaderPanel/>
                     </ItemsPanelTemplate>
                 </TabControl.ItemsPanel>
                 <TabControl.Template>

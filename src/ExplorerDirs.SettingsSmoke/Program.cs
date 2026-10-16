@@ -1,5 +1,9 @@
 using ExplorerDirs.App;
+using System.IO;
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 
 var root = Path.Combine(AppContext.BaseDirectory, "profile-smoke");
 Directory.CreateDirectory(root);
@@ -190,6 +194,46 @@ try
     finally { releaseOldProbe.Set(); }
     Check(!navigationGate.IsCurrent(oldProbe.GetAwaiter().GetResult()),
         "late result from an older directory probe cannot replace the newer navigation");
+
+    Check(TabReorder.Move(["A", "B", "C", "D"], 0, 2, false).SequenceEqual(["B", "A", "C", "D"]),
+        "dragging a first tab before a later tab uses the correct insertion index");
+    Check(TabReorder.Move(["A", "B", "C", "D"], 0, 2, true).SequenceEqual(["B", "C", "A", "D"]),
+        "dragging a first tab after a later tab uses the correct insertion index");
+    Check(TabReorder.Move(["A", "B", "C", "D"], 3, 1, false).SequenceEqual(["A", "D", "B", "C"]),
+        "dragging a last tab to the left preserves other tab order");
+    Check(TabReorder.Move(["A", "B", "C", "D"], 2, 2, true).SequenceEqual(["A", "B", "C", "D"]),
+        "dropping on the same tab leaves order unchanged");
+    Exception? layoutFailure = null;
+    var layoutThread = new Thread(() =>
+    {
+        try
+        {
+            var panel = new TabHeaderPanel();
+            var firstHeader = new Border { Width = 20, Height = 10 };
+            var secondHeader = new Border { Width = 30, Height = 10 };
+            panel.Children.Add(firstHeader);
+            panel.Children.Add(secondHeader);
+            TabHeaderPanel.SetOrder(firstHeader, 1);
+            TabHeaderPanel.SetOrder(secondHeader, 0);
+            panel.Measure(new Size(100, 10));
+            panel.Arrange(new Rect(0, 0, 100, 10));
+            Check(VisualTreeHelper.GetOffset(secondHeader).X == 0 &&
+                  VisualTreeHelper.GetOffset(firstHeader).X == 30,
+                  "tab headers arrange by display order");
+            TabHeaderPanel.SetOrder(firstHeader, 0);
+            TabHeaderPanel.SetOrder(secondHeader, 1);
+            panel.Arrange(new Rect(0, 0, 100, 10));
+            Check(VisualTreeHelper.GetOffset(firstHeader).X == 0 &&
+                  VisualTreeHelper.GetOffset(secondHeader).X == 20 &&
+                  ReferenceEquals(panel.Children[0], firstHeader),
+                  "reordering headers leaves child controls attached");
+        }
+        catch (Exception ex) { layoutFailure = ex; }
+    });
+    layoutThread.SetApartmentState(ApartmentState.STA);
+    layoutThread.Start();
+    layoutThread.Join();
+    if (layoutFailure is not null) throw layoutFailure;
 
     var favoritesIni = Path.Combine(root, "Favorites.ini");
     var favoritesStore = new FavoritesStore(favoritesIni);

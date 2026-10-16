@@ -7,7 +7,8 @@
 | Backspace、Alt+↑ | 打开当前目录的上一级 | 已接入 Shell 导航；Backspace 按用户习惯定义，区别于 Windows Explorer 的“后退” |
 | Alt+←、Alt+→ | 当前标签的后退、前进历史 | 已接入 ExplorerBrowser 内置 TravelLog；历史仅在当前运行的标签内 |
 | Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、转到、新建标签、关闭标签、标签标题、详细信息列标题、文件项的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 已接入；单窗格隔离 GUI 测试通过，四窗格待用户验收 |
-| Ctrl+Tab、Ctrl+Shift+Tab | 在当前窗格的标签间循环 | 已接入 |
+| Ctrl+Tab、Ctrl+Shift+Tab | 按当前窗格标题显示顺序循环标签 | 已接入；拖动排序后的顺序待 GUI 验收 |
+| 标签标题的 ←、→、Home、End | 按标题显示顺序切换标签；文件视图内的方向键仍交给 Shell | 已接入；待 GUI 验收 |
 | Alt+D、Ctrl+L | 聚焦并全选当前窗格地址栏 | 已接入 |
 | F5 | 刷新当前文件视图 | 已接入 |
 | F11 | 最大化 / 恢复窗口 | 已接入 |
