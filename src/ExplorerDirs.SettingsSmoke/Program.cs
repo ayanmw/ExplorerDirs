@@ -54,6 +54,39 @@ try
     store.Save(state);
     Check(File.GetLastWriteTimeUtc(ini) == lastWrite, "unchanged settings avoid write");
 
+    var conflictIni = Path.Combine(root, "conflict.ini");
+    var conflictStore = new SessionStore(conflictIni, Path.Combine(root, "missing-legacy.json"));
+    conflictStore.Save(state);
+    conflictStore.Load();
+    var externalEdit = File.ReadAllText(conflictIni) + "; changed by another instance" + Environment.NewLine;
+    File.WriteAllText(conflictIni, externalEdit);
+    try
+    {
+        conflictStore.Save(state with { Layout = 3 });
+        throw new Exception("external session edit was overwritten");
+    }
+    catch (IOException) { }
+    Check(File.ReadAllText(conflictIni) == externalEdit,
+        "external session edits remain untouched after a stale save");
+
+    var raceIni = Path.Combine(root, "race.ini");
+    using var raceStart = new Barrier(2);
+    Task<bool> RaceSave(int layout) => Task.Run(() =>
+    {
+        var instance = new SessionStore(raceIni, Path.Combine(root, "missing-legacy.json"));
+        Check(instance.Load() is null && raceStart.SignalAndWait(TimeSpan.FromSeconds(5)),
+            "both instances load the same absent session before writing");
+        try { instance.Save(state with { Layout = layout }); return true; }
+        catch (IOException) { return false; }
+    });
+    var firstRace = RaceSave(1);
+    var secondRace = RaceSave(2);
+    Task.WaitAll(firstRace, secondRace);
+    var raceState = SessionStore.Parse(File.ReadAllText(raceIni));
+    Check(firstRace.Result != secondRace.Result && raceState is not null &&
+          raceState.Layout == (firstRace.Result ? 1 : 2),
+          "simultaneous instances produce one intact session without stale overwrite");
+
     var recoveryIni = Path.Combine(root, "recovery.ini");
     var recoveryStore = new SessionStore(recoveryIni, Path.Combine(root, "missing-legacy.json"));
     var completeProfile = SessionStore.Render(state);
