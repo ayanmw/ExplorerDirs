@@ -714,6 +714,41 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CachedViewState() => _viewState.Copy();
 
+    public bool SetViewStyle(ViewStyle style)
+    {
+        var view = IntPtr.Zero;
+        try
+        {
+            view = GetFolderView2Pointer();
+            if (view == IntPtr.Zero)
+            {
+                MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
+                return false;
+            }
+            // Change only mode/size: do not reapply cached sorting or grouping.
+            var result = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, style.Mode, style.IconSize);
+            if (result < 0)
+            {
+                MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}");
+                return false;
+            }
+        }
+        catch (COMException ex)
+        {
+            MenuError?.Invoke(this, $"无法切换查看方式：0x{ex.HResult:X8}");
+            return false;
+        }
+        finally { if (view != IntPtr.Zero) Marshal.Release(view); }
+
+        // Read back what Shell actually accepted. Search views remain runtime-only.
+        try { CaptureViewState(); }
+        catch (Exception)
+        {
+            MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
+        }
+        return true;
+    }
+
     private void ApplyViewState()
     {
         var view = GetFolderView2Pointer();

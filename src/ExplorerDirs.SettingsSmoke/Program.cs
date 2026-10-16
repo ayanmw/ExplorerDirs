@@ -308,8 +308,25 @@ try
     Check(Enumerable.Range(1, 9).All(number =>
               KeyboardShortcuts.Resolve(0x30 + number, 2) == ExplorerShortcut.Tab1 + (number - 1)) &&
           KeyboardShortcuts.Resolve(0x30, 2) == ExplorerShortcut.None &&
-          KeyboardShortcuts.Resolve(0x31, 6) == ExplorerShortcut.None,
-          "Ctrl+1-9 selects tab positions without taking Shell view-style shortcuts");
+          Enumerable.Range(1, 8).All(number =>
+              KeyboardShortcuts.Resolve(0x30 + number, 6) == ExplorerShortcut.View1 + (number - 1)) &&
+          KeyboardShortcuts.Resolve(0x39, 6) == ExplorerShortcut.None,
+          "Ctrl+1-9 selects tabs; Ctrl+Shift+1 changes view without selecting a tab; unspecified 9 stays native");
+    var stylesStore = new SessionStore(Path.Combine(root, "view-styles.ini"), Path.Combine(root, "no-styles.json"));
+    var stylesState = new SessionState(1, 4,
+        [ViewStyle.All.Select(style => first with
+        {
+            View = first.View with { Mode = style.Mode, IconSize = style.IconSize }
+        }).ToList()]);
+    stylesStore.Save(stylesState);
+    var restoredStyles = stylesStore.Load()!;
+    Check(restoredStyles.DefaultViewMode == 4 && restoredStyles.Panes[0].Count == 8 &&
+        restoredStyles.Panes[0].Zip(stylesState.Panes[0]).All(pair =>
+            pair.First.View.Mode == pair.Second.View.Mode &&
+            pair.First.View.IconSize == pair.Second.View.IconSize &&
+            pair.First.View.SortColumns.SequenceEqual(first.View.SortColumns) &&
+            pair.First.View.GroupKey == groupKey && !pair.First.View.GroupAscending),
+        "all view presets survive INI round-trip with independent mode/size and unchanged defaults, sort and grouping");
     Check(KeyboardShortcuts.Resolve(0x72, 0) == ExplorerShortcut.Search &&
           KeyboardShortcuts.Resolve(0x45, 2) == ExplorerShortcut.Search &&
           KeyboardShortcuts.Resolve(0x46, 2) == ExplorerShortcut.Search,

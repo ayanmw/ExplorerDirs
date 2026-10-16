@@ -46,6 +46,7 @@
 
 ## Maintaining the project
 
+- Keep `docs/shell-parity.md` current when changing core browsing behavior. Compare Q-Dir's multi-pane workflow and Windows Explorer's native Shell interaction; prioritize file-operation/focus correctness, menus, navigation, view settings, then tree/preview integration. Distinguish native delegation, implemented host code, missing features, and real GUI acceptance; hosting ExplorerBrowser alone proves none of the acceptance cases.
 - When the user changes a durable project rule, update this file in the same change. Do not add speculative restrictions as rules.
 - When accepted requirements change scope or order, update `docs/roadmap.md` and the design document in the same change; distinguish implemented code from manual acceptance.
 - Keep the README's current capabilities and limitations accurate. State clearly which Shell menu behavior has been verified and that third-party extensions execute in the application process.

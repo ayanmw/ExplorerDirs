@@ -107,6 +107,12 @@ public partial class PaneControl : UserControl
         }
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
+    internal void SetViewStyle(ViewStyle style)
+    {
+        if (Current?.Browser.SetViewStyle(style) != true) return;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        FocusCurrentView();
+    }
     public void NavigateTo(string path) => Navigate(path);
     public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
     public void GoParent() => Current?.Browser.GoParent();

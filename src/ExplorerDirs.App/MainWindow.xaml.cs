@@ -173,6 +173,13 @@ public partial class MainWindow : Window
 
     private void BuildDefaultViewOptions()
     {
+        for (var index = 0; index < ViewStyle.All.Count; index++)
+        {
+            var style = ViewStyle.All[index];
+            var item = new MenuItem { Header = style.Name, InputGestureText = $"Ctrl+Shift+{index + 1}" };
+            item.Click += (_, _) => ActivePane.SetViewStyle(style);
+            CurrentViewMenu.Items.Add(item);
+        }
         foreach (var (mode, name) in new (uint Mode, string Name)[]
         {
             (4, "详细信息"), (3, "列表"), (2, "小图标"),
@@ -293,6 +300,11 @@ public partial class MainWindow : Window
     {
         if (shortcut == ExplorerShortcut.None) return false;
         SetActivePane(source);
+        if (shortcut is >= ExplorerShortcut.View1 and <= ExplorerShortcut.View8)
+        {
+            source.SetViewStyle(ViewStyle.All[(int)shortcut - (int)ExplorerShortcut.View1]);
+            return true;
+        }
         if (shortcut is >= ExplorerShortcut.Tab1 and <= ExplorerShortcut.Tab9)
         {
             source.SelectTabByNumber((int)shortcut - (int)ExplorerShortcut.Tab1 + 1);

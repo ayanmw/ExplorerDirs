@@ -35,6 +35,10 @@
 
 ## GUI 验收步骤
 
+新增查看方式入口：Ctrl+Shift+1 超大图标、2 大图标、3 中等图标、4 小图标、5 列表、6 详细信息、7 平铺、8 内容。顶部“视图 → 当前标签查看方式”提供相同操作，热键被外部应用占用时使用菜单。Ctrl+1～9 仍选择标签；Ctrl+Shift+9 暂交给 Shell，未声明支持。
+
+快捷键与菜单调用 Shell 的 [SetViewModeAndIconSize](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setviewmodeandiconsize)，切换后读回实时配置；不重新套用缓存排序/分组。微软 [File Explorer 快捷键表](https://support.microsoft.com/en-us/accessibility/windows/keyboard-shortcuts-in-windows) 列出 Ctrl+Shift+数字改变查看样式（例：2 大图标、6 详细信息）。本项目的八种样式、排序/分组保留、方向键焦点、复制标签和 INI 重启恢复均需 GUI 验收；构建与无窗口快捷键回归不能替代这些检查。
+
 1. 每个窗格分别打开多级目录，用 Alt+←、Alt+→ 确认其历史互不影响；再按 Backspace、Alt+↑ 返回父目录。切换标签后原标签的历史仍在。
 2. 在四窗格的某个文件项开始按 Shift+Tab，应依次到“名称”列标题、标签标题、关闭标签按钮；按 Tab 应原路返回。继续按 Tab 经过文件项后应到下一窗格“后退”按钮。切单窗格、再切回四窗格，确认焦点回到此前活动的文件区。进入地址栏并编辑文本，确认 Backspace 不触发上一级。重排当前窗格的标签后，用 Ctrl+1、Ctrl+2 跳转并检查按显示顺序选择；按超过标签数的 Ctrl+9 应保持原选择。
 3. 在文件区按 Alt+D / Ctrl+L、Ctrl+Tab、F5、F11；再检查文件视图的复制、粘贴、重命名、删除、新建文件夹、属性等 Shell 操作。

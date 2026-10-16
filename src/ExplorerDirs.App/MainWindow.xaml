@@ -20,6 +20,7 @@
             </MenuItem>
             <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>
             <MenuItem Header="视图(_V)">
+                <MenuItem x:Name="CurrentViewMenu" Header="当前标签查看方式"/>
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
                 <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
                 <Separator/>

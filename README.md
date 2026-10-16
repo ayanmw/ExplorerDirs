@@ -33,6 +33,8 @@
 
 ## 预览发布版
 
+持续对标的功能差距与验收优先级见 [Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。源码新增 Ctrl+Shift+1～8 和“视图 → 当前标签查看方式”，直接切换 Shell 图标、列表、详细信息、平铺和内容视图；尚未经过真实窗口验收或进入发布版。
+
 在 Windows 10/11 且安装 .NET 10 Windows Desktop Runtime 的环境中，从 [`releases`](releases/README.md) 下最新版本目录启动 `ExplorerDirs.App.exe`。发布目录与源码编译输出相互独立；当前版本位置会写在该目录的说明中。
 
 ## 开发调试
