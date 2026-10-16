@@ -27,6 +27,7 @@
 - `CrashLog` 在配置目录下写托管异常 JSON 报告，只记录异常类型、HRESULT 和不含源码路径的调用方法；不序列化异常消息、`Data`、当前文件路径或环境变量。同一异常对象只写一次，日志写入失败不能掩盖原异常。原生 Shell 扩展故障仍需独立的进程隔离或 Windows 故障报告方案。
 - `EnvironmentRefresh` 只读 Windows 用户与机器环境注册表，以 `DoNotExpandEnvironmentNames` 取得 `REG_EXPAND_SZ` 原始值，避免旧进程环境参与展开；再用新合并快照解析引用，机器与用户 PATH 按顺序合并，并从本进程移除运行期间曾观察到、现已删除的持久化变量。`REG_SZ` 保持字面值；进程独有变量仍可作为引用回退。官方行为依据：[RegistryKey.GetValue](https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.registrykey.getvalue?view=net-10.0)、[GetEnvironmentVariables](https://learn.microsoft.com/en-us/dotnet/api/system.environment.getenvironmentvariables?view=net-10.0)。
 - 标签恢复不以 `Directory.Exists` 结果替换保存路径；该 API 在无权限、磁盘故障等情况下也会返回 `false`。[目录存在性说明](https://learn.microsoft.com/en-us/dotnet/api/system.io.directory.exists?view=net-10.0)。导航请求先在后台探测，代际序号使过期结果失效；Shell 导航回调按目标路径区分本程序请求与用户在文件视图中的导航，因为首次导航回调同步、后续回调可异步。[WPF 后台工作](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/threading-model)、[ExplorerBrowser 回调顺序](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowserevents)。Shell 路径解析与实际绑定仍在 UI 线程，需要另行测量。
+- 每个 `PaneControl` 的标签标题用单行 `ItemsPresenter` 与水平 `ScrollViewer` 承载，选中标题请求滚入可见范围；左右滚动按钮和标题上的鼠标滚轮只改变标签栏位置，按钮不占据现有 Tab / Shift+Tab 焦点顺序。[WPF TabControl 模板说明](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/controls/tabcontrol)。选中内容仍由 `PART_SelectedContentHost` 展示，Shell 文件视图不变。
 - `EnvironmentRefresh` 合并 Windows 机器和用户持久化变量（PATH 按机器后用户拼接），收到 `WM_SETTINGCHANGE` 的 `Environment` 通知或手动触发时刷新本进程。直接创建的 `cmd.exe` 继承更新值。已有进程和通过文件关联启动的程序不在此承诺内。
 
 ## 后续文件操作原则

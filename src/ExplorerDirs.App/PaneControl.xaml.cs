@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace ExplorerDirs.App;
 
@@ -180,7 +181,12 @@ public partial class PaneControl : UserControl
             Height = 16,
             Margin = new Thickness(0, 0, 4, 0)
         });
-        header.Children.Add(new TextBlock { Text = string.IsNullOrEmpty(name) ? state.Path : name });
+        header.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrEmpty(name) ? state.Path : name,
+            MaxWidth = 180,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        });
         header.MouseDown += (_, e) =>
         {
             if (e.ChangedButton == MouseButton.Middle ||
@@ -192,6 +198,9 @@ public partial class PaneControl : UserControl
         };
         state.Tab.Header = header;
         state.Tab.ToolTip = state.Path;
+        if (state.Tab.IsSelected)
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => { if (state.Tab.IsSelected) state.Tab.BringIntoView(); }));
     }
 
     private ContextMenu CreateTabContextMenu(TabState state)
@@ -248,9 +257,47 @@ public partial class PaneControl : UserControl
         Address.Text = state.Path;
         Status.Text = "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
-        if (IsLoaded)
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
-                new Action(() => { if (IsVisible) FocusCurrentView(); }));
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (Current != state) return;
+            state.Tab.BringIntoView();
+            UpdateTabScrollButtons();
+            if (IsLoaded && IsVisible) FocusCurrentView();
+        }));
+    }
+
+    private ScrollViewer? TabHeaderScroll =>
+        Tabs.Template.FindName("TabHeaderScroll", Tabs) as ScrollViewer;
+
+    private void ScrollTabsLeft_Click(object sender, RoutedEventArgs e)
+    {
+        if (TabHeaderScroll is { } scroll)
+            scroll.ScrollToHorizontalOffset(Math.Max(0, scroll.HorizontalOffset - 140));
+    }
+
+    private void ScrollTabsRight_Click(object sender, RoutedEventArgs e)
+    {
+        if (TabHeaderScroll is { } scroll)
+            scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset + 140);
+    }
+
+    private void TabHeaderScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer scroll || scroll.ExtentWidth <= scroll.ViewportWidth) return;
+        scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta / 120.0 * 100);
+        e.Handled = true;
+    }
+
+    private void TabHeaderScroll_ScrollChanged(object sender, ScrollChangedEventArgs e) =>
+        UpdateTabScrollButtons();
+
+    private void UpdateTabScrollButtons()
+    {
+        if (TabHeaderScroll is not { } scroll) return;
+        if (Tabs.Template.FindName("ScrollTabsLeft", Tabs) is Button left)
+            left.IsEnabled = scroll.HorizontalOffset > 0.5;
+        if (Tabs.Template.FindName("ScrollTabsRight", Tabs) is Button right)
+            right.IsEnabled = scroll.HorizontalOffset + scroll.ViewportWidth < scroll.ExtentWidth - 0.5;
     }
 
     private void Up_Click(object sender, RoutedEventArgs e)
