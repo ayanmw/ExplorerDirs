@@ -688,6 +688,42 @@ try
           normalPathPlan.Values["FROM_PROCESS"] == @"C:\Users\example\Documents",
           "ordinary user PATH appends and process-only references remain available");
 
+    var fakeEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["STALE"] = "old-delete", ["UPDATED"] = "old-value", ["FAIL"] = null
+    };
+    var failingPlan = new EnvironmentRefreshPlan(
+        new Dictionary<string, string> { ["UPDATED"] = "new-value", ["FAIL"] = "rejected" },
+        ["STALE"]);
+    try
+    {
+        EnvironmentRefresh.ApplyPlan(failingPlan,
+            name => fakeEnvironment.GetValueOrDefault(name),
+            (name, value) =>
+            {
+                if (name == "FAIL") throw new IOException("simulated process environment write failure");
+                fakeEnvironment[name] = value;
+            });
+        throw new Exception("partial environment refresh was reported as successful");
+    }
+    catch (IOException) { }
+    Check(fakeEnvironment["STALE"] == "old-delete" && fakeEnvironment["UPDATED"] == "old-value" &&
+          fakeEnvironment["FAIL"] is null,
+          "failed environment update restores earlier deletions and assignments");
+    var rejectedOversize = new EnvironmentRefreshPlan(
+        new Dictionary<string, string> { ["UPDATED"] = "new-value", ["FAIL"] = new string('x', 32767) },
+        ["STALE"]);
+    try
+    {
+        EnvironmentRefresh.ApplyPlan(rejectedOversize,
+            name => fakeEnvironment.GetValueOrDefault(name),
+            (name, value) => fakeEnvironment[name] = value);
+        throw new Exception("oversized environment value was accepted");
+    }
+    catch (ArgumentException) { }
+    Check(fakeEnvironment["STALE"] == "old-delete" && fakeEnvironment["UPDATED"] == "old-value",
+          "invalid environment plan is rejected before changing any value");
+
     // This affects only the short-lived console test process; no persistent registry values are changed.
     Check(new EnvironmentRefresh().Reload() > 0, "live Windows environment snapshot can be refreshed");
 

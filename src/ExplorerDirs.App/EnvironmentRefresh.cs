@@ -35,10 +35,50 @@ internal sealed class EnvironmentRefresh
 
     internal static void ApplyPlan(EnvironmentRefreshPlan plan)
     {
-        foreach (var name in plan.Removed)
-            Environment.SetEnvironmentVariable(name, null, EnvironmentVariableTarget.Process);
-        foreach (var (name, value) in plan.Values)
-            Environment.SetEnvironmentVariable(name, value, EnvironmentVariableTarget.Process);
+        ApplyPlan(plan,
+            name => Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Process),
+            (name, value) => Environment.SetEnvironmentVariable(name, value, EnvironmentVariableTarget.Process));
+    }
+
+    internal static void ApplyPlan(EnvironmentRefreshPlan plan, Func<string, string?> read,
+        Action<string, string?> write)
+    {
+        var changes = plan.Removed.Select(name => (Name: name, Value: (string?)null))
+            .Concat(plan.Values.Select(pair => (Name: pair.Key, Value: (string?)pair.Value)))
+            .ToArray();
+        foreach (var (name, value) in changes)
+        {
+            if (string.IsNullOrEmpty(name) || name.Contains('=') || name.Contains('\0') || name.Length >= 32767)
+                throw new ArgumentException("持久化环境变量名称无效，未刷新进程环境。");
+            if (value is { Length: >= 32767 } || value?.Contains('\0') == true)
+                throw new ArgumentException("持久化环境变量值无效，未刷新进程环境。");
+        }
+
+        var before = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, _) in changes)
+            if (!before.ContainsKey(name)) before[name] = read(name);
+        var changed = new List<string>();
+        try
+        {
+            foreach (var (name, value) in changes)
+            {
+                write(name, value);
+                changed.Add(name);
+            }
+        }
+        catch (Exception error)
+        {
+            var rollbackFailures = new List<Exception>();
+            foreach (var name in changed.AsEnumerable().Reverse().Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try { write(name, before[name]); }
+                catch (Exception rollbackError) { rollbackFailures.Add(rollbackError); }
+            }
+            if (rollbackFailures.Count > 0)
+                throw new AggregateException("环境变量刷新失败，且部分旧值未能恢复。",
+                    new[] { error }.Concat(rollbackFailures));
+            throw;
+        }
     }
 
     internal static EnvironmentRefreshPlan BuildPlan(
