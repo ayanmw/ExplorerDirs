@@ -59,9 +59,16 @@ internal sealed class RunMarkerTracker : IDisposable
                 IsProcessStillRunning(marker.ProcessId, marker.StartedUtcTicks)) continue;
             detected = true;
             var suffix = Path.GetFileName(active)[4..];
+            var archive = Path.Combine(directory, "abrupt-" + suffix);
             try
             {
-                File.Move(active, Path.Combine(directory, "abrupt-" + suffix));
+                try { File.Move(active, archive); }
+                catch (IOException) when (File.Exists(archive))
+                {
+                    var alternative = Path.Combine(directory,
+                        $"abrupt-{Path.GetFileNameWithoutExtension(suffix)}-{Guid.NewGuid():N}.json");
+                    File.Move(active, alternative);
+                }
             }
             catch (Exception) { /* Preserve the active marker for a later attempt. */ }
         }

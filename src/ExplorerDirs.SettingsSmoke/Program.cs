@@ -528,6 +528,26 @@ try
         Check(!recoveredRun.PriorUncleanExit && File.ReadAllText(corruptMarker) == "{incomplete",
               "unreadable run evidence remains untouched without false crash attribution");
     }
+    var collisionDirectory = Path.Combine(root, "run-marker-collision");
+    Directory.CreateDirectory(collisionDirectory);
+    var previousAbrupt = Path.Combine(collisionDirectory, "abrupt-dead.json");
+    File.WriteAllText(previousAbrupt, "older report");
+    File.WriteAllText(Path.Combine(collisionDirectory, "run-dead.json"),
+        "{\"ProcessId\":2147483647,\"StartedUtcTicks\":1,\"AppVersion\":\"test\"}");
+    using (var recoveredCollision = RunMarkerTracker.TryStart(collisionDirectory)
+           ?? throw new Exception("run marker collision recovery could not start"))
+    {
+        Check(recoveredCollision.PriorUncleanExit && File.ReadAllText(previousAbrupt) == "older report" &&
+              !File.Exists(Path.Combine(collisionDirectory, "run-dead.json")) &&
+              Directory.GetFiles(collisionDirectory, "abrupt-dead-*.json").Length == 1,
+              "an existing abrupt report is preserved while the new ended run is archived");
+    }
+    using (var nextRun = RunMarkerTracker.TryStart(collisionDirectory)
+           ?? throw new Exception("next run marker could not start"))
+    {
+        Check(!nextRun.PriorUncleanExit,
+              "an archived marker does not cause another unclean-exit warning");
+    }
 
     var machineVariables = new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
     {
