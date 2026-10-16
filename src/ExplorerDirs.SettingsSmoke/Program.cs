@@ -178,6 +178,37 @@ try
           Directory.GetFiles(Path.Combine(root, "crash-logs"), "*.json").Length == 1,
           "the same managed exception is logged once");
 
+    var runMarkerDirectory = Path.Combine(root, "run-marker-smoke");
+    Directory.CreateDirectory(runMarkerDirectory);
+    foreach (var old in Directory.GetFiles(runMarkerDirectory, "*.json")) File.Delete(old);
+    File.WriteAllText(Path.Combine(runMarkerDirectory, "run-dead.json"),
+        "{\"ProcessId\":2147483647,\"StartedUtcTicks\":1,\"AppVersion\":\"test\"}");
+    using (var firstRun = RunMarkerTracker.TryStart(runMarkerDirectory)
+           ?? throw new Exception("run marker could not start"))
+    {
+        Check(firstRun.PriorUncleanExit && File.Exists(Path.Combine(runMarkerDirectory, "abrupt-dead.json")),
+              "terminated process marker becomes an abrupt-exit report");
+        using var secondRun = RunMarkerTracker.TryStart(runMarkerDirectory)
+            ?? throw new Exception("second run marker could not start");
+        Check(!secondRun.PriorUncleanExit &&
+              Directory.GetFiles(runMarkerDirectory, "run-*.json").Length == 2,
+              "another live instance is not mistaken for a crash");
+    }
+    Check(Directory.GetFiles(runMarkerDirectory, "run-*.json").Length == 0 &&
+          Directory.GetFiles(runMarkerDirectory, "abrupt-*.json").Length == 1,
+          "clean exits remove only their own live markers");
+    var abruptReport = File.ReadAllText(Path.Combine(runMarkerDirectory, "abrupt-dead.json"));
+    Check(!abruptReport.Contains(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.OrdinalIgnoreCase),
+          "abrupt-exit report contains no browsing path");
+    var corruptMarker = Path.Combine(runMarkerDirectory, "run-corrupt.json");
+    File.WriteAllText(corruptMarker, "{incomplete");
+    using (var recoveredRun = RunMarkerTracker.TryStart(runMarkerDirectory)
+           ?? throw new Exception("run marker recovery could not start"))
+    {
+        Check(!recoveredRun.PriorUncleanExit && File.ReadAllText(corruptMarker) == "{incomplete",
+              "unreadable run evidence remains untouched without false crash attribution");
+    }
+
     var machineVariables = new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
     {
         ["TOOLS"] = new(@"C:\new-tools", false),
