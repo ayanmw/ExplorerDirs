@@ -123,6 +123,16 @@ public partial class MainWindow : Window
 
     private PaneControl ActivePane { get; set; }
 
+    internal bool OpenExternalDirectory(string path)
+    {
+        if (!Path.IsPathFullyQualified(path)) return false;
+        _panes[0].OpenPathInNewTab(path);
+        SetActivePane(_panes[0]);
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        return true;
+    }
+
     private void SetActivePane(PaneControl pane)
     {
         ActivePane = pane;

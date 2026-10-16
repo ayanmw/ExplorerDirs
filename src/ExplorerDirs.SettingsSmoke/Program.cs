@@ -29,6 +29,58 @@ try
     Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
           StartupDirectory.Parse(["\0"]).Warning is not null,
           "unsupported or invalid arguments do not become a navigation target");
+    var routerProfile = Path.Combine(root, "router-smoke", "ExplorerDirs.ini");
+    var routerOtherProfile = Path.Combine(root, "router-other", "ExplorerDirs.ini");
+    Check(FolderOpenRouter.PipeName(routerProfile) != FolderOpenRouter.PipeName(routerOtherProfile),
+          "folder routing is scoped to its portable profile");
+    var routedPath = Path.Combine(root, "routed-folder");
+    Check(FolderOpenRouter.TryForwardAsync(routerProfile, routedPath,
+              TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Unavailable,
+          "no running window leaves the directory request with the launcher");
+    var routedPaths = new List<string>();
+    using (var router = FolderOpenRouter.TryStart(routerProfile, path =>
+           {
+               lock (routedPaths) routedPaths.Add(path);
+               return Task.FromResult(!path.EndsWith("deny", StringComparison.Ordinal));
+           }) ?? throw new Exception("folder router did not start"))
+    {
+        Check(FolderOpenRouter.TryStart(routerProfile, _ => Task.FromResult(true)) is null,
+              "only one window owns the folder route for a profile");
+        Check(FolderOpenRouter.TryForwardAsync(routerProfile, routedPath, TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted,
+              "a running window acknowledges a newly opened directory tab");
+        Check(FolderOpenRouter.TryForwardAsync(routerProfile, Path.Combine(root, "deny"), TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+              "a rejected folder request is not reported as opened");
+        Check(FolderOpenRouter.TryForwardAsync(routerProfile, "relative", TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+              "the pipe does not accept relative paths from another process");
+        var parallelPaths = Enumerable.Range(0, 4)
+            .Select(index => Path.Combine(root, "parallel-" + index)).ToArray();
+        var parallelForwards = parallelPaths.Select(path => FolderOpenRouter.TryForwardAsync(
+            routerProfile, path, TimeSpan.FromSeconds(3))).ToArray();
+        Task.WaitAll(parallelForwards);
+        Check(parallelForwards.All(task => task.Result == FolderForwardResult.Accepted),
+              "simultaneous directory requests all reach the existing process");
+    }
+    Check(routedPaths.Count == 6 && routedPaths[0] == routedPath,
+          "only valid absolute folder requests reach the window callback");
+    var startingProfile = Path.Combine(root, "router-starting", "ExplorerDirs.ini");
+    var windowReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using (var startingRouter = FolderOpenRouter.TryStart(startingProfile, async _ =>
+           {
+               await windowReady.Task;
+               return true;
+           }) ?? throw new Exception("starting folder router did not start"))
+    {
+        var pendingForward = FolderOpenRouter.TryForwardAsync(startingProfile, routedPath,
+            TimeSpan.FromSeconds(2));
+        Check(!pendingForward.Wait(TimeSpan.FromMilliseconds(100)),
+              "a folder request waits while the receiving window initializes");
+        windowReady.SetResult(true);
+        Check(pendingForward.GetAwaiter().GetResult() == FolderForwardResult.Accepted,
+              "the startup race forwards after the first window becomes ready");
+    }
     Check(ShellItemKind.IsFileSystemFolder(0x60000000) &&
           !ShellItemKind.IsFileSystemFolder(0x40000000) &&
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&

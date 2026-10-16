@@ -21,6 +21,7 @@
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
     <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/StartupDirectory.cs" Link="StartupDirectory.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
     <Compile Include="../ExplorerDirs.App/RunMarkerTracker.cs" Link="RunMarkerTracker.cs" />
     <Compile Include="../ExplorerDirs.App/PersistentTabHost.cs" Link="PersistentTabHost.cs" />
