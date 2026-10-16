@@ -27,14 +27,18 @@ internal sealed class EnvironmentRefresh
         var user = ReadPersisted(EnvironmentVariableTarget.User);
         var plan = BuildPlan(machine, user, ReadProcess(), _previousPersistedNames);
 
+        ApplyPlan(plan);
+        _previousPersistedNames.Clear();
+        _previousPersistedNames.UnionWith(plan.Values.Keys);
+        return plan.Values.Count;
+    }
+
+    internal static void ApplyPlan(EnvironmentRefreshPlan plan)
+    {
         foreach (var name in plan.Removed)
             Environment.SetEnvironmentVariable(name, null, EnvironmentVariableTarget.Process);
         foreach (var (name, value) in plan.Values)
             Environment.SetEnvironmentVariable(name, value, EnvironmentVariableTarget.Process);
-
-        _previousPersistedNames.Clear();
-        _previousPersistedNames.UnionWith(plan.Values.Keys);
-        return plan.Values.Count;
     }
 
     internal static EnvironmentRefreshPlan BuildPlan(

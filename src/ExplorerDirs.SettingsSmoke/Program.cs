@@ -572,6 +572,53 @@ try
           Path.IsPathFullyQualified(commandInfo.FileName) && File.Exists(commandInfo.FileName) &&
           commandInfo.WorkingDirectory == root && !commandInfo.UseShellExecute,
           "terminal launch uses the system command interpreter and requested directory");
+    const string childVariable = "EXPLORER_DIRS_CHILD_SMOKE";
+    const string removedChildVariable = "EXPLORER_DIRS_REMOVED_SMOKE";
+    var oldChildValue = Environment.GetEnvironmentVariable(childVariable, EnvironmentVariableTarget.Process);
+    var oldRemovedValue = Environment.GetEnvironmentVariable(removedChildVariable,
+        EnvironmentVariableTarget.Process);
+    var expectedChildValue = "updated-" + Guid.NewGuid().ToString("N");
+    try
+    {
+        Environment.SetEnvironmentVariable(removedChildVariable, "stale",
+            EnvironmentVariableTarget.Process);
+        var childPlan = EnvironmentRefresh.BuildPlan(
+            new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase)
+            {
+                [childVariable] = new(expectedChildValue, false)
+            },
+            new Dictionary<string, PersistedVariable>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            [removedChildVariable]);
+        EnvironmentRefresh.ApplyPlan(childPlan);
+        Check(Environment.GetEnvironmentVariable(removedChildVariable,
+                  EnvironmentVariableTarget.Process) is null,
+              "applying the environment plan removes a deleted persistent variable");
+        string? childOutput = null;
+        TerminalLauncher.OpenAsync(root, CancellationToken.None, info =>
+        {
+            info.Arguments = "/d /c echo %EXPLORER_DIRS_CHILD_SMOKE%";
+            info.CreateNoWindow = true;
+            info.RedirectStandardOutput = true;
+            using var child = Process.Start(info) ?? throw new Exception("hidden command did not start");
+            if (!child.WaitForExit(5000))
+            {
+                child.Kill();
+                throw new Exception("hidden command did not exit in time");
+            }
+            if (child.ExitCode != 0) throw new Exception("hidden command failed");
+            childOutput = child.StandardOutput.ReadToEnd().Trim();
+        }).GetAwaiter().GetResult();
+        Check(childOutput == expectedChildValue,
+              "a new command process inherits a freshly applied environment plan");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable(childVariable, oldChildValue,
+            EnvironmentVariableTarget.Process);
+        Environment.SetEnvironmentVariable(removedChildVariable, oldRemovedValue,
+            EnvironmentVariableTarget.Process);
+    }
     using var canceledCommand = new CancellationTokenSource();
     canceledCommand.Cancel();
     var launchAfterCancel = false;
