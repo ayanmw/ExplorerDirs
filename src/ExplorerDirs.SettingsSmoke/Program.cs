@@ -221,6 +221,14 @@ try
     Check(menuTargets.Resolve() == ShellMenuTarget.KeyboardSelection,
           "keyboard context menu uses selection rather than a stale mouse result");
     menuTargets.Reset();
+    long keyboardMenuClock = 20;
+    var keyboardMenuTarget = new ShellMenuTargetTracker(() => keyboardMenuClock);
+    keyboardMenuTarget.KeyboardMenuRequested();
+    Check(keyboardMenuTarget.Resolve() == ShellMenuTarget.KeyboardSelection,
+          "Shell menu key can establish keyboard origin before WM_CONTEXTMENU arrives");
+    keyboardMenuClock += 5001;
+    Check(keyboardMenuTarget.Resolve() == ShellMenuTarget.Unknown,
+          "unhandled Shell menu key does not leave a permanent selection target");
     var changedPoint = new ShellMenuPoint(55, 91);
     menuTargets.MouseDown(new ShellMenuPoint(54, 91),
         _ => Task.FromResult(ShellMenuTarget.Item));

@@ -14,9 +14,9 @@ Shell 自己的背景与选择集分别有 `SVGIO_BACKGROUND` 和 `SVGIO_SELECTI
 
 ## 当前实现与限制
 
-`ShellMenuTargetTracker` 在鼠标右键按下时保存屏幕坐标并启动异步 UI Automation 命中探测；`WM_CONTEXTMENU` 的坐标可更新目标，键盘坐标 `(-1,-1)` 清除旧鼠标结果。探测仅在元素属于当前 Shell 视图、位于列表内，并可区分条目或背景时返回结果。`WM_INITMENUPOPUP` 不等待 UI Automation；探测尚未完成、失败或过期时省略自定义命令，不阻塞原生 Shell 菜单。关闭菜单、切换到其他鼠标按钮时清除目标。
+`ShellMenuTargetTracker` 在鼠标右键按下时保存屏幕坐标并启动异步 UI Automation 命中探测；`WM_CONTEXTMENU` 的坐标可更新目标，键盘坐标 `(-1,-1)` 清除旧鼠标结果。Shell 文件区收到菜单键或 Shift+F10 时也预先标记键盘来源，避免 `WM_CONTEXTMENU` 未到达当前子类窗口时沿用鼠标目标；若按键未形成菜单，该来源在 5 秒后失效。探测仅在元素属于当前 Shell 视图、位于列表内，并可区分条目或背景时返回结果。`WM_INITMENUPOPUP` 不等待 UI Automation；探测尚未完成、失败或过期时省略自定义命令，不阻塞原生 Shell 菜单。关闭菜单、切换到其他鼠标按钮时清除目标。
 
-无窗口回归覆盖背景处保留选中项、条目命中、异步未完成/失败、键盘菜单、坐标变化、过期目标与负坐标解码。它不证明实际 ExplorerBrowser 的 UI Automation 树结构、探测时序或命中率；这些仍需真实窗口验收。
+无窗口回归覆盖背景处保留选中项、条目命中、异步未完成/失败、键盘菜单、未形成菜单的按键目标过期、坐标变化、过期鼠标目标与负坐标解码。它不证明实际 ExplorerBrowser 的 UI Automation 树结构、探测时序或命中率；这些仍需真实窗口验收。
 
 ## 验收
 

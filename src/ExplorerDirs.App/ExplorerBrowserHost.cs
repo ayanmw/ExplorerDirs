@@ -154,6 +154,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
             return base.TranslateAcceleratorCore(ref msg, modifiers);
 
+        if (msg.message == 0x0100 &&
+            ((msg.wParam.ToInt64() == 0x5D && modifiers == ModifierKeys.None) ||
+             (msg.wParam.ToInt64() == 0x79 && modifiers == ModifierKeys.Shift)))
+            _menuTarget.KeyboardMenuRequested(); // Menu key or Shift+F10.
+
         if (msg.message == 0x0100 || msg.message == 0x0104)
         {
             var shortcut = KeyboardShortcuts.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers);

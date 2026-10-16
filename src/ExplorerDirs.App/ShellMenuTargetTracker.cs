@@ -11,7 +11,7 @@ internal sealed class ShellMenuTargetTracker
     private readonly Func<long> _clock;
     private ShellMenuPoint? _mousePoint;
     private Task<ShellMenuTarget>? _mouseProbe;
-    private long _mouseStartedAt;
+    private long _sourceStartedAt;
     private bool _keyboard;
 
     public ShellMenuTargetTracker(Func<long>? clock = null) => _clock = clock ?? (() => Environment.TickCount64);
@@ -20,7 +20,7 @@ internal sealed class ShellMenuTargetTracker
     {
         _keyboard = false;
         _mousePoint = point;
-        _mouseStartedAt = _clock();
+        _sourceStartedAt = _clock();
         try { _mouseProbe = probe(point); }
         catch { _mouseProbe = Task.FromResult(ShellMenuTarget.Unknown); }
     }
@@ -29,9 +29,7 @@ internal sealed class ShellMenuTargetTracker
     {
         if (lParam == -1)
         {
-            _keyboard = true;
-            _mousePoint = null;
-            _mouseProbe = null;
+            KeyboardMenuRequested();
             return;
         }
         var point = DecodeContextPoint(lParam);
@@ -39,11 +37,19 @@ internal sealed class ShellMenuTargetTracker
             MouseDown(point, probe);
     }
 
+    public void KeyboardMenuRequested()
+    {
+        _keyboard = true;
+        _sourceStartedAt = _clock();
+        _mousePoint = null;
+        _mouseProbe = null;
+    }
+
     public ShellMenuTarget Resolve()
     {
+        if (_clock() - _sourceStartedAt > 5000) return ShellMenuTarget.Unknown;
         if (_keyboard) return ShellMenuTarget.KeyboardSelection;
-        if (_mousePoint is null || _clock() - _mouseStartedAt > 5000)
-            return ShellMenuTarget.Unknown;
+        if (_mousePoint is null) return ShellMenuTarget.Unknown;
         if (_mouseProbe is { IsFaulted: true })
         {
             _ = _mouseProbe.Exception;
