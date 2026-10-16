@@ -44,6 +44,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         Interval = TimeSpan.FromMilliseconds(250)
     };
     private bool _menuPrepared;
+    private readonly ShellMenuTargetTracker _menuTarget = new();
     private DispatcherTimer? _newFolderRenameTimer;
     private FolderCreationObservation? _newFolderObservation;
     private readonly Dictionary<ushort, Action> _menuActions = new();
@@ -983,6 +984,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _viewWindow = IntPtr.Zero;
         _lastContentFocusWindow = IntPtr.Zero;
         _menuActions.Clear();
+        _menuTarget.Reset();
     }
 
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
@@ -1003,9 +1005,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
-                case 0x0204: // WM_RBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
+                    _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
+                    break;
+                case 0x0204: // WM_RBUTTONDOWN
+                    Activated?.Invoke(this, EventArgs.Empty);
+                    if (GetCursorPos(out var menuPoint))
+                        _menuTarget.MouseDown(new ShellMenuPoint(menuPoint.X, menuPoint.Y), ProbeMenuTarget);
+                    break;
+                case 0x007B: // WM_CONTEXTMENU; (-1,-1) means keyboard invocation.
+                    _menuTarget.ContextMenu(lParam, ProbeMenuTarget);
                     break;
                 case 0x0211: // WM_ENTERMENULOOP
                     _menuPrepared = false;
@@ -1036,6 +1046,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     break;
                 case 0x0212: // WM_EXITMENULOOP
                     _menuPrepared = false;
+                    _menuTarget.Reset();
                     break;
                 case 0x0082: // WM_NCDESTROY
                     if (hwnd == _viewWindow) _viewWindow = IntPtr.Zero;
@@ -1049,7 +1060,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void InjectCommands(IntPtr menu)
     {
         if (menu == IntPtr.Zero || CustomCommands is null) return;
-        var selectedItem = GetSelectedItem();
+        var target = _menuTarget.Resolve();
+        Trace($"context-menu target={target}");
+        if (target == ShellMenuTarget.Unknown) return;
+        var selectedItem = target is ShellMenuTarget.Item or ShellMenuTarget.KeyboardSelection
+            ? GetSelectedItem() : null;
         var commands = CustomCommands(selectedItem);
         if (commands.Count == 0) return;
 
@@ -1066,6 +1081,47 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             InsertMenu(menu, (uint)inserted, 0x400 | 0x800, 0, null);
         if (inserted != commands.Count)
             MenuError?.Invoke(this, "部分自定义右键菜单命令未能插入。");
+    }
+
+    private Task<ShellMenuTarget> ProbeMenuTarget(ShellMenuPoint point)
+    {
+        var viewWindow = _viewWindow;
+        if (viewWindow == IntPtr.Zero) return Task.FromResult(ShellMenuTarget.Unknown);
+        // UI Automation queries against our own Shell view must not run inside
+        // the view's menu/window procedure. An unfinished probe fails closed.
+        return Task.Run(() =>
+        {
+            try { return HitTestMenuTarget(point, viewWindow); }
+            catch { return ShellMenuTarget.Unknown; }
+        });
+    }
+
+    private static ShellMenuTarget HitTestMenuTarget(ShellMenuPoint point, IntPtr viewWindow)
+    {
+        try
+        {
+            var element = AutomationElement.FromPoint(new Point(point.X, point.Y));
+            var item = false;
+            var list = false;
+            var owned = false;
+            var headerOrScrollBar = false;
+            for (var depth = 0; element is not null && depth < 32; depth++)
+            {
+                var type = element.Current.ControlType;
+                item |= type == ControlType.ListItem || type == ControlType.DataItem;
+                list |= type == ControlType.List;
+                headerOrScrollBar |= type == ControlType.Header || type == ControlType.ScrollBar;
+                var handle = new IntPtr(element.Current.NativeWindowHandle);
+                owned |= handle != IntPtr.Zero &&
+                    (handle == viewWindow || IsChild(viewWindow, handle));
+                element = TreeWalker.ControlViewWalker.GetParent(element);
+            }
+            if (!owned || !list || headerOrScrollBar) return ShellMenuTarget.Unknown;
+            return item ? ShellMenuTarget.Item : ShellMenuTarget.Background;
+        }
+        catch (ElementNotAvailableException) { return ShellMenuTarget.Unknown; }
+        catch (COMException) { return ShellMenuTarget.Unknown; }
+        catch (InvalidOperationException) { return ShellMenuTarget.Unknown; }
     }
 
     private SelectedItem? GetSelectedItem()
@@ -1163,6 +1219,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)]
     private struct FolderSettings { public uint ViewMode, Flags; }
     [StructLayout(LayoutKind.Sequential)]
@@ -1326,6 +1384,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]

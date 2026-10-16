@@ -187,6 +187,56 @@ try
           !ShellMenuCommand.TryGetMenuId((nint)0xE000, (nint)123, out _) &&
           !ShellMenuCommand.TryGetMenuId(IntPtr.Zero, IntPtr.Zero, out _),
           "custom menu commands ignore accelerators, control notifications, and separator IDs");
+    var menuTargets = new ShellMenuTargetTracker();
+    var backgroundPoint = new ShellMenuPoint(12, 88);
+    var probeCalls = 0;
+    Task<ShellMenuTarget> BackgroundProbe(ShellMenuPoint point)
+    {
+        probeCalls++;
+        Check(point == backgroundPoint, "background probe receives the mouse location");
+        return Task.FromResult(ShellMenuTarget.Background);
+    }
+    menuTargets.MouseDown(backgroundPoint, BackgroundProbe);
+    menuTargets.ContextMenu((nint)((88 << 16) | 12), BackgroundProbe);
+    Check(menuTargets.Resolve() == ShellMenuTarget.Background && probeCalls == 1,
+          "background right-click ignores a still-selected Shell item and reuses its point probe");
+    long menuClock = 100;
+    var staleMenuTarget = new ShellMenuTargetTracker(() => menuClock);
+    staleMenuTarget.MouseDown(backgroundPoint, _ => Task.FromResult(ShellMenuTarget.Item));
+    menuClock += 5001;
+    Check(staleMenuTarget.Resolve() == ShellMenuTarget.Unknown,
+          "old right-button hit cannot leak into an unrelated later menu");
+    menuTargets.MouseDown(new ShellMenuPoint(30, 90),
+        _ => Task.FromResult(ShellMenuTarget.Item));
+    menuTargets.ContextMenu((nint)((90 << 16) | 30),
+        _ => throw new Exception("matching menu point started a second probe"));
+    Check(menuTargets.Resolve() == ShellMenuTarget.Item,
+          "item right-click can use the Shell selection after hit confirmation");
+    var slowMenuProbe = new TaskCompletionSource<ShellMenuTarget>();
+    menuTargets.MouseDown(new ShellMenuPoint(40, 90), _ => slowMenuProbe.Task);
+    Check(menuTargets.Resolve() == ShellMenuTarget.Unknown,
+          "unfinished mouse hit test cannot borrow the Shell selection");
+    menuTargets.ContextMenu((nint)(-1), _ => throw new Exception("keyboard menu probed the mouse"));
+    slowMenuProbe.SetResult(ShellMenuTarget.Item);
+    Check(menuTargets.Resolve() == ShellMenuTarget.KeyboardSelection,
+          "keyboard context menu uses selection rather than a stale mouse result");
+    menuTargets.Reset();
+    var changedPoint = new ShellMenuPoint(55, 91);
+    menuTargets.MouseDown(new ShellMenuPoint(54, 91),
+        _ => Task.FromResult(ShellMenuTarget.Item));
+    menuTargets.ContextMenu((nint)((91 << 16) | 55), point =>
+        Task.FromResult(point == changedPoint ? ShellMenuTarget.Background : ShellMenuTarget.Item));
+    Check(menuTargets.Resolve() == ShellMenuTarget.Background,
+          "context message location replaces a stale right-button location");
+    menuTargets.Reset();
+    menuTargets.ContextMenu((nint)((91 << 16) | 55), _ =>
+        Task.FromException<ShellMenuTarget>(new InvalidOperationException("probe unavailable")));
+    Check(menuTargets.Resolve() == ShellMenuTarget.Unknown,
+          "failed hit test cannot borrow a selected item");
+    menuTargets.Reset();
+    Check(menuTargets.Resolve() == ShellMenuTarget.Unknown &&
+          ShellMenuTargetTracker.DecodeContextPoint(unchecked((nint)0xFFF8000C)) == new ShellMenuPoint(12, -8),
+          "closed menus forget hit targets and signed screen coordinates decode correctly");
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
