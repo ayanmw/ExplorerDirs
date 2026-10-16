@@ -12,5 +12,6 @@
     <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
     <Compile Include="../ExplorerDirs.App/EnvironmentRefresh.cs" Link="EnvironmentRefresh.cs" />
     <Compile Include="../ExplorerDirs.App/DirectoryNavigationGate.cs" Link="DirectoryNavigationGate.cs" />
+    <Compile Include="../ExplorerDirs.App/FavoritesStore.cs" Link="FavoritesStore.cs" />
   </ItemGroup>
 </Project>

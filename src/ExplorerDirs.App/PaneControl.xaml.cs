@@ -55,6 +55,7 @@ public partial class PaneControl : UserControl
             AddTab(state.Path, state.Browser.CaptureViewState());
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
+    public void NavigateTo(string path) => Navigate(path);
     public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
     public void GoParent() => Current?.Browser.GoParent();
     public void GoBack() => Current?.Browser.GoBack();

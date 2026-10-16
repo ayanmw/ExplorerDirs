@@ -17,6 +17,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly DispatcherTimer _viewPollTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly SessionStore _sessionStore = new();
+    private readonly FavoritesStore _favoritesStore;
+    private readonly List<string> _favorites;
     private readonly EnvironmentRefresh _environmentRefresh = new();
     private readonly Dictionary<int, Button> _layoutButtons = [];
     private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
@@ -38,6 +40,11 @@ public partial class MainWindow : Window
         var state = _sessionStore.Load();
         if (_sessionStore.LoadWarning is { } warning)
             EnvironmentStatus.Text = warning;
+        _favoritesStore = new FavoritesStore(Path.Combine(Path.GetDirectoryName(_sessionStore.Path)!, "Favorites.ini"));
+        _favorites = _favoritesStore.Load().ToList();
+        if (_favoritesStore.LoadWarning is { } favoritesWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? favoritesWarning : $"{EnvironmentStatus.Text} {favoritesWarning}";
         _defaultViewMode = state?.DefaultViewMode ?? 4;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
@@ -271,6 +278,67 @@ public partial class MainWindow : Window
     private void ReopenTab_Click(object sender, RoutedEventArgs e) => ActivePane.ReopenClosedTab();
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void FavoritesMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (e.Source == FavoritesMenu) BuildFavoritesMenu();
+    }
+
+    private void BuildFavoritesMenu()
+    {
+        FavoritesMenu.Items.Clear();
+        var currentPath = ActivePane.CurrentPath;
+        var isFavorite = _favorites.Any(path => FavoritesStore.SamePath(path, currentPath));
+        var add = new MenuItem { Header = "收藏当前目录", IsEnabled = !isFavorite };
+        add.Click += (_, _) => ChangeFavorites([.. _favorites, currentPath]);
+        FavoritesMenu.Items.Add(add);
+        var remove = new MenuItem { Header = "移除当前目录", IsEnabled = isFavorite };
+        remove.Click += (_, _) => ChangeFavorites(_favorites.Where(path =>
+            !FavoritesStore.SamePath(path, currentPath)).ToList());
+        FavoritesMenu.Items.Add(remove);
+        FavoritesMenu.Items.Add(new Separator());
+        if (_favorites.Count == 0)
+            FavoritesMenu.Items.Add(new MenuItem { Header = "（暂无收藏）", IsEnabled = false });
+        foreach (var path in _favorites)
+        {
+            var item = new MenuItem
+            {
+                Header = new TextBlock { Text = path, MaxWidth = 340, TextTrimming = TextTrimming.CharacterEllipsis },
+                ToolTip = path,
+                IsCheckable = true,
+                IsChecked = FavoritesStore.SamePath(path, currentPath)
+            };
+            item.Click += (_, _) => OpenFavorite(path);
+            FavoritesMenu.Items.Add(item);
+        }
+    }
+
+    private void ChangeFavorites(List<string> proposed)
+    {
+        try
+        {
+            _favoritesStore.Save(proposed);
+            _favorites.Clear();
+            _favorites.AddRange(proposed);
+            EnvironmentStatus.Text = $"已保存 {_favorites.Count} 个收藏目录。";
+        }
+        catch (Exception ex)
+        {
+            EnvironmentStatus.Text = $"收藏夹保存失败：{ex.Message}";
+        }
+    }
+
+    private void OpenFavorite(string path)
+    {
+        var pane = ActivePane;
+        _fileViewFocusDesired = true;
+        pane.NavigateTo(path);
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            if (IsActive && ReferenceEquals(ActivePane, pane) && Keyboard.FocusedElement is not TextBoxBase)
+                pane.FocusCurrentView();
+        }));
+    }
 
     private void RefreshEnvironment_Click(object sender, RoutedEventArgs e) => RefreshEnvironment();
 

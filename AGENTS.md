@@ -18,6 +18,7 @@
 
 - `src/` contains source code and local build/debug output. Never tell the user to run an executable from `src/` as their daily-use release.
 - Keep portable INI settings out of the registry. Published versions share `profile/ExplorerDirs.ini` beside the repository's `releases/` directory; debug builds use `src/.state/ExplorerDirs.ini`. A release copied elsewhere uses its own `profile/` next to the executable. Do not merge development and release profiles implicitly.
+- Store favorites in a separate `Favorites.ini` beside the session INI so older releases cannot remove them while saving sessions. Preserve external edits, invalid files, and newer formats before writing.
 - Persist global layout/default new-tab view and each tab's path, view mode, icon size, sort columns, and grouping independently. Duplicating a tab copies its live settings; a new tab uses the configured default view, initially Details. Preserve legacy JSON during one-way migration.
 - Put each usable build in a new immutable `releases/<version>/` directory using `scripts/publish.ps1`. Never publish over a running release or make a release depend on files under `src/`.
 - Keep generated release binaries out of Git. Track release instructions and build scripts. Verify the exact release executable launches before calling it usable.

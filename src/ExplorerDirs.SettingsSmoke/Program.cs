@@ -190,6 +190,45 @@ try
     finally { releaseOldProbe.Set(); }
     Check(!navigationGate.IsCurrent(oldProbe.GetAwaiter().GetResult()),
         "late result from an older directory probe cannot replace the newer navigation");
+
+    var favoritesIni = Path.Combine(root, "Favorites.ini");
+    var favoritesStore = new FavoritesStore(favoritesIni);
+    Check(favoritesStore.Load().Count == 0, "missing favorites profile starts empty");
+    favoritesStore.Save([@"C:\项目=测试", @"\\server\share\tools", @"c:\项目=测试\"]);
+    var favorites = favoritesStore.Load();
+    Check(favoritesStore.LoadWarning is null && favorites.Count == 2 &&
+          favorites[0] == @"C:\项目=测试" && favorites[1] == @"\\server\share\tools",
+          "favorites round-trip Unicode, equals signs, UNC paths, and case-insensitive duplicates");
+    var favoriteContent = File.ReadAllText(favoritesIni);
+    File.AppendAllText(favoritesIni, "; edit in another instance" + Environment.NewLine);
+    try
+    {
+        favoritesStore.Save([@"C:\new"]);
+        throw new Exception("concurrent favorites edit was overwritten");
+    }
+    catch (IOException) { }
+    Check(File.ReadAllText(favoritesIni).Contains("edit in another instance", StringComparison.Ordinal),
+          "concurrent favorites edit is not overwritten");
+    File.WriteAllText(favoritesIni, favoriteContent.Replace("Count=2", "Count=3", StringComparison.Ordinal));
+    var recoveredFavorites = favoritesStore.Load();
+    Check(recoveredFavorites.Count == 2 && favoritesStore.LoadWarning is not null &&
+          Directory.GetFiles(root, "Favorites.ini.invalid-*.bak").Length == 1,
+          "damaged favorites count is backed up and readable entries survive");
+    favoritesStore.Save(recoveredFavorites);
+    var savedFavorites = favoritesStore.Load();
+    Check(savedFavorites.Count == 2 && favoritesStore.LoadWarning is null,
+          "recovered favorites can be saved");
+    var futureFavorites = favoriteContent.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal);
+    File.WriteAllText(favoritesIni, futureFavorites);
+    Check(favoritesStore.Load().Count == 0 && favoritesStore.LoadWarning is not null,
+          "newer favorites format is not interpreted");
+    try
+    {
+        favoritesStore.Save([@"C:\new"]);
+        throw new Exception("newer favorites format was overwritten");
+    }
+    catch (IOException) { }
+    Check(File.ReadAllText(favoritesIni) == futureFavorites, "newer favorites profile stays untouched");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally

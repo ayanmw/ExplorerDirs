@@ -18,6 +18,7 @@
                 <MenuItem Header="关闭其他标签" Click="CloseOtherTabs_Click"/>
                 <MenuItem Header="恢复关闭的标签" InputGestureText="Ctrl+Shift+T" Click="ReopenTab_Click"/>
             </MenuItem>
+            <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>
             <MenuItem Header="视图(_V)">
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
                 <Separator/>
