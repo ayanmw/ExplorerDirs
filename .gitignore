@@ -8,3 +8,6 @@
 !/releases/README.md
 /profile/
 /src/.state/
+*.dmp
+*.mdmp
+*.hdmp

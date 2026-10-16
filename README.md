@@ -51,6 +51,8 @@ dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Rele
 
 只读崩溃摘要可运行 `powershell.exe -NoProfile -File .\scripts\crash-summary.ps1 -Days 30 -AsJson`，或加 `-AppName Q-Dir.exe` 查看对标程序。脚本同时报告事件条数和按进程 ID、创建时间去重的崩溃进程数，按版本归类；本项目还区分发布版、源码测试版和异常退出标记。输出不含完整路径或进程身份；故障模块名与退出标记都不能单独证明故障原因。脚本不启动两个程序。可用 `-ProfileDirectory` 指定复制到其他位置的发布版配置目录。[本机 Q-Dir 事件基线](docs/q-dir-crash-evidence-2026-10-16.md)。
 
+`scripts/wer-dumps.ps1` 的默认 `Status` 和 `Preview` 只读，可按程序名查看或预览 WER 小型转储配置。`Enable` 需要管理员 PowerShell 和显式 `-ConfirmDiagnosticCollection`；`Disable` 只删除本工具仍拥有的专用键，保留转储供人工处理。隔离 HKCU 注册表冒烟已通过，真实系统 WER 键没有启用。转储可能包含私人数据，默认放在 LocalAppData，不纳入 Git。见[可靠性设计](docs/reliability-isolation-design.md)。
+
 已有 Explorer Dirs 进程运行时，可先用 `Get-Process ExplorerDirs.App | Select-Object Id, StartTime` 选定实例，再执行 `powershell.exe -NoProfile -File .\scripts\perf-sample.ps1 -ProcessId <PID> -Samples 12 -IntervalMilliseconds 5000 -AsJson`。脚本只读采样工作集、私有内存、CPU、句柄与线程，不启动或控制 GUI，也不输出程序路径；可执行文件以 SHA-256 和“发布版/源码测试版/其他副本”标识。当前只有控制台进程的采样回归，尚无真实 Explorer Dirs 长时间运行数据。
 
 `scripts/folder-verb.ps1` 已准备可逆的**可选**文件夹/磁盘右键入口。默认 `Status` 和 `Preview` 只读；启用时要求未来发布版随附的 `FolderRoutingCapability.ini`、精确 SHA-256 和显式 GUI 验收确认。当前 `preview-0.5.2` 缺少单目录参数能力清单，脚本会拒绝将它设为入口目标。隔离注册表位置已验证启用、重复启用、外部修改保护及卸载；真实菜单显示和启动仍待空闲桌面验收。此入口不会更改文件夹默认打开动作或 Win+E，当前系统关联没有被修改。
