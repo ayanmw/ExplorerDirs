@@ -9,5 +9,6 @@
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
     <Compile Include="../ExplorerDirs.App/FocusTraversal.cs" Link="FocusTraversal.cs" />
+    <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
   </ItemGroup>
 </Project>

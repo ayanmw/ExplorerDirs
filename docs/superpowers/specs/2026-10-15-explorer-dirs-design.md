@@ -24,6 +24,7 @@
 - `ShellIconProvider` 仅为项目自己的标签标题取文件夹图标并释放本机图标句柄；文件视图内的图标由 Shell 绘制。
 - 新建文件夹通过当前 `IShellView` 的背景 `IContextMenu` 执行 Shell 的 `NewFolder` 命令；文件菜单和工具栏也可触发该操作。Ctrl+Shift+N 只作为本程序局部快捷键，不能覆盖其他程序注册的全局热键；不安装全局键盘钩子。GUI 自动化仅在用户留出桌面时显式运行，并在焦点转移后停止输入。
 - `SessionStore` 将全局布局、默认新标签查看方式和各标签路径、查看模式、图标大小、排序列及分组写入便携 INI，使用临时文件加覆盖移动避免半写入。发布版各版本共享项目根目录 `profile/ExplorerDirs.ini`；复制单个发布目录时使用其自身 `profile/`；Debug 写入 `src/.state/ExplorerDirs.ini`。首次启动从旧 JSON 单向迁移布局和路径，保留旧文件。加载时校验标签数量与区段完整性；损坏时先备份原文件，再恢复可解析标签并在窗口状态栏提示。无法备份或遇到高版本格式时禁止覆盖原文件。Shell 视图使用 `EBO_NOPERSISTVIEWSTATE`，不再调用 `SetPropertyBag` 保存自身状态到注册表。
+- `CrashLog` 在配置目录下写托管异常 JSON 报告，只记录异常类型、HRESULT 和不含源码路径的调用方法；不序列化异常消息、`Data`、当前文件路径或环境变量。同一异常对象只写一次，日志写入失败不能掩盖原异常。原生 Shell 扩展故障仍需独立的进程隔离或 Windows 故障报告方案。
 - `EnvironmentRefresh` 合并 Windows 机器和用户持久化变量（PATH 按机器后用户拼接），收到 `WM_SETTINGCHANGE` 的 `Environment` 通知或手动触发时刷新本进程。直接创建的 `cmd.exe` 继承更新值。已有进程和通过文件关联启动的程序不在此承诺内。
 
 ## 后续文件操作原则

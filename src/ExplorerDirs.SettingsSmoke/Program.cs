@@ -108,6 +108,23 @@ try
     }
     catch (IOException) { }
     Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
+
+    var crashLogs = new CrashLog(Path.Combine(root, "crash-logs"));
+    Exception simulatedCrash;
+    try { throw new InvalidOperationException(@"PRIVATE_PATH_C:\Users\marvin\secret.txt"); }
+    catch (Exception ex) { simulatedCrash = ex; }
+    var crashFile = crashLogs.TryWrite(CrashEventKind.DispatcherUnhandled, simulatedCrash);
+    Check(crashFile is not null && File.Exists(crashFile), "managed crash report is written");
+    var report = File.ReadAllText(crashFile!);
+    Check(report.Contains("InvalidOperationException", StringComparison.Ordinal) &&
+          report.Contains("DispatcherUnhandled", StringComparison.Ordinal),
+          "crash report retains diagnostic event and exception type");
+    Check(!report.Contains("PRIVATE_PATH", StringComparison.Ordinal) &&
+          !report.Contains(@"C:\Users\marvin", StringComparison.Ordinal),
+          "crash report omits exception messages and private paths");
+    Check(crashLogs.TryWrite(CrashEventKind.AppDomainUnhandled, simulatedCrash) is null &&
+          Directory.GetFiles(Path.Combine(root, "crash-logs"), "*.json").Length == 1,
+          "the same managed exception is logged once");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally
