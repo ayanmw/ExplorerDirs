@@ -291,6 +291,26 @@ try
     Check(favoritesStore.LoadWarning is null && favorites.Count == 2 &&
           favorites[0] == @"C:\项目=测试" && favorites[1] == @"\\server\share\tools",
           "favorites round-trip Unicode, equals signs, UNC paths, and case-insensitive duplicates");
+    var lockedFavoritesIni = Path.Combine(root, "locked-favorites.ini");
+    var lockedFavorites = new FavoritesStore(lockedFavoritesIni);
+    Check(lockedFavorites.Load().Count == 0, "locked favorites test starts without a file");
+    using (var heldWrite = new Mutex(false, PortableIniWriter.MutexName(lockedFavoritesIni)))
+    {
+        Check(heldWrite.WaitOne(TimeSpan.FromSeconds(1)), "test holds favorites write gate");
+        try
+        {
+            var blocked = Task.Run(() =>
+            {
+                try { lockedFavorites.Save([@"C:\blocked"]); return false; }
+                catch (IOException) { return true; }
+            }).GetAwaiter().GetResult();
+            Check(blocked && !File.Exists(lockedFavoritesIni),
+                "favorites writer does not bypass another instance's write gate");
+        }
+        finally { heldWrite.ReleaseMutex(); }
+    }
+    lockedFavorites.Save([@"C:\allowed"]);
+    Check(lockedFavorites.Load().Single() == @"C:\allowed", "favorites save succeeds after write gate releases");
     var favoriteContent = File.ReadAllText(favoritesIni);
     File.AppendAllText(favoritesIni, "; edit in another instance" + Environment.NewLine);
     try

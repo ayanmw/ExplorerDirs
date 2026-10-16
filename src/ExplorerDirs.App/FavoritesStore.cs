@@ -114,22 +114,9 @@ internal sealed class FavoritesStore
         for (var index = 0; index < favorites.Count; index++)
             builder.AppendLine($"Item{index}={favorites[index]}");
         var content = builder.ToString();
-        var currentContent = File.Exists(_path) ? File.ReadAllText(_path) : null;
-        if (currentContent != _lastSeenContent)
-            throw new IOException($"收藏夹已被其他实例修改，请重新启动后再保存：{_path}");
-        if (currentContent == content) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + $".{Guid.NewGuid():N}.tmp";
-        try
-        {
-            File.WriteAllText(temp, content, new UTF8Encoding(false));
-            File.Move(temp, _path, true);
-            _lastSeenContent = content;
-        }
-        finally
-        {
-            if (File.Exists(temp)) File.Delete(temp);
-        }
+        PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
+            $"收藏夹已被其他实例修改，请重新启动后再保存：{_path}");
+        _lastSeenContent = content;
     }
 
     internal static bool SamePath(string left, string right) =>

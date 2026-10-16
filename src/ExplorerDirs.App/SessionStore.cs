@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -138,37 +137,9 @@ internal sealed class SessionStore
         if (!_canOverwrite)
             throw new IOException($"无法备份损坏的配置文件，已停止覆盖：{_path}");
         var content = Render(state);
-        var fullPath = System.IO.Path.GetFullPath(_path).ToUpperInvariant();
-        var nameHash = SHA256.HashData(Encoding.UTF8.GetBytes(fullPath));
-        using var mutex = new Mutex(false, @"Local\ExplorerDirs.Session." + Convert.ToHexString(nameHash[..16]));
-        var acquired = false;
-        try
-        {
-            try { acquired = mutex.WaitOne(TimeSpan.FromMilliseconds(500)); }
-            catch (AbandonedMutexException) { acquired = true; }
-            if (!acquired) throw new IOException("会话配置正在由其他实例写入，请稍后重试。");
-
-            var currentContent = File.Exists(_path) ? File.ReadAllText(_path) : null;
-            if (currentContent != _lastSeenContent)
-                throw new IOException("会话配置已被其他实例修改；请重启程序后再保存。");
-            if (currentContent == content) return;
-
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-            var temp = _path + $".{Guid.NewGuid():N}.tmp";
-            try
-            {
-                File.WriteAllText(temp, content, new UTF8Encoding(false));
-                File.Move(temp, _path, true);
-                _lastSeenContent = content;
-            }
-            finally
-            {
-                try { if (File.Exists(temp)) File.Delete(temp); }
-                catch (IOException) { /* The failed write is reported by the original exception. */ }
-                catch (UnauthorizedAccessException) { }
-            }
-        }
-        finally { if (acquired) mutex.ReleaseMutex(); }
+        PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
+            "会话配置已被其他实例修改；请重启程序后再保存。");
+        _lastSeenContent = content;
     }
 
     internal static string Render(SessionState state)
