@@ -92,7 +92,12 @@ internal sealed class FolderOpenRouter : IDisposable
             await client.FlushAsync(deadline.Token).ConfigureAwait(false);
             var response = new byte[1];
             await client.ReadExactlyAsync(response, deadline.Token).ConfigureAwait(false);
-            return response[0] == 1 ? FolderForwardResult.Accepted : FolderForwardResult.Rejected;
+            return response[0] switch
+            {
+                1 => FolderForwardResult.Accepted,
+                0 => FolderForwardResult.Rejected,
+                _ => FolderForwardResult.Uncertain
+            };
         }
         catch (Exception exception) when (exception is IOException or OperationCanceledException)
         {

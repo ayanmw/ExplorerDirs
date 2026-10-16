@@ -23,6 +23,7 @@
 - Refresh this process's user and machine environment when Windows announces an Environment settings change or the user invokes the manual command. Launch commands directly from the refreshed process so they inherit the new values without restarting the file manager; do not modify persistent registry values or promise inheritance for programs started through file associations.
 - Current-directory search uses a Shell search location in the existing ExplorerBrowser. Keep each tab's saved path as a real directory; search queries remain runtime navigation state. F3/Ctrl+E/Ctrl+F focus the pane search box; Enter or the pane's Search button submits, and Escape returns to the directory. When the search bar is visible, Tab and Shift+Tab include its input, Search button, and close button before the tab header.
 - The executable may accept one directory argument for future folder-open routing. Resolve its syntax without probing the filesystem, preserve the restored session, and open the requested directory in a new first-pane tab. Reject unsupported arguments without changing the session. Do not change Windows associations or Win+E routing before the reversible system-entry work is verified.
+- For same-profile folder forwarding, only the protocol's exact accepted and rejected reply bytes are definitive. Treat missing, malformed, or unknown replies as uncertain so the launcher never reports that a possibly handled directory was definitely rejected.
 
 ## Source, development, and releases
 

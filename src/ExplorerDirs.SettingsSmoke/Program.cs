@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -119,6 +120,27 @@ try
     }
     Check(routedPaths.Count == 6 && routedPaths[0] == routedPath,
           "only valid absolute folder requests reach the window callback");
+    var unexpectedProfile = Path.Combine(root, "router-unexpected", "ExplorerDirs.ini");
+    using (var unexpectedServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(unexpectedProfile),
+           PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+           PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance))
+    {
+        var unexpectedResponse = Task.Run(async () =>
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await unexpectedServer.WaitForConnectionAsync(deadline.Token);
+            var header = new byte[4];
+            await unexpectedServer.ReadExactlyAsync(header, deadline.Token);
+            var payload = new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
+            await unexpectedServer.ReadExactlyAsync(payload, deadline.Token);
+            await unexpectedServer.WriteAsync(new byte[] { 2 }, deadline.Token);
+        });
+        var result = FolderOpenRouter.TryForwardAsync(unexpectedProfile, routedPath,
+            TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        unexpectedResponse.GetAwaiter().GetResult();
+        Check(result == FolderForwardResult.Uncertain,
+              "an unknown pipe response does not pretend the directory was rejected");
+    }
     var stalledProfile = Path.Combine(root, "router-stalled", "ExplorerDirs.ini");
     using (var stalledRouter = FolderOpenRouter.TryStart(stalledProfile,
                _ => Task.FromResult(true)) ?? throw new Exception("stalled router did not start"))
