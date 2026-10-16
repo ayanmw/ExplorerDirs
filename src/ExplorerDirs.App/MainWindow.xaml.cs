@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -147,6 +148,8 @@ public partial class MainWindow : Window
                 Height = 28,
                 Margin = new Thickness(1, 0, 1, 0)
             };
+            AutomationProperties.SetName(button, $"布局：{preset.Name}");
+            AutomationProperties.SetAutomationId(button, $"Layout{preset.Id}");
             button.Click += (_, _) => SetLayout(preset.Id);
             LayoutButtons.Children.Add(button);
             _layoutButtons[preset.Id] = button;
