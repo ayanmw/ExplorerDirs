@@ -58,6 +58,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public string CurrentPath => _location.DirectoryPath;
     public string? SearchQuery => _location.SearchQuery;
+    public bool ViewCaptureFailed { get; private set; }
     public event EventHandler<string>? Navigated;
     public event EventHandler<string>? SearchNavigated;
     public event EventHandler<string>? NavigationFailed;
@@ -677,6 +678,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CaptureViewState()
     {
+        try { return CaptureViewStateCore(); }
+        catch (Exception)
+        {
+            ViewCaptureFailed = true;
+            throw;
+        }
+    }
+
+    private ViewState CaptureViewStateCore()
+    {
         if (_location.IsSearchActive) return _viewState.Copy();
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return _viewState.Copy();
@@ -712,10 +723,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 ascending = groupAscending != 0;
             }
             _viewState = new ViewState(mode, iconSize, sorts, group, ascending);
+            ViewCaptureFailed = false;
             return _viewState.Copy();
         }
         finally { Marshal.Release(view); }
     }
+
+    public ViewState CachedViewState() => _viewState.Copy();
 
     private void ApplyViewState()
     {

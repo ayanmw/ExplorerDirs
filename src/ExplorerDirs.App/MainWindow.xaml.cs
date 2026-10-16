@@ -249,6 +249,7 @@ public partial class MainWindow : Window
     {
         if (_layout == id)
             return;
+        foreach (var pane in _panes) pane.CaptureVisibleViewState();
         _lastFocusedPaneByLayout[_layout] = Array.IndexOf(_panes, ActivePane);
         _layout = LayoutPreset.Find(id).Id;
         BuildLayout();

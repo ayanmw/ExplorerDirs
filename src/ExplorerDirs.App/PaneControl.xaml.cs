@@ -53,12 +53,27 @@ public partial class PaneControl : UserControl
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
-    internal IReadOnlyList<TabSettings> SnapshotTabs() => _tabOrder
-        .Select(tab =>
+    internal IReadOnlyList<TabSettings> SnapshotTabs()
+    {
+        CaptureVisibleViewState();
+        if (_tabOrder.Any(tab => ((TabState)tab.Tag).Browser.ViewCaptureFailed))
+            throw new IOException("有标签的视图配置暂时不可读取；未覆盖保存配置。");
+        return _tabOrder.Select(tab =>
         {
             var state = (TabState)tab.Tag;
-            return new TabSettings(state.Path, state.Browser.CaptureViewState());
+            return new TabSettings(state.Path, state.Browser.CachedViewState());
         }).ToArray();
+    }
+    internal void CaptureVisibleViewState()
+    {
+        if (IsVisible && Current is { } state && state.Browser.IsVisible)
+            CaptureViewState(state);
+    }
+    private void CaptureViewState(TabState state)
+    {
+        try { state.Browser.CaptureViewState(); }
+        catch (Exception) { /* The host records failure; session save will reject its stale cache. */ }
+    }
     internal IReadOnlyList<PinnedTabEntry> SnapshotPins(int paneIndex) => _tabOrder
         .Select((tab, index) => (State: (TabState)tab.Tag, Index: index))
         .Where(item => item.State.IsPinned)
@@ -442,7 +457,8 @@ public partial class PaneControl : UserControl
         var adjacent = state.Tab.IsSelected
             ? _tabOrder[closingIndex + 1 < _tabOrder.Count ? closingIndex + 1 : closingIndex - 1]
             : null;
-        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CaptureViewState()));
+        CaptureViewState(state);
+        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CachedViewState()));
         while (_closedTabs.Count > 20)
         {
             var recent = _closedTabs.Take(20).Reverse().ToArray();
@@ -604,6 +620,9 @@ public partial class PaneControl : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        foreach (var previous in e.RemovedItems.OfType<TabItem>())
+            if (Tabs.Items.Contains(previous) && previous.Tag is TabState oldState && oldState.Browser.IsVisible)
+                CaptureViewState(oldState);
         BrowserLayer.Show(state.Browser);
         _addressNavigationPending = false;
         Address.Text = state.Path;

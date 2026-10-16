@@ -15,6 +15,9 @@ var legacy = Path.Combine(root, "session.json");
 var store = new SessionStore(ini, legacy);
 var sortKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10);
 var groupKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
+var mutableSorts = new List<SortColumnState> { new(sortKey, 1) };
+var cachedView = new ViewState(4, 16, mutableSorts, groupKey, true).Copy();
+mutableSorts.Clear();
 var first = new TabSettings(@"C:\项目=测试", new ViewState(4, 16,
     [new SortColumnState(sortKey, -1)], groupKey, false));
 var second = new TabSettings(@"C:\项目=测试", ViewState.Default(6));
@@ -22,6 +25,8 @@ var state = new SessionState(2, 3, [[first, second], [], [], []]);
 
 try
 {
+    Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
+          "cached view state keeps independent sort columns after its source changes");
     Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null),
           "startup without a directory restores the normal session");
     Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
