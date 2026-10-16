@@ -42,6 +42,7 @@
 - 标签拖动使用 WPF 的 `DoDragDrop` 和仅在本窗格有效的临时令牌；Drop 按标题左右半区决定插入前后。[WPF 拖放机制](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/drag-and-drop-overview)。`TabHeaderPanel` 只重排标题的布局坐标，不从 `TabControl.Items` 删除或插入选中标签；`PersistentTabHost` 独立保持 Shell 内容。`PaneControl` 单独维护显示顺序，用于 Ctrl+Tab、标题方向键和会话快照；关闭选中标签时改选显示顺序中的相邻标签。排版与排序边界可无窗口测试，Shell 生命周期及真实拖放仍需 GUI 验收。
 - 地址区域默认展示可点击面包屑，编辑时切回原 `TextBox`；Alt+D、Ctrl+L、Tab 与右侧按钮均能进入完整路径输入，Esc 取消。`BreadcrumbPath` 用 [Path.IsPathFullyQualified](https://learn.microsoft.com/en-us/dotnet/api/system.io.path.ispathfullyqualified) 与 [Path.GetPathRoot](https://learn.microsoft.com/en-us/dotnet/api/system.io.path.getpathroot) 拆分驱动器和 UNC 分享根目录，不在展示阶段探测目录存在性；相对或无法解析的路径保留为一个整体段。点击段只导航当前标签。导航成功后更新面包屑，失败时保留当前路径并在状态栏显示原因；只有当前窗格仍活动时才恢复文件视图焦点。路径拆分可在控制台验证，WPF 鼠标与焦点行为待 GUI 验收。
 - `EnvironmentRefresh` 合并 Windows 机器和用户持久化变量（PATH 按机器后用户拼接），收到 `WM_SETTINGCHANGE` 的 `Environment` 通知或手动触发时刷新本进程。直接创建的 `cmd.exe` 继承更新值。已有进程和通过文件关联启动的程序不在此承诺内。
+- `TerminalLauncher` 通过后台任务启动系统目录下的 `cmd.exe`，工作目录取点击时的活动窗格路径，不在 UI 线程预先调用 `Directory.Exists`；窗口关闭时取消尚未启动的任务。失败时只在本窗口仍活动时显示对话框，否则留在状态栏，避免延迟错误抢占其他应用。`UseShellExecute=false` 下相对程序名依赖 PATH 的依据见[微软 ProcessStartInfo 说明](https://learn.microsoft.com/en-us/dotnet/fundamentals/runtime-libraries/system-diagnostics-processstartinfo-useshellexecute)，后台处理阻塞工作的依据见[WPF 线程模型](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/threading-model)。真实网络工作目录、命令行环境继承和关闭窗口竞态仍待 GUI 验收。
 
 ## 后续文件操作原则
 

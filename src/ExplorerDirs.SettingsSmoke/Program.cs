@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -373,6 +374,38 @@ try
 
     // This affects only the short-lived console test process; no persistent registry values are changed.
     Check(new EnvironmentRefresh().Reload() > 0, "live Windows environment snapshot can be refreshed");
+
+    ProcessStartInfo? commandInfo = null;
+    using var commandStarted = new ManualResetEventSlim();
+    using var releaseCommand = new ManualResetEventSlim();
+    var commandLaunch = TerminalLauncher.OpenAsync(root, CancellationToken.None, info =>
+    {
+        commandInfo = info;
+        commandStarted.Set();
+        releaseCommand.Wait();
+    });
+    try
+    {
+        Check(commandStarted.Wait(TimeSpan.FromSeconds(3)) && !commandLaunch.IsCompleted,
+              "slow command launch does not hold the calling thread");
+    }
+    finally { releaseCommand.Set(); }
+    commandLaunch.GetAwaiter().GetResult();
+    Check(commandInfo?.FileName == Path.Combine(Environment.SystemDirectory, "cmd.exe") &&
+          Path.IsPathFullyQualified(commandInfo.FileName) && File.Exists(commandInfo.FileName) &&
+          commandInfo.WorkingDirectory == root && !commandInfo.UseShellExecute,
+          "terminal launch uses the system command interpreter and requested directory");
+    using var canceledCommand = new CancellationTokenSource();
+    canceledCommand.Cancel();
+    var launchAfterCancel = false;
+    try
+    {
+        TerminalLauncher.OpenAsync(root, canceledCommand.Token,
+            _ => launchAfterCancel = true).GetAwaiter().GetResult();
+        throw new Exception("canceled terminal request unexpectedly started");
+    }
+    catch (OperationCanceledException) { }
+    Check(!launchAfterCancel, "a canceled window cannot start a delayed terminal");
 
     var navigationGate = new DirectoryNavigationGate();
     using var oldProbeStarted = new ManualResetEventSlim();

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
@@ -32,6 +31,8 @@ public partial class MainWindow : Window
     private bool _compactMode;
     private bool _initializing = true;
     private bool _fileViewFocusDesired;
+    private bool _openingTerminal;
+    private readonly CancellationTokenSource _terminalLaunchStop = new();
 
     public MainWindow(string? startupDirectory = null, string? startupWarning = null)
     {
@@ -111,6 +112,7 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowHook);
         Closing += (_, _) => { _viewPollTimer.Stop(); SaveSession(); };
+        Closed += (_, _) => _terminalLaunchStop.Cancel();
         if (startupDirectory is not null)
         {
             SetActivePane(_panes[0]);
@@ -417,27 +419,24 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
-    private void OpenTerminal_Click(object sender, RoutedEventArgs e)
+    private async void OpenTerminal_Click(object sender, RoutedEventArgs e)
     {
+        if (_openingTerminal) return;
+        _openingTerminal = true;
         var path = ActivePane.CurrentPath;
-        if (!Directory.Exists(path))
-        {
-            MessageBox.Show(this, "当前目录不可用。", "Explorer Dirs", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
         try
         {
-            Process.Start(new ProcessStartInfo("cmd.exe")
-            {
-                WorkingDirectory = path,
-                UseShellExecute = false
-            });
+            await TerminalLauncher.OpenAsync(path, _terminalLaunchStop.Token);
         }
+        catch (OperationCanceledException) when (_terminalLaunchStop.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "无法打开命令行", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (IsLoaded)
+                EnvironmentStatus.Text = $"命令行启动失败：{ex.Message}";
+            if (IsLoaded && IsVisible && IsActive)
+                MessageBox.Show(this, ex.Message, "无法打开命令行", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+        finally { _openingTerminal = false; }
     }
 
     private void ScheduleSave()
