@@ -526,6 +526,30 @@ try
     catch (OperationCanceledException) { }
     Check(!launchAfterCancel, "a canceled window cannot start a delayed terminal");
 
+    Check(DirectoryProbe.Check(@"C:\allowed", _ => FileAttributes.Directory, _ => false) ==
+          DirectoryProbeStatus.Directory &&
+          DirectoryProbe.Check(@"C:\ordinary-file", _ => FileAttributes.Archive, _ => false) ==
+          DirectoryProbeStatus.Unavailable,
+          "directory preflight distinguishes a directory from an ordinary file");
+    var probeFile = Path.Combine(root, "navigation-probe.txt");
+    File.WriteAllText(probeFile, "probe");
+    Check(DirectoryProbe.Check(root) == DirectoryProbeStatus.Directory &&
+          DirectoryProbe.Check(probeFile) == DirectoryProbeStatus.Unavailable &&
+          DirectoryProbe.Check(Path.Combine(root, "missing-directory")) == DirectoryProbeStatus.Unavailable,
+          "real filesystem directory, file, and missing path classification");
+    Check(DirectoryProbe.Check(@"C:\protected", _ => throw new UnauthorizedAccessException(), _ => false) ==
+          DirectoryProbeStatus.AccessDenied &&
+          DirectoryProbe.Check(@"C:\protected", _ => throw new System.Security.SecurityException(), _ => false) ==
+          DirectoryProbeStatus.AccessDenied,
+          "access denial is deferred to the Shell rather than misreported as missing");
+    Check(DirectoryProbe.Check(@"\\server\share\", _ => throw new IOException(), _ => true) ==
+          DirectoryProbeStatus.Directory &&
+          DirectoryProbe.Check(@"\\server\offline\", _ => throw new IOException(), _ => false) ==
+          DirectoryProbeStatus.Unavailable &&
+          DirectoryProbe.Check(@"C:\missing", _ => throw new DirectoryNotFoundException(),
+              _ => throw new Exception("local paths must not get a second filesystem probe")) ==
+          DirectoryProbeStatus.Unavailable,
+          "UNC share roots keep the existing Directory.Exists fallback");
     var navigationGate = new DirectoryNavigationGate();
     using var oldProbeStarted = new ManualResetEventSlim();
     using var releaseOldProbe = new ManualResetEventSlim();
@@ -533,14 +557,18 @@ try
     {
         oldProbeStarted.Set();
         releaseOldProbe.Wait();
-        return false;
+        return DirectoryProbeStatus.Unavailable;
     });
     try
     {
         Check(oldProbeStarted.Wait(TimeSpan.FromSeconds(3)), "first directory probe starts in background");
-        var newProbe = navigationGate.ProbeAsync(@"C:\ready", _ => true).GetAwaiter().GetResult();
-        Check(navigationGate.IsCurrent(newProbe) && newProbe.Exists,
+        var newProbe = navigationGate.ProbeAsync(@"C:\ready", _ => DirectoryProbeStatus.Directory).GetAwaiter().GetResult();
+        Check(navigationGate.IsCurrent(newProbe) && newProbe.CanNavigate,
               "new navigation can finish while older probe waits");
+        var deniedProbe = navigationGate.ProbeAsync(@"C:\protected", _ => DirectoryProbeStatus.AccessDenied)
+            .GetAwaiter().GetResult();
+        Check(navigationGate.IsCurrent(deniedProbe) && deniedProbe.CanNavigate,
+              "access denied reaches Shell navigation for its own error handling");
     }
     finally { releaseOldProbe.Set(); }
     Check(!navigationGate.IsCurrent(oldProbe.GetAwaiter().GetResult()),

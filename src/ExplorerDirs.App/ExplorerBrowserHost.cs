@@ -646,9 +646,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private async Task NavigateWhenAvailableAsync(string path)
     {
-        var probe = await _navigationGate.ProbeAsync(path, Directory.Exists);
+        var probe = await _navigationGate.ProbeAsync(path);
         if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
-        if (!probe.Exists)
+        if (!probe.CanNavigate)
         {
             NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
             return;
