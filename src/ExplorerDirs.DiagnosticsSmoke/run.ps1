@@ -27,7 +27,9 @@ try {
     $command = Join-Path $projectRoot 'scripts\crash-summary.ps1'
     $raw = & $command -ProfileDirectory $runRoot -EventXmlPath $xmlPath -AsJson | Out-String
     $report = $raw | ConvertFrom-Json
-    if ($report.WindowsCrashEventCount -ne 1 -or $report.SourceTestCrashEventCount -ne 1 -or
+    if ($report.WindowsCrashEventCount -ne 1 -or $report.DistinctProcessCrashCount -ne 1 -or
+        $report.EventsWithoutProcessIdentityCount -ne 1 -or
+        $report.SourceTestCrashEventCount -ne 1 -or
         $report.ReleaseCrashEventCount -ne 0 -or $report.StoredUncleanExitMarkerCount -ne 1 -or
         $report.Events[0].FaultingModule -ne 'third-party.dll' -or
         $report.Events[0].ExceptionCode -ne '0xc0000005' -or
@@ -40,6 +42,32 @@ try {
         ConvertFrom-Json
     if ($releaseReport.ReleaseCrashEventCount -ne 1 -or $releaseReport.SourceTestCrashEventCount -ne 0) {
         throw 'Crash summary did not distinguish the release executable.'
+    }
+
+    $qdirEvent = $xml.Replace('ExplorerDirs.App.exe', 'Q-Dir.exe').Replace($sourceExe, 'C:\PRIVATE\Q-Dir.exe')
+    $qdirEvent = $qdirEvent.Replace('third-party.dll', 'Q-Dir.exe')
+    $qdirEvent = $qdirEvent.Replace('<Data Name="AppPath">',
+        '<Data Name="AppVersion">12.73.0.0</Data><Data Name="ProcessId">0x1234</Data><Data Name="ProcessCreationTime">0xABC</Data><Data Name="AppPath">')
+    $qdirFirst = Join-Path $runRoot 'qdir-first.xml'
+    $qdirSecond = Join-Path $runRoot 'qdir-second.xml'
+    $qdirThird = Join-Path $runRoot 'qdir-third.xml'
+    [IO.File]::WriteAllText($qdirFirst, $qdirEvent)
+    [IO.File]::WriteAllText($qdirSecond, $qdirEvent.Replace('c0000005', 'c000041d'))
+    [IO.File]::WriteAllText($qdirThird,
+        $qdirEvent.Replace('0xABC', '0xDEF').Replace('12.73.0.0', '12.79.0.0'))
+    $qdirRaw = & $command -ProfileDirectory $runRoot -AppName 'Q-Dir.exe' `
+        -EventXmlPath @($qdirFirst, $qdirSecond, $qdirThird) -AsJson | Out-String
+    $qdirReport = $qdirRaw | ConvertFrom-Json
+    if ($qdirReport.WindowsCrashEventCount -ne 3 -or
+        $qdirReport.DistinctProcessCrashCount -ne 2 -or
+        $qdirReport.EventsWithoutProcessIdentityCount -ne 0 -or
+        $qdirReport.ReleaseCrashEventCount -ne 0 -or
+        $qdirReport.SourceTestCrashEventCount -ne 0 -or
+        $null -ne $qdirReport.StoredUncleanExitMarkerCount -or
+        @($qdirReport.CrashesByVersion | Where-Object { $_.Version -eq '12.73.0.0' -and $_.Processes -eq 1 }).Count -ne 1 -or
+        @($qdirReport.CrashesByVersion | Where-Object { $_.Version -eq '12.79.0.0' -and $_.Processes -eq 1 }).Count -ne 1 -or
+        $qdirRaw.Contains('PRIVATE') -or $qdirRaw.Contains('0xABC')) {
+        throw 'Q-Dir crash events were double counted or leaked paths/process identifiers.'
     }
     'Crash summary smoke: PASS'
 }

@@ -49,7 +49,7 @@ dotnet run --project .\src\ExplorerDirs.App\ExplorerDirs.App.csproj
 dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Release
 ```
 
-只读崩溃摘要可运行 `powershell.exe -NoProfile -File .\scripts\crash-summary.ps1 -Days 30 -AsJson`。它按项目内发布版、源码测试版和其他位置的副本分别计数 Windows 应用崩溃事件，并单独报告配置目录留下的异常退出标记数量。输出仅保留时间、故障模块文件名和异常码，不包含事件中的完整路径；模块名与退出标记都不能单独证明故障原因。诊断脚本不启动 Explorer Dirs。可用 `-ProfileDirectory` 指定复制到其他位置的发布版配置目录。
+只读崩溃摘要可运行 `powershell.exe -NoProfile -File .\scripts\crash-summary.ps1 -Days 30 -AsJson`，或加 `-AppName Q-Dir.exe` 查看对标程序。脚本同时报告事件条数和按进程 ID、创建时间去重的崩溃进程数，按版本归类；本项目还区分发布版、源码测试版和异常退出标记。输出不含完整路径或进程身份；故障模块名与退出标记都不能单独证明故障原因。脚本不启动两个程序。可用 `-ProfileDirectory` 指定复制到其他位置的发布版配置目录。[本机 Q-Dir 事件基线](docs/q-dir-crash-evidence-2026-10-16.md)。
 
 已有 Explorer Dirs 进程运行时，可先用 `Get-Process ExplorerDirs.App | Select-Object Id, StartTime` 选定实例，再执行 `powershell.exe -NoProfile -File .\scripts\perf-sample.ps1 -ProcessId <PID> -Samples 12 -IntervalMilliseconds 5000 -AsJson`。脚本只读采样工作集、私有内存、CPU、句柄与线程，不启动或控制 GUI，也不输出程序路径；可执行文件以 SHA-256 和“发布版/源码测试版/其他副本”标识。当前只有控制台进程的采样回归，尚无真实 Explorer Dirs 长时间运行数据。
 
