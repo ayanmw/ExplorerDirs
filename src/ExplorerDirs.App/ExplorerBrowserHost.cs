@@ -36,6 +36,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private readonly List<IntPtr> _subclassedWindows = new();
     private readonly SubclassProc _subclassProc;
     private readonly DirectoryNavigationGate _navigationGate = new();
+    private readonly ShellBrowserSite _browserSite = new();
     private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
     {
@@ -90,6 +91,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             var browserType = Type.GetTypeFromCLSID(BrowserClassId, true)!;
             _browser = (IExplorerBrowser)Activator.CreateInstance(browserType)!;
+            ShellBrowserSite.SetSite(_browser, _browserSite);
             var rect = ClientRect();
             var settings = new FolderSettings { ViewMode = _viewState.Mode, Flags = 0 };
             Check(_browser.Initialize(_hostWindow, ref rect, ref settings));
@@ -765,6 +767,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         DetachViewWindow();
         if (_advised) { _browser.Unadvise(_cookie); _advised = false; }
         _browser.Destroy();
+        try { ShellBrowserSite.SetSite(_browser, null); }
+        catch (COMException) { /* The browser may already have released its site. */ }
         Marshal.ReleaseComObject(_browser);
         _browser = null;
     }

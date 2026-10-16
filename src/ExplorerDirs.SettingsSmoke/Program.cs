@@ -2,6 +2,7 @@ using ExplorerDirs.App;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -150,6 +151,81 @@ try
           "Ctrl+Backspace remains available to text controls");
     Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
           "Ctrl+Shift+N routes to the Shell background New Folder command");
+    var searchScope = Path.Combine(root, "search scope & 中文");
+    Directory.CreateDirectory(searchScope);
+    var searchUri = ShellSearchLocation.BuildUri(searchScope, "name:报告 & #1");
+    Check(searchUri.StartsWith("search-ms:query=", StringComparison.Ordinal) &&
+          searchUri.Contains("%26", StringComparison.Ordinal) &&
+          searchUri.Contains("%23", StringComparison.Ordinal) &&
+          searchUri.Contains("crumb=location:", StringComparison.Ordinal) &&
+          ShellSearchLocation.TryReadScopeAndQuery(searchUri, out var parsedScope, out var parsedQuery) &&
+          parsedScope == searchScope && parsedQuery == "name:报告 & #1",
+          "search query and scope round-trip without confusing URI separators");
+    var searchPidl = ShellSearchLocation.ParsePidl(searchUri);
+    try
+    {
+        Check(searchPidl != IntPtr.Zero && ShellSearchLocation.IsSearchPidl(searchPidl),
+              "Windows parses scoped search into a virtual Shell location without a window");
+    }
+    finally { Marshal.FreeCoTaskMem(searchPidl); }
+    var browserSite = new ShellBrowserSite();
+    var serviceId = ShellBrowserSite.BrowserFrameServiceId;
+    var browser2Id = ShellBrowserSite.DialogBrowser2Id;
+    var serviceResult = browserSite.QueryService(ref serviceId, ref browser2Id, out var browser2Pointer);
+    var flagResult = browserSite.GetViewFlags(out var searchFlags);
+    try
+    {
+        var nativeFlags = 0u;
+        var nativeFlagResult = -1;
+        if (browser2Pointer != IntPtr.Zero)
+        {
+            var vtable = Marshal.ReadIntPtr(browser2Pointer);
+            var getFlagsPointer = Marshal.ReadIntPtr(vtable, 8 * IntPtr.Size);
+            nativeFlagResult = Marshal.GetDelegateForFunctionPointer<NativeGetViewFlags>(getFlagsPointer)(
+                browser2Pointer, out nativeFlags);
+        }
+        Check(serviceResult == 0 && browser2Pointer != IntPtr.Zero &&
+              flagResult == 0 &&
+              searchFlags == ShellBrowserSite.NoIncludeItemFlag &&
+              nativeFlagResult == 0 && nativeFlags == ShellBrowserSite.NoIncludeItemFlag,
+              $"browser site exposes background search view flags through the Shell service " +
+              $"(service=0x{serviceResult:X8}, pointer={browser2Pointer != IntPtr.Zero}, flags=0x{searchFlags:X8})");
+    }
+    finally { if (browser2Pointer != IntPtr.Zero) Marshal.Release(browser2Pointer); }
+    var browserId = typeof(IComDialogBrowser).GUID;
+    var baseServiceResult = browserSite.QueryService(ref serviceId, ref browserId, out var browserPointer);
+    try { Check(baseServiceResult == 0 && browserPointer != IntPtr.Zero,
+                "browser site also exposes the base dialog-browser interface"); }
+    finally { if (browserPointer != IntPtr.Zero) Marshal.Release(browserPointer); }
+    Exception? siteFailure = null;
+    var siteThread = new Thread(() =>
+    {
+        object? shellBrowser = null;
+        try
+        {
+            shellBrowser = Activator.CreateInstance(Type.GetTypeFromCLSID(
+                new Guid("71F96385-DDD6-48D3-A0C1-AE06E8B055FB"), true)!);
+            ShellBrowserSite.SetSite(shellBrowser!, new ShellBrowserSite());
+            var providerId = typeof(IShellServiceProvider).GUID;
+            var getSiteResult = ((ITestObjectWithSite)shellBrowser!).GetSite(ref providerId, out var provider);
+            try { Check(getSiteResult == 0 && provider != IntPtr.Zero,
+                        "headless ExplorerBrowser retains the background-search service site"); }
+            finally { if (provider != IntPtr.Zero) Marshal.Release(provider); }
+        }
+        catch (Exception ex) { siteFailure = ex; }
+        finally
+        {
+            if (shellBrowser is not null)
+            {
+                ShellBrowserSite.SetSite(shellBrowser, null);
+                Marshal.ReleaseComObject(shellBrowser);
+            }
+        }
+    });
+    siteThread.SetApartmentState(ApartmentState.STA);
+    siteThread.Start();
+    siteThread.Join();
+    if (siteFailure is not null) throw siteFailure;
     var observedDirectory = Path.Combine(root, "new-folder-observation");
     Directory.CreateDirectory(observedDirectory);
     using (var observation = FolderCreationObservation.TryStart(observedDirectory)
@@ -655,3 +731,14 @@ static void Check(bool condition, string name)
 {
     if (!condition) throw new Exception($"Failed: {name}");
 }
+
+[ComImport, Guid("FC4801A3-2BA9-11CF-A229-00AA003D7352"),
+ InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface ITestObjectWithSite
+{
+    [PreserveSig] int SetSite([MarshalAs(UnmanagedType.IUnknown)] object? site);
+    [PreserveSig] int GetSite(ref Guid iid, out IntPtr result);
+}
+
+[UnmanagedFunctionPointer(CallingConvention.StdCall)]
+internal delegate int NativeGetViewFlags(IntPtr self, out uint flags);
