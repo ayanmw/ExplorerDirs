@@ -18,3 +18,5 @@ powershell.exe -NoProfile -File .\scripts\crash-summary.ps1 -AppName Q-Dir.exe -
 [`0xc0000005` 是访问冲突](https://learn.microsoft.com/en-us/shows/Inside/C0000005)；[`0xc000041d` 表示用户回调函数内发生致命异常](https://learn.microsoft.com/en-us/troubleshoot/microsoftteams/teams-administration/resolve-teams-client-crash-issues)。同一进程的两条事件不能算作两次独立崩溃。这组事件证明这些 Q-Dir 进程发生了崩溃，**不能仅凭故障模块名判断 Q-Dir 本身还是某个 Shell 扩展先造成损坏**，也不能从事件数计算崩溃率。仍缺复现操作、调用栈/转储、运行时长与扩展对照实验。
 
 同窗口中，Explorer Dirs 有 1 条 `src/` 源码测试版事件、项目 `releases/` 发布版 0 条；源码测试事件另见[本项目崩溃证据](crash-evidence-2026-10-16.md)。这两个产品的使用时长和测试条件不同，数字不能直接比较稳定性。脚本输出不含完整程序路径、浏览目录、进程 ID 或创建时间；后两项只用于内存中去重。
+
+补充只读检查 WER `ReportArchive`：有 16 个 Q-Dir 报告目录，其中 10 个 `Report.wer` 当前可读，另 6 个因访问限制未读取；可读目录没有可用的 `.dmp`/`.mdmp`/`.hdmp` 转储文件。10 个可读报告的已加载模块清单都包含 `TortoiseGit.dll` 和 `TortoiseSVN.dll`。这只证明扩展 DLL 出现在当时的进程中，**不能归因于它们**；没有异常调用栈或转储就无法判断实际出错代码。未提升权限，也未更改 WER 设置或复制报告原文。

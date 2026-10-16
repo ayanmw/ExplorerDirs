@@ -72,6 +72,7 @@ dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Rele
 - [键盘操作清单与验收](docs/keyboard-shortcuts.md)
 - [架构与设计边界](docs/superpowers/specs/2026-10-15-explorer-dirs-design.md)
 - [路线图与验收](docs/roadmap.md)
+- [Shell 扩展崩溃的隔离与恢复设计](docs/reliability-isolation-design.md)
 - [贡献指南](CONTRIBUTING.md)
 
 本项目使用 [MIT 许可证](LICENSE)。
