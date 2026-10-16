@@ -36,5 +36,10 @@ if (-not (Test-Path -LiteralPath $exe)) {
 # A same-volume move makes a complete release visible under its final name.
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 Set-Content -LiteralPath (Join-Path $staging 'SHA256.txt') -Value ("ExplorerDirs.App.exe  " + $hash) -Encoding ASCII
+[IO.File]::WriteAllLines((Join-Path $staging 'FolderRoutingCapability.ini'), [string[]]@(
+    'FormatVersion=1',
+    'DirectoryArgument=true',
+    "ExecutableSha256=$hash"
+), [Text.UTF8Encoding]::new($false))
 Move-Item -LiteralPath $staging -Destination $destination
 Write-Output $destination

@@ -33,6 +33,7 @@
 - Put each usable build in a new immutable `releases/<version>/` directory using `scripts/publish.ps1`. Never publish over a running release or make a release depend on files under `src/`.
 - Keep generated release binaries out of Git. Track release instructions and build scripts. Verify the exact release executable launches before calling it usable.
 - Do not change Win+E, folder associations, or registry routing until there is a tested, reversible enable/disable flow.
+- The optional folder/drive context-menu verb must stay nondefault and per-user. Never point it at `src/` or an older release lacking `FolderRoutingCapability.ini`; require the exact release hash and GUI verification before enabling it. Disable only keys still matching this project's ownership marker and command.
 
 ## Maintaining the project
 
