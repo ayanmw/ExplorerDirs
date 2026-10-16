@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly FavoritesStore _favoritesStore;
     private readonly List<string> _favorites;
     private readonly UiPreferencesStore _uiPreferencesStore;
+    private readonly PinnedTabsStore _pinnedTabsStore;
     private readonly EnvironmentRefresh _environmentRefresh = new();
     private readonly Dictionary<int, Button> _layoutButtons = [];
     private readonly Dictionary<int, MenuItem> _layoutMenuItems = [];
@@ -53,14 +54,22 @@ public partial class MainWindow : Window
         if (_uiPreferencesStore.LoadWarning is { } appearanceWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? appearanceWarning : $"{EnvironmentStatus.Text} {appearanceWarning}";
+        _pinnedTabsStore = new PinnedTabsStore(Path.Combine(
+            Path.GetDirectoryName(_sessionStore.Path)!, "PinnedTabs.ini"));
+        var pinnedTabs = _pinnedTabsStore.Load();
+        if (_pinnedTabsStore.LoadWarning is { } pinsWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? pinsWarning : $"{EnvironmentStatus.Text} {pinsWarning}";
         _defaultViewMode = state?.DefaultViewMode ?? 4;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
         {
             var tabs = state?.Panes.ElementAtOrDefault(index);
-            var pane = new PaneControl(tabs is { Count: > 0 } ? tabs :
-                [new TabSettings(home, ViewState.Default(_defaultViewMode))],
-                () => ViewState.Default(_defaultViewMode));
+            var initialTabs = tabs is { Count: > 0 } ? tabs :
+                [new TabSettings(home, ViewState.Default(_defaultViewMode))];
+            var pane = new PaneControl(initialTabs,
+                () => ViewState.Default(_defaultViewMode),
+                PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index));
             _panes[index] = pane;
             pane.StateChanged += (_, _) => ScheduleSave();
             pane.GotKeyboardFocus += (_, _) => SetActivePane(pane);
@@ -441,10 +450,11 @@ public partial class MainWindow : Window
         {
             _sessionStore.Save(new SessionState(_layout, _defaultViewMode,
                 _panes.Select(p => p.SnapshotTabs().ToList()).ToList()));
+            _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
         }
         catch (Exception ex)
         {
-            EnvironmentStatus.Text = $"会话保存失败：{ex.Message}";
+            EnvironmentStatus.Text = $"配置保存失败：{ex.Message}";
         }
     }
 }

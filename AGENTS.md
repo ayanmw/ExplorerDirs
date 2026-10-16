@@ -8,6 +8,7 @@
 - Each file pane uses the Windows Shell ExplorerBrowser view. Keep its native item/background hit testing and View/Sort/Group/New/Properties commands; prepend Explorer Dirs commands to the same native context menu. Do not substitute a WPF ListView for the file view without explicit product review.
 - A tab header supports middle-click and left-button double-click to close. Keep at least one tab in each pane.
 - Reordering tab headers must preserve each hosted ExplorerBrowser instance and its navigation history. Keep displayed order, keyboard tab cycling, and saved tab order aligned.
+- Pinned tabs stay before ordinary tabs within a pane. Duplicating a pinned tab copies its pinned state; accidental close actions and “close other tabs” preserve pinned tabs until explicitly unpinned. Save pin metadata in a separate `PinnedTabs.ini` beside the session INI so older releases do not erase it. Match saved pins only when their pane, tab position, and path still agree with the session.
 - Layout switching stays in the top menu and toolbar; do not add layout choices to file-view or tab-header context menus.
 - Compact density is a global top-menu preference saved in `UiPreferences.ini` beside the session profile. Keep normal spacing as the default, preserve the native Shell view and keyboard focus stops when density changes, and do not let older releases erase the preference.
 - Route normal file-view keyboard shortcuts through the hosted Shell view. Keep file operations in Shell interfaces rather than duplicating copy/paste logic in WPF.

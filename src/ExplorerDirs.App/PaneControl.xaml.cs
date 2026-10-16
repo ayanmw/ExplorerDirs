@@ -29,6 +29,7 @@ public partial class PaneControl : UserControl
         public required TabItem Tab { get; init; }
         public required ExplorerBrowserHost Browser { get; init; }
         public required string Path { get; set; }
+        public bool IsPinned { get; set; }
     }
 
     public event EventHandler? StateChanged;
@@ -36,12 +37,14 @@ public partial class PaneControl : UserControl
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
 
-    internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView)
+    internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
+        IReadOnlySet<int>? pinnedIndices = null)
     {
         InitializeComponent();
         _newTabView = newTabView;
+        var tabIndex = 0;
         foreach (var tab in tabs)
-            AddTab(tab.Path, tab.View, false);
+            AddTab(tab.Path, tab.View, false, pinnedIndices?.Contains(tabIndex++) == true);
         if (Tabs.Items.Count == 0)
             AddTab(Home, _newTabView(), false);
         Tabs.SelectedIndex = 0;
@@ -56,13 +59,17 @@ public partial class PaneControl : UserControl
             var state = (TabState)tab.Tag;
             return new TabSettings(state.Path, state.Browser.CaptureViewState());
         }).ToArray();
+    internal IReadOnlyList<PinnedTabEntry> SnapshotPins(int paneIndex) => _tabOrder
+        .Select((tab, index) => (State: (TabState)tab.Tag, Index: index))
+        .Where(item => item.State.IsPinned)
+        .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Path)).ToArray();
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
     public void NewTab() => AddTab(Home, _newTabView());
     public void DuplicateCurrentTab()
     {
         if (Current is { } state)
-            AddTab(state.Path, state.Browser.CaptureViewState());
+            AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned);
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
     public void NavigateTo(string path) => Navigate(path);
@@ -163,16 +170,16 @@ public partial class PaneControl : UserControl
         foreach (var tab in Tabs.Items.Cast<TabItem>().ToArray())
         {
             var state = (TabState)tab.Tag;
-            if (state != current) CloseTab(state);
+            if (state != current && !state.IsPinned) CloseTab(state);
         }
     }
 
-    private void AddTab(string path, ViewState? view = null, bool select = true)
+    private void AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false)
     {
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView());
         var tab = new TabItem { Content = browser };
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
-        var state = new TabState { Tab = tab, Browser = browser, Path = path };
+        var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned };
         tab.Tag = state;
         browser.CustomCommands = selectedPath =>
         {
@@ -180,8 +187,9 @@ public partial class PaneControl : UserControl
             if (selectedPath is not null && Directory.Exists(selectedPath))
                 actions.Add(new("在新标签页中打开", () => AddTab(selectedPath, _newTabView())));
             actions.Add(new("新建标签页", NewTab));
-            actions.Add(new("复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState())));
-            actions.Add(new("关闭当前标签", () => CloseTab(state)));
+            actions.Add(new("复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned)));
+            actions.Add(new(state.IsPinned ? "取消固定当前标签" : "固定当前标签", () => TogglePinned(state)));
+            if (!state.IsPinned) actions.Add(new("关闭当前标签", () => CloseTab(state)));
             actions.Add(new("关闭其他标签", () =>
             {
                 Tabs.SelectedItem = state.Tab;
@@ -243,8 +251,9 @@ public partial class PaneControl : UserControl
         tab.Drop += Tab_Drop;
         tab.ContextMenu = CreateTabContextMenu(state);
         Tabs.Items.Add(tab);
-        _tabOrder.Add(tab);
-        TabHeaderPanel.SetOrder(tab, _tabOrder.Count - 1);
+        var insertion = pinned ? _tabOrder.TakeWhile(item => ((TabState)item.Tag).IsPinned).Count() : _tabOrder.Count;
+        _tabOrder.Insert(insertion, tab);
+        UpdateTabOrders();
         if (select) Tabs.SelectedItem = tab;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -260,6 +269,8 @@ public partial class PaneControl : UserControl
             Height = 16,
             Margin = new Thickness(0, 0, 4, 0)
         });
+        if (state.IsPinned)
+            header.Children.Add(new TextBlock { Text = "📌", ToolTip = "固定标签", Margin = new Thickness(0, 0, 3, 0) });
         header.Children.Add(new TextBlock
         {
             Text = string.IsNullOrEmpty(name) ? state.Path : name,
@@ -276,7 +287,7 @@ public partial class PaneControl : UserControl
             }
         };
         state.Tab.Header = header;
-        state.Tab.ToolTip = state.Path;
+        state.Tab.ToolTip = state.IsPinned ? $"固定标签 · {state.Path}" : state.Path;
         if (state.Tab.IsSelected)
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
                 new Action(() => { if (state.Tab.IsSelected) state.Tab.BringIntoView(); }));
@@ -286,15 +297,25 @@ public partial class PaneControl : UserControl
     {
         var menu = new ContextMenu();
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
-        AddMenuItem(menu, "复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState()), "Ctrl+K");
+        AddMenuItem(menu, "复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned), "Ctrl+K");
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
         menu.Items.Add(new Separator());
-        AddMenuItem(menu, "关闭标签页", () => CloseTab(state), "Ctrl+W");
+        var pinItem = new MenuItem { Header = "固定标签", IsCheckable = true };
+        pinItem.Click += (_, _) => TogglePinned(state);
+        menu.Items.Add(pinItem);
+        var closeItem = new MenuItem { Header = "关闭标签页", InputGestureText = "Ctrl+W" };
+        closeItem.Click += (_, _) => CloseTab(state);
+        menu.Items.Add(closeItem);
         AddMenuItem(menu, "关闭其他标签", () =>
         {
             Tabs.SelectedItem = state.Tab;
             CloseOtherTabs();
         });
+        menu.Opened += (_, _) =>
+        {
+            pinItem.IsChecked = state.IsPinned;
+            closeItem.IsEnabled = !state.IsPinned && Tabs.Items.Count > 1;
+        };
         return menu;
     }
 
@@ -307,7 +328,7 @@ public partial class PaneControl : UserControl
 
     private void CloseTab(TabState state)
     {
-        if (Tabs.Items.Count <= 1 || !Tabs.Items.Contains(state.Tab)) return;
+        if (state.IsPinned || Tabs.Items.Count <= 1 || !Tabs.Items.Contains(state.Tab)) return;
         if (ReferenceEquals(_dragCandidate, state.Tab)) _dragCandidate = null;
         var closingIndex = _tabOrder.IndexOf(state.Tab);
         var adjacent = state.Tab.IsSelected
@@ -325,6 +346,19 @@ public partial class PaneControl : UserControl
         UpdateTabOrders();
         if (adjacent is not null) Tabs.SelectedItem = adjacent;
         state.Browser.Dispose();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void TogglePinned(TabState state)
+    {
+        if (!Tabs.Items.Contains(state.Tab)) return;
+        _tabOrder.Remove(state.Tab);
+        state.IsPinned = !state.IsPinned;
+        var insertion = _tabOrder.TakeWhile(tab => ((TabState)tab.Tag).IsPinned).Count();
+        _tabOrder.Insert(insertion, state.Tab);
+        UpdateTabHeader(state);
+        UpdateTabOrders();
+        state.Tab.BringIntoView();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -401,7 +435,8 @@ public partial class PaneControl : UserControl
 
     private void Tab_DragOver(object sender, DragEventArgs e)
     {
-        if (sender is not TabItem || !IsOwnTabDrag(e.Data))
+        if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source ||
+            ((TabState)source.Tag).IsPinned != ((TabState)target.Tag).IsPinned)
         {
             e.Effects = DragDropEffects.None;
             e.Handled = true;
@@ -435,7 +470,8 @@ public partial class PaneControl : UserControl
         var original = _tabOrder.ToArray();
         var sourceIndex = Array.IndexOf(original, source);
         var targetIndex = Array.IndexOf(original, target);
-        if (sourceIndex < 0 || targetIndex < 0) return;
+        if (sourceIndex < 0 || targetIndex < 0 ||
+            ((TabState)source.Tag).IsPinned != ((TabState)target.Tag).IsPinned) return;
         var reordered = TabReorder.Move(original, sourceIndex, targetIndex, after).ToArray();
         if (original.SequenceEqual(reordered)) return;
 

@@ -309,6 +309,35 @@ try
     Check(!uiStore.Load() && uiStore.LoadWarning is null,
           "recovered appearance settings can be saved cleanly");
 
+    var pinsIni = Path.Combine(root, "PinnedTabs.ini");
+    if (File.Exists(pinsIni)) File.Delete(pinsIni);
+    foreach (var backup in Directory.GetFiles(root, "PinnedTabs.ini.invalid-*.bak")) File.Delete(backup);
+    var pinsStore = new PinnedTabsStore(pinsIni);
+    Check(pinsStore.Load().Count == 0, "missing pinned tabs profile starts empty");
+    var pinned = new[] { new PinnedTabEntry(0, 1, second.Path) };
+    pinsStore.Save(pinned);
+    var loadedPins = pinsStore.Load();
+    Check(loadedPins.SequenceEqual(pinned) &&
+          PinnedTabsStore.MatchPane([first, second], loadedPins, 0).SequenceEqual([1]) &&
+          !PinnedTabsStore.MatchPane([first, new TabSettings(@"C:\other", ViewState.Default())], loadedPins, 0).Any(),
+          "pinned duplicate path matches its saved position and ignores a changed session slot");
+    var pinsContent = File.ReadAllText(pinsIni);
+    File.AppendAllText(pinsIni, "; changed by another instance" + Environment.NewLine);
+    try { pinsStore.Save([]); throw new Exception("external pin edit was overwritten"); }
+    catch (IOException) { }
+    Check(File.ReadAllText(pinsIni).Contains("changed by another instance", StringComparison.Ordinal),
+          "external pinned tab edits remain untouched");
+    File.WriteAllText(pinsIni, pinsContent.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal));
+    Check(pinsStore.Load().Count == 0 && pinsStore.LoadWarning is not null,
+          "future pinned tab format is protected");
+    try { pinsStore.Save([]); throw new Exception("future pinned tab format was overwritten"); }
+    catch (IOException) { }
+    File.WriteAllText(pinsIni, pinsContent.Replace("Count=1", "Count=2", StringComparison.Ordinal));
+    Check(pinsStore.Load().Count == 1 && pinsStore.LoadWarning is not null,
+          "pinned tab recovery remains readable");
+    Check(Directory.GetFiles(root, "PinnedTabs.ini.invalid-*.bak").Length == 1,
+          "invalid pinned tab file is backed up before recovery");
+
     var favoritesIni = Path.Combine(root, "Favorites.ini");
     var favoritesStore = new FavoritesStore(favoritesIni);
     Check(favoritesStore.Load().Count == 0, "missing favorites profile starts empty");

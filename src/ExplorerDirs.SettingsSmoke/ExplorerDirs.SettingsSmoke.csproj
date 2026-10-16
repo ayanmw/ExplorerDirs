@@ -19,5 +19,6 @@
     <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
   </ItemGroup>
 </Project>
