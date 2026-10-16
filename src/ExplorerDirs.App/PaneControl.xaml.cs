@@ -81,6 +81,9 @@ public partial class PaneControl : UserControl
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
     internal bool IsShellRenameEditorFocused => Current?.Browser.IsRenameEditorFocused() == true;
     internal int FocusStopCount => Current?.Browser.HasColumnHeader() == true ? 11 : 10;
+    internal IReadOnlyList<int> MajorFocusStops => FocusStopCount == 11
+        ? [4, 8, ColumnHeaderStop, FileStopWithHeader]
+        : [4, 8, FileStopWithoutHeader];
 
     internal int CurrentFocusStop()
     {

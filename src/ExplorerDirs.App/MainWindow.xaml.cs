@@ -296,6 +296,8 @@ public partial class MainWindow : Window
             case ExplorerShortcut.Forward: source.GoForward(); break;
             case ExplorerShortcut.NextFocusStop: MoveFocus(false); break;
             case ExplorerShortcut.PreviousFocusStop: MoveFocus(true); break;
+            case ExplorerShortcut.NextFocusRegion: MoveMajorFocus(false); break;
+            case ExplorerShortcut.PreviousFocusRegion: MoveMajorFocus(true); break;
             case ExplorerShortcut.Address: source.FocusAddress(); break;
             case ExplorerShortcut.NewTab: source.NewTab(); source.FocusCurrentView(); break;
             case ExplorerShortcut.CloseTab: source.CloseCurrentTab(); source.FocusCurrentView(); break;
@@ -321,6 +323,20 @@ public partial class MainWindow : Window
         for (var attempt = 0; attempt < stops.Sum(); attempt++)
         {
             current = FocusTraversal.Move(current.Pane, current.Stop, stops, reverse);
+            SetActivePane(_panes[current.Pane]);
+            if (ActivePane.FocusStop(current.Stop)) return;
+        }
+    }
+
+    private void MoveMajorFocus(bool reverse)
+    {
+        var count = LayoutPreset.Find(_layout).Slots.Length;
+        var index = Array.IndexOf(_panes, ActivePane);
+        var regions = _panes.Take(count).Select(pane => pane.MajorFocusStops).ToArray();
+        var current = (Pane: Math.Clamp(index, 0, count - 1), Stop: ActivePane.CurrentFocusStop());
+        for (var attempt = 0; attempt < regions.Sum(stops => stops.Count); attempt++)
+        {
+            current = FocusTraversal.MoveMajor(current.Pane, current.Stop, regions, reverse);
             SetActivePane(_panes[current.Pane]);
             if (ActivePane.FocusStop(current.Stop)) return;
         }

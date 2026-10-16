@@ -122,6 +122,9 @@ try
     Check(KeyboardShortcuts.Resolve(0x09, 0) == ExplorerShortcut.NextFocusStop &&
           KeyboardShortcuts.Resolve(0x09, 4) == ExplorerShortcut.PreviousFocusStop,
           "Tab and Shift+Tab traverse pane focus stops");
+    Check(KeyboardShortcuts.Resolve(0x75, 0) == ExplorerShortcut.NextFocusRegion &&
+          KeyboardShortcuts.Resolve(0x75, 4) == ExplorerShortcut.PreviousFocusRegion,
+          "F6 and Shift+F6 traverse major regions in opposite directions");
     Check(KeyboardShortcuts.NextPane(3, 4, false) == 0 &&
           KeyboardShortcuts.NextPane(0, 4, true) == 3 &&
           KeyboardShortcuts.NextPane(0, 1, false) == 0,
@@ -133,6 +136,16 @@ try
           FocusTraversal.Move(0, 0, focusStops, true) == (3, 9) &&
           FocusTraversal.Move(2, -1, focusStops, true) == (2, 10),
           "forward and reverse tab order includes Details header and wraps panes");
+    IReadOnlyList<int>[] majorStops = [[4, 8, 9, 10], [4, 8, 9], [4, 8, 9, 10], [4, 8, 9]];
+    Check(FocusTraversal.MoveMajor(0, 4, majorStops, false) == (0, 8) &&
+          FocusTraversal.MoveMajor(0, 8, majorStops, false) == (0, 9) &&
+          FocusTraversal.MoveMajor(0, 9, majorStops, false) == (0, 10) &&
+          FocusTraversal.MoveMajor(0, 10, majorStops, false) == (1, 4) &&
+          FocusTraversal.MoveMajor(1, 4, majorStops, true) == (0, 10) &&
+          FocusTraversal.MoveMajor(0, 4, majorStops, true) == (3, 9) &&
+          FocusTraversal.MoveMajor(2, 6, majorStops, false) == (2, 8) &&
+          FocusTraversal.MoveMajor(2, -1, majorStops, true) == (2, 10),
+          "F6 skips fine controls, includes Details header, and wraps visible panes");
     Check(KeyboardShortcuts.Resolve(0x08, 2) == ExplorerShortcut.None,
           "Ctrl+Backspace remains available to text controls");
     Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
