@@ -42,6 +42,7 @@
 - Keep generated release binaries out of Git. Track release instructions and build scripts. Verify the exact release executable launches before calling it usable.
 - Do not change Win+E, folder associations, or registry routing until there is a tested, reversible enable/disable flow.
 - The optional folder/drive context-menu verb must stay nondefault and per-user. Never point it at `src/` or an older release lacking `FolderRoutingCapability.ini`; require the exact release hash and GUI verification before enabling it. Disable only keys still matching this project's ownership marker and command.
+- Folder routing may wait for a receiving window to finish startup, but disposing the router must cancel that wait and release its per-profile ownership lock. A client timeout is uncertain, not proof that the folder was rejected; do not acknowledge before a tab is actually accepted.
 
 ## Maintaining the project
 

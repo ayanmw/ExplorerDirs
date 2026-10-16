@@ -176,6 +176,29 @@ try
         Check(pendingForward.GetAwaiter().GetResult() == FolderForwardResult.Accepted,
               "the startup race forwards after the first window becomes ready");
     }
+    var stoppingProfile = Path.Combine(root, "router-stopping", "ExplorerDirs.ini");
+    var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var neverReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var stoppingRouter = FolderOpenRouter.TryStart(stoppingProfile, _ =>
+    {
+        callbackEntered.TrySetResult();
+        return neverReady.Task;
+    }) ?? throw new Exception("stopping router did not start");
+    var waitingForward = FolderOpenRouter.TryForwardAsync(stoppingProfile, routedPath,
+        TimeSpan.FromSeconds(5));
+    Check(callbackEntered.Task.Wait(TimeSpan.FromSeconds(2)),
+          "folder router reached the pending window callback");
+    stoppingRouter.Dispose();
+    FolderOpenRouter? replacementRouter = null;
+    var releasedOnStop = SpinWait.SpinUntil(() =>
+    {
+        replacementRouter = FolderOpenRouter.TryStart(stoppingProfile, _ => Task.FromResult(true));
+        return replacementRouter is not null;
+    }, TimeSpan.FromSeconds(2));
+    neverReady.TrySetResult(false); // Let the old callback finish even when the assertion fails.
+    using (replacementRouter)
+        Check(releasedOnStop, "disposing a router releases ownership despite a pending window callback");
+    _ = waitingForward.GetAwaiter().GetResult();
     Check(ShellItemKind.IsFileSystemFolder(0x60000000) &&
           !ShellItemKind.IsFileSystemFolder(0x40000000) &&
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&

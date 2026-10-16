@@ -153,8 +153,9 @@ internal sealed class FolderOpenRouter : IDisposable
             {
                 var path = Utf8.GetString(payload);
                 if (Path.IsPathFullyQualified(path) && Path.GetFullPath(path) == path)
-                    accepted = await _openDirectory(path).ConfigureAwait(false);
+                    accepted = await _openDirectory(path).WaitAsync(stop).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
             catch (Exception) { /* Invalid request or failed UI dispatch: reject it. */ }
         }
         await server.WriteAsync(new byte[] { accepted ? (byte)1 : (byte)0 }, stop).ConfigureAwait(false);
