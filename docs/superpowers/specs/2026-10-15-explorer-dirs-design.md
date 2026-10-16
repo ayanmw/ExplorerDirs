@@ -22,6 +22,7 @@
 - 原生文件视图聚焦时，宿主先识别应用级导航/标签/焦点遍历按键，再把其他键交给 Shell。每标签复用 ExplorerBrowser 的 TravelLog，`BrowseToIDList` 使用 `SBSP_NAVIGATEBACK` / `SBSP_NAVIGATEFORWARD` / `SBSP_PARENT`。Backspace 与 Alt+↑ 走父目录；Alt+←/→ 走历史。Tab / Shift+Tab 由 `FocusTraversal` 按正反向顺序经过每窗格导航按钮、地址、选中标签标题、详细信息列标题和文件项，再跨到下一窗格。列标题由 Shell UI Automation 元素聚焦；非详细信息视图跳过该停靠点。`MainWindow` 按布局记忆活动窗格，并在布局切换后恢复视图焦点。快捷键范围和人工验收见 `docs/keyboard-shortcuts.md`。
 - Shell 文件视图外层 `SHELLDLL_DefView` 不一定接收文件键盘输入。焦点恢复先定位其 `DirectUIHWND`（兼容传统 `SysListView32`），设置 Win32 焦点后通知 `IShellView::UIActivate`，并在 Shell 尚未恢复文件项焦点时以 `IFolderView::SelectItem` 重新聚焦现有选中项而不清除其他选择。剪贴板快捷键处理后延迟检查活动视图焦点；Shell 确认对话框关闭、主窗口重新激活时再恢复。如果 Shell 操作结束后前台窗口为空且 WPF 仍认为本窗口活动，可重新声明本窗口为前台；其他应用已有前台焦点时绝不抢焦点。地址栏、工具栏和其他窗格的显式焦点优先，避免异步恢复抢焦点。
 - `ShellIconProvider` 仅为项目自己的标签标题取文件夹图标并释放本机图标句柄；文件视图内的图标由 Shell 绘制。
+- 新建文件夹通过当前 `IShellView` 的背景 `IContextMenu` 执行 Shell 的 `NewFolder` 命令；文件菜单和工具栏也可触发该操作。Ctrl+Shift+N 只作为本程序局部快捷键，不能覆盖其他程序注册的全局热键；不安装全局键盘钩子。GUI 自动化仅在用户留出桌面时显式运行，并在焦点转移后停止输入。
 - `SessionStore` 将全局布局、默认新标签查看方式和各标签路径、查看模式、图标大小、排序列及分组写入便携 INI，使用临时文件加覆盖移动避免半写入。发布版各版本共享项目根目录 `profile/ExplorerDirs.ini`；复制单个发布目录时使用其自身 `profile/`；Debug 写入 `src/.state/ExplorerDirs.ini`。首次启动从旧 JSON 单向迁移布局和路径，保留旧文件。Shell 视图使用 `EBO_NOPERSISTVIEWSTATE`，不再调用 `SetPropertyBag` 保存自身状态到注册表。
 - `EnvironmentRefresh` 合并 Windows 机器和用户持久化变量（PATH 按机器后用户拼接），收到 `WM_SETTINGCHANGE` 的 `Environment` 通知或手动触发时刷新本进程。直接创建的 `cmd.exe` 继承更新值。已有进程和通过文件关联启动的程序不在此承诺内。
 

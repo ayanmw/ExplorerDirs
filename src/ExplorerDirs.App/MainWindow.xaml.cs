@@ -212,6 +212,7 @@ public partial class MainWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is MenuItem) return;
+        if (ActivePane.IsShellRenameEditorFocused) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var shortcut = KeyboardShortcuts.Resolve(KeyInterop.VirtualKeyFromKey(key), (int)Keyboard.Modifiers);
         if (shortcut == ExplorerShortcut.Parent && Keyboard.FocusedElement is TextBoxBase)
@@ -237,6 +238,7 @@ public partial class MainWindow : Window
             case ExplorerShortcut.ReopenTab: source.ReopenClosedTab(); source.FocusCurrentView(); break;
             case ExplorerShortcut.NextTab: source.SelectRelativeTab(false); break;
             case ExplorerShortcut.PreviousTab: source.SelectRelativeTab(true); break;
+            case ExplorerShortcut.NewFolder: source.CreateNewFolder(); break;
             case ExplorerShortcut.Refresh: source.RefreshCurrent(); break;
             case ExplorerShortcut.ToggleMaximize:
                 WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
@@ -260,6 +262,7 @@ public partial class MainWindow : Window
     }
 
     private void NewTab_Click(object sender, RoutedEventArgs e) => ActivePane.NewTab();
+    private void NewFolder_Click(object sender, RoutedEventArgs e) => ActivePane.CreateNewFolder();
     private void DuplicateTab_Click(object sender, RoutedEventArgs e) => ActivePane.DuplicateCurrentTab();
     private void CloseTab_Click(object sender, RoutedEventArgs e) => ActivePane.CloseCurrentTab();
     private void CloseOtherTabs_Click(object sender, RoutedEventArgs e) => ActivePane.CloseOtherTabs();

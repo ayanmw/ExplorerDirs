@@ -15,6 +15,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 {
     private static readonly Guid BrowserClassId = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
@@ -241,6 +242,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             (focused == _viewWindow || IsChild(_viewWindow, focused));
     }
 
+    public bool IsRenameEditorFocused()
+    {
+        var focused = GetFocus();
+        return focused != IntPtr.Zero && _viewWindow != IntPtr.Zero &&
+            IsChild(_viewWindow, focused) &&
+            WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase);
+    }
+
     public bool HasColumnHeader() => FindColumnHeader() is not null;
 
     public bool IsColumnHeaderFocused()
@@ -390,6 +399,159 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool GoParent() => BrowseRelative(BrowseParent);
     public bool GoBack() => BrowseRelative(BrowseBack);
     public bool GoForward() => BrowseRelative(BrowseForward);
+
+    public bool CreateNewFolder()
+    {
+        if (_browser is null) return false;
+        HashSet<string> existingFolders;
+        try { existingFolders = Directory.EnumerateDirectories(CurrentPath).ToHashSet(StringComparer.OrdinalIgnoreCase); }
+        catch (Exception ex)
+        {
+            MenuError?.Invoke(this, $"无法读取当前文件夹：{ex.Message}");
+            return false;
+        }
+        var parentPath = CurrentPath;
+        var viewId = ShellViewId;
+        if (_browser.GetCurrentView(ref viewId, out var viewObject) < 0) return false;
+        try
+        {
+            var menuId = ContextMenuId;
+            var itemResult = ((IShellView)viewObject).GetItemObject(0, ref menuId, out var menuObject); // SVGIO_BACKGROUND
+            Trace($"new-folder background={itemResult:X8}");
+            Check(itemResult);
+            try
+            {
+                var menu = CreatePopupMenu();
+                if (menu == IntPtr.Zero) throw new InvalidOperationException("无法创建 Shell 菜单。");
+                try
+                {
+                    var context = (IContextMenu)menuObject;
+                    var queryResult = context.QueryContextMenu(menu, 0, 1, 0x7fff, 0);
+                    Trace($"new-folder query={queryResult:X8}");
+                    Check(queryResult);
+                    var verb = Marshal.StringToHGlobalAnsi("NewFolder");
+                    try
+                    {
+                        var command = new NativeInvokeCommand
+                        {
+                            Size = (uint)Marshal.SizeOf<NativeInvokeCommand>(),
+                            Owner = Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : _hostWindow,
+                            Verb = verb,
+                            Show = 1
+                        };
+                        var invokeResult = context.InvokeCommand(ref command);
+                        Trace($"new-folder invoke={invokeResult:X8} focus={FolderFocusState()}");
+                        Check(invokeResult);
+                    }
+                    finally { Marshal.FreeHGlobal(verb); }
+                }
+                finally { DestroyMenu(menu); }
+            }
+            finally { Marshal.ReleaseComObject(menuObject); }
+            BeginRenameNewFolder(parentPath, existingFolders);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace($"new-folder exception={ex.GetType().Name}:{ex.Message}");
+            MenuError?.Invoke(this, $"新建文件夹失败：{ex.Message}");
+            return false;
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private void BeginRenameNewFolder(string parentPath, HashSet<string> existingFolders)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(120)
+        };
+        var attempts = 0;
+        timer.Tick += (_, _) =>
+        {
+            if (++attempts >= 12 || TryRenameNewFolder(parentPath, existingFolders))
+                timer.Stop();
+        };
+        timer.Start();
+    }
+
+    private bool TryRenameNewFolder(string parentPath, HashSet<string> existingFolders)
+    {
+        if (_browser is null || CurrentPath != parentPath || !IsVisible) return true;
+        try
+        {
+            var created = Directory.EnumerateDirectories(parentPath)
+                .Where(path => !existingFolders.Contains(path)).Take(2).ToArray();
+            if (created.Length == 0) return false;
+            if (created.Length > 1)
+            {
+                MenuError?.Invoke(this, "同时创建了多个文件夹，未自动进入重命名。请手动选择目标文件夹。");
+                return true;
+            }
+            var focusedPath = GetFocusedItemPath(parentPath);
+            Trace($"new-folder focused-match={string.Equals(focusedPath, created[0], StringComparison.OrdinalIgnoreCase)}");
+            if (!string.Equals(focusedPath, created[0], StringComparison.OrdinalIgnoreCase))
+            {
+                MenuError?.Invoke(this, "新文件夹已创建，但 Shell 焦点未指向它；未自动进入重命名。请手动选择新文件夹。");
+                return true;
+            }
+            Check(SHParseDisplayName(created[0], IntPtr.Zero, out var absolutePidl, 0, out _));
+            try
+            {
+                var childPidl = ILFindLastID(absolutePidl);
+                var iid = ShellViewId;
+                if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return false;
+                try
+                {
+                    var result = ((IShellView)viewObject).SelectItem(childPidl, 0x1f);
+                    Trace($"new-folder edit={result:X8}");
+                    return result >= 0;
+                }
+                finally { Marshal.ReleaseComObject(viewObject); }
+            }
+            finally { Marshal.FreeCoTaskMem(absolutePidl); }
+        }
+        catch (Exception ex)
+        {
+            MenuError?.Invoke(this, $"新建文件夹后无法进入重命名：{ex.Message}");
+            return true;
+        }
+    }
+
+    private string? GetFocusedItemPath(string parentPath)
+    {
+        if (_browser is null) return null;
+        var iid = FolderViewId;
+        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return null;
+        try
+        {
+            var view = (IFolderView)viewObject;
+            if (view.GetFocusedItem(out var index) < 0 || index < 0 ||
+                view.Item(index, out var childPidl) < 0 || childPidl == IntPtr.Zero)
+                return null;
+            try
+            {
+                if (SHParseDisplayName(parentPath, IntPtr.Zero, out var parentPidl, 0, out _) < 0)
+                    return null;
+                try
+                {
+                    var absolutePidl = ILCombine(parentPidl, childPidl);
+                    if (absolutePidl == IntPtr.Zero) return null;
+                    try
+                    {
+                        if (SHGetNameFromIDList(absolutePidl, 0x80058000, out var pathPtr) < 0)
+                            return null;
+                        try { return Marshal.PtrToStringUni(pathPtr); }
+                        finally { Marshal.FreeCoTaskMem(pathPtr); }
+                    }
+                    finally { Marshal.FreeCoTaskMem(absolutePidl); }
+                }
+                finally { Marshal.FreeCoTaskMem(parentPidl); }
+            }
+            finally { Marshal.FreeCoTaskMem(childPidl); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
 
     private bool BrowseRelative(uint flag)
     {
@@ -821,6 +983,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         public uint Private;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeInvokeCommand
+    {
+        public uint Size;
+        public uint Mask;
+        public IntPtr Owner;
+        public IntPtr Verb;
+        public IntPtr Parameters;
+        public IntPtr Directory;
+        public int Show;
+        public uint HotKey;
+        public IntPtr Icon;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetViewModeAndIconSizeDelegate(IntPtr instance, out uint mode, out int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -874,6 +1050,21 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         [PreserveSig] int EnableModeless(bool enable);
         [PreserveSig] int UIActivate(uint state);
         [PreserveSig] int Refresh();
+        [PreserveSig] int CreateViewWindow(IntPtr previous, IntPtr settings, IntPtr browser, IntPtr rect, out IntPtr hwnd);
+        [PreserveSig] int DestroyViewWindow();
+        [PreserveSig] int GetCurrentInfo(IntPtr settings);
+        [PreserveSig] int AddPropertySheetPages(uint reserved, IntPtr callback, IntPtr parameter);
+        [PreserveSig] int SaveViewState();
+        [PreserveSig] int SelectItem(IntPtr pidl, uint flags);
+        [PreserveSig] int GetItemObject(uint item, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object result);
+    }
+
+    [ComImport, Guid("000214E4-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IContextMenu
+    {
+        [PreserveSig] int QueryContextMenu(IntPtr menu, uint index, uint firstId, uint lastId, uint flags);
+        [PreserveSig] int InvokeCommand(ref NativeInvokeCommand command);
+        [PreserveSig] int GetCommandString(nuint commandId, uint flags, IntPtr reserved, IntPtr name, uint length);
     }
 
     [ComImport, Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -952,6 +1143,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maximum);
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern IntPtr CreatePopupMenu();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyMenu(IntPtr menu);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateWindowEx(uint extendedStyle, string className, string title, uint style,
@@ -961,6 +1157,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool DestroyWindow(IntPtr hwnd);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHParseDisplayName(string name, IntPtr bindContext, out IntPtr pidl, uint attributes, out uint receivedAttributes);
+    [DllImport("shell32.dll")]
+    private static extern IntPtr ILFindLastID(IntPtr pidl);
+    [DllImport("shell32.dll")]
+    private static extern IntPtr ILCombine(IntPtr parent, IntPtr child);
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHGetNameFromIDList(IntPtr pidl, uint displayNameType, out IntPtr name);
 }

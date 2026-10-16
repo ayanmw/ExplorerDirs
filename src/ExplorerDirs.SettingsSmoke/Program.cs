@@ -35,6 +35,8 @@ try
           "forward and reverse tab order includes Details header and wraps panes");
     Check(KeyboardShortcuts.Resolve(0x08, 2) == ExplorerShortcut.None,
           "Ctrl+Backspace remains available to text controls");
+    Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
+          "Ctrl+Shift+N routes to the Shell background New Folder command");
     store.Save(state);
     var loaded = store.Load() ?? throw new Exception("INI did not load");
     Check(loaded.Layout == 2 && loaded.DefaultViewMode == 3, "global settings");

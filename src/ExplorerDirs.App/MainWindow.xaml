@@ -6,6 +6,8 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="文件(_F)">
+                <MenuItem Header="新建文件夹" Click="NewFolder_Click"/>
+                <Separator/>
                 <MenuItem Header="新建标签页" InputGestureText="Ctrl+T" Click="NewTab_Click"/>
                 <MenuItem Header="关闭标签页" InputGestureText="Ctrl+W" Click="CloseTab_Click"/>
                 <Separator/>
@@ -35,6 +37,7 @@
                 <TextBlock Text="布局" VerticalAlignment="Center" Margin="4,0"/>
                 <StackPanel x:Name="LayoutButtons" Orientation="Horizontal"/>
                 <Separator/>
+                <Button Content="📁＋" AutomationProperties.Name="新建文件夹" ToolTip="在当前目录新建文件夹" Click="NewFolder_Click" Width="46"/>
                 <Button Content="＋" ToolTip="新建标签页 (Ctrl+T)" Click="NewTab_Click" Width="32"/>
                 <Button Content="▣＋" ToolTip="复制当前标签 (Ctrl+K)" Click="DuplicateTab_Click" Width="42"/>
                 <Button Content="×" ToolTip="关闭标签页 (Ctrl+W)" Click="CloseTab_Click" Width="32"/>

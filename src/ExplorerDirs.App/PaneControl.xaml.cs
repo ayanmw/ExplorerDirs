@@ -54,10 +54,12 @@ public partial class PaneControl : UserControl
             AddTab(state.Path, state.Browser.CaptureViewState());
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
+    public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
     public void GoParent() => Current?.Browser.GoParent();
     public void GoBack() => Current?.Browser.GoBack();
     public void GoForward() => Current?.Browser.GoForward();
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
+    internal bool IsShellRenameEditorFocused => Current?.Browser.IsRenameEditorFocused() == true;
     internal int FocusStopCount => Current?.Browser.HasColumnHeader() == true ? 11 : 10;
 
     internal int CurrentFocusStop()

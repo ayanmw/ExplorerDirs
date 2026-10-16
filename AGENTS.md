@@ -12,6 +12,7 @@
 - Keep navigation history independent for each tab by using ExplorerBrowser's travel log. Backspace and Alt+Up open the parent folder; Alt+Left/Right navigate history. Tab and Shift+Tab traverse each visible pane's navigation buttons, address, selected tab header, Details column header when present, and file items in exact reverse order; then wrap to the next/previous pane. Ctrl+Tab cycles tabs in the active pane. Restore file-view focus after layout changes; preserve address-bar editing shortcuts.
 - File operations and Shell confirmation dialogs must return keyboard focus to the active tab's actual file-content HWND. Do not treat the outer Shell view HWND as the file list, and do not steal focus from an address box, toolbar control, another pane, or another application.
 - After a Shell file operation, verify both the Win32 content focus and the Shell item focus. If Windows leaves no foreground window while this app is still active, reassert this app's foreground focus; never take foreground focus from another application. Keep existing multi-selection when restoring a focused item.
+- Keep standard shortcuts local to the app and provide menu or toolbar routes for actions whose key combinations may be registered globally by other software. Do not install global keyboard hooks or register global hotkeys to compete with other applications.
 
 ## Source, development, and releases
 
@@ -28,4 +29,5 @@
 - When accepted requirements change scope or order, update `docs/roadmap.md` and the design document in the same change; distinguish implemented code from manual acceptance.
 - Keep the README's current capabilities and limitations accurate. State clearly which Shell menu behavior has been verified and that third-party extensions execute in the application process.
 - Run a fresh build and focused smoke checks before committing or publishing. Record any unverified GUI behavior as pending, not complete.
+- When the user is using this computer, do not launch an interactive GUI, move the cursor, or inject keys for testing. GUI automation requires an explicitly available test window; its script must require an opt-in parameter and stop sending input if another application takes focus.
 - Preserve unrelated local changes and user session data. Keep commits narrow and reviewable.
