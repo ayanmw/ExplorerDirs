@@ -46,6 +46,8 @@ dotnet run --project .\src\ExplorerDirs.App\ExplorerDirs.App.csproj
 dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Release
 ```
 
+只读崩溃摘要可运行 `powershell.exe -NoProfile -File .\scripts\crash-summary.ps1 -Days 30 -AsJson`。它按项目内发布版、源码测试版和其他位置的副本分别计数 Windows 应用崩溃事件，并单独报告配置目录留下的异常退出标记数量。输出仅保留时间、故障模块文件名和异常码，不包含事件中的完整路径；模块名与退出标记都不能单独证明故障原因。诊断脚本不启动 Explorer Dirs。可用 `-ProfileDirectory` 指定复制到其他位置的发布版配置目录。
+
 ## 当前边界
 
 当前应用的地址栏与会话仅支持普通文件系统目录。文件操作、剪贴板、视图切换和第三方菜单由嵌入的 Windows Shell 视图提供；已接入 WPF 到 Shell 视图的快捷键转发，并为 Shell 未处理的 Ctrl+A/C/V/X/Z 调用原生 Shell 命令。旧预览版隔离测试已验证详细信息视图的正反向 Tab 和复制粘贴后的方向键；持久内容层改动、四窗格及 Shift+Delete 确认框返回仍需用户在真实窗口中验收。导航历史仅在当前运行的各标签内保留，重启后恢复路径而非历史。跨窗格拖放、撤销、回收站和网络位置也需针对真实目录人工验收。第三方 Shell 扩展在本程序进程内运行，尚无扩展崩溃隔离。文件关联启动的程序不保证继承本程序刷新后的环境变量；热刷新承诺针对本程序直接创建的子进程，可用“在当前目录打开命令行”验证。系统右键菜单与标签快捷关闭仍待用户在不同目录和窗口布局下预览确认。
