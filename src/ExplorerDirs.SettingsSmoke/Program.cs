@@ -435,6 +435,20 @@ try
     Check(Directory.GetFiles(root, "recovery.ini.invalid-*.bak").Length == 3,
         "missing General section is backed up");
 
+    var sortRecoveryIni = Path.Combine(root, "sort-recovery.ini");
+    var staleSortCountProfile = completeProfile.Replace("SortCount=1", "SortCount=0", StringComparison.Ordinal);
+    File.WriteAllText(sortRecoveryIni, staleSortCountProfile);
+    var sortRecoveryStore = new SessionStore(sortRecoveryIni, Path.Combine(root, "missing-legacy.json"));
+    var sortRecovered = sortRecoveryStore.Load() ?? throw new Exception("stale sort count did not recover");
+    Check(sortRecovered.Panes[0][0].View.SortColumns.SequenceEqual(first.View.SortColumns),
+        "orphaned sort column survives damaged sort count");
+    Check(sortRecoveryStore.LoadWarning is not null &&
+          Directory.GetFiles(root, "sort-recovery.ini.invalid-*.bak").Length == 1,
+        "damaged sort count is reported and backed up");
+    sortRecoveryStore.Save(sortRecovered);
+    Check(SessionStore.Parse(File.ReadAllText(sortRecoveryIni))?.Panes[0][0].View.SortColumns
+        .SequenceEqual(first.View.SortColumns) == true, "recovered sort remains after saving");
+
     File.Delete(ini);
     File.WriteAllText(legacy, JsonSerializer.Serialize(new { Layout = 4, Panes = new[]
     {

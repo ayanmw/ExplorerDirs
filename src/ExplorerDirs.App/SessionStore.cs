@@ -258,7 +258,22 @@ internal sealed class SessionStore
                 }
                 var sorts = new List<SortColumnState>();
                 var sortCount = ReadRequiredInt(values, "SortCount", 0, 0, 16, ref complete);
-                for (var sortIndex = 0; sortIndex < sortCount; sortIndex++)
+                var sortIndices = new SortedSet<int>(Enumerable.Range(0, sortCount));
+                foreach (var sortName in values.Keys.Where(key =>
+                    key.StartsWith("Sort", StringComparison.OrdinalIgnoreCase) &&
+                    !key.Equals("SortCount", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (!int.TryParse(sortName[4..], NumberStyles.None, CultureInfo.InvariantCulture,
+                            out var index) || index is < 0 or >= 16 ||
+                        !sortName.Equals($"Sort{index}", StringComparison.OrdinalIgnoreCase))
+                    {
+                        complete = false;
+                        continue;
+                    }
+                    if (index >= sortCount) complete = false;
+                    sortIndices.Add(index);
+                }
+                foreach (var sortIndex in sortIndices)
                 {
                     if (!values.TryGetValue($"Sort{sortIndex}", out var serialized))
                     {
