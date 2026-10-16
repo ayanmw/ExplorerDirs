@@ -151,6 +151,11 @@ try
           "Ctrl+Backspace remains available to text controls");
     Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
           "Ctrl+Shift+N routes to the Shell background New Folder command");
+    Check(Enumerable.Range(1, 9).All(number =>
+              KeyboardShortcuts.Resolve(0x30 + number, 2) == ExplorerShortcut.Tab1 + (number - 1)) &&
+          KeyboardShortcuts.Resolve(0x30, 2) == ExplorerShortcut.None &&
+          KeyboardShortcuts.Resolve(0x31, 6) == ExplorerShortcut.None,
+          "Ctrl+1-9 selects tab positions without taking Shell view-style shortcuts");
     Check(KeyboardShortcuts.Resolve(0x72, 0) == ExplorerShortcut.Search &&
           KeyboardShortcuts.Resolve(0x45, 2) == ExplorerShortcut.Search &&
           KeyboardShortcuts.Resolve(0x46, 2) == ExplorerShortcut.Search,

@@ -289,6 +289,11 @@ public partial class MainWindow : Window
     {
         if (shortcut == ExplorerShortcut.None) return false;
         SetActivePane(source);
+        if (shortcut is >= ExplorerShortcut.Tab1 and <= ExplorerShortcut.Tab9)
+        {
+            source.SelectTabByNumber((int)shortcut - (int)ExplorerShortcut.Tab1 + 1);
+            return true;
+        }
         switch (shortcut)
         {
             case ExplorerShortcut.Parent: source.GoParent(); break;

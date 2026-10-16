@@ -232,6 +232,12 @@ public partial class PaneControl : UserControl
         Tabs.SelectedItem = _tabOrder[KeyboardShortcuts.NextPane(selected, _tabOrder.Count, reverse)];
         FocusCurrentView();
     }
+    public void SelectTabByNumber(int number)
+    {
+        if (number < 1 || number > _tabOrder.Count) return;
+        Tabs.SelectedItem = _tabOrder[number - 1];
+        FocusCurrentView();
+    }
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
     public void ReopenClosedTab() { if (_closedTabs.TryPop(out var tab)) AddTab(tab.Path, tab.View); }
 
