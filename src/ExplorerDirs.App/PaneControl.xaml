@@ -29,19 +29,19 @@
                 </Grid>
             </DockPanel>
             <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"/>
-            <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged"
-                        PreviewKeyDown="Tabs_PreviewKeyDown"
-                        PreviewMouseMove="Tabs_PreviewMouseMove"
-                        PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
-                <TabControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <local:TabHeaderPanel/>
-                    </ItemsPanelTemplate>
-                </TabControl.ItemsPanel>
-                <TabControl.Template>
-                    <ControlTemplate TargetType="{x:Type TabControl}">
-                        <DockPanel>
-                            <Grid DockPanel.Dock="Top">
+            <DockPanel>
+                <TabControl x:Name="Tabs" DockPanel.Dock="Top" SelectionChanged="Tabs_SelectionChanged"
+                            PreviewKeyDown="Tabs_PreviewKeyDown"
+                            PreviewMouseMove="Tabs_PreviewMouseMove"
+                            PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
+                    <TabControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <local:TabHeaderPanel/>
+                        </ItemsPanelTemplate>
+                    </TabControl.ItemsPanel>
+                    <TabControl.Template>
+                        <ControlTemplate TargetType="{x:Type TabControl}">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="24"/>
                                     <ColumnDefinition Width="*"/>
@@ -62,14 +62,13 @@
                                         ToolTip="向右滚动标签" AutomationProperties.Name="向右滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsRight_Click"/>
                             </Grid>
-                            <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                                    Background="{TemplateBinding Background}">
-                                <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
-                            </Border>
-                        </DockPanel>
-                    </ControlTemplate>
-                </TabControl.Template>
-            </TabControl>
+                        </ControlTemplate>
+                    </TabControl.Template>
+                </TabControl>
+                <Border BorderBrush="#999" BorderThickness="1">
+                    <local:PersistentTabHost x:Name="BrowserLayer"/>
+                </Border>
+            </DockPanel>
         </DockPanel>
     </Border>
 </UserControl>

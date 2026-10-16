@@ -178,7 +178,7 @@ public partial class PaneControl : UserControl
     private void AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false)
     {
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView());
-        var tab = new TabItem { Content = browser };
+        var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned };
         tab.Tag = state;
@@ -346,6 +346,7 @@ public partial class PaneControl : UserControl
         _tabOrder.Remove(state.Tab);
         UpdateTabOrders();
         if (adjacent is not null) Tabs.SelectedItem = adjacent;
+        BrowserLayer.Remove(state.Browser);
         state.Browser.Dispose();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -496,6 +497,7 @@ public partial class PaneControl : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        BrowserLayer.Show(state.Browser);
         _addressNavigationPending = false;
         Address.Text = state.Path;
         RenderBreadcrumb(state.Path);

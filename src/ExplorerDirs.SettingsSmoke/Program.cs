@@ -306,6 +306,36 @@ try
                   VisualTreeHelper.GetOffset(secondHeader).X == 20 &&
                   ReferenceEquals(panel.Children[0], firstHeader),
                   "reordering headers leaves child controls attached");
+            var contentHost = new PersistentTabHost();
+            var firstContent = new Border();
+            var secondContent = new Border();
+            contentHost.Show(firstContent);
+            contentHost.Show(secondContent);
+            Check(contentHost.Children.Count == 2 &&
+                  ReferenceEquals(VisualTreeHelper.GetParent(firstContent), contentHost) &&
+                  firstContent.Visibility == Visibility.Collapsed &&
+                  secondContent.Visibility == Visibility.Visible,
+                  "switching tabs keeps the previous view in the visual tree");
+            contentHost.Show(firstContent);
+            Check(contentHost.Children.Count == 2 && firstContent.Visibility == Visibility.Visible &&
+                  secondContent.Visibility == Visibility.Collapsed,
+                  "returning to a tab reuses its existing view object");
+            contentHost.Remove(secondContent);
+            Check(contentHost.Children.Count == 1 &&
+                  VisualTreeHelper.GetParent(secondContent) is null,
+                  "closing a tab removes only its own view");
+            var paneGrid = new Grid();
+            var panes = Enumerable.Range(0, 4).Select(_ => new Border()).ToArray();
+            PaneLayoutHost.Apply(paneGrid, panes, LayoutPreset.Find(4));
+            PaneLayoutHost.Apply(paneGrid, panes, LayoutPreset.Find(1));
+            Check(paneGrid.Children.Count == 4 && panes[0].Visibility == Visibility.Visible &&
+                  panes.Skip(1).All(pane => pane.Visibility == Visibility.Collapsed) &&
+                  panes.All(pane => ReferenceEquals(VisualTreeHelper.GetParent(pane), paneGrid)),
+                  "hiding panes keeps every pane in the visual tree");
+            PaneLayoutHost.Apply(paneGrid, panes, LayoutPreset.Find(4));
+            Check(panes.All(pane => pane.Visibility == Visibility.Visible) &&
+                  Grid.GetRow(panes[3]) == 1 && Grid.GetColumn(panes[3]) == 1,
+                  "restoring four panes reuses their original controls");
         }
         catch (Exception ex) { layoutFailure = ex; }
     });

@@ -244,29 +244,13 @@ public partial class MainWindow : Window
 
     private void BuildLayout()
     {
-        PaneGrid.Children.Clear();
-        PaneGrid.RowDefinitions.Clear();
-        PaneGrid.ColumnDefinitions.Clear();
         var layout = LayoutPreset.Find(_layout);
-        for (var col = 0; col < layout.Columns; col++)
-            PaneGrid.ColumnDefinitions.Add(new ColumnDefinition());
-        for (var row = 0; row < layout.Rows; row++)
-            PaneGrid.RowDefinitions.Add(new RowDefinition());
-        for (var index = 0; index < layout.Slots.Length; index++)
-        {
-            var pane = _panes[index];
-            var slot = layout.Slots[index];
-            Grid.SetColumn(pane, slot.Column);
-            Grid.SetRow(pane, slot.Row);
-            Grid.SetColumnSpan(pane, slot.ColumnSpan);
-            Grid.SetRowSpan(pane, slot.RowSpan);
-            PaneGrid.Children.Add(pane);
-        }
+        PaneLayoutHost.Apply(PaneGrid, _panes, layout);
 
         var remembered = _lastFocusedPaneByLayout.GetValueOrDefault(_layout, -1);
         if (remembered >= 0 && remembered < layout.Slots.Length)
             ActivePane = _panes[remembered];
-        else if (!PaneGrid.Children.Contains(ActivePane))
+        else if (Array.IndexOf(_panes, ActivePane) >= layout.Slots.Length)
             ActivePane = _panes[0];
         foreach (var preset in LayoutPreset.All)
         {
