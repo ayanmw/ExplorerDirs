@@ -26,5 +26,6 @@
     <Compile Include="../ExplorerDirs.App/PersistentTabHost.cs" Link="PersistentTabHost.cs" />
     <Compile Include="../ExplorerDirs.App/PaneLayoutHost.cs" Link="PaneLayoutHost.cs" />
     <Compile Include="../ExplorerDirs.App/LayoutPreset.cs" Link="LayoutPreset.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderCreationObservation.cs" Link="FolderCreationObservation.cs" />
   </ItemGroup>
 </Project>

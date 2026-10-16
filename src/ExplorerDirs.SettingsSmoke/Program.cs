@@ -56,6 +56,32 @@ try
           "Ctrl+Backspace remains available to text controls");
     Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
           "Ctrl+Shift+N routes to the Shell background New Folder command");
+    var observedDirectory = Path.Combine(root, "new-folder-observation");
+    Directory.CreateDirectory(observedDirectory);
+    using (var observation = FolderCreationObservation.TryStart(observedDirectory)
+           ?? throw new Exception("local directory observation could not start"))
+    {
+        var createdOne = Path.Combine(observedDirectory, "one-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(createdOne);
+        Check(SpinWait.SpinUntil(() => observation.Snapshot().Directories.Contains(createdOne),
+                  TimeSpan.FromSeconds(3)),
+              "new directory is observed without enumerating the parent");
+        var createdFile = Path.Combine(observedDirectory, "file-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(createdFile, "sample");
+        Check(!SpinWait.SpinUntil(() => observation.Snapshot().Directories.Count > 1,
+                  TimeSpan.FromMilliseconds(400)),
+              "a new file is not mistaken for the folder to rename");
+        File.Delete(createdFile);
+        var createdTwo = Path.Combine(observedDirectory, "two-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(createdTwo);
+        Check(SpinWait.SpinUntil(() => observation.Snapshot().Directories.Count >= 2,
+                  TimeSpan.FromSeconds(3)),
+              "concurrent creations remain ambiguous rather than choosing the wrong folder");
+        Directory.Delete(createdOne);
+        Directory.Delete(createdTwo);
+    }
+    Check(FolderCreationObservation.TryStart(@"\\offline\share\folder") is null,
+          "UNC path skips the extra directory watcher");
     store.Save(state);
     var loaded = store.Load() ?? throw new Exception("INI did not load");
     Check(store.LoadWarning is null, "complete INI needs no recovery");

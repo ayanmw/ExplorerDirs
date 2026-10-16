@@ -42,6 +42,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         Interval = TimeSpan.FromMilliseconds(250)
     };
     private bool _menuPrepared;
+    private DispatcherTimer? _newFolderRenameTimer;
+    private FolderCreationObservation? _newFolderObservation;
     private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
@@ -407,16 +409,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool CreateNewFolder()
     {
         if (_browser is null) return false;
-        HashSet<string> existingFolders;
-        try { existingFolders = Directory.EnumerateDirectories(CurrentPath).ToHashSet(StringComparer.OrdinalIgnoreCase); }
-        catch (Exception ex)
-        {
-            MenuError?.Invoke(this, $"无法读取当前文件夹：{ex.Message}");
-            return false;
-        }
+        CancelPendingNewFolderRename();
         var parentPath = CurrentPath;
         var viewId = ShellViewId;
         if (_browser.GetCurrentView(ref viewId, out var viewObject) < 0) return false;
+        var observation = FolderCreationObservation.TryStart(parentPath);
         try
         {
             var menuId = ContextMenuId;
@@ -452,7 +449,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 finally { DestroyMenu(menu); }
             }
             finally { Marshal.ReleaseComObject(menuObject); }
-            BeginRenameNewFolder(parentPath, existingFolders);
+            if (observation is not null)
+            {
+                BeginRenameNewFolder(parentPath, observation);
+                observation = null; // The timer owns and disposes the observation.
+            }
             return true;
         }
         catch (Exception ex)
@@ -461,45 +462,60 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             MenuError?.Invoke(this, $"新建文件夹失败：{ex.Message}");
             return false;
         }
-        finally { Marshal.ReleaseComObject(viewObject); }
+        finally
+        {
+            observation?.Dispose();
+            Marshal.ReleaseComObject(viewObject);
+        }
     }
 
-    private void BeginRenameNewFolder(string parentPath, HashSet<string> existingFolders)
+    private void BeginRenameNewFolder(string parentPath, FolderCreationObservation observation)
     {
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(120)
         };
+        _newFolderObservation = observation;
+        _newFolderRenameTimer = timer;
         var attempts = 0;
         timer.Tick += (_, _) =>
         {
-            if (++attempts >= 12 || TryRenameNewFolder(parentPath, existingFolders))
-                timer.Stop();
+            if (!ReferenceEquals(_newFolderObservation, observation)) return;
+            if (TryRenameNewFolder(parentPath, observation))
+            {
+                CancelPendingNewFolderRename();
+                return;
+            }
+            if (++attempts < 12) return;
+            MenuError?.Invoke(this, "未能确认新建文件夹的 Shell 焦点；请检查创建结果并手动重命名。");
+            CancelPendingNewFolderRename();
         };
         timer.Start();
     }
 
-    private bool TryRenameNewFolder(string parentPath, HashSet<string> existingFolders)
+    private bool TryRenameNewFolder(string parentPath, FolderCreationObservation observation)
     {
         if (_browser is null || CurrentPath != parentPath || !IsVisible) return true;
+        if (IsRenameEditorFocused()) return true;
         try
         {
-            var created = Directory.EnumerateDirectories(parentPath)
-                .Where(path => !existingFolders.Contains(path)).Take(2).ToArray();
-            if (created.Length == 0) return false;
-            if (created.Length > 1)
+            var snapshot = observation.Snapshot();
+            if (snapshot.Failed)
+            {
+                MenuError?.Invoke(this, "目录监听失效；若文件夹已创建，请手动重命名。");
+                return true;
+            }
+            if (snapshot.Directories.Count == 0) return false;
+            if (snapshot.Directories.Count > 1)
             {
                 MenuError?.Invoke(this, "同时创建了多个文件夹，未自动进入重命名。请手动选择目标文件夹。");
                 return true;
             }
+            var created = snapshot.Directories[0];
             var focusedPath = GetFocusedItemPath(parentPath);
-            Trace($"new-folder focused-match={string.Equals(focusedPath, created[0], StringComparison.OrdinalIgnoreCase)}");
-            if (!string.Equals(focusedPath, created[0], StringComparison.OrdinalIgnoreCase))
-            {
-                MenuError?.Invoke(this, "新文件夹已创建，但 Shell 焦点未指向它；未自动进入重命名。请手动选择新文件夹。");
-                return true;
-            }
-            Check(SHParseDisplayName(created[0], IntPtr.Zero, out var absolutePidl, 0, out _));
+            Trace($"new-folder focused-match={string.Equals(focusedPath, created, StringComparison.OrdinalIgnoreCase)}");
+            if (!string.Equals(focusedPath, created, StringComparison.OrdinalIgnoreCase)) return false;
+            Check(SHParseDisplayName(created, IntPtr.Zero, out var absolutePidl, 0, out _));
             try
             {
                 var childPidl = ILFindLastID(absolutePidl);
@@ -520,6 +536,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             MenuError?.Invoke(this, $"新建文件夹后无法进入重命名：{ex.Message}");
             return true;
         }
+    }
+
+    private void CancelPendingNewFolderRename()
+    {
+        _newFolderRenameTimer?.Stop();
+        _newFolderRenameTimer = null;
+        _newFolderObservation?.Dispose();
+        _newFolderObservation = null;
     }
 
     private string? GetFocusedItemPath(string parentPath)
@@ -731,6 +755,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void DisposeBrowser()
     {
         _navigationGate.Cancel();
+        CancelPendingNewFolderRename();
         _issuedBrowserPaths.Clear();
         _focusRestoreTimer.Stop();
         if (_browser is null) return;
