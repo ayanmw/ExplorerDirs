@@ -27,6 +27,52 @@ try
 {
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
+    var shellView = new FakeShellViewStateSource
+    {
+        Mode = 3,
+        IconSize = 24,
+        Sorts = [new SortColumnState(sortKey, 1)],
+        Group = groupKey,
+        GroupAscending = false
+    };
+    var captured = ShellViewStateCapture.Capture(cachedView, shellView, out var captureComplete);
+    Check(captureComplete && captured.Mode == 3 && captured.IconSize == 24 &&
+          captured.SortColumns.SequenceEqual(shellView.Sorts) && captured.GroupKey == groupKey &&
+          !captured.GroupAscending, "complete Shell read replaces every cached view field");
+    foreach (var failedStep in new[] { "mode", "count", "columns", "group", "invalid-count", "short-columns" })
+    {
+        shellView.FailedStep = failedStep;
+        captured = ShellViewStateCapture.Capture(cachedView, shellView, out captureComplete);
+        Check(!captureComplete && captured.Mode == cachedView.Mode &&
+              captured.IconSize == cachedView.IconSize &&
+              captured.SortColumns.SequenceEqual(cachedView.SortColumns) &&
+              captured.GroupKey == cachedView.GroupKey &&
+              captured.GroupAscending == cachedView.GroupAscending,
+              $"{failedStep} leaves the last complete Shell view state intact");
+    }
+    shellView.FailedStep = null;
+    captured = ShellViewStateCapture.Capture(cachedView, shellView, out captureComplete);
+    Check(captureComplete && captured.Mode == 3,
+          "a later complete Shell read clears the capture failure");
+    var noSortView = new FakeShellViewStateSource
+    {
+        Mode = 4,
+        IconSize = 16,
+        FailedStep = "columns"
+    };
+    captured = ShellViewStateCapture.Capture(cachedView, noSortView, out captureComplete);
+    Check(captureComplete && captured.SortColumns.Count == 0 && captured.GroupKey is null,
+          "zero sort columns clear the cache without querying a column array");
+    var mutableShellSorts = new List<SortColumnState> { new(sortKey, -1) };
+    captured = ShellViewStateCapture.Capture(cachedView, new FakeShellViewStateSource
+    {
+        Mode = 4,
+        IconSize = 16,
+        Sorts = mutableShellSorts
+    }, out captureComplete);
+    mutableShellSorts.Clear();
+    Check(captureComplete && captured.SortColumns.Count == 1,
+          "captured sort columns do not alias the Shell reader's list");
     Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null),
           "startup without a directory restores the normal session");
     Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
@@ -810,3 +856,39 @@ internal interface ITestObjectWithSite
 
 [UnmanagedFunctionPointer(CallingConvention.StdCall)]
 internal delegate int NativeGetViewFlags(IntPtr self, out uint flags);
+
+internal sealed class FakeShellViewStateSource : IShellViewStateSource
+{
+    public uint Mode { get; init; }
+    public int IconSize { get; init; }
+    public IReadOnlyList<SortColumnState> Sorts { get; init; } = [];
+    public PropertyKeyState? Group { get; init; }
+    public bool GroupAscending { get; init; }
+    public string? FailedStep { get; set; }
+
+    public int GetMode(out uint mode, out int iconSize)
+    {
+        mode = Mode;
+        iconSize = IconSize;
+        return FailedStep == "mode" ? -1 : 0;
+    }
+
+    public int GetSortColumnCount(out int count)
+    {
+        count = FailedStep == "invalid-count" ? 17 : Sorts.Count;
+        return FailedStep == "count" ? -1 : 0;
+    }
+
+    public int GetSortColumns(int count, out IReadOnlyList<SortColumnState> columns)
+    {
+        columns = FailedStep == "short-columns" ? [] : Sorts;
+        return FailedStep == "columns" ? -1 : 0;
+    }
+
+    public int GetGroupBy(out PropertyKeyState? key, out bool ascending)
+    {
+        key = Group;
+        ascending = GroupAscending;
+        return FailedStep == "group" ? -1 : 0;
+    }
+}

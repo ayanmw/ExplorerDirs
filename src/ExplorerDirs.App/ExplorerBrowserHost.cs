@@ -697,41 +697,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         try
         {
-            var modeResult = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var iconSize);
-            if (modeResult < 0)
-            {
-                ViewCaptureFailed = true;
-                return _viewState.Copy();
-            }
-
-            var countResult = GetMethod<GetSortColumnCountDelegate>(view, 26)(view, out var count);
-            if (countResult < 0 || count is < 0 or > 16)
-            {
-                ViewCaptureFailed = true;
-                return _viewState.Copy();
-            }
-
-            var columns = new NativeSortColumn[count];
-            if (count > 0 && GetMethod<GetSortColumnsDelegate>(view, 28)(view, columns, count) < 0)
-            {
-                ViewCaptureFailed = true;
-                return _viewState.Copy();
-            }
-
-            var groupResult = GetMethod<GetGroupByDelegate>(view, 18)(view, out var groupKey, out var groupAscending);
-            if (groupResult < 0)
-            {
-                ViewCaptureFailed = true;
-                return _viewState.Copy();
-            }
-
-            var sorts = columns.Select(column => new SortColumnState(
-                new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToList();
-            var group = groupKey.FormatId != Guid.Empty
-                ? new PropertyKeyState(groupKey.FormatId, groupKey.PropertyId) : null;
-            var ascending = groupAscending != 0;
-            _viewState = new ViewState(mode, iconSize, sorts, group, ascending);
-            ViewCaptureFailed = false;
+            var captured = ShellViewStateCapture.Capture(_viewState,
+                new NativeViewStateSource(view), out var complete);
+            ViewCaptureFailed = !complete;
+            if (complete) _viewState = captured;
             return _viewState.Copy();
         }
         finally { Marshal.Release(view); }
@@ -785,6 +754,33 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
+
+    private sealed class NativeViewStateSource(IntPtr view) : IShellViewStateSource
+    {
+        public int GetMode(out uint mode, out int iconSize) =>
+            GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out mode, out iconSize);
+
+        public int GetSortColumnCount(out int count) =>
+            GetMethod<GetSortColumnCountDelegate>(view, 26)(view, out count);
+
+        public int GetSortColumns(int count, out IReadOnlyList<SortColumnState> columns)
+        {
+            var nativeColumns = new NativeSortColumn[count];
+            var result = GetMethod<GetSortColumnsDelegate>(view, 28)(view, nativeColumns, count);
+            columns = result < 0 ? [] : nativeColumns.Select(column => new SortColumnState(
+                new PropertyKeyState(column.Key.FormatId, column.Key.PropertyId), column.Direction)).ToArray();
+            return result;
+        }
+
+        public int GetGroupBy(out PropertyKeyState? key, out bool ascending)
+        {
+            var result = GetMethod<GetGroupByDelegate>(view, 18)(view, out var nativeKey, out var nativeAscending);
+            key = result >= 0 && nativeKey.FormatId != Guid.Empty
+                ? new PropertyKeyState(nativeKey.FormatId, nativeKey.PropertyId) : null;
+            ascending = result >= 0 && nativeAscending != 0;
+            return result;
+        }
+    }
 
     public void Refresh()
     {
