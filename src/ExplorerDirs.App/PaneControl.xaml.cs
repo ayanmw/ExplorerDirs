@@ -66,6 +66,7 @@ public partial class PaneControl : UserControl
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
     public void NewTab() => AddTab(Home, _newTabView());
+    public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
     public void DuplicateCurrentTab()
     {
         if (Current is { } state)

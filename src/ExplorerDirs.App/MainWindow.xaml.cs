@@ -32,7 +32,7 @@ public partial class MainWindow : Window
     private bool _initializing = true;
     private bool _fileViewFocusDesired;
 
-    public MainWindow()
+    public MainWindow(string? startupDirectory = null, string? startupWarning = null)
     {
         InitializeComponent();
 #if DEBUG
@@ -110,6 +110,14 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowHook);
         Closing += (_, _) => { _viewPollTimer.Stop(); SaveSession(); };
+        if (startupDirectory is not null)
+        {
+            SetActivePane(_panes[0]);
+            _panes[0].OpenPathInNewTab(startupDirectory);
+        }
+        if (startupWarning is not null)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? startupWarning : $"{EnvironmentStatus.Text} {startupWarning}";
     }
 
     private PaneControl ActivePane { get; set; }

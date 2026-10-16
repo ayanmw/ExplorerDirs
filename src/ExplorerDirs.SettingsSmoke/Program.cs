@@ -19,6 +19,16 @@ var state = new SessionState(2, 3, [[first, second], [], [], []]);
 
 try
 {
+    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null),
+          "startup without a directory restores the normal session");
+    Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
+          StartupDirectory.Parse([@"\\server\share\docs"]).Directory == @"\\server\share\docs",
+          "local and UNC directory arguments keep their normalized paths");
+    Check(StartupDirectory.Parse(["."]).Directory == Path.GetFullPath("."),
+          "relative startup directory resolves against the caller's current directory");
+    Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
+          StartupDirectory.Parse(["\0"]).Warning is not null,
+          "unsupported or invalid arguments do not become a navigation target");
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");

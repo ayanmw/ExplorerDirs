@@ -20,5 +20,8 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException += (_, args) =>
             _crashLog.TryWrite(CrashEventKind.UnobservedTask, args.Exception);
         base.OnStartup(e);
+        var requestedDirectory = StartupDirectory.Parse(e.Args);
+        MainWindow = new MainWindow(requestedDirectory.Directory, requestedDirectory.Warning);
+        MainWindow.Show();
     }
 }

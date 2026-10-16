@@ -17,6 +17,7 @@
 - File operations and Shell confirmation dialogs must return keyboard focus to the active tab's actual file-content HWND. Do not treat the outer Shell view HWND as the file list, and do not steal focus from an address box, toolbar control, another pane, or another application.
 - After a Shell file operation, verify both the Win32 content focus and the Shell item focus. If Windows leaves no foreground window while this app is still active, reassert this app's foreground focus; never take foreground focus from another application. Keep existing multi-selection when restoring a focused item.
 - Keep standard shortcuts local to the app and provide menu or toolbar routes for actions whose key combinations may be registered globally by other software. Do not install global keyboard hooks or register global hotkeys to compete with other applications.
+- The executable may accept one directory argument for future folder-open routing. Resolve its syntax without probing the filesystem, preserve the restored session, and open the requested directory in a new first-pane tab. Reject unsupported arguments without changing the session. Do not change Windows associations or Win+E routing before the reversible system-entry work is verified.
 
 ## Source, development, and releases
 
