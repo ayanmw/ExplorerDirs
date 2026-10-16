@@ -6,6 +6,7 @@
 - Use Q-Dir and other products as interaction references. Do not copy their binaries, configuration, artwork, or proprietary source into this repository.
 - Keep tab, pane, layout, and file-operation behavior independently testable. Preserve existing sessions and user files when adding features.
 - Each file pane uses the Windows Shell ExplorerBrowser view. Keep its native item/background hit testing and View/Sort/Group/New/Properties commands; prepend Explorer Dirs commands to the same native context menu. Do not substitute a WPF ListView for the file view without explicit product review.
+- Use the selected Shell item's attributes to decide whether to offer “open in new tab”; do not synchronously call `Directory.Exists` from context-menu construction. Limit that command to ordinary filesystem folders, excluding stream-backed containers.
 - A tab header supports middle-click and left-button double-click to close. Keep at least one tab in each pane.
 - Reordering tab headers must preserve each hosted ExplorerBrowser instance and its navigation history. Keep displayed order, keyboard tab cycling, and saved tab order aligned.
 - Pinned tabs stay before ordinary tabs within a pane. Duplicating a pinned tab copies its pinned state; accidental close actions and “close other tabs” preserve pinned tabs until explicitly unpinned. Save pin metadata in a separate `PinnedTabs.ini` beside the session INI so older releases do not erase it. Match saved pins only when their pane, tab position, and path still agree with the session.

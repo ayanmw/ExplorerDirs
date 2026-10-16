@@ -57,11 +57,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler<string>? NavigationFailed;
     public event EventHandler<string>? MenuError;
     public event EventHandler? Activated;
-    public Func<string?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
+    public Func<SelectedItem?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
     public Func<bool>? MayRestoreFocus { get; set; }
 
     public sealed record MenuAction(string Label, Action Action);
+    public sealed record SelectedItem(string Path, bool IsFileSystemFolder);
 
     public ExplorerBrowserHost(string initialPath, ViewState initialView)
     {
@@ -938,8 +939,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void InjectCommands(IntPtr menu)
     {
         if (menu == IntPtr.Zero || CustomCommands is null) return;
-        var selectedPath = GetSelectedPath();
-        var commands = CustomCommands(selectedPath);
+        var selectedItem = GetSelectedItem();
+        var commands = CustomCommands(selectedItem);
         if (commands.Count == 0) return;
 
         var id = (ushort)0xE000;
@@ -954,7 +955,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         InsertMenu(menu, (uint)entries.Count, 0x400 | 0x800, 0, null);
     }
 
-    private string? GetSelectedPath()
+    private SelectedItem? GetSelectedItem()
     {
         if (_browser is null) return null;
         var folderViewId = FolderViewId;
@@ -972,7 +973,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 try
                 {
                     if (item.GetDisplayName(0x80058000, out var pathPtr) < 0) return null;
-                    try { return Marshal.PtrToStringUni(pathPtr); }
+                    try
+                    {
+                        var path = Marshal.PtrToStringUni(pathPtr);
+                        if (string.IsNullOrWhiteSpace(path)) return null;
+                        var result = item.GetAttributes(ShellItemKind.RequestedAttributes, out var attributes);
+                        return new SelectedItem(path, result >= 0 && ShellItemKind.IsFileSystemFolder(attributes));
+                    }
                     finally { Marshal.FreeCoTaskMem(pathPtr); }
                 }
                 finally { Marshal.ReleaseComObject(item); }
@@ -1175,6 +1182,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         [PreserveSig] int BindToHandler(IntPtr bindContext, ref Guid handler, ref Guid iid, out IntPtr value);
         [PreserveSig] int GetParent(out IntPtr parent);
         [PreserveSig] int GetDisplayName(uint kind, out IntPtr name);
+        [PreserveSig] int GetAttributes(uint requested, out uint attributes);
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]

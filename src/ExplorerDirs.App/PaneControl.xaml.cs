@@ -182,11 +182,11 @@ public partial class PaneControl : UserControl
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned };
         tab.Tag = state;
-        browser.CustomCommands = selectedPath =>
+        browser.CustomCommands = selectedItem =>
         {
             var actions = new List<ExplorerBrowserHost.MenuAction>();
-            if (selectedPath is not null && Directory.Exists(selectedPath))
-                actions.Add(new("在新标签页中打开", () => AddTab(selectedPath, _newTabView())));
+            if (selectedItem is { IsFileSystemFolder: true })
+                actions.Add(new("在新标签页中打开", () => AddTab(selectedItem.Path, _newTabView())));
             actions.Add(new("新建标签页", NewTab));
             actions.Add(new("复制当前标签", () => AddTab(state.Path, state.Browser.CaptureViewState(), pinned: state.IsPinned)));
             actions.Add(new(state.IsPinned ? "取消固定当前标签" : "固定当前标签", () => TogglePinned(state)));
@@ -197,8 +197,8 @@ public partial class PaneControl : UserControl
                 CloseOtherTabs();
             }));
             actions.Add(new("恢复关闭的标签", ReopenClosedTab));
-            actions.Add(new(selectedPath is null ? "复制当前文件夹路径" : "复制完整路径",
-                () => Clipboard.SetText(selectedPath ?? state.Path)));
+            actions.Add(new(selectedItem is null ? "复制当前文件夹路径" : "复制完整路径",
+                () => Clipboard.SetText(selectedItem?.Path ?? state.Path)));
             return actions;
         };
         browser.Navigated += (_, navigatedPath) =>

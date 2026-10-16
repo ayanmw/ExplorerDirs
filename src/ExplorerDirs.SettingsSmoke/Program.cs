@@ -29,6 +29,11 @@ try
     Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
           StartupDirectory.Parse(["\0"]).Warning is not null,
           "unsupported or invalid arguments do not become a navigation target");
+    Check(ShellItemKind.IsFileSystemFolder(0x60000000) &&
+          !ShellItemKind.IsFileSystemFolder(0x40000000) &&
+          !ShellItemKind.IsFileSystemFolder(0x60400000) &&
+          !ShellItemKind.IsFileSystemFolder(0x20000000),
+          "only ordinary filesystem folders get the new-tab directory command");
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
