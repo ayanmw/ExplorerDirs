@@ -937,16 +937,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     }
                     break;
                 case 0x0111: // WM_COMMAND
-                    var commandId = unchecked((ushort)(wParam.ToInt64() & 0xffff));
-                    if (_menuActions.TryGetValue(commandId, out var action))
+                    if (ShellMenuCommand.TryGetMenuId(wParam, lParam, out var commandId))
                     {
+                        var customCommand = _menuActions.TryGetValue(commandId, out var action);
                         _menuActions.Clear();
-                        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+                        if (customCommand)
                         {
-                            try { action(); }
-                            catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
-                        }));
-                        return IntPtr.Zero;
+                            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+                            {
+                                try { action!(); }
+                                catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
+                            }));
+                            return IntPtr.Zero;
+                        }
                     }
                     break;
                 case 0x0212: // WM_EXITMENULOOP
@@ -968,16 +971,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var commands = CustomCommands(selectedItem);
         if (commands.Count == 0) return;
 
-        var id = (ushort)0xE000;
-        var entries = new List<(ushort Id, string Label)>();
-        foreach (var command in commands)
+        var inserted = 0;
+        for (var index = commands.Count - 1; index >= 0; index--)
         {
-            _menuActions[id] = command.Action;
-            entries.Add((id++, command.Label));
+            var id = checked((ushort)(0xE000 + index));
+            if (!InsertMenu(menu, 0, 0x400, id, commands[index].Label))
+                continue;
+            _menuActions[id] = commands[index].Action;
+            inserted++;
         }
-        for (var index = entries.Count - 1; index >= 0; index--)
-            InsertMenu(menu, 0, 0x400, entries[index].Id, entries[index].Label);
-        InsertMenu(menu, (uint)entries.Count, 0x400 | 0x800, 0, null);
+        if (inserted > 0)
+            InsertMenu(menu, (uint)inserted, 0x400 | 0x800, 0, null);
+        if (inserted != commands.Count)
+            MenuError?.Invoke(this, "部分自定义右键菜单命令未能插入。");
     }
 
     private SelectedItem? GetSelectedItem()
