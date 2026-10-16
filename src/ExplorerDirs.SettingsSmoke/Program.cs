@@ -170,6 +170,26 @@ try
 
     // This affects only the short-lived console test process; no persistent registry values are changed.
     Check(new EnvironmentRefresh().Reload() > 0, "live Windows environment snapshot can be refreshed");
+
+    var navigationGate = new DirectoryNavigationGate();
+    using var oldProbeStarted = new ManualResetEventSlim();
+    using var releaseOldProbe = new ManualResetEventSlim();
+    var oldProbe = navigationGate.ProbeAsync(@"\\offline\share", _ =>
+    {
+        oldProbeStarted.Set();
+        releaseOldProbe.Wait();
+        return false;
+    });
+    try
+    {
+        Check(oldProbeStarted.Wait(TimeSpan.FromSeconds(3)), "first directory probe starts in background");
+        var newProbe = navigationGate.ProbeAsync(@"C:\ready", _ => true).GetAwaiter().GetResult();
+        Check(navigationGate.IsCurrent(newProbe) && newProbe.Exists,
+              "new navigation can finish while older probe waits");
+    }
+    finally { releaseOldProbe.Set(); }
+    Check(!navigationGate.IsCurrent(oldProbe.GetAwaiter().GetResult()),
+        "late result from an older directory probe cannot replace the newer navigation");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally

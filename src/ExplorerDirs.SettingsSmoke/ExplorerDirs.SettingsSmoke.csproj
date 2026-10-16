@@ -11,5 +11,6 @@
     <Compile Include="../ExplorerDirs.App/FocusTraversal.cs" Link="FocusTraversal.cs" />
     <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
     <Compile Include="../ExplorerDirs.App/EnvironmentRefresh.cs" Link="EnvironmentRefresh.cs" />
+    <Compile Include="../ExplorerDirs.App/DirectoryNavigationGate.cs" Link="DirectoryNavigationGate.cs" />
   </ItemGroup>
 </Project>

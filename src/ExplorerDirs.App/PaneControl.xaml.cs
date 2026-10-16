@@ -31,7 +31,7 @@ public partial class PaneControl : UserControl
         InitializeComponent();
         _newTabView = newTabView;
         foreach (var tab in tabs)
-            AddTab(Directory.Exists(tab.Path) ? tab.Path : Home, tab.View, false);
+            AddTab(tab.Path, tab.View, false);
         if (Tabs.Items.Count == 0)
             AddTab(Home, _newTabView(), false);
         Tabs.SelectedIndex = 0;
@@ -236,6 +236,7 @@ public partial class PaneControl : UserControl
     {
         try
         {
+            Status.Text = "正在检查目录…";
             Current?.Browser.Navigate(path);
         }
         catch (Exception ex) { Status.Text = $"无法打开目录：{ex.Message}"; }

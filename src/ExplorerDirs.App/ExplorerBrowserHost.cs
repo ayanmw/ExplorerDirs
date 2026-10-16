@@ -35,6 +35,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
     private readonly SubclassProc _subclassProc;
+    private readonly DirectoryNavigationGate _navigationGate = new();
+    private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
     {
         Interval = TimeSpan.FromMilliseconds(250)
@@ -44,6 +46,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private uint _cookie;
     private bool _advised;
     private bool _hasNavigated;
+    private string? _retryPath;
     private bool _focusWhenReady;
     private bool _restoreFocusAfterNavigation;
     private IntPtr _lastContentFocusWindow;
@@ -565,17 +568,46 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public void Navigate(string path)
     {
         path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
-        if (!Directory.Exists(path))
-            throw new DirectoryNotFoundException(path);
         if (_browser is null)
         {
             CurrentPath = path;
+            _retryPath = path;
             return;
         }
 
-        Check(SHParseDisplayName(path, IntPtr.Zero, out var pidl, 0, out _));
-        try { Check(_browser.BrowseToIDList(pidl, 0)); }
-        finally { Marshal.FreeCoTaskMem(pidl); }
+        _retryPath = path;
+        _ = NavigateWhenAvailableAsync(path);
+    }
+
+    private async Task NavigateWhenAvailableAsync(string path)
+    {
+        var probe = await _navigationGate.ProbeAsync(path, Directory.Exists);
+        if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
+        if (!probe.Exists)
+        {
+            NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
+            return;
+        }
+
+        try
+        {
+            Check(SHParseDisplayName(path, IntPtr.Zero, out var pidl, 0, out _));
+            try
+            {
+                TrackIssuedPath(path);
+                int result;
+                try { result = _browser.BrowseToIDList(pidl, 0); }
+                catch
+                {
+                    CompleteIssuedPath(path);
+                    throw;
+                }
+                if (result < 0) CompleteIssuedPath(path);
+                Check(result);
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        catch (Exception ex) { NavigationFailed?.Invoke(this, $"无法打开目录：{ex.Message}"); }
     }
 
     public ViewState CaptureViewState()
@@ -669,6 +701,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public void Refresh()
     {
         if (_browser is null) return;
+        if (_retryPath is { } retryPath)
+        {
+            Navigate(retryPath);
+            return;
+        }
         var iid = ShellViewId;
         if (_browser.GetCurrentView(ref iid, out var viewObject) >= 0)
         {
@@ -692,6 +729,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DisposeBrowser()
     {
+        _navigationGate.Cancel();
+        _issuedBrowserPaths.Clear();
         _focusRestoreTimer.Stop();
         if (_browser is null) return;
         DetachViewWindow();
@@ -703,6 +742,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
     {
+        var targetPath = FileSystemPath(pidl);
+        if (targetPath is null || !_issuedBrowserPaths.ContainsKey(NormalizePathKey(targetPath)))
+            _navigationGate.Cancel();
         var focused = GetFocus();
         _restoreFocusAfterNavigation = _viewWindow != IntPtr.Zero &&
             (focused == _viewWindow || IsChild(_viewWindow, focused));
@@ -730,36 +772,59 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
-        var hr = SHGetNameFromIDList(pidl, 0x80058000, out var pathPtr);
-        if (hr >= 0)
+        var path = FileSystemPath(pidl);
+        if (!string.IsNullOrWhiteSpace(path))
         {
-            try
+            var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
+            CompleteIssuedPath(path);
+            CurrentPath = path;
+            _hasNavigated = true;
+            if (!issuedByApp || (_retryPath is not null &&
+                string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase)))
+                _retryPath = null;
+            try { AttachCurrentViewWindow(); }
+            catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
-                var path = Marshal.PtrToStringUni(pathPtr);
-                if (!string.IsNullOrWhiteSpace(path))
-                {
-                    CurrentPath = path;
-                    _hasNavigated = true;
-                    try { AttachCurrentViewWindow(); }
-                    catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
-                    Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
-                    {
-                        if (CurrentPath != path) return;
-                        try { ApplyViewState(); }
-                        catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
-                        if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
-                            FocusView();
-                        _restoreFocusAfterNavigation = false;
-                    }));
-                    Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
-                    {
-                        if (CurrentPath == path) Navigated?.Invoke(this, path);
-                    }));
-                }
-            }
-            finally { Marshal.FreeCoTaskMem(pathPtr); }
+                if (CurrentPath != path) return;
+                try { ApplyViewState(); }
+                catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
+                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
+                    FocusView();
+                _restoreFocusAfterNavigation = false;
+            }));
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (CurrentPath == path) Navigated?.Invoke(this, path);
+            }));
         }
         return 0;
+    }
+
+    private static string NormalizePathKey(string path) => Path.TrimEndingDirectorySeparator(path);
+
+    private void TrackIssuedPath(string path)
+    {
+        var key = NormalizePathKey(path);
+        _issuedBrowserPaths[key] = _issuedBrowserPaths.GetValueOrDefault(key) + 1;
+        if (_issuedBrowserPaths.Count > 32)
+            _issuedBrowserPaths.Remove(_issuedBrowserPaths.Keys.First());
+    }
+
+    private void CompleteIssuedPath(string path)
+    {
+        var key = NormalizePathKey(path);
+        if (!_issuedBrowserPaths.TryGetValue(key, out var count)) return;
+        if (count <= 1) _issuedBrowserPaths.Remove(key);
+        else _issuedBrowserPaths[key] = count - 1;
+    }
+
+    private static string? FileSystemPath(IntPtr pidl)
+    {
+        if (pidl == IntPtr.Zero || SHGetNameFromIDList(pidl, 0x80058000, out var pointer) < 0)
+            return null;
+        try { return Marshal.PtrToStringUni(pointer); }
+        finally { Marshal.FreeCoTaskMem(pointer); }
     }
 
     private void AttachCurrentViewWindow()
@@ -918,6 +983,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
+        if (FileSystemPath(pidl) is { } path)
+        {
+            var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
+            CompleteIssuedPath(path);
+            if (issuedByApp && _retryPath is not null &&
+                !string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))
+                return 0;
+        }
         NavigationFailed?.Invoke(this, "无法打开目录。");
         return 0;
     }
