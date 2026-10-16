@@ -39,6 +39,7 @@ try
           "Ctrl+Shift+N routes to the Shell background New Folder command");
     store.Save(state);
     var loaded = store.Load() ?? throw new Exception("INI did not load");
+    Check(store.LoadWarning is null, "complete INI needs no recovery");
     Check(loaded.Layout == 2 && loaded.DefaultViewMode == 3, "global settings");
     Check(loaded.Panes[0].Count == 2, "two tabs with same path");
     Check(loaded.Panes[0][0].Path == first.Path, "Unicode path with equals sign");
@@ -48,6 +49,35 @@ try
     var lastWrite = File.GetLastWriteTimeUtc(ini);
     store.Save(state);
     Check(File.GetLastWriteTimeUtc(ini) == lastWrite, "unchanged settings avoid write");
+
+    var recoveryIni = Path.Combine(root, "recovery.ini");
+    var recoveryStore = new SessionStore(recoveryIni, Path.Combine(root, "missing-legacy.json"));
+    var completeProfile = SessionStore.Render(state);
+    var truncatedProfile = completeProfile[..completeProfile.IndexOf("[Pane0.Tab1]", StringComparison.Ordinal)];
+    File.WriteAllText(recoveryIni, truncatedProfile);
+    var recovered = recoveryStore.Load() ?? throw new Exception("truncated INI did not recover");
+    Check(recovered.Panes[0].Count == 1 && recovered.Panes[0][0].Path == first.Path,
+        "truncated INI preserves readable tab");
+    Check(recoveryStore.LoadWarning is not null &&
+          Directory.GetFiles(root, "recovery.ini.invalid-*.bak").Length == 1,
+        "truncated INI is reported and backed up");
+    recoveryStore.Save(recovered);
+    Check(SessionStore.Parse(File.ReadAllText(recoveryIni))?.Panes[0].Count == 1,
+        "recovered INI can be saved cleanly");
+
+    File.WriteAllText(recoveryIni, completeProfile.Replace("TabCount=2", "TabCount=0", StringComparison.Ordinal));
+    var countRecovered = recoveryStore.Load() ?? throw new Exception("wrong tab count did not recover");
+    Check(countRecovered.Panes[0].Count == 2, "orphaned tab sections survive damaged tab count");
+    Check(Directory.GetFiles(root, "recovery.ini.invalid-*.bak").Length == 2,
+        "damaged tab count is backed up");
+
+    var headerlessProfile = completeProfile[completeProfile.IndexOf("[Pane0]", StringComparison.Ordinal)..];
+    File.WriteAllText(recoveryIni, headerlessProfile);
+    var headerlessRecovered = recoveryStore.Load() ?? throw new Exception("missing General section did not recover");
+    Check(headerlessRecovered.Layout == 4 && headerlessRecovered.Panes[0].Count == 2,
+        "missing General section falls back to layout default and preserves tabs");
+    Check(Directory.GetFiles(root, "recovery.ini.invalid-*.bak").Length == 3,
+        "missing General section is backed up");
 
     File.Delete(ini);
     File.WriteAllText(legacy, JsonSerializer.Serialize(new { Layout = 4, Panes = new[]
@@ -64,6 +94,20 @@ try
     var backups = Directory.GetFiles(root, "ExplorerDirs.ini.invalid-*.bak");
     Check(backups.Length == 1 && File.ReadAllText(backups[0]).Contains("Version=broken"),
         "invalid INI is preserved before overwrite");
+
+    var futureIni = Path.Combine(root, "future.ini");
+    var futureProfile = completeProfile.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal);
+    File.WriteAllText(futureIni, futureProfile);
+    var futureStore = new SessionStore(futureIni, Path.Combine(root, "missing-legacy.json"));
+    Check(futureStore.Load() is null && futureStore.LoadWarning is not null,
+        "newer format is not interpreted as this version");
+    try
+    {
+        futureStore.Save(state);
+        throw new Exception("newer format was overwritten");
+    }
+    catch (IOException) { }
+    Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
     Console.WriteLine("Settings smoke: PASS");
 }
 finally

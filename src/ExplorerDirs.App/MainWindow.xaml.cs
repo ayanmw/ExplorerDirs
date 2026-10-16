@@ -36,6 +36,8 @@ public partial class MainWindow : Window
         Title = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
 #endif
         var state = _sessionStore.Load();
+        if (_sessionStore.LoadWarning is { } warning)
+            EnvironmentStatus.Text = warning;
         _defaultViewMode = state?.DefaultViewMode ?? 4;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         for (var index = 0; index < _panes.Length; index++)
