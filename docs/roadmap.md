@@ -32,7 +32,7 @@
 - [x] F4 按微软当前 File Explorer 专用快捷键条目选中完整地址编辑框，与 Alt+D/Ctrl+L 共用入口；控制台映射回归通过，实际焦点待 GUI 验收。
 - [x] F6/Shift+F6 在每个可见窗格的地址、标签标题、可用的详细信息列标题和文件区间正反向切换，跳过窗格小按钮；按键映射、单/多窗格顺序和构建通过，真实 Shell 焦点待 GUI 验收。
 - [x] 当前目录搜索的 Shell 基础：按范围与查询生成 `search-ms:` 虚拟 PIDL；ExplorerBrowser 站点提供 `ICommDlgBrowser2` 的 `CDB2GVF_NOINCLUDEITEM`。无窗口 PIDL、COM vtable、站点往返和构建通过；真实视图是否取用该标志待 GUI 验收。
-- [ ] 补齐资源管理器的 F3/Ctrl+E/Ctrl+F 当前目录搜索；先按[搜索设计调查](search-research.md)接入原生 Search Folder、避免 ExplorerBrowser 搜索时阻塞 UI，并区分目录路径与虚拟搜索位置，再做搜索框、键盘和真实窗口验收。
+- [x] F3/Ctrl+E/Ctrl+F 当前目录搜索已接入原生 Search Folder 导航、窗格搜索栏、菜单和工具栏；真实目录路径与虚拟搜索位置分离，会话只保存目录。构建、URI/PIDL 与状态、快捷键及动态 Tab 顺序无窗口回归通过；结果、菜单、焦点、TravelLog 和非索引/网络目录的真实窗口验收尚未完成，依据见[搜索设计调查](search-research.md)。
 - [x] 标签标题保持单行；溢出时可用左右箭头或鼠标滚轮横向滚动，切换标签后请求将选中标题滚入可见区。XAML 构建通过，实际滚动与焦点需 GUI 验收。
 - [x] 同窗格标签拖动排序：标题只改变排版顺序，Shell 视图对象不从 TabControl 中移除；Ctrl+Tab、标题方向键及会话快照跟随显示顺序。排序与无窗口 WPF 排版回归通过，真实拖动和重启恢复待 GUI 验收。
 - [x] 标签切换不再通过 `TabControl.SelectedContent` 交换 ExplorerBrowser：已访问视图留在窗格的持久内容层，只切换可见性；布局切换时四个窗格始终留在主网格中。无窗口可视树回归与构建通过，原生 HWND 和各标签 TravelLog 是否跨切换保持待 GUI 验收。

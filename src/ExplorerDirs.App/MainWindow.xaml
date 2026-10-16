@@ -24,6 +24,7 @@
                 <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
                 <Separator/>
                 <MenuItem Header="刷新当前目录" InputGestureText="F5" Click="RefreshCurrent_Click"/>
+                <MenuItem Header="搜索当前目录" InputGestureText="F3 / Ctrl+E / Ctrl+F" Click="SearchCurrent_Click"/>
             </MenuItem>
             <MenuItem Header="工具(_O)">
                 <MenuItem Header="选项">
@@ -43,6 +44,8 @@
                 <Button Content="＋" ToolTip="新建标签页 (Ctrl+T)" Click="NewTab_Click" Width="32"/>
                 <Button Content="▣＋" ToolTip="复制当前标签 (Ctrl+K)" Click="DuplicateTab_Click" Width="42"/>
                 <Button Content="×" ToolTip="关闭标签页 (Ctrl+W)" Click="CloseTab_Click" Width="32"/>
+                <Button Content="⌕" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
+                        Click="SearchCurrent_Click" Width="32"/>
                 <Separator/>
                 <Button Content="↻ 环境" ToolTip="刷新本程序环境变量" Click="RefreshEnvironment_Click"/>
                 <Button Content="⌘ 命令行" ToolTip="在当前目录打开命令行" Click="OpenTerminal_Click"/>

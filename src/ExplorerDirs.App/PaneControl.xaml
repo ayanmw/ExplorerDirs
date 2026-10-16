@@ -28,6 +28,16 @@
                              Visibility="Collapsed" VerticalContentAlignment="Center"/>
                 </Grid>
             </DockPanel>
+            <DockPanel x:Name="SearchBar" DockPanel.Dock="Top" Margin="4,2,4,0"
+                       Visibility="Collapsed" LastChildFill="True">
+                <TextBlock DockPanel.Dock="Left" Text="搜索当前目录" VerticalAlignment="Center" Margin="2,0,6,0"/>
+                <Button x:Name="CloseSearchButton" DockPanel.Dock="Right" Content="×"
+                        ToolTip="返回目录并关闭搜索" Width="28" Margin="4,0,0,0"
+                        Click="CloseSearch_Click"/>
+                <TextBox x:Name="SearchBox" ToolTip="输入关键词后按 Enter 搜索；Esc 返回目录"
+                         AutomationProperties.Name="搜索当前目录" KeyDown="SearchBox_KeyDown"
+                         VerticalContentAlignment="Center"/>
+            </DockPanel>
             <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Margin="6,3" Foreground="#555"/>
             <DockPanel>
                 <TabControl x:Name="Tabs" DockPanel.Dock="Top" SelectionChanged="Tabs_SelectionChanged"

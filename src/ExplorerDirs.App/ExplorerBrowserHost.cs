@@ -36,6 +36,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private readonly List<IntPtr> _subclassedWindows = new();
     private readonly SubclassProc _subclassProc;
     private readonly DirectoryNavigationGate _navigationGate = new();
+    private readonly ShellNavigationState _location;
     private readonly ShellBrowserSite _browserSite = new();
     private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
@@ -55,8 +56,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private IntPtr _lastContentFocusWindow;
     private ViewState _viewState;
 
-    public string CurrentPath { get; private set; }
+    public string CurrentPath => _location.DirectoryPath;
+    public string? SearchQuery => _location.SearchQuery;
     public event EventHandler<string>? Navigated;
+    public event EventHandler<string>? SearchNavigated;
     public event EventHandler<string>? NavigationFailed;
     public event EventHandler<string>? MenuError;
     public event EventHandler? Activated;
@@ -69,7 +72,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ExplorerBrowserHost(string initialPath, ViewState initialView)
     {
-        CurrentPath = initialPath;
+        _location = new ShellNavigationState(initialPath);
         _viewState = initialView.Copy();
         _subclassProc = ViewWindowProc;
         _focusRestoreTimer.Tick += (_, _) =>
@@ -407,7 +410,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             FocusView();
     }
 
-    public bool GoParent() => BrowseRelative(BrowseParent);
+    public bool GoParent()
+    {
+        if (!_location.IsSearchActive) return BrowseRelative(BrowseParent);
+        Navigate(CurrentPath); // The directory is the parent of its virtual search results.
+        return true;
+    }
     public bool GoBack() => BrowseRelative(BrowseBack);
     public bool GoForward() => BrowseRelative(BrowseForward);
 
@@ -600,13 +608,40 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
         if (_browser is null)
         {
-            CurrentPath = path;
+            _location.CompleteDirectory(path);
             _retryPath = path;
             return;
         }
 
         _retryPath = path;
         _ = NavigateWhenAvailableAsync(path);
+    }
+
+    public void Search(string query)
+    {
+        if (_browser is null)
+        {
+            NavigationFailed?.Invoke(this, "搜索视图尚未就绪。");
+            return;
+        }
+        try
+        {
+            var uri = ShellSearchLocation.BuildUri(CurrentPath, query);
+            var pidl = ShellSearchLocation.ParsePidl(uri);
+            try
+            {
+                _navigationGate.Cancel();
+                _retryPath = null;
+                _focusWhenReady = true;
+                Check(_browser.BrowseToIDList(pidl, 0));
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        catch (Exception ex)
+        {
+            _focusWhenReady = false;
+            NavigationFailed?.Invoke(this, $"无法搜索当前目录：{ex.Message}");
+        }
     }
 
     private async Task NavigateWhenAvailableAsync(string path)
@@ -642,6 +677,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CaptureViewState()
     {
+        if (_location.IsSearchActive) return _viewState.Copy();
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return _viewState.Copy();
         try
@@ -781,7 +817,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var focused = GetFocus();
         _restoreFocusAfterNavigation = _viewWindow != IntPtr.Zero &&
             (focused == _viewWindow || IsChild(_viewWindow, focused));
-        if (_hasNavigated)
+        if (_hasNavigated && !_location.IsSearchActive)
         {
             try { CaptureViewState(); }
             catch (Exception ex) { MenuError?.Invoke(this, $"读取视图配置失败：{ex.Message}"); }
@@ -810,7 +846,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
             CompleteIssuedPath(path);
-            CurrentPath = path;
+            _location.CompleteDirectory(path);
             _hasNavigated = true;
             if (!issuedByApp || (_retryPath is not null &&
                 string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase)))
@@ -819,7 +855,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
-                if (CurrentPath != path) return;
+                if (CurrentPath != path || _location.IsSearchActive) return;
                 try { ApplyViewState(); }
                 catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
                 if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
@@ -828,7 +864,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
-                if (CurrentPath == path) Navigated?.Invoke(this, path);
+                if (CurrentPath == path && !_location.IsSearchActive) Navigated?.Invoke(this, path);
+            }));
+            return 0;
+        }
+        if (ShellSearchLocation.TryGetParsingName(pidl, out var searchUri) &&
+            _location.TryCompleteSearch(searchUri))
+        {
+            _hasNavigated = true;
+            _retryPath = null;
+            try { AttachCurrentViewWindow(); }
+            catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                if (_location.SearchUri != searchUri) return;
+                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
+                    FocusView();
+                _restoreFocusAfterNavigation = false;
+            }));
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (_location.SearchUri == searchUri)
+                    SearchNavigated?.Invoke(this, _location.SearchQuery!);
             }));
         }
         return 0;
@@ -1028,6 +1085,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
+        if (ShellSearchLocation.IsSearchPidl(pidl))
+        {
+            _focusWhenReady = false;
+            NavigationFailed?.Invoke(this, "无法打开搜索结果。");
+            return 0;
+        }
         if (FileSystemPath(pidl) is { } path)
         {
             var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));

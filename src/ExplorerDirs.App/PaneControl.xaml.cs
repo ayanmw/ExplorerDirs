@@ -10,9 +10,7 @@ public partial class PaneControl : UserControl
 {
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
-    private const int ColumnHeaderStop = 9;
-    private const int FileStopWithoutHeader = 9;
-    private const int FileStopWithHeader = 10;
+    private const int TabHeaderStop = 8;
     private readonly Stack<TabSettings> _closedTabs = new();
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
@@ -80,10 +78,16 @@ public partial class PaneControl : UserControl
     public void GoForward() => Current?.Browser.GoForward();
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
     internal bool IsShellRenameEditorFocused => Current?.Browser.IsRenameEditorFocused() == true;
-    internal int FocusStopCount => Current?.Browser.HasColumnHeader() == true ? 11 : 10;
-    internal IReadOnlyList<int> MajorFocusStops => FocusStopCount == 11
-        ? [4, 8, ColumnHeaderStop, FileStopWithHeader]
-        : [4, 8, FileStopWithoutHeader];
+    private int SearchStopCount => SearchBar.Visibility == Visibility.Visible ? 2 : 0;
+    private int HeaderStop => TabHeaderStop + SearchStopCount + 1;
+    internal int FocusStopCount => HeaderStop + (Current?.Browser.HasColumnHeader() == true ? 2 : 1);
+    internal IReadOnlyList<int> MajorFocusStops => SearchStopCount == 2
+        ? Current?.Browser.HasColumnHeader() == true
+            ? [4, TabHeaderStop, TabHeaderStop + 2, HeaderStop, FocusStopCount - 1]
+            : [4, TabHeaderStop, TabHeaderStop + 2, FocusStopCount - 1]
+        : Current?.Browser.HasColumnHeader() == true
+            ? [4, TabHeaderStop, HeaderStop, FocusStopCount - 1]
+            : [4, TabHeaderStop, FocusStopCount - 1];
 
     internal int CurrentFocusStop()
     {
@@ -91,9 +95,14 @@ public partial class PaneControl : UserControl
             Address, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
-        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused) return 8;
+        if (SearchStopCount == 2)
+        {
+            if (SearchBox.IsKeyboardFocusWithin) return TabHeaderStop;
+            if (CloseSearchButton.IsKeyboardFocusWithin) return TabHeaderStop + 1;
+        }
+        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused) return TabHeaderStop + SearchStopCount;
         if (Current?.Browser.HasNativeFocus() == true)
-            return Current.Browser.IsColumnHeaderFocused() ? ColumnHeaderStop : FocusStopCount - 1;
+            return Current.Browser.IsColumnHeaderFocused() ? HeaderStop : FocusStopCount - 1;
         return -1;
     }
 
@@ -103,17 +112,58 @@ public partial class PaneControl : UserControl
         {
             0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
             4 => null, 5 => GoButton, 6 => NewTabButton, 7 => CloseTabButton,
-            8 => Tabs.SelectedItem as TabItem,
             _ => null
         };
         if (stop == 4) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (target is not null) return target.Focus();
-        if (stop == ColumnHeaderStop && FocusStopCount == 11)
+        if (SearchStopCount == 2)
+        {
+            if (stop == TabHeaderStop) return SearchBox.Focus();
+            if (stop == TabHeaderStop + 1) return CloseSearchButton.Focus();
+        }
+        if (stop == TabHeaderStop + SearchStopCount)
+            return (Tabs.SelectedItem as TabItem)?.Focus() == true;
+        if (stop == HeaderStop && Current?.Browser.HasColumnHeader() == true)
             return Current?.Browser.FocusColumnHeader() == true;
-        if (stop == FileStopWithoutHeader && FocusStopCount == 10 ||
-            stop == FileStopWithHeader && FocusStopCount == 11)
+        if (stop == FocusStopCount - 1)
             return FocusCurrentView();
         return false;
+    }
+    public void FocusSearch()
+    {
+        if (Current is not { } state) return;
+        SearchBar.Visibility = Visibility.Visible;
+        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            if (Current is { } state && !string.IsNullOrWhiteSpace(SearchBox.Text))
+            {
+                Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
+                state.Browser.Search(SearchBox.Text);
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            CloseSearch();
+            e.Handled = true;
+        }
+    }
+
+    private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearch();
+
+    private void CloseSearch()
+    {
+        if (Current is { } state && state.Browser.SearchQuery is not null)
+            state.Browser.Navigate(state.Path);
+        SearchBar.Visibility = Visibility.Collapsed;
+        RestoreFileFocusWhenActive();
     }
     public void FocusAddress()
     {
@@ -219,6 +269,7 @@ public partial class PaneControl : UserControl
                     ShowBreadcrumb();
                 }
                 _addressNavigationPending = false;
+                SearchBar.Visibility = Visibility.Collapsed;
                 Status.Text = "Shell 视图";
                 if (restoreFocus)
                 {
@@ -228,11 +279,33 @@ public partial class PaneControl : UserControl
             }
             StateChanged?.Invoke(this, EventArgs.Empty);
         };
+        browser.SearchNavigated += (_, query) =>
+        {
+            state.Path = browser.CurrentPath;
+            UpdateTabHeader(state);
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            if (Current != state) return;
+            RenderBreadcrumb(state.Path);
+            if (!_addressEditing)
+            {
+                Address.Text = state.Path;
+                ShowBreadcrumb();
+            }
+            SearchBar.Visibility = Visibility.Visible;
+            if (!SearchBox.IsKeyboardFocusWithin || SearchBox.Text == query)
+                SearchBox.Text = query;
+            Status.Text = $"搜索结果：{query}";
+        };
         browser.NavigationFailed += (_, message) =>
         {
             if (Current == state)
             {
                 _addressNavigationPending = false;
+                if (state.Browser.SearchQuery is { } query)
+                {
+                    SearchBar.Visibility = Visibility.Visible;
+                    SearchBox.Text = query;
+                }
                 Status.Text = message;
             }
         };
@@ -505,7 +578,9 @@ public partial class PaneControl : UserControl
         Address.Text = state.Path;
         RenderBreadcrumb(state.Path);
         ShowBreadcrumb();
-        Status.Text = "Shell 视图";
+        SearchBar.Visibility = state.Browser.SearchQuery is null ? Visibility.Collapsed : Visibility.Visible;
+        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        Status.Text = state.Browser.SearchQuery is { } query ? $"搜索结果：{query}" : "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {

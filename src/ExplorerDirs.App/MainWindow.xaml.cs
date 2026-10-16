@@ -307,6 +307,7 @@ public partial class MainWindow : Window
             case ExplorerShortcut.PreviousTab: source.SelectRelativeTab(true); break;
             case ExplorerShortcut.NewFolder: source.CreateNewFolder(); break;
             case ExplorerShortcut.Refresh: source.RefreshCurrent(); break;
+            case ExplorerShortcut.Search: source.FocusSearch(); break;
             case ExplorerShortcut.ToggleMaximize:
                 WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
                 break;
@@ -349,6 +350,7 @@ public partial class MainWindow : Window
     private void CloseOtherTabs_Click(object sender, RoutedEventArgs e) => ActivePane.CloseOtherTabs();
     private void ReopenTab_Click(object sender, RoutedEventArgs e) => ActivePane.ReopenClosedTab();
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
+    private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void FavoritesMenu_SubmenuOpened(object sender, RoutedEventArgs e)

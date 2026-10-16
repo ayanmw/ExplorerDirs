@@ -151,6 +151,18 @@ try
           "Ctrl+Backspace remains available to text controls");
     Check(KeyboardShortcuts.Resolve(0x4e, 6) == ExplorerShortcut.NewFolder,
           "Ctrl+Shift+N routes to the Shell background New Folder command");
+    Check(KeyboardShortcuts.Resolve(0x72, 0) == ExplorerShortcut.Search &&
+          KeyboardShortcuts.Resolve(0x45, 2) == ExplorerShortcut.Search &&
+          KeyboardShortcuts.Resolve(0x46, 2) == ExplorerShortcut.Search,
+          "F3 and Ctrl+E/F focus current-directory search");
+    var searchFocusStops = new[] { 13, 12, 11, 10 };
+    Check(FocusTraversal.Move(0, 7, searchFocusStops, false) == (0, 8) &&
+          FocusTraversal.Move(0, 8, searchFocusStops, false) == (0, 9) &&
+          FocusTraversal.Move(0, 9, searchFocusStops, false) == (0, 10) &&
+          FocusTraversal.Move(0, 10, searchFocusStops, true) == (0, 9) &&
+          FocusTraversal.Move(0, 12, searchFocusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 12),
+          "visible search controls extend each pane's reversible Tab order");
     var searchScope = Path.Combine(root, "search scope & 中文");
     Directory.CreateDirectory(searchScope);
     var searchUri = ShellSearchLocation.BuildUri(searchScope, "name:报告 & #1");
@@ -164,10 +176,26 @@ try
     var searchPidl = ShellSearchLocation.ParsePidl(searchUri);
     try
     {
-        Check(searchPidl != IntPtr.Zero && ShellSearchLocation.IsSearchPidl(searchPidl),
-              "Windows parses scoped search into a virtual Shell location without a window");
+        Check(searchPidl != IntPtr.Zero && ShellSearchLocation.IsSearchPidl(searchPidl) &&
+              ShellSearchLocation.TryGetParsingName(searchPidl, out var shellSearchName) &&
+              ShellSearchLocation.TryReadScopeAndQuery(shellSearchName, out var shellScope, out var shellQuery) &&
+              shellScope == searchScope && shellQuery == "name:报告 & #1",
+              "Windows search PIDL preserves the scoped query for travel-log restoration");
     }
     finally { Marshal.FreeCoTaskMem(searchPidl); }
+    var searchNavigation = new ShellNavigationState(searchScope);
+    Check(searchNavigation.TryCompleteSearch(searchUri) &&
+          searchNavigation.DirectoryPath == searchScope &&
+          searchNavigation.SearchQuery == "name:报告 & #1" &&
+          searchNavigation.IsSearchActive,
+          "search results keep the scope as the tab's file-system directory");
+    searchNavigation.CompleteDirectory(Path.Combine(searchScope, "child"));
+    Check(!searchNavigation.IsSearchActive && searchNavigation.SearchQuery is null &&
+          searchNavigation.DirectoryPath == Path.Combine(searchScope, "child") &&
+          searchNavigation.TryCompleteSearch(searchUri) &&
+          searchNavigation.DirectoryPath == searchScope && searchNavigation.SearchQuery == "name:报告 & #1" &&
+          !searchNavigation.TryCompleteSearch("shell:unknown") && searchNavigation.IsSearchActive,
+          "folder navigation clears search while travel-log search restores its query");
     var browserSite = new ShellBrowserSite();
     var serviceId = ShellBrowserSite.BrowserFrameServiceId;
     var browser2Id = ShellBrowserSite.DialogBrowser2Id;

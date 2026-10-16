@@ -5,7 +5,7 @@ internal enum ExplorerShortcut
     None, Parent, Back, Forward, NextFocusStop, PreviousFocusStop,
     NextFocusRegion, PreviousFocusRegion, Address,
     NewTab, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab, NewFolder,
-    Refresh, ToggleMaximize
+    Refresh, Search, ToggleMaximize
 }
 
 internal static class KeyboardShortcuts
@@ -33,6 +33,9 @@ internal static class KeyboardShortcuts
         (0x09, 2) => ExplorerShortcut.NextTab,
         (0x09, 6) => ExplorerShortcut.PreviousTab,
         (0x74, 0) => ExplorerShortcut.Refresh,       // F5
+        (0x72, 0) => ExplorerShortcut.Search,        // F3
+        (0x45, 2) => ExplorerShortcut.Search,        // Ctrl+E
+        (0x46, 2) => ExplorerShortcut.Search,        // Ctrl+F
         (0x7a, 0) => ExplorerShortcut.ToggleMaximize,// F11
         _ => ExplorerShortcut.None
     };

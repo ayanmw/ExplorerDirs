@@ -1,6 +1,6 @@
 # 当前目录搜索：实现依据与边界
 
-状态：原生搜索位置与防阻塞服务站点已接入源码并通过无窗口测试；搜索结果导航、输入框和快捷键尚未接入。真实窗口验收须等用户留出空闲桌面。
+状态：搜索位置、ExplorerBrowser 导航、窗格内输入框和快捷键已接入源码；构建与无窗口测试通过。真实窗口搜索、焦点及菜单仍待用户留出空闲桌面验收。
 
 ## 已确认的 Shell 能力
 
@@ -14,14 +14,15 @@
 - 本机 Shell 无窗口探测及控制台回归证实：范围查询可解析成虚拟 PIDL；它没有 `SIGDN_FILESYSPATH`，有 `search-ms:` 解析名。`ShellSearchLocation` 负责构造、读取和解析该位置。
 - `ShellBrowserSite` 在 ExplorerBrowser 初始化前设置站点，向 `SID_SExplorerBrowserFrame` 提供 `ICommDlgBrowser2` 和 `CDB2GVF_NOINCLUDEITEM`。控制台测试核对 COM vtable 标志、基接口以及真实 ExplorerBrowser 对象的 `GetSite` 往返。Shell 视图实际调用此服务仍待 GUI 验收。
 
-## 当前源码需要改变的边界
+## 本轮源码接入
 
-- `ExplorerBrowserHost.Navigate` 对输入调用 `Path.GetFullPath` 和目录存在性探测，只接受普通文件系统路径；Search Folder 需要专用的 Shell item / PIDL 导航入口。
-- `OnNavigationComplete` 只在 `FileSystemPath(pidl)` 返回路径时更新当前状态。搜索结果是虚拟 Shell 位置，需分别记录搜索范围的文件系统路径与浏览器当前的 Shell 位置；不能把搜索 URI 写入现有路径字段或面包屑。
-- 搜索视图仍应保留原生 Shell 的文件操作、图标、右键菜单、排序和分组。先验证搜索文件夹导航、返回原目录及 TravelLog，再开放 F3、Ctrl+E、Ctrl+F 和窗格内搜索框。单独让快捷键聚焦一个没有结果能力的输入框不算完成。
+- `ExplorerBrowserHost.Search` 将查询 URI 解析成 PIDL，再交给原有 ExplorerBrowser；目录导航仍只接收文件系统路径。
+- `ShellNavigationState` 将保存用的真实目录路径与运行时搜索 URI、查询词分开。目录导航完成时清除搜索状态；返回历史中的搜索位置时恢复查询词。会话 INI 保存范围目录，不保存搜索结果视图或查询词。
+- 当前窗格的搜索栏接受 F3、Ctrl+E、Ctrl+F、顶部菜单或工具栏入口；Enter 提交查询，Escape 或关闭按钮返回范围目录。Tab/Shift+Tab 在搜索栏可见时遍历输入框和关闭按钮。
+- 搜索结果继续使用 Shell 视图。文件操作、图标、文件/空白处右键、查看/排序/分组、双击结果及 TravelLog 的实际行为均待 GUI 验收。Shell 视图是否确实取用防同步过滤站点，也必须在真实窗口确认。
 
 ## 验证门槛
 
-1. 控制台或无窗口验证搜索范围/查询条件构造及非文件系统位置识别；不得启动交互窗口。此项已通过本机回归。
+1. 控制台或无窗口验证搜索范围/查询条件构造、PIDL 往返、运行时搜索状态及快捷键映射；不得启动交互窗口。此项已通过本机回归。
 2. 空闲桌面时，在隔离测试配置中验证当前目录搜索、返回目录、后退/前进、双击结果、文件/空白处右键以及多窗格焦点。
 3. 分别测试已索引目录、未索引本地目录及网络目录，观察 UI 响应和取消；结果与配置恢复策略在实际行为明确后定稿。

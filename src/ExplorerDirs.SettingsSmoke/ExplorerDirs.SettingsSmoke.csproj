@@ -26,6 +26,7 @@
     <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuCommand.cs" Link="ShellMenuCommand.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellNavigationState.cs" Link="ShellNavigationState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
     <Compile Include="../ExplorerDirs.App/RunMarkerTracker.cs" Link="RunMarkerTracker.cs" />
     <Compile Include="../ExplorerDirs.App/PersistentTabHost.cs" Link="PersistentTabHost.cs" />
