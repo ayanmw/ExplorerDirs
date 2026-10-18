@@ -26,6 +26,55 @@ var state = new SessionState(2, 3, [[first, second], [], [], []]);
 
 try
 {
+    NativeColumnSmoke.Run();
+    var columnsProfile = SessionStore.Render(state).Replace("DisplayColumnCount=0",
+        $"DisplayColumnCount=2\nDisplayColumn0={groupKey},180\nDisplayColumn1={sortKey},320",
+        StringComparison.Ordinal);
+    var columnsRoundTrip = SessionStore.Render(SessionStore.Parse(columnsProfile)!);
+    Check(columnsRoundTrip.Contains($"DisplayColumn0={groupKey},180", StringComparison.Ordinal) &&
+          columnsRoundTrip.Contains($"DisplayColumn1={sortKey},320", StringComparison.Ordinal),
+          "visible column identity, order and widths survive session round-trip");
+    var savedColumns = SessionStore.Parse(columnsProfile)!.Panes[0][0].View.DisplayColumns!;
+    var mutableColumns = savedColumns.ToList();
+    var independentColumns = (first.View with { DisplayColumns = mutableColumns }).Copy();
+    mutableColumns.Clear();
+    Check(independentColumns.DisplayColumns!.SequenceEqual(savedColumns),
+        "duplicated view has an independent column layout snapshot");
+    var columnIni = Path.Combine(root, "columns.ini");
+    var columnStore = new SessionStore(columnIni, Path.Combine(root, "missing-columns.json"));
+    var legacyColumns = SessionStore.Render(state).Replace("FormatVersion=2", "FormatVersion=1")
+        .Replace("DisplayColumnCount=0" + Environment.NewLine, "");
+    File.WriteAllText(columnIni, legacyColumns);
+    var oldColumnsState = columnStore.Load()!;
+    Check(columnStore.LoadWarning is null && oldColumnsState.Panes[0][0].View.DisplayColumns is null,
+        "v1 loads without damage warning and leaves the Shell column defaults alone");
+    columnStore.Save(oldColumnsState);
+    columnStore.Save(oldColumnsState);
+    var upgradeBackups = Directory.GetFiles(root, "columns.ini.before-v2-*.bak");
+    Check(upgradeBackups.Length == 1 && File.ReadAllText(upgradeBackups[0]) == legacyColumns &&
+        File.ReadAllText(columnIni).Contains("FormatVersion=2"), "v1 migration keeps exactly one original snapshot");
+    foreach (var damaged in new[]
+    {
+        columnsProfile.Replace("DisplayColumnCount=2", "DisplayColumnCount=1"),
+        columnsProfile.Replace($"DisplayColumn1={sortKey},320", $"DisplayColumn1={groupKey},320"),
+        columnsProfile.Replace($"DisplayColumn1={sortKey},320", $"DisplayColumn1={sortKey},-3"),
+        columnsProfile.Replace($"DisplayColumn1={sortKey},320", ""),
+        columnsProfile.Replace("DisplayColumnCount=2", "DisplayColumnCount=99999999")
+    })
+    {
+        File.WriteAllText(columnIni, damaged);
+        var recoveredColumns = columnStore.Load()!;
+        Check(columnStore.LoadWarning is not null && recoveredColumns.Panes[0][0].Path == first.Path &&
+            recoveredColumns.Panes[0][0].View.DisplayColumns is null &&
+            recoveredColumns.Panes[0][0].View.SortColumns.SequenceEqual(first.View.SortColumns),
+            "bad count, duplicate, width or missing column drops only the damaged layout");
+        Check(Directory.GetFiles(root, "columns.ini.invalid-*.bak").Any(path => File.ReadAllText(path) == damaged),
+            "damaged column profile is backed up before any future save");
+    }
+    Check(Marshal.SizeOf<ShellColumnManager.NativeKey>() == 20 &&
+        Marshal.SizeOf<ShellColumnManager.ColumnInfo>() == 184 &&
+        Marshal.OffsetOf<ShellColumnManager.ColumnInfo>("Width").ToInt32() == 12,
+        "column COM structures match Windows SDK layout");
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
     var shellView = new FakeShellViewStateSource
@@ -55,6 +104,27 @@ try
     captured = ShellViewStateCapture.Capture(cachedView, shellView, out captureComplete);
     Check(captureComplete && captured.Mode == 3,
           "a later complete Shell read clears the capture failure");
+    shellView.DisplayColumns = savedColumns;
+    captured = ShellViewStateCapture.Capture(cachedView, shellView, out captureComplete);
+    Check(captureComplete && captured.DisplayColumns!.SequenceEqual(savedColumns),
+        "column capture joins the complete view snapshot");
+    foreach (var invalidColumns in new IReadOnlyList<DisplayColumnState>?[]
+    {
+        savedColumns, [], [savedColumns[0], savedColumns[0]],
+        [new DisplayColumnState(sortKey, -3)]
+    })
+    {
+        shellView.DisplayColumns = invalidColumns;
+        shellView.FailedStep = ReferenceEquals(invalidColumns, savedColumns) ? "display-columns" : null;
+        var failedCapture = ShellViewStateCapture.Capture(captured, shellView, out captureComplete);
+        Check(!captureComplete && failedCapture.DisplayColumns!.SequenceEqual(savedColumns),
+            "failed or invalid column capture preserves the entire previous snapshot");
+    }
+    shellView.FailedStep = null;
+    shellView.DisplayColumns = null;
+    var noColumnSupport = ShellViewStateCapture.Capture(captured, shellView, out captureComplete);
+    Check(captureComplete && noColumnSupport.DisplayColumns!.SequenceEqual(savedColumns),
+        "a view without IColumnManager retains the saved columns for the next supported view");
     var noSortView = new FakeShellViewStateSource
     {
         Mode = 4,
@@ -589,7 +659,7 @@ try
         "invalid INI is preserved before overwrite");
 
     var futureIni = Path.Combine(root, "future.ini");
-    var futureProfile = completeProfile.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal);
+    var futureProfile = completeProfile.Replace("FormatVersion=2", "FormatVersion=3", StringComparison.Ordinal);
     File.WriteAllText(futureIni, futureProfile);
     var futureStore = new SessionStore(futureIni, Path.Combine(root, "missing-legacy.json"));
     Check(futureStore.Load() is null && futureStore.LoadWarning is not null,
@@ -603,8 +673,8 @@ try
     Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
 
     var duplicateFutureIni = Path.Combine(root, "duplicate-future.ini");
-    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=1",
-        "FormatVersion=2" + Environment.NewLine + "FormatVersion=1", StringComparison.Ordinal);
+    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=2",
+        "FormatVersion=3" + Environment.NewLine + "FormatVersion=2", StringComparison.Ordinal);
     File.WriteAllText(duplicateFutureIni, duplicateFutureProfile);
     var duplicateFutureStore = new SessionStore(duplicateFutureIni, Path.Combine(root, "missing-legacy.json"));
     Check(duplicateFutureStore.Load() is null && duplicateFutureStore.LoadWarning is not null,
@@ -1146,6 +1216,12 @@ internal delegate int NativeGetViewFlags(IntPtr self, out uint flags);
 
 internal sealed class FakeShellViewStateSource : IShellViewStateSource
 {
+    public IReadOnlyList<DisplayColumnState>? DisplayColumns { get; set; }
+    public int GetDisplayColumns(out IReadOnlyList<DisplayColumnState>? columns)
+    {
+        columns = DisplayColumns;
+        return FailedStep == "display-columns" ? -1 : columns is null ? 1 : 0;
+    }
     public uint Mode { get; init; }
     public int IconSize { get; init; }
     public IReadOnlyList<SortColumnState> Sorts { get; init; } = [];

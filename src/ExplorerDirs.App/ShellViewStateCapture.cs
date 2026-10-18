@@ -6,6 +6,8 @@ internal interface IShellViewStateSource
     int GetSortColumnCount(out int count);
     int GetSortColumns(int count, out IReadOnlyList<SortColumnState> columns);
     int GetGroupBy(out PropertyKeyState? key, out bool ascending);
+    // S_FALSE: this view does not expose columns; retain the cached layout.
+    int GetDisplayColumns(out IReadOnlyList<DisplayColumnState>? columns);
 }
 
 internal static class ShellViewStateCapture
@@ -22,8 +24,12 @@ internal static class ShellViewStateCapture
             return cached.Copy();
         if (source.GetGroupBy(out var group, out var ascending) < 0)
             return cached.Copy();
+        var columnResult = source.GetDisplayColumns(out var columns);
+        if (columnResult != 1 && (columnResult != 0 || columns is null || !ColumnLayout.IsValid(columns)))
+            return cached.Copy();
 
         complete = true;
-        return new ViewState(mode, iconSize, sorts.ToArray(), group, ascending);
+        return new ViewState(mode, iconSize, sorts.ToArray(), group, ascending,
+            (columnResult == 1 ? cached.DisplayColumns : columns)?.ToArray());
     }
 }

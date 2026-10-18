@@ -10,6 +10,8 @@
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
+    <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
     <Compile Include="../ExplorerDirs.App/FocusTraversal.cs" Link="FocusTraversal.cs" />
     <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
     <Compile Include="../ExplorerDirs.App/EnvironmentRefresh.cs" Link="EnvironmentRefresh.cs" />

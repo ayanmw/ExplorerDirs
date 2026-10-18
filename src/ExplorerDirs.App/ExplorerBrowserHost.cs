@@ -31,6 +31,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private const int ShellSelectAll = 0x7021;
     private static readonly string? FocusTracePath = Environment.GetEnvironmentVariable("EXPLORER_DIRS_FOCUS_TRACE");
     private IExplorerBrowser? _browser;
+    private bool _columnRestoreFailed;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
@@ -695,6 +696,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ViewState CaptureViewStateCore()
     {
         if (_location.IsSearchActive) return _viewState.Copy();
+        if (_columnRestoreFailed)
+        {
+            ViewCaptureFailed = true;
+            return _viewState.Copy();
+        }
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero)
         {
@@ -751,6 +757,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ApplyViewState()
     {
+        // Keep a saved layout protected if the view is unavailable or COM fails
+        // before restoration finishes. A subsequent navigation retries it.
+        _columnRestoreFailed = _viewState.DisplayColumns is { Count: > 0 };
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return;
         try
@@ -758,6 +767,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode, _viewState.IconSize);
             if (modeResult < 0)
                 MenuError?.Invoke(this, $"查看方式未能恢复：0x{modeResult:X8}");
+            if (_viewState.DisplayColumns is { Count: > 0 } columnsToRestore)
+            {
+                // A failed/partial restore must not be captured over the saved layout.
+                var columnResult = ShellColumnManager.Apply(view, columnsToRestore);
+                _columnRestoreFailed = columnResult < 0;
+                if (columnResult < 0)
+                    MenuError?.Invoke(this, $"列设置恢复失败，暂未保存会话；请重新打开目录后重试。0x{columnResult:X8}");
+            }
             if (_viewState.SortColumns.Count > 0)
             {
                 var columns = _viewState.SortColumns.Select(sort => new NativeSortColumn
@@ -798,6 +815,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private sealed class NativeViewStateSource(IntPtr view) : IShellViewStateSource
     {
+        public int GetDisplayColumns(out IReadOnlyList<DisplayColumnState>? columns) =>
+            ShellColumnManager.Capture(view, out columns);
+
         public int GetMode(out uint mode, out int iconSize) =>
             GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out mode, out iconSize);
 

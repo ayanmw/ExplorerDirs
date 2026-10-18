@@ -27,10 +27,14 @@ internal sealed record ViewState(
     int IconSize,
     IReadOnlyList<SortColumnState> SortColumns,
     PropertyKeyState? GroupKey,
-    bool GroupAscending)
+    bool GroupAscending,
+    IReadOnlyList<DisplayColumnState>? DisplayColumns = null)
 {
     public static ViewState Default(uint mode = 4) => new(mode, -1, [], null, true);
-    public ViewState Copy() => this with { SortColumns = SortColumns.ToArray() };
+    public ViewState Copy() => this with
+    {
+        SortColumns = SortColumns.ToArray(), DisplayColumns = DisplayColumns?.ToArray()
+    };
 }
 
 internal sealed record TabSettings(string Path, ViewState View);
@@ -43,6 +47,7 @@ internal sealed class SessionStore
     private readonly string _legacyPath;
     private bool _canOverwrite = true;
     private string? _lastSeenContent;
+    private bool _versionOneBackedUp;
 
     public string Path => _path;
     public string? LoadWarning { get; private set; }
@@ -81,6 +86,7 @@ internal sealed class SessionStore
         LoadWarning = null;
         _canOverwrite = true;
         _lastSeenContent = null;
+        _versionOneBackedUp = false;
         if (File.Exists(_path))
         {
             ProfileParseResult? parsed = null;
@@ -139,6 +145,14 @@ internal sealed class SessionStore
         if (!_canOverwrite)
             throw new IOException($"无法备份损坏的配置文件，已停止覆盖：{_path}");
         var content = Render(state);
+        if (!_versionOneBackedUp && _lastSeenContent is not null &&
+            ParseProfile(_lastSeenContent).Version == 1)
+        {
+            // Preserve exactly the snapshot we loaded; a concurrent edit is still
+            // rejected by WriteIfUnchanged below. Never silently discard v1 settings.
+            File.WriteAllText(_path + $".before-v2-{Guid.NewGuid():N}.bak", _lastSeenContent);
+            _versionOneBackedUp = true;
+        }
         PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
             "会话配置已被其他实例修改；请重启程序后再保存。");
         _lastSeenContent = content;
@@ -149,7 +163,7 @@ internal sealed class SessionStore
         var builder = new StringBuilder();
         builder.AppendLine("; Explorer Dirs portable profile. Close the app before editing.");
         builder.AppendLine("[General]");
-        builder.AppendLine("FormatVersion=1");
+        builder.AppendLine("FormatVersion=2");
         builder.AppendLine($"Layout={state.Layout}");
         builder.AppendLine($"DefaultViewMode={state.DefaultViewMode}");
         builder.AppendLine($"ActivePane={Math.Clamp(state.ActivePane, 0, 3)}");
@@ -169,6 +183,10 @@ internal sealed class SessionStore
                 builder.AppendLine($"Path={tab.Path}");
                 builder.AppendLine($"ViewMode={tab.View.Mode}");
                 builder.AppendLine($"IconSize={tab.View.IconSize}");
+                builder.AppendLine($"DisplayColumnCount={tab.View.DisplayColumns?.Count ?? 0}");
+                if (tab.View.DisplayColumns is { } displayColumns)
+                    for (var columnIndex = 0; columnIndex < displayColumns.Count; columnIndex++)
+                        builder.AppendLine($"DisplayColumn{columnIndex}={displayColumns[columnIndex].Key},{displayColumns[columnIndex].Width}");
                 builder.AppendLine($"SortCount={tab.View.SortColumns.Count}");
                 for (var sortIndex = 0; sortIndex < tab.View.SortColumns.Count; sortIndex++)
                 {
@@ -184,7 +202,7 @@ internal sealed class SessionStore
 
     internal static SessionState? Parse(string content) => ParseProfile(content).State;
 
-    private sealed record ProfileParseResult(SessionState? State, bool Complete, bool NewerFormat);
+    private sealed record ProfileParseResult(SessionState? State, bool Complete, bool NewerFormat, int Version = 0);
 
     private static ProfileParseResult ParseProfile(string content)
     {
@@ -217,7 +235,7 @@ internal sealed class SessionStore
                 if (currentSection?.Equals("General", StringComparison.OrdinalIgnoreCase) == true &&
                     key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase) &&
                     BigInteger.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture,
-                        out var declaredVersion) && declaredVersion > 1)
+                        out var declaredVersion) && declaredVersion > 2)
                     newerFormatSeen = true;
                 if (current.ContainsKey(key)) complete = false;
                 current[key] = value;
@@ -227,8 +245,8 @@ internal sealed class SessionStore
 
         sections.TryGetValue("General", out var general);
         var version = general is null ? 0 : GetInt(general, "FormatVersion", 0);
-        if (newerFormatSeen || version > 1) return new ProfileParseResult(null, false, true);
-        if (version != 1) complete = false;
+        if (newerFormatSeen || version > 2) return new ProfileParseResult(null, false, true);
+        if (version is not (1 or 2)) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
         var activePane = ReadOptionalInt(general, "ActivePane", 0, 0, 3, ref complete);
@@ -304,17 +322,18 @@ internal sealed class SessionStore
                     complete = false;
                     ascending = true;
                 }
-                var view = new ViewState(mode, iconSize, sorts, group, ascending);
+                var columns = ColumnLayout.Parse(values, version >= 2, ref complete);
+                var view = new ViewState(mode, iconSize, sorts, group, ascending, columns);
                 tabs.Add(new TabSettings(path, view));
             }
             panes.Add(tabs);
             activeTabs.Add(ReadOptionalInt(pane, "ActiveTab", 0, 0, Math.Max(0, tabs.Count - 1),
                 ref complete));
         }
-        if (version != 1 && panes.All(pane => pane.Count == 0))
+        if (version is not (1 or 2) && panes.All(pane => pane.Count == 0))
             return new ProfileParseResult(null, false, false);
         return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes,
-            activePane, activeTabs), complete, false);
+            activePane, activeTabs), complete, false, version);
     }
 
     private static int ReadOptionalInt(Dictionary<string, string>? values, string key, int fallback,
