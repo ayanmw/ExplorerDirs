@@ -27,6 +27,12 @@ var state = new SessionState(2, 3, [[first, second], [], [], []]);
 try
 {
     NativeColumnSmoke.Run();
+    QdrImportSmoke.Run(root);
+    if (args.Length == 2 && args[0] == "--inspect-qdr")
+    {
+        var inspectedQdr = QdrImporter.Load(args[1]);
+        Console.WriteLine($"QDR import: {inspectedQdr.TabCount} tabs; pane counts {string.Join('/', inspectedQdr.Panes.Select(pane => pane.Count))}; warnings {inspectedQdr.Warnings.Count}");
+    }
     var columnsProfile = SessionStore.Render(state).Replace("DisplayColumnCount=0",
         $"DisplayColumnCount=2\nDisplayColumn0={groupKey},180\nDisplayColumn1={sortKey},320",
         StringComparison.Ordinal);

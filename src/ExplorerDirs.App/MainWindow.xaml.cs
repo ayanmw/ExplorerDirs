@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private bool _initializing = true;
     private bool _fileViewFocusDesired;
     private bool _openingTerminal;
+    private bool _importingQdr;
     private readonly CancellationTokenSource _terminalLaunchStop = new();
 
     public MainWindow(string? startupDirectory = null, string? startupWarning = null)
@@ -485,6 +486,55 @@ public partial class MainWindow : Window
             _saveTimer.Stop();
             _saveTimer.Start();
         }
+    }
+
+    private async void ImportQdr_Click(object sender, RoutedEventArgs e)
+    {
+        if (_importingQdr) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "导入 Q-Dir 配置", Filter = "Q-Dir 配置 (*.qdr)|*.qdr", CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        _importingQdr = true;
+        ImportQdrMenu.IsEnabled = false;
+        string? backupPath = null;
+        var appending = false;
+        try
+        {
+            var import = await Task.Run(() => QdrImporter.Load(dialog.FileName));
+            if (!IsVisible) return;
+            var summary = $"识别到 {import.TabCount} 个标签，将追加到对应窗格，保留已打开的标签。\n" +
+                string.Join("，", import.Panes.Select((pane, index) => $"窗格 {index + 1}：{pane.Count}")) +
+                (import.Layout == 4 ? "\n布局将切换为四窗格。" : "\n保留当前布局。") +
+                "\n\n" + string.Join("\n", import.Warnings) + "\n\n确认导入？导入前会备份当前会话。";
+            if (MessageBox.Show(this, summary, "导入 Q-Dir 配置", MessageBoxButton.OKCancel,
+                    MessageBoxImage.Information, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+            var snapshot = new SessionState(_layout, _defaultViewMode,
+                _panes.Select(pane => pane.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
+                _panes.Select(pane => pane.SelectedTabIndex).ToArray());
+            if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > 100))
+                throw new InvalidOperationException("导入后单窗格将超过 100 个标签，请先关闭一些标签再导入。");
+            var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
+            Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+            File.WriteAllText(backup, SessionStore.Render(snapshot));
+            backupPath = backup;
+            appending = true;
+            for (var pane = 0; pane < 4; pane++)
+                _panes[pane].ImportTabs(import.Panes[pane], import.SelectedTabs[pane]);
+            if (import.Layout is { } layout) SetLayout(layout);
+            ScheduleSave();
+            EnvironmentStatus.Text = $"已导入 {import.TabCount} 个标签；原会话已备份。未支持的配置未导入。";
+        }
+        catch (Exception ex)
+        {
+            var message = appending
+                ? $"导入未完整完成，可能已追加部分标签。原会话备份：{backupPath}\n{ex.Message}"
+                : $"导入失败，未追加标签：{ex.Message}";
+            EnvironmentStatus.Text = message;
+            if (IsActive) MessageBox.Show(this, message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { _importingQdr = false; ImportQdrMenu.IsEnabled = true; }
     }
 
     private void SaveSession()

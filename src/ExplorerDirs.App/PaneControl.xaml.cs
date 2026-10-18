@@ -84,6 +84,12 @@ public partial class PaneControl : UserControl
 
     public void NewTab() => AddTab(Home, _newTabView());
     public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
+    internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex)
+    {
+        var offset = _tabOrder.Count;
+        foreach (var tab in tabs) AddTab(tab.Path, tab.View.Copy(), select: false);
+        if (tabs.Count > 0) Tabs.SelectedItem = _tabOrder[offset + Math.Clamp(selectedIndex, 0, tabs.Count - 1)];
+    }
     public void DuplicateCurrentTab()
     {
         if (Current is { } state)

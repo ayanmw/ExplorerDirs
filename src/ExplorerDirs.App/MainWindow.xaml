@@ -6,6 +6,8 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="文件(_F)">
+                <MenuItem x:Name="ImportQdrMenu" Header="导入 Q-Dir 配置 (.qdr)…" Click="ImportQdr_Click"/>
+                <Separator/>
                 <MenuItem Header="新建文件夹" Click="NewFolder_Click"/>
                 <Separator/>
                 <MenuItem Header="新建标签页" InputGestureText="Ctrl+T" Click="NewTab_Click"/>
