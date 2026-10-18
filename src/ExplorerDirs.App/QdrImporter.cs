@@ -95,11 +95,17 @@ internal static class QdrImporter
                     warnings.Add("部分路径无效或为暂不支持的虚拟目录，已跳过。");
                     continue;
                 }
-                var mode = 4u;
-                if (values.TryGetValue("ViewMode" + entry.Value.Suffix, out var modeText) &&
-                    (!uint.TryParse(modeText, out mode) || mode is < 1 or > 8))
-                { mode = 4; warnings.Add("无法识别的查看方式使用详细信息。"); }
-                var tab = new TabSettings(path, ViewState.Default(mode));
+                var view = ViewState.Default();
+                if (values.TryGetValue("ColsAndSort" + entry.Value.Suffix, out var serialized) &&
+                    !QdrViewSettings.TryRead(serialized, out view))
+                    warnings.Add("部分标签的排序、分组、列宽及图标大小格式无法识别，使用本程序默认值。");
+                if (values.TryGetValue("ViewMode" + entry.Value.Suffix, out var modeText))
+                {
+                    if (!uint.TryParse(modeText, out var mode) || mode is < 1 or > 8)
+                    { mode = 4; warnings.Add("无法识别的查看方式使用详细信息。"); }
+                    view = view with { Mode = mode };
+                }
+                var tab = new TabSettings(path, view);
                 if (entry.Key < 0) current = tab;
                 else resolved[entry.Key] = tab;
             }
@@ -118,8 +124,6 @@ internal static class QdrImporter
         }
         int? layout = values.GetValueOrDefault("ViewMode") == "0" ? 4 : null;
         if (layout is null) warnings.Add("此布局编号尚未确认，保留当前布局；可从顶部布局按钮切换。");
-        if (values.Keys.Any(key => key.StartsWith("ColsAndSort", StringComparison.OrdinalIgnoreCase)))
-            warnings.Add("Q-Dir 私有排序、分组、列宽及图标大小数据未导入，使用本程序默认值。");
         warnings.Add("不导入树、预览、颜色、窗口位置、分隔比例及程序启动命令。");
         var result = new QdrImportResult(panes, selected, layout, warnings.ToArray());
         if (result.TabCount == 0) throw new InvalidDataException("未找到可导入的文件系统目录；当前会话未改变。");

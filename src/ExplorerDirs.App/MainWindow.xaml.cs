@@ -506,6 +506,7 @@ public partial class MainWindow : Window
             if (!IsVisible) return;
             var summary = $"识别到 {import.TabCount} 个标签，将追加到对应窗格，保留已打开的标签。\n" +
                 string.Join("，", import.Panes.Select((pane, index) => $"窗格 {index + 1}：{pane.Count}")) +
+                $"\n其中 {import.Panes.SelectMany(pane => pane).Count(tab => tab.View.DisplayColumns is not null)} 个标签包含可导入的排序、分组、图标大小和列设置。" +
                 (import.Layout == 4 ? "\n布局将切换为四窗格。" : "\n保留当前布局。") +
                 "\n\n" + string.Join("\n", import.Warnings) + "\n\n确认导入？导入前会备份当前会话。";
             if (MessageBox.Show(this, summary, "导入 Q-Dir 配置", MessageBoxButton.OKCancel,

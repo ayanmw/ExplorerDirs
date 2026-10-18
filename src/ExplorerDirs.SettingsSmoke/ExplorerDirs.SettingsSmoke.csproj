@@ -12,6 +12,7 @@
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrViewSettings.cs" Link="QdrViewSettings.cs" />
     <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
     <Compile Include="../ExplorerDirs.App/FocusTraversal.cs" Link="FocusTraversal.cs" />
     <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
