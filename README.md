@@ -33,9 +33,11 @@
 
 ## 预览发布版
 
+**2026-10-19 临时试用包：** [`releases/preview-0.6.0-temp.1/app/ExplorerDirs.App.exe`](releases/preview-0.6.0-temp.1/app/ExplorerDirs.App.exe)。包含以下新增源码功能，完整 GUI 验收尚未完成；日常版仍为 0.5.2。临时包独立复制配置，使用本包 `app/profile/`，避免升级日常版的会话。[相对 0.5.2 的变化与已知问题](docs/releases/preview-0.6.0-temp.1.md)。
+
 源码新增“文件 → 导入 Q-Dir 配置 (.qdr)…”：预览后按窗格追加标签，并备份现有会话。两份本机配置只读解析识别 42/28 个标签，已核对的格式还可导入排序、分组、图标大小、列顺序和列宽；支持范围和未导入项见 [Q-Dir 配置导入](docs/qdr-import.md)。尚未完成 GUI 验收，当前可用发布版仍为 preview-0.5.2。
 
-2026-10-18 源码已接入每标签的显示列、列宽、列顺序保存与复制；会话 INI 升级到 v2，首次保存 v1 前生成 `.before-v2-*.bak`。旧预览版不支持 v2，回退说明与真实窗口验收清单见 [列设置](docs/column-layout.md)。当前改动尚未发布。
+2026-10-18 源码已接入每标签的显示列、列宽、列顺序保存与复制；会话 INI 升级到 v2，首次保存 v1 前生成 `.before-v2-*.bak`。旧预览版不支持 v2，回退说明与真实窗口验收清单见 [列设置](docs/column-layout.md)。已收入上述临时试用包，正式 GUI 验收仍待完成。
 
 持续对标的功能差距与验收优先级见 [Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。源码新增 Ctrl+Shift+1～8 和“视图 → 当前标签查看方式”，直接切换 Shell 图标、列表、详细信息、平铺和内容视图；尚未经过真实窗口验收或进入发布版。
 

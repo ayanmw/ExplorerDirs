@@ -1,5 +1,13 @@
 # 可使用版本
 
+## 临时试用包（2026-10-19）
+
+用户要求提前预览的 `preview-0.6.0-temp.1/app/ExplorerDirs.App.exe` 已打包，**完整 GUI 验收未完成**，日常版仍保留 0.5.2。临时包使用自己的 `app/profile/`，打包时复制现有 INI，此后的修改不会写回日常版配置。启动入口比旧版多一层 `app`；完整变化及待测项见 [临时版说明](../docs/releases/preview-0.6.0-temp.1.md)，包内也附 `RELEASE-NOTES.md`。
+
+临时隔离包使用 `scripts/publish.ps1 -Version preview-0.6.0-temp.1 -IsolatedProfile -ReleaseNotes docs/releases/preview-0.6.0-temp.1.md`。正常版本的发布路径和共享配置规则不变。校验清单同时覆盖 EXE 和 DLL；系统入口仍须另行验收和显式启用。
+
+## 日常预览版
+
 每个版本放在独立子目录中。当前供预览的版本为 `releases\preview-0.5.2\ExplorerDirs.App.exe`。这些是完整发布输出，不依赖 `src` 下的编译结果；请从这里启动日常使用的版本。
 
 当前预览版是依赖 .NET 10 Windows Desktop Runtime 的 Windows 桌面程序。`SHA256.txt` 记录主程序校验值。旧版本保留供回退；不要在程序运行时覆盖其目录。

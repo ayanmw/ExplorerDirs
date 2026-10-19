@@ -1062,7 +1062,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     GetClassName(hwnd, focusedClass, focusedClass.Capacity);
                     if (focusedClass.ToString() is "DirectUIHWND" or "SysListView32")
                         _lastContentFocusWindow = hwnd;
-                    Activated?.Invoke(this, EventArgs.Empty);
+                    // Modal Shell dialogs can restore focus to an unrelated host's
+                    // Static container. Only actual file-view focus selects a pane.
+                    var contentFocus = FindContentFocusWindow();
+                    if (contentFocus != IntPtr.Zero && (hwnd == contentFocus || IsChild(contentFocus, hwnd)))
+                        Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
                 case 0x0207: // WM_MBUTTONDOWN
