@@ -190,12 +190,13 @@ internal static class QdrNativeViewProbe
 
 // Kept inheritable so opt-in probes can add Shell callbacks without changing the shared host behavior.
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDisposable
+public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, IShellServiceProvider, IDisposable
 {
     private readonly nint _parent;
     private readonly byte[] _bytes;
     private readonly ShellViewStateStore? _stateStore;
     private readonly Guid? _stateId;
+    private nint _activeObject;
     private ShellViewNavigationHistory? _navigation;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
@@ -211,6 +212,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal Func<bool, int>? EnableModelessHandler { get; set; }
     internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
     internal Func<nint, uint, uint, int>? ToolbarItemsHandler { get; set; }
+    internal Func<nint, nint, int>? ActiveObjectHandler { get; set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -256,6 +258,11 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
             }
             finally
             {
+                if (_activeObject != 0)
+                {
+                    Marshal.Release(_activeObject);
+                    _activeObject = 0;
+                }
                 var navigation = _navigation;
                 _navigation = null;
                 AcceleratorHandler = null;
@@ -268,6 +275,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
                 EnableModelessHandler = null;
                 ViewWindowActiveHandler = null;
                 ToolbarItemsHandler = null;
+                ActiveObjectHandler = null;
                 StatusTextChanged = null;
                 navigation?.Dispose();
             }
@@ -456,6 +464,34 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
             return unchecked((int)0x80004005);
         }
     }
+    public int GetBorder(nint border) => unchecked((int)0x80004001);
+    public int RequestBorderSpace(nint border) => unchecked((int)0x80004001);
+    public int SetBorderSpace(nint border) => unchecked((int)0x80004001);
+    public int SetActiveObject(nint activeObject, nint name)
+    {
+        var result = 0;
+        try
+        {
+            if (ActiveObjectHandler is { } handler) result = handler(activeObject, name);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell active object: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+        if (result < 0) return result;
+        if (activeObject != 0) Marshal.AddRef(activeObject);
+        var previous = _activeObject;
+        _activeObject = activeObject;
+        if (previous != 0) Marshal.Release(previous);
+        return result;
+    }
+    public int InsertMenus(nint sharedMenu, nint groupWidths) => InsertMenusSB(sharedMenu, groupWidths);
+    public int SetMenu(nint sharedMenu, nint oleMenu, nint activeWindow) => SetMenuSB(sharedMenu, oleMenu, activeWindow);
+    public int RemoveMenus(nint sharedMenu) => RemoveMenusSB(sharedMenu);
+    public int SetStatusText(nint text) => SetStatusTextSB(text);
+    public int EnableModeless(int enable) => EnableModelessSB(enable);
+    public int TranslateAccelerator(nint message, ushort id) => TranslateAcceleratorSB(message, id);
     [DllImport("shlwapi.dll")] private static extern nint SHCreateMemStream(byte[] bytes, uint count);
 }
 
@@ -478,4 +514,21 @@ public interface IStreamProbeBrowser
     [PreserveSig] int QueryActiveShellView(out nint view);
     [PreserveSig] int OnViewWindowActive(nint view);
     [PreserveSig] int SetToolbarItems(nint buttons, uint count, uint flags);
+}
+
+[ComVisible(true), Guid("00000116-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IStreamProbeOleInPlaceFrame
+{
+    [PreserveSig] int GetWindow(out nint window);
+    [PreserveSig] int ContextSensitiveHelp(int enter);
+    [PreserveSig] int GetBorder(nint border);
+    [PreserveSig] int RequestBorderSpace(nint border);
+    [PreserveSig] int SetBorderSpace(nint border);
+    [PreserveSig] int SetActiveObject(nint activeObject, nint name);
+    [PreserveSig] int InsertMenus(nint sharedMenu, nint groupWidths);
+    [PreserveSig] int SetMenu(nint sharedMenu, nint oleMenu, nint activeWindow);
+    [PreserveSig] int RemoveMenus(nint sharedMenu);
+    [PreserveSig] int SetStatusText(nint text);
+    [PreserveSig] int EnableModeless(int enable);
+    [PreserveSig] int TranslateAccelerator(nint message, ushort id);
 }

@@ -102,6 +102,7 @@ public static class ShellViewColorBrowserHostSmoke
             "missing Shell item metadata keeps the item visible through the color host callback");
 
         VerifyBaseHostFrameStateRouting();
+        VerifyOleInPlaceFrameSurface();
         VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
@@ -401,6 +402,86 @@ public static class ShellViewColorBrowserHostSmoke
         finally { Marshal.Release(browser); }
     }
 
+    private static void VerifyOleInPlaceFrameSurface()
+    {
+        var host = new StreamViewHost(0xFADE, []);
+        var frame = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeOleInPlaceFrame));
+        try
+        {
+            var getWindow = GetComMethod<GetWindowCallback>(frame, 3);
+            var border = GetComMethod<BorderCallback>(frame, 5);
+            var requestBorderSpace = GetComMethod<BorderCallback>(frame, 6);
+            var setBorderSpace = GetComMethod<BorderCallback>(frame, 7);
+            var setActiveObject = GetComMethod<SetActiveObjectCallback>(frame, 8);
+            var insertMenus = GetComMethod<InsertMenusCallback>(frame, 9);
+            var setMenu = GetComMethod<SetMenuCallback>(frame, 10);
+            var removeMenus = GetComMethod<RemoveMenusCallback>(frame, 11);
+            var setStatusText = GetComMethod<SetStatusTextCallback>(frame, 12);
+            var enableModeless = GetComMethod<EnableModelessCallback>(frame, 13);
+            var translateAccelerator = GetComMethod<TranslateAcceleratorCallback>(frame, 14);
+            Check(getWindow(frame, out var window) == 0 && window == 0xFADE,
+                "the isolated OLE frame exposes its parent HWND through IOleWindow");
+            Check(border(frame, 0) == unchecked((int)0x80004001) &&
+                  requestBorderSpace(frame, 0) == unchecked((int)0x80004001) &&
+                  setBorderSpace(frame, 0) == unchecked((int)0x80004001),
+                "the isolated OLE frame explicitly declines unsupported border negotiation");
+            (nint Object, nint Name) activeObject = default;
+            var activeObjectUnknown = Marshal.GetIUnknownForObject(new ActiveObjectFixture());
+            try
+            {
+                host.ActiveObjectHandler = (value, name) => { activeObject = (value, name); return 5; };
+                Check(setActiveObject(frame, activeObjectUnknown, 0xDEF) == 5 &&
+                      activeObject == (activeObjectUnknown, 0xDEF),
+                    "IOleInPlaceFrame.SetActiveObject forwards and retains the active COM object");
+                host.ActiveObjectHandler = (_, _) => throw new InvalidOperationException("fixture failure");
+                Check(setActiveObject(frame, activeObjectUnknown, 0xDEF) == unchecked((int)0x80004005),
+                    "a parent active-object callback exception stays inside the COM boundary");
+            }
+            finally { Marshal.Release(activeObjectUnknown); }
+            Check(insertMenus(frame, 0x123, 0x456) == 0 && setMenu(frame, 0x234, 0x567, 0x89A) == 0 &&
+                  removeMenus(frame, 0x345) == 0,
+                "the isolated OLE frame accepts shared-menu lifecycle calls when no frame menu is configured");
+
+            (nint Menu, nint Widths) inserted = default;
+            host.InsertMenusHandler = (menu, widths) => { inserted = (menu, widths); return 1; };
+            Check(insertMenus(frame, 0x123, 0x456) == 1 && inserted == (0x123, 0x456),
+                "IOleInPlaceFrame.InsertMenus reuses the isolated Shell host menu-group route");
+            (nint Menu, nint OleMenu, nint Active) installed = default;
+            host.SetMenuHandler = (menu, oleMenu, active) => { installed = (menu, oleMenu, active); return 2; };
+            Check(setMenu(frame, 0x234, 0x567, 0x89A) == 2 && installed == (0x234, 0x567, 0x89A),
+                "IOleInPlaceFrame.SetMenu reuses the Shell composite-menu route");
+            nint removed = 0;
+            host.RemoveMenusHandler = menu => { removed = menu; return 3; };
+            Check(removeMenus(frame, 0x345) == 3 && removed == 0x345,
+                "IOleInPlaceFrame.RemoveMenus reuses the Shell menu cleanup route");
+
+            var text = Marshal.StringToHGlobalUni("frame status");
+            try { Check(setStatusText(frame, text) == 0 && host.StatusText == "frame status",
+                "IOleInPlaceFrame.SetStatusText publishes frame status through the common host"); }
+            finally { Marshal.FreeHGlobal(text); }
+
+            bool? modeless = null;
+            host.EnableModelessHandler = enabled => { modeless = enabled; return 4; };
+            Check(enableModeless(frame, 1) == 4 && modeless == true,
+                "IOleInPlaceFrame.EnableModeless reuses the frame modeless-state route");
+            bool? accelerated = null;
+            host.AcceleratorHandler = (message, id) => { accelerated = message == 0xABC && id == 7; return accelerated.Value; };
+            Check(translateAccelerator(frame, 0xABC, 7) == 0 && accelerated == true,
+                "IOleInPlaceFrame.TranslateAccelerator reuses the host accelerator route");
+
+            host.Dispose();
+            Check(insertMenus(frame, 0x123, 0x456) == 0 && setMenu(frame, 0x234, 0x567, 0x89A) == 0 &&
+                  removeMenus(frame, 0x345) == 0 && enableModeless(frame, 1) == 0 &&
+                  translateAccelerator(frame, 0xABC, 7) == 1,
+                "disposing the isolated host disconnects its OLE frame callbacks");
+        }
+        finally
+        {
+            Marshal.Release(frame);
+            host.Dispose();
+        }
+    }
+
     private static void VerifyBaseHostFrameStateRouting()
     {
         using var host = new StreamViewHost(0, []);
@@ -572,6 +653,15 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int ViewWindowActiveCallback(nint self, nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SetToolbarItemsCallback(nint self, nint buttons, uint count, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetWindowCallback(nint self, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int BorderCallback(nint self, nint border);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetActiveObjectCallback(nint self, nint activeObject, nint name);
+
+    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+    private sealed class ActiveObjectFixture { }
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

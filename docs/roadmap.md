@@ -5,6 +5,11 @@
 - `InsertMenusSB`、`SetMenuSB`、`RemoveMenusSB` 现在可选委托给外层宿主；保留无菜单宿主时原有的 `S_OK` 空菜单行为，委托 HRESULT 原样返回，异常转换为 `E_FAIL`，释放时断开回调。
 - NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 验证菜单句柄、组宽指针、活动窗口、HRESULT、异常和释放行为。它只打通 `IShellBrowser` 的主菜单生命周期路由，没有创建/合并可见菜单或连接 WPF 菜单；产品右键菜单路径未改。
 
+## 2026-10-26：为隔离宿主增加 IOleInPlaceFrame 接口
+
+- `StreamViewHost` 现同时暴露 `IShellBrowser` 与 `IOleInPlaceFrame`。后者的菜单、状态文字、模态状态与快捷键方法复用已验证的宿主回调；`SetActiveObject` 在父级接受后 AddRef 新对象并释放旧对象，Dispose 时释放保留的接口；边框空间协商显式返回 `E_NOTIMPL`。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过实际 COM vtable 检查接口槽位、父窗口、菜单/状态/快捷键路由、边框拒绝、HRESULT、异常和释放。还没有调用 Shell 的 `UIActivate`、创建共享 HMENU 或安装 OLE 菜单描述符，因此菜单合并与消息派发仍未验收。
+
 ## 2026-10-26：为隔离 Shell 宿主接入框架状态回调
 
 - `EnableModelessSB` 与 `SetToolbarItems` 现可选择转发到外层宿主，保留原始 HRESULT；无宿主回调时仍返回原来的 `S_OK`，异常转换为 `E_FAIL`，释放时断开委托。
