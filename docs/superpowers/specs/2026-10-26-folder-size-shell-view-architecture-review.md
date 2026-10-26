@@ -84,3 +84,5 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 2026-10-27 同视图 schema 控制列：适配器再暴露一个 `System.DateCreated` 测试列。无窗口检查确认其 `PSGetPropertyDescription` 为 `S_OK`，未登记的静态键仍为 `TYPE_E_ELEMENTNOTFOUND`。在同一个未激活 Private Desktop DefView 中，标准名称、Size 和额外 DateCreated 子项均有文本（DateCreated 读取到测试文件时间），而紧邻的未登记自定义列仍为空；前台保护通过。四类适配器 `IPropertyStore` 请求仍为 0，故已显示的系统列值没有通过被包装的适配器请求。两列之间最直接的可观测差别是 schema 是否存在，这强烈支持缺失描述是自定义列空白的原因，但尚未证明注册自定义 schema 后 DefView 会调用其排序/取值回调。当前环境未发现 `WindowsSandbox.exe`；DISM 检查可选功能因需提升权限未执行，因此还没有可验证的 disposable Windows 环境。不得在日常系统注册；产品迁移仍需用户评审。
 
 当前工作会话复核：静态 folder contract smoke 再次通过，输出仍明确 `window-created=False`，只证明适配器合同，不证明 DefView 实际读取或排序列。当前 PowerShell 未发现 `Get-VM`、`vmconnect.exe`、`VBoxManage.exe` 或 `vmrun.exe` 命令；这只说明当前会话没有可直接使用的 VM 管理工具，不据此推断主机没有虚拟化或其他外部隔离环境。遵循共享桌面约束，本轮没有启动新的 Shell 宿主。继续原型前需提供/准备独立 Windows 会话或 VM；不得在本机日常系统注册机器级 property schema。
+
+2026-10-27 隔离环境复核：本会话 `Win32_ComputerSystem.HypervisorPresent=True`，但 `WindowsSandbox.exe`、Hyper-V PowerShell 模块、`Get-VM`、`vmconnect.exe`、`VBoxManage.exe`、`vmrun.exe` 均不可用；WSL 仅列出 Ubuntu 24.04，不是可验证 Windows DefView/机器级 schema 的 Windows VM。此结果只说明当前会话没有发现可操作的隔离 Windows 环境，不排除主机外部或其它账号已准备的 VM；未启动任何虚拟机或 Shell 宿主。
