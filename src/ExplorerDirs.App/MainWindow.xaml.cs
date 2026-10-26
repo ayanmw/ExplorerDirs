@@ -514,6 +514,7 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false
         };
+        ApplicationThemeWindowBinding.Attach(dialog, _themeController);
         var content = new StackPanel { Margin = new Thickness(16) };
         content.Children.Add(new TextBlock { Text = "预设名称（最多 64 个字符）：" });
         var input = new TextBox { Margin = new Thickness(0, 8, 0, 12), MinWidth = 350 };

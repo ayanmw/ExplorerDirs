@@ -104,6 +104,8 @@ internal static class PaneThemeMarkupSmoke
               windowThemeBinding.Contains("themeController.ThemeChanged -= themeChanged", StringComparison.Ordinal) &&
               windowThemeBinding.Contains("NativeWindowFrameTheme.Apply", StringComparison.Ordinal),
             "program starter, editor, and import preview windows follow live application theme changes");
+        Check(layoutWindowCode.Contains("ApplicationThemeWindowBinding.Attach(dialog, _themeController)", StringComparison.Ordinal),
+            "the code-created view-preset dialog follows the live application theme");
         Check(layoutWindowCode.Contains("ExplorerDirs.SelectionBackgroundBrush", StringComparison.Ordinal) &&
               layoutGridCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal) &&
               layoutHostCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
