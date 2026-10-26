@@ -2070,6 +2070,55 @@ public partial class MainWindow : Window
         finally { _importingQdr = false; ImportQdrMenu.IsEnabled = true; ExportQdrMenu.IsEnabled = true; }
     }
 
+    private void SaveWorkspaceToDesktop_Click(object sender, RoutedEventArgs e)
+    {
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存当前工作区到桌面",
+            Filter = "Explorer Dirs 桌面项 (*.lnk)|*.lnk",
+            DefaultExt = ".lnk",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = desktop,
+            FileName = "Explorer Dirs 工作区.lnk"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        string? qdrPath = null;
+        try
+        {
+            var snapshot = SnapshotSession();
+            var workspaceDirectory = WorkspaceCatalog.DirectoryFor(_sessionStore.Path);
+            Directory.CreateDirectory(workspaceDirectory);
+            qdrPath = Path.Combine(workspaceDirectory, $"Desktop-{Guid.NewGuid():N}.qdr");
+            var text = QdrExporter.Render(snapshot,
+                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                SnapshotLayoutProportions(), _treeWidths);
+            QdrExporter.Save(qdrPath, expected: null, text);
+
+            var executable = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+            var isDotnetHost = Path.GetFileNameWithoutExtension(executable)
+                .Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+            DesktopWorkspaceShortcut.Create(dialog.FileName, executable,
+                isDotnetHost ? Environment.GetCommandLineArgs()[0] : null,
+                qdrPath, AppContext.BaseDirectory);
+            EnvironmentStatus.Text = $"已创建桌面工作区项；状态文件保存在 {Path.GetFileName(qdrPath)}。";
+        }
+        catch (Exception ex)
+        {
+            if (qdrPath is not null)
+            {
+                try { File.Delete(qdrPath); }
+                catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException) { }
+            }
+            EnvironmentStatus.Text = $"创建桌面工作区项失败：{ex.Message}";
+            if (IsActive)
+                MessageBox.Show(this, EnvironmentStatus.Text, "创建桌面工作区项失败",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private async void ExportQdr_Click(object sender, RoutedEventArgs e) => await ExportQdrAsync(false);
 
     private async void ExportFileView_Click(object sender, RoutedEventArgs e)

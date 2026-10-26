@@ -468,6 +468,7 @@ try
         DefaultViewSmoke.VerifyOlderReader(args[1], root, proportionsOnly: true);
     WorkspaceCatalogSmoke.Run(root);
     ExplorerDirs.SettingsSmoke.WindowSessionRegistrySmoke.Run(root);
+    ExplorerDirs.SettingsSmoke.DesktopWorkspaceShortcutSmoke.Run(root);
     QdrViewSmoke.Run();
     ViewStyleWheelSmoke.Run();
     ShellQuickFilterSmoke.Run();
@@ -612,13 +613,17 @@ try
     mutableShellSorts.Clear();
     Check(captureComplete && captured.SortColumns.Count == 1,
           "captured sort columns do not alias the Shell reader's list");
-    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null),
+    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null, null),
           "startup without a directory restores the normal session");
     Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
           StartupDirectory.Parse([@"\\server\share\docs"]).Directory == @"\\server\share\docs",
           "local and UNC directory arguments keep their normalized paths");
     Check(StartupDirectory.Parse(["."]).Directory == Path.GetFullPath("."),
           "relative startup directory resolves against the caller's current directory");
+    Check(StartupDirectory.Parse([@"C:\work\saved.qdr"]).QdrFile == Path.GetFullPath(@"C:\work\saved.qdr") &&
+          StartupDirectory.Parse([@"C:\work\folder"]).Directory == Path.GetFullPath(@"C:\work\folder") &&
+          StartupDirectory.Parse([@"C:\work\saved.QDR"]).QdrFile == Path.GetFullPath(@"C:\work\saved.QDR"),
+          "Q-Dir status arguments are distinguished from directory arguments by extension");
     Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
           StartupDirectory.Parse(["\0"]).Warning is not null,
           "unsupported or invalid arguments do not become a navigation target");
@@ -633,6 +638,11 @@ try
     Check(FolderOpenRouter.TryActivateAsync(routerProfile, TimeSpan.FromMilliseconds(150))
               .GetAwaiter().GetResult() == FolderForwardResult.Unavailable,
           "no running process leaves the activation request with the launcher");
+    Check(FolderOpenRouter.TryForwardQdrAsync(routerProfile, Path.Combine(root, "saved.qdr"),
+              TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Unavailable &&
+          FolderOpenRouter.TryForwardQdrAsync(routerProfile, Path.Combine(root, "not-qdr.txt"),
+              TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+          "Q-Dir state requests use the route when available and reject non-qdr files");
     var routedPaths = new List<string>();
     using (var router = FolderOpenRouter.TryStart(routerProfile, path =>
            {
@@ -679,6 +689,23 @@ try
         Check(FolderOpenRouter.TryForwardAsync(activationProfile, routedPath, TimeSpan.FromSeconds(2))
                   .GetAwaiter().GetResult() == FolderForwardResult.Rejected && activationCount == 1,
               "directory routing remains distinct from window activation");
+    }
+    var qdrProfile = Path.Combine(root, "router-qdr", "ExplorerDirs.ini");
+    string? routedQdrPath = null;
+    using (var qdrRouter = FolderOpenRouter.TryStart(qdrProfile, _ => Task.FromResult(false),
+               openQdr: path =>
+               {
+                   routedQdrPath = path;
+                   return Task.FromResult(true);
+               }) ?? throw new Exception("Q-Dir route did not start"))
+    {
+        var qdrPath = Path.GetFullPath(Path.Combine(root, "Saved Workspace.qdr"));
+        Check(FolderOpenRouter.TryForwardQdrAsync(qdrProfile, qdrPath, TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && routedQdrPath == qdrPath,
+              "a Q-Dir startup request reaches its dedicated existing-process callback");
+        Check(FolderOpenRouter.TryForwardAsync(qdrProfile, Path.Combine(root, "folder"), TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+              "Q-Dir startup routing remains distinct from directory navigation");
     }
     var unexpectedProfile = Path.Combine(root, "router-unexpected", "ExplorerDirs.ini");
     using (var unexpectedServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(unexpectedProfile),

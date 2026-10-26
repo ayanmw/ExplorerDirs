@@ -11,6 +11,7 @@
             <MenuItem x:Name="FileMenu" Header="文件(_F)" SubmenuOpened="FileCommandsMenu_SubmenuOpened">
                 <MenuItem x:Name="ImportQdrMenu" Header="导入 Q-Dir 配置 (.qdr)…" Click="ImportQdr_Click"/>
                 <MenuItem x:Name="ExportQdrMenu" Header="导出 Q-Dir 状态 (.qdr)…" Click="ExportQdr_Click"/>
+                <MenuItem Header="保存当前工作区到桌面…" Click="SaveWorkspaceToDesktop_Click"/>
                 <MenuItem x:Name="ExportFileViewMenu" Header="导出当前文件视图…" Click="ExportFileView_Click"/>
                 <MenuItem x:Name="PrintFileViewMenu" Header="打印当前文件视图…" Click="PrintFileView_Click"/>
                 <MenuItem x:Name="PrintSelectedPhotosMenu" Header="打印所选照片…" IsEnabled="False" Click="PrintSelectedPhotos_Click"/>

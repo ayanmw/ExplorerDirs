@@ -15,6 +15,12 @@ internal static class QdrImportSmoke
             imported.Panes[0][1].View.Mode == 3 && imported.Panes[1][0].Path == @"D:\名字 & 目录",
             "QDR preserves pane mapping, active tab gap, reordered tabs, Unicode and ampersand paths");
         Require(imported.Warnings.Any(warning => warning.Contains("排序")), "private view blobs are reported as unsupported");
+        var launchState = QdrLaunchSession.Create(imported, @"C:\Users\marvin");
+        Require(launchState.Layout == 4 && launchState.Panes[0].Count == 3 &&
+                launchState.Panes[1][0].Path == imported.Panes[1][0].Path &&
+                launchState.Panes.Skip(2).All(pane => pane.Count == 1 && pane[0].Path == @"C:\Users\marvin") &&
+                launchState.ActiveTabIndices![0] == imported.SelectedTabs[0],
+            "a launchable Q-Dir session restores imported panes and fills empty panes with the normal home tab");
         var unknownFields = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\safe\nViewModeFlags1=7\nVendorPolicy=private-path\n",
             (value, _) => value);

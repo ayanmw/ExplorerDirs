@@ -54,6 +54,7 @@
     <Compile Include="../ExplorerDirs.App/NativeShellCommandMenu.cs" Link="NativeShellCommandMenu.cs" />
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrLaunchSession.cs" Link="QdrLaunchSession.cs" />
     <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
     <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
     <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
@@ -98,6 +99,7 @@
     <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/StartupDirectory.cs" Link="StartupDirectory.cs" />
     <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
+    <Compile Include="../ExplorerDirs.App/DesktopWorkspaceShortcut.cs" Link="DesktopWorkspaceShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeMiddleClick.cs" Link="ShellTreeMiddleClick.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeLocationTarget.cs" Link="ShellTreeLocationTarget.cs" />

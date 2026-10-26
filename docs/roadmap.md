@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：保存当前工作区为桌面启动项
+
+- 文件菜单新增“保存当前工作区到桌面…”。它把当前所有窗格、标签及视图状态导出为配置目录 `Workspaces` 下的 `.qdr`，并在用户选择的位置创建 Windows `.lnk`；快捷方式以应用自身为目标，参数指向该状态文件。通过 Shell Link COM 写入并临时文件原子替换，不改写用户桌面或已有 Q-Dir 配置，除非用户主动选择桌面位置。
+- 启动 `.qdr` 时将其映射为可启动会话：保留已导入 pane/tab 状态，空 pane 使用通常的 home 标签。已有应用进程收到 `.qdr` 启动参数时，经同 profile named pipe 在新的独立窗口恢复，不覆盖正在运行的窗口会话；请求与目录打开路由分离。
+- Release App 和 SettingsSmoke 构建通过（0 警告/错误）；完整 SettingsSmoke 通过，覆盖 Shell Link COM 读回含 Unicode/空格的参数、dotnet 调试宿主参数、Q-Dir pane 映射与空 pane 默认值、IPC 路由分流。没有启动应用或创建用户桌面快捷方式；真实双击启动、Shell 浏览器恢复和可见操作仍待 GUI 验收。
+
 ## 2026-10-27：将 drop target 生命周期延伸到 Shell 目录导航
 
 - 源码审查发现 folder `BrowseObject` 创建替代 `IShellView` 的路径没有注册新目录 `IDropTarget`；旧 `StreamViewHost` 也只允许一份注册，无法在切换期间安全地让新旧 view 短暂并存。现按 HWND 保存多份 OLE 注册：成功创建新 view 后先注册新目标，再撤销旧 HWND 目标并退休旧 view；创建/注册失败时撤销新目标并保留原 view 注册。

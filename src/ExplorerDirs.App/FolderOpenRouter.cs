@@ -21,6 +21,7 @@ internal sealed class FolderOpenRouter : IDisposable
     private readonly string _pipeName;
     private readonly FileStream _ownership;
     private readonly Func<string, Task<bool>> _openDirectory;
+    private readonly Func<string, Task<bool>>? _openQdr;
     private readonly Func<Task<bool>>? _activateWindow;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _serveTask;
@@ -28,11 +29,12 @@ internal sealed class FolderOpenRouter : IDisposable
 
     private FolderOpenRouter(string pipeName, FileStream ownership,
         Func<string, Task<bool>> openDirectory, Func<Task<bool>>? activateWindow,
-        NamedPipeServerStream firstServer)
+        Func<string, Task<bool>>? openQdr, NamedPipeServerStream firstServer)
     {
         _pipeName = pipeName;
         _ownership = ownership;
         _openDirectory = openDirectory;
+        _openQdr = openQdr;
         _activateWindow = activateWindow;
         _serveTask = ServeAsync(firstServer);
     }
@@ -48,7 +50,7 @@ internal sealed class FolderOpenRouter : IDisposable
     }
 
     public static FolderOpenRouter? TryStart(string profilePath, Func<string, Task<bool>> openDirectory,
-        Func<Task<bool>>? activateWindow = null)
+        Func<Task<bool>>? activateWindow = null, Func<string, Task<bool>>? openQdr = null)
     {
         var pipeName = PipeName(profilePath);
         FileStream? ownership = null;
@@ -59,7 +61,7 @@ internal sealed class FolderOpenRouter : IDisposable
             ownership = new FileStream(Path.Combine(directory, pipeName + ".lock"),
                 FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var firstServer = NewServer(pipeName, first: true);
-            return new FolderOpenRouter(pipeName, ownership, openDirectory, activateWindow, firstServer);
+            return new FolderOpenRouter(pipeName, ownership, openDirectory, activateWindow, openQdr, firstServer);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -80,11 +82,33 @@ internal sealed class FolderOpenRouter : IDisposable
         return await SendRequestAsync(profilePath, payload, timeout).ConfigureAwait(false);
     }
 
+    public static async Task<FolderForwardResult> TryForwardQdrAsync(string profilePath, string path,
+        TimeSpan timeout)
+    {
+        byte[] payload;
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (!Path.GetExtension(fullPath).Equals(".qdr", StringComparison.OrdinalIgnoreCase))
+                return FolderForwardResult.Rejected;
+            payload = Utf8.GetBytes(fullPath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or
+            PathTooLongException or EncoderFallbackException)
+        {
+            return FolderForwardResult.Rejected;
+        }
+        if (payload.Length is < 1 or > MaximumPathBytes)
+            return FolderForwardResult.Rejected;
+
+        return await SendRequestAsync(profilePath, payload, timeout, qdr: true).ConfigureAwait(false);
+    }
+
     public static Task<FolderForwardResult> TryActivateAsync(string profilePath, TimeSpan timeout) =>
         SendRequestAsync(profilePath, null, timeout);
 
     private static async Task<FolderForwardResult> SendRequestAsync(string profilePath, byte[]? payload,
-        TimeSpan timeout)
+        TimeSpan timeout, bool qdr = false)
     {
         using var client = new NamedPipeClientStream(".", PipeName(profilePath), PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
@@ -99,10 +123,17 @@ internal sealed class FolderOpenRouter : IDisposable
         try
         {
             var header = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(header, payload is null ? -1 : payload.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(header, payload is null ? -1 : qdr ? -2 : payload.Length);
             await client.WriteAsync(header, deadline.Token).ConfigureAwait(false);
             if (payload is not null)
+            {
+                if (qdr)
+                {
+                    BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
+                    await client.WriteAsync(header, deadline.Token).ConfigureAwait(false);
+                }
                 await client.WriteAsync(payload, deadline.Token).ConfigureAwait(false);
+            }
             await client.FlushAsync(deadline.Token).ConfigureAwait(false);
             var response = new byte[1];
             await client.ReadExactlyAsync(response, deadline.Token).ConfigureAwait(false);
@@ -167,20 +198,33 @@ internal sealed class FolderOpenRouter : IDisposable
                 catch (Exception) { /* A failed activation must not masquerade as accepted. */ }
             }
         }
-        else if (length is > 0 and <= MaximumPathBytes)
+        else if (length is > 0 and <= MaximumPathBytes || length == -2)
         {
-            var payload = new byte[length];
+            var pathLength = length;
+            if (length == -2)
+            {
+                await server.ReadExactlyAsync(header, readDeadline.Token).ConfigureAwait(false);
+                pathLength = BinaryPrimitives.ReadInt32LittleEndian(header);
+            }
+            if (pathLength is < 1 or > MaximumPathBytes) goto Respond;
+            var payload = new byte[pathLength];
             readDeadline.CancelAfter(RequestReadTimeout);
             await server.ReadExactlyAsync(payload, readDeadline.Token).ConfigureAwait(false);
             try
             {
                 var path = Utf8.GetString(payload);
-                if (Path.IsPathFullyQualified(path) && Path.GetFullPath(path) == path)
-                    accepted = await _openDirectory(path).WaitAsync(stop).ConfigureAwait(false);
+                if (!Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path) goto Respond;
+                if (length == -2)
+                {
+                    if (_openQdr is not null && Path.GetExtension(path).Equals(".qdr", StringComparison.OrdinalIgnoreCase))
+                        accepted = await _openQdr(path).WaitAsync(stop).ConfigureAwait(false);
+                }
+                else accepted = await _openDirectory(path).WaitAsync(stop).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
             catch (Exception) { /* Invalid request or failed UI dispatch: reject it. */ }
         }
+    Respond:
         await server.WriteAsync(new byte[] { accepted ? (byte)1 : (byte)0 }, stop).ConfigureAwait(false);
         await server.FlushAsync(stop).ConfigureAwait(false);
     }
