@@ -49,12 +49,51 @@ internal static class StandaloneTreeProbe
         }
     }
 
+    internal static int RunIconInitializationSizeAb()
+    {
+        var foreground = GetForegroundWindow();
+        var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden tree initialization-size A/B",
+            0x80000000, 0, 0, 320, 480, 0, 0, 0, 0);
+        if (parent == 0) throw new Exception("Hidden initialization-size A/B parent creation failed.");
+        var fixture = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "ExplorerDirsTreeSize-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var initializedAtOnePixel = CaptureIconMode(parent, fixture, useExplicitIcons: true,
+                initializationWidth: 1, initializationHeight: 1);
+            var initializedAtFinalSize = CaptureIconMode(parent, fixture, useExplicitIcons: true,
+                initializationWidth: 320, initializationHeight: 480);
+            var samePixels = initializedAtOnePixel.PixelHash == initializedAtFinalSize.PixelHash &&
+                initializedAtOnePixel.IconBandHash == initializedAtFinalSize.IconBandHash;
+            var sameIcon = initializedAtOnePixel.IconMatchPixels == initializedAtFinalSize.IconMatchPixels &&
+                initializedAtOnePixel.IconTemplatePixels == initializedAtFinalSize.IconTemplatePixels &&
+                initializedAtOnePixel.IconAtX == initializedAtFinalSize.IconAtX &&
+                initializedAtOnePixel.IconAtY == initializedAtFinalSize.IconAtY;
+            Console.WriteLine($"tree-icon-initial-size-ab: foreground-unchanged={GetForegroundWindow() == foreground}; " +
+                $"same-pixels={samePixels}; same-icon-match={sameIcon}; " +
+                $"initialized-1x1={initializedAtOnePixel}; initialized-final={initializedAtFinalSize}");
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon initialization-size A/B changed the foreground window.");
+            return 0;
+        }
+        finally
+        {
+            DestroyWindow(parent);
+            Directory.Delete(fixture, recursive: true);
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon initialization-size A/B teardown changed the foreground window.");
+        }
+    }
+
     private static (int Normal, int Selected, int ClientPixels, int IconBandPixels, string PixelHash,
         string IconBandHash, string IconBandColors, int IconMatchPixels, int IconTemplatePixels,
         int IconAtX, int IconAtY, string Row) CaptureIconMode(
-        nint parent, string fixture, bool useExplicitIcons)
+        nint parent, string fixture, bool useExplicitIcons, int initializationWidth = 320,
+        int initializationHeight = 480)
     {
-        using var tree = new ExplorerDirs.App.NativeShellTree(parent, 320, 480, useExplicitIcons);
+        using var tree = new ExplorerDirs.App.NativeShellTree(parent, initializationWidth, initializationHeight, useExplicitIcons);
+        if ((initializationWidth != 320 || initializationHeight != 480) &&
+            !MoveWindow(tree.WindowHandle, 0, 0, 320, 480, true))
+            throw new Exception("Could not resize the initially small hidden tree host.");
         tree.SetRoot(fixture);
         Pump();
         var nativeTree = FindWindowExW(tree.WindowHandle, 0, "SysTreeView32", null);
@@ -529,6 +568,7 @@ internal static class StandaloneTreeProbe
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool MoveWindow(nint window, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
     private delegate bool EnumChildCallback(nint window, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildCallback callback, nint parameter);

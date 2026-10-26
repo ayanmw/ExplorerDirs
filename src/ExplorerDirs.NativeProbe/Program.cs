@@ -94,6 +94,8 @@ internal static class Program
             return StandaloneTreeProbe.RunCore();
         if (args.Length == 1 && args[0] == "--tree-icon-render-ab")
             return StandaloneTreeProbe.RunIconRenderAb();
+        if (args.Length == 1 && args[0] == "--tree-icon-initial-size-ab")
+            return StandaloneTreeProbe.RunIconInitializationSizeAb();
         if (args.Length == 1 && args[0] == "--tree-icon-callback-smoke")
             return StandaloneTreeProbe.RunIconContract();
         if (args.Length != 1 || args[0] is not ("--selection-commands" or "--search-folder-navigation" or "--navigation-capability" or "--navigation-cancel" or "--menu-capability" or "--color-capability" or "--pane-capability" or "--pane-capability-selected" or "--pane-capability-off" or "--pane-same-location" or "--view-style-capability" or "--view-style-synchronized-hosted" or "--view-data-capability" or "--view-property-refresh-capability" or "--folder-filter-capability" or "--folder-header-options-hosted"))
