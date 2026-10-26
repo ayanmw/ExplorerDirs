@@ -1,6 +1,6 @@
 # 逐行文件夹大小列：原生 Shell 视图架构评审
 
-状态：架构评审完成；只授权评审，不授权产品视图迁移。本文件补充[逐行文件夹大小与子项计数列调查](../../folder-size-column-investigation.md)和[IShellView 分阶段迁移门槛](2026-10-25-ishellview-host-migration-gates.md)。
+状态：架构评审完成；用户已授权隔离 `IShellView` 原型验证，不授权产品视图迁移。本文件补充[逐行文件夹大小与子项计数列调查](../../folder-size-column-investigation.md)和[IShellView 分阶段迁移门槛](2026-10-25-ishellview-host-migration-gates.md)。
 
 ## 结论
 
@@ -82,3 +82,5 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 2026-10-27 属性描述缓存直读：在无窗口合同探针中调用 Windows `PSGetPropertyDescription`，原型 `PROPERTYKEY` 返回 `TYPE_E_ELEMENTNOTFOUND`（`0x8002802B`），标准 `System.Size` 返回 `S_OK`。因此当前原型键确实没有已加载的 property description schema；这与新增列空白相符，但不证明 DefView 的 `GetDetailsOf` 路径一定需要该 schema，也不证明注册后排序能工作。Microsoft 契约说明该 HRESULT 表示属性键不存在于 schema subsystem cache；不在日常系统注册机器级 schema。[PSGetPropertyDescription](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psgetpropertydescription)。
 
 2026-10-27 同视图 schema 控制列：适配器再暴露一个 `System.DateCreated` 测试列。无窗口检查确认其 `PSGetPropertyDescription` 为 `S_OK`，未登记的静态键仍为 `TYPE_E_ELEMENTNOTFOUND`。在同一个未激活 Private Desktop DefView 中，标准名称、Size 和额外 DateCreated 子项均有文本（DateCreated 读取到测试文件时间），而紧邻的未登记自定义列仍为空；前台保护通过。四类适配器 `IPropertyStore` 请求仍为 0，故已显示的系统列值没有通过被包装的适配器请求。两列之间最直接的可观测差别是 schema 是否存在，这强烈支持缺失描述是自定义列空白的原因，但尚未证明注册自定义 schema 后 DefView 会调用其排序/取值回调。当前环境未发现 `WindowsSandbox.exe`；DISM 检查可选功能因需提升权限未执行，因此还没有可验证的 disposable Windows 环境。不得在日常系统注册；产品迁移仍需用户评审。
+
+当前工作会话复核：静态 folder contract smoke 再次通过，输出仍明确 `window-created=False`，只证明适配器合同，不证明 DefView 实际读取或排序列。当前 PowerShell 未发现 `Get-VM`、`vmconnect.exe`、`VBoxManage.exe` 或 `vmrun.exe` 命令；这只说明当前会话没有可直接使用的 VM 管理工具，不据此推断主机没有虚拟化或其他外部隔离环境。遵循共享桌面约束，本轮没有启动新的 Shell 宿主。继续原型前需提供/准备独立 Windows 会话或 VM；不得在本机日常系统注册机器级 property schema。
