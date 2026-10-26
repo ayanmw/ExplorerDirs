@@ -46,6 +46,8 @@ internal static class Program
             return ShellViewHostFilterProbe.Run();
         if (args.Length == 1 && args[0] == "--ishellview-host-filter-private-desktop")
             return PrivateDesktopShellProbe.RunHostFilter();
+        if (args.Length == 1 && args[0] == "--private-desktop-owner-smoke")
+            return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 1 && args[0] == "--ishellview-menu-command-private-desktop")
             return PrivateDesktopShellProbe.RunHostMenuCommands();
         if (args.Length == 2 && args[0] == "--ishellview-host-filter-virtual-private-desktop")
@@ -104,6 +106,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-command-state-readonly-private-desktop (same read-only query on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-host-filter (hidden direct IShellView ICommDlgBrowser3 filtering fixture)");
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
+            Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --ishellview-host-filter-virtual-private-desktop <scope> (one virtual Shell scope on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");

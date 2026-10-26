@@ -2,12 +2,16 @@
 
 ## 2026-10-26：IShellView 隔离迁移原型复跑
 
+- 根因已确认：微软说明 `CreateDesktopW` 创建新 Desktop 时会把调用线程也分配到该 Desktop；原 `PrivateDesktopShellProbe.Run` 在主线程创建它，探针返回后主线程仍在非输入 Desktop，导致主线程 `GetForegroundWindow()` 变为 0。之前外层“前台变化”检查失败是线程桌面归属造成的误报，不能证明用户前台被切换。[CreateDesktopW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createdesktopw)、[GetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getforegroundwindow)
+- Desktop 创建现已移至专用 bootstrap 线程；`--private-desktop-owner-smoke` 验证当前线程 Desktop/foreground 前后相同，且新建 Desktop 可关闭。NativeProbe Release build 0 警告、0 错误；owner smoke 通过。尚未复跑 Shell 宿主，因此迁移探针在修复后的隔离边界上仍待确认；完整 filesystem 序列的超时点也未定位。此前 ZIP-only 已完成视图创建和 teardown，约 4 秒，挂点不在该单场景。
+- 修复后 ZIP-only watchdog 退出码 0：fixture、ZIP PIDL 解析、`BrowseObject`、一项视图枚举、Shell 菜单/拖放接口查询及 teardown 完成；外层 foreground HWND 前后同为 `0x550EC2`。完整 host-filter 运行到 ZIP 与 teardown 后退出码 1，外层 HWND 从 `0x10EA8` 变为 `0x550EC2`；后续只读 Win32 查询确认两者分别是 ChatGPT (`Chrome_WidgetWin_1`) 和 `dnplayer` / `EvertaleMockPreview` (`LDPlayerMainFrame`)。因此修正了旧桌面归属误报，但完整宿主仍出现实际前台差异；无法判断是探针中的 Shell 激活调用所致，还是期间外部窗口活动。立即停止所有 Shell 宿主/GUI 探针，不尝试恢复前台；需改用独立 Windows 会话/VM 或其他不共享当前交互桌面的隔离环境。
+
 - 用户授权继续做隔离 `IShellView` 迁移验证；生产窗格仍使用 ExplorerBrowser。本轮 NativeProbe Release 构建通过（0 警告、0 错误）。
 - `host-filter-private-desktop` 在独立 Private Desktop 上通过临时 filesystem 的筛选、Ctrl+A/Down/Enter 加速器调用、三层导航、上级及历史往返，并通过多个 Shell 位置的局部菜单/接口检查；但运行在 Search Folder 检查之后、ZIP 容器结果输出之前未返回，25 秒内部期限与 45 秒外部 watchdog 均触发。当前无法从日志区分 ZIP Shell provider 卡住还是其导航/清理调用阻塞，故该次全流程验收失败，不能将先前局部通过外推为完整宿主通过。
 - `host-menu-commands-private-desktop` 已执行列头菜单映射、Details、刷新、升降序排序/分组和焦点恢复局部检查；这些阶段自身报告前台句柄未变。探针返回后 `PrivateDesktopShellProbe` 的最终全局前台比较却为 false，未采样到变化发生于销毁视图、释放 COM、清理 fixture 或 Private Desktop 退出的哪个边界。按安全约束停止后续 Shell 宿主运行，不发布、不改产品宿主；菜单/命令结论仅保留为局部隔离证据。
 - 已为后续受控复跑增加 ZIP fixture/解析/导航各阶段标记，以及视图销毁、COM/PIDL 释放、父窗口处理、fixture 清理前后的前台句柄采样。NativeProbe Release 构建通过（0 警告、0 错误）；由于上次全局前台保护失败，本次只编译，未重跑任何 Shell 宿主。ZIP 的单目标入口现可通过既有 `host-filter-virtual-private-desktop -VirtualScope ZipContainer` watchdog 参数使用。
 - 后续按单目标入口运行 ZIP：Shell 绝对 PIDL 解析、`BrowseObject`、视图创建、菜单/拖放接口查询和逐阶段 teardown 均在约 4 秒内完成；探针线程始终运行于非输入 Private Desktop，内部 `GetForegroundWindow` 读数为 0。外层仍因前后台比较返回失败，但旧外层只输出布尔值，因此无法判定是实际前台句柄变化还是观察边界问题。该单场景排除了 ZIP 导航本身必然超时；此前完整序列的超时点仍未定位。
-- 已扩充 PrivateDesktopShellProbe 的超时及结束日志，输出外层实际前台 HWND 前后值。NativeProbe Release 构建和 `git diff --check` 通过；没有复跑 Shell 宿主。下一步根据已有日志核对窗口/桌面语义，只有建立可靠保护后才复测完整序列。完整 OLE 拖放、物理键盘消息循环和可见焦点仍未验证。内存问题继续按本路线图既定的固定 PID/固定负载纵向采样计划跟进。
+- 已扩充 PrivateDesktopShellProbe 的超时及结束日志，输出外层实际前台 HWND 前后值。迁移原型的焦点/宿主验证暂时需要独立 Windows 会话；在此之前可继续推进与窗口激活无关的 Q-Dir parity 源码工作，但不再启动 NativeProbe Shell view。完整 OLE 拖放、物理键盘消息循环和可见焦点仍未验证。内存问题继续按本路线图既定的固定 PID/固定负载纵向采样计划跟进。
 
 ## 2026-10-26：地址栏导航箭头右键打开历史
 

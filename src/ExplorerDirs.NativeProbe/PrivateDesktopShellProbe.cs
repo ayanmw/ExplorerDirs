@@ -27,13 +27,25 @@ internal static class PrivateDesktopShellProbe
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);
 
+    internal static int RunDesktopOwnershipSmoke()
+    {
+        var originalDesktop = GetThreadDesktop(GetCurrentThreadId());
+        var originalForeground = GetForegroundWindow();
+        var probeDesktop = CreateProbeDesktop("ExplorerDirs-Ownership-Smoke-" + Guid.NewGuid().ToString("N"));
+        var currentDesktop = GetThreadDesktop(GetCurrentThreadId());
+        var currentForeground = GetForegroundWindow();
+        var closed = CloseDesktop(probeDesktop);
+        var passed = originalDesktop != 0 && probeDesktop != 0 && originalDesktop == currentDesktop &&
+            originalForeground == currentForeground && closed;
+        Console.WriteLine($"private-desktop-owner-smoke: original-thread-desktop=0x{originalDesktop:X}; current-thread-desktop=0x{currentDesktop:X}; foreground-before=0x{originalForeground:X}; foreground-after=0x{currentForeground:X}; close-created-desktop={closed}; passed={passed}");
+        return passed ? 0 : 1;
+    }
+
     private static int Run(string kind, Func<int> probe)
     {
         var foregroundBefore = GetForegroundWindow();
         var desktopName = "ExplorerDirs-Probe-" + Guid.NewGuid().ToString("N");
-        var desktop = CreateDesktopW(desktopName, null, 0, 0, 0x01FF, 0);
-        if (desktop == 0)
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the isolated probe desktop.");
+        var desktop = CreateProbeDesktop(desktopName);
 
         var result = 1;
         Exception? failure = null;
@@ -92,6 +104,22 @@ internal static class PrivateDesktopShellProbe
         return result;
     }
 
+    private static nint CreateProbeDesktop(string name)
+    {
+        nint desktop = 0;
+        var error = 0;
+        var creator = new Thread(() =>
+        {
+            desktop = CreateDesktopW(name, null, 0, 0, 0x01FF, 0);
+            if (desktop == 0) error = Marshal.GetLastWin32Error();
+        }) { IsBackground = true, Name = "ExplorerDirs private Desktop creator" };
+        creator.Start();
+        creator.Join();
+        if (desktop == 0)
+            throw new System.ComponentModel.Win32Exception(error, "Could not create the isolated probe desktop.");
+        return desktop;
+    }
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint CreateDesktopW(string desktop, string? device, nint devmode, uint flags, uint desiredAccess, nint security);
 
@@ -100,4 +128,13 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint GetThreadDesktop(uint threadId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool CloseDesktop(nint desktop);
 }
