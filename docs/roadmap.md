@@ -2967,3 +2967,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 主题调色板原先仅将强调色以固定比例混入控件背景，红色系统色等输入可产生与底色对比不足的选中背景。新增回归先按预期失败，再让浅/深主题的选中背景至少达到 3:1；调整仅向黑或白作满足门槛所需的最小混合，保持源强调色方向。选中文字继续使用黑/白中对比更高的一方，并验证至少 4.5:1。
 - 覆盖红色、纯黑、纯白、灰色强调色与浅/深两主题的数值回归；完整 Release SettingsSmoke 通过，App Release build 0 警告、0 错误。未启动 GUI，无法据数值断言实际选中色块观感、原生 Shell 选择或高对比度可见效果。
+
+## 2026-10-26：Shift+方向键隔离探针边界
+
+- 为隔离 `IShellView` `TranslateAccelerator` 探针临时添加 Shift+Down 选区尝试。第一次 Private Desktop 运行中，Ctrl+A 正常、方向键焦点移动正常，单次 Shift+Down 返回 `S_OK` 但没有扩大选区；调整为“一个已选且聚焦的锚点”后，第二次运行反而在 Shift+Down 前 Ctrl+A 未选中任何项目。两轮父窗口均隐藏、前台未变，探针进程退出后清理 Private Desktop。
+- 结果无法区分 modifier 状态、单次 accelerator 调用与 Shell 消息泵/焦点状态的影响，不是产品缺陷结论。已撤回该误报式断言；当前现有 Ctrl+A/方向键探针继续通过但有重复性波动。要验证 Shift 范围选择，下一步需要完整键盘消息循环的隔离夹具；不能用单次 `TranslateAccelerator` 结果改变产品键盘路由或宣称 GUI 行为已验收。
+- 日志：`src/.state/native-probe-watchdog/20261026-171141-bec0d947.stdout.log`、`src/.state/native-probe-watchdog/20261026-171158-7fb9d5c1.stdout.log`。这两次失败样本只用于界定探针，不计为 Shell parity 通过或产品失败。
