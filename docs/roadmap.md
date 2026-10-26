@@ -3455,3 +3455,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 从原生 View 菜单定位 Details 项并使用当前实际 ID；在 Small Icons 基线上，将 `WM_COMMAND` 发给宿主父窗口不改变模式，发给对应 `IShellView` window 后目标 view 切到 Details。探针对两条路由分别复位基线并断言结果。
 - NativeProbe Release build 0 警告/错误；Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台窗口未变。
 - 这指向后续宿主必须把 Shell 命令路由到当前活动 view，但仍是合成消息，不是菜单实际点击或 WPF 消息路由验证。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-激活后的-shell-原生菜单组内容读取)。
+
+## 2026-10-27：四窗格共享菜单 frame 探针未通过
+
+- 隔离尝试把每个 Shell view 的子窗格 parent 与菜单 top-level frame 分离：Pane 1 可读共享菜单，激活 Pane 2 后 `GetMenu` 返回的句柄无有效菜单项（`GetMenuItemCount=-1`，host callback counts `5/9/4`）。NativeProbe build 通过，完整 session-restore watchdog 因菜单探针失败退出码 1。
+- 失败原型代码已撤回，既有四窗格 consumer 保持原样；不据此判断 Shell 菜单本身失败。下一步先查清跨 host 菜单安装/卸载顺序及 HMENU 生命周期，再实现共享 frame 协调并复测。
+- 详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格共享菜单宿主尝试未通过)。

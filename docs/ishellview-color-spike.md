@@ -861,3 +861,9 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 继续验证 View→Details 菜单命令分派：探针从激活后的 View 子菜单按本地化标题定位 Details 项并读取其运行时命令 ID（本机样本 `0x704B`），将 view 设为 Small Icons 作为基线。对宿主父 HWND 发送 `WM_COMMAND` 后模式仍为 `2`；重置基线后，将相同消息发送到目标 `IShellView` window，模式变为 Details `4`。断言覆盖父窗口无变化及目标 view 的模式变化，Release build 0 警告/错误，Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台句柄保持 `0x81852`。
 
 这说明原型中 Shell 菜单项自身的命令 ID 可由目标 view window 处理，也提示应用宿主需要把活动 view 的 Shell 命令送到正确窗口。实验使用合成 `WM_COMMAND`，没有真实跟踪菜单或鼠标选项；父窗口是探针的 `STATIC` host，不代表 WPF window 的默认/自定义窗口过程。仍需在真实 OLE 菜单循环和多 pane 活动目标下验证，不能直接当作产品路由实现已经确定。
+
+### 2026-10-27 四窗格共享菜单宿主尝试未通过
+
+为测试上节推导的多 pane 命令目标，在隔离 consumer 中尝试把 pane 的 Shell view parent（子窗格）与菜单 frame（顶层容器）分开，并按 pane 依序激活、向目标 view window 发送 Details 命令。NativeProbe Release build 通过，但 session-restore consumer 在 Pane 2 菜单读取处失败：Pane 1 可读到顶层共享菜单；切换到 Pane 2 后 `GetMenu` 返回的非零句柄没有可读菜单项（`GetMenuItemCount=-1`），当时 Pane 2 host 回调计数为 insert/set/remove `5/9/4`。失败日志：`src/.state/native-probe-watchdog/20261027-032413-14966fbe.stdout.log`。
+
+这不是 Windows 菜单系统或 `IShellView` 的负面结论，因为失败发生在 NativeProbe 自建的多 host 菜单 frame 管理。该 frame split 实验代码已撤回，原先四窗格 session restore consumer 和产品 ExplorerBrowser 未改。当前证据表明每个 view 的菜单不能只靠各自 host 独立 Set/Remove 同一个顶层菜单；下一步需隔离真实回调顺序、句柄有效期及跨 host 所有权，再设计协调器并复跑四窗格激活/卸载和命令目标验证。未验证真实菜单点击或 WPF 产品窗口。
