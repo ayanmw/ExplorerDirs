@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Diagnostics;
+using System.Reflection;
 
 namespace ExplorerDirs.NativeProbe;
 
@@ -63,8 +65,28 @@ internal static class ShellViewStateStreamSmoke
             "writing one host does not replace another host's initial stream");
 
         VerifyPersistedSessions();
+        VerifyCrossProcessPersistence();
 
         Console.WriteLine("Shell view state stream smoke: PASS");
+        return 0;
+    }
+
+    internal static int RunChildCommand(string[] args)
+    {
+        if (!Guid.TryParseExact(args[2], "N", out var sessionId))
+            throw new ArgumentException("Child session ID must be a compact GUID.", nameof(args));
+        var bytes = Convert.FromHexString(args[3]);
+        var store = new ShellViewStateStore(args[1]);
+        using var host = new StreamViewHost(0, [], store, sessionId);
+        if (args[0] == "--shell-view-state-store-child-write")
+        {
+            WriteBytes(host, bytes);
+            Console.WriteLine("Child view-state stream saved.");
+            return 0;
+        }
+
+        var actual = ReadBytes(host, bytes.Length);
+        Check(actual.SequenceEqual(bytes), "a separate process reads the exact persisted view-state stream");
         return 0;
     }
 
@@ -106,6 +128,53 @@ internal static class ShellViewStateStreamSmoke
         {
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static void VerifyCrossProcessPersistence()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+        var sessionId = Guid.NewGuid();
+        var expected = new byte[] { 41, 42, 43, 44, 45 };
+        try
+        {
+            var write = RunChild("--shell-view-state-store-child-write", directory,
+                sessionId.ToString("N"), Convert.ToHexString(expected));
+            Check(write.ExitCode == 0, $"writer process saved the session stream: {write.Output}");
+
+            var read = RunChild("--shell-view-state-store-child-read", directory,
+                sessionId.ToString("N"), Convert.ToHexString(expected));
+            Check(read.ExitCode == 0, $"a new process restored the session stream: {read.Output}");
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static (int ExitCode, string Output) RunChild(params string[] arguments)
+    {
+        var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Current process path is unavailable.");
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(Assembly.GetEntryAssembly()?.Location ?? throw new InvalidOperationException("Probe assembly path is unavailable."));
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the isolated NativeProbe child process.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(15_000))
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+            throw new TimeoutException("NativeProbe view-state child process exceeded 15 seconds.");
+        }
+        return (process.ExitCode, stdoutTask.GetAwaiter().GetResult() + stderrTask.GetAwaiter().GetResult());
     }
 
     private static void WriteBytes(StreamViewHost host, byte[] bytes)

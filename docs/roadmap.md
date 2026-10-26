@@ -3174,3 +3174,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `ShellViewStateStore` 现在把 Shell 的不透明 view-state stream 按稳定 GUID 会话键保存为分离文件；写入使用唯一临时文件并 flush，再替换目标文件。`StreamViewHost.Dispose` 在释放 Shell 写入流前提交快照，后续新建 store/host 会优先恢复该会话的字节；没有记录时仍使用导入的初始快照。此存储仅供 NativeProbe，未连接应用 profile、INI、窗口 session registry 或 Q-Dir 导入/导出。
 - 扩展 `--shell-view-state-stream-smoke` 覆盖两个会话各自写入、重建 store/host 后逐字节读回及未保存会话回退。未创建 Shell view，不能证明真实 Shell 销毁时的写入时序，也未运行独立进程重启验证。
 - 此结果把原型推进到跨 host 对象重建的本地磁盘持久化，但不关闭迁移阶段门槛；后续仍须先在独立 Windows 会话验证真实 view create/destroy 顺序，再设计与产品每标签 session identity 的适配。
+
+## 2026-10-26：跨进程复验隔离 view-state 文件存储
+
+- `--shell-view-state-stream-smoke` 现在启动两个隔离 NativeProbe 子进程：第一个以真实 COM IStream 写入并正常退出；第二个用新的 `ShellViewStateStore`/`StreamViewHost` 按同一 GUID 读取并逐字节比较。用例先因 child 命令未接线而按预期失败，接线后退出码 0。
+- 此证据验证探针文件存储跨进程可读，不代表进程崩溃、真实 `IShellView.DestroyViewWindow` 调用顺序或产品 session 重启恢复。没有创建 Shell view、GUI 或修改产品 profile；迁移门槛保持开放。

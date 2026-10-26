@@ -30,6 +30,8 @@ internal static class Program
             return QdrNativeViewProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
             return ShellViewStateStreamSmoke.Run();
+        if (args.Length == 4 && args[0] is "--shell-view-state-store-child-write" or "--shell-view-state-store-child-read")
+            return ShellViewStateStreamSmoke.RunChildCommand(args);
         if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
             return StaticShellColumnContractSmoke.Run();
         if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")

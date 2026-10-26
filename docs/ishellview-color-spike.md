@@ -8,6 +8,8 @@
 
 同一探针随后加入 `ShellViewStateStore`：以稳定 GUID 会话键将 opaque native stream 写入独立二进制文件，先写唯一临时文件并 flush，再原子替换目标；`StreamViewHost.Dispose` 在释放最后的写入流前提交保存。重新创建 store 和 host 后可读取原 stream，未保存的 GUID 仍使用构造时的初始字节。NativeProbe smoke 覆盖双会话隔离与恢复；没有模拟独立进程重启或真实 `IShellView` 的保存/销毁时序，因此这仍不等于产品标签会话持久化。
 
+跨进程复验增加两个 NativeProbe 子进程：写入进程创建 `StreamViewHost`、写真实 COM `IStream` 并退出；读取进程重新创建 store/host 后按相同 GUID 逐字节读回。该 smoke 证明独立进程可以消费原型文件状态，仍未启动 `IShellView`，因此不验证 Shell 真实销毁时的写流提交时序或应用会话恢复。
+
 ## 2026-10-26：内存 DC 字体资源生命周期
 
 字体策略 smoke 现在额外创建内存 GDI DC，调用真实 `TrySelect` 将逐项样式字体选入，再执行与项目绘制后相同的 `Restore`，确认原字体重新成为当前对象后才销毁 DC。定向 `--shell-view-color-policy-smoke` 通过。该结果覆盖 GDI 句柄选择/恢复，不创建 Shell view，也不证明真实 DefView 通知或可见像素绘制。
