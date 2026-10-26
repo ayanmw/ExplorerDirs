@@ -307,3 +307,5 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 2026-10-27 IShellView 合并 File/Edit 菜单原型：标准合并菜单 File 与 Edit 组中的命令现在按组归属识别，并将原始 Shell 命令 ID 发给活动 view HWND；Edit > Select All 仍走原生选择接口，View 命令保持原路由。合成 HMENU smoke 验证 File/Edit/View 命令分组、嵌套菜单路径、Edit 命令分类和非法组不匹配，没有创建 Shell view。实际 File/Edit 命令执行、菜单激活/显示、列标题范围及可见 GUI 交互未验证，不能视为迁移菜单门槛通过。
 
 2026-10-27 列标题菜单契约复核：Microsoft `IShellView::GetItemObject` 使用 `_SVGIO` 范围，官方枚举只有背景、选中、全部和已勾选项目；没有列标题范围。因此列标题菜单不是缺少一个 `GetItemObject` 参数，而是独立表头 `WM_CONTEXTMENU` 的创建、命令来源和执行路由问题。现有 Private Desktop 探针只捕获 popup、初始化查看/排序/分组子菜单并比较其命令 ID 偏移，随后取消菜单；尚未验证实际命令分发、排序列身份或用户可见行为。[Microsoft GetItemObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-getitemobject) · [Microsoft _SVGIO](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-_svgio)
+
+2026-10-27 OLE 宿主边框合同复核：隔离 `StreamViewHost` 的 `GetBorder` 返回父客户区；`RequestBorderSpace` / `SetBorderSpace` 接受零边框占用，并对非零工具栏空间返回 `INPLACE_E_NOTOOLSPACE`。`--shell-view-color-policy-smoke` 经真实 COM vtable 覆盖了有效/空参数及返回码，没有创建 `IShellView`。这只验证宿主合同，不证明 Shell 实际激活流程会按该顺序调用，也不代表完整宿主迁移门槛通过。
