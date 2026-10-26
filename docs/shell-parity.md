@@ -286,3 +286,5 @@ Ctrl+N 已创建独立窗口会话：主窗口继续使用 `ExplorerDirs.ini`，
 2026-10-27 IShellView 原型 F2 编辑焦点扩展：Icon、Details、SmallIcon、List、Tile 五种模式下，F2 均进入原生重命名编辑框；Left/Up/Right/Down 合成键后编辑框焦点保持，Private Desktop 完整流程连续两轮通过。真实多窗格焦点争用及 ExplorerBrowser 产品行为仍待可见验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-五种视图模式下-f2-编辑焦点隔离验证)
 
 2026-10-27 四窗格 IShellView F2 路由：四个 pane 分别启动重命名并将 Left/Up/Right/Down 路由到目标 view 后，编辑焦点保持，兄弟 pane 的 focused item 和 selection 不变，两轮 Private Desktop 完整探针通过。尚未验证 WPF 的错误窗格路由、物理输入或 ExplorerBrowser 产品行为。[隔离原型记录](ishellview-color-spike.md#2026-10-27-四窗格-f2-编辑方向键焦点隔离)
+
+2026-10-27 IShellView 错误目标焦点隔离：Pane 1 原生 F2 编辑时，Pane 2 收到 Pane 1 编辑框的合成 Down 消息并返回 `S_FALSE`，未夺取 Pane 1 编辑焦点；四窗格真实 Shell session-restore consumer 连续两轮通过。该结果不覆盖 WPF `HwndHost` 消息链或物理输入。[隔离原型记录](ishellview-color-spike.md#2026-10-27-错误-pane-的-accelerator-不夺取活动-f2-编辑焦点)

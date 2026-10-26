@@ -919,3 +919,11 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 `session-restore-private-desktop` watchdog 连续两轮退出码 0：`20261027-034716-d5121c08.stdout.log` 与 `20261027-034738-631c462c.stdout.log`。日志报告 `pane1` 到 `pane4` 均 `arrows=4/focus-isolated=True`，四窗格菜单激活/卸载恢复、视图状态恢复、Shell 文件操作、同/异目录通知仍通过，前台 HWND 未变化。
 
 这是 Private Desktop 内显式定向至目标 view 的合成 accelerator 检查。它验证四个 view 的原生焦点/选区互不串扰，但不模拟 WPF `HwndHost` 的 Tab/Shift+Tab 或错误 pane 路由，也未覆盖真实键盘、鼠标、可见窗口或 ExplorerBrowser 正式产品。因此不能视为用户报告的多窗格重命名问题已修复，产品代码和 release 未改。
+
+### 2026-10-27 错误 pane 的 accelerator 不夺取活动 F2 编辑焦点
+
+四窗格 consumer 新增反向路由试验：Pane 1 的原生 `Edit` 正持有 F2 重命名焦点时，将 `WM_KEYDOWN Down`（`hwnd` 指向 Pane 1 的编辑框）故意交给 Pane 2 的 `IShellView::TranslateAccelerator`。目标错误 pane 返回 `S_FALSE`；Pane 1 编辑框保持有效并继续持有焦点，随后对四个 pane 分别执行正确路由的 Left/Up/Right/Down，兄弟 view 的 focused item/selection 均保持不变。
+
+`session-restore-private-desktop` 完整 watchdog 连续两轮退出码 0：`20261027-035210-efee867c.stdout.log`、`20261027-035232-37d2a85f.stdout.log`。两轮都报告 `foreign-route=pane2:00000001/pane1-edit-retained=True` 和四 pane `arrows=4/focus-isolated=True`，前台 HWND 未变化。
+
+这是直接合成调用 Shell accelerator 的错误目标实验，不模拟 WPF `HwndHost` 事件链，也不能证明真实物理消息一定到达正确 host。它说明原生 DefView 在该样本中对错误 view 返回未处理并保留原编辑焦点；产品多窗格焦点问题仍需产品消息循环与真实输入验收。产品 ExplorerBrowser、配置和 release 未改。

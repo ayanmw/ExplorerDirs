@@ -3488,3 +3488,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 四窗格 session-restore consumer 现在逐个激活 pane、打开 F2 原生重命名，并将四方向键送到各自编辑框。每次按键后四个 view 的 focused item 与 selection 均逐一核对；两轮完整 Private Desktop watchdog 通过，四 pane 都报告 `arrows=4/focus-isolated=True`，前台窗口未变。
 - 该结果证明定向 `IShellView::TranslateAccelerator` 下 pane 状态隔离；不覆盖 WPF 焦点链、错误 pane 路由、真实输入或 ExplorerBrowser 产品宿主，故多窗格重命名 P0 仍未验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-四窗格-f2-编辑方向键焦点隔离)
+
+## 2026-10-27：错误 pane 的 accelerator 不夺取活动 F2 编辑焦点
+
+- 四窗格隔离 consumer 在 Pane 1 重命名时，把 Down 键消息故意交给 Pane 2 的 `IShellView::TranslateAccelerator`。Pane 2 返回 `S_FALSE`，Pane 1 编辑框焦点保持；随后四 pane 各自的四方向键路由与兄弟 focused item/selection 隔离仍通过。完整 Private Desktop watchdog 两轮退出码 0，前台未变。
+- 这只验证直接合成 Shell accelerator 的错误目标路径，不模拟 WPF `HwndHost` 消息链或真实物理键；产品多窗格键盘 P0 仍待可见验收。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27-错误-pane-的-accelerator-不夺取活动-f2-编辑焦点)。

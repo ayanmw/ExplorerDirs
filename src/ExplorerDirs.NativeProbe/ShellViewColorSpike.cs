@@ -658,6 +658,22 @@ internal static class ShellViewColorSpike
             if (f2Hr < 0 || edit == 0 || GetFocus() != edit)
                 throw new InvalidOperationException($"Pane {target + 1} did not focus its inline rename editor (hr=0x{f2Hr:X8}; edit=0x{edit:X}; focus=0x{GetFocus():X}).");
 
+            if (target == 0)
+            {
+                var foreignPaneMessage = new NativeMessage
+                {
+                    Window = edit,
+                    Id = 0x0100,
+                    WParam = 0x28,
+                    LParam = 0x00500001
+                };
+                var foreignPaneHr = At<TranslateAccelerator>(views[1], 5)(views[1], ref foreignPaneMessage);
+                Pump(10);
+                if (foreignPaneHr < 0 || !IsWindow(edit) || GetFocus() != edit)
+                    throw new InvalidOperationException($"A sibling pane's accelerator disrupted Pane 1 rename focus (hr=0x{foreignPaneHr:X8}; edit-alive={IsWindow(edit)}; focus=0x{GetFocus():X}).");
+                verified.Add($"foreign-route=pane2:{foreignPaneHr:X8}/pane1-edit-retained=True");
+            }
+
             var arrows = new[]
             {
                 (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
