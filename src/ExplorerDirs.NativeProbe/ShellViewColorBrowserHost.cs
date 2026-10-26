@@ -125,6 +125,7 @@ public static class ShellViewColorBrowserHostSmoke
             "a failed GetDisplayNameOf callback keeps the Shell item visible", getDisplayNameResult: unchecked((int)0x80004005));
 
         CheckNavigationCallback();
+        CheckIndependentPaneNavigationHistories();
         CheckNavigationExceptionComBoundary();
     }
 
@@ -826,6 +827,58 @@ public static class ShellViewColorBrowserHostSmoke
 
         Check(pool.FreedCount > 0,
             "disposing the color host releases the PIDLs owned by its navigation history");
+    }
+
+    private static void CheckIndependentPaneNavigationHistories()
+    {
+        using var pool = new ShellViewNavigationHistorySmoke.PidlPool();
+        var firstRoot = pool.Create(101);
+        var firstChild = pool.Create(102);
+        var firstFailed = pool.Create(104);
+        var secondRoot = pool.Create(201);
+        var secondChild = pool.Create(202);
+        var secondBranch = pool.Create(203);
+        var firstHistory = new ShellViewNavigationHistory(firstRoot, pool.Clone, pool.Free,
+            pool.Equal, pool.Parent, pool.Combine,
+            (target, _) => pool.Read(target) == 104 ? unchecked((int)0x80004005) : 0);
+        var secondHistory = new ShellViewNavigationHistory(secondRoot, pool.Clone, pool.Free,
+            pool.Equal, pool.Parent, pool.Combine, (_, _) => 0);
+        using var firstHost = new ShellViewColorBrowserHost(0, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)), firstHistory);
+        using var secondHost = new ShellViewColorBrowserHost(0, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)), secondHistory);
+        var firstBrowser = Marshal.GetComInterfaceForObject(firstHost, typeof(IStreamProbeBrowser));
+        var secondBrowser = Marshal.GetComInterfaceForObject(secondHost, typeof(IStreamProbeBrowser));
+        try
+        {
+            var firstBrowse = GetComMethod<BrowseObjectCallback>(firstBrowser, 11);
+            var secondBrowse = GetComMethod<BrowseObjectCallback>(secondBrowser, 11);
+            Check(firstBrowse(firstBrowser, firstChild, 0) == 0 && firstHistory.Index == 1 &&
+                  pool.Read(firstHistory.CurrentPidl) == 102 && secondHistory.Index == 0 &&
+                  pool.Read(secondHistory.CurrentPidl) == 201,
+                "the first Shell pane records navigation without changing its sibling history");
+            Check(secondBrowse(secondBrowser, secondChild, 0) == 0 && secondHistory.Index == 1 &&
+                  pool.Read(secondHistory.CurrentPidl) == 202 && firstHistory.Index == 1 &&
+                  pool.Read(firstHistory.CurrentPidl) == 102,
+                "interleaved navigation keeps each Shell pane at its own location");
+            Check(firstBrowse(firstBrowser, 0, 0x4000) == 0 && firstHistory.Index == 0 &&
+                  pool.Read(firstHistory.CurrentPidl) == 101 && secondHistory.Index == 1 &&
+                  pool.Read(secondHistory.CurrentPidl) == 202,
+                "Back in one Shell pane does not move the sibling pane");
+            Check(secondBrowse(secondBrowser, secondBranch, 0) == 0 &&
+                  secondHistory.Index == 2 && pool.Read(secondHistory.CurrentPidl) == 203 &&
+                  firstHistory.Index == 0 && pool.Read(firstHistory.CurrentPidl) == 101,
+                "a history branch in one Shell pane does not replace the sibling travel log");
+            Check(firstBrowse(firstBrowser, firstFailed, 0) == unchecked((int)0x80004005) &&
+                  firstHistory.Index == 0 && pool.Read(firstHistory.CurrentPidl) == 101 &&
+                  secondHistory.Index == 2 && pool.Read(secondHistory.CurrentPidl) == 203,
+                "a failed navigation preserves both pane locations and independent history indices");
+        }
+        finally
+        {
+            Marshal.Release(secondBrowser);
+            Marshal.Release(firstBrowser);
+        }
     }
 
     private static void CheckNavigationExceptionComBoundary()

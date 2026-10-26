@@ -3297,3 +3297,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 直接调用目标 `IDropTarget` 的 `DragEnter/DragOver/Drop` 返回 COPY effect，但没有生成目标文件；因此这不是拖放成功证据。真正 OLE `DoDragDrop` 前置定位失败：Private Desktop 的 `GetCursorPos` 返回失败。未对当前桌面设置光标或注入鼠标输入，临时失败实现已撤回。
 - Shell 拖放仍是迁移原型的未完成验收项。需要隔离桌面具备自身可用光标，或用户明确授权的隔离 GUI 输入会话后，再验证实际文件内容、双方视图通知和操作效果。详细失败记录与日志见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-隔离-shell-拖放探针未通过产品行为门槛)。
+
+
+## 2026-10-27：双 pane Shell 导航历史隔离 smoke
+
+- 两个独立 `ShellViewColorBrowserHost` 经各自的 `IShellBrowser::BrowseObject` COM 入口交错导航、后退、建立分支与失败跳转；每个步骤断言双方的当前 PIDL 和 history index。NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。
+- 这是合成 PIDL 的宿主历史状态 smoke，不创建实际 Shell view；真实 Shell back/forward、可见按钮状态和 Pane 集成仍未验证，产品代码与 release 未改。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-双-pane-ishellbrowser-导航历史隔离-smoke)。

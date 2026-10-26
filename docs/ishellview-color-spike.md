@@ -760,3 +760,8 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 从真实源 view 选中 child PIDL 后取得 `IDataObject`，并从目标文件夹的 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得 Shell drop target。手动调用 `DragEnter`、`DragOver`、`Drop` 虽均返回成功且保留 COPY effect，目标夹具始终未生成文件；这条直接回调路径不构成真实拖放验收。进一步改为 OLE `DoDragDrop` 后，Private Desktop 中 `GetCursorPos` 返回失败，无法在不移动/注入用户桌面输入的情况下把隔离目标放到当前光标下，因而没有开始 OLE 拖放循环。相关失败日志：`20261027-003901-65e574d6.stdout.log`、`20261027-003958-08c0f48b.stdout.log`、`20261027-004029-d5c2fb1a.stdout.log`、`20261027-004054-b9fd9a72.stdout.log`、`20261027-004126-daa97a66.stdout.log`、`20261027-004146-fd004e7e.stdout.log`、`20261027-004213-3866e1a3.stdout.log`、`20261027-004239-60802bf2.stdout.log`、`20261027-004305-030e6607.stdout.log`、`20261027-004459-b33c6755.stdout.log`。
 
 失败的临时拖放代码已撤回；四窗格跨目录通知隔离的已提交探针不受影响。本记录不判定 Windows Shell 拖放本身失败，也不代表产品拖放已验证。后续需要让真实 OLE 拖放循环在可定位指针的独立测试桌面内运行，或在用户明确授权的隔离 GUI 会话中进行；不调用 `SetCursorPos` 修改当前用户指针。官方合同说明：文件夹级 drop target 通过 `IShellFolder::CreateViewObject` 请求，而条目级 `GetUIObjectOf(IID_IDropTarget)` 的 `cidl` 需为 1。
+### 2026-10-27 双 pane IShellBrowser 导航历史隔离 smoke
+
+`ShellViewColorBrowserHostSmoke` 现通过两个独立 host 暴露出的 `IShellBrowser::BrowseObject` COM vtable 交错执行导航：各自进入不同 PIDL、第一 pane 后退、第二 pane 建立新历史分支，以及第一 pane 的失败目标。每一步都同时断言两个 history 的当前位置和索引；跨 pane 操作没有改变另一方历史，失败导航保留双方状态。NativeProbe Release 构建 0 警告/错误，`--shell-view-color-policy-smoke` 全部通过。
+
+此项使用 `ShellViewNavigationHistorySmoke.PidlPool` 的合成 PIDL 与成功/失败回调，不创建真实 Shell view，也不证明后退/前进按钮状态、travel log 或可见 Pane 导航。实际 `IShellView` 宿主历史接线仍需窗口级验证；产品 ExplorerBrowser 代码、配置和 release 未修改。
