@@ -364,9 +364,10 @@ internal static class ShellViewColorSpike
         Pump(150);
         var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
         var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
+        var selectAllRouting = VerifyFourPaneCtrlARouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -502,6 +503,83 @@ internal static class ShellViewColorSpike
         }
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Pane arrow routing changed the foreground window outside the Private Desktop probe.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneCtrlARouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Ctrl+A routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var verified = new List<string>(3);
+        var originalKeyboardState = new byte[256];
+        if (!GetKeyboardState(originalKeyboardState))
+            throw new InvalidOperationException("Could not snapshot the isolated probe thread keyboard state.");
+        var controlDownState = (byte[])originalKeyboardState.Clone();
+        controlDownState[0x11] |= 0x80; // VK_CONTROL down only on this isolated probe thread.
+        try
+        {
+            for (var target = 0; target < 3; target++)
+            {
+                var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+                Check(windowHr);
+                var listView = FindChildByClass(viewWindow, "SysListView32");
+                if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for Ctrl+A.");
+                Check(At<ActivateView>(views[target], 7)(views[target], 2)); // SVUIA_ACTIVATE_FOCUS.
+                _ = SetFocus(listView);
+                if (GetFocus() != listView)
+                    throw new InvalidOperationException($"Pane {target + 1} list did not receive isolated keyboard focus for Ctrl+A.");
+                if (GetForegroundWindow() != foreground)
+                    throw new InvalidOperationException("Activating a pane for Ctrl+A changed the foreground window.");
+
+                var message = new NativeMessage
+                {
+                    Window = listView,
+                    Id = 0x0100, // WM_KEYDOWN
+                    WParam = (nuint)'A',
+                    LParam = 0x001E0001
+                };
+                int result;
+                if (!SetKeyboardState(controlDownState))
+                    throw new InvalidOperationException("Could not set the isolated probe thread Ctrl modifier state.");
+                try { result = At<TranslateAccelerator>(views[target], 5)(views[target], ref message); }
+                finally
+                {
+                    if (!SetKeyboardState(originalKeyboardState))
+                        throw new InvalidOperationException("Could not restore the isolated probe thread keyboard state.");
+                }
+                Check(result);
+
+                Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 1, out var selectedCount)); // SVGIO_SELECTION.
+                Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 2, out var totalCount)); // SVGIO_ALLVIEW.
+                if (totalCount < 2 || selectedCount != totalCount)
+                    throw new InvalidOperationException($"Pane {target + 1} Ctrl+A selected {selectedCount}/{totalCount} items.");
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    if (pane == target) continue;
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var siblingSelection));
+                    if (siblingSelection != 0)
+                        throw new InvalidOperationException($"Ctrl+A in pane {target + 1} selected {siblingSelection} items in sibling pane {pane + 1}.");
+                }
+                verified.Add($"pane{target + 1}:{selectedCount}");
+
+                for (var item = 0; item < totalCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], item, 0));
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var remainingSelection));
+                    if (remainingSelection != 0)
+                        throw new InvalidOperationException($"Ctrl+A probe left {remainingSelection} selected items in pane {pane + 1}.");
+                }
+            }
+        }
+        finally
+        {
+            if (!SetKeyboardState(originalKeyboardState))
+                throw new InvalidOperationException("Could not restore the isolated probe thread keyboard state after Ctrl+A routing.");
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Ctrl+A pane routing changed the foreground window.");
         return string.Join(',', verified);
     }
 
@@ -2759,6 +2837,8 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
+    [DllImport("user32.dll")] private static extern bool GetKeyboardState([Out] byte[] state);
+    [DllImport("user32.dll")] private static extern bool SetKeyboardState([In] byte[] state);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProc callback, nuint id);

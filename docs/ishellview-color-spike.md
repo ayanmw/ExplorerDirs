@@ -799,3 +799,11 @@ Release NativeProbe 构建 0 警告/错误；Private Desktop watchdog 连续三�
 NativeProbe Release 构建 0 警告/错误；完整四窗格 Private Desktop watchdog 连续三轮退出码 0，前台 HWND 保持 `0x81852`。日志：`20261027-010520-482e0ca0.stdout.log`、`20261027-010542-f36a9d5b.stdout.log`、`20261027-010559-e5ef25fc.stdout.log`。
 
 这证明默认 filesystem `IShellView` 在三个标准模式下能经各自 accelerator 入口移动 pane 内 Shell 焦点，并保持兄弟 view 状态。消息由隔离探针合成并直接交给 Shell，不是物理键盘/完整应用消息循环；不证明 WPF `HwndHost` 焦点、Tab/Shift+Tab、重命名编辑器、剪贴板操作或用户可见行为。产品 ExplorerBrowser、配置与 release 未修改。
+
+### 2026-10-27 四窗格 Ctrl+A 选择路由
+
+在同一四窗格 consumer 中逐 pane 激活各自 `IShellView` 与列表焦点，以隔离探针线程的键盘状态设置 Ctrl 按下，然后经对应 `IShellView::TranslateAccelerator` 派发 Ctrl+A。pane 1–3 分别读回自身全部两项被选中，另外三个 pane 的选中项数量保持为零；每步清除选择，并在 finally 路径恢复原线程键盘状态。没有读取或写入系统剪贴板。
+
+NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 watchdog 连续三轮退出码 0，记录 `ctrl-a=pane1:2,pane2:2,pane3:2`，前台 HWND 保持 `0x81852`。日志：`20261027-010720-60883814.stdout.log`、`20261027-010744-e5a5e1ee.stdout.log`、`20261027-010803-f770a4fc.stdout.log`。
+
+该证据是直接合成 Ctrl+A 消息与线程 modifier 状态的 Shell accelerator 路径，不是物理键盘或完整产品消息循环验收；第四 pane 只有一个 fixture 项且未纳入全选断言。产品 ExplorerBrowser、WPF、剪贴板与 release 未修改。

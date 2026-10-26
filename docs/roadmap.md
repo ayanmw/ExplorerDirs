@@ -3326,3 +3326,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在真实隔离 Shell view 的 Details、List、Icon 三种模式中，分别通过目标 view 的 `TranslateAccelerator` 将第一项焦点移动到下一项；网格视图使用 Right，Details/List 使用 Down。四个 view 的焦点读回确认兄弟 pane 不变；单项第四 pane 不参与移动断言。
 - Private Desktop 完整 session-restore probe 连续三轮退出码 0，菜单路由、选择项菜单、文件操作和通知仍通过，前台句柄未变。
 - 此为合成消息直调 Shell accelerator，不等同物理键盘、完整 message loop、重命名编辑或产品 WPF 焦点验收。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-ishellview-方向键焦点路由)。
+
+## 2026-10-27：四窗格 Ctrl+A 选择路由
+
+- 在三个包含多项的真实 Shell pane 上逐一通过各自 `IShellView::TranslateAccelerator` 派发 Ctrl+A。每次仅目标 view 的两项全选，其他 pane 选择数为零；探针随后清空选择，并恢复线程键盘 modifier 状态。
+- Private Desktop 完整四窗格探针连续三轮退出码 0；方向键、各 pane Shell 菜单、文件操作和目录通知检查同步通过，主桌面前台不变；未操作系统剪贴板。
+- 这是合成按键与 modifier 状态的单次 Shell accelerator 路径，不证明物理 Ctrl+A、完整消息循环或 ExplorerBrowser 产品焦点接线。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-ctrl-a-选择路由)。
