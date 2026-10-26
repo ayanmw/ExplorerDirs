@@ -6,9 +6,9 @@
 
 新增 `--shell-view-state-stream-smoke`，不创建 `IShellView`，直接通过真实 Windows `SHCreateMemStream`/COM `IStream` 接口写入字节，再请求读取流并逐字节比较；还以两个 host 共用一个初始数组后修改调用方数组的方式，验证每个 host 保留独立初始快照，且其中一个 host 的 stream 更新不会覆盖另一个 host。两项回归分别先因读回旧初始值、初始数组被外部修改而失败，修复后通过。NativeProbe/App Release build 与完整 SettingsSmoke 通过，0 警告/错误。此结果只证明同一个 `StreamViewHost` 实例内存往返及实例隔离；没有进程重启持久化或 Q-Dir 互操作证据。
 
-同一探针随后加入 `ShellViewStateStore`：以稳定 GUID 会话键将 opaque native stream 写入独立二进制文件，先写唯一临时文件并 flush，再原子替换目标；`StreamViewHost.Dispose` 在释放最后的写入流前提交保存。重新创建 store 和 host 后可读取原 stream，未保存的 GUID 仍使用构造时的初始字节。NativeProbe smoke 覆盖双会话隔离与恢复；没有模拟独立进程重启或真实 `IShellView` 的保存/销毁时序，因此这仍不等于产品标签会话持久化。
+同一探针随后加入 `ShellViewStateStore`：以稳定 GUID 会话键将 opaque native stream 写入独立二进制文件，先写唯一临时文件并 flush，再原子替换目标；`StreamViewHost.Dispose` 在释放最后的写入流前提交保存。重新创建 store 和 host 后可读取原 stream，未保存的 GUID 仍使用构造时的初始字节。NativeProbe smoke 覆盖双会话隔离与恢复；尽管后续已增加独立进程读写复验，真实 `IShellView` 的保存/销毁时序及产品标签会话持久化仍未验证。
 
-跨进程复验增加两个 NativeProbe 子进程：写入进程创建 `StreamViewHost`、写真实 COM `IStream` 并退出；读取进程重新创建 store/host 后按相同 GUID 逐字节读回。该 smoke 证明独立进程可以消费原型文件状态，仍未启动 `IShellView`，因此不验证 Shell 真实销毁时的写流提交时序或应用会话恢复。
+跨进程复验由三个 NativeProbe 子进程组成：两个先后运行的写入进程针对同一 GUID 各写一代状态并退出，最后一个新进程重新创建 store/host，逐字节读回第二代最新内容。该 smoke 证明独立进程可恢复并更新原型文件状态，仍未启动 `IShellView`，因此不验证 Shell 真实销毁时的写流提交时序或应用会话恢复。
 
 ## 2026-10-26：内存 DC 字体资源生命周期
 

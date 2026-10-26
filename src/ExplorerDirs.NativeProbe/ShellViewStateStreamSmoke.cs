@@ -134,16 +134,21 @@ internal static class ShellViewStateStreamSmoke
     {
         var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
         var sessionId = Guid.NewGuid();
-        var expected = new byte[] { 41, 42, 43, 44, 45 };
+        var firstGeneration = new byte[] { 41, 42, 43, 44, 45 };
+        var latestGeneration = new byte[] { 51, 52, 53, 54, 55, 56 };
         try
         {
             var write = RunChild("--shell-view-state-store-child-write", directory,
-                sessionId.ToString("N"), Convert.ToHexString(expected));
-            Check(write.ExitCode == 0, $"writer process saved the session stream: {write.Output}");
+                sessionId.ToString("N"), Convert.ToHexString(firstGeneration));
+            Check(write.ExitCode == 0, $"first writer process saved the session stream: {write.Output}");
+
+            var update = RunChild("--shell-view-state-store-child-write", directory,
+                sessionId.ToString("N"), Convert.ToHexString(latestGeneration));
+            Check(update.ExitCode == 0, $"later writer process updated the session stream: {update.Output}");
 
             var read = RunChild("--shell-view-state-store-child-read", directory,
-                sessionId.ToString("N"), Convert.ToHexString(expected));
-            Check(read.ExitCode == 0, $"a new process restored the session stream: {read.Output}");
+                sessionId.ToString("N"), Convert.ToHexString(latestGeneration));
+            Check(read.ExitCode == 0, $"a new process restored the latest session generation: {read.Output}");
         }
         finally
         {

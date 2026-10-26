@@ -3177,5 +3177,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-26：跨进程复验隔离 view-state 文件存储
 
-- `--shell-view-state-stream-smoke` 现在启动两个隔离 NativeProbe 子进程：第一个以真实 COM IStream 写入并正常退出；第二个用新的 `ShellViewStateStore`/`StreamViewHost` 按同一 GUID 读取并逐字节比较。用例先因 child 命令未接线而按预期失败，接线后退出码 0。
+- `--shell-view-state-stream-smoke` 现在启动三个隔离 NativeProbe 子进程：两个依次用同一 GUID 写入不同代的真实 COM IStream 状态并退出；第三个以新 store/host 读回最新一代并逐字节比较。复验退出码 0。
 - 此证据验证探针文件存储跨进程可读，不代表进程崩溃、真实 `IShellView.DestroyViewWindow` 调用顺序或产品 session 重启恢复。没有创建 Shell view、GUI 或修改产品 profile；迁移门槛保持开放。
