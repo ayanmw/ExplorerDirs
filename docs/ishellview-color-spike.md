@@ -1052,6 +1052,12 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 
 NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步在禁止合成用户输入的边界内评估 OLE drag-loop 验证方式，并继续迁移所需的其余宿主能力；本探针不会被视为拖放迁移完成。
 
+#### 2026-10-27 当前会话复跑
+
+使用 `scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 45` 复跑，退出码 0。新的逐项结果再次显示：选中项对象和 `SHCreateDataObject` 的七种格式、`CF_HDROP` 路径、CIDA 父/子 PIDL 路径以及异步接口初始状态相同（`async-mode=False`、`in-operation=False`）；对真实选中项对象直接调用目标 `DragEnter/DragOver/Drop` 返回 `S_OK`、COPY effect=1，但目标文件未生成；对 `SHCreateDataObject` 对象调用相同目标回调则成功复制且保留源文件。前台 HWND 未改变。日志：`src/.state/native-probe-watchdog/20261027-061828-f46d134c.stdout.log`。
+
+复跑确认差异仍在，但尚未定位其根因；不能把相同公开格式等同于相同内部拖放生命周期。下一步需在授权的隔离可接收输入环境取得真实 OLE `DoDragDrop` 闭环，或继续从非输入可观察的 Shell source/target 回调调查实际操作依赖。当前桌面约束下不模拟鼠标/键盘，也不把直接回调测试当作拖放完成。
+
 ### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
 
 frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再由当前 coordinator owner 执行；View 菜单分支之前没有复核 owner，Edit → Select All 已有该检查。两条消息之间切换 pane 时，旧命令可能以新 frame 菜单匹配出命令 ID，却向旧 owner 的 view HWND 发送。本轮在 View 命令执行前加入 owner 检查，并把 coordinator 活动状态传入 dispatcher。NativeProbe Release 构建 0 警告/错误；无 Shell-view 的 `--shell-view-color-policy-smoke` 通过，新增隐藏 frame 两 pane 回归确认 stale owner 的已识别命令被消费但不派发。没有创建 `IShellView`、显示菜单或启动产品 ExplorerBrowser；实际 Shell 菜单时序及可见行为仍待隔离桌面验收。

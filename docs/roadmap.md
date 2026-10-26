@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：复核隔离 IShellView 拖放目标接收
+
+- 复跑 `drop-target-private-desktop`，确认注册目标对 `SHCreateDataObject` 的真实 Shell 文件对象能复制并保留源文件；对真实 `IShellView` 选中项对象直接调用相同的 `DragEnter/DragOver/Drop` 虽返回 `S_OK` 和 COPY effect，却没有生成目标文件。两种对象当前可见格式、CF_HDROP/CIDA 路径及 async capability 初始值相同，根因未明。
+- Private Desktop watchdog 退出码 0，前台 HWND 不变。该回调探针不等于完整 OLE `DoDragDrop`；真实源/目标循环、移动/修饰键、可见交互和产品宿主仍是迁移门槛。复跑证据见[IShellView 拖放记录](ishellview-color-spike.md#2026-10-27-当前会话复跑)。
+
 ## 2026-10-27：保存当前工作区为桌面启动项
 
 - 文件菜单新增“保存当前工作区到桌面…”。它把当前所有窗格、标签及视图状态导出为配置目录 `Workspaces` 下的 `.qdr`，并在用户选择的位置创建 Windows `.lnk`；快捷方式以应用自身为目标，参数指向该状态文件。通过 Shell Link COM 写入并临时文件原子替换，不改写用户桌面或已有 Q-Dir 配置，除非用户主动选择桌面位置。
