@@ -1,5 +1,12 @@
 # 路线图
 
+## 2026-10-26：IShellView 隔离迁移原型复跑
+
+- 用户授权继续做隔离 `IShellView` 迁移验证；生产窗格仍使用 ExplorerBrowser。本轮 NativeProbe Release 构建通过（0 警告、0 错误）。
+- `host-filter-private-desktop` 在独立 Private Desktop 上通过临时 filesystem 的筛选、Ctrl+A/Down/Enter 加速器调用、三层导航、上级及历史往返，并通过多个 Shell 位置的局部菜单/接口检查；但运行在 Search Folder 检查之后、ZIP 容器结果输出之前未返回，25 秒内部期限与 45 秒外部 watchdog 均触发。当前无法从日志区分 ZIP Shell provider 卡住还是其导航/清理调用阻塞，故该次全流程验收失败，不能将先前局部通过外推为完整宿主通过。
+- `host-menu-commands-private-desktop` 已执行列头菜单映射、Details、刷新、升降序排序/分组和焦点恢复局部检查；这些阶段自身报告前台句柄未变。探针返回后 `PrivateDesktopShellProbe` 的最终全局前台比较却为 false，未采样到变化发生于销毁视图、释放 COM、清理 fixture 或 Private Desktop 退出的哪个边界。按安全约束停止后续 Shell 宿主运行，不发布、不改产品宿主；菜单/命令结论仅保留为局部隔离证据。
+- 下一步先只读缩小两个边界：拆开 Search Folder 后的 ZIP 导航/清理步骤，并为菜单探针在各 teardown 阶段记录前台句柄与窗口状态。重新运行前必须保证失败时可以安全终止且无任何用户前台变化；完整 OLE 拖放、物理键盘消息循环和可见焦点仍未验证。内存问题继续按本路线图既定的固定 PID/固定负载纵向采样计划跟进。
+
 ## 2026-10-26：地址栏导航箭头右键打开历史
 
 - 对照 [Q-Dir FAQ 146](https://www.softwareok.com/?faq=146&seite=faq-Q-DIR)，在每个窗格后退/前进箭头上增加右键菜单入口，复用该标签现有的最近路径列表，点击历史项直接导航；菜单锚定在被右键的箭头下方。左键命令和路径输入框原生右键菜单保持原样。

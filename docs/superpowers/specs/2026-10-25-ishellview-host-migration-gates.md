@@ -129,3 +129,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 ## 当前下一步
 
 阶段 0 的可执行能力/证据矩阵已列出；阶段 1 filesystem 原型已验证三层绝对 PIDL 导航、Shell 父级边界、历史往返/分支截断、失败目标保留旧 view。七类虚拟位置现各自通过独立 Private Desktop view 创建/菜单查询探针；核心动词状态按 provider 记录，Search Folder 结果数不稳定，ZIP 命令名查询跳过。默认 filesystem 背景菜单的 Details、Refresh、排序与分组升降序命令均有实际 `InvokeCommand` 和状态读回；扩展复测一次在清理后前台对照失败，原因未定，当前先停用新的 Shell view 运行。手动直调 `IDropTarget::Drop` 不作为拖放行为结论。完整 `DoDragDrop` 会按当前鼠标指针定位目标窗口，需要活动输入桌面；当前 Private Desktop 不活动，不能安全地将输入注入用户桌面。后续在隔离且可接收输入的测试会话，仅对临时 filesystem fixture 验证 OLE source/target；不调用虚拟位置的 Drop，也不启动产品 ExplorerBrowser。此原型授权不代表产品文件视图迁移批准；迁移决策仍待用户审阅本草案。Shift 范围选择的合成 `TranslateAccelerator` 结果不作为失败门槛；完整消息循环或真实输入证据尚缺。
+
+2026-10-26 受用户授权复跑迁移探针：Release 构建成功（0 警告/错误）。Private Desktop 导航/筛选探针重新通过临时 filesystem 的绝对 PIDL 深层导航、父级、历史、加速器单次派发及局部 Shell 菜单检查，但在 Search Folder 检查之后、ZIP 容器输出之前未完成；内部 25 秒等待及外部 45 秒 watchdog 触发。现有日志不能确定挂点是在 ZIP provider 导航、视图销毁还是随后资源清理。Private Desktop 菜单命令探针完成列头菜单映射、视图/刷新/排序/分组和局部焦点恢复后，探针内多个阶段仍报告前台未变，但外层在调用返回后检测到全局前台句柄不同。由于没有逐个 teardown 阶段采样，本次不能确定变化来源。按安全边界暂停后续 Shell 宿主运行；此结果不作完整迁移通过证据。
+
+下次先做源码级缩小：为 ZIP 目标和 Search Folder 之后的清理拆分独立门槛，为菜单探针在 DestroyView、接口释放、fixture 清理和线程退出前后记录前台句柄。重新运行需要满足失败可终止且不改变用户前台的保护条件；完整 OLE 拖放与真实物理键盘/可见焦点仍未验证。用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。
