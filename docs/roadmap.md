@@ -3505,3 +3505,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 尝试将 frame 收到的 Shell Details 命令 `0x704B` 转发到 coordinator 当前记录的活动视图；命令到达 frame subclass，但目标 pane 2 的视图模式没有变化，owner 仍指向 pane 1。进一步按焦点 HWND 选择 pane 也未使命令生效（Private Desktop watchdog 退出码 1，日志 `20261027-041021-6ff9cece.stdout.log`、`20261027-041155-4116eada.stdout.log`）。两条未经验证的转发分支均已撤回，已通过的应用自定义命令路由不受影响。
 - 微软文件夹视图文档说明 Shell 菜单的相关 `WM_COMMAND` 由 Explorer 宿主处理，不会直接传给 folder view 对象；因此问题不只是焦点映射，当前直接转发给 `IShellView` 的方法本身不成立。下一步先确认自建宿主执行标准 Shell 命令的公开契约，再设计最小 pane dispatch probe。此项通过前，不宣称 Shell 原生菜单命令路由或产品 `IShellView` 迁移完成。
 - 详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-shell-原生菜单命令-frame-转发尚未通过)。
+
+## 2026-10-27：撤回 frame 转发后的原生命令基线复核
+
+- 恢复到上一已提交实现后，NativeProbe Release build 0 警告/错误，完整四窗格 `session-restore-private-desktop` watchdog 退出码 0（`20261027-041344-088dec96.stdout.log`）。各 pane 经背景 `IContextMenu` canonical verb 分别完成 Details、排序、分组；四窗格会话/菜单生命周期、自定义命令 active-pane 路由、文件操作/通知和 F2 方向键焦点隔离仍通过，前台 HWND 未变。
+- 这些原生命令走的是 context-menu `InvokeCommand`，不证明 frame 合成 View 菜单的 `WM_COMMAND` 已可用。后续先研究 Explorer 宿主处理 `FCIDM_SHVIEWFIRST..LAST` 的标准命令路径，再实现 frame dispatch 原型；Shell 菜单命令通过前不进入产品宿主迁移。
+- 详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-撤回-frame-转发实验后的四窗格原生命令基线复核)。

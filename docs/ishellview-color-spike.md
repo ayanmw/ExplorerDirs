@@ -943,3 +943,9 @@ NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-col
 微软的 [Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 明确说明，Shell view 菜单的相关 `WM_COMMAND` 由 Explorer 宿主处理，不会传给 folder view 对象；因此把 frame 消息直接发给 `IShellView` 是错误的架构假设。`IShellBrowser::OnViewWindowActive` 用于通知宿主 view 获取焦点，`SetMenuSB` 安装 composite menu，但这两项文档本身没有定义我们这个自建宿主怎样执行 Details 命令。参考：[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[IShellBrowser::OnViewWindowActive](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-onviewwindowactive)。
 
 失败的 Shell 命令转发分支已撤回；上一节已通过的应用自定义 probe 命令 active-pane 路由保持。下一步先从 Windows Explorer/Shell 实现和公开接口确定宿主必须承担的标准命令执行路径，再设计最小 pane dispatch probe；在此之前不将 Shell 菜单分派能力列为已完成，也不迁移产品宿主。
+
+### 2026-10-27 撤回 frame 转发实验后的四窗格原生命令基线复核
+
+在恢复到已提交的应用菜单 probe 后，重新运行 Release build 与完整 `session-restore-private-desktop` watchdog。构建 0 警告/错误，watchdog 退出码 0，日志 `20261027-041344-088dec96.stdout.log`。四个 filesystem `IShellView` 通过 Shell 背景 `IContextMenu::InvokeCommand` 的 canonical verbs 分别执行 Details、排序和分组；会话恢复、菜单 merge 生命周期、自定义 app command active-pane 路由、复制/重命名/删除、目录通知及四 pane F2 方向键焦点隔离也全部通过，foreground HWND 未变。
+
+这轮确认撤回未损坏已通过的原生能力。但 `menu-commands=pane1:details/sort/group,...` 走的是逐 pane 背景 context menu canonical verb，不是 frame 上合成 View 菜单的 `WM_COMMAND`；两者必须分开记录。后续需查明 Explorer 宿主如何处理 standard `FCIDM_SHVIEWFIRST..LAST` 命令，并据此为自建 frame 建立受支持的执行路径。
