@@ -40,6 +40,12 @@ NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回�
 
 COM vtable smoke 覆盖上述空指针、零值和非零请求；NativeProbe Release 定向 `--shell-view-color-policy-smoke` 通过。依据：[RequestBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-requestborderspace)、[SetBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-setborderspace)。没有创建 `IShellView`，因此真实 Shell 是否请求边框空间及其菜单/工具栏表现仍未验证。
 
+## 2026-10-27：保留隔离 Shell view-state 流的读写模式
+
+`IShellBrowser::GetViewStateStream` 现在按 `grfMode & STGM_ACCESS` 区分 READ、WRITE 和 READWRITE。READWRITE 使用已有 Shell 快照/初始导入状态作为流内容，同时保留可写流供后续保存；不合法访问值 `3` 返回 `E_INVALIDARG` 且不返回流。微软文档指出三种访问模式均有效，虽然 Shell 通常在创建视图时用 READ、保存时用 WRITE。
+
+`--shell-view-state-stream-smoke` 先因 READWRITE 返回空流而失败；修正后验证读取原状态、覆写并 Dispose 持久化到独立 session，再由新 host 读回；无效访问模式也有拒绝断言。定向 smoke 通过。没有创建真实 `IShellView`，因此尚未确认 Windows Shell 是否会在该原型路径请求 READWRITE；依据：[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)。
+
 ## 2026-10-26：补齐 IOleWindow 帮助回调路由
 
 `StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。

@@ -411,14 +411,18 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         _navigation?.BrowseObject(pidl, flags) ?? unchecked((int)0x80004001);
     public int GetViewStateStream(uint mode, out nint stream)
     {
-        var read = (mode & 3) == 0;
+        stream = 0;
+        var access = mode & 3;
+        if (access == 3) return unchecked((int)0x80070057);
+        var read = access is 0 or 2;
+        var write = access is 1 or 2;
         if (read) Reads++;
-        // The initial import is a one-time fallback; later view creation on this host restores its last Shell-written state.
+        if (write) Writes++;
+        // Read-write callers need the latest snapshot as their initial stream contents, then may replace it in place.
         var bytes = read ? GetReadStateBytes() : [];
         stream = SHCreateMemStream(bytes, (uint)bytes.Length);
-        if (!read && stream != 0)
+        if (write && stream != 0)
         {
-            Writes++;
             if (_savedStream != 0) Marshal.Release(_savedStream);
             _savedStream = stream;
             Marshal.AddRef(stream);

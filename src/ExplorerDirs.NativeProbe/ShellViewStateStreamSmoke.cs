@@ -64,6 +64,7 @@ internal static class ShellViewStateStreamSmoke
         Check(ReadBytes(sibling, initialSnapshot.Length).SequenceEqual(initialSnapshot),
             "writing one host does not replace another host's initial stream");
 
+        VerifyReadWriteMode();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
 
@@ -123,6 +124,61 @@ internal static class ShellViewStateStreamSmoke
             using (var missing = new StreamViewHost(0, fallback, reopenedStore, Guid.NewGuid()))
                 Check(ReadBytes(missing, fallback.Length).SequenceEqual(fallback),
                     "a session without saved state uses its initial fallback");
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void VerifyReadWriteMode()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+        var sessionId = Guid.NewGuid();
+        var initial = new byte[] { 61, 62, 63, 64 };
+        var updated = new byte[] { 71, 72, 73 };
+        try
+        {
+            var store = new ShellViewStateStore(directory);
+            using (var host = new StreamViewHost(0, initial, store, sessionId))
+            {
+                Check(host.GetViewStateStream(3, out var invalidPointer) == unchecked((int)0x80070057) &&
+                      invalidPointer == 0,
+                    "an invalid structured-storage access mode is rejected without returning a stream");
+                Check(host.GetViewStateStream(2, out var pointer) == 0 && pointer != 0,
+                    "read-write mode returns a stream");
+                try
+                {
+                    var stream = (IStream)Marshal.GetObjectForIUnknown(pointer);
+                    try
+                    {
+                        var existing = new byte[initial.Length];
+                        var read = Marshal.AllocCoTaskMem(sizeof(int));
+                        try
+                        {
+                            stream.Read(existing, existing.Length, read);
+                            Check(Marshal.ReadInt32(read) == existing.Length && existing.SequenceEqual(initial),
+                                "read-write mode starts with the saved view state");
+                        }
+                        finally { Marshal.FreeCoTaskMem(read); }
+                        stream.Seek(0, 0, 0);
+                        var written = Marshal.AllocCoTaskMem(sizeof(int));
+                        try
+                        {
+                            stream.Write(updated, updated.Length, written);
+                            Check(Marshal.ReadInt32(written) == updated.Length,
+                                "read-write mode accepts an updated view state");
+                        }
+                        finally { Marshal.FreeCoTaskMem(written); }
+                    }
+                    finally { Marshal.ReleaseComObject(stream); }
+                }
+                finally { Marshal.Release(pointer); }
+            }
+
+            using var restored = new StreamViewHost(0, [], new ShellViewStateStore(directory), sessionId);
+            Check(ReadBytes(restored, updated.Length).SequenceEqual(updated),
+                "disposing a read-write stream persists its updated session state");
         }
         finally
         {

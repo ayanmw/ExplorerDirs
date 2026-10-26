@@ -6,6 +6,11 @@
 - 这是隔离迁移原型的接口合同改进，不代表创建过 `IShellView`、Shell 工具栏布局已集成，或产品 ExplorerBrowser 已迁移。
 - Property Schema 仍不能作为便携、进程内的自定义列验证路径：[`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 说明其为机器级注册，涉及 `HKEY_LOCAL_MACHINE` 写权限，不支持按用户 profile 注册；不在日常系统登记测试 schema。后续逐项列验证需在可丢弃 Windows VM 内进行。
 
+## 2026-10-27：保留隔离 view-state 流的 READWRITE 状态
+
+- `StreamViewHost.GetViewStateStream` 之前把 `STGM_READWRITE` 当作纯写入，给请求者空白流，可能破坏该标签既有的 view state。现同时装入当前 session 快照并跟踪同一流的写入，Dispose 后持久化新状态；访问模式 `3` 被拒绝。
+- `--shell-view-state-stream-smoke` 覆盖初值读取、更新写入、Dispose 后新 host 跨 session store 读回及非法访问值；通过后仍未创建真实 `IShellView`，真实 Shell 访问序列待验证。依据：[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)。
+
 ## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
 
 - 用户已明确授权在隔离原型中推进完整宿主迁移验证，验收面包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点与每会话视图状态。该授权仅覆盖 NativeProbe/隔离宿主，不包含将产品 ExplorerBrowser 替换为 IShellView，也不包含发布迁移版本。
