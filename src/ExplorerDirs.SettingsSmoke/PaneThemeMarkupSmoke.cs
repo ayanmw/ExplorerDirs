@@ -23,7 +23,9 @@ internal static class PaneThemeMarkupSmoke
             ("Button", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("ToggleButton", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("CheckBox", new[] { ("Foreground", "ExplorerDirs.ControlTextBrush") }),
-            ("RadioButton", new[] { ("Foreground", "ExplorerDirs.ControlTextBrush") })
+            ("RadioButton", new[] { ("Foreground", "ExplorerDirs.ControlTextBrush") }),
+            ("ListBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("ListBoxItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") })
         })
         {
             var surfaceStyle = appResources.Descendants(presentation + "Style")
@@ -33,6 +35,19 @@ internal static class PaneThemeMarkupSmoke
                     (string?)setter.Attribute("Value") == $"{{DynamicResource {property.Item2}}}")),
                 $"{target} surfaces and text use dynamic semantic theme roles");
         }
+        var listItemStyle = appResources.Descendants(presentation + "Style")
+            .SingleOrDefault(element => (string?)element.Attribute("TargetType") == "{x:Type ListBoxItem}");
+        var listSelectedTrigger = listItemStyle?.Elements(presentation + "Style.Triggers")
+            .Elements(presentation + "Trigger")
+            .SingleOrDefault(trigger => (string?)trigger.Attribute("Property") == "IsSelected" &&
+                                        (string?)trigger.Attribute("Value") == "True");
+        Check(listSelectedTrigger?.Elements(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "Background" &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentBrush}") == true &&
+              listSelectedTrigger.Elements(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "Foreground" &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentTextBrush}"),
+            "selected WPF list items use the readable theme accent pair");
         var tabControl = document.Descendants(presentation + "TabControl")
             .Single(element => (string?)element.Attribute(xaml + "Name") == "Tabs");
         var style = tabControl.Element(presentation + "TabControl.ItemContainerStyle")?

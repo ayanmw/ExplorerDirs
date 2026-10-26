@@ -58,5 +58,20 @@
         <Style TargetType="{x:Type RadioButton}">
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
         </Style>
+        <Style TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ListBoxItem}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.AccentTextBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Application.Resources>
 </Application>
