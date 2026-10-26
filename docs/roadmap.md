@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：增加状态栏选中项目大小开关
+
+- Q-Dir 官方英文功能清单列出状态栏的对象数量与选中对象大小显示选项。本程序原先固定显示计数并尝试读取可用选中大小；现于“视图”增加“状态栏显示选中项目大小”，默认开启，独立保存在 `StatusBarSelectionSize.ini`，关闭后停止读取选区大小属性，只保留总数和选中数。递归目录扫描仍只由 F9 启动。
+- `SettingsSmoke` 覆盖默认值、便携 INI 往返和与状态栏显隐配置分离；完整 Release `SettingsSmoke` 通过，App Release build 通过（0 警告、0 错误），`git diff --check` 通过。本轮未启动 GUI，菜单与状态文本可见效果待验收。官方依据：[Q-Dir 英文功能清单](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)。
+
 ## 2026-10-27：复选框设置汇报 Shell 应用失败
 
 - 源码复核发现，现有标签的 Shell 视图拒绝复选框设置时，宿主只触发内部菜单错误事件，没有把失败传回 Pane 的汇总器；全局 INI 已保存后，状态文本可能仍报告所有标签都已应用。现在宿主返回 HRESULT，Pane 将失败与对应路径汇总到状态文本；未创建的视图仍只保存偏好，待 `OnViewCreated` 时应用。

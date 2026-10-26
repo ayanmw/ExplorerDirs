@@ -41,11 +41,13 @@ public partial class MainWindow : Window
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
+    private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
     private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private bool _showStatusBar = true;
+    private bool _showSelectionSizeInStatusBar = true;
     private bool _selectionCheckBoxes;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
@@ -176,6 +178,10 @@ public partial class MainWindow : Window
         _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
             _profileDirectory, "StatusBar.ini"));
         _showStatusBar = _statusBarVisibilityStore.Load();
+        _statusBarSelectionSizeStore = new StatusBarSelectionSizeStore(Path.Combine(
+            _profileDirectory, "StatusBarSelectionSize.ini"));
+        _showSelectionSizeInStatusBar = _statusBarSelectionSizeStore.Load();
+        StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
         _selectionCheckBoxesStore = new SelectionCheckBoxesStore(Path.Combine(
             _profileDirectory, "SelectionCheckBoxes.ini"));
         _selectionCheckBoxes = _selectionCheckBoxesStore.Load();
@@ -228,6 +234,9 @@ public partial class MainWindow : Window
         if (_statusBarVisibilityStore.LoadWarning is { } statusBarWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? statusBarWarning : $"{EnvironmentStatus.Text} {statusBarWarning}";
+        if (_statusBarSelectionSizeStore.LoadWarning is { } statusBarSelectionSizeWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarSelectionSizeWarning : $"{EnvironmentStatus.Text} {statusBarSelectionSizeWarning}";
         if (_selectionCheckBoxesStore.LoadWarning is { } checkBoxesWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? checkBoxesWarning : $"{EnvironmentStatus.Text} {checkBoxesWarning}";
@@ -262,6 +271,7 @@ public partial class MainWindow : Window
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
+            pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
             pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
             pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
@@ -954,6 +964,23 @@ public partial class MainWindow : Window
     {
         StatusBarMenu.IsChecked = _showStatusBar;
         foreach (var pane in _panes) pane.SetStatusBarVisible(_showStatusBar);
+    }
+
+    private void StatusBarSelectionSize_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarSelectionSizeMenu.IsChecked;
+        try
+        {
+            _statusBarSelectionSizeStore.Save(next);
+            _showSelectionSizeInStatusBar = next;
+            foreach (var pane in _panes) pane.SetStatusBarSelectionSizeVisible(next);
+            EnvironmentStatus.Text = next ? "状态栏将显示可取得的选中项目大小。" : "状态栏将只显示项目数量。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
+            EnvironmentStatus.Text = $"状态栏选中大小设置保存失败：{ex.Message}";
+        }
     }
 
     private void SelectionCheckBoxes_Click(object sender, RoutedEventArgs e)

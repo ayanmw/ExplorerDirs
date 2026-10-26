@@ -33,6 +33,16 @@ internal static class StatusBarVisibilitySmoke
         Require(futureConflict && File.ReadAllText(path).Contains("FormatVersion=2", StringComparison.Ordinal),
             "future status-bar preference data is not overwritten");
 
+        var selectionSizePath = Path.Combine(root, "StatusBarSelectionSize.ini");
+        var selectionSize = new StatusBarSelectionSizeStore(selectionSizePath);
+        Require(selectionSize.Load() && selectionSize.LoadWarning is null,
+            "status-bar selected-size display keeps the current default enabled");
+        selectionSize.Save(false);
+        Require(!new StatusBarSelectionSizeStore(selectionSizePath).Load(),
+            "status-bar selected-size display round-trips through its own portable INI");
+        Require(File.ReadAllText(path).Contains("Show=false", StringComparison.Ordinal),
+            "status-bar content preference is stored separately from bar visibility");
+
         var checkBoxesPath = Path.Combine(root, "SelectionCheckBoxes.ini");
         var checkBoxes = new SelectionCheckBoxesStore(checkBoxesPath);
         Require(!checkBoxes.Load() && checkBoxes.LoadWarning is null,

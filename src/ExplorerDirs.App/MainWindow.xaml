@@ -70,6 +70,8 @@
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
                 <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
                 <MenuItem x:Name="StatusBarMenu" Header="状态栏" IsCheckable="True" Click="StatusBar_Click"/>
+                <MenuItem x:Name="StatusBarSelectionSizeMenu" Header="状态栏显示选中项目大小" IsCheckable="True"
+                          Click="StatusBarSelectionSize_Click"/>
                 <MenuItem x:Name="SelectionCheckBoxesMenu" Header="使用复选框选择项目" IsCheckable="True"
                           Click="SelectionCheckBoxes_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">

@@ -21,6 +21,7 @@ public partial class PaneControl : UserControl
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
+    private bool _showSelectionSizeInStatusBar = true;
     private bool _updatingFilterPresets;
     private TabItem? _dragCandidate;
     private Point _dragStart;
@@ -96,6 +97,12 @@ public partial class PaneControl : UserControl
 
     internal void SetStatusBarVisible(bool visible) =>
         StatusBarRow.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
+    internal void SetStatusBarSelectionSizeVisible(bool visible)
+    {
+        _showSelectionSizeInStatusBar = visible;
+        RefreshItemCounts();
+    }
 
     internal void SetActivePaneVisual(bool isActive)
     {
@@ -228,7 +235,7 @@ public partial class PaneControl : UserControl
     {
         if (!IsLoaded || !IsVisible) return;
         var state = Current;
-        var counts = state?.Browser.ReadItemCounts();
+        var counts = state?.Browser.ReadItemCounts(includeSelectionSize: _showSelectionSizeInStatusBar);
         if (Current == state && IsLoaded && IsVisible)
         {
             ItemCounts.Text = counts?.DisplayText ?? "项目统计暂不可用";

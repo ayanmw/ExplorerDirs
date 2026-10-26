@@ -16,6 +16,9 @@ internal sealed class MultilineTabHeadersStore(string path)
 internal sealed class StatusBarVisibilityStore(string path)
     : PortableBooleanPreference(path, "StatusBar", "Show", "状态栏", defaultValue: true);
 
+internal sealed class StatusBarSelectionSizeStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "ShowSelectionSize", "状态栏选中大小", defaultValue: true);
+
 internal sealed class SelectionCheckBoxesStore(string path)
     : PortableBooleanPreference(path, "Selection", "CheckBoxes", "复选框选择");
 
