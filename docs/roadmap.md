@@ -3483,3 +3483,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 把 F2 与四方向键检查纳入五种 Shell/ListView 同步模式循环。初次测试发现 Icon 模式因宿主尚未 UIActivate，F2 虽返回 `S_OK`，却未切入编辑框；为探针按原生宿主生命周期显示隔离父窗（`SW_SHOWNOACTIVATE`）并激活 view 后，完整 Private Desktop 流程连续两轮通过，Shell edit 与焦点在四方向键期间均保持，退出时恢复隐藏父窗，foreground HWND 未变化。
 - 测试日志：`20261027-034456-3eb61774.stdout.log`、`20261027-034526-eca8b327.stdout.log`。这是单 view、合成键消息的原型证据，尚未覆盖真实键盘、多窗格互相抢焦点、WPF `HwndHost` 或 ExplorerBrowser 产品宿主；不表示用户报告的产品 F2 缺陷已修复。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-27-五种视图模式下-f2-编辑焦点隔离验证)。
+
+## 2026-10-27：四窗格 F2 编辑方向键焦点隔离
+
+- 四窗格 session-restore consumer 现在逐个激活 pane、打开 F2 原生重命名，并将四方向键送到各自编辑框。每次按键后四个 view 的 focused item 与 selection 均逐一核对；两轮完整 Private Desktop watchdog 通过，四 pane 都报告 `arrows=4/focus-isolated=True`，前台窗口未变。
+- 该结果证明定向 `IShellView::TranslateAccelerator` 下 pane 状态隔离；不覆盖 WPF 焦点链、错误 pane 路由、真实输入或 ExplorerBrowser 产品宿主，故多窗格重命名 P0 仍未验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-四窗格-f2-编辑方向键焦点隔离)

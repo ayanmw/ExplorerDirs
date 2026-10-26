@@ -911,3 +911,11 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 完整 `host-filter-private-desktop` watchdog 连续两轮退出码 0：`20261027-034456-3eb61774.stdout.log`、`20261027-034526-eca8b327.stdout.log`。五种模式各自的 F2 都进入 `Edit` 并获得焦点，Left/Up/Right/Down 均为 `S_OK` 且编辑框/焦点保持；Ctrl+A、Down 导航、多层 history 和本轮其它 Shell view 检查也通过。前台 HWND 保持不变。
 
 该结果只验证 Private Desktop 内合成 accelerator 消息；没有验证物理键盘、相邻多窗格焦点争用、用户可见多窗格操作或 ExplorerBrowser 产品宿主。本次没有改产品视图或 release。
+
+### 2026-10-27 四窗格 F2 编辑方向键焦点隔离
+
+在四窗格 session-restore consumer 的完整流程中，对每个真实 filesystem `IShellView` 分别激活 view、聚焦其列表、选中一个项目并通过 `TranslateAccelerator` 启动 F2。向当前编辑框连续发送 Left/Up/Right/Down 后，编辑 HWND 与键盘焦点保持；逐键读取四个 view 的 focused item 和 selection，兄弟 pane 均未变化。结束时用 Escape 取消重命名并清除测试选择。
+
+`session-restore-private-desktop` watchdog 连续两轮退出码 0：`20261027-034716-d5121c08.stdout.log` 与 `20261027-034738-631c462c.stdout.log`。日志报告 `pane1` 到 `pane4` 均 `arrows=4/focus-isolated=True`，四窗格菜单激活/卸载恢复、视图状态恢复、Shell 文件操作、同/异目录通知仍通过，前台 HWND 未变化。
+
+这是 Private Desktop 内显式定向至目标 view 的合成 accelerator 检查。它验证四个 view 的原生焦点/选区互不串扰，但不模拟 WPF `HwndHost` 的 Tab/Shift+Tab 或错误 pane 路由，也未覆盖真实键盘、鼠标、可见窗口或 ExplorerBrowser 正式产品。因此不能视为用户报告的多窗格重命名问题已修复，产品代码和 release 未改。

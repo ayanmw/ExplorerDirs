@@ -394,9 +394,10 @@ internal static class ShellViewColorSpike
         var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
         var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
         var selectAllRouting = VerifyFourPaneCtrlARouting(views, folderViews);
+        var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -609,6 +610,95 @@ internal static class ShellViewColorSpike
         }
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Ctrl+A pane routing changed the foreground window.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Rename routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var verified = new List<string>(views.Count);
+        for (var target = 0; target < views.Count; target++)
+        {
+            var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+            Check(windowHr);
+            var listView = FindChildByClass(viewWindow, "SysListView32");
+            if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for its rename test.");
+            Check(At<ActivateView>(views[target], 7)(views[target], 2)); // SVUIA_ACTIVATE_FOCUS.
+            Pump(100);
+            _ = SetFocus(listView);
+            if (GetFocus() != listView)
+                throw new InvalidOperationException($"Pane {target + 1} list did not receive isolated keyboard focus for F2.");
+            Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 2, out var itemCount));
+            if (itemCount == 0) throw new InvalidOperationException($"Pane {target + 1} has no item for its rename test.");
+            Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], 0,
+                0x1u | 0x4u | 0x10u | 0x40000000u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+
+            var siblingFocus = new int[folderViews.Count];
+            var siblingSelection = new int[folderViews.Count];
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out siblingFocus[pane]));
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out siblingSelection[pane]));
+                var expectedSelection = pane == target ? 1 : 0;
+                if (siblingSelection[pane] != expectedSelection)
+                    throw new InvalidOperationException($"F2 setup for pane {target + 1} leaked selection into pane {pane + 1}: {siblingSelection[pane]}.");
+            }
+
+            var f2 = new NativeMessage { Window = listView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+            var f2Hr = At<TranslateAccelerator>(views[target], 5)(views[target], ref f2);
+            var edit = FindChildByClass(viewWindow, "Edit");
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+            while (DateTime.UtcNow < deadline && (edit == 0 || GetFocus() != edit))
+            {
+                Pump(10);
+                edit = FindChildByClass(viewWindow, "Edit");
+            }
+            if (f2Hr < 0 || edit == 0 || GetFocus() != edit)
+                throw new InvalidOperationException($"Pane {target + 1} did not focus its inline rename editor (hr=0x{f2Hr:X8}; edit=0x{edit:X}; focus=0x{GetFocus():X}).");
+
+            var arrows = new[]
+            {
+                (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+                (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+                (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+                (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+            };
+            try
+            {
+                foreach (var arrow in arrows)
+                {
+                    var message = new NativeMessage { Window = edit, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                    var hr = At<TranslateAccelerator>(views[target], 5)(views[target], ref message);
+                    Pump(10);
+                    if (hr < 0 || !IsWindow(edit) || GetFocus() != edit)
+                        throw new InvalidOperationException($"Pane {target + 1} lost rename focus on {arrow.Name} (hr=0x{hr:X8}; edit-alive={IsWindow(edit)}; focus=0x{GetFocus():X}).");
+                    for (var pane = 0; pane < folderViews.Count; pane++)
+                    {
+                        Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out var focusAfter));
+                        Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectionAfter));
+                        if (focusAfter != siblingFocus[pane] || selectionAfter != siblingSelection[pane])
+                            throw new InvalidOperationException($"Pane {target + 1} {arrow.Name} changed pane {pane + 1} item focus/selection: {siblingFocus[pane]}/{siblingSelection[pane]}->{focusAfter}/{selectionAfter}.");
+                    }
+                }
+            }
+            finally
+            {
+                if (IsWindow(edit))
+                {
+                    var escape = new NativeMessage { Window = edit, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+                    _ = At<TranslateAccelerator>(views[target], 5)(views[target], ref escape);
+                    Pump(20);
+                }
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], item, 0));
+            }
+            if (IsWindow(edit)) throw new InvalidOperationException($"Pane {target + 1} did not dismiss the cancelled rename editor.");
+            verified.Add($"pane{target + 1}/arrows=4/focus-isolated=True");
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Four-pane rename routing changed the foreground window outside the Private Desktop probe.");
         return string.Join(',', verified);
     }
 
