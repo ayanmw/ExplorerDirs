@@ -10,6 +10,7 @@ internal static class ShellViewDropTargetProbe
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid DropTargetId = new("00000122-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid FormatEnumeratorId = new("00000103-0000-0000-C000-000000000046");
     private const uint DropEffectCopy = 1;
     private const uint DropEffectMask = 7;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
@@ -116,6 +117,8 @@ internal static class ShellViewDropTargetProbe
                 Console.WriteLine($"shell-view-drop-target-candidate: source=selected-view; get-data-object=0x{selectedDataObjectHr:X8}");
             else
                 Console.WriteLine("shell-view-drop-target-stage: selected-data-object-acquired");
+            if (selectedDataObject != 0) LogDataObjectFormats("selected-view", selectedDataObject);
+            LogDataObjectFormats("SHCreateDataObject", dataObject);
 
             shellViewId = ShellViewId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetPane, ref shellViewId, out targetView));
@@ -246,10 +249,45 @@ internal static class ShellViewDropTargetProbe
         return copied;
     }
 
+    private static void LogDataObjectFormats(string label, nint dataObject)
+    {
+        var hr = At<EnumFormatEtc>(dataObject, 8)(dataObject, 1, out var enumerator); // DATADIR_GET.
+        if (hr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-formats: source={label}; enum=0x{hr:X8}");
+            return;
+        }
+
+        try
+        {
+            var formats = new List<string>();
+            while (true)
+            {
+                var nextHr = At<NextFormatEtc>(enumerator, 3)(enumerator, 1, out var format, out var fetched);
+                if (nextHr < 0) Marshal.ThrowExceptionForHR(nextHr);
+                if (fetched == 0) break;
+                var formatName = new System.Text.StringBuilder(128);
+                var nameLength = GetClipboardFormatNameW(format.Format, formatName, formatName.Capacity);
+                var name = format.Format == 15 ? "CF_HDROP" : nameLength > 0 ? formatName.ToString() : $"CF_{format.Format}";
+                formats.Add($"{name}(aspect=0x{format.Aspect:X},index={format.Index},tymed=0x{format.Medium:X})");
+            }
+            Console.WriteLine($"shell-view-drop-target-formats: source={label}; formats={string.Join(';', formats)}");
+        }
+        finally { Marshal.Release(enumerator); }
+    }
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
     [StructLayout(LayoutKind.Sequential)] private struct PointL { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
+    {
+        public ushort Format;
+        public nint TargetDevice;
+        public uint Aspect;
+        public int Index;
+        public uint Medium;
+    }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings,
         nint browser, ref StreamProbeRect bounds, out nint window);
@@ -259,6 +297,8 @@ internal static class ShellViewDropTargetProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint itemPidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumFormatEtc(nint self, uint direction, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NextFormatEtc(nint self, uint count, out FormatEtc format, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragEnter(nint self, nint dataObject, uint keyState, ref PointL point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragOver(nint self, uint keyState, ref PointL point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragLeave(nint self);
@@ -273,5 +313,6 @@ internal static class ShellViewDropTargetProbe
     [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(nint window, out Rect bounds);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClipboardFormatNameW(ushort format, System.Text.StringBuilder name, int maxCount);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
 }

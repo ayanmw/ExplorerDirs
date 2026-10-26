@@ -3592,4 +3592,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 修正探针对 `ILFindChild` 借用 PIDL 的错误释放，并在枚举前等待源 view 稳定到 3 个测试项目；Private Desktop watchdog 退出码 0，foreground 未变。
 - `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)` 成功返回选中项数据对象；将其直接传给注册的目标文件夹 `IDropTarget` 后，`DragEnter/DragOver/Drop` 均返回 `S_OK` 且 Copy effect=1，但目标中未出现文件。此前已知 `SHCreateDataObject` 构造对象在相同目标路径能真实复制，源文件保留。这个差异说明单纯的 Shell 方法成功码不足以证明拖放操作完成，选中项对象的格式/生命周期及真实 OLE drag loop 仍需调查。
+- 两个 `IDataObject::EnumFormatEtc(DATADIR_GET)` 列出了完全相同的 7 种格式：Shell IDList Array、CF_HDROP、FileName、FileContents、FileNameW、FileGroupDescriptorW、ZoneIdentifier，aspect/index/tymed 也一致。故“缺少常见公开格式”不是当前证据支持的解释；尚未比较格式内容、异步拖放能力或完整 OLE 源端生命周期。
 - NativeProbe Release build 0 警告/错误；本次仍未调用 `DoDragDrop`，没有用户桌面输入或产品宿主改动。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27对比-ishellview-选中项数据对象)。
