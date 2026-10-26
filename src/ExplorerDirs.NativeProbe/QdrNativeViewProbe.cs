@@ -622,12 +622,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             {
                 var error = Marshal.GetLastWin32Error();
                 if (popup != 0) DestroyMenu(popup);
-                for (var j = 0; j < inserted; j++)
-                {
-                    RemoveMenu(menu, (uint)j, 0x400);
-                    DestroyMenu(_insertedMenuPopups[j]);
-                    _insertedMenuPopups[j] = 0;
-                }
+                RollbackInsertedMenuGroups(menu, _insertedMenuPopups, inserted);
                 return error == 0 ? unchecked((int)0x80004005) : unchecked((int)(0x80070000 | (error & 0xFFFF)));
             }
             _insertedMenuPopups[i] = popup;
@@ -640,6 +635,17 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         Marshal.WriteInt32(widths, 2 * sizeof(int), 3);
         Marshal.WriteInt32(widths, 4 * sizeof(int), 1);
         return 0;
+    }
+
+    internal static void RollbackInsertedMenuGroups(nint menu, nint[] popups, int inserted)
+    {
+        // Removing by position shifts later entries left, so unwind in reverse insertion order.
+        for (var i = inserted - 1; i >= 0; i--)
+        {
+            RemoveMenu(menu, (uint)i, 0x400);
+            DestroyMenu(popups[i]);
+            popups[i] = 0;
+        }
     }
 
     private int RemoveOwnedMenuGroups(nint menu)

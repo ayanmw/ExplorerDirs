@@ -46,6 +46,12 @@ COM vtable smoke 覆盖上述空指针、零值和非零请求；NativeProbe Rel
 
 `--shell-view-state-stream-smoke` 先因 READWRITE 返回空流而失败；修正后验证读取原状态、覆写并 Dispose 持久化到独立 session，再由新 host 读回；无效访问模式也有拒绝断言。定向 smoke 通过。没有创建真实 `IShellView`，因此尚未确认 Windows Shell 是否会在该原型路径请求 READWRITE；依据：[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)。
 
+## 2026-10-27：修正部分 OLE 菜单组插入失败的回滚
+
+源码审查发现 `InsertNativeMenuGroups` 的失败清理按正序移除菜单位置。每次删除会让后续项左移，可能遗留自有 popup 并错删紧邻的菜单项。现在通过共同的回滚函数按逆序撤销已插入组，释放相应 popup 句柄。
+
+新增原生 HMENU 回归夹具，先插入三个自有 popup，再追加一个外部 popup；夹具先按旧正序行为失败，逆序修正后完整清除自有组并保留外部项。`--shell-view-color-policy-smoke` 全部通过。此测试不创建 `IShellView`、不显示菜单，也不验证 Shell 可见菜单合并或产品菜单接线。
+
 ## 2026-10-26：补齐 IOleWindow 帮助回调路由
 
 `StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。

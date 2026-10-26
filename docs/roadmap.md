@@ -11,6 +11,11 @@
 - `StreamViewHost.GetViewStateStream` 之前把 `STGM_READWRITE` 当作纯写入，给请求者空白流，可能破坏该标签既有的 view state。现同时装入当前 session 快照并跟踪同一流的写入，Dispose 后持久化新状态；访问模式 `3` 被拒绝。
 - `--shell-view-state-stream-smoke` 覆盖初值读取、更新写入、Dispose 后新 host 跨 session store 读回及非法访问值；通过后仍未创建真实 `IShellView`，真实 Shell 访问序列待验证。依据：[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)。
 
+## 2026-10-27：修正隔离 OLE 菜单组失败回滚
+
+- 原生菜单组部分插入失败时，按位置正序移除导致索引左移，留下自有菜单项。现在改为逆序回滚，并释放每个已插入 popup。
+- `--shell-view-color-policy-smoke` 的部分插入 HMENU 夹具按旧逻辑失败、修正后通过；验证保留外部 popup 且销毁全部自有 popup。构建和完整定向 smoke 通过。未创建 `IShellView`，真实 Shell 激活/可见菜单交互仍待独立桌面验收。
+
 ## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
 
 - 用户已明确授权在隔离原型中推进完整宿主迁移验证，验收面包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点与每会话视图状态。该授权仅覆盖 NativeProbe/隔离宿主，不包含将产品 ExplorerBrowser 替换为 IShellView，也不包含发布迁移版本。
