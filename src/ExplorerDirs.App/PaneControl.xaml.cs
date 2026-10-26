@@ -995,11 +995,14 @@ public partial class PaneControl : UserControl
     }
 
     public void ShowAddressHistory()
+        => ShowAddressHistory(AddressHost);
+
+    private void ShowAddressHistory(FrameworkElement placementTarget)
     {
         if (Current is not { } state) return;
         var menu = new ContextMenu
         {
-            PlacementTarget = AddressHost,
+            PlacementTarget = placementTarget,
             Placement = PlacementMode.Bottom,
             DataContext = state
         };
@@ -1013,6 +1016,13 @@ public partial class PaneControl : UserControl
     }
 
     private void AddressHistory_Click(object sender, RoutedEventArgs e) => ShowAddressHistory();
+
+    private void NavigationHistoryRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement target) return;
+        ShowAddressHistory(target);
+        e.Handled = true;
+    }
 
     private void AddressMenu_Click(object sender, RoutedEventArgs e)
     {

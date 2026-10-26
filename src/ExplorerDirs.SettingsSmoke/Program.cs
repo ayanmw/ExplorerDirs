@@ -83,6 +83,13 @@ if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--address-path-history-smoke")
+{
+    AddressPathHistorySmoke.Run();
+    Console.WriteLine("Address path history smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();
