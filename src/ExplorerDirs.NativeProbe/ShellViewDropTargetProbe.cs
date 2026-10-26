@@ -133,6 +133,11 @@ internal static class ShellViewDropTargetProbe
             LogGlobalPayload("SHCreateDataObject", dataObject, "FileGroupDescriptorW");
             if (selectedDataObject != 0) LogGlobalPayload("selected-view", selectedDataObject, "ZoneIdentifier");
             LogGlobalPayload("SHCreateDataObject", dataObject, "ZoneIdentifier");
+            foreach (var formatName in new[] { "Preferred DropEffect", "Performed DropEffect", "Logical Performed DropEffect", "InShellDragLoop" })
+            {
+                if (selectedDataObject != 0) LogOptionalDropFormat("selected-view", selectedDataObject, formatName);
+                LogOptionalDropFormat("SHCreateDataObject", dataObject, formatName);
+            }
             if (selectedDataObject != 0) LogShellIdListPayload("selected-view", selectedDataObject);
             LogShellIdListPayload("SHCreateDataObject", dataObject);
 
@@ -467,6 +472,17 @@ internal static class ShellViewDropTargetProbe
         }
     }
 
+    private static void LogOptionalDropFormat(string label, nint dataObject, string formatName)
+    {
+        var formatId = RegisterClipboardFormatW(formatName);
+        if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var format = new FormatEtc { Format = checked((ushort)formatId), Aspect = 1, Index = -1, Medium = 1 };
+        var queryHr = At<QueryGetData>(dataObject, 5)(dataObject, ref format);
+        Console.WriteLine($"shell-view-drop-target-optional-format: source={label}; format={formatName}; query=0x{queryHr:X8}");
+        // IDataObject::QueryGetData communicates support with S_OK; S_FALSE must not trigger GetData.
+        if (queryHr == 0) LogGlobalPayload(label, dataObject, formatName);
+    }
+
     private static int ReadCidaOffset(nint cida, long size, int index)
     {
         var offset = Marshal.ReadInt32(cida, checked(4 + 4 * index));
@@ -512,6 +528,7 @@ internal static class ShellViewDropTargetProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumFormatEtc(nint self, uint direction, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NextFormatEtc(nint self, uint count, out FormatEtc format, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref FormatEtc format, out StgMedium medium);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryGetData(nint self, ref FormatEtc format);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadStream(nint self, nint buffer, uint bytesToRead, out uint bytesRead);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAsyncMode(nint self, [MarshalAs(UnmanagedType.Bool)] out bool asyncMode);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InAsyncOperation(nint self, [MarshalAs(UnmanagedType.Bool)] out bool inOperation);

@@ -1062,6 +1062,8 @@ NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private
 
 继续读取两对象列举出的 HGLOBAL 格式：`FileName`（ANSI 短路径）、`FileNameW`（Unicode 完整路径）、`FileGroupDescriptorW`（596 字节）、`ZoneIdentifier`（4 字节）逐项长度与 SHA-256 相同；配合此前相同的 `CF_HDROP`、`FileContents` 和 CIDA 路径，本次已读取的所有公开格式 payload 均未发现差异。Release build 0 警告/错误，Private Desktop watchdog 退出码 0、前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-062311-c9d2f378.stdout.log`。这仍不能覆盖 OLE drag-loop 状态、私有接口/对象身份或目标回调依赖，因此不据此认定数据对象完全等价。
 
+最后对 Shell 源/目标协商格式调用 `IDataObject::QueryGetData`：`Preferred DropEffect`、`Performed DropEffect`、`Logical Performed DropEffect` 和 `InShellDragLoop` 在两种对象上都返回 `S_FALSE`，均不可用。修正探针只在 `S_OK` 时再调用 `GetData` 后，Private Desktop watchdog 仍退出码 0、文件操作差异保持；日志：`src/.state/native-probe-watchdog/20261027-062530-d4425fd8.stdout.log`。微软说明 `CFSTR_INDRAGLOOP` 可用于避免 drag loop 中过早读取数据，且效果格式承担源/目标协商；本机这两个对象均未提供这些格式。来源：[Shell Clipboard Formats](https://learn.microsoft.com/en-us/windows/win32/shell/clipboard)。
+
 复跑确认差异仍在，但尚未定位其根因；不能把相同公开格式等同于相同内部拖放生命周期。下一步需在授权的隔离可接收输入环境取得真实 OLE `DoDragDrop` 闭环，或继续从非输入可观察的 Shell source/target 回调调查实际操作依赖。当前桌面约束下不模拟鼠标/键盘，也不把直接回调测试当作拖放完成。
 
 ### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
