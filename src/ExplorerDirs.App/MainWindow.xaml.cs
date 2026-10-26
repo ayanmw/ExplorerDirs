@@ -1800,6 +1800,8 @@ public partial class MainWindow : Window
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
+    private void CalculateSelectedItemsRecursiveSize_Click(object sender, RoutedEventArgs e)
+        => ActivePane.CalculateSelectedItemsRecursiveSize();
     private void RestartApplication_Click(object sender, RoutedEventArgs e)
         => RequestRestartApplication();
 

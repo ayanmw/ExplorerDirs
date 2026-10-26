@@ -55,9 +55,11 @@ public partial class PaneControl : UserControl
     private CancellationTokenSource? _recursiveSizeCancellation;
     private TabState? _recursiveSizeOwner;
     private string? _recursiveSizePath;
+    private bool _recursiveSizeIsSelection;
     private RecursiveDirectoryScanResult? _lastRecursiveSizeResult;
     private string? _lastRecursiveSizePath;
     private TabState? _lastRecursiveSizeOwner;
+    private bool _lastRecursiveSizeIsSelection;
 
     private sealed class TabState
     {
@@ -283,35 +285,93 @@ public partial class PaneControl : UserControl
         _recursiveSizeCancellation = cancellation;
         _recursiveSizeOwner = state;
         _recursiveSizePath = path;
+        _recursiveSizeIsSelection = false;
         _lastRecursiveSizeResult = null;
         _lastRecursiveSizePath = null;
+        _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
         RecursiveSizeStatus.Text = "正在计算目录总大小… 已检查 0 项 · 再按 F9 取消";
         RecursiveSizeStatus.ToolTip = path;
         RecursiveSizeStatus.Visibility = Visibility.Visible;
-        _ = ScanRecursiveDirectoryAsync(state, path, cancellation);
+        _ = ScanRecursiveDirectoryAsync(state, path, cancellation, null);
     }
 
-    private async Task ScanRecursiveDirectoryAsync(TabState owner, string path, CancellationTokenSource cancellation)
+    public void CalculateSelectedItemsRecursiveSize()
+    {
+        if (_recursiveSizeCancellation is not null)
+        {
+            CancelRecursiveDirectorySize();
+        }
+
+        if (Current is not { } state || !state.Browser.IsFileSystemLocation)
+        {
+            RecursiveSizeStatus.Text = "递归大小仅支持文件系统项目。";
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+
+        IReadOnlyList<string> paths;
+        try { paths = state.Browser.CaptureSelectedFileSystemPaths(); }
+        catch (Exception ex)
+        {
+            RecursiveSizeStatus.Text = $"无法读取所选项目：{ex.Message}";
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+        if (paths.Count == 0)
+        {
+            RecursiveSizeStatus.Text = "请先选择文件或文件夹。";
+            RecursiveSizeStatus.ToolTip = null;
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _recursiveSizeCancellation = cancellation;
+        _recursiveSizeOwner = state;
+        _recursiveSizePath = state.Path;
+        _recursiveSizeIsSelection = true;
+        _lastRecursiveSizeResult = null;
+        _lastRecursiveSizePath = null;
+        _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
+        RecursiveSizeStatus.Text = "正在计算所选项目递归大小… 已检查 0 项 · 再按 F9 取消";
+        RecursiveSizeStatus.ToolTip = $"选择项目数：{paths.Count:N0}";
+        RecursiveSizeStatus.Visibility = Visibility.Visible;
+        _ = ScanRecursiveDirectoryAsync(state, state.Path, cancellation, paths.ToArray());
+    }
+
+    private async Task ScanRecursiveDirectoryAsync(TabState owner, string path, CancellationTokenSource cancellation,
+        string[]? selectedPaths)
     {
         try
         {
             var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));
-            var result = await Task.Run(() => RecursiveDirectoryScanner.Scan(path, cancellation.Token, entriesChecked =>
+            var isSelection = selectedPaths is not null;
+            void ReportProgress(long entriesChecked)
             {
                 if (!progressThrottle.ShouldReport(Stopwatch.GetTimestamp())) return;
                 Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
                 {
                     if (IsCurrentRecursiveSizeScan(owner, path, cancellation))
-                        RecursiveSizeStatus.Text = $"正在计算目录总大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消";
+                        RecursiveSizeStatus.Text = isSelection
+                            ? $"正在计算所选项目递归大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消"
+                            : $"正在计算目录总大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消";
                 }));
-            }), cancellation.Token).ConfigureAwait(false);
+            }
+
+            var result = await Task.Run(() => selectedPaths is null
+                ? RecursiveDirectoryScanner.Scan(path, cancellation.Token, ReportProgress)
+                : RecursiveDirectoryScanner.ScanSelection(selectedPaths, cancellation.Token, ReportProgress),
+                cancellation.Token).ConfigureAwait(false);
             await Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
                 _lastRecursiveSizeResult = result;
                 _lastRecursiveSizePath = path;
                 _lastRecursiveSizeOwner = owner;
-                RenderRecursiveSizeResult(path, result);
+                _lastRecursiveSizeIsSelection = isSelection;
+                RenderRecursiveSizeResult(path, result, isSelection);
             });
         }
         catch (OperationCanceledException) { }
@@ -323,7 +383,7 @@ public partial class PaneControl : UserControl
             await Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
-                RecursiveSizeStatus.Text = $"无法计算目录大小：{ex.Message}";
+                RecursiveSizeStatus.Text = $"无法计算{(selectedPaths is null ? "目录" : "所选项目")}大小：{ex.Message}";
                 RecursiveSizeStatus.ToolTip = path;
             });
         }
@@ -336,6 +396,7 @@ public partial class PaneControl : UserControl
                     _recursiveSizeCancellation = null;
                     _recursiveSizeOwner = null;
                     _recursiveSizePath = null;
+                    _recursiveSizeIsSelection = false;
                 }
                 cancellation.Dispose();
             });
@@ -353,9 +414,11 @@ public partial class PaneControl : UserControl
         _recursiveSizeCancellation = null;
         _recursiveSizeOwner = null;
         _recursiveSizePath = null;
+        _recursiveSizeIsSelection = false;
         _lastRecursiveSizeResult = null;
         _lastRecursiveSizePath = null;
         _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
         if (cancellation is not null) cancellation.Cancel();
         RecursiveSizeStatus.Text = "";
         RecursiveSizeStatus.ToolTip = null;
@@ -367,13 +430,14 @@ public partial class PaneControl : UserControl
         RefreshItemCounts();
         RefreshDiskSpace();
         if (_lastRecursiveSizeResult is { } result && _lastRecursiveSizePath is { } path)
-            RenderRecursiveSizeResult(path, result);
+            RenderRecursiveSizeResult(path, result, _lastRecursiveSizeIsSelection);
     }
 
-    private void RenderRecursiveSizeResult(string path, RecursiveDirectoryScanResult result)
+    private void RenderRecursiveSizeResult(string path, RecursiveDirectoryScanResult result, bool isSelection)
     {
-        RecursiveSizeStatus.Text = ByteSizeFormatter.FormatRecursiveDirectorySummary(result, ByteSizeFormatter.Options);
-        RecursiveSizeStatus.ToolTip = $"{path}\n不跟随重解析点；无法读取或已跳过位置：{result.Unreadable:N0}";
+        var summary = ByteSizeFormatter.FormatRecursiveDirectorySummary(result, ByteSizeFormatter.Options);
+        RecursiveSizeStatus.Text = isSelection ? $"所选项目：{summary}" : summary;
+        RecursiveSizeStatus.ToolTip = $"{(isSelection ? "所选项目" : path)}\n不跟随重解析点；无法读取或已跳过位置：{result.Unreadable:N0}";
     }
 
     private void RefreshNavigationAvailability()
@@ -1240,6 +1304,8 @@ public partial class PaneControl : UserControl
         {
             if (Current == state)
             {
+                if (_recursiveSizeIsSelection && ReferenceEquals(_recursiveSizeOwner, state))
+                    CancelRecursiveDirectorySize();
                 CommandContextChanged?.Invoke(this, EventArgs.Empty);
                 QueueSelectionCountsRefresh(state);
                 if (_autoExpandTreeSelection && IsVisible)

@@ -30,6 +30,88 @@ internal static class RecursiveDirectoryScanner
 {
     private const int ProgressEntryInterval = 256;
 
+    internal static RecursiveDirectoryScanResult ScanSelection(IEnumerable<string> selectedPaths,
+        CancellationToken cancellationToken, Action<long>? progress = null)
+    {
+        var roots = new List<(string Path, bool IsDirectory)>();
+        var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long unreadable = 0;
+        foreach (var selectedPath in selectedPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Path.IsPathFullyQualified(selectedPath))
+            {
+                unreadable++;
+                continue;
+            }
+            try
+            {
+                var path = Path.GetFullPath(selectedPath);
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    unreadable++;
+                    continue;
+                }
+                var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                if (uniquePaths.Add(path))
+                    roots.Add((path, isDirectory));
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException)
+            {
+                unreadable++;
+            }
+        }
+
+        // Walk each selected path's ancestors so a parent selection covers descendants without O(n²) comparisons.
+        var selectedDirectories = roots.Where(root => root.IsDirectory)
+            .Select(root => root.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        roots.RemoveAll(candidate =>
+        {
+            var ancestor = Path.GetDirectoryName(candidate.Path);
+            while (ancestor is not null)
+            {
+                if (selectedDirectories.Contains(ancestor)) return true;
+                ancestor = Path.GetDirectoryName(ancestor);
+            }
+            return false;
+        });
+
+        ulong bytes = 0;
+        long files = 0;
+        long directories = 0;
+        long progressOffset = 0;
+        foreach (var root in roots)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (root.IsDirectory)
+            {
+                var result = Scan(root.Path, cancellationToken,
+                    entriesChecked => progress?.Invoke(checked(progressOffset + entriesChecked)));
+                bytes = checked(bytes + result.Bytes);
+                files = checked(files + result.Files);
+                directories = checked(directories + result.Directories);
+                unreadable = checked(unreadable + result.Unreadable);
+                progressOffset = checked(progressOffset + result.Files + result.Directories + result.Unreadable);
+            }
+            else
+            {
+                try
+                {
+                    bytes = checked(bytes + (ulong)new FileInfo(root.Path).Length);
+                    files++;
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or OverflowException)
+                {
+                    unreadable++;
+                }
+                progressOffset++;
+                progress?.Invoke(progressOffset);
+            }
+        }
+        return new(bytes, files, directories, unreadable);
+    }
+
     internal static RecursiveDirectoryScanResult Scan(
         string root, CancellationToken cancellationToken, Action<long>? progress = null)
     {

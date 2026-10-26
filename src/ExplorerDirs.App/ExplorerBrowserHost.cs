@@ -189,6 +189,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             CaptureProgramStarterItemPaths(1), CaptureProgramStarterItemPaths(2));
     }
 
+    internal IReadOnlyList<string> CaptureSelectedFileSystemPaths()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        return CaptureProgramStarterItemPaths(1).Where(Path.IsPathFullyQualified).ToArray();
+    }
+
     internal PhotoPrintSelectionResult CapturePhotoPrintSelection()
     {
         if (_browser is null || !IsVisible || _viewReadiness.Pending)
