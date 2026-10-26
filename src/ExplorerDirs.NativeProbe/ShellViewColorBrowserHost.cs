@@ -560,14 +560,16 @@ public static class ShellViewColorBrowserHostSmoke
         using var host = new StreamViewHost(frameWindow, []);
         var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         var menu = CreateMenu();
+        var foreignPopup = CreatePopupMenu();
         var widths = Marshal.AllocHGlobal(6 * sizeof(int));
         try
         {
-            Check(menu != 0, "a native shared-menu root is created for the insertion smoke");
+            Check(menu != 0 && foreignPopup != 0 && AppendMenuW(menu, 0x10, foreignPopup, "Shell object menu"),
+                "a native shared-menu root with a foreign popup is created for the insertion smoke");
             for (var i = 0; i < 6; i++) Marshal.WriteInt32(widths, i * sizeof(int), 0);
             var insertMenus = GetComMethod<InsertMenusCallback>(browser, 5);
             var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
-            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 6,
+            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 7,
                 "IShellBrowser.InsertMenusSB inserts the six standard host popup groups");
             var labels = new[] { "File", "Edit", "View", "Favorites", "Tools", "Help" };
             for (var i = 0; i < labels.Length; i++)
@@ -582,16 +584,18 @@ public static class ShellViewColorBrowserHostSmoke
             Check(Enumerable.Range(0, 6).Select(i => Marshal.ReadInt32(widths, i * sizeof(int)))
                     .SequenceEqual(new[] { 2, 0, 3, 0, 1, 0 }),
                 "OLEMENUGROUPWIDTHS reports host counts for File, Container, and Window groups");
-            Check(removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 0,
-                "IShellBrowser.RemoveMenusSB removes and releases only host popup groups");
-            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 6 &&
-                  removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 0,
+            Check(removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 1 &&
+                  GetSubMenu(menu, 0) == foreignPopup,
+                "IShellBrowser.RemoveMenusSB leaves the foreign popup untouched while removing host groups");
+            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 7 &&
+                  removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 1 && GetSubMenu(menu, 0) == foreignPopup,
                 "the same shared menu can be merged and removed again");
         }
         finally
         {
             Marshal.FreeHGlobal(widths);
             if (menu != 0) DestroyMenu(menu);
+            else if (foreignPopup != 0) DestroyMenu(foreignPopup);
             Marshal.Release(browser);
             if (frameWindow != 0) DestroyWindow(frameWindow);
         }
@@ -788,6 +792,7 @@ public static class ShellViewColorBrowserHostSmoke
     [DllImport("user32.dll")] private static extern nint CreateMenu();
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int capacity, uint flags);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
