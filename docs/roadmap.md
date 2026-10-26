@@ -3543,3 +3543,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - NativeProbe Release 构建 0 警告/错误；`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。通过的 `direct-listview-mode-capture` 在真实 filesystem `IShellView` 的 `SysListView32` 上覆盖 Icon、Details、SmallIcon、List、Tile 五种样式；两条按文件身份配置不同颜色的样本，在未排序、排序及分组后都取得两行非零颜色像素，排序/分组后身份映射正确。
 - 前置 `visible-row-pixels` 路径回调为零，未通过；只有后续专用采样路径算作证据。Private Desktop 前台句柄未变。颜色绘制因此具备隔离技术可行性证据，仍不代表产品着色已接入或用户桌面外观验收通过；真实 OLE 拖放、物理键盘焦点及 WPF 宿主集成仍在迁移门槛中。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27五种-listview-样式的逐项颜色像素隔离复核)。
+
+## 2026-10-27：Alt+Tab 时暂停文件操作焦点恢复期限
+
+- 源码追踪发现，Shell 文件操作的焦点恢复请求虽会在窗口失活期间保留并暂停 `SetFocus`，但原有 1.5 秒绝对期限仍持续计时；用户离开应用超过该期限后返回，请求可能先过期。现在失活轮询会更新计时检查点，期限只在窗口活动期间消耗；窗格/视图/导航/用户输入门控与激活后的 1.5 秒上限不变。
+- `ShellFocusRestoreGateSmoke` 对“失活时间超过期限”“持续失活轮询”“重新激活后恢复有界计时”新增回归；先因缺少计时检查点 API 按预期失败，再通过。完整 Release SettingsSmoke 通过，App Release build 0 警告/错误。未操作剪贴板、启动 ExplorerBrowser 或使用物理键盘；真实 Alt+Tab、Ctrl+C/V 和 Shift+Delete 后的方向键体验仍待可见验收，文件操作焦点 P0 保持开放。

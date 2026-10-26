@@ -72,6 +72,17 @@ internal static class ShellFocusRestoreGateSmoke
         Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: false,
                 fileContentAlreadyFocused: false), expected: false,
             "focus retry stays pending without taking focus while the app window is inactive");
+        var startedAtBeforeInactivePeriod = 10L;
+        var startedAtWhileInactive = ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+            startedAtBeforeInactivePeriod, now: 5000, windowActive: false);
+        Check(startedAtWhileInactive == 5000, expected: true,
+            "time spent away from the application does not consume the active focus-recovery window");
+        Check(ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+                startedAtWhileInactive, now: 5010, windowActive: false) == 5010, expected: true,
+            "an inactive retry keeps the pending request alive without accumulating inactive time");
+        Check(ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+                startedAtWhileInactive, now: 5100, windowActive: true) == 5000, expected: true,
+            "reactivation resumes the bounded focus-recovery window from its latest inactive checkpoint");
         Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
                 fileContentAlreadyFocused: false), expected: true,
             "focus retry restores the file-content target when a sibling Shell control has focus");

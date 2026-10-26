@@ -20,6 +20,9 @@ internal static class ShellFocusRestoreGate
     internal static bool ShouldAttemptRestore(bool canContinue, bool windowActive,
         bool fileContentAlreadyFocused) => canContinue && windowActive && !fileContentAlreadyFocused;
 
+    internal static long ResolveRetryWindowStartTimestamp(long startedAt, long now, bool windowActive) =>
+        windowActive ? startedAt : now;
+
     internal static bool ShouldKeepPendingRestoreAfterNativeInput(bool inputInFileContent,
         bool inputInColumnHeader, bool sameView, bool focusStillDesired) =>
         inputInFileContent && !inputInColumnHeader && sameView && focusStillDesired;

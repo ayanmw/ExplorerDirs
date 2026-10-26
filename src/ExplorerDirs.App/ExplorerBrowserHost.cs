@@ -857,6 +857,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var focusStillDesired =
             (MayContinueFileOperationFocusRestore?.Invoke() ?? MayRestoreFocus?.Invoke() == true) && IsVisible;
         var windowActive = window?.IsActive == true;
+        var retryWindowStart = ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+            request.StartedAt, Stopwatch.GetTimestamp(), windowActive);
+        if (retryWindowStart != request.StartedAt)
+        {
+            request = request with { StartedAt = retryWindowStart };
+            _pendingFileOperationFocusRestore = request;
+        }
         var sameView = ReferenceEquals(request.Browser, _browser) &&
             request.NavigationVersion == _viewReadiness.NavigationVersion &&
             string.Equals(request.Path, CurrentPath, StringComparison.OrdinalIgnoreCase);
