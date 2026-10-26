@@ -35,10 +35,10 @@
 - Test: `src/ExplorerDirs.SettingsSmoke/ExplorerChromeIconSmoke.cs`
 - Modify: `src/ExplorerDirs.SettingsSmoke/Program.cs`
 
-- [ ] Add a failing smoke for the complete geometry set and mapping of every Shell command.
-- [ ] Add command icon mappings, label-plus-icon button content, and menu icon creation.
-- [ ] Run focused icon smoke and confirm every geometry parses, maps once, and uses semantic strokes.
-- [ ] Commit the icon mapping/helper task with integration.
+- [x] Add a failing smoke for the complete geometry set and mapping of every Shell command.
+- [x] Add command icon mappings, label-plus-icon button content, and menu icon creation.
+- [x] Run focused icon smoke and confirm every geometry parses, maps once, and uses semantic strokes.
+- [x] Commit the icon mapping/helper task with integration.
 
 ### Task 2: Apply icons to command controls
 
@@ -47,11 +47,11 @@
 - Modify: `src/ExplorerDirs.App/MainWindow.xaml.cs`
 - Test: `src/ExplorerDirs.SettingsSmoke/ExplorerChromeIconSmoke.cs`
 
-- [ ] Replace print, folder-size, environment refresh, and terminal glyphs with named vector icons.
-- [ ] Add matching menu and text-preserving toolbar icons for all `ShellFileCommand` entries.
-- [ ] Assert the unchanged event handlers, automation names, visible labels, shortcuts, and shell state paths.
-- [ ] Run focused icon, full Release `SettingsSmoke`, and App Release build.
-- [ ] Commit the command toolbar integration.
+- [x] Replace print, folder-size, environment refresh, and terminal glyphs with named vector icons.
+- [x] Add matching menu and text-preserving toolbar icons for all `ShellFileCommand` entries.
+- [x] Assert the unchanged event handlers, automation names, visible labels, shortcuts, and shell state paths.
+- [x] Run focused icon, full Release `SettingsSmoke`, and App Release build.
+- [x] Commit the command toolbar integration.
 
 ### Task 3: Record verification boundary
 
@@ -59,6 +59,6 @@
 - Modify: `docs/theme-icon-roadmap.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] Run `git diff --check` and verify no Shell command state or invocation logic changed.
-- [ ] Record that command outcomes remain native and that visual/DPI/high-contrast checks need GUI acceptance.
-- [ ] Commit the record with this implementation batch.
+- [x] Run `git diff --check` and verify no Shell command state or invocation logic changed.
+- [x] Record that command outcomes remain native and that visual/DPI/high-contrast checks need GUI acceptance.
+- [x] Commit the record with this implementation batch.

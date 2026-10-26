@@ -138,13 +138,16 @@
                 <Button x:Name="SearchCurrentDirectoryButton" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
                         AutomationProperties.AutomationId="OpenCurrentDirectorySearch"
                         Click="SearchCurrent_Click" Width="32"/>
-                <Button Content="🖨" ToolTip="打印当前文件视图" AutomationProperties.Name="打印当前文件视图"
+                <Button x:Name="PrintFileViewToolbarButton" ToolTip="打印当前文件视图"
+                        AutomationProperties.Name="打印当前文件视图"
                         Click="PrintFileView_Click" Width="36"/>
-                <Button Content="大小" ToolTip="计算或取消当前目录递归大小 (F9)"
+                <Button x:Name="FolderSizeToolbarButton" ToolTip="计算或取消当前目录递归大小 (F9)"
                         AutomationProperties.Name="计算当前目录递归大小" Click="CalculateDirectorySize_Click"/>
                 <Separator/>
-                <Button Content="↻ 环境" ToolTip="刷新本程序环境变量" Click="RefreshEnvironment_Click"/>
-                <Button Content="⌘ 命令行" ToolTip="在当前目录打开命令行" Click="OpenTerminal_Click"/>
+                <Button x:Name="RefreshEnvironmentToolbarButton" ToolTip="刷新本程序环境变量"
+                        AutomationProperties.Name="刷新本程序环境变量" Click="RefreshEnvironment_Click" Width="32"/>
+                <Button x:Name="OpenTerminalToolbarButton" ToolTip="在当前目录打开命令行"
+                        AutomationProperties.Name="在当前目录打开命令行" Click="OpenTerminal_Click" Width="32"/>
             </ToolBar>
         </ToolBarTray>
         <TextBlock x:Name="EnvironmentStatus" DockPanel.Dock="Bottom" Margin="8,2"

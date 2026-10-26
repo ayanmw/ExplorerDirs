@@ -8,14 +8,20 @@ internal static class ExplorerChromeIconSmoke
     internal static void Run()
     {
         var geometries = ExplorerChromeIcons.All;
-        Check(geometries.Count == 12,
-            "navigation and tab commands have a dedicated vector geometry");
+        Check(geometries.Count == 25,
+            "navigation, tab, and file command controls have dedicated vector geometries");
         Check(geometries.All(geometry => !geometry.IsEmpty() &&
               geometry.Bounds.X >= 0 && geometry.Bounds.Y >= 0 &&
               geometry.Bounds.Right <= 16 && geometry.Bounds.Bottom <= 16),
             "navigation and tab geometries parse within the 16-unit icon grid");
         Check(geometries.Select(geometry => geometry.ToString()).Distinct(StringComparer.Ordinal).Count() == geometries.Count,
-            "navigation and tab command paths are distinct");
+            "navigation, tab, and file command paths are distinct");
+
+        var fileCommands = ShellFileCommands.All;
+        Check(fileCommands.Count == 9 && fileCommands
+                  .Select(command => ExplorerChromeIcons.ForCommand(command.Command).ToString())
+                  .Distinct(StringComparer.Ordinal).Count() == fileCommands.Count,
+            "every Shell file command maps to its own vector geometry");
 
         var repoRoot = FindRepoRoot();
         var factory = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerChromeIcons.cs"));
@@ -60,6 +66,20 @@ internal static class ExplorerChromeIconSmoke
               mainMarkup.Contains("Click=\"DuplicateTab_Click\"", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"CloseTab_Click\"", StringComparison.Ordinal),
             "main tab/navigation toolbar icons preserve command handlers");
+        Check(factory.Contains("CreateLabeledButtonContent", StringComparison.Ordinal) &&
+              factory.Contains("CreateMenuIcon", StringComparison.Ordinal) &&
+              mainCode.Contains("ExplorerChromeIcons.CreateLabeledButtonContent(info.Command, info.Label)", StringComparison.Ordinal) &&
+              mainCode.Contains("ExplorerChromeIcons.CreateMenuIcon(info.Command)", StringComparison.Ordinal),
+            "file command toolbar and menu create icons from the existing command identity");
+        Check(mainCode.Contains("PrintFileViewToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              mainCode.Contains("FolderSizeToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              mainCode.Contains("RefreshEnvironmentToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              mainCode.Contains("OpenTerminalToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"PrintFileView_Click\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"CalculateDirectorySize_Click\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"RefreshEnvironment_Click\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"OpenTerminal_Click\"", StringComparison.Ordinal),
+            "print, folder size, environment, and terminal buttons keep their original handlers");
 
         Console.WriteLine("Explorer chrome icon smoke: PASS");
 

@@ -93,6 +93,10 @@ public partial class MainWindow : Window
         CloseTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close));
         RefreshCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh));
         SearchCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Search));
+        PrintFileViewToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Print));
+        FolderSizeToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.FolderSize));
+        RefreshEnvironmentToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Environment));
+        OpenTerminalToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Terminal));
         if (_themeController is not null)
             _themeController.ThemeChanged += ThemeController_ThemeChanged;
         ByteSizeFormatter.OptionsChanged += ByteSizeFormatter_OptionsChanged;
@@ -1136,13 +1140,18 @@ public partial class MainWindow : Window
     {
         foreach (var info in ShellFileCommands.All)
         {
-            var item = new MenuItem { Header = info.Label, InputGestureText = info.Shortcut, IsEnabled = false };
+            var item = new MenuItem
+            {
+                Header = info.Label, Icon = ExplorerChromeIcons.CreateMenuIcon(info.Command),
+                InputGestureText = info.Shortcut, IsEnabled = false
+            };
             item.Click += (_, _) => InvokeFileCommand(info.Command);
             FileCommandsMenu.Items.Add(item);
             _fileCommandMenus[info.Command] = item;
             var button = new Button
             {
-                Content = info.Label, ToolTip = $"{info.Label} ({info.Shortcut})",
+                Content = ExplorerChromeIcons.CreateLabeledButtonContent(info.Command, info.Label),
+                ToolTip = $"{info.Label} ({info.Shortcut})",
                 IsEnabled = false, Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(1, 0, 1, 0)
             };
             AutomationProperties.SetName(button, info.Label);
