@@ -204,11 +204,44 @@ internal static class ShellViewColorSpike
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
             if (probeSessionRestore)
             {
-                const uint expectedMode = 2; // FVM_SMALLICON
+                const uint expectedMode = 4; // FVM_DETAILS
+                var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+                var nameKey = new PropertyKeyState(propertyFormatId, 10);
+                var sizeKey = new PropertyKeyState(propertyFormatId, 12);
+                var typeKey = new PropertyKeyState(propertyFormatId, 4);
+                var expectedSort = new SortColumn
+                {
+                    Key = new PropertyKey { FormatId = propertyFormatId, PropertyId = nameKey.PropertyId },
+                    Direction = -1
+                };
+                var expectedColumns = new DisplayColumnState[]
+                {
+                    new(nameKey, 280), new(sizeKey, 120), new(typeKey, 160)
+                };
                 Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, 16));
-                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var modeBeforeSave, out _));
-                Check(At<SaveViewState>(view, 13)(view));
+                Check(At<SetSortColumns>(folderView, 27)(folderView, [expectedSort], 1));
+                var expectedGroup = new PropertyKey { FormatId = propertyFormatId, PropertyId = typeKey.PropertyId };
+                Check(At<SetGroupBy>(folderView, 17)(folderView, ref expectedGroup, 1));
+                Check(ShellColumnManager.Apply(folderView, expectedColumns));
                 Pump(500);
+                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var modeBeforeSave, out _));
+                Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCountBeforeSave));
+                if (sortCountBeforeSave != 1)
+                    throw new Exception($"The real Shell view did not retain the requested sort before saving: {sortCountBeforeSave}.");
+                var sortBeforeSave = new SortColumn[sortCountBeforeSave];
+                Check(At<GetSortColumns>(folderView, 28)(folderView, sortBeforeSave, sortCountBeforeSave));
+                var groupBeforeSaveHr = At<GetGroupBy>(folderView, 18)(folderView, out var groupBeforeSave, out var groupAscendingBeforeSave);
+                Check(groupBeforeSaveHr);
+                Check(ShellColumnManager.Capture(folderView, out var columnsBeforeSave));
+                var sortBeforeSaveMatches = sortBeforeSave[0].Key.FormatId == expectedSort.Key.FormatId &&
+                    sortBeforeSave[0].Key.PropertyId == expectedSort.Key.PropertyId && sortBeforeSave[0].Direction == expectedSort.Direction;
+                var groupBeforeSaveMatches = groupBeforeSave.FormatId == expectedGroup.FormatId &&
+                    groupBeforeSave.PropertyId == expectedGroup.PropertyId && groupAscendingBeforeSave == 1;
+                var columnsBeforeSaveMatch = columnsBeforeSave is not null && expectedColumns.SequenceEqual(columnsBeforeSave);
+                if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
+                    throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
+                Check(At<SaveViewState>(view, 13)(view));
+                Pump(350);
 
                 var oldView = view;
                 var oldFolder = folder;
@@ -244,14 +277,28 @@ internal static class ShellViewColorSpike
                 Check(folderViewHr);
                 _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
                 Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var restoredMode, out _));
+                Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var restoredSortCount));
+                var restoredSorts = new SortColumn[restoredSortCount];
+                Check(At<GetSortColumns>(folderView, 28)(folderView, restoredSorts, restoredSortCount));
+                var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var restoredGroup, out var restoredGroupAscending);
+                Check(groupResult);
+                Check(ShellColumnManager.Capture(folderView, out var restoredColumns));
+                var sortRestored = restoredSortCount == 1 && restoredSorts[0].Key.FormatId == expectedSort.Key.FormatId &&
+                    restoredSorts[0].Key.PropertyId == expectedSort.Key.PropertyId && restoredSorts[0].Direction == expectedSort.Direction;
+                var groupRestored = restoredGroup.FormatId == expectedGroup.FormatId &&
+                    restoredGroup.PropertyId == expectedGroup.PropertyId && restoredGroupAscending == 1;
+                var columnsRestored = restoredColumns is not null && expectedColumns.SequenceEqual(restoredColumns);
                 Console.WriteLine($"ishellview-session-restore: save-view-state=True; shell-write-callbacks={shellWrites}; " +
                     $"persisted-bytes={savedState.Length}; recreated-host-reads={host.Reads}; " +
                     $"mode-before-save={modeBeforeSave}; create-settings={settings.Mode}/{settings.Flags}; " +
-                    $"expected-mode={expectedMode}; restored-mode={restoredMode}; " +
+                    $"mode={modeBeforeSave}/{restoredMode}; sort={sortCountBeforeSave}/{restoredSortCount}/{sortRestored}; " +
+                    $"group={groupBeforeSaveHr:X8}/{groupResult:X8}/{groupRestored}; " +
+                    $"columns={columnsBeforeSave?.Count ?? 0}/{restoredColumns?.Count ?? 0}/{columnsRestored}; " +
                     $"foreground-unchanged={GetForegroundWindow() == foreground}");
-                if (modeBeforeSave != expectedMode || restoredMode != expectedMode || host.Reads == 0 ||
+                if (modeBeforeSave != expectedMode || restoredMode != expectedMode || !sortRestored ||
+                    !groupRestored || !columnsRestored || host.Reads == 0 ||
                     GetForegroundWindow() != foreground)
-                    throw new Exception("The real Shell view did not save and restore the selected mode through its session stream.");
+                    throw new Exception("The real Shell view did not restore the expected mode, sort, group, and columns through its session stream.");
                 return 0;
             }
             var selectHr = At<SelectFolderItem>(folderView, 15)(folderView, 0, 0x1); // IFolderView::SelectItem; SVSI_SELECT only.
