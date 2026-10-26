@@ -17,10 +17,10 @@ internal static class FullScreenPresentationSmoke
               fullScreen.WindowStyle == WindowStyle.None &&
               fullScreen.ResizeMode == ResizeMode.NoResize,
             "full-screen presentation removes the frame and resize handles");
-        Check(fullScreen.MenuVisibility == Visibility.Collapsed &&
-              fullScreen.ToolBarVisibility == Visibility.Collapsed &&
-              fullScreen.StatusBarVisibility == Visibility.Collapsed,
-            "full-screen presentation hides the app chrome");
+        Check(fullScreen.MenuVisibility == original.MenuVisibility &&
+              fullScreen.ToolBarVisibility == original.ToolBarVisibility &&
+              fullScreen.StatusBarVisibility == original.StatusBarVisibility,
+            "immersive full-screen presentation preserves each app bar visibility");
         Check(fullScreen.Left == original.Left && fullScreen.Top == original.Top &&
               fullScreen.Width == original.Width && fullScreen.Height == original.Height &&
               fullScreen.Topmost == original.Topmost,

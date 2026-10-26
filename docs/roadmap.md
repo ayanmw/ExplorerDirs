@@ -82,7 +82,7 @@
 
 ## 2026-10-27：实现 Q-Dir F11 全屏切换
 
-- Q-Dir 官方命令表将 F11 定义为全屏。Explorer Dirs 现在可用 F11 或“视图 → 全屏”进入无边框全屏，隐藏菜单、主工具栏和状态栏，并覆盖当前显示器；再次按 F11 或菜单项会恢复进入前的普通/最大化状态和各栏显示状态。全屏是临时窗口状态，不写入 profile 或会话文件。来源：[Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
+- Q-Dir 官方命令表将 F11 定义为全屏。按用户确认，Explorer Dirs 的 F11 或“视图 → 全屏”采用沉浸模式：去掉窗口边框、覆盖当前显示器，同时保留进入前的菜单、主工具栏和状态栏显隐状态；再次按 F11 或菜单项恢复进入前的普通/最大化状态和各栏显隐状态。全屏是临时窗口状态，不写入 profile 或会话文件。来源：[Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
 - Release SettingsSmoke 与 App Release 构建覆盖源码及状态转换；未启动 GUI，因此实际显示器边界、多显示器/DPI、任务栏遮挡与 ExplorerBrowser 视图缩放仍待可见验收。
 
 ## 2026-10-27：补齐 Q-Dir 状态栏显示选项

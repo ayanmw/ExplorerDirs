@@ -296,6 +296,8 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 2026-10-27 Q-Dir 重启快捷键：官方快捷键清单列出 Alt+F11 重启；本程序“文件 → 重启应用”现在标注并响应 Alt+F11，复用现有确认、所有窗口会话保存和重启逻辑。分派/接线 smoke、完整 Release `SettingsSmoke` 与 App Release 构建通过；没有触发真实重启或 GUI 验收。[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)
 
+2026-10-27 F11 沉浸式全屏：按用户选择，保留应用菜单、工具栏和状态栏原先的显隐状态；全屏只移除窗口边框并覆盖当前显示器，退出后恢复原窗口状态。无窗口状态 smoke 与 Release build 通过；多显示器、任务栏遮挡和实际 Shell 视图尺寸尚未可见验收。[路线图](roadmap.md#2026-10-27实现-q-dir-f11-全屏切换)
+
 2026-10-27 IShellView 原型 F2 编辑焦点：单个默认 Shell 视图在 F2 重命名编辑期间，Left/Up/Right/Down 四个合成按键均由 `TranslateAccelerator` 接收，编辑框与焦点保持。Private Desktop 临时夹具验证通过；这不覆盖多窗格/WPF 或 ExplorerBrowser 产品，因此现有多窗格重命名缺陷仍为 P0 待可见验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-f2-编辑状态下四方向键隔离验证)
 
 2026-10-27 IShellView 原型 F2 编辑焦点扩展：Icon、Details、SmallIcon、List、Tile 五种模式下，F2 均进入原生重命名编辑框；Left/Up/Right/Down 合成键后编辑框焦点保持，Private Desktop 完整流程连续两轮通过。真实多窗格焦点争用及 ExplorerBrowser 产品行为仍待可见验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-五种视图模式下-f2-编辑焦点隔离验证)

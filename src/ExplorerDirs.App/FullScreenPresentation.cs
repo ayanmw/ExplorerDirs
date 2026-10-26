@@ -19,9 +19,6 @@ internal readonly record struct FullScreenPresentation(
     {
         WindowState = System.Windows.WindowState.Normal,
         WindowStyle = System.Windows.WindowStyle.None,
-        ResizeMode = System.Windows.ResizeMode.NoResize,
-        MenuVisibility = Visibility.Collapsed,
-        ToolBarVisibility = Visibility.Collapsed,
-        StatusBarVisibility = Visibility.Collapsed
+        ResizeMode = System.Windows.ResizeMode.NoResize
     };
 }
