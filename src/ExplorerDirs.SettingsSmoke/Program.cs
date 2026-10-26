@@ -70,6 +70,12 @@ if (args.Length == 1 && args[0] == "--explorer-chrome-icon-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--native-shell-tree-icon-fallback-smoke")
+{
+    ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();
