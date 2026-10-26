@@ -396,7 +396,7 @@ public partial class PaneControl : UserControl
         foreach (var tab in _tabOrder)
         {
             var state = (TabState)tab.Tag;
-            if (ReferenceEquals(state, Current) || !state.Browser.HasLiveShellView) continue;
+            if ((IsVisible && ReferenceEquals(state, Current)) || !state.Browser.HasLiveShellView) continue;
             if (!state.Browser.CanReleaseForMemoryOptimization())
             {
                 skipped++;
