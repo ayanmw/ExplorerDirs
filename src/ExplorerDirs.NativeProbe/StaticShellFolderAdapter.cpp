@@ -14,11 +14,15 @@ namespace
     // filesystem PIDLs and Shell operations while adding one deterministic column.
     constexpr PROPERTYKEY kStaticSizeKey =
     { { 0xA38B883C, 0xFA8A, 0x4E1C, { 0x8B, 0x52, 0xC6, 0x05, 0xE5, 0xD0, 0x12, 0x34 } }, 1 };
+    constexpr PROPERTYKEY kSizeKey =
+    { { 0xB725F130, 0x47EF, 0x101A, { 0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC } }, 12 };
     constexpr UINT kColumnLimit = 64;
     volatile LONG g_staticColumnComparisons = 0;
     volatile LONG g_allComparisons = 0;
     volatile LONG g_lastCompareColumn = -1;
     volatile LONG g_customDetailsEx = 0;
+    volatile LONG g_standardSizeDetailsEx = 0;
+    volatile LONG g_standardSizeComparisons = 0;
     volatile LONG g_customDetailsOf = 0;
 
     bool NameFromPidl(IShellFolder2* folder, PCUITEMID_CHILD pidl, std::wstring& name)
@@ -116,8 +120,10 @@ namespace
         {
             InterlockedIncrement(&g_allComparisons);
             InterlockedExchange(&g_lastCompareColumn, LOWORD(column));
-            if (LOWORD(column) != _columnCount) return _inner->CompareIDs(column, left, right);
-            InterlockedIncrement(&g_staticColumnComparisons);
+            const auto columnIndex = LOWORD(column);
+            if (columnIndex != _columnCount && columnIndex != 1) return _inner->CompareIDs(column, left, right);
+            if (columnIndex == 1) InterlockedIncrement(&g_standardSizeComparisons);
+            else InterlockedIncrement(&g_staticColumnComparisons);
             std::wstring leftName, rightName;
             if (!NameFromPidl(_inner, left, leftName) || !NameFromPidl(_inner, right, rightName)) return E_FAIL;
             bool leftFound = false, rightFound = false;
@@ -153,8 +159,9 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* column, VARIANT* value) override
         {
-            if (!column || *column != kStaticSizeKey) return _inner->GetDetailsEx(item, column, value);
-            InterlockedIncrement(&g_customDetailsEx);
+            if (!column || (*column != kStaticSizeKey && *column != kSizeKey)) return _inner->GetDetailsEx(item, column, value);
+            if (*column == kSizeKey) InterlockedIncrement(&g_standardSizeDetailsEx);
+            else InterlockedIncrement(&g_customDetailsEx);
             if (!item) return E_INVALIDARG;
             std::wstring name;
             if (!NameFromPidl(_inner, item, name)) return E_FAIL;
@@ -169,6 +176,23 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
         {
             if (!details) return E_POINTER;
+            if (column == 1 && item)
+            {
+                std::wstring name;
+                if (!NameFromPidl(_inner, item, name)) return E_FAIL;
+                bool found = false;
+                const auto number = ValueForName(name, found);
+                if (!found) return E_FAIL;
+                details->fmt = LVCFMT_RIGHT;
+                details->cxChar = 16;
+                details->str.uType = STRRET_WSTR;
+                const auto valueText = std::to_wstring(number);
+                const auto length = valueText.size() + 1;
+                details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(length * sizeof(wchar_t)));
+                if (!details->str.pOleStr) return E_OUTOFMEMORY;
+                StringCchCopyW(details->str.pOleStr, length, valueText.c_str());
+                return S_OK;
+            }
             if (column < _columnCount) return _inner->GetDetailsOf(item, column, details);
             if (column != _columnCount) return E_INVALIDARG;
             InterlockedIncrement(&g_customDetailsOf);
@@ -228,6 +252,16 @@ extern "C" __declspec(dllexport) LONG WINAPI GetLastShellColumnComparisonIndex()
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsExCount()
 {
     return InterlockedCompareExchange(&g_customDetailsEx, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsExCount()
+{
+    return InterlockedCompareExchange(&g_standardSizeDetailsEx, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellComparisonCount()
+{
+    return InterlockedCompareExchange(&g_standardSizeComparisons, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()

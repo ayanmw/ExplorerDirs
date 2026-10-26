@@ -11,6 +11,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+    private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const uint SvgioAllView = 2;
 
     internal static int RunFolderContract()
@@ -75,14 +76,47 @@ internal static class StaticShellFolderAdapterProbe
                 Marshal.FreeCoTaskMem(keyPointer);
             }
 
+            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            var sizeKeyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
+            var sizeVariant = Marshal.AllocCoTaskMem(24);
+            try
+            {
+                Marshal.StructureToPtr(sizeKey, sizeKeyPointer, false);
+                foreach (var (name, expectedValue) in new[]
+                {
+                    ("two.bin", 2UL), ("ten.bin", 10UL), ("hundred.bin", 100UL), ("ten-copy.bin", 10UL)
+                })
+                {
+                    Marshal.Copy(new byte[272], 0, details, 272);
+                    Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], 1, details));
+                    if (ReadDetailsText(details) != expectedValue.ToString())
+                        throw new Exception($"Standard Size display mismatch for {name}.");
+
+                    Marshal.GetNativeVariantForObject(0UL, sizeVariant);
+                    Check(At<GetDetailsEx>(adapter, 17)(adapter, items[name], sizeKeyPointer, sizeVariant));
+                    var value = Marshal.GetObjectForNativeVariant(sizeVariant);
+                    if (value is not ulong number || number != expectedValue)
+                        throw new Exception($"Standard PKEY_Size mismatch for {name}: {value}; expected {expectedValue}.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(sizeVariant);
+                Marshal.FreeCoTaskMem(sizeKeyPointer);
+            }
+
             var compare = At<CompareIDs>(adapter, 7);
+            CheckCompare(compare(adapter, 1, items["two.bin"], items["ten.bin"]), -1, "standard Size 2 before 10");
+            CheckCompare(compare(adapter, 1, items["ten.bin"], items["hundred.bin"]), -1, "standard Size 10 before 100");
+            CheckCompare(compare(adapter, 1, items["ten.bin"], items["ten-copy.bin"]), 0, "standard Size equal values");
+            CheckCompare(compare(adapter, 1, items["hundred.bin"], items["two.bin"]), 1, "standard Size 100 after 2");
             CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["ten.bin"]), -1, "2 before 10");
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["hundred.bin"]), -1, "10 before 100");
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["ten-copy.bin"]), 0, "equal values");
             CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
-                "state=0x12; title-and-four-values=valid; variant=UInt64; " +
+                "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 "compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; window-created=False");
             return 0;
         }
@@ -192,6 +226,7 @@ internal static class StaticShellFolderAdapterProbe
             var columns = new DisplayColumnState[]
             {
                 new(new(NameKeyFormat, 10), 220),
+                new(new(SizeKeyFormat, 12), 110),
                 new(new(property.FormatId, property.PropertyId), 150)
             };
             Check(ShellColumnManager.Apply(folderView, columns));
@@ -202,8 +237,14 @@ internal static class StaticShellFolderAdapterProbe
             values = ReadSortedValues(folderView, adapter, nativeKey, -1);
             if (!values.SequenceEqual(new ulong[] { 100, 10, 10, 2 })) throw new Exception("Descending sort was not numeric: " + string.Join(',', values));
 
+            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            values = ReadSortedValues(folderView, adapter, sizeKey, 1);
+            if (!values.SequenceEqual(new ulong[] { 2, 10, 10, 100 })) throw new Exception("Ascending PKEY_Size sort was not numeric: " + string.Join(',', values));
+            values = ReadSortedValues(folderView, adapter, sizeKey, -1);
+            if (!values.SequenceEqual(new ulong[] { 100, 10, 10, 2 })) throw new Exception("Descending PKEY_Size sort was not numeric: " + string.Join(',', values));
+
             Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-column-visible=True; " +
-                "typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=False; foreground-unchanged=True");
+                "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=False; foreground-unchanged=True");
             CheckBoundary(parent, foreground, "static column sorting");
         }
         catch (Exception ex)
@@ -354,7 +395,9 @@ internal static class StaticShellFolderAdapterProbe
             var index = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetLastShellColumnComparisonIndex"))();
             var detailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsExCount"))();
             var detailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsOfCount"))();
-            return $"compare={total}/{custom}/{index}; GetDetailsEx={detailsEx}; GetDetailsOf={detailsOf}";
+            var sizeDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsExCount"))();
+            var sizeCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellComparisonCount"))();
+            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf={detailsOf}";
         }
         finally { NativeLibrary.Free(module); }
     }
