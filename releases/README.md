@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`preview-0.6.0-temp.61/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.60，在“此电脑”地址菜单中动态列出逻辑驱动器，并为就绪的本地固定盘显示卷标；网络盘不会触发远程卷标读取。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`，EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过。没有启动 GUI；真实菜单交互、驱动器导航和 Q-Dir 互操作仍待桌面验收。详见[第六十一版说明](../docs/releases/preview-0.6.0-temp.61.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
 `preview-0.6.0-temp.60/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.59，地址栏上级菜单改为可展开祖先目录树；增加 Windows 强调色基础接线和活动窗格强调色边框。产品版本 `0.6.0-preview.temp.60+80d2bbd147ac4d248e5554e509692c0f9c432f3b`，EXE SHA-256 `58BED64B44B2F66A8930A265B9200EC2DB78EE7EB41B5A33322974B2220DE258`，DLL SHA-256 `346D9CF4187750E28416F99E82338FB760D089D9D79DC843C253A867926A4F75`，与包内清单一致。Release SettingsSmoke、App Release 构建与发布隔离 smoke 通过。没有启动 GUI；菜单实际交互、系统切色和 Q-Dir 实际互操作仍待验收。详见[第六十版说明](../docs/releases/preview-0.6.0-temp.60.md)及包内 `RELEASE-NOTES.md`。
 
 ## 最新临时预览包（2026-10-26）

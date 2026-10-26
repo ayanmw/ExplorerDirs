@@ -10,6 +10,8 @@
 
 ## 验证与限制
 
+- 产品版本：`0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`。
+- EXE SHA-256：`A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`；DLL SHA-256：`5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内 `app\SHA256.txt` 一致。
 - 地址菜单定向 smoke 和完整 Release `SettingsSmoke` 通过。
 - App Release 构建 0 警告、0 错误；发布隔离 smoke 通过。
 - 未启动程序窗口、未操作桌面或 Q-Dir。菜单弹出、真实驱动器导航、映射盘断开表现和 Q-Dir 实际互操作仍待可见验收。

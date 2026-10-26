@@ -5,7 +5,7 @@
 ## 2026-10-26：temp.61 地址栏驱动器名称预览
 
 - 地址栏位置菜单在“此电脑”下显示当前逻辑驱动器；本地固定盘显示卷标，未命名或不可读取时回退为驱动器类型名称，网络盘不查询远程卷标。
-- 地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建（0 警告/错误）和发布隔离 smoke 通过。temp.61 发布记录已准备，实际包路径计划为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.61`；包版本和哈希将在构建后登记。未启动程序或操作桌面，实际菜单行为与 Q-Dir 互操作仍待可见验收。
+- 地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建（0 警告/错误）和发布隔离 smoke 通过。预览包位于 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.61`，使用独立 `app/profile/`。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`；EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。未启动程序或操作桌面，实际菜单行为与 Q-Dir 互操作仍待可见验收。
 
 ## 2026-10-26：temp.60 隔离预览
 
