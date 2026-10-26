@@ -39,7 +39,8 @@ internal static class ShellViewColorSpike
     private static int _customDrawItems;
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
-        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false)
+        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
+        bool probeSessionRestore = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -201,6 +202,58 @@ internal static class ShellViewColorSpike
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
+            if (probeSessionRestore)
+            {
+                const uint expectedMode = 2; // FVM_SMALLICON
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, 16));
+                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var modeBeforeSave, out _));
+                Check(At<SaveViewState>(view, 13)(view));
+                Pump(500);
+
+                var oldView = view;
+                var oldFolder = folder;
+                if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
+                if (contextMenu != 0) { Marshal.Release(contextMenu); contextMenu = 0; }
+                view = folder = viewWindow = 0;
+                viewWindowCreateAttempted = false;
+                host.View = 0;
+                viewRetirement.Retire(oldView, oldFolder);
+                var shellWrites = host.Writes;
+                Marshal.Release(hostPointer);
+                hostPointer = 0;
+                host.Dispose();
+                host = null;
+                var persisted = stateStore.TryLoad(sessionId, out var savedState);
+                if (!persisted || shellWrites == 0)
+                    throw new Exception($"Saving the real Shell view produced no persisted stream: writes={shellWrites}; saved={persisted}.");
+
+                Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+                Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
+                host = new ShellViewColorBrowserHost(parent, [], itemFilter,
+                    stateStore: new ShellViewStateStore(stateDirectory), stateId: sessionId);
+                host.View = view;
+                hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+                settings = new StreamProbeSettings { Mode = uint.MaxValue };
+                bounds = new StreamProbeRect { Right = 640, Bottom = 420 };
+                viewWindowCreateAttempted = true;
+                Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+                if (viewWindow == 0)
+                    throw new InvalidOperationException("Restored Shell view creation succeeded without a window.");
+                Pump(1000);
+                folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
+                Check(folderViewHr);
+                _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var restoredMode, out _));
+                Console.WriteLine($"ishellview-session-restore: save-view-state=True; shell-write-callbacks={shellWrites}; " +
+                    $"persisted-bytes={savedState.Length}; recreated-host-reads={host.Reads}; " +
+                    $"mode-before-save={modeBeforeSave}; create-settings={settings.Mode}/{settings.Flags}; " +
+                    $"expected-mode={expectedMode}; restored-mode={restoredMode}; " +
+                    $"foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (modeBeforeSave != expectedMode || restoredMode != expectedMode || host.Reads == 0 ||
+                    GetForegroundWindow() != foreground)
+                    throw new Exception("The real Shell view did not save and restore the selected mode through its session stream.");
+                return 0;
+            }
             var selectHr = At<SelectFolderItem>(folderView, 15)(folderView, 0, 0x1); // IFolderView::SelectItem; SVSI_SELECT only.
             Pump();
             var headerFlagProbe = VerifyColumnHeaderFlag(folderView);
@@ -516,7 +569,7 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    if (!probeMenuActivation && (shellWrites == 0 || !persisted || !restored))
+                    if (!probeMenuActivation && !probeSessionRestore && (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
                     GC.KeepAlive(host);
                 }
@@ -1808,6 +1861,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous,
         ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SaveViewState(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderUiObject(nint self, nint owner, uint itemCount,

@@ -734,3 +734,9 @@ NativeProbe 新增 `--ishellview-menu-activation-private-desktop`，在唯一临
 首次探针运行在菜单结果后被颜色主探针的状态流断言判为失败，因为专用菜单模式没有执行颜色主探针后续刷新/绘制阶段。现把这条模式与状态流验收条件分开；状态流门槛由独立的颜色探针复验，不降低原门槛。
 
 这证明真实默认 Shell 视图激活会进入当前隔离 `IShellBrowser` 的菜单生命周期并安装共享菜单。它没有显示/点击菜单，也没有验证 Shell 菜单项与应用自定义命令合并后的排序、绘制、快捷键、启用状态或命令分派；未覆盖 ExplorerBrowser 产品宿主、Pane/WPF 容器或标签切换。实际可见菜单验收仍需之后获准的隔离输入会话，产品宿主、INI 和 release 未修改。日志：`src/.state/native-probe-watchdog/20261027-000439-ec670e37.stdout.log`、`20261027-000445-8a085849.stdout.log`、`20261027-000446-98774ea8.stdout.log`；独立状态流复验：`20261027-000447-38b83a8d.stdout.log`。
+
+### 2026-10-27 真实 IShellView 会话流恢复查看模式
+
+新增 `--ishellview-session-restore-private-desktop`：先创建临时文件夹 view，使用 `IFolderView2::SetViewModeAndIconSize` 将查看方式设为 SmallIcon (`mode=2`)，再调用 `IShellView::SaveViewState`、销毁旧 view 并让宿主按 session GUID 落盘。创建新的 `ShellViewColorBrowserHost` 和新的真实 `IShellView` 后，Shell 对新宿主请求 4 次读取，返回已保存的 772 字节流；`IFolderView2::GetViewModeAndIconSize` 最终读回 `mode=2`。Private Desktop watchdog 连续两轮退出码 0，foreground HWND 均保持 `0x81852`；定向 `--shell-view-color-policy-smoke` 和 Release build 通过（0 警告、0 错误）。日志：`20261027-000904-156cb2cf.stdout.log`、`20261027-000931-90903253.stdout.log`、`20261027-000933-b043e742.stdout.log`。
+
+早期失败并非 Shell 忽略了会话流：该轮用 `IFolderView::SetCurrentViewMode` 返回成功，但保存前模式读回仍为 `1`；改用项目其他视图探针已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前和新 view 恢复后都为 `2`。本次只证明同一进程内新建真实 view 对单一查看模式的 session-stream 恢复；排序、分组、列宽/列序、多进程启动与应用 session 协调器仍待验证。前面记录的“简化路径未恢复模式”仍适用于旧测试刺激，不再代表当前修正后的模式结果。产品 ExplorerBrowser、INI 与 release 均未接入或修改。

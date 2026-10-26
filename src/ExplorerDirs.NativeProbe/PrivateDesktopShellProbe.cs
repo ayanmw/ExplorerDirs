@@ -18,6 +18,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunMenuActivation() => Run("menu-activation", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, probeMenuActivation: true));
 
+    internal static int RunSessionRestore() => Run("session-restore", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, probeSessionRestore: true));
+
     internal static int RunReadOnlyColorRule() => Run("color-readonly-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, readOnlyRuleProbe: true));
 

@@ -60,6 +60,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunColor();
         if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")
             return PrivateDesktopShellProbe.RunMenuActivation();
+        if (args.Length == 1 && args[0] == "--ishellview-session-restore-private-desktop")
+            return PrivateDesktopShellProbe.RunSessionRestore();
         if (args.Length == 1 && args[0] == "--ishellview-color-readonly-private-desktop")
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")

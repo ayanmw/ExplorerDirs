@@ -3,7 +3,7 @@ param(
     [int]$TimeoutSeconds = 30,
     [ValidateSet('Desktop', 'ThisPC', 'RecycleBin', 'Libraries', 'NetworkPlaces', 'SearchFolder', 'ZipContainer')]
     [string]$VirtualScope,
-    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'menu-activation-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop')]
+    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop')]
     [string]$Probe = 'color',
     [switch]$TestTimeoutPath
 )
@@ -31,6 +31,7 @@ else {
         'host-filter-private-desktop' { '--ishellview-host-filter-private-desktop' }
         'host-menu-commands-private-desktop' { '--ishellview-menu-command-private-desktop' }
         'menu-activation-private-desktop' { '--ishellview-menu-activation-private-desktop' }
+        'session-restore-private-desktop' { '--ishellview-session-restore-private-desktop' }
         'host-filter-virtual-private-desktop' {
             if ([string]::IsNullOrWhiteSpace($VirtualScope)) { throw 'Set -VirtualScope for the selected probe.' }
             '--ishellview-host-filter-virtual-private-desktop "{0}"' -f $VirtualScope

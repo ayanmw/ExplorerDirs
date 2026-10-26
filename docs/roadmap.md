@@ -86,7 +86,7 @@
 
 | 顺序 | 工作项 | 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。菜单命令、导航/筛选、临时文件操作和 watcher 刷新重叠 Private Desktop 探针通过；真实 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 三轮均触发 `InsertMenusSB / SetMenuSB / RemoveMenusSB`，读到共享菜单已安装，主桌面前台 HWND 未变；真实 Shell view 写入的 772 字节状态流已按 session GUID 落盘，并由重建 host 读回 | 下一步让新建的真实 `IShellView` 消费恢复流，检查模式/列等可观察状态；真实 `DoDragDrop`、物理输入/可见焦点仍需隔离且可接收输入的测试会话。实际可见菜单交互、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过全部门槛前不迁移产品视图或发布 |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。菜单命令、导航/筛选、临时文件操作与 watcher 刷新重叠 Private Desktop 探针通过；真实 `UIActivate` 触发共享菜单生命周期；新建真实 `IShellView` 已从同 session stream 恢复小图标模式（2/2），主桌面前台 HWND 未变 | 下一步扩展状态恢复检查到排序、分组、列宽/列序，并评估跨进程会话接续；真实 `DoDragDrop`、物理输入/可见焦点仍需隔离且可接收输入的测试会话。实际可见菜单交互、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过全部门槛前不迁移产品视图或发布 |
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；失败项单独复现、修复并提交 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；单次重启后内存下降不是泄漏证据，现有同 PID 短采样负载也不固定 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
@@ -3276,3 +3276,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 新增 `--ishellview-menu-activation-private-desktop`，在真实默认 filesystem `IShellView` 创建后调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`，记录 `IShellBrowser` 的 `InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 次数，并检查宿主窗口是否安装共享菜单。Private Desktop watchdog 连续三轮退出码 0；每轮均观察到 `insert=7 / set=13 / remove=6`、`shared-menu-present=True`，主桌面 foreground HWND 保持 `0x81852`。
 - NativeProbe Release build 0 警告、0 错误；原 `color-private-desktop` 状态流往返探针单独复跑通过，仍读回 772 字节。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-激活菜单合并回调)。
 - 这只证明真实 Shell 激活进入隔离宿主菜单生命周期并安装共享菜单；实际可见菜单中的自定义/Shell 项顺序、绘制、快捷键、启用状态和点击行为仍未验证。产品 ExplorerBrowser、INI 和 release 未修改。
+
+## 2026-10-27：真实 IShellView 会话流恢复查看模式
+
+- 修正前一次状态恢复原型的刺激方式：`IFolderView::SetCurrentViewMode` 返回成功，但当前 DefView 读回仍是模式 1；改用本项目已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前确认为小图标模式 2。
+- 探针随后显式调用 `IShellView::SaveViewState` 并销毁旧 view。真实 Shell 写入一次、session store 保存 772 字节；新建 host 在同 GUID 下收到 4 次读流调用，新建真实 view 读回模式 2。Private Desktop watchdog 连续两轮退出码 0，前台 HWND 未变；定向宿主策略 smoke 通过，NativeProbe Release build 0 警告、0 错误。
+- 目前只验证同一进程内重建真实 Shell view 对单一查看模式的恢复；排序、分组、列布局、应用进程重启及产品标签会话接线尚未验证。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-会话流恢复查看模式)。
