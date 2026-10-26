@@ -1853,3 +1853,9 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 另一个隐藏 HostProbe 在四个生产 ExplorerBrowser 视图就绪后，先对包含四个窗格目录的根路径注册/注销，再对根目录下新建的空目录注册/注销。立即连续注册的初测中 3/4 轮完全成功；一轮第一笔成功、第二笔失败。两笔之间增加 150 ms WPF STA 消息泵等待后，8 轮中 4 轮两次都成功、2 轮两次都失败；另外 2 轮在宿主就绪阶段发现前台窗口被外部改变，按保护逻辑停止，未进入注册测试。等待不能稳定修复问题，路径内容也没有表现出稳定关联。原始日志：`src/.state/registration-once-low-frequency-20261026.log`、`src/.state/registration-after-hosts-paired-targets-20261026.log`、`src/.state/registration-after-hosts-pumped-pairs-20261026.log`、`src/.state/registration-after-hosts-low-frequency-20261026.log`、`src/.state/registration-after-hosts-empty-root-20261026.log`、`src/.state/registration-after-hosts-repeat-20261026.log`、`src/.state/shell-change-registration-stress-20261026.log`。
 
 测试只在隐藏窗口上观察注册/注销，没有执行文件操作。由于后续轮次检测到外部前台窗口切换，停止了更多 ExplorerBrowser 宿主探测。HostProbe Release 构建通过，0 警告、0 错误；没有改产品注册参数、重试、延时或 watcher 策略。`last-error=0/8` 都不足以定位无效参数或资源条件；根因仍开放。
+
+### 2026-10-26 再验 128 项批量删除与大视图身份扫描门控
+
+在上节状态机修正及身份扫描门控之后，当前 Release HostProbe 连续两次运行 `--live-shell-directory-stress-large 10000`。两轮均退出码 0；独立 observer 对 burst 文件创建/删除均为 `10,000/10,000`，产品 watcher 含额外测试子文件夹事件为 `10,001/10,001`。128 项批量删除目标 `burst-0127.txt` 在 Shell 视图仍有 10,002 项时被确认是文件，单次查询分别耗时 4 ms；两轮 `batch-visible=True`。大视图目录删除扫描计数均为 0、结果 `SkippedLargeView`，由计数协调器完成收敛。
+
+两轮最终目标窗格计数均为 3，四窗格计数为 `10003/3`；`second.txt`、`third.txt` 选区和未选中的 `initial.txt` 焦点在创建、单项删除及批量删除后保持。批量删除收敛分别使用 2 次与 1 次 fallback；Dispatcher 最大间隔也有波动（ContextIdle 108/128 ms，Input 83/85 ms，Normal 77/85 ms）。这加强了 128 项删除状态机修复在本机隐藏生产宿主上的重复证据，但不证明可见交互、慢速/网络位置、其它 Shell provider 或跨机器稳定性；自动刷新 P0 仍开放，无 release。
