@@ -34,6 +34,47 @@ internal static class StaticShellFolderAdapterProbe
                 items.Add(name, ParseChild(adapter, name));
 
             var columnIndex = GetColumnCount(folder);
+            var property = StaticShellColumnContract.PropertyKey;
+            var expectedKey = new ShellColumnManager.NativeKey { FormatId = property.FormatId, PropertyId = property.PropertyId };
+            var keyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
+            var variant = Marshal.AllocCoTaskMem(24);
+            var details = Marshal.AllocCoTaskMem(272);
+            try
+            {
+                Marshal.StructureToPtr(expectedKey, keyPointer, false);
+                Check(At<GetDefaultColumnState>(adapter, 16)(adapter, (uint)columnIndex, out var state));
+                if (state != 0x12) throw new Exception($"Unexpected custom column state 0x{state:X}.");
+                Check(At<MapColumn>(adapter, 19)(adapter, (uint)columnIndex, keyPointer));
+                var mappedKey = Marshal.PtrToStructure<ShellColumnManager.NativeKey>(keyPointer);
+                if (mappedKey.FormatId != expectedKey.FormatId || mappedKey.PropertyId != expectedKey.PropertyId)
+                    throw new Exception("Custom column did not map to its property key.");
+
+                foreach (var (name, expectedValue) in new[]
+                {
+                    ("two.bin", 2UL), ("ten.bin", 10UL), ("hundred.bin", 100UL), ("ten-copy.bin", 10UL)
+                })
+                {
+                    Marshal.Copy(new byte[272], 0, details, 272);
+                    Check(At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)columnIndex, details));
+                    if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
+                    Marshal.Copy(new byte[272], 0, details, 272);
+                    Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], (uint)columnIndex, details));
+                    if (ReadDetailsText(details) != expectedValue.ToString()) throw new Exception($"Display text mismatch for {name}.");
+
+                    Marshal.GetNativeVariantForObject(0UL, variant);
+                    Check(At<GetDetailsEx>(adapter, 17)(adapter, items[name], keyPointer, variant));
+                    var value = Marshal.GetObjectForNativeVariant(variant);
+                    if (value is not ulong number || number != expectedValue)
+                        throw new Exception($"Typed numeric value mismatch for {name}: {value}.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(details);
+                Marshal.FreeCoTaskMem(variant);
+                Marshal.FreeCoTaskMem(keyPointer);
+            }
+
             var compare = At<CompareIDs>(adapter, 7);
             CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["ten.bin"]), -1, "2 before 10");
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["hundred.bin"]), -1, "10 before 100");
@@ -41,6 +82,7 @@ internal static class StaticShellFolderAdapterProbe
             CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
+                "state=0x12; title-and-four-values=valid; variant=UInt64; " +
                 "compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; window-created=False");
             return 0;
         }

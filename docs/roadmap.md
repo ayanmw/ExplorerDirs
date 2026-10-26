@@ -2,10 +2,10 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
-## 2026-10-26：静态 Shell 数值列原型的数据契约
+## 2026-10-26：隔离 Shell 静态数值列原型
 
-- NativeProbe 新增自定义测试 PROPERTYKEY 与四个固定 `UInt64` 样本 `2/10/100/10`，比较规则使用数值比较，未知名称返回缺失而非伪造零值；定向 smoke 先因数据契约不存在而失败，接入后通过。NativeProbe Release build 0 警告、0 错误。
-- 这只是后续 `IShellFolder2` adapter 的数据/比较策略，不含 COM 适配器、列元数据、DefView、显示或 Shell 数值排序证据；没有递归计算，也没有改产品文件视图。下一步把该策略接入隔离 folder adapter，再通过 DefView 检查列枚举、`GetDetailsEx` 类型、`CompareIDs` 排序和 `IColumnManager` 列状态。
+- NativeProbe 用自定义 PROPERTYKEY 与四个固定 `UInt64` 样本 `2/10/100/10` 验证了 `IShellFolder2` shim 的列状态、属性键映射、标题、文本值、`GetDetailsEx` 类型/值及 `CompareIDs` 数值顺序。无窗口 COM 直测通过；NativeProbe Release build 0 警告、0 错误。
+- Private Desktop DefView 检查确认视图持有 shim、列状态可读回，但实际项目顺序不变，DefView 未调用自定义 `GetDetailsEx` 或 `CompareIDs`；因此排序/显示门槛仍失败。不要接入产品 ExplorerBrowser，也不做递归计算。下一步查清 DefView 列求值的安全隔离前置条件；不得在用户桌面调用 `IShellView.UIActivate`。
 
 ## 2026-10-26：修复原生目录树默认图标回退
 
