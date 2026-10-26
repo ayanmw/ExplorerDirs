@@ -2,11 +2,15 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`preview-0.6.0-temp.64/app/ExplorerDirs.App.exe`，使用独立 profile。新增 System/Light/Dark 之外独立的自定义强调色输入，以及 Windows 11 DWM 标题栏、标题文字和边框主题同步；高对比度恢复系统默认色。产品版本 `0.6.0-preview.temp.64+b16b394881d3146c826b5ca1272cf188aa0a41bb`，EXE SHA-256 `AB14A78944F6762CCC087E6DE845A3E5CDC06907429AB350B419C64C1A279110`，DLL SHA-256 `7B1D7BC4543A76ACF95FA7D1A4DAB1742EEBB337A6D098EAA71CEDD49C80B61B`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 与发布隔离 smoke 通过；profile 文件哈希与来源一致。没有启动 GUI；主题对话框、系统切色、标题栏外观、高对比度及 Shell 文件区深色仍待桌面验收。详见[temp.64 说明](../docs/releases/preview-0.6.0-temp.64.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
 `preview-0.6.0-temp.63/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.61，照片打印窗口改用 Windows 动态系统颜色，当前标签增加系统强调色底边；同时修复隔离 worktree 发布时未从主项目 profile 复制现有设置的问题。产品版本 `0.6.0-preview.temp.63+fb48e6c4cf819c8d79ce20ac09f44243edd01172`，EXE SHA-256 `D579B06A362D9E89E721EA4DD13B3EDBE9C5E2244471665330F88C5927105A5E`，DLL SHA-256 `04C833116CD902ACCAFD9D5316C5185624703986601ADA1DA29A636CBAB2C6C2`，与包内清单一致。全量 Release `SettingsSmoke`、App Release 构建与发布隔离 smoke 通过。未启动 GUI；多窗格视觉、系统主题变化、高对比度、Shell 文件区深色和 Q-Dir 颜色互操作仍待验收。
 
 ## 此前临时预览包（2026-10-26）
 
-`preview-0.6.0-temp.62/app/ExplorerDirs.App.exe`，保留作较早的临时包。该包包含照片打印窗口系统色和当前标签强调色，但由隔离 worktree 发布时其 `app/profile/` 没有从主项目复制现存配置；建议使用 temp.63 预览。没有启动 GUI。
+`preview-0.6.0-temp.62/app/ExplorerDirs.App.exe`，保留作较早的临时包。该包包含照片打印窗口系统色和当前标签强调色，但由隔离 worktree 发布时其 `app/profile/` 没有从主项目复制现存配置；请使用 temp.64。没有启动 GUI。
 
 ## 此前临时预览包（2026-10-26）
 
