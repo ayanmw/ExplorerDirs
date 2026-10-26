@@ -3604,3 +3604,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 对照 Q-Dir 官方英文功能页，发现其标签菜单列有 “Tab Group”“Move to new Tab Group”“Copy to new Tab Group”“Use Tab Groups”。当前 Explorer Dirs 会话模型按窗格保存标签集合，没有已知的标签组实体或组切换命令。
 - 公开页面只给出菜单文案，无法确认组作用域、命名/切换交互、是否跨窗格，以及与布局/会话的持久化关系。将此列为 P2 差距；先通过可见 Q-Dir 行为确认语义，再决定标签/工作区模型和 INI 迁移方案，不先写猜测性配置。来源：[Q-Dir 官方英文功能页](https://www.softwareok.com/?seite=Freeware%2FQ-DIR%2Flanguage%2FEnglish)。
+
+## 2026-10-27：拒绝已过期 owner 的延迟 Shell View 命令
+
+- 源码追踪发现，隔离 frame subclass 接收 Shell View `WM_COMMAND` 后会投递自定义消息再执行；Edit → Select All 分支传入 `IsCurrentOwner` 检查，但 View 菜单分支没有。若 pane 在两条消息之间切换，延迟命令会读取当前 frame 菜单的命令 ID，却向旧 owner 的 `IShellView` window 发送命令。
+- 为 View 菜单命令增加执行前 owner 检查，并让 frame dispatcher 传入共享 coordinator 的当前 owner 状态。先加入回归场景，旧接口下 build 按预期失败；实现后 NativeProbe Release build 通过（0 警告、0 错误），`--shell-view-color-policy-smoke` 通过，包括隐藏 frame 上两 pane 同命令 ID、切换 owner 后拒绝旧 pane 命令。
+- 验证未创建 `IShellView`，仅运行隐藏普通 HWND/OLE 菜单协调器；真实 Shell 菜单、pane 切换的物理时序和 WPF/产品宿主仍未验证。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。

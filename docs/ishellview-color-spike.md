@@ -1051,3 +1051,7 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 首次运行发现源 `sourceChildPidl` 是 `ILFindChild` 指向绝对 PIDL 内部的借用指针，不应释放；错误释放导致 heap corruption。移除释放并加入最多 3 秒的 Shell 枚举等待后，探针稳定运行。当前日志还会列出目标目录最终文件名，防止仅依赖 Drop 的成功码误判操作已完成。
 
 NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步在禁止合成用户输入的边界内评估 OLE drag-loop 验证方式，并继续迁移所需的其余宿主能力；本探针不会被视为拖放迁移完成。
+
+### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
+
+frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再由当前 coordinator owner 执行；View 菜单分支之前没有复核 owner，Edit → Select All 已有该检查。两条消息之间切换 pane 时，旧命令可能以新 frame 菜单匹配出命令 ID，却向旧 owner 的 view HWND 发送。本轮在 View 命令执行前加入 owner 检查，并把 coordinator 活动状态传入 dispatcher。NativeProbe Release 构建 0 警告/错误；无 Shell-view 的 `--shell-view-color-policy-smoke` 通过，新增隐藏 frame 两 pane 回归确认 stale owner 的已识别命令被消费但不派发。没有创建 `IShellView`、显示菜单或启动产品 ExplorerBrowser；实际 Shell 菜单时序及可见行为仍待隔离桌面验收。

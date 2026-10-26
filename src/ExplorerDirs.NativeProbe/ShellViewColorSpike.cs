@@ -732,7 +732,8 @@ internal static class ShellViewColorSpike
         throw new InvalidOperationException($"The Shell background context menu did not expose canonical verb '{expectedVerb}' in the requested command-ID range.");
     }
 
-    internal static bool TryInvokeMergedViewMenuCommand(StreamViewHost owner, uint commandId, bool execute = true)
+    internal static bool TryInvokeMergedViewMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
     {
         if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
         var composite = GetMenu(owner.MenuFrameWindow);
@@ -740,6 +741,9 @@ internal static class ShellViewColorSpike
         var mergedPath = FindMenuCommandPath(viewMenu, commandId);
         if (mergedPath is null) return false;
         if (!execute) return true;
+        // A queued WM_COMMAND can outlive the pane that owned the merged menu.
+        // Consume recognized commands from retired owners without invoking their view.
+        if (isStillActive is not null && !isStillActive()) return true;
 
         // FCIDM_SHVIEWFIRST..LAST commands belong to the active folder view's
         // window procedure. Forward the original Shell command ID instead of

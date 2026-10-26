@@ -112,6 +112,7 @@ public static class ShellViewColorBrowserHostSmoke
         VerifyNativeMenuRollback();
         VerifyNativeSharedMenuInstallation();
         VerifySharedMenuFrameCoordination();
+        VerifyStaleViewMenuCommandOwnerIsIgnored();
         VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
@@ -808,6 +809,91 @@ public static class ShellViewColorBrowserHostSmoke
             return descriptor;
         }
         finally { Marshal.FreeHGlobal(widths); }
+    }
+
+    private static void VerifyStaleViewMenuCommandOwnerIsIgnored()
+    {
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        nint frameWindow = 0, stalePane = 0, activePane = 0, baseMenu = 0, staleMenu = 0, activeMenu = 0;
+        nint staleDescriptor = 0, activeDescriptor = 0, staleActiveObject = 0, activeActiveObject = 0;
+        StreamViewHost? staleHost = null, activeHost = null;
+        try
+        {
+            frameWindow = CreateWindowExW(0, "STATIC", "stale queued view command owner smoke", 0,
+                0, 0, 320, 200, 0, 0, 0, 0);
+            stalePane = CreateWindowExW(0, "STATIC", "stale pane", 0x40000000, 0, 0, 100, 80, frameWindow, 0, 0, 0);
+            activePane = CreateWindowExW(0, "STATIC", "active pane", 0x40000000, 100, 0, 100, 80, frameWindow, 0, 0, 0);
+            baseMenu = CreateMenu();
+            staleMenu = CreateViewCommandMenu(0x7001);
+            activeMenu = CreateViewCommandMenu(0x7001);
+            Check(frameWindow != 0 && stalePane != 0 && activePane != 0 && baseMenu != 0 &&
+                  staleMenu != 0 && activeMenu != 0 && SetMenu(frameWindow, baseMenu),
+                "two pane menus with the same Shell View command are created on a hidden frame");
+
+            staleDescriptor = CreateOleDescriptor(staleMenu);
+            activeDescriptor = CreateOleDescriptor(activeMenu);
+            using var coordinator = new ShellMenuFrameCoordinator(frameWindow);
+            staleHost = new StreamViewHost(stalePane, [], menuFrameWindow: frameWindow,
+                menuFrameCoordinator: coordinator);
+            activeHost = new StreamViewHost(activePane, [], menuFrameWindow: frameWindow,
+                menuFrameCoordinator: coordinator);
+            staleHost.View = frameWindow; // The inactive-owner gate must run before the view pointer is dereferenced.
+            staleActiveObject = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(stalePane),
+                typeof(IOleInPlaceActiveObjectProbe));
+            activeActiveObject = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(activePane),
+                typeof(IOleInPlaceActiveObjectProbe));
+            Check(staleHost.SetActiveObject(staleActiveObject, 0) == 0 &&
+                  activeHost.SetActiveObject(activeActiveObject, 0) == 0 &&
+                  staleHost.SetMenuSB(staleMenu, staleDescriptor, stalePane) == 0 &&
+                  activeHost.SetMenuSB(activeMenu, activeDescriptor, activePane) == 0,
+                "activating the second pane transfers command ownership after the first pane menu was active");
+
+            var traceCountBeforeStaleCommand = staleHost.MenuTrace.Count;
+            Check(ShellViewColorSpike.TryInvokeMergedViewMenuCommand(staleHost, 0x7001,
+                      isStillActive: () => coordinator.IsCurrentOwner(staleHost)) &&
+                  staleHost.MenuTrace.Count == traceCountBeforeStaleCommand,
+                "a queued View menu command for the retired pane is consumed without dispatching to its view");
+            Console.WriteLine("PASS a stale queued Shell View command cannot dispatch through its retired pane owner");
+        }
+        finally
+        {
+            staleHost?.Dispose();
+            activeHost?.Dispose();
+            if (staleActiveObject != 0) Marshal.Release(staleActiveObject);
+            if (activeActiveObject != 0) Marshal.Release(activeActiveObject);
+            if (frameWindow != 0 && IsWindow(frameWindow) && GetMenu(frameWindow) != 0) SetMenu(frameWindow, 0);
+            if (staleDescriptor != 0) OleDestroyMenuDescriptor(staleDescriptor);
+            if (activeDescriptor != 0) OleDestroyMenuDescriptor(activeDescriptor);
+            if (frameWindow != 0 && IsWindow(frameWindow)) DestroyWindow(frameWindow);
+            if (baseMenu != 0) DestroyMenu(baseMenu);
+            if (staleMenu != 0) DestroyMenu(staleMenu);
+            if (activeMenu != 0) DestroyMenu(activeMenu);
+            OleUninitialize();
+        }
+    }
+
+    private static nint CreateViewCommandMenu(uint commandId)
+    {
+        var menu = CreateMenu();
+        var file = CreatePopupMenu();
+        var edit = CreatePopupMenu();
+        var view = CreatePopupMenu();
+        if (menu == 0 || file == 0 || edit == 0 || view == 0 ||
+            !AppendMenuW(view, 0, (nint)commandId, "Details") ||
+            !AppendMenuW(menu, 0x10, file, "File") || !AppendMenuW(menu, 0x10, edit, "Edit") ||
+            !AppendMenuW(menu, 0x10, view, "View"))
+        {
+            if (menu != 0) DestroyMenu(menu);
+            else
+            {
+                if (file != 0) DestroyMenu(file);
+                if (edit != 0) DestroyMenu(edit);
+                if (view != 0) DestroyMenu(view);
+            }
+            throw new InvalidOperationException("Could not create a Shell View command menu fixture.");
+        }
+        return menu;
     }
 
     private static void VerifyNativeSharedMenuGroups()

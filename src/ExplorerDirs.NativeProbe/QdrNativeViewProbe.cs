@@ -931,7 +931,8 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     coordinator._pendingShellMenuCommandOwner = null;
                 }
                 if (owner is not null && commandId != 0 &&
-                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId))
+                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId,
+                        isStillActive: () => coordinator?.IsCurrentOwner(owner) == true))
                     _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId,
                         isStillActive: () => coordinator?.IsCurrentOwner(owner) == true);
                 return 0;
