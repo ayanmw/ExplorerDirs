@@ -1100,4 +1100,4 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 
 扩展专用 smoke：用普通隐藏 Win32 frame 与 pane、六组 synthetic HMENU、真实 OLE menu descriptor 和 `ShellMenuFrameCoordinator` subclass；发送合成 `WM_ENTERMENULOOP`、嵌套 `WM_MENUSELECT`、`WM_COMMAND`，再从消息队列分派 coordinator 实际投递的延迟消息。File 与 View 复用合法范围命令 ID `0x7123`，分别由来源菜单路由到隐藏假 pane HWND，并分别记录 group 0/group 2。此验证覆盖 subclass 收件、来源状态、排队、PostMessage 及最终 HWND 送达，未模拟系统菜单跟踪，也未创建 Shell view。
 
-随后把同一 coordinator smoke 扩展到按位置通知的 `WM_MENUCOMMAND`：File 与 View 的重复 ID `0x7123` 分别按各自 `HMENU` 派发，Object 组的同 ID 则不投递命令。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。它补足 synthetic 消息链的集成证据；真实 OLE/DefView 模态菜单实际消息次序、命令 ID、接收 HWND 与用户可见行为仍未验证，迁移门槛不关闭。
+随后把同一 coordinator smoke 扩展到按位置通知的 `WM_MENUCOMMAND`：File 与 View 的重复 ID `0x7123` 分别按各自 `HMENU` 派发，Object 组的同 ID 则不投递命令。再连续提交 File 与 View 两个 `WM_COMMAND`，在消息泵派发前改变当前选中来源；FIFO 两次延迟派发仍分别保留 File、View 的来源组。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。它补足 synthetic 消息链的集成证据；真实 OLE/DefView 模态菜单实际消息次序、命令 ID、接收 HWND 与用户可见行为仍未验证，迁移门槛不关闭。

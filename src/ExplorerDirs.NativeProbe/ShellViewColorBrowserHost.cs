@@ -938,24 +938,24 @@ public static class ShellViewColorBrowserHostSmoke
             Check(SetWindowSubclass(paneWindow, CoordinatorCommandObserverProcedure, 0xD17, 0),
                 "the fake pane observes deferred Shell WM_COMMAND delivery");
             observerInstalled = true;
+            var traceCountBeforeCommands = host.MenuTrace.Count;
 
             _coordinatorObservedCommandId = 0;
             SendMessageW(frameWindow, 0x0211, 0, 0); // WM_ENTERMENULOOP.
             SendMessageW(frameWindow, 0x011F, 0x00100000, compositeMenu); // File group popup.
             SendMessageW(frameWindow, 0x011F, 0x7123, fileChild); // File leaf command selected.
             SendMessageW(frameWindow, 0x0111, 0x7123, 0); // WM_COMMAND.
-            DispatchOnePostedCoordinatorMessage(frameWindow);
-            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=0", StringComparison.Ordinal) == true,
-                "the actual subclass message path defers and routes the duplicate ID to its File source");
-
-            _coordinatorObservedCommandId = 0;
-            SendMessageW(frameWindow, 0x0211, 0, 0);
             SendMessageW(frameWindow, 0x011F, 0x00100002, compositeMenu); // View group popup.
             SendMessageW(frameWindow, 0x011F, 0x7123, viewMenu); // View leaf command selected.
             SendMessageW(frameWindow, 0x0111, 0x7123, 0);
             DispatchOnePostedCoordinatorMessage(frameWindow);
-            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=2", StringComparison.Ordinal) == true,
-                "the same command ID is independently routed to its View source through the subclass");
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.Count == traceCountBeforeCommands + 1 &&
+                  host.MenuTrace[^1].Contains("group=0", StringComparison.Ordinal),
+                "the first queued duplicate ID keeps its File source after a later View selection");
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.Count == traceCountBeforeCommands + 2 &&
+                  host.MenuTrace[^1].Contains("group=2", StringComparison.Ordinal),
+                "the next queued duplicate ID retains FIFO order and its View source");
 
             _coordinatorObservedCommandId = 0;
             SendMessageW(frameWindow, 0x0126, 0, fileChild); // WM_MENUCOMMAND, File item position 0.
