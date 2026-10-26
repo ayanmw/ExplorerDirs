@@ -12,6 +12,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+try {
+    $commonGitDir = (& git -C $PSScriptRoot rev-parse --path-format=absolute --git-common-dir 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $commonGitDir) {
+        $commonGitDir = [IO.Path]::GetFullPath(([string]$commonGitDir).Trim())
+        if ([IO.Path]::GetFileName($commonGitDir) -eq '.git') {
+            $projectRoot = [IO.Path]::GetDirectoryName($commonGitDir)
+        }
+    }
+}
+catch { } # Keep working in source archives that do not include Git metadata.
 $process = [Diagnostics.Process]::GetProcessById($ProcessId)
 try {
     $process.Refresh()
@@ -23,16 +33,17 @@ try {
     $origin = if ($AllowOtherProcess -and $process.ProcessName -ne 'ExplorerDirs.App') {
         'other-process'
     } else { 'other-copy' }
+    $executablePath = $null
     $binarySha256 = $null
     try {
-        $executable = [IO.Path]::GetFullPath($process.MainModule.FileName)
+        $executablePath = [IO.Path]::GetFullPath($process.MainModule.FileName)
         $releaseRoot = (Join-Path $projectRoot 'releases') + [IO.Path]::DirectorySeparatorChar
         $sourceRoot = (Join-Path $projectRoot 'src') + [IO.Path]::DirectorySeparatorChar
         if ($process.ProcessName -eq 'ExplorerDirs.App') {
-            if ($executable.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) { $origin = 'release' }
-            elseif ($executable.StartsWith($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) { $origin = 'source-test' }
+            if ($executablePath.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) { $origin = 'release' }
+            elseif ($executablePath.StartsWith($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) { $origin = 'source-test' }
         }
-        $binarySha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
+        $binarySha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash
     }
     catch { } # A protected executable can still be sampled by PID.
 
@@ -70,10 +81,11 @@ try {
         catch [System.InvalidOperationException] { $status = 'exited'; break }
     }
     $result = [pscustomobject]@{
-        SchemaVersion = 1
+        SchemaVersion = 2
         ProcessId = $ProcessId
         ProcessName = $process.ProcessName
         Origin = $origin
+        ExecutablePath = $executablePath
         ExecutableSha256 = $binarySha256
         ProcessStartUtc = $processStart.ToString('o')
         Status = $status
