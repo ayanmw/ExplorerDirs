@@ -464,12 +464,12 @@ Release 构建 0 警告/错误，纯策略 smoke 退出码 0；组件抽取后�
 |---|---|---|---|
 | Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、简单服务查询；菜单栏/工具栏框架回调多为 no-op | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 要实现菜单/状态/控制窗、快捷键转发和活动 view 生命周期，而非只创建 `IShellView` |
 | 导航和历史 | 基类 `BrowseObject` 返回 `E_NOTIMPL`；筛选探针子类仅为两个临时文件夹实现导航、父级及内存历史 | ExplorerBrowser navigation events、取消/过期门控、虚拟位置/搜索路由及每标签 Shell TravelLog | 完整目录/虚拟位置导航、失败恢复、Back/Forward/Parent 语义及并发状态门控 |
-| 筛选 | 基础颜色宿主未提供 `ICommDlgBrowser3`；单独 FilteredHost 实现了测试过滤器和窄场景导航 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | 合并过滤、原生回调线程语义和大目录枚举时序，并验证全目录/搜索行为 |
+| 筛选 | 颜色宿主现实现并以 smoke 验证 CDB/CDB2/CDB3 全部回调槽；CDB3 的 `IncludeObject` 覆盖匹配、排除及 provider 元数据失败开放。FilteredHost 仍仅覆盖临时目录导航/历史 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | CDB 接口槽已不再是缺口；仍需把过滤规则、原生回调线程语义和大目录枚举时序整合进通用宿主，并验证全目录/搜索行为 |
 | 选择与状态 | 颜色探针手工创建选择；多选恢复使用生产快照类，但没有产品窗口/标签协调器 | `ExplorerBrowserHost` 维护用户选择快照、焦点、命令可用状态、视图模式/排序/分组/列配置及延迟恢复 | 连接真实用户输入代际、标签持久化、焦点遍历、刷新恢复与错误路径 |
 | 文件更新 | 当前颜色探针临时接入产品 watcher/batch coordinator 做隔离操作验证 | 每个产品文件系统标签拥有目录 watcher、合并队列、Shell STA Refresh 与 fallback | 从临时 fixture 移植到每个新宿主实例，验证 burst、异常、溢出和跨路径切换 |
 | Pane/界面集成 | 独立 parent hwnd，无 WPF PaneControl、标签、四窗格或应用主题 | WPF 每窗格/每标签持有 ExplorerBrowser，负责视图附着/隐藏、原生 Pane、地址/搜索/标签和布局状态 | 完整容器、创建/销毁、重排、隐藏保留、每标签配置、状态栏和系统主题集成 |
 
-`ShellViewHostFilterProbe.FilteredHost` 证明 `BrowseObject` 与 CDB3 过滤可在窄隔离用例内实现；它不是通用导航框架，也未补足产品窗格生命周期。当前证据支持“颜色绘制技术在默认 IShellView 中可行”，不支持把产品视图直接替换为该原型。颜色继续留在隔离研究阶段，后续若要进入产品方案，必须先针对上述导航/筛选/状态/刷新/容器缺口完成独立设计和分阶段等价验证。
+`ShellViewColorBrowserHost` 现已把 CDB/CDB2/CDB3 回调接入颜色宿主，并通过真实托管 CCW vtable smoke；`ShellViewHostFilterProbe.FilteredHost` 另证明 `BrowseObject` 与 CDB3 过滤可在窄隔离用例内实现。两者都不是通用导航框架，也未补足产品窗格生命周期。当前证据支持“颜色绘制技术在默认 IShellView 中部分模式可行”，不支持把产品视图直接替换为该原型。颜色继续留在隔离研究阶段，后续若要进入产品方案，必须先针对上述导航/状态/刷新/容器缺口完成独立设计和分阶段等价验证；CDB3 的接口槽本身已有 smoke，DefView 实际调用顺序、全目录/搜索过滤及大目录时序仍未验证。
 
 ## 2026-10-25 Shift 范围选择的合成加速器边界
 
