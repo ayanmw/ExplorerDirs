@@ -86,7 +86,7 @@
 
 | 顺序 | 工作项 | 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。最近完整 Private Desktop 探针结束时观察到前台窗口变化，无法区分探针与外部活动，已停止继续运行 Shell 宿主/GUI 探针 | 仅在独立 Windows 会话、VM 或其它不共享交互桌面的隔离环境中继续。先证明宿主全程不影响外部前台，再逐步复测导航、菜单、文件操作、筛选、通知、拖放、焦点与会话；未过全部门槛前不迁移产品视图或发布 |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。2026-10-26 复跑 Private Desktop 菜单命令和导航/筛选宿主探针均退出码 0，外层主桌面前台 HWND 未变；可复现原生菜单命令与合成键盘/导航链路 | 继续在隔离原型覆盖真实文件操作后的通知/焦点保持及每会话视图状态；真实 `DoDragDrop`、物理输入/可见焦点仍需隔离且可接收输入的测试会话。菜单合并、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过所有门槛前不迁移产品视图或发布 |
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；失败项单独复现、修复并提交 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；单次重启后内存下降不是泄漏证据，现有同 PID 短采样负载也不固定 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
@@ -3256,3 +3256,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `StreamViewHost.InsertMenusSB` 的默认有效父窗口路径现在插入 File、Edit、View、Favorites、Tools、Help 六个原生弹出组，设置 Shell 标准菜单 ID 和 `OLEMENUGROUPWIDTHS=[2,0,3,0,1,0]`；`RemoveMenusSB`/`Dispose` 仅清理该 host 创建的组，显式外层回调优先。
 - `--shell-view-color-policy-smoke` 的 COM vtable 隐藏 HWND 检查覆盖标签、ID、分组计数、卸载、再次合并、卸载时保留同一 HMENU 上的外部 popup，以及以真实 `IOleInPlaceActiveObject` 接口安装/卸载 OLE composite。NativeProbe Release `dotnet run` 通过；尚未创建 `IShellView`，所以 Shell 命令填充、实际 OLE 菜单消息分派和可见菜单均未验证。ExplorerBrowser 产品 UI 和发布物未修改。
 - 直接向隐藏 frame 合成 WM_INITMENU/WM_INITMENUPOPUP/WM_MENUSELECT/WM_COMMAND 未把 WM_COMMAND 转发到 active-object 窗口；此路径绕过系统菜单跟踪，不能作为真实分派的失败或成功证据，已记入原型边界。
+
+## 2026-10-26：复跑隔离迁移原型的导航与菜单命令
+
+- NativeProbe Release 构建通过（0 警告、0 错误）。`host-menu-commands-private-desktop` watchdog 退出码 0：原生查看、刷新、Name 升/降序、Type 分组升/降序均由 `IFolderView2` 读回；刷新/重排时焦点或条目会短暂丢失，约 50–250 ms 后稳定恢复。日志：`src/.state/native-probe-watchdog/20261026-234804-68f63cb0.stdout.log`。
+- `host-filter-private-desktop` watchdog 退出码 0：临时 filesystem view 的筛选/分组导出、五种同步视图、Ctrl+A、Down、Enter、文件目标拒绝、父级/后退/前进与历史分支截断均通过；Desktop、此电脑、回收站、库、网络位置、搜索文件夹和 ZIP fixture 均成功创建 Shell view。日志：`src/.state/native-probe-watchdog/20261026-234810-1051c20f.stdout.log`。
+- 两次 Private Desktop 运行的外层 foreground HWND 均保持为 `0x81852`。这只证明这些隔离宿主/合成加速器场景在本次会话没有改变主桌面前台；不等同真实鼠标拖放、物理键盘、可见焦点或产品 Pane/标签容器验收。`IDropTarget` 接口可查询仍不代表 OLE `DoDragDrop` 已通过。
