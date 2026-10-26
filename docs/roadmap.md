@@ -11,6 +11,7 @@
 
 - 按已确认的架构评审范围，继续保持 ExplorerBrowser 产品视图不变。隔离 `IShellFolder2`/DefView 原生 shim 已通过静态列接口与数值比较器合同，但未激活 DefView 不调用逐项属性/排序回调；此前 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 曾改变外层前台状态，因此不能在用户桌面重试。
 - 新增 Private Desktop 原生 ListView 读取：标准名称/Size subitem 可读，新增派生列 subitem 仍为空，且没有触发 adapter 的逐项目 `GetDetailsOf`、`GetDetailsEx` 或 `CompareIDs`；前台保护通过，升序门槛仍失败。这说明只对未激活 DefView 发送 `LVM_GETITEMTEXTW` 不足以触发派生列，不支持“列表所有文本都未初始化”的简单解释；激活条件、property schema 和 Shell item 属性读取通路仍待区分。
+- 适配器四个 `IPropertyStore` 请求入口（`QueryInterface`、`BindToObject`、`BindToStorage`、`GetUIObjectOf`）的计数均为 0；因此不实现基于这些入口的属性存储装饰器。原始 `IShellItem` 属性访问不经过该 shim，这次计数不覆盖该路径；property schema 也未验证，不在日常系统注册。
 - 逐行大小列仍是有价值但高难度的 Q-Dir 差距：需要在不抢用户前台的隔离环境中找到安全、可重复的活动 DefView 求值条件，之后才评估真实 PIDL 委托、Shell 菜单/操作、拖放、通知与每标签状态。当前没有批准迁移 ExplorerBrowser，也不加入递归大小列或自绘列表。
 
 ## 2026-10-26：窗口暂时失焦时保留文件操作焦点恢复

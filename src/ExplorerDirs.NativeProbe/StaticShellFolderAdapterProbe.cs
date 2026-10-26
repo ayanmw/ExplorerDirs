@@ -454,7 +454,13 @@ internal static class StaticShellFolderAdapterProbe
             var sizeDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsExCount"))();
             var sizeCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellComparisonCount"))();
             var sizeDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsOfCount"))();
-            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}";
+            var propertyStoreQuery = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreQueryInterfaceRequestCount"))();
+            var propertyStoreBindObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToObjectRequestCount"))();
+            var propertyStoreBindStorage = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToStorageRequestCount"))();
+            var propertyStoreUiObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreUiObjectRequestCount"))();
+            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; " +
+                $"GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
+                $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}";
         }
         finally { NativeLibrary.Free(module); }
     }

@@ -25,6 +25,10 @@ namespace
     volatile LONG g_standardSizeComparisons = 0;
     volatile LONG g_standardSizeDetailsOf = 0;
     volatile LONG g_customDetailsOf = 0;
+    volatile LONG g_propertyStoreQueryInterfaceRequests = 0;
+    volatile LONG g_propertyStoreBindToObjectRequests = 0;
+    volatile LONG g_propertyStoreBindToStorageRequests = 0;
+    volatile LONG g_propertyStoreUiObjectRequests = 0;
 
     bool NameFromPidl(IShellFolder2* folder, PCUITEMID_CHILD pidl, std::wstring& name)
     {
@@ -91,6 +95,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
         {
+            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreQueryInterfaceRequests);
             if (!object) return E_POINTER;
             *object = nullptr;
             if (iid == IID_IUnknown || iid == IID_IShellFolder || iid == IID_IShellFolder2)
@@ -114,9 +119,15 @@ namespace
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND hwnd, SHCONTF flags, IEnumIDList** enumerator) override
         { return _inner->EnumObjects(hwnd, flags, enumerator); }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
-        { return _inner->BindToObject(item, bind, iid, value); }
+        {
+            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToObjectRequests);
+            return _inner->BindToObject(item, bind, iid, value);
+        }
         HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
-        { return _inner->BindToStorage(item, bind, iid, value); }
+        {
+            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToStorageRequests);
+            return _inner->BindToStorage(item, bind, iid, value);
+        }
         HRESULT STDMETHODCALLTYPE CompareIDs(LPARAM column, PCUIDLIST_RELATIVE left, PCUIDLIST_RELATIVE right) override
         {
             InterlockedIncrement(&g_allComparisons);
@@ -145,7 +156,10 @@ namespace
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
         { return _inner->GetAttributesOf(count, items, attributes); }
         HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
-        { return _inner->GetUIObjectOf(owner, count, items, iid, reserved, value); }
+        {
+            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreUiObjectRequests);
+            return _inner->GetUIObjectOf(owner, count, items, iid, reserved, value);
+        }
         HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF flags, STRRET* name) override
         { return _inner->GetDisplayNameOf(item, flags, name); }
         HRESULT STDMETHODCALLTYPE SetNameOf(HWND owner, PCUITEMID_CHILD item, LPCWSTR name, SHGDNF flags, PITEMID_CHILD* renamed) override
@@ -274,6 +288,26 @@ extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsOfCount(
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customDetailsOf, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreQueryInterfaceRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreQueryInterfaceRequests, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreBindToObjectRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreBindToObjectRequests, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreBindToStorageRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreBindToStorageRequests, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreUiObjectRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreUiObjectRequests, 0, 0);
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
