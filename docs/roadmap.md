@@ -1,5 +1,22 @@
 # 路线图
 
+## 当前推进顺序与验收边界（2026-10-26）
+
+| 顺序 | 工作项 | 当前状态 | 下一步 |
+| --- | --- | --- | --- |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。最近完整 Private Desktop 探针结束时观察到前台窗口变化，无法区分探针与外部活动，已停止继续运行 Shell 宿主/GUI 探针 | 仅在独立 Windows 会话、VM 或其它不共享交互桌面的隔离环境中继续。先证明宿主全程不影响外部前台，再逐步复测导航、菜单、文件操作、筛选、通知、拖放、焦点与会话；未过全部门槛前不迁移产品视图或发布 |
+| 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；失败项单独复现、修复并提交 |
+| 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；单次重启后内存下降不是泄漏证据，现有同 PID 短采样负载也不固定 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
+| 4 | 已接入组件的可见体验 | 树图标像素绘制、主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等已有源码或无窗口证据，但仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；每轮只修复有复现证据的问题 |
+| 5 | 尚未确定实现边界的 Q-Dir 差异 | 逐项文件夹大小列需要未确定的原生 Shell 列架构；预览格式过滤与现有 Preview Handler 没有已确认的逐项接口；Q-Dir `TreeNsplit` 字段含义未知 | 保持为评估项。先取得可确认的 Q-Dir 行为/配置证据并完成兼容设计，不以猜测字段、递归导航扫描或未经验证的 ExplorerBrowser 替换填补差距 |
+
+### “已实现”与“已验收”的口径
+
+- **已接入**：源码入口、状态处理或配置路径存在；构建通过只证明可编译。
+- **无窗口验证**：纯状态、Shell 接口或隔离宿主的测试结果，仅覆盖文档列出的具体场景。
+- **可见验收**：在指定发布二进制和隔离测试目录中，通过真实鼠标/键盘操作并确认屏幕结果、Shell 状态及重启行为。
+- 任何一层都不自动代表下一层通过；本路线图及 `docs/shell-parity.md` 应继续逐项标明证据边界。
+
 ## 2026-10-26：IShellView 隔离迁移原型复跑
 
 - 根因已确认：微软说明 `CreateDesktopW` 创建新 Desktop 时会把调用线程也分配到该 Desktop；原 `PrivateDesktopShellProbe.Run` 在主线程创建它，探针返回后主线程仍在非输入 Desktop，导致主线程 `GetForegroundWindow()` 变为 0。之前外层“前台变化”检查失败是线程桌面归属造成的误报，不能证明用户前台被切换。[CreateDesktopW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createdesktopw)、[GetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getforegroundwindow)
