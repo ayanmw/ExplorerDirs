@@ -39,7 +39,7 @@ internal static class ShellViewColorSpike
     private static int _customDrawItems;
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
-        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false)
+        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -178,6 +178,17 @@ internal static class ShellViewColorSpike
             {
                 ShowWindow(parent, 4); // SW_SHOWNOACTIVATE
                 Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS
+            }
+            if (probeMenuActivation)
+            {
+                Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_FOCUS
+                Pump();
+                var sharedMenu = GetMenu(parent);
+                Console.WriteLine($"ishellview-menu-activation: insert={host.InsertMenusCallCount}; " +
+                    $"set={host.SetMenuCallCount}; remove={host.RemoveMenusCallCount}; " +
+                    $"shared-menu-present={sharedMenu != 0}; active-view={view != 0}; " +
+                    $"foreground-unchanged={GetForegroundWindow() == foreground}");
+                return 0;
             }
             Pump();
 
@@ -505,7 +516,7 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    if (shellWrites == 0 || !persisted || !restored)
+                    if (!probeMenuActivation && (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
                     GC.KeepAlive(host);
                 }
@@ -1911,6 +1922,7 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);

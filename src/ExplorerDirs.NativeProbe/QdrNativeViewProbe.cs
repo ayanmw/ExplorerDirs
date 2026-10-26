@@ -203,6 +203,9 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private nint _insertedMenuRoot;
     private readonly nint[] _insertedMenuPopups = new nint[6];
     private ShellViewNavigationHistory? _navigation;
+    private int _insertMenusCallCount;
+    private int _setMenuCallCount;
+    private int _removeMenusCallCount;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
     internal string? StatusText { get; private set; }
@@ -214,6 +217,9 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal Func<nint, nint, int>? InsertMenusHandler { get; set; }
     internal Func<nint, nint, nint, int>? SetMenuHandler { get; set; }
     internal Func<nint, int>? RemoveMenusHandler { get; set; }
+    internal int InsertMenusCallCount => Volatile.Read(ref _insertMenusCallCount);
+    internal int SetMenuCallCount => Volatile.Read(ref _setMenuCallCount);
+    internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
     internal Func<bool, int>? EnableModelessHandler { get; set; }
     internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
     internal Func<nint, uint, uint, int>? ToolbarItemsHandler { get; set; }
@@ -337,6 +343,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int InsertMenusSB(nint menu, nint widths)
     {
+        Interlocked.Increment(ref _insertMenusCallCount);
         if (InsertMenusHandler is not { } handler)
             return _parent == 0 ? 0 : InsertNativeMenuGroups(menu, widths);
         try { return handler(menu, widths); }
@@ -348,6 +355,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int SetMenuSB(nint menu, nint oleMenu, nint active)
     {
+        Interlocked.Increment(ref _setMenuCallCount);
         if (SetMenuHandler is not { } handler) return InstallSharedMenu(menu, oleMenu, active);
         try { return handler(menu, oleMenu, active); }
         catch (Exception ex)
@@ -358,6 +366,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int RemoveMenusSB(nint menu)
     {
+        Interlocked.Increment(ref _removeMenusCallCount);
         if (RemoveMenusHandler is not { } handler)
         {
             var result = menu == _installedSharedMenu ? UninstallSharedMenu() : 0;

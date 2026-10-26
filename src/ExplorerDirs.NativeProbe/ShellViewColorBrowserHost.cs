@@ -463,9 +463,13 @@ public static class ShellViewColorBrowserHostSmoke
             var insertMenus = GetComMethod<InsertMenusCallback>(browser, 5);
             var setMenu = GetComMethod<SetMenuCallback>(browser, 6);
             var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
+            Check(host.InsertMenusCallCount == 0 && host.SetMenuCallCount == 0 && host.RemoveMenusCallCount == 0,
+                "a new isolated Shell host starts with an empty menu lifecycle trace");
             Check(insertMenus(browser, 0x111, 0x222) == 0 && setMenu(browser, 0x111, 0x333, 0x444) == 0 &&
                   removeMenus(browser, 0x111) == 0,
                 "the generic StreamViewHost accepts Shell menu lifecycle calls when no parent menu is configured");
+            Check(host.InsertMenusCallCount == 1 && host.SetMenuCallCount == 1 && host.RemoveMenusCallCount == 1,
+                "the isolated Shell host records each shared menu lifecycle callback");
 
             (nint Menu, nint Widths) inserted = default;
             host.InsertMenusHandler = (menu, widths) => { inserted = (menu, widths); return 0; };

@@ -86,7 +86,7 @@
 
 | 顺序 | 工作项 | 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。菜单命令、导航/筛选、临时文件操作和 watcher 刷新重叠 Private Desktop 探针通过，主桌面前台 HWND 未变；真实 Shell view 写入的 772 字节状态流已按 session GUID 落盘，并由重建 host 读回 | 下一步让新建的真实 `IShellView` 消费恢复流，检查模式/列等可观察状态；真实 `DoDragDrop`、物理输入/可见焦点仍需隔离且可接收输入的测试会话。菜单合并、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过全部门槛前不迁移产品视图或发布 |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。菜单命令、导航/筛选、临时文件操作和 watcher 刷新重叠 Private Desktop 探针通过；真实 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 三轮均触发 `InsertMenusSB / SetMenuSB / RemoveMenusSB`，读到共享菜单已安装，主桌面前台 HWND 未变；真实 Shell view 写入的 772 字节状态流已按 session GUID 落盘，并由重建 host 读回 | 下一步让新建的真实 `IShellView` 消费恢复流，检查模式/列等可观察状态；真实 `DoDragDrop`、物理输入/可见焦点仍需隔离且可接收输入的测试会话。实际可见菜单交互、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过全部门槛前不迁移产品视图或发布 |
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；失败项单独复现、修复并提交 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；单次重启后内存下降不是泄漏证据，现有同 PID 短采样负载也不固定 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
@@ -3270,3 +3270,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `color-private-desktop` watchdog 退出码 0；实际 Shell view 生命周期调用 4 次写流回调，销毁后落盘 772 字节，新建隔离 host 按同一 GUID 读回的流与落盘内容逐字节一致。主桌面前台 HWND 未变。日志：`src/.state/native-probe-watchdog/20261027-000036-81c04f29.stdout.log`。
 - 额外尝试用单独的视图模式切换、销毁/重新导航触发写入，并让第二个真实 view 消费该状态；这些简化路径没有产生写流，故不能证明 Shell 会恢复模式或列。完整探针的写回只在更完整的 view 绘制/刷新生命周期中出现，触发条件尚未隔离；其中一轮失败记录：`src/.state/native-probe-watchdog/20261026-235844-733e4d24.stdout.log`。主桌面前台句柄仍未改变。
 - 当前证据只证明真实 Shell 写流到临时 session store、重建 host 后再次提供相同流；不证明跨应用进程重启或产品标签 session identity。产品 ExplorerBrowser、INI 配置和发布物未接入或修改。
+
+## 2026-10-27：真实 IShellView 激活菜单合并回调
+
+- 新增 `--ishellview-menu-activation-private-desktop`，在真实默认 filesystem `IShellView` 创建后调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`，记录 `IShellBrowser` 的 `InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 次数，并检查宿主窗口是否安装共享菜单。Private Desktop watchdog 连续三轮退出码 0；每轮均观察到 `insert=7 / set=13 / remove=6`、`shared-menu-present=True`，主桌面 foreground HWND 保持 `0x81852`。
+- NativeProbe Release build 0 警告、0 错误；原 `color-private-desktop` 状态流往返探针单独复跑通过，仍读回 772 字节。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-激活菜单合并回调)。
+- 这只证明真实 Shell 激活进入隔离宿主菜单生命周期并安装共享菜单；实际可见菜单中的自定义/Shell 项顺序、绘制、快捷键、启用状态和点击行为仍未验证。产品 ExplorerBrowser、INI 和 release 未修改。

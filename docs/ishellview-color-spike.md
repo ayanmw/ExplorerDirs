@@ -726,3 +726,11 @@ Microsoft 的 `BrowseObject` 文档说明 `SBSP_EXPLOREMODE` 表示新浏览窗�
 `color-private-desktop` 在临时 fixture 中创建真实默认 filesystem `IShellView`。`DestroyViewWindow` 期间宿主收到 4 次 stream 写回；`Dispose` 后同 GUID 状态文件存在，大小 772 字节。随后新建隔离宿主使用相同 GUID 调用 `GetViewStateStream(READ)`，逐字节匹配实际 Shell 写出的流。该次 NativeProbe Release build 0 警告/错误，Private Desktop watchdog 退出码 0；主桌面 foreground HWND 从 `0x81852` 保持不变。复验日志：`src/.state/native-probe-watchdog/20261027-000036-81c04f29.stdout.log`。
 
 证据仅覆盖 Shell 销毁回调到临时 session store、再由新 host 提供相同字节。单独切换模式、停用/销毁 view 或同路径重导航均未触发写回；写入只在完整探针后段出现，目前尚未隔离出最小触发条件。让第二个真实 `IShellView` 消费恢复流并读回模式/列的尝试因此没有通过，失败记录：`src/.state/native-probe-watchdog/20261026-235844-733e4d24.stdout.log`。没有跨应用进程重启或连接产品标签会话 ID。状态目录和 fixture 都由探针创建并清理，产品 INI、ExplorerBrowser 与 release 未修改。
+
+### 2026-10-27 真实 IShellView 激活菜单合并回调
+
+NativeProbe 新增 `--ishellview-menu-activation-private-desktop`，在唯一临时 filesystem fixture 上创建实际默认 `IShellView`，随后调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`。`StreamViewHost` 记录 `IShellBrowser::InsertMenusSB`、`SetMenuSB` 与 `RemoveMenusSB` 实际入口次数；探针并检查顶层宿主 `GetMenu` 是否返回共享菜单句柄。Release 构建 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过。Private Desktop watchdog 连续三轮退出码 0，每轮稳定读到 `insert=7 / set=13 / remove=6`、`shared-menu-present=True`、`active-view=True`；主桌面 foreground HWND 始终为 `0x81852`。原 `color-private-desktop` 另行复跑退出码 0，状态流仍写入 772 字节并由重建 host 读回。
+
+首次探针运行在菜单结果后被颜色主探针的状态流断言判为失败，因为专用菜单模式没有执行颜色主探针后续刷新/绘制阶段。现把这条模式与状态流验收条件分开；状态流门槛由独立的颜色探针复验，不降低原门槛。
+
+这证明真实默认 Shell 视图激活会进入当前隔离 `IShellBrowser` 的菜单生命周期并安装共享菜单。它没有显示/点击菜单，也没有验证 Shell 菜单项与应用自定义命令合并后的排序、绘制、快捷键、启用状态或命令分派；未覆盖 ExplorerBrowser 产品宿主、Pane/WPF 容器或标签切换。实际可见菜单验收仍需之后获准的隔离输入会话，产品宿主、INI 和 release 未修改。日志：`src/.state/native-probe-watchdog/20261027-000439-ec670e37.stdout.log`、`20261027-000445-8a085849.stdout.log`、`20261027-000446-98774ea8.stdout.log`；独立状态流复验：`20261027-000447-38b83a8d.stdout.log`。

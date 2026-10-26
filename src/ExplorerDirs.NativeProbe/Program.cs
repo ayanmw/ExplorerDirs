@@ -58,6 +58,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunHostFilterVirtualScope(args[1]);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike-private-desktop")
             return PrivateDesktopShellProbe.RunColor();
+        if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")
+            return PrivateDesktopShellProbe.RunMenuActivation();
         if (args.Length == 1 && args[0] == "--ishellview-color-readonly-private-desktop")
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")
