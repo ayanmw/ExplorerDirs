@@ -103,6 +103,7 @@ public static class ShellViewColorBrowserHostSmoke
 
         VerifyBaseHostFrameStateRouting();
         VerifyOleInPlaceFrameSurface();
+        VerifyNativeSharedMenuInstallation();
         VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
@@ -438,9 +439,11 @@ public static class ShellViewColorBrowserHostSmoke
                     "a parent active-object callback exception stays inside the COM boundary");
             }
             finally { Marshal.Release(activeObjectUnknown); }
+            host.SetMenuHandler = (_, _, _) => 0;
             Check(insertMenus(frame, 0x123, 0x456) == 0 && setMenu(frame, 0x234, 0x567, 0x89A) == 0 &&
                   removeMenus(frame, 0x345) == 0,
                 "the isolated OLE frame accepts shared-menu lifecycle calls when no frame menu is configured");
+            host.SetMenuHandler = null;
 
             (nint Menu, nint Widths) inserted = default;
             host.InsertMenusHandler = (menu, widths) => { inserted = (menu, widths); return 1; };
@@ -470,7 +473,7 @@ public static class ShellViewColorBrowserHostSmoke
                 "IOleInPlaceFrame.TranslateAccelerator reuses the host accelerator route");
 
             host.Dispose();
-            Check(insertMenus(frame, 0x123, 0x456) == 0 && setMenu(frame, 0x234, 0x567, 0x89A) == 0 &&
+            Check(insertMenus(frame, 0x123, 0x456) == 0 &&
                   removeMenus(frame, 0x345) == 0 && enableModeless(frame, 1) == 0 &&
                   translateAccelerator(frame, 0xABC, 7) == 1,
                 "disposing the isolated host disconnects its OLE frame callbacks");
@@ -479,6 +482,72 @@ public static class ShellViewColorBrowserHostSmoke
         {
             Marshal.Release(frame);
             host.Dispose();
+        }
+    }
+
+    private static void VerifyNativeSharedMenuInstallation()
+    {
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        nint frameWindow = 0, menu = 0, popup = 0, previousMenu = 0, descriptor = 0, browser = 0;
+        StreamViewHost? host = null;
+        try
+        {
+            frameWindow = CreateWindowExW(0, "STATIC", "isolated OLE menu install smoke", 0,
+                0, 0, 320, 200, 0, 0, 0, 0);
+            Check(frameWindow != 0 && !IsWindowVisible(frameWindow),
+                "the OLE menu installation smoke uses a hidden top-level frame");
+            menu = CreateMenu();
+            popup = CreatePopupMenu();
+            Check(menu != 0 && popup != 0 && AppendMenuW(menu, 0x10, popup, "File"),
+                "a native shared menu fixture is created without showing a window");
+            previousMenu = CreateMenu();
+            Check(previousMenu != 0 && AppendMenuW(previousMenu, 0, 1, "existing frame menu") &&
+                  SetMenu(frameWindow, previousMenu),
+                "a pre-existing frame menu is installed before the Shell composite");
+
+            var widths = Marshal.AllocHGlobal(6 * sizeof(int));
+            try
+            {
+                for (var i = 0; i < 6; i++) Marshal.WriteInt32(widths, i * sizeof(int), 0);
+                Marshal.WriteInt32(widths, 0, 1);
+                descriptor = OleCreateMenuDescriptor(menu, widths);
+            }
+            finally { Marshal.FreeHGlobal(widths); }
+            Check(descriptor != 0, "OLE creates a descriptor for the shared menu fixture");
+
+            host = new StreamViewHost(frameWindow, []);
+            browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var setMenu = GetComMethod<SetMenuCallback>(browser, 6);
+            var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
+            var installResult = setMenu(browser, menu, descriptor, frameWindow);
+            Check(installResult == 0 && GetMenu(frameWindow) == menu,
+                "IShellBrowser.SetMenuSB installs the shared HMENU on the hidden frame");
+            var removeResult = removeMenus(browser, menu);
+            Check(removeResult == 0 && GetMenu(frameWindow) == previousMenu,
+                "IShellBrowser.RemoveMenusSB unhooks OLE dispatch and restores the previous frame menu");
+            Check(setMenu(browser, menu, descriptor, frameWindow) == 0 && GetMenu(frameWindow) == menu,
+                "the same host can reinstall the composite menu after a completed deactivation");
+            host.Dispose();
+            host = null;
+            Check(GetMenu(frameWindow) == previousMenu,
+                "disposing an active menu host unhooks OLE and restores the prior frame menu");
+            OleDestroyMenuDescriptor(descriptor);
+            descriptor = 0;
+            Console.WriteLine("PASS the caller retains and can destroy its OLE menu descriptor after host uninstallation");
+        }
+        finally
+        {
+            if (browser != 0) Marshal.Release(browser);
+            host?.Dispose();
+            if (descriptor != 0) OleDestroyMenuDescriptor(descriptor);
+            if (frameWindow != 0 && GetMenu(frameWindow) != 0) SetMenu(frameWindow, 0);
+            if (frameWindow != 0 && IsWindow(frameWindow)) DestroyWindow(frameWindow);
+            // Destroying the menu bar also destroys its attached popup.
+            if (menu != 0) DestroyMenu(menu);
+            else if (popup != 0) DestroyMenu(popup);
+            if (previousMenu != 0) DestroyMenu(previousMenu);
+            OleUninitialize();
         }
     }
 
@@ -659,6 +728,24 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int BorderCallback(nint self, nint border);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SetActiveObjectCallback(nint self, nint activeObject, nint name);
+
+    [DllImport("ole32.dll")] private static extern int OleInitialize(nint reserved);
+    [DllImport("ole32.dll")] private static extern void OleUninitialize();
+    [DllImport("ole32.dll")] private static extern nint OleCreateMenuDescriptor(nint menu, nint widths);
+    [DllImport("ole32.dll")] private static extern void OleDestroyMenuDescriptor(nint descriptor);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint CreateWindowExW(uint exStyle, string className, string windowName, uint style,
+        int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
+    [DllImport("user32.dll")] private static extern nint CreateMenu();
+    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool AppendMenuW(nint menu, uint flags, nint idOrSubmenu, string text);
+    [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
+    [DllImport("user32.dll")] private static extern bool SetMenu(nint window, nint menu);
+    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
 
     [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
     private sealed class ActiveObjectFixture { }

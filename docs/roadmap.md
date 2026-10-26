@@ -3,12 +3,13 @@
 ## 2026-10-26：为隔离 Shell 宿主接入菜单生命周期回调
 
 - `InsertMenusSB`、`SetMenuSB`、`RemoveMenusSB` 现在可选委托给外层宿主；保留无菜单宿主时原有的 `S_OK` 空菜单行为，委托 HRESULT 原样返回，异常转换为 `E_FAIL`，释放时断开回调。
-- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 验证菜单句柄、组宽指针、活动窗口、HRESULT、异常和释放行为。它只打通 `IShellBrowser` 的主菜单生命周期路由，没有创建/合并可见菜单或连接 WPF 菜单；产品右键菜单路径未改。
+- 没有注入外层处理器且 parent 为有效 HWND 时，`SetMenuSB` 调用 Win32 `SetMenu` 并用 `OleSetMenuDescriptor` 安装 OLE 分派；`RemoveMenusSB` 卸载分派并在共享菜单仍挂在 parent 上时恢复前一菜单，不销毁调用方 HMENU/HOLEMENU。parent 无效时返回参数错误，parent 为零时保留空宿主 `S_OK` 行为。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 与隐藏顶层 HWND 验证菜单安装/卸载、descriptor 调用方所有权、参数、HRESULT、异常和释放行为。没有创建 `IShellView` 或显示菜单，未连接 WPF 菜单；产品右键菜单路径未改。
 
 ## 2026-10-26：为隔离宿主增加 IOleInPlaceFrame 接口
 
 - `StreamViewHost` 现同时暴露 `IShellBrowser` 与 `IOleInPlaceFrame`。后者的菜单、状态文字、模态状态与快捷键方法复用已验证的宿主回调；`SetActiveObject` 在父级接受后 AddRef 新对象并释放旧对象，Dispose 时释放保留的接口；边框空间协商显式返回 `E_NOTIMPL`。
-- NativeProbe 的 `--shell-view-color-policy-smoke` 通过实际 COM vtable 检查接口槽位、父窗口、菜单/状态/快捷键路由、边框拒绝、HRESULT、异常和释放。还没有调用 Shell 的 `UIActivate`、创建共享 HMENU 或安装 OLE 菜单描述符，因此菜单合并与消息派发仍未验收。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过实际 COM vtable 检查接口槽位、父窗口、菜单/状态/快捷键路由、边框拒绝、HRESULT、异常和释放。隐藏 HWND 菜单 fixture 已验证 synthetic HMENU 的 SetMenu/OLE descriptor 安装卸载；仍没有 Shell `UIActivate` 实际回调或真实 Shell 菜单项，因此 Shell 菜单合并与消息派发仍未验收。
 
 ## 2026-10-26：为隔离 Shell 宿主接入框架状态回调
 

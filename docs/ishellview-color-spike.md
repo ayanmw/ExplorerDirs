@@ -24,9 +24,9 @@ NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回�
 
 ## 2026-10-26：为 IShellBrowser 接入外层菜单生命周期路由
 
-`StreamViewHost.InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 现可选调用外层宿主处理器；未配置处理器时继续返回原来的 `S_OK`，表示宿主不提供共享菜单。处理器收到原始 HMENU、`OLEMENU`、活动窗口 HWND 和菜单组宽度指针，返回的 HRESULT 被保留；异常转成 `E_FAIL`，释放时清除三个处理器。
+`StreamViewHost.InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 可选调用外层宿主处理器；处理器收到原始 HMENU、`HOLEMENU`、活动窗口 HWND 和菜单组宽度指针，返回 HRESULT 原样保留，异常转成 `E_FAIL`。没有外层 SetMenu/RemoveMenus 处理器且 parent HWND 有效时，host 自己调用 Win32 `SetMenu` 并以 `OleSetMenuDescriptor` 接入 OLE 菜单分派；卸载时解除分派，并仅在该共享菜单仍挂在 parent 时恢复之前的菜单。parent 为零时维持空宿主 `S_OK` 行为。
 
-`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser` CCW vtable 验证三个方法的参数传递、HRESULT、异常边界与释放后的空菜单行为。没有创建 `IShellView` 或实际 HMENU，也没有将 WPF 菜单转换成 Win32 共享菜单；这只提供浏览器框架路由，不证明菜单已经合并、显示或可交互。产品右键菜单实现不受影响。
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser` CCW vtable 和未显示的顶层 HWND 验证原生菜单安装/卸载，以及 `OleCreateMenuDescriptor` 创建、`OleSetMenuDescriptor` 安装/解除和调用方销毁顺序。没有创建 `IShellView`，也没有 Shell 菜单项进入 composite 或转换 WPF 菜单；因此不证明 Shell 实际合并、命令派发或可见交互。HMENU 与 HOLEMENU 仍由调用方拥有。产品右键菜单实现不受影响。
 
 ## 2026-10-26：为 Shell 控制窗提供外层宿主路由
 

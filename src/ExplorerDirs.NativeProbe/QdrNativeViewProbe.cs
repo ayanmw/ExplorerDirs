@@ -197,6 +197,9 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private readonly ShellViewStateStore? _stateStore;
     private readonly Guid? _stateId;
     private nint _activeObject;
+    private nint _installedSharedMenu;
+    private nint _installedActiveWindow;
+    private nint _previousFrameMenu;
     private ShellViewNavigationHistory? _navigation;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
@@ -258,6 +261,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             }
             finally
             {
+                UninstallSharedMenu();
                 if (_activeObject != 0)
                 {
                     Marshal.Release(_activeObject);
@@ -340,7 +344,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int SetMenuSB(nint menu, nint oleMenu, nint active)
     {
-        if (SetMenuHandler is not { } handler) return 0;
+        if (SetMenuHandler is not { } handler) return InstallSharedMenu(menu, oleMenu, active);
         try { return handler(menu, oleMenu, active); }
         catch (Exception ex)
         {
@@ -350,7 +354,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int RemoveMenusSB(nint menu)
     {
-        if (RemoveMenusHandler is not { } handler) return 0;
+        if (RemoveMenusHandler is not { } handler)
+            return menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
         try { return handler(menu); }
         catch (Exception ex)
         {
@@ -492,7 +497,64 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     public int SetStatusText(nint text) => SetStatusTextSB(text);
     public int EnableModeless(int enable) => EnableModelessSB(enable);
     public int TranslateAccelerator(nint message, ushort id) => TranslateAcceleratorSB(message, id);
+
+    private int InstallSharedMenu(nint menu, nint oleMenu, nint active)
+    {
+        if (_parent == 0) return 0;
+        if (menu == 0) return UninstallSharedMenu();
+        if (!IsWindow(_parent) || !IsMenu(menu)) return unchecked((int)0x80070057);
+        if (_installedSharedMenu != 0)
+        {
+            var removeResult = UninstallSharedMenu();
+            if (removeResult < 0) return removeResult;
+        }
+
+        var previousMenu = GetMenu(_parent);
+        if (!SetMenu(_parent, menu)) return Marshal.GetHRForLastWin32Error();
+        DrawMenuBar(_parent);
+        var frame = Marshal.GetComInterfaceForObject(this, typeof(IStreamProbeOleInPlaceFrame));
+        int result;
+        try { result = OleSetMenuDescriptor(oleMenu, _parent, active, frame, _activeObject); }
+        finally { Marshal.Release(frame); }
+        if (result < 0)
+        {
+            SetMenu(_parent, previousMenu);
+            DrawMenuBar(_parent);
+            return result;
+        }
+        _installedSharedMenu = menu;
+        _installedActiveWindow = active;
+        _previousFrameMenu = previousMenu;
+        return result;
+    }
+
+    private int UninstallSharedMenu()
+    {
+        if (_parent == 0 || _installedSharedMenu == 0) return 0;
+        var frame = Marshal.GetComInterfaceForObject(this, typeof(IStreamProbeOleInPlaceFrame));
+        int result;
+        try { result = OleSetMenuDescriptor(0, _parent, _installedActiveWindow, frame, _activeObject); }
+        finally { Marshal.Release(frame); }
+        if (result < 0) return result;
+        if (GetMenu(_parent) == _installedSharedMenu)
+        {
+            if (!SetMenu(_parent, _previousFrameMenu)) return Marshal.GetHRForLastWin32Error();
+            DrawMenuBar(_parent);
+        }
+        _installedSharedMenu = 0;
+        _installedActiveWindow = 0;
+        _previousFrameMenu = 0;
+        return result;
+    }
+
     [DllImport("shlwapi.dll")] private static extern nint SHCreateMemStream(byte[] bytes, uint count);
+    [DllImport("ole32.dll")] private static extern int OleSetMenuDescriptor(nint descriptor, nint frameWindow,
+        nint activeWindow, nint frame, nint activeObject);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
+    [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
 }
 
 // Exact IShellBrowser layout, including its IOleWindow methods (slots 3/4).
