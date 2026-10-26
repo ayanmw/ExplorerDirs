@@ -486,7 +486,20 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             return unchecked((int)0x80004005);
         }
     }
-    public int GetBorder(nint border) => unchecked((int)0x80004001);
+    public int GetBorder(nint border)
+    {
+        if (border == 0) return unchecked((int)0x80070057);
+        if (_parent == 0 || !IsWindow(_parent)) return unchecked((int)0x80004005);
+        if (!GetClientRect(_parent, out var client)) return Marshal.GetHRForLastWin32Error();
+        Marshal.StructureToPtr(new StreamProbeRect
+        {
+            Left = client.Left,
+            Top = client.Top,
+            Right = client.Right,
+            Bottom = client.Bottom
+        }, border, false);
+        return 0;
+    }
     public int RequestBorderSpace(nint border) => unchecked((int)0x80004001);
     public int SetBorderSpace(nint border) => unchecked((int)0x80004001);
     public int SetActiveObject(nint activeObject, nint name)
@@ -646,6 +659,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool GetClientRect(nint window, out StreamProbeRect rect);
     [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

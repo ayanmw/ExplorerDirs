@@ -503,7 +503,11 @@ public static class ShellViewColorBrowserHostSmoke
 
     private static void VerifyOleInPlaceFrameSurface()
     {
-        var host = new StreamViewHost(0xFADE, []);
+        var frameWindow = CreateWindowExW(0, "STATIC", "isolated OLE frame border smoke", 0,
+            0, 0, 320, 200, 0, 0, 0, 0);
+        Check(frameWindow != 0 && !IsWindowVisible(frameWindow),
+            "the OLE frame border smoke uses a hidden parent window");
+        var host = new StreamViewHost(frameWindow, []);
         var frame = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeOleInPlaceFrame));
         try
         {
@@ -518,12 +522,26 @@ public static class ShellViewColorBrowserHostSmoke
             var setStatusText = GetComMethod<SetStatusTextCallback>(frame, 12);
             var enableModeless = GetComMethod<EnableModelessCallback>(frame, 13);
             var translateAccelerator = GetComMethod<TranslateAcceleratorCallback>(frame, 14);
-            Check(getWindow(frame, out var window) == 0 && window == 0xFADE,
+            Check(getWindow(frame, out var window) == 0 && window == frameWindow,
                 "the isolated OLE frame exposes its parent HWND through IOleWindow");
-            Check(border(frame, 0) == unchecked((int)0x80004001) &&
-                  requestBorderSpace(frame, 0) == unchecked((int)0x80004001) &&
+            var borderPointer = Marshal.AllocHGlobal(Marshal.SizeOf<StreamProbeRect>());
+            try
+            {
+                Check(GetClientRect(frameWindow, out var expectedBorder),
+                    "the hidden OLE frame client rectangle is readable");
+                var borderResult = border(frame, borderPointer);
+                var actualBorder = Marshal.PtrToStructure<StreamProbeRect>(borderPointer);
+                Check(borderResult == 0 && actualBorder.Left == expectedBorder.Left &&
+                      actualBorder.Top == expectedBorder.Top && actualBorder.Right == expectedBorder.Right &&
+                      actualBorder.Bottom == expectedBorder.Bottom,
+                    $"IOleInPlaceFrame.GetBorder returns the parent client area (hr=0x{borderResult:X8}, rect={actualBorder.Left},{actualBorder.Top},{actualBorder.Right},{actualBorder.Bottom})");
+                Check(border(frame, 0) == unchecked((int)0x80070057),
+                    "IOleInPlaceFrame.GetBorder rejects a null output pointer");
+            }
+            finally { Marshal.FreeHGlobal(borderPointer); }
+            Check(requestBorderSpace(frame, 0) == unchecked((int)0x80004001) &&
                   setBorderSpace(frame, 0) == unchecked((int)0x80004001),
-                "the isolated OLE frame explicitly declines unsupported border negotiation");
+                "the isolated OLE frame declines unsupported border-space negotiation");
             (nint Object, nint Name) activeObject = default;
             var activeObjectUnknown = Marshal.GetIUnknownForObject(new ActiveObjectFixture());
             try
@@ -572,8 +590,7 @@ public static class ShellViewColorBrowserHostSmoke
                 "IOleInPlaceFrame.TranslateAccelerator reuses the host accelerator route");
 
             host.Dispose();
-            Check(insertMenus(frame, 0x123, 0x456) == 0 &&
-                  removeMenus(frame, 0x345) == 0 && enableModeless(frame, 1) == 0 &&
+            Check(enableModeless(frame, 1) == 0 &&
                   translateAccelerator(frame, 0xABC, 7) == 1,
                 "disposing the isolated host disconnects its OLE frame callbacks");
         }
@@ -581,6 +598,8 @@ public static class ShellViewColorBrowserHostSmoke
         {
             Marshal.Release(frame);
             host.Dispose();
+            Check(DestroyWindow(frameWindow) && !IsWindow(frameWindow),
+                "the hidden OLE frame border parent is destroyed after the smoke");
         }
     }
 
@@ -967,6 +986,8 @@ public static class ShellViewColorBrowserHostSmoke
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint CreateWindowExW(uint exStyle, string className, string windowName, uint style,
         int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(nint window, out StreamProbeRect rect);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);

@@ -28,6 +28,12 @@ NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键
 
 NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回调参数与 HRESULT、异常边界、边框拒绝及 Dispose 后断开。根据[微软 IOleInPlaceFrame 契约](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-ioleinplaceframe)，这个接口提供容器框架菜单/状态/快捷键入口；当前还没有 Shell `UIActivate` 实际调用、共享 HMENU 生命周期或 `OleSetMenuDescriptor` 证据，因此这不代表主菜单已合并、安装或能正确分派命令。
 
+## 2026-10-27：实现隔离宿主 GetBorder
+
+`StreamViewHost.GetBorder` 现在验证输出指针和父 HWND，再通过 `GetClientRect` 返回容器可用客户区；空指针返回 `E_INVALIDARG`，无效父窗口返回 `E_FAIL`，Win32 读取失败转换为对应 HRESULT。`RequestBorderSpace` / `SetBorderSpace` 仍返回 `E_NOTIMPL`，因为原型尚未提供可分配的独立 Shell 工具栏边框空间。
+
+`--shell-view-color-policy-smoke` 先以隐藏普通 HWND 的 COM 回调断言复现 `GetBorder` 不写结果的失败，再核对返回矩形与独立 `GetClientRect` 结果一致、空指针被拒绝、其余 OLE frame 路由和异常/Dispose 回归通过。该验证没有创建或激活 `IShellView`，不证明真实 Shell 对边框协商的调用时序或产品菜单/工具栏布局。
+
 ## 2026-10-26：补齐 IOleWindow 帮助回调路由
 
 `StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。

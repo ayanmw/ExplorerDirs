@@ -10,6 +10,7 @@
 
 - 当前 Release `--shell-view-color-policy-smoke` 退出码 0。复核覆盖隔离宿主的 `IShellBrowser` 导航历史与会话流、CDB2/CDB3 查询、菜单生命周期、控件窗口/消息路由、应用加速键回退、状态文本、活动 view、工具栏回调，以及 `IOleInPlaceFrame` 的 COM 路由和异常边界。
 - 此 smoke 没有创建 `IShellView`，也不验证真实 Shell view 是否按预期调用这些入口；它只确认当前通用 host 代码及回调合同回归。迁移门槛仍是隔离真实 view 上的 OLE 拖放、可见菜单合并、物理焦点/输入与会话恢复验收；当前继续限于无 Shell-view 的源码工作。
+- 后续在同一隔离 smoke 中先确认 `IOleInPlaceFrame.GetBorder` 的输出矩形未填充，再实现为父 HWND 的客户区矩形；客户区逐字段对照及空指针错误回归通过。`RequestBorderSpace` / `SetBorderSpace` 仍显式不支持；未创建 `IShellView`，因此不宣称 Shell 已消费该边界或工具栏布局已验收。细节见[隔离宿主记录](ishellview-color-spike.md#2026-10-27实现隔离宿主-getborder)。
 
 ## 2026-10-26：Q-Dir 导入预览列出未导入的颜色规则模式
 
