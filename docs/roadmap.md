@@ -3437,3 +3437,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 源码审查发现，每标签 `ShellSearchHistory` 在两张映射表中保留查询 URI，原有清理只随宿主对象回收；`DisposeBrowser()` 销毁对应 ExplorerBrowser 和其 TravelLog，却没有清掉这些映射。现在在该生命周期边界清空映射，之后重建的浏览器从新历史开始。
 - Search Folder SettingsSmoke 在旧实现下因缺少清理入口按预期失败；修正后覆盖旧搜索身份不可再解析及新浏览器重新登记搜索。完整 Release SettingsSmoke 和 App Release build 通过（0 警告、0 错误）。这修复的是确定的托管引用生命周期，不证明它是用户观测到的主要内存增长来源；实际同 PID 内存仍需持续采样。
 - 未启动 ExplorerBrowser 或 GUI；真实搜索 Back/Forward 和 WPF HwndHost 重建后的可见行为仍待验收。
+
+## 2026-10-27：IShellView 原生重命名与方向键隔离验证
+
+- Private Desktop 探针在 canonical `newfolder` 创建后显式选中新目录并聚焦列表；经 `IShellView::TranslateAccelerator` 发送 F2 后，原生内联编辑框成功打开并取得焦点。编辑期间再路由 Left/Right，编辑框保持存在且继续持有焦点。
+- NativeProbe Release 构建 0 警告/错误；`host-newfolder-private-desktop` watchdog 退出码 0，隔离前台 HWND 未变，临时夹具清理完成。验证范围仅为 Shell 原生 accelerator 和左右键，不含产品多窗格/WPF 消息接线、上下键或物理键盘。
+- 这是后续重命名焦点问题的实现线索，不是产品缺陷修复，也不证明 IShellView 宿主迁移已具备产品级兼容性。详见 [IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹-canonical-verb-原型通过)。

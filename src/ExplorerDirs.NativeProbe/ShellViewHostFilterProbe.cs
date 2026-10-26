@@ -198,14 +198,42 @@ internal static class ShellViewHostFilterProbe
                     ? ReadVisibleItemNames(folderView, afterViewCount)[focusedIndex]
                     : string.Empty;
                 var renameEditor = FindChildByClass(viewWindow, "Edit");
+                var renameEditorAfterCreate = renameEditor != 0;
                 var focusedWindowClass = new System.Text.StringBuilder(128);
                 if (GetFocus() != 0) _ = GetClassNameW(GetFocus(), focusedWindowClass, focusedWindowClass.Capacity);
-                Console.WriteLine($"ishellview-newfolder-diagnostic: list-focus-before={listFocusBefore}; attempts=[{string.Join(';', attempts)}]; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; canonical-verb-succeeded={canonicalVerbSucceeded}; selected-count={createdSelectionCount}; focused-index={focusedIndex}; focused-name={focusedName}; rename-editor-present={renameEditor != 0}; focused-window-class={focusedWindowClass}; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
                     throw new Exception("The isolated New Folder diagnostic changed the desktop boundary.");
                 if (!listFocusBefore || !canonicalVerbSucceeded || added.Length != 1 || afterViewCount != 3 ||
                     !Directory.Exists(Path.Combine(fixture, added[0])))
                     throw new Exception("The focused Shell view's newfolder canonical verb did not create exactly one visible fixture directory.");
+
+                var addedIndex = Array.FindIndex(ReadVisibleItemNames(folderView, afterViewCount),
+                    name => name.Equals(added[0], StringComparison.OrdinalIgnoreCase));
+                if (addedIndex < 0) throw new Exception("The created folder has no row in the Shell view.");
+                Check(At<SelectItem>(folderView, 15)(folderView, addedIndex, 0x1u | 0x4u | 0x10u | 0x40000000u));
+                _ = SetFocus(newFolderListView);
+                var f2 = new NativeMessage { Window = newFolderListView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+                var f2Hr = At<TranslateAccelerator>(view, 5)(view, ref f2);
+                var renameDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+                while (DateTime.UtcNow < renameDeadline && renameEditor == 0)
+                {
+                    Application.DoEvents();
+                    renameEditor = FindChildByClass(viewWindow, "Edit");
+                    if (renameEditor == 0) Thread.Sleep(10);
+                }
+                if (renameEditor == 0) throw new Exception($"Shell TranslateAccelerator F2 did not open an inline rename editor: hr=0x{f2Hr:X8}.");
+                var focusInRenameEditor = GetFocus() == renameEditor;
+                var arrowResults = new List<string>();
+                foreach (var arrow in new[] { (Name: "left", Key: 0x25u, LParam: 0x004B0001u), (Name: "right", Key: 0x27u, LParam: 0x004D0001u) })
+                {
+                    var message = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                    var arrowHr = At<TranslateAccelerator>(view, 5)(view, ref message);
+                    Application.DoEvents();
+                    arrowResults.Add($"{arrow.Name}=0x{arrowHr:X8},edit-alive={IsWindow(renameEditor)},edit-focus={GetFocus() == renameEditor}");
+                    if (!IsWindow(renameEditor) || GetFocus() != renameEditor)
+                        throw new Exception($"Shell {arrow.Name} accelerator left the inline rename editor.");
+                }
+                Console.WriteLine($"ishellview-newfolder-diagnostic: list-focus-before={listFocusBefore}; attempts=[{string.Join(';', attempts)}]; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; canonical-verb-succeeded={canonicalVerbSucceeded}; selected-count-after-create={createdSelectionCount}; focused-index-after-create={focusedIndex}; focused-name-after-create={focusedName}; rename-editor-after-create={renameEditorAfterCreate}; focused-window-class-after-create={focusedWindowClass}; f2-hr=0x{f2Hr:X8}; f2-focus-in-edit={focusInRenameEditor}; arrow-routing=[{string.Join(',', arrowResults)}]; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 return 0;
             }
             VerifyGroupedFilteredExport(folderView);
