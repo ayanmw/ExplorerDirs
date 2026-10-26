@@ -28,6 +28,8 @@ internal static class Program
             return LiveUpdateProbe.RunViewFlagMatrix();
         if (args.Length == 1 && args[0] == "--qdr-native-stream")
             return QdrNativeViewProbe.Run();
+        if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
+            return StaticShellColumnContractSmoke.Run();
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")
             return ShellViewColorSpike.Run();
         if (args.Length == 1 && args[0] == "--shell-view-color-policy-smoke")
@@ -86,6 +88,7 @@ internal static class Program
             Console.WriteLine("       --live-updates / --live-updates-wpf (four hidden views, native file changes, optional WPF pump)");
             Console.WriteLine("       --live-updates-view-flags (same matrix plus production site with CDB2GVF_NOINCLUDEITEM disabled)");
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
+            Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");
             Console.WriteLine("       --shell-view-color-policy-smoke (selection snapshot and rule-color policy only; no Shell window or files)");

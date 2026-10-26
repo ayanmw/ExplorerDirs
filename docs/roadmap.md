@@ -2,6 +2,11 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
+## 2026-10-26：静态 Shell 数值列原型的数据契约
+
+- NativeProbe 新增自定义测试 PROPERTYKEY 与四个固定 `UInt64` 样本 `2/10/100/10`，比较规则使用数值比较，未知名称返回缺失而非伪造零值；定向 smoke 先因数据契约不存在而失败，接入后通过。NativeProbe Release build 0 警告、0 错误。
+- 这只是后续 `IShellFolder2` adapter 的数据/比较策略，不含 COM 适配器、列元数据、DefView、显示或 Shell 数值排序证据；没有递归计算，也没有改产品文件视图。下一步把该策略接入隔离 folder adapter，再通过 DefView 检查列枚举、`GetDetailsEx` 类型、`CompareIDs` 排序和 `IColumnManager` 列状态。
+
 ## 2026-10-26：修复原生目录树默认图标回退
 
 - 目录树事件回调未提供自定义索引时，改为返回 `E_NOTIMPL`，让 `NamespaceTreeControl` 解析 Shell 默认图标；生产实现和独立 NativeProbe 保持同一回退语义，回归检查纳入完整 Release `SettingsSmoke`。微软官方 NamespaceTreeControl 示例采用相同的未实现回调语义。
