@@ -64,6 +64,12 @@ if (args.Length == 1 && args[0] == "--view-style-icon-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--explorer-chrome-icon-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();
@@ -416,6 +422,7 @@ try
     PaneThemeMarkupSmoke.Run();
     ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
     ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")

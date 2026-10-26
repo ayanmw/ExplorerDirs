@@ -24,6 +24,7 @@
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleIconSet.cs" Link="ViewStyleIconSet.cs" />
+    <Compile Include="../ExplorerDirs.App/ExplorerChromeIcons.cs" Link="ExplorerChromeIcons.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleWheelCycle.cs" Link="ViewStyleWheelCycle.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleWheelAccumulator.cs" Link="ViewStyleWheelAccumulator.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemCounts.cs" Link="ShellItemCounts.cs" />

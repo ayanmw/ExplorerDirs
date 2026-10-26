@@ -37,11 +37,11 @@
 - Modify: `src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj`
 - Modify: `src/ExplorerDirs.SettingsSmoke/Program.cs`
 
-- [ ] Write geometry/factory smoke coverage and run it to confirm RED before adding the factory.
-- [ ] Define Back, Forward, Up, Refresh, Tree, NewTab, NewWindow, DuplicateTab, Close, Search, AddressDropDown, and History paths.
-- [ ] Route existing view menu and toolbar paths through the shared factory without changing item click behavior.
-- [ ] Run focused navigation icon, view style icon, and pane theme smokes.
-- [ ] Commit this task as part of the navigation/tab icon batch.
+- [x] Write geometry/factory smoke coverage and run it to confirm RED before adding the factory.
+- [x] Define Back, Forward, Up, Refresh, Tree, NewTab, NewWindow, DuplicateTab, Close, Search, AddressDropDown, and History paths.
+- [x] Route existing view menu and toolbar paths through the shared factory without changing item click behavior.
+- [x] Run focused navigation icon, view style icon, and pane theme smokes.
+- [x] Commit this task as part of the navigation/tab icon batch.
 
 ### Task 2: Apply icons to pane navigation and tab toolbars
 
@@ -52,11 +52,11 @@
 - Modify: `src/ExplorerDirs.App/MainWindow.xaml.cs`
 - Test: `src/ExplorerDirs.SettingsSmoke/ExplorerChromeIconSmoke.cs`
 
-- [ ] Replace pane back/forward/up/refresh/tree and path dropdown/history glyphs with shared vector content.
-- [ ] Replace main toolbar new tab/window, duplicate/close tab, refresh, and search glyphs.
-- [ ] Preserve each control's click handler, shortcuts, tooltip, automation ID, and focus stop; add names where glyphs were the only label.
-- [ ] Run focused smoke and inspect diff for command or tab-order changes.
-- [ ] Commit the control integration task.
+- [x] Replace pane back/forward/up/refresh/tree and path dropdown/history glyphs with shared vector content.
+- [x] Replace main toolbar new tab/window, duplicate/close tab, refresh, and search glyphs.
+- [x] Preserve each control's click handler, shortcuts, tooltip, automation ID, and focus stop; add names where glyphs were the only label.
+- [x] Run focused smoke and inspect diff for command or tab-order changes.
+- [x] Commit the control integration task.
 
 ### Task 3: Verify and record
 
@@ -64,7 +64,7 @@
 - Modify: `docs/theme-icon-roadmap.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] Run full Release `ExplorerDirs.SettingsSmoke` and App Release build.
-- [ ] Run `git diff --check` and verify no Shell navigation or file operation code changed.
-- [ ] Record that actual toolbar proportions, DPI, hover/disabled states, and high-contrast appearance still need desktop acceptance.
-- [ ] Commit the verification record with this implementation batch.
+- [x] Run full Release `ExplorerDirs.SettingsSmoke` and App Release build.
+- [x] Run `git diff --check` and verify no Shell navigation or file operation code changed.
+- [x] Record that actual toolbar proportions, DPI, hover/disabled states, and high-contrast appearance still need desktop acceptance.
+- [x] Commit the verification record with this implementation batch.

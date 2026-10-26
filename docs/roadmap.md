@@ -12,6 +12,11 @@
 - 新增 16 单位几何图标集，按 Explorer Ctrl+Shift+1～8 的查看方式顺序绘制。每窗格上方和状态栏的查看按钮共用紧凑矢量查看图标；两个查看菜单为每种查看方式显示对应几何图标，线条使用动态语义文字色。现有布局图形也继续使用语义主题画刷。
 - 图标 Smoke 验证八个几何均可解析、边界符合图标网格且不重复，并确认菜单继续传递原 `ViewStyle`、按钮保留无障碍名称。定向图标/主题 smoke、完整 Release `SettingsSmoke`、App Release 构建通过（0 警告、0 错误）。没有操作 GUI；实际尺寸、DPI、弹出菜单观感和高对比度效果仍待验收。实现计划见[查看方式矢量图标计划](superpowers/plans/2026-10-27-view-style-icons.md)。
 
+## 2026-10-27：导航与标签工具栏接入共享矢量图标
+
+- 新增共享主题色图标工厂，现为每窗格后退/前进/上级/刷新/目录树/路径位置/历史按钮，以及主工具栏新建标签/窗口、复制/关闭标签、刷新和搜索提供矢量图标。被替换的字符原来承担可访问名称时补上明确 UI Automation 名称；点击事件、快捷键、提示、焦点停靠与 Shell 调用保持原样。查看方式菜单和按钮也改用共享工厂。
+- 新增图标几何、语义笔刷和命令绑定 smoke；完整 Release `SettingsSmoke`、App Release 构建通过（0 警告、0 错误）。未启动 GUI；大小、DPI、悬停/禁用状态和高对比度外观仍待桌面验收。实现计划见[导航与标签矢量图标计划](superpowers/plans/2026-10-27-navigation-tab-icons.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。

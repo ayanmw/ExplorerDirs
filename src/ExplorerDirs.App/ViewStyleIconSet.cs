@@ -17,5 +17,4 @@ internal static class ViewStyleIconSet
         Geometry.Parse("M1,1 H4 V4 H1 Z M6,1 H15 M6,3 H12 M1,7 H4 V10 H1 Z M6,7 H15 M6,9 H12 M1,13 H4 V16 H1 Z M6,13 H15 M6,15 H12")
     });
 
-    internal static Geometry Dropdown { get; } = Geometry.Parse("M1,2 L4,5 L7,2");
 }

@@ -22,7 +22,7 @@ internal static class ViewStyleIconSmoke
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
         var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
         Check(menuCode.Contains("CreateMenuIcon(style", StringComparison.Ordinal) &&
-              menuCode.Contains("ExplorerDirs.ControlTextBrush", StringComparison.Ordinal) &&
+              menuCode.Contains("ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               menuCode.Contains("item.Click += (_, _) => apply(style)", StringComparison.Ordinal),
             "view menu icons use the semantic text role and preserve Shell command dispatch");
         Check(paneCode.Contains("ViewStyleMenu.CreateToolbarIcon()", StringComparison.Ordinal) &&

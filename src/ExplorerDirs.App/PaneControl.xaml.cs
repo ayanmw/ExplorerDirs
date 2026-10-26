@@ -82,8 +82,15 @@ public partial class PaneControl : UserControl
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
     {
         InitializeComponent();
+        BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
+        ForwardButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Forward), 14);
+        UpButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Up), 14);
+        RefreshButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh), 14);
+        TreeButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Tree));
         ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
+        AddressMenuButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.AddressDropDown), 12);
+        AddressHistoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.History), 14);
         AddressTreeHost.DirectorySelected += identity =>
         {
             var owner = Current;

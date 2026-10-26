@@ -120,18 +120,22 @@
                 <StackPanel x:Name="FileCommandButtons" Orientation="Horizontal"
                             MouseEnter="FileCommandButtons_Refresh" GotKeyboardFocus="FileCommandButtons_Refresh"/>
                 <Separator/>
-                <Button Content="＋" ToolTip="新建标签页 (Ctrl+T)" Click="NewTab_Click" Width="32"/>
-                <Button Content="▣↗" ToolTip="新建窗口 (Ctrl+N)" Click="NewWindow_Click" Width="38"/>
-                <Button Content="▣＋" ToolTip="复制当前标签 (Ctrl+K)" Click="DuplicateTab_Click" Width="42"/>
-                <Button Content="×" ToolTip="关闭标签页 (Ctrl+W)" Click="CloseTab_Click" Width="32"/>
+                <Button x:Name="NewTabToolbarButton" ToolTip="新建标签页 (Ctrl+T)"
+                        AutomationProperties.Name="新建标签页" Click="NewTab_Click" Width="32"/>
+                <Button x:Name="NewWindowToolbarButton" ToolTip="新建窗口 (Ctrl+N)"
+                        AutomationProperties.Name="新建窗口" Click="NewWindow_Click" Width="38"/>
+                <Button x:Name="DuplicateTabToolbarButton" ToolTip="复制当前标签 (Ctrl+K)"
+                        AutomationProperties.Name="复制当前标签" Click="DuplicateTab_Click" Width="42"/>
+                <Button x:Name="CloseTabToolbarButton" ToolTip="关闭标签页 (Ctrl+W)"
+                        AutomationProperties.Name="关闭标签页" Click="CloseTab_Click" Width="32"/>
                 <ToggleButton x:Name="PreviewPaneToggle" Content="预览" ToolTip="切换当前标签的预览窗格 (Alt+P)"
                               AutomationProperties.Name="切换预览窗格" Click="PreviewPaneToggle_Click"/>
                 <ToggleButton x:Name="DetailsPaneToggle" Content="详情" ToolTip="切换当前标签的详情窗格 (Alt+Shift+P)"
                               AutomationProperties.Name="切换详情窗格" Click="DetailsPaneToggle_Click"/>
-                <Button Content="↻" ToolTip="刷新当前目录 (F5)" AutomationProperties.Name="刷新当前目录"
+                <Button x:Name="RefreshCurrentDirectoryButton" ToolTip="刷新当前目录 (F5)" AutomationProperties.Name="刷新当前目录"
                         AutomationProperties.AutomationId="RefreshCurrentDirectory"
                         Click="RefreshCurrent_Click" Width="32"/>
-                <Button Content="⌕" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
+                <Button x:Name="SearchCurrentDirectoryButton" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
                         AutomationProperties.AutomationId="OpenCurrentDirectorySearch"
                         Click="SearchCurrent_Click" Width="32"/>
                 <Button Content="🖨" ToolTip="打印当前文件视图" AutomationProperties.Name="打印当前文件视图"

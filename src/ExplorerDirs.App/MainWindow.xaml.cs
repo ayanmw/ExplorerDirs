@@ -87,6 +87,12 @@ public partial class MainWindow : Window
     {
         _themeController = themeController;
         InitializeComponent();
+        NewTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab));
+        NewWindowToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewWindow));
+        DuplicateTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.DuplicateTab));
+        CloseTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close));
+        RefreshCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh));
+        SearchCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Search));
         if (_themeController is not null)
             _themeController.ThemeChanged += ThemeController_ThemeChanged;
         ByteSizeFormatter.OptionsChanged += ByteSizeFormatter_OptionsChanged;
