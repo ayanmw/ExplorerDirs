@@ -88,6 +88,11 @@ internal static class StaticShellFolderAdapterProbe
             createdView = true;
             Pump(800);
             CheckBoundary(parent, foreground, "DefView creation");
+            var verifyViewFolder = Marshal.GetDelegateForFunctionPointer<VerifyViewFolder>(
+                NativeLibrary.GetExport(nativeLibrary, "VerifyStaticShellViewFolder"));
+            Check(verifyViewFolder(view, adapter, out var adapterBackedView));
+            Console.WriteLine($"native-static-shell-column: view-uses-adapter={adapterBackedView}");
+            if (adapterBackedView == 0) throw new Exception("DefView did not retain the native Shell-folder adapter.");
             Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
             Check(At<SetMode>(folderView, 35)(folderView, 4, 16)); // Details view.
 
@@ -249,7 +254,9 @@ internal static class StaticShellFolderAdapterProbe
             var custom = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellColumnComparisonCount"))();
             var total = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetAllShellColumnComparisonCount"))();
             var index = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetLastShellColumnComparisonIndex"))();
-            return $"{total}/{custom}/{index}";
+            var detailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsExCount"))();
+            var detailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsOfCount"))();
+            return $"compare={total}/{custom}/{index}; GetDetailsEx={detailsEx}; GetDetailsOf={detailsOf}";
         }
         finally { NativeLibrary.Free(module); }
     }
@@ -263,6 +270,7 @@ internal static class StaticShellFolderAdapterProbe
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyViewFolder(nint view, nint adapter, out int matches);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCompareCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect rect, out nint window);

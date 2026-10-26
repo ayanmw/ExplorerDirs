@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ExplorerDirs.NativeProbe;
 
 // Runs focus-sensitive Shell probes on a separate, never-switched Windows Desktop.
 // This keeps SetFocus activation inside the probe desktop instead of the user's desktop.
@@ -19,6 +20,9 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunCommandStateReadOnly() =>
         Run("command-state-readonly", () => ShellViewColorSpike.Run(queryCommandStatesOnly: true));
+
+    internal static int RunStaticShellColumnAdapter() =>
+        Run("static-shell-column-adapter", StaticShellFolderAdapterProbe.Run);
 
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);

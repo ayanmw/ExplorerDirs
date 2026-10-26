@@ -18,6 +18,8 @@ namespace
     volatile LONG g_staticColumnComparisons = 0;
     volatile LONG g_allComparisons = 0;
     volatile LONG g_lastCompareColumn = -1;
+    volatile LONG g_customDetailsEx = 0;
+    volatile LONG g_customDetailsOf = 0;
 
     bool NameFromPidl(IShellFolder2* folder, PCUITEMID_CHILD pidl, std::wstring& name)
     {
@@ -152,6 +154,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* column, VARIANT* value) override
         {
             if (!column || *column != kStaticSizeKey) return _inner->GetDetailsEx(item, column, value);
+            InterlockedIncrement(&g_customDetailsEx);
             if (!item) return E_INVALIDARG;
             std::wstring name;
             if (!NameFromPidl(_inner, item, name)) return E_FAIL;
@@ -168,6 +171,7 @@ namespace
             if (!details) return E_POINTER;
             if (column < _columnCount) return _inner->GetDetailsOf(item, column, details);
             if (column != _columnCount) return E_INVALIDARG;
+            InterlockedIncrement(&g_customDetailsOf);
             details->fmt = LVCFMT_RIGHT;
             details->cxChar = 16;
             details->str.uType = STRRET_WSTR;
@@ -221,6 +225,16 @@ extern "C" __declspec(dllexport) LONG WINAPI GetLastShellColumnComparisonIndex()
     return InterlockedCompareExchange(&g_lastCompareColumn, 0, 0);
 }
 
+extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsExCount()
+{
+    return InterlockedCompareExchange(&g_customDetailsEx, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()
+{
+    return InterlockedCompareExchange(&g_customDetailsOf, 0, 0);
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
@@ -230,4 +244,25 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
     if (!instance) return E_OUTOFMEMORY;
     *adapter = instance;
     return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
+    IShellView* view, IShellFolder2* adapter, BOOL* matches)
+{
+    if (!view || !adapter || !matches) return E_POINTER;
+    *matches = FALSE;
+    IFolderView2* folderView = nullptr;
+    IShellFolder2* viewFolder = nullptr;
+    IUnknown* adapterIdentity = nullptr;
+    IUnknown* viewIdentity = nullptr;
+    HRESULT hr = view->QueryInterface(IID_PPV_ARGS(&folderView));
+    if (SUCCEEDED(hr)) hr = folderView->GetFolder(IID_PPV_ARGS(&viewFolder));
+    if (SUCCEEDED(hr)) hr = adapter->QueryInterface(IID_PPV_ARGS(&adapterIdentity));
+    if (SUCCEEDED(hr)) hr = viewFolder->QueryInterface(IID_PPV_ARGS(&viewIdentity));
+    if (SUCCEEDED(hr)) *matches = adapterIdentity == viewIdentity;
+    if (viewIdentity) viewIdentity->Release();
+    if (adapterIdentity) adapterIdentity->Release();
+    if (viewFolder) viewFolder->Release();
+    if (folderView) folderView->Release();
+    return hr;
 }
