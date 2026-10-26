@@ -192,6 +192,7 @@ internal static class QdrNativeViewProbe
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
 public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, IShellServiceProvider, IDisposable
 {
+    internal const uint ProbeApplicationCommandId = 0x7FF0;
     private readonly nint _parent;
     private readonly nint _menuFrameWindow;
     private readonly ShellMenuFrameCoordinator? _menuFrameCoordinator;
@@ -224,6 +225,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int InsertMenusCallCount => Volatile.Read(ref _insertMenusCallCount);
     internal int SetMenuCallCount => Volatile.Read(ref _setMenuCallCount);
     internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
+    internal int ApplicationMenuCommandCount { get; private set; }
     internal nint BrowserParentWindow => _parent;
     internal nint MenuFrameWindow => _menuFrameWindow;
     internal bool OwnsAttachedCustomMenuGroup => _customMenuRoot != 0 && _customMenuPopup != 0 && HasSubMenu(_customMenuRoot, _customMenuPopup);
@@ -390,7 +392,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         {
             result = menu == 0
                 ? RemoveCustomMenuGroup(_customMenuRoot)
-                : EnsureCustomMenuGroup(menu);
+                : _parent == 0 ? 0 : EnsureCustomMenuGroup(menu);
             if (result >= 0 && menu == 0) result = InstallSharedMenu(menu, oleMenu, active);
             if (result >= 0 && menu != 0) result = InstallSharedMenu(menu, oleMenu, active);
         }
@@ -701,15 +703,15 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
 
         var popup = CreatePopupMenu();
         var label = Marshal.StringToHGlobalUni("Explorer Dirs");
-        var marker = Marshal.StringToHGlobalUni("Prototype host command group");
+        var marker = Marshal.StringToHGlobalUni("Probe active-pane command");
         try
         {
             var item = new MenuItemInfo
             {
                 Size = (uint)Marshal.SizeOf<MenuItemInfo>(),
                 Mask = 0x47, // MIIM_STATE|MIIM_ID|MIIM_SUBMENU|MIIM_STRING.
-                State = 0x3, // MFS_DISABLED | MFS_GRAYED; the probe adds no fake command behavior.
-                Id = 0x7FF0,
+                State = 0,
+                Id = ProbeApplicationCommandId,
                 SubMenu = popup,
                 Text = marker
             };
@@ -718,7 +720,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             {
                 var error = Marshal.GetHRForLastWin32Error();
                 DestroyMenu(popup);
-                return error;
+                return error == 0 ? unchecked((int)0x80004005) : error;
             }
             var rootItem = item;
             rootItem.State = 0;
@@ -729,7 +731,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             {
                 var error = Marshal.GetHRForLastWin32Error();
                 DestroyMenu(popup);
-                return error;
+                return error == 0 ? unchecked((int)0x80004005) : error;
             }
             _customMenuRoot = menu;
             _customMenuPopup = popup;
@@ -754,7 +756,11 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             {
                 if (GetSubMenu(menu, position) != _customMenuPopup) continue;
                 found = position;
-                if (!RemoveMenu(menu, (uint)position, 0x400)) return Marshal.GetHRForLastWin32Error();
+                if (!RemoveMenu(menu, (uint)position, 0x400))
+                {
+                    var error = Marshal.GetHRForLastWin32Error();
+                    return error == 0 ? unchecked((int)0x80004005) : error;
+                }
                 break;
             }
         }
@@ -765,6 +771,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
 
     internal int RetireCustomMenuGroup() => RemoveCustomMenuGroup(_customMenuRoot);
+    internal void OnApplicationMenuCommand() => ApplicationMenuCommandCount++;
 
     private static bool HasSubMenu(nint root, nint popup)
     {
@@ -838,9 +845,14 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
 
 // Multiple DefViews share one real frame menu. A stale RemoveMenusSB from an
 // inactive pane must not unregister the menu dispatcher owned by the active pane.
-internal sealed class ShellMenuFrameCoordinator
+internal sealed class ShellMenuFrameCoordinator : IDisposable
 {
+    private const uint WmCommand = 0x0111;
+    private static readonly SubclassProcedure FrameSubclassProcedure = FrameWindowSubclass;
     private readonly nint _frameWindow;
+    private readonly GCHandle _selfHandle;
+    private readonly nuint _subclassId;
+    private bool _disposed;
     private nint _baseMenu;
     private nint _activeMenu;
     private nint _activeWindow;
@@ -853,9 +865,50 @@ internal sealed class ShellMenuFrameCoordinator
             throw new ArgumentException("A valid top-level menu frame window is required.", nameof(frameWindow));
         _frameWindow = frameWindow;
         _baseMenu = GetMenu(frameWindow);
+        _selfHandle = GCHandle.Alloc(this);
+        _subclassId = unchecked((nuint)GCHandle.ToIntPtr(_selfHandle));
+        if (!SetWindowSubclass(frameWindow, FrameSubclassProcedure, _subclassId, GCHandle.ToIntPtr(_selfHandle)))
+        {
+            _selfHandle.Free();
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not install the isolated Shell menu command router.");
+        }
     }
 
     internal nint BaseMenu => _baseMenu;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            if (_owner is not null) _ = Deactivate(_owner);
+        }
+        finally
+        {
+            if (IsWindow(_frameWindow)) _ = RemoveWindowSubclass(_frameWindow, FrameSubclassProcedure, _subclassId);
+            if (_selfHandle.IsAllocated) _selfHandle.Free();
+        }
+    }
+
+    private static nint FrameWindowSubclass(nint window, uint message, nuint wParam, nint lParam,
+        nuint subclassId, nint referenceData)
+    {
+        try
+        {
+            if (message == WmCommand && lParam == 0 && (uint)(wParam & 0xFFFF) == StreamViewHost.ProbeApplicationCommandId && referenceData != 0)
+            {
+                var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
+                coordinator?._owner?.OnApplicationMenuCommand();
+                return 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell app menu command dispatch: {ex.GetType().Name}");
+        }
+        return DefSubclassProc(window, message, wParam, lParam);
+    }
 
     internal int SetMenu(StreamViewHost owner, nint menu, nint oleMenu, nint activeWindow)
     {
@@ -962,6 +1015,14 @@ internal sealed class ShellMenuFrameCoordinator
 
     [DllImport("ole32.dll")] private static extern int OleSetMenuDescriptor(nint descriptor,
         nint frameWindow, nint activeWindow, nint frame, nint activeObject);
+    [DllImport("comctl32.dll", SetLastError = true)] private static extern bool SetWindowSubclass(nint window,
+        SubclassProcedure callback, nuint subclassId, nint referenceData);
+    [DllImport("comctl32.dll", SetLastError = true)] private static extern bool RemoveWindowSubclass(nint window,
+        SubclassProcedure callback, nuint subclassId);
+    [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message,
+        nuint wParam, nint lParam);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProcedure(nint window,
+        uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);

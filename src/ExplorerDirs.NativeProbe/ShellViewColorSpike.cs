@@ -159,6 +159,7 @@ internal static class ShellViewColorSpike
             if (folder != 0) Marshal.Release(folder);
             if (hostPointer != 0) Marshal.Release(hostPointer);
             if (host is not null) host.Dispose();
+            menuCoordinator?.Dispose();
             if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
             if (parent != 0 && IsWindow(parent)) _ = DestroyWindow(parent);
             Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
@@ -322,6 +323,12 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Pane {index + 1} did not install the merged Shell and app menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; custom-menu={customMenuPresent}; trace=[{string.Join(';', current.MenuTrace)}].");
             if (index > 0 && hosts[index - 1].OwnsAttachedCustomMenuGroup)
                 throw new InvalidOperationException($"The previous pane retained its app-owned custom menu group after pane {index + 1} became active; previous-menu=0x{menuBeingReplaced:X}; previous-host=[{string.Join(';', hosts[index - 1].MenuTrace)}].");
+            var commandCountsBefore = hosts.Select(host => host.ApplicationMenuCommandCount).ToArray();
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)StreamViewHost.ProbeApplicationCommandId, 0);
+            if (hosts.Select((host, hostIndex) => (host, hostIndex))
+                    .Any(entry => entry.hostIndex != index && entry.host.ApplicationMenuCommandCount != commandCountsBefore[entry.hostIndex]) ||
+                current.ApplicationMenuCommandCount != commandCountsBefore[index] + 1)
+                throw new InvalidOperationException($"The merged app menu command did not dispatch only to active pane {index + 1}: before={string.Join(',', commandCountsBefore)}; after={string.Join(',', hosts.Select(host => host.ApplicationMenuCommandCount))}.");
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
@@ -330,12 +337,16 @@ internal static class ShellViewColorSpike
         var finalRemoveCount = finalHost.RemoveMenusCallCount;
         Check(At<ActivateView>(views[^1], 7)(views[^1], 0)); // SVUIA_DEACTIVATE.
         Pump(250);
+        var countsBeforeInactiveCommand = hosts.Select(host => host.ApplicationMenuCommandCount).ToArray();
+        _ = SendMessageW(menuFrameWindow, 0x0111, (nint)StreamViewHost.ProbeApplicationCommandId, 0);
         if (finalHost.RemoveMenusCallCount <= finalRemoveCount || GetMenu(menuFrameWindow) != menuCoordinator.BaseMenu ||
-            finalHost.OwnsAttachedCustomMenuGroup)
+            finalHost.OwnsAttachedCustomMenuGroup ||
+            hosts.Where((host, index) => host.ApplicationMenuCommandCount != countsBeforeInactiveCommand[index]).Any())
             throw new InvalidOperationException($"Deactivating the last Shell pane did not remove the active shared menu and restore the frame menu: remove={finalHost.RemoveMenusCallCount - finalRemoveCount}; expected=0x{menuCoordinator.BaseMenu:X}; actual=0x{GetMenu(menuFrameWindow):X}; trace=[{string.Join(';', finalHost.MenuTrace)}].");
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
         return $"per-pane-insert-set={string.Join(',', activations)}; custom-menu=present-in-each-active-composite; " +
+            $"app-command-routing={string.Join(',', hosts.Select((host, index) => $"pane{index + 1}:{host.ApplicationMenuCommandCount}"))}; inactive-command=ignored; " +
             $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
             "frame-menu-restored-after-deactivate=True; foreground-unchanged=True";
     }

@@ -746,7 +746,7 @@ public static class ShellViewColorBrowserHostSmoke
 
             descriptorOne = CreateOleDescriptor(menuOne);
             descriptorTwo = CreateOleDescriptor(menuTwo);
-            var coordinator = new ShellMenuFrameCoordinator(frameWindow);
+            using var coordinator = new ShellMenuFrameCoordinator(frameWindow);
             hostOne = new StreamViewHost(paneOne, [], menuFrameWindow: frameWindow,
                 menuFrameCoordinator: coordinator);
             hostTwo = new StreamViewHost(paneTwo, [], menuFrameWindow: frameWindow,
