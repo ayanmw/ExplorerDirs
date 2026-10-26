@@ -1,3 +1,5 @@
+> **ExplorerBrowser Shell 状态提示（2026-10-26）：**每标签浏览器的 `StatusTextChange` 事件现经原生事件 sink 投递到独立的每窗格提示区域，错误/搜索/F9 状态仍使用原来的状态区域；事件按 COM 连接线程和订阅身份检查，标签切换恢复对应浏览器最近文本。SettingsSmoke 覆盖 native `IDispatch` BSTR、清空和卸订阅后的迟到回调，完整 Release SettingsSmoke 与 App Release build 通过。未启动 ExplorerBrowser/GUI，Shell 实际是否发送提示、鼠标悬停内容与四窗格布局仍待可见验收。
+
 > **Shell 命令状态查询重入刷新（2026-10-26）：**Shell 原生命令查询期间若重入事件改变选区/活动上下文，查询会丢弃过期快照。现有合并刷新门控会保留查询期间到达的刷新请求，避免嵌套 timer 消费后令工具栏停留在旧启用状态；外层查询结束后只补一次刷新。纯逻辑回归和完整 Release SettingsSmoke、App Release build 通过；COM 重入与可见工具栏状态未验收。详见[路线图](roadmap.md#2026-10-26shell-命令状态查询期间保留刷新请求)。
 
 > **Alt+Tab 期间保留文件操作焦点恢复（2026-10-26）：**窗口失焦不再销毁仍有效的文件操作焦点恢复请求；后台暂停 Shell 焦点读取和 `SetFocus`，切回后只在活动窗格、文件视图焦点意图、标签/路径及用户输入代数仍有效时继续原有有界恢复。状态 smoke、完整 Release SettingsSmoke、App Release 构建通过；没有使用剪贴板或可见 GUI，真实 Ctrl+C/V、Shift+Delete 与 Alt+Tab 时序仍待验收，文件操作焦点 P0 未关闭。

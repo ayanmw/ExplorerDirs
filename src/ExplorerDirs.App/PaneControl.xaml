@@ -120,6 +120,9 @@
                 <TextBlock x:Name="RecursiveSizeStatus" DockPanel.Dock="Left" Margin="6,3"
                            MaxWidth="420" TextTrimming="CharacterEllipsis" Visibility="Collapsed"
                            AutomationProperties.AutomationId="PaneRecursiveSize"/>
+                <TextBlock x:Name="ShellStatusHint" DockPanel.Dock="Left" Margin="6,3" MaxWidth="280"
+                           Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"
+                           TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneShellStatusHint"/>
                 <TextBlock x:Name="Status" Margin="6,3" Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"
                            TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneStatus"/>
             </DockPanel>

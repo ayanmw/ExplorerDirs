@@ -90,6 +90,11 @@ internal static class PaneThemeMarkupSmoke
               paneMarkup.Contains("ExplorerDirs.MutedTextBrush", StringComparison.Ordinal) &&
               paneMarkup.Contains("ExplorerDirs.ControlBackgroundBrush", StringComparison.Ordinal),
             "pane address, status, tree, and divider chrome consume semantic theme roles");
+        Check(paneMarkup.Contains("x:Name=\"ShellStatusHint\"", StringComparison.Ordinal) &&
+              paneMarkup.Contains("AutomationProperties.AutomationId=\"PaneShellStatusHint\"", StringComparison.Ordinal) &&
+              paneCode.Contains("ShellStatusTextChanged", StringComparison.Ordinal) &&
+              paneCode.Contains("UpdateShellStatusHint(state.Browser.ShellStatusText)", StringComparison.Ordinal),
+            "Shell status text has a separate accessible pane slot with active-tab restoration");
         Check(paneCode.Contains("isActive ? \"ExplorerDirs.AccentBrush\" : \"ExplorerDirs.BorderBrush\"", StringComparison.Ordinal),
             "active pane accent and inactive pane border remain distinct semantic roles");
         Check(photoPrintWindow.Contains("ExplorerDirs.WindowBackgroundBrush", StringComparison.Ordinal) &&

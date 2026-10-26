@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-26：将 ExplorerBrowser Shell 提示接入每窗格状态栏
+
+- 复用每标签浏览器已有的 `DWebBrowserEvents2` 连接点，将 `StatusTextChange` 经线程/订阅身份门控投递到当前窗格。每个窗格新增独立的 Shell 提示区域，不覆盖现有错误、搜索或 F9 扫描消息；切换标签时恢复该标签最近的提示，隐藏窗格时清空显示。
+- SettingsSmoke 通过 native `IDispatch` BSTR 事件、托管写入/清空、取消订阅后的迟到事件检查；完整 Release SettingsSmoke 与 App Release build 通过（0 警告/错误）。没有启动 ExplorerBrowser 或 GUI，尚未证明 Windows Shell/provider 会在实际文件选择/悬停中发送该事件，也没有可见布局验收。
+
 ## 2026-10-26：接收隔离 Shell Browser 状态文本
 
 - `StreamViewHost.SetStatusTextSB` 不再静默丢弃 Shell 文本：复制 LPCWSTR 到原型 host 状态，空指针清除，并通过 `StatusTextChanged` 通知订阅者。真实 `IShellBrowser::SetStatusTextSB` vtable smoke 覆盖写入/清除与事件通知，通过 `--shell-view-color-policy-smoke`。

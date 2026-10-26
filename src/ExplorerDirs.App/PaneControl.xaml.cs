@@ -162,13 +162,18 @@ public partial class PaneControl : UserControl
         };
         IsVisibleChanged += (_, _) =>
         {
-            if (IsVisible && IsLoaded) { RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start(); }
+            if (IsVisible && IsLoaded)
+            {
+                RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start();
+                UpdateShellStatusHint(Current?.Browser.ShellStatusText);
+            }
             else
             {
                 CloseAddressTree();
                 CancelRecursiveDirectorySize();
                 CancelSelectionCountsRefresh();
                 _itemCountsTimer.Stop(); ItemCounts.Text = ""; ItemCounts.ToolTip = null; _diskSpace.Reset();
+                UpdateShellStatusHint(null);
             }
         };
     }
@@ -1164,6 +1169,10 @@ public partial class PaneControl : UserControl
         {
             if (Current == state) RefreshNavigationAvailability();
         };
+        browser.ShellStatusTextChanged += (_, text) =>
+        {
+            if (Current == state) UpdateShellStatusHint(text);
+        };
         browser.SelectionContextChanged += (_, _) =>
         {
             if (Current == state)
@@ -1199,6 +1208,7 @@ public partial class PaneControl : UserControl
             if (ReferenceEquals(_recursiveSizeOwner, state) || ReferenceEquals(_lastRecursiveSizeOwner, state))
                 CancelRecursiveDirectorySize();
             if (Current != state) return;
+            UpdateShellStatusHint(null);
             CancelSelectionCountsRefresh();
             RefreshNavigationAvailability();
             _treeHost?.CancelSynchronization();
@@ -1612,6 +1622,12 @@ public partial class PaneControl : UserControl
         Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_alwaysShowTabStrip, Tabs.Items.Count)
             ? Visibility.Visible : Visibility.Collapsed;
 
+    private void UpdateShellStatusHint(string? text)
+    {
+        ShellStatusHint.Text = text ?? string.Empty;
+        ShellStatusHint.ToolTip = string.IsNullOrEmpty(text) ? null : text;
+    }
+
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
@@ -1628,6 +1644,7 @@ public partial class PaneControl : UserControl
         RefreshNavigationAvailability();
         SyncTreeToCurrent(state);
         _diskSpace.Reset();
+        UpdateShellStatusHint(state.Browser.ShellStatusText);
         ItemCounts.Text = ""; // Never carry a previous tab's selection counts across a switch.
         ItemCounts.ToolTip = null;
         CancelSelectionCountsRefresh();

@@ -391,6 +391,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler<string>? Navigated;
     public event EventHandler? NavigationStarting;
     public event EventHandler? NavigationAvailabilityChanged;
+    public event EventHandler<string?>? ShellStatusTextChanged;
     internal event EventHandler? SelectionContextChanged;
     internal event Action<QuickFilterSettings>? QuickFilterChanged;
     internal event Action<ShellMenuPoint>? HeaderPresetMenuRequested;
@@ -490,7 +491,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var browserUnknown = Marshal.GetIUnknownForObject(_browser);
             try
             {
-                _historyEvents = ShellHistoryEvents.Subscribe(browserUnknown, QueueNavigationAvailability);
+                _historyEvents = ShellHistoryEvents.Subscribe(browserUnknown, QueueNavigationAvailability,
+                    QueueShellStatusTextChanged);
                 ReportFolderHeaderFailure(ShellFolderViewOptions.EnableCustomPosition(browserUnknown));
             }
             finally { Marshal.Release(browserUnknown); }
@@ -1495,6 +1497,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 NavigationAvailabilityChanged?.Invoke(this, EventArgs.Empty);
         }));
     }
+
+    private void QueueShellStatusTextChanged(string? text)
+    {
+        var owner = _historyEvents;
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            if (_browser is not null && ReferenceEquals(_historyEvents, owner))
+                ShellStatusTextChanged?.Invoke(this, text);
+        }));
+    }
+
+    internal string? ShellStatusText => _historyEvents?.StatusText;
 
     public void Navigate(string path)
     {
