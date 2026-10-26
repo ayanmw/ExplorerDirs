@@ -3904,6 +3904,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         CancelPendingNewFolderRename();
         _issuedBrowserPaths.Clear();
         _issuedSearches.Clear();
+        // Destroying the browser also destroys its Shell TravelLog; old search PIDL aliases cannot be used after recreation.
+        _searchHistory.Clear();
         _pendingFileOperationFocusRestore = null;
         _focusRestoreTimer.Stop();
         if (_browser is null) return;

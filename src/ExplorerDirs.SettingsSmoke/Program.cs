@@ -983,6 +983,12 @@ try
                   searchHistory.TryResolve(otherPidl, out var secondSearchUri) && secondSearchUri == otherUri &&
                   !new ShellSearchHistory().TryResolve(searchPidl, out _),
                 "search query history remains distinct and browser-local");
+            searchHistory.Clear();
+            Check(!searchHistory.TryResolve(searchPidl, out _) && !searchHistory.TryResolve(otherPidl, out _),
+                "disposing a Shell browser releases its search identity mappings");
+            searchHistory.Remember(searchPidl, searchUri);
+            Check(searchHistory.TryResolve(searchPidl, out var reopenedSearchUri) && reopenedSearchUri == searchUri,
+                "a recreated Shell browser can record fresh search identities");
         }
         finally { Marshal.FreeCoTaskMem(otherPidl); }
         var collisionHistory = new ShellSearchHistory();

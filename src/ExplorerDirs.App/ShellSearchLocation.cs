@@ -121,6 +121,12 @@ internal sealed class ShellSearchHistory
         locations[Identity(pidl)] = uri;
     }
 
+    internal void Clear()
+    {
+        locations.Clear();
+        namedLocations.Clear();
+    }
+
     internal bool TryResolve(nint pidl, out string uri)
     {
         uri = string.Empty;

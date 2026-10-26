@@ -271,6 +271,8 @@ Ctrl+N 已创建独立窗口会话：主窗口继续使用 `ExplorerDirs.ini`，
 
 2026-10-26 Q-Dir `[Program]` 导入中，多个未引用的参数区段等号现在作为歧义行显示在跳过预览中，避免把可能的工作目录静默拼进参数；明确引用的等号参数仍通过 argv 边界测试。导入 smoke、完整 Release SettingsSmoke、App Release 构建通过。真实 Q-Dir 正向配置样本及窗口交互尚未验收，详见[路线图](roadmap.md#2026-10-26q-dir-程序项导入拒绝含糊的额外分隔符)。
 
+2026-10-27 搜索位置生命周期：浏览器销毁时清空该宿主的搜索 PIDL/解析名称映射，因为对应 Shell TravelLog 同时失效；每标签仍在当前浏览器生命周期内保留搜索 Back/Forward 所需身份。SettingsSmoke 验证销毁后旧身份失效及重新记录；没有启动 ExplorerBrowser，真实搜索返回/前进与 HwndHost 重建后的可见行为仍待验收。详见[路线图](roadmap.md#2026-10-27浏览器销毁时清理-shell-搜索身份映射)。
+
 2026-10-26 Program Starter 的显式相对工作目录按应用程序目录解析；绝对路径、活动文件夹默认值及虚拟位置回退保持原样。参数 smoke 通过。Q-Dir 官方资料未明确第四字段相对路径锚点，因此这是本程序的便携路径规则，不作跨应用一致性声明；完整 SettingsSmoke、Release 构建和实际 Q-Dir 正向样本验收见[路线图](roadmap.md#2026-10-26program-starter-支持相对工作目录)。
 
 2026-10-26 地址与查看入口：窗格工具栏现在提供每标签查看方式按钮，并复用原 Shell 查看方式菜单；地址位置下拉显示当前路径及所有上级、常用系统目录和 Shell 位置，历史菜单继续独立。现代地址栏保留独立编辑按钮，经典完整路径可点击编辑；位置下拉是单独 Tab 停靠点。路径菜单模型与焦点顺序 smoke、Release 构建通过；弹出菜单图标、布局和虚拟位置的可见行为仍待桌面验收。[Q-Dir 地址栏/上级目录 FAQ](https://www.softwareok.com/?faq=53&seite=faq-Q-DIR) · [Microsoft Explorer 地址栏与面包屑](https://learn.microsoft.com/en-us/windows/win32/shell/developing-with-windows-explorer)
