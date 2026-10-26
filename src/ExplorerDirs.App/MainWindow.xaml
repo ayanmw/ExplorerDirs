@@ -70,6 +70,8 @@
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
                 <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
                 <MenuItem x:Name="StatusBarMenu" Header="状态栏" IsCheckable="True" Click="StatusBar_Click"/>
+                <MenuItem x:Name="SelectionCheckBoxesMenu" Header="使用复选框选择项目" IsCheckable="True"
+                          Click="SelectionCheckBoxes_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModePerPaneMenu" Header="每窗格各一棵树" IsCheckable="True" Tag="PerPane" Click="TreeMode_Click"/>

@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：补齐 Q-Dir 文件视图复选框选择
+
+- Q-Dir FAQ 77 说明可在列表视图开启复选框选择，并支持 Ctrl+A 全选、Ctrl+Shift+A 反选。项目原有 Ctrl+Shift+A 反选命令已经由 Shell 选区命令实现；本批补上 View 菜单“使用复选框选择项目”，默认关闭，便携配置写入 `SelectionCheckBoxes.ini`，并应用于所有现有、隐藏及新建标签的 Shell view。
+- 复用 `IFolderView2::SetCurrentFolderFlags` 的 `FWF_CHECKSELECT`（0x00040000）位，仅改这一位并读回验证；应用在每次 `OnViewCreated`，切换偏好时也立即应用到已有视图。独立纯状态 smoke 覆盖开关位与无关 flags 保留，便携偏好往返 smoke 通过；完整 Release SettingsSmoke 与 App Release build 通过（0 警告、0 错误）。尚未启动 ExplorerBrowser 或可见 GUI，因此真实勾选、混合项目、复选框点击对 Shell 选中/操作命令的影响待验收。
+- 依据：[Q-Dir FAQ 77](https://softwareok.com/?faq=77&seite=faq-Q-DIR)、[FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags)、[IFolderView2::SetCurrentFolderFlags](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setcurrentfolderflags)。
+
 ## 2026-10-27：更正 IShellView 选中项拖放探针的文件名断言
 
 - 复跑发现早期探针选中了 `view-target.txt`，却按 `selected-view.txt` 检查目标文件名，因此把成功复制误判为失败。已修正为用独立 `selectedSourcePidl` 选择 `selected-view.txt`，并同时校验目标文件的原名和精确内容；真实 `IShellView::GetItemObject(SVGIO_SELECTION)` 数据对象经目标文件夹 `IDropTarget` 直接调用后成功复制，源文件保留。早期“不落盘”的记录由此撤销。

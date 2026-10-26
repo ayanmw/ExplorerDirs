@@ -32,6 +32,14 @@ internal static class StatusBarVisibilitySmoke
         catch (IOException) { futureConflict = true; }
         Require(futureConflict && File.ReadAllText(path).Contains("FormatVersion=2", StringComparison.Ordinal),
             "future status-bar preference data is not overwritten");
+
+        var checkBoxesPath = Path.Combine(root, "SelectionCheckBoxes.ini");
+        var checkBoxes = new SelectionCheckBoxesStore(checkBoxesPath);
+        Require(!checkBoxes.Load() && checkBoxes.LoadWarning is null,
+            "Q-Dir-style item checkboxes default to disabled");
+        checkBoxes.Save(true);
+        Require(new SelectionCheckBoxesStore(checkBoxesPath).Load(),
+            "item checkbox preference round-trips through its portable INI");
     }
 
     private static void Require(bool value, string message)

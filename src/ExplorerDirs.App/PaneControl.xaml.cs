@@ -20,6 +20,7 @@ public partial class PaneControl : UserControl
     private readonly Func<ViewState> _newTabView;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private HiddenItemsPreference _hiddenItemsPreference;
+    private bool _selectionCheckBoxes;
     private bool _updatingFilterPresets;
     private TabItem? _dragCandidate;
     private Point _dragStart;
@@ -110,7 +111,8 @@ public partial class PaneControl : UserControl
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
         QuickFilterFavoritesStore quickFilterFavoritesStore,
-        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
+        bool selectionCheckBoxes = false)
     {
         InitializeComponent();
         BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
@@ -148,6 +150,7 @@ public partial class PaneControl : UserControl
         _newTabView = newTabView;
         _quickFilterFavoritesStore = quickFilterFavoritesStore;
         _hiddenItemsPreference = hiddenItemsPreference;
+        _selectionCheckBoxes = selectionCheckBoxes;
         QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
@@ -476,6 +479,18 @@ public partial class PaneControl : UserControl
         foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
         {
             try { state.Browser.SetHiddenItemsPreference(preference); }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> SetSelectionCheckBoxes(bool enabled)
+    {
+        _selectionCheckBoxes = enabled;
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try { state.Browser.SetSelectionCheckBoxes(enabled); }
             catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
         }
         return failures;
@@ -1181,7 +1196,7 @@ public partial class PaneControl : UserControl
         AddressPathHistory? addressHistory = null)
     {
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
-            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference);
+            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned,

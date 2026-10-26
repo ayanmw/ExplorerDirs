@@ -33,6 +33,19 @@ internal static class FolderHeaderFlagsSmoke
                 throw new InvalidOperationException($"Custom-position option expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8}.");
         }
 
+        var checkSelectCases = new (uint Input, bool Enabled, uint Expected)[]
+        {
+            (0x40200008, true, 0x40240008),
+            (0x40240008, false, 0x40200008),
+            (0xFFFFFFFF, true, 0xFFFFFFFF)
+        };
+        foreach (var (input, enabled, expected) in checkSelectCases)
+        {
+            var actual = ShellFolderViewOptions.SetCheckSelect(input, enabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"Check-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
+        }
+
         Console.WriteLine("Folder header flags smoke: PASS");
     }
 }

@@ -4,6 +4,7 @@ internal static class ShellFolderViewOptions
 {
     internal const uint CustomPosition = 0x00000002;
     internal const uint HeaderSuppressionMask = 0x01800000;
+    internal const uint CheckSelect = 0x00040000;
 
     private static readonly Guid FolderViewOptionsId = new("3CC974D2-B302-4D36-AD3E-06D93F695D3F");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
@@ -12,6 +13,9 @@ internal static class ShellFolderViewOptions
     internal static uint EnableCustomPosition(uint options) => options | CustomPosition;
 
     internal static uint EnableAllViewHeaders(uint folderFlags) => folderFlags & ~HeaderSuppressionMask;
+
+    internal static uint SetCheckSelect(uint folderFlags, bool enabled) =>
+        enabled ? folderFlags | CheckSelect : folderFlags & ~CheckSelect;
 
     internal static int EnableCustomPosition(IntPtr browserUnknown) =>
         EnableCustomPosition(browserUnknown, out _, out _);
@@ -68,6 +72,28 @@ internal static class ShellFolderViewOptions
             var headersEnabled = (updatedFolderFlags & HeaderSuppressionMask) == 0;
             var unrelatedFlagsPreserved = ((originalFolderFlags ^ updatedFolderFlags) & ~HeaderSuppressionMask) == 0;
             return headersEnabled && unrelatedFlagsPreserved ? 0 : EFail;
+        }
+        finally { Marshal.Release(folderView); }
+    }
+
+    internal static int SetCheckSelect(IntPtr shellView, bool enabled)
+    {
+        var result = Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView);
+        if (result < 0) return result;
+        if (folderView == IntPtr.Zero) return EFail;
+        try
+        {
+            var get = Method<GetCurrentFolderFlags>(folderView, 25);
+            var set = Method<SetCurrentFolderFlags>(folderView, 24);
+            result = get(folderView, out var original);
+            if (result < 0) return result;
+            var updated = SetCheckSelect(original, enabled);
+            if (updated == original) return 0;
+            result = set(folderView, CheckSelect, updated);
+            if (result < 0) return result;
+            result = get(folderView, out var actual);
+            if (result < 0) return result;
+            return (actual & CheckSelect) == (updated & CheckSelect) ? 0 : EFail;
         }
         finally { Marshal.Release(folderView); }
     }

@@ -1,3 +1,5 @@
+> **文件视图复选框选择（2026-10-27）：**“视图 → 使用复选框选择项目”通过 Shell `IFolderView2::SetCurrentFolderFlags(FWF_CHECKSELECT)` 切换，默认关闭，便携偏好应用于现有和后续每个标签。Release SettingsSmoke 与 App Release build 通过；尚未运行 ExplorerBrowser/可见 UI，复选框点击与 Shell 选中状态待桌面验收。Ctrl+Shift+A 反选命令已存在；依据 [Q-Dir FAQ 77](https://softwareok.com/?faq=77&seite=faq-Q-DIR)。
+
 > **多行标签栏（2026-10-27）：**“视图 → 多行标签栏”现可让标签标题按可用宽度换行，隐藏单行滚动箭头并启用纵向滚动；默认关闭，保存在独立便携 `MultilineTabHeaders.ini`。Release SettingsSmoke 覆盖单行滚动范围、多行行列坐标及配置往返，App Release build 通过。尚未运行可见 GUI；极窄窗格、拖动重排、标签标题动态变化和键盘焦点需人工验收。
 
 > **隔离 Shell 菜单命令队列（2026-10-27）：**共享 frame coordinator 现在按 FIFO 保存每条延迟 `WM_COMMAND` 的 pane owner 与命令 ID，防止 STA 处理前新命令覆盖旧槽。隐藏 frame smoke 验证两个 owner/ID 的顺序与身份，NativeProbe Release build 和完整 `--shell-view-color-policy-smoke` 通过；未创建 `IShellView`，真实菜单回调时序仍待验证。产品未改。

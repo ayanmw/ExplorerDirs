@@ -40,6 +40,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private QuickFilterSettings _quickFilterSettings = QuickFilterSettings.Empty;
     private ShellFolderFilter? _quickFilter;
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
+    private bool _selectionCheckBoxes;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
     private long _quickFilterRequestVersion;
@@ -423,7 +424,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
         bool showPreviewPane = false, bool showDetailsPane = false,
-        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
+        bool selectionCheckBoxes = false)
     {
         if (showPreviewPane && showDetailsPane)
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
@@ -431,6 +433,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _viewState = initialView.Copy();
         _quickFilterSettings = quickFilter;
         _hiddenItemsPreference = hiddenItemsPreference;
+        _selectionCheckBoxes = selectionCheckBoxes;
         _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
@@ -449,6 +452,30 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         return SetVisibleShellPane(visible ? ExplorerShellPane.Preview :
             _visibleShellPane == ExplorerShellPane.Preview ? ExplorerShellPane.None : _visibleShellPane);
+    }
+
+    internal void SetSelectionCheckBoxes(bool enabled)
+    {
+        _selectionCheckBoxes = enabled;
+        if (_browser is null || _viewWindow == IntPtr.Zero) return;
+        var viewId = ShellViewId;
+        var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
+        if (viewResult < 0 || viewObject is null)
+        {
+            MenuError?.Invoke(this, $"无法读取当前 Shell 视图以切换复选框选择（0x{viewResult:X8}）。");
+            return;
+        }
+        try
+        {
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try
+            {
+                var result = ShellFolderViewOptions.SetCheckSelect(view, enabled);
+                if (result < 0) MenuError?.Invoke(this, $"Shell 未能切换复选框选择（0x{result:X8}）。");
+            }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
     }
 
     internal bool SetDetailsPaneVisible(bool visible)
@@ -3980,6 +4007,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 ReportFolderHeaderFailure(ShellFolderViewOptions.EnableAllViewHeaders(view));
+                var checkSelectResult = ShellFolderViewOptions.SetCheckSelect(view, _selectionCheckBoxes);
+                if (checkSelectResult < 0)
+                    MenuError?.Invoke(this, $"Shell 未能应用复选框选择设置（0x{checkSelectResult:X8}）。");
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
                     AttachViewWindow(hwnd);
             }

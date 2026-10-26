@@ -41,10 +41,12 @@ public partial class MainWindow : Window
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
+    private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private bool _showStatusBar = true;
+    private bool _selectionCheckBoxes;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -174,6 +176,10 @@ public partial class MainWindow : Window
         _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
             _profileDirectory, "StatusBar.ini"));
         _showStatusBar = _statusBarVisibilityStore.Load();
+        _selectionCheckBoxesStore = new SelectionCheckBoxesStore(Path.Combine(
+            _profileDirectory, "SelectionCheckBoxes.ini"));
+        _selectionCheckBoxes = _selectionCheckBoxesStore.Load();
+        SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -222,6 +228,9 @@ public partial class MainWindow : Window
         if (_statusBarVisibilityStore.LoadWarning is { } statusBarWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? statusBarWarning : $"{EnvironmentStatus.Text} {statusBarWarning}";
+        if (_selectionCheckBoxesStore.LoadWarning is { } checkBoxesWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? checkBoxesWarning : $"{EnvironmentStatus.Text} {checkBoxesWarning}";
         var isPrimarySession = string.Equals(Path.GetFullPath(_sessionStore.Path),
             Path.GetFullPath(primarySessionPath), StringComparison.OrdinalIgnoreCase);
         var pinnedTabsPath = isPrimarySession ? Path.Combine(_profileDirectory, "PinnedTabs.ini") :
@@ -249,7 +258,7 @@ public partial class MainWindow : Window
                 () => ViewState.Default(_defaultViewMode, _defaultIconSize),
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
-                _quickFilterFavoritesStore, _hiddenItemsPreference);
+                _quickFilterFavoritesStore, _hiddenItemsPreference, _selectionCheckBoxes);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
@@ -945,6 +954,25 @@ public partial class MainWindow : Window
     {
         StatusBarMenu.IsChecked = _showStatusBar;
         foreach (var pane in _panes) pane.SetStatusBarVisible(_showStatusBar);
+    }
+
+    private void SelectionCheckBoxes_Click(object sender, RoutedEventArgs e)
+    {
+        var next = SelectionCheckBoxesMenu.IsChecked;
+        try
+        {
+            _selectionCheckBoxesStore.Save(next);
+            _selectionCheckBoxes = next;
+            var failures = _panes.SelectMany(pane => pane.SetSelectionCheckBoxes(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已为文件视图启用复选框选择。" : "已关闭文件视图复选框选择。"
+                : $"设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
+            EnvironmentStatus.Text = $"复选框选择设置保存失败：{ex.Message}";
+        }
     }
 
     private void ApplyTabStripVisibility()
