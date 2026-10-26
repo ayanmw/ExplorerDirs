@@ -95,6 +95,11 @@ $preview = & $script -Version 'preview-0.6.0-temp.4'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.6.0-preview.temp.4') {
     throw 'A temporary preview directory version was not applied to the published product version.'
 }
+$redirectedReleaseRoot = Join-Path $fixture 'redirected-releases'
+$redirected = & $script -Version 'fixture-redirected' -ReleaseRoot $redirectedReleaseRoot
+if ([IO.Path]::GetFullPath($redirected) -ne [IO.Path]::GetFullPath((Join-Path $redirectedReleaseRoot 'fixture-redirected'))) {
+    throw 'The requested release root was not used.'
+}
 $versioned = & $script -Version 'preview-0.7.0'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.7.0-preview') {
     throw 'A normal preview directory version was not applied to the published product version.'

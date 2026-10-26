@@ -2,12 +2,19 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$Version = 'preview-0.5.2',
     [switch]$IsolatedProfile,
-    [string]$ReleaseNotes
+    [string]$ReleaseNotes,
+    [string]$ReleaseRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'releases'))
+$releaseRoot = [System.IO.Path]::GetFullPath(
+    $(if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) { Join-Path $projectRoot 'releases' } else { $ReleaseRoot }))
+$releasePrefix = if ($releaseRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $releaseRoot
+} else {
+    $releaseRoot + [System.IO.Path]::DirectorySeparatorChar
+}
 $project = Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj'
 $productVersion = $null
 if ($Version -match '^preview-(\d+\.\d+\.\d+)-temp\.(\d+)$') {
@@ -25,7 +32,7 @@ $destination = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot $Version))
 $buildOutput = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ('src\ExplorerDirs.App\bin\publish-build\' + $Version)))
 
 foreach ($path in @($staging, $destination)) {
-    if (-not $path.StartsWith($releaseRoot + [System.IO.Path]::DirectorySeparatorChar,
+    if (-not $path.StartsWith($releasePrefix,
         [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Release path escapes releases directory: $path"
     }
