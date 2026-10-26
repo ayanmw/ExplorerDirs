@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：隔离 IShellView 文件夹 drop target 注册生命周期
+
+- 四窗格 session-restore 原型现从每个当前目录 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得目录级目标，并通过 `OleInitialize`、`RegisterDragDrop` 注册到对应 Shell view HWND；切换/销毁 view 前由同一 STA host `RevokeDragDrop` 并平衡 `OleUninitialize`，避免注册指针跨 HWND 生命周期残留。依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`IDropTarget`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idroptarget)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize) 与 [`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop) 合同。
+- 定向普通隐藏 HWND smoke 通过：重复注册返回 `DRAGDROP_E_ALREADYREGISTERED`，撤销后同 HWND 可再次注册，重复 Dispose 不重复撤销，前台窗口未改变；NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。没有创建 Shell view、发起 `DoDragDrop` 或输入；四窗格真实目录目标接口是否可注册，以及实际拖放内容/通知仍待获准的隔离宿主运行。
+
 ## 2026-10-27：隔离 IShellView 菜单 frame 分离候选
 
 - 按用户授权继续隔离迁移原型。已将每 pane 的 `IShellBrowser.GetWindow` 与 OLE 菜单 frame HWND 分开，并给四个 native view 接入共享菜单协调器；探针新增真实激活后的窗口层级、HRESULT 和顶层菜单断言。

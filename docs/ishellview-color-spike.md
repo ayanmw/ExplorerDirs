@@ -6,6 +6,14 @@ NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠�
 
 依据 Microsoft [`IDropSource`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idropsource)、[`QueryContinueDrag`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-querycontinuedrag) 与 [`GiveFeedback`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-givefeedback) 合同。当前尚未连接 `DoDragDrop` 源数据对象，也未运行拖放消息循环；这不证明跨窗格拖放已完成或有效。
 
+## 2026-10-27：隔离四窗格文件夹 drop target 注册生命周期
+
+`StreamViewHost` 现保留一份 STA 窗口目标注册所有权，通过 `OleInitialize` 和 `RegisterDragDrop` 将传入的 Shell drop target 绑定到对应 view HWND，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 从每个当前 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级 drop target，包括 pane 重建路径；宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
+
+`--shell-view-drop-target-registration-smoke` 先按预期因缺少注册 owner 失败；实现后通过实际 OLE 注册 API 与普通隐藏 STATIC HWND 验证单次注册、重复注册拒绝、撤销后重新注册、重复 Dispose 和前台不变。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；四窗格接线只完成编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
+
+依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize)、[`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop)、[`RevokeDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-revokedragdrop) 合同。
+
 ## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
 
 `StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。

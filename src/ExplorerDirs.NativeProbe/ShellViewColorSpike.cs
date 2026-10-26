@@ -92,6 +92,7 @@ internal static class ShellViewColorSpike
             createAttempted = true;
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0) throw new InvalidOperationException("The consumer view was created without a window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
             Console.WriteLine("session-restore-consumer-stage: view-created");
             if (GetParent(pane) != parent || GetParent(viewWindow) != pane)
                 throw new InvalidOperationException("The restored Shell view is not hosted inside its first child pane.");
@@ -156,6 +157,7 @@ internal static class ShellViewColorSpike
             if (folderView != 0) Marshal.Release(folderView);
             if (view != 0)
             {
+                if (host is not null) host.RevokeDropTarget();
                 if (createAttempted)
                 {
                     try { _ = At<DestroyViewWindow>(view, 10)(view); }
@@ -209,6 +211,7 @@ internal static class ShellViewColorSpike
         var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
         Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
         if (viewWindow == 0) throw new InvalidOperationException("The second Shell view was created without a window.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
         if (GetParent(viewWindow) != pane)
             throw new InvalidOperationException("The sibling Shell view is not hosted inside its child pane.");
         Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
@@ -231,6 +234,7 @@ internal static class ShellViewColorSpike
             shellView => At<DestroyViewWindow>(shellView, 10)(shellView),
             shellView => Marshal.Release(shellView),
             message => Console.WriteLine("concurrent-view retirement: " + message));
+        host.RevokeDropTarget();
         host.View = 0;
         retirement.Retire(view, folder);
         view = folder = viewWindow = 0;
@@ -256,6 +260,7 @@ internal static class ShellViewColorSpike
         bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
         Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
         if (viewWindow == 0) throw new InvalidOperationException("The sibling Shell view could not be recreated.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
         if (GetParent(viewWindow) != pane)
             throw new InvalidOperationException("The recreated Shell view left its child pane host.");
         Check(At<ActivateView>(view, 7)(view, 1));
@@ -1185,6 +1190,7 @@ internal static class ShellViewColorSpike
         Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out var viewWindow));
         if (viewWindow == 0 || GetParent(viewWindow) != pane)
             throw new InvalidOperationException("The additional Shell view is not parented to its pane host.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
         Check(At<ActivateView>(view, 7)(view, 1));
         Pump(500);
         Check(Marshal.QueryInterface(view, in FolderView2Id, out var folderView));
@@ -3210,6 +3216,14 @@ internal static class ShellViewColorSpike
         var interfaceId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         Check(SHCreateItemFromParsingName(path, 0, ref interfaceId, out var item));
         return item;
+    }
+
+    private static void RegisterFolderDropTarget(nint folder, nint viewWindow, ShellViewColorBrowserHost host)
+    {
+        var dropTargetId = DropTargetId;
+        Check(At<CreateViewObject>(folder, 8)(folder, viewWindow, ref dropTargetId, out var dropTarget));
+        try { host.RegisterDropTarget(viewWindow, dropTarget); }
+        finally { Marshal.Release(dropTarget); }
     }
 
     private static bool WaitForShellView(nint folderView, int expectedCount, string? presentPath, string? absentPath,

@@ -208,6 +208,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private nint _customMenuPopup;
     private readonly nint[] _insertedMenuPopups = new nint[6];
     private ShellViewNavigationHistory? _navigation;
+    private ShellViewDropTargetRegistration? _dropTargetRegistration;
     private int _insertMenusCallCount;
     private int _setMenuCallCount;
     private int _removeMenusCallCount;
@@ -227,6 +228,17 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
     internal int ApplicationMenuCommandCount { get; private set; }
     internal nint BrowserParentWindow => _parent;
+    internal void RegisterDropTarget(nint viewWindow, nint dropTarget)
+    {
+        if (_dropTargetRegistration is not null)
+            throw new InvalidOperationException("This Shell host already owns a registered drop target.");
+        _dropTargetRegistration = new ShellViewDropTargetRegistration(viewWindow, dropTarget);
+    }
+    internal void RevokeDropTarget()
+    {
+        _dropTargetRegistration?.Dispose();
+        _dropTargetRegistration = null;
+    }
     internal nint MenuFrameWindow => _menuFrameWindow;
     internal bool OwnsAttachedCustomMenuGroup => _customMenuRoot != 0 && _customMenuPopup != 0 && HasSubMenu(_customMenuRoot, _customMenuPopup);
     internal List<string> MenuTrace { get; } = [];
@@ -264,6 +276,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     {
         try
         {
+            RevokeDropTarget();
             if (_savedStream != 0 && _stateStore is not null && _stateId is Guid stateId)
                 _stateStore.Save(stateId, ReadSavedBytes());
         }
