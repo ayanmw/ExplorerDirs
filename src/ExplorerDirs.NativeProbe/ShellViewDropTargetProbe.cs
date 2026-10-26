@@ -125,6 +125,14 @@ internal static class ShellViewDropTargetProbe
             LogDataObjectPayload("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogFileContentsPayload("selected-view", selectedDataObject);
             LogFileContentsPayload("SHCreateDataObject", dataObject);
+            if (selectedDataObject != 0) LogGlobalPayload("selected-view", selectedDataObject, "FileName");
+            LogGlobalPayload("SHCreateDataObject", dataObject, "FileName");
+            if (selectedDataObject != 0) LogGlobalPayload("selected-view", selectedDataObject, "FileNameW");
+            LogGlobalPayload("SHCreateDataObject", dataObject, "FileNameW");
+            if (selectedDataObject != 0) LogGlobalPayload("selected-view", selectedDataObject, "FileGroupDescriptorW");
+            LogGlobalPayload("SHCreateDataObject", dataObject, "FileGroupDescriptorW");
+            if (selectedDataObject != 0) LogGlobalPayload("selected-view", selectedDataObject, "ZoneIdentifier");
+            LogGlobalPayload("SHCreateDataObject", dataObject, "ZoneIdentifier");
             if (selectedDataObject != 0) LogShellIdListPayload("selected-view", selectedDataObject);
             LogShellIdListPayload("SHCreateDataObject", dataObject);
 
@@ -412,6 +420,49 @@ internal static class ShellViewDropTargetProbe
         finally
         {
             Marshal.FreeHGlobal(buffer);
+            ReleaseStgMedium(ref medium);
+        }
+    }
+
+    private static void LogGlobalPayload(string label, nint dataObject, string formatName)
+    {
+        var formatId = RegisterClipboardFormatW(formatName);
+        if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var format = new FormatEtc
+        {
+            Format = checked((ushort)formatId),
+            Aspect = 1,
+            Index = -1,
+            Medium = 1 // TYMED_HGLOBAL.
+        };
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-format-data: source={label}; format={formatName}; get=0x{getDataHr:X8}");
+            return;
+        }
+
+        nint locked = 0;
+        try
+        {
+            var size = GlobalSize(medium.Handle);
+            if (size > 1024 * 1024) throw new InvalidDataException($"{formatName} payload exceeds the diagnostic limit: {size} bytes.");
+            locked = GlobalLock(medium.Handle);
+            if (size > 0 && locked == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var bytes = new byte[checked((int)size)];
+            if (bytes.Length > 0) Marshal.Copy(locked, bytes, 0, bytes.Length);
+            var prefix = Convert.ToHexString(bytes.AsSpan(0, Math.Min(bytes.Length, 64)));
+            var text = formatName switch
+            {
+                "FileName" => System.Text.Encoding.ASCII.GetString(bytes).TrimEnd('\0'),
+                "FileNameW" => System.Text.Encoding.Unicode.GetString(bytes).TrimEnd('\0'),
+                _ => string.Empty
+            };
+            Console.WriteLine($"shell-view-drop-target-format-data: source={label}; format={formatName}; get=0x{getDataHr:X8}; bytes={bytes.Length}; sha256={Convert.ToHexString(SHA256.HashData(bytes))}; prefix={prefix}; text={text}");
+        }
+        finally
+        {
+            if (locked != 0) _ = GlobalUnlock(medium.Handle);
             ReleaseStgMedium(ref medium);
         }
     }

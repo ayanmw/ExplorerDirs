@@ -1060,6 +1060,8 @@ NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private
 
 再将单次选中项对象的 `Drop` 回调 `grfKeyState` 改为 0（按钮已释放），同时保留 `DragEnter/DragOver` 的 `MK_LBUTTON`；这是微软说明通常在释放鼠标时发生 Drop 的状态。选中项对象仍返回 `S_OK`/COPY，但未生成文件，排除本探针 Drop 阶段残留 `MK_LBUTTON` 是当前差异原因。该轮 NativeProbe Release build 0 警告/错误，Private Desktop watchdog 退出码 0、前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-062132-27c56b4b.stdout.log`。另一个尝试在一次失败的直接 Drop 后从同一 view 再获取一份选择对象，探针在该 COM 调用附近超时；该分支已撤销，不作为 Drop 按键状态的对照证据。
 
+继续读取两对象列举出的 HGLOBAL 格式：`FileName`（ANSI 短路径）、`FileNameW`（Unicode 完整路径）、`FileGroupDescriptorW`（596 字节）、`ZoneIdentifier`（4 字节）逐项长度与 SHA-256 相同；配合此前相同的 `CF_HDROP`、`FileContents` 和 CIDA 路径，本次已读取的所有公开格式 payload 均未发现差异。Release build 0 警告/错误，Private Desktop watchdog 退出码 0、前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-062311-c9d2f378.stdout.log`。这仍不能覆盖 OLE drag-loop 状态、私有接口/对象身份或目标回调依赖，因此不据此认定数据对象完全等价。
+
 复跑确认差异仍在，但尚未定位其根因；不能把相同公开格式等同于相同内部拖放生命周期。下一步需在授权的隔离可接收输入环境取得真实 OLE `DoDragDrop` 闭环，或继续从非输入可观察的 Shell source/target 回调调查实际操作依赖。当前桌面约束下不模拟鼠标/键盘，也不把直接回调测试当作拖放完成。
 
 ### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
