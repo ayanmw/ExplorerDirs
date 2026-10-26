@@ -82,6 +82,9 @@ public partial class PaneControl : UserControl
         UpdateTabStripVisibility();
     }
 
+    internal void SetStatusBarVisible(bool visible) =>
+        StatusBarRow.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
     internal void SetActivePaneVisual(bool isActive)
     {
         RootBorder.SetResourceReference(Border.BorderBrushProperty,
@@ -599,7 +602,8 @@ public partial class PaneControl : UserControl
         paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
         addressHistoryButtonVisible: true,
         addressPathButtonVisible: true,
-        tabHeaderVisible: Tabs.Visibility == Visibility.Visible);
+        tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
+        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -639,7 +643,7 @@ public partial class PaneControl : UserControl
         }
         if (Tabs.Visibility == Visibility.Visible && Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
             return focus.TabHeader;
-        if (ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
+        if (focus.StatusTools >= 0 && ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
         if (CurrentTreeFocusTarget switch
             {
                 TreeFocusTarget.Shared => _sharedTreeHasFocus?.Invoke() == true,
@@ -695,7 +699,7 @@ public partial class PaneControl : UserControl
         if (stop == focus.ColumnHeader && Current?.Browser.HasColumnHeader() == true)
             return Current?.Browser.FocusColumnHeader() == true;
         if (stop == focus.FileView) return FocusCurrentView();
-        if (stop == focus.StatusTools) return ViewStyleButton.Focus();
+        if (focus.StatusTools >= 0 && stop == focus.StatusTools) return ViewStyleButton.Focus();
         return false;
     }
     public void FocusSearch()

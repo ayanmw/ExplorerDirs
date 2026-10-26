@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：补齐 Q-Dir 状态栏显示选项
+
+- Q-Dir 官方 FAQ 36 列出文件视图状态栏显示/隐藏选项；Explorer Dirs 现于“视图”菜单提供同类开关，默认显示，保存到 profile `StatusBar.ini`。隐藏时各窗格的状态文本、项目数、磁盘空间和状态栏查看按钮一并隐藏，隐藏栏不再占用 Tab/Shift+Tab 或 F6 停靠点。
+- SettingsSmoke 覆盖默认值、便携 INI 往返、外部编辑冲突与未来格式保护；焦点回归把状态栏显示/隐藏加入全部动态组合。实际菜单操作、空间收益和焦点转移仍待可见 GUI 验收。
+
 ## 2026-10-27：补齐隔离 OLE 拖放源端回调合同
 
 - NativeProbe 新增标准 `IDropSource` 实现：Escape 取消、发起拖动的鼠标按钮释放时完成，其余状态继续；None/Copy/Move 光标反馈交给 OLE 默认指针。COM vtable smoke 覆盖左键源与右键源。

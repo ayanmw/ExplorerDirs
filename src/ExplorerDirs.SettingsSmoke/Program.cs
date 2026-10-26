@@ -356,6 +356,7 @@ ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run();
 var root = Path.Combine(AppContext.BaseDirectory, "profile-smoke");
 Directory.CreateDirectory(root);
 ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(root);
+ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(root);
 ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root);
 if (args.Length == 1 && args[0] == "--view-preset-store-smoke")
 {

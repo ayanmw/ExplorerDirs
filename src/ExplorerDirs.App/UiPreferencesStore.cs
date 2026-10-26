@@ -10,6 +10,9 @@ internal sealed class UiPreferencesStore(string path)
 internal sealed class TabStripVisibilityStore(string path)
     : PortableBooleanPreference(path, "Tabs", "AlwaysShow", "标签栏", defaultValue: true);
 
+internal sealed class StatusBarVisibilityStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "Show", "状态栏", defaultValue: true);
+
 internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
 

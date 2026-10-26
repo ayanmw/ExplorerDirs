@@ -106,7 +106,7 @@
                          AutomationProperties.Name="快速筛选文件名" KeyDown="QuickFilterBox_KeyDown"
                          VerticalContentAlignment="Center"/>
             </DockPanel>
-            <DockPanel DockPanel.Dock="Bottom" LastChildFill="True">
+            <DockPanel x:Name="StatusBarRow" DockPanel.Dock="Bottom" LastChildFill="True">
                 <Button x:Name="ViewStyleButton" DockPanel.Dock="Right"
                         Margin="2,1" Padding="5,0"
                         ToolTip="切换当前窗格标签的查看方式"

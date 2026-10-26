@@ -58,6 +58,8 @@
 
 2026-10-24 Q-Dir 状态栏空间概览补齐：[官网](https://www.softwareok.com/?seite=Freeware/Q-Dir)列出分区空间使用概览。本程序已有的后台容量读取现以百分比优先显示当前用户可用比例，并同时保留可用容量；百分比四舍五入到整数，总容量为 0 时不显示比例，工具提示仍保留可用/总容量原值。格式回归和 SettingsSmoke 通过；四窗格可见宽度、挂载点/配额与网络盘展示仍待 GUI 验收。
 
+2026-10-27 Q-Dir 状态栏显示/隐藏：官方 [FAQ 36](https://www.softwareok.com/?faq=36&seite=faq-Q-DIR) 说明可按偏好显示或隐藏文件视图状态栏。本程序“视图 → 状态栏”默认开启，使用独立 `StatusBar.ini`；关闭后隐藏每窗格状态信息、项目计数、磁盘空间及状态栏查看按钮，并从键盘 Tab/F6 次序中移除隐藏停靠点。配置往返、外部编辑保护、未来格式拒写及完整焦点矩阵通过；实际菜单交互、隐藏栏后的视觉空间和真实焦点仍待可见验收。
+
 2026-10-24 文件夹删除 RMDIR 隐藏对照：3 轮不手动提前通知均在产品 250 ms 合并后发送 RMDIR、fallback=0；3 轮额外提前发送中有 2 轮在 140/153 ms 更新，另 1 轮由产品后续通知/fallback 收敛。`NONE` 组不是无 RMDIR 控制；现有 coalescing 规则不变，GUI 与大批量行为仍待验收。见[调查记录](live-update-investigation.md#2026-10-24文件夹删除提前与合并-rmdir-对照)。
 
 2026-10-24 Release 隐藏生产 `--live-shell-product-monitor` 通过：单文件操作、跨窗格复制/删除/移动和文件夹创建/删除都到达对应视图；选区与焦点恢复。整轮仍触发 9 次 fallback，文件夹删除 fallback 1 次且没有发 RMDIR；这只证明受控本机 Shell 路径，不等同于可见 UI 或低延迟验收。详见[调查记录](live-update-investigation.md#2026-10-24生产-shell-文件操作与自动更新复验)。

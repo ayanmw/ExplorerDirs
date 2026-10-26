@@ -38,8 +38,10 @@ public partial class MainWindow : Window
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
+    private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
+    private bool _showStatusBar = true;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -163,6 +165,9 @@ public partial class MainWindow : Window
         _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
             _profileDirectory, "TabStripVisibility.ini"));
         _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
+        _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
+            _profileDirectory, "StatusBar.ini"));
+        _showStatusBar = _statusBarVisibilityStore.Load();
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -208,6 +213,9 @@ public partial class MainWindow : Window
         if (_tabStripVisibilityStore.LoadWarning is { } tabStripWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? tabStripWarning : $"{EnvironmentStatus.Text} {tabStripWarning}";
+        if (_statusBarVisibilityStore.LoadWarning is { } statusBarWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarWarning : $"{EnvironmentStatus.Text} {statusBarWarning}";
         var isPrimarySession = string.Equals(Path.GetFullPath(_sessionStore.Path),
             Path.GetFullPath(primarySessionPath), StringComparison.OrdinalIgnoreCase);
         var pinnedTabsPath = isPrimarySession ? Path.Combine(_profileDirectory, "PinnedTabs.ini") :
@@ -238,6 +246,7 @@ public partial class MainWindow : Window
                 _quickFilterFavoritesStore, _hiddenItemsPreference);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
+            pane.SetStatusBarVisible(_showStatusBar);
             pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
             pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
@@ -278,6 +287,7 @@ public partial class MainWindow : Window
         ApplyThemePreferenceMenuState();
         ApplySizeDisplayMenuState();
         ApplyCompactMode();
+        ApplyStatusBarVisibility();
         ApplyTabStripVisibility();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
@@ -888,6 +898,29 @@ public partial class MainWindow : Window
             ApplyTabStripVisibility();
             EnvironmentStatus.Text = $"标签栏显示设置保存失败：{ex.Message}";
         }
+    }
+
+    private void StatusBar_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarMenu.IsChecked;
+        try
+        {
+            _statusBarVisibilityStore.Save(next);
+            _showStatusBar = next;
+            ApplyStatusBarVisibility();
+            EnvironmentStatus.Text = next ? "已显示状态栏。" : "已隐藏状态栏。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarMenu.IsChecked = _showStatusBar;
+            EnvironmentStatus.Text = $"状态栏显示设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ApplyStatusBarVisibility()
+    {
+        StatusBarMenu.IsChecked = _showStatusBar;
+        foreach (var pane in _panes) pane.SetStatusBarVisible(_showStatusBar);
     }
 
     private void ApplyTabStripVisibility()
