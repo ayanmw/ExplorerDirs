@@ -8,8 +8,11 @@ internal static class NativeShellTreeIconFallbackSmoke
     {
         var repoRoot = FindRepoRoot();
         var source = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "NativeShellTree.cs"));
-        Check(source.Contains("OnGetDefaultIconIndex(nint item, out int normal, out int open)\n    {\n        normal = open = -1;\n        return unchecked((int)0x80004001);", StringComparison.Ordinal),
-            "unhandled namespace-tree icon lookup returns E_NOTIMPL so Shell uses its default icon");
+        var probe = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.NativeProbe", "StandaloneTreeProbe.cs"));
+        Check(UsesDefaultIconFallback(source),
+            "product namespace-tree icon lookup returns E_NOTIMPL so Shell uses its default icon");
+        Check(UsesDefaultIconFallback(probe),
+            "standalone tree probe uses the same default icon fallback as the product");
         Console.WriteLine("Native Shell tree icon fallback smoke: PASS");
 
         static string FindRepoRoot()
@@ -28,5 +31,8 @@ internal static class NativeShellTreeIconFallbackSmoke
         {
             if (!condition) throw new InvalidOperationException(message);
         }
+
+        static bool UsesDefaultIconFallback(string source) =>
+            source.Contains("OnGetDefaultIconIndex(nint item, out int normal, out int open)\n    {\n        normal = open = -1;\n        return unchecked((int)0x80004001);", StringComparison.Ordinal);
     }
 }

@@ -340,7 +340,11 @@ public sealed class TreeProbeEvents : ITreeProbeEvents
     public int OnBeforeContextMenu(nint item, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnAfterContextMenu(nint item, nint input, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnBeforeStateImageChange(nint item) => 0;
-    public int OnGetDefaultIconIndex(nint item, out int normal, out int open) { normal = open = -1; return 1; }
+    public int OnGetDefaultIconIndex(nint item, out int normal, out int open)
+    {
+        normal = open = -1;
+        return unchecked((int)0x80004001); // E_NOTIMPL lets NamespaceTreeControl resolve the Shell icon.
+    }
 }
 
 [ComVisible(true), Guid("93D77985-B3D8-4484-8318-672CDDA002CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
