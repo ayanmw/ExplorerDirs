@@ -46,6 +46,8 @@ NativeProbe Release 构建 0 警告、0 错误；无失效 owner 防护前，完
 
 诊断输出现在分别标记 view 创建/恢复、pane 创建、菜单路由和每项文件操作，帮助定位偶发 consumer 停滞。全选菜单的隔离 pane 路由已按上一节验证；超时原因仍未确认。隐藏原型通过也不代表产品 ExplorerBrowser 或可见用户桌面验收。
 
+当前可见停滞点集中在 `file-delete-performed` 之后、`file-delete-verified` 之前，但旧阶段日志无法区分主视图计数/路径匹配、Refresh、四 pane 计数或恢复列/排序/分组检查。NativeProbe 现会分别记录这些边界，并在删除主视图等待中记录 `Pump`、`ItemCount`、PIDL 路径检查和每窗格计数等待入口，供下次获准的隔离运行定位具体阻塞调用。本轮仅构建验证，没有启动 ExplorerBrowser/IShellView 宿主探针；当前无根因结论。
+
 ## 2026-10-27：Content 视图逐项颜色绘制像素验证
 
 在同一 NativeProbe 文件夹中切换到 `FVM_CONTENT`（Shell mode 8），确认原生 `SysListView32` 为 Content 样式且包含两个夹具项目；随后对每个项目读取其标签区域像素，并与按 Shell 项目身份匹配的规则背景色比较。首次采样可能发生在逐项绘制回调前，因此最多重试 10 次、每次间隔 100 ms。`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-044600-26c2494a.stdout.log` 报告 `shell=8/32;list-view=4;items=2;callbacks=2;attempts=2`，两项实际与预期颜色分别为 `0xF0E0D0`、`0xD0F0E0`。完整 NativeProbe Release 构建 0 警告/错误；该轮 session state 写回 772 字节，重建 host 恢复成功，Private Desktop 前台 HWND 不变。

@@ -3554,6 +3554,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 纠正早前探针误判：`IFolderView::SelectItem` 的 `SVSI_SELECT=0x1`，取消选择为 `0`；曾将 `0x1` 错当清选标志，旧“误选 pane 2”结果无效。当前 Shell 菜单实测将 Edit → 全选分配为 `0x7023`。NativeProbe frame coordinator 依据当前 Edit 菜单项识别该命令，再调用共享 `ShellSelectionCommands.Apply(All)` 到当前 pane 的 `IFolderView2`。
 - NativeProbe Release build 0 警告/错误；无 stale-owner 防护前两轮完整 `session-restore-private-desktop` watchdog 退出码 0。加入 pending owner 当前性检查后，四次回归均通过 `menu-activation-complete` 阶段（包含每 pane Edit → Select All 的选择数与 sibling 隔离断言），但之后分别在复制/重命名/删除阶段超时。新路由在隔离四窗格中已验证；完整回归的后续文件操作间歇性超时尚未查明，不能报告为整轮通过。
 - 该命令分派仍是 NativeProbe 原型，依赖当前中/英文 Shell 菜单项目文本；owner 变化竞态分支、其他本地化、真实菜单跟踪、物理键盘及 WPF 产品宿主尚未验证。完整迁移门槛仍开放，详见[隔离 IShellView 原型记录](ishellview-color-spike.md#2026-10-27隔离-edit--select-all-pane-路由)。
+- 为定位 `file-delete-performed` 后的间歇超时，NativeProbe 现逐步记录主视图计数/路径匹配、Refresh、四 pane 计数和视图设置检查的进入/退出边界；删除主视图等待还记录消息泵、Shell 计数和 PIDL 查找阶段。只做 Release 编译与差异检查，没有启动 Shell 宿主探针；停滞根因仍未知，待有当前授权的隔离运行再读取这些标记。
 
 ## 2026-10-27：恢复 consumer 增加逐阶段诊断并复核四窗格基线
 

@@ -1260,12 +1260,26 @@ internal static class ShellViewColorSpike
                 finally { Marshal.Release(item); }
             });
             Console.WriteLine("session-restore-consumer-stage: file-delete-performed");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-path-check-start");
             if (File.Exists(renamedPath))
                 throw new IOException("The restored Shell view session could not delete its fixture through IFileOperation.");
-            if (!WaitForShellView(folderView, initialCount, null, renamedPath) &&
-                !RefreshUntilShellViewMatches(view, folderView, initialCount, null, renamedPath))
+            Console.WriteLine("session-restore-consumer-stage: file-delete-primary-view-wait-start");
+            var deleteViewMatched = WaitForShellView(folderView, initialCount, null, renamedPath,
+                "session-delete-primary");
+            Console.WriteLine($"session-restore-consumer-stage: file-delete-primary-view-wait-result={deleteViewMatched}");
+            var deleteRefreshMatched = false;
+            if (!deleteViewMatched)
+            {
+                Console.WriteLine("session-restore-consumer-stage: file-delete-refresh-start");
+                deleteRefreshMatched = RefreshUntilShellViewMatches(view, folderView, initialCount, null,
+                    renamedPath, "session-delete-refresh");
+                Console.WriteLine($"session-restore-consumer-stage: file-delete-refresh-result={deleteRefreshMatched}");
+            }
+            if (!deleteViewMatched && !deleteRefreshMatched)
                 throw new IOException("The restored Shell view did not remove the deleted fixture after refresh.");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-all-pane-counts-start");
             WaitForAllPaneCounts(allFolderViews, initialCount, "delete");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-settings-check-start");
             AssertViewSettings("delete");
             Console.WriteLine("session-restore-consumer-stage: file-delete-verified");
             return "copy/rename/delete=all-4-panes-converged";
@@ -1280,7 +1294,9 @@ internal static class ShellViewColorSpike
         {
             for (var index = 0; index < folderViews.Count; index++)
             {
+                Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-start");
                 var count = WaitForShellViewItemCount(folderViews[index], expectedCount);
+                Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-result={count}");
                 if (count != expectedCount)
                     throw new IOException($"Pane {index + 1} did not converge after {operation}: expected={expectedCount}, observed={count}.");
             }
@@ -3196,30 +3212,50 @@ internal static class ShellViewColorSpike
         return item;
     }
 
-    private static bool WaitForShellView(nint folderView, int expectedCount, string? presentPath, string? absentPath)
+    private static bool WaitForShellView(nint folderView, int expectedCount, string? presentPath, string? absentPath,
+        string? diagnosticLabel = null)
     {
         const uint SvgIoAllView = 2;
         var deadline = Environment.TickCount64 + 5000;
         var observedCount = -1;
+        var attempt = 0;
         while (Environment.TickCount64 < deadline)
         {
+            attempt++;
+            TraceWaitPhase("pump-start");
             Pump(100);
+            TraceWaitPhase($"item-count-start; attempt={attempt}");
             Check(At<ItemCount>(folderView, 7)(folderView, SvgIoAllView, out observedCount));
             if (observedCount != expectedCount) continue;
 
+            TraceWaitPhase($"path-check-start; attempt={attempt}");
             var hasExpectedItem = presentPath is null || ShellViewContainsPath(folderView, presentPath);
             var oldItemRemoved = absentPath is null || !ShellViewContainsPath(folderView, absentPath);
             if (hasExpectedItem && oldItemRemoved)
+            {
+                TraceWaitPhase($"matched; attempt={attempt}");
                 return true;
+            }
         }
+        TraceWaitPhase($"deadline; attempts={attempt}; observed-count={observedCount}");
         return false;
+
+        void TraceWaitPhase(string phase)
+        {
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; {phase}");
+        }
     }
 
     private static bool RefreshUntilShellViewMatches(nint view, nint folderView, int expectedCount,
-        string? presentPath, string? absentPath)
+        string? presentPath, string? absentPath, string? diagnosticLabel = null)
     {
+        if (diagnosticLabel is not null)
+            Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; refresh-call-start");
         Check(At<RefreshView>(view, 8)(view));
-        return WaitForShellView(folderView, expectedCount, presentPath, absentPath);
+        if (diagnosticLabel is not null)
+            Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; refresh-call-returned");
+        return WaitForShellView(folderView, expectedCount, presentPath, absentPath, diagnosticLabel);
     }
 
     private static bool NotifyThenWaitForShellView(uint eventId, string path, string? secondPath,
