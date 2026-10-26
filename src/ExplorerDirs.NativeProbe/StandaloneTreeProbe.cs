@@ -146,7 +146,8 @@ internal static class StandaloneTreeProbe
                 var bestX = -1;
                 var bestY = -1;
                 for (var y = 0; y <= Math.Min(iconBottom - iconHeight, 16); y++)
-                for (var x = 24; x <= Math.Min(iconRight - iconWidth, 56); x++)
+                // The native tree's indentation differs from the earlier assumed offset; search the full leading row.
+                for (var x = 0; x <= Math.Min(iconRight - iconWidth, 56); x++)
                 {
                     var matches = 0;
                     foreach (var pixel in foreground)
