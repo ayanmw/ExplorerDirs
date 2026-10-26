@@ -285,6 +285,7 @@ internal static class ShellViewColorSpike
         if (views.Count != 4 || hosts.Count != 4)
             throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
         var foreground = GetForegroundWindow();
+        foreach (var host in hosts) host.MenuTrace.Clear();
         var before = hosts.Select(host => (host.InsertMenusCallCount, host.SetMenuCallCount,
             host.RemoveMenusCallCount)).ToArray();
         var activations = new List<string>(views.Count);
@@ -302,7 +303,9 @@ internal static class ShellViewColorSpike
         }
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
-        return $"per-pane-insert-set={string.Join(',', activations)}; foreground-unchanged=True";
+        return $"per-pane-insert-set={string.Join(',', activations)}; " +
+            $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
+            "foreground-unchanged=True";
     }
 
     private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,

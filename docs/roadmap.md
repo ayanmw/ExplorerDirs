@@ -3461,3 +3461,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 隔离尝试把每个 Shell view 的子窗格 parent 与菜单 top-level frame 分离：Pane 1 可读共享菜单，激活 Pane 2 后 `GetMenu` 返回的句柄无有效菜单项（`GetMenuItemCount=-1`，host callback counts `5/9/4`）。NativeProbe build 通过，完整 session-restore watchdog 因菜单探针失败退出码 1。
 - 失败原型代码已撤回，既有四窗格 consumer 保持原样；不据此判断 Shell 菜单本身失败。下一步先查清跨 host 菜单安装/卸载顺序及 HMENU 生命周期，再实现共享 frame 协调并复测。
 - 详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格共享菜单宿主尝试未通过)。
+
+## 2026-10-27：确认四窗格 SetMenuSB 失败是 child HWND 菜单错误
+
+- 在完整四窗格 session-restore 探针中记录每个 host 的菜单回调句柄与 HRESULT。四个 pane 的 `InsertMenusSB`/`SetMenuSB` 回调都到达，但 `SetMenuSB` 均返回 `0x8007059C`，frame 参数是 pane child HWND，安装后 `GetMenu` 为 0。其余已有多窗格会话、菜单 context command、键盘路由、文件操作和通知检查通过。
+- 结合 Microsoft `SetMenu` 契约，这个 HRESULT 对应 `ERROR_CHILD_WINDOW_MENU`：子窗口不能拥有菜单。原有“menu callback counts > 0”并未证明菜单成功安装；此前 frame split 试验缺少跨 host 协调。
+- 下一步拆分 Shell view pane parent 与顶层 OLE frame window，并实现共享菜单/descriptor 所有权与 active view 生命周期。详细证据和官方合同链接见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格菜单-setmenu-子窗格错误根因确认)。

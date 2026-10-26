@@ -867,3 +867,11 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 为测试上节推导的多 pane 命令目标，在隔离 consumer 中尝试把 pane 的 Shell view parent（子窗格）与菜单 frame（顶层容器）分开，并按 pane 依序激活、向目标 view window 发送 Details 命令。NativeProbe Release build 通过，但 session-restore consumer 在 Pane 2 菜单读取处失败：Pane 1 可读到顶层共享菜单；切换到 Pane 2 后 `GetMenu` 返回的非零句柄没有可读菜单项（`GetMenuItemCount=-1`），当时 Pane 2 host 回调计数为 insert/set/remove `5/9/4`。失败日志：`src/.state/native-probe-watchdog/20261027-032413-14966fbe.stdout.log`。
 
 这不是 Windows 菜单系统或 `IShellView` 的负面结论，因为失败发生在 NativeProbe 自建的多 host 菜单 frame 管理。该 frame split 实验代码已撤回，原先四窗格 session restore consumer 和产品 ExplorerBrowser 未改。当前证据表明每个 view 的菜单不能只靠各自 host 独立 Set/Remove 同一个顶层菜单；下一步需隔离真实回调顺序、句柄有效期及跨 host 所有权，再设计协调器并复跑四窗格激活/卸载和命令目标验证。未验证真实菜单点击或 WPF 产品窗口。
+
+### 2026-10-27 四窗格菜单 SetMenu 子窗格错误根因确认
+
+给每个 `StreamViewHost` 增加只读回调轨迹后，既有四窗格 Private Desktop session-restore probe 仍完整通过（退出码 0；文件状态恢复、菜单命令、copy 选择菜单、方向键、Ctrl+A、复制/重命名/删除及目录通知均通过）。但 `VerifyFourPaneMenuActivation` 的日志显示，四个 pane 的 `SetMenuSB` 虽都被调用，返回值全部为 `0x8007059C`，调用中传入的 frame HWND 是各自 pane 子窗口，随后 `GetMenu(frame)` 为 0。日志：`src/.state/native-probe-watchdog/20261027-032609-83148717.stdout.log`。
+
+`0x8007059C` 是 `HRESULT_FROM_WIN32(ERROR_CHILD_WINDOW_MENU)`；`SetMenu` 文档规定菜单不能分配给 child window，因此原型当前把 menu 设在 pane 上必然失败。`OleSetMenuDescriptor` 也要求将 dispatch 安装到 container frame window；`IShellBrowser::SetMenuSB` 的用途是安装合成菜单，Shell 文档还要求 view deactivation 时通过 `RemoveMenusSB` 恢复菜单。依据：[SetMenu](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setmenu)、[系统错误码 1300–1699](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1300-1699-)、[OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)、[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
+
+因此之前只检查 `InsertMenusSB`/`SetMenuSB` 回调次数的四窗格“菜单激活”结论只能证明回调到达各个 host，不能证明任何 pane 的合成菜单被安装。下一步必须将每 view 的 `IShellBrowser::GetWindow`（pane parent）与 top-level `IOleInPlaceFrame::GetWindow`/菜单 frame 分开，并由一个共享 frame owner 串行管理当前 menu、OLE descriptor、活动 view 和移除恢复。尚未验证该协调器、真实菜单跟踪或 WPF 产品接线；产品代码和 release 未改。

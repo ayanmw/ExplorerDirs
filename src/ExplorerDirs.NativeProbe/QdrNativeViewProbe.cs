@@ -220,6 +220,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int InsertMenusCallCount => Volatile.Read(ref _insertMenusCallCount);
     internal int SetMenuCallCount => Volatile.Read(ref _setMenuCallCount);
     internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
+    internal List<string> MenuTrace { get; } = [];
     internal Func<bool, int>? EnableModelessHandler { get; set; }
     internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
     internal Func<nint, uint, uint, int>? ToolbarItemsHandler { get; set; }
@@ -350,41 +351,50 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     public int InsertMenusSB(nint menu, nint widths)
     {
         Interlocked.Increment(ref _insertMenusCallCount);
+        int result;
         if (InsertMenusHandler is not { } handler)
-            return _parent == 0 ? 0 : InsertNativeMenuGroups(menu, widths);
-        try { return handler(menu, widths); }
+            result = _parent == 0 ? 0 : InsertNativeMenuGroups(menu, widths);
+        else try { result = handler(menu, widths); }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.WriteLine($"Shell menu insertion: {ex.GetType().Name}");
-            return unchecked((int)0x80004005);
+            result = unchecked((int)0x80004005);
         }
+        MenuTrace.Add($"insert menu=0x{menu:X} hr=0x{result:X8} valid={IsMenu(menu)} count={(IsMenu(menu) ? GetMenuItemCount(menu) : -1)}");
+        return result;
     }
     public int SetMenuSB(nint menu, nint oleMenu, nint active)
     {
         Interlocked.Increment(ref _setMenuCallCount);
-        if (SetMenuHandler is not { } handler) return InstallSharedMenu(menu, oleMenu, active);
-        try { return handler(menu, oleMenu, active); }
+        int result;
+        if (SetMenuHandler is not { } handler) result = InstallSharedMenu(menu, oleMenu, active);
+        else try { result = handler(menu, oleMenu, active); }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.WriteLine($"Shell menu activation: {ex.GetType().Name}");
-            return unchecked((int)0x80004005);
+            result = unchecked((int)0x80004005);
         }
+        var installed = GetMenu(_parent);
+        MenuTrace.Add($"set menu=0x{menu:X} active=0x{active:X} hr=0x{result:X8} frame=0x{_parent:X} installed=0x{installed:X} valid={IsMenu(installed)} count={(IsMenu(installed) ? GetMenuItemCount(installed) : -1)}");
+        return result;
     }
     public int RemoveMenusSB(nint menu)
     {
         Interlocked.Increment(ref _removeMenusCallCount);
+        int result;
         if (RemoveMenusHandler is not { } handler)
         {
-            var result = menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
-            if (result < 0) return result;
-            return RemoveOwnedMenuGroups(menu);
+            result = menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
+            if (result >= 0) result = RemoveOwnedMenuGroups(menu);
         }
-        try { return handler(menu); }
+        else try { result = handler(menu); }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.WriteLine($"Shell menu removal: {ex.GetType().Name}");
-            return unchecked((int)0x80004005);
+            result = unchecked((int)0x80004005);
         }
+        MenuTrace.Add($"remove menu=0x{menu:X} hr=0x{result:X8} frame=0x{_parent:X} installed=0x{GetMenu(_parent):X}");
+        return result;
     }
     public int SetStatusTextSB(nint text)
     {
