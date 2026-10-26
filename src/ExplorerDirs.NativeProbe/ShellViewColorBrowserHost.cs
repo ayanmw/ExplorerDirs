@@ -762,12 +762,19 @@ public static class ShellViewColorBrowserHostSmoke
                 "the first pane installs its menu on the shared top-level frame");
             Check(hostTwo.SetMenuSB(menuTwo, descriptorTwo, paneTwo) == 0 && GetMenu(frameWindow) == menuTwo,
                 "activating the second pane transfers the frame menu and OLE descriptor");
+            Check(hostOne.SetMenuSB(new nint(0xBAD), descriptorOne, paneOne) == unchecked((int)0x80070057) &&
+                  GetMenu(frameWindow) == menuTwo,
+                "an invalid incoming menu is rejected without disturbing the current frame owner");
             Check(hostOne.RemoveMenusSB(menuOne) == 0 && GetMenu(frameWindow) == menuTwo,
                 "a late RemoveMenusSB from the inactive first pane leaves the second pane menu installed");
+            hostOne.Dispose();
+            hostOne = null;
+            Check(GetMenu(frameWindow) == menuTwo,
+                "disposing an inactive pane does not uninstall the active pane menu");
             Check(hostTwo.RemoveMenusSB(menuTwo) == 0 && GetMenu(frameWindow) == baseMenu,
                 "deactivating the active pane restores the frame's pre-existing menu");
-            Check(((IStreamProbeBrowser)hostOne).GetWindow(out var browserWindow) == 0 && browserWindow == paneOne &&
-                  ((IStreamProbeOleInPlaceFrame)hostOne).GetWindow(out var oleFrameWindow) == 0 &&
+            Check(((IStreamProbeBrowser)hostTwo).GetWindow(out var browserWindow) == 0 && browserWindow == paneTwo &&
+                  ((IStreamProbeOleInPlaceFrame)hostTwo).GetWindow(out var oleFrameWindow) == 0 &&
                   oleFrameWindow == frameWindow,
                 "IShellBrowser retains its pane HWND while IOleInPlaceFrame exposes the shared top-level HWND");
             Console.WriteLine("PASS shared frame menu transfer, stale-owner removal, and restoration");
