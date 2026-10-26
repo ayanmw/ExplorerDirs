@@ -2,7 +2,7 @@
 
 ## 2026-10-27：拒绝隔离 OLE 宿主的无效父窗口
 
-- `StreamViewHost.GetWindow` 对零值或已销毁的父 HWND 返回 `E_FAIL`，且输出句柄保持为零；有效父 HWND 仍正常返回。定向 COM vtable smoke 先按预期暴露旧行为，再通过修正验证；NativeProbe Release 构建 0 警告、0 错误。
+- `StreamViewHost.GetWindow` 对零值或已销毁的父 HWND 返回 `E_FAIL`，且输出句柄保持为零；有效父 HWND 仍正常返回。定向 COM vtable smoke 先按预期暴露旧行为，再通过修正验证，并分别覆盖零值与失效句柄；NativeProbe Release 构建 0 警告、0 错误。
 - 本 smoke 未创建 `IShellView`，不代表真实 Shell 激活或产品迁移验收。依据：[IOleWindow::GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-iolewindow-getwindow)。
 
 ## 2026-10-27：隔离 OLE frame 边框空间合同

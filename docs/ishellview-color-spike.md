@@ -4,7 +4,7 @@
 
 `StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。
 
-COM vtable smoke 先复现该反例并按预期失败；修正后 `dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore`（0 警告、0 错误）及 `--shell-view-color-policy-smoke` 通过。该 smoke 只创建隐藏普通 HWND，没有创建 `IShellView`，不证明真实 Shell 激活行为。依据：[IOleWindow::GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-iolewindow-getwindow)。
+COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄已销毁的回归。`dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore`（0 警告、0 错误）及 `--shell-view-color-policy-smoke` 通过。该 smoke 只创建隐藏普通 HWND，没有创建 `IShellView`，不证明真实 Shell 激活行为。依据：[IOleWindow::GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-iolewindow-getwindow)。
 
 ## 当前授权与迁移阶段门槛
 

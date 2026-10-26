@@ -537,6 +537,22 @@ public static class ShellViewColorBrowserHostSmoke
                 }
                 finally { Marshal.Release(windowlessFrame); }
             }
+            var retiredWindow = CreateWindowExW(0, "STATIC", "retired OLE frame parent", 0,
+                0, 0, 120, 80, 0, 0, 0, 0);
+            Check(retiredWindow != 0 && DestroyWindow(retiredWindow) && !IsWindow(retiredWindow),
+                "the stale-parent fixture is destroyed before the COM query");
+            using (var staleHost = new StreamViewHost(retiredWindow, []))
+            {
+                var staleFrame = Marshal.GetComInterfaceForObject(staleHost, typeof(IStreamProbeOleInPlaceFrame));
+                try
+                {
+                    var getStale = GetComMethod<GetWindowCallback>(staleFrame, 3);
+                    Check(getStale(staleFrame, out var staleOutput) == unchecked((int)0x80004005) &&
+                          staleOutput == 0,
+                        "the isolated OLE frame reports E_FAIL when its parent HWND has been destroyed");
+                }
+                finally { Marshal.Release(staleFrame); }
+            }
             var borderPointer = Marshal.AllocHGlobal(Marshal.SizeOf<StreamProbeRect>());
             try
             {
