@@ -1083,3 +1083,9 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 现在 NativeProbe 先在全部六个 OLE 菜单组中解析命令归属；只有命令仅出现在 File、Edit、View 中的一个组时才执行对应分支，Object、Window、Help 组的 ID 不交给 Shell view。多组重复或找不到的 ID 都不作 Shell 命令派发。Smoke 覆盖 File/Edit/View 的唯一命令、与其它组冲突的 ID 拒绝、原始 ID 到达隐藏假 Shell HWND，以及旧 view 重入切换保护。先补回归并观察到缺失 resolver 的编译失败，再实现；`dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --shell-menu-group-routing-smoke` 退出码 0。
 
 本轮不创建 `IShellView`，不启动 ExplorerBrowser，不显示菜单。它验证的是应用自有 frame 的 synthetic HMENU 路由策略；真实 Shell composite menu 的 ID 分配是否出现重复仍未知，所以不能声称已观察到用户可见误派发，也不能替代真实 Shell 菜单验证。
+
+### 2026-10-27 为列头 popup 记录消息 owner 窗口链
+
+微软的 `WM_INITMENUPOPUP` 契约说明消息会发给下拉菜单的 owner window；现有列头探针读取到该 HWND，但只把它用于初始化子菜单，没有保存或输出。现为探针记录首次 popup 的 owner HWND 与最多八层父窗口的 HWND/窗口类名，便于后续辨认实际收件者属于 header、view 还是宿主 frame。
+
+本轮只改 NativeProbe 诊断输出并进行 Release 编译；没有运行需要创建 `IShellView` 的列头菜单探针，因此 owner 链仍无运行时结论。该日志用于确定真实 popup 的菜单 owner，不等同于用户选中菜单项后 `WM_COMMAND` 的最终接收 HWND；命令分派仍待单独证据。[WM_INITMENUPOPUP](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-initmenupopup)

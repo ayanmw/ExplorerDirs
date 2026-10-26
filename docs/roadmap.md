@@ -3662,6 +3662,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - frame 原先按 View、File、Edit 固定次序查找延迟 `WM_COMMAND` 的 ID；消息没有来源组信息，因此跨组 ID 重复时会存在按优先级误判的风险。NativeProbe 现在检查全部六个 OLE 组，只有唯一出现在 File/Edit/View 之一才分派；重复、Object/Window/Help 组或未识别 ID 不发给 Shell view。
 - 合成菜单 smoke 覆盖 File/Edit/View 唯一 ID、与其它组冲突时拒绝、实际到达隐藏假 HWND，以及 view 重入切换后拒绝旧命令；先补场景并确认旧代码无法编译，再实现。专用 `--shell-menu-group-routing-smoke` 通过，未创建 `IShellView`、未启动 ExplorerBrowser。真实 Shell composite 是否存在重复 ID 尚无观察证据；此改动只关闭歧义风险，不代表真实菜单命令已验证。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27-合并菜单命令-id-必须唯一归属)。
+
+## 2026-10-27：补充列头 popup owner 诊断
+
+- `WM_INITMENUPOPUP` 发给菜单 owner window；原列头探针拿到这个 HWND 后只用它初始化子菜单，未记录其身份。现在 NativeProbe 在输出中增加 popup owner HWND 和最多八层父窗口类名链，后续运行时可确认弹出菜单由 header、view 还是宿主 frame 持有。
+- NativeProbe Release build 通过，0 警告/错误；没有运行 `IShellView` 菜单探针，故实际 owner 与点击后命令接收窗口都仍未知。该诊断为后续隔离取证准备，不是菜单路由行为验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-为列头-popup-记录消息-owner-窗口链)；消息契约：[WM_INITMENUPOPUP](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-initmenupopup)。
 ## 2026-10-27：多行标签栏选项
 
 - Q-Dir 公布的标签栏能力包含多行标签显示。本程序新增“视图 → 多行标签栏”，按可用宽度排列标签行，关闭横向箭头并提供纵向滚动；默认仍为原先单行滚动，开关保存于独立便携 `MultilineTabHeaders.ini`。标签头仍由现有 `TabHeaderPanel` 排序，不重建浏览器或导航历史。

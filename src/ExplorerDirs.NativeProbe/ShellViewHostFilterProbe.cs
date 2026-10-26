@@ -1100,6 +1100,8 @@ internal static class ShellViewHostFilterProbe
         var capturedSubmenus = new List<(string Caption, List<(int Id, string Text)> Items)>();
         var initializedSubmenus = new HashSet<nint>();
         nint capturedRootMenu = 0;
+        nint capturedPopupOwner = 0;
+        var capturedPopupOwnerChain = "(not captured)";
         HookProc? hookCallback = null;
         nint hook = 0;
         try
@@ -1124,6 +1126,8 @@ internal static class ShellViewHostFilterProbe
                             var menu = unchecked((nint)message.WParam);
                             if (capturedRootMenu != 0) return CallNextHookEx(hook, code, wParam, lParam);
                             capturedRootMenu = menu;
+                            capturedPopupOwner = message.Window;
+                            capturedPopupOwnerChain = DescribeWindowChain(message.Window);
                             var count = GetMenuItemCount(menu);
                             for (var index = 0; index < count; index++)
                             {
@@ -1220,7 +1224,7 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception($"The '{expectedCaption}' submenu items did not map one-for-one to the background command ID base: mapped={mappedOffsets.Length}, header={actualSubmenu.Items.Count}, background={backgroundSubmenu.Items.Count}, offsets=[{string.Join(',', offsets)}], expected={strongestOffset.Key}.");
             mappedSubmenuRows.Add($"{expectedCaption}:{actualSubmenu.Items.Count(item => item.Id != -1)} items");
         }
-        Console.WriteLine($"ishellview-column-header-menu: items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
+        Console.WriteLine($"ishellview-column-header-menu: owner=0x{capturedPopupOwner:X}; owner-chain=[{capturedPopupOwnerChain}]; items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
     }
 
     private static IReadOnlyList<string> ReadBackgroundMenuCaptions(nint view) =>
@@ -1440,6 +1444,19 @@ internal static class ShellViewHostFilterProbe
             return true;
         }, 0);
         return match;
+    }
+
+    private static string DescribeWindowChain(nint window)
+    {
+        var chain = new List<string>();
+        for (var depth = 0; window != 0 && depth < 8 && IsWindow(window); depth++)
+        {
+            var className = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(window, className, className.Capacity);
+            chain.Add($"0x{window:X}:{className}");
+            window = GetParent(window);
+        }
+        return string.Join(" <- ", chain);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1663,6 +1680,7 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, nint rect);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
