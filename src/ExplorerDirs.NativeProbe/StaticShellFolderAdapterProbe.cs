@@ -241,6 +241,10 @@ internal static class StaticShellFolderAdapterProbe
             Check(ShellColumnManager.Apply(folderView, columns));
             Check(ShellColumnManager.Capture(folderView, out var captured));
             if (captured is null || !captured.SequenceEqual(columns)) throw new Exception("Custom column visibility/order did not persist.");
+            var refreshHr = At<RefreshView>(view, 8)(view);
+            Console.WriteLine($"native-static-shell-column: refresh-after-column-change-hr=0x{refreshHr:X8}");
+            Check(refreshHr);
+            Pump(500);
             // Read the actual DefView ListView subitems to distinguish a missing
             // Shell column callback from an inactive view that cannot serve any text.
             var displayedColumns = new[] { 0, 1, 2, 3 }
@@ -524,6 +528,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
