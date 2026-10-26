@@ -63,7 +63,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 | 快捷键与输入控件 | `ExplorerBrowserHost.TranslateAcceleratorCore`，Shell 文件命令兜底，重命名编辑器箭头路由 | 单次 `TranslateAccelerator` 的 Ctrl+A、Down、Enter已验证；完整消息循环不足 | `ShellRenameKeyRoutingSmoke`、`FileViewShortcutDispatchSmoke`、Private Desktop 基础导航 probe | 物理键盘、Shift 范围选择、复制/粘贴、重命名、确认框后的方向键及 Tab 正反遍历 |
 | 筛选、搜索和 Shell 回调 | `ShellBrowserSite` 的 CDB/CDB2/CDB3；`ShellFolderFilter`、Search Folder 路由 | `FilteredHost` 的 `IncludeObject` 使用临时筛选夹具；隔离颜色宿主通过 CDB2/CDB3 全部继承/新增槽转发到产品回调，CDB3 `IncludeObject` 也通过真实 CCW vtable 覆盖匹配、排除及 `GetFolder`/属性/显示名失败开放 | SettingsSmoke quick-filter/search 与 CDB3 状态；`ShellViewHostFilterProbe` 隐藏导航/筛选集成；`ShellViewColorBrowserHostSmoke` vtable 与故障注入回归 | 完整 DefView 枚举与回调时序、隐藏项/筛选结果读回、搜索往返、多窗格隔离、真实 provider 失败 |
 | 视图模式、排序、分组、列 | `ViewStyle`、`ShellColumnManager`、每标签视图状态/预设 | 默认 Shell modes 可切换；ListView 同步属于颜色原型局部手段 | View/QDR SettingsSmoke、NativeProbe view-style probes | 八种模式（含 Content/自定义）的真实 Shell 状态、排序分组/列读回、刷新保留 |
-| 会话与 `.qdr` | `SessionStore`、`QdrImporter`、`QdrExporter`、view state stream | `StreamViewHost` 的 stream 只在内存，没有产品会话编排 | QDR/Session SettingsSmoke 与 view-stream NativeProbe | 新宿主重启恢复、导入/导出互操作、标签复制和配置升级保护 |
+| 会话与 `.qdr` | `SessionStore`、`QdrImporter`、`QdrExporter`、view state stream | `StreamViewHost` 可在同一宿主实例内读回最近一次 Shell 写入的 stream；仍只在内存，没有产品会话编排 | QDR/Session SettingsSmoke 与 view-stream NativeProbe | 新宿主重启恢复、标签隔离/复制、导入/导出互操作和配置升级保护 |
 | 文件操作及实时变化 | Shell `IFileOperation` 路由、`ShellDirectoryChangeQueue/Batch`、每窗格 watcher/恢复 | 通过独立 watcher 接入做过少量复制/改名/删除与刷新重叠测试 | SettingsSmoke 的纯逻辑/文件夹具；NativeProbe 临时操作；ExplorerBrowser HostProbe 可复用但当前暂停 | 操作前后视图收敛、大目录/burst/溢出、选区身份、失败对话框与跨窗格状态 |
 | 焦点、选择与恢复 | `ShellViewSelectionSnapshot`、`ShellFocusRestoreGate`、`FocusTraversal` | 选择快照复用过；隐藏 focus 结果不具可见意义 | SettingsSmoke focus/selection gates；NativeProbe selection identity | 原生项目/列标题焦点、四窗格 Tab/Shift+Tab、粘贴/删除确认后的方向键 |
 | 拖放与 Shell provider | 产品 `IDropTarget`/WPF tab drop/导航树 Shell | 隔离 view 暴露 `IDropTarget`，未构成真实 OLE 源端 | NativeProbe data object、HostProbe 目标接口/夹具 | 鼠标真实 OLE Copy/Move/Link、虚拟 PIDL、标签重排、网络与 ZIP 行为 |
@@ -137,5 +137,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 修复后 ZIP-only watchdog 退出码 0，前台 HWND 前后同为 `0x550EC2`。完整 host-filter 现在能跑到结束，但外层前台 HWND 从 `0x10EA8` 变成 `0x550EC2` 并失败；只读窗口查询将其分别识别为 ChatGPT 主窗口和 `dnplayer` 的 `EvertaleMockPreview`。由于无法判断是 Shell 激活调用还是测试期间外部活动导致，停止继续运行 Shell 宿主或尝试恢复窗口。根因修复解决了主线程意外留在新 Desktop 的问题，但未达成完整 foreground 隔离门槛。
 
 用户随后明确授权继续推进隔离迁移原型。该授权允许 NativeProbe/临时夹具范围内的原型开发和验证，不代表产品 `ExplorerBrowserHost` 可以替换，也不代表可发布迁移版本。由于完整 Private Desktop 探针曾观察到前台句柄变化且原因未能归因，本机共享交互桌面上暂不启动任何新的 `IShellView` 宿主或 GUI 探针；需先准备独立 Windows 会话、VM 或其他不共享输入桌面的环境。期间可继续进行不启动 Shell view 的源码契约审查、纯逻辑 smoke 和构建验证。
+
+2026-10-26：NativeProbe 的 `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的内存流作为同宿主后续读请求的来源；第一次读仍使用导入的初始字节。无 Shell view 的 COM IStream smoke 先按预期因读回初始字节而失败，接线后通过；SettingsSmoke、NativeProbe/App Release build 与 `git diff --check` 通过。该改动只验证单个宿主生命周期内的 native stream 往返，不提供多标签隔离、磁盘持久化、重启恢复或产品会话编排证据。
 
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。

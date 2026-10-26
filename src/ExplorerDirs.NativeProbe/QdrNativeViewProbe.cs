@@ -248,8 +248,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     {
         var read = (mode & 3) == 0;
         if (read) Reads++;
-        // All writes, if requested, go to disposable memory rather than a profile.
-        var bytes = read ? _bytes : [];
+        // The initial import is a one-time fallback; later view creation on this host restores its last Shell-written state.
+        var bytes = read ? (_savedStream == 0 ? _bytes : ReadSavedBytes()) : [];
         stream = SHCreateMemStream(bytes, (uint)bytes.Length);
         if (!read && stream != 0)
         {

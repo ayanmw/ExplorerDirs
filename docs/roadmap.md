@@ -3161,3 +3161,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 按用户授权复跑隔离 Private Desktop `--ishellview-color-spike-private-desktop`。当前样本中，原生查看方式循环、Shell 背景/文件菜单及命令状态可读；临时 fixture 的复制、重命名、删除均在文件系统和 Shell 视图中收敛，目录 watcher 与刷新重叠期间的新增项也最终同步。选择、焦点和刷新后恢复快照通过，探针报告前台句柄未变化。
 - 逐项颜色本轮没有通过像素验收：同步切换布局的自定义绘制采样未命中规则色像素，排序/分组状态也没有有效项目绘制像素。因此保留“特定隔离样本已出现可着色像素”这一历史证据，但本轮不能将逐项着色列为稳定能力，更不能推导为产品体验已具备。
 - 完整 Release SettingsSmoke 与 App Release build 通过（0 警告、0 错误）。该探针仍是独立原生宿主，不等同于 ExplorerBrowser 产品宿主；没有验证完整 OLE `DoDragDrop` 输入循环、产品每标签会话持久化、键盘物理焦点或可见产品 UI。迁移门槛继续开放，产品文件视图没有改变。
+
+## 2026-10-26：隔离宿主同会话恢复 Shell view-state stream
+
+- `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的数据用于同一 host 后续的读取；初次读取仍返回调用方传入的初始状态流。新增 `--shell-view-state-stream-smoke`，通过 Windows 内存 IStream 的实际 Write/Read 验证同 host 往返；用例先因返回固定初始字节失败，修复后通过。
+- Release `SettingsSmoke`、NativeProbe/App Release build、`git diff --check` 通过，构建 0 警告/错误。没有创建 Shell view；这只是隔离宿主进程内的临时内存行为，未实现标签间隔离、INI/磁盘保存、跨重启恢复、产品接线或 Q-Dir 互操作。
+- 此原型改进不关闭迁移阶段门槛。下一步仍需在允许启动原生 Shell view 的独立 Windows 会话中验证新旧 view 切换的真实 stream 生命周期；产品 `ExplorerBrowser` 保持不变。

@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：让同一探针宿主读回 Shell 写入的视图流
+
+`StreamViewHost.GetViewStateStream` 之前每次读取都返回固定的初始字节；即使 Shell 已写入新视图状态，后续在同一宿主生命周期内创建 view 仍读不到它。现在首次读取使用传入的初始流，之后若存在 Shell 写入则从保存的内存 `IStream` 读取最近字节。
+
+新增 `--shell-view-state-stream-smoke`，不创建 `IShellView`，直接通过真实 Windows `SHCreateMemStream`/COM `IStream` 接口写入字节，再请求读取流并逐字节比较。用例先因读回旧初始值失败，修复后通过。NativeProbe/App Release build 与完整 SettingsSmoke 通过，0 警告/错误。此结果只证明同一个 `StreamViewHost` 实例内存往返；没有多标签、跨进程/重启持久化或 Q-Dir 互操作证据。
+
 ## 2026-10-26：内存 DC 字体资源生命周期
 
 字体策略 smoke 现在额外创建内存 GDI DC，调用真实 `TrySelect` 将逐项样式字体选入，再执行与项目绘制后相同的 `Restore`，确认原字体重新成为当前对象后才销毁 DC。定向 `--shell-view-color-policy-smoke` 通过。该结果覆盖 GDI 句柄选择/恢复，不创建 Shell view，也不证明真实 DefView 通知或可见像素绘制。

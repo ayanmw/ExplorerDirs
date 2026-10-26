@@ -28,6 +28,8 @@ internal static class Program
             return LiveUpdateProbe.RunViewFlagMatrix();
         if (args.Length == 1 && args[0] == "--qdr-native-stream")
             return QdrNativeViewProbe.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
+            return ShellViewStateStreamSmoke.Run();
         if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
             return StaticShellColumnContractSmoke.Run();
         if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
@@ -98,6 +100,7 @@ internal static class Program
             Console.WriteLine("       --live-updates / --live-updates-wpf (four hidden views, native file changes, optional WPF pump)");
             Console.WriteLine("       --live-updates-view-flags (same matrix plus production site with CDB2GVF_NOINCLUDEITEM disabled)");
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
+            Console.WriteLine("       --shell-view-state-stream-smoke (IShellBrowser view-state stream save/restore without a Shell view)");
             Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");
             Console.WriteLine("       --static-shell-column-folder-smoke (native IShellFolder2 adapter CompareIDs; no window)");
             Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
