@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：转发活动 Shell 视图通知
+
+`StreamViewHost.OnViewWindowActive` 现在可选委托给外层宿主，原样传递活动 view 指针并返回父级 HRESULT。无回调时仍返回原先的 `S_OK`；异常转换为 `E_FAIL`，释放 host 时解除委托。
+
+`--shell-view-color-policy-smoke` 经实际 `IShellBrowser` CCW vtable 槽 16 验证参数、HRESULT、异常隔离和释放后的默认行为。没有创建 Shell view 或窗口，因此焦点、激活时序以及多窗格/标签激活尚未验证。
+
 ## 2026-10-26：接入 Shell 模态与工具栏状态回调
 
 `StreamViewHost.EnableModelessSB` 和 `SetToolbarItems` 现在可选调用外层宿主回调：前者传递 Shell 请求的启用/禁用状态，后者传递原生按钮结构指针、数量和标志；回调 HRESULT 原样返回。未配置回调仍返回原有的 `S_OK`，异常转换成 `E_FAIL`，释放时清除委托。

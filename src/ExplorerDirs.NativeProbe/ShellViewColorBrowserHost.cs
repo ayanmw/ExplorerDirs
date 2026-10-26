@@ -408,9 +408,11 @@ public static class ShellViewColorBrowserHostSmoke
         try
         {
             var enableModeless = GetComMethod<EnableModelessCallback>(browser, 9);
+            var viewWindowActive = GetComMethod<ViewWindowActiveCallback>(browser, 16);
             var setToolbarItems = GetComMethod<SetToolbarItemsCallback>(browser, 17);
-            Check(enableModeless(browser, 0) == 0 && setToolbarItems(browser, 0x111, 2, 3) == 0,
-                "the generic StreamViewHost accepts modeless and toolbar callbacks when no parent UI is configured");
+            Check(enableModeless(browser, 0) == 0 && viewWindowActive(browser, 0xABC) == 0 &&
+                  setToolbarItems(browser, 0x111, 2, 3) == 0,
+                "the generic StreamViewHost accepts frame callbacks when no parent UI is configured");
 
             bool? modeless = null;
             host.EnableModelessHandler = enabled =>
@@ -421,6 +423,18 @@ public static class ShellViewColorBrowserHostSmoke
             Check(enableModeless(browser, 1) == 0 && modeless == true &&
                   enableModeless(browser, 0) == unchecked((int)0x80070005) && modeless == false,
                 "the generic StreamViewHost forwards modeless state and preserves the parent's HRESULT");
+
+            nint activeView = 0;
+            host.ViewWindowActiveHandler = view =>
+            {
+                activeView = view;
+                return 1;
+            };
+            Check(viewWindowActive(browser, 0xDEF) == 1 && activeView == 0xDEF,
+                "the generic StreamViewHost forwards the activated Shell view and preserves the parent's HRESULT");
+            host.ViewWindowActiveHandler = _ => throw new InvalidOperationException("fixture failure");
+            Check(viewWindowActive(browser, 0xDEF) == unchecked((int)0x80004005),
+                "a parent view-activation callback exception stays inside the COM boundary");
 
             (nint Buttons, uint Count, uint Flags) toolbar = default;
             host.ToolbarItemsHandler = (buttons, count, flags) =>
@@ -434,8 +448,9 @@ public static class ShellViewColorBrowserHostSmoke
             Check(setToolbarItems(browser, 0x222, 4, 5) == unchecked((int)0x80004005),
                 "a parent toolbar callback exception stays inside the COM boundary");
             host.Dispose();
-            Check(enableModeless(browser, 1) == 0 && setToolbarItems(browser, 0x222, 4, 5) == 0,
-                "disposing the generic StreamViewHost disconnects modeless and toolbar routes");
+            Check(enableModeless(browser, 1) == 0 && viewWindowActive(browser, 0xDEF) == 0 &&
+                  setToolbarItems(browser, 0x222, 4, 5) == 0,
+                "disposing the generic StreamViewHost disconnects frame-state routes");
         }
         finally { Marshal.Release(browser); }
     }
@@ -536,6 +551,8 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int RemoveMenusCallback(nint self, nint menu);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int EnableModelessCallback(nint self, int enable);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ViewWindowActiveCallback(nint self, nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SetToolbarItemsCallback(nint self, nint buttons, uint count, uint flags);
 

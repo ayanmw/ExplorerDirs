@@ -10,6 +10,11 @@
 - `EnableModelessSB` 与 `SetToolbarItems` 现可选择转发到外层宿主，保留原始 HRESULT；无宿主回调时仍返回原来的 `S_OK`，异常转换为 `E_FAIL`，释放时断开委托。
 - NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 检查模态开关值、工具栏按钮数据/计数/标志、HRESULT、异常与释放行为。没有创建窗口或可见工具栏，也没有接入产品控件；这只是隔离框架路由。
 
+## 2026-10-26：转发隔离宿主的活动视图通知
+
+- `OnViewWindowActive` 现可把活动 Shell view 接口指针和回调转给外层宿主；未配置处理器时维持 `S_OK`，委托 HRESULT 原样返回，异常转为 `E_FAIL`，释放时断开回调。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过 `IShellBrowser` vtable 槽 16 检查指针/HRESULT、异常与释放后默认行为。未创建 Shell view；不证明窗口焦点、激活顺序或产品窗格激活行为。
+
 ## 2026-10-26：补齐隔离宿主的 Shell 控制窗路由
 
 - `StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现可委托给外层宿主提供的控件窗口映射/消息处理器；未配置控件时分别返回 `E_FAIL` / `E_NOTIMPL`，异常留在 COM 边界内，释放宿主时解除委托。

@@ -208,6 +208,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal Func<nint, nint, nint, int>? SetMenuHandler { get; set; }
     internal Func<nint, int>? RemoveMenusHandler { get; set; }
     internal Func<bool, int>? EnableModelessHandler { get; set; }
+    internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
     internal Func<nint, uint, uint, int>? ToolbarItemsHandler { get; set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
@@ -263,6 +264,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
                 SetMenuHandler = null;
                 RemoveMenusHandler = null;
                 EnableModelessHandler = null;
+                ViewWindowActiveHandler = null;
                 ToolbarItemsHandler = null;
                 StatusTextChanged = null;
                 navigation?.Dispose();
@@ -423,7 +425,16 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     }
     public int QueryActiveShellView(out nint view)
     { view = View; if (view != 0) Marshal.AddRef(view); return view == 0 ? unchecked((int)0x80004005) : 0; }
-    public int OnViewWindowActive(nint view) => 0;
+    public int OnViewWindowActive(nint view)
+    {
+        if (ViewWindowActiveHandler is not { } handler) return 0;
+        try { return handler(view); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell view activation: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int SetToolbarItems(nint buttons, uint count, uint flags)
     {
         if (ToolbarItemsHandler is not { } handler) return 0;
