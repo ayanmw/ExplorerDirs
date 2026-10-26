@@ -3,7 +3,7 @@
 ## 2026-10-26：发布 temp.69 临时预览
 
 - 将 `0f9af33` 打包为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.69`，采用独立 profile；其源文件来自 temp.68 隔离 profile，复制后逐文件哈希一致。
-- Release SettingsSmoke、App Release 构建、文件视图导出故障注入 smoke 通过；包内 EXE/DLL 哈希与 `SHA256.txt` 一致，版本为 `0.6.0-preview.temp.69+0f9af33c06fc43397bc01188069821a2f0bdef2e`。
+- Release SettingsSmoke、App Release 构建、文件视图导出故障注入 smoke 与发布隔离 smoke 通过；包内 EXE/DLL 哈希与 `SHA256.txt` 一致，版本为 `0.6.0-preview.temp.69+0f9af33c06fc43397bc01188069821a2f0bdef2e`。
 - 未启动发布程序。目录树实际绘制、Tab 焦点、禁用态图标和导出对话框仍待可见验收，详见[temp.69 说明](releases/preview-0.6.0-temp.69.md)。
 
 ## 2026-10-26：文件视图导出采用完整文件替换

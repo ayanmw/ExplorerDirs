@@ -11,6 +11,7 @@
 - Release SettingsSmoke 通过。
 - ExplorerDirs.App Release 构建通过，0 警告、0 错误。
 - 文件视图导出故障注入确认失败时旧目标不变，临时文件会清理；成功时完整替换目标。
+- 发布隔离 smoke 通过：版本目录冲突被拒绝，profile 仅复制允许的配置，来源不变；使用夹具 EXE，不启动真实程序。
 - 本预览使用独立 profile。没有启动可见 GUI。
 
 ## 尚待验收
