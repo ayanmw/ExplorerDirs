@@ -397,7 +397,8 @@ internal static class StaticShellFolderAdapterProbe
             var detailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsOfCount"))();
             var sizeDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsExCount"))();
             var sizeCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellComparisonCount"))();
-            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf={detailsOf}";
+            var sizeDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsOfCount"))();
+            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}";
         }
         finally { NativeLibrary.Free(module); }
     }

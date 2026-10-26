@@ -65,4 +65,4 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 
 2026-10-27 属性 schema 调查：当前静态列使用临时自定义 PROPERTYKEY，但没有相应 `.propdesc`；微软 Explorer Data Provider 样例随自定义属性提供 property description，定义属性类型/标签。`PSRegisterPropertySchema` 官方契约称注册机器级 schema 且应在安装期调用。由此提出待验证假设：DefView 不读取该自定义键可能与其无已注册属性描述有关。为维持便携方向，不在开发机注册 schema；下一次隔离实验改用系统已有 `PKEY_Size`，使用静态值查看 DefView 是否读取并排序该标准列。此实验若成功，只证明标准 Size 路径可用，不证明任意新自定义属性可免注册扩展。
 
-随后无窗口合同已扩展为标准 `PKEY_Size`：shim 在现有 Size 列的 `GetDetailsOf`/`GetDetailsEx` 和列索引 1 的 `CompareIDs` 返回 `2/10/10/100`；无窗口 probe 验证 `UInt64`、显示文本及数值比较均通过。DefView 对标准 Size 键是否实际调用这些接口仍未验证，Private Desktop 视图 probe 未运行；不将直接接口调用结果当作 Shell 排序结果。
+随后无窗口合同已扩展为标准 `PKEY_Size`：shim 在现有 Size 列的 `GetDetailsOf`/`GetDetailsEx` 和列索引 1 的 `CompareIDs` 返回 `2/10/10/100`；无窗口 probe 验证 `UInt64`、显示文本及数值比较均通过。DefView 对标准 Size 键是否实际调用这些接口仍未验证，Private Desktop 视图 probe 未运行；不将直接接口调用结果当作 Shell 排序结果。后续 Private Desktop 探针输出必须区分 `GetDetailsOf`（逐项文本）、`GetDetailsEx`（属性值）及 `CompareIDs`（列比较）三条回调；旧版日志没有对标准 Size 项目的 `GetDetailsOf` 单独计数，故此前关于该调用路径的证据不完整。

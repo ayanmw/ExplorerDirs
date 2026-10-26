@@ -23,6 +23,7 @@ namespace
     volatile LONG g_customDetailsEx = 0;
     volatile LONG g_standardSizeDetailsEx = 0;
     volatile LONG g_standardSizeComparisons = 0;
+    volatile LONG g_standardSizeDetailsOf = 0;
     volatile LONG g_customDetailsOf = 0;
 
     bool NameFromPidl(IShellFolder2* folder, PCUITEMID_CHILD pidl, std::wstring& name)
@@ -176,6 +177,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
         {
             if (!details) return E_POINTER;
+            if (column == 1 && item) InterlockedIncrement(&g_standardSizeDetailsOf);
             if (column == 1 && item)
             {
                 std::wstring name;
@@ -262,6 +264,11 @@ extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsExCount(
 extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellComparisonCount()
 {
     return InterlockedCompareExchange(&g_standardSizeComparisons, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsOfCount()
+{
+    return InterlockedCompareExchange(&g_standardSizeDetailsOf, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()

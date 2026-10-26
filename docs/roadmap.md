@@ -13,6 +13,7 @@
 - NativeProbe 用四个固定 `UInt64` 样本 `2/10/100/10` 验证隔离 `IShellFolder2` shim。无窗口合同覆盖自定义 PROPERTYKEY 列，也覆盖系统标准 `PKEY_Size` 的 `GetDetailsOf` 文本、`GetDetailsEx` 类型/值和 `CompareIDs` 数值顺序；NativeProbe Release build 0 警告、0 错误。
 - Private Desktop DefView 检查确认视图持有 shim、列状态可读回，但实际项目顺序不变，DefView 未调用自定义 `GetDetailsEx` 或 `CompareIDs`；因此排序/显示门槛仍失败。不要接入产品 ExplorerBrowser，也不做递归计算。下一步查清 DefView 列求值的安全隔离前置条件；不得在用户桌面调用 `IShellView.UIActivate`。
 - 调查补充：实验列使用未登记的临时 PROPERTYKEY；微软 Explorer Data Provider 示例随自定义属性提供 `.propdesc`，其中声明属性类型和标签。`PSRegisterPropertySchema` 文档说明 schema 是机器级、安装期注册。**待验证假设：**DefView 未读取实验属性可能与缺少 property description schema 有关。现在已完成无窗口标准 `PKEY_Size` 直测；下一门槛是在安全隔离的 DefView 中观察该标准列的实际取值/排序回调，并与未登记自定义键对照。不得在日常系统注册测试 schema。
+- 下一轮探针补充：原生 shim 现对标准 Size 列逐项目文本回调 `GetDetailsOf` 单独计数；此前仅观测 `GetDetailsEx` 与 `CompareIDs`，不能据此排除 DefView 走文本接口。新计数已接入探针输出，待以后经明确授权的隔离桌面测试；本轮不运行 Shell 窗口。
 
 ## 2026-10-26：修复原生目录树默认图标回退
 
