@@ -879,8 +879,8 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     private nint _activeWindow;
     private nint _oleMenu;
     private StreamViewHost? _owner;
-    private uint _pendingShellMenuCommandId;
-    private StreamViewHost? _pendingShellMenuCommandOwner;
+    // WM_COMMAND messages can queue before this STA handles the deferred dispatcher message.
+    private readonly Queue<(StreamViewHost Owner, uint CommandId)> _pendingShellMenuCommands = new();
 
     internal ShellMenuFrameCoordinator(nint frameWindow)
     {
@@ -910,6 +910,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
         }
         finally
         {
+            _pendingShellMenuCommands.Clear();
             if (IsWindow(_frameWindow)) _ = RemoveWindowSubclass(_frameWindow, FrameSubclassProcedure, _subclassId);
             if (_selfHandle.IsAllocated) _selfHandle.Free();
         }
@@ -923,18 +924,14 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
             if (message == WmRunShellMenuCommand && referenceData != 0)
             {
                 var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
-                var owner = coordinator?._pendingShellMenuCommandOwner;
-                var commandId = coordinator?._pendingShellMenuCommandId ?? 0;
-                if (coordinator is not null)
-                {
-                    coordinator._pendingShellMenuCommandId = 0;
-                    coordinator._pendingShellMenuCommandOwner = null;
-                }
-                if (owner is not null && commandId != 0 &&
-                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId,
-                        isStillActive: () => coordinator?.IsCurrentOwner(owner) == true))
-                    _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId,
-                        isStillActive: () => coordinator?.IsCurrentOwner(owner) == true);
+                var pending = default((StreamViewHost Owner, uint CommandId));
+                if (coordinator is not null && coordinator._pendingShellMenuCommands.TryDequeue(out var queued))
+                    pending = queued;
+                if (pending.Owner is not null && pending.CommandId != 0 &&
+                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(pending.Owner, pending.CommandId,
+                        isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true))
+                    _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(pending.Owner, pending.CommandId,
+                        isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true);
                 return 0;
             }
             if (message == WmCommand && referenceData != 0)
@@ -950,11 +947,13 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     (ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId, execute: false) ||
                      ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId, execute: false)))
                 {
-                    coordinator._pendingShellMenuCommandId = commandId;
-                    coordinator._pendingShellMenuCommandOwner = owner;
-                    if (PostMessageW(window, WmRunShellMenuCommand, 0, 0)) return 0;
-                    coordinator._pendingShellMenuCommandId = 0;
-                    coordinator._pendingShellMenuCommandOwner = null;
+                    // Post first, then enqueue: this STA cannot dispatch the posted message until
+                    // this WndProc returns, and a failed post leaves no orphaned queue entry.
+                    if (PostMessageW(window, WmRunShellMenuCommand, 0, 0))
+                    {
+                        coordinator._pendingShellMenuCommands.Enqueue((owner, commandId));
+                        return 0;
+                    }
                 }
             }
         }

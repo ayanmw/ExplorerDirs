@@ -32,6 +32,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 已有隐藏 COM smoke、局部文件操作/通知样本和会话状态测试来自不同验证层，不能合并宣称完整迁移通过。完整 Private Desktop session-restore 探针现已覆盖真实 `IShellView` 的写入、销毁、重建和恢复；颜色像素已有五种 ListView 样式及排序/分组后的隔离证据，但仍缺真实用户桌面的可见验收、真实 OLE 拖放闭环、物理键盘焦点，以及 WPF 产品宿主集成。当前继续不使用 Computer Use；不将隔离宿主证据当作产品 UI 验收。
 
+### 2026-10-27：保留连续到达的延迟 Shell 菜单命令
+
+静态复核共享 frame subclass 时发现，菜单 `WM_COMMAND` 被延迟到自定义消息执行，但 coordinator 原先只保存一个待处理命令。若在 STA 消费第一个自定义消息前又收到同类命令，第二条会覆盖第一条；已投递的两个自定义消息随后都可能读取第二条命令，造成首命令丢失或命令执行次数不匹配。NativeProbe 现为每条成功投递的自定义消息按 FIFO 入队对应的 pane owner 与 command ID，逐条出队，并在 coordinator dispose 时清空队列；owner 仍在执行前复核。NativeProbe Release build 通过（0 警告、0 错误）；本轮未运行 smoke 或真实 Shell 菜单时序验证。
+
+完整 `DoDragDrop` 仍不能在当前 Private Desktop 条件下安全验证：微软文档说明 OLE 循环按当前光标下窗口寻找目标并跟踪鼠标/键状态；`GetCursorPos` 和 `SetCursorPos` 要求调用时 input desktop 为当前桌面。为了避免向用户桌面注入鼠标输入，本轮没有尝试驱动真实拖动；直接调用 `IDropTarget` 的通过结果仍不等同于 OLE 源/目标闭环。参见 [DoDragDrop](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-dodragdrop)、[GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) 与 [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos)。
+
 ### 2026-10-27：五种 ListView 样式的逐项颜色像素隔离复核
 
 `color-private-desktop` watchdog 本轮退出码 0，NativeProbe Release build 为 0 警告/错误，日志为 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。原型为两条文件身份配置不同前景/背景颜色，在 Icon、Details、SmallIcon、List、Tile 五种原生 ListView 样式中读取目标行像素；排序与 Size 分组后再按当前 Shell item 身份映射颜色，并对两行分别断言非零像素。该路径报告五种样式 `matched-color-unsorted` 与 `matched-shell-and-listview-sorted-grouped` 均通过。

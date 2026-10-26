@@ -6,6 +6,11 @@
 - 拓展 `IDataObjectAsyncCapability` 阶段记录后，两类对象在 `DragEnter`、`DragOver`、`Drop` 前后均为 `async-mode=False`、`in-operation=False`；此状态没有解释此前误判。
 - NativeProbe Release build 0 警告/错误，`drop-target-private-desktop` watchdog 退出码 0，前台 HWND 未变（日志：`src/.state/native-probe-watchdog/20261027-064309-d58b7ee7.stdout.log`）。此探针只直接调用目标回调，不等同于完整 OLE `DoDragDrop`；源端交接、修饰键/移动语义、可见跨窗格拖动及产品宿主仍待验收。记录见[IShellView 拖放调查](ishellview-color-spike.md#2026-10-27-对比-ishellview-选中项数据对象)。
 
+## 2026-10-27：排队隔离 Shell 菜单的延迟命令
+
+- 菜单命令由 frame subclass 延迟到自定义消息执行。源码审查发现 coordinator 原先只有一个待处理槽；多条命令在 STA 再次派发前到达时会覆盖 owner/ID。现在每个成功投递的自定义消息对应 FIFO 队列中的一个 pane owner 与 command ID，逐条取出，释放 coordinator 时清空队列；原有执行前 owner 校验保留。
+- NativeProbe Release build 通过（0 警告、0 错误），`git diff --check` 通过；本轮未运行 smoke 或真实 Shell 菜单时序验证。完整 `DoDragDrop` 依赖当前光标和 input desktop，当前不向用户桌面注入输入；直接调用目标 `IDropTarget` 不能替代完整 OLE 循环。迁移授权及产品不迁移的边界不变，详见[原型记录](ishellview-color-spike.md#2026-10-27保留连续到达的延迟-shell-菜单命令)。
+
 ## 2026-10-27：保存当前工作区为桌面启动项
 
 - 文件菜单新增“保存当前工作区到桌面…”。它把当前所有窗格、标签及视图状态导出为配置目录 `Workspaces` 下的 `.qdr`，并在用户选择的位置创建 Windows `.lnk`；快捷方式以应用自身为目标，参数指向该状态文件。通过 Shell Link COM 写入并临时文件原子替换，不改写用户桌面或已有 Q-Dir 配置，除非用户主动选择桌面位置。
