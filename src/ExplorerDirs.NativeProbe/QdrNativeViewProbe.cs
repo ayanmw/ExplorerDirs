@@ -848,6 +848,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
 internal sealed class ShellMenuFrameCoordinator : IDisposable
 {
     private const uint WmCommand = 0x0111;
+    private const uint WmRunShellMenuCommand = 0x8000 + 0x3A1;
     private static readonly SubclassProcedure FrameSubclassProcedure = FrameWindowSubclass;
     private readonly nint _frameWindow;
     private readonly GCHandle _selfHandle;
@@ -858,6 +859,8 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     private nint _activeWindow;
     private nint _oleMenu;
     private StreamViewHost? _owner;
+    private uint _pendingShellMenuCommandId;
+    private StreamViewHost? _pendingShellMenuCommandOwner;
 
     internal ShellMenuFrameCoordinator(nint frameWindow)
     {
@@ -896,11 +899,38 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     {
         try
         {
-            if (message == WmCommand && lParam == 0 && (uint)(wParam & 0xFFFF) == StreamViewHost.ProbeApplicationCommandId && referenceData != 0)
+            if (message == WmRunShellMenuCommand && referenceData != 0)
             {
                 var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
-                coordinator?._owner?.OnApplicationMenuCommand();
+                var owner = coordinator?._pendingShellMenuCommandOwner;
+                var commandId = coordinator?._pendingShellMenuCommandId ?? 0;
+                if (coordinator is not null)
+                {
+                    coordinator._pendingShellMenuCommandId = 0;
+                    coordinator._pendingShellMenuCommandOwner = null;
+                }
+                if (owner is not null && commandId != 0)
+                    _ = ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId);
                 return 0;
+            }
+            if (message == WmCommand && referenceData != 0)
+            {
+                var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
+                var commandId = (uint)(wParam & 0xFFFF);
+                if (lParam == 0 && commandId == StreamViewHost.ProbeApplicationCommandId)
+                {
+                    coordinator?._owner?.OnApplicationMenuCommand();
+                    return 0;
+                }
+                if (lParam == 0 && commandId <= 0x7FFF && coordinator?._owner is { } owner &&
+                    ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId, execute: false))
+                {
+                    coordinator._pendingShellMenuCommandId = commandId;
+                    coordinator._pendingShellMenuCommandOwner = owner;
+                    if (PostMessageW(window, WmRunShellMenuCommand, 0, 0)) return 0;
+                    coordinator._pendingShellMenuCommandId = 0;
+                    coordinator._pendingShellMenuCommandOwner = null;
+                }
             }
         }
         catch (Exception ex)
@@ -1028,6 +1058,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
     [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
+    [DllImport("user32.dll")] private static extern bool PostMessageW(nint window, uint message, nuint wParam, nint lParam);
 }
 
 // Exact IShellBrowser layout, including its IOleWindow methods (slots 3/4).

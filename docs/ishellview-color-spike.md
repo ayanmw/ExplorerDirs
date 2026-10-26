@@ -16,7 +16,15 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 用户已授权继续推进隔离 `IShellView` 宿主迁移原型，验证范围包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点和每会话 view-state。授权范围仅限 NativeProbe/隔离宿主，不等于批准替换产品 ExplorerBrowser 或发布迁移版本；产品文件视图保持现状，直到原型门槛有完整证据并单独评审。
 
-已有的隐藏 COM smoke、局部文件操作/通知样本和跨进程 view-state 文件测试来自不同路径，不能合并宣称完整迁移通过。尚缺同一宿主内的稳定逐项颜色像素、真实 OLE 拖放闭环、物理键盘焦点，以及由真实 `IShellView` 写入后销毁、重建并恢复会话状态的验证。当前继续不使用 Computer Use；遵循项目桌面规则，只做源码和不创建 Shell view 的验证，直到具备独立 Windows 会话条件。
+已有隐藏 COM smoke、局部文件操作/通知样本和会话状态测试来自不同验证层，不能合并宣称完整迁移通过。完整 Private Desktop session-restore 探针现已覆盖真实 `IShellView` 的写入、销毁、重建和恢复；仍缺稳定逐项颜色像素、真实 OLE 拖放闭环、物理键盘焦点，以及 WPF 产品宿主集成。当前继续不使用 Computer Use；不将隔离宿主证据当作产品 UI 验收。
+
+## 2026-10-27：四窗格 Shell View 菜单命令映射与执行
+
+隔离宿主的顶层 frame subclass 现在将 Shell composite View 菜单的 `WM_COMMAND` 映射到当前 pane 背景 `IContextMenu` 的 canonical verb。Shell 菜单项 ID 与 context-menu ID 并不一致，因此实现读取活动 View 菜单项的层级标题路径，再与 `IContextMenu::QueryContextMenu` 生成的命令路径匹配；按层级后缀消歧排序和分组菜单中重复的升序/降序项。执行通过 `IContextMenu::InvokeCommand`，并在原始 `WM_COMMAND` 返回后 `PostMessage` 到 frame，避免在 Shell 菜单回调中同步重入。
+
+清理诊断代码后的第一次完整 `session-restore-private-desktop` watchdog 通过，日志为 `src/.state/native-probe-watchdog/20261027-042447-50659c58.stdout.log`。四个真实 filesystem `IShellView` pane 均验证 Details、排序升序/降序和分组升序/降序；每项只改变活动 pane，兄弟 pane 的模式、排序和分组保持不变。文件复制/重命名/删除、目录通知、F2 焦点隔离、view-state 重建恢复和 foreground HWND 不变等既有检查也通过。紧接着的重复回归在 120 秒 watchdog 时限超时，日志 `src/.state/native-probe-watchdog/20261027-042623-ddebc4b7.stdout.log` 只到筛选器基线、未输出根因；前台窗口未变化、stderr 仅有 watchdog 超时。当前命令映射有一次完整通过证据，但整套原型回归的重复性未确认。
+
+此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 
 ## 2026-10-26：读取 Q-Dir Filter2 原始规则行
 

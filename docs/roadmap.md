@@ -3517,3 +3517,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在真实 composite View 菜单中读到 Details ID `0x704B`；同一 pane 的 `IContextMenu` canonical verb `viewlogicaldetails` 在 `idCmdFirst=0x7000` 时分配 ID `0x701B`。ID 不相同，不能把 View 菜单 ID 直接重解释成 context-menu verb ID。
 - 完整四窗格 watchdog 仍退出码 0（`20261027-041457-17b0712f.stdout.log`）；该检查只读比较 ID，不执行 frame View 菜单命令。下一步查 Windows Explorer 对标准 `FCIDM_SHVIEWFIRST..LAST` 命令的宿主处理/映射，再做最小 dispatch 实验。
 - 详情见[隔离原型记录](ishellview-color-spike.md#2026-10-27-撤回-frame-转发实验后的四窗格原生命令基线复核)。
+
+## 2026-10-27：四窗格 Shell View 菜单命令映射与执行
+
+- 清理诊断代码后的首次 Private Desktop 四 pane 回归通过：隔离宿主将 Shell View composite menu 的 Details、排序升/降序、分组升/降序命令映射到当前 pane `IContextMenu` canonical verb 执行；每次只改变活动 pane，兄弟 view 状态不变。完整会话恢复、文件操作/通知、F2 焦点隔离检查通过，主桌面前台窗口不变。日志：`src/.state/native-probe-watchdog/20261027-042447-50659c58.stdout.log`。随后的重复运行在 120 秒 watchdog 时限超时，日志停在筛选器基线，根因未确定：`src/.state/native-probe-watchdog/20261027-042623-ddebc4b7.stdout.log`。
+- 结论：标准菜单命令的隔离 frame 分派路线在一次完整运行中通过，但原型回归可重复性仍待查；继续补齐真实菜单跟踪/OLE accelerator、实际拖放、颜色绘制和 WPF 宿主集成门槛。未接入产品 ExplorerBrowser 替换，也未发布迁移版本。详情见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-view-菜单命令映射与执行)。

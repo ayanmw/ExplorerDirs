@@ -268,7 +268,7 @@ internal static class ShellViewColorSpike
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         var menuRouting = VerifyFourPaneMenuActivation(
-            new[] { restoredView, view, pane3.View, pane4.View }, allHosts, containerParent,
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews, allHosts, expectedModes, containerParent,
             menuCoordinator);
         var menuCommands = VerifyFourPaneMenuCommandRouting(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
@@ -288,16 +288,29 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
-        IReadOnlyList<ShellViewColorBrowserHost> hosts, nint menuFrameWindow,
+        IReadOnlyList<nint> folderViews, IReadOnlyList<ShellViewColorBrowserHost> hosts,
+        IReadOnlyList<uint> expectedModes, nint menuFrameWindow,
         ShellMenuFrameCoordinator menuCoordinator)
     {
-        if (views.Count != 4 || hosts.Count != 4)
+        if (views.Count != 4 || folderViews.Count != 4 || hosts.Count != 4 || expectedModes.Count != 4)
             throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
         var foreground = GetForegroundWindow();
         foreach (var host in hosts) host.MenuTrace.Clear();
         var before = hosts.Select(host => (host.InsertMenusCallCount, host.SetMenuCallCount,
             host.RemoveMenusCallCount)).ToArray();
         var activations = new List<string>(views.Count);
+        var shellMenuCommands = new List<string>(views.Count);
+        var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
+        var typeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 4 };
+        foreach (var folderView in folderViews)
+        {
+            Check(At<SetSortColumns>(folderView, 27)(folderView,
+                [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+            var groupKey = typeKey;
+            Check(At<SetGroupBy>(folderView, 17)(folderView, ref groupKey, 1));
+        }
+        Pump(250);
         for (var index = 0; index < views.Count; index++)
         {
             var menuBeingReplaced = GetMenu(menuFrameWindow);
@@ -329,6 +342,47 @@ internal static class ShellViewColorSpike
                     .Any(entry => entry.hostIndex != index && entry.host.ApplicationMenuCommandCount != commandCountsBefore[entry.hostIndex]) ||
                 current.ApplicationMenuCommandCount != commandCountsBefore[index] + 1)
                 throw new InvalidOperationException($"The merged app menu command did not dispatch only to active pane {index + 1}: before={string.Join(',', commandCountsBefore)}; after={string.Join(',', hosts.Select(host => host.ApplicationMenuCommandCount))}.");
+
+            var detailsCommandId = FindShellViewCommandId(GetSubMenu(installedMenu, 2), "详细信息", "Details");
+            var backgroundVerbDetailsId = FindBackgroundVerbCommandId(views[index], "viewlogicaldetails", 0x7000);
+            Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], 2, 16)); // FVM_SMALLICON.
+            Pump(100);
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)detailsCommandId, 0); // WM_COMMAND.
+            Pump(250);
+            Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out var shellMenuMode, out _));
+            if (shellMenuMode != 4)
+                throw new InvalidOperationException($"The host did not execute the merged Shell Details command for pane {index + 1}: id=0x{detailsCommandId:X4}; mode={shellMenuMode}; trace=[{string.Join(';', current.MenuTrace)}].");
+            for (var siblingIndex = 0; siblingIndex < folderViews.Count; siblingIndex++)
+            {
+                if (siblingIndex == index) continue;
+                Check(At<GetViewModeAndIconSize>(folderViews[siblingIndex], 36)(folderViews[siblingIndex], out var siblingMode, out _));
+                if (siblingMode != expectedModes[siblingIndex])
+                    throw new InvalidOperationException($"The merged Shell Details command for pane {index + 1} changed sibling pane {siblingIndex + 1}: mode={siblingMode}; expected={expectedModes[siblingIndex]}.");
+            }
+            Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], expectedModes[index],
+                expectedModes[index] == 1 ? 48 : expectedModes[index] == 3 ? 16 : -1));
+            Pump(150);
+            var viewMenu = GetSubMenu(installedMenu, 2);
+            var sortDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递减");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortDescendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, -1, 1, nameKey, typeKey, "Sort Descending");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var sortAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递增");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortAscendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Sort Ascending");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var groupDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递减");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupDescendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 0, nameKey, typeKey, "Group Descending");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var groupAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递增");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupAscendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Group Ascending");
+            shellMenuCommands.Add($"pane{index + 1}:details=0x{detailsCommandId:X4}/context=0x{backgroundVerbDetailsId:X4}/same={detailsCommandId == backgroundVerbDetailsId},sort={sortDescendingId:X4}/{sortAscendingId:X4},group={groupDescendingId:X4}/{groupAscendingId:X4}");
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
@@ -346,9 +400,61 @@ internal static class ShellViewColorSpike
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
         return $"per-pane-insert-set={string.Join(',', activations)}; custom-menu=present-in-each-active-composite; " +
+            $"shell-menu-command={string.Join(',', shellMenuCommands)}; " +
             $"app-command-routing={string.Join(',', hosts.Select((host, index) => $"pane{index + 1}:{host.ApplicationMenuCommandCount}"))}; inactive-command=ignored; " +
             $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
             "frame-menu-restored-after-deactivate=True; foreground-unchanged=True";
+    }
+
+    private static uint FindMenuCommandIdByPathSuffix(nint menu, params string[] suffix)
+    {
+        var match = FindMenuCommandIdByPathSuffix(menu, [], suffix);
+        return match ?? throw new InvalidOperationException($"The Shell view menu did not contain command path suffix [{string.Join(" > ", suffix)}].");
+
+        static uint? FindMenuCommandIdByPathSuffix(nint currentMenu, IReadOnlyList<string> parents,
+            IReadOnlyList<string> expectedSuffix)
+        {
+            for (var index = 0; currentMenu != 0 && index < GetMenuItemCount(currentMenu); index++)
+            {
+                var text = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(currentMenu, (uint)index, text, text.Capacity, 0x400);
+                var itemLabel = NormalizeMenuLabel(text.ToString());
+                var id = GetMenuItemID(currentMenu, index);
+                if (id >= 0)
+                {
+                    var path = parents.Append(itemLabel).ToArray();
+                    if (path.Length >= expectedSuffix.Count && expectedSuffix.Select((part, partIndex) =>
+                            string.Equals(path[^(expectedSuffix.Count - partIndex)], part, StringComparison.OrdinalIgnoreCase)).All(equal => equal))
+                        return unchecked((uint)id);
+                }
+                var nested = GetSubMenu(currentMenu, index);
+                if (nested == 0) continue;
+                var nestedParents = string.IsNullOrEmpty(itemLabel) ? parents : parents.Append(itemLabel).ToArray();
+                var nestedMatch = FindMenuCommandIdByPathSuffix(nested, nestedParents, expectedSuffix);
+                if (nestedMatch is not null) return nestedMatch;
+            }
+            return null;
+        }
+    }
+
+    private static void AssertFourPaneSortGroupDirections(IReadOnlyList<nint> folderViews,
+        int activeIndex, int sortDirection, int groupAscending,
+        PropertyKey nameKey, PropertyKey typeKey, string phase)
+    {
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<GetSortColumnCount>(folderViews[index], 26)(folderViews[index], out var count));
+            if (count != 1) throw new InvalidOperationException($"Pane {index + 1} sort count changed during merged-menu {phase}: {count}.");
+            var sorts = new SortColumn[count];
+            Check(At<GetSortColumns>(folderViews[index], 28)(folderViews[index], sorts, count));
+            Check(At<GetGroupBy>(folderViews[index], 18)(folderViews[index], out var group, out var ascending));
+            var expectedSort = index == activeIndex ? sortDirection : 1;
+            var expectedGroup = index == activeIndex ? groupAscending : 1;
+            if (sorts[0].Key.FormatId != nameKey.FormatId || sorts[0].Key.PropertyId != nameKey.PropertyId ||
+                sorts[0].Direction != expectedSort || group.FormatId != typeKey.FormatId ||
+                group.PropertyId != typeKey.PropertyId || ascending != expectedGroup)
+                throw new InvalidOperationException($"Merged Shell menu {phase} changed an unexpected pane state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSort}/{expectedGroup}.");
+        }
     }
 
     private static bool HasMenuGroup(nint menu, string caption)
@@ -383,9 +489,6 @@ internal static class ShellViewColorSpike
         }
         Pump(300);
         AssertSortAndGroupDirections(-1, 1, 1, "menu test baseline");
-        var topViewDetailsId = FindShellMenuCommandId(menuOwner, "详细信息", "Details");
-        var backgroundVerbDetailsId = FindBackgroundVerbCommandId(views[0], "viewlogicaldetails", 0x7000);
-        var detailsIdMapping = $"view-details=0x{topViewDetailsId:X4};background-verb=0x{backgroundVerbDetailsId:X4};same={topViewDetailsId == backgroundVerbDetailsId}";
         for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
         {
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
@@ -429,7 +532,7 @@ internal static class ShellViewColorSpike
         var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; {detailsIdMapping}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -467,6 +570,11 @@ internal static class ShellViewColorSpike
     {
         var composite = GetMenu(menuOwner);
         var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
+        return FindShellViewCommandId(viewMenu, labels);
+    }
+
+    private static uint FindShellViewCommandId(nint viewMenu, params string[] labels)
+    {
         for (var index = 0; viewMenu != 0 && index < GetMenuItemCount(viewMenu); index++)
         {
             var text = new System.Text.StringBuilder(128);
@@ -509,6 +617,109 @@ internal static class ShellViewColorSpike
         }
         finally { Marshal.Release(contextMenu); }
         throw new InvalidOperationException($"The Shell background context menu did not expose canonical verb '{expectedVerb}' in the requested command-ID range.");
+    }
+
+    internal static bool TryInvokeMergedViewMenuCommand(StreamViewHost owner, uint commandId, bool execute = true)
+    {
+        if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
+        var composite = GetMenu(owner.MenuFrameWindow);
+        var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
+        var mergedPath = FindMenuCommandPath(viewMenu, commandId);
+        if (mergedPath is null) return false;
+
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(owner.View, 15)(owner.View, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            const uint firstCommandId = 0x7000;
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create the in-memory Shell menu used to resolve a merged view command.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0,
+                    firstCommandId, 0x7FFF, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xFFFF, 0x7FFF - firstCommandId);
+                var buffer = Marshal.AllocHGlobal(512);
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        var contextPath = FindMenuCommandPath(menu, firstCommandId + offset);
+                        if (contextPath is null || !HasMatchingCommandPathSuffix(mergedPath, contextPath))
+                            continue;
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) != 0) continue; // GCS_VERBW
+                        var verb = Marshal.PtrToStringUni(buffer);
+                        if (string.IsNullOrWhiteSpace(verb)) continue;
+                        if (!execute) return true;
+                        var invoke = new NativeInvokeInfo
+                        {
+                            Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                            Window = owner.MenuFrameWindow,
+                            Verb = (nint)offset,
+                            Show = 1
+                        };
+                        var invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                        Check(invokeResult);
+                        owner.MenuTrace.Add($"shell-command id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' verb='{verb}' context-id=0x{firstCommandId + offset:X4}");
+                        return true;
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+        owner.MenuTrace.Add($"shell-command-unmapped id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}'");
+        return false;
+    }
+
+    private static IReadOnlyList<string>? FindMenuCommandPath(nint menu, uint commandId,
+        IReadOnlyList<string>? parents = null)
+    {
+        parents ??= [];
+        for (var index = 0; menu != 0 && index < GetMenuItemCount(menu); index++)
+        {
+            var text = new System.Text.StringBuilder(256);
+            _ = GetMenuStringW(menu, (uint)index, text, text.Capacity, 0x400);
+            var itemLabel = NormalizeMenuLabel(text.ToString());
+            if (unchecked((uint)GetMenuItemID(menu, index)) == commandId)
+                return parents.Append(itemLabel).ToArray();
+            var nested = GetSubMenu(menu, index);
+            if (nested == 0) continue;
+            var nestedParents = string.IsNullOrEmpty(itemLabel) ? parents : parents.Append(itemLabel).ToArray();
+            var nestedPath = FindMenuCommandPath(nested, commandId, nestedParents);
+            if (nestedPath is not null) return nestedPath;
+        }
+        return null;
+    }
+
+    private static bool HasMatchingCommandPathSuffix(IReadOnlyList<string> mergedPath,
+        IReadOnlyList<string> contextPath)
+    {
+        var count = Math.Min(2, Math.Min(mergedPath.Count, contextPath.Count));
+        if (count == 0) return false;
+        for (var offset = 1; offset <= count; offset++)
+        {
+            if (!string.Equals(mergedPath[^offset], contextPath[^offset], StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
+
+    private static string NormalizeMenuLabel(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return string.Empty;
+        var accelerator = label.IndexOf('\t');
+        if (accelerator >= 0) label = label[..accelerator];
+        var normalized = label.Replace("&", string.Empty, StringComparison.Ordinal)
+            .Trim().TrimEnd('.', '…').Trim();
+        if (normalized.Length >= 3 && normalized[^3] == '(' && normalized[^1] == ')' &&
+            char.IsLetterOrDigit(normalized[^2]))
+            normalized = normalized[..^3].TrimEnd();
+        return normalized;
     }
 
     private static string VerifyFourPaneSelectionMenus(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
@@ -1703,7 +1914,8 @@ internal static class ShellViewColorSpike
             ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(22_000))
+        // The four-pane frame probe now dispatches Details, sorting and grouping through each merged Shell menu.
+        if (!process.WaitForExit(60_000))
         {
             try { process.Kill(entireProcessTree: true); }
             catch (InvalidOperationException) { }
