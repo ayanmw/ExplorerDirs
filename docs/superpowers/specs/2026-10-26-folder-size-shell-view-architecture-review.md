@@ -55,4 +55,6 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 
 ## 评审后下一步
 
-先补一个不含递归行为的隔离原型验证 `IShellFolder2` 列枚举、静态值显示和数值排序；同时把结果与 `SHCreateShellFolderView` / `IShellBrowser` 合同记录在迁移矩阵。该原型不改产品代码。只有该门槛通过后，才讨论真实文件操作委托和是否继续递归大小列研究。
+2026-10-26 已验证静态数值列策略本身（`2, 10, 10, 100` 的数值比较、格式化和相等值次序）；这只是纯托管策略 smoke，不是 Shell 列接线证据。随后构造隔离 `IShellFolder2` 适配器：真实文件夹 PIDL 可解析，基础列枚举和静态列元数据/值调用可由适配器处理，但 `SHCreateShellFolderView` 拒绝了托管 COM 包装对象，返回 `E_NOINTERFACE`。因此 DefView 尚未创建，列显示、`IColumnManager` 读回、DefView 排序和普通 Shell 操作均未验证。
+
+结论：当前托管 CCW 适配器不能证明此架构可行。若继续，下一步应先做一个极小的原生 COM `IShellFolder`/`IShellFolder2` shim（可由 C++ 实现），通过 `QueryInterface` 将未实现接口委托给真实文件系统文件夹，并仅在隔离夹具中重复同一静态列门槛；然后再考虑浏览器服务、PIDL 操作和文件变更通知。该原生 shim 仍只是架构实验，不授权产品迁移，也不加入递归扫描。失败的托管适配器源文件和运行入口已撤下，保留策略 smoke 与本评审结论，避免留下一个被误认为可工作的原型。
