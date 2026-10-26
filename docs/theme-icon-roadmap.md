@@ -23,6 +23,8 @@
 
 ## 实施阶段
 
+WPF 语义色资源阶段的实施步骤见[实施计划](superpowers/plans/2026-10-27-theme-semantic-resources.md)。该计划只覆盖应用自有 WPF 外壳；ExplorerBrowser 文件区和 Shell 文件图标仍按下文独立调查与验收。
+
 ### 阶段 1：完成应用界面语义色
 
 - 保留 `System / Light / Dark`，默认 `System`。`System` 同时读取 Windows 明暗偏好和系统强调色；显式 `Light` 或 `Dark` 固定明暗，但仍可跟随系统强调色。
