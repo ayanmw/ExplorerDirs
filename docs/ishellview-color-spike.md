@@ -851,3 +851,9 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 后续扩展同一 Private Desktop 探针：创建后明确通过 `IFolderView::SelectItem` 选中新目录，设置列表焦点，并将合成 F2 交给 `IShellView::TranslateAccelerator`。F2 返回 `S_OK`，原生内联 `Edit` 出现且取得焦点；随后将合成 Left/Right 交回 `IShellView::TranslateAccelerator`，两者均返回 `S_OK`，编辑窗口保持存在并持续持有焦点。这提供了一个可行的原生路径，可供后续解决多窗格重命名时方向键被邻窗格截获的问题。它只验证了编辑中的左右方向键，尚未覆盖上下键、真实物理键、完整 WPF/HwndHost 消息循环或产品多窗格路由，因此不能据此宣称用户报告的产品缺陷已修复。
 
 该结果证明默认文件系统 `IShellView` 可通过 canonical verb 完成新建文件夹并由视图枚举新项；程序化创建自身没有自动选中/重命名，但显式选中后原生 F2 和编辑器左右键路由有效。偏移在重新构造菜单时发生变化，因此不能跨菜单缓存；即使逐次重新查询后，offset 调用仍失败，具体原因未明。仍未验证真实弹出菜单点击、ExplorerBrowser 产品或完整四窗格，也不把一次具体命令推广为所有 Shell 命令都应使用字符串。隔离探针新增 `--ishellview-newfolder-private-desktop` 与 watchdog 入口，并要求列表预先持有焦点、创建结果同时出现在磁盘和 Shell 列表才算通过；产品 ExplorerBrowser、用户目录和 release 均未改动。
+
+### 2026-10-27 激活后的 Shell 原生菜单组内容读取
+
+扩展 `--ishellview-menu-activation-private-desktop`：在真实默认 filesystem `IShellView` 完成 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 后读取宿主共享 `HMENU` 的根级菜单组及其子项。Private Desktop watchdog 退出码 0，NativeProbe Release build 0 警告/错误，主桌面 foreground HWND 保持 `0x81852`。探针确认 File/Edit/View/Help 四个子菜单已包含 Shell 项目；当前中文 Windows 样本分别读到 4/10/18/1 项，Edit 含剪切、复制、粘贴、全选及快捷键，View 含八种查看方式及排列/排序/分组/列选择命令。探针以菜单组非空作为通过条件，不依赖本地化标题与具体子项数量。
+
+这补足了此前只有 `InsertMenusSB`/`SetMenuSB` 回调次数及共享句柄的证据：激活后的共享菜单对象中确实有 Shell 填充的标准命令。仍未追踪显示菜单、真实点击、应用自定义菜单插入位置、命令分派、键盘快捷键优先级或 WPF 活动 pane；因此不能证明应用当前菜单体验已合并，也不验证 ExplorerBrowser 产品菜单。产品代码、配置、release 与用户桌面未改动。

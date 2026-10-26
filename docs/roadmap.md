@@ -3443,3 +3443,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - Private Desktop 探针在 canonical `newfolder` 创建后显式选中新目录并聚焦列表；经 `IShellView::TranslateAccelerator` 发送 F2 后，原生内联编辑框成功打开并取得焦点。编辑期间再路由 Left/Right，编辑框保持存在且继续持有焦点。
 - NativeProbe Release 构建 0 警告/错误；`host-newfolder-private-desktop` watchdog 退出码 0，隔离前台 HWND 未变，临时夹具清理完成。验证范围仅为 Shell 原生 accelerator 和左右键，不含产品多窗格/WPF 消息接线、上下键或物理键盘。
 - 这是后续重命名焦点问题的实现线索，不是产品缺陷修复，也不证明 IShellView 宿主迁移已具备产品级兼容性。详见 [IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹-canonical-verb-原型通过)。
+
+## 2026-10-27：读取 IShellView 激活后的原生菜单组
+
+- 在实际 Shell `UIActivate` 后读取共享 `HMENU`，探针确认 Shell 已向 File/Edit/View/Help 子菜单填充标准命令。当前中文系统样本读取到 4/10/18/1 个项目，包括剪切、复制、粘贴、全选、查看方式、排序、分组与列选择；通过条件只要求这些组非空，避免依赖系统语言或固定项目数。
+- Release NativeProbe 构建 0 警告/错误；Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台 HWND 未变。
+- 这是共享菜单结构和 Shell 命令填充的证据；尚未显示/点击菜单、插入应用自定义菜单项、验证命令分派或 WPF 活动 pane。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-激活后的-shell-原生菜单组内容读取)。

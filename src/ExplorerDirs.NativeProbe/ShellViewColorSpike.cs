@@ -979,9 +979,17 @@ internal static class ShellViewColorSpike
                 Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_FOCUS
                 Pump();
                 var sharedMenu = GetMenu(parent);
+                var sharedMenuItems = Enumerable.Range(0, 6)
+                    .Select(index => GetSubMenu(sharedMenu, index))
+                    .ToArray();
+                if (sharedMenu == 0 || GetMenuItemCount(sharedMenu) < 6 ||
+                    sharedMenuItems.Where((_, index) => index is 0 or 1 or 2 or 5)
+                        .Any(submenu => submenu == 0 || GetMenuItemCount(submenu) == 0))
+                    throw new Exception("Shell UI activation did not populate the shared File/Edit/View/Help menu groups.");
                 Console.WriteLine($"ishellview-menu-activation: insert={host.InsertMenusCallCount}; " +
                     $"set={host.SetMenuCallCount}; remove={host.RemoveMenusCallCount}; " +
                     $"shared-menu-present={sharedMenu != 0}; active-view={view != 0}; " +
+                    $"menu-groups=[{DescribeSharedMenu(sharedMenu)}]; " +
                     $"foreground-unchanged={GetForegroundWindow() == foreground}");
                 return 0;
             }
@@ -2801,6 +2809,27 @@ internal static class ShellViewColorSpike
         public uint TextColor;
         public uint TextBackground;
     }
+    private static string DescribeSharedMenu(nint menu)
+    {
+        if (menu == 0) return "";
+        var groups = new List<string>();
+        for (var index = 0; index < GetMenuItemCount(menu); index++)
+        {
+            var caption = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400);
+            var submenu = GetSubMenu(menu, index);
+            var items = new List<string>();
+            for (var child = 0; submenu != 0 && child < GetMenuItemCount(submenu); child++)
+            {
+                var item = new System.Text.StringBuilder(128);
+                if (GetMenuStringW(submenu, (uint)child, item, item.Capacity, 0x400) > 0 && item.Length > 0)
+                    items.Add(item.ToString());
+            }
+            groups.Add($"{caption}({items.Count})={string.Join("|", items)}");
+        }
+        return string.Join(";", groups);
+    }
+
     [StructLayout(LayoutKind.Sequential)] private struct BitmapInfoHeader
     {
         public uint Size;
@@ -2870,6 +2899,9 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int maxLength, uint flags);
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);
