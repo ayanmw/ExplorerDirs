@@ -1069,3 +1069,7 @@ NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private
 ### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
 
 frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再由当前 coordinator owner 执行；View 菜单分支之前没有复核 owner，Edit → Select All 已有该检查。两条消息之间切换 pane 时，旧命令可能以新 frame 菜单匹配出命令 ID，却向旧 owner 的 view HWND 发送。本轮在 View 命令执行前加入 owner 检查，并把 coordinator 活动状态传入 dispatcher。NativeProbe Release 构建 0 警告/错误；无 Shell-view 的 `--shell-view-color-policy-smoke` 通过，新增隐藏 frame 两 pane 回归确认 stale owner 的已识别命令被消费但不派发。没有创建 `IShellView`、显示菜单或启动产品 ExplorerBrowser；实际 Shell 菜单时序及可见行为仍待隔离桌面验收。
+
+### 2026-10-27 无窗口原型基线复核
+
+重新执行 `dotnet build src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-restore`，0 警告、0 错误；随后运行 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --shell-view-color-policy-smoke`，退出码 0。该 smoke 覆盖颜色策略、隔离宿主 COM 契约、导航历史、共享菜单 owner 变更及 `IDropSource` 回调约定；不创建 `IShellView`，不执行 `DoDragDrop`，也不验证物理输入、实际菜单点击或 WPF 产品集成。此结果只确认纯逻辑/宿主契约基线当前可编译且通过，拖放迁移门槛仍未关闭。
