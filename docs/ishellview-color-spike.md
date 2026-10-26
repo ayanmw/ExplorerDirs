@@ -1040,6 +1040,8 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 
 ### 2026-10-27 对比 IShellView 选中项数据对象
 
+> **更正（2026-10-27）：**早期探针把选择数据对象的目标文件名错设为 `selected-view.txt`，但当时实际选中的是 `sourceItemPidl` 对应的 `view-target.txt`。Drop 创建原文件名后，探针只检查错误的目标路径，因而把成功复制误报为失败。此前本节及路线图中的“真实选中项对象不复制”结论无效，以下更新结果为准。
+
 扩展 Private Desktop 探针创建源 `IShellView`，等待临时目录条目完成枚举，选择一个文件并调用 `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)`。该调用成功；同一目标文件夹的 `IDropTarget` 对此数据对象的 `DragEnter`、`DragOver`、`Drop` 均返回 `S_OK` 且 Copy effect=1，但目标目录没有新增文件。作为对照，单独用 `SHCreateDataObject` 从同一源目录构造的数据对象仍能复制并保留源文件。`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 仍返回 `E_NOINTERFACE`。
 
 两个对象的 `IDataObject::EnumFormatEtc(DATADIR_GET)` 结果相同，均含 7 种公开格式：`Shell IDList Array`、`CF_HDROP`、`FileName`、`FileContents`、`FileNameW`、`FileGroupDescriptorW`、`ZoneIdentifier`，且 aspect、index 和 tymed 属性一致。当前证据排除了“格式列表缺少常用 Shell 文件格式”这一简单解释，但没有比较延迟渲染的数据内容、`IDataObjectAsyncCapability` 或源端 `IDropSource`/OLE drag-loop 生命周期。
@@ -1052,19 +1054,13 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 
 NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步在禁止合成用户输入的边界内评估 OLE drag-loop 验证方式，并继续迁移所需的其余宿主能力；本探针不会被视为拖放迁移完成。
 
-#### 2026-10-27 当前会话复跑
+#### 2026-10-27 更正后的当前会话复跑
 
-使用 `scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 45` 复跑，退出码 0。新的逐项结果再次显示：选中项对象和 `SHCreateDataObject` 的七种格式、`CF_HDROP` 路径、CIDA 父/子 PIDL 路径以及异步接口初始状态相同（`async-mode=False`、`in-operation=False`）；对真实选中项对象直接调用目标 `DragEnter/DragOver/Drop` 返回 `S_OK`、COPY effect=1，但目标文件未生成；对 `SHCreateDataObject` 对象调用相同目标回调则成功复制且保留源文件。前台 HWND 未改变。日志：`src/.state/native-probe-watchdog/20261027-061828-f46d134c.stdout.log`。
+现将 view 选择明确改为 `selectedSourcePidl`，目标断言同时核对原文件名和精确 fixture 内容。`scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 45` 退出码 0：目标文件夹 `IDropTarget` 直接消费真实 `IShellView::GetItemObject(SVGIO_SELECTION)` 数据对象后，`selected-view.txt` 已创建且内容匹配，源文件保留；`SHCreateDataObject` 路径也通过。前台 HWND 未变。新日志：`src/.state/native-probe-watchdog/20261027-064205-255387b2.stdout.log`。
 
-随后增加对延迟呈现 `FileContents` 的只读读取：两个对象的第 0 项均返回 25 字节，内容为同一 fixture 文本，SHA-256 均为 `B9D1DE3E5861DE4AED41ED31B4F8C281EE91FDD6F8B7186E0E5DC2ACB183CDD7`。读取发生在目标回调之前，之后差异仍然复现。更新探针的 NativeProbe Release 构建 0 警告/错误，`drop-target-private-desktop` watchdog 退出码 0，前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-061959-bfda41ab.stdout.log`。
+这次把异步状态读取扩展到 `DragEnter`、`DragOver` 和 `Drop` 前后；两个对象在所有阶段均保持 `async-mode=False`、`in-operation=False`，状态没有变化，也无需用异步操作状态解释前述假失败。此前针对 `FileContents`、HGLOBAL 格式、Drop 键状态及协商格式的观测仍是数据，只是不能再支撑“选中项对象不复制”这一结论。
 
-再将单次选中项对象的 `Drop` 回调 `grfKeyState` 改为 0（按钮已释放），同时保留 `DragEnter/DragOver` 的 `MK_LBUTTON`；这是微软说明通常在释放鼠标时发生 Drop 的状态。选中项对象仍返回 `S_OK`/COPY，但未生成文件，排除本探针 Drop 阶段残留 `MK_LBUTTON` 是当前差异原因。该轮 NativeProbe Release build 0 警告/错误，Private Desktop watchdog 退出码 0、前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-062132-27c56b4b.stdout.log`。另一个尝试在一次失败的直接 Drop 后从同一 view 再获取一份选择对象，探针在该 COM 调用附近超时；该分支已撤销，不作为 Drop 按键状态的对照证据。
-
-继续读取两对象列举出的 HGLOBAL 格式：`FileName`（ANSI 短路径）、`FileNameW`（Unicode 完整路径）、`FileGroupDescriptorW`（596 字节）、`ZoneIdentifier`（4 字节）逐项长度与 SHA-256 相同；配合此前相同的 `CF_HDROP`、`FileContents` 和 CIDA 路径，本次已读取的所有公开格式 payload 均未发现差异。Release build 0 警告/错误，Private Desktop watchdog 退出码 0、前台 HWND 不变；日志：`src/.state/native-probe-watchdog/20261027-062311-c9d2f378.stdout.log`。这仍不能覆盖 OLE drag-loop 状态、私有接口/对象身份或目标回调依赖，因此不据此认定数据对象完全等价。
-
-最后对 Shell 源/目标协商格式调用 `IDataObject::QueryGetData`：`Preferred DropEffect`、`Performed DropEffect`、`Logical Performed DropEffect` 和 `InShellDragLoop` 在两种对象上都返回 `S_FALSE`，均不可用。修正探针只在 `S_OK` 时再调用 `GetData` 后，Private Desktop watchdog 仍退出码 0、文件操作差异保持；日志：`src/.state/native-probe-watchdog/20261027-062530-d4425fd8.stdout.log`。微软说明 `CFSTR_INDRAGLOOP` 可用于避免 drag loop 中过早读取数据，且效果格式承担源/目标协商；本机这两个对象均未提供这些格式。来源：[Shell Clipboard Formats](https://learn.microsoft.com/en-us/windows/win32/shell/clipboard)。
-
-复跑确认差异仍在，但尚未定位其根因；不能把相同公开格式等同于相同内部拖放生命周期。下一步需在授权的隔离可接收输入环境取得真实 OLE `DoDragDrop` 闭环，或继续从非输入可观察的 Shell source/target 回调调查实际操作依赖。当前桌面约束下不模拟鼠标/键盘，也不把直接回调测试当作拖放完成。
+本证据只验证直接调用目标接口的复制和目标内容，不等于完整 OLE `DoDragDrop` 源端/目标交接；鼠标命中、Ctrl/Shift/右键拖动、移动语义、可见交互和产品宿主仍待独占且获授权的桌面验收。依据：[OLE drag-and-drop](https://learn.microsoft.com/en-us/windows/win32/com/drag-and-drop)。
 
 ### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
 

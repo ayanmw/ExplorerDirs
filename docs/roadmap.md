@@ -1,13 +1,10 @@
 # 路线图
 
-## 2026-10-27：复核隔离 IShellView 拖放目标接收
+## 2026-10-27：更正 IShellView 选中项拖放探针的文件名断言
 
-- 复跑 `drop-target-private-desktop`，确认注册目标对 `SHCreateDataObject` 的真实 Shell 文件对象能复制并保留源文件；对真实 `IShellView` 选中项对象直接调用相同的 `DragEnter/DragOver/Drop` 虽返回 `S_OK` 和 COPY effect，却没有生成目标文件。两种对象当前可见格式、CF_HDROP/CIDA 路径及 async capability 初始值相同，根因未明。
-- 新增 FileContents 延迟流只读诊断后，两对象也返回相同的 25 字节内容及 SHA-256；复测仍可稳定区分为选中项对象不落盘、独立 Shell 文件对象复制成功。Private Desktop watchdog 退出码 0，前台 HWND 不变。
-- 按微软 Drop 发生在按钮释放后的常见时序，将直接回调的 `Drop.grfKeyState` 改为 0 后，选中项对象仍未落盘；排除按键状态残留这一探针变量。
-- 对列举出的 `FileName`、`FileNameW`、`FileGroupDescriptorW`、`ZoneIdentifier` 实际 payload 逐项读取后与独立 Shell 对象长度/hash 相同；加上已对比的 CF_HDROP、FileContents 和 CIDA，已读取的公开格式尚未解释差异。
-- 查询 Shell 拖放协商格式时，两种对象都对 Preferred/Performed/Logical Performed DropEffect 与 InShellDragLoop 返回 `S_FALSE`；没有发现格式可用性差异。完整 OLE 源/目标循环仍未覆盖。
-- 该回调探针不等于完整 OLE `DoDragDrop`；真实源/目标循环、移动/修饰键、可见交互和产品宿主仍是迁移门槛。复跑证据见[IShellView 拖放记录](ishellview-color-spike.md#2026-10-27-当前会话复跑)。
+- 复跑发现早期探针选中了 `view-target.txt`，却按 `selected-view.txt` 检查目标文件名，因此把成功复制误判为失败。已修正为用独立 `selectedSourcePidl` 选择 `selected-view.txt`，并同时校验目标文件的原名和精确内容；真实 `IShellView::GetItemObject(SVGIO_SELECTION)` 数据对象经目标文件夹 `IDropTarget` 直接调用后成功复制，源文件保留。早期“不落盘”的记录由此撤销。
+- 拓展 `IDataObjectAsyncCapability` 阶段记录后，两类对象在 `DragEnter`、`DragOver`、`Drop` 前后均为 `async-mode=False`、`in-operation=False`；此状态没有解释此前误判。
+- NativeProbe Release build 0 警告/错误，`drop-target-private-desktop` watchdog 退出码 0，前台 HWND 未变（日志：`src/.state/native-probe-watchdog/20261027-064309-d58b7ee7.stdout.log`）。此探针只直接调用目标回调，不等同于完整 OLE `DoDragDrop`；源端交接、修饰键/移动语义、可见跨窗格拖动及产品宿主仍待验收。记录见[IShellView 拖放调查](ishellview-color-spike.md#2026-10-27-对比-ishellview-选中项数据对象)。
 
 ## 2026-10-27：保存当前工作区为桌面启动项
 
@@ -3616,9 +3613,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-27：对比 IShellView 选中项数据对象
 
 - 修正探针对 `ILFindChild` 借用 PIDL 的错误释放，并在枚举前等待源 view 稳定到 3 个测试项目；Private Desktop watchdog 退出码 0，foreground 未变。
-- `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)` 成功返回选中项数据对象；将其直接传给注册的目标文件夹 `IDropTarget` 后，`DragEnter/DragOver/Drop` 均返回 `S_OK` 且 Copy effect=1，但目标中未出现文件。此前已知 `SHCreateDataObject` 构造对象在相同目标路径能真实复制，源文件保留。这个差异说明单纯的 Shell 方法成功码不足以证明拖放操作完成，选中项对象的格式/生命周期及真实 OLE drag loop 仍需调查。
-- 两个 `IDataObject::EnumFormatEtc(DATADIR_GET)` 均列出相同的 7 种格式及相同 aspect/index/tymed；`CF_HDROP` 与 CIDA 均指向同一源目录下的 `view-target.txt`。两个对象都支持 `IDataObjectAsyncCapability`，且 `GetAsyncMode=False`、`InOperation=False`。因此已检查的公开格式、载荷路径和异步初始状态相同，直接 `Drop` 行为差异仍未解释。
-- NativeProbe Release build 0 警告/错误；Private Desktop watchdog 退出码 0，foreground 未变。微软文档说明 `DoDragDrop` 驱动源/目标完整循环，逐个直接调用 `IDropTarget` 方法不是完整拖放验收：[OLE drag-and-drop](https://learn.microsoft.com/en-us/windows/win32/com/drag-and-drop)、[Shell data object](https://learn.microsoft.com/en-us/windows/win32/shell/dataobject)。私有桌面无法读取/移动当前指针，当前约束禁止注入鼠标/键盘，因此本轮未调用真实 `DoDragDrop`；产品迁移、用户可见交互、修饰键与移动语义仍未验证。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27对比-ishellview-选中项数据对象)。
+- 后续更正发现此阶段把 `view-target.txt` 作为源选择，却检查了 `selected-view.txt` 目标路径；当时观测到的 `copied=False` 只是目标名断言错误，不代表 Shell 未复制。该失败结论已撤销，见路线图顶部 2026-10-27 更正条目与[原型记录](ishellview-color-spike.md#2026-10-27-对比-ishellview-选中项数据对象)。
+- 真实选中项复制已在更正后的探针通过；本隔离测试仍只直接调用目标 `IDropTarget`，并非真实 OLE `DoDragDrop`。源端循环、移动/修饰键、鼠标命中、可见交互和产品接线未验证。
 
 ## 2026-10-27：登记 Q-Dir 标签组差距
 

@@ -29,7 +29,8 @@ internal static class ShellViewDropTargetProbe
         var selectedTargetPath = Path.Combine(targetFolderPath, "selected-view.txt");
         var registeredTargetPath = Path.Combine(targetFolderPath, "registered-target.txt");
         var viewTargetPath = Path.Combine(targetFolderPath, "view-target.txt");
-        nint parent = 0, sourcePane = 0, targetPane = 0, sourceFolderPidl = 0, sourceItemPidl = 0, targetFolderPidl = 0;
+        nint parent = 0, sourcePane = 0, targetPane = 0, sourceFolderPidl = 0, sourceItemPidl = 0,
+            selectedSourcePidl = 0, targetFolderPidl = 0;
         nint sourceFolder = 0, targetFolder = 0, sourceView = 0, targetView = 0;
         nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
         nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, childPidls = 0;
@@ -46,6 +47,7 @@ internal static class ShellViewDropTargetProbe
             File.WriteAllText(registeredSourcePath, "native-shell-folder-drop-fixture");
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourceFolderPath, 0, out sourceFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourcePath, 0, out sourceItemPidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(selectedSourcePath, 0, out selectedSourcePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(targetFolderPath, 0, out targetFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, sourceFolderPidl, 0, in ShellFolderId, out sourceFolder));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, targetFolderPidl, 0, in ShellFolderId, out targetFolder));
@@ -80,8 +82,9 @@ internal static class ShellViewDropTargetProbe
             Console.WriteLine("shell-view-drop-target-stage: source-view-created");
             var folderViewId = FolderViewId;
             Marshal.ThrowExceptionForHR(Marshal.QueryInterface(sourceView, in folderViewId, out sourceFolderView));
-            var sourceChildPidl = ILFindChild(sourceFolderPidl, sourceItemPidl);
-            if (sourceChildPidl == 0) throw new InvalidOperationException("The selected source item is not a child of its folder.");
+            // Keep the selected PIDL paired with its expected target name; a mismatch once made a successful copy look like a failure.
+            var selectedChildPidl = ILFindChild(sourceFolderPidl, selectedSourcePidl);
+            if (selectedChildPidl == 0) throw new InvalidOperationException("The selected source item is not a child of its folder.");
             var sourceItemCount = 0;
             var enumerationDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
             do
@@ -99,7 +102,7 @@ internal static class ShellViewDropTargetProbe
                 if (getItemHr < 0 || itemPidl == 0) continue;
                 try
                 {
-                    if (ILIsEqual(sourceChildPidl, itemPidl))
+                    if (ILIsEqual(selectedChildPidl, itemPidl))
                     {
                         sourceItemIndex = index;
                         break;
@@ -166,10 +169,11 @@ internal static class ShellViewDropTargetProbe
             var point = new PointL { X = boundsOnScreen.Left + Math.Max(1, boundsOnScreen.Right - boundsOnScreen.Left) / 2,
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
-            var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point, viewTargetPath, "IShellView.GetItemObject");
+            var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point,
+                viewTargetPath, "IShellView.GetItemObject", "native-shell-drop-fixture");
             // OLE invokes Drop after release; compare the selected-view object with its actual button-up state.
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
-                selectedTargetPath, "selected view IDataObject", dropKeyState: 0);
+                selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture", dropKeyState: 0);
             // Keep the registered folder target as a separate candidate with its own Shell data object.
             var secondSourcePath = registeredSourcePath;
             var secondSourcePidl = nint.Zero;
@@ -184,7 +188,7 @@ internal static class ShellViewDropTargetProbe
                 Marshal.WriteIntPtr(secondChildArray, secondChild);
                 Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, secondChildArray, 0, in DataObjectId, out secondDataObject));
                 folderTargetResult = TryTransfer(folderDropTarget, secondDataObject, point, registeredTargetPath,
-                    "IShellFolder.CreateViewObject (registered HWND target)");
+                    "IShellFolder.CreateViewObject (registered HWND target)", "native-shell-folder-drop-fixture");
             }
             finally
             {
@@ -199,8 +203,8 @@ internal static class ShellViewDropTargetProbe
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
             Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-copy={folderTargetResult}; sources-preserved={sourcePreserved}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !sourcePreserved)
-                throw new InvalidOperationException("The registered folder drop target did not perform a non-destructive isolated copy.");
+            if (!folderTargetResult || !selectedDataObjectResult || !sourcePreserved)
+                throw new InvalidOperationException("An isolated source or destination Shell IDataObject copy failed, or a source was not preserved.");
             return 0;
         }
         finally
@@ -227,6 +231,7 @@ internal static class ShellViewDropTargetProbe
             if (sourceFolderPidl != 0) Marshal.FreeCoTaskMem(sourceFolderPidl);
             if (sourceItemPidl != 0) Marshal.FreeCoTaskMem(sourceItemPidl);
             if (targetFolderPidl != 0) Marshal.FreeCoTaskMem(targetFolderPidl);
+            if (selectedSourcePidl != 0) Marshal.FreeCoTaskMem(selectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
             if (sourcePane != 0 && !DestroyWindow(sourcePane))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -240,11 +245,13 @@ internal static class ShellViewDropTargetProbe
     }
 
     private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label,
-        uint dropKeyState = 0x0001)
+        string expectedContents, uint dropKeyState = 0x0001)
     {
+        LogAsyncOperationState(label, dataObject, "before-drag-enter");
         var allowedEffect = DropEffectCopy;
         var enterHr = At<DragEnter>(target, 3)(target, dataObject, 0x0001, ref point, ref allowedEffect);
         if (enterHr < 0) throw new COMException($"{label} DragEnter failed", enterHr);
+        LogAsyncOperationState(label, dataObject, "after-drag-enter");
         var enterEffect = allowedEffect & DropEffectMask;
         if (enterEffect == 0 || (enterEffect & ~DropEffectCopy) != 0)
         {
@@ -256,6 +263,7 @@ internal static class ShellViewDropTargetProbe
         var overEffect = DropEffectCopy;
         var overHr = At<DragOver>(target, 4)(target, 0x0001, ref point, ref overEffect);
         if (overHr < 0) throw new COMException($"{label} DragOver failed", overHr);
+        LogAsyncOperationState(label, dataObject, "after-drag-over");
         if ((overEffect & DropEffectMask) != DropEffectCopy)
         {
             _ = At<DragLeave>(target, 5)(target);
@@ -266,10 +274,30 @@ internal static class ShellViewDropTargetProbe
         var dropEffect = overEffect & DropEffectMask;
         var dropHr = At<Drop>(target, 6)(target, dataObject, dropKeyState, ref point, ref dropEffect);
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
-        var copied = File.Exists(destination) && File.ReadAllText(destination).StartsWith("native-shell-", StringComparison.Ordinal);
+        LogAsyncOperationState(label, dataObject, "after-drop");
+        var copied = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
         var targetFiles = Directory.GetFiles(Path.GetDirectoryName(destination)!).Select(Path.GetFileName).Order().ToArray();
         Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop-key-state=0x{dropKeyState:X}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
         return copied;
+    }
+
+    private static void LogAsyncOperationState(string label, nint dataObject, string stage)
+    {
+        var asyncDataObjectId = AsyncDataObjectId;
+        var asyncHr = Marshal.QueryInterface(dataObject, in asyncDataObjectId, out var asyncDataObject);
+        if (asyncHr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-async-stage: source={label}; stage={stage}; supported=False; query=0x{asyncHr:X8}");
+            return;
+        }
+
+        try
+        {
+            var modeHr = At<GetAsyncMode>(asyncDataObject, 4)(asyncDataObject, out var asyncMode);
+            var operationHr = At<InAsyncOperation>(asyncDataObject, 6)(asyncDataObject, out var inOperation);
+            Console.WriteLine($"shell-view-drop-target-async-stage: source={label}; stage={stage}; mode-hr=0x{modeHr:X8}; async-mode={asyncMode}; operation-hr=0x{operationHr:X8}; in-operation={inOperation}");
+        }
+        finally { Marshal.Release(asyncDataObject); }
     }
 
     private static void LogDataObjectFormats(string label, nint dataObject)
