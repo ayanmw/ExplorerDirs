@@ -32,6 +32,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 微软文档分别说明 [`IShellView::TranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator) 是 Explorer 调用以分发文件视图快捷键，[`IShellBrowser::TranslateAcceleratorSB`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-translateacceleratorsb) 处理浏览器 frame accelerator，而 [`OleTranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator) 属于对象服务器请求容器翻译的 OLE 路由。当前应先通过真实 `IShellView::TranslateAccelerator` 探查当前 Shell view 是否会委托 browser `TranslateAcceleratorSB`，并区分 view 自己消费的按键与容器按键；不把 OLE API 的合成测试当作 Shell 文件视图的快捷键证据。
 
+### 2026-10-27：探测 filesystem view 到 browser accelerator 的委托
+
+在完整 Private Desktop session-restore consumer 内，对有焦点的真实 filesystem `IShellView` 直接提交独立的 F4、F6、F24 `WM_KEYDOWN`，每次前都重新聚焦同一原生文件列表。`IShellView::TranslateAccelerator` 分别返回 F4=`S_FALSE`、F6=`S_OK`、F24=`S_FALSE`；三次均未调用 `IShellBrowser::TranslateAcceleratorSB` 回调。探针结束后恢复原焦点，前台 HWND 未变；完整四窗格 session-restore watchdog 退出码 0，日志：`src/.state/native-probe-watchdog/20261027-043550-7cf2b1d4.stdout.log`。
+
+这说明 Windows 当前 filesystem view 对这几个合成按键没有委托 browser accelerator handler，其中 F6 由 view 自己消费。它不证明自定义 namespace extension 对 frame accelerator 的一般委托规则，也不覆盖真实物理按键、消息循环 accelerator table 或 WPF `HwndHost`。下一步应从 frame 的实际 `IOleInPlaceSite::GetWindowContext`/accelerator-table 生命周期或 ExplorerBrowser 的宿主路由继续验证，而不是把未回调视为宿主接口无效。
+
 ## 2026-10-26：读取 Q-Dir Filter2 原始规则行
 
 NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键，按键序号排序，并保留模式字符串及其后六个原始字段。这个结构依据本机可读 `Q-Dir.ini` 的 12 行样本；字段含义未确认的值不映射到颜色或样式开关。编号规则若字段数不符或序号重复，解析整体失败且不返回部分规则。

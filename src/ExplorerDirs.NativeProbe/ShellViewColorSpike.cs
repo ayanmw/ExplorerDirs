@@ -128,6 +128,8 @@ internal static class ShellViewColorSpike
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
             Console.WriteLine("session-restore-consumer-stage: state-restored");
+            var shellAcceleratorRoute = ProbeShellBrowserAcceleratorForwarding(host, view, viewWindow);
+            Console.WriteLine("session-restore-consumer-stage: shell-accelerator-route=" + shellAcceleratorRoute);
             var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
                 folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator);
             Console.WriteLine("session-restore-consumer-stage: four-pane-finished");
@@ -291,6 +293,55 @@ internal static class ShellViewColorSpike
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
             $"menu-routing={menuRouting}; menu-commands={menuCommands}; file-updates={allPaneCounts}; " +
             $"directory-notifications={directoryIsolation}; independent=True";
+    }
+
+    private static string ProbeShellBrowserAcceleratorForwarding(ShellViewColorBrowserHost host,
+        nint view, nint viewWindow)
+    {
+        var foreground = GetForegroundWindow();
+        var priorFocus = GetFocus();
+        var listView = FindChildByClass(viewWindow, "SysListView32");
+        if (listView == 0) throw new InvalidOperationException("The Shell accelerator probe has no native file list.");
+        _ = SetFocus(listView);
+        if (GetFocus() != listView)
+            throw new InvalidOperationException("Could not focus the isolated Shell file list for accelerator routing.");
+
+        var priorHandler = host.AcceleratorHandler;
+        var calls = new List<string>();
+        host.AcceleratorHandler = (messagePointer, commandId) =>
+        {
+            var forwarded = Marshal.PtrToStructure<NativeMessage>(messagePointer);
+            calls.Add($"id=0x{commandId:X4}/msg=0x{forwarded.Id:X}/key=0x{forwarded.WParam:X}");
+            return true;
+        };
+        try
+        {
+            var results = new List<string>(3);
+            foreach (var (name, key) in new[] { ("F4", 0x73u), ("F6", 0x75u), ("F24", 0x87u) })
+            {
+                _ = SetFocus(listView);
+                if (GetFocus() != listView)
+                    throw new InvalidOperationException($"Could not restore the isolated file-list focus before {name}.");
+                var before = calls.Count;
+                var message = new NativeMessage
+                {
+                    Window = listView,
+                    Id = 0x0100, // WM_KEYDOWN
+                    WParam = key,
+                    LParam = 1
+                };
+                var result = At<TranslateAccelerator>(view, 5)(view, ref message);
+                results.Add($"{name}:hr=0x{result:X8}/browser-delegated={calls.Count != before}");
+            }
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Probing Shell accelerator forwarding changed the foreground window.");
+            return string.Join(',', results) + $";browser-calls=[{string.Join(';', calls)}]";
+        }
+        finally
+        {
+            host.AcceleratorHandler = priorHandler;
+            if (priorFocus != 0 && IsWindow(priorFocus)) _ = SetFocus(priorFocus);
+        }
     }
 
     private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,

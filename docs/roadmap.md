@@ -3527,3 +3527,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 隔离试验中，Win32 `TranslateAccelerator` 能匹配合成按键与 accelerator 表，但 `OleTranslateAccelerator` 返回 `S_FALSE`，未到达 frame handler。该探针没有完整 OLE `GetWindowContext` 生命周期，不能判断 `IOleInPlaceFrame::TranslateAccelerator` 本身有问题；临时代码已撤回。
 - 下一步走文件浏览器真实调用链：从有焦点的 `IShellView::TranslateAccelerator` 检查 Shell 是否委托 `IShellBrowser::TranslateAcceleratorSB`，记录返回值、消息和 pane 路由。ExplorerBrowser 产品和 release 均未改。详细依据见[隔离原型记录](ishellview-color-spike.md#2026-10-27区分-ole-frame-与-shell-view-accelerator-路径)。
+
+## 2026-10-27：验证 filesystem Shell view 的 browser accelerator 委托
+
+- 完整 Private Desktop session-restore consumer 对有焦点的真实 filesystem `IShellView` 合成 F4、F6、F24 `WM_KEYDOWN`。返回值依次为 `S_FALSE`、`S_OK`、`S_FALSE`，browser `TranslateAcceleratorSB` handler 三次均未调用；每次输入前恢复同一文件列表焦点。完整四窗格 session-restore watchdog 退出码 0，前台窗口不变。日志：`src/.state/native-probe-watchdog/20261027-043550-7cf2b1d4.stdout.log`。
+- 结论仅适用于此 filesystem view 与这三个合成按键；不代表 namespace extension、真实输入或 WPF 宿主。下一步补齐 OLE in-place `GetWindowContext`/accelerator-table 生命周期，再检查 frame accelerator 的真实路由；产品 ExplorerBrowser 与 release 未改。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27探测-filesystem-view-到-browser-accelerator-的委托)。
