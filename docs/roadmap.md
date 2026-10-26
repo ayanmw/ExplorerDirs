@@ -3581,3 +3581,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在每个真实 filesystem `IShellView::CreateViewWindow` 返回后，从对应文件夹取得 `IID_IDropTarget` 并将其注册到新 view HWND；导航替换 view 时先注册新 HWND、再撤销旧 HWND；失败回滚只撤销新 HWND，释放 view 前撤销其 drop target。重新构建 NativeProbe Release（0 警告、0 错误）后，完整 `session-restore-private-desktop` watchdog 退出码 0：四 pane 恢复、菜单/排序/分组命令、复制/重命名/删除、跨 view 目录通知与焦点隔离均通过，`foreground-unchanged=True`。日志：`src/.state/native-probe-watchdog/20261027-053426-3ca5dac1.stdout.log`。
 - 独立 `--shell-view-drop-target-registration-smoke` 通过：单 host 注册四个 HWND、第二 host 重复注册正确失败且不抢走原 owner、选择性撤销后 HWND 可重新注册、Dispose 撤销剩余注册；前台窗口未变化。
 - 证据确认真实 Shell view 暴露的 `IDropTarget` 已在四窗格 host 生命周期中完成注册/替换/撤销，不能等同于实际 OLE 拖放。未执行 `DoDragDrop`，未验证拖放效果、鼠标源端、第三方目标、ExplorerBrowser/WPF 产品接线；这些仍是迁移门槛。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27四窗格原生-shell-view-的-drop-target-生命周期复核)。
+
+## 2026-10-27：隔离 IShellView 文件夹目标接收 Shell 数据对象
+
+- `IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 在本机 filesystem view 返回 `E_NOINTERFACE`；经 `IShellFolder::CreateViewObject` 取得并注册到 view HWND 的目录目标则接受 `SHCreateDataObject` 构造的临时 Shell 文件对象。`DragEnter/DragOver/Drop` 均成功，Copy effect 为 1，目标内容匹配、源文件保留。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog 退出码 0，`--shell-view-color-policy-smoke` 通过，foreground 未变。
+- 前两次 watchdog 超时根因为 Private Desktop top-level parent `DestroyWindow` 清理阻塞；遵从现有一次性探针进程清理规则后退出正常。两次超时留下的两个 `%TEMP%\ExplorerDirs-NativeProbe\<guid>` 测试夹具无法通过当前工具删除，详情见[探针记录](ishellview-color-spike.md#2026-10-27-ishellview-文件夹-drop-target-的-shell-数据对象接收)。
+- 这是文件夹目标接收 Shell `IDataObject` 的隔离证据，源对象通过 `SHCreateDataObject` 构造；没有验证从真实选择创建的数据对象、`DoDragDrop`、鼠标命中/修饰键/移动语义或用户可见跨窗格拖动，故拖放 P0 仍开放。

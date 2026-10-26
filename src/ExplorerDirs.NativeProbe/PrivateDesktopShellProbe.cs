@@ -23,6 +23,8 @@ internal static class PrivateDesktopShellProbe
     internal static int RunSessionRestore() => Run("session-restore", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, probeSessionRestore: true));
 
+    internal static int RunDropTarget() => Run("drop-target", ShellViewDropTargetProbe.Run);
+
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId) =>
         Run("session-restore-consumer", () => ShellViewColorSpike.RunSessionRestoreConsumer(
             fixture, stateDirectory, sessionId, terminateProcessAfterProbe: true));

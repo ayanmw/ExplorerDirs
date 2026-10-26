@@ -44,6 +44,8 @@ internal static class Program
             return ShellViewColorPolicySmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-registration-smoke")
             return ShellViewDropTargetRegistrationSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-private-desktop")
+            return PrivateDesktopShellProbe.RunDropTarget();
         if (args.Length == 1 && args[0] == "--ishellview-command-state-readonly")
             return ShellViewColorSpike.Run(queryCommandStatesOnly: true);
         if (args.Length == 1 && args[0] == "--ishellview-command-state-readonly-private-desktop")

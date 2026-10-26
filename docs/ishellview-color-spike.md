@@ -1029,3 +1029,11 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 另运行 `ExplorerDirs.NativeProbe.dll --shell-view-drop-target-registration-smoke`，通过单 host 四 HWND 注册、重复注册冲突不改变原 owner、选择性撤销与重新注册、Dispose 撤销其余注册，且前台窗口保持不变。
 
 边界：以上没有调用 `DoDragDrop`，也没有让用户文件经鼠标跨 pane 拖动。它确认目标接口已绑定到真实 view HWND，不证明 Drop effect、移动/复制语义、外部拖放源/目标、可见交互或 ExplorerBrowser/WPF 产品接线。真实拖放验收仍需要可接收 OLE 输入的隔离桌面，并保持与用户日常桌面分离。
+
+### 2026-10-27 IShellView 文件夹 drop target 的 Shell 数据对象接收
+
+新增 Private Desktop 临时夹具探针，对比 `IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 与从目标文件夹 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得并注册到该 view HWND 的目标。当前 filesystem `IShellView::GetItemObject` 返回 `E_NOINTERFACE (0x80004002)`；文件夹目标的 `DragEnter`、`DragOver`、`Drop` 均返回 `S_OK`，Copy effect 为 1，使用 `SHCreateDataObject` 构造的 Shell 文件数据对象将临时文件复制到目标目录，源文件内容与存续状态都保持。NativeProbe Release build 0 警告/错误，`drop-target-private-desktop` watchdog 退出码 0，`--shell-view-color-policy-smoke` 通过，foreground 未变化。
+
+前两次探针运行在文件操作完成后卡于 Private Desktop 顶层 parent 的 `DestroyWindow`，watchdog 以超时结束；诊断确认 drop 与 Shell view 的撤销/销毁均已完成。按现有 Private Desktop 约束改为由一次性进程退出回收 top-level parent 后，探针退出码 0。两次被 watchdog 结束的探针各遗留一个仅含测试文件的临时 fixture，路径为 `%TEMP%\ExplorerDirs-NativeProbe\81c4ff72648f49fba34e19442d1aa5d4` 与 `%TEMP%\ExplorerDirs-NativeProbe\a9ef35a4f4244e62bb1150f2ad1cbdf9`；当前工具拒绝删除这些用户 temp 目录，故未声称已清理。
+
+这项结果比单纯注册 smoke 多验证了文件夹目标确实能消费 Shell `IDataObject` 并执行复制；但数据对象由 `SHCreateDataObject` 构造，不是从真实源 view 当前选择取得。它不证明真实 OLE `DoDragDrop`、鼠标命中/修饰键源端交接、移动语义、第三方目标或可见多窗格行为；`DoDragDrop` 仍待可接收输入的独立桌面验收。
