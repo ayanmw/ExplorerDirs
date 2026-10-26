@@ -58,6 +58,13 @@
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ExplorerDirs.SelectionBackgroundBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="{x:Type CheckBox}">
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>

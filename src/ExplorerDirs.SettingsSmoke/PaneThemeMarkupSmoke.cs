@@ -48,6 +48,22 @@ internal static class PaneThemeMarkupSmoke
                   (string?)setter.Attribute("Property") == "Foreground" &&
                   (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.SelectionTextBrush}"),
             "selected WPF list items use the contrast-checked selection palette");
+        var toggleStyle = appResources.Descendants(presentation + "Style")
+            .SingleOrDefault(element => (string?)element.Attribute("TargetType") == "{x:Type ToggleButton}");
+        var toggleCheckedTrigger = toggleStyle?.Elements(presentation + "Style.Triggers")
+            .Elements(presentation + "Trigger")
+            .SingleOrDefault(trigger => (string?)trigger.Attribute("Property") == "IsChecked" &&
+                                        (string?)trigger.Attribute("Value") == "True");
+        Check(toggleCheckedTrigger?.Elements(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "Background" &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.SelectionBackgroundBrush}") == true &&
+              toggleCheckedTrigger.Elements(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "BorderBrush" &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentBrush}") &&
+              toggleCheckedTrigger.Elements(presentation + "Setter").Any(setter =>
+                  (string?)setter.Attribute("Property") == "Foreground" &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.SelectionTextBrush}"),
+            "checked feature toggles use contrast-checked selection and dynamic accent roles");
         var tabControl = document.Descendants(presentation + "TabControl")
             .Single(element => (string?)element.Attribute(xaml + "Name") == "Tabs");
         var style = tabControl.Element(presentation + "TabControl.ItemContainerStyle")?
