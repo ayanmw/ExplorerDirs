@@ -754,24 +754,35 @@ internal static class ShellViewColorSpike
     private static bool TryInvokeMergedShellViewMenuCommand(StreamViewHost owner, uint commandId, int groupIndex,
         bool execute, Func<bool>? isStillActive)
     {
-        if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
+        var shellView = owner.View;
+        if (shellView == 0 || owner.MenuFrameWindow == 0) return false;
         var composite = GetMenu(owner.MenuFrameWindow);
         var mergedPath = FindMergedMenuCommandPath(composite, groupIndex, commandId);
         if (mergedPath is null) return false;
         if (!execute) return true;
         // A queued WM_COMMAND can outlive the pane that owned the merged menu.
         // Consume recognized commands from retired owners without invoking their view.
-        if (isStillActive is not null && !isStillActive()) return true;
+        bool IsCurrent() => IsCurrentShellMenuOwner(owner, shellView, isStillActive);
+        if (!IsCurrent()) return true;
 
         // FCIDM_SHVIEWFIRST..LAST commands belong to the active folder view's
         // window procedure. Forward the original Shell command ID instead of
         // translating localized labels into a separate context-menu verb.
-        var windowResult = At<GetWindow>(owner.View, 3)(owner.View, out var viewWindow);
+        var windowResult = At<GetWindow>(shellView, 3)(shellView, out var viewWindow);
         if (windowResult < 0 || viewWindow == 0 || !IsWindow(viewWindow))
             throw new InvalidOperationException($"The active Shell view returned an invalid command target HWND: hr=0x{windowResult:X8}; hwnd=0x{viewWindow:X}.");
+        // GetWindow is a synchronous COM call and can reenter the frame; revalidate
+        // the pane/view before sending a command to the HWND it returned.
+        if (!IsCurrent()) return true;
         _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
         owner.MenuTrace.Add($"shell-command group={groupIndex} id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
         return true;
+    }
+
+    internal static bool IsCurrentShellMenuOwner(StreamViewHost owner, nint expectedView, Func<bool>? isStillActive)
+    {
+        if (isStillActive is not null && !isStillActive()) return false;
+        return expectedView != 0 && owner.View == expectedView;
     }
 
     internal static bool TryInvokeMergedEditMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,

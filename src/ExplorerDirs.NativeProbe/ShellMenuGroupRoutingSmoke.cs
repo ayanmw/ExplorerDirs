@@ -43,8 +43,14 @@ internal static class ShellMenuGroupRoutingSmoke
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8124) != MergedEditMenuCommandRoute.ShellView ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8125) != MergedEditMenuCommandRoute.NotFound)
                 throw new InvalidOperationException("Merged Edit commands must distinguish Select All, native Shell commands and unrelated command IDs.");
+            using var owner = new StreamViewHost(0, []) { View = (nint)0x1234 };
+            if (!ShellViewColorSpike.IsCurrentShellMenuOwner(owner, (nint)0x1234, () => true) ||
+                ShellViewColorSpike.IsCurrentShellMenuOwner(owner, (nint)0x1234,
+                    () => { owner.View = (nint)0x5678; return true; }) ||
+                ShellViewColorSpike.IsCurrentShellMenuOwner(owner, (nint)0x5678, () => false))
+                throw new InvalidOperationException("A Shell menu command must be cancelled when its view or pane changes during a reentrant callback.");
 
-            Console.WriteLine("shell-menu-group-routing-smoke: PASS synthetic File/Edit/View group ownership; no Shell view created");
+            Console.WriteLine("shell-menu-group-routing-smoke: PASS menu group ownership and reentrant active-view guard; no Shell view created");
             return 0;
         }
         finally
