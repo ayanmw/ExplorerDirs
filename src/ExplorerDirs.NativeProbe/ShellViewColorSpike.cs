@@ -735,10 +735,21 @@ internal static class ShellViewColorSpike
     internal static bool TryInvokeMergedViewMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
         Func<bool>? isStillActive = null)
     {
+        return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 2, execute, isStillActive);
+    }
+
+    internal static bool TryInvokeMergedFileMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 0, execute, isStillActive);
+    }
+
+    private static bool TryInvokeMergedShellViewMenuCommand(StreamViewHost owner, uint commandId, int groupIndex,
+        bool execute, Func<bool>? isStillActive)
+    {
         if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
         var composite = GetMenu(owner.MenuFrameWindow);
-        var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
-        var mergedPath = FindMenuCommandPath(viewMenu, commandId);
+        var mergedPath = FindMergedMenuCommandPath(composite, groupIndex, commandId);
         if (mergedPath is null) return false;
         if (!execute) return true;
         // A queued WM_COMMAND can outlive the pane that owned the merged menu.
@@ -752,7 +763,7 @@ internal static class ShellViewColorSpike
         if (windowResult < 0 || viewWindow == 0 || !IsWindow(viewWindow))
             throw new InvalidOperationException($"The active Shell view returned an invalid command target HWND: hr=0x{windowResult:X8}; hwnd=0x{viewWindow:X}.");
         _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
-        owner.MenuTrace.Add($"shell-command id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
+        owner.MenuTrace.Add($"shell-command group={groupIndex} id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
         return true;
     }
 
@@ -819,6 +830,12 @@ internal static class ShellViewColorSpike
             if (nestedPath is not null) return nestedPath;
         }
         return null;
+    }
+
+    internal static IReadOnlyList<string>? FindMergedMenuCommandPath(nint compositeMenu, int groupIndex, uint commandId)
+    {
+        if (compositeMenu == 0 || !IsMenu(compositeMenu) || groupIndex is < 0 or > 5) return null;
+        return FindMenuCommandPath(GetSubMenu(compositeMenu, groupIndex), commandId);
     }
 
     private static string NormalizeMenuLabel(string? label)
