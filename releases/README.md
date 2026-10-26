@@ -1,6 +1,10 @@
 # 可使用版本
 
-## 最新临时预览包（2026-10-26）
+## 最新临时预览包（2026-10-27）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.74\app\ExplorerDirs.App.exe`，使用独立 profile。新增地址历史入口和 Q-Dir 路径输入规则、标签栏显示模式及对应 Tab 顺序、每窗格 Shell 状态提示，以及 `.qdr` 颜色规则模式导入预览。产品版本 `0.6.0-preview.temp.74+e74ad26a950edaf291730abb30dc3a00978dc769`，EXE SHA-256 `37BC65EE5234C5F1754A56BBE85FB3D104AB8C9E4AF6C4033B04274208A98701`，DLL SHA-256 `8E696F29B81547A1DE98AC21101B6CB1767A477FACB1F39369AAAFA1433837D0`，与包内清单一致。完整 Release `SettingsSmoke` 和 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；实际菜单、焦点、Shell 状态提示、文件区颜色及 Q-Dir 互操作仍待可见验收。详见[temp.74 说明](../docs/releases/preview-0.6.0-temp.74.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
 
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.73\app\ExplorerDirs.App.exe`，使用独立 profile。移除实测收益有限的“优化内存”，并新增“文件 > 重启应用”，确认后保存并恢复当前进程管理的全部窗口会话；其它独立 Explorer Dirs 进程不受影响。产品版本 `0.6.0-preview.temp.73+0d874d442d0f6efb0535cb920729fa89fd691da7`，EXE SHA-256 `1230251D4E33F5E932669E4A20C7C55FB5C42D7B254C9ED2B9C2549533EC60F3`，DLL SHA-256 `7BFA7311A8AC5976CAABB2177862279A219D35756BE256622142CAABD6EDDB31`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；重启后的真实窗口恢复、菜单交互、Shell 文件区主题与 Q-Dir 互操作仍待验收。内存视图释放 A/B 只观察到约 2 MB 变化；后续将按同一进程和固定工作负载观察运行期增长。详见[temp.73 说明](../docs/releases/preview-0.6.0-temp.73.md)及包内 `RELEASE-NOTES.md`。
 
