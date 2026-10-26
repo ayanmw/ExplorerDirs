@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：读取 Q-Dir Filter2 原始规则行
+
+NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键，按键序号排序，并保留模式字符串及其后六个原始字段。这个结构依据本机可读 `Q-Dir.ini` 的 12 行样本；字段含义未确认的值不映射到颜色或样式开关。编号规则若字段数不符或序号重复，解析整体失败且不返回部分规则。
+
+颜色策略 smoke 覆盖样本中的 `#Hidden`、通配规则和 `#BG` 原始行，以及缺字段拒绝。该读取器仅供隔离原型使用，未接入产品 `.qdr` 导入器；不会导入 Q-Dir 颜色、也不证明 `IShellView` 可见绘制或迁移兼容性。产品当前仍对 `[Filter2]` 显示“未导入”警告。依据：本地 `C:\SoftwareOK\Q-Dir\Q-Dir.ini` 可读文本与 [Q-Dir FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR) 对颜色值状态的一般说明；其余字段的对应关系仍待确认。
+
 ## 2026-10-26：为隔离 Shell 宿主插入标准 OLE 菜单组
 
 `StreamViewHost.InsertMenusSB` 的默认宿主路径现创建 File、Edit、View、Favorites、Tools、Help 六个原生弹出菜单，并使用 Shell 标准菜单 ID；`OLEMENUGROUPWIDTHS` 的宿主数量为 `[2,0,3,0,1,0]`。`RemoveMenusSB` 与 `Dispose` 只移除宿主创建的菜单组和子菜单；外层显式回调仍优先接管。菜单标题暂为固定英文原型标签，未连接 WPF 产品菜单或本地化资源。
