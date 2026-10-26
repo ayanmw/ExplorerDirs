@@ -2,6 +2,17 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
+## 2026-10-26：temp.62 隔离主题预览
+
+- 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。
+- 未启动 GUI；此包不代表多窗格主题、深色/高对比度视觉、Shell 文件区着色或 Q-Dir 颜色互操作已验收。变更细节见[第六十二版说明](releases/preview-0.6.0-temp.62.md)。
+
+## 2026-10-26：temp.63 使用主项目 profile 的隔离预览
+
+- 从隔离 worktree 发布时，原脚本只查找 worktree 自己的 `profile/`；该目录缺失会导致新包的独立 profile 为空。`publish.ps1` 现提供 `-ProfileRoot`，默认行为仍从当前仓库 profile 复制；明确传入时校验目录存在，并从指定来源只读复制允许的 INI、登记的窗口会话/固定标签侧车及顶层工作区/快速链接。
+- `publish-smoke.ps1` 覆盖外部 profile 来源、字节一致、来源不变及显式缺失路径拒绝。temp.63 在本项目中使用 `D:\projects\explorer-dirs\profile` 生成独立 `app/profile/`，包含照片打印窗口系统色和当前标签强调色。发布细节见[第六十三版说明](releases/preview-0.6.0-temp.63.md)。
+- 产品版本 `0.6.0-preview.temp.63+fb48e6c4cf819c8d79ce20ac09f44243edd01172`；EXE SHA-256 `D579B06A362D9E89E721EA4DD13B3EDBE9C5E2244471665330F88C5927105A5E`，DLL SHA-256 `04C833116CD902ACCAFD9D5316C5185624703986601ADA1DA29A636CBAB2C6C2`，均与包内清单一致。发布隔离 smoke、全量 Release `SettingsSmoke`、App Release 构建通过；未启动 GUI，主题可见效果仍待桌面验收。
+
 ## 2026-10-26：照片打印窗口跟随 Windows 系统颜色
 
 - 照片打印窗口的背景、正文、预览边框和预览底色改用 WPF 动态系统资源，设置错误文字跟随系统文字色，避免高对比度/深色环境下继续硬编码浅色或固定红色。

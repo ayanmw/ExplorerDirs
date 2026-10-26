@@ -2,6 +2,14 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`preview-0.6.0-temp.63/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.61，照片打印窗口改用 Windows 动态系统颜色，当前标签增加系统强调色底边；同时修复隔离 worktree 发布时未从主项目 profile 复制现有设置的问题。产品版本 `0.6.0-preview.temp.63+fb48e6c4cf819c8d79ce20ac09f44243edd01172`，EXE SHA-256 `D579B06A362D9E89E721EA4DD13B3EDBE9C5E2244471665330F88C5927105A5E`，DLL SHA-256 `04C833116CD902ACCAFD9D5316C5185624703986601ADA1DA29A636CBAB2C6C2`，与包内清单一致。全量 Release `SettingsSmoke`、App Release 构建与发布隔离 smoke 通过。未启动 GUI；多窗格视觉、系统主题变化、高对比度、Shell 文件区深色和 Q-Dir 颜色互操作仍待验收。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.62/app/ExplorerDirs.App.exe`，保留作较早的临时包。该包包含照片打印窗口系统色和当前标签强调色，但由隔离 worktree 发布时其 `app/profile/` 没有从主项目复制现存配置；建议使用 temp.63 预览。没有启动 GUI。
+
+## 此前临时预览包（2026-10-26）
+
 `preview-0.6.0-temp.61/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.60，在“此电脑”地址菜单中动态列出逻辑驱动器，并为就绪的本地固定盘显示卷标；网络盘不会触发远程卷标读取。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`，EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过。没有启动 GUI；真实菜单交互、驱动器导航和 Q-Dir 互操作仍待桌面验收。详见[第六十一版说明](../docs/releases/preview-0.6.0-temp.61.md)及包内 `RELEASE-NOTES.md`。
 
 ## 此前临时预览包（2026-10-26）
@@ -221,6 +229,8 @@
 用户要求提前预览的 `preview-0.6.0-temp.1/app/ExplorerDirs.App.exe` 已打包，**完整 GUI 验收未完成**，日常版仍保留 0.5.2。临时包使用自己的 `app/profile/`，打包时复制现有 INI，此后的修改不会写回日常版配置。启动入口比旧版多一层 `app`；完整变化及待测项见 [临时版说明](../docs/releases/preview-0.6.0-temp.1.md)，包内也附 `RELEASE-NOTES.md`。
 
 临时隔离包使用 `scripts/publish.ps1 -Version preview-0.6.0-temp.1 -IsolatedProfile -ReleaseNotes docs/releases/preview-0.6.0-temp.1.md`。正常版本的发布路径和共享配置规则不变。校验清单同时覆盖 EXE 和 DLL；系统入口仍须另行验收和显式启用。
+
+从隔离 worktree 发布临时预览时，可通过 `-ProfileRoot D:\projects\explorer-dirs\profile` 指向主项目现有 profile；脚本只复制其允许列表内的配置文件、已登记窗口会话侧车及顶层工作区/快速链接，不修改来源。省略参数时仍默认从当前源码仓库的 `profile/` 复制。
 
 2026-10-23 发布脚本补齐隔离配置复制：会话、目录收藏、固定标签、紧凑选项、目录树和布局比例的独立 INI，以及 `Workspaces` 顶层 `.qdr` 收藏。仅复制原文，不解析或执行，不回写源 profile；不递归复制其他目录。此修正只影响之后打包的版本，现有包未改动。`pwsh -NoProfile -File scripts/publish-smoke.ps1` 用独立 fixture 仓库和占位构建文件检查复制、源文件不变、同名版本拒绝及普通发布行为；它不启动应用，也不代替实际发布构建或 GUI 验收。
 
