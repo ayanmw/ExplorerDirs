@@ -86,7 +86,7 @@
 
 | 顺序 | 工作项 | 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。菜单命令、导航/筛选、临时文件操作与 watcher 刷新重叠 Private Desktop 探针通过；真实 `UIActivate` 触发共享菜单生命周期；独立 NativeProbe 消费进程恢复 Details、排序、分组和列序/宽度。Details 视图保持存活时，第二个真实 Shell view 使用独立 session GUID 切换到 List；其 Shell stream 保存 772 字节，销毁后以同 GUID 重建读回 List，原视图仍是 Details。原视图复制/重命名/删除后设置保持；该完整隔离流程连续三轮通过，主桌面前台 HWND 未变 | 下一步验证多 Pane/标签容器协调，及 view 激活/切换时的焦点、菜单和 watcher 行为。真实 `DoDragDrop`、物理输入/可见焦点、可见菜单、Pane/WPF 容器和生产每标签协调器仍是迁移缺口；未过全部门槛前不迁移产品视图或发布 |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。Private Desktop 原生容器现同时托管两个子窗格 HWND，各有一个真实 Shell view 与独立 session GUID；第二窗格切到 List、保存、销毁后按 GUID 重建仍恢复 List，第一窗格保持 Details。首窗格状态及文件操作保持探针连续三轮通过，主桌面前台 HWND 未变 | 下一步扩展到四窗格创建/销毁与窗格切换，验证每窗格 view 生命周期、焦点/菜单路由及目录通知不会串窗格。当前只是原生子窗格父子关系，尚非 WPF `PaneControl`/生产每标签协调器；真实 `DoDragDrop`、物理输入/可见焦点、可见菜单、WPF 容器和产品集成仍未验证；未过全部门槛前不迁移产品视图或发布 |
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；失败项单独复现、修复并提交 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；单次重启后内存下降不是泄漏证据，现有同 PID 短采样负载也不固定 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
@@ -3277,8 +3277,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - NativeProbe Release build 0 警告、0 错误；原 `color-private-desktop` 状态流往返探针单独复跑通过，仍读回 772 字节。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-激活菜单合并回调)。
 - 这只证明真实 Shell 激活进入隔离宿主菜单生命周期并安装共享菜单；实际可见菜单中的自定义/Shell 项顺序、绘制、快捷键、启用状态和点击行为仍未验证。产品 ExplorerBrowser、INI 和 release 未修改。
 
-## 2026-10-27：真实 IShellView 会话流跨进程恢复、并行会话独立往返与文件操作
+## 2026-10-27：真实 IShellView 双子窗格会话往返与文件操作
 
 - 修正前一次状态恢复原型的刺激方式：`IFolderView::SetCurrentViewMode` 返回成功，但当前 DefView 读回仍是模式 1；改用本项目已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前确认了期望查看模式。
-- 探针设置 Details、Name 降序、Type 升序分组和三列顺序/宽度，显式调用 `IShellView::SaveViewState` 并销毁旧 view。真实 Shell 写入一次、session store 保存 748 字节；另一个 NativeProbe 进程以同 GUID 打开该目录，Shell 对新 host 请求 4 次读流，并将模式、排序、分组、列数/顺序/宽度全部读回。消费者保持该 Details view 存活，再创建第二个真实 `IShellView` 和不同 session GUID；第二个视图切为 List 后独立调用 `SaveViewState`，销毁时写入 772 字节。消费者保持第一个 view 不动，以第二个 GUID 重建 view，Shell 对新 host 请求 4 次读流并恢复 List；与此同时第一个 view 仍读回 Details。随后第一个视图通过 `IFileOperation` 复制、重命名、删除 fixture 文件，每次操作及必要刷新后模式、排序、分组、列仍匹配。Private Desktop watchdog 连续三轮退出码 0，主桌面前台 HWND 均未变；定向宿主策略 smoke 通过，NativeProbe Release build 0 警告、0 错误。
-- 此项证明真实 Shell 视图能在同进程不同 session GUID 下并行保存、销毁、重建并隔离查看模式，且原恢复视图的 Shell 文件操作不丢设置；仍不等同 ExplorerDirs.App 正式进程重启或产品标签注册表/INI session ID 接线，未验证多 Pane/多标签容器协调、可见拖放/键盘行为。消费进程退出时由 OS 回收其隔离 Shell STA，生产探针负责删除本轮 fixture/state 目录。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-会话流跨进程恢复并行会话独立往返与文件操作)。
+- 原生隔离容器在一个 top-level HWND 下创建两个互为兄弟的 child pane HWND，分别托管真实 `IShellView`；探针断言两 pane 的父句柄一致、各自 view window 是所属 pane 的子窗口。首窗格恢复 Details、Name 降序、Type 升序分组和三列顺序/宽度，消费进程收到 Shell 4 次读流。第二窗格使用独立 session GUID 切换为 List 并写入 772 字节，销毁后仍挂在同一 pane 下按该 GUID 重建，收到 4 次读流并恢复 List；第一窗格继续读回 Details。首窗格后续通过 `IFileOperation` 复制、重命名、删除 fixture，每项操作后模式、排序、分组、列仍匹配。该完整 Private Desktop watchdog 连续三轮退出码 0，主桌面前台 HWND 均未变；定向宿主策略 smoke 通过，NativeProbe Release build 0 警告、0 错误。
+- 这证明两个真实 Shell view 能作为同一原生父容器的两个子窗格同时存活，并按 session GUID 独立保存/销毁/恢复；不等同 WPF `PaneControl`、ExplorerDirs.App 正式标签 session-store 或四窗格协调，也未验证 view 激活时的物理焦点、可见菜单、拖放和键盘行为。消费进程退出时由 OS 回收隔离 Shell STA，生产探针负责清理本轮 fixture/state 目录。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-双子窗格会话往返与文件操作)。
