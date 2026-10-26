@@ -196,8 +196,14 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     private readonly byte[] _bytes;
     private readonly ShellViewStateStore? _stateStore;
     private readonly Guid? _stateId;
+    private ShellViewNavigationHistory? _navigation;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
+    internal ShellViewNavigationHistory? NavigationHistory
+    {
+        get => _navigation;
+        set => _navigation = value;
+    }
     internal int Reads;
     internal int Writes;
     private nint _savedStream;
@@ -221,16 +227,27 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     }
     public void Dispose()
     {
-        if (_savedStream == 0) return;
         try
         {
-            if (_stateStore is not null && _stateId is Guid stateId)
+            if (_savedStream != 0 && _stateStore is not null && _stateId is Guid stateId)
                 _stateStore.Save(stateId, ReadSavedBytes());
         }
         finally
         {
-            Marshal.Release(_savedStream);
-            _savedStream = 0;
+            try
+            {
+                if (_savedStream != 0)
+                {
+                    Marshal.Release(_savedStream);
+                    _savedStream = 0;
+                }
+            }
+            finally
+            {
+                var navigation = _navigation;
+                _navigation = null;
+                navigation?.Dispose();
+            }
         }
     }
     public int QueryService(ref Guid service, ref Guid iid, out nint pointer)
@@ -258,7 +275,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         return unchecked((int)0x80004002);
     }
     // Imported view bytes can be shared by callers; snapshot them so later tab/source edits cannot mutate this host's fallback state.
-    internal StreamViewHost(nint parent, byte[] bytes, ShellViewStateStore? stateStore = null, Guid? stateId = null)
+    internal StreamViewHost(nint parent, byte[] bytes, ShellViewStateStore? stateStore = null,
+        Guid? stateId = null, ShellViewNavigationHistory? navigation = null)
     {
         if ((stateStore is null) != (stateId is null))
             throw new ArgumentException("A view-state store and session ID must be supplied together.");
@@ -266,6 +284,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         _bytes = (byte[])bytes.Clone();
         _stateStore = stateStore;
         _stateId = stateId;
+        _navigation = navigation;
     }
     public int GetWindow(out nint window) { window = _parent; return 0; }
     public int ContextSensitiveHelp(int enter) => unchecked((int)0x80004001);
@@ -275,7 +294,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     public int SetStatusTextSB(nint text) => 0;
     public int EnableModelessSB(int enable) => 0;
     public int TranslateAcceleratorSB(nint msg, ushort id) => 1;
-    public virtual int BrowseObject(nint pidl, uint flags) => unchecked((int)0x80004001);
+    public virtual int BrowseObject(nint pidl, uint flags) =>
+        _navigation?.BrowseObject(pidl, flags) ?? unchecked((int)0x80004001);
     public int GetViewStateStream(uint mode, out nint stream)
     {
         var read = (mode & 3) == 0;

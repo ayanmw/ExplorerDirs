@@ -1315,7 +1315,6 @@ internal static class ShellViewHostFilterProbe
         // Keep the isolated host's non-filter browser callbacks aligned with the
         // product site; only IncludeObject remains specialized for this fixture.
         private readonly ShellBrowserSite _browserCallbacks = new() { QuickFilterActive = true };
-        private readonly ShellViewNavigationHistory _navigation;
         internal ShellFolderFilter Filter { get; }
         private int _includeObjectCalls;
         private int _defaultCommandCalls;
@@ -1327,15 +1326,15 @@ internal static class ShellViewHostFilterProbe
         internal long CallbackSelectionVersion => _browserCallbacks.SelectionVersion;
         internal bool BrowseTargetIsChild { get; private set; }
         internal bool BrowseTargetIsRoot { get; private set; }
-        internal int HistoryIndex => _navigation.Index;
-        internal nint CurrentPidl => _navigation.CurrentPidl;
+        internal int HistoryIndex => NavigationHistory!.Index;
+        internal nint CurrentPidl => NavigationHistory!.CurrentPidl;
         internal nint PendingView => _pendingView;
 
         internal FilteredHost(nint parent, ShellFolderFilter filter, nint rootPidl, nint expectedChildPidl,
             Func<nint, uint, int> navigate) : base(parent, [])
         {
             Filter = filter;
-            _navigation = new ShellViewNavigationHistory(rootPidl, ClonePidl, Marshal.FreeCoTaskMem,
+            NavigationHistory = new ShellViewNavigationHistory(rootPidl, ClonePidl, Marshal.FreeCoTaskMem,
                 ILIsEqual, TryGetParentPidl, ILCombine, (target, flags) =>
                 {
                     BrowseTargetIsChild = ILIsEqual(target, expectedChildPidl);
@@ -1373,7 +1372,7 @@ internal static class ShellViewHostFilterProbe
         public override int BrowseObject(nint pidl, uint flags)
         {
             Interlocked.Increment(ref _browseObjectCalls);
-            return _navigation.BrowseObject(pidl, flags);
+            return base.BrowseObject(pidl, flags);
         }
 
         public int OnDefaultCommand(nint shellView)
@@ -1421,11 +1420,6 @@ internal static class ShellViewHostFilterProbe
         public int GetCurrentFilter(nint text, int capacity) => _browserCallbacks.GetCurrentFilter(text, capacity);
         public int OnPreViewCreated(nint shellView) => _browserCallbacks.OnPreViewCreated(shellView);
 
-        public new void Dispose()
-        {
-            base.Dispose();
-            _navigation.Dispose();
-        }
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, ref Guid iid, out nint value);

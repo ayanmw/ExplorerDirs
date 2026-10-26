@@ -13,30 +13,18 @@ internal sealed class ShellViewColorBrowserHost : StreamViewHost,
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private readonly ShellBrowserSite _callbacks = new() { QuickFilterActive = true };
     private readonly ShellFolderFilter _filter;
-    private ShellViewNavigationHistory? _navigation;
     private int _includeObjectCalls;
 
     internal ShellViewColorBrowserHost(nint parent, byte[] state, ShellFolderFilter filter,
-        ShellViewNavigationHistory? navigation = null) : base(parent, state)
+        ShellViewNavigationHistory? navigation = null) : base(parent, state, navigation: navigation)
     {
         _filter = filter;
-        _navigation = navigation;
     }
 
     internal int IncludeObjectCalls => Volatile.Read(ref _includeObjectCalls);
     internal long SelectionVersion => _callbacks.SelectionVersion;
-    internal int NavigationIndex => _navigation?.Index ?? 0;
-    internal nint CurrentPidl => _navigation?.CurrentPidl ?? 0;
-
-    public override int BrowseObject(nint pidl, uint flags) =>
-        _navigation?.BrowseObject(pidl, flags) ?? base.BrowseObject(pidl, flags);
-
-    public new void Dispose()
-    {
-        _navigation?.Dispose();
-        _navigation = null;
-        base.Dispose();
-    }
+    internal int NavigationIndex => NavigationHistory?.Index ?? 0;
+    internal nint CurrentPidl => NavigationHistory?.CurrentPidl ?? 0;
 
     public int OnDefaultCommand(nint shellView) => _callbacks.OnDefaultCommand(shellView);
     public int OnStateChange(nint shellView, uint change) => _callbacks.OnStateChange(shellView, change);
@@ -113,6 +101,7 @@ public static class ShellViewColorBrowserHostSmoke
         Check(host.IncludeObject(0, 0) == 0 && host.IncludeObjectCalls == 3,
             "missing Shell item metadata keeps the item visible through the color host callback");
 
+        VerifyBaseHostBrowseObject();
         CheckIncludeObject("notes.txt", expected: 0,
             "an item matching the configured pattern remains visible through IncludeObject");
         CheckIncludeObject("notes.bin", expected: 1,
@@ -221,6 +210,37 @@ public static class ShellViewColorBrowserHostSmoke
             if (cdb3 != 0) Marshal.Release(cdb3);
         }
         finally { Marshal.Release(provider); }
+    }
+
+    private static void VerifyBaseHostBrowseObject()
+    {
+        using var pool = new ShellViewNavigationHistorySmoke.PidlPool();
+        var root = pool.Create(1);
+        var child = pool.Create(2);
+        var failedTarget = pool.Create(4);
+        var history = new ShellViewNavigationHistory(root, pool.Clone, pool.Free,
+            pool.Equal, pool.Parent, pool.Combine,
+            (target, _) => pool.Read(target) == 4 ? unchecked((int)0x80004005) : 0);
+        var host = new StreamViewHost(0, [], navigation: history);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        try
+        {
+            var browseObject = GetComMethod<BrowseObjectCallback>(browser, 11);
+            var successHr = browseObject(browser, child, 0);
+            Check(successHr == 0 && history.Index == 1 && pool.Read(history.CurrentPidl) == 2,
+                "the generic StreamViewHost routes BrowseObject through its retained Shell navigation history");
+            var failedHr = browseObject(browser, failedTarget, 0);
+            Check(failedHr == unchecked((int)0x80004005) && history.Index == 1 &&
+                  pool.Read(history.CurrentPidl) == 2,
+                "the generic StreamViewHost returns navigation failure without changing its current history");
+        }
+        finally
+        {
+            Marshal.Release(browser);
+            host.Dispose();
+        }
+        Check(pool.FreedCount >= 2,
+            "disposing the generic StreamViewHost releases its retained navigation PIDLs");
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]

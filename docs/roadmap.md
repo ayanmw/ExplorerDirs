@@ -6,6 +6,12 @@
 - 增加回归先确认服务查询失败，再让独立原型通过请求 IID 查询自身；`--shell-view-color-policy-smoke` 全部通过。此项只验证托管 COM 服务路由，没有创建 `IShellView`，不证明 DefView 实际查询时序或产品迁移条件已满足。
 - 下一步仍是补齐通用导航/宿主状态并在独立 Windows 会话验证 Shell 实际调用；产品继续使用 ExplorerBrowser。
 
+## 2026-10-26：将隔离 IShellBrowser 导航路由并入通用宿主
+
+- `StreamViewHost.BrowseObject` 现在可使用注入的 `ShellViewNavigationHistory` 处理真实托管 COM 入口；颜色宿主与筛选宿主共用同一基类路由，历史 PIDL 由基类销毁。无注入历史的基础 host 仍返回 `E_NOTIMPL`。
+- `--shell-view-color-policy-smoke` 通过真实 `IShellBrowser::BrowseObject` vtable 验证成功/失败导航、失败保留当前位置与 PIDL 所有权。测试使用模拟 PIDL 和委托，没有创建 `IShellView`。
+- 产品导航逻辑和 ExplorerBrowser 未改；实际 Shell provider 导航、view/HWND 交接、焦点/选区恢复仍待独立会话验证。
+
 ## 2026-10-26：对齐 Q-Dir 的标签栏显示选项
 
 - Q-Dir FAQ 101 确认可设为始终显示标签栏，或至少有两个标签时显示。项目现于“视图 → 标签栏显示”提供两种模式，默认保持既有始终显示行为，配置独立保存于便携 `TabStripVisibility.ini`。
