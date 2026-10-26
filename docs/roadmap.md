@@ -2987,3 +2987,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 新增共享窗口主题绑定器，并将应用主题控制器传给三个窗口。它们使用动态窗口背景/文字资源，监听主题变化刷新 DWM 标题栏颜色，并在关闭时解除监听；命令、文件视图和导入行为不变。PaneThemeMarkupSmoke 新增回归，先确认缺失时失败，再确认三窗接线与绑定器生命周期。
 - 定向 PaneThemeMarkupSmoke 与完整 Release SettingsSmoke 通过；App Release 构建 0 警告、0 错误。未启动 GUI，实际主题切换和高对比度外观仍待可见验收；ExplorerBrowser 文件区黑底问题及 Q-Dir 文件颜色规则兼容仍未解决。
 - 后续源码盘点又发现“保存查看预设”代码弹窗同样缺少主题接线；现已复用共享绑定器加入动态背景/文字与标题栏更新，smoke 先失败后通过。完整 SettingsSmoke 和 App Release 构建已复验；未启动 GUI，仍待可见验收。
+
+## 2026-10-26：逐行文件夹大小列的 Shell 架构评审
+
+- 用户选择先做原生 `IShellView` 架构评审。对照逐行大小调查与隔离宿主门槛后，建议原型尝试 `IShellFolder2` folder adapter + Windows DefView：这是比自绘列表更有希望保留原生菜单/项目语义的路线，但仍需独立浏览器宿主，不能直接插入 ExplorerBrowser，也没有产品迁移批准。
+- 明确淘汰 ExplorerBrowser 的 `SetViewProperty`（数值不参与本机 Shell 大小排序、刷新会清除且接口已弃用）、旧 `IColumnProvider`，以及为单列重写完整 `IShellView` UI。迁移门槛涵盖导航/历史、文件菜单/操作、键盘焦点、每标签视图状态、实时通知、拖放、Shell provider 和可见验收。
+- 下一步仅建议隔离验证静态列与数值排序，再评估原生文件项委托；不扫描递归文件夹、不改产品视图。当前 AGENTS.md 禁止以递归扫描填补属性缺失，逐行大小列实现前必须重新审阅此策略。

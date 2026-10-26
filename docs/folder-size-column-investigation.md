@@ -55,3 +55,7 @@
 复查 Q-Dir 官方 [FAQ 63](https://www.softwareok.com/?faq=63&seite=faq-Q-DIR) 后确认，逐行信息不止一个递归大小字段：Q-Dir 可把文件夹总大小显示在 Size 列，并把文件/目录数量（包括子目录中的项目）显示在 Type 列。官方说明通过 F9 的 Data Size Information 配置这类信息，也提供是否忽略文件夹大小参与排序的选项。后续若实现，需覆盖用户可选择的排序语义，不能把“文件夹大小永不参与排序”当作完整验收条件。
 
 本项目目前的 F9/状态栏扫描只汇总当前目录的总字节数、文件数和子目录数，尚未提供逐行数据。此前 `SetViewProperty(System.Size)` spike 证明该视图缓存不会参与本机 Shell 大小排序且刷新会清除，不能满足可排序列。公开资料补充了 Q-Dir 的目标行为，但没有改变 ExplorerBrowser 对任意新列缺少受支持扩展接口的结论；也没有新增视图实现方案或启动 Shell 探针。
+
+### 2026-10-26 原生 Shell 视图架构评审
+
+用户选择先做原生 `IShellView` 架构评审。评审推荐隔离验证 `IShellFolder2` folder adapter + Windows DefView，而不是自绘列表或重写完整 `IShellView`；这仍需独立 `IShellBrowser` 宿主，不可作为 ExplorerBrowser 的列插件。评审范围、比较、门槛及递归计算策略冲突见[架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。未修改产品代码、未运行 Shell 宿主或 GUI。
