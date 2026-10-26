@@ -35,7 +35,7 @@ internal static class StandaloneTreeProbe
         {
             var shellDefault = CaptureIconMode(parent, fixture, useExplicitIcons: false);
             var explicitSystemList = CaptureIconMode(parent, fixture, useExplicitIcons: true);
-            Console.WriteLine($"tree-icon-render-ab: foreground-unchanged={GetForegroundWindow() == foreground}; default={shellDefault}; explicit={explicitSystemList}");
+            Console.WriteLine($"tree-icon-render-ab: foreground-unchanged={GetForegroundWindow() == foreground}; default-icon-match={shellDefault.IconMatchPixels}/{shellDefault.IconTemplatePixels}@{shellDefault.IconAtX},{shellDefault.IconAtY}; explicit-icon-match={explicitSystemList.IconMatchPixels}/{explicitSystemList.IconTemplatePixels}@{explicitSystemList.IconAtX},{explicitSystemList.IconAtY}; default={shellDefault}; explicit={explicitSystemList}");
             if (GetForegroundWindow() != foreground)
                 throw new Exception("Tree icon A/B changed the foreground window.");
             return shellDefault.ClientPixels != 0 || explicitSystemList.ClientPixels != 0 ? 0 : 2;
@@ -50,7 +50,8 @@ internal static class StandaloneTreeProbe
     }
 
     private static (int Normal, int Selected, int ClientPixels, int IconBandPixels, string PixelHash,
-        string IconBandHash, string IconBandColors, string Row) CaptureIconMode(
+        string IconBandHash, string IconBandColors, int IconMatchPixels, int IconTemplatePixels,
+        int IconAtX, int IconAtY, string Row) CaptureIconMode(
         nint parent, string fixture, bool useExplicitIcons)
     {
         using var tree = new ExplorerDirs.App.NativeShellTree(parent, 320, 480, useExplicitIcons);
@@ -90,10 +91,12 @@ internal static class StandaloneTreeProbe
             var pixels = new List<uint>();
             var iconBandPixels = new List<uint>();
             var pixelBands = new int[5];
+            var clientPixels = new uint[iconRight, iconBottom];
             for (var y = 0; y < iconBottom; y++)
             for (var x = 0; x < iconRight; x++)
             {
                 var pixel = GetPixel(memoryDc, x, y);
+                clientPixels[x, y] = pixel;
                 if (pixel != 0xFFFFFFFF && pixel != (uint)background)
                 {
                     pixels.Add(pixel);
@@ -112,9 +115,57 @@ internal static class StandaloneTreeProbe
             var iconBandColors = string.Join(',', iconBandPixels.GroupBy(pixel => pixel)
                 .OrderByDescending(group => group.Count()).Take(8)
                 .Select(group => $"{group.Key:X6}:{group.Count()}"));
-            return (images.Normal, images.Selected, pixels.Count, iconBandPixels.Count, hash, iconBandHash,
-                iconBandColors,
-                $"0,0,{iconRight},{iconBottom}; bands16={string.Join(',', pixelBands)}");
+            var iconList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            if (iconList == 0 || !ImageList_GetIconSize(iconList, out var iconWidth, out var iconHeight) ||
+                iconWidth <= 0 || iconHeight <= 0 || iconWidth > iconRight || iconHeight > iconBottom)
+                throw new Exception("The Shell icon template dimensions are unavailable for tree pixel comparison.");
+            var expectedDc = CreateCompatibleDC(screenDc);
+            var expectedBitmap = CreateCompatibleBitmap(screenDc, iconWidth, iconHeight);
+            if (expectedDc == 0 || expectedBitmap == 0)
+            {
+                if (expectedBitmap != 0) DeleteObject(expectedBitmap);
+                if (expectedDc != 0) DeleteDC(expectedDc);
+                throw new Exception("Could not create the Shell icon template bitmap.");
+            }
+            var priorExpectedBitmap = SelectObject(expectedDc, expectedBitmap);
+            try
+            {
+                var iconBounds = new Rect { Right = iconWidth, Bottom = iconHeight };
+                _ = FillRect(expectedDc, ref iconBounds, brush);
+                if (!ImageList_Draw(iconList, images.Normal, expectedDc, 0, 0, 0))
+                    throw new Exception("The Shell image list could not render the selected tree item icon template.");
+                var foreground = new List<(int X, int Y, uint Color)>();
+                for (var y = 0; y < iconHeight; y++)
+                for (var x = 0; x < iconWidth; x++)
+                {
+                    var pixel = GetPixel(expectedDc, x, y);
+                    if (pixel != background) foreground.Add((x, y, pixel));
+                }
+                // A/B equality alone cannot prove the candidate pixels are an icon; match the captured row against the actual Shell image-list entry.
+                var bestMatches = 0;
+                var bestX = -1;
+                var bestY = -1;
+                for (var y = 0; y <= Math.Min(iconBottom - iconHeight, 16); y++)
+                for (var x = 24; x <= Math.Min(iconRight - iconWidth, 56); x++)
+                {
+                    var matches = 0;
+                    foreach (var pixel in foreground)
+                        if (clientPixels[x + pixel.X, y + pixel.Y] == pixel.Color) matches++;
+                    if (matches <= bestMatches) continue;
+                    bestMatches = matches;
+                    bestX = x;
+                    bestY = y;
+                }
+                return (images.Normal, images.Selected, pixels.Count, iconBandPixels.Count, hash, iconBandHash,
+                    iconBandColors, bestMatches, foreground.Count, bestX, bestY,
+                    $"0,0,{iconRight},{iconBottom}; bands16={string.Join(',', pixelBands)}");
+            }
+            finally
+            {
+                _ = SelectObject(expectedDc, priorExpectedBitmap);
+                DeleteObject(expectedBitmap);
+                DeleteDC(expectedDc);
+            }
         }
         finally
         {
@@ -481,6 +532,8 @@ internal static class StandaloneTreeProbe
     private delegate bool EnumChildCallback(nint window, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildCallback callback, nint parameter);
     [DllImport("comctl32.dll")] private static extern int ImageList_GetImageCount(nint imageList);
+    [DllImport("comctl32.dll")] private static extern bool ImageList_GetIconSize(nint imageList, out int width, out int height);
+    [DllImport("comctl32.dll")] private static extern bool ImageList_Draw(nint imageList, int imageIndex, nint dc, int x, int y, uint style);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
