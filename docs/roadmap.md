@@ -3347,4 +3347,4 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-27：补齐 Q-Dir 普通鼠标滚轮焦点选项
 
 - 顶部“视图”菜单新增默认关闭的“鼠标悬停滚轮”，保存在独立 `MouseWheelFocus.ini`。开启后，普通垂直滚轮消息定向到指针所在的可见 Shell 文件视图或目录树；对逐窗格目标更新逻辑活动窗格，不抢键盘焦点；Ctrl+滚轮继续使用原有查看方式循环路径。
-- 完整 Release `SettingsSmoke`、定向 `--mouse-wheel-focus-smoke`、App Release 构建通过；本批已提交 `3ad1101`。这证明配置、消息决策和代码接线可构建，不代表真实鼠标、焦点、四窗格菜单行为通过；这些仍需可见桌面验收。对标依据：[Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR)。
+- 完整 Release `SettingsSmoke`、定向 `--mouse-wheel-focus-smoke`、App Release 构建通过；本批已提交 `3ad1101`。这证明配置、消息决策和代码接线可构建，不代表真实鼠标、焦点、四窗格菜单行为通过；这些仍需可见桌面验收。对标依据：[Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR)；WPF 消息循环允许过滤器修改待分发消息，并要求分发修改后的消息，见 [Microsoft WPF/Win32 消息循环说明](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/sharing-message-loops-between-wpf-and-win32)。该静态事件每线程共享、多个监听器顺序不保证，所以依靠 HWND 所属视图判定，仍待真实鼠标确认。
