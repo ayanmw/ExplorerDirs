@@ -2975,3 +2975,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 第四次试验将 Shift/Down 按下与释放排入 Private Desktop 的原生列表窗口队列，按“`TranslateAccelerator`，若返回 `S_FALSE` 再 Translate/Dispatch”的顺序处理。Shift 返回 `S_FALSE`、Down 返回 `S_OK`，最终焦点在第 1 项而选区仍为 `1/2`。虽然探针内部父窗口隐藏且内部前台检查未变，Private Desktop 外层退出检查报告 `foreground-unchanged=False`，因此该轮隔离边界不合格；更早的一次全量宿主运行也在 45 秒 watchdog 超时后被终止。临时队列探针已撤回，没有据此改产品代码。
 - 这些结果仍无法区分异步键态、Shell 完整输入处理和当前桌面变化，不是产品缺陷结论。不要继续注入键盘消息或把单次/队列合成结果当成用户可见行为；需待有明确桌面交接时验证真实多布局重命名与方向键。此限制不妨碍继续其它源码路线。
 - 日志：`src/.state/native-probe-watchdog/20261026-171141-bec0d947.stdout.log`、`src/.state/native-probe-watchdog/20261026-171158-7fb9d5c1.stdout.log`、`src/.state/native-probe-watchdog/20261026-171519-680f9dd8.stdout.log`、`src/.state/native-probe-watchdog/20261026-172051-3f01b637.stdout.log`、`src/.state/native-probe-watchdog/20261026-172214-9e030845.stdout.log`。这些样本只用于界定探针，不计为 Shell parity 通过或产品失败。
+
+## 2026-10-26：发布临时预览 temp.65
+
+- 按先前预览发布要求，将当前 worktree 打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.65`，应用放在 `app/` 并使用独立 profile。产品版本 `0.6.0-preview.temp.65+59bd93cea788f148b0414f28eee74d03a36153e5`；EXE SHA-256 `0A8D60B9A1EABEAA094DD133C2806BD7168F42F79BCCEE4AC5C310573B54B4F0`，DLL SHA-256 `EF852111FEC936BCED7C57EA795C418FE60742E0B8B2F240183ECD0A3EE5E5BC`，均匹配包内清单。
+- Release SettingsSmoke 通过，App Release 构建 0 警告/错误，发布 profile fixture smoke 通过。隔离 profile 的两个配置文件与来源哈希一致；来源未修改。未启动应用或操作 GUI；主题外观、目录树同步、Shell 文件区和 Q-Dir 互操作仍待可见验收。详见[预览说明](releases/preview-0.6.0-temp.65.md)。
