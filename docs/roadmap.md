@@ -7,6 +7,11 @@
 - 目录树事件回调未提供自定义索引时，改为返回 `E_NOTIMPL`，让 `NamespaceTreeControl` 解析 Shell 默认图标；生产实现和独立 NativeProbe 保持同一回退语义，回归检查纳入完整 Release `SettingsSmoke`。微软官方 NamespaceTreeControl 示例采用相同的未实现回调语义。
 - 定向与完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过；已准备 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.66` 独立 profile 预览包，EXE/DLL 哈希与清单一致。未启动 GUI，目录树的实际图标显示及虚拟 Shell 节点仍待可见验收。
 
+## 2026-10-26：目录树图标截图复核
+
+- 用户提供的 `Preview 0.6.0` 截图中，左侧目录树名称前仍有图标栏空白；这是图标回退代码之后的可见失败证据。截图没有可执行文件路径或构建哈希，不能确认是否来自 temp.66，因此既不能把问题判为已修，也不能据此归因到某个二进制。
+- 目录树图标回退仍标记为“源码已接线、用户可见结果未通过/构建身份未知”。后续验收须记录实际 EXE 路径与 SHA-256，再检查文件系统和虚拟 Shell 节点的正常/展开图标；源码 smoke 不作为可见图标验收。
+
 ## 2026-10-26：目录树跟随文件列表选区
 
 - 对照 Q-Dir [FAQ 66](https://www.softwareok.com/?faq=66&seite=faq-Q-DIR) 的“从列表选择并展开”选项，为本项目增加默认开启、可单独关闭的“视图 → 目录树 → 从文件列表选择并展开”。当前活动标签在单选到经 Shell 确认的文件夹后，使用其绝对 Shell 解析名定位并展开对应逐窗格树；共享树只跟随当前活动窗格。文件视图目录和键盘焦点不变，关闭树/多选/选择普通文件/非活动窗格都不触发；独立便携设置为 `NavigationTreeSelection.ini`。
