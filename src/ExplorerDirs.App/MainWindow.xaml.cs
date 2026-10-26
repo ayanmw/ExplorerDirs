@@ -227,6 +227,7 @@ public partial class MainWindow : Window
 
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
         ActivePane = _panes[Math.Clamp(state?.ActivePane ?? 0, 0, _panes.Length - 1)];
+        UpdateActivePaneVisuals();
         BuildLayoutControls();
         BuildFileCommandControls();
         BuildDefaultViewOptions();
@@ -314,6 +315,7 @@ public partial class MainWindow : Window
     {
         var changed = !ReferenceEquals(ActivePane, pane);
         ActivePane = pane;
+        UpdateActivePaneVisuals();
         var index = Array.IndexOf(_panes, pane);
         if (index >= 0 && index < LayoutPreset.Find(_layout).Slots.Length)
             _lastFocusedPaneByLayout[_layout] = index;
@@ -321,6 +323,12 @@ public partial class MainWindow : Window
         UpdateShellPaneToggles();
         if (changed) ScheduleFileCommandRefresh(pane);
         if (changed) ScheduleSave();
+    }
+
+    private void UpdateActivePaneVisuals()
+    {
+        foreach (var pane in _panes)
+            pane.SetActivePaneVisual(ReferenceEquals(pane, ActivePane));
     }
 
     private void ViewMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateShellPaneToggles();

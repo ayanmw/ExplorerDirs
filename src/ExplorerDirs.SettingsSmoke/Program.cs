@@ -46,6 +46,12 @@ if (args.Length == 1 && args[0] == "--theme-palette-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--active-pane-theme-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckActivePaneAccentWiring();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();

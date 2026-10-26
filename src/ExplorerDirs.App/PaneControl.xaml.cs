@@ -65,6 +65,13 @@ public partial class PaneControl : UserControl
     internal event EventHandler? CommandContextChanged;
     internal event EventHandler? TreeWidthChanged;
     public event EventHandler? Activated;
+
+    internal void SetActivePaneVisual(bool isActive)
+    {
+        RootBorder.SetResourceReference(Border.BorderBrushProperty,
+            isActive ? "ExplorerDirs.AccentBrush" : SystemColors.ControlDarkBrushKey);
+        RootBorder.BorderThickness = isActive ? new Thickness(2) : new Thickness(1);
+    }
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }

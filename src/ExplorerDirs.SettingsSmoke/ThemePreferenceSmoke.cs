@@ -90,7 +90,8 @@ internal static class ThemePreferenceSmoke
         Check(Resolve("System", false).ToString() == "Light", "System theme resolves to Light when Windows prefers light colors");
         Check(Resolve("Light", true).ToString() == "Light", "explicit Light preference ignores the Windows color setting");
         Check(Resolve("Dark", false).ToString() == "Dark", "explicit Dark preference ignores the Windows color setting");
-        Check(resolvedType.IsEnum, "resolved theme uses a distinct state from the stored preference");        var paletteFactory = paletteType.GetMethod("For", BindingFlags.Static | BindingFlags.Public,
+        Check(resolvedType.IsEnum, "resolved theme uses a distinct state from the stored preference");
+        var paletteFactory = paletteType.GetMethod("For", BindingFlags.Static | BindingFlags.Public,
             binder: null, types: [resolvedType, typeof(System.Windows.Media.Color)], modifiers: null)
             ?? throw new Exception("ThemePalette.For(theme, accent) is required to derive colors from the system accent.");
         var accent = System.Windows.Media.Color.FromRgb(232, 64, 48);
@@ -124,6 +125,39 @@ internal static class ThemePreferenceSmoke
         {
             if (!condition) throw new Exception(message);
             Console.WriteLine("PASS " + message);
+        }
+    }
+    public static void CheckActivePaneAccentWiring()
+    {
+        var repoRoot = FindRepoRoot();
+        var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
+        var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        var windowCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+        Check(paneMarkup.Contains("x:Name=\"RootBorder\"", StringComparison.Ordinal),
+            "pane has a stable root border for active focus indication");
+        Check(paneCode.Contains("SetActivePaneVisual", StringComparison.Ordinal) &&
+              paneCode.Contains("ExplorerDirs.AccentBrush", StringComparison.Ordinal),
+            "pane active state uses the dynamic accent brush");
+        Check(windowCode.Contains("UpdateActivePaneVisuals", StringComparison.Ordinal) &&
+              windowCode.Contains("SetActivePaneVisual(ReferenceEquals(pane, ActivePane))", StringComparison.Ordinal),
+            "active pane changes update every pane visual");
+
+        static string FindRepoRoot()
+        {
+            for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+                 directory = directory.Parent)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md")) &&
+                    File.Exists(Path.Combine(directory.FullName, "src", "ExplorerDirs.App", "PaneControl.xaml")))
+                    return directory.FullName;
+            }
+            throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
+        }
+
+        static void Check(bool condition, string label)
+        {
+            if (!condition) throw new Exception("Active pane theme wiring: " + label);
+            Console.WriteLine("PASS " + label);
         }
     }
 }
