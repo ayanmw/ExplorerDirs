@@ -4,7 +4,7 @@
 
 `preview-0.6.0-temp.61/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.60，在“此电脑”地址菜单中动态列出逻辑驱动器，并为就绪的本地固定盘显示卷标；网络盘不读取远程卷标。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`，EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过。没有启动 GUI；真实菜单交互、驱动器导航和 Q-Dir 互操作仍待桌面验收。详见[包内说明](preview-0.6.0-temp.61/RELEASE-NOTES.md)。
 
-## 最新临时预览包（2026-10-26）
+## 此前临时预览包（2026-10-26）
 
 `preview-0.6.0-temp.59/app/ExplorerDirs.App.exe`，使用独立 profile。新增每窗格查看方式工具栏入口，以及列出当前路径上级和常用 Shell 位置的地址下拉；编辑与地址历史入口保持独立。产品版本 `0.6.0-preview.temp.59+77495f5d72a4739c2bb33a21d021328294f728c0`，EXE SHA-256 `C561B3B50F509760F823B0C71789570905CEB0E91414310DD8D9EC459770A7A7`，DLL SHA-256 `BFA91F50B668D370C9D62786EA6350F62989941FC25ECC450F450B9432EF0486`，与包内清单一致。路径菜单/焦点 smoke、App Release 构建、发布隔离 smoke 和重跑后的完整 Release SettingsSmoke 均通过；首次环境消息前台窗口断言失败未能复现。未启动 GUI；菜单和真实 Shell 导航仍待可见验收，路线图尚未全部完成。详见[第五十九版说明](../docs/releases/preview-0.6.0-temp.59.md)及包内 `RELEASE-NOTES.md`。
 
