@@ -18,6 +18,13 @@ if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
+{
+    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.Run();
+    Console.WriteLine("Recursive directory scanner smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--shell-watcher-recovery-smoke")
 {
     ShellDirectoryWatcherRecoverySmoke.Run();
@@ -362,7 +369,7 @@ ExplorerDirs.SettingsSmoke.ProgramStarterLauncherSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterShortcutSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterCommandStateSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run();
-var root = Path.Combine(AppContext.BaseDirectory, "profile-smoke");
+var root = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.SettingsSmoke.{Guid.NewGuid():N}");
 Directory.CreateDirectory(root);
 ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(root);
 ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(root);
@@ -384,12 +391,6 @@ if (args.Length == 1 && args[0] == "--qdr-location-roundtrip-only")
 {
     QdrExportSmoke.Run(root);
     Console.WriteLine("Q-Dir Shell location export/import smoke: PASS");
-    return;
-}
-if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
-{
-    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.Run();
-    Console.WriteLine("Recursive directory scanner smoke: PASS");
     return;
 }
 ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run();

@@ -35,6 +35,7 @@ internal static class RecursiveDirectoryScanner
     {
         var roots = new List<(string Path, bool IsDirectory)>();
         var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reparsePathCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         long unreadable = 0;
         foreach (var selectedPath in selectedPaths)
         {
@@ -48,7 +49,7 @@ internal static class RecursiveDirectoryScanner
             {
                 var path = Path.GetFullPath(selectedPath);
                 var attributes = File.GetAttributes(path);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                if (HasReparsePointInPath(path, attributes, reparsePathCache))
                 {
                     unreadable++;
                     continue;
@@ -110,6 +111,38 @@ internal static class RecursiveDirectoryScanner
             }
         }
         return new(bytes, files, directories, unreadable);
+    }
+
+    private static bool HasReparsePointInPath(string path, FileAttributes attributes,
+        Dictionary<string, bool> cache)
+    {
+        var checkedPaths = new List<string>();
+        var currentPath = path;
+        var currentAttributes = attributes;
+        while (true)
+        {
+            if (cache.TryGetValue(currentPath, out var cachedResult))
+            {
+                foreach (var checkedPath in checkedPaths) cache[checkedPath] = cachedResult;
+                return cachedResult;
+            }
+            if ((currentAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                cache[currentPath] = true;
+                foreach (var checkedPath in checkedPaths) cache[checkedPath] = true;
+                return true;
+            }
+
+            checkedPaths.Add(currentPath);
+            var parent = Path.GetDirectoryName(currentPath);
+            if (parent is null || string.Equals(parent, currentPath, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var checkedPath in checkedPaths) cache[checkedPath] = false;
+                return false;
+            }
+            currentPath = parent;
+            currentAttributes = File.GetAttributes(currentPath);
+        }
     }
 
     internal static RecursiveDirectoryScanResult Scan(

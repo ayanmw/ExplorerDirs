@@ -92,8 +92,13 @@ internal static class RecursiveDirectoryScannerSmoke
             Check(selectedLinkResult.Bytes == 0 && selectedLinkResult.Files == 0 &&
                   selectedLinkResult.Directories == 0 && selectedLinkResult.Unreadable == 1,
                 "recursive selection scan skips a selected reparse point without counting its target");
+            var selectedLinkChildResult = RecursiveDirectoryScanner.ScanSelection(
+                [Path.Combine(directoryLink, "outside.bin")], CancellationToken.None);
+            Check(selectedLinkChildResult.Bytes == 0 && selectedLinkChildResult.Files == 0 &&
+                  selectedLinkChildResult.Directories == 0 && selectedLinkChildResult.Unreadable == 1,
+                "recursive selection scan does not follow a selected path through a reparse-point ancestor");
             var linkedResult = RecursiveDirectoryScanner.Scan(root, CancellationToken.None);
-            Check(linkedResult.Bytes == 8 && linkedResult.Files == 2 && linkedResult.Directories == 2 &&
+            Check(linkedResult.Bytes == 8 && linkedResult.Files == 602 && linkedResult.Directories == 3 &&
                   linkedResult.Unreadable == 1,
                 $"recursive scan skips a real directory reparse point without counting its target contents " +
                 $"(attributes={File.GetAttributes(directoryLink)}, result={linkedResult})");
