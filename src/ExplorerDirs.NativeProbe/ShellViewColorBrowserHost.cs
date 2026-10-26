@@ -491,7 +491,7 @@ public static class ShellViewColorBrowserHostSmoke
     {
         var oleResult = OleInitialize(0);
         if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
-        nint frameWindow = 0, menu = 0, popup = 0, previousMenu = 0, descriptor = 0, browser = 0;
+        nint frameWindow = 0, menu = 0, popup = 0, previousMenu = 0, descriptor = 0, browser = 0, frame = 0, activeObject = 0;
         StreamViewHost? host = null;
         try
         {
@@ -520,11 +520,17 @@ public static class ShellViewColorBrowserHostSmoke
 
             host = new StreamViewHost(frameWindow, []);
             browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            frame = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeOleInPlaceFrame));
+            var activeObjectFixture = new ActiveObjectInterfaceFixture(frameWindow);
+            activeObject = Marshal.GetComInterfaceForObject(activeObjectFixture, typeof(IOleInPlaceActiveObjectProbe));
+            var setActiveObject = GetComMethod<SetActiveObjectCallback>(frame, 8);
+            Check(setActiveObject(frame, activeObject, 0) == 0,
+                "IOleInPlaceFrame.SetActiveObject accepts and retains a real IOleInPlaceActiveObject interface");
             var setMenu = GetComMethod<SetMenuCallback>(browser, 6);
             var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
             var installResult = setMenu(browser, menu, descriptor, frameWindow);
             Check(installResult == 0 && GetMenu(frameWindow) == menu,
-                "IShellBrowser.SetMenuSB installs the shared HMENU on the hidden frame");
+                "IShellBrowser.SetMenuSB installs the shared HMENU and active-object dispatcher on the hidden frame");
             var removeResult = removeMenus(browser, menu);
             Check(removeResult == 0 && GetMenu(frameWindow) == previousMenu,
                 "IShellBrowser.RemoveMenusSB unhooks OLE dispatch and restores the previous frame menu");
@@ -541,7 +547,9 @@ public static class ShellViewColorBrowserHostSmoke
         finally
         {
             if (browser != 0) Marshal.Release(browser);
+            if (frame != 0) Marshal.Release(frame);
             host?.Dispose();
+            if (activeObject != 0) Marshal.Release(activeObject);
             if (descriptor != 0) OleDestroyMenuDescriptor(descriptor);
             if (frameWindow != 0 && GetMenu(frameWindow) != 0) SetMenu(frameWindow, 0);
             if (frameWindow != 0 && IsWindow(frameWindow)) DestroyWindow(frameWindow);
@@ -778,6 +786,30 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int BorderCallback(nint self, nint border);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SetActiveObjectCallback(nint self, nint activeObject, nint name);
+
+    [ComVisible(true), Guid("00000117-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IOleInPlaceActiveObjectProbe
+    {
+        [PreserveSig] int GetWindow(out nint window);
+        [PreserveSig] int ContextSensitiveHelp(int enter);
+        [PreserveSig] int TranslateAccelerator(nint message);
+        [PreserveSig] int OnFrameWindowActivate(int activate);
+        [PreserveSig] int OnDocWindowActivate(int activate);
+        [PreserveSig] int ResizeBorder(nint border, nint uiWindow, int frameWindow);
+        [PreserveSig] int EnableModeless(int enable);
+    }
+
+    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+    private sealed class ActiveObjectInterfaceFixture(nint window) : IOleInPlaceActiveObjectProbe
+    {
+        public int GetWindow(out nint result) { result = window; return 0; }
+        public int ContextSensitiveHelp(int enter) => 0;
+        public int TranslateAccelerator(nint message) => 1;
+        public int OnFrameWindowActivate(int activate) => 0;
+        public int OnDocWindowActivate(int activate) => 0;
+        public int ResizeBorder(nint border, nint uiWindow, int frameWindow) => 0;
+        public int EnableModeless(int enable) => 0;
+    }
 
     [DllImport("ole32.dll")] private static extern int OleInitialize(nint reserved);
     [DllImport("ole32.dll")] private static extern void OleUninitialize();
