@@ -136,7 +136,7 @@
                             PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
                     <TabControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <local:TabHeaderPanel/>
+                            <local:TabHeaderPanel Multiline="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"/>
                         </ItemsPanelTemplate>
                     </TabControl.ItemsPanel>
                     <TabControl.ItemContainerStyle>
@@ -154,9 +154,9 @@
                         <ControlTemplate TargetType="{x:Type TabControl}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="ScrollTabsLeft" Grid.Column="0" Content="‹"
                                         ToolTip="向左滚动标签" AutomationProperties.Name="向左滚动标签"
@@ -175,6 +175,14 @@
                                         ToolTip="向右滚动标签" AutomationProperties.Name="向右滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsRight_Click"/>
                             </Grid>
+                            <ControlTemplate.Triggers>
+                                <DataTrigger Binding="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}" Value="True">
+                                    <Setter TargetName="ScrollTabsLeft" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ScrollTabsRight" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="TabHeaderScroll" Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+                                    <Setter TargetName="TabHeaderScroll" Property="VerticalScrollBarVisibility" Value="Auto"/>
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </TabControl.Template>
                 </TabControl>

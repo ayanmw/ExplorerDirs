@@ -21,6 +21,18 @@ internal static class TabStripVisibilitySmoke
         Check(store.Load(), "missing tab-strip preference preserves the existing always-visible default");
         store.Save(false);
         Check(!new TabStripVisibilityStore(path).Load(), "multiple-tabs preference round-trips through portable INI");
+
+        var multilinePath = Path.Combine(root, "MultilineTabHeaders.ini");
+        var multilineStore = new MultilineTabHeadersStore(multilinePath);
+        Check(!multilineStore.Load(), "multiline tab headers are off by default");
+        multilineStore.Save(true);
+        Check(new MultilineTabHeadersStore(multilinePath).Load(),
+            "multiline tab-header preference round-trips through its independent portable INI");
+        multilineStore = new MultilineTabHeadersStore(multilinePath);
+        multilineStore.Load();
+        multilineStore.Save(false);
+        Check(!new MultilineTabHeadersStore(multilinePath).Load(),
+            "multiline tab-header preference can be disabled again");
     }
 
     private static void Check(bool condition, string message)

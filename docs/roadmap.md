@@ -3610,3 +3610,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 源码追踪发现，隔离 frame subclass 接收 Shell View `WM_COMMAND` 后会投递自定义消息再执行；Edit → Select All 分支传入 `IsCurrentOwner` 检查，但 View 菜单分支没有。若 pane 在两条消息之间切换，延迟命令会读取当前 frame 菜单的命令 ID，却向旧 owner 的 `IShellView` window 发送命令。
 - 为 View 菜单命令增加执行前 owner 检查，并让 frame dispatcher 传入共享 coordinator 的当前 owner 状态。先加入回归场景，旧接口下 build 按预期失败；实现后 NativeProbe Release build 通过（0 警告、0 错误），`--shell-view-color-policy-smoke` 通过，包括隐藏 frame 上两 pane 同命令 ID、切换 owner 后拒绝旧 pane 命令。
 - 验证未创建 `IShellView`，仅运行隐藏普通 HWND/OLE 菜单协调器；真实 Shell 菜单、pane 切换的物理时序和 WPF/产品宿主仍未验证。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。
+## 2026-10-27：多行标签栏选项
+
+- Q-Dir 公布的标签栏能力包含多行标签显示。本程序新增“视图 → 多行标签栏”，按可用宽度排列标签行，关闭横向箭头并提供纵向滚动；默认仍为原先单行滚动，开关保存于独立便携 `MultilineTabHeaders.ini`。标签头仍由现有 `TabHeaderPanel` 排序，不重建浏览器或导航历史。
+- Release SettingsSmoke 覆盖默认关闭及开关往返，App Release build 通过。未运行可见 GUI；窄窗格、动态标签、拖放重排、标签数量增加后的滚动和焦点行为待验收。此项代码已实现，交互验收未完成。

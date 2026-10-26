@@ -10,6 +10,9 @@ namespace ExplorerDirs.App;
 
 public partial class PaneControl : UserControl
 {
+    public static readonly DependencyProperty MultilineTabHeadersProperty = DependencyProperty.Register(
+        nameof(MultilineTabHeaders), typeof(bool), typeof(PaneControl), new PropertyMetadata(false));
+
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
     private readonly Stack<TabSettings> _closedTabs = new();
@@ -81,6 +84,14 @@ public partial class PaneControl : UserControl
         _alwaysShowTabStrip = alwaysShow;
         UpdateTabStripVisibility();
     }
+
+    public bool MultilineTabHeaders
+    {
+        get => (bool)GetValue(MultilineTabHeadersProperty);
+        set => SetValue(MultilineTabHeadersProperty, value);
+    }
+
+    internal void SetMultilineTabHeaders(bool enabled) => MultilineTabHeaders = enabled;
 
     internal void SetStatusBarVisible(bool visible) =>
         StatusBarRow.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;

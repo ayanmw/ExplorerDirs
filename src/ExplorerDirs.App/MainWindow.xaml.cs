@@ -38,9 +38,11 @@ public partial class MainWindow : Window
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
+    private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
+    private bool _multilineTabHeaders;
     private bool _showStatusBar = true;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
@@ -165,6 +167,9 @@ public partial class MainWindow : Window
         _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
             _profileDirectory, "TabStripVisibility.ini"));
         _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
+        _multilineTabHeadersStore = new MultilineTabHeadersStore(Path.Combine(
+            _profileDirectory, "MultilineTabHeaders.ini"));
+        _multilineTabHeaders = _multilineTabHeadersStore.Load();
         _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
             _profileDirectory, "StatusBar.ini"));
         _showStatusBar = _statusBarVisibilityStore.Load();
@@ -289,6 +294,7 @@ public partial class MainWindow : Window
         ApplyCompactMode();
         ApplyStatusBarVisibility();
         ApplyTabStripVisibility();
+        ApplyMultilineTabHeaders();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
         UpdatePreviewPaneToggle();
@@ -900,6 +906,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MultilineTabHeaders_Click(object sender, RoutedEventArgs e)
+    {
+        var next = MultilineTabHeadersMenu.IsChecked;
+        try
+        {
+            _multilineTabHeadersStore.Save(next);
+            _multilineTabHeaders = next;
+            ApplyMultilineTabHeaders();
+            EnvironmentStatus.Text = next ? "标签栏已改为多行显示。" : "标签栏已恢复单行滚动显示。";
+        }
+        catch (Exception ex)
+        {
+            ApplyMultilineTabHeaders();
+            EnvironmentStatus.Text = $"多行标签栏设置保存失败：{ex.Message}";
+        }
+    }
+
     private void StatusBar_Click(object sender, RoutedEventArgs e)
     {
         var next = StatusBarMenu.IsChecked;
@@ -927,6 +950,12 @@ public partial class MainWindow : Window
     {
         foreach (var pane in _panes) pane.SetAlwaysShowTabStrip(_alwaysShowTabStrip);
         UpdateTabStripVisibilityMenu();
+    }
+
+    private void ApplyMultilineTabHeaders()
+    {
+        MultilineTabHeadersMenu.IsChecked = _multilineTabHeaders;
+        foreach (var pane in _panes) pane.SetMultilineTabHeaders(_multilineTabHeaders);
     }
 
     private void UpdateTabStripVisibilityMenu()
