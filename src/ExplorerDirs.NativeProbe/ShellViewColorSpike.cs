@@ -299,6 +299,7 @@ internal static class ShellViewColorSpike
         var activations = new List<string>(views.Count);
         for (var index = 0; index < views.Count; index++)
         {
+            var menuBeingReplaced = GetMenu(menuFrameWindow);
             Check(At<ActivateView>(views[index], 7)(views[index], 2)); // SVUIA_ACTIVATE_FOCUS.
             Pump(250);
             var current = hosts[index];
@@ -311,27 +312,44 @@ internal static class ShellViewColorSpike
             var browserHresult = shellBrowser.GetWindow(out var browserWindow);
             var frameHresult = oleFrame.GetWindow(out var frameWindow);
             var installedMenu = GetMenu(menuFrameWindow);
+            var customMenuPresent = HasMenuGroup(installedMenu, "Explorer Dirs");
             var successfulSetMenu = current.MenuTrace.Any(trace =>
                 trace.Contains("hr=0x00000000", StringComparison.Ordinal) &&
                 trace.Contains($"frame=0x{menuFrameWindow:X}", StringComparison.Ordinal));
             if (browserHresult < 0 || browserWindow != current.BrowserParentWindow ||
                 frameHresult < 0 || frameWindow != menuFrameWindow || browserWindow == frameWindow ||
-                installedMenu == 0 || !successfulSetMenu)
-                throw new InvalidOperationException($"Pane {index + 1} did not install its Shell menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; trace=[{string.Join(';', current.MenuTrace)}].");
+                installedMenu == 0 || !successfulSetMenu || !customMenuPresent)
+                throw new InvalidOperationException($"Pane {index + 1} did not install the merged Shell and app menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; custom-menu={customMenuPresent}; trace=[{string.Join(';', current.MenuTrace)}].");
+            if (index > 0 && hosts[index - 1].OwnsAttachedCustomMenuGroup)
+                throw new InvalidOperationException($"The previous pane retained its app-owned custom menu group after pane {index + 1} became active; previous-menu=0x{menuBeingReplaced:X}; previous-host=[{string.Join(';', hosts[index - 1].MenuTrace)}].");
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
         var finalHost = hosts[^1];
+        var finalCompositeMenu = GetMenu(menuFrameWindow);
         var finalRemoveCount = finalHost.RemoveMenusCallCount;
         Check(At<ActivateView>(views[^1], 7)(views[^1], 0)); // SVUIA_DEACTIVATE.
         Pump(250);
-        if (finalHost.RemoveMenusCallCount <= finalRemoveCount || GetMenu(menuFrameWindow) != menuCoordinator.BaseMenu)
+        if (finalHost.RemoveMenusCallCount <= finalRemoveCount || GetMenu(menuFrameWindow) != menuCoordinator.BaseMenu ||
+            finalHost.OwnsAttachedCustomMenuGroup)
             throw new InvalidOperationException($"Deactivating the last Shell pane did not remove the active shared menu and restore the frame menu: remove={finalHost.RemoveMenusCallCount - finalRemoveCount}; expected=0x{menuCoordinator.BaseMenu:X}; actual=0x{GetMenu(menuFrameWindow):X}; trace=[{string.Join(';', finalHost.MenuTrace)}].");
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
-        return $"per-pane-insert-set={string.Join(',', activations)}; " +
+        return $"per-pane-insert-set={string.Join(',', activations)}; custom-menu=present-in-each-active-composite; " +
             $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
             "frame-menu-restored-after-deactivate=True; foreground-unchanged=True";
+    }
+
+    private static bool HasMenuGroup(nint menu, string caption)
+    {
+        if (menu == 0 || !IsMenu(menu)) return false;
+        for (var index = 0; index < GetMenuItemCount(menu); index++)
+        {
+            var text = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(menu, (uint)index, text, text.Capacity, 0x400);
+            if (string.Equals(text.ToString(), caption, StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
     private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,
@@ -3071,6 +3089,7 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
     [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
     [DllImport("user32.dll")] private static extern uint GetMenuItemID(nint menu, int position);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int maxLength, uint flags);

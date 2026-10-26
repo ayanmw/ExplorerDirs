@@ -203,6 +203,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private nint _installedActiveWindow;
     private nint _previousFrameMenu;
     private nint _insertedMenuRoot;
+    private nint _customMenuRoot;
+    private nint _customMenuPopup;
     private readonly nint[] _insertedMenuPopups = new nint[6];
     private ShellViewNavigationHistory? _navigation;
     private int _insertMenusCallCount;
@@ -224,6 +226,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
     internal nint BrowserParentWindow => _parent;
     internal nint MenuFrameWindow => _menuFrameWindow;
+    internal bool OwnsAttachedCustomMenuGroup => _customMenuRoot != 0 && _customMenuPopup != 0 && HasSubMenu(_customMenuRoot, _customMenuPopup);
     internal List<string> MenuTrace { get; } = [];
     internal Func<bool, int>? EnableModelessHandler { get; set; }
     internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
@@ -275,6 +278,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             finally
             {
                 UninstallSharedMenu();
+                RemoveCustomMenuGroup(_customMenuRoot);
                 RemoveOwnedMenuGroups(_insertedMenuRoot);
                 if (_activeObject != 0)
                 {
@@ -382,7 +386,14 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     {
         Interlocked.Increment(ref _setMenuCallCount);
         int result;
-        if (SetMenuHandler is not { } handler) result = InstallSharedMenu(menu, oleMenu, active);
+        if (SetMenuHandler is not { } handler)
+        {
+            result = menu == 0
+                ? RemoveCustomMenuGroup(_customMenuRoot)
+                : EnsureCustomMenuGroup(menu);
+            if (result >= 0 && menu == 0) result = InstallSharedMenu(menu, oleMenu, active);
+            if (result >= 0 && menu != 0) result = InstallSharedMenu(menu, oleMenu, active);
+        }
         else try { result = handler(menu, oleMenu, active); }
         catch (Exception ex)
         {
@@ -402,7 +413,10 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             result = _menuFrameCoordinator is not null
                 ? _menuFrameCoordinator.RemoveMenu(this, menu)
                 : menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
-            if (result >= 0) result = RemoveOwnedMenuGroups(menu);
+            // Shell may pass a different composite handle here than the one it
+            // supplied to SetMenuSB; remove only popup handles this host owns.
+            if (result >= 0) result = RemoveOwnedMenuGroups(_insertedMenuRoot);
+            if (result >= 0) result = RemoveCustomMenuGroup(_customMenuRoot);
         }
         else try { result = handler(menu); }
         catch (Exception ex)
@@ -673,6 +687,93 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         return 0;
     }
 
+    // The Shell builds its six standard groups after InsertMenusSB. Add the app-owned
+    // group at SetMenuSB time so it participates in the exact composite HMENU the frame displays.
+    private int EnsureCustomMenuGroup(nint menu)
+    {
+        if (menu == 0 || !IsMenu(menu)) return unchecked((int)0x80070057);
+        if (_customMenuRoot == menu && _customMenuPopup != 0) return 0;
+        if (_customMenuRoot != 0)
+        {
+            var removeResult = RemoveCustomMenuGroup(_customMenuRoot);
+            if (removeResult < 0) return removeResult;
+        }
+
+        var popup = CreatePopupMenu();
+        var label = Marshal.StringToHGlobalUni("Explorer Dirs");
+        var marker = Marshal.StringToHGlobalUni("Prototype host command group");
+        try
+        {
+            var item = new MenuItemInfo
+            {
+                Size = (uint)Marshal.SizeOf<MenuItemInfo>(),
+                Mask = 0x47, // MIIM_STATE|MIIM_ID|MIIM_SUBMENU|MIIM_STRING.
+                State = 0x3, // MFS_DISABLED | MFS_GRAYED; the probe adds no fake command behavior.
+                Id = 0x7FF0,
+                SubMenu = popup,
+                Text = marker
+            };
+            if (popup == 0) return unchecked((int)0x8007000E);
+            if (!InsertMenuItemW(popup, 0, true, ref item))
+            {
+                var error = Marshal.GetHRForLastWin32Error();
+                DestroyMenu(popup);
+                return error;
+            }
+            var rootItem = item;
+            rootItem.State = 0;
+            rootItem.Id = 0x7FEF;
+            rootItem.SubMenu = popup;
+            rootItem.Text = label;
+            if (!InsertMenuItemW(menu, (uint)GetMenuItemCount(menu), true, ref rootItem))
+            {
+                var error = Marshal.GetHRForLastWin32Error();
+                DestroyMenu(popup);
+                return error;
+            }
+            _customMenuRoot = menu;
+            _customMenuPopup = popup;
+            return 0;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(marker);
+            Marshal.FreeHGlobal(label);
+        }
+    }
+
+    private int RemoveCustomMenuGroup(nint menu)
+    {
+        if (_customMenuRoot == 0 || menu != _customMenuRoot) return 0;
+        var root = _customMenuRoot;
+        var popupHandle = _customMenuPopup;
+        var found = -1;
+        if (IsMenu(menu))
+        {
+            for (var position = GetMenuItemCount(menu) - 1; position >= 0; position--)
+            {
+                if (GetSubMenu(menu, position) != _customMenuPopup) continue;
+                found = position;
+                if (!RemoveMenu(menu, (uint)position, 0x400)) return Marshal.GetHRForLastWin32Error();
+                break;
+            }
+        }
+        if (_customMenuPopup != 0) DestroyMenu(_customMenuPopup);
+        _customMenuRoot = _customMenuPopup = 0;
+        MenuTrace.Add($"custom-remove root=0x{root:X} popup=0x{popupHandle:X} found={found} still-present={HasSubMenu(root, popupHandle)}");
+        return 0;
+    }
+
+    internal int RetireCustomMenuGroup() => RemoveCustomMenuGroup(_customMenuRoot);
+
+    private static bool HasSubMenu(nint root, nint popup)
+    {
+        if (!IsMenu(root)) return false;
+        for (var position = 0; position < GetMenuItemCount(root); position++)
+            if (GetSubMenu(root, position) == popup) return true;
+        return false;
+    }
+
     internal static void RollbackInsertedMenuGroups(nint menu, nint[] popups, int inserted)
     {
         // Removing by position shifts later entries left, so unwind in reverse insertion order.
@@ -768,6 +869,8 @@ internal sealed class ShellMenuFrameCoordinator
         {
             var unhookResult = Unhook(priorOwner, priorWindow);
             if (unhookResult < 0) return unhookResult;
+            var removeCustomMenuResult = priorOwner.RetireCustomMenuGroup();
+            if (removeCustomMenuResult < 0) return removeCustomMenuResult;
         }
 
         if (!SetMenu(_frameWindow, menu))
@@ -804,6 +907,8 @@ internal sealed class ShellMenuFrameCoordinator
     {
         if (!ReferenceEquals(_owner, owner)) return 0;
         var result = Unhook(owner, _activeWindow);
+        if (result < 0) return result;
+        result = owner.RetireCustomMenuGroup();
         if (result < 0) return result;
         if (GetMenu(_frameWindow) == _activeMenu)
         {

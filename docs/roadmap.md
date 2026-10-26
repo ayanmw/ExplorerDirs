@@ -3493,3 +3493,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 四窗格隔离 consumer 在 Pane 1 重命名时，把 Down 键消息故意交给 Pane 2 的 `IShellView::TranslateAccelerator`。Pane 2 返回 `S_FALSE`，Pane 1 编辑框焦点保持；随后四 pane 各自的四方向键路由与兄弟 focused item/selection 隔离仍通过。完整 Private Desktop watchdog 两轮退出码 0，前台未变。
 - 这只验证直接合成 Shell accelerator 的错误目标路径，不模拟 WPF `HwndHost` 消息链或真实物理键；产品多窗格键盘 P0 仍待可见验收。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27-错误-pane-的-accelerator-不夺取活动-f2-编辑焦点)。
+
+## 2026-10-27：四窗格 Shell 菜单合并应用菜单组
+
+- 隔离 `StreamViewHost` 在 `SetMenuSB` 安装前向 Shell composite HMENU 添加自有 `Explorer Dirs` 菜单组，并在活动 pane 切换/停用时经共享菜单协调器清理自有 popup；菜单组内只放禁用原型标记。该处理遵循 Shell 先构造菜单、宿主再修改 composite menu 的接口顺序。
+- NativeProbe Release build 0 警告、0 错误；完整 `session-restore-private-desktop` watchdog 退出码 0。四个真实 filesystem `IShellView` 逐个激活时当前菜单均含应用组，前一 owner 菜单资源清理、最终恢复原 frame 菜单均通过；此前 view-state、Shell 菜单命令、文件操作/通知与焦点隔离检查继续通过，主桌面 foreground HWND 不变。
+- 仅为 Private Desktop 隔离宿主证据；没有显示/点击菜单、执行自定义命令、验证快捷键/OLE 菜单消息循环或接入 WPF 产品宿主。产品 ExplorerBrowser、配置与 release 未改。详细证据见[原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-菜单合并应用菜单组)。
