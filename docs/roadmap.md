@@ -3381,3 +3381,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 私有桌面静态列探针在成功应用列配置后调用 `IShellView::Refresh`，返回 `S_OK`；刷新后自定义列仍为空、实际升序仍为 `100,10,10,2`，DefView 未调用 adapter 的项目取值/比较回调。刷新不是当前缺失列行为的修复方式。
 - 官方 `PSRegisterPropertySchema` / `PSUnregisterPropertySchema` 契约要求机器级 schema 和 `HKLM` 写权限，注册属于安装流程、注销属于卸载流程；不在日常开发机执行临时 schema 注册。逐行列仍是失败中的隔离实验，不接入产品。
 - 探针 Release build 通过（0 警告、0 错误）；私有桌面前台保护通过。详见[逐行文件夹大小列架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
+
+## 2026-10-27：布局工具栏选中态使用系统强调色
+
+- 当前布局按钮保留对比度检查过的选择背景，并将边框切换为动态 `ExplorerDirs.AccentBrush`；非选中布局仍使用中性边框。切换布局时按当前主题资源刷新，不新增持久化配置或改变布局行为。
+- `--pane-theme-markup-smoke` 对新语义资源接线先失败、后通过；完整 SettingsSmoke 与 App Release build 通过后提交。实际窗口颜色、高对比度和四窗格窄宽度仍待可见验收。

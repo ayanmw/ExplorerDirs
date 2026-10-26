@@ -112,9 +112,11 @@ internal static class PaneThemeMarkupSmoke
         Check(layoutWindowCode.Contains("ApplicationThemeWindowBinding.Attach(dialog, _themeController)", StringComparison.Ordinal),
             "the code-created view-preset dialog follows the live application theme");
         Check(layoutWindowCode.Contains("ExplorerDirs.SelectionBackgroundBrush", StringComparison.Ordinal) &&
+              layoutWindowCode.Contains("SetResourceReference(Control.BorderBrushProperty", StringComparison.Ordinal) &&
+              layoutWindowCode.Contains("isSelected ? \"ExplorerDirs.AccentBrush\" : \"ExplorerDirs.BorderBrush\"", StringComparison.Ordinal) &&
               layoutGridCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal) &&
               layoutHostCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
-            "layout selector and pane splitters consume semantic selection and border roles");
+            "layout selector uses semantic selection/accent roles and pane splitters use semantic borders");
 
         Console.WriteLine("Pane theme markup smoke: PASS");
 

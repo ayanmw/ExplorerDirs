@@ -1133,9 +1133,12 @@ public partial class MainWindow : Window
         SynchronizeSharedTree();
         foreach (var preset in LayoutPreset.All)
         {
-            _layoutMenuItems[preset.Id].IsChecked = preset.Id == _layout;
+            var isSelected = preset.Id == _layout;
+            _layoutMenuItems[preset.Id].IsChecked = isSelected;
             _layoutButtons[preset.Id].SetResourceReference(Control.BackgroundProperty,
-                preset.Id == _layout ? "ExplorerDirs.SelectionBackgroundBrush" : "ExplorerDirs.ControlBackgroundBrush");
+                isSelected ? "ExplorerDirs.SelectionBackgroundBrush" : "ExplorerDirs.ControlBackgroundBrush");
+            _layoutButtons[preset.Id].SetResourceReference(Control.BorderBrushProperty,
+                isSelected ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
         }
     }
 
