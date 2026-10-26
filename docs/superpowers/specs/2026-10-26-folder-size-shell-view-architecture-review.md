@@ -29,7 +29,7 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 ## 建议原型边界
 
 1. 单独的 NativeProbe/原型进程、单窗格、普通本地文件系统目录；不替换产品 `ExplorerBrowserHost`，不读取或写入日常 profile、release 或用户 Q-Dir 配置。
-2. 先验证标准 DefView 能从 adapter 读取两列：现有原生列 + 一个简单的静态数值列；确认 Details 列标题、列隐藏/显示、列顺序、`IColumnManager` 读回及数字升降序。这个步骤只验证列合同，不做递归扫描。
+2. 先验证标准 DefView 能从 adapter 读取两列：现有原生列 + 一个简单的静态数值列；确认 `GetDetailsOf(NULL, index)` 的列标题/索引、`MapColumnToSCID` 的属性键映射、`GetDetailsEx` 返回值的明确类型、`GetDefaultColumnState` 的默认显示状态，以及 `IColumnManager` 的列可见性/顺序读回。数值比较必须在 `CompareIDs` 收到新增列索引时用数字比较；用 `2, 10, 100` 等会令字符串排序出错的静态样本分别验证升序、降序和相等值。该阶段只证明 DefView 的列合同，不做递归扫描或真实文件夹大小计算。[Microsoft `IShellFolder2::GetDetailsEx`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdetailsex)、[`GetDefaultColumn`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumn)、[`GetDefaultColumnState`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumnstate)、[`IShellFolder::CompareIDs`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)。
 3. 再验证真实文件/文件夹 PIDL 委托：图标、打开、属性、文件项和背景菜单、复制/粘贴/删除/重命名、剪贴板、拖放均仍作用于原始文件系统项目。
 4. 最后才加入受控递归计算及缓存。递归不能在 Shell 列回调或 UI STA 上同步执行；需要显式启动、取消、进度、失败/权限不全表示、缓存身份、文件变化失效、刷新与排序一致性。当前 `AGENTS.md` 禁止为填补属性缺失而递归计算文件夹大小；实现递归列前必须先由用户审阅并更新该约束。
 5. 再分别覆盖多层目录、重命名/移动/删除后列值失效、隐藏文件策略、重解析点循环、网络/脱机目录和高项目数。第一阶段只声称本地普通文件夹支持。
