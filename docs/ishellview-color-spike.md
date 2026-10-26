@@ -16,7 +16,13 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 用户已授权继续推进隔离 `IShellView` 宿主迁移原型，验证范围包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点和每会话 view-state。授权范围仅限 NativeProbe/隔离宿主，不等于批准替换产品 ExplorerBrowser 或发布迁移版本；产品文件视图保持现状，直到原型门槛有完整证据并单独评审。
 
-已有隐藏 COM smoke、局部文件操作/通知样本和会话状态测试来自不同验证层，不能合并宣称完整迁移通过。完整 Private Desktop session-restore 探针现已覆盖真实 `IShellView` 的写入、销毁、重建和恢复；仍缺稳定逐项颜色像素、真实 OLE 拖放闭环、物理键盘焦点，以及 WPF 产品宿主集成。当前继续不使用 Computer Use；不将隔离宿主证据当作产品 UI 验收。
+已有隐藏 COM smoke、局部文件操作/通知样本和会话状态测试来自不同验证层，不能合并宣称完整迁移通过。完整 Private Desktop session-restore 探针现已覆盖真实 `IShellView` 的写入、销毁、重建和恢复；颜色像素已有五种 ListView 样式及排序/分组后的隔离证据，但仍缺真实用户桌面的可见验收、真实 OLE 拖放闭环、物理键盘焦点，以及 WPF 产品宿主集成。当前继续不使用 Computer Use；不将隔离宿主证据当作产品 UI 验收。
+
+### 2026-10-27：五种 ListView 样式的逐项颜色像素隔离复核
+
+`color-private-desktop` watchdog 本轮退出码 0，NativeProbe Release build 为 0 警告/错误，日志为 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。原型为两条文件身份配置不同前景/背景颜色，在 Icon、Details、SmallIcon、List、Tile 五种原生 ListView 样式中读取目标行像素；排序与 Size 分组后再按当前 Shell item 身份映射颜色，并对两行分别断言非零像素。该路径报告五种样式 `matched-color-unsorted` 与 `matched-shell-and-listview-sorted-grouped` 均通过。
+
+日志前面的 `visible-row-pixels` 检查没有收到逐项通知，结果是 0；不能把它算作成功证据。通过的像素证据来自后续专用 `direct-listview-mode-capture`，对实际 `SysListView32` 的 `NM_CUSTOMDRAW` 采样。整个窗口属于独立 Private Desktop，主桌面 foreground HWND 未变；本结果验证隔离宿主的绘制技术可行性，不代表产品已接入，也不替代用户桌面的可见验收、主题/缩放检查或真实 Shell 扩展兼容检查。
 
 ## 2026-10-27：四窗格 Shell View 菜单命令映射与执行
 

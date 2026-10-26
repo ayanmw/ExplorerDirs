@@ -3538,3 +3538,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 对照微软 `IOleInPlaceSite::GetWindowContext` 与 `OleTranslateAccelerator` 契约后，确认 OLE frame accelerator 是 in-place object activation 提供的另一条路线。当前原型由 `IShellFolder::CreateViewObject` 直接创建 filesystem `IShellView`，没有 OLE in-place object 生命周期；给它补造 `GetWindowContext` 不会验证文件视图实际按键行为。因此移除“完成 OLE accelerator 生命周期”作为 Shell view 迁移门槛。
 - 保留真实 filesystem view `IShellView::TranslateAccelerator` 的 F4/F6/F24 委托结果；接下来的 keyboard gate 是产品 `ExplorerBrowserHost.TranslateAcceleratorCore` 中的实际焦点、活动 pane、rename editor 与 Shell 视图分发，需用隔离产品 HostProbe 验证。真实物理键盘和可见 WPF 行为仍需后续桌面验收；不据此声称产品迁移完成。
 - 参考：[IOleInPlaceSite::GetWindowContext](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplacesite-getwindowcontext)、[OleTranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator)、[IShellView::TranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)。产品 ExplorerBrowser 与 release 未改。
+
+## 2026-10-27：隔离 Shell view 逐项颜色像素覆盖五种样式
+
+- NativeProbe Release 构建 0 警告/错误；`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。通过的 `direct-listview-mode-capture` 在真实 filesystem `IShellView` 的 `SysListView32` 上覆盖 Icon、Details、SmallIcon、List、Tile 五种样式；两条按文件身份配置不同颜色的样本，在未排序、排序及分组后都取得两行非零颜色像素，排序/分组后身份映射正确。
+- 前置 `visible-row-pixels` 路径回调为零，未通过；只有后续专用采样路径算作证据。Private Desktop 前台句柄未变。颜色绘制因此具备隔离技术可行性证据，仍不代表产品着色已接入或用户桌面外观验收通过；真实 OLE 拖放、物理键盘焦点及 WPF 宿主集成仍在迁移门槛中。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27五种-listview-样式的逐项颜色像素隔离复核)。
