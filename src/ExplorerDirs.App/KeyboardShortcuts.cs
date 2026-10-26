@@ -7,6 +7,7 @@ internal enum ExplorerShortcut
     NewTab, NewWindow, QuickFolderMenu, ProgramStarter, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab, OpenSelectionInNewTab,
     Tab1, Tab2, Tab3, Tab4, Tab5, Tab6, Tab7, Tab8, Tab9, NewFolder, InvertSelection,
     Refresh, Search, QuickFilter, ExpandTree, TogglePreviewPane, ToggleDetailsPane, ToggleMaximize,
+    RestartApplication,
     CalculateDirectorySize,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
     PasteSpecial,
@@ -59,6 +60,7 @@ internal static class KeyboardShortcuts
         (0x46, 2) => ExplorerShortcut.Search,        // Ctrl+F
         (0x4d, 2) => ExplorerShortcut.QuickFilter,    // Ctrl+M: Q-Dir-style quick filter
         (0x7a, 0) => ExplorerShortcut.ToggleMaximize,// F11
+        (0x7a, 1) => ExplorerShortcut.RestartApplication, // Q-Dir: Alt+F11.
         _ => ExplorerShortcut.None
     };
 

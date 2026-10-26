@@ -21,7 +21,7 @@
                 <MenuItem Header="新建窗口" InputGestureText="Ctrl+N" Click="NewWindow_Click"/>
                 <MenuItem Header="关闭标签页" InputGestureText="Ctrl+W" Click="CloseTab_Click"/>
                 <Separator/>
-                <MenuItem Header="重启应用" Click="RestartApplication_Click"/>
+                <MenuItem Header="重启应用" InputGestureText="Alt+F11" Click="RestartApplication_Click"/>
                 <MenuItem Header="退出" Click="Exit_Click"/>
             </MenuItem>
             <MenuItem x:Name="FileCommandsMenu" Header="编辑(_E)" SubmenuOpened="FileCommandsMenu_SubmenuOpened">

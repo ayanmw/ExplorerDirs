@@ -1252,6 +1252,9 @@ public partial class MainWindow : Window
             case ExplorerShortcut.ProgramStarter:
                 OpenProgramStarterWindow();
                 break;
+            case ExplorerShortcut.RestartApplication:
+                RequestRestartApplication();
+                break;
             case ExplorerShortcut.ActivateMenu:
                 if (MainMenu.Items.Count == 0 || MainMenu.Items[0] is not MenuItem firstMenu) return false;
                 firstMenu.Focus();
@@ -1580,6 +1583,9 @@ public partial class MainWindow : Window
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
     private void RestartApplication_Click(object sender, RoutedEventArgs e)
+        => RequestRestartApplication();
+
+    private void RequestRestartApplication()
     {
         if (_restartApplication is null) return;
         if (MessageBox.Show(this,

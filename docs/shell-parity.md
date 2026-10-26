@@ -274,3 +274,5 @@ Ctrl+N 已创建独立窗口会话：主窗口继续使用 `ExplorerDirs.ini`，
 2026-10-26 Program Starter 的显式相对工作目录按应用程序目录解析；绝对路径、活动文件夹默认值及虚拟位置回退保持原样。参数 smoke 通过。Q-Dir 官方资料未明确第四字段相对路径锚点，因此这是本程序的便携路径规则，不作跨应用一致性声明；完整 SettingsSmoke、Release 构建和实际 Q-Dir 正向样本验收见[路线图](roadmap.md#2026-10-26program-starter-支持相对工作目录)。
 
 2026-10-26 地址与查看入口：窗格工具栏现在提供每标签查看方式按钮，并复用原 Shell 查看方式菜单；地址位置下拉显示当前路径及所有上级、常用系统目录和 Shell 位置，历史菜单继续独立。现代地址栏保留独立编辑按钮，经典完整路径可点击编辑；位置下拉是单独 Tab 停靠点。路径菜单模型与焦点顺序 smoke、Release 构建通过；弹出菜单图标、布局和虚拟位置的可见行为仍待桌面验收。[Q-Dir 地址栏/上级目录 FAQ](https://www.softwareok.com/?faq=53&seite=faq-Q-DIR) · [Microsoft Explorer 地址栏与面包屑](https://learn.microsoft.com/en-us/windows/win32/shell/developing-with-windows-explorer)
+
+2026-10-27 Q-Dir 重启快捷键：官方快捷键清单列出 Alt+F11 重启；本程序“文件 → 重启应用”现在标注并响应 Alt+F11，复用现有确认、所有窗口会话保存和重启逻辑。分派/接线 smoke、完整 Release `SettingsSmoke` 与 App Release 构建通过；没有触发真实重启或 GUI 验收。[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)

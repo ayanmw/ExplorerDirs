@@ -763,11 +763,15 @@ try
           !ShellMenuCommand.TryGetMenuId(IntPtr.Zero, IntPtr.Zero, out _),
           "custom menu commands ignore accelerators, control notifications, and separator IDs");
     ShellMenuTargetTrackerSmoke.Run();
+    ExplorerDirs.SettingsSmoke.RestartShortcutSmoke.Run();
     ShellStatusCountRefreshGateSmoke.Run();
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
     Check(KeyboardShortcuts.Resolve(0x27, 1) == ExplorerShortcut.Forward, "Alt+Right goes forward");
+    Check(KeyboardShortcuts.Resolve(0x7a, 1) == ExplorerShortcut.RestartApplication &&
+          KeyboardShortcuts.Resolve(0x7a, 0) == ExplorerShortcut.ToggleMaximize,
+          "Alt+F11 restarts the app while F11 keeps its maximize action");
     Check(KeyboardShortcuts.ResolveTabHeaderArrow(0x25, 2, tabHeaderFocused: true) == ExplorerShortcut.PreviousTab &&
           KeyboardShortcuts.ResolveTabHeaderArrow(0x27, 2, tabHeaderFocused: true) == ExplorerShortcut.NextTab,
           "Ctrl+Left/Right switches tabs while a tab header has focus");

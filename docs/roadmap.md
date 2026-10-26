@@ -5,6 +5,11 @@
 - 文件视图原有 Ctrl+滚轮处理限定于 Shell 子视图 HWND；现在窗格 WPF 表面（导航工具栏、地址区、标签栏等）也将 Ctrl+滚轮传给该窗格当前标签的同一查看方式循环，成功切换才消费事件，普通滚轮仍留给原控件。
 - 新增源码接线 smoke，完整 Release `SettingsSmoke` 通过；App Release 构建通过（0 警告、0 错误），`git diff --check` 通过。没有操作 GUI；不同控件上的真实滚轮、四窗格目标、视图刷新后的焦点和普通滚轮行为仍待可见验收。
 
+## 2026-10-27：补齐 Q-Dir Alt+F11 重启快捷键
+
+- Q-Dir 官方快捷键清单将 Alt+F11 定义为重启。本项目现将其接入现有的确认、逐窗口会话保存和重启流程，并在“文件 → 重启应用”旁标注快捷键；普通 F11 仍最大化/还原窗口，不注册系统级热键。
+- 快捷键分派/菜单接线 smoke、完整 Release `SettingsSmoke`、App Release 构建和 `git diff --check` 通过。没有触发实际重启；跨多窗口会话恢复仍需可见验收。来源：[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
+
 ## 2026-10-27：补齐 Q-Dir 状态栏显示选项
 
 - Q-Dir 官方 FAQ 36 列出文件视图状态栏显示/隐藏选项；Explorer Dirs 现于“视图”菜单提供同类开关，默认显示，保存到 profile `StatusBar.ini`。隐藏时各窗格的状态文本、项目数、磁盘空间和状态栏查看按钮一并隐藏，隐藏栏不再占用 Tab/Shift+Tab 或 F6 停靠点。
