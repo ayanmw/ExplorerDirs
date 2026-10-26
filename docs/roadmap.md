@@ -15,6 +15,11 @@
 - `OnViewWindowActive` 现可把活动 Shell view 接口指针和回调转给外层宿主；未配置处理器时维持 `S_OK`，委托 HRESULT 原样返回，异常转为 `E_FAIL`，释放时断开回调。
 - NativeProbe 的 `--shell-view-color-policy-smoke` 通过 `IShellBrowser` vtable 槽 16 检查指针/HRESULT、异常与释放后默认行为。未创建 Shell view；不证明窗口焦点、激活顺序或产品窗格激活行为。
 
+## 2026-10-26：补齐隔离宿主的 IOleWindow 帮助回调
+
+- `ContextSensitiveHelp` 可选转发进入/退出帮助模式的状态给外层宿主；无回调时保留原来的 `E_NOTIMPL`，返回值透传，异常转成 `E_FAIL`，释放时断开处理器。
+- NativeProbe 的 COM vtable smoke 覆盖 IOleWindow 槽 4 的默认 HRESULT、状态值、失败 HRESULT、异常和释放行为。没有调用真实帮助 UI 或创建 Shell view。
+
 ## 2026-10-26：补齐隔离宿主的 Shell 控制窗路由
 
 - `StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现可委托给外层宿主提供的控件窗口映射/消息处理器；未配置控件时分别返回 `E_FAIL` / `E_NOTIMPL`，异常留在 COM 边界内，释放宿主时解除委托。

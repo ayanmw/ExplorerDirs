@@ -408,9 +408,11 @@ public static class ShellViewColorBrowserHostSmoke
         try
         {
             var enableModeless = GetComMethod<EnableModelessCallback>(browser, 9);
+            var contextSensitiveHelp = GetComMethod<EnableModelessCallback>(browser, 4);
             var viewWindowActive = GetComMethod<ViewWindowActiveCallback>(browser, 16);
             var setToolbarItems = GetComMethod<SetToolbarItemsCallback>(browser, 17);
-            Check(enableModeless(browser, 0) == 0 && viewWindowActive(browser, 0xABC) == 0 &&
+            Check(enableModeless(browser, 0) == 0 && contextSensitiveHelp(browser, 0) == unchecked((int)0x80004001) &&
+                  viewWindowActive(browser, 0xABC) == 0 &&
                   setToolbarItems(browser, 0x111, 2, 3) == 0,
                 "the generic StreamViewHost accepts frame callbacks when no parent UI is configured");
 
@@ -423,6 +425,19 @@ public static class ShellViewColorBrowserHostSmoke
             Check(enableModeless(browser, 1) == 0 && modeless == true &&
                   enableModeless(browser, 0) == unchecked((int)0x80070005) && modeless == false,
                 "the generic StreamViewHost forwards modeless state and preserves the parent's HRESULT");
+
+            bool? contextHelp = null;
+            host.ContextSensitiveHelpHandler = entering =>
+            {
+                contextHelp = entering;
+                return entering ? 1 : unchecked((int)0x80070005);
+            };
+            Check(contextSensitiveHelp(browser, 1) == 1 && contextHelp == true &&
+                  contextSensitiveHelp(browser, 0) == unchecked((int)0x80070005) && contextHelp == false,
+                "the generic StreamViewHost forwards context-help state and preserves the parent's HRESULT");
+            host.ContextSensitiveHelpHandler = _ => throw new InvalidOperationException("fixture failure");
+            Check(contextSensitiveHelp(browser, 1) == unchecked((int)0x80004005),
+                "a parent context-help callback exception stays inside the COM boundary");
 
             nint activeView = 0;
             host.ViewWindowActiveHandler = view =>
@@ -448,7 +463,9 @@ public static class ShellViewColorBrowserHostSmoke
             Check(setToolbarItems(browser, 0x222, 4, 5) == unchecked((int)0x80004005),
                 "a parent toolbar callback exception stays inside the COM boundary");
             host.Dispose();
-            Check(enableModeless(browser, 1) == 0 && viewWindowActive(browser, 0xDEF) == 0 &&
+            Check(enableModeless(browser, 1) == 0 &&
+                  contextSensitiveHelp(browser, 1) == unchecked((int)0x80004001) &&
+                  viewWindowActive(browser, 0xDEF) == 0 &&
                   setToolbarItems(browser, 0x222, 4, 5) == 0,
                 "disposing the generic StreamViewHost disconnects frame-state routes");
         }

@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：补齐 IOleWindow 帮助回调路由
+
+`StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。
+
 ## 2026-10-26：转发活动 Shell 视图通知
 
 `StreamViewHost.OnViewWindowActive` 现在可选委托给外层宿主，原样传递活动 view 指针并返回父级 HRESULT。无回调时仍返回原先的 `S_OK`；异常转换为 `E_FAIL`，释放 host 时解除委托。

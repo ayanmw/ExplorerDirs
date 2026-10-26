@@ -202,6 +202,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal string? StatusText { get; private set; }
     internal event Action<string?>? StatusTextChanged;
     internal Func<nint, ushort, bool>? AcceleratorHandler { get; set; }
+    internal Func<bool, int>? ContextSensitiveHelpHandler { get; set; }
     internal Func<uint, nint>? ControlWindowProvider { get; set; }
     internal Func<uint, uint, nuint, nint, (int HResult, nint Result)>? ControlMessageHandler { get; set; }
     internal Func<nint, nint, int>? InsertMenusHandler { get; set; }
@@ -258,6 +259,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
                 var navigation = _navigation;
                 _navigation = null;
                 AcceleratorHandler = null;
+                ContextSensitiveHelpHandler = null;
                 ControlWindowProvider = null;
                 ControlMessageHandler = null;
                 InsertMenusHandler = null;
@@ -308,7 +310,16 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         _navigation = navigation;
     }
     public int GetWindow(out nint window) { window = _parent; return 0; }
-    public int ContextSensitiveHelp(int enter) => unchecked((int)0x80004001);
+    public int ContextSensitiveHelp(int enter)
+    {
+        if (ContextSensitiveHelpHandler is not { } handler) return unchecked((int)0x80004001);
+        try { return handler(enter != 0); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell context help: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int InsertMenusSB(nint menu, nint widths)
     {
         if (InsertMenusHandler is not { } handler) return 0;
