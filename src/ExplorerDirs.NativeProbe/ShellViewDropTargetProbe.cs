@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using ExplorerDirs.NativeProbe;
 
 // Compares Shell drop targets exposed by a direct IShellView against its folder target.
@@ -122,6 +123,8 @@ internal static class ShellViewDropTargetProbe
             LogDataObjectFormats("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogDataObjectPayload("selected-view", selectedDataObject);
             LogDataObjectPayload("SHCreateDataObject", dataObject);
+            if (selectedDataObject != 0) LogFileContentsPayload("selected-view", selectedDataObject);
+            LogFileContentsPayload("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogShellIdListPayload("selected-view", selectedDataObject);
             LogShellIdListPayload("SHCreateDataObject", dataObject);
 
@@ -365,6 +368,52 @@ internal static class ShellViewDropTargetProbe
         }
     }
 
+    private static void LogFileContentsPayload(string label, nint dataObject)
+    {
+        var formatId = RegisterClipboardFormatW("FileContents");
+        if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var format = new FormatEtc
+        {
+            Format = checked((ushort)formatId),
+            Aspect = 1,
+            Index = 0,
+            Medium = 4 // TYMED_ISTREAM, as advertised by both selected-item data objects.
+        };
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-filecontents: source={label}; get=0x{getDataHr:X8}");
+            return;
+        }
+
+        var buffer = Marshal.AllocHGlobal(4096);
+        try
+        {
+            using var contents = new MemoryStream();
+            while (contents.Length <= 1024 * 1024)
+            {
+                var readHr = At<ReadStream>(medium.Handle, 3)(medium.Handle, buffer, 4096, out var read);
+                if (read > 0)
+                {
+                    var chunk = new byte[read];
+                    Marshal.Copy(buffer, chunk, 0, checked((int)read));
+                    contents.Write(chunk);
+                }
+                if (readHr < 0) throw new COMException($"{label} FileContents IStream::Read failed", readHr);
+                if (read == 0) break;
+            }
+
+            var bytes = contents.ToArray();
+            var sample = System.Text.Encoding.UTF8.GetString(bytes);
+            Console.WriteLine($"shell-view-drop-target-filecontents: source={label}; get=0x{getDataHr:X8}; bytes={bytes.Length}; sha256={Convert.ToHexString(SHA256.HashData(bytes))}; utf8-sample={sample}");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+            ReleaseStgMedium(ref medium);
+        }
+    }
+
     private static int ReadCidaOffset(nint cida, long size, int index)
     {
         var offset = Marshal.ReadInt32(cida, checked(4 + 4 * index));
@@ -410,6 +459,7 @@ internal static class ShellViewDropTargetProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumFormatEtc(nint self, uint direction, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NextFormatEtc(nint self, uint count, out FormatEtc format, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref FormatEtc format, out StgMedium medium);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadStream(nint self, nint buffer, uint bytesToRead, out uint bytesRead);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAsyncMode(nint self, [MarshalAs(UnmanagedType.Bool)] out bool asyncMode);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InAsyncOperation(nint self, [MarshalAs(UnmanagedType.Bool)] out bool inOperation);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragEnter(nint self, nint dataObject, uint keyState, ref PointL point, ref uint effect);
