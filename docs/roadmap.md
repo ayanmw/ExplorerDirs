@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
+
+- 用户已明确授权在隔离原型中推进完整宿主迁移验证，验收面包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点与每会话视图状态。该授权仅覆盖 NativeProbe/隔离宿主，不包含将产品 ExplorerBrowser 替换为 IShellView，也不包含发布迁移版本。
+- 当前已有的证据分别覆盖隐藏 COM vtable/菜单生命周期 smoke、局部 Shell 文件操作与通知样本、以及独立 IStream 会话文件测试；这些拼接证据尚未在同一可见宿主中覆盖完整门槛。逐项颜色绘制像素未稳定命中，完整 OLE 拖放循环、物理键盘焦点和真实会话恢复仍未通过。
+- 继续按 `docs/ishellview-color-spike.md` 推进原型；用户要求暂不使用 Computer Use，且项目规则禁止在无当前桌面授权时创建可能激活前台的 Shell 宿主，因此本阶段限于源码和无 Shell-view 验证。真实宿主门槛需在独立 Windows 会话完成后评估是否值得迁移产品。
+
 ## 2026-10-26：为隔离 Shell 宿主接入菜单生命周期回调
 
 - `InsertMenusSB`、`SetMenuSB`、`RemoveMenusSB` 现在可选委托给外层宿主；保留无菜单宿主时原有的 `S_OK` 空菜单行为，委托 HRESULT 原样返回，异常转换为 `E_FAIL`，释放时断开回调。
