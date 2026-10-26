@@ -18,7 +18,7 @@
                 <MenuItem x:Name="NewFolderMenu" Header="新建文件夹" InputGestureText="Ctrl+Shift+N" IsEnabled="False" Click="NewFolder_Click"/>
                 <Separator/>
                 <MenuItem Header="新建标签页" InputGestureText="Ctrl+T" Click="NewTab_Click"/>
-                <MenuItem Header="新建窗口" InputGestureText="Ctrl+N" Click="NewWindow_Click"/>
+                <MenuItem Header="复制当前窗口" InputGestureText="Ctrl+N" Click="NewWindow_Click"/>
                 <MenuItem Header="关闭标签页" InputGestureText="Ctrl+W" Click="CloseTab_Click"/>
                 <Separator/>
                 <MenuItem Header="重启应用" InputGestureText="Alt+F11" Click="RestartApplication_Click"/>
@@ -146,8 +146,8 @@
                 <Separator/>
                 <Button x:Name="NewTabToolbarButton" ToolTip="新建标签页 (Ctrl+T)"
                         AutomationProperties.Name="新建标签页" Click="NewTab_Click" Width="32"/>
-                <Button x:Name="NewWindowToolbarButton" ToolTip="新建窗口 (Ctrl+N)"
-                        AutomationProperties.Name="新建窗口" Click="NewWindow_Click" Width="38"/>
+                <Button x:Name="NewWindowToolbarButton" ToolTip="复制当前窗口及其标签和布局 (Ctrl+N)"
+                        AutomationProperties.Name="复制当前窗口" Click="NewWindow_Click" Width="38"/>
                 <Button x:Name="DuplicateTabToolbarButton" ToolTip="复制当前标签 (Ctrl+K)"
                         AutomationProperties.Name="复制当前标签" Click="DuplicateTab_Click" Width="42"/>
                 <Button x:Name="CloseTabToolbarButton" ToolTip="关闭标签页 (Ctrl+W)"

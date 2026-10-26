@@ -74,6 +74,8 @@ internal static class ExplorerChromeIconSmoke
               mainCode.Contains("SearchCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"NewTab_Click\"", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"NewWindow_Click\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Header=\"复制当前窗口\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("ToolTip=\"复制当前窗口及其标签和布局 (Ctrl+N)\"", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"DuplicateTab_Click\"", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"CloseTab_Click\"", StringComparison.Ordinal),
             "main tab/navigation toolbar icons preserve command handlers");

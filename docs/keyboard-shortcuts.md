@@ -35,7 +35,7 @@
 | Ctrl+M | 打开当前窗格快速筛选栏；Enter 应用编辑条件，F5 应用并刷新，Esc 清除筛选并关闭 | 已接入；预设保存/载入/删除及焦点顺序待可见 GUI 验收 |
 | F6、Shift+F6 | 在每个可见窗格的地址栏、可见搜索输入、可见快速筛选输入、标签标题、可见目录树、详细信息列标题（若有）、文件区和状态栏“查看”入口之间正反向循环；跳过窗格内的小按钮 | 停靠点映射有无窗口回归；按[详情窗格设计](superpowers/specs/2026-10-24-details-pane-design.md)不为原生预览/详情窗格增加独立停靠点。Shell 窗格切换后的真实焦点和菜单退出焦点仍待 GUI 验收 |
 | Alt+P、Alt+Shift+P、Ctrl+Shift+E | 切换当前标签的预览窗格、详情窗格；将可见目录树展开并定位到当前目录 | Alt+P/Alt+Shift+P 分别切换互斥的原生 Shell 帧，状态按标签保存；菜单/工具栏显示快捷键。Ctrl+Shift+E 将当前窗格树展开到目录。SettingsSmoke 和隐藏生产宿主回归通过；窗格可见渲染、实际尺寸、焦点及树交互待 GUI 验收 |
-| Ctrl+N | 创建独立会话的新窗口；下次启动恢复窗口集合 | 已接入独立窗口 INI 和 `WindowSessions.ini` 顺序清单；收藏夹与应用偏好仍按 profile 共享，固定标签随窗口会话保存。隐藏配置回归通过；可见快捷键、新窗口并行交互和重启恢复待 GUI 验收 |
+| Ctrl+N | 复制当前窗口及其布局/标签，并创建独立会话 | 已接入独立窗口 INI 和 `WindowSessions.ini` 顺序清单；收藏夹与应用偏好仍按 profile 共享，固定标签随窗口会话保存。隐藏配置回归通过；可见快捷键、新窗口并行交互和重启恢复待 GUI 验收 |
 | Windows+E | 打开文件资源管理器 | 仍由 Windows 系统处理；本应用未注册全局热键或接管系统 Shell。作为后续可逆系统集成项单独规划，不计为当前已支持快捷键 |
 
 2026-10-24 微软现行 File Explorer 快捷键清单复核：[Alt+Shift+P](https://support.microsoft.com/en-gb/accessibility/windows/keyboard-shortcuts-in-windows) 切换详情窗格；[Num Lock+* / + / -](https://support.microsoft.com/en-au/accessibility/windows/keyboard-shortcuts-in-windows) 是目录树中的展开/折叠命令，应由获得焦点的原生目录树处理，不应映射到文件列表。生产 `NativeShellTree` 原生控件与 WPF `ShellTreeHost.TranslateAcceleratorCore` 隐藏宿主都通过 `+` 展开、`*` 递归展开子目录、`-` 折叠测试；WPF 探针仅在加速器未处理时按消息循环派发，并确认前台窗口未变。两项测试都由探针直接建立隔离树状态，不验证实体 Num Lock 输入、用户 Tab/F6 获得焦点或可见焦点体验，仍需桌面验收。
