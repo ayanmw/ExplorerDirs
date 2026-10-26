@@ -2,7 +2,13 @@
 
 ## 状态
 
-规划稿。此文件记录用户要求自主规划的主题和图标方向，不代表已经实现或通过可见验收。初始 `System/Light/Dark` 偏好设计见[基础主题设计](2026-10-25-theme-preference.md)。
+规划与阶段状态。初始 `System/Light/Dark` 偏好设计见[基础主题设计](2026-10-25-theme-preference.md)。
+
+### 2026-10-26 实施记录
+
+- 第一阶段基础接线已实现：`SystemThemeMonitor` 读取 Windows Accent 并接收颜色变化；应用在 System/Light/Dark 三种模式下都使用最新成功的系统强调色，读取失败继续沿用上次有效值，首次失败回退到默认蓝色。主题 INI 格式未改变。
+- 语义色板增加 Accent/AccentText，选中背景会基于浅/深中性表面和系统强调色派生，前景通过相对对比度选择。资源已提供应用级 Accent 画刷，当前尚未把活动标签、焦点环等控件逐个接入。
+- 派生色纯逻辑冒烟、完整设置冒烟及 App Release 构建通过；尚未观察实际 Windows 强调色变化事件、多窗口同步、WPF 控件可见效果或高对比度切换。本阶段仍需桌面验收。
 
 ## 意图
 
@@ -10,7 +16,7 @@
 
 ## 已核实现状
 
-- `Theme.ini` 已保存全局 `System/Light/Dark`；默认跟随 Windows。`SystemThemeMonitor` 当前通过 `UISettings` 颜色变化事件推断明暗，但未读取 `UIColorType.Accent`；`ThemePalette` 对强调色使用固定值。
+- `Theme.ini` 已保存全局 `System/Light/Dark`；默认跟随 Windows。`SystemThemeMonitor` 现通过 `UISettings` 颜色变化事件读取系统明暗与 `UIColorType.Accent`；`ThemePalette` 可由系统强调色派生选中色与语义 Accent 资源。
 - WPF 窗口、菜单、工具栏、导航和状态栏可通过动态系统颜色资源更新。ExplorerBrowser 文件区由 Windows Shell 绘制，不会因替换 WPF 资源而自动变色。
 - 文件/文件夹图标由 Shell 提供。应用布局及命令按钮中还有字符或独立绘制图标，需要统一视觉资源。
 - Q-Dir 公开资料将整体“Color - Theme”与文件颜色过滤分开列出；文件规则可针对扩展名、目录、只读、隐藏状态设置文字/背景/字体样式，`#BG` 与 `#BG-A` 分别表示普通视图和活动视图背景。FAQ 47 说明启用保存选项后可把颜色设置写入收藏 `.qdr`，但当前本机样本没有规则正向样本，`colorthema=0` 的含义也未确认。

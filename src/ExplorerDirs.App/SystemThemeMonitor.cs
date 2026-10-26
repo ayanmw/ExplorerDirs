@@ -1,4 +1,5 @@
 using Windows.UI.ViewManagement;
+using System.Windows.Media;
 
 namespace ExplorerDirs.App;
 
@@ -16,6 +17,15 @@ internal sealed class SystemThemeMonitor : IDisposable
         {
             var foreground = _settings.GetColorValue(UIColorType.Foreground);
             return !ThemePalette.IsLightForeground(foreground.R, foreground.G, foreground.B);
+        }
+    }
+
+    public Color Accent
+    {
+        get
+        {
+            var accent = _settings.GetColorValue(UIColorType.Accent);
+            return Color.FromArgb(accent.A, accent.R, accent.G, accent.B);
         }
     }
 

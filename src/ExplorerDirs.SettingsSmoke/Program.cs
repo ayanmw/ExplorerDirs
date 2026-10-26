@@ -40,6 +40,12 @@ if (args.Length == 1 && args[0] == "--pure-state-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--theme-palette-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckResolution();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();

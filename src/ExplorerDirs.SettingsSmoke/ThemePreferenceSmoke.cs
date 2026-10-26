@@ -90,7 +90,29 @@ internal static class ThemePreferenceSmoke
         Check(Resolve("System", false).ToString() == "Light", "System theme resolves to Light when Windows prefers light colors");
         Check(Resolve("Light", true).ToString() == "Light", "explicit Light preference ignores the Windows color setting");
         Check(Resolve("Dark", false).ToString() == "Dark", "explicit Dark preference ignores the Windows color setting");
-        Check(resolvedType.IsEnum, "resolved theme uses a distinct state from the stored preference");
+        Check(resolvedType.IsEnum, "resolved theme uses a distinct state from the stored preference");        var paletteFactory = paletteType.GetMethod("For", BindingFlags.Static | BindingFlags.Public,
+            binder: null, types: [resolvedType, typeof(System.Windows.Media.Color)], modifiers: null)
+            ?? throw new Exception("ThemePalette.For(theme, accent) is required to derive colors from the system accent.");
+        var accent = System.Windows.Media.Color.FromRgb(232, 64, 48);
+        var lightColors = paletteFactory.Invoke(null, [Enum.Parse(resolvedType, "Light"), accent])
+            ?? throw new Exception("Light accent palette returned null.");
+        var darkColors = paletteFactory.Invoke(null, [Enum.Parse(resolvedType, "Dark"), accent])
+            ?? throw new Exception("Dark accent palette returned null.");
+        var selection = lightColors.GetType().GetProperty("SelectionBackground")
+            ?? throw new Exception("ThemeColors.SelectionBackground is required.");
+        var accentColor = lightColors.GetType().GetProperty("Accent")
+            ?? throw new Exception("ThemeColors.Accent is required.");
+        var selectionText = lightColors.GetType().GetProperty("SelectionText")
+            ?? throw new Exception("ThemeColors.SelectionText is required.");
+        Check(Equals(accentColor.GetValue(lightColors), accent),
+            "system accent is retained as a semantic theme color");
+        Check(!Equals(selection.GetValue(lightColors), selection.GetValue(ThemePalette.For(ResolvedTheme.Light))),
+            "Windows accent changes the light selection palette");
+        Check(!Equals(selection.GetValue(darkColors), selection.GetValue(ThemePalette.For(ResolvedTheme.Dark))),
+            "Windows accent changes the dark selection palette");
+        Check(selectionText.GetValue(lightColors) is System.Windows.Media.Color &&
+              selectionText.GetValue(darkColors) is System.Windows.Media.Color,
+            "accent selection palettes choose explicit readable foregrounds");
         var classify = paletteType.GetMethod("IsLightForeground", BindingFlags.Static | BindingFlags.Public)
             ?? throw new Exception("ThemePalette.IsLightForeground is required for system theme detection.");
         Check((bool)classify.Invoke(null, [byte.MaxValue, byte.MaxValue, byte.MaxValue])!,

@@ -13,6 +13,7 @@ internal sealed class ApplicationThemeController : IDisposable
     private readonly ThemePreferenceStore _store;
     private readonly SystemThemeMonitor? _systemThemeMonitor;
     private bool _systemIsDark;
+    private Color _systemAccent = ThemePalette.DefaultAccent;
     private int _disposed;
 
     public ThemePreference Preference { get; private set; }
@@ -29,8 +30,11 @@ internal sealed class ApplicationThemeController : IDisposable
         try
         {
             _systemThemeMonitor = new SystemThemeMonitor();
-            _systemIsDark = _systemThemeMonitor.IsDark;
             _systemThemeMonitor.ColorValuesChanged += OnSystemColorValuesChanged;
+            try { _systemIsDark = _systemThemeMonitor.IsDark; }
+            catch (Exception) { _systemIsDark = false; }
+            try { _systemAccent = _systemThemeMonitor.Accent; }
+            catch (Exception) { _systemAccent = ThemePalette.DefaultAccent; }
         }
         catch (Exception)
         {
@@ -63,9 +67,11 @@ internal sealed class ApplicationThemeController : IDisposable
         if (Volatile.Read(ref _disposed) != 0) return;
         _dispatcher.BeginInvoke(new Action(() =>
         {
-            if (Volatile.Read(ref _disposed) != 0 || Preference != ThemePreference.System) return;
-            try { _systemIsDark = _systemThemeMonitor?.IsDark ?? false; }
-            catch (Exception) { return; }
+            if (Volatile.Read(ref _disposed) != 0) return;
+            try { if (_systemThemeMonitor is not null) _systemIsDark = _systemThemeMonitor.IsDark; }
+            catch (Exception) { }
+            try { if (_systemThemeMonitor is not null) _systemAccent = _systemThemeMonitor.Accent; }
+            catch (Exception) { }
             Apply();
         }));
     }
@@ -85,13 +91,15 @@ internal sealed class ApplicationThemeController : IDisposable
         }
         else
         {
-            SetThemeResources(ThemePalette.For(Resolved));
+            SetThemeResources(ThemePalette.For(Resolved, _systemAccent));
         }
         ThemeChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void SetThemeResources(ThemeColors colors)
     {
+        SetBrush("ExplorerDirs.AccentBrush", colors.Accent);
+        SetBrush("ExplorerDirs.AccentTextBrush", colors.AccentText);
         SetBrush(SystemColors.WindowBrushKey, colors.WindowBackground);
         SetBrush(SystemColors.WindowTextBrushKey, colors.WindowText);
         SetBrush(SystemColors.ControlBrushKey, colors.ControlBackground);
@@ -124,7 +132,7 @@ internal sealed class ApplicationThemeController : IDisposable
             SystemColors.ControlDarkBrushKey, SystemColors.ControlLightBrushKey,
             SystemColors.GrayTextBrushKey, SystemColors.HighlightBrushKey,
             SystemColors.HighlightTextBrushKey, SystemColors.InfoBrushKey,
-            SystemColors.InfoTextBrushKey
+            SystemColors.InfoTextBrushKey, "ExplorerDirs.AccentBrush", "ExplorerDirs.AccentTextBrush"
         })
             _application.Resources.Remove(key);
     }
