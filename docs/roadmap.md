@@ -3599,3 +3599,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)` 成功返回选中项数据对象；将其直接传给注册的目标文件夹 `IDropTarget` 后，`DragEnter/DragOver/Drop` 均返回 `S_OK` 且 Copy effect=1，但目标中未出现文件。此前已知 `SHCreateDataObject` 构造对象在相同目标路径能真实复制，源文件保留。这个差异说明单纯的 Shell 方法成功码不足以证明拖放操作完成，选中项对象的格式/生命周期及真实 OLE drag loop 仍需调查。
 - 两个 `IDataObject::EnumFormatEtc(DATADIR_GET)` 均列出相同的 7 种格式及相同 aspect/index/tymed；`CF_HDROP` 与 CIDA 均指向同一源目录下的 `view-target.txt`。两个对象都支持 `IDataObjectAsyncCapability`，且 `GetAsyncMode=False`、`InOperation=False`。因此已检查的公开格式、载荷路径和异步初始状态相同，直接 `Drop` 行为差异仍未解释。
 - NativeProbe Release build 0 警告/错误；Private Desktop watchdog 退出码 0，foreground 未变。微软文档说明 `DoDragDrop` 驱动源/目标完整循环，逐个直接调用 `IDropTarget` 方法不是完整拖放验收：[OLE drag-and-drop](https://learn.microsoft.com/en-us/windows/win32/com/drag-and-drop)、[Shell data object](https://learn.microsoft.com/en-us/windows/win32/shell/dataobject)。私有桌面无法读取/移动当前指针，当前约束禁止注入鼠标/键盘，因此本轮未调用真实 `DoDragDrop`；产品迁移、用户可见交互、修饰键与移动语义仍未验证。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27对比-ishellview-选中项数据对象)。
+
+## 2026-10-27：登记 Q-Dir 标签组差距
+
+- 对照 Q-Dir 官方英文功能页，发现其标签菜单列有 “Tab Group”“Move to new Tab Group”“Copy to new Tab Group”“Use Tab Groups”。当前 Explorer Dirs 会话模型按窗格保存标签集合，没有已知的标签组实体或组切换命令。
+- 公开页面只给出菜单文案，无法确认组作用域、命名/切换交互、是否跨窗格，以及与布局/会话的持久化关系。将此列为 P2 差距；先通过可见 Q-Dir 行为确认语义，再决定标签/工作区模型和 INI 迁移方案，不先写猜测性配置。来源：[Q-Dir 官方英文功能页](https://www.softwareok.com/?seite=Freeware%2FQ-DIR%2Flanguage%2FEnglish)。
