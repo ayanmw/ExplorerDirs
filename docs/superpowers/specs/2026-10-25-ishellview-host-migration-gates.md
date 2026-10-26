@@ -1,6 +1,6 @@
 # 独立 IShellView 宿主分阶段迁移门槛
 
-状态：待用户审阅；本文件是架构决策草案，不授权产品文件视图迁移。它根据路线图中“先形成分阶段设计/迁移门槛”的下一步整理，不改变现有 ExplorerBrowser 产品架构。
+状态：用户已授权继续隔离 `IShellView` 迁移原型；本文件仍不授权替换产品文件视图。它规定逐阶段验证门槛，不改变现有 ExplorerBrowser 产品架构。
 
 ## 意图
 
@@ -135,5 +135,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 后续 ZIP-only 复跑约 4 秒完成 Shell PIDL 解析、`BrowseObject`、视图创建、菜单/拖放接口查询和 teardown；此前完整序列的挂点仍未确定。前台保护失败的根因是 `PrivateDesktopShellProbe.Run` 在主线程调用 `CreateDesktopW`：Microsoft 契约说明创建 Desktop 时将其分配给调用线程，因此返回后主线程继续处于非输入 Desktop，`GetForegroundWindow` 为 0，并不表示用户桌面真的换了前台。[CreateDesktopW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createdesktopw)、[GetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getforegroundwindow)。现在已将创建移到专用 bootstrap 线程；`--private-desktop-owner-smoke` 验证主线程的 Desktop 与前台句柄保持不变，且创建的 Desktop 可关闭。Release build 与 owner smoke 通过；尚未在修复后复跑 Shell 宿主。
 
 修复后 ZIP-only watchdog 退出码 0，前台 HWND 前后同为 `0x550EC2`。完整 host-filter 现在能跑到结束，但外层前台 HWND 从 `0x10EA8` 变成 `0x550EC2` 并失败；只读窗口查询将其分别识别为 ChatGPT 主窗口和 `dnplayer` 的 `EvertaleMockPreview`。由于无法判断是 Shell 激活调用还是测试期间外部活动导致，停止继续运行 Shell 宿主或尝试恢复窗口。根因修复解决了主线程意外留在新 Desktop 的问题，但未达成完整 foreground 隔离门槛。
+
+用户随后明确授权继续推进隔离迁移原型。该授权允许 NativeProbe/临时夹具范围内的原型开发和验证，不代表产品 `ExplorerBrowserHost` 可以替换，也不代表可发布迁移版本。由于完整 Private Desktop 探针曾观察到前台句柄变化且原因未能归因，本机共享交互桌面上暂不启动任何新的 `IShellView` 宿主或 GUI 探针；需先准备独立 Windows 会话、VM 或其他不共享输入桌面的环境。期间可继续进行不启动 Shell view 的源码契约审查、纯逻辑 smoke 和构建验证。
 
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。
