@@ -70,6 +70,7 @@
 - 本机进程检查发现当前运行实例来自 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.58`；目录树系统图像列表绑定与 Shell 图标索引回调是在后续 temp.69 源码中尝试的。截图标题只显示 Preview 0.6.0，无法仅凭截图确认具体包号，因此不能将截图认定为 temp.69 的可见结果。
 - 当前源码的隔离 `--tree-host-core` 探针通过：生产树控件绑定同一系统图像列表，实际选中节点普通/选中图标索引均为 `3`（列表共 512 项）；隐藏父窗口销毁后前台窗口未改变。
 - 这排除了当前探针环境中的“图像列表未绑定”或“节点图像索引缺失”，但不验证图标像素是否实际绘制，也不能确认用户截图对应的 temp 编号。缺图标仍是未解决的可见问题；下一步需在用户确认的预览版本上检查实际绘制，或增加隔离像素探针定位树控件绘制层。
+- 对照微软 [Windows Classic Samples 的 NamespaceTreeControl 示例](https://github.com/microsoft/Windows-classic-samples/blob/main/Samples/Win7Samples/winui/shell/appplatform/namespacetreecontrol/NameSpaceTreeSample.cpp)：示例的 `OnGetDefaultIconIndex` 返回 `E_NOTIMPL`，初始化时也没有替换内部 `SysTreeView32` 图像列表，依赖 NamespaceTreeControl 自己的默认图标路径。当前生产树则同时覆写回调并绑定 `SHGetFileInfo` 返回的系统图像列表；索引有效和句柄相同仍不足以证明自定义路径正确绘制。下一步应在隔离树控件中只切换“默认回退”与“自定义回调/图像列表”，采集行区域实际像素并比较；像素证据出现前不再改生产图标实现。
 
 ## 2026-10-26：补充目录树节点图标诊断
 
