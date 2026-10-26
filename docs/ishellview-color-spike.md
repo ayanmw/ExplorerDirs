@@ -1021,3 +1021,11 @@ NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-col
 这轮确认撤回未损坏已通过的原生能力。但 `menu-commands=pane1:details/sort/group,...` 走的是逐 pane 背景 context menu canonical verb，不是 frame 上合成 View 菜单的 `WM_COMMAND`；两者必须分开记录。后续需查明 Explorer 宿主如何处理 standard `FCIDM_SHVIEWFIRST..LAST` 命令，并据此为自建 frame 建立受支持的执行路径。
 
 随后把两种 Details 命令 ID 做只读对比：真实 composite View 菜单项 ID 为 `0x704B`；查询同一 pane 的背景 `IContextMenu` 时以 `0x7000` 为 `idCmdFirst`，canonical verb `viewlogicaldetails` 对应 `0x701B`。二者不相同，因此不能把 View 菜单 ID 直接当作 context-menu verb ID。包含对比的四窗格 watchdog 再次退出码 0，日志 `20261027-041457-17b0712f.stdout.log`，所有既有 pane 操作/会话检查仍通过。该差异不证明 Explorer 具体如何执行 `0x704B`；仍需找到宿主命令表或标准分发实现。
+
+### 2026-10-27 四窗格原生 Shell view 的 drop target 生命周期复核
+
+NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-053426-3ca5dac1.stdout.log`。四个真实 filesystem `IShellView` 的创建、激活、视图状态恢复、菜单切换、复制/重命名/删除、同/跨目录更新通知和方向键焦点隔离均通过，结束时 `foreground-unchanged=True`。本轮产品外的宿主原型在每个 `CreateViewWindow` 后取得该 view 文件夹的 `IID_IDropTarget` 并注册新 HWND；导航时先注册新窗口，再撤销旧窗口；view 销毁前撤销注册。四窗格完整探针顺利完成，证明该注册/替换/撤销路径没有破坏当前 host 生命周期。
+
+另运行 `ExplorerDirs.NativeProbe.dll --shell-view-drop-target-registration-smoke`，通过单 host 四 HWND 注册、重复注册冲突不改变原 owner、选择性撤销与重新注册、Dispose 撤销其余注册，且前台窗口保持不变。
+
+边界：以上没有调用 `DoDragDrop`，也没有让用户文件经鼠标跨 pane 拖动。它确认目标接口已绑定到真实 view HWND，不证明 Drop effect、移动/复制语义、外部拖放源/目标、可见交互或 ExplorerBrowser/WPF 产品接线。真实拖放验收仍需要可接收 OLE 输入的隔离桌面，并保持与用户日常桌面分离。

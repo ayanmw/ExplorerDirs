@@ -3575,3 +3575,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-27：恢复 consumer 增加逐阶段诊断并复核四窗格基线
 
 - 为恢复 consumer 增加 view/pane 创建、菜单验证和复制/重命名/删除阶段标记。前次三轮通过、一轮文件操作阶段超时；随后新路由批次又有两轮完整回归通过。阶段标记帮助把超时定位到不同阶段，但间歇原因尚未查明。真实拖放、可见菜单交互和 WPF 产品宿主集成仍是迁移门槛。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27为恢复-consumer-增加逐阶段诊断)。
+
+## 2026-10-27：四窗格原生 Shell view 的 drop target 生命周期复核
+
+- 在每个真实 filesystem `IShellView::CreateViewWindow` 返回后，从对应文件夹取得 `IID_IDropTarget` 并将其注册到新 view HWND；导航替换 view 时先注册新 HWND、再撤销旧 HWND；失败回滚只撤销新 HWND，释放 view 前撤销其 drop target。重新构建 NativeProbe Release（0 警告、0 错误）后，完整 `session-restore-private-desktop` watchdog 退出码 0：四 pane 恢复、菜单/排序/分组命令、复制/重命名/删除、跨 view 目录通知与焦点隔离均通过，`foreground-unchanged=True`。日志：`src/.state/native-probe-watchdog/20261027-053426-3ca5dac1.stdout.log`。
+- 独立 `--shell-view-drop-target-registration-smoke` 通过：单 host 注册四个 HWND、第二 host 重复注册正确失败且不抢走原 owner、选择性撤销后 HWND 可重新注册、Dispose 撤销剩余注册；前台窗口未变化。
+- 证据确认真实 Shell view 暴露的 `IDropTarget` 已在四窗格 host 生命周期中完成注册/替换/撤销，不能等同于实际 OLE 拖放。未执行 `DoDragDrop`，未验证拖放效果、鼠标源端、第三方目标、ExplorerBrowser/WPF 产品接线；这些仍是迁移门槛。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27四窗格原生-shell-view-的-drop-target-生命周期复核)。
