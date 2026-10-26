@@ -252,23 +252,29 @@ internal static class ShellViewColorSpike
         Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out restoredMode, out _));
         if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
             throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
+        var otherFixture = GetNotificationIsolationFixture(fixture);
         var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48);
-        var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1);
+        var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1,
+            otherFixture, expectedItemCount: 1);
         var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
         var allHosts = new[] { restoredHost, host, pane3.Host, pane4.Host };
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allHosts);
+        var rootFolderViews = allViews.Take(3).ToArray();
         var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
-            expectedSort, columnsExpected, allViews);
+            expectedSort, columnsExpected, rootFolderViews);
+        var directoryIsolation = VerifyDirectoryNotificationIsolation(rootFolderViews, pane4.FolderView,
+            fixture, otherFixture);
         AssertPaneModes(allViews, expectedModes, "file operations");
         return $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
             $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
             $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
             $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
-            $"menu-routing={menuRouting}; file-updates={allPaneCounts}; independent=True";
+            $"menu-routing={menuRouting}; file-updates={allPaneCounts}; " +
+            $"directory-notifications={directoryIsolation}; independent=True";
     }
 
     private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
@@ -298,7 +304,8 @@ internal static class ShellViewColorSpike
     }
 
     private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
-        nint containerParent, int x, int y, uint expectedMode, int iconSize)
+        nint containerParent, int x, int y, uint expectedMode, int iconSize,
+        string? location = null, int expectedItemCount = 2)
     {
         var pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs session restore pane {expectedMode}",
             0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, containerParent, 0, 0, 0);
@@ -307,7 +314,7 @@ internal static class ShellViewColorSpike
         var sessionId = Guid.NewGuid();
         if (store.TryLoad(sessionId, out _))
             throw new InvalidOperationException("A new pane unexpectedly reused a saved Shell session.");
-        Check(SHParseDisplayName(fixture, 0, out var pidl, 0, out _));
+        Check(SHParseDisplayName(location ?? fixture, 0, out var pidl, 0, out _));
         Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out var folder));
         var shellViewId = ShellViewId;
         Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out var view));
@@ -324,7 +331,7 @@ internal static class ShellViewColorSpike
         Check(At<ActivateView>(view, 7)(view, 1));
         Pump(500);
         Check(Marshal.QueryInterface(view, in FolderView2Id, out var folderView));
-        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        _ = WaitForShellViewItemCount(folderView, expectedItemCount);
         if (host.Reads == 0)
             throw new InvalidOperationException("The additional pane did not request a Shell stream for its session GUID.");
         Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, iconSize));
@@ -429,6 +436,67 @@ internal static class ShellViewColorSpike
                 columns is null || !expectedColumns.SequenceEqual(columns))
                 throw new IOException($"The Shell {operation} changed the restored mode, sort, group, or columns.");
         }
+    }
+
+    private static string VerifyDirectoryNotificationIsolation(IReadOnlyList<nint> rootFolderViews,
+        nint otherFolderView, string fixture, string otherFixture)
+    {
+        var originalCount = rootFolderViews.Count == 0
+            ? throw new ArgumentException("At least one root-directory view is required.", nameof(rootFolderViews))
+            : GetShellViewItemCount(rootFolderViews[0]);
+        var otherOriginal = Path.Combine(otherFixture, "isolated-target.txt");
+        var unrelatedCopy = Path.Combine(otherFixture, "isolated-copy.txt");
+        if (!ShellViewContainsPath(otherFolderView, otherOriginal) || ShellViewContainsPath(otherFolderView,
+                Path.Combine(fixture, "blue-rule-target.txt")))
+            throw new IOException("The fourth pane did not stay scoped to its separate fixture directory.");
+        foreach (var rootView in rootFolderViews)
+            if (GetShellViewItemCount(rootView) != originalCount)
+                throw new IOException("The three root-directory panes did not converge after their file operations.");
+
+        var source = CreateShellItem(otherOriginal);
+        var destination = CreateShellItem(otherFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination,
+                    Path.GetFileName(unrelatedCopy), 0)));
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+        if (!File.Exists(unrelatedCopy) ||
+            !WaitForShellView(otherFolderView, 2, unrelatedCopy, null))
+            throw new IOException("The Shell notification did not update the pane showing the destination directory.");
+        foreach (var rootView in rootFolderViews)
+        {
+            if (GetShellViewItemCount(rootView) != originalCount || ShellViewContainsPath(rootView, unrelatedCopy))
+                throw new IOException("A file notification from another directory leaked into a root-directory pane.");
+        }
+        if (ShellViewContainsPath(otherFolderView, Path.Combine(fixture, "session-copy.txt")) ||
+            ShellViewContainsPath(otherFolderView, Path.Combine(fixture, "session-renamed.txt")))
+            throw new IOException("The separate-directory pane displayed a root-directory file operation.");
+        return "root-copy-rename-delete=3-panes; other-copy=other-pane-only";
+    }
+
+    private static string GetNotificationIsolationFixture(string fixture)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var path = Path.GetFullPath(Path.Combine(root,
+            Path.GetFileName(fixture) + "-notification-isolation"));
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || Directory.Exists(path) || File.Exists(path))
+            throw new IOException("The isolated notification fixture path is not a fresh child of NativeProbe fixtures.");
+        Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "isolated-target.txt"), "separate-directory");
+        return path;
+    }
+
+    private static int GetShellViewItemCount(nint folderView)
+    {
+        Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count)); // SVGIO_ALLVIEW.
+        return count;
     }
 
     private readonly record struct LivePaneView(nint Pane, nint View, nint ViewWindow, nint Folder, nint Pidl,
@@ -998,6 +1066,14 @@ internal static class ShellViewColorSpike
                 if (readOnlyFixturePath is not null && File.Exists(readOnlyFixturePath))
                     File.SetAttributes(readOnlyFixturePath, File.GetAttributes(readOnlyFixturePath) & ~FileAttributes.ReadOnly);
                 Directory.Delete(fullFixture, recursive: true);
+            }
+            if (probeSessionRestore)
+            {
+                var notificationFixture = Path.GetFullPath(Path.Combine(fixturesRoot,
+                    Path.GetFileName(fixture) + "-notification-isolation"));
+                if (notificationFixture.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    Directory.Exists(notificationFixture))
+                    Directory.Delete(notificationFixture, recursive: true);
             }
             var fullStateDirectory = Path.GetFullPath(stateDirectory);
             if (fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullStateDirectory))

@@ -748,3 +748,9 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 四窗格 session-restore consumer 在四个模式和各自 host 已建立后，依序对每个真实 `IShellView` 调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`。每轮在目标 pane 的 `ShellViewColorBrowserHost` 上分别观察到 `InsertMenusSB +1`、`SetMenuSB +2`；Shell 离开该 pane 时 `RemoveMenusSB +1`。Private Desktop watchdog 连续三轮通过，三轮都维持主桌面 foreground HWND `0x81852`。日志：`20261027-003403-1ceb1c1b.stdout.log`、`20261027-003416-58e4ebf2.stdout.log`、`20261027-003426-f3a24d83.stdout.log`。
 
 该结果只验证 `UIActivate` 的 Shell 回调进入对应原生 pane host；没有打开或点击菜单，不能证明菜单视觉合并、WPF 命令分派、键盘焦点或真实输入体验。四个 view 仍位于同一隔离进程且浏览相同 fixture，未验证生产宿主、不同路径通知、拖放，也未修改产品 ExplorerBrowser、INI 或 release。
+
+### 2026-10-27 四窗格跨目录 Shell 通知隔离
+
+四窗格 session-restore consumer 将前三个 `IShellView` 留在主 fixture，第四个 view 放到兄弟隔离 fixture；两组都保持自己的视图模式和 session host。主目录的 Shell 复制、重命名、删除只要求前三个 pane 收敛；随后在另一目录执行 Shell 复制，第四个 pane 收到新项目且计数 `1→2`，前三个 pane 保持原计数并且没有出现该跨目录文件。Private Desktop watchdog 连续三轮退出码 0，主桌面 foreground HWND 每轮未变：`20261027-003657-e9c78ab7.stdout.log`、`20261027-003711-0d8fef2c.stdout.log`、`20261027-003721-a191bc98.stdout.log`。夹具位于 NativeProbe `fixtures` 根目录并由外层探针按根路径边界清理。
+
+本结果证明同一隔离原生容器里的 Shell 文件通知按不同目录更新各自 view，未依赖 F5 刷新。它仍是 `IFileOperation` 触发的合成操作，不覆盖真实外部进程 watcher、产品 PaneControl/WPF、可见菜单/物理输入、拖放或 ExplorerBrowser 产品接线；产品配置与 release 未改。

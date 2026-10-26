@@ -3287,3 +3287,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 四窗格恢复探针逐个调用四个真实 `IShellView::UIActivate(SVUIA_ACTIVATE_FOCUS)`；三轮 Private Desktop watchdog 均退出码 0。每次目标 pane 宿主都收到 `InsertMenusSB` 与 `SetMenuSB`，离开 pane 时收到 `RemoveMenusSB`（每次增量分别为 `1/2/1`）；前台窗口句柄保持不变。四种模式与复制/重命名/删除后的四窗格通知收敛也在同轮继续通过。
 - 这证明 Shell 菜单生命周期回调能按当前被激活的原生 pane 进入各自宿主。没有展示或点击菜单，也没有验证菜单项实际合并、命令状态/分派、WPF 焦点、物理键盘、跨目录通知或拖放；不能据此判定原型已达到产品迁移门槛。产品 ExplorerBrowser、配置和 release 未改。
+
+## 2026-10-27：四窗格跨目录通知隔离
+
+- 四窗格恢复探针把前三个 Shell view 留在主目录、第四个 view 放入兄弟临时目录。主目录的复制/重命名/删除由三个 view 收敛；随后在独立目录用 `IFileOperation` 新建副本，仅第四个 view 从 1 项更新到 2 项，前三个 view 计数不变且不含该项。连续三轮 Private Desktop watchdog 退出码 0，前台窗口句柄均保持不变。
+- 这验证同一隔离原生容器内不同路径的 Shell 文件通知互不串扰。验证触发来自本进程 `IFileOperation`，不代表外部程序 watcher、产品 WPF、拖放或物理输入验收；产品 ExplorerBrowser、配置与 release 未修改。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格跨目录-shell-通知隔离)。
