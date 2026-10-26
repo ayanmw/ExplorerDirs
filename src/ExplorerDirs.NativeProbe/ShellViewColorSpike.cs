@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
@@ -37,6 +38,122 @@ internal static class ShellViewColorSpike
     private static nint _observedListView;
     private static int _customDrawPrepaint;
     private static int _customDrawItems;
+
+    internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
+        bool terminateProcessAfterProbe = false)
+    {
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullFixture = Path.GetFullPath(fixture);
+        var fullStateDirectory = Path.GetFullPath(stateDirectory);
+        if (!fullFixture.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("session-restore-consumer: fixture and state store must remain under NativeProbe fixtures.");
+            return 1;
+        }
+
+        var store = new ShellViewStateStore(fullStateDirectory);
+        if (!store.TryLoad(sessionId, out var persistedState))
+        {
+            Console.Error.WriteLine("session-restore-consumer: session state was not present before this process started.");
+            return 1;
+        }
+
+        nint parent = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        var createAttempted = false;
+        ShellViewColorBrowserHost? host = null;
+        var result = 1;
+        try
+        {
+            var windowStyle = 0x10CF0000u | 0x10000000u;
+            var extendedStyle = 0x08000000u | 0x00000080u;
+            parent = CreateWindowExW(extendedStyle, "STATIC", "ExplorerDirs session restore consumer",
+                windowStyle, 100, 100, 760, 520, 0, 0, 0, 0);
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated consumer parent window.");
+            Check(SHParseDisplayName(fullFixture, 0, out pidl, 0, out _));
+            Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+            var shellViewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
+            host = new ShellViewColorBrowserHost(parent, [],
+                new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                stateStore: store, stateId: sessionId);
+            host.View = view;
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 640, Bottom = 420 };
+            createAttempted = true;
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+            if (viewWindow == 0) throw new InvalidOperationException("The consumer view was created without a window.");
+            ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated desktop.
+            Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
+            Pump(1000);
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+            Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out _));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            if (sortCount != 1) throw new Exception($"Restored sort count was {sortCount}, expected one.");
+            var sorts = new SortColumn[sortCount];
+            Check(At<GetSortColumns>(folderView, 28)(folderView, sorts, sortCount));
+            var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+            var expectedSort = new SortColumn
+            {
+                Key = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 },
+                Direction = -1
+            };
+            var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var group, out var groupAscending);
+            Check(groupResult);
+            Check(ShellColumnManager.Capture(folderView, out var columns));
+            var columnsExpected = new DisplayColumnState[]
+            {
+                new(new PropertyKeyState(propertyFormatId, 10), 280),
+                new(new PropertyKeyState(propertyFormatId, 12), 120),
+                new(new PropertyKeyState(propertyFormatId, 4), 160)
+            };
+            var restored = mode == 4 && sorts[0].Key.FormatId == expectedSort.Key.FormatId &&
+                sorts[0].Key.PropertyId == expectedSort.Key.PropertyId && sorts[0].Direction == expectedSort.Direction &&
+                group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
+                columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
+            Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
+                $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
+                $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}");
+            if (!restored) throw new Exception("A new process did not restore the persisted Shell view mode, sort, group, and columns.");
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("session-restore-consumer failure: " + ex.Message);
+        }
+        finally
+        {
+            if (terminateProcessAfterProbe)
+            {
+                // This helper process owns its isolated Shell Desktop; releasing the STA view can stall.
+                // Its parent removes the temporary fixture and state directory after this process exits.
+                Console.Out.Flush();
+                Console.Error.Flush();
+                Environment.Exit(result);
+            }
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0)
+            {
+                if (createAttempted)
+                {
+                    try { _ = At<DestroyViewWindow>(view, 10)(view); }
+                    catch (Exception ex) { Console.Error.WriteLine("session-restore-consumer destroy: " + ex.Message); }
+                }
+                if (host is not null) host.View = 0;
+                Marshal.Release(view);
+            }
+            if (folder != 0) Marshal.Release(folder);
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (host is not null) host.Dispose();
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (parent != 0 && IsWindow(parent)) _ = DestroyWindow(parent);
+            Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
+        }
+        return result;
+    }
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
@@ -260,45 +377,18 @@ internal static class ShellViewColorSpike
                 if (!persisted || shellWrites == 0)
                     throw new Exception($"Saving the real Shell view produced no persisted stream: writes={shellWrites}; saved={persisted}.");
 
-                Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
-                Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
-                host = new ShellViewColorBrowserHost(parent, [], itemFilter,
-                    stateStore: new ShellViewStateStore(stateDirectory), stateId: sessionId);
-                host.View = view;
-                hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
-                settings = new StreamProbeSettings { Mode = uint.MaxValue };
-                bounds = new StreamProbeRect { Right = 640, Bottom = 420 };
-                viewWindowCreateAttempted = true;
-                Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
-                if (viewWindow == 0)
-                    throw new InvalidOperationException("Restored Shell view creation succeeded without a window.");
-                Pump(1000);
-                folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
-                Check(folderViewHr);
-                _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
-                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var restoredMode, out _));
-                Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var restoredSortCount));
-                var restoredSorts = new SortColumn[restoredSortCount];
-                Check(At<GetSortColumns>(folderView, 28)(folderView, restoredSorts, restoredSortCount));
-                var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var restoredGroup, out var restoredGroupAscending);
-                Check(groupResult);
-                Check(ShellColumnManager.Capture(folderView, out var restoredColumns));
-                var sortRestored = restoredSortCount == 1 && restoredSorts[0].Key.FormatId == expectedSort.Key.FormatId &&
-                    restoredSorts[0].Key.PropertyId == expectedSort.Key.PropertyId && restoredSorts[0].Direction == expectedSort.Direction;
-                var groupRestored = restoredGroup.FormatId == expectedGroup.FormatId &&
-                    restoredGroup.PropertyId == expectedGroup.PropertyId && restoredGroupAscending == 1;
-                var columnsRestored = restoredColumns is not null && expectedColumns.SequenceEqual(restoredColumns);
-                Console.WriteLine($"ishellview-session-restore: save-view-state=True; shell-write-callbacks={shellWrites}; " +
-                    $"persisted-bytes={savedState.Length}; recreated-host-reads={host.Reads}; " +
-                    $"mode-before-save={modeBeforeSave}; create-settings={settings.Mode}/{settings.Flags}; " +
-                    $"mode={modeBeforeSave}/{restoredMode}; sort={sortCountBeforeSave}/{restoredSortCount}/{sortRestored}; " +
-                    $"group={groupBeforeSaveHr:X8}/{groupResult:X8}/{groupRestored}; " +
-                    $"columns={columnsBeforeSave?.Count ?? 0}/{restoredColumns?.Count ?? 0}/{columnsRestored}; " +
-                    $"foreground-unchanged={GetForegroundWindow() == foreground}");
-                if (modeBeforeSave != expectedMode || restoredMode != expectedMode || !sortRestored ||
-                    !groupRestored || !columnsRestored || host.Reads == 0 ||
-                    GetForegroundWindow() != foreground)
-                    throw new Exception("The real Shell view did not restore the expected mode, sort, group, and columns through its session stream.");
+                if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
+                    throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
+                var consumer = RunSessionRestoreConsumerProcess(fixture, stateDirectory, sessionId);
+                Console.WriteLine($"ishellview-session-restore: producer-pid={Environment.ProcessId}; " +
+                    $"shell-write-callbacks={shellWrites}; persisted-bytes={savedState.Length}; " +
+                    $"mode-before-save={modeBeforeSave}; sort={sortCountBeforeSave}; " +
+                    $"group={groupBeforeSaveHr:X8}; columns={columnsBeforeSave?.Count ?? 0}; " +
+                    $"consumer-exit={consumer.ExitCode}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                foreach (var line in consumer.Output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+                    Console.WriteLine("ishellview-session-restore-child: " + line);
+                if (consumer.ExitCode != 0 || GetForegroundWindow() != foreground)
+                    throw new Exception("A separate NativeProbe process did not restore the real Shell view from the persisted session stream.");
                 return 0;
             }
             var selectHr = At<SelectFolderItem>(folderView, 15)(folderView, 0, 0x1); // IFolderView::SelectItem; SVSI_SELECT only.
@@ -643,6 +733,43 @@ internal static class ShellViewColorSpike
     {
         var until = Environment.TickCount64 + milliseconds;
         while (Environment.TickCount64 < until) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(10); }
+    }
+
+    private static (int ExitCode, string Output) RunSessionRestoreConsumerProcess(
+        string fixture, string stateDirectory, Guid sessionId)
+    {
+        var executable = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Could not determine the NativeProbe process executable.");
+        var assembly = typeof(ShellViewColorSpike).Assembly.Location;
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(assembly);
+        start.ArgumentList.Add("--ishellview-session-restore-consumer-private-desktop");
+        start.ArgumentList.Add(fixture);
+        start.ArgumentList.Add(stateDirectory);
+        start.ArgumentList.Add(sessionId.ToString("D"));
+
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(22_000))
+        {
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            process.WaitForExit();
+            var timeoutOutput = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+            return (124, $"consumer process timed out; {timeoutOutput[0]}{timeoutOutput[1]}");
+        }
+
+        var output = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+        return (process.ExitCode, output[0] + output[1]);
     }
 
     private static byte[] ReadViewStateBytes(nint pointer)

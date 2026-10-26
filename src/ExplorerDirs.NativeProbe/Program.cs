@@ -62,6 +62,9 @@ internal static class Program
             return PrivateDesktopShellProbe.RunMenuActivation();
         if (args.Length == 1 && args[0] == "--ishellview-session-restore-private-desktop")
             return PrivateDesktopShellProbe.RunSessionRestore();
+        if (args.Length == 4 && args[0] == "--ishellview-session-restore-consumer-private-desktop" &&
+            Guid.TryParse(args[3], out var restoreSessionId))
+            return PrivateDesktopShellProbe.RunSessionRestoreConsumer(args[1], args[2], restoreSessionId);
         if (args.Length == 1 && args[0] == "--ishellview-color-readonly-private-desktop")
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")
