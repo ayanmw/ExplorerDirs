@@ -69,9 +69,14 @@ internal static class ShellFocusRestoreGateSmoke
         Check(ShellFocusRestoreGate.ShouldFocusContentWindow(focusWithinContentWindow: true,
             columnHeaderFocused: false), expected: false,
             "FocusView retains a focused file item inside the content window");
-        Check(ShellFocusRestoreGate.ShouldAttemptRestore(true, fileContentAlreadyFocused: false), expected: true,
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: false,
+                fileContentAlreadyFocused: false), expected: false,
+            "focus retry stays pending without taking focus while the app window is inactive");
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
+                fileContentAlreadyFocused: false), expected: true,
             "focus retry restores the file-content target when a sibling Shell control has focus");
-        Check(ShellFocusRestoreGate.ShouldAttemptRestore(true, fileContentAlreadyFocused: true), expected: false,
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
+                fileContentAlreadyFocused: true), expected: false,
             "focus monitor skips redundant SetFocus when file content already owns focus");
         Check(ShellFocusRestoreGate.CanRestoreForeground(foregroundIsEmpty: true, foregroundOwnedByThisWindow: false), expected: true,
             "file-operation focus may recover when Windows has no foreground window");

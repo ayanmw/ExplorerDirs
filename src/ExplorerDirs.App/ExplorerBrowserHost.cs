@@ -405,6 +405,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
     public Func<int, bool>? CtrlWheelHandler { get; set; }
     public Func<bool>? MayRestoreFocus { get; set; }
+    public Func<bool>? MayContinueFileOperationFocusRestore { get; set; }
     internal QuickFilterSettings QuickFilter => _quickFilterSettings;
     internal HiddenItemsPreference HiddenItemsPreference => _hiddenItemsPreference;
     internal bool PreviewPaneVisible => _visibleShellPane == ExplorerShellPane.Preview;
@@ -847,7 +848,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!ReferenceEquals(_pendingFileOperationFocusRestore, request)) return;
         var window = Window.GetWindow(this);
-        var focusStillDesired = MayRestoreFocus?.Invoke() == true && IsVisible && window?.IsActive == true;
+        var focusStillDesired =
+            (MayContinueFileOperationFocusRestore?.Invoke() ?? MayRestoreFocus?.Invoke() == true) && IsVisible;
+        var windowActive = window?.IsActive == true;
         var sameView = ReferenceEquals(request.Browser, _browser) &&
             request.NavigationVersion == _viewReadiness.NavigationVersion &&
             string.Equals(request.Path, CurrentPath, StringComparison.OrdinalIgnoreCase);
@@ -862,10 +865,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return;
         }
 
-        var fileContentFocused = IsFileContentFocused();
-        var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue, fileContentFocused);
+        var fileContentFocused = windowActive && IsFileContentFocused();
+        var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue,
+            windowActive, fileContentFocused);
         if (FocusTracePath is not null)
-            Trace($"focus-restore-poll desired={focusStillDesired} same-view={sameView} input-unchanged={userInputUnchanged} " +
+            Trace($"focus-restore-poll desired={focusStillDesired} window-active={windowActive} same-view={sameView} input-unchanged={userInputUnchanged} " +
                 $"within-window={withinRetryWindow} content-focused={fileContentFocused} attempt={shouldAttemptRestore} " +
                 $"elapsed-ms={Stopwatch.GetElapsedTime(request.StartedAt).TotalMilliseconds:F0}");
         if (shouldAttemptRestore)

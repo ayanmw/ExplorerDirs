@@ -17,8 +17,8 @@ internal static class ShellFocusRestoreGate
         return (uint)selectionMarkedIndex < (uint)itemCount ? selectionMarkedIndex : -1;
     }
 
-    internal static bool ShouldAttemptRestore(bool canContinue, bool fileContentAlreadyFocused) =>
-        canContinue && !fileContentAlreadyFocused;
+    internal static bool ShouldAttemptRestore(bool canContinue, bool windowActive,
+        bool fileContentAlreadyFocused) => canContinue && windowActive && !fileContentAlreadyFocused;
 
     internal static bool ShouldKeepPendingRestoreAfterNativeInput(bool inputInFileContent,
         bool inputInColumnHeader, bool sameView, bool focusStillDesired) =>

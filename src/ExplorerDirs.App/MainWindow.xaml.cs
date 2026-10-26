@@ -243,6 +243,7 @@ public partial class MainWindow : Window
             pane.HeaderPresetMenuRequested += ShowViewPresetContextMenu;
             pane.ShortcutRequested += ExecuteShortcut;
             pane.MayRestoreFileFocus = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired && IsActive;
+            pane.MayKeepFileFocusRestorePending = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired;
         }
 
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;

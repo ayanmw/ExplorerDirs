@@ -84,6 +84,7 @@ public partial class PaneControl : UserControl
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
+    internal Func<bool>? MayKeepFileFocusRestorePending { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
@@ -1290,6 +1291,8 @@ public partial class PaneControl : UserControl
         browser.CtrlWheelHandler = CycleViewStyle;
         browser.MayRestoreFocus = () => Current == state && IsVisible &&
             _treeHost?.HasNativeFocus() != true && MayRestoreFileFocus?.Invoke() == true;
+        browser.MayContinueFileOperationFocusRestore = () => Current == state && IsVisible &&
+            _treeHost?.HasNativeFocus() != true && MayKeepFileFocusRestorePending?.Invoke() == true;
         UpdateTabHeader(state);
         tab.PreviewMouseLeftButtonDown += (_, e) =>
         {
