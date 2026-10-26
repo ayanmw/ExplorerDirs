@@ -19,7 +19,11 @@ internal static class PaneThemeMarkupSmoke
             ("ToolBarTray", new[] { ("Background", "ExplorerDirs.WindowBackgroundBrush") }),
             ("TextBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush"), ("CaretBrush", "ExplorerDirs.ControlTextBrush"), ("SelectionBrush", "ExplorerDirs.AccentBrush"), ("SelectionTextBrush", "ExplorerDirs.AccentTextBrush") }),
             ("ComboBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
-            ("ComboBoxItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") })
+            ("ComboBoxItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") }),
+            ("Button", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("ToggleButton", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("CheckBox", new[] { ("Foreground", "ExplorerDirs.ControlTextBrush") }),
+            ("RadioButton", new[] { ("Foreground", "ExplorerDirs.ControlTextBrush") })
         })
         {
             var surfaceStyle = appResources.Descendants(presentation + "Style")

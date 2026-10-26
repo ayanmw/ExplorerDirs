@@ -32,6 +32,11 @@
 - 文本框和下拉框表面、文字、边框消费语义主题；文本插入光标及选中文字消费动态主题/强调色。未替换模板，不改变输入事件、编辑模式、焦点或选择处理。
 - 主题接线 smoke 先按预期因缺少 TextBox 绑定失败，接入后 TextBox、ComboBox 和 ComboBoxItem 检查通过；完整 Release `SettingsSmoke` 与 App Release build（0 警告、0 错误）通过。没有操作 GUI，编辑态、下拉态、禁用态和高对比度颜色仍待验收。计划见[文本输入控件主题计划](superpowers/plans/2026-10-27-themed-text-entry-controls.md)。
 
+## 2026-10-27：按钮与选择控件接入动态主题
+
+- WPF 按钮、切换按钮、复选框和单选框使用动态语义色，不重做系统控件模板，保留现有命令、焦点和状态行为。
+- 定向资源 smoke 先按预期因 Button 主题样式缺失失败，接入四类样式后通过。App Release 构建 0 警告、0 错误；完整 Release `SettingsSmoke` 与 `git diff --check` 待本批最终验证。未操作 GUI，鼠标 hover/pressed、禁用/勾选及高对比度外观待可见验收。计划见[按钮控件主题计划](superpowers/plans/2026-10-27-themed-button-controls.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。
