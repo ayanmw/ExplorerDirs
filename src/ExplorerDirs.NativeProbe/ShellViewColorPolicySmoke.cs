@@ -4,6 +4,19 @@ internal static class ShellViewColorPolicySmoke
 {
     internal static int Run()
     {
+        var appliedColors = new List<uint>();
+        Check(ShellViewColorBackgroundPolicy.TryApply(1, 0x00112233,
+                (_, color) => { appliedColors.Add(color); return true; }) &&
+              appliedColors.SequenceEqual(new uint[] { 0x00112233 }),
+            "a resolved view background is sent to the native list view unchanged");
+        Check(ShellViewColorBackgroundPolicy.TryApply(1, null,
+                (_, color) => { appliedColors.Add(color); return true; }) &&
+              appliedColors.Last() == ShellViewColorBackgroundPolicy.NoColor,
+            "an unresolved view background restores the parent-painted Shell default");
+        Check(!ShellViewColorBackgroundPolicy.TryApply(0, 0x00112233,
+                (_, _) => throw new InvalidOperationException("A missing view window must not be called.")),
+            "a missing native list view is rejected without sending a message");
+
         ShellViewReferenceRetirementSmoke.Run();
         ShellViewNavigationHistorySmoke.Run();
         ShellViewColorBrowserHostSmoke.Run();

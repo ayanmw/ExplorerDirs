@@ -90,13 +90,19 @@
 
 Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 将 `#BG` 定义为视图背景，将 `#BG-A` 定义为活动视图背景。NativeProbe 现把它们交给独立的视图背景匹配/求值入口，不当作文件名通配规则；`#BG-A` 只命中活动视图，`#BG` 可为活动或非活动视图供色，并沿用同一逐属性优先级逻辑。无窗口策略 smoke 覆盖两个标记、活动状态、全局回退和高优先级锁定。
 
-这只是值解析，没有连接到视图 HWND 或实际背景绘制，也没有导入 `.qdr`。官方 [FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 示例公开 `useColor` / `useTreeColor` 开关；FAQ 47 说明需在保存收藏前启用颜色保存。现有本机样本无可验证的颜色规则序列化内容，所以规则编码/导入仍未确定。未启动 GUI、Private Desktop 探针或产品 ExplorerBrowser。
+此记录后来已由下方“接入隔离 Shell 视图背景色”推进：解析出的颜色会应用到原生 `SysListView32`，未命中时传 `CLR_NONE` 让父窗口绘制系统默认背景。该实现仍仅在隔离 `IShellView` 原型中，真实背景像素、主题变化、`.qdr` 规则导入以及产品 ExplorerBrowser 均未验证。官方 [FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 示例公开 `useColor` / `useTreeColor` 开关；FAQ 47 说明需在保存收藏前启用颜色保存。官方页面仍未给出规则序列化字段，因此不推断 `.qdr` 导入格式。
 
 ## 2026-10-26：建模 Q-Dir 颜色规则的逐属性优先级
 
-Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 和[官方旧版帮助页](https://www.softwareok.com/?seite=q-dir-hilfe)说明颜色表按顺序执行、最上方优先；文字色、背景色、粗体、斜体、下划线、删除线各自具有 `-1/0/+1` 状态。`-1` 将该属性交给较低优先级规则，`0` 锁定未设置，`+1` 锁定已设置。NativeProbe 现为六类属性保存独立三态值，并用同一个纯 evaluator 按规则顺序解析；隔离自绘现消费文字色和背景色，字体样式未接入绘制。官方资料没有给出可核实的 Q-Dir 颜色规则 INI 行格式，因此不推断解析/导入行为。
+Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 和[官方旧版帮助页](https://www.softwareok.com/?seite=q-dir-hilfe)说明颜色表按顺序执行、最上方优先；文字色、背景色、粗体、斜体、下划线、删除线各自具有 `-1/0/+1` 状态。`-1` 将该属性交给较低优先级规则，`0` 锁定未设置，`+1` 锁定已设置。NativeProbe 现为六类属性保存独立三态值，并用同一个纯 evaluator 按规则顺序解析；隔离自绘消费文字色、逐项背景色和字体样式，`#BG`/`#BG-A` 视图背景也已连接到原生 ListView 背景消息。官方资料没有给出可核实的 Q-Dir 颜色规则 INI 行格式，因此不推断解析/导入行为。
 
 无窗口策略 smoke 覆盖 continuation、两种锁定、不匹配/最终 continuation，以及同一项目上背景与文字颜色、字体样式的独立优先级。隔离像素夹具仍通过该 evaluator 为两条背景色规则解析颜色身份。策略 smoke、完整 Release SettingsSmoke、NativeProbe Release build、App Release build 均通过，0 警告/错误。本轮未运行 GUI/Private Desktop 像素探针；未接入产品 ExplorerBrowser、用户设置或 `.qdr` 导入。Q-Dir 配置存储格式、规则导入及用户可见效果仍未验证。
+
+## 2026-10-26：接入隔离 Shell 视图背景色
+
+`#BG-A` / `#BG` 解析结果现通过 `LVM_SETBKCOLOR` 发送到隔离视图的 `SysListView32`；创建导航后的新视图时重新应用。无规则时发送 `CLR_NONE`，让 ListView 将背景擦除交给父窗口，保留 Shell 默认系统色。颜色仍只存在于 NativeProbe 夹具，不进入产品设置或 ExplorerBrowser。
+
+新增纯逻辑 smoke 覆盖已解析 COLORREF 原样转发、无规则默认回退及无效 HWND 拒绝。NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。未创建 Shell view，因此真实 `LVM_SETBKCOLOR` 返回值、活动/非活动 pane 像素、各查看模式与 OS 主题变化尚未验证；`.qdr` 颜色规则序列化仍未知。
 
 ## 2026-10-26 复验普通颜色路径与控件基线
 

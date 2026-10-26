@@ -439,6 +439,11 @@
 - 字体策略 smoke 覆盖四属性启用、显式关闭与继承；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --shell-view-color-policy-smoke` 通过，NativeProbe Release build 0 警告/错误。没有启动 Shell/GUI/Private Desktop 探针，真实绘制生命周期和像素效果仍待后续专门验收；不代表产品 ExplorerBrowser 已支持颜色规则。
 - 已确认的 Program Starter 方向已有完整实现和隔离 smoke：独立 profile `ProgramStarter.ini`、Q-Dir `[Program]` 导入预览与显式应用均就绪，用户 Q-Dir.ini 不会被写回。当前缺少带有效启动项的用户 Q-Dir.ini 正向样本，真实导入预览界面仍待桌面验收。
 
+## 2026-10-26：隔离颜色原型应用逐视图背景色
+
+- NativeProbe 的隔离 Shell 列表视图现在按 `#BG-A` / `#BG` 规则应用背景色，并在导航创建新视图后重新设置；无匹配规则时使用 `CLR_NONE`，交由父窗口绘制背景。该实现仅验证原生列表视图背景色接线，不属于产品功能。
+- 背景色策略 smoke 覆盖颜色透传、无规则回退和空窗口句柄拒绝；NativeProbe Release build 与 `--shell-view-color-policy-smoke` 通过。没有启动 Shell/GUI/Private Desktop 探针，真实 Shell 视图显示效果仍待单独验收。
+
 ## 2026-10-26：颜色探针接入原生项目过滤回调
 
 - 颜色原型宿主现同时暴露 `ICommDlgBrowser`、`ICommDlgBrowser2`、`ICommDlgBrowser3`，并把 `IncludeObject` 路由到现有 `ShellFolderFilter`。这属于隔离原生视图的过滤回调，并非产品使用的 `IFolderFilterSite` 路径；既有记录显示原始 `IShellView` 不支持 `IFolderFilterSite`，故该探针无法照搬 ExplorerBrowser 的安装机制。隔离夹具加了一个应被过滤的 `.bin` 文件；探针断言全部项目都经过回调、列表只保留两条可见 `.txt` 项，从而让颜色索引按过滤后的 Shell 顺序建立。修复 NativeProbe 对 `HiddenItemsPreference` 的漏链接。

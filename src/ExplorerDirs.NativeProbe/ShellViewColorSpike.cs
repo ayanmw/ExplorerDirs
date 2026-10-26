@@ -81,6 +81,8 @@ internal static class ShellViewColorSpike
                 if (createHr < 0) Marshal.ThrowExceptionForHR(createHr);
                 if (nextWindow == 0)
                     throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
+                var nextListView = FindChildByClass(nextWindow, "SysListView32");
+                if (nextListView != 0) _ = ApplyFixtureViewBackground(nextListView, isActiveView: true);
 
                 view = nextView;
                 folder = nextFolder;
@@ -262,6 +264,10 @@ internal static class ShellViewColorSpike
             var itemCount = listView == 0 ? 0 : unchecked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT
             if (listView != 0)
             {
+                var viewBackground = ApplyFixtureViewBackground(listView, isActiveView: true);
+                var actualViewBackground = unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)); // LVM_GETBKCOLOR
+                if (viewBackground is { } expectedViewBackground && actualViewBackground != expectedViewBackground)
+                    throw new Exception($"ListView background did not retain the active Q-Dir color rule: expected=0x{expectedViewBackground:X6}; actual=0x{actualViewBackground:X6}.");
                 originalListStyle = GetWindowLongPtrW(listView, -16); // GWL_STYLE
                 if (((long)originalListStyle & 0x10000000) == 0) // WS_VISIBLE
                 {
@@ -277,6 +283,7 @@ internal static class ShellViewColorSpike
                 subclassed = true;
             }
             if (listView != 0) RefreshFixtureColorMap(folderView, fixturePaths);
+            Console.WriteLine($"ishellview-color-spike: view-background-color={(listView == 0 ? "unsupported" : $"0x{unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)):X6}")}");
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
@@ -848,6 +855,20 @@ internal static class ShellViewColorSpike
                 ShellViewColorRuleEvaluator.ResolveFontStyle(rules, orderedNames[index], attributes, static rule => rule.Strikeout));
             if (fontStyle.HasOverrides) CustomDrawFontStyles[(nuint)index] = fontStyle;
         }
+    }
+
+    private static uint? ApplyFixtureViewBackground(nint listView, bool isActiveView)
+    {
+        var rules = new[]
+        {
+            ShellViewColorRule.BackgroundOnly("#BG-A", ShellColorRuleDecision.Set, 0x00F0E0D0u),
+            ShellViewColorRule.BackgroundOnly("#BG", ShellColorRuleDecision.Set, 0x00D0E0F0u)
+        };
+        var color = ShellViewColorRuleEvaluator.ResolveViewBackground(rules, isActiveView);
+        if (!ShellViewColorBackgroundPolicy.TryApply(listView, color,
+                (window, value) => SendMessageW(window, 0x1001, 0, unchecked((nint)(long)value)) != 0))
+            throw new InvalidOperationException("The isolated Shell ListView rejected its resolved background color.");
+        return color;
     }
 
     private static ShellViewColorRule WithTextColor(ShellViewColorRule rule, uint textColor) =>
