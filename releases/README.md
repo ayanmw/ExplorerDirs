@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.73\app\ExplorerDirs.App.exe`，使用独立 profile。移除实测收益有限的“优化内存”，并新增“文件 > 重启应用”，确认后保存并恢复当前进程管理的全部窗口会话；其它独立 Explorer Dirs 进程不受影响。产品版本 `0.6.0-preview.temp.73+0d874d442d0f6efb0535cb920729fa89fd691da7`，EXE SHA-256 `1230251D4E33F5E932669E4A20C7C55FB5C42D7B254C9ED2B9C2549533EC60F3`，DLL SHA-256 `7BFA7311A8AC5976CAABB2177862279A219D35756BE256622142CAABD6EDDB31`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；重启后的真实窗口恢复、菜单交互、Shell 文件区主题与 Q-Dir 互操作仍待验收。内存视图释放 A/B 只观察到约 2 MB 变化；后续将按同一进程和固定工作负载观察运行期增长。详见[temp.73 说明](../docs/releases/preview-0.6.0-temp.73.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.70\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.69，文件操作后的焦点恢复请求会在窗口短暂失焦时保留；后台暂停焦点查询和 `SetFocus`，切回后在目标仍有效时继续有界恢复。产品版本 `0.6.0-preview.temp.70+9b0e91c596a134c10979b270a4aa91edd53aff03`，EXE SHA-256 `1225C43B0989E52D749FD13AB16E91B097CC6A4ECC2DAB431EC1F8332C94EC23`，DLL SHA-256 `7F39DCFF6D1A2658C8E023B84D8E7872D343789D6459136AB8A79C9E27323431`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；profile 文件与空闲 temp.69 隔离 profile 逐项哈希一致。没有启动 GUI；真实文件操作焦点、Alt+Tab 时序和目录树图标可见绘制仍待验收。详见[包说明](../docs/releases/preview-0.6.0-temp.70.md)及包内 `RELEASE-NOTES.md`。
 
 ## 最新临时预览包（2026-10-26）

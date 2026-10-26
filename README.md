@@ -1,10 +1,10 @@
 # Explorer Dirs
 
-### 2026-10-26 当前可预览版本：`preview-0.6.0-temp.64`
+### 2026-10-26 当前可预览版本：`preview-0.6.0-temp.73`
 
-[打开 temp.64 程序](releases/preview-0.6.0-temp.64/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。本版在 temp.63 基础上增加自定义强调色和 Windows 11 窗口标题栏主题。详情见[temp.64 说明](docs/releases/preview-0.6.0-temp.64.md)及[发布清单](releases/README.md)。
+[打开 temp.73 程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.73/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。本版移除了实测收益有限的“优化内存”，并在“文件”菜单加入重启应用：确认后保存并恢复当前进程管理的全部窗口会话；其它独立 Explorer Dirs 进程不受影响。详情见[temp.73 说明](docs/releases/preview-0.6.0-temp.73.md)及[发布清单](releases/README.md)。
 
-temp.64 的 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过，包内版本与 EXE/DLL SHA-256 已核对。没有启动 GUI、ExplorerBrowser 或 Q-Dir；强调色对话框、系统切色、高对比度、Shell 文件区深色及 Q-Dir 互操作仍待可见验收。
+temp.73 的 Release `SettingsSmoke`、App Release 构建通过，包内版本与 EXE/DLL SHA-256 已核对。预览程序未启动；重启后的真实窗口恢复、菜单交互、Shell 文件区主题及 Q-Dir 互操作仍待可见验收。内存采样中，一次性视图释放 44 个视图只带来约 2 MB 的有限变化；后续以同一进程、固定工作负载监测运行期增长，不把视图数直接折算为内存收益。
 
 源码还提供 Shell 原生文件视图和右键菜单、标签/多布局/独立窗口会话、`.qdr` 导入与状态导出、文件视图 CSV/TXT/HTML/XLS 导出、打印、搜索/筛选、目录树/预览/详情窗格、状态栏及大小显示格式设置，以及通过 Windows 系统对话框映射/断开网络驱动器的菜单入口。文件视图导出始终包含整份当前视图，即使已有选中项；该范围与用户确认一致。网络驱动器入口的分发 smoke 已通过，真实对话框、连接/断开后的驱动器刷新及凭据交互尚未验收。
 
