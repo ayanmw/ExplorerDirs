@@ -3155,3 +3155,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 用户选择先做原生 `IShellView` 架构评审。对照逐行大小调查与隔离宿主门槛后，建议原型尝试 `IShellFolder2` folder adapter + Windows DefView：这是比自绘列表更有希望保留原生菜单/项目语义的路线，但仍需独立浏览器宿主，不能直接插入 ExplorerBrowser，也没有产品迁移批准。
 - 明确淘汰 ExplorerBrowser 的 `SetViewProperty`（数值不参与本机 Shell 大小排序、刷新会清除且接口已弃用）、旧 `IColumnProvider`，以及为单列重写完整 `IShellView` UI。迁移门槛涵盖导航/历史、文件菜单/操作、键盘焦点、每标签视图状态、实时通知、拖放、Shell provider 和可见验收。
 - 下一步仅建议隔离验证静态列与数值排序，再评估原生文件项委托；不扫描递归文件夹、不改产品视图。当前 AGENTS.md 禁止以递归扫描填补属性缺失，逐行大小列实现前必须重新审阅此策略。
+
+## 2026-10-26：复验隔离 IShellView 原型的文件操作与通知
+
+- 按用户授权复跑隔离 Private Desktop `--ishellview-color-spike-private-desktop`。当前样本中，原生查看方式循环、Shell 背景/文件菜单及命令状态可读；临时 fixture 的复制、重命名、删除均在文件系统和 Shell 视图中收敛，目录 watcher 与刷新重叠期间的新增项也最终同步。选择、焦点和刷新后恢复快照通过，探针报告前台句柄未变化。
+- 逐项颜色本轮没有通过像素验收：同步切换布局的自定义绘制采样未命中规则色像素，排序/分组状态也没有有效项目绘制像素。因此保留“特定隔离样本已出现可着色像素”这一历史证据，但本轮不能将逐项着色列为稳定能力，更不能推导为产品体验已具备。
+- 完整 Release SettingsSmoke 与 App Release build 通过（0 警告、0 错误）。该探针仍是独立原生宿主，不等同于 ExplorerBrowser 产品宿主；没有验证完整 OLE `DoDragDrop` 输入循环、产品每标签会话持久化、键盘物理焦点或可见产品 UI。迁移门槛继续开放，产品文件视图没有改变。
