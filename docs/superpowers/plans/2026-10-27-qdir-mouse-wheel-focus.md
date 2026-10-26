@@ -4,9 +4,9 @@
 
 **Goal:** Add an opt-in portable setting that routes ordinary mouse-wheel messages to the visible Shell file view or directory tree under the pointer, matching Q-Dir's Mouse wheel focus behavior.
 
-**Architecture:** A WPF thread message filter retargets only vertical `WM_MOUSEWHEEL` messages when the preference is enabled and the pointed HWND belongs to a visible Explorer Dirs Shell view/tree. It updates the logical active pane for per-pane views, leaves Ctrl+wheel untouched, and does not take keyboard focus. A dedicated portable INI stores the preference; the default is off.
+**Architecture:** A thread-local `WH_GETMESSAGE` hook retargets only removed vertical `WM_MOUSEWHEEL` messages when the preference is enabled and the HWND at the message's recorded screen point belongs to a visible Explorer Dirs Shell view/tree. It updates the logical active pane for per-pane views, leaves Ctrl+wheel untouched, and does not take keyboard focus. A dedicated portable INI stores the preference; the default is off.
 
-**Tech Stack:** .NET 10 Windows Desktop WPF, `ComponentDispatcher.ThreadFilterMessage`, native HWND hit testing, SettingsSmoke.
+**Tech Stack:** .NET 10 Windows Desktop WPF, thread-local Win32 `WH_GETMESSAGE`, native HWND hit testing, SettingsSmoke.
 
 **Spec:** `docs/shell-parity.md` Q-Dir mouse-wheel-focus parity, grounded in [Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR).
 
@@ -57,6 +57,6 @@
 - [x] Write settings smoke for default-off INI load/save and the router decision cases; cross-window HWND ownership remains untested.
 - [x] Run the preference smoke before wiring and confirm it fails because the setting store is not yet connected.
 - [x] Add `MouseWheelFocus.ini` with default-off `FocusOnWheel`, a checkable View-menu item, and save-failure feedback.
-- [x] Subscribe/unsubscribe `ThreadFilterMessage` with the main window lifetime; use `GetCursorPos`/`WindowFromPoint`, fail closed for invalid or non-Shell HWNDs, and retarget without synthesizing messages.
+- [x] Install/uninstall one thread-local `WH_GETMESSAGE` hook while a window has the preference enabled; process only `PM_REMOVE`, use the wheel message's signed screen point with `WindowFromPoint`, fail closed for non-Shell HWNDs, and retarget the queued message without synthesizing a second one.
 - [x] Run full Release SettingsSmoke and App Release build; actual Ctrl+wheel route is unchanged by source inspection and the existing router smoke.
 - [x] Commit the integrated feature (`3ad1101`) and update the shell-parity status. Roadmap log entry remains to be added.

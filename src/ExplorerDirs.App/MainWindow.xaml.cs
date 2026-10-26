@@ -314,7 +314,15 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) =>
         {
-            ComponentDispatcher.ThreadFilterMessage += OnThreadFilterMessage;
+            try { MouseWheelFocusMessageHook.Register(this, _mouseWheelFocusEnabled); }
+            catch (Exception ex)
+            {
+                SetMouseWheelFocusEnabled(false);
+                try { _mouseWheelFocusPreferenceStore.Save(false); }
+                catch (Exception saveError) { ex = new AggregateException(ex, saveError); }
+                MouseWheelFocusMessageHook.Register(this, false);
+                EnvironmentStatus.Text = ex.Message;
+            }
             if (HwndSource.FromHwnd(new WindowInteropHelper(this).Handle) is { } source)
                 _systemSettingChangeHook = new SystemSettingChangeHook(source, RefreshEnvironment,
                     RefreshFollowedWindowsHiddenItems);
@@ -329,7 +337,7 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
-            ComponentDispatcher.ThreadFilterMessage -= OnThreadFilterMessage;
+            MouseWheelFocusMessageHook.Unregister(this);
             if (_themeController is not null)
                 _themeController.ThemeChanged -= ThemeController_ThemeChanged;
             _terminalLaunchStop.Cancel();
@@ -386,32 +394,39 @@ public partial class MainWindow : Window
     private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)
     {
         var next = MouseWheelFocusMenu.IsChecked;
-        try { _mouseWheelFocusPreferenceStore.Save(next); }
+        try
+        {
+            _mouseWheelFocusPreferenceStore.Save(next);
+            MouseWheelFocusMessageHook.SetEnabled(next);
+        }
         catch (Exception ex)
         {
             MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
+            try { _mouseWheelFocusPreferenceStore.Save(_mouseWheelFocusEnabled); }
+            catch (Exception saveError) { ex = new AggregateException(ex, saveError); }
             EnvironmentStatus.Text = ex.Message;
-            return;
         }
-        _mouseWheelFocusEnabled = next;
     }
 
-    private void OnThreadFilterMessage(ref MSG message, ref bool handled)
+    internal bool TryRetargetMouseWheel(ref MSG message, nint hovered)
     {
-        if (handled || !_mouseWheelFocusEnabled || message.message != 0x020A ||
-            !GetCursorPos(out var cursor)) return;
-
-        var hovered = WindowFromPoint(cursor);
         var pane = _panes.FirstOrDefault(candidate => candidate.ContainsMouseWheelShellTarget(hovered));
         var sharedTreeTarget = _treeDisplayMode == TreeDisplayMode.Shared &&
             _sharedTreeHost?.ContainsNativeWindow(hovered) == true;
         if (!MouseWheelFocusRouter.TryRetarget(unchecked((uint)message.message),
                 unchecked((nuint)message.wParam.ToInt64()), _mouseWheelFocusEnabled,
                 message.hwnd, hovered, pane is not null || sharedTreeTarget, out var target))
-            return;
+            return false;
 
         message.hwnd = target;
         if (pane is not null) SetActivePane(pane);
+        return true;
+    }
+
+    internal void SetMouseWheelFocusEnabled(bool enabled)
+    {
+        _mouseWheelFocusEnabled = enabled;
+        MouseWheelFocusMenu.IsChecked = enabled;
     }
 
     private void HiddenItemsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateHiddenItemsPreferenceMenu();
@@ -2172,12 +2187,4 @@ public partial class MainWindow : Window
 
     internal void ReportSessionIssue(string message) => EnvironmentStatus.Text = message;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint { public int X, Y; }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool GetCursorPos(out NativePoint point);
-
-    [DllImport("user32.dll")]
-    private static extern nint WindowFromPoint(NativePoint point);
 }

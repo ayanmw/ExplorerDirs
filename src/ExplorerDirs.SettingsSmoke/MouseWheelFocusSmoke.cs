@@ -8,6 +8,15 @@ internal static class MouseWheelFocusSmoke
     internal static void Run()
     {
         CheckPortablePreference();
+        Check(MouseWheelFocusRouter.ShouldProcessGetMessage(0, 1),
+            "the thread GetMessage hook processes a retrieved message");
+        Check(!MouseWheelFocusRouter.ShouldProcessGetMessage(0, 0),
+            "the thread GetMessage hook ignores peeks that do not remove a message");
+        Check(!MouseWheelFocusRouter.ShouldProcessGetMessage(-1, 1),
+            "the thread GetMessage hook ignores negative hook codes");
+        var point = MouseWheelFocusRouter.GetScreenPoint(unchecked((nint)0xFFF60014UL));
+        Check(point.X == 20 && point.Y == -10,
+            "wheel-message coordinates preserve signed positions on multiple monitors");
         Check(MouseWheelFocusRouter.TryRetarget(0x020A, 0, true, 10, 20, true, out var target) && target == 20,
             "enabled focus routing targets the Shell view under the pointer");
         Check(!MouseWheelFocusRouter.TryRetarget(0x020A, 0, false, 10, 20, true, out target) && target == 10,
