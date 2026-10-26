@@ -201,8 +201,50 @@ internal static class ShellViewColorSpike
         Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out var restoredMode, out _));
         if (siblingMode != 3 || restoredMode != 4)
             throw new InvalidOperationException($"Concurrent Shell views shared view mode state: sibling={siblingMode}; restored={restoredMode}.");
-        return $"restored-stream-bytes={restoredState.Length}; sibling-reads={host.Reads}; " +
-            $"sibling-mode={siblingMode}; restored-mode={restoredMode}; independent=True";
+        var siblingInitialReads = host.Reads;
+        Check(At<SaveViewState>(view, 13)(view));
+        Pump(350);
+        var retirement = new ShellViewReferenceRetirement(
+            shellView => At<DestroyViewWindow>(shellView, 10)(shellView),
+            shellView => Marshal.Release(shellView),
+            message => Console.WriteLine("concurrent-view retirement: " + message));
+        host.View = 0;
+        retirement.Retire(view, folder);
+        view = folder = viewWindow = 0;
+        var siblingWrites = host.Writes;
+        Marshal.Release(hostPointer);
+        hostPointer = 0;
+        host.Dispose();
+        host = null;
+        if (siblingWrites == 0 || !store.TryLoad(siblingSessionId, out var siblingState) ||
+            restoredState.SequenceEqual(siblingState))
+            throw new InvalidOperationException("The sibling Shell view did not persist an independent view-state stream.");
+
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+        shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
+        host = new ShellViewColorBrowserHost(parent, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: siblingSessionId);
+        host.View = view;
+        hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        bounds = new StreamProbeRect { Right = 480, Bottom = 320 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+        if (viewWindow == 0) throw new InvalidOperationException("The sibling Shell view could not be recreated.");
+        Check(At<ActivateView>(view, 7)(view, 1));
+        Pump(700);
+        Marshal.Release(folderView);
+        folderView = 0;
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var recreatedMode, out _));
+        Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out restoredMode, out _));
+        if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
+            throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
+        return $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
+            $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
+            $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; independent=True";
     }
 
     private static string VerifySessionRestoreFileOperations(nint view, nint folderView, string fixture,
