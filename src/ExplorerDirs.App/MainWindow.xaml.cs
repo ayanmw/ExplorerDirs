@@ -1190,7 +1190,7 @@ public partial class MainWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is MenuItem) return;
-        if (ActivePane.IsShellRenameEditorFocused) return;
+        if (IsAnyShellRenameEditorFocused()) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var virtualKey = KeyInterop.VirtualKeyFromKey(key);
         var modifiers = (int)Keyboard.Modifiers;
@@ -1210,6 +1210,9 @@ public partial class MainWindow : Window
             return;
         e.Handled = ExecuteShortcut(ActivePane, shortcut);
     }
+
+    private bool IsAnyShellRenameEditorFocused() =>
+        _panes.Any(pane => pane.IsShellRenameEditorFocused);
 
     private bool ExecuteShortcut(PaneControl source, ExplorerShortcut shortcut)
     {
@@ -1532,9 +1535,10 @@ public partial class MainWindow : Window
         _fileCommandRefreshGate.Cancel();
         _queryingFileCommands = true;
         var pane = ActivePane;
+        var renameEditorFocused = IsAnyShellRenameEditorFocused();
         try
         {
-            var states = pane.IsShellRenameEditorFocused
+            var states = renameEditorFocused
                 ? ShellFileCommands.All.ToDictionary(info => info.Command, _ => false)
                 : pane.QueryFileCommands();
             if (!ReferenceEquals(pane, ActivePane)) return;
@@ -1544,7 +1548,7 @@ public partial class MainWindow : Window
                 _fileCommandButtons[command].IsEnabled = enabled;
             }
             NewFolderMenu.IsEnabled = states.GetValueOrDefault(ShellFileCommand.NewFolder);
-            var counts = pane.IsShellRenameEditorFocused ? null : pane.ReadSelectionCounts();
+            var counts = renameEditorFocused ? null : pane.ReadSelectionCounts();
             if (!ReferenceEquals(pane, ActivePane)) counts = null;
             foreach (var (command, item) in _selectionMenus)
                 item.IsEnabled = counts is not null &&

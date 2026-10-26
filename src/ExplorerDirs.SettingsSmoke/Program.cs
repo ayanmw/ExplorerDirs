@@ -32,6 +32,13 @@ if (args.Length == 1 && args[0] == "--shell-selection-restore-gate-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--shell-rename-window-gate-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
+    Console.WriteLine("Shell rename window gate smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--pure-state-smoke")
 {
     DirectoryMonitorStartupSmoke.Run();
@@ -342,6 +349,7 @@ ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
 ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
+ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
 HiddenItemsPreferenceSmoke.Run();
 ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
 ExplorerDirs.SettingsSmoke.QuickLinkStoreSmoke.Run();
