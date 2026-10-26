@@ -3292,3 +3292,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 四窗格恢复探针把前三个 Shell view 留在主目录、第四个 view 放入兄弟临时目录。主目录的复制/重命名/删除由三个 view 收敛；随后在独立目录用 `IFileOperation` 新建副本，仅第四个 view 从 1 项更新到 2 项，前三个 view 计数不变且不含该项。连续三轮 Private Desktop watchdog 退出码 0，前台窗口句柄均保持不变。
 - 这验证同一隔离原生容器内不同路径的 Shell 文件通知互不串扰。验证触发来自本进程 `IFileOperation`，不代表外部程序 watcher、产品 WPF、拖放或物理输入验收；产品 ExplorerBrowser、配置与 release 未修改。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格跨目录-shell-通知隔离)。
+
+## 2026-10-27：隔离拖放尝试与验证边界
+
+- 直接调用目标 `IDropTarget` 的 `DragEnter/DragOver/Drop` 返回 COPY effect，但没有生成目标文件；因此这不是拖放成功证据。真正 OLE `DoDragDrop` 前置定位失败：Private Desktop 的 `GetCursorPos` 返回失败。未对当前桌面设置光标或注入鼠标输入，临时失败实现已撤回。
+- Shell 拖放仍是迁移原型的未完成验收项。需要隔离桌面具备自身可用光标，或用户明确授权的隔离 GUI 输入会话后，再验证实际文件内容、双方视图通知和操作效果。详细失败记录与日志见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-隔离-shell-拖放探针未通过产品行为门槛)。

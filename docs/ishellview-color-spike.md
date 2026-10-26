@@ -754,3 +754,9 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 四窗格 session-restore consumer 将前三个 `IShellView` 留在主 fixture，第四个 view 放到兄弟隔离 fixture；两组都保持自己的视图模式和 session host。主目录的 Shell 复制、重命名、删除只要求前三个 pane 收敛；随后在另一目录执行 Shell 复制，第四个 pane 收到新项目且计数 `1→2`，前三个 pane 保持原计数并且没有出现该跨目录文件。Private Desktop watchdog 连续三轮退出码 0，主桌面 foreground HWND 每轮未变：`20261027-003657-e9c78ab7.stdout.log`、`20261027-003711-0d8fef2c.stdout.log`、`20261027-003721-a191bc98.stdout.log`。夹具位于 NativeProbe `fixtures` 根目录并由外层探针按根路径边界清理。
 
 本结果证明同一隔离原生容器里的 Shell 文件通知按不同目录更新各自 view，未依赖 F5 刷新。它仍是 `IFileOperation` 触发的合成操作，不覆盖真实外部进程 watcher、产品 PaneControl/WPF、可见菜单/物理输入、拖放或 ExplorerBrowser 产品接线；产品配置与 release 未改。
+
+### 2026-10-27 隔离 Shell 拖放探针未通过产品行为门槛
+
+从真实源 view 选中 child PIDL 后取得 `IDataObject`，并从目标文件夹的 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得 Shell drop target。手动调用 `DragEnter`、`DragOver`、`Drop` 虽均返回成功且保留 COPY effect，目标夹具始终未生成文件；这条直接回调路径不构成真实拖放验收。进一步改为 OLE `DoDragDrop` 后，Private Desktop 中 `GetCursorPos` 返回失败，无法在不移动/注入用户桌面输入的情况下把隔离目标放到当前光标下，因而没有开始 OLE 拖放循环。相关失败日志：`20261027-003901-65e574d6.stdout.log`、`20261027-003958-08c0f48b.stdout.log`、`20261027-004029-d5c2fb1a.stdout.log`、`20261027-004054-b9fd9a72.stdout.log`、`20261027-004126-daa97a66.stdout.log`、`20261027-004146-fd004e7e.stdout.log`、`20261027-004213-3866e1a3.stdout.log`、`20261027-004239-60802bf2.stdout.log`、`20261027-004305-030e6607.stdout.log`、`20261027-004459-b33c6755.stdout.log`。
+
+失败的临时拖放代码已撤回；四窗格跨目录通知隔离的已提交探针不受影响。本记录不判定 Windows Shell 拖放本身失败，也不代表产品拖放已验证。后续需要让真实 OLE 拖放循环在可定位指针的独立测试桌面内运行，或在用户明确授权的隔离 GUI 会话中进行；不调用 `SetCursorPos` 修改当前用户指针。官方合同说明：文件夹级 drop target 通过 `IShellFolder::CreateViewObject` 请求，而条目级 `GetUIObjectOf(IID_IDropTarget)` 的 `cidl` 需为 1。
