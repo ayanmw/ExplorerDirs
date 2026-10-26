@@ -752,9 +752,9 @@ internal static class ShellViewColorSpike
     }
 
     internal static bool TryInvokeMergedMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
-        Func<bool>? isStillActive = null)
+        Func<bool>? isStillActive = null, nint selectedMenu = 0)
     {
-        return ResolveMergedShellMenuCommandGroup(GetMenu(owner.MenuFrameWindow), commandId) switch
+        return ResolveMergedShellMenuCommandGroup(GetMenu(owner.MenuFrameWindow), commandId, selectedMenu) switch
         {
             0 => TryInvokeMergedFileMenuCommand(owner, commandId, execute, isStillActive),
             1 => TryInvokeMergedEditMenuCommand(owner, commandId, execute, isStillActive),
@@ -881,9 +881,20 @@ internal static class ShellViewColorSpike
         return FindMenuCommandPath(GetSubMenu(compositeMenu, groupIndex), commandId);
     }
 
-    internal static int? ResolveMergedShellMenuCommandGroup(nint compositeMenu, uint commandId)
+    internal static int? ResolveMergedShellMenuCommandGroup(nint compositeMenu, uint commandId, nint selectedMenu = 0)
     {
         if (compositeMenu == 0 || !IsMenu(compositeMenu)) return null;
+        if (selectedMenu != 0)
+        {
+            for (var groupIndex = 0; groupIndex < 6; groupIndex++)
+            {
+                var groupMenu = GetSubMenu(compositeMenu, groupIndex);
+                if (groupMenu != 0 && ContainsMenu(groupMenu, selectedMenu))
+                    return FindMergedMenuCommandPath(compositeMenu, groupIndex, commandId) is null ? null : groupIndex;
+            }
+            return null;
+        }
+
         int? matchedGroup = null;
         for (var groupIndex = 0; groupIndex < 6; groupIndex++)
         {
@@ -892,6 +903,17 @@ internal static class ShellViewColorSpike
             matchedGroup = groupIndex;
         }
         return matchedGroup;
+    }
+
+    private static bool ContainsMenu(nint rootMenu, nint candidate)
+    {
+        if (rootMenu == candidate) return true;
+        for (var index = 0; index < GetMenuItemCount(rootMenu); index++)
+        {
+            var submenu = GetSubMenu(rootMenu, index);
+            if (submenu != 0 && ContainsMenu(submenu, candidate)) return true;
+        }
+        return false;
     }
 
     private static string NormalizeMenuLabel(string? label)

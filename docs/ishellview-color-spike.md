@@ -1089,3 +1089,9 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 微软的 `WM_INITMENUPOPUP` 契约说明消息会发给下拉菜单的 owner window；现有列头探针读取到该 HWND，但只把它用于初始化子菜单，没有保存或输出。现为探针记录首次 popup 的 owner HWND 与最多八层父窗口的 HWND/窗口类名，便于后续辨认实际收件者属于 header、view 还是宿主 frame。
 
 本轮只改 NativeProbe 诊断输出并进行 Release 编译；没有运行需要创建 `IShellView` 的列头菜单探针，因此 owner 链仍无运行时结论。该日志用于确定真实 popup 的菜单 owner，不等同于用户选中菜单项后 `WM_COMMAND` 的最终接收 HWND；命令分派仍待单独证据。[WM_INITMENUPOPUP](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-initmenupopup)
+
+### 2026-10-27 使用 WM_MENUSELECT 来源区分同 ID 菜单项
+
+前一批为避免误派发，缺少来源信息且跨组 ID 重复时会拒绝命令；这保证了安全，却会让合法的重复 ID 项不可用。微软 `WM_MENUSELECT` 消息提供当前选中项 ID/弹出菜单索引及菜单句柄；现在 NativeProbe 保存该选择路径对应的子菜单来源，并在延迟命令队列中保留来源句柄。路由器先依来源菜单确定 OLE 组：File/Edit/View 按各自组执行，Object/Window/Help 不传给 Shell view；没有有效来源时仍只接受唯一归属的 ID。对设置 `MNS_NOTIFYBYPOS` 的路径也加入 `WM_MENUCOMMAND` 的 menu+index 识别。
+
+合成菜单 smoke 覆盖嵌套 `WM_MENUSELECT` 参数序列、File 与 View 同 ID 分派、Object 同 ID 拒绝、显式 Reset 清除来源状态、来源句柄随 FIFO 队列保存，以及真实隐藏假 HWND 收到原始命令 ID；NativeProbe Release build 与专用 smoke 通过。测试没有进入真实菜单模态循环，也没有创建 `IShellView`，所以实际 Shell/OLE 是否把菜单消息送到当前 frame、菜单退出与 `WM_COMMAND` 的时序仍待隔离宿主验证。依据：[WM_MENUSELECT](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menuselect)、[WM_COMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command)、[WM_MENUCOMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menucommand)。

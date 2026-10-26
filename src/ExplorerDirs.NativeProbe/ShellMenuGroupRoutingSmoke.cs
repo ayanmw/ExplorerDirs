@@ -56,6 +56,11 @@ internal static class ShellMenuGroupRoutingSmoke
                 ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8128) != 0 ||
                 ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8129) is not null)
                 throw new InvalidOperationException("The frame must route commands only when their File/Edit/View menu group is unique.");
+            if (ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8123, fileChild) != 0 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8123, groups[2]) != 2 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8125, groups[3]) != 3)
+                throw new InvalidOperationException("The selected menu handle must disambiguate duplicate IDs and retain non-view OLE group identity.");
+            VerifyMenuSelectionContext(composite, groups, fileChild);
             if (ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8123) != MergedEditMenuCommandRoute.SelectAll ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8124) != MergedEditMenuCommandRoute.ShellView ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8125) != MergedEditMenuCommandRoute.NotFound)
@@ -67,7 +72,7 @@ internal static class ShellMenuGroupRoutingSmoke
                 ShellViewColorSpike.IsCurrentShellMenuOwner(owner, (nint)0x5678, () => false))
                 throw new InvalidOperationException("A Shell menu command must be cancelled when its view or pane changes during a reentrant callback.");
 
-            VerifyMergedCommandDelivery(composite);
+            VerifyMergedCommandDelivery(composite, fileChild, groups);
 
             Console.WriteLine("shell-menu-group-routing-smoke: PASS File/Edit/View routing, reentrant active-view guard, and WM_COMMAND delivery; no Shell view created");
             return 0;
@@ -78,7 +83,7 @@ internal static class ShellMenuGroupRoutingSmoke
         }
     }
 
-    private static void VerifyMergedCommandDelivery(nint composite)
+    private static void VerifyMergedCommandDelivery(nint composite, nint fileChild, IReadOnlyList<nint> groups)
     {
         var frame = CreateWindowExW(0, "STATIC", "synthetic menu frame", 0, 0, 0, 200, 120, 0, 0, 0, 0);
         if (frame == 0) throw new InvalidOperationException("Could not create a hidden window for synthetic WM_COMMAND delivery.");
@@ -109,6 +114,12 @@ internal static class ShellMenuGroupRoutingSmoke
             if (ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8123) ||
                 ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8125) || _observedCommandId != 0)
                 throw new InvalidOperationException("A command shared by multiple OLE menu groups must not be dispatched to an arbitrary Shell view route.");
+            if (!ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8123, selectedMenu: fileChild) ||
+                !owner.MenuTrace[^1].Contains("group=0", StringComparison.Ordinal) ||
+                !ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8123, selectedMenu: groups[2]) ||
+                !owner.MenuTrace[^1].Contains("group=2", StringComparison.Ordinal) ||
+                ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8125, selectedMenu: groups[3]))
+                throw new InvalidOperationException("A selected menu source must route duplicate File/View IDs to their own group and reject Object commands.");
 
             _observedCommandId = 0;
             var activeChecks = 0;
@@ -128,6 +139,32 @@ internal static class ShellMenuGroupRoutingSmoke
             if (IsWindow(frame)) _ = DestroyWindow(frame);
         }
     }
+
+    private static void VerifyMenuSelectionContext(nint composite, IReadOnlyList<nint> groups, nint fileChild)
+    {
+        var selection = new MergedShellMenuSelection();
+        selection.Observe(MenuSelectWParam(0, 0x10), composite, composite);
+        selection.Observe(MenuSelectWParam(0, 0x10), groups[0], composite);
+        selection.Observe(MenuSelectWParam(0x8123, 0), composite, composite);
+        if (!selection.TryGetSource(0x8123, out var fileSource) || fileSource != fileChild)
+            throw new InvalidOperationException("Nested WM_MENUSELECT events must retain the selected File submenu as the command source.");
+
+        selection.Observe(MenuSelectWParam(2, 0x10), composite, composite);
+        selection.Observe(MenuSelectWParam(0x8123, 0), composite, composite);
+        if (!selection.TryGetSource(0x8123, out var viewSource) || viewSource != groups[2])
+            throw new InvalidOperationException("WM_MENUSELECT must replace a prior File source with the selected View group.");
+
+        selection.Observe(MenuSelectWParam(3, 0x10), composite, composite);
+        selection.Observe(MenuSelectWParam(0x8125, 0), composite, composite);
+        if (!selection.TryGetSource(0x8125, out var objectSource) || objectSource != groups[3])
+            throw new InvalidOperationException("WM_MENUSELECT must preserve non-view OLE group source identity for the router to reject safely.");
+
+        selection.Reset();
+        if (selection.TryGetSource(0x8125, out _))
+            throw new InvalidOperationException("Exiting the menu loop must clear its selected command source.");
+    }
+
+    private static nuint MenuSelectWParam(uint item, uint flags) => item | ((nuint)flags << 16);
 
     private static nint ObserveCommand(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {

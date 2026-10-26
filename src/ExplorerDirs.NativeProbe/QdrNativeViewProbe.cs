@@ -868,6 +868,10 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
 internal sealed class ShellMenuFrameCoordinator : IDisposable
 {
     private const uint WmCommand = 0x0111;
+    private const uint WmMenuSelect = 0x011F;
+    private const uint WmMenuCommand = 0x0126;
+    private const uint WmEnterMenuLoop = 0x0211;
+    private const uint WmExitMenuLoop = 0x0212;
     private const uint WmRunShellMenuCommand = 0x8000 + 0x3A1;
     private static readonly SubclassProcedure FrameSubclassProcedure = FrameWindowSubclass;
     private readonly nint _frameWindow;
@@ -879,8 +883,9 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     private nint _activeWindow;
     private nint _oleMenu;
     private StreamViewHost? _owner;
-    // WM_COMMAND messages can queue before this STA handles the deferred dispatcher message.
-    private readonly Queue<(StreamViewHost Owner, uint CommandId)> _pendingShellMenuCommands = new();
+    private readonly MergedShellMenuSelection _menuSelection = new();
+    // Menu commands can queue before this STA handles the deferred dispatcher message.
+    private readonly Queue<(StreamViewHost Owner, uint CommandId, nint SelectedMenu)> _pendingShellMenuCommands = new();
 
     internal ShellMenuFrameCoordinator(nint frameWindow)
     {
@@ -899,10 +904,13 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
 
     internal nint BaseMenu => _baseMenu;
     internal bool IsCurrentOwner(StreamViewHost owner) => !_disposed && ReferenceEquals(_owner, owner);
-    internal void EnqueuePendingShellMenuCommand(StreamViewHost owner, uint commandId) =>
-        _pendingShellMenuCommands.Enqueue((owner, commandId));
-    internal bool TryDequeuePendingShellMenuCommand(out (StreamViewHost Owner, uint CommandId) command) =>
+    internal void EnqueuePendingShellMenuCommand(StreamViewHost owner, uint commandId, nint selectedMenu = 0) =>
+        _pendingShellMenuCommands.Enqueue((owner, commandId, selectedMenu));
+    internal bool TryDequeuePendingShellMenuCommand(out (StreamViewHost Owner, uint CommandId, nint SelectedMenu) command) =>
         _pendingShellMenuCommands.TryDequeue(out command);
+
+    private bool TryGetSelectedMenu(uint commandId, out nint selectedMenu) =>
+        _menuSelection.TryGetSource(commandId, out selectedMenu);
 
     public void Dispose()
     {
@@ -931,8 +939,37 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                 if (coordinator is not null && coordinator.TryDequeuePendingShellMenuCommand(out var pending) &&
                     pending.CommandId != 0)
                     _ = ShellViewColorSpike.TryInvokeMergedMenuCommand(pending.Owner, pending.CommandId,
-                        isStillActive: () => coordinator.IsCurrentOwner(pending.Owner));
+                        isStillActive: () => coordinator.IsCurrentOwner(pending.Owner),
+                        selectedMenu: pending.SelectedMenu);
                 return 0;
+            }
+            if (referenceData != 0 && message is WmEnterMenuLoop or WmExitMenuLoop)
+            {
+                var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
+                coordinator?._menuSelection.Reset();
+            }
+            if (message == WmMenuSelect && referenceData != 0)
+            {
+                var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
+                // WM_COMMAND carries only an ID, so retain the selected submenu source through dispatch.
+                if (coordinator is not null && coordinator._owner is { } menuOwner && coordinator._activeMenu != 0)
+                    coordinator._menuSelection.Observe(wParam, lParam, coordinator._activeMenu);
+            }
+            if (message == WmMenuCommand && referenceData != 0)
+            {
+                var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
+                if (coordinator?._owner is { } owner)
+                {
+                    var menu = lParam;
+                    var commandId = menu == 0 ? uint.MaxValue : GetMenuItemID(menu, unchecked((int)wParam));
+                    if (commandId <= 0x7FFF &&
+                        ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, commandId, execute: false,
+                            selectedMenu: menu) && PostMessageW(window, WmRunShellMenuCommand, 0, 0))
+                    {
+                        coordinator.EnqueuePendingShellMenuCommand(owner, commandId, menu);
+                        return 0;
+                    }
+                }
             }
             if (message == WmCommand && referenceData != 0)
             {
@@ -943,14 +980,18 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     coordinator?._owner?.OnApplicationMenuCommand();
                     return 0;
                 }
+                nint selectedMenu = 0;
+                var hasSelectionMenu = coordinator is not null && coordinator.TryGetSelectedMenu(commandId, out selectedMenu);
                 if (lParam == 0 && commandId <= 0x7FFF && coordinator?._owner is { } owner &&
-                    ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, commandId, execute: false))
+                    ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, commandId, execute: false,
+                        selectedMenu: hasSelectionMenu ? selectedMenu : 0))
                 {
                     // Post first, then enqueue: this STA cannot dispatch the posted message until
                     // this WndProc returns, and a failed post leaves no orphaned queue entry.
                     if (PostMessageW(window, WmRunShellMenuCommand, 0, 0))
                     {
-                        coordinator.EnqueuePendingShellMenuCommand(owner, commandId);
+                        coordinator.EnqueuePendingShellMenuCommand(owner, commandId,
+                            hasSelectionMenu ? selectedMenu : 0);
                         return 0;
                     }
                 }
@@ -965,6 +1006,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
 
     internal int SetMenu(StreamViewHost owner, nint menu, nint oleMenu, nint activeWindow)
     {
+        _menuSelection.Reset();
         if (menu == 0) return Deactivate(owner);
         if (!IsWindow(_frameWindow) || !IsMenu(menu)) return unchecked((int)0x80070057);
         var priorOwner = _owner;
@@ -1011,6 +1053,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
 
     internal int Deactivate(StreamViewHost owner)
     {
+        _menuSelection.Reset();
         if (!ReferenceEquals(_owner, owner)) return 0;
         var result = Unhook(owner, _activeWindow);
         if (result < 0) return result;
@@ -1078,6 +1121,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
         uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
+    [DllImport("user32.dll")] private static extern uint GetMenuItemID(nint menu, int position);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
     [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
