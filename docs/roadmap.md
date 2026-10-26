@@ -3261,4 +3261,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - NativeProbe Release 构建通过（0 警告、0 错误）。`host-menu-commands-private-desktop` watchdog 退出码 0：原生查看、刷新、Name 升/降序、Type 分组升/降序均由 `IFolderView2` 读回；刷新/重排时焦点或条目会短暂丢失，约 50–250 ms 后稳定恢复。日志：`src/.state/native-probe-watchdog/20261026-234804-68f63cb0.stdout.log`。
 - `host-filter-private-desktop` watchdog 退出码 0：临时 filesystem view 的筛选/分组导出、五种同步视图、Ctrl+A、Down、Enter、文件目标拒绝、父级/后退/前进与历史分支截断均通过；Desktop、此电脑、回收站、库、网络位置、搜索文件夹和 ZIP fixture 均成功创建 Shell view。日志：`src/.state/native-probe-watchdog/20261026-234810-1051c20f.stdout.log`。
-- 两次 Private Desktop 运行的外层 foreground HWND 均保持为 `0x81852`。这只证明这些隔离宿主/合成加速器场景在本次会话没有改变主桌面前台；不等同真实鼠标拖放、物理键盘、可见焦点或产品 Pane/标签容器验收。`IDropTarget` 接口可查询仍不代表 OLE `DoDragDrop` 已通过。
+- `color-private-desktop` watchdog 退出码 0：临时 fixture 的复制、重命名、删除后项目数从 `2→3→3→2` 收敛；刷新期间创建文件后，后续刷新将数量恢复到 4，并保持选择/隐藏焦点快照。逐项目标色在本次八种查看方式采样中仍为 `0`，不能把历史个别命中视为稳定着色能力。日志：`src/.state/native-probe-watchdog/20261026-234913-94950277.stdout.log`。
+- 三次 Private Desktop 运行的外层 foreground HWND 均保持为 `0x81852`。这只证明这些隔离宿主/合成加速器场景在本次会话没有改变主桌面前台；不等同真实鼠标拖放、物理键盘、可见焦点或产品 Pane/标签容器验收。`IDropTarget` 接口可查询仍不代表 OLE `DoDragDrop` 已通过。
