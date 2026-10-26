@@ -83,6 +83,13 @@ if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--file-view-export-smoke")
+{
+    FileViewExportSmoke.Run();
+    Console.WriteLine("File view export smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--focus-traversal-smoke")
 {
     FocusTraversalSmoke.Run();

@@ -1908,10 +1908,8 @@ public partial class MainWindow : Window
                 _ => throw new InvalidOperationException("未知的导出格式。")
             };
             await Task.Run(() =>
-            {
-                using var output = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None);
-                FileViewExportWriter.Write(output, format, snapshot);
-            });
+                FileViewExportFile.WriteAtomically(dialog.FileName,
+                    output => FileViewExportWriter.Write(output, format, snapshot)));
             EnvironmentStatus.Text = $"已导出 {snapshot.Rows.Count:N0} 项，{snapshot.Columns.Count} 列到 {Path.GetFileName(dialog.FileName)}。导出整个活动视图，当前选区不缩小导出范围。";
         }
         catch (Exception ex)
