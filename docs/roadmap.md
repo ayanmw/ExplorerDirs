@@ -3314,3 +3314,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 四个真实 Shell view 各自通过背景 `IContextMenu` 执行 Details、Name 升序/降序及 Type 分组升序/降序。每次命令后都读取四个 pane 的排序键/方向与分组键/方向，确认只有调用命令的 pane 发生预期变化；每轮后恢复模式及 pane 1 的 Name 降序基线。
 - Release NativeProbe 构建 0 警告/错误，Private Desktop watchdog 连续三轮退出码 0；四窗格复制/重命名/删除和跨目录通知均通过，主桌面前台句柄不变。
 - 这是隐藏隔离默认 filesystem view 的 canonical verb/状态读回，不证明菜单可见合并、列标题右键、物理输入或 WPF 活动 pane 接线。产品 ExplorerBrowser、配置与 release 未改。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-shell-排序与分组菜单命令隔离)。
+
+## 2026-10-27：四窗格文件项 Shell 菜单目标隔离
+
+- 每个真实 `IShellView` 单独选中一个项目，通过自身 `SVGIO_SELECTION` 获取 `IContextMenu` 并枚举到 canonical `copy`；逐步读取四个 view 的选择数量，确认另外三个 pane 不继承活动 pane 选区，测试后清除全部选区。
+- Private Desktop watchdog 连续三轮退出码 0，四窗格状态、Shell 文件操作与通知检查通过，主桌面前台未变。探针没有执行文件命令、修改剪贴板或显示菜单。
+- 可见右键菜单合并/命令调用、第三方扩展、产品 ExplorerBrowser 及 WPF 目标命中仍待验证。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格文件项菜单目标隔离)。

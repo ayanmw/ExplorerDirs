@@ -783,3 +783,11 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 NativeProbe Release 构建 0 警告、0 错误；加入 Details 菜单后排序/分组状态不变断言后，Private Desktop watchdog 连续三轮退出码 0；三轮均通过四个 pane 的菜单命令路由、文件操作和通知检查，主桌面 foreground HWND 保持 `0x81852`。日志：`20261027-005805-3fc08177.stdout.log`、`20261027-005826-4d2e0fc6.stdout.log`、`20261027-005843-098f9488.stdout.log`。
 
 该证据证明隔离默认 filesystem `IShellView` 的标准背景菜单命令可按各 pane 的原生 `IContextMenu` 定向，并读回独立排序/分组状态；菜单未实际显示或点击，因此不证明 UI 合并、列标题右键、物理输入、扩展菜单或 WPF 活动 pane 接线。产品 ExplorerBrowser、配置与 release 未修改。
+
+### 2026-10-27 四窗格文件项菜单目标隔离
+
+在四窗格 session-restore consumer 中逐个 `IFolderView2::SelectItem` 选中一项，并经对应 `IShellView::GetItemObject(SVGIO_SELECTION, IID_IContextMenu)` 查询文件项菜单。每一步都读取四个 view 的 `SVGIO_SELECTION` 数量，断言只有目标窗格有一项选中；原生菜单必须枚举出 canonical `copy` 动词。随后清空四个 view 的选区。探针不调用菜单命令、不访问系统剪贴板，也不显示菜单。
+
+Release NativeProbe 构建 0 警告/错误；Private Desktop watchdog 连续三轮退出码 0，四个 pane 都读到自己的 `copy` 菜单且兄弟 pane 选区为零，四窗格文件操作/通知及前台 HWND `0x81852` 检查通过。日志：`20261027-010130-21d014fe.stdout.log`、`20261027-010152-b16fbd87.stdout.log`、`20261027-010209-b0ee888b.stdout.log`。
+
+这验证了隔离原生 view 能从各自选择项提供 Shell 文件菜单对象并保持选区隔离；未验证可见右键菜单、命令点击、第三方扩展菜单、产品 ExplorerBrowser 或 WPF 目标命中。

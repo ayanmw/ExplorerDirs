@@ -362,9 +362,10 @@ internal static class ShellViewColorSpike
         var restoreGroupKey = typeKey;
         Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
         Pump(150);
+        var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -396,6 +397,54 @@ internal static class ShellViewColorSpike
                     throw new InvalidOperationException($"Shell menu command {phase} changed the wrong view state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSortDirection}/{expectedGroupDirection}.");
             }
         }
+    }
+
+    private static string VerifyFourPaneSelectionMenus(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Selection menu probe requires exactly four Shell panes.");
+        var verified = new List<string>(views.Count);
+        for (var index = 0; index < views.Count; index++)
+        {
+            const uint svgIoAllView = 2;
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], svgIoAllView, out var itemCount));
+            if (itemCount == 0) throw new InvalidOperationException($"Pane {index + 1} has no item for its selection menu probe.");
+            nint contextMenu = 0, popup = 0;
+            try
+            {
+                Check(At<SelectFolderItem>(folderViews[index], 15)(folderViews[index], 0,
+                    0x1u | 0x4u | 0x10u | 0x40000000u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectedCount)); // SVGIO_SELECTION.
+                    var expectedSelection = pane == index ? 1 : 0;
+                    if (selectedCount != expectedSelection)
+                        throw new InvalidOperationException($"Selecting pane {index + 1} leaked selection into pane {pane + 1}: expected={expectedSelection}, observed={selectedCount}.");
+                }
+                var contextMenuId = ContextMenuId;
+                Check(At<GetItemObject>(views[index], 15)(views[index], 1, ref contextMenuId, out contextMenu)); // SVGIO_SELECTION.
+                if (contextMenu == 0)
+                    throw new InvalidOperationException($"Pane {index + 1} did not provide a selected-item IContextMenu.");
+                var commands = QueryMenuCommands(contextMenu, out popup, out _);
+                if (!commands.Any(command => command.Verb.Equals("copy", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Pane {index + 1} selected-item menu did not expose the standard copy command.");
+                verified.Add($"pane{index + 1}:copy");
+            }
+            finally
+            {
+                if (popup != 0) DestroyMenu(popup);
+                if (contextMenu != 0) Marshal.Release(contextMenu);
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[index], 15)(folderViews[index], item, 0));
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectedCount));
+                    if (selectedCount != 0)
+                        throw new InvalidOperationException($"Selection menu probe left pane {pane + 1} selected: {selectedCount} items.");
+                }
+            }
+        }
+        return string.Join(',', verified);
     }
 
     private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
