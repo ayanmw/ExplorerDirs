@@ -3531,4 +3531,10 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-27：验证 filesystem Shell view 的 browser accelerator 委托
 
 - 完整 Private Desktop session-restore consumer 对有焦点的真实 filesystem `IShellView` 合成 F4、F6、F24 `WM_KEYDOWN`。返回值依次为 `S_FALSE`、`S_OK`、`S_FALSE`，browser `TranslateAcceleratorSB` handler 三次均未调用；每次输入前恢复同一文件列表焦点。完整四窗格 session-restore watchdog 退出码 0，前台窗口不变。日志：`src/.state/native-probe-watchdog/20261027-043550-7cf2b1d4.stdout.log`。
-- 结论仅适用于此 filesystem view 与这三个合成按键；不代表 namespace extension、真实输入或 WPF 宿主。下一步补齐 OLE in-place `GetWindowContext`/accelerator-table 生命周期，再检查 frame accelerator 的真实路由；产品 ExplorerBrowser 与 release 未改。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27探测-filesystem-view-到-browser-accelerator-的委托)。
+- 结论仅适用于此 filesystem view 与这三个合成按键；不代表 namespace extension、真实输入或 WPF 宿主。该验证范围和后续产品键盘路由见下面的路线修正；产品 ExplorerBrowser 与 release 未改。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27探测-filesystem-view-到-browser-accelerator-的委托)。
+
+## 2026-10-27：修正 Shell view accelerator 的验证路线
+
+- 对照微软 `IOleInPlaceSite::GetWindowContext` 与 `OleTranslateAccelerator` 契约后，确认 OLE frame accelerator 是 in-place object activation 提供的另一条路线。当前原型由 `IShellFolder::CreateViewObject` 直接创建 filesystem `IShellView`，没有 OLE in-place object 生命周期；给它补造 `GetWindowContext` 不会验证文件视图实际按键行为。因此移除“完成 OLE accelerator 生命周期”作为 Shell view 迁移门槛。
+- 保留真实 filesystem view `IShellView::TranslateAccelerator` 的 F4/F6/F24 委托结果；接下来的 keyboard gate 是产品 `ExplorerBrowserHost.TranslateAcceleratorCore` 中的实际焦点、活动 pane、rename editor 与 Shell 视图分发，需用隔离产品 HostProbe 验证。真实物理键盘和可见 WPF 行为仍需后续桌面验收；不据此声称产品迁移完成。
+- 参考：[IOleInPlaceSite::GetWindowContext](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplacesite-getwindowcontext)、[OleTranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator)、[IShellView::TranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)。产品 ExplorerBrowser 与 release 未改。
