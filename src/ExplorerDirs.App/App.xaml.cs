@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Diagnostics;
+using System.IO;
 
 namespace ExplorerDirs.App;
 
@@ -14,6 +16,7 @@ public partial class App : Application
     private ApplicationThemeController? _themeController;
     private readonly List<MainWindow> _openWindows = [];
     private MainWindow? _folderTargetWindow;
+    private bool _restartRequested;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -133,7 +136,7 @@ public partial class App : Application
     private MainWindow CreateWindow(string sessionPath, string? startupDirectory, string? warning)
     {
         var window = new MainWindow(_themeController!, startupDirectory, warning, sessionPath,
-            System.IO.Path.GetDirectoryName(new SessionStore().Path), OpenSiblingWindow);
+            System.IO.Path.GetDirectoryName(new SessionStore().Path), OpenSiblingWindow, RestartApplication);
         window.Closed += (_, _) => OnWindowClosed(window);
         window.Activated += (_, _) => _folderTargetWindow = window;
         _openWindows.Add(window);
@@ -178,7 +181,7 @@ public partial class App : Application
 
     private void OnWindowClosed(MainWindow window)
     {
-        if (_windowSessions is not null && _openWindows.Count > 1)
+        if (!_restartRequested && _windowSessions is not null && _openWindows.Count > 1)
         {
             try { _windowSessions.Remove(window.SessionPath); }
             catch (Exception ex)
@@ -194,11 +197,41 @@ public partial class App : Application
             MainWindow = _openWindows[0];
     }
 
+    private void RestartApplication()
+    {
+        if (_restartRequested || _openWindows.Count == 0) return;
+        foreach (var window in _openWindows.ToArray())
+            if (!window.SaveSessionForRestart()) return;
+        _restartRequested = true;
+        foreach (var window in _openWindows.ToArray()) window.Close();
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _folderOpenRouter?.Dispose();
+        _folderOpenRouter = null;
         _themeController?.Dispose();
         _runMarkerTracker?.Dispose();
+        if (_restartRequested)
+        {
+            try
+            {
+                var executable = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+                var start = new ProcessStartInfo(executable)
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = AppContext.BaseDirectory
+                };
+                if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                    start.ArgumentList.Add(Environment.GetCommandLineArgs()[0]);
+                Process.Start(start);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"会话已保存，但重新启动失败：{ex.Message}", "Explorer Dirs",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
         base.OnExit(e);
     }
 }

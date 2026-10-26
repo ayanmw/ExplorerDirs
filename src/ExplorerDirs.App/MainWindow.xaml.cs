@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private readonly ApplicationThemeController? _themeController;
     private readonly string _profileDirectory;
     private readonly Action<MainWindow>? _createWindow;
+    private readonly Action? _restartApplication;
     private readonly FavoritesStore _favoritesStore;
     private readonly ViewPresetStore _viewPresetStore;
     private readonly List<string> _favorites;
@@ -85,7 +86,8 @@ public partial class MainWindow : Window
         : this(null, startupDirectory, startupWarning) { }
 
     internal MainWindow(ApplicationThemeController? themeController, string? startupDirectory = null, string? startupWarning = null,
-        string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null)
+        string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null,
+        Action? restartApplication = null)
     {
         _themeController = themeController;
         InitializeComponent();
@@ -120,6 +122,7 @@ public partial class MainWindow : Window
         if (_viewPresetStore.LoadWarning is { } viewPresetsWarning)
             EnvironmentStatus.Text = viewPresetsWarning;
         _createWindow = createWindow;
+        _restartApplication = restartApplication;
 #if DEBUG
         Title = "Explorer Dirs · 开发调试";
 #else
@@ -1438,14 +1441,13 @@ public partial class MainWindow : Window
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
-    private void OptimizeMemoryOnce_Click(object sender, RoutedEventArgs e)
+    private void RestartApplication_Click(object sender, RoutedEventArgs e)
     {
-        var results = _panes.Select(pane => pane.OptimizeInactiveViews()).ToArray();
-        var released = results.Sum(result => result.Released);
-        var skipped = results.Sum(result => result.Skipped);
-        MessageBox.Show(this,
-            $"本次已释放 {released} 个闲置文件视图；{skipped} 个视图因导航历史、选择状态、滚动位置或视图状态无法安全确认而跳过。\n\n当前布局隐藏的窗格也会参与优化。切回被释放的标签或窗格时，Shell 文件视图会重新加载，可能需要等待。",
-            "内存优化", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (_restartApplication is null) return;
+        if (MessageBox.Show(this,
+                "将关闭当前 Explorer Dirs 进程中的所有窗口，保存窗口会话后重新启动。继续吗？",
+                "重启 Explorer Dirs", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            _restartApplication();
     }
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
@@ -2048,7 +2050,7 @@ public partial class MainWindow : Window
         return snapshot;
     }
 
-    private void SaveSession()
+    private bool SaveSession()
     {
         try
         {
@@ -2058,11 +2060,21 @@ public partial class MainWindow : Window
                 _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
                 _paneTreeVisibility.ToArray(), _treeDisplayMode));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
+            return true;
         }
         catch (Exception ex)
         {
             EnvironmentStatus.Text = $"配置保存失败：{ex.Message}";
+            return false;
         }
+    }
+
+    internal bool SaveSessionForRestart()
+    {
+        if (SaveSession()) return true;
+        MessageBox.Show(this, EnvironmentStatus.Text, "无法重启 Explorer Dirs",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
     }
 
     internal SessionState SnapshotSession() => new(_layout, _defaultViewMode,
