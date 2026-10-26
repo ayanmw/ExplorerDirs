@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.67\app\ExplorerDirs.App.exe`，使用隔离 profile。针对 temp.66 左侧目录树图标空白，现由 Shell 回调显式提供系统关闭/展开图标索引。产品版本 `0.6.0-preview.temp.67+8dd46e8564f47fd1a82d25e9cfc9986b0ac5ecc2`，EXE SHA-256 `BA32C9F7BDF1E98718A5E83518B35499E438BEFFD51E02FD6E94AB5F3BFA600D`，DLL SHA-256 `987C1236F9B36C13D4A30CB6876E39B95DF2F99E34E0E4D5F98FA358B34365D3`，与包内清单一致。Release `SettingsSmoke`、App Release build 和发布隔离 smoke 通过。没有启动 GUI；请重点检查普通文件夹、驱动器和虚拟 Shell 节点的图标。详见[temp.67 说明](../docs/releases/preview-0.6.0-temp.67.md)。
+
+## 最新临时预览包（2026-10-26）
+
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.66\app\ExplorerDirs.App.exe`，使用隔离 profile。修复原生左侧目录树未提供自定义图标索引时的默认 Shell 图标回退。产品版本 `0.6.0-preview.temp.66+aaa7b6a3f6e4234532313dad077b284119b18ffd`，EXE SHA-256 `EACFCAD4AD68F39D082DEF92D8C453D5BF782C70D39D19C83CC157CE35A70CDE`，DLL SHA-256 `FD1193CBD1C56AD3936AE5A3C30C9853339966ADE8DB61FC34EEB85D776E1D62`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 和发布隔离 smoke 通过。未启动 GUI；目录树图标可见效果、虚拟 Shell 节点及多窗格体验仍待预览验收。详见[temp.66 说明](../docs/releases/preview-0.6.0-temp.66.md)及包内 `RELEASE-NOTES.md`。
 
 ## 最新临时预览包（2026-10-26）
