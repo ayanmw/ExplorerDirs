@@ -27,10 +27,33 @@ internal static class AddressPathHistorySmoke
         var backButton = paneMarkup.Descendants().Single(element => (string?)element.Attribute(xaml + "Name") == "BackButton");
         var forwardButton = paneMarkup.Descendants().Single(element => (string?)element.Attribute(xaml + "Name") == "ForwardButton");
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        var hostCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
         Check((string?)backButton.Attribute("PreviewMouseRightButtonUp") == "NavigationHistoryRightClick" &&
               (string?)forwardButton.Attribute("PreviewMouseRightButtonUp") == "NavigationHistoryRightClick" &&
               paneCode.Contains("ShowAddressHistory(target)", StringComparison.Ordinal),
             "right-clicking either navigation arrow opens the shared recent-path menu at the clicked button");
+
+        Check(hostCode.Contains("AddressInputResolver.Resolve", StringComparison.Ordinal) &&
+              hostCode.Contains("string.IsNullOrWhiteSpace(path)", StringComparison.Ordinal) &&
+              hostCode.Contains("Refresh()", StringComparison.Ordinal) &&
+              paneCode.Contains("if (string.IsNullOrWhiteSpace(path))", StringComparison.Ordinal) &&
+              paneCode.Contains("RefreshCurrent();", StringComparison.Ordinal) &&
+              paneCode.Contains("ShowBreadcrumb();", StringComparison.Ordinal),
+            "address navigation resolves relative and environment paths and refreshes on empty input");
+        var addressBase = @"C:\Users\Marvin\Documents";
+        Check(AddressInputResolver.Resolve("..", addressBase) == @"C:\Users\Marvin" &&
+              AddressInputResolver.Resolve(@"..\Downloads", addressBase) == @"C:\Users\Marvin\Downloads" &&
+              AddressInputResolver.Resolve("D:", addressBase) == @"D:\",
+            "relative paths resolve from the current folder and a drive-only address opens its root");
+        var windowsDirectory = Environment.GetEnvironmentVariable("WINDIR")!;
+        Check(AddressInputResolver.Resolve("%WINDIR%", addressBase) == Path.GetFullPath(windowsDirectory) &&
+              AddressInputResolver.Resolve(string.Empty, addressBase) == string.Empty &&
+              AddressInputResolver.Resolve("relative/path", null) == "relative/path",
+            "environment variables expand, empty input remains a refresh command, and virtual locations keep relative text untouched");
+        Check(AddressInputResolver.Resolve("shell:RecycleBinFolder", addressBase) == "shell:RecycleBinFolder" &&
+              AddressInputResolver.Resolve("https://example.invalid/a", addressBase) == "https://example.invalid/a" &&
+              AddressInputResolver.Resolve(@"C:relative", addressBase) == @"C:relative",
+            "Shell locations, protocol inputs and drive-relative paths are not joined to the current folder");
 
         static void Check(bool condition, string message)
         {

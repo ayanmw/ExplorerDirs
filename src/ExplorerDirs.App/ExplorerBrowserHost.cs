@@ -1498,7 +1498,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public void Navigate(string path)
     {
-        path = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        path = AddressInputResolver.Resolve(path,
+            _location.IsFileSystemLocation ? _location.DirectoryPath : null);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            Refresh();
+            return;
+        }
         if (!ShellLocationIdentity.TryNormalize(path, out path, out var isFileSystemPath))
         {
             NavigationFailed?.Invoke(this, "路径不是可识别的文件系统位置或受支持的 Shell 文件夹。");

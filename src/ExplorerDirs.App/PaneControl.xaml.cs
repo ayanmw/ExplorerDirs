@@ -1434,6 +1434,14 @@ public partial class PaneControl : UserControl
 
     private void Navigate(string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _addressNavigationPending = false;
+            RefreshCurrent();
+            ShowBreadcrumb();
+            return;
+        }
+
         try
         {
             Status.Text = "正在检查目录…";

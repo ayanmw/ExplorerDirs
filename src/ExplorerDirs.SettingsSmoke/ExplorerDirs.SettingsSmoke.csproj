@@ -82,6 +82,7 @@
     <Compile Include="../ExplorerDirs.App/TabReorder.cs" Link="TabReorder.cs" />
     <Compile Include="../ExplorerDirs.App/TabHeaderPanel.cs" Link="TabHeaderPanel.cs" />
     <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
+    <Compile Include="../ExplorerDirs.App/AddressInputResolver.cs" Link="AddressInputResolver.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
     <Compile Include="../ExplorerDirs.App/TreeSelectionAutoExpand.cs" Link="TreeSelectionAutoExpand.cs" />
