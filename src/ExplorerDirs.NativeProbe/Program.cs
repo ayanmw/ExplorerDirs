@@ -88,6 +88,8 @@ internal static class Program
             return StandaloneTreeProbe.Run();
         if (args.Length == 1 && args[0] == "--tree-host-core")
             return StandaloneTreeProbe.RunCore();
+        if (args.Length == 1 && args[0] == "--tree-icon-render-ab")
+            return StandaloneTreeProbe.RunIconRenderAb();
         if (args.Length == 1 && args[0] == "--tree-icon-callback-smoke")
             return StandaloneTreeProbe.RunIconContract();
         if (args.Length != 1 || args[0] is not ("--selection-commands" or "--search-folder-navigation" or "--navigation-capability" or "--navigation-cancel" or "--menu-capability" or "--color-capability" or "--pane-capability" or "--pane-capability-selected" or "--pane-capability-off" or "--pane-same-location" or "--view-style-capability" or "--view-style-synchronized-hosted" or "--view-data-capability" or "--view-property-refresh-capability" or "--folder-filter-capability" or "--folder-header-options-hosted"))
@@ -132,6 +134,7 @@ internal static class Program
             Console.WriteLine("       --pane-same-location (tree preference refresh without changing location)");
             Console.WriteLine("       --standalone-tree (independent hidden native tree, isolated roots only)");
             Console.WriteLine("       --tree-host-core (production tree wrapper in an isolated hidden parent)");
+            Console.WriteLine("       --tree-icon-render-ab (hidden NamespaceTreeControl default-vs-explicit icon rendering comparison)");
             Console.WriteLine("       --tree-icon-callback-smoke (production Shell icon callback contract; no window or input)");
             Console.WriteLine("       --view-style-capability (native view modes and selection/sort/group preservation; no wheel input)");
             Console.WriteLine("       --view-style-synchronized-hosted (opt-in hidden ExplorerBrowser plus product ShellBrowserSite; syncs standard ListView modes)");

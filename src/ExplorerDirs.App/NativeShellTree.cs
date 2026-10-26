@@ -42,11 +42,12 @@ internal sealed class NativeShellTree : IDisposable
         }
     }
 
-    internal NativeShellTree(nint parent, int width, int height)
+    internal NativeShellTree(nint parent, int width, int height, bool useExplicitShellIcons = true)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("目录树必须在 STA 线程创建。");
-        _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick);
+        _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick,
+            useExplicitShellIcons);
         var clsid = new Guid("AE054212-3535-4430-83ED-D501AA6680E6");
         var iid = new Guid("028212A3-B627-47E9-8856-C14265554E4F");
         try
@@ -64,9 +65,12 @@ internal sealed class NativeShellTree : IDisposable
                 if (hwnd == 0 || !IsChild(parent, hwnd)) throw new InvalidOperationException("目录树窗口不属于当前宿主。");
                 WindowHandle = hwnd;
                 var treeView = FindWindowEx(hwnd, 0, "SysTreeView32", null);
-                var systemImageList = ShellTreeIconIndexResolver.GetSystemImageList();
-                if (treeView != 0 && systemImageList != 0)
-                    _ = SendMessage(treeView, 0x1109, 0, systemImageList); // TVM_SETIMAGELIST / TVSIL_NORMAL
+                if (useExplicitShellIcons)
+                {
+                    var systemImageList = ShellTreeIconIndexResolver.GetSystemImageList();
+                    if (treeView != 0 && systemImageList != 0)
+                        _ = SendMessage(treeView, 0x1109, 0, systemImageList); // TVM_SETIMAGELIST / TVSIL_NORMAL
+                }
             }
             finally { Marshal.Release(window); }
             Check(Method<Advise>(4)(_tree, _events, out _cookie));
@@ -316,7 +320,7 @@ internal sealed class NativeShellTree : IDisposable
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
 internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput,
-    Func<nint, uint, uint, bool> itemClick) : INativeTreeEvents
+    Func<nint, uint, uint, bool> itemClick, bool useExplicitShellIcons = true) : INativeTreeEvents
 {
     public int OnItemClick(nint item, uint hit, uint click)
     {
@@ -357,6 +361,7 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
     public int OnGetDefaultIconIndex(nint item, out int normal, out int open)
     {
         normal = open = -1;
+        if (!useExplicitShellIcons) return unchecked((int)0x80004001);
         if (item == 0 || GetDisplayName(item, out var parsingName) < 0 || parsingName == 0)
             return unchecked((int)0x80004001);
         try

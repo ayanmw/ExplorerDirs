@@ -24,6 +24,96 @@ internal static class StandaloneTreeProbe
         finally { Marshal.Release(item); }
     }
 
+    internal static int RunIconRenderAb()
+    {
+        var foreground = GetForegroundWindow();
+        var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden tree icon A/B",
+            0x80000000, 0, 0, 320, 480, 0, 0, 0, 0);
+        if (parent == 0) throw new Exception("Hidden icon A/B parent creation failed.");
+        var fixture = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "ExplorerDirsTreeIcon-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var shellDefault = CaptureIconMode(parent, fixture, useExplicitIcons: false);
+            var explicitSystemList = CaptureIconMode(parent, fixture, useExplicitIcons: true);
+            Console.WriteLine($"tree-icon-render-ab: foreground-unchanged={GetForegroundWindow() == foreground}; default={shellDefault}; explicit={explicitSystemList}");
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon A/B changed the foreground window.");
+            return shellDefault.ClientPixels != 0 || explicitSystemList.ClientPixels != 0 ? 0 : 2;
+        }
+        finally
+        {
+            DestroyWindow(parent);
+            Directory.Delete(fixture, recursive: true);
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon A/B teardown changed the foreground window.");
+        }
+    }
+
+    private static (int Normal, int Selected, int ClientPixels, string PixelHash, string Row) CaptureIconMode(
+        nint parent, string fixture, bool useExplicitIcons)
+    {
+        using var tree = new ExplorerDirs.App.NativeShellTree(parent, 320, 480, useExplicitIcons);
+        tree.SetRoot(fixture);
+        Pump();
+        var nativeTree = FindWindowExW(tree.WindowHandle, 0, "SysTreeView32", null);
+        if (nativeTree == 0) throw new Exception("Tree icon A/B could not find the native tree view.");
+        var root = SendMessageW(nativeTree, 0x110a, 0, 0); // TVM_GETNEXTITEM / TVGN_ROOT
+        var images = ReadTreeItemImages(nativeTree, root);
+        var client = new Rect();
+        if (!GetClientRect(nativeTree, out client)) throw new Exception("Could not read tree icon A/B client bounds.");
+        var width = Math.Max(1, client.Right - client.Left);
+        var height = Math.Max(1, client.Bottom - client.Top);
+        var screenDc = GetDC(nativeTree);
+        if (screenDc == 0) throw new Exception("Could not acquire the hidden tree client DC.");
+        var memoryDc = CreateCompatibleDC(screenDc);
+        var bitmap = CreateCompatibleBitmap(screenDc, width, height);
+        if (memoryDc == 0 || bitmap == 0)
+        {
+            if (bitmap != 0) DeleteObject(bitmap);
+            if (memoryDc != 0) DeleteDC(memoryDc);
+            ReleaseDC(nativeTree, screenDc);
+            throw new Exception("Could not create the hidden tree pixel target.");
+        }
+
+        var oldBitmap = SelectObject(memoryDc, bitmap);
+        var background = GetSysColor(5); // COLOR_WINDOW
+        var brush = CreateSolidBrush(background);
+        try
+        {
+            var bounds = new Rect { Right = width, Bottom = height };
+            _ = FillRect(memoryDc, ref bounds, brush);
+            _ = SendMessageW(nativeTree, 0x0318, memoryDc, 0x0000000C); // WM_PRINTCLIENT / PRF_CLIENT | PRF_ERASEBKGND
+            // Hidden tree views do not report item bounds reliably; the first root row is at the client origin.
+            var iconRight = Math.Min(80, width);
+            var iconBottom = Math.Min(32, height);
+            var pixels = new List<uint>();
+            var pixelBands = new int[5];
+            for (var y = 0; y < iconBottom; y++)
+            for (var x = 0; x < iconRight; x++)
+            {
+                var pixel = GetPixel(memoryDc, x, y);
+                if (pixel != 0xFFFFFFFF && pixel != (uint)background)
+                {
+                    pixels.Add(pixel);
+                    pixelBands[Math.Min(x / 16, pixelBands.Length - 1)]++;
+                }
+            }
+            var bytes = new byte[pixels.Count * sizeof(uint)];
+            Buffer.BlockCopy(pixels.ToArray(), 0, bytes, 0, bytes.Length);
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16];
+            return (images.Normal, images.Selected, pixels.Count, hash,
+                $"0,0,{iconRight},{iconBottom}; bands16={string.Join(',', pixelBands)}");
+        }
+        finally
+        {
+            DeleteObject(brush);
+            _ = SelectObject(memoryDc, oldBitmap);
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            ReleaseDC(nativeTree, screenDc);
+        }
+    }
+
     internal static int RunCore()
     {
         var foreground = GetForegroundWindow();
@@ -358,6 +448,18 @@ internal static class StandaloneTreeProbe
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string path, nint bind, ref Guid iid, out nint item);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] private static extern nint GetDC(nint window);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
+    [DllImport("user32.dll")] private static extern uint GetSysColor(int index);
+    [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref Rect rect, nint brush);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleBitmap(nint dc, int width, int height);
+    [DllImport("gdi32.dll")] private static extern nint SelectObject(nint dc, nint value);
+    [DllImport("gdi32.dll")] private static extern nint CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint value);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
