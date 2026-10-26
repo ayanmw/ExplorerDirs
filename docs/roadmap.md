@@ -6,6 +6,11 @@
 - 当前已有的证据分别覆盖隐藏 COM vtable/菜单生命周期 smoke、局部 Shell 文件操作与通知样本、以及独立 IStream 会话文件测试；这些拼接证据尚未在同一可见宿主中覆盖完整门槛。逐项颜色绘制像素未稳定命中，完整 OLE 拖放循环、物理键盘焦点和真实会话恢复仍未通过。
 - 继续按 `docs/ishellview-color-spike.md` 推进原型；用户要求暂不使用 Computer Use，且项目规则禁止在无当前桌面授权时创建可能激活前台的 Shell 宿主，因此本阶段限于源码和无 Shell-view 验证。真实宿主门槛需在独立 Windows 会话完成后评估是否值得迁移产品。
 
+## 2026-10-27：复核隔离 IShellBrowser / OLE frame 回调合同
+
+- 当前 Release `--shell-view-color-policy-smoke` 退出码 0。复核覆盖隔离宿主的 `IShellBrowser` 导航历史与会话流、CDB2/CDB3 查询、菜单生命周期、控件窗口/消息路由、应用加速键回退、状态文本、活动 view、工具栏回调，以及 `IOleInPlaceFrame` 的 COM 路由和异常边界。
+- 此 smoke 没有创建 `IShellView`，也不验证真实 Shell view 是否按预期调用这些入口；它只确认当前通用 host 代码及回调合同回归。迁移门槛仍是隔离真实 view 上的 OLE 拖放、可见菜单合并、物理焦点/输入与会话恢复验收；当前继续限于无 Shell-view 的源码工作。
+
 ## 2026-10-26：Q-Dir 导入预览列出未导入的颜色规则模式
 
 - `.qdr` 导入预览此前只报告 `[Filter2]` 规则数量，无法让用户判断哪些颜色模式没有导入。现在列出最多六个规则模式并截断过长模式；颜色值和其它未确认字段仍不显示，也不应用规则。
