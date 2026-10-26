@@ -1075,3 +1075,11 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 ### 2026-10-27 无窗口原型基线复核
 
 重新执行 `dotnet build src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-restore`，0 警告、0 错误；随后运行 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --shell-view-color-policy-smoke`，退出码 0。该 smoke 覆盖颜色策略、隔离宿主 COM 契约、导航历史、共享菜单 owner 变更及 `IDropSource` 回调约定；不创建 `IShellView`，不执行 `DoDragDrop`，也不验证物理输入、实际菜单点击或 WPF 产品集成。此结果只确认纯逻辑/宿主契约基线当前可编译且通过，拖放迁移门槛仍未关闭。
+
+### 2026-10-27 合并菜单命令 ID 必须唯一归属
+
+源码审查发现，frame 收到延迟 `WM_COMMAND` 后原先按 View、File、Edit 的固定优先级查找相同命令 ID。`WM_COMMAND` 本身只携带低 16 位命令 ID，不携带来源菜单组；若 composite HMENU 在多个组复用同一 ID，固定优先级可能把命令解释成另一组的命令。旧合成菜单 smoke 已构造跨组重复 ID，但没有验证最终 frame 路由。
+
+现在 NativeProbe 先在全部六个 OLE 菜单组中解析命令归属；只有命令仅出现在 File、Edit、View 中的一个组时才执行对应分支，Object、Window、Help 组的 ID 不交给 Shell view。多组重复或找不到的 ID 都不作 Shell 命令派发。Smoke 覆盖 File/Edit/View 的唯一命令、与其它组冲突的 ID 拒绝、原始 ID 到达隐藏假 Shell HWND，以及旧 view 重入切换保护。先补回归并观察到缺失 resolver 的编译失败，再实现；`dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --shell-menu-group-routing-smoke` 退出码 0。
+
+本轮不创建 `IShellView`，不启动 ExplorerBrowser，不显示菜单。它验证的是应用自有 frame 的 synthetic HMENU 路由策略；真实 Shell composite menu 的 ID 分配是否出现重复仍未知，所以不能声称已观察到用户可见误派发，也不能替代真实 Shell 菜单验证。

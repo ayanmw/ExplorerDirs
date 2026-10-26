@@ -929,15 +929,9 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
             {
                 var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
                 if (coordinator is not null && coordinator.TryDequeuePendingShellMenuCommand(out var pending) &&
-                    pending.CommandId != 0 &&
-                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(pending.Owner, pending.CommandId,
-                        isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true))
-                {
-                    if (!ShellViewColorSpike.TryInvokeMergedFileMenuCommand(pending.Owner, pending.CommandId,
-                            isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true))
-                        _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(pending.Owner, pending.CommandId,
-                            isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true);
-                }
+                    pending.CommandId != 0)
+                    _ = ShellViewColorSpike.TryInvokeMergedMenuCommand(pending.Owner, pending.CommandId,
+                        isStillActive: () => coordinator.IsCurrentOwner(pending.Owner));
                 return 0;
             }
             if (message == WmCommand && referenceData != 0)
@@ -950,9 +944,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     return 0;
                 }
                 if (lParam == 0 && commandId <= 0x7FFF && coordinator?._owner is { } owner &&
-                    (ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId, execute: false) ||
-                     ShellViewColorSpike.TryInvokeMergedFileMenuCommand(owner, commandId, execute: false) ||
-                     ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId, execute: false)))
+                    ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, commandId, execute: false))
                 {
                     // Post first, then enqueue: this STA cannot dispatch the posted message until
                     // this WndProc returns, and a failed post leaves no orphaned queue entry.

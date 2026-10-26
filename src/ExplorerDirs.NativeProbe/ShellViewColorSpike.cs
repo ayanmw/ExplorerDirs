@@ -751,6 +751,18 @@ internal static class ShellViewColorSpike
         return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 0, execute, isStillActive);
     }
 
+    internal static bool TryInvokeMergedMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        return ResolveMergedShellMenuCommandGroup(GetMenu(owner.MenuFrameWindow), commandId) switch
+        {
+            0 => TryInvokeMergedFileMenuCommand(owner, commandId, execute, isStillActive),
+            1 => TryInvokeMergedEditMenuCommand(owner, commandId, execute, isStillActive),
+            2 => TryInvokeMergedViewMenuCommand(owner, commandId, execute, isStillActive),
+            _ => false
+        };
+    }
+
     private static bool TryInvokeMergedShellViewMenuCommand(StreamViewHost owner, uint commandId, int groupIndex,
         bool execute, Func<bool>? isStillActive)
     {
@@ -867,6 +879,19 @@ internal static class ShellViewColorSpike
     {
         if (compositeMenu == 0 || !IsMenu(compositeMenu) || groupIndex is < 0 or > 5) return null;
         return FindMenuCommandPath(GetSubMenu(compositeMenu, groupIndex), commandId);
+    }
+
+    internal static int? ResolveMergedShellMenuCommandGroup(nint compositeMenu, uint commandId)
+    {
+        if (compositeMenu == 0 || !IsMenu(compositeMenu)) return null;
+        int? matchedGroup = null;
+        for (var groupIndex = 0; groupIndex < 6; groupIndex++)
+        {
+            if (FindMergedMenuCommandPath(compositeMenu, groupIndex, commandId) is null) continue;
+            if (matchedGroup is not null) return null;
+            matchedGroup = groupIndex;
+        }
+        return matchedGroup;
     }
 
     private static string NormalizeMenuLabel(string? label)

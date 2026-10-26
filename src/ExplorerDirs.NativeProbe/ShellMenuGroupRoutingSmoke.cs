@@ -10,7 +10,7 @@ internal static class ShellMenuGroupRoutingSmoke
     {
         var composite = CreateMenu();
         if (composite == 0) throw new InvalidOperationException("Could not create a synthetic composite menu.");
-        var groups = new nint[3];
+        var groups = new nint[6];
         try
         {
             for (var index = 0; index < groups.Length; index++)
@@ -30,6 +30,12 @@ internal static class ShellMenuGroupRoutingSmoke
                 throw new InvalidOperationException("Could not create the synthetic Edit copy command.");
             if (!AppendMenuW(groups[2], 0, 0x8123, "Details"))
                 throw new InvalidOperationException("Could not create the synthetic View menu command.");
+            if (!AppendMenuW(groups[0], 0, 0x8125, "Refresh File") ||
+                !AppendMenuW(groups[0], 0, 0x8128, "Unique File") ||
+                !AppendMenuW(groups[2], 0, 0x8126, "Details View") ||
+                !AppendMenuW(groups[3], 0, 0x8125, "Object Command") ||
+                !AppendMenuW(groups[4], 0, 0x8127, "Window Command"))
+                throw new InvalidOperationException("Could not create unique synthetic Shell menu commands.");
 
             var path = ShellViewColorSpike.FindMergedMenuCommandPath(composite, 0, 0x8123);
             if (path is null || !path.SequenceEqual(["New", "New Item"]))
@@ -42,6 +48,14 @@ internal static class ShellMenuGroupRoutingSmoke
                 throw new InvalidOperationException("A View group command was not kept in its own group.");
             if (ShellViewColorSpike.FindMergedMenuCommandPath(composite, 3, 0x8123) is not null)
                 throw new InvalidOperationException("A command lookup outside the six standard groups must not match.");
+            if (ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8123) is not null ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8124) != 1 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8125) is not null ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8126) != 2 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8127) != 4 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8128) != 0 ||
+                ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8129) is not null)
+                throw new InvalidOperationException("The frame must route commands only when their File/Edit/View menu group is unique.");
             if (ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8123) != MergedEditMenuCommandRoute.SelectAll ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8124) != MergedEditMenuCommandRoute.ShellView ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8125) != MergedEditMenuCommandRoute.NotFound)
@@ -83,18 +97,22 @@ internal static class ShellMenuGroupRoutingSmoke
             owner.View = viewPointer;
 
             _observedCommandId = 0;
-            if (!ShellViewColorSpike.TryInvokeMergedFileMenuCommand(owner, 0x8123) || _observedCommandId != 0x8123)
+            if (!ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8128) || _observedCommandId != 0x8128)
                 throw new InvalidOperationException("A merged File command did not reach the Shell view HWND with its original command ID.");
             _observedCommandId = 0;
-            if (!ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, 0x8124) || _observedCommandId != 0x8124)
+            if (!ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8124) || _observedCommandId != 0x8124)
                 throw new InvalidOperationException("A merged Edit command did not reach the Shell view HWND with its original command ID.");
             _observedCommandId = 0;
-            if (!ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, 0x8123) || _observedCommandId != 0x8123)
+            if (!ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8126) || _observedCommandId != 0x8126)
                 throw new InvalidOperationException("A merged View command did not reach the Shell view HWND with its original command ID.");
+            _observedCommandId = 0;
+            if (ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8123) ||
+                ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8125) || _observedCommandId != 0)
+                throw new InvalidOperationException("A command shared by multiple OLE menu groups must not be dispatched to an arbitrary Shell view route.");
 
             _observedCommandId = 0;
             var activeChecks = 0;
-            if (!ShellViewColorSpike.TryInvokeMergedFileMenuCommand(owner, 0x8123, isStillActive: () =>
+            if (!ShellViewColorSpike.TryInvokeMergedMenuCommand(owner, 0x8128, isStillActive: () =>
                 {
                     if (++activeChecks == 2) owner.View = (nint)0x5678;
                     return true;
