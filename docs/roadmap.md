@@ -13,6 +13,7 @@
 - 新增 Private Desktop 原生 ListView 读取：标准名称/Size subitem 可读，新增派生列 subitem 仍为空，且没有触发 adapter 的逐项目 `GetDetailsOf`、`GetDetailsEx` 或 `CompareIDs`；前台保护通过，升序门槛仍失败。这说明只对未激活 DefView 发送 `LVM_GETITEMTEXTW` 不足以触发派生列，不支持“列表所有文本都未初始化”的简单解释；激活条件、property schema 和 Shell item 属性读取通路仍待区分。
 - 适配器四个 `IPropertyStore` 请求入口（`QueryInterface`、`BindToObject`、`BindToStorage`、`GetUIObjectOf`）的计数均为 0；因此不实现基于这些入口的属性存储装饰器。原始 `IShellItem` 属性访问不经过该 shim，这次计数不覆盖该路径；schema 是否造成空列仍待验证，不在日常系统注册。
 - 无窗口 `PSGetPropertyDescription` 读回原型自定义 `PROPERTYKEY` 为 `TYPE_E_ELEMENTNOTFOUND (0x8002802B)`，标准 `System.Size` 为 `S_OK`，确认原型自定义键缺少已加载的 property description。此结果与 DefView 空列相符但不证明因果；机器级 schema 不在日常系统注册。
+- 同一未激活 DefView 增加已登记的 `System.DateCreated` 对照列后，ListView 可读取其时间文本，而紧邻的未登记派生列仍为空；此前名称和 Size 也正常。此结果强烈支持 schema 是新增列读取的门槛，但排序回调仍为 0，未登记键注册后的行为尚未验证。当前未找到 Windows Sandbox，DISM 状态查询需提升权限；不在日常系统试注册 schema。
 - 逐行大小列仍是有价值但高难度的 Q-Dir 差距：需要在不抢用户前台的隔离环境中找到安全、可重复的活动 DefView 求值条件，之后才评估真实 PIDL 委托、Shell 菜单/操作、拖放、通知与每标签状态。当前没有批准迁移 ExplorerBrowser，也不加入递归大小列或自绘列表。
 
 ## 2026-10-26：窗口暂时失焦时保留文件操作焦点恢复

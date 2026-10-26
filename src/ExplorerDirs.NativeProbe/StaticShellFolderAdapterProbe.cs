@@ -119,11 +119,13 @@ internal static class StaticShellFolderAdapterProbe
                 { FormatId = property.FormatId, PropertyId = property.PropertyId });
             var sizeSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = SizeKeyFormat, PropertyId = 12 });
+            var dateCreatedSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+                { FormatId = SizeKeyFormat, PropertyId = 15 });
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; " +
-                $"property-description(custom/size)=0x{customSchema:X8}/0x{sizeSchema:X8}; window-created=False");
+                $"property-description(custom/size/date-created)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}; window-created=False");
             return 0;
         }
         catch (Exception ex)
@@ -233,14 +235,15 @@ internal static class StaticShellFolderAdapterProbe
             {
                 new(new(NameKeyFormat, 10), 220),
                 new(new(SizeKeyFormat, 12), 110),
-                new(new(property.FormatId, property.PropertyId), 150)
+                new(new(property.FormatId, property.PropertyId), 150),
+                new(new(SizeKeyFormat, 15), 180)
             };
             Check(ShellColumnManager.Apply(folderView, columns));
             Check(ShellColumnManager.Capture(folderView, out var captured));
             if (captured is null || !captured.SequenceEqual(columns)) throw new Exception("Custom column visibility/order did not persist.");
             // Read the actual DefView ListView subitems to distinguish a missing
             // Shell column callback from an inactive view that cannot serve any text.
-            var displayedColumns = new[] { 0, 1, 2 }
+            var displayedColumns = new[] { 0, 1, 2, 3 }
                 .Select(subItem => (SubItem: subItem, Values: ReadDisplayedColumnValues(view, subItem)))
                 .ToArray();
             foreach (var column in displayedColumns)

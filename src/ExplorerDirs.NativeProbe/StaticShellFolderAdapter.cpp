@@ -16,6 +16,8 @@ namespace
     { { 0xA38B883C, 0xFA8A, 0x4E1C, { 0x8B, 0x52, 0xC6, 0x05, 0xE5, 0xD0, 0x12, 0x34 } }, 1 };
     constexpr PROPERTYKEY kSizeKey =
     { { 0xB725F130, 0x47EF, 0x101A, { 0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC } }, 12 };
+    constexpr PROPERTYKEY kDateCreatedKey =
+    { { 0xB725F130, 0x47EF, 0x101A, { 0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC } }, 15 };
     constexpr UINT kColumnLimit = 64;
     volatile LONG g_staticColumnComparisons = 0;
     volatile LONG g_allComparisons = 0;
@@ -133,6 +135,7 @@ namespace
             InterlockedIncrement(&g_allComparisons);
             InterlockedExchange(&g_lastCompareColumn, LOWORD(column));
             const auto columnIndex = LOWORD(column);
+            if (columnIndex == _columnCount + 1) return _inner->CompareIDs(15, left, right);
             if (columnIndex != _columnCount && columnIndex != 1) return _inner->CompareIDs(column, left, right);
             if (columnIndex == 1) InterlockedIncrement(&g_standardSizeComparisons);
             else InterlockedIncrement(&g_staticColumnComparisons);
@@ -170,6 +173,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column, SHCOLSTATEF* state) override
         {
             if (column == _columnCount) { *state = SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
+            if (column == _columnCount + 1) { *state = SHCOLSTATE_TYPE_DATE | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
             return column < _columnCount ? _inner->GetDefaultColumnState(column, state) : E_INVALIDARG;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* column, VARIANT* value) override
@@ -191,6 +195,19 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
         {
             if (!details) return E_POINTER;
+            if (column == _columnCount + 1)
+            {
+                if (item) return _inner->GetDetailsOf(item, 15, details);
+                details->fmt = LVCFMT_LEFT;
+                details->cxChar = 24;
+                details->str.uType = STRRET_WSTR;
+                const wchar_t* title = L"Known schema control";
+                const auto length = wcslen(title) + 1;
+                details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(length * sizeof(wchar_t)));
+                if (!details->str.pOleStr) return E_OUTOFMEMORY;
+                StringCchCopyW(details->str.pOleStr, length, title);
+                return S_OK;
+            }
             if (column == 1 && item) InterlockedIncrement(&g_standardSizeDetailsOf);
             if (column == 1 && item)
             {
@@ -237,8 +254,9 @@ namespace
         {
             if (!id) return E_POINTER;
             if (column < _columnCount) return _inner->MapColumnToSCID(column, id);
-            if (column != _columnCount) return E_INVALIDARG;
-            *id = kStaticSizeKey;
+            if (column == _columnCount) *id = kStaticSizeKey;
+            else if (column == _columnCount + 1) *id = kDateCreatedKey;
+            else return E_INVALIDARG;
             return S_OK;
         }
 
