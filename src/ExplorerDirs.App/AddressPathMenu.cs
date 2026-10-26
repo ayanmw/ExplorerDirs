@@ -2,7 +2,8 @@ using System.IO;
 
 namespace ExplorerDirs.App;
 
-internal sealed record AddressPathMenuEntry(string Header, string Identity, bool IsAncestor);
+internal sealed record AddressPathMenuEntry(string Header, string Identity, bool IsAncestor,
+    string? ParentIdentity, int Depth, bool IsCurrent);
 
 internal static class AddressPathMenu
 {
@@ -23,14 +24,21 @@ internal static class AddressPathMenu
         IEnumerable<(string Header, string Identity)>? commonLocations = null)
     {
         var entries = new List<AddressPathMenuEntry>();
-        foreach (var segment in BreadcrumbPath.Build(currentPath).Reverse())
-            entries.Add(new(segment.Label, segment.Path, IsAncestor: true));
+        var pathSegments = BreadcrumbPath.Build(currentPath);
+        for (var index = 0; index < pathSegments.Count; index++)
+        {
+            var segment = pathSegments[index];
+            entries.Add(new(segment.Label, segment.Path, IsAncestor: true,
+                ParentIdentity: index == 0 ? null : pathSegments[index - 1].Path,
+                Depth: index, IsCurrent: index == pathSegments.Count - 1));
+        }
 
         foreach (var (header, identity) in commonLocations ?? CommonLocations)
         {
             if (string.IsNullOrWhiteSpace(identity) || entries.Any(entry =>
                     string.Equals(entry.Identity, identity, StringComparison.OrdinalIgnoreCase))) continue;
-            entries.Add(new(header, identity, IsAncestor: false));
+            entries.Add(new(header, identity, IsAncestor: false, ParentIdentity: null,
+                Depth: 0, IsCurrent: false));
         }
         return entries;
     }
