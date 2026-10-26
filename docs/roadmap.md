@@ -9,7 +9,7 @@
 ## 2026-10-26：Q-Dir 导入预览列出未导入的颜色规则模式
 
 - `.qdr` 导入预览此前只报告 `[Filter2]` 规则数量，无法让用户判断哪些颜色模式没有导入。现在列出最多六个规则模式并截断过长模式；颜色值和其它未确认字段仍不显示，也不应用规则。
-- `QdrImportSmoke` 先验证模式预览并按预期失败；实现后完整 Release SettingsSmoke 通过，App Release 构建 0 警告、0 错误，`git diff --check` 通过。此改动改善导入预览，不代表 Filter2 字段映射、颜色导入或 `IShellView` 逐项颜色已实现。
+- `QdrImportSmoke` 先验证模式预览并按预期失败，随后通过；扩展回归也确认长模式被截断、最多列六条且颜色值不泄露。完整 Release SettingsSmoke 通过，App Release 构建 0 警告、0 错误，`git diff --check` 通过。此改动改善导入预览，不代表 Filter2 字段映射、颜色导入或 `IShellView` 逐项颜色已实现。
 
 ## 2026-10-26：为隔离 Shell 宿主接入菜单生命周期回调
 

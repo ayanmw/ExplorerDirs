@@ -88,6 +88,16 @@ internal static class QdrImportSmoke
                 qdrColorRules.Warnings.All(warning => !warning.Contains("FF0000")) &&
                 !qdrColorRules.Warnings.Any(warning => warning.Contains("未识别且未应用的字段名")),
             "Q-Dir import preview lists Filter2 rule patterns without interpreting or exposing color values");
+        var longFilterPattern = new string('x', 70);
+        var manyFilterRules = string.Join("\n", Enumerable.Range(0, 8).Select(index =>
+            $"{index}={(index == 0 ? longFilterPattern : $"pattern-{index}")}=1=00AA00=-1=1=-1=0"));
+        var boundedColorWarning = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nDir1=C:\\left\n[Filter2]\n" + manyFilterRules,
+            (value, _) => value).Warnings.Single(warning => warning.Contains("Filter2"));
+        Require(boundedColorWarning.Length < 400 && boundedColorWarning.Contains(new string('x', 61) + "…") &&
+                boundedColorWarning.Contains("pattern-5") && !boundedColorWarning.Contains("pattern-6") &&
+                boundedColorWarning.EndsWith("等", StringComparison.Ordinal),
+            "Q-Dir Filter2 preview bounds long patterns and the number of listed rules");
         var previewDisabled = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\left\nVorschau=0\n", (value, _) => value);
         Require(!previewDisabled.Panes[0][0].PreviewPaneVisible &&
