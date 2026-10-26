@@ -201,6 +201,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal ShellBrowserSite? BrowserSite;
     internal string? StatusText { get; private set; }
     internal event Action<string?>? StatusTextChanged;
+    internal Func<nint, ushort, bool>? AcceleratorHandler { get; set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -248,6 +249,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
             {
                 var navigation = _navigation;
                 _navigation = null;
+                AcceleratorHandler = null;
+                StatusTextChanged = null;
                 navigation?.Dispose();
             }
         }
@@ -301,7 +304,16 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         return 0;
     }
     public int EnableModelessSB(int enable) => 0;
-    public int TranslateAcceleratorSB(nint msg, ushort id) => 1;
+    public int TranslateAcceleratorSB(nint msg, ushort id)
+    {
+        if (AcceleratorHandler is not { } handler) return 1; // S_FALSE leaves the key with Shell.
+        try { return handler(msg, id) ? 0 : 1; }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell accelerator notification: {ex.GetType().Name}");
+            return 1;
+        }
+    }
     public virtual int BrowseObject(nint pidl, uint flags) =>
         _navigation?.BrowseObject(pidl, flags) ?? unchecked((int)0x80004001);
     public int GetViewStateStream(uint mode, out nint stream)

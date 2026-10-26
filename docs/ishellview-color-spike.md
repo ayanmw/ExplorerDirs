@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：为 IShellBrowser 提供父级快捷键路由
+
+`StreamViewHost.TranslateAcceleratorSB` 不再无条件返回 `S_FALSE`。隔离宿主可选提供 `AcceleratorHandler`：返回已处理时向 Shell 返回 `S_OK`；无处理器、未消费或处理器异常时返回 `S_FALSE`，保持 Shell 原生处理。宿主释放时清除处理器引用。
+
+`--shell-view-color-policy-smoke` 通过实际 `IShellBrowser` CCW vtable 验证消息指针和命令 ID 到达处理器、消费/回退 HRESULT、处理器异常不越过 COM 边界以及释放后不再调用处理器。没有创建 `IShellView` 或完整消息循环，也没有接入产品的 WPF 快捷键路由；物理键盘、多选、文本编辑排除和焦点行为仍未验证。
+
 ## 2026-10-26：接收 IShellBrowser 状态文本
 
 `StreamViewHost.SetStatusTextSB` 原先返回 `S_OK` 但丢弃传入文本。现将 LPCWSTR 复制到 host 的 `StatusText` 状态；空指针表示清除，并通过 `StatusTextChanged` 通知隔离宿主订阅者。通知异常会被限制在 native callback 边界内，不涉及原生传入缓冲区的所有权。

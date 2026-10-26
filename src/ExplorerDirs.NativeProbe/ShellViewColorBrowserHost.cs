@@ -101,6 +101,7 @@ public static class ShellViewColorBrowserHostSmoke
         Check(host.IncludeObject(0, 0) == 0 && host.IncludeObjectCalls == 3,
             "missing Shell item metadata keeps the item visible through the color host callback");
 
+        VerifyBaseHostAcceleratorRouting();
         VerifyBaseHostStatusText();
         VerifyBaseHostBrowseObject();
         CheckIncludeObject("notes.txt", expected: 0,
@@ -272,6 +273,43 @@ public static class ShellViewColorBrowserHostSmoke
         }
     }
 
+    private static void VerifyBaseHostAcceleratorRouting()
+    {
+        using var host = new StreamViewHost(0, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var message = Marshal.AllocHGlobal(48);
+        try
+        {
+            var translate = GetComMethod<TranslateAcceleratorCallback>(browser, 10);
+            ushort receivedId = 0;
+            nint receivedMessage = 0;
+            host.AcceleratorHandler = (nativeMessage, id) =>
+            {
+                receivedMessage = nativeMessage;
+                receivedId = id;
+                return id == 0x54;
+            };
+            Check(translate(browser, message, 0x54) == 0 && receivedMessage == message && receivedId == 0x54,
+                "the generic StreamViewHost lets its parent consume an application accelerator");
+            Check(translate(browser, message, 0x55) == 1 && receivedId == 0x55,
+                "an application accelerator declined by the parent remains available to Shell");
+            host.AcceleratorHandler = (_, _) => throw new InvalidOperationException("fixture failure");
+            Check(translate(browser, message, 0x54) == 1,
+                "an accelerator handler exception falls through to Shell without crossing the COM boundary");
+            host.AcceleratorHandler = null;
+            Check(translate(browser, message, 0x54) == 1,
+                "the generic StreamViewHost preserves Shell handling when no parent accelerator route exists");
+            host.Dispose();
+            Check(translate(browser, message, 0x54) == 1,
+                "disposing the generic StreamViewHost disconnects its parent accelerator route");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(message);
+            Marshal.Release(browser);
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowserViewCallback(nint self, nint shellView);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -354,6 +392,8 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int QueryServiceCallback(nint self, ref Guid service, ref Guid iid, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SetStatusTextCallback(nint self, nint text);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int TranslateAcceleratorCallback(nint self, nint message, ushort id);
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

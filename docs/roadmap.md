@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-26：为隔离 Shell 宿主接入应用快捷键路由
+
+- `StreamViewHost.TranslateAcceleratorSB` 现在可调用注入的宿主处理器：处理器返回已消费时返回 `S_OK`；返回未处理、未配置或抛异常时返回 `S_FALSE`，让 Shell 继续处理。释放宿主时断开处理器与状态回调，避免保留父级委托。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 覆盖按键 ID/消息指针转发、消费、Shell 回退、异常边界和释放后断开。该回调只是隔离宿主接入点，没有接上 WPF 应用快捷键路由，也没有创建 `IShellView` 或运行完整消息循环；真实快捷键行为和焦点仍待隔离 GUI 验收。
+
 ## 2026-10-26：将 ExplorerBrowser Shell 提示接入每窗格状态栏
 
 - 复用每标签浏览器已有的 `DWebBrowserEvents2` 连接点，将 `StatusTextChange` 经线程/订阅身份门控投递到当前窗格。每个窗格新增独立的 Shell 提示区域，不覆盖现有错误、搜索或 F9 扫描消息；切换标签时恢复该标签最近的提示，隐藏窗格时清空显示。
