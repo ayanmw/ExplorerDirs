@@ -887,13 +887,11 @@ public partial class MainWindow : Window
         {
             var panel = new Border
             {
-                BorderBrush = SystemColors.ControlDarkBrush,
                 BorderThickness = new Thickness(1),
-                Background = SystemColors.ControlLightBrush,
                 Margin = new Thickness(1)
             };
-            panel.SetResourceReference(Border.BorderBrushProperty, SystemColors.ControlDarkBrushKey);
-            panel.SetResourceReference(Border.BackgroundProperty, SystemColors.ControlLightBrushKey);
+            panel.SetResourceReference(Border.BorderBrushProperty, "ExplorerDirs.BorderBrush");
+            panel.SetResourceReference(Border.BackgroundProperty, "ExplorerDirs.ControlBackgroundBrush");
             Grid.SetRow(panel, slot.Row);
             Grid.SetColumn(panel, slot.Column);
             Grid.SetRowSpan(panel, slot.RowSpan);
@@ -933,7 +931,7 @@ public partial class MainWindow : Window
         {
             _layoutMenuItems[preset.Id].IsChecked = preset.Id == _layout;
             _layoutButtons[preset.Id].SetResourceReference(Control.BackgroundProperty,
-                preset.Id == _layout ? SystemColors.HighlightBrushKey : SystemColors.ControlBrushKey);
+                preset.Id == _layout ? "ExplorerDirs.SelectionBackgroundBrush" : "ExplorerDirs.ControlBackgroundBrush");
         }
     }
 

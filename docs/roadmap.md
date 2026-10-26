@@ -2,6 +2,11 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
+## 2026-10-27：WPF 外壳接入语义主题画刷
+
+- 主题控制器现在同时发布窗口、控件、边框、次级文字、强调色和选中态画刷；主窗口、各窗格、布局切换图标/分隔条和照片打印辅助窗改为消费这些动态语义角色。高对比度时移除自定义 `SystemColors` 覆盖，语义角色回落到 Windows 画刷。
+- 新增定向语义资源与 XAML 接线 smoke；验证“未接线”时首个语义角色断言按预期失败，接线后定向主题和窗格标记检查通过。完整 Release `SettingsSmoke` 与 App Release 构建通过（0 警告、0 错误）。未运行 GUI；实际系统切色、多窗口刷新和高对比度可见效果仍待验收。实现计划见[语义主题资源计划](superpowers/plans/2026-10-27-theme-semantic-resources.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。

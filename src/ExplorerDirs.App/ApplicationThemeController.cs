@@ -98,8 +98,16 @@ internal sealed class ApplicationThemeController : IDisposable
 
     private void SetThemeResources(ThemeColors colors)
     {
+        SetBrush("ExplorerDirs.WindowBackgroundBrush", colors.WindowBackground);
+        SetBrush("ExplorerDirs.WindowTextBrush", colors.WindowText);
+        SetBrush("ExplorerDirs.ControlBackgroundBrush", colors.ControlBackground);
+        SetBrush("ExplorerDirs.ControlTextBrush", colors.ControlText);
+        SetBrush("ExplorerDirs.BorderBrush", colors.Border);
+        SetBrush("ExplorerDirs.MutedTextBrush", colors.MutedText);
         SetBrush("ExplorerDirs.AccentBrush", colors.Accent);
         SetBrush("ExplorerDirs.AccentTextBrush", colors.AccentText);
+        SetBrush("ExplorerDirs.SelectionBackgroundBrush", colors.SelectionBackground);
+        SetBrush("ExplorerDirs.SelectionTextBrush", colors.SelectionText);
         SetBrush(SystemColors.WindowBrushKey, colors.WindowBackground);
         SetBrush(SystemColors.WindowTextBrushKey, colors.WindowText);
         SetBrush(SystemColors.ControlBrushKey, colors.ControlBackground);
@@ -131,9 +139,20 @@ internal sealed class ApplicationThemeController : IDisposable
             SystemColors.MenuBrushKey, SystemColors.MenuTextBrushKey,
             SystemColors.ControlDarkBrushKey, SystemColors.ControlLightBrushKey,
             SystemColors.GrayTextBrushKey, SystemColors.HighlightBrushKey,
-            SystemColors.HighlightTextBrushKey, SystemColors.InfoBrushKey,
-            SystemColors.InfoTextBrushKey, "ExplorerDirs.AccentBrush", "ExplorerDirs.AccentTextBrush"
+            SystemColors.HighlightTextBrushKey, SystemColors.InfoBrushKey, SystemColors.InfoTextBrushKey
         })
             _application.Resources.Remove(key);
+
+        // Semantic aliases must resolve to the live Windows colors in high contrast instead of disappearing.
+        _application.Resources["ExplorerDirs.WindowBackgroundBrush"] = SystemColors.WindowBrush;
+        _application.Resources["ExplorerDirs.WindowTextBrush"] = SystemColors.WindowTextBrush;
+        _application.Resources["ExplorerDirs.ControlBackgroundBrush"] = SystemColors.ControlBrush;
+        _application.Resources["ExplorerDirs.ControlTextBrush"] = SystemColors.ControlTextBrush;
+        _application.Resources["ExplorerDirs.BorderBrush"] = SystemColors.ControlDarkBrush;
+        _application.Resources["ExplorerDirs.MutedTextBrush"] = SystemColors.GrayTextBrush;
+        _application.Resources["ExplorerDirs.AccentBrush"] = SystemColors.HighlightBrush;
+        _application.Resources["ExplorerDirs.AccentTextBrush"] = SystemColors.HighlightTextBrush;
+        _application.Resources["ExplorerDirs.SelectionBackgroundBrush"] = SystemColors.HighlightBrush;
+        _application.Resources["ExplorerDirs.SelectionTextBrush"] = SystemColors.HighlightTextBrush;
     }
 }

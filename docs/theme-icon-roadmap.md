@@ -70,6 +70,7 @@ WPF 语义色资源阶段的实施步骤见[实施计划](superpowers/plans/2026
 ## 当前未完成
 
 - WPF 全部主要组件尚未消费统一语义色板，系统主题和强调色尚未完成可见验收。
+- 2026-10-27：`ApplicationThemeController` 发布窗口、控件、边框、次级文字、强调色和选中状态语义画刷；主窗口、窗格、布局选择/分隔条和照片打印辅助窗已绑定动态语义资源。高对比度时清除应用对 `SystemColors` 的覆盖，并将语义角色映射回 Windows 系统画刷。完整 SettingsSmoke 与 App Release 构建通过；Windows 实际切色、多窗口刷新、对比度可读性仍未做可见验收。
 - 2026-10-26：每个窗格当前选中的标签增加两 DIP 强调色下划线，使用动态 `ExplorerDirs.AccentBrush`；仅改 TabItem 边框样式，保留默认模板和原生文件视图。XAML smoke 与 Release 构建通过，未做可见多窗格/高对比度验收。
 - 2026-10-26：照片打印窗口改用 Windows 动态窗口/文字/边框系统色，减少辅助窗口在深色和高对比度环境中的硬编码浅色；`SettingsSmoke` 与 App Release 构建通过。此项仅覆盖该 WPF 窗口，尚无可见主题验收，也未改变 ExplorerBrowser 文件区。
 - ExplorerBrowser 文件区深色与逐项着色能力仍未确认，隔离 `IShellView` 探针不能证明产品可用。

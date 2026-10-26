@@ -69,7 +69,7 @@ public partial class PaneControl : UserControl
     internal void SetActivePaneVisual(bool isActive)
     {
         RootBorder.SetResourceReference(Border.BorderBrushProperty,
-            isActive ? "ExplorerDirs.AccentBrush" : SystemColors.ControlDarkBrushKey);
+            isActive ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
         RootBorder.BorderThickness = isActive ? new Thickness(2) : new Thickness(1);
     }
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;

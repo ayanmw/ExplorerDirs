@@ -6,7 +6,7 @@
 
 **Architecture:** Keep `Theme.ini`, `SystemThemeMonitor`, and `ThemePalette` as the source of preferences and colors. `ApplicationThemeController` publishes semantic WPF brushes alongside the existing SystemColors overrides; WPF-owned XAML consumes semantic roles through `DynamicResource`. In high contrast, remove app-owned overrides so Windows retains control. ExplorerBrowser and Shell-owned file views remain unchanged.
 
-**Tech Stack:** .NET 8 WPF, XAML DynamicResource, `ExplorerDirs.SettingsSmoke`.
+**Tech Stack:** .NET 10 WPF, XAML DynamicResource, `ExplorerDirs.SettingsSmoke`.
 
 **Spec:** [2026-10-26 theme and icons design](../specs/2026-10-26-theme-and-icons-design.md)
 
@@ -14,7 +14,7 @@
 
 - Preserve profile `Theme.ini` v1 and `System/Light/Dark` behavior.
 - Keep Windows accent color live in System, Light, and Dark modes.
-- High contrast must clear custom semantic and SystemColors brushes.
+- High contrast clears custom SystemColors overrides and maps semantic roles back to Windows system brushes.
 - Do not claim or implement ExplorerBrowser file-row/background coloring in this work.
 - Do not alter commands, focus stops, tab templates, Shell menus, or native file icons.
 
@@ -39,11 +39,11 @@
 - Publish application resources named `ExplorerDirs.WindowBackgroundBrush`, `ExplorerDirs.WindowTextBrush`, `ExplorerDirs.ControlBackgroundBrush`, `ExplorerDirs.ControlTextBrush`, `ExplorerDirs.BorderBrush`, `ExplorerDirs.MutedTextBrush`, `ExplorerDirs.AccentBrush`, `ExplorerDirs.AccentTextBrush`, `ExplorerDirs.SelectionBackgroundBrush`, and `ExplorerDirs.SelectionTextBrush`.
 - Values come from the current `ThemeColors`; no second palette or persistence format is introduced.
 
-- [ ] Add smoke assertions that each role is published from the selected palette and accent, and that the high-contrast clearing path removes the semantic roles.
-- [ ] Run the focused theme smoke and confirm it fails because semantic resources are not yet published.
-- [ ] Add the semantic resource set/remove behavior to `ApplicationThemeController` while preserving current SystemColors behavior.
-- [ ] Run the focused theme smoke and confirm it passes for Light and Dark accent palettes.
-- [ ] Commit this task as `feat: publish semantic theme brushes`.
+- [x] Add smoke assertions that each role is published from the selected palette and accent, and that the high-contrast path maps semantic roles back to Windows system brushes.
+- [x] Run the focused theme smoke and confirm it fails because semantic resources are not yet published.
+- [x] Add the semantic resource set/remove behavior to `ApplicationThemeController` while preserving current SystemColors behavior.
+- [x] Run the focused theme smoke and confirm it passes for Light and Dark accent palettes.
+- [x] Commit this task as part of the semantic WPF theme resource batch.
 
 ### Task 2: Move app-owned WPF chrome to semantic roles
 
@@ -59,11 +59,12 @@
 - WPF-owned windows, pane borders, muted status text, splitters, address surfaces, and auxiliary window borders use the semantic resource names from Task 1.
 - SystemColors remain available as the fallback path when semantic resources are removed for high contrast.
 
-- [ ] Extend markup smoke checks to cover the WPF-owned color bindings and assert the active-pane border still uses `ExplorerDirs.AccentBrush`.
-- [ ] Run the focused markup smoke and confirm it fails on the current direct SystemColors references.
-- [ ] Replace only the app-owned color bindings identified by the XAML/source inventory; retain transparent overlays and the print document's white paper surface.
-- [ ] Run focused theme and markup smokes and confirm both pass.
-- [ ] Commit this task as `feat: bind WPF chrome to semantic theme roles`.
+- [x] Extend markup smoke checks to cover the WPF-owned color bindings and assert the active-pane border still uses `ExplorerDirs.AccentBrush`.
+- [x] Use the Task 1 red result for missing semantic roles; the first full run then exposed a stale photo-print markup assertion, which was updated to the new roles before the green rerun.
+- [x] Replace only the app-owned color bindings identified by the XAML/source inventory; retain transparent overlays and the print document's white paper surface.
+- [x] Run focused theme and markup smokes and confirm both pass.
+- [x] Update the existing photo-print markup expectation to the semantic resources after the full suite exposed that stale assertion.
+- [x] Commit this task as part of the semantic WPF theme resource batch.
 
 ### Task 3: Verify release integration and record acceptance boundary
 
@@ -71,10 +72,10 @@
 - Modify: `docs/theme-icon-roadmap.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] Run full `ExplorerDirs.SettingsSmoke` and Release-build `ExplorerDirs.App`.
-- [ ] Inspect `git diff --check` and confirm no Shell view, command routing, or unrelated file changes.
-- [ ] Record that code/configuration checks pass but live Windows theme changes, multi-window rendering, and high-contrast visuals still require authorized desktop acceptance.
-- [ ] Commit the verification record separately from the implementation tasks.
+- [x] Run full `ExplorerDirs.SettingsSmoke` and Release-build `ExplorerDirs.App`.
+- [x] Inspect `git diff --check` and confirm no Shell view, command routing, or unrelated file changes.
+- [x] Record that code/configuration checks pass but live Windows theme changes, multi-window rendering, and high-contrast visuals still require authorized desktop acceptance.
+- [x] Commit the verification record with the implementation batch.
 
 ## Manual Acceptance After Desktop Handoff
 

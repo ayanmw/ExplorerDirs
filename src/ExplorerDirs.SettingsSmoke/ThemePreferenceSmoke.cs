@@ -160,4 +160,55 @@ internal static class ThemePreferenceSmoke
             Console.WriteLine("PASS " + label);
         }
     }
+
+    public static void CheckSemanticBrushRoles()
+    {
+        var repoRoot = FindRepoRoot();
+        var controller = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ApplicationThemeController.cs"));
+        var setStart = controller.IndexOf("private void SetThemeResources", StringComparison.Ordinal);
+        var clearStart = controller.IndexOf("private void ClearThemeResources", StringComparison.Ordinal);
+        Check(setStart >= 0 && clearStart > setStart,
+            "theme controller exposes separate resource apply and high-contrast clear paths");
+
+        var apply = controller[setStart..clearStart];
+        var clear = controller[clearStart..];
+        var roles = new Dictionary<string, (string Color, string SystemFallback)>
+        {
+            ["ExplorerDirs.WindowBackgroundBrush"] = ("WindowBackground", "WindowBrush"),
+            ["ExplorerDirs.WindowTextBrush"] = ("WindowText", "WindowTextBrush"),
+            ["ExplorerDirs.ControlBackgroundBrush"] = ("ControlBackground", "ControlBrush"),
+            ["ExplorerDirs.ControlTextBrush"] = ("ControlText", "ControlTextBrush"),
+            ["ExplorerDirs.BorderBrush"] = ("Border", "ControlDarkBrush"),
+            ["ExplorerDirs.MutedTextBrush"] = ("MutedText", "GrayTextBrush"),
+            ["ExplorerDirs.AccentBrush"] = ("Accent", "HighlightBrush"),
+            ["ExplorerDirs.AccentTextBrush"] = ("AccentText", "HighlightTextBrush"),
+            ["ExplorerDirs.SelectionBackgroundBrush"] = ("SelectionBackground", "HighlightBrush"),
+            ["ExplorerDirs.SelectionTextBrush"] = ("SelectionText", "HighlightTextBrush")
+        };
+
+        foreach (var (role, mapping) in roles)
+        {
+            Check(apply.Contains($"SetBrush(\"{role}\", colors.{mapping.Color})", StringComparison.Ordinal) &&
+                  clear.Contains($"_application.Resources[\"{role}\"] = SystemColors.{mapping.SystemFallback};", StringComparison.Ordinal),
+                $"semantic brush {role} follows the palette and falls back to Windows in high contrast");
+        }
+
+        static string FindRepoRoot()
+        {
+            for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+                 directory = directory.Parent)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md")) &&
+                    File.Exists(Path.Combine(directory.FullName, "src", "ExplorerDirs.App", "ApplicationThemeController.cs")))
+                    return directory.FullName;
+            }
+            throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
+        }
+
+        static void Check(bool condition, string label)
+        {
+            if (!condition) throw new Exception("Semantic theme brush wiring: " + label);
+            Console.WriteLine("PASS " + label);
+        }
+    }
 }

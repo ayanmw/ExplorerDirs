@@ -52,6 +52,12 @@ if (args.Length == 1 && args[0] == "--active-pane-theme-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--semantic-theme-brush-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();
@@ -402,6 +408,7 @@ try
     ExplorerDirs.SettingsSmoke.PhotoPrintPreviewGateSmoke.Run();
     ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run();
     PaneThemeMarkupSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")

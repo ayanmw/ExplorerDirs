@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ExplorerDirs.App"
         Title="Explorer Dirs" Height="800" Width="1280" MinHeight="420" MinWidth="650"
-        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        Background="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"
+        Foreground="{DynamicResource ExplorerDirs.WindowTextBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <DockPanel>
         <Menu x:Name="MainMenu" DockPanel.Dock="Top">
@@ -144,7 +144,7 @@
             </ToolBar>
         </ToolBarTray>
         <TextBlock x:Name="EnvironmentStatus" DockPanel.Dock="Bottom" Margin="8,2"
-                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                   Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"/>
         <Grid x:Name="TreeLayoutGrid" Margin="5,2,5,5">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="SharedTreeColumn" Width="0"/>
@@ -152,11 +152,11 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Border x:Name="SharedTreeContainer" Grid.Column="0" Visibility="Collapsed"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ControlLightBrushKey}}"
+                    BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}"
                     BorderThickness="1" Margin="0,0,4,0"/>
             <GridSplitter x:Name="SharedTreeSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Center"
                           ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                          ShowsPreview="True" Background="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" Cursor="SizeWE"
+                          ShowsPreview="True" Background="{DynamicResource ExplorerDirs.ControlBackgroundBrush}" Cursor="SizeWE"
                           Focusable="False" IsTabStop="False" Visibility="Collapsed"
                           AutomationProperties.Name="调整共享目录树宽度"
                           DragCompleted="SharedTreeSplitter_DragCompleted"/>

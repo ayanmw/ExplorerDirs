@@ -32,6 +32,33 @@ internal static class PaneThemeMarkupSmoke
                   (string?)setter.Attribute("Value") == "0,0,0,2"),
             "tab indicator uses only a two-DIP bottom border without replacing the Shell view");
 
+        var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml"));
+        var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
+        var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        var photoPrintWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PhotoPrintWindow.xaml"));
+        var layoutWindowCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+        var layoutGridCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneLayoutGrid.cs"));
+        var layoutHostCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneLayoutHost.cs"));
+        Check(mainWindow.Contains("ExplorerDirs.WindowBackgroundBrush", StringComparison.Ordinal) &&
+              mainWindow.Contains("ExplorerDirs.WindowTextBrush", StringComparison.Ordinal) &&
+              mainWindow.Contains("ExplorerDirs.MutedTextBrush", StringComparison.Ordinal) &&
+              mainWindow.Contains("ExplorerDirs.ControlBackgroundBrush", StringComparison.Ordinal),
+            "main window and shared navigation chrome consume semantic theme roles");
+        Check(paneMarkup.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal) &&
+              paneMarkup.Contains("ExplorerDirs.WindowBackgroundBrush", StringComparison.Ordinal) &&
+              paneMarkup.Contains("ExplorerDirs.MutedTextBrush", StringComparison.Ordinal) &&
+              paneMarkup.Contains("ExplorerDirs.ControlBackgroundBrush", StringComparison.Ordinal),
+            "pane address, status, tree, and divider chrome consume semantic theme roles");
+        Check(paneCode.Contains("isActive ? \"ExplorerDirs.AccentBrush\" : \"ExplorerDirs.BorderBrush\"", StringComparison.Ordinal),
+            "active pane accent and inactive pane border remain distinct semantic roles");
+        Check(photoPrintWindow.Contains("ExplorerDirs.WindowBackgroundBrush", StringComparison.Ordinal) &&
+              photoPrintWindow.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
+            "photo print window follows application surface and border roles");
+        Check(layoutWindowCode.Contains("ExplorerDirs.SelectionBackgroundBrush", StringComparison.Ordinal) &&
+              layoutGridCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal) &&
+              layoutHostCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
+            "layout selector and pane splitters consume semantic selection and border roles");
+
         Console.WriteLine("Pane theme markup smoke: PASS");
 
         static string FindRepoRoot()
