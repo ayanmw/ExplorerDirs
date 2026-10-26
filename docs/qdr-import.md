@@ -8,6 +8,8 @@
 
 2026-10-26 补查本机 Q-Dir `Favoriten/Quick-Link` 下的另一个收藏 `.qdr`，只读取树字段：四个 `TreeNsplit` 仍全为 `2500`，没有启用树或非默认宽度对照。该样本未增加映射依据；不分析 Q-Dir 二进制或推断这些值的单位，导入器继续跳过 `TreeNsplit`。
 
+2026-10-27 只读核对本机 `start.qdr` 与一个收藏 `.qdr` 的树字段：两者均为 `tree_mode=2`、`Tree1`～`Tree4=0`、`Tree1split`～`Tree4split=2500`。这与 FAQ 117 的示例 `tree_mode=0` 不同，但其余树值相同；目前没有对应的可见行为记录，不能据此解释 `tree_mode=2` 对树显示的影响。两个样本仍都没有树开启或非默认宽度对照，`TreeNsplit` 继续不导入，避免将未经验证的比例转换成目录树 DIP 宽度。[Q-Dir 官方 FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR)
+
 `Tree1`～`Tree4` 采用布尔解释是基于字段名、格式串 `%d` 和 Q-Dir“逐窗格开启/关闭”说明的实现假设；本机样本的值均为 0，仍未通过可见互操作确认 1/0。官方 [FAQ 26](https://www.softwareok.com/?faq=26&seite=faq-Q-DIR) 说明可用一棵共享树服务全部视图，[FAQ 32](https://www.softwareok.com/?faq=32&seite=faq-Q-DIR) 说明可分别启用各视图的目录树；[FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 列出 `tree_mode` 与 `Tree1split`～`Tree4split` 示例，但没有给出分隔值单位。`tree_mode` 数值映射已于 2026-10-25 通过本机 PE 菜单资源、代码分支和官方字符串表确定；`TreeNsplit` 的宽度单位/方向/适用视图仍待受控配置样本或可见互操作确认。本程序自有目录树宽度由 Explorer Dirs 扩展 v4 保存，使用 DIP，不转换或冒充 Q-Dir 的 `TreeNsplit`。
 
 2026-10-18：源码入口“文件 → 导入 Q-Dir 配置 (.qdr)…”。选择文件后先显示标签数量与未支持项，确认后追加到对应窗格；不关闭已有标签、不修改源文件。导入前将当前会话写入同一 profile 下的 `ExplorerDirs.ini.before-qdr-*.bak`。备份或完整快照失败则不追加。
