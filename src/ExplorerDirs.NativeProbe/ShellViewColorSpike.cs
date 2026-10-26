@@ -115,12 +115,13 @@ internal static class ShellViewColorSpike
                 group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
+            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, folderView);
             var fileOperations = VerifySessionRestoreFileOperations(view, folderView, fullFixture, propertyFormatId,
                 expectedSort, columnsExpected);
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
                 $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
-                $"shell-file-operations={fileOperations}");
+                $"concurrent-views={concurrentViews}; shell-file-operations={fileOperations}");
             result = 0;
         }
         catch (Exception ex)
@@ -156,6 +157,52 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
         }
         return result;
+    }
+
+    private static string VerifyConcurrentViewIsolation(string fixture, ShellViewStateStore store,
+        Guid restoredSessionId, nint restoredFolderView)
+    {
+        // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
+        nint parent = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        ShellViewColorBrowserHost? host = null;
+        var windowStyle = 0x10CF0000u | 0x10000000u;
+        var extendedStyle = 0x08000000u | 0x00000080u;
+        parent = CreateWindowExW(extendedStyle, "STATIC", "ExplorerDirs concurrent session view",
+            windowStyle, 900, 100, 520, 360, 0, 0, 0, 0);
+        if (parent == 0) throw new InvalidOperationException("Could not create the second isolated view parent.");
+        if (!store.TryLoad(restoredSessionId, out var restoredState))
+            throw new InvalidOperationException("The restored view session disappeared before its sibling was created.");
+        Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+        var shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
+        var siblingSessionId = Guid.NewGuid();
+        host = new ShellViewColorBrowserHost(parent, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: siblingSessionId);
+        if (store.TryLoad(siblingSessionId, out _))
+            throw new InvalidOperationException("The new sibling unexpectedly inherited another session's stream.");
+        host.View = view;
+        hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        var bounds = new StreamProbeRect { Right = 480, Bottom = 320 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+        if (viewWindow == 0) throw new InvalidOperationException("The second Shell view was created without a window.");
+        ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated desktop.
+        Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
+        Pump(700);
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        if (host.Reads == 0)
+            throw new InvalidOperationException("The concurrent Shell view did not request its own session stream.");
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 3, 16)); // FVM_LIST
+        Pump(300);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var siblingMode, out _));
+        Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out var restoredMode, out _));
+        if (siblingMode != 3 || restoredMode != 4)
+            throw new InvalidOperationException($"Concurrent Shell views shared view mode state: sibling={siblingMode}; restored={restoredMode}.");
+        return $"restored-stream-bytes={restoredState.Length}; sibling-reads={host.Reads}; " +
+            $"sibling-mode={siblingMode}; restored-mode={restoredMode}; independent=True";
     }
 
     private static string VerifySessionRestoreFileOperations(nint view, nint folderView, string fixture,
