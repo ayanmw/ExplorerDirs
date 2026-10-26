@@ -5,7 +5,12 @@
 - 用户截图显示左侧树节点前的图标栏空白。只读进程核对发现当前运行实例来自 `preview-0.6.0-temp.58`；截图本身没有版本标识，因此不能据此判定 temp.69 的图标绑定是否有效。temp.69 继承了图像索引回调和系统图像列表绑定，但可见绘制仍待在该版本上验收。
 - 此前 smoke 只验证索引范围与列表句柄，不能算图标修复完成。
 - NativeProbe 的原生目录树检查现会读取实际选中节点的 `TVIF_IMAGE` 与 `TVIF_SELECTEDIMAGE`，核对索引是否落在绑定的系统图像列表范围内，以区分节点索引缺失与图像绘制问题。
-- NativeProbe Release 构建通过（0 警告、0 错误），本轮没有启动树控件或 GUI；节点索引诊断仍待下次桌面授权验收，缺图标根因未确认。
+- 无窗口 `--tree-icon-callback-smoke` 通过：生产回调为真实临时目录返回 `normal=3/open=3`，系统图像表共 512 项。NativeProbe Release 构建通过（0 警告、0 错误），本轮没有启动树控件或 GUI；节点索引诊断仍待下次桌面授权验收，缺图标根因未确认。
+
+## 2026-10-26：静态 Shell 大小列适配器合同复验
+
+- 按原生 Shell 视图架构评审的下一步，运行无窗口 `--static-shell-column-folder-smoke`。适配器为 `PKEY_Size` 返回 `UInt64` 与显示文本，并在 `CompareIDs` 中正确处理 2、10、100 和相等值（退出码 0）；输出确认 `window-created=False`。
+- 这只验证 `IShellFolder2` 文件夹适配器的列/排序合同，测试值是固定夹具数据；不代表真实递归文件夹大小计算、DefView 显示、拖放或菜单兼容已实现。Private Desktop DefView 探针与产品接入仍未执行。
 
 ## 2026-10-26：发布 temp.69 临时预览
 

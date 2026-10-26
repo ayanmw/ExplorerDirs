@@ -59,3 +59,9 @@
 ### 2026-10-26 原生 Shell 视图架构评审
 
 用户选择先做原生 `IShellView` 架构评审。评审推荐隔离验证 `IShellFolder2` folder adapter + Windows DefView，而不是自绘列表或重写完整 `IShellView`；这仍需独立 `IShellBrowser` 宿主，不可作为 ExplorerBrowser 的列插件。评审范围、比较、门槛及递归计算策略冲突见[架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。未修改产品代码、未运行 Shell 宿主或 GUI。
+
+### 2026-10-26 无窗口文件夹适配器合同复验
+
+运行 `ExplorerDirs.NativeProbe.exe --static-shell-column-folder-smoke`，在不创建窗口的条件下直接查询隔离 `IShellFolder2` 适配器。`PKEY_Size` 可读为 `UInt64`，标准大小列的格式化文本和 `CompareIDs` 均按 2、10、100 的数值顺序处理，并将相等值比较为 0；退出码为 0，探针输出 `window-created=False`。样本值是适配器合同夹具，不是真实递归目录计算结果。
+
+这提高了 `IShellFolder2` + Windows DefView 路线的可行性证据，但没有创建 DefView、没有验证文件系统文件夹视图的列显示/排序，也没有覆盖拖放、右键菜单、Shell 操作和刷新。下一步仍需独立宿主兼容门槛验证；在本项目当前不进行 GUI/桌面操作的约束下，不运行该宿主探针，也不接入 ExplorerBrowser 产品代码。
