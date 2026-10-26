@@ -14,7 +14,7 @@
                     <Button x:Name="RefreshButton" Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
                     <ToggleButton x:Name="TreeButton" Content="树" ToolTip="切换当前窗格目录树" Click="Tree_Click" Width="32" Margin="4,0,0,0"
                                   AutomationProperties.Name="当前窗格目录树"/>
-                    <Button x:Name="ToolbarViewStyleButton" Content="▦ ▾" ToolTip="切换当前标签的文件视图方式"
+                    <Button x:Name="ToolbarViewStyleButton" ToolTip="切换当前标签的文件视图方式"
                             AutomationProperties.Name="查看方式" Click="ViewStyle_Click" Width="46" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
@@ -102,7 +102,7 @@
                          VerticalContentAlignment="Center"/>
             </DockPanel>
             <DockPanel DockPanel.Dock="Bottom" LastChildFill="True">
-                <Button x:Name="ViewStyleButton" DockPanel.Dock="Right" Content="查看 ▾"
+                <Button x:Name="ViewStyleButton" DockPanel.Dock="Right"
                         Margin="2,1" Padding="5,0"
                         ToolTip="切换当前窗格标签的查看方式"
                         AutomationProperties.Name="当前窗格查看方式"

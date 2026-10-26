@@ -34,12 +34,13 @@
 - Create: `src/ExplorerDirs.App/ViewStyleIconSet.cs`
 - Create: `src/ExplorerDirs.SettingsSmoke/ViewStyleIconSmoke.cs`
 - Modify: `src/ExplorerDirs.SettingsSmoke/Program.cs`
+- Modify: `src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj`
 
-- [ ] Add smoke coverage for count/order, parseable non-empty geometry, and distinct paths.
-- [ ] Run the focused icon smoke and confirm it fails before the icon set exists.
-- [ ] Add eight 16-unit vector paths aligned with `ViewStyle.All` and a compact toolbar aggregate.
-- [ ] Re-run the focused icon smoke and confirm all paths parse and remain distinct.
-- [ ] Commit this task as `feat: add vector assets for shell view modes`.
+- [x] Add smoke coverage for count/order, parseable non-empty geometry, and distinct paths.
+- [x] Run the focused icon smoke and confirm it fails before the icon set exists.
+- [x] Link the geometry source into SettingsSmoke and add eight 16-unit vector paths aligned with `ViewStyle.All` plus a compact toolbar aggregate.
+- [x] Re-run the focused icon smoke and confirm all paths parse and remain distinct.
+- [x] Commit this task as part of the view-style vector icon batch.
 
 ### Task 2: Use vectors in view menus and pane controls
 
@@ -49,11 +50,11 @@
 - Modify: `src/ExplorerDirs.App/PaneControl.xaml`
 - Test: `src/ExplorerDirs.SettingsSmoke/ViewStyleIconSmoke.cs`
 
-- [ ] Add menu `Path` icons indexed from each `ViewStyle` while preserving `Tag`, check state, and click dispatch.
-- [ ] Replace the toolbar/status button character content with the same compact vector view icon and chevron.
-- [ ] Assert menu and both buttons use the semantic `ExplorerDirs.ControlTextBrush` and preserve command/accessibility wiring.
-- [ ] Run focused icon and existing pane theme markup smokes.
-- [ ] Commit this task as `feat: show vector icons for view switching`.
+- [x] Add menu `Path` icons indexed from each `ViewStyle` while preserving `Tag`, check state, and click dispatch.
+- [x] Replace the toolbar/status button character content with the same compact vector view icon and chevron.
+- [x] Assert menu and both buttons use the semantic `ExplorerDirs.ControlTextBrush` and preserve command/accessibility wiring.
+- [x] Run focused icon and existing pane theme markup smokes.
+- [x] Commit this task as part of the view-style vector icon batch.
 
 ### Task 3: Verify and record
 
@@ -61,7 +62,7 @@
 - Modify: `docs/theme-icon-roadmap.md`
 - Modify: `docs/roadmap.md`
 
-- [ ] Run full `ExplorerDirs.SettingsSmoke` and App Release build.
-- [ ] Run `git diff --check`; confirm no changes to `ViewStyle`, Shell view dispatch, file icons, or focus navigation.
-- [ ] Record that visual sizing, DPI and high-contrast presentation still require authorized GUI acceptance.
-- [ ] Commit the verification record with the implementation batch.
+- [x] Run full `ExplorerDirs.SettingsSmoke` and App Release build.
+- [x] Run `git diff --check`; confirm no changes to `ViewStyle`, Shell view dispatch, file icons, or focus navigation.
+- [x] Record that visual sizing, DPI and high-contrast presentation still require authorized GUI acceptance.
+- [x] Commit the verification record with the implementation batch.

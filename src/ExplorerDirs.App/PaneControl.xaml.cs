@@ -82,6 +82,8 @@ public partial class PaneControl : UserControl
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
     {
         InitializeComponent();
+        ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
+        ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         AddressTreeHost.DirectorySelected += identity =>
         {
             var owner = Current;
