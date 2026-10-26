@@ -718,3 +718,11 @@ Microsoft 的 `BrowseObject` 文档说明 `SBSP_EXPLOREMODE` 表示新浏览窗�
 本轮屏幕内像素检查中，八种 Shell 查看方式的项目行目标颜色像素均未命中（`0/0`）；Icon、Details、SmallIcon、List 没有收到可用的 `CDDS_ITEMPREPAINT`，Tile/Content 收到项目绘制通知，但也没有项目级回调，因而没有逐项着色。对照用的普通 ListView 在同一探针会话中各模式均产生项目回调并命中像素，证明采样链路可工作；不能把该对照结果外推为默认 Shell `IShellView` 支持着色。背景/选中项 Shell 菜单、视图模式读回和临时文件复制/重命名/删除刷新也在本轮通过，但均属于隔离默认 filesystem view，不是产品 ExplorerBrowser 或可见用户操作验收。
 
 这次屏幕内负结果结束了对相同 DefView `NM_CUSTOMDRAW` 项目回调路径的重复采样；逐项颜色仍是未决能力，不据此迁移产品宿主。后续优先推进可复用的原生 Shell 菜单和文件操作行为；若要继续颜色，应先提出新的、不同于该 DefView 回调路径的技术假设并单独验证。
+
+### 2026-10-27 真实 Shell view-state stream 按会话键写回
+
+`ShellViewColorBrowserHost` 现在可把 `ShellViewStateStore` 与稳定 session GUID 传给通用 `StreamViewHost`。策略 smoke 新增真实派生宿主的 store/read/write/dispose/recreate 往返，先因构造器不暴露 store 而失败，接线后通过。
+
+`color-private-desktop` 在临时 fixture 中创建真实默认 filesystem `IShellView`。`DestroyViewWindow` 期间宿主收到 4 次 stream 写回；`Dispose` 后同 GUID 状态文件存在，大小 772 字节。随后新建隔离宿主使用相同 GUID 调用 `GetViewStateStream(READ)`，逐字节匹配实际 Shell 写出的流。该次 NativeProbe Release build 0 警告/错误，Private Desktop watchdog 退出码 0；主桌面 foreground HWND 从 `0x81852` 保持不变。复验日志：`src/.state/native-probe-watchdog/20261027-000036-81c04f29.stdout.log`。
+
+证据仅覆盖 Shell 销毁回调到临时 session store、再由新 host 提供相同字节。单独切换模式、停用/销毁 view 或同路径重导航均未触发写回；写入只在完整探针后段出现，目前尚未隔离出最小触发条件。让第二个真实 `IShellView` 消费恢复流并读回模式/列的尝试因此没有通过，失败记录：`src/.state/native-probe-watchdog/20261026-235844-733e4d24.stdout.log`。没有跨应用进程重启或连接产品标签会话 ID。状态目录和 fixture 都由探针创建并清理，产品 INI、ExplorerBrowser 与 release 未修改。

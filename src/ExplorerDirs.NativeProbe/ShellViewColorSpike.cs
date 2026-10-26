@@ -45,6 +45,9 @@ internal static class ShellViewColorSpike
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
+        var stateDirectory = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N") + "-view-state");
+        var sessionId = Guid.NewGuid();
+        var stateStore = new ShellViewStateStore(stateDirectory);
         nint parent = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0;
         nint folderView = 0, contextMenu = 0, selectionMenu = 0, dropTarget = 0, listView = 0;
         nint drawNotifyTarget = 0, backgroundMenuHandle = 0, selectionMenuHandle = 0;
@@ -158,7 +161,8 @@ internal static class ShellViewColorSpike
             var itemFilter = new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false));
             var navigation = new ShellViewNavigationHistory(pidl, ILClone, Marshal.FreeCoTaskMem,
                 ILIsEqual, GetParentPidl, ILCombine, Navigate);
-            host = new ShellViewColorBrowserHost(parent, [], itemFilter, navigation);
+            host = new ShellViewColorBrowserHost(parent, [], itemFilter, navigation,
+                stateStore, sessionId);
             host.View = view;
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -482,7 +486,29 @@ internal static class ShellViewColorSpike
             if (parentDestroyed || viewRetirement.DeferredCount == 0)
             {
                 if (hostPointer != 0) Marshal.Release(hostPointer);
-                if (host is not null) { host.View = 0; host.Dispose(); GC.KeepAlive(host); }
+                if (host is not null)
+                {
+                    var shellWrites = host.Writes;
+                    host.View = 0;
+                    host.Dispose();
+                    var persisted = stateStore.TryLoad(sessionId, out var savedState);
+                    var restored = false;
+                    if (persisted)
+                    {
+                        using var restoredHost = new ShellViewColorBrowserHost(0, [],
+                            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                            stateStore: new ShellViewStateStore(stateDirectory), stateId: sessionId);
+                        if (restoredHost.GetViewStateStream(0, out var readPointer) == 0 && readPointer != 0)
+                        {
+                            try { restored = ReadViewStateBytes(readPointer).SequenceEqual(savedState); }
+                            finally { Marshal.Release(readPointer); }
+                        }
+                    }
+                    Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
+                    if (shellWrites == 0 || !persisted || !restored)
+                        throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
+                    GC.KeepAlive(host);
+                }
             }
             else if (host is not null) GC.KeepAlive(host);
             var fullFixture = Path.GetFullPath(fixture);
@@ -493,6 +519,9 @@ internal static class ShellViewColorSpike
                     File.SetAttributes(readOnlyFixturePath, File.GetAttributes(readOnlyFixturePath) & ~FileAttributes.ReadOnly);
                 Directory.Delete(fullFixture, recursive: true);
             }
+            var fullStateDirectory = Path.GetFullPath(stateDirectory);
+            if (fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullStateDirectory))
+                Directory.Delete(fullStateDirectory, recursive: true);
             _readOnlyRuleProbe = false;
             if (GetForegroundWindow() != foreground)
                 Console.WriteLine("ishellview-color-spike cleanup: foreground changed.");
@@ -503,6 +532,29 @@ internal static class ShellViewColorSpike
     {
         var until = Environment.TickCount64 + milliseconds;
         while (Environment.TickCount64 < until) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(10); }
+    }
+
+    private static byte[] ReadViewStateBytes(nint pointer)
+    {
+        var stream = (System.Runtime.InteropServices.ComTypes.IStream)Marshal.GetObjectForIUnknown(pointer);
+        try
+        {
+            stream.Stat(out var stat, 1);
+            if (stat.cbSize is < 0 or > 65_536)
+                throw new InvalidDataException("The saved Shell view-state stream exceeds the probe limit.");
+            var bytes = new byte[(int)stat.cbSize];
+            var read = Marshal.AllocCoTaskMem(sizeof(int));
+            try
+            {
+                stream.Seek(0, 0, 0);
+                stream.Read(bytes, bytes.Length, read);
+                if (Marshal.ReadInt32(read) != bytes.Length)
+                    throw new InvalidDataException("The recreated host returned an incomplete Shell view-state stream.");
+                return bytes;
+            }
+            finally { Marshal.FreeCoTaskMem(read); }
+        }
+        finally { Marshal.ReleaseComObject(stream); }
     }
 
     private static nint FindChildByClass(nint parent, string className)

@@ -16,7 +16,8 @@ internal sealed class ShellViewColorBrowserHost : StreamViewHost,
     private int _includeObjectCalls;
 
     internal ShellViewColorBrowserHost(nint parent, byte[] state, ShellFolderFilter filter,
-        ShellViewNavigationHistory? navigation = null) : base(parent, state, navigation: navigation)
+        ShellViewNavigationHistory? navigation = null, ShellViewStateStore? stateStore = null,
+        Guid? stateId = null) : base(parent, state, stateStore, stateId, navigation)
     {
         _filter = filter;
     }
@@ -72,6 +73,8 @@ public static class ShellViewColorBrowserHostSmoke
 {
     internal static void Run()
     {
+        VerifyPersistedSessionStream();
+
         using var host = new ShellViewColorBrowserHost(0, [],
             new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)));
         var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
@@ -123,6 +126,95 @@ public static class ShellViewColorBrowserHostSmoke
 
         CheckNavigationCallback();
         CheckNavigationExceptionComBoundary();
+    }
+
+    private static void VerifyPersistedSessionStream()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirsColorHostState-" + Guid.NewGuid().ToString("N"));
+        var store = new ShellViewStateStore(directory);
+        var sessionId = Guid.NewGuid();
+        var initial = new byte[] { 1, 3, 5 };
+        var updated = new byte[] { 8, 6, 4, 2 };
+        store.Save(sessionId, initial);
+        try
+        {
+            var host = new ShellViewColorBrowserHost(0, [0],
+                new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                stateStore: store, stateId: sessionId);
+            try
+            {
+                Check(host.GetViewStateStream(0, out var readPointer) == 0 && readPointer != 0,
+                    "the color host opens the saved stream for its session key");
+                try
+                {
+                    Check(ReadStream(readPointer).SequenceEqual(initial) && host.Reads == 1,
+                        "a recreated color host restores its session's stored Shell stream");
+                }
+                finally { Marshal.Release(readPointer); }
+
+                Check(host.GetViewStateStream(1, out var writePointer) == 0 && writePointer != 0,
+                    "the color host provides a write stream for its session");
+                try { WriteStream(writePointer, updated); }
+                finally { Marshal.Release(writePointer); }
+            }
+            finally { host.Dispose(); }
+
+            Check(store.TryLoad(sessionId, out var saved) && saved.SequenceEqual(updated),
+                "disposing the color host persists its Shell-written stream under the session key");
+
+            var restoredHost = new ShellViewColorBrowserHost(0, [9],
+                new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                stateStore: new ShellViewStateStore(directory), stateId: sessionId);
+            try
+            {
+                Check(restoredHost.GetViewStateStream(0, out var pointer) == 0 && pointer != 0,
+                    "a new color host can reopen the persisted session stream");
+                try
+                {
+                    Check(ReadStream(pointer).SequenceEqual(updated),
+                        "a new color host restores the latest persisted Shell-written bytes");
+                }
+                finally { Marshal.Release(pointer); }
+            }
+            finally { restoredHost.Dispose(); }
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    private static byte[] ReadStream(nint pointer)
+    {
+        var stream = (System.Runtime.InteropServices.ComTypes.IStream)Marshal.GetObjectForIUnknown(pointer);
+        try
+        {
+            var size = Marshal.AllocCoTaskMem(sizeof(int));
+            try
+            {
+                stream.Stat(out var stat, 1);
+                var bytes = new byte[checked((int)stat.cbSize)];
+                stream.Seek(0, 0, 0);
+                stream.Read(bytes, bytes.Length, size);
+                Check(Marshal.ReadInt32(size) == bytes.Length, "the full session stream is readable");
+                return bytes;
+            }
+            finally { Marshal.FreeCoTaskMem(size); }
+        }
+        finally { Marshal.ReleaseComObject(stream); }
+    }
+
+    private static void WriteStream(nint pointer, byte[] bytes)
+    {
+        var stream = (System.Runtime.InteropServices.ComTypes.IStream)Marshal.GetObjectForIUnknown(pointer);
+        try
+        {
+            var written = Marshal.AllocCoTaskMem(sizeof(int));
+            try
+            {
+                stream.Write(bytes, bytes.Length, written);
+                Check(Marshal.ReadInt32(written) == bytes.Length, "the Shell-written session stream is complete");
+            }
+            finally { Marshal.FreeCoTaskMem(written); }
+        }
+        finally { Marshal.ReleaseComObject(stream); }
     }
 
     private static void VerifyCdb3VtableCallbacks(nint unknown, ShellViewColorBrowserHost host)
