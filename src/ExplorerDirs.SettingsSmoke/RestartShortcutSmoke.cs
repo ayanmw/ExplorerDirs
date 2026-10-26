@@ -7,9 +7,10 @@ internal static class RestartShortcutSmoke
 {
     internal static void Run()
     {
-        Check(KeyboardShortcuts.Resolve(0x7A, 1) == ExplorerShortcut.RestartApplication &&
-              KeyboardShortcuts.Resolve(0x7A, 0) == ExplorerShortcut.ToggleMaximize,
-            "Alt+F11 restarts the app without changing F11 maximize behavior");
+        Check(KeyboardShortcuts.Resolve(0x7A, 1) == ExplorerShortcut.RestartApplication,
+            "Alt+F11 restarts the app");
+        Check(KeyboardShortcuts.Resolve(0x7A, 0) == ExplorerShortcut.ToggleFullScreen,
+            "F11 enters full-screen mode rather than only maximizing the window");
 
         var repoRoot = FindRepoRoot();
         var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
@@ -19,6 +20,10 @@ internal static class RestartShortcutSmoke
               mainWindow.Contains("_restartApplication();", StringComparison.Ordinal) &&
               mainWindow.Contains("MessageBoxButton.YesNo", StringComparison.Ordinal),
             "restart shortcut uses the existing confirmation and session-safe restart callback");
+        Check(mainWindow.Contains("case ExplorerShortcut.ToggleFullScreen:", StringComparison.Ordinal) &&
+              mainWindow.Contains("ToggleFullScreen();", StringComparison.Ordinal) &&
+              markup.Contains("Header=\"全屏\" InputGestureText=\"F11\"", StringComparison.Ordinal),
+            "F11 dispatches to a full-screen command also exposed in the View menu");
         Check(markup.Contains("InputGestureText=\"Alt+F11\"", StringComparison.Ordinal),
             "the File menu advertises the restart shortcut");
 

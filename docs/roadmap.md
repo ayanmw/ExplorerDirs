@@ -49,12 +49,13 @@
 
 ## 2026-10-27：补齐 Q-Dir Alt+F11 重启快捷键
 
-- Q-Dir 官方快捷键清单将 Alt+F11 定义为重启。本项目现将其接入现有的确认、逐窗口会话保存和重启流程，并在“文件 → 重启应用”旁标注快捷键；普通 F11 仍最大化/还原窗口，不注册系统级热键。
+- Q-Dir 官方快捷键清单将 Alt+F11 定义为重启。本项目现将其接入现有的确认、逐窗口会话保存和重启流程，并在“文件 → 重启应用”旁标注快捷键；普通 F11 切换全屏，不注册系统级热键。
 - 快捷键分派/菜单接线 smoke、完整 Release `SettingsSmoke`、App Release 构建和 `git diff --check` 通过。没有触发实际重启；跨多窗口会话恢复仍需可见验收。来源：[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
 
-## 2026-10-27：确认 F11 全屏行为差距
+## 2026-10-27：实现 Q-Dir F11 全屏切换
 
-- 源码将普通 F11 映射到 `ToggleMaximize`，只在最大化和普通窗口间切换；Q-Dir 官方命令表标注 F11 为“Full Screen”。因此当前功能接线不能算作 Q-Dir 全屏兼容。下一步按用户选择确定全屏时是否隐藏应用菜单/主工具栏/状态栏，再实现可恢复的窗口状态；不把最大化当作全屏。来源：[Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
+- Q-Dir 官方命令表将 F11 定义为全屏。Explorer Dirs 现在可用 F11 或“视图 → 全屏”进入无边框全屏，隐藏菜单、主工具栏和状态栏，并覆盖当前显示器；再次按 F11 或菜单项会恢复进入前的普通/最大化状态和各栏显示状态。全屏是临时窗口状态，不写入 profile 或会话文件。来源：[Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
+- Release SettingsSmoke 与 App Release 构建覆盖源码及状态转换；未启动 GUI，因此实际显示器边界、多显示器/DPI、任务栏遮挡与 ExplorerBrowser 视图缩放仍待可见验收。
 
 ## 2026-10-27：补齐 Q-Dir 状态栏显示选项
 

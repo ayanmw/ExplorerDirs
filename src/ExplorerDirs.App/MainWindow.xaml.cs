@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly string _profileDirectory;
     private readonly Action<MainWindow>? _createWindow;
     private readonly Action? _restartApplication;
+    private FullScreenPresentation? _fullScreenRestoreState;
     private readonly FavoritesStore _favoritesStore;
     private readonly ViewPresetStore _viewPresetStore;
     private readonly List<string> _favorites;
@@ -1218,7 +1219,7 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.FocusedElement is MenuItem) return;
+        if (Keyboard.FocusedElement is MenuItem && _fullScreenRestoreState is null) return;
         if (IsAnyShellRenameEditorFocused()) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var virtualKey = KeyInterop.VirtualKeyFromKey(key);
@@ -1330,12 +1331,112 @@ public partial class MainWindow : Window
             case ExplorerShortcut.ToggleDetailsPane:
                 SetDetailsPaneVisible(!source.DetailsPaneVisible);
                 break;
-            case ExplorerShortcut.ToggleMaximize:
-                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            case ExplorerShortcut.ToggleFullScreen:
+                ToggleFullScreen();
                 break;
         }
         return true;
     }
+
+    private void ToggleFullScreen()
+    {
+        if (_fullScreenRestoreState is { } saved)
+        {
+            RestoreWindowPresentation(saved);
+            _fullScreenRestoreState = null;
+            return;
+        }
+
+        var restoreBounds = WindowState == WindowState.Maximized ? RestoreBounds :
+            new Rect(Left, Top, ActualWidth, ActualHeight);
+        var original = new FullScreenPresentation(WindowState, WindowStyle, ResizeMode, Topmost,
+            restoreBounds.Left, restoreBounds.Top, restoreBounds.Width, restoreBounds.Height,
+            MainMenu.Visibility, MainToolBar.Visibility, EnvironmentStatus.Visibility);
+        var fullScreen = original.EnterFullScreen();
+
+        try
+        {
+            _fullScreenRestoreState = original;
+            WindowState = fullScreen.WindowState;
+            WindowStyle = fullScreen.WindowStyle;
+            ResizeMode = fullScreen.ResizeMode;
+            MainMenu.Visibility = fullScreen.MenuVisibility;
+            MainToolBar.Visibility = fullScreen.ToolBarVisibility;
+            EnvironmentStatus.Visibility = fullScreen.StatusBarVisibility;
+            FullScreenMenu.IsChecked = true;
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            if (monitor == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(monitor, ref monitorInfo))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var bounds = monitorInfo.Monitor;
+            if (!SetWindowPos(hwnd, 0, bounds.Left, bounds.Top, bounds.Right - bounds.Left,
+                    bounds.Bottom - bounds.Top, SwpNoZOrder | SwpNoActivate | SwpFrameChanged))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        catch (Exception ex)
+        {
+            RestoreWindowPresentation(original);
+            _fullScreenRestoreState = null;
+            FullScreenMenu.IsChecked = false;
+            EnvironmentStatus.Text = $"无法切换全屏：{ex.Message}";
+        }
+    }
+
+    private void RestoreWindowPresentation(FullScreenPresentation saved)
+    {
+        WindowState = WindowState.Normal;
+        WindowStyle = saved.WindowStyle;
+        ResizeMode = saved.ResizeMode;
+        Topmost = saved.Topmost;
+        Left = saved.Left;
+        Top = saved.Top;
+        Width = saved.Width;
+        Height = saved.Height;
+        MainMenu.Visibility = saved.MenuVisibility;
+        MainToolBar.Visibility = saved.ToolBarVisibility;
+        EnvironmentStatus.Visibility = saved.StatusBarVisibility;
+        FullScreenMenu.IsChecked = false;
+        WindowState = saved.WindowState;
+    }
+
+    private void FullScreenMenu_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
+
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
 
     private void ProgramStarter_Click(object sender, RoutedEventArgs e) => OpenProgramStarterWindow();
 
