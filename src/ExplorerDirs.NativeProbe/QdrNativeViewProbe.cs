@@ -754,6 +754,8 @@ internal sealed class ShellMenuFrameCoordinator
         _baseMenu = GetMenu(frameWindow);
     }
 
+    internal nint BaseMenu => _baseMenu;
+
     internal int SetMenu(StreamViewHost owner, nint menu, nint oleMenu, nint activeWindow)
     {
         if (menu == 0) return Deactivate(owner);

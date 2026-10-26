@@ -891,3 +891,9 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 第一次运行新菜单断言时 Pane 2 失败：诊断轨迹显示它仍将子窗格 HWND 当作 frame，并再次收到 `0x8007059C`。追查到原因是 session-restore consumer 在销毁并重建 Pane 2 host 时漏传 `menuFrameWindow` 和共享 coordinator；不是协调器的菜单交接失败。修正重建路径后，Release 构建 0 警告/错误，`session-restore-private-desktop` watchdog 连续三轮退出码 0，日志：`20261027-033501-8d0242bc.stdout.log`、`20261027-033524-cf73daba.stdout.log`、`20261027-033542-fdd57431.stdout.log`；另一次首次失败诊断为 `20261027-033410-53e04d8b.stdout.log`。
 
 三轮中四个 Pane 的 `SetMenuSB` 均返回 `S_OK`，共享 top-level frame 均安装对应 pane 的合成菜单；pane 逐个激活时的旧菜单移除不会清掉新 owner 的菜单。四窗格 Details、排序、分组命令各自作用于目标 pane，view-state 多进程恢复、复制/重命名/删除与同/异目录 Shell 通知检查均通过。probe 明确报告 `foreground-unchanged=True`。这是真实默认 filesystem `IShellView` 在 Private Desktop 的原生激活/菜单合并证据；仍未显示或点击菜单，也未验证 WPF/产品宿主、物理键盘输入、扩展菜单和 OLE 拖放，因此不能据此迁移或发布产品宿主。
+
+### 2026-10-27 四窗格最后一个 view 停用后恢复 frame 菜单
+
+在四窗格菜单循环末尾对最后一个 view 调用 `UIActivate(SVUIA_DEACTIVATE)`，新增断言要求 Shell 增加 `RemoveMenusSB` 回调、顶层 frame 菜单恢复到 coordinator 创建时的原始菜单。NativeProbe Release 构建 0 警告/错误；`session-restore-private-desktop` watchdog 退出码 0，日志 `20261027-033747-45b38d47.stdout.log`。轨迹显示最后 pane 的 `SetMenuSB(menu=0)` 与 `RemoveMenusSB` 均返回 `S_OK`，`GetMenu(frame)` 从活动菜单变回 0；前台 HWND 未变化。完整四窗格会话、命令、文件操作及目录通知样本也通过。
+
+该检查补齐了原型的活动菜单卸载路径，但仍不显示或点击菜单，也不验证 WPF/ExplorerBrowser 产品宿主。Shell 拖放仍未通过 `DoDragDrop`：微软 [GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) 与 [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos) 文档要求调用线程位于 input desktop；Private Desktop 不是活动 input desktop，不能用它来定位拖动光标。没有切换用户桌面或注入输入；真实拖放仍需独占且获授权的可接收输入会话。

@@ -267,7 +267,8 @@ internal static class ShellViewColorSpike
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         var menuRouting = VerifyFourPaneMenuActivation(
-            new[] { restoredView, view, pane3.View, pane4.View }, allHosts, containerParent);
+            new[] { restoredView, view, pane3.View, pane4.View }, allHosts, containerParent,
+            menuCoordinator);
         var menuCommands = VerifyFourPaneMenuCommandRouting(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
         var rootFolderViews = allViews.Take(3).ToArray();
@@ -286,7 +287,8 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
-        IReadOnlyList<ShellViewColorBrowserHost> hosts, nint menuFrameWindow)
+        IReadOnlyList<ShellViewColorBrowserHost> hosts, nint menuFrameWindow,
+        ShellMenuFrameCoordinator menuCoordinator)
     {
         if (views.Count != 4 || hosts.Count != 4)
             throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
@@ -319,11 +321,17 @@ internal static class ShellViewColorSpike
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
+        var finalHost = hosts[^1];
+        var finalRemoveCount = finalHost.RemoveMenusCallCount;
+        Check(At<ActivateView>(views[^1], 7)(views[^1], 0)); // SVUIA_DEACTIVATE.
+        Pump(250);
+        if (finalHost.RemoveMenusCallCount <= finalRemoveCount || GetMenu(menuFrameWindow) != menuCoordinator.BaseMenu)
+            throw new InvalidOperationException($"Deactivating the last Shell pane did not remove the active shared menu and restore the frame menu: remove={finalHost.RemoveMenusCallCount - finalRemoveCount}; expected=0x{menuCoordinator.BaseMenu:X}; actual=0x{GetMenu(menuFrameWindow):X}; trace=[{string.Join(';', finalHost.MenuTrace)}].");
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
         return $"per-pane-insert-set={string.Join(',', activations)}; " +
             $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
-            "foreground-unchanged=True";
+            "frame-menu-restored-after-deactivate=True; foreground-unchanged=True";
     }
 
     private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,

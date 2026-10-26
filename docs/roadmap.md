@@ -3,7 +3,8 @@
 ## 2026-10-27：隔离 IShellView 菜单 frame 分离候选
 
 - 按用户授权继续隔离迁移原型。已将每 pane 的 `IShellBrowser.GetWindow` 与 OLE 菜单 frame HWND 分开，并给四个 native view 接入共享菜单协调器；探针新增真实激活后的窗口层级、HRESULT 和顶层菜单断言。
-- 隐藏 HWND/OLE vtable smoke 验证两 pane 菜单交接、无效 HMENU 拒绝、旧 owner 延迟移除/释放保护、frame 菜单恢复；四窗格 Private Desktop watchdog 随后连续三轮验证真实 `UIActivate` 菜单合并成功、每 pane 的 Shell 查看/排序/分组命令路由，以及会话恢复、文件操作和目录通知，主桌面 foreground 未变。NativeProbe Release 构建 0 警告/错误，两个定向 smoke 均通过。该证据不覆盖可见菜单点击、物理输入、WPF/产品宿主、第三方扩展菜单或 OLE 拖放。产品仍使用 ExplorerBrowser，未发布；下一步继续验证拖放/焦点和剩余宿主契约，再依据完整门槛评估产品迁移。
+- 隐藏 HWND/OLE vtable smoke 验证两 pane 菜单交接、无效 HMENU 拒绝、旧 owner 延迟移除/释放保护、frame 菜单恢复；四窗格 Private Desktop watchdog 连续三轮验证真实 `UIActivate` 菜单合并和每 pane 的查看/排序/分组命令路由，以及会话恢复、文件操作和目录通知，主桌面 foreground 未变。新增真实 `SVUIA_DEACTIVATE` 检查也通过：最后一个 pane 退出时 Shell 回调卸载 OLE 菜单并恢复 frame 原菜单。NativeProbe Release 构建 0 警告/错误，定向 smoke 均通过。该证据不覆盖可见菜单点击、物理输入、WPF/产品宿主、第三方扩展菜单或 OLE 拖放。产品仍使用 ExplorerBrowser，未发布。
+- 真实 OLE `DoDragDrop` 尚未运行。Private Desktop 中 `GetCursorPos` 失败；微软文档要求调用 `SetCursorPos` 时 input desktop 必须是当前桌面，因此不能在这个非活动 Private Desktop 中把目标窗口放到指针下，也不能为此切换到用户共享的 input desktop。继续其它无交互宿主契约与焦点验证；真实拖放留待独占且授权的可接收输入会话。[GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) · [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos)
 
 ## 2026-10-27：多窗格重命名期间阻止窗口级快捷键和 Shell 状态查询
 
