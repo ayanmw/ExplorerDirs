@@ -98,7 +98,7 @@ temp.73 的 Release `SettingsSmoke`、App Release 构建通过，包内版本与
 
 ## 预览发布版
 
-最新已有预览包为 [temp.64](releases/preview-0.6.0-temp.64/app/ExplorerDirs.App.exe)。文件区可见刷新、焦点/选区保持、右键目标、目录树、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
+最新已有预览包为 [temp.73](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.73/app/ExplorerDirs.App.exe)，使用独立 profile。它包含菜单、文件操作、查看方式、导航、`.qdr` 导入/导出和目录树图标绑定等近期源码；预览包未启动，图标可见绘制、文件操作焦点恢复、右键目标、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
 
 ## 开发调试
 
