@@ -6,7 +6,7 @@
 
 **Architecture:** A WPF thread message filter retargets only vertical `WM_MOUSEWHEEL` messages when the preference is enabled and the pointed HWND belongs to a visible Explorer Dirs Shell view/tree. It updates the logical active pane for per-pane views, leaves Ctrl+wheel untouched, and does not take keyboard focus. A dedicated portable INI stores the preference; the default is off.
 
-**Tech Stack:** .NET 8 WPF, `ComponentDispatcher.ThreadFilterMessage`, native HWND hit testing, SettingsSmoke.
+**Tech Stack:** .NET 10 Windows Desktop WPF, `ComponentDispatcher.ThreadFilterMessage`, native HWND hit testing, SettingsSmoke.
 
 **Spec:** `docs/shell-parity.md` Q-Dir mouse-wheel-focus parity, grounded in [Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR).
 
@@ -52,7 +52,7 @@
 - Modify: `src/ExplorerDirs.App/ShellTreeHost.cs`
 - Modify: `src/ExplorerDirs.SettingsSmoke/MouseWheelFocusSmoke.cs`
 
-**Interfaces:** `PaneControl.TryGetWheelTarget(nint hwnd)` confirms the HWND belongs to its current file view or visible per-pane tree. `ExplorerBrowserHost.ContainsNativeWindow(nint hwnd)` and `ShellTreeHost.ContainsNativeWindow(nint hwnd)` use native parent/child identity. MainWindow's thread filter updates `MSG.hwnd` only after router approval and calls `SetActivePane` only for a matching per-pane target.
+**Interfaces:** `PaneControl.ContainsMouseWheelShellTarget(nint hwnd)` confirms the HWND belongs to its current file view or visible per-pane tree. `ExplorerBrowserHost.ContainsNativeWindow(nint hwnd)` and `ShellTreeHost.ContainsNativeWindow(nint hwnd)` use native parent/child identity. MainWindow's thread filter updates `MSG.hwnd` only after router approval and calls `SetActivePane` only for a matching per-pane target.
 
 - [x] Write settings smoke for default-off INI load/save and the router decision cases; cross-window HWND ownership remains untested.
 - [x] Run the preference smoke before wiring and confirm it fails because the setting store is not yet connected.
