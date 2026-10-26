@@ -354,18 +354,8 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
         try
         {
             var path = Marshal.PtrToStringUni(parsingName);
-            if (string.IsNullOrWhiteSpace(path)) return unchecked((int)0x80004001);
-            const uint systemImageIndex = 0x00004000;
-            const uint smallIcon = 0x00000001;
-            const uint openIcon = 0x00000002;
-            var size = (uint)Marshal.SizeOf<ShellFileInfo>();
-            if (SHGetFileInfo(path, 0, out var closedInfo, size, systemImageIndex | smallIcon) == 0 || closedInfo.Index < 0)
+            if (!ShellTreeIconIndexResolver.TryResolve(path ?? string.Empty, out normal, out open))
                 return unchecked((int)0x80004001);
-            normal = closedInfo.Index;
-            if (SHGetFileInfo(path, 0, out var openInfo, size, systemImageIndex | smallIcon | openIcon) != 0 && openInfo.Index >= 0)
-                open = openInfo.Index;
-            else
-                open = normal;
             return 0;
         }
         catch { return unchecked((int)0x80004001); }
@@ -380,17 +370,6 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * nint.Size));
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDisplayNameNative(nint self, uint kind, out nint value);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern nint SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint infoSize, uint flags);
-}
-
-[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-internal struct ShellFileInfo
-{
-    public nint Icon;
-    public int Index;
-    public uint Attributes;
-    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string DisplayName;
-    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string TypeName;
 }
 
 [ComVisible(true), Guid("93D77985-B3D8-4484-8318-672CDDA002CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

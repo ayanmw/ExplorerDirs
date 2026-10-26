@@ -17,6 +17,7 @@
 - 用户提供的 `Preview 0.6.0` 截图中，左侧目录树名称前仍有图标栏空白。窗口版本与 temp.66 相符，且该包 EXE SHA-256 `EACFCAD4...A70CDE` 与发布清单匹配；检查其构建提交 `aaa7b6a` 确认回调返回 `E_NOTIMPL`，因此截图复现的是 temp.66 的实际缺陷。
 - 复核发现当前系统的 `NamespaceTreeControl` 并未按预期从 `OnGetDefaultIconIndex = E_NOTIMPL` 回退显示图标；该注释及仅检查源码字符串的 smoke 不能证明图标显示。源码现改为对每个 `IShellItem` 读取绝对 Shell 解析名，并用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)` 显式返回 Windows 系统图像列表中的关闭/展开索引，解析失败时才回退 `E_NOTIMPL`。
 - 完整 Release `SettingsSmoke` 与 App Release 构建通过；源码实现已在当前分支，但尚未发布在用户截图对应的 temp.66 中。新预览用于验证这版修复；仍需可见验收普通目录和虚拟 Shell 节点图标，命令行 smoke 与打包成功不能代替实际绘制确认。
+- 后续将索引解析提取到生产与 smoke 共用的 `ShellTreeIconIndexResolver`；Release `SettingsSmoke` 现在会直接调用 `SHGetFileInfo` 检查真实临时文件夹的普通/展开索引均有效（本机返回 `3/3`），而不是只搜索源码。完整 SettingsSmoke 与 App Release build（0 警告、0 错误）通过；这只证明索引解析，不证明 `NamespaceTreeControl` 绘制，temp.67 仍待可见验收。
 
 ## 2026-10-26：目录树跟随文件列表选区
 

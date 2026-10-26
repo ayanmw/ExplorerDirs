@@ -19,6 +19,7 @@
     <Compile Include="../ExplorerDirs.App/FileViewShortcutDispatch.cs" Link="FileViewShortcutDispatch.cs" />
     <Compile Include="../ExplorerDirs.App/AddressTreeShortcutState.cs" Link="AddressTreeShortcutState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeFolderLocation.cs" Link="ShellTreeFolderLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeIconIndexResolver.cs" Link="ShellTreeIconIndexResolver.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathHistory.cs" Link="AddressPathHistory.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
