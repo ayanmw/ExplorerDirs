@@ -103,6 +103,8 @@ public partial class MainWindow : Window
         SearchCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Search));
         PrintFileViewToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Print));
         FolderSizeToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.FolderSize));
+        PreviewPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent(ExplorerChromeIcon.Preview, "预览");
+        DetailsPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent(ExplorerChromeIcon.Details, "详情");
         RefreshEnvironmentToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Environment));
         OpenTerminalToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Terminal));
         if (_themeController is not null)

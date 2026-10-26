@@ -8,7 +8,7 @@ internal static class ExplorerChromeIconSmoke
     internal static void Run()
     {
         var geometries = ExplorerChromeIcons.All;
-        Check(geometries.Count == 25,
+        Check(geometries.Count == 27,
             "navigation, tab, and file command controls have dedicated vector geometries");
         Check(geometries.All(geometry => !geometry.IsEmpty() &&
               geometry.Bounds.X >= 0 && geometry.Bounds.Y >= 0 &&
@@ -61,6 +61,11 @@ internal static class ExplorerChromeIconSmoke
               paneMarkup.Contains("AutomationProperties.Name=\"前进\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"上级目录\"", StringComparison.Ordinal),
             "pane navigation icons preserve their original handlers and explicit accessible names");
+        Check(paneCode.Contains("NewTabButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              paneCode.Contains("CloseTabButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              paneMarkup.Contains("AutomationProperties.Name=\"新建标签页\"", StringComparison.Ordinal) &&
+              paneMarkup.Contains("AutomationProperties.Name=\"关闭标签页\"", StringComparison.Ordinal),
+            "pane tab controls use the shared vector icons and preserve accessible names");
         Check(mainCode.Contains("NewTabToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               mainCode.Contains("NewWindowToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               mainCode.Contains("DuplicateTabToolbarButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
@@ -86,6 +91,11 @@ internal static class ExplorerChromeIconSmoke
               mainMarkup.Contains("Click=\"RefreshEnvironment_Click\"", StringComparison.Ordinal) &&
               mainMarkup.Contains("Click=\"OpenTerminal_Click\"", StringComparison.Ordinal),
             "print, folder size, environment, and terminal buttons keep their original handlers");
+        Check(mainCode.Contains("PreviewPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent", StringComparison.Ordinal) &&
+              mainCode.Contains("DetailsPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"PreviewPaneToggle_Click\"", StringComparison.Ordinal) &&
+              mainMarkup.Contains("Click=\"DetailsPaneToggle_Click\"", StringComparison.Ordinal),
+            "preview and details toggles use labeled vector icons without changing their commands");
 
         Console.WriteLine("Explorer chrome icon smoke: PASS");
 

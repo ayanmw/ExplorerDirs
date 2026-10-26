@@ -31,7 +31,9 @@ internal enum ExplorerChromeIcon
     Properties,
     Undo,
     Redo,
-    NewFolder
+    NewFolder,
+    Preview,
+    Details
 }
 
 internal static class ExplorerChromeIcons
@@ -62,7 +64,9 @@ internal static class ExplorerChromeIcons
         Geometry.Parse("M2,2 H10 L14,6 V14 H2 Z M10,2 V6 H14 M8,8 V8.2 M8,10 V13"),
         Geometry.Parse("M4,5 C2,7 2,10 4,12 L7,14 M4,5 H1 V2 M4,5 L7,2 M6,8 H14"),
         Geometry.Parse("M12,5 C14,7 14,10 12,12 L9,14 M12,5 H15 V2 M12,5 L9,2 M10,8 H2"),
-        Geometry.Parse("M1,4 H6 L8,6 H15 V14 H1 Z M8,8 V13 M5.5,10.5 H10.5")
+        Geometry.Parse("M1,4 H6 L8,6 H15 V14 H1 Z M8,8 V13 M5.5,10.5 H10.5"),
+        Geometry.Parse("M1,2 H11 V14 H1 Z M13,3 H15 V13 H13 Z"),
+        Geometry.Parse("M2,2 H14 V14 H2 Z M5,5 H7 M9,5 H12 M5,8 H7 M9,8 H12 M5,11 H7 M9,11 H12")
     });
 
     internal static Geometry For(ExplorerChromeIcon icon) => All[(int)icon];
@@ -120,6 +124,12 @@ internal static class ExplorerChromeIcons
     internal static Path CreateMenuIcon(ShellFileCommand command) => CreatePath(ForCommand(command));
 
     internal static StackPanel CreateLabeledButtonContent(ShellFileCommand command, string label)
+        => CreateLabeledButtonContent(ForCommand(command), label);
+
+    internal static StackPanel CreateLabeledButtonContent(ExplorerChromeIcon icon, string label)
+        => CreateLabeledButtonContent(For(icon), label);
+
+    private static StackPanel CreateLabeledButtonContent(Geometry geometry, string label)
     {
         var content = new StackPanel
         {
@@ -127,9 +137,9 @@ internal static class ExplorerChromeIcons
             VerticalAlignment = VerticalAlignment.Center,
             IsHitTestVisible = false
         };
-        var icon = CreatePath(ForCommand(command), 14, 1.25);
-        icon.Margin = new Thickness(0, 0, 4, 0);
-        content.Children.Add(icon);
+        var path = CreatePath(geometry, 14, 1.25);
+        path.Margin = new Thickness(0, 0, 4, 0);
+        content.Children.Add(path);
         content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
         return content;
     }

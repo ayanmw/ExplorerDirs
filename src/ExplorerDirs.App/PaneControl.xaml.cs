@@ -104,6 +104,8 @@ public partial class PaneControl : UserControl
         UpButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Up), 14);
         RefreshButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh), 14);
         TreeButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Tree));
+        NewTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab), 14);
+        CloseTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close), 14);
         ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         AddressMenuButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.AddressDropDown), 12);
