@@ -8,12 +8,9 @@ internal static class NativeShellTreeIconFallbackSmoke
     {
         var repoRoot = FindRepoRoot();
         var source = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "NativeShellTree.cs"));
-        var probe = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.NativeProbe", "StandaloneTreeProbe.cs"));
-        Check(UsesDefaultIconFallback(source),
-            "product namespace-tree icon lookup returns E_NOTIMPL so Shell uses its default icon");
-        Check(UsesDefaultIconFallback(probe),
-            "standalone tree probe uses the same default icon fallback as the product");
-        Console.WriteLine("Native Shell tree icon fallback smoke: PASS");
+        Check(UsesSystemShellIcons(source),
+            "product namespace-tree callback supplies normal/open Windows system image-list indices");
+        Console.WriteLine("Native Shell tree icon smoke: PASS");
 
         static string FindRepoRoot()
         {
@@ -32,7 +29,10 @@ internal static class NativeShellTreeIconFallbackSmoke
             if (!condition) throw new InvalidOperationException(message);
         }
 
-        static bool UsesDefaultIconFallback(string source) =>
-            source.Contains("OnGetDefaultIconIndex(nint item, out int normal, out int open)\n    {\n        normal = open = -1;\n        return unchecked((int)0x80004001);", StringComparison.Ordinal);
+        static bool UsesSystemShellIcons(string source) =>
+            source.Contains("SHGetFileInfo", StringComparison.Ordinal) &&
+            source.Contains("OnGetDefaultIconIndex(nint item, out int normal, out int open)", StringComparison.Ordinal) &&
+            source.Contains("systemImageIndex | smallIcon", StringComparison.Ordinal) &&
+            source.Contains("return 0;", StringComparison.Ordinal);
     }
 }
