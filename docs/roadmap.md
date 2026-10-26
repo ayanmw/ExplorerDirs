@@ -2971,5 +2971,6 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-26：Shift+方向键隔离探针边界
 
 - 为隔离 `IShellView` `TranslateAccelerator` 探针临时添加 Shift+Down 选区尝试。第一次 Private Desktop 运行中，Ctrl+A 正常、方向键焦点移动正常，单次 Shift+Down 返回 `S_OK` 但没有扩大选区；调整为“一个已选且聚焦的锚点”后，第二次运行反而在 Shift+Down 前 Ctrl+A 未选中任何项目。两轮父窗口均隐藏、前台未变，探针进程退出后清理 Private Desktop。
-- 结果无法区分 modifier 状态、单次 accelerator 调用与 Shell 消息泵/焦点状态的影响，不是产品缺陷结论。已撤回该误报式断言；当前现有 Ctrl+A/方向键探针继续通过但有重复性波动。要验证 Shift 范围选择，下一步需要完整键盘消息循环的隔离夹具；不能用单次 `TranslateAccelerator` 结果改变产品键盘路由或宣称 GUI 行为已验收。
-- 日志：`src/.state/native-probe-watchdog/20261026-171141-bec0d947.stdout.log`、`src/.state/native-probe-watchdog/20261026-171158-7fb9d5c1.stdout.log`。这两次失败样本只用于界定探针，不计为 Shell parity 通过或产品失败。
+- 第三次运行先单独确认一项已选锚点，再调用带线程 Shift 键态的 `TranslateAccelerator`。Ctrl+A 与普通 Down 本轮通过；Shift+Down 返回 `S_OK` 并把焦点从第 0 项移到第 1 项，但选中数保持 `1/2`。这说明“仅有已选锚点”仍不足以令直接调用扩展范围；探针仍没有走真实键盘输入及 ExplorerBrowser/WPF 的消息泵派发。
+- 这些结果无法区分异步键态、完整消息派发与 Shell 内部焦点/锚点状态，不是产品缺陷结论。试验断言已撤回；现有 Ctrl+A/方向键探针不再因本轮假设而改写。下一步需在不切换当前用户桌面的条件下建立能观察完整键盘消息派发的隔离验证；若无法保持该边界，应留待明确的可见桌面验收。不能用单次 `TranslateAccelerator` 结果改变产品键盘路由或宣称 GUI 行为已验收。
+- 日志：`src/.state/native-probe-watchdog/20261026-171141-bec0d947.stdout.log`、`src/.state/native-probe-watchdog/20261026-171158-7fb9d5c1.stdout.log`、`src/.state/native-probe-watchdog/20261026-171519-680f9dd8.stdout.log`。这些样本只用于界定探针，不计为 Shell parity 通过或产品失败。
