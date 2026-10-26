@@ -857,3 +857,7 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 扩展 `--ishellview-menu-activation-private-desktop`：在真实默认 filesystem `IShellView` 完成 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 后读取宿主共享 `HMENU` 的根级菜单组及其子项。Private Desktop watchdog 退出码 0，NativeProbe Release build 0 警告/错误，主桌面 foreground HWND 保持 `0x81852`。探针确认 File/Edit/View/Help 四个子菜单已包含 Shell 项目；当前中文 Windows 样本分别读到 4/10/18/1 项，Edit 含剪切、复制、粘贴、全选及快捷键，View 含八种查看方式及排列/排序/分组/列选择命令。探针以菜单组非空作为通过条件，不依赖本地化标题与具体子项数量。
 
 这补足了此前只有 `InsertMenusSB`/`SetMenuSB` 回调次数及共享句柄的证据：激活后的共享菜单对象中确实有 Shell 填充的标准命令。仍未追踪显示菜单、真实点击、应用自定义菜单插入位置、命令分派、键盘快捷键优先级或 WPF 活动 pane；因此不能证明应用当前菜单体验已合并，也不验证 ExplorerBrowser 产品菜单。产品代码、配置、release 与用户桌面未改动。
+
+继续验证 View→Details 菜单命令分派：探针从激活后的 View 子菜单按本地化标题定位 Details 项并读取其运行时命令 ID（本机样本 `0x704B`），将 view 设为 Small Icons 作为基线。对宿主父 HWND 发送 `WM_COMMAND` 后模式仍为 `2`；重置基线后，将相同消息发送到目标 `IShellView` window，模式变为 Details `4`。断言覆盖父窗口无变化及目标 view 的模式变化，Release build 0 警告/错误，Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台句柄保持 `0x81852`。
+
+这说明原型中 Shell 菜单项自身的命令 ID 可由目标 view window 处理，也提示应用宿主需要把活动 view 的 Shell 命令送到正确窗口。实验使用合成 `WM_COMMAND`，没有真实跟踪菜单或鼠标选项；父窗口是探针的 `STATIC` host，不代表 WPF window 的默认/自定义窗口过程。仍需在真实 OLE 菜单循环和多 pane 活动目标下验证，不能直接当作产品路由实现已经确定。

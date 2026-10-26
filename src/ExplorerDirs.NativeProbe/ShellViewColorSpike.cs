@@ -986,6 +986,40 @@ internal static class ShellViewColorSpike
                     sharedMenuItems.Where((_, index) => index is 0 or 1 or 2 or 5)
                         .Any(submenu => submenu == 0 || GetMenuItemCount(submenu) == 0))
                     throw new Exception("Shell UI activation did not populate the shared File/Edit/View/Help menu groups.");
+                var menuView = Marshal.QueryInterface(view, in FolderView2Id, out var menuFolderView);
+                Check(menuView);
+                try
+                {
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 1, 16)); // FVM_ICON
+                    var detailsIndex = Enumerable.Range(0, GetMenuItemCount(sharedMenuItems[2]))
+                        .FirstOrDefault(index =>
+                        {
+                            var text = new System.Text.StringBuilder(128);
+                            _ = GetMenuStringW(sharedMenuItems[2], (uint)index, text, text.Capacity, 0x400);
+                            return text.ToString().Contains("详细信息", StringComparison.OrdinalIgnoreCase) ||
+                                text.ToString().Contains("Details", StringComparison.OrdinalIgnoreCase);
+                        }, -1);
+                    if (detailsIndex < 0) throw new Exception("The native Shell View menu has no Details command.");
+                    var detailsCommandId = GetMenuItemID(sharedMenuItems[2], detailsIndex);
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 2, 16)); // FVM_SMALLICON baseline.
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var parentStart, out _));
+                    var parentDispatch = SendMessageW(parent, 0x0111, (nint)detailsCommandId, 0); // WM_COMMAND
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var modeAfterParent, out _));
+                    if (modeAfterParent != parentStart)
+                        throw new Exception($"The parent window unexpectedly changed Shell view mode while routing a menu command: {parentStart}->{modeAfterParent}.");
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 2, 16)); // Reset before view routing.
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var viewStart, out _));
+                    var viewDispatch = SendMessageW(viewWindow, 0x0111, (nint)detailsCommandId, 0);
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var modeAfterView, out _));
+                    if (viewStart != 2 || modeAfterView != 4)
+                        throw new Exception($"The Shell View menu command did not change only the target IShellView to Details: {viewStart}->{modeAfterView}.");
+                    Console.WriteLine($"ishellview-menu-command-routing: id=0x{detailsCommandId:X}; parent-start={parentStart}; parent-result=0x{parentDispatch.ToInt64():X}; parent-mode={modeAfterParent}; view-start={viewStart}; view-result=0x{viewDispatch.ToInt64():X}; view-mode={modeAfterView}");
+                }
+                finally { Marshal.Release(menuFolderView); }
                 Console.WriteLine($"ishellview-menu-activation: insert={host.InsertMenusCallCount}; " +
                     $"set={host.SetMenuCallCount}; remove={host.RemoveMenusCallCount}; " +
                     $"shared-menu-present={sharedMenu != 0}; active-view={view != 0}; " +
@@ -2901,6 +2935,7 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
+    [DllImport("user32.dll")] private static extern uint GetMenuItemID(nint menu, int position);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int maxLength, uint flags);
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);

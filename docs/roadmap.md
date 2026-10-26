@@ -3449,3 +3449,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在实际 Shell `UIActivate` 后读取共享 `HMENU`，探针确认 Shell 已向 File/Edit/View/Help 子菜单填充标准命令。当前中文系统样本读取到 4/10/18/1 个项目，包括剪切、复制、粘贴、全选、查看方式、排序、分组与列选择；通过条件只要求这些组非空，避免依赖系统语言或固定项目数。
 - Release NativeProbe 构建 0 警告/错误；Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台 HWND 未变。
 - 这是共享菜单结构和 Shell 命令填充的证据；尚未显示/点击菜单、插入应用自定义菜单项、验证命令分派或 WPF 活动 pane。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-激活后的-shell-原生菜单组内容读取)。
+
+## 2026-10-27：Shell 主菜单命令目标窗口探针
+
+- 从原生 View 菜单定位 Details 项并使用当前实际 ID；在 Small Icons 基线上，将 `WM_COMMAND` 发给宿主父窗口不改变模式，发给对应 `IShellView` window 后目标 view 切到 Details。探针对两条路由分别复位基线并断言结果。
+- NativeProbe Release build 0 警告/错误；Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台窗口未变。
+- 这指向后续宿主必须把 Shell 命令路由到当前活动 view，但仍是合成消息，不是菜单实际点击或 WPF 消息路由验证。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-激活后的-shell-原生菜单组内容读取)。
