@@ -93,6 +93,7 @@ public static class ShellViewColorBrowserHostSmoke
             VerifyQueryInterface<IComDialogBrowser>(browser);
             VerifyQueryInterface<IComDialogBrowser2>(browser);
             VerifyQueryInterface<IComDialogBrowser3>(browser);
+            VerifyQueryServiceCallbacks(host);
             var cdb3Id = typeof(IComDialogBrowser3).GUID;
             var cdb3Hr = Marshal.QueryInterface(browser, in cdb3Id, out var cdb3);
             if (cdb3Hr < 0 || cdb3 == 0)
@@ -203,6 +204,25 @@ public static class ShellViewColorBrowserHostSmoke
         return Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(vtable, slot * nint.Size));
     }
 
+    private static void VerifyQueryServiceCallbacks(ShellViewColorBrowserHost host)
+    {
+        var provider = Marshal.GetComInterfaceForObject(host, typeof(IShellServiceProvider));
+        try
+        {
+            var queryService = GetComMethod<QueryServiceCallback>(provider, 3);
+            var serviceId = ShellBrowserSite.BrowserFrameServiceId;
+            var cdb2Id = typeof(IComDialogBrowser2).GUID;
+            var cdb3Id = typeof(IComDialogBrowser3).GUID;
+            var cdb2Hr = queryService(provider, ref serviceId, ref cdb2Id, out var cdb2);
+            var cdb3Hr = queryService(provider, ref serviceId, ref cdb3Id, out var cdb3);
+            Check(cdb2Hr == 0 && cdb2 != 0 && cdb3Hr == 0 && cdb3 != 0,
+                "SID_SShellBrowser QueryService exposes the color host CDB2/CDB3 callbacks");
+            if (cdb2 != 0) Marshal.Release(cdb2);
+            if (cdb3 != 0) Marshal.Release(cdb3);
+        }
+        finally { Marshal.Release(provider); }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowserViewCallback(nint self, nint shellView);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -281,6 +301,8 @@ public static class ShellViewColorBrowserHostSmoke
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowseObjectCallback(nint self, nint pidl, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int QueryServiceCallback(nint self, ref Guid service, ref Guid iid, out nint result);
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

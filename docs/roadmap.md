@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-26：补齐隔离颜色宿主的 CDB 服务查询路由
+
+- 隔离 `StreamViewHost.QueryService` 在没有外部 `BrowserSite` 时，原先无法以 `SID_SShellBrowser` 返回 host 自己实现的 CDB2/CDB3；直接 `QueryInterface` smoke 没覆盖 Shell 常用服务入口。
+- 增加回归先确认服务查询失败，再让独立原型通过请求 IID 查询自身；`--shell-view-color-policy-smoke` 全部通过。此项只验证托管 COM 服务路由，没有创建 `IShellView`，不证明 DefView 实际查询时序或产品迁移条件已满足。
+- 下一步仍是补齐通用导航/宿主状态并在独立 Windows 会话验证 Shell 实际调用；产品继续使用 ExplorerBrowser。
+
 ## 2026-10-26：对齐 Q-Dir 的标签栏显示选项
 
 - Q-Dir FAQ 101 确认可设为始终显示标签栏，或至少有两个标签时显示。项目现于“视图 → 标签栏显示”提供两种模式，默认保持既有始终显示行为，配置独立保存于便携 `TabStripVisibility.ini`。

@@ -236,8 +236,18 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     public int QueryService(ref Guid service, ref Guid iid, out nint pointer)
     {
         pointer = 0;
-        if (BrowserSite is not null && service == ShellBrowserSite.BrowserFrameServiceId)
-            return BrowserSite.QueryService(ref service, ref iid, out pointer);
+        if (service == ShellBrowserSite.BrowserFrameServiceId)
+        {
+            if (BrowserSite is not null)
+                return BrowserSite.QueryService(ref service, ref iid, out pointer);
+
+            // Standalone IShellView hosts expose their own CDB callbacks through
+            // SID_SShellBrowser, as DefView asks IServiceProvider rather than
+            // relying on QueryInterface against the IShellBrowser pointer.
+            var unknown = Marshal.GetIUnknownForObject(this);
+            try { return Marshal.QueryInterface(unknown, in iid, out pointer); }
+            finally { Marshal.Release(unknown); }
+        }
         var browserId = typeof(IStreamProbeBrowser).GUID;
         if (iid == browserId && (service == browserId ||
             service == new Guid("4c96be40-915c-11cf-99d3-00aa004ae837")))

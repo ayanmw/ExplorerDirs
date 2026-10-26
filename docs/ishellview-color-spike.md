@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：通过 SID_SShellBrowser 暴露 CDB2/CDB3 服务
+
+颜色宿主先前只在直接 `QueryInterface` 时能取得自身的 `ICommDlgBrowser2/3`，而 `StreamViewHost.QueryService` 在未配置独立 `BrowserSite` 时对 `SID_SShellBrowser` 返回 `E_NOINTERFACE`。现为该独立原型增加服务查询回退：若没有外部 site，则按请求 IID 对 host 自身执行 `QueryInterface`；已有 `BrowserSite` 时仍优先委托给它。
+
+Smoke 先通过实际 `IServiceProvider` CCW vtable 槽调用 `QueryService`，并按 `SID_SShellBrowser` 请求 CDB2/CDB3；修复前两次查询均未取得接口，修复后均成功。完整 `--shell-view-color-policy-smoke` 通过，包括既有 CDB2/CDB3 全槽回调、筛选及 provider 失败开放用例。该验证没有创建 `IShellView`，仅证明托管服务路由/COM 身份可用，不证明 DefView 实际通过此路径查询或调用的时序，也不证明产品 ExplorerBrowser 已可迁移。
+
 ## 2026-10-26：让同一探针宿主读回 Shell 写入的视图流
 
 `StreamViewHost.GetViewStateStream` 之前每次读取都返回固定的初始字节；即使 Shell 已写入新视图状态，后续在同一宿主生命周期内创建 view 仍读不到它。现在首次读取使用传入的初始流，之后若存在 Shell 写入则从保存的内存 `IStream` 读取最近字节。构造时复制输入字节，避免两个标签/调用方共用同一数组后，外部修改污染每个 host 的初始回退状态。
@@ -464,7 +470,7 @@ Release 构建 0 警告/错误，纯策略 smoke 退出码 0；组件抽取后�
 |---|---|---|---|
 | Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、简单服务查询；菜单栏/工具栏框架回调多为 no-op | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 要实现菜单/状态/控制窗、快捷键转发和活动 view 生命周期，而非只创建 `IShellView` |
 | 导航和历史 | 基类 `BrowseObject` 返回 `E_NOTIMPL`；筛选探针子类仅为两个临时文件夹实现导航、父级及内存历史 | ExplorerBrowser navigation events、取消/过期门控、虚拟位置/搜索路由及每标签 Shell TravelLog | 完整目录/虚拟位置导航、失败恢复、Back/Forward/Parent 语义及并发状态门控 |
-| 筛选 | 颜色宿主现实现并以 smoke 验证 CDB/CDB2/CDB3 全部回调槽；CDB3 的 `IncludeObject` 覆盖匹配、排除及 provider 元数据失败开放。FilteredHost 仍仅覆盖临时目录导航/历史 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | CDB 接口槽已不再是缺口；仍需把过滤规则、原生回调线程语义和大目录枚举时序整合进通用宿主，并验证全目录/搜索行为 |
+| 筛选 | 颜色宿主现实现并以 smoke 验证 CDB/CDB2/CDB3 全部回调槽及 `SID_SShellBrowser` 的 QueryService 路由；CDB3 的 `IncludeObject` 覆盖匹配、排除及 provider 元数据失败开放。FilteredHost 仍仅覆盖临时目录导航/历史 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | CDB 托管接口与服务查询合同已有 smoke；仍需确认 DefView 实际查询/回调顺序，并将过滤规则、原生回调线程语义和大目录枚举时序整合进通用宿主，验证全目录/搜索行为 |
 | 选择与状态 | 颜色探针手工创建选择；多选恢复使用生产快照类，但没有产品窗口/标签协调器 | `ExplorerBrowserHost` 维护用户选择快照、焦点、命令可用状态、视图模式/排序/分组/列配置及延迟恢复 | 连接真实用户输入代际、标签持久化、焦点遍历、刷新恢复与错误路径 |
 | 文件更新 | 当前颜色探针临时接入产品 watcher/batch coordinator 做隔离操作验证 | 每个产品文件系统标签拥有目录 watcher、合并队列、Shell STA Refresh 与 fallback | 从临时 fixture 移植到每个新宿主实例，验证 burst、异常、溢出和跨路径切换 |
 | Pane/界面集成 | 独立 parent hwnd，无 WPF PaneControl、标签、四窗格或应用主题 | WPF 每窗格/每标签持有 ExplorerBrowser，负责视图附着/隐藏、原生 Pane、地址/搜索/标签和布局状态 | 完整容器、创建/销毁、重排、隐藏保留、每标签配置、状态栏和系统主题集成 |
