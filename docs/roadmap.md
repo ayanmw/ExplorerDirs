@@ -3369,3 +3369,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 顶部“视图”菜单新增默认关闭的“鼠标悬停滚轮”，保存在独立 `MouseWheelFocus.ini`。开启后，普通垂直滚轮消息定向到指针所在的可见 Shell 文件视图或目录树；对逐窗格目标更新逻辑活动窗格，不抢键盘焦点；Ctrl+滚轮继续使用原有查看方式循环路径。
 - 完整 Release `SettingsSmoke`、定向 `--mouse-wheel-focus-smoke`、App Release 构建通过；本批已提交 `3ad1101`。这证明配置、消息决策和代码接线可构建，不代表真实鼠标、焦点、四窗格菜单行为通过；这些仍需可见桌面验收。对标依据：[Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR)；复核 WPF 官方源码发现 `ComponentDispatcher` 目前只支持键盘消息，因此已改用仅绑定本 UI 线程的 `WH_GETMESSAGE` 钩子；只处理 `PM_REMOVE` 的竖向滚轮，并从消息自带的有符号屏幕坐标确定目标，不用全局钩子或合成第二条滚轮消息。实现依据：[WPF ComponentDispatcher 源码](https://github.com/dotnet/wpf/blob/main/src/Microsoft.DotNet.Wpf/src/WindowsBase/System/Windows/Interop/ComponentDispatcher.cs)、[Win32 SetWindowsHookEx](https://learn.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setwindowshookexw)、[WM_MOUSEWHEEL](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousewheel)。真实鼠标、滚动方向/精度及多窗格焦点仍待桌面验收。
+
+## 2026-10-27：Shell 文件命令过期请求前置取消
+
+- `ShellFileCommands.Invoke` 现在会在打开原生菜单前检查请求上下文；Shell 菜单构造或 `IsEnabled` 查询可能重入改变窗格、导航或选区，因此两处之后也会再次检查，取消整条过期命令。
+- 回归用例先在旧实现上失败，证明预先过期的请求仍会创建菜单；修正后覆盖预过期不打开菜单、菜单构造期间过期、命令状态查询期间过期，以及 New Folder 背景菜单路径。
+- Release `SettingsSmoke` 和 App Release 构建通过，0 警告/错误。仅完成状态逻辑与构建验证，没有调用真实 Shell 命令、启动 ExplorerBrowser 或可见 GUI；实际 COM 扩展重入行为仍待隔离验证。

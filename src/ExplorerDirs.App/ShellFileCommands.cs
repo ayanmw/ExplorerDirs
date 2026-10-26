@@ -80,9 +80,11 @@ internal static class ShellFileCommands
     internal static int? Invoke(ShellFileCommand command, Func<bool, IShellCommandMenu?> open,
         Func<bool>? stillCurrent = null)
     {
+        if (stillCurrent?.Invoke() == false) return null;
         var info = All.Single(info => info.Command == command);
         using var menu = open(info.Background);
-        return menu?.IsEnabled(info.Verb) == true && (stillCurrent?.Invoke() ?? true)
-            ? menu.Invoke(info.Verb) : null;
+        if (stillCurrent?.Invoke() == false || menu?.IsEnabled(info.Verb) != true ||
+            stillCurrent?.Invoke() == false) return null;
+        return menu.Invoke(info.Verb);
     }
 }

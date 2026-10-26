@@ -65,11 +65,16 @@ internal static class ShellFileCommandsSmoke
         Check(ShellFileCommands.Invoke(ShellFileCommand.Redo, _ => disabledRedo) is null &&
             disabledRedo.Invocations == 0 && disabledRedo.Disposed,
             "redo is not invoked when the current Shell background menu reports it disabled");
+        var staleRedoContext = true;
         var staleRedo = new FakeMenu(["redo"]);
         Check(ShellFileCommands.Invoke(ShellFileCommand.Redo,
-                background => background ? staleRedo : throw new Exception("Redo queried the selected-item menu."),
-                () => false) is null && staleRedo.Invocations == 0 && staleRedo.Disposed,
-            "a stale pane or navigation context cancels Redo before native invocation");
+                background =>
+                {
+                    if (!background) throw new Exception("Redo queried the selected-item menu.");
+                    staleRedoContext = false; // Native menu construction can reenter the host.
+                    return staleRedo;
+                }, () => staleRedoContext) is null && staleRedo.Invocations == 0 && staleRedo.Disposed,
+            "a pane or navigation change during Redo menu construction cancels invocation");
         Check(ShellFileCommands.Query(_ => null).Values.All(enabled => !enabled), "unavailable view disables commands");
         var contextCurrent = true;
         var queryMenus = new List<FakeMenu>();
@@ -112,12 +117,36 @@ internal static class ShellFileCommandsSmoke
         Check(stoppedDuringStateQuery.Values.All(enabled => !enabled) && !backgroundOpenedAfterStateQuery &&
             reentrantSelectionMenu.Disposed,
             "a stale context during native command-state lookup prevents later menus");
+        var invalidatedContextCurrent = true;
         var invalidated = new FakeMenu(["delete"]);
-        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => invalidated, () => false) is null &&
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ =>
+            {
+                invalidatedContextCurrent = false;
+                return invalidated;
+            }, () => invalidatedContextCurrent) is null &&
             invalidated.Invocations == 0 && invalidated.Disposed, "changed pane or selection cancels before invocation");
+        var staleRequestOpenedMenu = false;
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ =>
+            {
+                staleRequestOpenedMenu = true;
+                return new FakeMenu(["delete"]);
+            }, () => false) is null && !staleRequestOpenedMenu,
+            "a request already stale before invocation does not construct a native menu");
+        var staleDuringInvokeStateQuery = true;
+        var staleDuringInvokeStateMenu = new FakeMenu(["delete"])
+            { OnIsEnabled = () => staleDuringInvokeStateQuery = false };
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => staleDuringInvokeStateMenu,
+                () => staleDuringInvokeStateQuery) is null && staleDuringInvokeStateMenu.Invocations == 0 &&
+            staleDuringInvokeStateMenu.Disposed,
+            "a request invalidated during native command-state lookup is not invoked");
+        var newFolderContextCurrent = true;
         var newFolder = new FakeMenu(["NewFolder"]);
         Check(ShellFileCommands.Invoke(ShellFileCommand.NewFolder, background =>
-            background ? newFolder : throw new Exception("NewFolder queried the selection."), () => false) is null &&
+            {
+                if (!background) throw new Exception("NewFolder queried the selection.");
+                newFolderContextCurrent = false;
+                return newFolder;
+            }, () => newFolderContextCurrent) is null &&
             newFolder.Invocations == 0 && newFolder.Disposed, "new folder cancels after reentrant background menu preparation");
         var rejected = new FakeMenu(["delete"]) { Result = unchecked((int)0x80004005) };
         Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => rejected) < 0 && rejected.Disposed,
