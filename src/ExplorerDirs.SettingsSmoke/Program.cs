@@ -46,6 +46,16 @@ if (args.Length == 1 && args[0] == "--theme-palette-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--tab-strip-visibility-smoke")
+{
+    var smokeRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.TabStripSmoke.{Guid.NewGuid():N}");
+    Directory.CreateDirectory(smokeRoot);
+    try { ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(smokeRoot); }
+    finally { Directory.Delete(smokeRoot, recursive: true); }
+    Console.WriteLine("Tab strip visibility smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--active-pane-theme-smoke")
 {
     ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckActivePaneAccentWiring();
@@ -339,6 +349,7 @@ ExplorerDirs.SettingsSmoke.ProgramStarterCommandStateSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run();
 var root = Path.Combine(AppContext.BaseDirectory, "profile-smoke");
 Directory.CreateDirectory(root);
+ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(root);
 ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root);
 if (args.Length == 1 && args[0] == "--view-preset-store-smoke")
 {

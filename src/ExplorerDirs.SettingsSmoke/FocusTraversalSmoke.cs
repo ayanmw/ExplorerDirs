@@ -39,7 +39,7 @@ internal static class FocusTraversalSmoke
                 "F6 reverses every Shift+F6 transition across major pane regions");
         }
 
-        for (var options = 0; options < 256; options++)
+        for (var options = 0; options < 512; options++)
         {
             var hasSearch = (options & 1) != 0;
             var hasFilter = (options & 2) != 0;
@@ -49,11 +49,13 @@ internal static class FocusTraversalSmoke
             var hasAddressHistoryButton = (options & 32) != 0;
             var hasAddressMenuButton = (options & 64) != 0;
             var hasPaneViewStyleButton = (options & 128) != 0;
+            var hasTabHeader = (options & 256) != 0;
             var map = PaneFocusStopMap.Create(hasSearch, hasFilter, hasTree, hasColumnHeader,
                 paneTreeButtonVisible: hasTreeButton,
                 paneViewStyleButtonVisible: hasPaneViewStyleButton,
                 addressHistoryButtonVisible: hasAddressHistoryButton,
-                addressPathButtonVisible: hasAddressMenuButton);
+                addressPathButtonVisible: hasAddressMenuButton,
+                tabHeaderVisible: hasTabHeader);
             var expectedSearchCount = hasSearch ? 3 : 0;
             var expectedFilterCount = hasFilter ? 8 : 0;
             // The per-pane view-style button is keyboard-focusable in the actual toolbar;
@@ -65,9 +67,10 @@ internal static class FocusTraversalSmoke
             var expectedAddressMenu = hasAddressMenuButton ? expectedAddress + 1 : -1;
             var expectedAddressHistory = hasAddressHistoryButton ? expectedAddress + 1 + (hasAddressMenuButton ? 1 : 0) : -1;
             var expectedGo = expectedAddress + 1 + (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
-            var expectedTabHeader = expectedNavigationStops + expectedSearchCount + expectedFilterCount;
-            var expectedTree = expectedTabHeader + 1;
-            var expectedColumnHeader = expectedTree + (hasTree ? 1 : 0);
+            var nextAfterFilter = expectedNavigationStops + expectedSearchCount + expectedFilterCount;
+            var expectedTabHeader = hasTabHeader ? nextAfterFilter : -1;
+            var expectedTree = nextAfterFilter + (hasTabHeader ? 1 : 0);
+            var expectedColumnHeader = nextAfterFilter + (hasTabHeader ? 1 : 0) + (hasTree ? 1 : 0);
             var expectedFileView = expectedColumnHeader + (hasColumnHeader ? 1 : 0);
             Check(map.NavigationStopCount == expectedNavigationStops && map.TreeButton == (hasTreeButton ? 4 : -1) &&
                   map.PaneViewStyle == expectedPaneViewStyle &&
@@ -82,7 +85,7 @@ internal static class FocusTraversalSmoke
             var expectedStops = new List<int>(Enumerable.Range(0, expectedNavigationStops));
             if (hasSearch) expectedStops.AddRange([map.SearchStart, map.SearchStart + 1, map.SearchStart + 2]);
             if (hasFilter) expectedStops.AddRange(Enumerable.Range(map.FilterStart, 8));
-            expectedStops.Add(map.TabHeader);
+            if (hasTabHeader) expectedStops.Add(map.TabHeader);
             if (hasTree) expectedStops.Add(map.Tree);
             if (hasColumnHeader) expectedStops.Add(map.ColumnHeader);
             expectedStops.AddRange([map.FileView, map.StatusTools]);
@@ -92,7 +95,7 @@ internal static class FocusTraversalSmoke
             var expectedMajorStops = new List<int> { expectedAddress };
             if (hasSearch) expectedMajorStops.Add(expectedNavigationStops);
             if (hasFilter) expectedMajorStops.Add(expectedNavigationStops + expectedSearchCount);
-            expectedMajorStops.Add(expectedTabHeader);
+            if (hasTabHeader) expectedMajorStops.Add(expectedTabHeader);
             if (hasTree) expectedMajorStops.Add(expectedTree);
             if (hasColumnHeader) expectedMajorStops.Add(expectedColumnHeader);
             expectedMajorStops.AddRange([expectedFileView, expectedFileView + 1]);

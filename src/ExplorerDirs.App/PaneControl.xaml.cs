@@ -24,6 +24,7 @@ public partial class PaneControl : UserControl
     private string? _dragToken;
     private bool _addressEditing;
     private bool _classicAddressBar;
+    private bool _alwaysShowTabStrip = true;
     private bool _addressNavigationPending;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
@@ -73,6 +74,12 @@ public partial class PaneControl : UserControl
     {
         _autoExpandTreeSelection = enabled;
         _treeSelectionSyncRequestVersion++;
+    }
+
+    internal void SetAlwaysShowTabStrip(bool alwaysShow)
+    {
+        _alwaysShowTabStrip = alwaysShow;
+        UpdateTabStripVisibility();
     }
 
     internal void SetActivePaneVisual(bool isActive)
@@ -584,7 +591,8 @@ public partial class PaneControl : UserControl
         TreeButton.Visibility == Visibility.Visible,
         paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
         addressHistoryButtonVisible: true,
-        addressPathButtonVisible: true);
+        addressPathButtonVisible: true,
+        tabHeaderVisible: Tabs.Visibility == Visibility.Visible);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -622,7 +630,7 @@ public partial class PaneControl : UserControl
             for (var index = 0; index < filterControls.Length; index++)
                 if (filterControls[index].IsKeyboardFocusWithin) return focus.FilterStart + index;
         }
-        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
+        if (Tabs.Visibility == Visibility.Visible && Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
             return focus.TabHeader;
         if (ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
         if (CurrentTreeFocusTarget switch
@@ -1597,7 +1605,12 @@ public partial class PaneControl : UserControl
     {
         for (var index = 0; index < _tabOrder.Count; index++)
             TabHeaderPanel.SetOrder(_tabOrder[index], index);
+        UpdateTabStripVisibility();
     }
+
+    private void UpdateTabStripVisibility() =>
+        Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_alwaysShowTabStrip, Tabs.Items.Count)
+            ? Visibility.Visible : Visibility.Collapsed;
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

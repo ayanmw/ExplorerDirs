@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private ProgramStarterWindow? _programStarterWindow;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
+    private readonly TabStripVisibilityStore _tabStripVisibilityStore;
+    private bool _alwaysShowTabStrip;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -150,6 +152,9 @@ public partial class MainWindow : Window
         _uiPreferencesStore = new UiPreferencesStore(Path.Combine(
             _profileDirectory, "UiPreferences.ini"));
         _compactMode = _uiPreferencesStore.Load();
+        _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
+            _profileDirectory, "TabStripVisibility.ini"));
+        _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -189,6 +194,9 @@ public partial class MainWindow : Window
         if (_uiPreferencesStore.LoadWarning is { } appearanceWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? appearanceWarning : $"{EnvironmentStatus.Text} {appearanceWarning}";
+        if (_tabStripVisibilityStore.LoadWarning is { } tabStripWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? tabStripWarning : $"{EnvironmentStatus.Text} {tabStripWarning}";
         var isPrimarySession = string.Equals(Path.GetFullPath(_sessionStore.Path),
             Path.GetFullPath(primarySessionPath), StringComparison.OrdinalIgnoreCase);
         var pinnedTabsPath = isPrimarySession ? Path.Combine(_profileDirectory, "PinnedTabs.ini") :
@@ -259,6 +267,7 @@ public partial class MainWindow : Window
         ApplyThemePreferenceMenuState();
         ApplySizeDisplayMenuState();
         ApplyCompactMode();
+        ApplyTabStripVisibility();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
         UpdatePreviewPaneToggle();
@@ -357,7 +366,11 @@ public partial class MainWindow : Window
             pane.SetActivePaneVisual(ReferenceEquals(pane, ActivePane));
     }
 
-    private void ViewMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateShellPaneToggles();
+    private void ViewMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        UpdateShellPaneToggles();
+        UpdateTabStripVisibilityMenu();
+    }
 
     private void HiddenItemsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateHiddenItemsPreferenceMenu();
 
@@ -798,6 +811,36 @@ public partial class MainWindow : Window
             CompactModeMenu.IsChecked = _compactMode;
             EnvironmentStatus.Text = $"外观配置保存失败：{ex.Message}";
         }
+    }
+
+    private void TabStripVisibility_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value }) return;
+        var next = value.Equals("Always", StringComparison.Ordinal);
+        try
+        {
+            _tabStripVisibilityStore.Save(next);
+            _alwaysShowTabStrip = next;
+            ApplyTabStripVisibility();
+            EnvironmentStatus.Text = next ? "标签栏始终显示。" : "标签栏仅在多个标签时显示。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabStripVisibility();
+            EnvironmentStatus.Text = $"标签栏显示设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ApplyTabStripVisibility()
+    {
+        foreach (var pane in _panes) pane.SetAlwaysShowTabStrip(_alwaysShowTabStrip);
+        UpdateTabStripVisibilityMenu();
+    }
+
+    private void UpdateTabStripVisibilityMenu()
+    {
+        AlwaysShowTabsMenu.IsChecked = _alwaysShowTabStrip;
+        ShowTabsWhenMultipleMenu.IsChecked = !_alwaysShowTabStrip;
     }
 
     private void ThemePreference_Click(object sender, RoutedEventArgs e)

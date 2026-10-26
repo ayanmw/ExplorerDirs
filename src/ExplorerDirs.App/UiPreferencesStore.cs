@@ -7,6 +7,9 @@ namespace ExplorerDirs.App;
 internal sealed class UiPreferencesStore(string path)
     : PortableBooleanPreference(path, "Appearance", "Compact", "外观");
 
+internal sealed class TabStripVisibilityStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "AlwaysShow", "标签栏", defaultValue: true);
+
 internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
 
