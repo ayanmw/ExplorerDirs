@@ -21,10 +21,15 @@ $raw = powershell.exe -NoProfile -File $sampler -ProcessId $sampledPid `
     -AllowOtherProcess -Samples 3 -IntervalMilliseconds 100 -AsJson | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Process sampler failed.' }
 $report = $raw | ConvertFrom-Json
-if ($report.SchemaVersion -ne 2 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
+if ($report.SchemaVersion -ne 3 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
     $report.Samples.Count -ne 3 -or $report.Origin -ne 'other-process' -or
     $report.ExecutablePath -ne $expectedExecutablePath -or
     $report.PeakWorkingSetBytes -le 0 -or $report.PeakPrivateBytes -le 0 -or
+    $report.Samples[0].WorkingSetDeltaFromFirstBytes -ne 0 -or
+    $report.Samples[0].PrivateBytesDeltaFromFirstBytes -ne 0 -or
+    $report.Samples[2].PrivateBytesDeltaFromFirstBytes -ne $report.FinalPrivateBytesDeltaBytes -or
+    $report.Samples[2].WorkingSetDeltaFromFirstBytes -ne $report.FinalWorkingSetDeltaBytes -or
+    $report.FinalPrivateBytesDeltaBytesPerMinute -ne $report.Samples[2].PrivateBytesDeltaBytesPerMinute -or
     $report.Samples[1].ElapsedSeconds -le $report.Samples[0].ElapsedSeconds -or
     $raw.Contains($projectRoot)) {
     throw 'Process sampler returned invalid data or leaked its executable path.'
@@ -47,7 +52,7 @@ if ($ReleaseProcessId -gt 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Release process sampler failed.' }
     $releaseReport = $releaseRaw | ConvertFrom-Json
     $releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'releases')) + [IO.Path]::DirectorySeparatorChar
-    if ($releaseReport.SchemaVersion -ne 2 -or $releaseReport.Origin -ne 'release' -or
+    if ($releaseReport.SchemaVersion -ne 3 -or $releaseReport.Origin -ne 'release' -or
         $releaseReport.ExecutablePath -ne $expectedReleasePath -or
         -not $expectedReleasePath.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Release process was not identified against the main repository releases directory.'

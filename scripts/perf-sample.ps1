@@ -52,6 +52,8 @@ try {
     $status = 'completed'
     $previousSeconds = $null
     $previousCpuSeconds = $null
+    $firstWorkingSetBytes = $null
+    $firstPrivateBytes = $null
     for ($index = 0; $index -lt $Samples; $index++) {
         if ($index -gt 0) { Start-Sleep -Milliseconds $IntervalMilliseconds }
         try {
@@ -60,6 +62,17 @@ try {
             if ($process.StartTime.ToUniversalTime() -ne $processStart) { $status = 'identity-changed'; break }
             $seconds = $watch.Elapsed.TotalSeconds
             $cpuSeconds = $process.TotalProcessorTime.TotalSeconds
+            $workingSetBytes = [long]$process.WorkingSet64
+            $privateBytes = [long]$process.PrivateMemorySize64
+            if ($index -eq 0) {
+                $firstWorkingSetBytes = $workingSetBytes
+                $firstPrivateBytes = $privateBytes
+            }
+            $workingSetDelta = $workingSetBytes - $firstWorkingSetBytes
+            $privateBytesDelta = $privateBytes - $firstPrivateBytes
+            $privateBytesDeltaPerMinute = if ($seconds -gt 0) {
+                [Math]::Round($privateBytesDelta / $seconds * 60, 2)
+            } else { $null }
             $cpuPercent = $null
             if ($null -ne $previousSeconds -and $seconds -gt $previousSeconds) {
                 $cpuPercent = [Math]::Round(100 * ($cpuSeconds - $previousCpuSeconds) /
@@ -68,8 +81,11 @@ try {
             $rows.Add([pscustomobject]@{
                 TimeUtc = [DateTime]::UtcNow.ToString('o')
                 ElapsedSeconds = [Math]::Round($seconds, 3)
-                WorkingSetBytes = [long]$process.WorkingSet64
-                PrivateBytes = [long]$process.PrivateMemorySize64
+                WorkingSetBytes = $workingSetBytes
+                PrivateBytes = $privateBytes
+                WorkingSetDeltaFromFirstBytes = $workingSetDelta
+                PrivateBytesDeltaFromFirstBytes = $privateBytesDelta
+                PrivateBytesDeltaBytesPerMinute = $privateBytesDeltaPerMinute
                 TotalCpuSeconds = [Math]::Round($cpuSeconds, 3)
                 CpuPercentOfMachine = $cpuPercent
                 HandleCount = [int]$process.HandleCount
@@ -81,7 +97,7 @@ try {
         catch [System.InvalidOperationException] { $status = 'exited'; break }
     }
     $result = [pscustomobject]@{
-        SchemaVersion = 2
+        SchemaVersion = 3
         ProcessId = $ProcessId
         ProcessName = $process.ProcessName
         Origin = $origin
@@ -94,6 +110,9 @@ try {
         IntervalMilliseconds = $IntervalMilliseconds
         PeakWorkingSetBytes = if ($rows.Count) { ($rows | Measure-Object -Property WorkingSetBytes -Maximum).Maximum } else { $null }
         PeakPrivateBytes = if ($rows.Count) { ($rows | Measure-Object -Property PrivateBytes -Maximum).Maximum } else { $null }
+        FinalWorkingSetDeltaBytes = if ($rows.Count) { $rows[-1].WorkingSetDeltaFromFirstBytes } else { $null }
+        FinalPrivateBytesDeltaBytes = if ($rows.Count) { $rows[-1].PrivateBytesDeltaFromFirstBytes } else { $null }
+        FinalPrivateBytesDeltaBytesPerMinute = if ($rows.Count) { $rows[-1].PrivateBytesDeltaBytesPerMinute } else { $null }
         Samples = @($rows)
     }
     if ($AsJson) { $result | ConvertTo-Json -Depth 5 }
