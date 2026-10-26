@@ -363,9 +363,10 @@ internal static class ShellViewColorSpike
         Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
         Pump(150);
         var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
+        var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -444,6 +445,63 @@ internal static class ShellViewColorSpike
                 }
             }
         }
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Arrow routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var verified = new List<string>(3);
+        for (var target = 0; target < 3; target++)
+        {
+            var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+            Check(windowHr);
+            var listView = FindChildByClass(viewWindow, "SysListView32");
+            if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for its arrow test.");
+            Check(At<GetViewModeAndIconSize>(folderViews[target], 36)(folderViews[target], out var mode, out _));
+            _ = SetFocus(listView);
+            if (GetFocus() != listView)
+                throw new InvalidOperationException($"Pane {target + 1} file list did not receive isolated keyboard focus.");
+
+            Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], 0,
+                0x1u | 0x4u | 0x10u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED.
+            Check(At<GetFocusedItem>(folderViews[target], 10)(folderViews[target], out var before));
+            if (before != 0) throw new InvalidOperationException($"Pane {target + 1} arrow fixture expected first-item focus, got {before}.");
+            var siblingFocus = new int[folderViews.Count];
+            for (var pane = 0; pane < folderViews.Count; pane++)
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out siblingFocus[pane]));
+
+            var message = new NativeMessage
+            {
+                Window = listView,
+                Id = 0x0100, // WM_KEYDOWN
+                WParam = mode == 1 ? 0x27u : 0x28u, // Icon grid uses Right; Details/List use Down.
+                LParam = mode == 1 ? 0x014D0001 : 0x00500001
+            };
+            Check(At<TranslateAccelerator>(views[target], 5)(views[target], ref message));
+            Pump(100);
+            Check(At<GetFocusedItem>(folderViews[target], 10)(folderViews[target], out var after));
+            if (after != 1)
+                throw new InvalidOperationException($"Pane {target + 1} Down accelerator did not move its focused item: {before}->{after}.");
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                if (pane == target) continue;
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out var siblingAfter));
+                if (siblingAfter != siblingFocus[pane])
+                    throw new InvalidOperationException($"Pane {target + 1} Down accelerator changed pane {pane + 1} focus: {siblingFocus[pane]}->{siblingAfter}.");
+            }
+            verified.Add($"pane{target + 1}/mode{mode}:{before}->{after}");
+        }
+        for (var pane = 0; pane < folderViews.Count; pane++)
+        {
+            Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var itemCount)); // SVGIO_ALLVIEW.
+            for (var item = 0; item < itemCount; item++)
+                Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Pane arrow routing changed the foreground window outside the Private Desktop probe.");
         return string.Join(',', verified);
     }
 
@@ -2592,7 +2650,9 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, nuint commandId, uint flags, nint reserved, nint name, uint length);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TranslateAccelerator(nint self, ref NativeMessage message);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderItem(nint self, int index, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItemByPidl(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewModeAndIconSize(nint self, out uint mode, out int size);
@@ -2620,6 +2680,15 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
+    [StructLayout(LayoutKind.Sequential)] private struct NativeMessage
+    {
+        public nint Window;
+        public uint Id;
+        public nuint WParam;
+        public nint LParam;
+        public uint Time;
+        public int X, Y;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid FormatId; public uint PropertyId; }
     [StructLayout(LayoutKind.Sequential)] private struct SortColumn { public PropertyKey Key; public int Direction; }
@@ -2688,6 +2757,8 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProc callback, nuint id);

@@ -3320,3 +3320,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 每个真实 `IShellView` 单独选中一个项目，通过自身 `SVGIO_SELECTION` 获取 `IContextMenu` 并枚举到 canonical `copy`；逐步读取四个 view 的选择数量，确认另外三个 pane 不继承活动 pane 选区，测试后清除全部选区。
 - Private Desktop watchdog 连续三轮退出码 0，四窗格状态、Shell 文件操作与通知检查通过，主桌面前台未变。探针没有执行文件命令、修改剪贴板或显示菜单。
 - 可见右键菜单合并/命令调用、第三方扩展、产品 ExplorerBrowser 及 WPF 目标命中仍待验证。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格文件项菜单目标隔离)。
+
+## 2026-10-27：四窗格 IShellView 方向键焦点路由
+
+- 在真实隔离 Shell view 的 Details、List、Icon 三种模式中，分别通过目标 view 的 `TranslateAccelerator` 将第一项焦点移动到下一项；网格视图使用 Right，Details/List 使用 Down。四个 view 的焦点读回确认兄弟 pane 不变；单项第四 pane 不参与移动断言。
+- Private Desktop 完整 session-restore probe 连续三轮退出码 0，菜单路由、选择项菜单、文件操作和通知仍通过，前台句柄未变。
+- 此为合成消息直调 Shell accelerator，不等同物理键盘、完整 message loop、重命名编辑或产品 WPF 焦点验收。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-ishellview-方向键焦点路由)。

@@ -791,3 +791,11 @@ NativeProbe Release 构建 0 警告、0 错误；加入 Details 菜单后排序/
 Release NativeProbe 构建 0 警告/错误；Private Desktop watchdog 连续三轮退出码 0，四个 pane 都读到自己的 `copy` 菜单且兄弟 pane 选区为零，四窗格文件操作/通知及前台 HWND `0x81852` 检查通过。日志：`20261027-010130-21d014fe.stdout.log`、`20261027-010152-b16fbd87.stdout.log`、`20261027-010209-b0ee888b.stdout.log`。
 
 这验证了隔离原生 view 能从各自选择项提供 Shell 文件菜单对象并保持选区隔离；未验证可见右键菜单、命令点击、第三方扩展菜单、产品 ExplorerBrowser 或 WPF 目标命中。
+
+### 2026-10-27 四窗格 IShellView 方向键焦点路由
+
+四窗格 consumer 分别在 Details、List、Icon 模式中，将焦点设到第一项并通过对应 `IShellView::TranslateAccelerator` 派发导航键：Details/List 使用 Down，Icon 网格使用 Right。三种模式的目标 pane 焦点均从索引 0 移至 1；每次操作前后读取四个 `IFolderView2::GetFocusedItem`，兄弟 pane 的焦点索引保持不变。第四窗格只有一个项目，未纳入移动断言。结束前清空测试选择。
+
+NativeProbe Release 构建 0 警告/错误；完整四窗格 Private Desktop watchdog 连续三轮退出码 0，前台 HWND 保持 `0x81852`。日志：`20261027-010520-482e0ca0.stdout.log`、`20261027-010542-f36a9d5b.stdout.log`、`20261027-010559-e5ef25fc.stdout.log`。
+
+这证明默认 filesystem `IShellView` 在三个标准模式下能经各自 accelerator 入口移动 pane 内 Shell 焦点，并保持兄弟 view 状态。消息由隔离探针合成并直接交给 Shell，不是物理键盘/完整应用消息循环；不证明 WPF `HwndHost` 焦点、Tab/Shift+Tab、重命名编辑器、剪贴板操作或用户可见行为。产品 ExplorerBrowser、配置与 release 未修改。
