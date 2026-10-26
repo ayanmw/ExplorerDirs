@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
+    private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
     private bool _windowsShowsHiddenItems;
     private bool _classicAddressBar;
+    private bool _mouseWheelFocusEnabled;
     private bool _initializing = true;
     private bool _fileViewFocusDesired;
     private bool _openingTerminal;
@@ -152,6 +154,10 @@ public partial class MainWindow : Window
         _uiPreferencesStore = new UiPreferencesStore(Path.Combine(
             _profileDirectory, "UiPreferences.ini"));
         _compactMode = _uiPreferencesStore.Load();
+        _mouseWheelFocusPreferenceStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "MouseWheelFocus.ini"), "Mouse", "FocusOnWheel", "鼠标滚轮焦点");
+        _mouseWheelFocusEnabled = _mouseWheelFocusPreferenceStore.Load();
+        MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
         _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
             _profileDirectory, "TabStripVisibility.ini"));
         _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
@@ -194,6 +200,9 @@ public partial class MainWindow : Window
         if (_uiPreferencesStore.LoadWarning is { } appearanceWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? appearanceWarning : $"{EnvironmentStatus.Text} {appearanceWarning}";
+        if (_mouseWheelFocusPreferenceStore.LoadWarning is { } wheelFocusWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? wheelFocusWarning : $"{EnvironmentStatus.Text} {wheelFocusWarning}";
         if (_tabStripVisibilityStore.LoadWarning is { } tabStripWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? tabStripWarning : $"{EnvironmentStatus.Text} {tabStripWarning}";
@@ -305,6 +314,7 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) =>
         {
+            ComponentDispatcher.ThreadFilterMessage += OnThreadFilterMessage;
             if (HwndSource.FromHwnd(new WindowInteropHelper(this).Handle) is { } source)
                 _systemSettingChangeHook = new SystemSettingChangeHook(source, RefreshEnvironment,
                     RefreshFollowedWindowsHiddenItems);
@@ -319,6 +329,7 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            ComponentDispatcher.ThreadFilterMessage -= OnThreadFilterMessage;
             if (_themeController is not null)
                 _themeController.ThemeChanged -= ThemeController_ThemeChanged;
             _terminalLaunchStop.Cancel();
@@ -370,6 +381,37 @@ public partial class MainWindow : Window
     {
         UpdateShellPaneToggles();
         UpdateTabStripVisibilityMenu();
+    }
+
+    private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)
+    {
+        var next = MouseWheelFocusMenu.IsChecked;
+        try { _mouseWheelFocusPreferenceStore.Save(next); }
+        catch (Exception ex)
+        {
+            MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
+            EnvironmentStatus.Text = ex.Message;
+            return;
+        }
+        _mouseWheelFocusEnabled = next;
+    }
+
+    private void OnThreadFilterMessage(ref MSG message, ref bool handled)
+    {
+        if (handled || !_mouseWheelFocusEnabled || message.message != 0x020A ||
+            !GetCursorPos(out var cursor)) return;
+
+        var hovered = WindowFromPoint(cursor);
+        var pane = _panes.FirstOrDefault(candidate => candidate.ContainsMouseWheelShellTarget(hovered));
+        var sharedTreeTarget = _treeDisplayMode == TreeDisplayMode.Shared &&
+            _sharedTreeHost?.ContainsNativeWindow(hovered) == true;
+        if (!MouseWheelFocusRouter.TryRetarget(unchecked((uint)message.message),
+                unchecked((nuint)message.wParam.ToInt64()), _mouseWheelFocusEnabled,
+                message.hwnd, hovered, pane is not null || sharedTreeTarget, out var target))
+            return;
+
+        message.hwnd = target;
+        if (pane is not null) SetActivePane(pane);
     }
 
     private void HiddenItemsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateHiddenItemsPreferenceMenu();
@@ -2129,4 +2171,13 @@ public partial class MainWindow : Window
         _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
 
     internal void ReportSessionIssue(string message) => EnvironmentStatus.Text = message;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(NativePoint point);
 }

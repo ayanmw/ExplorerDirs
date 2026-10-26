@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.IO;
 
 namespace ExplorerDirs.SettingsSmoke;
 
@@ -6,6 +7,7 @@ internal static class MouseWheelFocusSmoke
 {
     internal static void Run()
     {
+        CheckPortablePreference();
         Check(MouseWheelFocusRouter.TryRetarget(0x020A, 0, true, 10, 20, true, out var target) && target == 20,
             "enabled focus routing targets the Shell view under the pointer");
         Check(!MouseWheelFocusRouter.TryRetarget(0x020A, 0, false, 10, 20, true, out target) && target == 10,
@@ -19,6 +21,29 @@ internal static class MouseWheelFocusSmoke
         Check(!MouseWheelFocusRouter.TryRetarget(0x020E, 0, true, 10, 20, true, out target) && target == 10,
             "horizontal wheel messages are not changed by vertical focus routing");
         Console.WriteLine("Mouse wheel focus smoke: PASS");
+    }
+
+    private static void CheckPortablePreference()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.MouseWheelFocus.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "MouseWheelFocus.ini");
+        try
+        {
+            var store = new PortableBooleanPreference(path, "Mouse", "FocusOnWheel", "鼠标滚轮焦点");
+            Check(!store.Load(), "mouse-wheel focus defaults off");
+            store.Save(true);
+            Check(new PortableBooleanPreference(path, "Mouse", "FocusOnWheel", "鼠标滚轮焦点").Load(),
+                "mouse-wheel focus persists in its portable INI");
+            File.WriteAllText(path, "[Mouse]" + Environment.NewLine +
+                "FormatVersion=2" + Environment.NewLine + "FocusOnWheel=true" + Environment.NewLine);
+            var future = new PortableBooleanPreference(path, "Mouse", "FocusOnWheel", "鼠标滚轮焦点");
+            Check(!future.Load() && future.LoadWarning is not null,
+                "a newer mouse-wheel focus preference is protected and defaults off");
+            try { future.Save(false); throw new InvalidOperationException("A future preference format was overwritten."); }
+            catch (IOException) { }
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     private static void Check(bool condition, string message)

@@ -719,6 +719,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 &&
+        ((_hostWindow != 0 && (hwnd == _hostWindow || IsChild(_hostWindow, hwnd))) ||
+         (_viewWindow != 0 && (hwnd == _viewWindow || IsChild(_viewWindow, hwnd))));
+
     public bool HasColumnHeader() => FindColumnHeader() is not null;
 
     public bool IsColumnHeaderFocused()

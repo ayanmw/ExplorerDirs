@@ -43,6 +43,9 @@ internal sealed class ShellTreeHost : HwndHost
         };
     }
 
+    internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 && _tree is { WindowHandle: not 0 } tree &&
+        (hwnd == tree.WindowHandle || IsChild(tree.WindowHandle, hwnd));
+
     public void SetDirectory(string directory)
     {
         _addressTreeMode = false;

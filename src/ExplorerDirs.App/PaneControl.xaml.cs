@@ -744,6 +744,9 @@ public partial class PaneControl : UserControl
 
     internal bool IsQuickFilterInputFocused => QuickFilterBox.IsKeyboardFocusWithin;
     internal bool HasFileViewFocus => _treeHost?.HasNativeFocus() != true && Current?.Browser.HasNativeFocus() == true;
+    internal bool ContainsMouseWheelShellTarget(nint hwnd) => IsVisible &&
+        (Current?.Browser.ContainsNativeWindow(hwnd) == true ||
+         (TreeVisible && _treeHost?.ContainsNativeWindow(hwnd) == true));
 
     public void FocusQuickFilter()
     {
