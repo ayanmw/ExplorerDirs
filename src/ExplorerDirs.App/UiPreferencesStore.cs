@@ -19,6 +19,9 @@ internal sealed class StatusBarVisibilityStore(string path)
 internal sealed class StatusBarSelectionSizeStore(string path)
     : PortableBooleanPreference(path, "StatusBar", "ShowSelectionSize", "状态栏选中大小", defaultValue: true);
 
+internal sealed class StatusBarFolderSizeWhenEmptyStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "ShowFolderSizeWhenEmpty", "状态栏当前目录大小");
+
 internal sealed class SelectionCheckBoxesStore(string path)
     : PortableBooleanPreference(path, "Selection", "CheckBoxes", "复选框选择");
 

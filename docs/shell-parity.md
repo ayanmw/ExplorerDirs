@@ -1,3 +1,5 @@
+> **状态栏当前目录大小提示（2026-10-27）：**新增默认关闭的“视图 → 未选中时显示当前目录可取得大小”，仅用 Shell 当前视图直接子项的可用属性汇总；选区存在时优先显示选中大小，不递归目录。完整 Release SettingsSmoke、App/NativeProbe Release build 通过；隐藏 ExplorerBrowser `SVGIO_ALLVIEW` 探针验证 3 个直接条目中两文件大小合计 8 字节、目录未纳入，前台未改变。未做可见 GUI 验收；属性缓存 5 秒，同数目内容变化可能短暂陈旧。详见[路线图](roadmap.md#2026-10-27未选中时显示当前目录可取得大小)。
+
 > **文件视图复选框选择（2026-10-27）：**“视图 → 使用复选框选择项目”通过 Shell `IFolderView2::SetCurrentFolderFlags(FWF_CHECKSELECT)` 切换，默认关闭，便携偏好应用于现有和后续每个标签。Release SettingsSmoke 与 App Release build 通过；尚未运行 ExplorerBrowser/可见 UI，复选框点击与 Shell 选中状态待桌面验收。Ctrl+Shift+A 反选命令已存在；依据 [Q-Dir FAQ 77](https://softwareok.com/?faq=77&seite=faq-Q-DIR)。
 
 > **多行标签栏（2026-10-27）：**“视图 → 多行标签栏”现可让标签标题按可用宽度换行，隐藏单行滚动箭头并启用纵向滚动；默认关闭，保存在独立便携 `MultilineTabHeaders.ini`。Release SettingsSmoke 覆盖单行滚动范围、多行行列坐标及配置往返，App Release build 通过。尚未运行可见 GUI；极窄窗格、拖动重排、标签标题动态变化和键盘焦点需人工验收。

@@ -89,10 +89,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     };
     private FocusRestoreRequest? _pendingFileOperationFocusRestore;
     private const double FileOperationFocusRestoreWindowMilliseconds = 1500;
-    private static readonly TimeSpan SelectionSizeRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ShellPropertySizeRefreshInterval = TimeSpan.FromSeconds(5);
     private ShellSelectionSizeCacheKey? _selectionSizeCacheKey;
     private ulong? _selectionSizeCacheBytes;
     private long _selectionSizeCacheReadAt;
+    private ShellFolderSizeCacheKey? _folderSizeCacheKey;
+    private ulong? _folderSizeCacheBytes;
+    private long _folderSizeCacheReadAt;
     private bool _menuPrepared;
     private readonly ShellMenuTargetTracker _menuTarget = new();
     private readonly ShellHeaderPresetMenuGate _headerPresetMenuGate = new();
@@ -1727,13 +1730,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CachedViewState() => _viewState.Copy();
 
-    internal ShellItemCounts? ReadItemCounts(bool includeSelectionSize = true)
-        => ReadItemCountsCore(includeSelectionSize, requireVisible: true);
+    internal ShellItemCounts? ReadItemCounts(bool includeSelectionSize = true, bool includeFolderSize = false)
+        => ReadItemCountsCore(includeSelectionSize, includeFolderSize, requireVisible: true);
 
     private int? ReadDirectoryMonitorItemCount() =>
-        ReadItemCountsCore(includeSelectionSize: false, requireVisible: false)?.Total;
+        ReadItemCountsCore(includeSelectionSize: false, includeFolderSize: false, requireVisible: false)?.Total;
 
-    private ShellItemCounts? ReadItemCountsCore(bool includeSelectionSize, bool requireVisible)
+    private ShellItemCounts? ReadItemCountsCore(bool includeSelectionSize, bool includeFolderSize, bool requireVisible)
     {
         if ((requireVisible && !IsVisible) || _viewReadiness.Pending || _browser is null || _viewWindow == IntPtr.Zero)
             return null;
@@ -1760,10 +1763,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     ? Stopwatch.GetElapsedTime(_selectionSizeCacheReadAt)
                     : Timeout.InfiniteTimeSpan;
                 readSelectionSize = ShellSelectionSizeRefreshGate.ShouldRead(_selectionSizeCacheKey,
-                    sizeKey.Value, age, SelectionSizeRefreshInterval);
+                    sizeKey.Value, age, ShellPropertySizeRefreshInterval);
                 selectionBytes = readSelectionSize
                     ? ReadSelectionSize(view, selectedCounts.Selected)
                     : _selectionSizeCacheBytes;
+            }
+            ShellFolderSizeCacheKey? folderSizeKey = null;
+            ulong? folderBytes = null;
+            var readFolderSize = false;
+            if (includeFolderSize && counts is { Selected: 0, Total: > 0 } folderCounts)
+            {
+                folderSizeKey = new ShellFolderSizeCacheKey(generation, folderCounts.Total);
+                var age = _folderSizeCacheKey == folderSizeKey
+                    ? Stopwatch.GetElapsedTime(_folderSizeCacheReadAt)
+                    : Timeout.InfiniteTimeSpan;
+                readFolderSize = _folderSizeCacheKey != folderSizeKey || age >= ShellPropertySizeRefreshInterval;
+                folderBytes = readFolderSize
+                    ? ReadItemArraySize(view, 2, folderCounts.Total)
+                    : _folderSizeCacheBytes;
             }
             // A Shell COM call may pump messages and complete another navigation.
             if (generation != _viewReadiness.Generation || _viewReadiness.Pending ||
@@ -1787,6 +1804,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     _selectionSizeCacheReadAt = 0;
                 }
             }
+            if (folderSizeKey is { } folderKey && counts is not null)
+            {
+                if (readFolderSize)
+                {
+                    _folderSizeCacheKey = folderKey;
+                    _folderSizeCacheBytes = folderBytes;
+                    _folderSizeCacheReadAt = Stopwatch.GetTimestamp();
+                }
+                counts = counts with { KnownFolderBytes = folderBytes };
+            }
             return counts;
         }
         catch (COMException) { return null; }
@@ -1794,14 +1821,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { if (viewObject is not null) Marshal.ReleaseComObject(viewObject); }
     }
 
-    private static ulong? ReadSelectionSize(IFolderView view, int expectedCount)
+    private static ulong? ReadSelectionSize(IFolderView view, int expectedCount) =>
+        ReadItemArraySize(view, 1, expectedCount);
+
+    private static ulong? ReadItemArraySize(IFolderView view, uint scope, int expectedCount)
     {
         object? array = null;
         nint unknown = 0, items = 0;
         try
         {
             var id = ShellItemArrayId;
-            if (view.Items(1, ref id, out array) != 0 || array is null) return null;
+            if (view.Items(scope, ref id, out array) != 0 || array is null) return null;
             unknown = Marshal.GetIUnknownForObject(array);
             if (Marshal.QueryInterface(unknown, in id, out items) != 0) return null;
             return ShellSelectionSize.Read(items, expectedCount);
@@ -1815,6 +1845,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (array is not null) Marshal.ReleaseComObject(array);
         }
     }
+
+    private readonly record struct ShellFolderSizeCacheKey(long ViewGeneration, int ItemCount);
 
     internal (uint Mode, int IconSize)? ReadViewStyle()
     {

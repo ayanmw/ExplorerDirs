@@ -43,6 +43,14 @@ internal static class StatusBarVisibilitySmoke
         Require(File.ReadAllText(path).Contains("Show=false", StringComparison.Ordinal),
             "status-bar content preference is stored separately from bar visibility");
 
+        var folderSizePath = Path.Combine(root, "StatusBarFolderSize.ini");
+        var folderSize = new StatusBarFolderSizeWhenEmptyStore(folderSizePath);
+        Require(!folderSize.Load() && folderSize.LoadWarning is null,
+            "current-folder size without a selection defaults to disabled");
+        folderSize.Save(true);
+        Require(new StatusBarFolderSizeWhenEmptyStore(folderSizePath).Load(),
+            "current-folder size preference round-trips independently");
+
         var checkBoxesPath = Path.Combine(root, "SelectionCheckBoxes.ini");
         var checkBoxes = new SelectionCheckBoxesStore(checkBoxesPath);
         Require(!checkBoxes.Load() && checkBoxes.LoadWarning is null,

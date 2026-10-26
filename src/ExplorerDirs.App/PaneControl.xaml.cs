@@ -22,6 +22,7 @@ public partial class PaneControl : UserControl
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
     private bool _showSelectionSizeInStatusBar = true;
+    private bool _showFolderSizeWhenEmpty;
     private bool _updatingFilterPresets;
     private TabItem? _dragCandidate;
     private Point _dragStart;
@@ -101,6 +102,12 @@ public partial class PaneControl : UserControl
     internal void SetStatusBarSelectionSizeVisible(bool visible)
     {
         _showSelectionSizeInStatusBar = visible;
+        RefreshItemCounts();
+    }
+
+    internal void SetStatusBarFolderSizeWhenEmpty(bool enabled)
+    {
+        _showFolderSizeWhenEmpty = enabled;
         RefreshItemCounts();
     }
 
@@ -235,7 +242,8 @@ public partial class PaneControl : UserControl
     {
         if (!IsLoaded || !IsVisible) return;
         var state = Current;
-        var counts = state?.Browser.ReadItemCounts(includeSelectionSize: _showSelectionSizeInStatusBar);
+        var counts = state?.Browser.ReadItemCounts(includeSelectionSize: _showSelectionSizeInStatusBar,
+            includeFolderSize: _showFolderSizeWhenEmpty);
         if (Current == state && IsLoaded && IsVisible)
         {
             ItemCounts.Text = counts?.DisplayText ?? "项目统计暂不可用";

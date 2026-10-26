@@ -586,6 +586,11 @@ internal static class Program
             Marshal.ThrowExceptionForHR(Method<GetInterface>(browser, 17)(browser, ref viewId, out view));
             Marshal.ThrowExceptionForHR(Method<ItemCount>(view, 7)(view, 2, out var count));
             if (count != 3) throw new Exception("Unexpected hidden-view fixture count.");
+            Marshal.ThrowExceptionForHR(Method<GetItems>(view, 8)(view, 2, ref arrayId, out items));
+            var folderSize = ShellSelectionSize.Read(items, count);
+            Marshal.Release(items);
+            items = 0;
+            if (folderSize != 8) throw new Exception("Hidden view current-folder size mismatch.");
             for (var i = 0; i < count; i++)
                 // SVSI_SELECT only. No focus, activation, keyboard, or mouse.
                 Marshal.ThrowExceptionForHR(Method<SelectItem>(view, 15)(view, i, 1));
@@ -593,7 +598,7 @@ internal static class Program
             Marshal.ThrowExceptionForHR(Method<GetItems>(view, 8)(view, 1, ref arrayId, out items));
             var size = ShellSelectionSize.Read(items, selected);
             if (selected != 3 || size != 8) throw new Exception("Hidden view selection size mismatch.");
-            Console.WriteLine("hidden-view: selected=3; known-size=8; folder-content-excluded=True");
+            Console.WriteLine("hidden-view: current-folder-known-size=8; selected=3; selected-known-size=8; folder-content-excluded=True");
         }
         finally
         {

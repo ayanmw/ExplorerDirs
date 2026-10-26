@@ -42,12 +42,14 @@ public partial class MainWindow : Window
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
     private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
+    private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
     private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private bool _showStatusBar = true;
     private bool _showSelectionSizeInStatusBar = true;
+    private bool _showFolderSizeWhenEmpty;
     private bool _selectionCheckBoxes;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
@@ -182,6 +184,10 @@ public partial class MainWindow : Window
             _profileDirectory, "StatusBarSelectionSize.ini"));
         _showSelectionSizeInStatusBar = _statusBarSelectionSizeStore.Load();
         StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
+        _statusBarFolderSizeWhenEmptyStore = new StatusBarFolderSizeWhenEmptyStore(Path.Combine(
+            _profileDirectory, "StatusBarFolderSize.ini"));
+        _showFolderSizeWhenEmpty = _statusBarFolderSizeWhenEmptyStore.Load();
+        StatusBarFolderSizeWhenEmptyMenu.IsChecked = _showFolderSizeWhenEmpty;
         _selectionCheckBoxesStore = new SelectionCheckBoxesStore(Path.Combine(
             _profileDirectory, "SelectionCheckBoxes.ini"));
         _selectionCheckBoxes = _selectionCheckBoxesStore.Load();
@@ -237,6 +243,9 @@ public partial class MainWindow : Window
         if (_statusBarSelectionSizeStore.LoadWarning is { } statusBarSelectionSizeWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? statusBarSelectionSizeWarning : $"{EnvironmentStatus.Text} {statusBarSelectionSizeWarning}";
+        if (_statusBarFolderSizeWhenEmptyStore.LoadWarning is { } statusBarFolderSizeWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarFolderSizeWarning : $"{EnvironmentStatus.Text} {statusBarFolderSizeWarning}";
         if (_selectionCheckBoxesStore.LoadWarning is { } checkBoxesWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? checkBoxesWarning : $"{EnvironmentStatus.Text} {checkBoxesWarning}";
@@ -272,6 +281,7 @@ public partial class MainWindow : Window
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
             pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
+            pane.SetStatusBarFolderSizeWhenEmpty(_showFolderSizeWhenEmpty);
             pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
             pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
@@ -980,6 +990,25 @@ public partial class MainWindow : Window
         {
             StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
             EnvironmentStatus.Text = $"状态栏选中大小设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void StatusBarFolderSizeWhenEmpty_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarFolderSizeWhenEmptyMenu.IsChecked;
+        try
+        {
+            _statusBarFolderSizeWhenEmptyStore.Save(next);
+            _showFolderSizeWhenEmpty = next;
+            foreach (var pane in _panes) pane.SetStatusBarFolderSizeWhenEmpty(next);
+            EnvironmentStatus.Text = next
+                ? "状态栏将在没有选中项目时显示可取得的当前目录直接子项大小。"
+                : "已关闭状态栏的当前目录大小读取。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarFolderSizeWhenEmptyMenu.IsChecked = _showFolderSizeWhenEmpty;
+            EnvironmentStatus.Text = $"状态栏当前目录大小设置保存失败：{ex.Message}";
         }
     }
 

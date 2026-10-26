@@ -47,6 +47,16 @@ internal static class ShellItemCountsSmoke
         selected = 0;
         Check(ShellItemCounts.Read(flag => (0, flag == 2 ? 3 : selected))!.Selected == 0,
             "clearing selection is reflected on the next snapshot");
+
+        var folder = new ShellItemCounts(3, 0, KnownFolderBytes: 8);
+        Check(folder.DisplayText.Contains("当前目录可取得大小", StringComparison.Ordinal),
+            "unselected folder-size summary is identified separately");
+        var selection = new ShellItemCounts(3, 1, KnownSelectionBytes: 5, KnownFolderBytes: 8);
+        Check(selection.DisplayText.Contains("可取得大小", StringComparison.Ordinal) &&
+              !selection.DisplayText.Contains("当前目录可取得大小", StringComparison.Ordinal),
+            "selection size takes precedence over the folder-size summary");
+        Check(!new ShellItemCounts(3, 0).DisplayText.Contains("可取得大小", StringComparison.Ordinal),
+            "unknown folder size stays omitted instead of appearing as zero");
     }
 
     private static void Check(bool value, string label)
