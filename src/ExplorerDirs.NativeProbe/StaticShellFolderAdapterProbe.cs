@@ -232,6 +232,14 @@ internal static class StaticShellFolderAdapterProbe
             Check(ShellColumnManager.Apply(folderView, columns));
             Check(ShellColumnManager.Capture(folderView, out var captured));
             if (captured is null || !captured.SequenceEqual(columns)) throw new Exception("Custom column visibility/order did not persist.");
+            // Read the actual DefView ListView subitems to distinguish a missing
+            // Shell column callback from an inactive view that cannot serve any text.
+            var displayedColumns = new[] { 0, 1, 2 }
+                .Select(subItem => (SubItem: subItem, Values: ReadDisplayedColumnValues(view, subItem)))
+                .ToArray();
+            foreach (var column in displayedColumns)
+                Console.WriteLine($"native-static-shell-column: list-view-subitem-{column.SubItem}-text=[{string.Join(',', column.Values)}]");
+            Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
             var values = ReadSortedValues(folderView, adapter, nativeKey, 1);
             if (!values.SequenceEqual(new ulong[] { 2, 10, 10, 100 })) throw new Exception("Ascending sort was not numeric: " + string.Join(',', values));
             values = ReadSortedValues(folderView, adapter, nativeKey, -1);
@@ -354,6 +362,54 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(keyPointer); Marshal.FreeCoTaskMem(variant); }
     }
 
+    private static string[] ReadDisplayedColumnValues(nint view, int subItem)
+    {
+        Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
+        nint listView = 0;
+        EnumChildWindows(viewWindow, (child, _) =>
+        {
+            var className = new System.Text.StringBuilder(32);
+            if (GetClassNameW(child, className, className.Capacity) > 0 && className.ToString() == "SysListView32")
+            {
+                listView = child;
+                return false;
+            }
+            return true;
+        }, 0);
+        if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child to query.");
+
+        var count = unchecked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT
+        if (count != 4) throw new InvalidOperationException($"Expected four displayed rows, got {count}.");
+        var textBuffer = Marshal.AllocHGlobal(512 * sizeof(char));
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            var values = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(textBuffer, 0);
+                var item = new NativeListViewItem
+                {
+                    Item = index,
+                    SubItem = subItem,
+                    Text = textBuffer,
+                    TextCapacity = 512
+                };
+                Marshal.StructureToPtr(item, itemPointer, false);
+                var length = unchecked((int)SendMessageW(listView, 0x1073, (nint)index, itemPointer)); // LVM_GETITEMTEXTW
+                if (length < 0 || length >= 512)
+                    throw new InvalidOperationException($"ListView returned invalid text length {length} for row {index}.");
+                values[index] = Marshal.PtrToStringUni(textBuffer, length) ?? string.Empty;
+            }
+            return values;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(itemPointer);
+            Marshal.FreeHGlobal(textBuffer);
+        }
+    }
+
     private static nint ParseChild(nint adapter, string name)
     {
         var text = Marshal.StringToCoTaskMemUni(name);
@@ -411,6 +467,24 @@ internal static class StaticShellFolderAdapterProbe
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
+    {
+        public uint Mask;
+        public int Item;
+        public int SubItem;
+        public uint State;
+        public uint StateMask;
+        public nint Text;
+        public int TextCapacity;
+        public int Image;
+        public nint Parameter;
+        public int Indent;
+        public int GroupId;
+        public uint ColumnCount;
+        public nint Columns;
+        public nint ColumnFormats;
+        public int Group;
+    }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyViewFolder(nint view, nint adapter, out int matches);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCompareCount();
@@ -429,6 +503,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint pidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
@@ -439,4 +514,8 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
+    private delegate bool EnumChildProc(nint window, nint parameter);
 }
