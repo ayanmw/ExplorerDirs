@@ -32,6 +32,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 
+### 2026-10-27：Edit → Select All 的 pane 路由尚未验证
+
+真实合成菜单确认 Edit 组包含“全选 (Ctrl+A)”。尝试在四 pane 循环中把该菜单项 `WM_COMMAND` 分别发给目标 `IShellView::GetWindow` 与共享 frame；两种尝试都未满足“仅目标 pane 全选”，读回显示 pane 2 被选中。前一轮探针还曾用错 `IFolderView::SelectItem` 的取消选择标志，发现后已改正；整个临时全选断言与辅助代码已撤回，没有带入原型或产品。
+
+该失败只说明当前隔离菜单/焦点准备不足以验证命令分派，不能据此断言 Shell 自身行为或 WPF 产品焦点路由。随后恢复原代码并构建 NativeProbe 成功；`session-restore-private-desktop` watchdog 两次在 consumer 的 accelerator 阶段后超时，分别为 60 秒和 120 秒（日志 `20261027-045951-b850b086.stdout.log`、`20261027-050020-1b584e44.stdout.log`）。较早的 `20261027-045900-3a3de998.stdout.log` 则因 pane 2 误选断言失败。主桌面 foreground HWND 始终未变化。下一步应先找到 consumer 停滞点并建立可靠的 pane 焦点准备，再单独验证 Edit 命令；全选路由目前仍属未验证项。
+
 ## 2026-10-27：Content 视图逐项颜色绘制像素验证
 
 在同一 NativeProbe 文件夹中切换到 `FVM_CONTENT`（Shell mode 8），确认原生 `SysListView32` 为 Content 样式且包含两个夹具项目；随后对每个项目读取其标签区域像素，并与按 Shell 项目身份匹配的规则背景色比较。首次采样可能发生在逐项绘制回调前，因此最多重试 10 次、每次间隔 100 ms。`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-044600-26c2494a.stdout.log` 报告 `shell=8/32;list-view=4;items=2;callbacks=2;attempts=2`，两项实际与预期颜色分别为 `0xF0E0D0`、`0xD0F0E0`。完整 NativeProbe Release 构建 0 警告/错误；该轮 session state 写回 772 字节，重建 host 恢复成功，Private Desktop 前台 HWND 不变。

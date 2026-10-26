@@ -3548,3 +3548,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 源码追踪发现，Shell 文件操作的焦点恢复请求虽会在窗口失活期间保留并暂停 `SetFocus`，但原有 1.5 秒绝对期限仍持续计时；用户离开应用超过该期限后返回，请求可能先过期。现在失活轮询会更新计时检查点，期限只在窗口活动期间消耗；窗格/视图/导航/用户输入门控与激活后的 1.5 秒上限不变。
 - `ShellFocusRestoreGateSmoke` 对“失活时间超过期限”“持续失活轮询”“重新激活后恢复有界计时”新增回归；先因缺少计时检查点 API 按预期失败，再通过。完整 Release SettingsSmoke 通过，App Release build 0 警告/错误。未操作剪贴板、启动 ExplorerBrowser 或使用物理键盘；真实 Alt+Tab、Ctrl+C/V 和 Shift+Delete 后的方向键体验仍待可见验收，文件操作焦点 P0 保持开放。
+
+## 2026-10-27：IShellView Edit → Select All pane 路由未证实
+
+- NativeProbe 菜单读取确认 Edit 组有“全选 (Ctrl+A)”。隔离四 pane 尝试分别将命令投递到目标 `IShellView` HWND 与共享 frame；两者均未只选中目标 pane，结果误选 pane 2。发现探针曾错误使用 `IFolderView::SelectItem` 的取消选择标志后已修正；临时断言代码撤回，没有修改产品路由。
+- 恢复代码后 NativeProbe Release 构建通过；完整 Private Desktop consumer 在 accelerator 探测之后两次超时，前台 HWND 未变。全选路由仍未验证；下一步先定位 consumer 停滞并确定可靠的 pane 焦点注入，再恢复针对性探针。详见[隔离 IShellView 原型记录](ishellview-color-spike.md#2026-10-27-edit--select-all-的-pane-路由尚未验证)。
