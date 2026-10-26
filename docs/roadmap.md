@@ -4,6 +4,7 @@
 
 - 复跑 `drop-target-private-desktop`，确认注册目标对 `SHCreateDataObject` 的真实 Shell 文件对象能复制并保留源文件；对真实 `IShellView` 选中项对象直接调用相同的 `DragEnter/DragOver/Drop` 虽返回 `S_OK` 和 COPY effect，却没有生成目标文件。两种对象当前可见格式、CF_HDROP/CIDA 路径及 async capability 初始值相同，根因未明。
 - 新增 FileContents 延迟流只读诊断后，两对象也返回相同的 25 字节内容及 SHA-256；复测仍可稳定区分为选中项对象不落盘、独立 Shell 文件对象复制成功。Private Desktop watchdog 退出码 0，前台 HWND 不变。
+- 按微软 Drop 发生在按钮释放后的常见时序，将直接回调的 `Drop.grfKeyState` 改为 0 后，选中项对象仍未落盘；排除按键状态残留这一探针变量。
 - 该回调探针不等于完整 OLE `DoDragDrop`；真实源/目标循环、移动/修饰键、可见交互和产品宿主仍是迁移门槛。复跑证据见[IShellView 拖放记录](ishellview-color-spike.md#2026-10-27-当前会话复跑)。
 
 ## 2026-10-27：保存当前工作区为桌面启动项

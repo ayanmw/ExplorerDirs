@@ -154,8 +154,9 @@ internal static class ShellViewDropTargetProbe
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point, viewTargetPath, "IShellView.GetItemObject");
+            // OLE invokes Drop after release; compare the selected-view object with its actual button-up state.
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
-                selectedTargetPath, "selected view IDataObject");
+                selectedTargetPath, "selected view IDataObject", dropKeyState: 0);
             // Keep the registered folder target as a separate candidate with its own Shell data object.
             var secondSourcePath = registeredSourcePath;
             var secondSourcePidl = nint.Zero;
@@ -225,7 +226,8 @@ internal static class ShellViewDropTargetProbe
         }
     }
 
-    private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label)
+    private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label,
+        uint dropKeyState = 0x0001)
     {
         var allowedEffect = DropEffectCopy;
         var enterHr = At<DragEnter>(target, 3)(target, dataObject, 0x0001, ref point, ref allowedEffect);
@@ -249,11 +251,11 @@ internal static class ShellViewDropTargetProbe
         }
 
         var dropEffect = overEffect & DropEffectMask;
-        var dropHr = At<Drop>(target, 6)(target, dataObject, 0x0001, ref point, ref dropEffect);
+        var dropHr = At<Drop>(target, 6)(target, dataObject, dropKeyState, ref point, ref dropEffect);
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
         var copied = File.Exists(destination) && File.ReadAllText(destination).StartsWith("native-shell-", StringComparison.Ordinal);
         var targetFiles = Directory.GetFiles(Path.GetDirectoryName(destination)!).Select(Path.GetFileName).Order().ToArray();
-        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
+        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop-key-state=0x{dropKeyState:X}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
         return copied;
     }
 
