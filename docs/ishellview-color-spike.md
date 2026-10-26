@@ -24,7 +24,7 @@ NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键
 
 ## 2026-10-26：为隔离 Shell 宿主提供 IOleInPlaceFrame
 
-`StreamViewHost` 现在也暴露 `IOleInPlaceFrame` IID。其菜单插入/安装/移除、状态文字、模态状态与 accelerator 方法复用 `IShellBrowser` 已验证的父级路由；`SetActiveObject` 走独立回调，父级接受后 host 保留一个 COM 引用并在替换/Dispose 时释放。边框空间的三个方法保留为 `E_NOTIMPL`，异常回调转成 `E_FAIL`。
+`StreamViewHost` 现在也暴露 `IOleInPlaceFrame` IID。其菜单插入/安装/移除、状态文字、模态状态与 accelerator 方法复用 `IShellBrowser` 已验证的父级路由；`SetActiveObject` 走独立回调，父级接受后 host 保留一个 COM 引用并在替换/Dispose 时释放。`GetBorder` 报告父 HWND 客户区；`RequestBorderSpace` 与 `SetBorderSpace` 仍为 `E_NOTIMPL`，异常回调转成 `E_FAIL`。
 
 NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回调参数与 HRESULT、异常边界、边框拒绝及 Dispose 后断开。根据[微软 IOleInPlaceFrame 契约](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-ioleinplaceframe)，这个接口提供容器框架菜单/状态/快捷键入口；当前还没有 Shell `UIActivate` 实际调用、共享 HMENU 生命周期或 `OleSetMenuDescriptor` 证据，因此这不代表主菜单已合并、安装或能正确分派命令。
 
