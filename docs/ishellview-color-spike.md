@@ -885,3 +885,9 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 当前仅 `dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 通过（0 警告、0 错误）；没有启动 Shell view 或隔离桌面，因此 menu coordinator 的真实 COM/OLE 生命周期、连续 pane 激活、旧 owner 延迟移除和 frame 菜单恢复尚未验证。产品 ExplorerBrowser、INI 与 release 未改；本候选代码未接入产品。
 
 随后为协调器增加非 Shell hidden-window 回归：两个 child pane 的菜单依次接管同一 top-level frame；无效 HMENU 被拒绝且不影响当前 owner；旧 pane 对旧菜单的迟到 `RemoveMenusSB` 及释放旧 pane 都不会拆除新菜单；当前 owner 移除后恢复 frame 原菜单；同一 host 的 Browser `GetWindow` 与 OLE frame `GetWindow` 分别返回 child 与 top-level HWND。`dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 0 警告、0 错误，`dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --shell-view-color-policy-smoke` 退出码 0。它只验证 Win32/OLE coordinator 状态机和 COM vtable，不创建 `IShellView`、不显示菜单、不运行 Shell 激活，所以仍需前述真实四窗格隔离验证。
+
+### 2026-10-27 四窗格菜单共享 frame 真实回调验证
+
+第一次运行新菜单断言时 Pane 2 失败：诊断轨迹显示它仍将子窗格 HWND 当作 frame，并再次收到 `0x8007059C`。追查到原因是 session-restore consumer 在销毁并重建 Pane 2 host 时漏传 `menuFrameWindow` 和共享 coordinator；不是协调器的菜单交接失败。修正重建路径后，Release 构建 0 警告/错误，`session-restore-private-desktop` watchdog 连续三轮退出码 0，日志：`20261027-033501-8d0242bc.stdout.log`、`20261027-033524-cf73daba.stdout.log`、`20261027-033542-fdd57431.stdout.log`；另一次首次失败诊断为 `20261027-033410-53e04d8b.stdout.log`。
+
+三轮中四个 Pane 的 `SetMenuSB` 均返回 `S_OK`，共享 top-level frame 均安装对应 pane 的合成菜单；pane 逐个激活时的旧菜单移除不会清掉新 owner 的菜单。四窗格 Details、排序、分组命令各自作用于目标 pane，view-state 多进程恢复、复制/重命名/删除与同/异目录 Shell 通知检查均通过。probe 明确报告 `foreground-unchanged=True`。这是真实默认 filesystem `IShellView` 在 Private Desktop 的原生激活/菜单合并证据；仍未显示或点击菜单，也未验证 WPF/产品宿主、物理键盘输入、扩展菜单和 OLE 拖放，因此不能据此迁移或发布产品宿主。

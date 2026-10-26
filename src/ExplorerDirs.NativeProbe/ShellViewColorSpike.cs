@@ -237,7 +237,8 @@ internal static class ShellViewColorSpike
         Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
         host = new ShellViewColorBrowserHost(pane, [],
             new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
-            stateStore: store, stateId: siblingSessionId);
+            stateStore: store, stateId: siblingSessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
         host.View = view;
         hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -305,12 +306,16 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Activating pane {index + 1} did not route Shell menu callbacks to its own host: insert={insertDelta}; set={setDelta}.");
             var shellBrowser = (IStreamProbeBrowser)current;
             var oleFrame = (IStreamProbeOleInPlaceFrame)current;
-            if (shellBrowser.GetWindow(out var browserWindow) < 0 || browserWindow != current.BrowserParentWindow ||
-                oleFrame.GetWindow(out var frameWindow) < 0 || frameWindow != menuFrameWindow ||
-                browserWindow == frameWindow || GetMenu(menuFrameWindow) == 0 ||
-                !current.MenuTrace.Any(trace => trace.Contains("hr=0x00000000", StringComparison.Ordinal) &&
-                    trace.Contains($"frame=0x{menuFrameWindow:X}", StringComparison.Ordinal)))
-                throw new InvalidOperationException($"Pane {index + 1} did not install its Shell menu on the shared top-level frame.");
+            var browserHresult = shellBrowser.GetWindow(out var browserWindow);
+            var frameHresult = oleFrame.GetWindow(out var frameWindow);
+            var installedMenu = GetMenu(menuFrameWindow);
+            var successfulSetMenu = current.MenuTrace.Any(trace =>
+                trace.Contains("hr=0x00000000", StringComparison.Ordinal) &&
+                trace.Contains($"frame=0x{menuFrameWindow:X}", StringComparison.Ordinal));
+            if (browserHresult < 0 || browserWindow != current.BrowserParentWindow ||
+                frameHresult < 0 || frameWindow != menuFrameWindow || browserWindow == frameWindow ||
+                installedMenu == 0 || !successfulSetMenu)
+                throw new InvalidOperationException($"Pane {index + 1} did not install its Shell menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; trace=[{string.Join(';', current.MenuTrace)}].");
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
