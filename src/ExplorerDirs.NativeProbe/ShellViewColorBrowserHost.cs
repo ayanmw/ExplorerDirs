@@ -921,8 +921,9 @@ public static class ShellViewColorBrowserHostSmoke
             fileChild = CreatePopupMenu();
             Check(fileChild != 0 && AppendMenuW(fileChild, 0, (nint)0x7123, "New Item") &&
                   AppendMenuW(fileMenu, 0x10, fileChild, "New") &&
-                  AppendMenuW(viewMenu, 0, (nint)0x7123, "Details"),
-                "File and View groups contain the same command ID under distinct menu handles");
+                  AppendMenuW(viewMenu, 0, (nint)0x7123, "Details") &&
+                  AppendMenuW(groups[3], 0, (nint)0x7123, "Object command"),
+                "File, View, and Object groups contain the same command ID under distinct menu handles");
             descriptor = CreateOleDescriptor(compositeMenu);
 
             using var coordinator = new ShellMenuFrameCoordinator(frameWindow);
@@ -956,8 +957,27 @@ public static class ShellViewColorBrowserHostSmoke
             Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=2", StringComparison.Ordinal) == true,
                 "the same command ID is independently routed to its View source through the subclass");
 
+            _coordinatorObservedCommandId = 0;
+            SendMessageW(frameWindow, 0x0126, 0, fileChild); // WM_MENUCOMMAND, File item position 0.
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=0", StringComparison.Ordinal) == true,
+                "WM_MENUCOMMAND resolves the File command by position and retains its menu source");
+
+            _coordinatorObservedCommandId = 0;
+            SendMessageW(frameWindow, 0x0126, 0, viewMenu); // WM_MENUCOMMAND, View item position 0.
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=2", StringComparison.Ordinal) == true,
+                "WM_MENUCOMMAND disambiguates the same ID by its View menu handle");
+
+            var traceCount = host.MenuTrace.Count;
+            _coordinatorObservedCommandId = 0;
+            SendMessageW(frameWindow, 0x0126, 0, groups[3]); // WM_MENUCOMMAND from the unsupported Object group.
+            Check(!PeekMessageW(out _, frameWindow, 0x83A1, 0x83A1, 1) &&
+                  _coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
+                "WM_MENUCOMMAND from the Object group is consumed without dispatching to the pane");
+
             SendMessageW(frameWindow, 0x0212, 0, 0); // WM_EXITMENULOOP.
-            Console.WriteLine("PASS coordinator WM_MENUSELECT -> WM_COMMAND -> posted dispatch on hidden Win32 windows");
+            Console.WriteLine("PASS coordinator WM_MENUSELECT/WM_COMMAND and WM_MENUCOMMAND posted dispatch on hidden Win32 windows");
         }
         finally
         {

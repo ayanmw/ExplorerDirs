@@ -3671,11 +3671,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-27：用 WM_MENUSELECT 来源路由重复 ID 菜单项
 
 - 之前无来源信息时，为避免误派发会拒绝跨组重复 ID；现把 `WM_MENUSELECT` 的子菜单来源保存在路由状态和延迟命令队列中。File/Edit/View 重复 ID 按选中的实际菜单组路由；Object/Window/Help 命令不交给 Shell view；无来源时仍要求唯一 ID。增加了 `WM_MENUCOMMAND`（按位置菜单）路径。
-- NativeProbe Release build、专用 smoke 通过；新增隐藏普通 Win32 frame/pane 的完整 synthetic subclass 消息链回归，验证 `WM_MENUSELECT` → `WM_COMMAND` → coordinator `PostMessage` → pane `WM_COMMAND`。同一合法 ID `0x7123` 分别按 File/View 来源命中 group 0/group 2。它不是系统菜单跟踪，不创建 Shell view；真实 Shell/OLE 菜单时序和产品行为仍未验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-隐藏-frame-coordinator-消息链-smoke)。
+- NativeProbe Release build、专用 smoke 通过；新增隐藏普通 Win32 frame/pane 的完整 synthetic subclass 消息链回归，验证 `WM_MENUSELECT` → `WM_COMMAND` → coordinator `PostMessage` → pane `WM_COMMAND`，以及 `WM_MENUCOMMAND` 的 menu+index 路径。同一合法 ID `0x7123` 的 File/View 项按来源命中 group 0/group 2，Object 组同 ID 不派发。它不是系统菜单跟踪，不创建 Shell view；真实 Shell/OLE 菜单时序和产品行为仍未验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-隐藏-frame-coordinator-消息链-smoke)。
 
 ## 2026-10-27：隐藏 frame 的合并菜单消息链验证
 
-- 菜单来源测试现在经过实际 `ShellMenuFrameCoordinator` 窗口 subclass、命令 FIFO、延迟 `PostMessage` 与隐藏 pane HWND；File/View 同 ID 均收到原始 `WM_COMMAND`，trace 分别确认菜单组。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。
+- 菜单来源测试现在经过实际 `ShellMenuFrameCoordinator` 窗口 subclass、命令 FIFO、延迟 `PostMessage` 与隐藏 pane HWND；File/View 重复 ID 经 `WM_MENUSELECT` 与 `WM_MENUCOMMAND` 均收到原始 `WM_COMMAND`，Object 组命令不派发。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。
 - 边界：输入是手动合成的 Win32 消息，不是系统弹出菜单的模态选择；未创建 `IShellView`/ExplorerBrowser，也未测试实际 Shell/OLE 命令行为。真实 Shell 菜单消息收件窗口与先后顺序、可见体验仍待隔离原生宿主验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-隐藏-frame-coordinator-消息链-smoke)。
 ## 2026-10-27：多行标签栏选项
 

@@ -10,7 +10,7 @@
 
 > **IShellView 延迟 View 命令拒绝过期 pane（2026-10-27）：**隔离 NativeProbe 的共享菜单 frame 会把 `WM_COMMAND` 延迟到自定义消息执行；切换 pane 后，旧 View 菜单命令之前可能沿旧 owner 发给已不活动的 view。现有执行前再次核对 coordinator owner，过期命令被消费但不派发。新增隐藏 frame 两 pane 回归；NativeProbe Release build 与无 Shell-view 的 `--shell-view-color-policy-smoke` 通过。仅是迁移原型门控，不代表产品 ExplorerBrowser 或真实菜单交互验收。详见[原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。
 
-> **隐藏 frame 合并菜单消息链（2026-10-27）：**`--shell-menu-group-routing-smoke` 现经过真实 coordinator subclass、来源跟踪、延迟消息队列及隐藏 pane HWND，合成 File/View 相同命令 ID 后各自按来源组收到原始 `WM_COMMAND`；构建 0 警告/错误。未创建 `IShellView`，也未触发系统真实菜单模态跟踪，Shell/OLE 菜单接收窗口及时序、用户可见行为仍待独立验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-隐藏-frame-coordinator-消息链-smoke)。
+> **隐藏 frame 合并菜单消息链（2026-10-27）：**`--shell-menu-group-routing-smoke` 现经过真实 coordinator subclass、来源跟踪、延迟消息队列及隐藏 pane HWND；File/View 重复 ID 经 `WM_MENUSELECT` 和按位置的 `WM_MENUCOMMAND` 都按来源组收到原始 `WM_COMMAND`，Object 组同 ID 被拒绝。构建 0 警告/错误。未创建 `IShellView`，也未触发系统真实菜单模态跟踪，Shell/OLE 菜单接收窗口及时序、用户可见行为仍待独立验证。详见[原型记录](ishellview-color-spike.md#2026-10-27-隐藏-frame-coordinator-消息链-smoke)。
 
 > **ExplorerBrowser Shell 状态提示（2026-10-26）：**每标签浏览器的 `StatusTextChange` 事件现经原生事件 sink 投递到独立的每窗格提示区域，错误/搜索/F9 状态仍使用原来的状态区域；事件按 COM 连接线程和订阅身份检查，标签切换恢复对应浏览器最近文本。SettingsSmoke 覆盖 native `IDispatch` BSTR、清空和卸订阅后的迟到回调，完整 Release SettingsSmoke 与 App Release build 通过。未启动 ExplorerBrowser/GUI，Shell 实际是否发送提示、鼠标悬停内容与四窗格布局仍待可见验收。
 

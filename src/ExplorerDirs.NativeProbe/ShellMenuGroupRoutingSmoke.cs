@@ -75,7 +75,7 @@ internal static class ShellMenuGroupRoutingSmoke
 
             VerifyMergedCommandDelivery(composite, fileChild, groups);
 
-            Console.WriteLine("shell-menu-group-routing-smoke: PASS File/Edit/View routing, reentrant active-view guard, and WM_COMMAND delivery; no Shell view created");
+            Console.WriteLine("shell-menu-group-routing-smoke: PASS File/Edit/View routing, reentrant active-view guard, WM_MENUSELECT/WM_MENUCOMMAND delivery; no Shell view created");
             return 0;
         }
         finally
