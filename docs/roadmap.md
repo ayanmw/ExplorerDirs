@@ -2,6 +2,11 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
+## 2026-10-26：修复原生目录树默认图标回退
+
+- 目录树事件回调未提供自定义索引时，改为返回 `E_NOTIMPL`，让 `NamespaceTreeControl` 解析 Shell 默认图标；新增回归检查并纳入完整 Release `SettingsSmoke`。微软官方 NamespaceTreeControl 示例采用相同的未实现回调语义。
+- 定向 smoke 与 App Release 构建通过；未启动 GUI，目录树的实际图标显示及虚拟 Shell 节点仍待可见验收。
+
 ## 2026-10-26：目录树跟随文件列表选区
 
 - 对照 Q-Dir [FAQ 66](https://www.softwareok.com/?faq=66&seite=faq-Q-DIR) 的“从列表选择并展开”选项，为本项目增加默认开启、可单独关闭的“视图 → 目录树 → 从文件列表选择并展开”。当前活动标签在单选到经 Shell 确认的文件夹后，使用其绝对 Shell 解析名定位并展开对应逐窗格树；共享树只跟随当前活动窗格。文件视图目录和键盘焦点不变，关闭树/多选/选择普通文件/非活动窗格都不触发；独立便携设置为 `NavigationTreeSelection.ini`。

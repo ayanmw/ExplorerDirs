@@ -442,6 +442,7 @@ try
     ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
     ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
     ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
+    ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")
