@@ -71,13 +71,14 @@ internal static class PrivateDesktopShellProbe
 
         if (!probeReturned.Wait(TimeSpan.FromSeconds(25)))
         {
-            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; probe did not return before the deadline");
+            var foregroundAtTimeout = GetForegroundWindow();
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
             return 124;
         }
 
         var foregroundAfter = GetForegroundWindow();
         var foregroundUnchanged = foregroundBefore == foregroundAfter;
-        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
+        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
 
         if (failure is not null)
         {

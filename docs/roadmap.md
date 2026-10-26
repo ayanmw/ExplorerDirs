@@ -6,7 +6,8 @@
 - `host-filter-private-desktop` 在独立 Private Desktop 上通过临时 filesystem 的筛选、Ctrl+A/Down/Enter 加速器调用、三层导航、上级及历史往返，并通过多个 Shell 位置的局部菜单/接口检查；但运行在 Search Folder 检查之后、ZIP 容器结果输出之前未返回，25 秒内部期限与 45 秒外部 watchdog 均触发。当前无法从日志区分 ZIP Shell provider 卡住还是其导航/清理调用阻塞，故该次全流程验收失败，不能将先前局部通过外推为完整宿主通过。
 - `host-menu-commands-private-desktop` 已执行列头菜单映射、Details、刷新、升降序排序/分组和焦点恢复局部检查；这些阶段自身报告前台句柄未变。探针返回后 `PrivateDesktopShellProbe` 的最终全局前台比较却为 false，未采样到变化发生于销毁视图、释放 COM、清理 fixture 或 Private Desktop 退出的哪个边界。按安全约束停止后续 Shell 宿主运行，不发布、不改产品宿主；菜单/命令结论仅保留为局部隔离证据。
 - 已为后续受控复跑增加 ZIP fixture/解析/导航各阶段标记，以及视图销毁、COM/PIDL 释放、父窗口处理、fixture 清理前后的前台句柄采样。NativeProbe Release 构建通过（0 警告、0 错误）；由于上次全局前台保护失败，本次只编译，未重跑任何 Shell 宿主。ZIP 的单目标入口现可通过既有 `host-filter-virtual-private-desktop -VirtualScope ZipContainer` watchdog 参数使用。
-- 下一步先分析新诊断的风险边界与超时清理，再决定是否可以安全地单独运行 ZIP 目标或复测 teardown；完整 OLE 拖放、物理键盘消息循环和可见焦点仍未验证。内存问题继续按本路线图既定的固定 PID/固定负载纵向采样计划跟进。
+- 后续按单目标入口运行 ZIP：Shell 绝对 PIDL 解析、`BrowseObject`、视图创建、菜单/拖放接口查询和逐阶段 teardown 均在约 4 秒内完成；探针线程始终运行于非输入 Private Desktop，内部 `GetForegroundWindow` 读数为 0。外层仍因前后台比较返回失败，但旧外层只输出布尔值，因此无法判定是实际前台句柄变化还是观察边界问题。该单场景排除了 ZIP 导航本身必然超时；此前完整序列的超时点仍未定位。
+- 已扩充 PrivateDesktopShellProbe 的超时及结束日志，输出外层实际前台 HWND 前后值。NativeProbe Release 构建和 `git diff --check` 通过；没有复跑 Shell 宿主。下一步根据已有日志核对窗口/桌面语义，只有建立可靠保护后才复测完整序列。完整 OLE 拖放、物理键盘消息循环和可见焦点仍未验证。内存问题继续按本路线图既定的固定 PID/固定负载纵向采样计划跟进。
 
 ## 2026-10-26：地址栏导航箭头右键打开历史
 
