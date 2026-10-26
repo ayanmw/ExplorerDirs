@@ -159,21 +159,35 @@ internal static class ShellViewHostFilterProbe
                 _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE, still confined to the Private Desktop.
                 Check(At<ActivateView>(view, 7)(view, 4)); // SVUIA_ACTIVATE_NOFOCUS.
                 Application.DoEvents();
-                var before = Directory.GetFileSystemEntries(fixture).Select(Path.GetFileName)
+                var before = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
-                var invokeHr = InvokeBackgroundVerbRaw(view, parent, "newfolder", 0x400); // CMIC_MASK_FLAG_NO_UI.
-                var settleUntil = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-                while (DateTime.UtcNow < settleUntil)
+                var attempts = new List<string>();
+                foreach (var mode in new[] { "offset", "ansi-verb", "unicode-verb" })
                 {
-                    Application.DoEvents();
-                    Thread.Sleep(10);
+                    var invokeHr = InvokeBackgroundVerbRaw(view, parent, "newfolder", 0x400,
+                        canonicalString: mode != "offset", unicodeVerb: mode == "unicode-verb");
+                    var settleUntil = DateTime.UtcNow + TimeSpan.FromMilliseconds(500);
+                    while (DateTime.UtcNow < settleUntil)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(10);
+                    }
+                    var afterAttempt = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
+                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                    attempts.Add($"{mode}=0x{invokeHr:X8},entries=[{string.Join('|', afterAttempt)}]");
+                    if (invokeHr >= 0 || !before.SequenceEqual(afterAttempt, StringComparer.OrdinalIgnoreCase)) break;
                 }
-                var after = Directory.GetFileSystemEntries(fixture).Select(Path.GetFileName)
+                var after = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
                 Check(At<ItemCount>(folderView, 7)(folderView, 2, out var afterViewCount));
-                Console.WriteLine($"ishellview-newfolder-diagnostic: invoke-hr=0x{invokeHr:X8}; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                var added = after.Except(before, StringComparer.OrdinalIgnoreCase).ToArray();
+                var canonicalVerbSucceeded = attempts.Any(attempt => attempt.StartsWith("ansi-verb=0x00000000", StringComparison.Ordinal));
+                Console.WriteLine($"ishellview-newfolder-diagnostic: attempts=[{string.Join(';', attempts)}]; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; canonical-verb-succeeded={canonicalVerbSucceeded}; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
                     throw new Exception("The isolated New Folder diagnostic changed the desktop boundary.");
+                if (!canonicalVerbSucceeded || added.Length != 1 || afterViewCount != 3 ||
+                    !Directory.Exists(Path.Combine(fixture, added[0])))
+                    throw new Exception("The Shell newfolder canonical verb did not create exactly one visible fixture directory.");
                 return 0;
             }
             VerifyGroupedFilteredExport(folderView);
@@ -1196,7 +1210,8 @@ internal static class ShellViewHostFilterProbe
     private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb) =>
         Check(InvokeBackgroundVerbRaw(view, owner, expectedVerb));
 
-    private static int InvokeBackgroundVerbRaw(nint view, nint owner, string expectedVerb, uint invokeMask = 0)
+    private static int InvokeBackgroundVerbRaw(nint view, nint owner, string expectedVerb, uint invokeMask = 0,
+        bool canonicalString = false, bool unicodeVerb = false)
     {
         var contextMenuId = ContextMenuId;
         Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
@@ -1225,18 +1240,39 @@ internal static class ShellViewHostFilterProbe
                         }
                     }
                     if (commandOffset is null) throw new Exception($"The Shell background menu did not expose the '{expectedVerb}' canonical verb.");
+                    if (string.Equals(expectedVerb, "newfolder", StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"ishellview-newfolder-map: command-offset={commandOffset.Value}; invocation={(unicodeVerb ? "unicode-verb" : canonicalString ? "ansi-verb" : "offset")}");
                 }
                 finally { Marshal.FreeHGlobal(buffer); }
 
-                var invoke = new NativeInvokeInfo
+                nint ansiVerb = 0, unicodeVerbPointer = 0;
+                try
                 {
-                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
-                    Mask = invokeMask,
-                    Window = owner,
-                    Verb = (nint)commandOffset.Value,
-                    Show = 1
-                };
-                return At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                    var invoke = new NativeInvokeInfo
+                    {
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        Mask = invokeMask | (unicodeVerb ? 0x4000u : 0u), // CMIC_MASK_UNICODE.
+                        Window = owner,
+                        Verb = (nint)commandOffset.Value,
+                        Show = 1
+                    };
+                    if (canonicalString)
+                    {
+                        ansiVerb = Marshal.StringToCoTaskMemAnsi(expectedVerb);
+                        invoke.Verb = ansiVerb;
+                        if (unicodeVerb)
+                        {
+                            unicodeVerbPointer = Marshal.StringToCoTaskMemUni(expectedVerb);
+                            invoke.VerbW = unicodeVerbPointer;
+                        }
+                    }
+                    return At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                }
+                finally
+                {
+                    if (unicodeVerbPointer != 0) Marshal.FreeCoTaskMem(unicodeVerbPointer);
+                    if (ansiVerb != 0) Marshal.FreeCoTaskMem(ansiVerb);
+                }
             }
             finally { DestroyMenu(menu); }
         }

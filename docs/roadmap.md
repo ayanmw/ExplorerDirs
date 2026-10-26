@@ -3407,10 +3407,10 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 官方 `PSRegisterPropertySchema` / `PSUnregisterPropertySchema` 契约要求机器级 schema 和 `HKLM` 写权限，注册属于安装流程、注销属于卸载流程；不在日常开发机执行临时 schema 注册。逐行列仍是失败中的隔离实验，不接入产品。
 - 探针 Release build 通过（0 警告、0 错误）；私有桌面前台保护通过。详见[逐行文件夹大小列架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
 
-## 2026-10-27：隔离 IShellView 的“新建文件夹”调用仍未通过
+## 2026-10-27：隔离 IShellView 通过 canonical verb 新建文件夹
 
-- 背景 Shell 菜单能返回 `newfolder` canonical verb，但在未显示与已显示/`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 的隔离 Private Desktop 视图中调用 `IContextMenu::InvokeCommand`，均返回 `E_FAIL (0x80004005)`；显示视图一轮带 `CMIC_MASK_FLAG_NO_UI`。两轮前后临时目录内容相同、Shell 视图均为 2 项，没有 `GetControlWindow` 请求或状态文本回调；Private Desktop 外前台句柄保持不变。单命令 watchdog 退出码 0（将 HRESULT 作为诊断结果），既有查看/刷新/排序/分组菜单探针复跑退出码 0。
-- 这排除了“仅因 view 隐藏”以及“调用失败前已创建目录”的可能，但未覆盖真实菜单展示与点击，不能据此判断可见 DefView 或产品宿主行为。下一步核对 canonical verb 与菜单命令偏移的调用形式，并追踪 `InvokeCommand` 前后的 `IShellBrowser`/`ICommDlgBrowser` 回调。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹调用失败)。
+- `GetCommandString` 返回 `newfolder` 对应 offset `115`；用该 MAKEINTRESOURCE offset 调用 `IContextMenu::InvokeCommand` 得到 `E_FAIL (0x80004005)`，改用 ANSI canonical verb `newfolder` 得到 `S_OK`，并在唯一临时目录创建“新建文件夹”，Shell 视图由 2 项更新到 3 项。调用带 `CMIC_MASK_FLAG_NO_UI`；没有 `GetControlWindow` 请求或状态文本回调，Private Desktop 外前台句柄保持不变。NativeProbe Release build 0 警告/错误，单命令 watchdog 退出码 0；既有查看/刷新/排序/分组命令复跑退出码 0。
+- 已证明隔离默认 filesystem `IShellView` 可通过 canonical verb 执行创建并让视图收敛；尚未证明真实菜单弹出/点击、Inline Rename/焦点、ExplorerBrowser 产品接线或完整多窗格行为。offset 调用失败原因仍未知，不据单一命令推广全局调用规则。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹-canonical-verb-原型通过)。
 
 ## 2026-10-27：布局工具栏选中态使用系统强调色
 

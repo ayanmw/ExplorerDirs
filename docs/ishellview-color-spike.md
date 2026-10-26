@@ -844,8 +844,8 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 
 该证据是直接合成 Ctrl+A 消息与线程 modifier 状态的 Shell accelerator 路径，不是物理键盘或完整产品消息循环验收；第四 pane 只有一个 fixture 项且未纳入全选断言。产品 ExplorerBrowser、WPF、剪贴板与 release 未修改。
 
-### 2026-10-27 背景菜单“新建文件夹”调用失败
+### 2026-10-27 背景菜单“新建文件夹” canonical verb 原型通过
 
-`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb；此前只查询过它的状态，没有执行。单命令探针分别在未显示和已显示/`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 的 Private Desktop 视图中调用。两次 `IContextMenu::InvokeCommand` 都返回 `E_FAIL (0x80004005)`；显示视图复测使用 `CMIC_MASK_FLAG_NO_UI`。该次调用前后临时目录均为 `child|filter.bin|keep.txt`，Shell 列表均为 2 项；没有 `GetControlWindow` 请求或状态文本回调，Private Desktop 以外的前台 HWND 保持不变。NativeProbe Release build 0 警告、0 错误，`host-newfolder-private-desktop` watchdog 退出码 0。另行复跑既有查看、刷新、排序和分组命令 watchdog 退出码 0。
+`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb。单命令探针在 Private Desktop 中显示并以 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 激活默认 `IShellView`，然后比较两种调用形式：`GetCommandString` 找到的命令偏移为 `115`，以 `MAKEINTRESOURCE(115)` 传给 `IContextMenu::InvokeCommand` 返回 `E_FAIL (0x80004005)`；以 ANSI canonical verb 字符串 `newfolder` 调用返回 `S_OK`，实际在唯一临时目录创建“新建文件夹”，Shell 项目数由 2 增至 3。测试使用 `CMIC_MASK_FLAG_NO_UI`，没有调用 `GetControlWindow` 或状态文本回调；Private Desktop 外前台 HWND 未变，夹具随后清理。NativeProbe Release build 0 警告、0 错误，定向 watchdog 退出码 0。既有查看、刷新、排序和分组命令探针也复跑通过。
 
-这排除了“仅因 view 完全隐藏”以及“Shell 已先创建目录但回报失败”两种解释，也没有证据表明缺少 `GetControlWindow`/状态栏服务导致失败；仍不能把它推广为可见 Explorer DefView 或产品宿主失败，因为没有真实显示/点击上下文菜单。下一步核对 canonical verb 与 menu command offset 的调用形式，并追踪 `InvokeCommand` 前后的 `IShellBrowser`/`ICommDlgBrowser` 回调，或寻找与 Shell 菜单一致的独立创建路径。隔离探针新增 `--ishellview-newfolder-private-desktop` 与 watchdog 入口；ExplorerBrowser 产品视图、用户目录和 release 均未改动。
+此结果证明默认文件系统 `IShellView` 可通过 canonical verb 完成新建文件夹并由视图枚举新项；仍未验证真实弹出菜单点击、Inline Rename/焦点、产品 ExplorerBrowser 或完整四窗格。当前 offset 115 为何返回失败而 ANSI canonical verb 成功仍未解释，不把一次具体命令推广为所有 Shell 命令都应使用字符串。隔离探针新增 `--ishellview-newfolder-private-desktop` 与 watchdog 入口，并要求创建结果同时出现在磁盘和 Shell 列表才算通过；产品 ExplorerBrowser、用户目录和 release 均未改动。
