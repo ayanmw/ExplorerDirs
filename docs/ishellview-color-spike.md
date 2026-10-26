@@ -38,6 +38,14 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 前两轮未通过的采样分别暴露了颜色值通道顺序解释错误，以及 Content 初次绘制尚未收到逐项回调；修正比较为原始 COLORREF 后，带有限重试的第三轮稳定命中。此前五种标准 ListView 样式的逐项颜色采样也已通过。该证据证明隔离 `IShellView`/DefView 在六种已测视图模式中能按项目绘制规则颜色，但不代表颜色功能已接入 Explorer Dirs 产品、Q-Dir `.qdr` 颜色已导入，也没有覆盖主题变化、DPI、多语言 Shell 扩展或可见 UI 验收。
 
+## 2026-10-27：四窗格原生 View 菜单命令 ID 直接分派
+
+将合并 View 菜单中已匹配到的 `FCIDM_SHVIEWFIRST..LAST` 命令原样发送给当前活动 `IShellView::GetWindow` 返回的 view HWND。此前 NativeProbe 用菜单文字路径匹配背景 `IContextMenu` canonical verb；微软 [`Implementing a Folder View`](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 说明 folder-specific 菜单命令在该 ID 区间内，并由 Explorer 宿主传给 folder view 窗口过程处理。单 pane 的 Details 命令实验也确认父 frame 收到同一 `WM_COMMAND` 不改变视图，而 view HWND 收到后切至 Details。
+
+Release NativeProbe 构建 0 警告/错误；`session-restore-private-desktop` watchdog 连续两次退出码 0：`20261027-044947-295ada75.stdout.log` 与 `20261027-045014-d7a36a44.stdout.log`。每次都在四 pane 分别将合成菜单里的 Details、排序升/降序、分组升/降序命令送达各自 view HWND；读回结果表明只有当前 pane 状态变化。四窗格菜单安装/停用恢复、视图状态恢复、复制/重命名/删除与 watcher 检查、F2 四方向键焦点隔离继续通过，前台 HWND 未变。
+
+该结果补齐隔离 NativeProbe 中的标准 View 菜单命令目标路由，并避免用本地化菜单文字推断 context-menu verb。命令清单仍通过当前 composite 菜单 ID 查找；实际菜单显示/点击、键盘菜单导航、标准 File/Edit 菜单命令、WPF `HwndHost` 和 ExplorerBrowser 产品均未验证。产品宿主不变更、不发布。
+
 ## 2026-10-27：区分 OLE frame 与 Shell view accelerator 路径
 
 验证 `OleTranslateAccelerator` 时，探针创建的 accelerator 表可被 Win32 `TranslateAccelerator` 匹配，但调用 OLE API 返回 `S_FALSE` 且没有到达 `IOleInPlaceFrame::TranslateAccelerator` handler。该单次实验未满足完整 OLE in-place activation / `GetWindowContext` 生命周期，不能作为 frame accelerator 实现失败的结论；临时测试代码已撤回，不影响完整会话恢复探针。

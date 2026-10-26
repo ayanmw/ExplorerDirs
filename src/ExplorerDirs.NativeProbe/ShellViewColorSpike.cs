@@ -683,56 +683,18 @@ internal static class ShellViewColorSpike
         var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
         var mergedPath = FindMenuCommandPath(viewMenu, commandId);
         if (mergedPath is null) return false;
+        if (!execute) return true;
 
-        var contextMenuId = ContextMenuId;
-        Check(At<GetItemObject>(owner.View, 15)(owner.View, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
-        try
-        {
-            const uint firstCommandId = 0x7000;
-            var menu = CreatePopupMenu();
-            if (menu == 0) throw new InvalidOperationException("Could not create the in-memory Shell menu used to resolve a merged view command.");
-            try
-            {
-                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0,
-                    firstCommandId, 0x7FFF, 0x10 | 0x800);
-                Check(queryResult);
-                var commandCount = Math.Min(queryResult & 0xFFFF, 0x7FFF - firstCommandId);
-                var buffer = Marshal.AllocHGlobal(512);
-                try
-                {
-                    var getCommandString = At<GetCommandString>(contextMenu, 5);
-                    for (uint offset = 0; offset < commandCount; offset++)
-                    {
-                        var contextPath = FindMenuCommandPath(menu, firstCommandId + offset);
-                        if (contextPath is null || !HasMatchingCommandPathSuffix(mergedPath, contextPath))
-                            continue;
-                        Marshal.WriteInt16(buffer, 0);
-                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) != 0) continue; // GCS_VERBW
-                        var verb = Marshal.PtrToStringUni(buffer);
-                        if (string.IsNullOrWhiteSpace(verb)) continue;
-                        if (!execute) return true;
-                        var invoke = new NativeInvokeInfo
-                        {
-                            Size = Marshal.SizeOf<NativeInvokeInfo>(),
-                            Window = owner.MenuFrameWindow,
-                            Verb = (nint)offset,
-                            Show = 1
-                        };
-                        var invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
-                        Check(invokeResult);
-                        owner.MenuTrace.Add($"shell-command id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' verb='{verb}' context-id=0x{firstCommandId + offset:X4}");
-                        return true;
-                    }
-                }
-                finally { Marshal.FreeHGlobal(buffer); }
-            }
-            finally { DestroyMenu(menu); }
-        }
-        finally { Marshal.Release(contextMenu); }
-        owner.MenuTrace.Add($"shell-command-unmapped id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}'");
-        return false;
+        // FCIDM_SHVIEWFIRST..LAST commands belong to the active folder view's
+        // window procedure. Forward the original Shell command ID instead of
+        // translating localized labels into a separate context-menu verb.
+        var windowResult = At<GetWindow>(owner.View, 3)(owner.View, out var viewWindow);
+        if (windowResult < 0 || viewWindow == 0 || !IsWindow(viewWindow))
+            throw new InvalidOperationException($"The active Shell view returned an invalid command target HWND: hr=0x{windowResult:X8}; hwnd=0x{viewWindow:X}.");
+        _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        owner.MenuTrace.Add($"shell-command id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
+        return true;
     }
-
     private static IReadOnlyList<string>? FindMenuCommandPath(nint menu, uint commandId,
         IReadOnlyList<string>? parents = null)
     {
@@ -751,19 +713,6 @@ internal static class ShellViewColorSpike
             if (nestedPath is not null) return nestedPath;
         }
         return null;
-    }
-
-    private static bool HasMatchingCommandPathSuffix(IReadOnlyList<string> mergedPath,
-        IReadOnlyList<string> contextPath)
-    {
-        var count = Math.Min(2, Math.Min(mergedPath.Count, contextPath.Count));
-        if (count == 0) return false;
-        for (var offset = 1; offset <= count; offset++)
-        {
-            if (!string.Equals(mergedPath[^offset], contextPath[^offset], StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-        return true;
     }
 
     private static string NormalizeMenuLabel(string? label)
