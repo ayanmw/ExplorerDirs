@@ -22,7 +22,7 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 隔离宿主的顶层 frame subclass 现在将 Shell composite View 菜单的 `WM_COMMAND` 映射到当前 pane 背景 `IContextMenu` 的 canonical verb。Shell 菜单项 ID 与 context-menu ID 并不一致，因此实现读取活动 View 菜单项的层级标题路径，再与 `IContextMenu::QueryContextMenu` 生成的命令路径匹配；按层级后缀消歧排序和分组菜单中重复的升序/降序项。执行通过 `IContextMenu::InvokeCommand`，并在原始 `WM_COMMAND` 返回后 `PostMessage` 到 frame，避免在 Shell 菜单回调中同步重入。
 
-清理诊断代码后的第一次完整 `session-restore-private-desktop` watchdog 通过，日志为 `src/.state/native-probe-watchdog/20261027-042447-50659c58.stdout.log`。四个真实 filesystem `IShellView` pane 均验证 Details、排序升序/降序和分组升序/降序；每项只改变活动 pane，兄弟 pane 的模式、排序和分组保持不变。文件复制/重命名/删除、目录通知、F2 焦点隔离、view-state 重建恢复和 foreground HWND 不变等既有检查也通过。紧接着的重复回归在 120 秒 watchdog 时限超时，日志 `src/.state/native-probe-watchdog/20261027-042623-ddebc4b7.stdout.log` 只到筛选器基线、未输出根因；前台窗口未变化、stderr 仅有 watchdog 超时。当前命令映射有一次完整通过证据，但整套原型回归的重复性未确认。
+完整回归有过两次 120 秒 watchdog 超时（`20261027-042623-ddebc4b7.stdout.log`、`20261027-042802-29e50ff5.stdout.log`），前台窗口均未变化。第二次增加阶段标记后确认生产 view 已保存并销毁，停在独立恢复 consumer 调用附近；当时 consumer 输出只在退出后回传，无法定位其内部阶段。随后保留了生产/consumer 阶段标记，并改为实时转发 consumer stdout/stderr。两次连续完整运行通过（`20261027-042900-e2e86451.stdout.log`、`20261027-042934-db8d1d60.stdout.log`）：四个真实 filesystem `IShellView` pane 均验证 Details、排序升序/降序和分组升序/降序；每项只改变活动 pane，兄弟 pane 的模式、排序和分组保持不变。文件复制/重命名/删除、目录通知、F2 焦点隔离、view-state 重建恢复和 foreground HWND 不变等既有检查也通过。consumer 早期停滞的原因仍未复现或确认；阶段输出保留，以便下次超时时定位。
 
 此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 

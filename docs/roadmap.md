@@ -3520,5 +3520,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-27：四窗格 Shell View 菜单命令映射与执行
 
-- 清理诊断代码后的首次 Private Desktop 四 pane 回归通过：隔离宿主将 Shell View composite menu 的 Details、排序升/降序、分组升/降序命令映射到当前 pane `IContextMenu` canonical verb 执行；每次只改变活动 pane，兄弟 view 状态不变。完整会话恢复、文件操作/通知、F2 焦点隔离检查通过，主桌面前台窗口不变。日志：`src/.state/native-probe-watchdog/20261027-042447-50659c58.stdout.log`。随后的重复运行在 120 秒 watchdog 时限超时，日志停在筛选器基线，根因未确定：`src/.state/native-probe-watchdog/20261027-042623-ddebc4b7.stdout.log`。
-- 结论：标准菜单命令的隔离 frame 分派路线在一次完整运行中通过，但原型回归可重复性仍待查；继续补齐真实菜单跟踪/OLE accelerator、实际拖放、颜色绘制和 WPF 宿主集成门槛。未接入产品 ExplorerBrowser 替换，也未发布迁移版本。详情见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-view-菜单命令映射与执行)。
+- 两次完整 Private Desktop 四 pane 回归通过，日志为 `20261027-042900-e2e86451.stdout.log` 和 `20261027-042934-db8d1d60.stdout.log`；此前两轮分别在 120 秒时限超时，阶段输出将停滞范围缩小到独立恢复 consumer 附近，但未复现原因。现在 producer/consumer 均输出阶段标记，父进程实时转发 consumer 输出。通过运行中，Shell View composite menu 的 Details、排序升/降序、分组升/降序均映射到当前 pane `IContextMenu` canonical verb，每次只改变活动 pane；完整会话恢复、文件操作/通知、F2 焦点隔离检查通过，主桌面前台窗口不变。
+- 结论：标准菜单命令的隔离 frame 分派路线在连续两次完整运行中通过；早先 consumer 阶段超时仍是未解释的间歇风险。继续补齐真实菜单跟踪/OLE accelerator、实际拖放、颜色绘制和 WPF 宿主集成门槛。未接入产品 ExplorerBrowser 替换，也未发布迁移版本。详情见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-view-菜单命令映射与执行)。

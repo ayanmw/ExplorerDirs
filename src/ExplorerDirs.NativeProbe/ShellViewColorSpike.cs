@@ -72,6 +72,7 @@ internal static class ShellViewColorSpike
             parent = CreateWindowExW(extendedStyle, "STATIC", "ExplorerDirs session restore consumer",
                 windowStyle, 100, 100, 800, 560, 0, 0, 0, 0);
             if (parent == 0) throw new InvalidOperationException("Could not create the isolated consumer parent window.");
+            Console.WriteLine("session-restore-consumer-stage: parent-created");
             menuCoordinator = new ShellMenuFrameCoordinator(parent);
             pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 1",
                 0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265, parent, 0, 0, 0);
@@ -91,13 +92,16 @@ internal static class ShellViewColorSpike
             createAttempted = true;
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0) throw new InvalidOperationException("The consumer view was created without a window.");
+            Console.WriteLine("session-restore-consumer-stage: view-created");
             if (GetParent(pane) != parent || GetParent(viewWindow) != pane)
                 throw new InvalidOperationException("The restored Shell view is not hosted inside its first child pane.");
             ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated desktop.
             Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
+            Console.WriteLine("session-restore-consumer-stage: view-activated");
             Pump(1000);
             Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
             _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+            Console.WriteLine("session-restore-consumer-stage: items-enumerated");
             Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out _));
             Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
             if (sortCount != 1) throw new Exception($"Restored sort count was {sortCount}, expected one.");
@@ -123,8 +127,10 @@ internal static class ShellViewColorSpike
                 group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
+            Console.WriteLine("session-restore-consumer-stage: state-restored");
             var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
                 folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator);
+            Console.WriteLine("session-restore-consumer-stage: four-pane-finished");
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
                 $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
@@ -1468,6 +1474,7 @@ internal static class ShellViewColorSpike
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
             if (probeSessionRestore)
             {
+                Console.WriteLine("ishellview-session-restore-stage: configure-view");
                 const uint expectedMode = 4; // FVM_DETAILS
                 var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
                 var nameKey = new PropertyKeyState(propertyFormatId, 10);
@@ -1487,6 +1494,7 @@ internal static class ShellViewColorSpike
                 var expectedGroup = new PropertyKey { FormatId = propertyFormatId, PropertyId = typeKey.PropertyId };
                 Check(At<SetGroupBy>(folderView, 17)(folderView, ref expectedGroup, 1));
                 Check(ShellColumnManager.Apply(folderView, expectedColumns));
+                Console.WriteLine("ishellview-session-restore-stage: view-configured");
                 Pump(500);
                 Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var modeBeforeSave, out _));
                 Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCountBeforeSave));
@@ -1505,6 +1513,7 @@ internal static class ShellViewColorSpike
                 if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
                     throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
                 Check(At<SaveViewState>(view, 13)(view));
+                Console.WriteLine("ishellview-session-restore-stage: shell-save-returned");
                 Pump(350);
 
                 var oldView = view;
@@ -1515,17 +1524,20 @@ internal static class ShellViewColorSpike
                 viewWindowCreateAttempted = false;
                 host.View = 0;
                 viewRetirement.Retire(oldView, oldFolder);
+                Console.WriteLine("ishellview-session-restore-stage: old-view-retired");
                 var shellWrites = host.Writes;
                 Marshal.Release(hostPointer);
                 hostPointer = 0;
                 host.Dispose();
                 host = null;
+                Console.WriteLine("ishellview-session-restore-stage: host-disposed");
                 var persisted = stateStore.TryLoad(sessionId, out var savedState);
                 if (!persisted || shellWrites == 0)
                     throw new Exception($"Saving the real Shell view produced no persisted stream: writes={shellWrites}; saved={persisted}.");
 
                 if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
                     throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
+                Console.WriteLine("ishellview-session-restore-stage: starting-consumer");
                 var consumer = RunSessionRestoreConsumerProcess(fixture, stateDirectory, sessionId);
                 Console.WriteLine($"ishellview-session-restore: producer-pid={Environment.ProcessId}; " +
                     $"shell-write-callbacks={shellWrites}; persisted-bytes={savedState.Length}; " +
@@ -1912,8 +1924,8 @@ internal static class ShellViewColorSpike
 
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = DrainChildOutput(process.StandardOutput, "stdout");
+        var stderr = DrainChildOutput(process.StandardError, "stderr");
         // The four-pane frame probe now dispatches Details, sorting and grouping through each merged Shell menu.
         if (!process.WaitForExit(60_000))
         {
@@ -1926,6 +1938,17 @@ internal static class ShellViewColorSpike
 
         var output = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
         return (process.ExitCode, output[0] + output[1]);
+
+        static async Task<string> DrainChildOutput(StreamReader reader, string stream)
+        {
+            var output = new System.Text.StringBuilder();
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                Console.WriteLine($"session-restore-consumer-live-{stream}: {line}");
+                output.AppendLine(line);
+            }
+            return output.ToString();
+        }
     }
 
     private static byte[] ReadViewStateBytes(nint pointer)
