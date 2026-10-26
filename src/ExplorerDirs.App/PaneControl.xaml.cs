@@ -998,7 +998,7 @@ public partial class PaneControl : UserControl
         };
         var entries = AddressPathMenu.Build(state.Path);
         var addedCommonSeparator = false;
-        var pathItems = new Dictionary<string, MenuItem>(StringComparer.OrdinalIgnoreCase);
+        var itemsByIdentity = new Dictionary<string, MenuItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
             if (!entry.IsAncestor && !addedCommonSeparator)
@@ -1023,16 +1023,9 @@ public partial class PaneControl : UserControl
             {
                 if (ReferenceEquals(Current, state)) state.Browser.Navigate(entry.Identity);
             };
-            if (entry.IsAncestor)
-            {
-                if (entry.ParentIdentity is null) menu.Items.Add(item);
-                else pathItems[entry.ParentIdentity].Items.Add(item);
-                pathItems[entry.Identity] = item;
-            }
-            else
-            {
-                menu.Items.Add(item);
-            }
+            if (entry.ParentIdentity is null) menu.Items.Add(item);
+            else itemsByIdentity[entry.ParentIdentity].Items.Add(item);
+            itemsByIdentity[entry.Identity] = item;
         }
         menu.IsOpen = true;
     }

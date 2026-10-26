@@ -4,7 +4,8 @@ internal static class AddressPathMenuSmoke
 {
     internal static void Run()
     {
-        var entries = AddressPathMenu.Build(@"C:\work\project", [("此电脑", "shell:MyComputerFolder")]);
+        var entries = AddressPathMenu.Build(@"C:\work\project",
+            [new AddressPathMenuLocation("此电脑", "shell:MyComputerFolder")]);
         Check(entries.Take(3).Select(entry => entry.Identity).SequenceEqual(
                 [@"C:\", @"C:\work", @"C:\work\project"]),
             "path dropdown lists the root-to-current hierarchy");
@@ -21,6 +22,22 @@ internal static class AddressPathMenuSmoke
             "common Shell locations follow path ancestors");
         Check(AddressPathMenu.Build("shell:RecycleBinFolder", []).Single().Identity == "shell:RecycleBinFolder",
             "virtual Shell locations remain directly navigable without filesystem path splitting");
+
+        var computerTree = AddressPathMenu.Build("shell:RecycleBinFolder",
+        [
+            new AddressPathMenuLocation("此电脑", "shell:MyComputerFolder"),
+            new AddressPathMenuLocation("驱动器 (D:)", @"D:\", "shell:MyComputerFolder")
+        ]);
+        var drive = computerTree.Single(entry => entry.Identity == @"D:\");
+        Check(drive.ParentIdentity == "shell:MyComputerFolder" && drive.Depth == 1,
+            "logical drives are nested beneath This PC");
+
+        var liveLocations = AddressPathMenu.Build("shell:RecycleBinFolder");
+        var listedDrives = liveLocations.Where(entry =>
+            !entry.IsAncestor && entry.ParentIdentity == "shell:MyComputerFolder").Select(entry => entry.Identity);
+        Check(Environment.GetLogicalDrives().All(rootPath => listedDrives.Contains(rootPath,
+                StringComparer.OrdinalIgnoreCase)),
+            "the path menu includes logical drives discovered at build time");
 
         static void Check(bool condition, string message)
         {
