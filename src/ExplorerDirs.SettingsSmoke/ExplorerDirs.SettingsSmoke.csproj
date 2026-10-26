@@ -87,6 +87,7 @@
     <Compile Include="../ExplorerDirs.App/ThemePreferenceStore.cs" Link="ThemePreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/SizeDisplayPreferenceStore.cs" Link="SizeDisplayPreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePalette.cs" Link="ThemePalette.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeWindowFrameTheme.cs" Link="NativeWindowFrameTheme.cs" />
     <Compile Include="../ExplorerDirs.App/ViewPresetStore.cs" Link="ViewPresetStore.cs" />
     <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/StartupDirectory.cs" Link="StartupDirectory.cs" />

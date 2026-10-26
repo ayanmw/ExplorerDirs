@@ -145,6 +145,12 @@ if (args.Length == 1 && args[0] == "--pane-theme-markup-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--window-frame-theme-smoke")
+{
+    WindowFrameThemeSmoke.Run();
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--roundtrip-qdr")
 {
     QdrRoundTripProbe.Run(args[1]);

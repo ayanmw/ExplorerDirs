@@ -18,6 +18,7 @@ internal sealed class ApplicationThemeController : IDisposable
 
     public ThemePreference Preference { get; private set; }
     public ResolvedTheme Resolved { get; private set; }
+    public ThemeColors? CurrentColors { get; private set; }
     public string? LoadWarning => _store.LoadWarning;
     public event EventHandler? ThemeChanged;
 
@@ -87,11 +88,13 @@ internal sealed class ApplicationThemeController : IDisposable
         Resolved = ThemePalette.Resolve(Preference, _systemIsDark);
         if (SystemParameters.HighContrast)
         {
+            CurrentColors = null;
             ClearThemeResources();
         }
         else
         {
-            SetThemeResources(ThemePalette.For(Resolved, _systemAccent));
+            CurrentColors = ThemePalette.For(Resolved, _systemAccent);
+            SetThemeResources(CurrentColors.Value);
         }
         ThemeChanged?.Invoke(this, EventArgs.Empty);
     }

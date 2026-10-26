@@ -42,6 +42,11 @@
 - 将辅助窗口的 `ListBox` 表面和行绑定到语义颜色，选中行使用当前强调色与成对的可读文字色；不改变列表模板、选区逻辑或 ExplorerBrowser 文件列表。
 - 定向接线 smoke 先因 ListBox 样式缺失失败，加入资源后通过；完整 Release `SettingsSmoke`、App Release build（0 警告、0 错误）和 `git diff --check` 均通过。未操作 GUI，列表可见效果待验收。计划见[WPF 列表主题计划](superpowers/plans/2026-10-27-themed-listbox.md)。
 
+## 2026-10-27：Windows 11 标题栏同步应用主题
+
+- 主窗口和照片打印辅助窗将应用调色板同步到 DWM 标题栏、标题文字和边框；主题变化即时重新应用，高对比度恢复系统默认。调用公开的 Windows 11 22000+ 颜色属性；旧系统拒绝属性时不影响窗口创建和 WPF 客户区主题。
+- 纯 COLORREF/高对比度策略和两个窗口接线 smoke 通过；完整 Release `SettingsSmoke`、App Release build（0 警告、0 错误）和差异检查通过。未启动 GUI，Windows 11/旧系统兼容、激活态标题栏颜色和实时切换效果仍待可见验收。计划见[窗口标题栏主题计划](superpowers/plans/2026-10-27-themed-window-frame.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。

@@ -284,6 +284,7 @@ public partial class MainWindow : Window
             if (HwndSource.FromHwnd(new WindowInteropHelper(this).Handle) is { } source)
                 _systemSettingChangeHook = new SystemSettingChangeHook(source, RefreshEnvironment,
                     RefreshFollowedWindowsHiddenItems);
+            ApplyWindowFrameTheme();
         };
         Closing += (_, _) =>
         {
@@ -774,8 +775,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ThemeController_ThemeChanged(object? sender, EventArgs e) =>
+    private void ThemeController_ThemeChanged(object? sender, EventArgs e)
+    {
         ApplyThemePreferenceMenuState();
+        ApplyWindowFrameTheme();
+    }
+
+    private void ApplyWindowFrameTheme() =>
+        NativeWindowFrameTheme.Apply(new WindowInteropHelper(this).Handle, _themeController?.CurrentColors);
 
     private void ByteSizeFormatter_OptionsChanged(object? sender, EventArgs e)
     {
@@ -1880,7 +1887,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var window = new PhotoPrintWindow(decoded.Images, rejected) { Owner = this };
+            var window = new PhotoPrintWindow(decoded.Images, rejected, _themeController) { Owner = this };
             if (window.ShowDialog() == true)
                 EnvironmentStatus.Text = $"已提交照片打印任务：{window.SubmittedPhotoCount:N0} 张，{window.SubmittedPageCount:N0} 页。";
             else
