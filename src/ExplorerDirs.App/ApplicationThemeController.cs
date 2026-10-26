@@ -14,11 +14,13 @@ internal sealed class ApplicationThemeController : IDisposable
     private readonly SystemThemeMonitor? _systemThemeMonitor;
     private bool _systemIsDark;
     private Color _systemAccent = ThemePalette.DefaultAccent;
+    private Color? _customAccentColor;
     private int _disposed;
 
     public ThemePreference Preference { get; private set; }
     public ResolvedTheme Resolved { get; private set; }
     public ThemeColors? CurrentColors { get; private set; }
+    public Color? CustomAccentColor => _customAccentColor;
     public string? LoadWarning => _store.LoadWarning;
     public event EventHandler? ThemeChanged;
 
@@ -28,6 +30,7 @@ internal sealed class ApplicationThemeController : IDisposable
         _dispatcher = application.Dispatcher;
         _store = new ThemePreferenceStore(Path.Combine(profileDirectory, "Theme.ini"));
         Preference = _store.Load();
+        _customAccentColor = _store.CustomAccentColor;
         try
         {
             _systemThemeMonitor = new SystemThemeMonitor();
@@ -49,6 +52,13 @@ internal sealed class ApplicationThemeController : IDisposable
     {
         _store.Save(preference);
         Preference = preference;
+        Apply();
+    }
+
+    public void SetCustomAccentColor(Color? color)
+    {
+        _store.SaveAccentColor(color);
+        _customAccentColor = color;
         Apply();
     }
 
@@ -93,7 +103,7 @@ internal sealed class ApplicationThemeController : IDisposable
         }
         else
         {
-            CurrentColors = ThemePalette.For(Resolved, _systemAccent);
+            CurrentColors = ThemePalette.For(Resolved, _customAccentColor ?? _systemAccent);
             SetThemeResources(CurrentColors.Value);
         }
         ThemeChanged?.Invoke(this, EventArgs.Empty);

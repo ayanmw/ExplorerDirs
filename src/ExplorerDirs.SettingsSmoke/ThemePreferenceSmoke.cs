@@ -25,6 +25,10 @@ internal static class ThemePreferenceSmoke
             ?? throw new Exception("ThemePreferenceStore.Load is required.");
         var save = storeType.GetMethod("Save", BindingFlags.Instance | BindingFlags.Public)
             ?? throw new Exception("ThemePreferenceStore.Save is required.");
+        var saveAccent = storeType.GetMethod("SaveAccentColor", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new Exception("ThemePreferenceStore.SaveAccentColor is required.");
+        var customAccent = storeType.GetProperty("CustomAccentColor", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new Exception("ThemePreferenceStore.CustomAccentColor is required.");
         var warning = storeType.GetProperty("LoadWarning", BindingFlags.Instance | BindingFlags.Public);
 
         object Load() => load.Invoke(store, null) ?? throw new Exception("ThemePreferenceStore.Load returned null.");
@@ -33,8 +37,25 @@ internal static class ThemePreferenceSmoke
 
         Check(Value(Load()) == "System" && warning?.GetValue(store) is null,
             "missing theme preference defaults to System");
+        var customColor = System.Windows.Media.Color.FromRgb(0x2a, 0x7b, 0xc4);
+        saveAccent.Invoke(store, [customColor]);
+        Check(Value(Load()) == "System" && Equals(customAccent.GetValue(store), customColor) &&
+              File.ReadAllText(storePath).Contains("FormatVersion=2", StringComparison.Ordinal) &&
+              File.ReadAllText(storePath).Contains("AccentColor=#2A7BC4", StringComparison.Ordinal),
+            "custom accent color round-trips in Theme.ini format 2");
+        saveAccent.Invoke(store, [null]);
+        Check(customAccent.GetValue(store) is null && Value(Load()) == "System",
+            "returning to Windows accent clears the custom color without changing theme mode");
+
+        File.WriteAllText(storePath, "[Theme]" + Environment.NewLine +
+            "FormatVersion=1" + Environment.NewLine + "Mode=Dark" + Environment.NewLine);
+        Check(Value(Load()) == "Dark" && customAccent.GetValue(store) is null,
+            "version 1 theme profiles retain their mode and default to Windows accent");
         Save("Dark");
         Check(Value(Load()) == "Dark", "Dark preference round-trips through the profile INI");
+        saveAccent.Invoke(store, [customColor]);
+        Check(Value(Load()) == "Dark" && Equals(customAccent.GetValue(store), customColor),
+            "changing accent preserves the selected Light/Dark/System mode");
         Save("Light");
         Check(Value(Load()) == "Light", "Light preference round-trips through the profile INI");
         Save("System");
@@ -48,19 +69,25 @@ internal static class ThemePreferenceSmoke
         Check(externalConflict && File.ReadAllText(storePath).Contains("external edit", StringComparison.Ordinal),
             "external theme preference edits are preserved");
 
-        File.WriteAllText(storePath, validContent.Replace("FormatVersion=1", "FormatVersion=2", StringComparison.Ordinal));
+        File.WriteAllText(storePath, validContent.Replace("FormatVersion=2", "FormatVersion=3", StringComparison.Ordinal));
         Check(Value(Load()) == "System" && warning?.GetValue(store) is not null,
             "future theme preference format is protected with a warning");
         var futureFormatProtected = false;
         try { Save("Light"); }
         catch (TargetInvocationException ex) when (ex.InnerException is IOException) { futureFormatProtected = true; }
-        Check(futureFormatProtected && File.ReadAllText(storePath).Contains("FormatVersion=2", StringComparison.Ordinal),
+        Check(futureFormatProtected && File.ReadAllText(storePath).Contains("FormatVersion=3", StringComparison.Ordinal),
             "future theme preference format is not overwritten");
 
         File.WriteAllText(storePath, "[Theme]" + Environment.NewLine + "FormatVersion=1" + Environment.NewLine + "Mode=Unknown" + Environment.NewLine);
         Check(Value(Load()) == "System" && warning?.GetValue(store) is not null &&
               Directory.GetFiles(root, "Theme.ini.invalid-*.bak").Length == 1,
             "invalid theme preference is backed up before defaulting to System");
+        File.WriteAllText(storePath, "[Theme]" + Environment.NewLine +
+            "FormatVersion=2" + Environment.NewLine + "Mode=Dark" + Environment.NewLine + "AccentColor=#12GG56" + Environment.NewLine);
+        Check(Value(Load()) == "System" && warning?.GetValue(store) is not null &&
+              Directory.GetFiles(root, "Theme.ini.invalid-*.bak").Length == 2,
+            "invalid custom RGB is backed up and never partially applied");
+        CheckCustomAccentUiWiring();
         Console.WriteLine("Theme preference smoke: PASS");
 
         static void Check(bool condition, string message)
@@ -68,6 +95,35 @@ internal static class ThemePreferenceSmoke
             if (!condition) throw new Exception(message);
             Console.WriteLine("PASS " + message);
         }
+    }
+
+    private static void CheckCustomAccentUiWiring()
+    {
+        var repoRoot = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repoRoot is not null &&
+               !(File.Exists(Path.Combine(repoRoot.FullName, "docs", "roadmap.md")) &&
+                 File.Exists(Path.Combine(repoRoot.FullName, "src", "ExplorerDirs.App", "ApplicationThemeController.cs"))))
+            repoRoot = repoRoot.Parent;
+        var root = repoRoot?.FullName ?? throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
+        var menu = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "MainWindow.xaml"));
+        var window = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+        var dialogMarkup = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "AccentColorDialog.xaml"));
+        var dialogCode = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "AccentColorDialog.xaml.cs"));
+        if (!(menu.Contains("Click=\"WindowsAccent_Click\"", StringComparison.Ordinal) &&
+              menu.Contains("Click=\"CustomAccent_Click\"", StringComparison.Ordinal) &&
+              window.Contains("new AccentColorDialog(current) { Owner = this }", StringComparison.Ordinal) &&
+              window.Contains("SetCustomAccentColor(selected)", StringComparison.Ordinal) &&
+              window.Contains("SetCustomAccentColor(null)", StringComparison.Ordinal)))
+            throw new Exception("Theme menu must select custom or live Windows accent through the owned dialog.");
+        Console.WriteLine("PASS theme menu selects custom or live Windows accent through the owned dialog");
+        if (!(dialogMarkup.Contains("TextChanged=\"ColorText_TextChanged\"", StringComparison.Ordinal) &&
+              dialogMarkup.Contains("IsDefault=\"True\"", StringComparison.Ordinal) &&
+              dialogMarkup.Contains("IsCancel=\"True\"", StringComparison.Ordinal) &&
+              dialogCode.Contains("TryParseColor(ColorText.Text", StringComparison.Ordinal) &&
+              dialogCode.Contains("DialogResult = true", StringComparison.Ordinal)))
+            throw new Exception("Custom accent dialog must validate input and apply only after confirmation.");
+        Console.WriteLine("PASS custom accent dialog previews valid RGB input and applies only after confirmation");
+        Console.WriteLine("Custom accent UI smoke: PASS");
     }
 
     public static void CheckResolution()

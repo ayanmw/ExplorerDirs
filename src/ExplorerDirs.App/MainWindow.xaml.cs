@@ -775,6 +775,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private void WindowsAccent_Click(object sender, RoutedEventArgs e)
+    {
+        if (_themeController is null) return;
+        try
+        {
+            _themeController.SetCustomAccentColor(null);
+            EnvironmentStatus.Text = "强调色已设置为跟随 Windows。";
+        }
+        catch (Exception ex)
+        {
+            ApplyThemePreferenceMenuState();
+            EnvironmentStatus.Text = $"强调色配置保存失败：{ex.Message}";
+        }
+    }
+
+    private void CustomAccent_Click(object sender, RoutedEventArgs e)
+    {
+        if (_themeController is null) return;
+        var current = _themeController.CurrentColors?.Accent ?? ThemePalette.DefaultAccent;
+        var dialog = new AccentColorDialog(current) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedColor is not { } selected)
+        {
+            ApplyThemePreferenceMenuState();
+            return;
+        }
+        try
+        {
+            _themeController.SetCustomAccentColor(selected);
+            EnvironmentStatus.Text = $"自定义强调色已应用：#{selected.R:X2}{selected.G:X2}{selected.B:X2}";
+        }
+        catch (Exception ex)
+        {
+            ApplyThemePreferenceMenuState();
+            EnvironmentStatus.Text = $"强调色配置保存失败：{ex.Message}";
+        }
+    }
+
     private void ThemeController_ThemeChanged(object? sender, EventArgs e)
     {
         ApplyThemePreferenceMenuState();
@@ -853,6 +890,9 @@ public partial class MainWindow : Window
         SystemThemeMenu.IsChecked = preference == ThemePreference.System;
         LightThemeMenu.IsChecked = preference == ThemePreference.Light;
         DarkThemeMenu.IsChecked = preference == ThemePreference.Dark;
+        var usesCustomAccent = _themeController?.CustomAccentColor.HasValue == true;
+        WindowsAccentMenu.IsChecked = !usesCustomAccent;
+        CustomAccentMenu.IsChecked = usesCustomAccent;
     }
 
     private void AddressBarStyle_Click(object sender, RoutedEventArgs e)

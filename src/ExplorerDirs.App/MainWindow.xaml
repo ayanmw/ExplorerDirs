@@ -72,6 +72,13 @@
                         <MenuItem x:Name="SystemThemeMenu" Header="跟随系统" IsCheckable="True" Tag="System" Click="ThemePreference_Click"/>
                         <MenuItem x:Name="LightThemeMenu" Header="浅色" IsCheckable="True" Tag="Light" Click="ThemePreference_Click"/>
                         <MenuItem x:Name="DarkThemeMenu" Header="深色" IsCheckable="True" Tag="Dark" Click="ThemePreference_Click"/>
+                        <Separator/>
+                        <MenuItem Header="强调色">
+                            <MenuItem x:Name="WindowsAccentMenu" Header="跟随 Windows 强调色"
+                                      IsCheckable="True" Click="WindowsAccent_Click"/>
+                            <MenuItem x:Name="CustomAccentMenu" Header="自定义强调色…"
+                                      IsCheckable="True" Click="CustomAccent_Click"/>
+                        </MenuItem>
                     </MenuItem>
                     <MenuItem x:Name="DefaultViewMenu" Header="新建标签默认查看"/>
                     <MenuItem Header="地址栏样式">
