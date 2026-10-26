@@ -3409,9 +3409,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-27：隔离 IShellView 的“新建文件夹”调用仍未通过
 
-- 背景 Shell 菜单能返回 `newfolder` canonical verb，但在隔离 Private Desktop 的 `IContextMenu::InvokeCommand` 调用中返回 `E_FAIL (0x80004005)`；增加 `CMIC_MASK_FLAG_NO_UI` 后结果相同。此前已通过的查看、刷新、排序、分组命令不受影响，前台窗口保护通过。
-- 异常发生于调用返回后、视图项目枚举前；虽然临时夹具按清理路径删除，但本轮没有记录调用前后的目录内容，因此尚不能证明没有先创建文件夹。菜单中出现命令不代表命令已可用；隐藏视图失败也不足以断言用户可见 DefView 或 ExplorerBrowser 必然失败。
-- 下一步把该动作拆成单命令短进程，先对比调用前后临时目录内容，再记录调用期间的 `IShellBrowser` 服务回调与 HRESULT，定位是否为隐藏视图限制或隔离宿主缺少服务。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹调用失败)。
+- 背景 Shell 菜单能返回 `newfolder` canonical verb，但在未显示与已显示/`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 的隔离 Private Desktop 视图中调用 `IContextMenu::InvokeCommand`，均返回 `E_FAIL (0x80004005)`；显示视图一轮带 `CMIC_MASK_FLAG_NO_UI`。两轮前后临时目录内容相同、Shell 视图均为 2 项，没有 `GetControlWindow` 请求或状态文本回调；Private Desktop 外前台句柄保持不变。单命令 watchdog 退出码 0（将 HRESULT 作为诊断结果），既有查看/刷新/排序/分组菜单探针复跑退出码 0。
+- 这排除了“仅因 view 隐藏”以及“调用失败前已创建目录”的可能，但未覆盖真实菜单展示与点击，不能据此判断可见 DefView 或产品宿主行为。下一步核对 canonical verb 与菜单命令偏移的调用形式，并追踪 `InvokeCommand` 前后的 `IShellBrowser`/`ICommDlgBrowser` 回调。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹调用失败)。
 
 ## 2026-10-27：布局工具栏选中态使用系统强调色
 

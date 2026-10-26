@@ -9,6 +9,8 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunHostMenuCommands() => Run("host-menu-commands", ShellViewHostFilterProbe.RunMenuCommandsForPrivateDesktop);
 
+    internal static int RunHostNewFolder() => Run("host-newfolder", ShellViewHostFilterProbe.RunNewFolderForPrivateDesktop);
+
     internal static int RunHostFilterVirtualScope(string scope) =>
         Run($"host-filter-{scope}", () => ShellViewHostFilterProbe.RunVirtualScopeForPrivateDesktop(scope));
 

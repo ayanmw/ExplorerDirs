@@ -54,6 +54,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 1 && args[0] == "--ishellview-menu-command-private-desktop")
             return PrivateDesktopShellProbe.RunHostMenuCommands();
+        if (args.Length == 1 && args[0] == "--ishellview-newfolder-private-desktop")
+            return PrivateDesktopShellProbe.RunHostNewFolder();
         if (args.Length == 2 && args[0] == "--ishellview-host-filter-virtual-private-desktop")
             return PrivateDesktopShellProbe.RunHostFilterVirtualScope(args[1]);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike-private-desktop")

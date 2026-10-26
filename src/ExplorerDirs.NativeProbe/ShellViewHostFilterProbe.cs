@@ -29,11 +29,14 @@ internal static class ShellViewHostFilterProbe
     internal static int RunMenuCommandsForPrivateDesktop() => Run(stopAfterGroupedExport: false,
         leaveParentForThreadExit: true, menuCommandsOnly: true);
 
+    internal static int RunNewFolderForPrivateDesktop() => Run(stopAfterGroupedExport: false,
+        leaveParentForThreadExit: true, newFolderOnly: true);
+
     internal static int RunVirtualScopeForPrivateDesktop(string scope) =>
         Run(stopAfterGroupedExport: false, leaveParentForThreadExit: true, virtualScopeOnly: scope);
 
     private static int Run(bool stopAfterGroupedExport, bool leaveParentForThreadExit, string? virtualScopeOnly = null,
-        bool menuCommandsOnly = false)
+        bool menuCommandsOnly = false, bool newFolderOnly = false)
     {
         var foreground = GetForegroundWindow();
         var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -97,6 +100,13 @@ internal static class ShellViewHostFilterProbe
             Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
 
             host = new FilteredHost(parent, new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)), folderPidl, childFolderPidl, Navigate);
+            List<uint> controlWindowRequests = [];
+            List<string?> statusTextChanges = [];
+            if (newFolderOnly)
+            {
+                host.ControlWindowProvider = id => { controlWindowRequests.Add(id); return 0; };
+                host.StatusTextChanged += text => statusTextChanges.Add(text);
+            }
             host.View = view;
             viewPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -142,6 +152,28 @@ internal static class ShellViewHostFilterProbe
             if (menuCommandsOnly)
             {
                 VerifyNativeMenuCommands(view, folderView, parent, foreground);
+                return 0;
+            }
+            if (newFolderOnly)
+            {
+                _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE, still confined to the Private Desktop.
+                Check(At<ActivateView>(view, 7)(view, 4)); // SVUIA_ACTIVATE_NOFOCUS.
+                Application.DoEvents();
+                var before = Directory.GetFileSystemEntries(fixture).Select(Path.GetFileName)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                var invokeHr = InvokeBackgroundVerbRaw(view, parent, "newfolder", 0x400); // CMIC_MASK_FLAG_NO_UI.
+                var settleUntil = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+                while (DateTime.UtcNow < settleUntil)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(10);
+                }
+                var after = Directory.GetFileSystemEntries(fixture).Select(Path.GetFileName)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out var afterViewCount));
+                Console.WriteLine($"ishellview-newfolder-diagnostic: invoke-hr=0x{invokeHr:X8}; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
+                    throw new Exception("The isolated New Folder diagnostic changed the desktop boundary.");
                 return 0;
             }
             VerifyGroupedFilteredExport(folderView);
@@ -1161,7 +1193,10 @@ internal static class ShellViewHostFilterProbe
         return Array.FindIndex(names, name => name.Equals(expectedName, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb) =>
+        Check(InvokeBackgroundVerbRaw(view, owner, expectedVerb));
+
+    private static int InvokeBackgroundVerbRaw(nint view, nint owner, string expectedVerb, uint invokeMask = 0)
     {
         var contextMenuId = ContextMenuId;
         Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
@@ -1196,11 +1231,12 @@ internal static class ShellViewHostFilterProbe
                 var invoke = new NativeInvokeInfo
                 {
                     Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Mask = invokeMask,
                     Window = owner,
                     Verb = (nint)commandOffset.Value,
                     Show = 1
                 };
-                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                return At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
             }
             finally { DestroyMenu(menu); }
         }
@@ -1472,6 +1508,7 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
         string cls, string name, uint style, int x, int y, int width, int height,
         nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);

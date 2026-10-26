@@ -846,6 +846,6 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 
 ### 2026-10-27 背景菜单“新建文件夹”调用失败
 
-`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb；此前只查询过它的状态，没有执行。新增的隔离调用在执行 `IContextMenu::InvokeCommand` 时返回 `E_FAIL (0x80004005)`。加入 `CMIC_MASK_FLAG_NO_UI` 后同样返回 `E_FAIL`。前台句柄保持不变，探针按清理路径释放 Shell view 并删除唯一临时夹具；因为异常在项目枚举前发生，当前日志没有证明该命令是否先产生了磁盘副作用。
+`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb；此前只查询过它的状态，没有执行。单命令探针分别在未显示和已显示/`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 的 Private Desktop 视图中调用。两次 `IContextMenu::InvokeCommand` 都返回 `E_FAIL (0x80004005)`；显示视图复测使用 `CMIC_MASK_FLAG_NO_UI`。该次调用前后临时目录均为 `child|filter.bin|keep.txt`，Shell 列表均为 2 项；没有 `GetControlWindow` 请求或状态文本回调，Private Desktop 以外的前台 HWND 保持不变。NativeProbe Release build 0 警告、0 错误，`host-newfolder-private-desktop` watchdog 退出码 0。另行复跑既有查看、刷新、排序和分组命令 watchdog 退出码 0。
 
-因此不能把“菜单列出新建文件夹”计作可用，也不能仅凭隐藏视图中的 `E_FAIL` 推断可见 DefView/产品宿主一定失败。下一步应在临时夹具中记录 `InvokeCommand` 前后的目录项、`IShellBrowser` 服务回调及 Shell 返回码，并拆分为单命令短进程；确认创建结果和必要宿主服务后，再判断这是隐藏视图限制还是宿主契约缺项。ExplorerBrowser 产品视图、用户目录和 release 均未改动。
+这排除了“仅因 view 完全隐藏”以及“Shell 已先创建目录但回报失败”两种解释，也没有证据表明缺少 `GetControlWindow`/状态栏服务导致失败；仍不能把它推广为可见 Explorer DefView 或产品宿主失败，因为没有真实显示/点击上下文菜单。下一步核对 canonical verb 与 menu command offset 的调用形式，并追踪 `InvokeCommand` 前后的 `IShellBrowser`/`ICommDlgBrowser` 回调，或寻找与 Shell 菜单一致的独立创建路径。隔离探针新增 `--ishellview-newfolder-private-desktop` 与 watchdog 入口；ExplorerBrowser 产品视图、用户目录和 release 均未改动。
