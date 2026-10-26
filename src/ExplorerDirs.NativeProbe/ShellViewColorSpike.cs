@@ -6,6 +6,13 @@ using ExplorerDirs.NativeProbe;
 // Isolated architecture spike: test whether the stock DefView used by IShellView
 // exposes a supported item-color hook while retaining native Shell operations.
 // The default host and fixture are hidden and temporary; no ExplorerBrowser or input is used.
+internal enum MergedEditMenuCommandRoute
+{
+    NotFound,
+    ShellView,
+    SelectAll
+}
+
 internal static class ShellViewColorSpike
 {
     private const uint ShellRenameItem = 0x00000001;
@@ -772,11 +779,15 @@ internal static class ShellViewColorSpike
     {
         if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
         var composite = GetMenu(owner.MenuFrameWindow);
+        var route = ResolveMergedEditMenuCommandRoute(composite, commandId);
+        if (route == MergedEditMenuCommandRoute.NotFound) return false;
+        if (route == MergedEditMenuCommandRoute.ShellView)
+            return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 1, execute, isStillActive);
+        if (!execute) return true;
+
         var editMenu = composite == 0 ? 0 : GetSubMenu(composite, 1);
         var caption = FindMenuItemCaption(editMenu, commandId);
         var normalizedCaption = NormalizeMenuLabel(caption);
-        if (normalizedCaption is not ("全选" or "Select All")) return false;
-        if (!execute) return true;
 
         var folderViewId = FolderView2Id;
         Check(Marshal.QueryInterface(owner.View, in folderViewId, out var folderView));
@@ -793,6 +804,15 @@ internal static class ShellViewColorSpike
         finally { Marshal.Release(folderView); }
         owner.MenuTrace.Add($"edit-command id=0x{commandId:X4} path='Edit > {normalizedCaption}' target=active-view");
         return true;
+    }
+
+    internal static MergedEditMenuCommandRoute ResolveMergedEditMenuCommandRoute(nint compositeMenu, uint commandId)
+    {
+        var path = FindMergedMenuCommandPath(compositeMenu, 1, commandId);
+        if (path is null) return MergedEditMenuCommandRoute.NotFound;
+        return NormalizeMenuLabel(path[^1]) is "全选" or "Select All"
+            ? MergedEditMenuCommandRoute.SelectAll
+            : MergedEditMenuCommandRoute.ShellView;
     }
 
     private static string? FindMenuItemCaption(nint menu, uint commandId)

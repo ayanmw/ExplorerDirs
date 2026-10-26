@@ -23,6 +23,8 @@ internal static class ShellMenuGroupRoutingSmoke
                 throw new InvalidOperationException("Could not create the synthetic File menu command.");
             if (!AppendMenuW(groups[1], 0, 0x8123, "Select All"))
                 throw new InvalidOperationException("Could not create the synthetic Edit menu command.");
+            if (!AppendMenuW(groups[1], 0, 0x8124, "Copy"))
+                throw new InvalidOperationException("Could not create the synthetic Edit copy command.");
             if (!AppendMenuW(groups[2], 0, 0x8123, "Details"))
                 throw new InvalidOperationException("Could not create the synthetic View menu command.");
 
@@ -37,6 +39,10 @@ internal static class ShellMenuGroupRoutingSmoke
                 throw new InvalidOperationException("A View group command was not kept in its own group.");
             if (ShellViewColorSpike.FindMergedMenuCommandPath(composite, 3, 0x8123) is not null)
                 throw new InvalidOperationException("A command lookup outside the six standard groups must not match.");
+            if (ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8123) != MergedEditMenuCommandRoute.SelectAll ||
+                ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8124) != MergedEditMenuCommandRoute.ShellView ||
+                ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8125) != MergedEditMenuCommandRoute.NotFound)
+                throw new InvalidOperationException("Merged Edit commands must distinguish Select All, native Shell commands and unrelated command IDs.");
 
             Console.WriteLine("shell-menu-group-routing-smoke: PASS synthetic File/Edit/View group ownership; no Shell view created");
             return 0;

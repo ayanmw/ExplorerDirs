@@ -304,4 +304,4 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 2026-10-27 IShellView 错误目标焦点隔离：Pane 1 原生 F2 编辑时，Pane 2 收到 Pane 1 编辑框的合成 Down 消息并返回 `S_FALSE`，未夺取 Pane 1 编辑焦点；四窗格真实 Shell session-restore consumer 连续两轮通过。该结果不覆盖 WPF `HwndHost` 消息链或物理输入。[隔离原型记录](ishellview-color-spike.md#2026-10-27-错误-pane-的-accelerator-不夺取活动-f2-编辑焦点)
 
-2026-10-27 IShellView 合并 File 菜单原型：标准合并菜单 File 组中的命令现在按组归属识别，并将原始 Shell 命令 ID 发给活动 view HWND；Edit 仍只单独接管“全选”，View 命令保持原路由。合成 HMENU smoke 验证 File/Edit/View 命令分组、嵌套菜单路径和非法组不匹配，没有创建 Shell view。实际 File 命令执行、菜单激活/显示、列标题范围及可见 GUI 交互未验证，不能视为迁移菜单门槛通过。
+2026-10-27 IShellView 合并 File/Edit 菜单原型：标准合并菜单 File 与 Edit 组中的命令现在按组归属识别，并将原始 Shell 命令 ID 发给活动 view HWND；Edit > Select All 仍走原生选择接口，View 命令保持原路由。合成 HMENU smoke 验证 File/Edit/View 命令分组、嵌套菜单路径、Edit 命令分类和非法组不匹配，没有创建 Shell view。实际 File/Edit 命令执行、菜单激活/显示、列标题范围及可见 GUI 交互未验证，不能视为迁移菜单门槛通过。
