@@ -56,7 +56,13 @@ internal static class ThemePalette
         };
 
         var mix = theme == ResolvedTheme.Light ? 0.18 : 0.34;
-        return neutral with { SelectionBackground = Blend(neutral.ControlBackground, accent, mix), SelectionText = ContrastingText(Blend(neutral.ControlBackground, accent, mix)) };
+        var selectionBackground = EnsureContrast(
+            Blend(neutral.ControlBackground, accent, mix), neutral.ControlBackground, 3.0);
+        return neutral with
+        {
+            SelectionBackground = selectionBackground,
+            SelectionText = ContrastingText(selectionBackground)
+        };
     }
 
     private static Color Blend(Color background, Color foreground, double foregroundWeight) => Color.FromRgb(
@@ -68,6 +74,33 @@ internal static class ThemePalette
         ContrastRatio(background, Colors.Black) >= ContrastRatio(background, Colors.White)
             ? Colors.Black
             : Colors.White;
+
+    private static Color EnsureContrast(Color foreground, Color background, double minimumRatio)
+    {
+        if (ContrastRatio(foreground, background) >= minimumRatio) return foreground;
+
+        var darkenWeight = FindBlendWeight(foreground, Colors.Black, background, minimumRatio);
+        var lightenWeight = FindBlendWeight(foreground, Colors.White, background, minimumRatio);
+        return darkenWeight <= lightenWeight
+            ? Blend(foreground, Colors.Black, darkenWeight)
+            : Blend(foreground, Colors.White, lightenWeight);
+    }
+
+    private static double FindBlendWeight(Color color, Color target, Color background, double minimumRatio)
+    {
+        var low = 0d;
+        var high = 1d;
+        for (var iteration = 0; iteration < 24; iteration++)
+        {
+            var middle = (low + high) / 2;
+            if (ContrastRatio(Blend(color, target, middle), background) >= minimumRatio)
+                high = middle;
+            else
+                low = middle;
+        }
+
+        return high;
+    }
 
     private static double ContrastRatio(Color first, Color second)
     {

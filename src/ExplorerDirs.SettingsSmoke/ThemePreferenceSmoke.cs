@@ -170,6 +170,37 @@ internal static class ThemePreferenceSmoke
         Check(selectionText.GetValue(lightColors) is System.Windows.Media.Color &&
               selectionText.GetValue(darkColors) is System.Windows.Media.Color,
             "accent selection palettes choose explicit readable foregrounds");
+        var controlBackground = lightColors.GetType().GetProperty("ControlBackground")
+            ?? throw new Exception("ThemeColors.ControlBackground is required to validate selection contrast.");
+        var selectionBackgroundDark = darkColors.GetType().GetProperty("SelectionBackground")
+            ?? throw new Exception("ThemeColors.SelectionBackground is required for Dark mode.");
+        var controlBackgroundDark = darkColors.GetType().GetProperty("ControlBackground")
+            ?? throw new Exception("ThemeColors.ControlBackground is required for Dark mode.");
+        foreach (var testAccent in new[]
+                 {
+                     accent,
+                     System.Windows.Media.Color.FromRgb(0, 0, 0),
+                     System.Windows.Media.Color.FromRgb(255, 255, 255),
+                     System.Windows.Media.Color.FromRgb(128, 128, 128)
+                 })
+        {
+            foreach (var themeName in new[] { "Light", "Dark" })
+            {
+                var colors = paletteFactory.Invoke(null, [Enum.Parse(resolvedType, themeName), testAccent])
+                    ?? throw new Exception($"{themeName} palette returned null for contrast test.");
+                var background = (System.Windows.Media.Color)(themeName == "Light"
+                    ? controlBackground.GetValue(colors)!
+                    : controlBackgroundDark.GetValue(colors)!);
+                var selectionColor = (System.Windows.Media.Color)(themeName == "Light"
+                    ? selection.GetValue(colors)!
+                    : selectionBackgroundDark.GetValue(colors)!);
+                var textColor = (System.Windows.Media.Color)selectionText.GetValue(colors)!;
+                Check(Contrast(background, selectionColor) >= 3.0,
+                    $"{themeName} selection background keeps 3:1 contrast for accent #{testAccent.R:X2}{testAccent.G:X2}{testAccent.B:X2}");
+                Check(Contrast(selectionColor, textColor) >= 4.5,
+                    $"{themeName} selection text keeps 4.5:1 contrast for accent #{testAccent.R:X2}{testAccent.G:X2}{testAccent.B:X2}");
+            }
+        }
         var classify = paletteType.GetMethod("IsLightForeground", BindingFlags.Static | BindingFlags.Public)
             ?? throw new Exception("ThemePalette.IsLightForeground is required for system theme detection.");
         Check((bool)classify.Invoke(null, [byte.MaxValue, byte.MaxValue, byte.MaxValue])!,
@@ -181,6 +212,23 @@ internal static class ThemePreferenceSmoke
         {
             if (!condition) throw new Exception(message);
             Console.WriteLine("PASS " + message);
+        }
+
+        static double Contrast(System.Windows.Media.Color first, System.Windows.Media.Color second)
+        {
+            static double Luminance(System.Windows.Media.Color color)
+            {
+                static double Linearize(byte channel)
+                {
+                    var value = channel / 255d;
+                    return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+                }
+                return 0.2126 * Linearize(color.R) + 0.7152 * Linearize(color.G) + 0.0722 * Linearize(color.B);
+            }
+            var firstLuminance = Luminance(first);
+            var secondLuminance = Luminance(second);
+            return (Math.Max(firstLuminance, secondLuminance) + 0.05) /
+                   (Math.Min(firstLuminance, secondLuminance) + 0.05);
         }
     }
     public static void CheckActivePaneAccentWiring()
