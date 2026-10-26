@@ -21,11 +21,11 @@
 
 ## Q-Dir 预览格式过滤的实现边界（2026-10-25）
 
-Q-Dir [FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR) 将设置放在 Extras → more options → General，并说用 `*.*` 可查看预览中的所有格式；相邻 [FAQ 17](https://www.softwareok.com/?faq=17&seite=faq-Q-DIR) 说明 PDF 预览依赖 Windows 中安装的预览能力。由这些描述可推断此项是对可进入预览的格式做限制，不是从文件列表中隐藏文件。FAQ 34 的通用说明还提及日期、大小与关键词过滤，但没有说明这些字段如何出现在 General 页的预览过滤设置中；在真实界面确认前，不把这段泛化说明当成已证实的 Q-Dir 设置项。
+Q-Dir [FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR) 将设置放在 Extras → more options → General，并说用 `*.*` 可查看预览中的所有格式；相邻 [FAQ 17](https://www.softwareok.com/?faq=17&seite=faq-Q-DIR) 说明 PDF 预览依赖 Windows 中安装的预览能力。2026-10-26 重新核对 FAQ 全文时发现，页面标题和设置位置支持“预览资格过滤”的理解，但同页通用段落又声称它会减少文件列表显示，并列出日期、大小、关键词条件；这些描述与 `*.*` 预览提示之间没有说明其关系。因此公开文字不足以确认该控件只限制预览，还是也筛选文件列表；不得把“不是文件列表过滤”当成已证实事实。真实 Q-Dir 界面仍待观察。
 
 当前应用的 `IFolderFilterSite` 是文件枚举过滤点；复用它会隐藏列表项目，语义不正确。微软定义的 `IExplorerPaneVisibility::GetPaneState` 只返回 Preview Pane 等整个窗格的可见状态，不能按当前选择文件的扩展名单独禁用预览。保持系统注册的 Preview Handler 与 ExplorerBrowser 原生窗格时，现有接入没有逐文件格式过滤钩子。改由应用自己托管 Preview Handler 则要接管 Shell 的预览处理器生命周期、窗口、焦点与快捷键交互；微软指出处理器通常在进程外系统宿主运行，这一变更扩大兼容和稳定性边界。
 
-因此本轮不把快速筛选当作替代实现，也不随文件选择反复隐藏/显示整个预览窗格。保留差异，待可见观察确认 Q-Dir 的精确交互后，再评估是否值得为此引入自建 Preview Handler 宿主；原生预览功能本身继续按上文计划验收。接口依据：[Preview Handler Architecture](https://learn.microsoft.com/en-us/windows/win32/shell/preview-handlers)、[IExplorerPaneVisibility::GetPaneState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerpanevisibility-getpanestate)、[IExplorerBrowser](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowser)。
+在 Q-Dir 的实际行为得到确认前，不把快速筛选改造成预览过滤，也不随选择隐藏整个预览窗格。若确认它只限制预览资格，再评估逐项过滤需要的宿主边界；若它也筛选列表，则需按文件可见性功能单独对照。本项目当前架构事实不变：`IFolderFilterSite` 过滤的是列表枚举，`IExplorerPaneVisibility` 控制整个窗格，均不能表达“列表保留项目但不对特定扩展名预览”。接口依据：[Preview Handler Architecture](https://learn.microsoft.com/en-us/windows/win32/shell/preview-handlers)、[IExplorerPaneVisibility::GetPaneState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerpanevisibility-getpanestate)、[IExplorerBrowser](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowser)。
 
 ## 后续验收
 

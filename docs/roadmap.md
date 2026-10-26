@@ -1588,8 +1588,8 @@
 
 ## 2026-10-25：Q-Dir 预览格式过滤实现边界复核
 
-- Q-Dir FAQ 34 将通配符列在预览设置并说明 `*.*` 查看所有可预览格式；FAQ 17 说明 PDF 预览依赖 Windows 预览支持。由此推断它限制所选项目能否进入预览，不是文件列表过滤。Microsoft 文档确认 ExplorerBrowser 的 `IExplorerPaneVisibility` 只控制整个 Preview Pane 显示状态；复用 `IFolderFilterSite` 则会把文件从列表中隐藏，两者都不能表达所需的逐项预览资格。
-- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；差异保留为待评估，先待 Q-Dir 可见交互确认是否值得引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-25)。
+- Q-Dir FAQ 34 将通配符列在预览设置并说明 `*.*` 查看所有可预览格式；FAQ 17 说明 PDF 预览依赖 Windows 预览支持。FAQ 34 同页通用段落又描述减少列表显示并提及日期、大小和关键词，尚不足以确认实际控件语义。Microsoft 文档确认 ExplorerBrowser 的 `IExplorerPaneVisibility` 只控制整个 Preview Pane 显示状态；复用 `IFolderFilterSite` 则会把文件从列表中隐藏。
+- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；差异保留为待评估，先待 Q-Dir 可见交互确认过滤作用于预览、列表或两者，再决定是否引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-25)。
 
 ## 2026-10-25：F9 当前目录递归大小与子项计数
 
