@@ -115,9 +115,15 @@ internal static class StaticShellFolderAdapterProbe
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["ten-copy.bin"]), 0, "equal values");
             CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
 
+            var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+                { FormatId = property.FormatId, PropertyId = property.PropertyId });
+            var sizeSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+                { FormatId = SizeKeyFormat, PropertyId = 12 });
+
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
-                "compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; window-created=False");
+                $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; " +
+                $"property-description(custom/size)=0x{customSchema:X8}/0x{sizeSchema:X8}; window-created=False");
             return 0;
         }
         catch (Exception ex)
@@ -425,6 +431,14 @@ internal static class StaticShellFolderAdapterProbe
         finally { if (pointer != 0) Marshal.FreeCoTaskMem(pointer); }
     }
 
+    private static int GetPropertyDescriptionStatus(ShellColumnManager.NativeKey key)
+    {
+        var interfaceId = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
+        var result = PSGetPropertyDescription(in key, in interfaceId, out var description);
+        if (description != 0) Marshal.Release(description);
+        return result;
+    }
+
     private static void CheckCompare(int hr, short expected, string label)
     {
         if (hr < 0 || unchecked((short)(hr & 0xffff)) != expected)
@@ -524,4 +538,6 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     private delegate bool EnumChildProc(nint window, nint parameter);
+    [DllImport("propsys.dll", PreserveSig = true)] private static extern int PSGetPropertyDescription(
+        in ShellColumnManager.NativeKey key, in Guid interfaceId, out nint description);
 }
