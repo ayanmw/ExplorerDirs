@@ -61,11 +61,17 @@ internal static class StandaloneTreeProbe
             using var synchronization = tree.BeginSynchronization();
             tree.SetRoot(fixture);
             Pump();
+            treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0);
+            if (treeImageList != systemImageList)
+                throw new Exception("Populating the Shell tree replaced the system image list used by Shell icon indices.");
             var selected = tree.SelectDirectory(child);
             Pump(); // Native expansion may materialize descendants asynchronously.
             if (!selected) selected = tree.SelectDirectory(child);
             if (!selected) throw new Exception("Production tree did not select child.");
             Pump();
+            treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0);
+            if (treeImageList != systemImageList)
+                throw new Exception("Expanding Shell tree nodes replaced the system image list used by Shell icon indices.");
             if (!string.Equals(tree.SelectedDirectory, child, StringComparison.OrdinalIgnoreCase))
                 throw new Exception("Production tree selected path mismatch.");
             if (requests != 0 || tree.SelectionRevision == 0)
