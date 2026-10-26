@@ -3,6 +3,27 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:ExplorerDirs.App">
     <Application.Resources>
-
+        <!-- Keep app-owned navigation surfaces on the same live palette as the window chrome. -->
+        <Style TargetType="{x:Type Menu}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type MenuItem}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ContextMenu}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ToolBarTray}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ToolBar}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+        </Style>
     </Application.Resources>
 </Application>

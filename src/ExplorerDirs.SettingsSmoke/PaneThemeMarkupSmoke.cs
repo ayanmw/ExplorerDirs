@@ -6,9 +6,26 @@ internal static class PaneThemeMarkupSmoke
     internal static void Run()
     {
         var repoRoot = FindRepoRoot();
+        var appResources = XDocument.Load(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "App.xaml"));
         var document = XDocument.Load(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        foreach (var (target, properties) in new[]
+        {
+            ("Menu", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") }),
+            ("MenuItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") }),
+            ("ContextMenu", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("ToolBar", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("ToolBarTray", new[] { ("Background", "ExplorerDirs.WindowBackgroundBrush") })
+        })
+        {
+            var surfaceStyle = appResources.Descendants(presentation + "Style")
+                .SingleOrDefault(element => (string?)element.Attribute("TargetType") == $"{{x:Type {target}}}");
+            Check(surfaceStyle is not null && properties.All(property => surfaceStyle.Elements(presentation + "Setter").Any(setter =>
+                    (string?)setter.Attribute("Property") == property.Item1 &&
+                    (string?)setter.Attribute("Value") == $"{{DynamicResource {property.Item2}}}")),
+                $"{target} surfaces and text use dynamic semantic theme roles");
+        }
         var tabControl = document.Descendants(presentation + "TabControl")
             .Single(element => (string?)element.Attribute(xaml + "Name") == "Tabs");
         var style = tabControl.Element(presentation + "TabControl.ItemContainerStyle")?

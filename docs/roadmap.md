@@ -22,6 +22,11 @@
 - 打印、递归目录大小、环境刷新和终端按钮改用主题语义色矢量图标；剪切、复制、粘贴、删除、重命名、属性、撤销、重做和新建文件夹的动态菜单/文字工具栏显示配对图标。保留原命令标识、标签、快捷键、点击处理、提示及 Shell 状态门控。
 - 定向图标 smoke 覆盖 25 个几何、九个 Shell 文件命令映射、菜单/工具栏入口及原处理器；完整 Release `SettingsSmoke`、App Release 构建（0 警告、0 错误）和 `git diff --check` 通过。未启动 GUI，图标尺寸、DPI、禁用/悬停和高对比度外观仍待可见验收。计划见[命令工具栏矢量图标计划](superpowers/plans/2026-10-27-command-toolbar-icons.md)。
 
+## 2026-10-27：应用菜单与工具栏表面跟随语义主题
+
+- 为 WPF `Menu`、`MenuItem`、`ContextMenu`、`ToolBar` 和 `ToolBarTray` 接入现有动态表面/文字/边框资源，不替换系统控件模板，不改变菜单命令及键盘行为；ExplorerBrowser 和 Shell 原生菜单保持原生绘制。
+- 增加五类控件的动态主题接线 smoke；定向主题 smoke、完整 Release `SettingsSmoke`、App Release 构建（0 警告、0 错误）和 `git diff --check` 通过。未操作 GUI，浅/深色实际弹出菜单、高对比度及 hover/selection 视觉仍待可见验收。计划见[菜单与工具栏主题表面计划](superpowers/plans/2026-10-27-themed-menu-toolbar-surfaces.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。
