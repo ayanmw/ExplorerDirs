@@ -1168,7 +1168,7 @@ public partial class MainWindow : Window
             _programStarterWindow.Activate();
             return;
         }
-        _programStarterWindow = new ProgramStarterWindow(_programStarterStore, _programStarterEntries,
+        _programStarterWindow = new ProgramStarterWindow(_programStarterStore, _programStarterEntries, _themeController,
             CaptureProgramStarterContext, message => EnvironmentStatus.Text = message) { Owner = this };
         _programStarterWindow.Closed += (_, _) =>
         {

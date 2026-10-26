@@ -2980,3 +2980,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 按先前预览发布要求，将当前 worktree 打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.65`，应用放在 `app/` 并使用独立 profile。产品版本 `0.6.0-preview.temp.65+59bd93cea788f148b0414f28eee74d03a36153e5`；EXE SHA-256 `0A8D60B9A1EABEAA094DD133C2806BD7168F42F79BCCEE4AC5C310573B54B4F0`，DLL SHA-256 `EF852111FEC936BCED7C57EA795C418FE60742E0B8B2F240183ECD0A3EE5E5BC`，均匹配包内清单。
 - Release SettingsSmoke 通过，App Release 构建 0 警告/错误，发布 profile fixture smoke 通过。隔离 profile 的两个配置文件与来源哈希一致；来源未修改。未启动应用或操作 GUI；主题外观、目录树同步、Shell 文件区和 Q-Dir 互操作仍待可见验收。详见[预览说明](releases/preview-0.6.0-temp.65.md)。
+
+## 2026-10-26：补齐程序启动器窗口主题接线
+
+- 源码盘点发现，程序启动器、启动项编辑及 Q-Dir 程序项导入预览是代码创建的独立 WPF 窗口；原先没有绑定窗口语义背景/文字，也没有随主题切换更新 Windows 标题栏。
+- 新增共享窗口主题绑定器，并将应用主题控制器传给三个窗口。它们使用动态窗口背景/文字资源，监听主题变化刷新 DWM 标题栏颜色，并在关闭时解除监听；命令、文件视图和导入行为不变。PaneThemeMarkupSmoke 新增回归，先确认缺失时失败，再确认三窗接线与绑定器生命周期。
+- 定向 PaneThemeMarkupSmoke 与完整 Release SettingsSmoke 通过；App Release 构建 0 警告、0 错误。未启动 GUI，实际主题切换和高对比度外观仍待可见验收；ExplorerBrowser 文件区黑底问题及 Q-Dir 文件颜色规则兼容仍未解决。

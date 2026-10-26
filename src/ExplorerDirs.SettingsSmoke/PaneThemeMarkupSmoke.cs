@@ -75,6 +75,8 @@ internal static class PaneThemeMarkupSmoke
         var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
         var photoPrintWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PhotoPrintWindow.xaml"));
+        var programStarterWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ProgramStarterWindow.cs"));
+        var windowThemeBinding = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ApplicationThemeWindowBinding.cs"));
         var layoutWindowCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
         var layoutGridCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneLayoutGrid.cs"));
         var layoutHostCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneLayoutHost.cs"));
@@ -93,6 +95,15 @@ internal static class PaneThemeMarkupSmoke
         Check(photoPrintWindow.Contains("ExplorerDirs.WindowBackgroundBrush", StringComparison.Ordinal) &&
               photoPrintWindow.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
             "photo print window follows application surface and border roles");
+        Check(programStarterWindow.Contains("ApplicationThemeWindowBinding.Attach(this, themeController)", StringComparison.Ordinal) &&
+              programStarterWindow.Split("ApplicationThemeWindowBinding.Attach(this, themeController)", StringSplitOptions.None).Length == 4 &&
+              layoutWindowCode.Contains("new ProgramStarterWindow(_programStarterStore, _programStarterEntries, _themeController", StringComparison.Ordinal) &&
+              windowThemeBinding.Contains("SetResourceReference(Control.BackgroundProperty", StringComparison.Ordinal) &&
+              windowThemeBinding.Contains("SetResourceReference(Control.ForegroundProperty", StringComparison.Ordinal) &&
+              windowThemeBinding.Contains("themeController.ThemeChanged += themeChanged", StringComparison.Ordinal) &&
+              windowThemeBinding.Contains("themeController.ThemeChanged -= themeChanged", StringComparison.Ordinal) &&
+              windowThemeBinding.Contains("NativeWindowFrameTheme.Apply", StringComparison.Ordinal),
+            "program starter, editor, and import preview windows follow live application theme changes");
         Check(layoutWindowCode.Contains("ExplorerDirs.SelectionBackgroundBrush", StringComparison.Ordinal) &&
               layoutGridCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal) &&
               layoutHostCode.Contains("ExplorerDirs.BorderBrush", StringComparison.Ordinal),
