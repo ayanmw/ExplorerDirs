@@ -58,3 +58,5 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 2026-10-26 已验证静态数值列策略本身（`2, 10, 10, 100` 的数值比较、格式化和相等值次序）；这只是纯托管策略 smoke，不是 Shell 列接线证据。随后构造隔离 `IShellFolder2` 适配器：真实文件夹 PIDL 可解析，基础列枚举和静态列元数据/值调用可由适配器处理，但 `SHCreateShellFolderView` 拒绝了托管 COM 包装对象，返回 `E_NOINTERFACE`。因此 DefView 尚未创建，列显示、`IColumnManager` 读回、DefView 排序和普通 Shell 操作均未验证。
 
 结论：当前托管 CCW 适配器不能证明此架构可行。若继续，下一步应先做一个极小的原生 COM `IShellFolder`/`IShellFolder2` shim（可由 C++ 实现），通过 `QueryInterface` 将未实现接口委托给真实文件系统文件夹，并仅在隔离夹具中重复同一静态列门槛；然后再考虑浏览器服务、PIDL 操作和文件变更通知。该原生 shim 仍只是架构实验，不授权产品迁移，也不加入递归扫描。失败的托管适配器源文件和运行入口已撤下，保留策略 smoke 与本评审结论，避免留下一个被误认为可工作的原型。
+
+2026-10-26 原生 shim 进度：`StaticShellFolderAdapter.cpp` 已由本机 Visual Studio x64 编译器以 `/W4 /WX` 编译成功。隔离探针中适配器的列标题、默认状态、PROPERTYKEY 映射和 `UInt64` 取值均读回成功；DefView 的 `IColumnManager` 也读回新增列及顺序，`IFolderView2` 排序键读回测试 PROPERTYKEY，但实际文件顺序没有变化，`CompareIDs` 的自定义列分支未触发，故“可排序列”门槛仍失败。另一次 DefView 创建使前台窗口改变，探针检测后立即终止；在恢复明确桌面安全条件前，不再运行该宿主探针。CLI 已把该探针锁在显式 `--AllowInteractiveDesktopControl` 参数后，避免误运行。当前证据不足以建议产品接入，仍需解决 Shell 排序和隔离宿主边界。
