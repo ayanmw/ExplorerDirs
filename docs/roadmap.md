@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：隔离 OLE frame 边框空间合同
+
+- NativeProbe 的 `IOleInPlaceFrame` 现接受不占用工具栏边框的空/零空间请求；对非零工具栏空间请求返回标准 `INPLACE_E_NOTOOLSPACE`，对空的 `RequestBorderSpace` 参数返回 `E_INVALIDARG`。定向 `--shell-view-color-policy-smoke` 经真实 CCW vtable 通过。
+- 这是隔离迁移原型的接口合同改进，不代表创建过 `IShellView`、Shell 工具栏布局已集成，或产品 ExplorerBrowser 已迁移。
+- Property Schema 仍不能作为便携、进程内的自定义列验证路径：[`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 说明其为机器级注册，涉及 `HKEY_LOCAL_MACHINE` 写权限，不支持按用户 profile 注册；不在日常系统登记测试 schema。后续逐项列验证需在可丢弃 Windows VM 内进行。
+
 ## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
 
 - 用户已明确授权在隔离原型中推进完整宿主迁移验证，验收面包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点与每会话视图状态。该授权仅覆盖 NativeProbe/隔离宿主，不包含将产品 ExplorerBrowser 替换为 IShellView，也不包含发布迁移版本。

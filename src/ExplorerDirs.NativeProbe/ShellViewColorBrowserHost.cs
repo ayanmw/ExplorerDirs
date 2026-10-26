@@ -539,9 +539,21 @@ public static class ShellViewColorBrowserHostSmoke
                     "IOleInPlaceFrame.GetBorder rejects a null output pointer");
             }
             finally { Marshal.FreeHGlobal(borderPointer); }
-            Check(requestBorderSpace(frame, 0) == unchecked((int)0x80004001) &&
-                  setBorderSpace(frame, 0) == unchecked((int)0x80004001),
-                "the isolated OLE frame declines unsupported border-space negotiation");
+            var borderWidths = Marshal.AllocHGlobal(Marshal.SizeOf<StreamProbeRect>());
+            try
+            {
+                Marshal.StructureToPtr(default(StreamProbeRect), borderWidths, false);
+                Check(requestBorderSpace(frame, borderWidths) == 0 &&
+                      setBorderSpace(frame, borderWidths) == 0 && setBorderSpace(frame, 0) == 0,
+                    "the isolated OLE frame accepts requests that allocate no toolbar border space");
+                Marshal.StructureToPtr(new StreamProbeRect { Left = 1 }, borderWidths, false);
+                Check(requestBorderSpace(frame, borderWidths) == unchecked((int)0x800401A1) &&
+                      setBorderSpace(frame, borderWidths) == unchecked((int)0x800401A1),
+                    "the isolated OLE frame reports the documented no-tool-space HRESULT for unsupported toolbars");
+            }
+            finally { Marshal.FreeHGlobal(borderWidths); }
+            Check(requestBorderSpace(frame, 0) == unchecked((int)0x80070057),
+                "the isolated OLE frame rejects a null border-space request");
             (nint Object, nint Name) activeObject = default;
             var activeObjectUnknown = Marshal.GetIUnknownForObject(new ActiveObjectFixture());
             try

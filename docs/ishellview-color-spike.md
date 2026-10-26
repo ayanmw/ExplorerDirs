@@ -34,6 +34,12 @@ NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回�
 
 `--shell-view-color-policy-smoke` 先以隐藏普通 HWND 的 COM 回调断言复现 `GetBorder` 不写结果的失败，再核对返回矩形与独立 `GetClientRect` 结果一致、空指针被拒绝、其余 OLE frame 路由和异常/Dispose 回归通过。该验证没有创建或激活 `IShellView`，不证明真实 Shell 对边框协商的调用时序或产品菜单/工具栏布局。
 
+## 2026-10-27：补齐隔离宿主的 OLE 边框空间拒绝合同
+
+复核 `IOleInPlaceUIWindow` 合同后，`RequestBorderSpace` 对空指针返回 `E_INVALIDARG`；对四边均为零的请求返回 `S_OK`，对需要工具栏空间的请求返回 `INPLACE_E_NOTOOLSPACE`。`SetBorderSpace` 接受空指针或零宽度，不声称分配原型不支持的非零工具栏空间，并返回同一明确的无工具空间 HRESULT。
+
+COM vtable smoke 覆盖上述空指针、零值和非零请求；NativeProbe Release 定向 `--shell-view-color-policy-smoke` 通过。依据：[RequestBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-requestborderspace)、[SetBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-setborderspace)。没有创建 `IShellView`，因此真实 Shell 是否请求边框空间及其菜单/工具栏表现仍未验证。
+
 ## 2026-10-26：补齐 IOleWindow 帮助回调路由
 
 `StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。

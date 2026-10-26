@@ -500,8 +500,18 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         }, border, false);
         return 0;
     }
-    public int RequestBorderSpace(nint border) => unchecked((int)0x80004001);
-    public int SetBorderSpace(nint border) => unchecked((int)0x80004001);
+    public int RequestBorderSpace(nint border)
+    {
+        if (border == 0) return unchecked((int)0x80070057);
+        return HasRequestedBorderSpace(border) ? unchecked((int)0x800401A1) : 0;
+    }
+    public int SetBorderSpace(nint border) =>
+        border == 0 || !HasRequestedBorderSpace(border) ? 0 : unchecked((int)0x800401A1);
+    private static bool HasRequestedBorderSpace(nint border)
+    {
+        var widths = Marshal.PtrToStructure<StreamProbeRect>(border);
+        return widths.Left != 0 || widths.Top != 0 || widths.Right != 0 || widths.Bottom != 0;
+    }
     public int SetActiveObject(nint activeObject, nint name)
     {
         var result = 0;
