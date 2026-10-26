@@ -101,6 +101,7 @@ public static class ShellViewColorBrowserHostSmoke
         Check(host.IncludeObject(0, 0) == 0 && host.IncludeObjectCalls == 3,
             "missing Shell item metadata keeps the item visible through the color host callback");
 
+        VerifyBaseHostStatusText();
         VerifyBaseHostBrowseObject();
         CheckIncludeObject("notes.txt", expected: 0,
             "an item matching the configured pattern remains visible through IncludeObject");
@@ -243,6 +244,28 @@ public static class ShellViewColorBrowserHostSmoke
             "disposing the generic StreamViewHost releases its retained navigation PIDLs");
     }
 
+    private static void VerifyBaseHostStatusText()
+    {
+        using var host = new StreamViewHost(0, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var message = Marshal.StringToHGlobalUni("Loading folder contents");
+        try
+        {
+            var setStatusText = GetComMethod<SetStatusTextCallback>(browser, 8);
+            var setHr = setStatusText(browser, message);
+            Check(setHr == 0 && host.StatusText == "Loading folder contents",
+                "the generic StreamViewHost captures Shell status text through SetStatusTextSB");
+            var clearHr = setStatusText(browser, 0);
+            Check(clearHr == 0 && host.StatusText is null,
+                "a null SetStatusTextSB argument clears the generic host status text");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(message);
+            Marshal.Release(browser);
+        }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowserViewCallback(nint self, nint shellView);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -323,6 +346,8 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int BrowseObjectCallback(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int QueryServiceCallback(nint self, ref Guid service, ref Guid iid, out nint result);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetStatusTextCallback(nint self, nint text);
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

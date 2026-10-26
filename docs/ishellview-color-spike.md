@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：接收 IShellBrowser 状态文本
+
+`StreamViewHost.SetStatusTextSB` 原先返回 `S_OK` 但丢弃传入文本。现将 LPCWSTR 复制到 host 的 `StatusText` 状态；空指针表示清除。这样 Shell 提供者的状态提示可被后续宿主 UI 消费，不涉及原生传入缓冲区的所有权。
+
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser::SetStatusTextSB` CCW vtable 槽写入文本再传空指针清除，两个状态断言通过。没有创建 `IShellView` 或 WPF 状态栏；尚未验证 DefView/ provider 实际调用内容、调用时序或文本显示布局。
+
 ## 2026-10-26：通过 SID_SShellBrowser 暴露 CDB2/CDB3 服务
 
 颜色宿主先前只在直接 `QueryInterface` 时能取得自身的 `ICommDlgBrowser2/3`，而 `StreamViewHost.QueryService` 在未配置独立 `BrowserSite` 时对 `SID_SShellBrowser` 返回 `E_NOINTERFACE`。现为该独立原型增加服务查询回退：若没有外部 site，则按请求 IID 对 host 自身执行 `QueryInterface`；已有 `BrowserSite` 时仍优先委托给它。
@@ -474,7 +480,7 @@ Release 构建 0 警告/错误，纯策略 smoke 退出码 0；组件抽取后�
 
 | 能力 | 隔离原型 | 当前产品实现 | 迁移缺口 |
 |---|---|---|---|
-| Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、简单服务查询；菜单栏/工具栏框架回调多为 no-op | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 要实现菜单/状态/控制窗、快捷键转发和活动 view 生命周期，而非只创建 `IShellView` |
+| Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、简单服务查询；`SetStatusTextSB` 现复制/清除状态文本，其它菜单/工具栏框架回调仍为 no-op | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 将 Shell 状态接入 pane 状态栏，并实现/验证菜单、控制窗、快捷键转发和活动 view 生命周期 |
 | 导航和历史 | `StreamViewHost` 可注入共享 `ShellViewNavigationHistory` 并统一路由绝对/相对 PIDL、父级及历史标志；颜色探针回调会按目标绑定文件夹并创建/替换 Shell view，筛选探针仍限临时 fixture | ExplorerBrowser navigation events、取消/过期门控、虚拟位置/搜索路由及每标签 Shell TravelLog | 基类 COM 路由与纯状态历史已有 smoke；实际 Shell 导航的 provider 失败、view/HWND 交接、焦点/选区恢复和并发门控仍须独立验证 |
 | 筛选 | 颜色宿主现实现并以 smoke 验证 CDB/CDB2/CDB3 全部回调槽及 `SID_SShellBrowser` 的 QueryService 路由；CDB3 的 `IncludeObject` 覆盖匹配、排除及 provider 元数据失败开放。FilteredHost 仍仅覆盖临时目录导航/历史 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | CDB 托管接口与服务查询合同已有 smoke；仍需确认 DefView 实际查询/回调顺序，并将过滤规则、原生回调线程语义和大目录枚举时序整合进通用宿主，验证全目录/搜索行为 |
 | 选择与状态 | 颜色探针手工创建选择；多选恢复使用生产快照类，但没有产品窗口/标签协调器 | `ExplorerBrowserHost` 维护用户选择快照、焦点、命令可用状态、视图模式/排序/分组/列配置及延迟恢复 | 连接真实用户输入代际、标签持久化、焦点遍历、刷新恢复与错误路径 |

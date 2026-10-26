@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-26：接收隔离 Shell Browser 状态文本
+
+- `StreamViewHost.SetStatusTextSB` 不再静默丢弃 Shell 文本：复制 LPCWSTR 到原型 host 状态，空指针清除。真实 `IShellBrowser::SetStatusTextSB` vtable smoke 覆盖写入/清除，通过 `--shell-view-color-policy-smoke`。
+- 此项未创建 `IShellView`，也没有 WPF 状态栏；真实 provider 的调用内容和 UI 显示仍待隔离宿主验证。产品状态栏未改。
+
 ## 2026-10-26：补齐隔离颜色宿主的 CDB 服务查询路由
 
 - 隔离 `StreamViewHost.QueryService` 在没有外部 `BrowserSite` 时，原先无法以 `SID_SShellBrowser` 返回 host 自己实现的 CDB2/CDB3；直接 `QueryInterface` smoke 没覆盖 Shell 常用服务入口。

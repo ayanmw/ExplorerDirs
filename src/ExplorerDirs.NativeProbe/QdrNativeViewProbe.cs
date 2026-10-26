@@ -199,6 +199,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     private ShellViewNavigationHistory? _navigation;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
+    internal string? StatusText { get; private set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -291,7 +292,11 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     public int InsertMenusSB(nint menu, nint widths) => 0;
     public int SetMenuSB(nint menu, nint oleMenu, nint active) => 0;
     public int RemoveMenusSB(nint menu) => 0;
-    public int SetStatusTextSB(nint text) => 0;
+    public int SetStatusTextSB(nint text)
+    {
+        StatusText = text == 0 ? null : Marshal.PtrToStringUni(text);
+        return 0;
+    }
     public int EnableModelessSB(int enable) => 0;
     public int TranslateAcceleratorSB(nint msg, ushort id) => 1;
     public virtual int BrowseObject(nint pidl, uint flags) =>
