@@ -875,3 +875,11 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 `0x8007059C` 是 `HRESULT_FROM_WIN32(ERROR_CHILD_WINDOW_MENU)`；`SetMenu` 文档规定菜单不能分配给 child window，因此原型当前把 menu 设在 pane 上必然失败。`OleSetMenuDescriptor` 也要求将 dispatch 安装到 container frame window；`IShellBrowser::SetMenuSB` 的用途是安装合成菜单，Shell 文档还要求 view deactivation 时通过 `RemoveMenusSB` 恢复菜单。依据：[SetMenu](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setmenu)、[系统错误码 1300–1699](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1300-1699-)、[OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)、[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
 
 因此之前只检查 `InsertMenusSB`/`SetMenuSB` 回调次数的四窗格“菜单激活”结论只能证明回调到达各个 host，不能证明任何 pane 的合成菜单被安装。下一步必须将每 view 的 `IShellBrowser::GetWindow`（pane parent）与 top-level `IOleInPlaceFrame::GetWindow`/菜单 frame 分开，并由一个共享 frame owner 串行管理当前 menu、OLE descriptor、活动 view 和移除恢复。尚未验证该协调器、真实菜单跟踪或 WPF 产品接线；产品代码和 release 未改。
+
+### 2026-10-27 OLE 菜单 frame 与 Shell pane HWND 分离（源码候选）
+
+上一轮真实 `UIActivate` 菜单跟踪发现四个 pane 都回调 `SetMenuSB`，但 HRESULT 是 `0x8007059C`（`ERROR_CHILD_WINDOW_MENU`）。根因是 `IShellBrowser.GetWindow` 和 `IOleInPlaceFrame.GetWindow` 共用 child pane HWND；Win32 `SetMenu` 不允许把窗口菜单挂到 child window。微软文档也要求 OLE 菜单分派安装在容器 frame HWND 上：[SetMenu](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setmenu)、[OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)。
+
+NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame，四个 `IShellView` 共用 `ShellMenuFrameCoordinator`。协调器负责当前 owner 的 OLE descriptor 和菜单切换；迟到的非 owner `RemoveMenusSB` 不应卸载活动 pane 的菜单，切换安装失败会尝试恢复上一 owner。四窗格探针现会断言 Browser `GetWindow` 仍返回 pane，OLE frame `GetWindow` 返回共同顶层 HWND，并要求 `SetMenuSB` 成功且 frame 上确实有菜单。
+
+当前仅 `dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 通过（0 警告、0 错误）；没有启动 Shell view 或隔离桌面，因此 menu coordinator 的真实 COM/OLE 生命周期、连续 pane 激活、旧 owner 延迟移除和 frame 菜单恢复尚未验证。产品 ExplorerBrowser、INI 与 release 未改；本候选代码未接入产品。

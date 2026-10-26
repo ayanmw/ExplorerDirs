@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：隔离 IShellView 菜单 frame 分离候选
+
+- 按用户授权继续隔离迁移原型。已将每 pane 的 `IShellBrowser.GetWindow` 与 OLE 菜单 frame HWND 分开，并给四个 native view 接入共享菜单协调器；探针新增真实激活后的窗口层级、HRESULT 和顶层菜单断言。
+- NativeProbe Release 构建通过（0 警告/错误），但本次没有启动 Shell view 或 GUI，协调器实际生命周期尚未验证。产品仍使用 ExplorerBrowser，未发布；下步需在独占隔离桌面运行四窗格激活/切换、旧 pane 延迟移除、菜单命令回路，并补测故障回滚后再评估是否继续向产品迁移。
+
 ## 2026-10-27：多窗格重命名期间阻止窗口级快捷键和 Shell 状态查询
 
 - 源码复核发现窗口 `PreviewKeyDown` 与文件命令状态刷新都只询问 `ActivePane` 是否持有原生重命名 Edit。现在统一检查所有 pane 的 Shell 子窗口；任一重命名框保持原生键盘所有权时，应用级快捷键不执行，Shell 命令/选区状态也不查询。

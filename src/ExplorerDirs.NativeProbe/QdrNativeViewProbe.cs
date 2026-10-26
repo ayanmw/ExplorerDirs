@@ -193,6 +193,8 @@ internal static class QdrNativeViewProbe
 public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, IShellServiceProvider, IDisposable
 {
     private readonly nint _parent;
+    private readonly nint _menuFrameWindow;
+    private readonly ShellMenuFrameCoordinator? _menuFrameCoordinator;
     private readonly byte[] _bytes;
     private readonly ShellViewStateStore? _stateStore;
     private readonly Guid? _stateId;
@@ -220,6 +222,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int InsertMenusCallCount => Volatile.Read(ref _insertMenusCallCount);
     internal int SetMenuCallCount => Volatile.Read(ref _setMenuCallCount);
     internal int RemoveMenusCallCount => Volatile.Read(ref _removeMenusCallCount);
+    internal nint BrowserParentWindow => _parent;
+    internal nint MenuFrameWindow => _menuFrameWindow;
     internal List<string> MenuTrace { get; } = [];
     internal Func<bool, int>? EnableModelessHandler { get; set; }
     internal Func<nint, int>? ViewWindowActiveHandler { get; set; }
@@ -321,11 +325,14 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     // Imported view bytes can be shared by callers; snapshot them so later tab/source edits cannot mutate this host's fallback state.
     internal StreamViewHost(nint parent, byte[] bytes, ShellViewStateStore? stateStore = null,
-        Guid? stateId = null, ShellViewNavigationHistory? navigation = null)
+        Guid? stateId = null, ShellViewNavigationHistory? navigation = null,
+        nint menuFrameWindow = 0, ShellMenuFrameCoordinator? menuFrameCoordinator = null)
     {
         if ((stateStore is null) != (stateId is null))
             throw new ArgumentException("A view-state store and session ID must be supplied together.");
         _parent = parent;
+        _menuFrameWindow = menuFrameWindow == 0 ? parent : menuFrameWindow;
+        _menuFrameCoordinator = menuFrameCoordinator;
         _bytes = (byte[])bytes.Clone();
         _stateStore = stateStore;
         _stateId = stateId;
@@ -338,6 +345,14 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         window = _parent;
         return 0;
     }
+    int IStreamProbeOleInPlaceFrame.GetWindow(out nint window)
+    {
+        window = 0;
+        if (_menuFrameWindow == 0 || !IsWindow(_menuFrameWindow)) return unchecked((int)0x80004005);
+        window = _menuFrameWindow;
+        return 0;
+    }
+    internal nint ActiveObjectPointer => _activeObject;
     public int ContextSensitiveHelp(int enter)
     {
         if (ContextSensitiveHelpHandler is not { } handler) return unchecked((int)0x80004001);
@@ -374,8 +389,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             System.Diagnostics.Trace.WriteLine($"Shell menu activation: {ex.GetType().Name}");
             result = unchecked((int)0x80004005);
         }
-        var installed = GetMenu(_parent);
-        MenuTrace.Add($"set menu=0x{menu:X} active=0x{active:X} hr=0x{result:X8} frame=0x{_parent:X} installed=0x{installed:X} valid={IsMenu(installed)} count={(IsMenu(installed) ? GetMenuItemCount(installed) : -1)}");
+        var installed = GetMenu(_menuFrameWindow);
+        MenuTrace.Add($"set menu=0x{menu:X} active=0x{active:X} hr=0x{result:X8} frame=0x{_menuFrameWindow:X} installed=0x{installed:X} valid={IsMenu(installed)} count={(IsMenu(installed) ? GetMenuItemCount(installed) : -1)}");
         return result;
     }
     public int RemoveMenusSB(nint menu)
@@ -384,7 +399,9 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         int result;
         if (RemoveMenusHandler is not { } handler)
         {
-            result = menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
+            result = _menuFrameCoordinator is not null
+                ? _menuFrameCoordinator.RemoveMenu(this, menu)
+                : menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
             if (result >= 0) result = RemoveOwnedMenuGroups(menu);
         }
         else try { result = handler(menu); }
@@ -393,7 +410,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             System.Diagnostics.Trace.WriteLine($"Shell menu removal: {ex.GetType().Name}");
             result = unchecked((int)0x80004005);
         }
-        MenuTrace.Add($"remove menu=0x{menu:X} hr=0x{result:X8} frame=0x{_parent:X} installed=0x{GetMenu(_parent):X}");
+        MenuTrace.Add($"remove menu=0x{menu:X} hr=0x{result:X8} frame=0x{_menuFrameWindow:X} installed=0x{GetMenu(_menuFrameWindow):X}");
         return result;
     }
     public int SetStatusTextSB(nint text)
@@ -561,25 +578,27 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private int InstallSharedMenu(nint menu, nint oleMenu, nint active)
     {
         if (_parent == 0) return 0;
+        if (_menuFrameCoordinator is not null)
+            return _menuFrameCoordinator.SetMenu(this, menu, oleMenu, active);
         if (menu == 0) return UninstallSharedMenu();
-        if (!IsWindow(_parent) || !IsMenu(menu)) return unchecked((int)0x80070057);
+        if (!IsWindow(_menuFrameWindow) || !IsMenu(menu)) return unchecked((int)0x80070057);
         if (_installedSharedMenu != 0)
         {
             var removeResult = UninstallSharedMenu();
             if (removeResult < 0) return removeResult;
         }
 
-        var previousMenu = GetMenu(_parent);
-        if (!SetMenu(_parent, menu)) return Marshal.GetHRForLastWin32Error();
-        DrawMenuBar(_parent);
+        var previousMenu = GetMenu(_menuFrameWindow);
+        if (!SetMenu(_menuFrameWindow, menu)) return Marshal.GetHRForLastWin32Error();
+        DrawMenuBar(_menuFrameWindow);
         var frame = Marshal.GetComInterfaceForObject(this, typeof(IStreamProbeOleInPlaceFrame));
         int result;
-        try { result = OleSetMenuDescriptor(oleMenu, _parent, active, frame, _activeObject); }
+        try { result = OleSetMenuDescriptor(oleMenu, _menuFrameWindow, active, frame, _activeObject); }
         finally { Marshal.Release(frame); }
         if (result < 0)
         {
-            SetMenu(_parent, previousMenu);
-            DrawMenuBar(_parent);
+            SetMenu(_menuFrameWindow, previousMenu);
+            DrawMenuBar(_menuFrameWindow);
             return result;
         }
         _installedSharedMenu = menu;
@@ -590,16 +609,17 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
 
     private int UninstallSharedMenu()
     {
-        if (_parent == 0 || _installedSharedMenu == 0) return 0;
+        if (_menuFrameCoordinator is not null) return _menuFrameCoordinator.Deactivate(this);
+        if (_menuFrameWindow == 0 || _installedSharedMenu == 0) return 0;
         var frame = Marshal.GetComInterfaceForObject(this, typeof(IStreamProbeOleInPlaceFrame));
         int result;
-        try { result = OleSetMenuDescriptor(0, _parent, _installedActiveWindow, frame, _activeObject); }
+        try { result = OleSetMenuDescriptor(0, _menuFrameWindow, _installedActiveWindow, frame, _activeObject); }
         finally { Marshal.Release(frame); }
         if (result < 0) return result;
-        if (GetMenu(_parent) == _installedSharedMenu)
+        if (GetMenu(_menuFrameWindow) == _installedSharedMenu)
         {
-            if (!SetMenu(_parent, _previousFrameMenu)) return Marshal.GetHRForLastWin32Error();
-            DrawMenuBar(_parent);
+            if (!SetMenu(_menuFrameWindow, _previousFrameMenu)) return Marshal.GetHRForLastWin32Error();
+            DrawMenuBar(_menuFrameWindow);
         }
         _installedSharedMenu = 0;
         _installedActiveWindow = 0;
@@ -713,6 +733,133 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
+}
+
+// Multiple DefViews share one real frame menu. A stale RemoveMenusSB from an
+// inactive pane must not unregister the menu dispatcher owned by the active pane.
+internal sealed class ShellMenuFrameCoordinator
+{
+    private readonly nint _frameWindow;
+    private nint _baseMenu;
+    private nint _activeMenu;
+    private nint _activeWindow;
+    private nint _oleMenu;
+    private StreamViewHost? _owner;
+
+    internal ShellMenuFrameCoordinator(nint frameWindow)
+    {
+        if (frameWindow == 0 || !IsWindow(frameWindow))
+            throw new ArgumentException("A valid top-level menu frame window is required.", nameof(frameWindow));
+        _frameWindow = frameWindow;
+        _baseMenu = GetMenu(frameWindow);
+    }
+
+    internal int SetMenu(StreamViewHost owner, nint menu, nint oleMenu, nint activeWindow)
+    {
+        if (menu == 0) return Deactivate(owner);
+        if (!IsWindow(_frameWindow) || !IsMenu(menu)) return unchecked((int)0x80070057);
+        var priorOwner = _owner;
+        var priorMenu = _activeMenu;
+        var priorWindow = _activeWindow;
+        var priorOleMenu = _oleMenu;
+        if (priorOwner is not null)
+        {
+            var unhookResult = Unhook(priorOwner, priorWindow);
+            if (unhookResult < 0) return unhookResult;
+        }
+
+        if (!SetMenu(_frameWindow, menu))
+        {
+            var error = Marshal.GetHRForLastWin32Error();
+            RestorePrior(priorOwner, priorMenu, priorWindow, priorOleMenu);
+            return error;
+        }
+        DrawMenuBar(_frameWindow);
+        var frame = Marshal.GetComInterfaceForObject(owner, typeof(IStreamProbeOleInPlaceFrame));
+        int result;
+        try { result = OleSetMenuDescriptor(oleMenu, _frameWindow, activeWindow, frame, owner.ActiveObjectPointer); }
+        finally { Marshal.Release(frame); }
+        if (result < 0)
+        {
+            RestorePrior(priorOwner, priorMenu, priorWindow, priorOleMenu);
+            return result;
+        }
+
+        _owner = owner;
+        _activeMenu = menu;
+        _activeWindow = activeWindow;
+        _oleMenu = oleMenu;
+        return result;
+    }
+
+    internal int RemoveMenu(StreamViewHost owner, nint menu)
+    {
+        if (!ReferenceEquals(_owner, owner) || menu != _activeMenu) return 0;
+        return Deactivate(owner);
+    }
+
+    internal int Deactivate(StreamViewHost owner)
+    {
+        if (!ReferenceEquals(_owner, owner)) return 0;
+        var result = Unhook(owner, _activeWindow);
+        if (result < 0) return result;
+        if (GetMenu(_frameWindow) == _activeMenu)
+        {
+            if (!SetMenu(_frameWindow, _baseMenu)) return Marshal.GetHRForLastWin32Error();
+            DrawMenuBar(_frameWindow);
+        }
+        _owner = null;
+        _activeMenu = _activeWindow = _oleMenu = 0;
+        return 0;
+    }
+
+    private int Unhook(StreamViewHost owner, nint activeWindow)
+    {
+        var frame = Marshal.GetComInterfaceForObject(owner, typeof(IStreamProbeOleInPlaceFrame));
+        try { return OleSetMenuDescriptor(0, _frameWindow, activeWindow, frame, owner.ActiveObjectPointer); }
+        finally { Marshal.Release(frame); }
+    }
+
+    private void RestorePrior(StreamViewHost? owner, nint menu, nint activeWindow, nint oleMenu)
+    {
+        var restoreMenu = owner is null ? _baseMenu : menu;
+        if (GetMenu(_frameWindow) != restoreMenu)
+        {
+            SetMenu(_frameWindow, restoreMenu);
+            DrawMenuBar(_frameWindow);
+        }
+        if (owner is null)
+        {
+            _owner = null;
+            _activeMenu = _activeWindow = _oleMenu = 0;
+            return;
+        }
+
+        var frame = Marshal.GetComInterfaceForObject(owner, typeof(IStreamProbeOleInPlaceFrame));
+        int result;
+        try { result = OleSetMenuDescriptor(oleMenu, _frameWindow, activeWindow, frame, owner.ActiveObjectPointer); }
+        finally { Marshal.Release(frame); }
+        if (result >= 0)
+        {
+            _owner = owner;
+            _activeMenu = menu;
+            _activeWindow = activeWindow;
+            _oleMenu = oleMenu;
+        }
+        else
+        {
+            _owner = null;
+            _activeMenu = _activeWindow = _oleMenu = 0;
+        }
+    }
+
+    [DllImport("ole32.dll")] private static extern int OleSetMenuDescriptor(nint descriptor,
+        nint frameWindow, nint activeWindow, nint frame, nint activeObject);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
+    [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
 }
 
 // Exact IShellBrowser layout, including its IOleWindow methods (slots 3/4).

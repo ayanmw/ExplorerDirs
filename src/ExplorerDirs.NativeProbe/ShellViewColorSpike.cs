@@ -63,6 +63,7 @@ internal static class ShellViewColorSpike
         nint parent = 0, pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
         var createAttempted = false;
         ShellViewColorBrowserHost? host = null;
+        ShellMenuFrameCoordinator? menuCoordinator = null;
         var result = 1;
         try
         {
@@ -71,6 +72,7 @@ internal static class ShellViewColorSpike
             parent = CreateWindowExW(extendedStyle, "STATIC", "ExplorerDirs session restore consumer",
                 windowStyle, 100, 100, 800, 560, 0, 0, 0, 0);
             if (parent == 0) throw new InvalidOperationException("Could not create the isolated consumer parent window.");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
             pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 1",
                 0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265, parent, 0, 0, 0);
             if (pane == 0) throw new InvalidOperationException("Could not create the first child pane.");
@@ -80,7 +82,8 @@ internal static class ShellViewColorSpike
             Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
             host = new ShellViewColorBrowserHost(pane, [],
                 new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
-                stateStore: store, stateId: sessionId);
+                stateStore: store, stateId: sessionId, menuFrameWindow: parent,
+                menuFrameCoordinator: menuCoordinator);
             host.View = view;
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -121,7 +124,7 @@ internal static class ShellViewColorSpike
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
             var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
-                folderView, propertyFormatId, expectedSort, columnsExpected);
+                folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator);
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
                 $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
@@ -167,7 +170,7 @@ internal static class ShellViewColorSpike
         Guid restoredSessionId, nint containerParent, nint restoredView, nint firstPane,
         ShellViewColorBrowserHost restoredHost,
         nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
-        IReadOnlyList<DisplayColumnState> columnsExpected)
+        IReadOnlyList<DisplayColumnState> columnsExpected, ShellMenuFrameCoordinator menuCoordinator)
     {
         // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
         nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
@@ -186,7 +189,8 @@ internal static class ShellViewColorSpike
         var siblingSessionId = Guid.NewGuid();
         host = new ShellViewColorBrowserHost(pane, [],
             new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
-            stateStore: store, stateId: siblingSessionId);
+            stateStore: store, stateId: siblingSessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
         if (store.TryLoad(siblingSessionId, out _))
             throw new InvalidOperationException("The new sibling unexpectedly inherited another session's stream.");
         host.View = view;
@@ -253,15 +257,16 @@ internal static class ShellViewColorSpike
         if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
             throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
         var otherFixture = GetNotificationIsolationFixture(fixture);
-        var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48);
+        var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48,
+            menuCoordinator: menuCoordinator);
         var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1,
-            otherFixture, expectedItemCount: 1);
+            otherFixture, expectedItemCount: 1, menuCoordinator: menuCoordinator);
         var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
         var allHosts = new[] { restoredHost, host, pane3.Host, pane4.Host };
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         var menuRouting = VerifyFourPaneMenuActivation(
-            new[] { restoredView, view, pane3.View, pane4.View }, allHosts);
+            new[] { restoredView, view, pane3.View, pane4.View }, allHosts, containerParent);
         var menuCommands = VerifyFourPaneMenuCommandRouting(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
         var rootFolderViews = allViews.Take(3).ToArray();
@@ -280,7 +285,7 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
-        IReadOnlyList<ShellViewColorBrowserHost> hosts)
+        IReadOnlyList<ShellViewColorBrowserHost> hosts, nint menuFrameWindow)
     {
         if (views.Count != 4 || hosts.Count != 4)
             throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
@@ -298,6 +303,14 @@ internal static class ShellViewColorSpike
             var setDelta = current.SetMenuCallCount - before[index].SetMenuCallCount;
             if (insertDelta <= 0 || setDelta <= 0)
                 throw new InvalidOperationException($"Activating pane {index + 1} did not route Shell menu callbacks to its own host: insert={insertDelta}; set={setDelta}.");
+            var shellBrowser = (IStreamProbeBrowser)current;
+            var oleFrame = (IStreamProbeOleInPlaceFrame)current;
+            if (shellBrowser.GetWindow(out var browserWindow) < 0 || browserWindow != current.BrowserParentWindow ||
+                oleFrame.GetWindow(out var frameWindow) < 0 || frameWindow != menuFrameWindow ||
+                browserWindow == frameWindow || GetMenu(menuFrameWindow) == 0 ||
+                !current.MenuTrace.Any(trace => trace.Contains("hr=0x00000000", StringComparison.Ordinal) &&
+                    trace.Contains($"frame=0x{menuFrameWindow:X}", StringComparison.Ordinal)))
+                throw new InvalidOperationException($"Pane {index + 1} did not install its Shell menu on the shared top-level frame.");
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
@@ -634,7 +647,8 @@ internal static class ShellViewColorSpike
 
     private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
         nint containerParent, int x, int y, uint expectedMode, int iconSize,
-        string? location = null, int expectedItemCount = 2)
+        string? location = null, int expectedItemCount = 2,
+        ShellMenuFrameCoordinator? menuCoordinator = null)
     {
         var pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs session restore pane {expectedMode}",
             0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, containerParent, 0, 0, 0);
@@ -649,7 +663,8 @@ internal static class ShellViewColorSpike
         Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out var view));
         var host = new ShellViewColorBrowserHost(pane, [],
             new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
-            stateStore: store, stateId: sessionId);
+            stateStore: store, stateId: sessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
         host.View = view;
         var hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         var settings = new StreamProbeSettings { Mode = uint.MaxValue };

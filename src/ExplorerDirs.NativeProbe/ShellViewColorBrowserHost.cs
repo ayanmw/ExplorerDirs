@@ -17,7 +17,9 @@ internal sealed class ShellViewColorBrowserHost : StreamViewHost,
 
     internal ShellViewColorBrowserHost(nint parent, byte[] state, ShellFolderFilter filter,
         ShellViewNavigationHistory? navigation = null, ShellViewStateStore? stateStore = null,
-        Guid? stateId = null) : base(parent, state, stateStore, stateId, navigation)
+        Guid? stateId = null, nint menuFrameWindow = 0,
+        ShellMenuFrameCoordinator? menuFrameCoordinator = null)
+        : base(parent, state, stateStore, stateId, navigation, menuFrameWindow, menuFrameCoordinator)
     {
         _filter = filter;
     }
