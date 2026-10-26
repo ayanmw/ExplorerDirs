@@ -3555,6 +3555,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 保留真实 filesystem view `IShellView::TranslateAccelerator` 的 F4/F6/F24 委托结果；接下来的 keyboard gate 是产品 `ExplorerBrowserHost.TranslateAcceleratorCore` 中的实际焦点、活动 pane、rename editor 与 Shell 视图分发，需用隔离产品 HostProbe 验证。真实物理键盘和可见 WPF 行为仍需后续桌面验收；不据此声称产品迁移完成。
 - 参考：[IOleInPlaceSite::GetWindowContext](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplacesite-getwindowcontext)、[OleTranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator)、[IShellView::TranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)。产品 ExplorerBrowser 与 release 未改。
 
+## 2026-10-27：为后续内存增长调查准备只读采样器
+
+- 现有记录没有本轮可比较的进程样本；当前机器也没有运行中的 Explorer Dirs 实例，因此不启动应用制造基线。新增 `scripts/sample-memory.ps1`，默认每 5 秒记录 5 分钟内所有已运行 ExplorerDirs.App 进程的 working set、private bytes、virtual bytes、句柄数和线程数；应用退出后自动结束，不读取目录/文件路径，不启动或操作窗口。
+- 仅做脚本解析检查和“没有运行实例”退出路径验证；未取得运行时内存曲线。使用方法和证据限制见[内存采样说明](memory-sampling.md)。这为未来在相同窗格/标签负载下比较内存变化提供 CSV，不把单一 working-set 数值当作泄漏诊断，也不改变应用内存策略。
+
 ## 2026-10-27：隔离 Shell view 逐项颜色像素覆盖五种样式
 
 - NativeProbe Release 构建 0 警告/错误；`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。通过的 `direct-listview-mode-capture` 在真实 filesystem `IShellView` 的 `SysListView32` 上覆盖 Icon、Details、SmallIcon、List、Tile 五种样式；两条按文件身份配置不同颜色的样本，在未排序、排序及分组后都取得两行非零颜色像素，排序/分组后身份映射正确。
