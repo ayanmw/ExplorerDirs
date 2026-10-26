@@ -103,6 +103,7 @@ public static class ShellViewColorBrowserHostSmoke
 
         VerifyBaseHostFrameStateRouting();
         VerifyOleInPlaceFrameSurface();
+        VerifyNativeSharedMenuGroups();
         VerifyNativeSharedMenuInstallation();
         VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
@@ -439,6 +440,7 @@ public static class ShellViewColorBrowserHostSmoke
                     "a parent active-object callback exception stays inside the COM boundary");
             }
             finally { Marshal.Release(activeObjectUnknown); }
+            host.InsertMenusHandler = (_, _) => 0;
             host.SetMenuHandler = (_, _, _) => 0;
             Check(insertMenus(frame, 0x123, 0x456) == 0 && setMenu(frame, 0x234, 0x567, 0x89A) == 0 &&
                   removeMenus(frame, 0x345) == 0,
@@ -548,6 +550,50 @@ public static class ShellViewColorBrowserHostSmoke
             else if (popup != 0) DestroyMenu(popup);
             if (previousMenu != 0) DestroyMenu(previousMenu);
             OleUninitialize();
+        }
+    }
+
+    private static void VerifyNativeSharedMenuGroups()
+    {
+        var frameWindow = CreateWindowExW(0, "STATIC", "isolated native menu groups", 0,
+            0, 0, 320, 200, 0, 0, 0, 0);
+        using var host = new StreamViewHost(frameWindow, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var menu = CreateMenu();
+        var widths = Marshal.AllocHGlobal(6 * sizeof(int));
+        try
+        {
+            Check(menu != 0, "a native shared-menu root is created for the insertion smoke");
+            for (var i = 0; i < 6; i++) Marshal.WriteInt32(widths, i * sizeof(int), 0);
+            var insertMenus = GetComMethod<InsertMenusCallback>(browser, 5);
+            var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
+            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 6,
+                "IShellBrowser.InsertMenusSB inserts the six standard host popup groups");
+            var labels = new[] { "File", "Edit", "View", "Favorites", "Tools", "Help" };
+            for (var i = 0; i < labels.Length; i++)
+            {
+                var text = new System.Text.StringBuilder(64);
+                Check(GetMenuStringW(menu, (uint)i, text, text.Capacity, 0x400) > 0 && text.ToString() == labels[i],
+                    $"the shared menu group {i} is {labels[i]}");
+            }
+            Check(Enumerable.Range(0, 6).Select(i => GetMenuItemCommandId(menu, i))
+                    .SequenceEqual(new uint[] { 0x8000, 0x8040, 0x8080, 0x8170, 0x80C0, 0x8100 }),
+                "the standard Shell popup menu identifiers are assigned in documented order");
+            Check(Enumerable.Range(0, 6).Select(i => Marshal.ReadInt32(widths, i * sizeof(int)))
+                    .SequenceEqual(new[] { 2, 0, 3, 0, 1, 0 }),
+                "OLEMENUGROUPWIDTHS reports host counts for File, Container, and Window groups");
+            Check(removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 0,
+                "IShellBrowser.RemoveMenusSB removes and releases only host popup groups");
+            Check(insertMenus(browser, menu, widths) == 0 && GetMenuItemCount(menu) == 6 &&
+                  removeMenus(browser, menu) == 0 && GetMenuItemCount(menu) == 0,
+                "the same shared menu can be merged and removed again");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(widths);
+            if (menu != 0) DestroyMenu(menu);
+            Marshal.Release(browser);
+            if (frameWindow != 0) DestroyWindow(frameWindow);
         }
     }
 
@@ -741,6 +787,28 @@ public static class ShellViewColorBrowserHostSmoke
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern nint CreateMenu();
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int capacity, uint flags);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeMenuItemInfo
+    {
+        public uint Size, Mask, Type, State, Id;
+        public nint SubMenu, CheckedBitmap, UncheckedBitmap, ItemData, Text;
+        public uint TextLength;
+        public nint ItemBitmap;
+    }
+    private static uint GetMenuItemCommandId(nint menu, int position)
+    {
+        var item = new NativeMenuItemInfo { Size = (uint)Marshal.SizeOf<NativeMenuItemInfo>(), Mask = 0x2 };
+        if (!GetMenuItemInfoW(menu, (uint)position, true, ref item))
+            throw new InvalidOperationException("GetMenuItemInfoW could not read a native menu item.");
+        return item.Id;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMenuItemInfoW(nint menu, uint item, [MarshalAs(UnmanagedType.Bool)] bool byPosition,
+        ref NativeMenuItemInfo info);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool AppendMenuW(nint menu, uint flags, nint idOrSubmenu, string text);
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);

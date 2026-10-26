@@ -200,6 +200,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private nint _installedSharedMenu;
     private nint _installedActiveWindow;
     private nint _previousFrameMenu;
+    private nint _insertedMenuRoot;
+    private readonly nint[] _insertedMenuPopups = new nint[6];
     private ShellViewNavigationHistory? _navigation;
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
@@ -262,6 +264,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             finally
             {
                 UninstallSharedMenu();
+                RemoveOwnedMenuGroups(_insertedMenuRoot);
                 if (_activeObject != 0)
                 {
                     Marshal.Release(_activeObject);
@@ -334,7 +337,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int InsertMenusSB(nint menu, nint widths)
     {
-        if (InsertMenusHandler is not { } handler) return 0;
+        if (InsertMenusHandler is not { } handler)
+            return _parent == 0 ? 0 : InsertNativeMenuGroups(menu, widths);
         try { return handler(menu, widths); }
         catch (Exception ex)
         {
@@ -355,7 +359,11 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     public int RemoveMenusSB(nint menu)
     {
         if (RemoveMenusHandler is not { } handler)
-            return menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
+        {
+            var result = menu == _installedSharedMenu ? UninstallSharedMenu() : 0;
+            if (result < 0) return result;
+            return RemoveOwnedMenuGroups(menu);
+        }
         try { return handler(menu); }
         catch (Exception ex)
         {
@@ -547,6 +555,81 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         return result;
     }
 
+    private int InsertNativeMenuGroups(nint menu, nint widths)
+    {
+        if (_parent == 0 || !IsWindow(_parent)) return 0;
+        if (menu == 0 || widths == 0 || !IsMenu(menu) || _insertedMenuRoot != 0)
+            return unchecked((int)0x80070057);
+
+        string[] labels = ["File", "Edit", "View", "Favorites", "Tools", "Help"];
+        uint[] ids = [0x8000, 0x8040, 0x8080, 0x8170, 0x80C0, 0x8100];
+        var inserted = 0;
+        for (var i = 0; i < labels.Length; i++)
+        {
+            var popup = CreatePopupMenu();
+            var text = Marshal.StringToHGlobalUni(labels[i]);
+            bool success;
+            try
+            {
+                var item = new MenuItemInfo
+                {
+                    Size = (uint)Marshal.SizeOf<MenuItemInfo>(),
+                    Mask = 0x47, // MIIM_STATE|MIIM_ID|MIIM_SUBMENU|MIIM_STRING.
+                    Id = ids[i],
+                    SubMenu = popup,
+                    Text = text
+                };
+                success = popup != 0 && InsertMenuItemW(menu, (uint)i, true, ref item);
+            }
+            finally { Marshal.FreeHGlobal(text); }
+            if (!success)
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (popup != 0) DestroyMenu(popup);
+                for (var j = 0; j < inserted; j++)
+                {
+                    RemoveMenu(menu, (uint)j, 0x400);
+                    DestroyMenu(_insertedMenuPopups[j]);
+                    _insertedMenuPopups[j] = 0;
+                }
+                return error == 0 ? unchecked((int)0x80004005) : unchecked((int)(0x80070000 | (error & 0xFFFF)));
+            }
+            _insertedMenuPopups[i] = popup;
+            inserted++;
+        }
+
+        _insertedMenuRoot = menu;
+        for (var i = 0; i < 6; i++) Marshal.WriteInt32(widths, i * sizeof(int), 0);
+        Marshal.WriteInt32(widths, 0, 2);
+        Marshal.WriteInt32(widths, 2 * sizeof(int), 3);
+        Marshal.WriteInt32(widths, 4 * sizeof(int), 1);
+        return 0;
+    }
+
+    private int RemoveOwnedMenuGroups(nint menu)
+    {
+        if (_insertedMenuRoot == 0 || menu != _insertedMenuRoot) return 0;
+        if (menu != 0 && IsMenu(menu))
+        {
+            for (var i = 0; i < _insertedMenuPopups.Length; i++)
+            {
+                var popup = _insertedMenuPopups[i];
+                if (popup == 0) continue;
+                var count = GetMenuItemCount(menu);
+                for (var position = count - 1; position >= 0; position--)
+                {
+                    if (GetSubMenu(menu, position) != popup) continue;
+                    RemoveMenu(menu, (uint)position, 0x400);
+                    break;
+                }
+                DestroyMenu(popup);
+                _insertedMenuPopups[i] = 0;
+            }
+        }
+        _insertedMenuRoot = 0;
+        return 0;
+    }
+
     [DllImport("shlwapi.dll")] private static extern nint SHCreateMemStream(byte[] bytes, uint count);
     [DllImport("ole32.dll")] private static extern int OleSetMenuDescriptor(nint descriptor, nint frameWindow,
         nint activeWindow, nint frame, nint activeObject);
@@ -555,6 +638,22 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetMenu(nint window, nint menu);
     [DllImport("user32.dll")] private static extern bool DrawMenuBar(nint window);
+    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MenuItemInfo
+    {
+        public uint Size, Mask, Type, State, Id;
+        public nint SubMenu, CheckedBitmap, UncheckedBitmap, ItemData, Text;
+        public uint TextLength;
+        public nint ItemBitmap;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool InsertMenuItemW(nint menu, uint item, [MarshalAs(UnmanagedType.Bool)] bool byPosition,
+        ref MenuItemInfo info);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool RemoveMenu(nint menu, uint position, uint flags);
+    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
 }
 
 // Exact IShellBrowser layout, including its IOleWindow methods (slots 3/4).

@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：为隔离 Shell 宿主插入标准 OLE 菜单组
+
+`StreamViewHost.InsertMenusSB` 的默认宿主路径现创建 File、Edit、View、Favorites、Tools、Help 六个原生弹出菜单，并使用 Shell 标准菜单 ID；`OLEMENUGROUPWIDTHS` 的宿主数量为 `[2,0,3,0,1,0]`。`RemoveMenusSB` 与 `Dispose` 只移除宿主创建的菜单组和子菜单；外层显式回调仍优先接管。菜单标题暂为固定英文原型标签，未连接 WPF 产品菜单或本地化资源。
+
+`--shell-view-color-policy-smoke` 先在隐藏 HWND 上经实际 COM vtable 验证菜单项、ID、分组宽度、移除/释放及重复合并。没有创建 `IShellView`，Shell 尚未向这些组添加自己的命令项；因此不证明 Shell 菜单项合并、OLE 命令派发或可见交互。依据：[Microsoft Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
+
 ## 2026-10-26：为隔离 Shell 宿主提供 IOleInPlaceFrame
 
 `StreamViewHost` 现在也暴露 `IOleInPlaceFrame` IID。其菜单插入/安装/移除、状态文字、模态状态与 accelerator 方法复用 `IShellBrowser` 已验证的父级路由；`SetActiveObject` 走独立回调，父级接受后 host 保留一个 COM 引用并在替换/Dispose 时释放。边框空间的三个方法保留为 `E_NOTIMPL`，异常回调转成 `E_FAIL`。

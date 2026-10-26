@@ -3237,3 +3237,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - `--shell-view-state-stream-smoke` 现在启动三个隔离 NativeProbe 子进程：两个依次用同一 GUID 写入不同代的真实 COM IStream 状态并退出；第三个以新 store/host 读回最新一代并逐字节比较。复验退出码 0。
 - 此证据验证探针文件存储跨进程可读，不代表进程崩溃、真实 `IShellView.DestroyViewWindow` 调用顺序或产品 session 重启恢复。没有创建 Shell view、GUI 或修改产品 profile；迁移门槛保持开放。
+
+## 2026-10-26：隔离宿主插入标准 OLE 菜单组
+
+- `StreamViewHost.InsertMenusSB` 的默认有效父窗口路径现在插入 File、Edit、View、Favorites、Tools、Help 六个原生弹出组，设置 Shell 标准菜单 ID 和 `OLEMENUGROUPWIDTHS=[2,0,3,0,1,0]`；`RemoveMenusSB`/`Dispose` 仅清理该 host 创建的组，显式外层回调优先。
+- `--shell-view-color-policy-smoke` 的 COM vtable 隐藏 HWND 检查覆盖标签、ID、分组计数、卸载和再次合并。NativeProbe Release `dotnet run` 通过；尚未创建 `IShellView`，所以 Shell 命令填充、OLE 命令消息分派和可见菜单均未验证。ExplorerBrowser 产品 UI 和发布物未修改。
