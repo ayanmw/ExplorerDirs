@@ -30,6 +30,8 @@ internal static class Program
             return QdrNativeViewProbe.Run();
         if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
             return StaticShellColumnContractSmoke.Run();
+        if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")
@@ -91,6 +93,7 @@ internal static class Program
             Console.WriteLine("       --live-updates-view-flags (same matrix plus production site with CDB2GVF_NOINCLUDEITEM disabled)");
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
             Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");
+            Console.WriteLine("       --static-shell-column-folder-smoke (native IShellFolder2 adapter CompareIDs; no window)");
             Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");

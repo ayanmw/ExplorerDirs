@@ -13,6 +13,55 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const uint SvgioAllView = 2;
 
+    internal static int RunFolderContract()
+    {
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
+        nint folderPidl = 0, folder = 0, adapter = 0, nativeLibrary = 0;
+        var items = new Dictionary<string, nint>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            Directory.CreateDirectory(fixture);
+            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
+                File.WriteAllText(Path.Combine(fixture, name), "static-column fixture");
+            Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
+            Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
+            nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
+            var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
+                NativeLibrary.GetExport(nativeLibrary, "CreateStaticShellFolderAdapter"));
+            Check(createAdapter(folder, out adapter));
+            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
+                items.Add(name, ParseChild(adapter, name));
+
+            var columnIndex = GetColumnCount(folder);
+            var compare = At<CompareIDs>(adapter, 7);
+            CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["ten.bin"]), -1, "2 before 10");
+            CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["hundred.bin"]), -1, "10 before 100");
+            CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["ten-copy.bin"]), 0, "equal values");
+            CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
+
+            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
+                "compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; window-created=False");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("native-static-shell-folder-contract failure: " + ex);
+            return 1;
+        }
+        finally
+        {
+            foreach (var item in items.Values) ILFree(item);
+            if (adapter != 0) Marshal.Release(adapter);
+            if (folder != 0) Marshal.Release(folder);
+            if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
+            if (nativeLibrary != 0) NativeLibrary.Free(nativeLibrary);
+            var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (Path.GetFullPath(fixture).StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fixture))
+                Directory.Delete(fixture, recursive: true);
+        }
+    }
+
     internal static int Run()
     {
         var foreground = GetForegroundWindow();
@@ -86,8 +135,9 @@ internal static class StaticShellFolderAdapterProbe
             var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref createSettings, hostPointer, ref bounds, out _));
             createdView = true;
+            _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the private desktop.
             Pump(800);
-            CheckBoundary(parent, foreground, "DefView creation");
+            CheckBoundary(parent, foreground, "DefView creation", expectVisible: true);
             var verifyViewFolder = Marshal.GetDelegateForFunctionPointer<VerifyViewFolder>(
                 NativeLibrary.GetExport(nativeLibrary, "VerifyStaticShellViewFolder"));
             Check(verifyViewFolder(view, adapter, out var adapterBackedView));
@@ -236,6 +286,12 @@ internal static class StaticShellFolderAdapterProbe
         finally { if (pointer != 0) Marshal.FreeCoTaskMem(pointer); }
     }
 
+    private static void CheckCompare(int hr, short expected, string label)
+    {
+        if (hr < 0 || unchecked((short)(hr & 0xffff)) != expected)
+            throw new Exception($"CompareIDs {label}: HRESULT=0x{hr:X8}; expected comparison={expected}.");
+    }
+
     private static string FindAdapterLibrary()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
@@ -261,8 +317,8 @@ internal static class StaticShellFolderAdapterProbe
         finally { NativeLibrary.Free(module); }
     }
 
-    private static void CheckBoundary(nint parent, nint foreground, string stage)
-    { if (IsWindowVisible(parent) || GetForegroundWindow() != foreground) throw new Exception($"{stage} crossed the hidden-window/foreground boundary."); }
+    private static void CheckBoundary(nint parent, nint foreground, string stage, bool expectVisible = false)
+    { if (IsWindowVisible(parent) != expectVisible || GetForegroundWindow() != foreground) throw new Exception($"{stage} crossed the isolated-window/foreground boundary."); }
     private static void Pump(int milliseconds)
     { var until = Environment.TickCount64 + milliseconds; while (Environment.TickCount64 < until) { Application.DoEvents(); Thread.Sleep(10); } }
     private static T At<T>(nint value, int slot) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * IntPtr.Size));
@@ -278,6 +334,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetMode(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDefaultColumnState(nint self, uint column, out uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIDs(nint self, nint sortColumn, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumn(nint self, uint column, nint key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bind, nint name, nint eaten, out nint item, out uint attributes);
@@ -294,5 +351,6 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
 }
