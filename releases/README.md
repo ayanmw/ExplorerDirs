@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.69\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.68，补入窗格“查看方式”按钮的 Tab 停靠点、禁用态矢量图标变淡，以及文件视图导出的同目录临时写入后替换。产品版本 `0.6.0-preview.temp.69+0f9af33c06fc43397bc01188069821a2f0bdef2e`，EXE SHA-256 `FA6787460F5AE294957214C4A1AEC2573B8A2266B56E3DF3F4450787C671F64F`，DLL SHA-256 `7520E7C1C4BB937C587EAEF6EEF270ECDCEBD7556AC2BD65D49967F3892A5A96`，与包内清单一致。完整 Release `SettingsSmoke` 和 App Release 构建通过；文件导出故障注入 smoke 通过。独立 profile 来自 temp.68 并逐文件校验。没有启动 GUI；目录树图标可见绘制、焦点顺序、禁用态图标和导出对话框仍待验收。详见[temp.69 说明](../docs/releases/preview-0.6.0-temp.69.md)。
+
+## 最新临时预览包（2026-10-26）
+
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.67\app\ExplorerDirs.App.exe`，使用隔离 profile。针对 temp.66 左侧目录树图标空白，现由 Shell 回调显式提供系统关闭/展开图标索引。产品版本 `0.6.0-preview.temp.67+8dd46e8564f47fd1a82d25e9cfc9986b0ac5ecc2`，EXE SHA-256 `BA32C9F7BDF1E98718A5E83518B35499E438BEFFD51E02FD6E94AB5F3BFA600D`，DLL SHA-256 `987C1236F9B36C13D4A30CB6876E39B95DF2F99E34E0E4D5F98FA358B34365D3`，与包内清单一致。Release `SettingsSmoke`、App Release build 和发布隔离 smoke 通过。没有启动 GUI；请重点检查普通文件夹、驱动器和虚拟 Shell 节点的图标。详见[temp.67 说明](../docs/releases/preview-0.6.0-temp.67.md)。
 
 ## 最新临时预览包（2026-10-26）
