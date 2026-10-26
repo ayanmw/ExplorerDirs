@@ -2575,6 +2575,46 @@ internal static class ShellViewColorSpike
             Check(setGroup(folderView, ref noGroup, 0));
         }
         Check(setSorts(folderView, originalSorts, originalSortCount));
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 8, -1)); // FVM_CONTENT.
+        Pump(200);
+        Check(getViewState(folderView, out var contentMode, out var contentSize));
+        var contentListMode = SendMessageW(listView, 0x108F, 0, 0).ToInt32(); // LVM_GETVIEW.
+        var contentItemCount = SendMessageW(listView, 0x1004, 0, 0).ToInt64(); // LVM_GETITEMCOUNT.
+        if (contentMode != 8 || contentItemCount != fixturePaths.Length)
+            throw new Exception($"Content view did not expose the fixture rows: shell={contentMode}/{contentSize}; " +
+                $"list-view={contentListMode}; items={contentItemCount}.");
+        RefreshFixtureColorMap(folderView, fixturePaths);
+        ClearColorProbeSelection();
+        var contentCapture = default((int[] RowHits, int[] BitmapHits, string ItemRects, string CustomDrawDetails,
+            int Prepaint, int CustomDrawItems, nuint[] DrawItems, bool PrintWindowRendered));
+        var contentPaintAttempts = 0;
+        for (; contentPaintAttempts < 10; contentPaintAttempts++)
+        {
+            contentCapture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            if (contentCapture.CustomDrawItems >= fixturePaths.Length &&
+                Enumerable.Range(0, fixturePaths.Length).All(index =>
+                    CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue) ==
+                    CustomDrawBackgrounds[(nuint)index]))
+                break;
+            Pump(100);
+        }
+        var contentPixelResults = Enumerable.Range(0, fixturePaths.Length).Select(index =>
+        {
+            var actual = CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue);
+            var expected = CustomDrawBackgrounds[(nuint)index];
+            return $"{index}:0x{actual:X6}/0x{expected:X6}";
+        }).ToArray();
+        var contentAttempts = Math.Min(contentPaintAttempts + 1, 10);
+        Console.WriteLine("content-view-item-pixels=" + string.Join(',', contentPixelResults) +
+            $";callbacks={contentCapture.CustomDrawItems};attempts={contentAttempts};" +
+            $"shell={contentMode}/{contentSize};list-view={contentListMode};items={contentItemCount};label-bounds=" +
+            string.Join(',', CustomDrawLabelBounds.OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key}:{FormatRect(pair.Value)}")));
+        if (contentCapture.CustomDrawItems < fixturePaths.Length ||
+            Enumerable.Range(0, fixturePaths.Length).Any(index =>
+                CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue) !=
+                CustomDrawBackgrounds[(nuint)index]))
+            throw new Exception("Content view did not paint both per-item rule colors at their label pixels.");
         Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, originalMode, originalIconSize));
         Pump(250);
         Check(getViewState(folderView, out var restoredMode, out var restoredSize));

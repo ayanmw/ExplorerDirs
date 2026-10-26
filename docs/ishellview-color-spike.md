@@ -32,6 +32,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 
+## 2026-10-27：Content 视图逐项颜色绘制像素验证
+
+在同一 NativeProbe 文件夹中切换到 `FVM_CONTENT`（Shell mode 8），确认原生 `SysListView32` 为 Content 样式且包含两个夹具项目；随后对每个项目读取其标签区域像素，并与按 Shell 项目身份匹配的规则背景色比较。首次采样可能发生在逐项绘制回调前，因此最多重试 10 次、每次间隔 100 ms。`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-044600-26c2494a.stdout.log` 报告 `shell=8/32;list-view=4;items=2;callbacks=2;attempts=2`，两项实际与预期颜色分别为 `0xF0E0D0`、`0xD0F0E0`。完整 NativeProbe Release 构建 0 警告/错误；该轮 session state 写回 772 字节，重建 host 恢复成功，Private Desktop 前台 HWND 不变。
+
+前两轮未通过的采样分别暴露了颜色值通道顺序解释错误，以及 Content 初次绘制尚未收到逐项回调；修正比较为原始 COLORREF 后，带有限重试的第三轮稳定命中。此前五种标准 ListView 样式的逐项颜色采样也已通过。该证据证明隔离 `IShellView`/DefView 在六种已测视图模式中能按项目绘制规则颜色，但不代表颜色功能已接入 Explorer Dirs 产品、Q-Dir `.qdr` 颜色已导入，也没有覆盖主题变化、DPI、多语言 Shell 扩展或可见 UI 验收。
+
 ## 2026-10-27：区分 OLE frame 与 Shell view accelerator 路径
 
 验证 `OleTranslateAccelerator` 时，探针创建的 accelerator 表可被 Win32 `TranslateAccelerator` 匹配，但调用 OLE API 返回 `S_FALSE` 且没有到达 `IOleInPlaceFrame::TranslateAccelerator` handler。该单次实验未满足完整 OLE in-place activation / `GetWindowContext` 生命周期，不能作为 frame accelerator 实现失败的结论；临时测试代码已撤回，不影响完整会话恢复探针。

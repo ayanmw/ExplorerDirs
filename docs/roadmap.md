@@ -55,7 +55,7 @@
 ## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
 
 - 用户已明确授权在隔离原型中推进完整宿主迁移验证，验收面包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点与每会话视图状态。该授权仅覆盖 NativeProbe/隔离宿主，不包含将产品 ExplorerBrowser 替换为 IShellView，也不包含发布迁移版本。
-- 当前已有的证据分别覆盖隐藏 COM vtable/菜单生命周期 smoke、局部 Shell 文件操作与通知样本、以及独立 IStream 会话文件测试；这些拼接证据尚未在同一可见宿主中覆盖完整门槛。逐项颜色绘制像素未稳定命中，完整 OLE 拖放循环、物理键盘焦点和真实会话恢复仍未通过。
+- 当前已有的证据分别覆盖隐藏 COM vtable/菜单生命周期 smoke、局部 Shell 文件操作与通知样本、独立 IStream 会话文件测试，以及五种标准视图和 Content 视图下的逐项颜色像素采样；这些拼接证据尚未在同一可见宿主中覆盖完整门槛。完整 OLE 拖放循环、物理键盘焦点和真实会话恢复仍未通过。
 - 继续按 `docs/ishellview-color-spike.md` 推进原型；用户要求暂不使用 Computer Use，且项目规则禁止在无当前桌面授权时创建可能激活前台的 Shell 宿主，因此本阶段限于源码和无 Shell-view 验证。真实宿主门槛需在独立 Windows 会话完成后评估是否值得迁移产品。
 
 ## 2026-10-27：复核隔离 IShellBrowser / OLE frame 回调合同
@@ -149,7 +149,7 @@
 
 | 顺序 | 工作项 | 当前状态 | 下一步 |
 | --- | --- | --- | --- |
-| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。Private Desktop 四窗格原生容器已验证 Details/List/Icon/Tile 并存、独立视图流往返、同/异目录文件操作与通知、各 pane 的查看/排序/分组菜单命令路由、共享 top-level OLE 菜单合并与停用恢复、文件项菜单目标隔离、方向键焦点路由、Ctrl+A 选区隔离，以及五种视图模式和四窗格中 F2 编辑期间的四方向键焦点隔离；两轮完整四窗格迁移 consumer 验证通过，前台保护检查通过 | 原型尚非 WPF/产品集成。剩余的真实 OLE `DoDragDrop` 源端交接、可见菜单点击、物理键盘焦点和可见多窗格体验仍待验收；`GetCursorPos`/`SetCursorPos` 要求当前 input desktop，Private Desktop 本身无法定位用户拖动指针。本阶段继续源码与独立 Private Desktop 验证，不进行用户桌面输入。产品 ExplorerBrowser 不迁移、不发布，直到完整迁移门槛与用户审阅通过 |
+| 1 | ExplorerBrowser / `IShellView` 迁移原型 | 用户已授权隔离原型；产品仍使用 ExplorerBrowser。Private Desktop 四窗格原生容器已验证 Details/List/Icon/Tile 并存、独立视图流往返、同/异目录文件操作与通知、各 pane 的查看/排序/分组菜单命令路由、共享 top-level OLE 菜单合并与停用恢复、文件项菜单目标隔离、方向键焦点路由、Ctrl+A 选区隔离，以及五种标准视图和 Content 模式下逐项颜色绘制，并覆盖四窗格中 F2 编辑期间的四方向键焦点隔离；两轮完整四窗格迁移 consumer 验证通过，前台保护检查通过 | 原型尚非 WPF/产品集成。剩余的真实 OLE `DoDragDrop` 源端交接、可见菜单点击、物理键盘焦点和可见多窗格体验仍待验收；`GetCursorPos`/`SetCursorPos` 要求当前 input desktop，Private Desktop 本身无法定位用户拖动指针。本阶段继续源码与独立 Private Desktop 验证，不进行用户桌面输入。产品 ExplorerBrowser 不迁移、不发布，直到完整迁移门槛与用户审阅通过 |
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；当前无桌面授权，继续修复有源码依据且可无窗口验证的项目 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；只读采样器现输出每个样本相对起点的工作集/Private Bytes 变化量及 Private Bytes 每分钟变化率（JSON schema 3）。本轮检查没有运行中的 Explorer Dirs 进程，故无新增真实应用曲线 | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
