@@ -83,10 +83,11 @@ internal static class QdrImportSmoke
             "[Filter2]\n0=*.jpg=1=FF0000=-1=1=-1=0\n1=#BG-A=1=-1=-1=1=-1=0\n",
             (value, _) => value);
         Require(qdrColorRules.Warnings.Any(warning => warning.Contains("Filter2") && warning.Contains("2") &&
-                    warning.Contains("颜色规则") && warning.Contains("未导入")) &&
+                    warning.Contains("颜色规则") && warning.Contains("未导入") &&
+                    warning.Contains("*.jpg") && warning.Contains("#BG-A")) &&
                 qdrColorRules.Warnings.All(warning => !warning.Contains("FF0000")) &&
                 !qdrColorRules.Warnings.Any(warning => warning.Contains("未识别且未应用的字段名")),
-            "Q-Dir import preview counts Filter2 rules without interpreting or exposing their values");
+            "Q-Dir import preview lists Filter2 rule patterns without interpreting or exposing color values");
         var previewDisabled = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\left\nVorschau=0\n", (value, _) => value);
         Require(!previewDisabled.Panes[0][0].PreviewPaneVisible &&

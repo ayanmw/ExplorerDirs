@@ -6,6 +6,11 @@
 - 当前已有的证据分别覆盖隐藏 COM vtable/菜单生命周期 smoke、局部 Shell 文件操作与通知样本、以及独立 IStream 会话文件测试；这些拼接证据尚未在同一可见宿主中覆盖完整门槛。逐项颜色绘制像素未稳定命中，完整 OLE 拖放循环、物理键盘焦点和真实会话恢复仍未通过。
 - 继续按 `docs/ishellview-color-spike.md` 推进原型；用户要求暂不使用 Computer Use，且项目规则禁止在无当前桌面授权时创建可能激活前台的 Shell 宿主，因此本阶段限于源码和无 Shell-view 验证。真实宿主门槛需在独立 Windows 会话完成后评估是否值得迁移产品。
 
+## 2026-10-26：Q-Dir 导入预览列出未导入的颜色规则模式
+
+- `.qdr` 导入预览此前只报告 `[Filter2]` 规则数量，无法让用户判断哪些颜色模式没有导入。现在列出最多六个规则模式并截断过长模式；颜色值和其它未确认字段仍不显示，也不应用规则。
+- `QdrImportSmoke` 先验证模式预览并按预期失败；实现后完整 Release SettingsSmoke 通过，App Release 构建 0 警告、0 错误，`git diff --check` 通过。此改动改善导入预览，不代表 Filter2 字段映射、颜色导入或 `IShellView` 逐项颜色已实现。
+
 ## 2026-10-26：为隔离 Shell 宿主接入菜单生命周期回调
 
 - `InsertMenusSB`、`SetMenuSB`、`RemoveMenusSB` 现在可选委托给外层宿主；保留无菜单宿主时原有的 `S_OK` 空菜单行为，委托 HRESULT 原样返回，异常转换为 `E_FAIL`，释放时断开回调。

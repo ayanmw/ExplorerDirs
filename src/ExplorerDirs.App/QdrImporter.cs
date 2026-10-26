@@ -68,6 +68,7 @@ internal static class QdrImporter
         var duplicate = false;
         var inFilter2 = false;
         var filter2RuleCount = 0;
+        var filter2Patterns = new List<string>(6);
         foreach (var raw in text.Split('\n'))
         {
             var line = raw.Trim().TrimStart('\uFEFF');
@@ -81,7 +82,17 @@ internal static class QdrImporter
             {
                 var equals = line.IndexOf('=');
                 if (equals > 0 && int.TryParse(line.AsSpan(0, equals).Trim(), NumberStyles.None,
-                    CultureInfo.InvariantCulture, out _)) filter2RuleCount++;
+                    CultureInfo.InvariantCulture, out _))
+                {
+                    filter2RuleCount++;
+                    var patternStart = equals + 1;
+                    var patternEnd = line.IndexOf('=', patternStart);
+                    if (patternEnd > patternStart && filter2Patterns.Count < 6)
+                    {
+                        var pattern = line[patternStart..patternEnd].Trim();
+                        filter2Patterns.Add(pattern.Length <= 64 ? pattern : pattern[..61] + "…");
+                    }
+                }
                 continue;
             }
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
@@ -251,7 +262,12 @@ internal static class QdrImporter
         var proportions = QdrProportions.Read(values, layout, warnings);
         warnings.Add("不导入颜色规则、背景值、窗口位置及程序启动命令。");
         if (filter2RuleCount > 0)
-            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；当前版本未导入。预览不会显示这些规则的值。");
+        {
+            var patternSummary = filter2Patterns.Count == 0 ? "" : "规则模式：" +
+                string.Join("、", filter2Patterns) +
+                (filter2RuleCount > filter2Patterns.Count ? "等" : "");
+            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；当前版本未导入。{patternSummary}");
+        }
         AddUnsupportedColorSwitchWarning(values, "useColor", warnings);
         AddUnsupportedColorSwitchWarning(values, "useTreeColor", warnings);
         var result = QdrExporter.ApplyExtension(values, duplicate,
