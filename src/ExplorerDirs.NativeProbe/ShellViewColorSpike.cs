@@ -263,7 +263,7 @@ internal static class ShellViewColorSpike
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allHosts);
         var menuCommands = VerifyFourPaneMenuCommandRouting(
-            new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent);
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
         var rootFolderViews = allViews.Take(3).ToArray();
         var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
             expectedSort, columnsExpected, rootFolderViews);
@@ -306,12 +306,25 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,
-        IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, nint menuOwner)
+        IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, nint menuOwner,
+        SortColumn expectedOriginalSort)
     {
         if (views.Count != 4 || folderViews.Count != 4 || expectedModes.Count != 4)
             throw new ArgumentException("Menu command routing probe requires exactly four Shell panes.");
         var foreground = GetForegroundWindow();
         var results = new List<string>(views.Count);
+        var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
+        var typeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 4 };
+        foreach (var folderView in folderViews)
+        {
+            Check(At<SetSortColumns>(folderView, 27)(folderView,
+                [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+            var groupKey = typeKey;
+            Check(At<SetGroupBy>(folderView, 17)(folderView, ref groupKey, 1));
+        }
+        Pump(300);
+        AssertSortAndGroupDirections(-1, 1, 1, "menu test baseline");
         for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
         {
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
@@ -327,11 +340,28 @@ internal static class ShellViewColorSpike
             if (commandMode != 4)
                 throw new InvalidOperationException($"The Shell Details menu command did not affect pane {targetIndex + 1}: mode={commandMode}.");
             AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "after");
+            AssertSortAndGroupDirections(-1, 1, 1, $"pane {targetIndex + 1} Details");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortdescending");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, -1, 1, $"pane {targetIndex + 1} Sort Descending");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortascending");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Sort Ascending");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupdescending");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 0, $"pane {targetIndex + 1} Group Descending");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupascending");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Group Ascending");
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex],
                 expectedModes[targetIndex], expectedModes[targetIndex] == 1 ? 48 : expectedModes[targetIndex] == 3 ? 16 : -1));
             Pump(150);
-            results.Add($"pane{targetIndex + 1}:details-only");
+            results.Add($"pane{targetIndex + 1}:details/sort/group");
         }
+        Check(At<SetSortColumns>(folderViews[0], 27)(folderViews[0], [expectedOriginalSort], 1));
+        var restoreGroupKey = typeKey;
+        Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
+        Pump(150);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
         return $"{string.Join(',', results)}; foreground-unchanged=True";
@@ -345,6 +375,25 @@ internal static class ShellViewColorSpike
                 Check(At<GetViewModeAndIconSize>(actualViews[index], 36)(actualViews[index], out var mode, out _));
                 if (mode != expected[index])
                     throw new InvalidOperationException($"The Shell menu command {phase} pane {activeIndex + 1} changed sibling pane {index + 1}: mode={mode}; expected={expected[index]}.");
+            }
+        }
+
+        void AssertSortAndGroupDirections(int activePaneIndex, int activeSortDirection,
+            int activeGroupDirection, string phase)
+        {
+            for (var index = 0; index < folderViews.Count; index++)
+            {
+                Check(At<GetSortColumnCount>(folderViews[index], 26)(folderViews[index], out var count));
+                if (count != 1) throw new InvalidOperationException($"Pane {index + 1} sort count changed during {phase}: {count}.");
+                var sorts = new SortColumn[count];
+                Check(At<GetSortColumns>(folderViews[index], 28)(folderViews[index], sorts, count));
+                Check(At<GetGroupBy>(folderViews[index], 18)(folderViews[index], out var group, out var ascending));
+                var expectedSortDirection = index == activePaneIndex || activePaneIndex < 0 ? activeSortDirection : 1;
+                var expectedGroupDirection = index == activePaneIndex || activePaneIndex < 0 ? activeGroupDirection : 1;
+                if (sorts[0].Key.FormatId != nameKey.FormatId || sorts[0].Key.PropertyId != nameKey.PropertyId ||
+                    sorts[0].Direction != expectedSortDirection || group.FormatId != typeKey.FormatId ||
+                    group.PropertyId != typeKey.PropertyId || ascending != expectedGroupDirection)
+                    throw new InvalidOperationException($"Shell menu command {phase} changed the wrong view state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSortDirection}/{expectedGroupDirection}.");
             }
         }
     }

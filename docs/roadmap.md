@@ -3308,3 +3308,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 经各 pane 自己的背景 `IContextMenu` 调用 canonical `viewlogicaldetails`，四个 pane 都能分别从 List 切换到 Details，其他 pane 模式保持；还原各 pane 后，四窗格复制/重命名/删除和跨目录通知通过。诊断确定 Shell 在 Details 菜单命令后按当前 view 宽度重排列宽，但列身份、顺序、排序和分组不变。验证保留初次会话恢复的精确列宽断言，菜单往返后的文件操作断言改为检查列身份/顺序。Private Desktop watchdog 退出码 0，主桌面前台句柄未变。
 - 未展示或点击菜单，真实视觉合并、物理键盘与 WPF 活动 pane 集成仍未验证；产品 ExplorerBrowser、配置和 release 未改。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格标准-shell-查看命令定向到目标-pane)。
+
+## 2026-10-27：四窗格 Shell 排序与分组命令路由
+
+- 四个真实 Shell view 各自通过背景 `IContextMenu` 执行 Details、Name 升序/降序及 Type 分组升序/降序。每次命令后都读取四个 pane 的排序键/方向与分组键/方向，确认只有调用命令的 pane 发生预期变化；每轮后恢复模式及 pane 1 的 Name 降序基线。
+- Release NativeProbe 构建 0 警告/错误，Private Desktop watchdog 连续三轮退出码 0；四窗格复制/重命名/删除和跨目录通知均通过，主桌面前台句柄不变。
+- 这是隐藏隔离默认 filesystem view 的 canonical verb/状态读回，不证明菜单可见合并、列标题右键、物理输入或 WPF 活动 pane 接线。产品 ExplorerBrowser、配置与 release 未改。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-shell-排序与分组菜单命令隔离)。

@@ -775,3 +775,11 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 探针现在对四个 pane 都运行 List→Shell Details 菜单命令→恢复原模式；文件操作阶段继续检查 Details、排序、分组和列身份/顺序。精确列宽仍在独立进程首次恢复状态时严格检查。Release build 0 警告/错误；2026-10-27 00:53:05 Private Desktop watchdog 退出码 0，四 pane 命令路由、复制/重命名/删除和跨目录通知全部通过，主桌面 foreground HWND `0x81852` 未变。日志：`src/.state/native-probe-watchdog/20261027-005305-a64c57ff.stdout.log`。
 
 测试仍不显示菜单，也不证明真实菜单外观、物理键盘或 WPF 活动 pane 集成；产品 ExplorerBrowser、配置与 release 未改。
+
+### 2026-10-27 四窗格 Shell 排序与分组菜单命令隔离
+
+在同一四窗格 consumer 中，先为每个真实 view 建立 Name 升序、Type 升序分组的可读回基线。然后逐个 pane 通过其自身背景 `IContextMenu` 调用 `viewlogicaldetails`、`sortdescending`、`sortascending`、`groupdescending`、`groupascending`；每次调用后读取四个 `IFolderView2` 状态，验证只有目标 pane 的排序/分组方向改变，其他三个 pane 保持升序。恢复四种查看模式和 pane 1 原有 Name 降序状态后，再执行已有 Shell 复制/重命名/删除及跨目录通知检查。
+
+NativeProbe Release 构建 0 警告、0 错误；加入 Details 菜单后排序/分组状态不变断言后，Private Desktop watchdog 连续三轮退出码 0；三轮均通过四个 pane 的菜单命令路由、文件操作和通知检查，主桌面 foreground HWND 保持 `0x81852`。日志：`20261027-005805-3fc08177.stdout.log`、`20261027-005826-4d2e0fc6.stdout.log`、`20261027-005843-098f9488.stdout.log`。
+
+该证据证明隔离默认 filesystem `IShellView` 的标准背景菜单命令可按各 pane 的原生 `IContextMenu` 定向，并读回独立排序/分组状态；菜单未实际显示或点击，因此不证明 UI 合并、列标题右键、物理输入、扩展菜单或 WPF 活动 pane 接线。产品 ExplorerBrowser、配置与 release 未修改。
