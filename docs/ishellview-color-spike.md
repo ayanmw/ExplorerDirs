@@ -765,3 +765,9 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 `ShellViewColorBrowserHostSmoke` 现通过两个独立 host 暴露出的 `IShellBrowser::BrowseObject` COM vtable 交错执行导航：各自进入不同 PIDL、第一 pane 后退、第二 pane 建立新历史分支，以及第一 pane 的失败目标。每一步都同时断言两个 history 的当前位置和索引；跨 pane 操作没有改变另一方历史，失败导航保留双方状态。NativeProbe Release 构建 0 警告/错误，`--shell-view-color-policy-smoke` 全部通过。
 
 此项使用 `ShellViewNavigationHistorySmoke.PidlPool` 的合成 PIDL 与成功/失败回调，不创建真实 Shell view，也不证明后退/前进按钮状态、travel log 或可见 Pane 导航。实际 `IShellView` 宿主历史接线仍需窗口级验证；产品 ExplorerBrowser 代码、配置和 release 未修改。
+
+### 2026-10-27 四窗格标准 Shell 查看命令定向到目标 pane
+
+四窗格 consumer 为每个 Shell view 取得原生背景 `IContextMenu`，按 canonical verb `viewlogicaldetails` 调用 `IContextMenu::InvokeCommand`，验证 pane 2、3、4 各自从 List/Icon/Tile 切到 Details、其它 pane 仍保持既定模式，再恢复原模式。连续三轮 Private Desktop watchdog 退出码 0；四窗格状态、复制/重命名/删除、跨目录通知仍通过，foreground HWND 未变。日志：`20261027-004952-5e89970c.stdout.log`、`20261027-005008-7067c712.stdout.log`、`20261027-005020-58682019.stdout.log`。NativeProbe Release build 0 警告/错误，策略 smoke 与 diff check 通过。
+
+首次把同一往返也施加到首 pane 后，后续文件操作中的恢复列/排序/分组断言失败；当时未把失败细分到视图切换、命令自身或后续复制事件，因此当前探针保留该 pane 为状态基线，不称此路径已解决。测试不显示菜单，也不证明真实菜单外观、物理键盘或 WPF 活动 pane 集成；产品 ExplorerBrowser、配置与 release 未改。

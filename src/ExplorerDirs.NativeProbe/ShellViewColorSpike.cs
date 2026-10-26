@@ -262,6 +262,8 @@ internal static class ShellViewColorSpike
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allHosts);
+        var menuCommands = VerifyFourPaneMenuCommandRouting(
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent);
         var rootFolderViews = allViews.Take(3).ToArray();
         var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
             expectedSort, columnsExpected, rootFolderViews);
@@ -273,7 +275,7 @@ internal static class ShellViewColorSpike
             $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
             $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
-            $"menu-routing={menuRouting}; file-updates={allPaneCounts}; " +
+            $"menu-routing={menuRouting}; menu-commands={menuCommands}; file-updates={allPaneCounts}; " +
             $"directory-notifications={directoryIsolation}; independent=True";
     }
 
@@ -301,6 +303,97 @@ internal static class ShellViewColorSpike
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
         return $"per-pane-insert-set={string.Join(',', activations)}; foreground-unchanged=True";
+    }
+
+    private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, nint menuOwner)
+    {
+        if (views.Count != 4 || folderViews.Count != 4 || expectedModes.Count != 4)
+            throw new ArgumentException("Menu command routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var results = new List<string>(views.Count - 1);
+        // Pane 1 is the restored sort/group/column baseline; leave its serialized state untouched.
+        for (var targetIndex = 1; targetIndex < views.Count; targetIndex++)
+        {
+            Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
+            Pump(150);
+            Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var listMode, out _));
+            if (listMode != 3)
+                throw new InvalidOperationException($"Pane {targetIndex + 1} could not enter List before its Shell menu command.");
+            AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "before");
+
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "viewlogicaldetails");
+            Pump(250);
+            Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var commandMode, out _));
+            if (commandMode != 4)
+                throw new InvalidOperationException($"The Shell Details menu command did not affect pane {targetIndex + 1}: mode={commandMode}.");
+            AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "after");
+            Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex],
+                expectedModes[targetIndex], expectedModes[targetIndex] == 1 ? 48 : expectedModes[targetIndex] == 3 ? 16 : -1));
+            Pump(150);
+            results.Add($"pane{targetIndex + 1}:details-only");
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
+        return $"{string.Join(',', results)}; foreground-unchanged=True";
+
+        void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
+            IReadOnlyList<uint> expected, int activeIndex, string phase)
+        {
+            for (var index = 0; index < actualViews.Count; index++)
+            {
+                if (index == activeIndex) continue;
+                Check(At<GetViewModeAndIconSize>(actualViews[index], 36)(actualViews[index], out var mode, out _));
+                if (mode != expected[index])
+                    throw new InvalidOperationException($"The Shell menu command {phase} pane {activeIndex + 1} changed sibling pane {index + 1}: mode={mode}; expected={expected[index]}.");
+            }
+        }
+    }
+
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create an in-memory Shell context menu.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xffff, 0x7fff);
+                var buffer = Marshal.AllocHGlobal(512);
+                uint? commandOffset = null;
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                        {
+                            commandOffset = offset;
+                            break;
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+                if (commandOffset is null)
+                    throw new InvalidOperationException($"The Shell background menu did not expose canonical verb '{expectedVerb}'.");
+                var invoke = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Window = owner,
+                    Verb = (nint)commandOffset.Value,
+                    Show = 1
+                };
+                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
     }
 
     private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
@@ -2397,6 +2490,7 @@ internal static class ShellViewColorSpike
         nint childPidls, ref Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, nuint commandId, uint flags, nint reserved, nint name, uint length);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItemByPidl(nint self, nint pidl, uint flags);
@@ -2429,6 +2523,24 @@ internal static class ShellViewColorSpike
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid FormatId; public uint PropertyId; }
     [StructLayout(LayoutKind.Sequential)] private struct SortColumn { public PropertyKey Key; public int Direction; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
+    {
+        public int Size;
+        public uint Mask;
+        public nint Window;
+        public nint Verb;
+        public nint Parameters;
+        public nint Directory;
+        public int Show;
+        public uint HotKey;
+        public nint Icon;
+        public nint Title;
+        public nint VerbW;
+        public nint ParametersW;
+        public nint DirectoryW;
+        public nint TitleW;
+        public System.Drawing.Point InvokePoint;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct CustomDraw
     {
         public NotifyHeader Header;

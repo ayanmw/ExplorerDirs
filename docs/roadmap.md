@@ -3303,3 +3303,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 两个独立 `ShellViewColorBrowserHost` 经各自的 `IShellBrowser::BrowseObject` COM 入口交错导航、后退、建立分支与失败跳转；每个步骤断言双方的当前 PIDL 和 history index。NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。
 - 这是合成 PIDL 的宿主历史状态 smoke，不创建实际 Shell view；真实 Shell back/forward、可见按钮状态和 Pane 集成仍未验证，产品代码与 release 未改。详见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-双-pane-ishellbrowser-导航历史隔离-smoke)。
+
+## 2026-10-27：四窗格标准 Shell 菜单命令路由
+
+- 经各 pane 自己的背景 `IContextMenu` 调用 canonical `viewlogicaldetails`，pane 2、3、4 分别只改变目标 view，其它 pane 的查看模式保持；还原各 pane 模式后，四窗格操作和跨目录通知 probe 连续三轮通过，主桌面前台句柄未变。
+- 首 pane 首次参与模式往返后，后续的恢复列/排序/分组断言失败，尚未定位是菜单模式往返还是随后的文件操作引发。当前将它留作恢复状态基线；这一结果不证明标准菜单视觉/点击或产品 WPF 集成。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格标准-shell-查看命令定向到目标-pane)。
