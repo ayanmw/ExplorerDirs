@@ -122,6 +122,8 @@ internal static class ShellViewDropTargetProbe
             LogDataObjectFormats("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogDataObjectPayload("selected-view", selectedDataObject);
             LogDataObjectPayload("SHCreateDataObject", dataObject);
+            if (selectedDataObject != 0) LogShellIdListPayload("selected-view", selectedDataObject);
+            LogShellIdListPayload("SHCreateDataObject", dataObject);
 
             shellViewId = ShellViewId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetPane, ref shellViewId, out targetView));
@@ -318,6 +320,66 @@ internal static class ShellViewDropTargetProbe
         finally { ReleaseStgMedium(ref medium); }
     }
 
+    private static void LogShellIdListPayload(string label, nint dataObject)
+    {
+        var formatId = RegisterClipboardFormatW("Shell IDList Array");
+        if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var format = new FormatEtc { Format = checked((ushort)formatId), Aspect = 1, Index = -1, Medium = 1 };
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-cida: source={label}; get=0x{getDataHr:X8}");
+            return;
+        }
+
+        nint locked = 0;
+        try
+        {
+            var size = GlobalSize(medium.Handle);
+            if (size < 8 || size > int.MaxValue) throw new InvalidDataException($"Invalid CIDA size: {size}.");
+            locked = GlobalLock(medium.Handle);
+            if (locked == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var childCount = Marshal.ReadInt32(locked);
+            if (childCount < 0 || childCount > 1024 || 4L + 4L * (childCount + 1) > (long)size)
+                throw new InvalidDataException($"Invalid CIDA child count: {childCount}.");
+            var parentOffset = ReadCidaOffset(locked, (long)size, 0);
+            var parentPidl = IntPtr.Add(locked, parentOffset);
+            var paths = new List<string>(childCount + 1)
+            {
+                GetFileSystemPath(parentPidl)
+            };
+            for (var index = 1; index <= childCount; index++)
+            {
+                var childOffset = ReadCidaOffset(locked, (long)size, index);
+                var absolutePidl = ILCombine(parentPidl, IntPtr.Add(locked, childOffset));
+                if (absolutePidl == 0) throw new InvalidOperationException("ILCombine failed for a CIDA item.");
+                try { paths.Add(GetFileSystemPath(absolutePidl)); }
+                finally { Marshal.FreeCoTaskMem(absolutePidl); }
+            }
+            Console.WriteLine($"shell-view-drop-target-cida: source={label}; parent-and-items={string.Join(';', paths)}");
+        }
+        finally
+        {
+            if (locked != 0) _ = GlobalUnlock(medium.Handle);
+            ReleaseStgMedium(ref medium);
+        }
+    }
+
+    private static int ReadCidaOffset(nint cida, long size, int index)
+    {
+        var offset = Marshal.ReadInt32(cida, checked(4 + 4 * index));
+        if (offset < 0 || offset >= size) throw new InvalidDataException($"CIDA offset {offset} is outside its {size}-byte payload.");
+        return offset;
+    }
+
+    private static string GetFileSystemPath(nint pidl)
+    {
+        var hr = SHGetNameFromIDList(pidl, 0x80058000, out var name); // SIGDN_FILESYSPATH.
+        Marshal.ThrowExceptionForHR(hr);
+        try { return Marshal.PtrToStringUni(name) ?? throw new InvalidDataException("Shell returned an empty parsing path."); }
+        finally { Marshal.FreeCoTaskMem(name); }
+    }
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -366,6 +428,12 @@ internal static class ShellViewDropTargetProbe
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClipboardFormatNameW(ushort format, System.Text.StringBuilder name, int maxCount);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFileW(nint drop, uint file, System.Text.StringBuilder? path, uint pathLength);
+    [DllImport("shell32.dll")] private static extern nint ILCombine(nint absoluteParent, nint relativeChild);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHGetNameFromIDList(nint pidl, uint nameKind, out nint name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string formatName);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
     [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref StgMedium medium);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
 }
