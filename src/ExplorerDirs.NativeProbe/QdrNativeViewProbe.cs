@@ -899,6 +899,10 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
 
     internal nint BaseMenu => _baseMenu;
     internal bool IsCurrentOwner(StreamViewHost owner) => !_disposed && ReferenceEquals(_owner, owner);
+    internal void EnqueuePendingShellMenuCommand(StreamViewHost owner, uint commandId) =>
+        _pendingShellMenuCommands.Enqueue((owner, commandId));
+    internal bool TryDequeuePendingShellMenuCommand(out (StreamViewHost Owner, uint CommandId) command) =>
+        _pendingShellMenuCommands.TryDequeue(out command);
 
     public void Dispose()
     {
@@ -924,10 +928,8 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
             if (message == WmRunShellMenuCommand && referenceData != 0)
             {
                 var coordinator = (ShellMenuFrameCoordinator?)GCHandle.FromIntPtr(referenceData).Target;
-                var pending = default((StreamViewHost Owner, uint CommandId));
-                if (coordinator is not null && coordinator._pendingShellMenuCommands.TryDequeue(out var queued))
-                    pending = queued;
-                if (pending.Owner is not null && pending.CommandId != 0 &&
+                if (coordinator is not null && coordinator.TryDequeuePendingShellMenuCommand(out var pending) &&
+                    pending.CommandId != 0 &&
                     !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(pending.Owner, pending.CommandId,
                         isStillActive: () => coordinator?.IsCurrentOwner(pending.Owner) == true))
                     _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(pending.Owner, pending.CommandId,
@@ -951,7 +953,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     // this WndProc returns, and a failed post leaves no orphaned queue entry.
                     if (PostMessageW(window, WmRunShellMenuCommand, 0, 0))
                     {
-                        coordinator._pendingShellMenuCommands.Enqueue((owner, commandId));
+                        coordinator.EnqueuePendingShellMenuCommand(owner, commandId);
                         return 0;
                     }
                 }

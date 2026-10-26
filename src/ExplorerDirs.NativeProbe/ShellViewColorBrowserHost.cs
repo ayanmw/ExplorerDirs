@@ -849,6 +849,15 @@ public static class ShellViewColorBrowserHostSmoke
                   activeHost.SetMenuSB(activeMenu, activeDescriptor, activePane) == 0,
                 "activating the second pane transfers command ownership after the first pane menu was active");
 
+            coordinator.EnqueuePendingShellMenuCommand(staleHost, 0x7001);
+            coordinator.EnqueuePendingShellMenuCommand(activeHost, 0x7002);
+            Check(coordinator.TryDequeuePendingShellMenuCommand(out var firstPending) &&
+                  ReferenceEquals(firstPending.Owner, staleHost) && firstPending.CommandId == 0x7001 &&
+                  coordinator.TryDequeuePendingShellMenuCommand(out var secondPending) &&
+                  ReferenceEquals(secondPending.Owner, activeHost) && secondPending.CommandId == 0x7002 &&
+                  !coordinator.TryDequeuePendingShellMenuCommand(out _),
+                "deferred Shell menu commands preserve FIFO owner and command identity without overwriting earlier entries");
+
             var traceCountBeforeStaleCommand = staleHost.MenuTrace.Count;
             Check(ShellViewColorSpike.TryInvokeMergedViewMenuCommand(staleHost, 0x7001,
                       isStillActive: () => coordinator.IsCurrentOwner(staleHost)) &&
