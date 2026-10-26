@@ -2,6 +2,11 @@
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
+## 2026-10-26：temp.61 地址栏驱动器名称预览
+
+- 地址栏位置菜单在“此电脑”下显示当前逻辑驱动器；本地固定盘显示卷标，未命名或不可读取时回退为驱动器类型名称，网络盘不查询远程卷标。
+- 地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建（0 警告/错误）和发布隔离 smoke 通过。temp.61 发布记录已准备，实际包路径计划为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.61`；包版本和哈希将在构建后登记。未启动程序或操作桌面，实际菜单行为与 Q-Dir 互操作仍待可见验收。
+
 ## 2026-10-26：temp.60 隔离预览
 
 - 按用户之前的预览请求发布 temp.60，内容包含地址祖先层级下拉、Windows 强调色基础接线和活动窗格强调色标记。包位于 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.60`，使用独立 `app/profile/`，不依赖 `src/`。产品版本 `0.6.0-preview.temp.60+80d2bbd147ac4d248e5554e509692c0f9c432f3b`；EXE SHA-256 `58BED64B44B2F66A8930A265B9200EC2DB78EE7EB41B5A33322974B2220DE258`，DLL SHA-256 `346D9CF4187750E28416F99E82338FB760D089D9D79DC843C253A867926A4F75`，与包内清单相符。
