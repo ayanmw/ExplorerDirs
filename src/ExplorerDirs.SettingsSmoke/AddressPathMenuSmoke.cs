@@ -39,6 +39,13 @@ internal static class AddressPathMenuSmoke
                 StringComparer.OrdinalIgnoreCase)),
             "the path menu includes logical drives discovered at build time");
 
+        Check(AddressPathMenu.GetDriveHeader(@"C:\", System.IO.DriveType.Fixed, "Windows") == "Windows (C:)",
+            "drive labels include the local volume label and drive letter");
+        Check(AddressPathMenu.GetDriveHeader(@"D:\", System.IO.DriveType.Fixed, "") == "本地磁盘 (D:)",
+            "an unlabeled fixed drive uses the localized drive type caption");
+        Check(AddressPathMenu.GetDriveHeader(@"Z:\", System.IO.DriveType.Network, "") == "网络驱动器 (Z:)",
+            "network drives use a caption without requiring a remote volume query");
+
         static void Check(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);

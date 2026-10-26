@@ -47,8 +47,12 @@ internal static class AddressPathMenu
         };
 
         foreach (var driveRoot in Environment.GetLogicalDrives())
-            locations.Add(new($"驱动器 ({driveRoot.TrimEnd(Path.DirectorySeparatorChar)})",
+        {
+            var drive = new DriveInfo(driveRoot);
+            var volumeLabel = GetFixedDriveVolumeLabel(drive);
+            locations.Add(new(GetDriveHeader(driveRoot, drive.DriveType, volumeLabel),
                 driveRoot, ThisPcIdentity));
+        }
 
         locations.AddRange(
         [
@@ -58,5 +62,32 @@ internal static class AddressPathMenu
             new("回收站", "shell:RecycleBinFolder")
         ]);
         return locations;
+    }
+
+    internal static string GetDriveHeader(string root, DriveType driveType, string volumeLabel)
+    {
+        var driveLetter = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (driveType == DriveType.Fixed && !string.IsNullOrWhiteSpace(volumeLabel))
+            return $"{volumeLabel.Trim()} ({driveLetter})";
+
+        var typeName = driveType switch
+        {
+            DriveType.Fixed => "本地磁盘",
+            DriveType.Removable => "可移动磁盘",
+            DriveType.CDRom => "光盘驱动器",
+            DriveType.Network => "网络驱动器",
+            DriveType.Ram => "RAM 磁盘",
+            _ => "驱动器"
+        };
+        return $"{typeName} ({driveLetter})";
+    }
+
+    private static string GetFixedDriveVolumeLabel(DriveInfo drive)
+    {
+        // Network drives can block while reading metadata, so only query ready local disks.
+        if (drive.DriveType != DriveType.Fixed) return string.Empty;
+        try { return drive.IsReady ? drive.VolumeLabel : string.Empty; }
+        catch (IOException) { return string.Empty; }
+        catch (UnauthorizedAccessException) { return string.Empty; }
     }
 }
