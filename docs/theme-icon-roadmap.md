@@ -44,7 +44,8 @@
 
 ### 阶段 4：Q-Dir 主题和颜色规则兼容
 
-- 公开资料确认 Q-Dir 有命名颜色主题、活动窗格背景、文件/文件夹规则及 `#BG`、`#BG-A`、`#DIR`、`#RO` 等标记；具体 `.qdr` 字段编码需以官方说明或真实配置样本为准。
+- 将 Q-Dir 颜色能力拆成独立范围：文件视图背景（`#BG`）、活动视图背景（`#BG-A`）、文件/文件夹逐项规则（如 `#DIR`、`#RO`）、活动地址栏高亮，以及目录树的颜色筛选。Q-Dir 官方说明目录树不能设置背景色，因此不把地址栏、文件视图和目录树强行当成同一套全局换肤。
+- FAQ 117 示例列出 `useColor`、`useTreeColor` 等开关，FAQ 47 说明颜色/背景设置可保存到收藏，但公开资料没有给出这些颜色规则与命名主题在 `.qdr` 中的完整字段和序列化格式。导入器只能应用经公开字段说明或真实配置样本确认的值；未确认时显示未导入提示，不根据字段名猜测。
 - 导入器列出可识别设置、无法映射项目和将要应用的范围；用户确认后只修改本程序配置，不写入 Q-Dir 配置。
 - 文件规则按 Q-Dir 优先级/逐属性语义处理。若产品视图无法可靠呈色，设置项应显示不支持或受限状态，不静默伪装成已生效。
 - 本程序导出的 Q-Dir 文件只写已经验证的基础字段；应用私有主题设置写在独立扩展字段中，并在不兼容时可忽略。
@@ -74,7 +75,9 @@
 ## 参考
 
 - [Q-Dir 颜色与设计](https://www.softwareok.com/?page=Windows%2FImages%2FQ-Dir%2F4)
+- [Q-Dir 活动地址栏高亮 FAQ](https://www.softwareok.com/?faq=45&seite=faq-Q-DIR)
 - [Q-Dir 活动窗格背景色 FAQ](https://softwareok.com/?faq=47&seite=faq-Q-DIR)
 - [Q-Dir 禁用颜色高亮 FAQ](https://www.softwareok.com/?faq=97&seite=faq-Q-DIR)
 - [Q-Dir 功能清单](https://www.softwareok.com/?seite=Freeware%2FQ-DIR%2FHelp+file)
+- [Q-Dir FAQ 117 状态/颜色字段示例](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR)
 - 本项目 [隔离 IShellView 颜色原型记录](ishellview-color-spike.md)
