@@ -7,6 +7,9 @@ namespace ExplorerDirs.NativeProbe;
 
 internal static class ShellViewStateStreamSmoke
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetViewStateStreamCallback(nint self, uint mode, out nint stream);
+
     internal static int Run()
     {
         var initial = new byte[] { 1, 2, 3, 4 };
@@ -142,38 +145,44 @@ internal static class ShellViewStateStreamSmoke
             var store = new ShellViewStateStore(directory);
             using (var host = new StreamViewHost(0, initial, store, sessionId))
             {
-                Check(host.GetViewStateStream(3, out var invalidPointer) == unchecked((int)0x80070057) &&
-                      invalidPointer == 0,
-                    "an invalid structured-storage access mode is rejected without returning a stream");
-                Check(host.GetViewStateStream(2, out var pointer) == 0 && pointer != 0,
-                    "read-write mode returns a stream");
+                var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
                 try
                 {
-                    var stream = (IStream)Marshal.GetObjectForIUnknown(pointer);
+                    var getViewStateStream = GetBrowserMethod<GetViewStateStreamCallback>(browser, 12);
+                    Check(getViewStateStream(browser, 3, out var invalidPointer) == unchecked((int)0x80070057) &&
+                      invalidPointer == 0,
+                        "the IShellBrowser COM entry rejects an invalid structured-storage access mode");
+                    Check(getViewStateStream(browser, 2, out var pointer) == 0 && pointer != 0,
+                        "the IShellBrowser COM entry returns a read-write stream");
                     try
                     {
-                        var existing = new byte[initial.Length];
-                        var read = Marshal.AllocCoTaskMem(sizeof(int));
+                        var stream = (IStream)Marshal.GetObjectForIUnknown(pointer);
                         try
                         {
-                            stream.Read(existing, existing.Length, read);
-                            Check(Marshal.ReadInt32(read) == existing.Length && existing.SequenceEqual(initial),
-                                "read-write mode starts with the saved view state");
+                            var existing = new byte[initial.Length];
+                            var read = Marshal.AllocCoTaskMem(sizeof(int));
+                            try
+                            {
+                                stream.Read(existing, existing.Length, read);
+                                Check(Marshal.ReadInt32(read) == existing.Length && existing.SequenceEqual(initial),
+                                    "read-write mode starts with the saved view state");
+                            }
+                            finally { Marshal.FreeCoTaskMem(read); }
+                            stream.Seek(0, 0, 0);
+                            var written = Marshal.AllocCoTaskMem(sizeof(int));
+                            try
+                            {
+                                stream.Write(updated, updated.Length, written);
+                                Check(Marshal.ReadInt32(written) == updated.Length,
+                                    "read-write mode accepts an updated view state");
+                            }
+                            finally { Marshal.FreeCoTaskMem(written); }
                         }
-                        finally { Marshal.FreeCoTaskMem(read); }
-                        stream.Seek(0, 0, 0);
-                        var written = Marshal.AllocCoTaskMem(sizeof(int));
-                        try
-                        {
-                            stream.Write(updated, updated.Length, written);
-                            Check(Marshal.ReadInt32(written) == updated.Length,
-                                "read-write mode accepts an updated view state");
-                        }
-                        finally { Marshal.FreeCoTaskMem(written); }
+                        finally { Marshal.ReleaseComObject(stream); }
                     }
-                    finally { Marshal.ReleaseComObject(stream); }
+                    finally { Marshal.Release(pointer); }
                 }
-                finally { Marshal.Release(pointer); }
+                finally { Marshal.Release(browser); }
             }
 
             using var restored = new StreamViewHost(0, [], new ShellViewStateStore(directory), sessionId);
@@ -282,6 +291,13 @@ internal static class ShellViewStateStreamSmoke
             finally { Marshal.ReleaseComObject(stream); }
         }
         finally { Marshal.Release(pointer); }
+    }
+
+    private static T GetBrowserMethod<T>(nint browser, int slot) where T : Delegate
+    {
+        var vtable = Marshal.ReadIntPtr(browser);
+        var method = Marshal.ReadIntPtr(vtable, slot * IntPtr.Size);
+        return Marshal.GetDelegateForFunctionPointer<T>(method);
     }
 
     private static void Check(bool condition, string message)
