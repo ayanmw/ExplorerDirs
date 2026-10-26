@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.70\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.69，文件操作后的焦点恢复请求会在窗口短暂失焦时保留；后台暂停焦点查询和 `SetFocus`，切回后在目标仍有效时继续有界恢复。产品版本 `0.6.0-preview.temp.70+9b0e91c596a134c10979b270a4aa91edd53aff03`，EXE SHA-256 `1225C43B0989E52D749FD13AB16E91B097CC6A4ECC2DAB431EC1F8332C94EC23`，DLL SHA-256 `7F39DCFF6D1A2658C8E023B84D8E7872D343789D6459136AB8A79C9E27323431`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；profile 文件与空闲 temp.69 隔离 profile 逐项哈希一致。没有启动 GUI；真实文件操作焦点、Alt+Tab 时序和目录树图标可见绘制仍待验收。详见[包说明](../docs/releases/preview-0.6.0-temp.70.md)及包内 `RELEASE-NOTES.md`。
+
+## 最新临时预览包（2026-10-26）
+
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.69\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.68，补入窗格“查看方式”按钮的 Tab 停靠点、禁用态矢量图标变淡，以及文件视图导出的同目录临时写入后替换。产品版本 `0.6.0-preview.temp.69+0f9af33c06fc43397bc01188069821a2f0bdef2e`，EXE SHA-256 `FA6787460F5AE294957214C4A1AEC2573B8A2266B56E3DF3F4450787C671F64F`，DLL SHA-256 `7520E7C1C4BB937C587EAEF6EEF270ECDCEBD7556AC2BD65D49967F3892A5A96`，与包内清单一致。完整 Release `SettingsSmoke`、App Release 构建、文件导出故障注入 smoke 和发布隔离 smoke 通过；独立 profile 来自 temp.68 并逐文件校验。没有启动 GUI；目录树图标可见绘制、焦点顺序、禁用态图标和导出对话框仍待验收。详见[temp.69 说明](../docs/releases/preview-0.6.0-temp.69.md)。
 
 ## 最新临时预览包（2026-10-26）
