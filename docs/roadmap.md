@@ -3522,3 +3522,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 两次完整 Private Desktop 四 pane 回归通过，日志为 `20261027-042900-e2e86451.stdout.log` 和 `20261027-042934-db8d1d60.stdout.log`；此前两轮分别在 120 秒时限超时，阶段输出将停滞范围缩小到独立恢复 consumer 附近，但未复现原因。现在 producer/consumer 均输出阶段标记，父进程实时转发 consumer 输出。通过运行中，Shell View composite menu 的 Details、排序升/降序、分组升/降序均映射到当前 pane `IContextMenu` canonical verb，每次只改变活动 pane；完整会话恢复、文件操作/通知、F2 焦点隔离检查通过，主桌面前台窗口不变。
 - 结论：标准菜单命令的隔离 frame 分派路线在连续两次完整运行中通过；早先 consumer 阶段超时仍是未解释的间歇风险。继续补齐真实菜单跟踪/OLE accelerator、实际拖放、颜色绘制和 WPF 宿主集成门槛。未接入产品 ExplorerBrowser 替换，也未发布迁移版本。详情见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-view-菜单命令映射与执行)。
+
+## 2026-10-27：厘清 Shell view 与 OLE frame accelerator
+
+- 隔离试验中，Win32 `TranslateAccelerator` 能匹配合成按键与 accelerator 表，但 `OleTranslateAccelerator` 返回 `S_FALSE`，未到达 frame handler。该探针没有完整 OLE `GetWindowContext` 生命周期，不能判断 `IOleInPlaceFrame::TranslateAccelerator` 本身有问题；临时代码已撤回。
+- 下一步走文件浏览器真实调用链：从有焦点的 `IShellView::TranslateAccelerator` 检查 Shell 是否委托 `IShellBrowser::TranslateAcceleratorSB`，记录返回值、消息和 pane 路由。ExplorerBrowser 产品和 release 均未改。详细依据见[隔离原型记录](ishellview-color-spike.md#2026-10-27区分-ole-frame-与-shell-view-accelerator-路径)。

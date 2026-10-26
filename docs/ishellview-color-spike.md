@@ -26,6 +26,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 
+## 2026-10-27：区分 OLE frame 与 Shell view accelerator 路径
+
+验证 `OleTranslateAccelerator` 时，探针创建的 accelerator 表可被 Win32 `TranslateAccelerator` 匹配，但调用 OLE API 返回 `S_FALSE` 且没有到达 `IOleInPlaceFrame::TranslateAccelerator` handler。该单次实验未满足完整 OLE in-place activation / `GetWindowContext` 生命周期，不能作为 frame accelerator 实现失败的结论；临时测试代码已撤回，不影响完整会话恢复探针。
+
+微软文档分别说明 [`IShellView::TranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator) 是 Explorer 调用以分发文件视图快捷键，[`IShellBrowser::TranslateAcceleratorSB`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-translateacceleratorsb) 处理浏览器 frame accelerator，而 [`OleTranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator) 属于对象服务器请求容器翻译的 OLE 路由。当前应先通过真实 `IShellView::TranslateAccelerator` 探查当前 Shell view 是否会委托 browser `TranslateAcceleratorSB`，并区分 view 自己消费的按键与容器按键；不把 OLE API 的合成测试当作 Shell 文件视图的快捷键证据。
+
 ## 2026-10-26：读取 Q-Dir Filter2 原始规则行
 
 NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键，按键序号排序，并保留模式字符串及其后六个原始字段。这个结构依据本机可读 `Q-Dir.ini` 的 12 行样本；字段含义未确认的值不映射到颜色或样式开关。编号规则若字段数不符或序号重复，解析整体失败且不返回部分规则。
