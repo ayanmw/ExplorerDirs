@@ -5,7 +5,7 @@
 ## 2026-10-26：修复原生目录树默认图标回退
 
 - 目录树事件回调未提供自定义索引时，改为返回 `E_NOTIMPL`，让 `NamespaceTreeControl` 解析 Shell 默认图标；新增回归检查并纳入完整 Release `SettingsSmoke`。微软官方 NamespaceTreeControl 示例采用相同的未实现回调语义。
-- 定向 smoke 与 App Release 构建通过；未启动 GUI，目录树的实际图标显示及虚拟 Shell 节点仍待可见验收。
+- 定向与完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过；已准备 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.66` 独立 profile 预览包，EXE/DLL 哈希与清单一致。未启动 GUI，目录树的实际图标显示及虚拟 Shell 节点仍待可见验收。
 
 ## 2026-10-26：目录树跟随文件列表选区
 

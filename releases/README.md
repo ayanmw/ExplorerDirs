@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-26）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.66\app\ExplorerDirs.App.exe`，使用隔离 profile。修复原生左侧目录树未提供自定义图标索引时的默认 Shell 图标回退。产品版本 `0.6.0-preview.temp.66+aaa7b6a3f6e4234532313dad077b284119b18ffd`，EXE SHA-256 `EACFCAD4AD68F39D082DEF92D8C453D5BF782C70D39D19C83CC157CE35A70CDE`，DLL SHA-256 `FD1193CBD1C56AD3936AE5A3C30C9853339966ADE8DB61FC34EEB85D776E1D62`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 和发布隔离 smoke 通过。未启动 GUI；目录树图标可见效果、虚拟 Shell 节点及多窗格体验仍待预览验收。详见[temp.66 说明](../docs/releases/preview-0.6.0-temp.66.md)及包内 `RELEASE-NOTES.md`。
+
+## 最新临时预览包（2026-10-26）
+
 `preview-0.6.0-temp.64/app/ExplorerDirs.App.exe`，使用独立 profile。新增 System/Light/Dark 之外独立的自定义强调色输入，以及 Windows 11 DWM 标题栏、标题文字和边框主题同步；高对比度恢复系统默认色。产品版本 `0.6.0-preview.temp.64+b16b394881d3146c826b5ca1272cf188aa0a41bb`，EXE SHA-256 `AB14A78944F6762CCC087E6DE845A3E5CDC06907429AB350B419C64C1A279110`，DLL SHA-256 `7B1D7BC4543A76ACF95FA7D1A4DAB1742EEBB337A6D098EAA71CEDD49C80B61B`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 与发布隔离 smoke 通过；profile 文件哈希与来源一致。没有启动 GUI；主题对话框、系统切色、标题栏外观、高对比度及 Shell 文件区深色仍待桌面验收。详见[temp.64 说明](../docs/releases/preview-0.6.0-temp.64.md)及包内 `RELEASE-NOTES.md`。
 
 ## 此前临时预览包（2026-10-26）
