@@ -903,3 +903,11 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 将原有的 Left/Right 检查扩展为 Left/Up/Right/Down。Private Desktop `host-newfolder-private-desktop` watchdog 通过：先用 Shell canonical `newfolder` 在临时目录创建项目，选中并聚焦它，向 `IShellView::TranslateAccelerator` 发送 F2，再把四个方向键分别发给原生 `Edit` 编辑框。四次返回 `S_OK`，编辑框持续存在且持续持有焦点；日志 `src/.state/native-probe-watchdog/20261027-034108-b117b401.stdout.log` 显示 `foreground-unchanged=True`。NativeProbe Release build 为 0 警告、0 错误。
 
 这只证明单个原生 filesystem `IShellView` 的合成消息路径；没有覆盖 List/Icon 等视图方式、真实物理键盘、多窗格邻窗焦点、WPF `HwndHost` 或产品 ExplorerBrowser。该证据可用于后续宿主迁移比较，不能宣称用户报告的多窗格 F2 缺陷已修复。
+
+### 2026-10-27 五种视图模式下 F2 编辑焦点隔离验证
+
+将重命名焦点检查放入 Shell 与 `SysListView32` 同步模式循环，覆盖 Icon、Details、SmallIcon、List、Tile。初次尝试在 Icon 模式未进入编辑态；诊断显示 F2 返回 `S_OK`、选中项仍为 1，但焦点落在 `SHELLDLL_DefView`。根因是该通用筛选探针此前没有激活 Shell view。按原生宿主使用条件，在 Private Desktop 上以 `SW_SHOWNOACTIVATE` 显示父窗并调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 后复测；结束时恢复隐藏父窗。
+
+完整 `host-filter-private-desktop` watchdog 连续两轮退出码 0：`20261027-034456-3eb61774.stdout.log`、`20261027-034526-eca8b327.stdout.log`。五种模式各自的 F2 都进入 `Edit` 并获得焦点，Left/Up/Right/Down 均为 `S_OK` 且编辑框/焦点保持；Ctrl+A、Down 导航、多层 history 和本轮其它 Shell view 检查也通过。前台 HWND 保持不变。
+
+该结果只验证 Private Desktop 内合成 accelerator 消息；没有验证物理键盘、相邻多窗格焦点争用、用户可见多窗格操作或 ExplorerBrowser 产品宿主。本次没有改产品视图或 release。

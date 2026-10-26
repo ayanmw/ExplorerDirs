@@ -3478,3 +3478,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 将原生重命名探针从 Left/Right 扩展到 Left/Up/Right/Down。`host-newfolder-private-desktop` watchdog 通过：Shell 创建临时文件夹，选中并聚焦后启动 F2 编辑，再将四个方向键交给编辑框；四键均返回 `S_OK`，编辑窗口和焦点保持，前台 HWND 未变化。NativeProbe Release build 0 警告、0 错误。
 - 这只覆盖合成消息下的单个原生 filesystem `IShellView`；List/Icon 等模式、真实键盘、多窗格、WPF `HwndHost` 与 ExplorerBrowser 产品行为仍待验收。它为迁移原型补充焦点兼容证据，不代表原产品问题已修复。详细日志和边界见[隔离原型记录](ishellview-color-spike.md#2026-10-27-f2-编辑状态下四方向键隔离验证)。
+
+## 2026-10-27：五种视图模式下 F2 编辑焦点隔离验证
+
+- 把 F2 与四方向键检查纳入五种 Shell/ListView 同步模式循环。初次测试发现 Icon 模式因宿主尚未 UIActivate，F2 虽返回 `S_OK`，却未切入编辑框；为探针按原生宿主生命周期显示隔离父窗（`SW_SHOWNOACTIVATE`）并激活 view 后，完整 Private Desktop 流程连续两轮通过，Shell edit 与焦点在四方向键期间均保持，退出时恢复隐藏父窗，foreground HWND 未变化。
+- 测试日志：`20261027-034456-3eb61774.stdout.log`、`20261027-034526-eca8b327.stdout.log`。这是单 view、合成键消息的原型证据，尚未覆盖真实键盘、多窗格互相抢焦点、WPF `HwndHost` 或 ExplorerBrowser 产品宿主；不表示用户报告的产品 F2 缺陷已修复。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-27-五种视图模式下-f2-编辑焦点隔离验证)。

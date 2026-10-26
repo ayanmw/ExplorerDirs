@@ -277,7 +277,7 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception("The native context-menu scopes did not resolve file Copy and background Refresh commands independently.");
             var listView = FindChildByClass(viewWindow, "SysListView32");
             if (listView == 0) throw new Exception("The isolated Shell view has no native file list window.");
-            VerifySynchronizedViewModes(folderView, listView, host);
+            VerifySynchronizedViewModes(folderView, listView, host, viewWindow, parent);
             Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedCount)); // SVGIO_SELECTION
             if (selectedCount != 0) throw new Exception("The fixture view unexpectedly started with a selection.");
             var callbackSelectionVersionBefore = host.CallbackSelectionVersion;
@@ -773,7 +773,7 @@ internal static class ShellViewHostFilterProbe
         finally { Marshal.Release(folder); }
     }
 
-    private static void VerifySynchronizedViewModes(nint folderView, nint listView, FilteredHost host)
+    private static void VerifySynchronizedViewModes(nint folderView, nint listView, FilteredHost host, nint viewWindow, nint parent)
     {
         const int LvmSetView = 0x108E;
         const int LvmGetView = 0x108F;
@@ -786,6 +786,8 @@ internal static class ShellViewHostFilterProbe
             (Name: "Tile", ListView: 4, Shell: 6, IconSize: 48)
         };
         var results = new List<string>();
+        _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE; the parent remains on the Private Desktop.
+        Check(At<ActivateView>(host.View, 7)(host.View, 1)); // SVUIA_ACTIVATE_FOCUS.
         foreach (var mode in viewPairs)
         {
             var setHr = setMode(folderView, (uint)mode.Shell, mode.IconSize);
@@ -807,13 +809,78 @@ internal static class ShellViewHostFilterProbe
             if (actualShellMode != mode.Shell || iconSize != mode.IconSize || actualListViewMode != mode.ListView || visibleItems != 2 ||
                 !visibleNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).SequenceEqual(["child", "keep.txt"], StringComparer.OrdinalIgnoreCase))
                 throw new Exception($"Synchronized {mode.Name} mode changed the native list layout or filtered contents: set=0x{setHr:X8},shell-immediate={shellModeAfterSet}/{sizeAfterSet},lvm-set={listViewSetResult},shell-final={actualShellMode}/{iconSize},list={actualListViewMode},items={visibleItems},names={string.Join(',', visibleNames)}.");
-            results.Add($"{mode.Name}=shell:{actualShellMode}/{iconSize},list:{actualListViewMode},items:{visibleItems}");
+            var renameArrowResults = VerifyRenameArrowRouting(folderView, listView, viewWindow, host.View, visibleNames, mode.Name);
+            results.Add($"{mode.Name}=shell:{actualShellMode}/{iconSize},list:{actualListViewMode},items:{visibleItems},rename-arrows:[{string.Join(',', renameArrowResults)}]");
         }
         // Keep the following linear Down-key probe in Details, where its expected next-row behavior is defined.
         Check(setMode(folderView, 4, 16));
         _ = SendMessageW(listView, LvmSetView, 1, 0);
         Application.DoEvents();
+        _ = ShowWindow(parent, 0); // SW_HIDE; restore the probe's original hidden-parent boundary.
         Console.WriteLine("ishellview-host-filter: synchronized-view-modes=" + string.Join('|', results));
+    }
+
+    private static IReadOnlyList<string> VerifyRenameArrowRouting(nint folderView, nint listView, nint viewWindow, nint view,
+        IReadOnlyList<string> visibleNames, string modeName)
+    {
+        const uint selectFocusedVisible = 0x1u | 0x4u | 0x10u | 0x40000000u;
+        var itemIndex = Array.FindIndex(visibleNames.ToArray(), name => name.Equals("keep.txt", StringComparison.OrdinalIgnoreCase));
+        if (itemIndex < 0) throw new Exception($"The {modeName} view has no rename fixture item.");
+
+        Check(At<SelectItem>(folderView, 15)(folderView, itemIndex, selectFocusedVisible));
+        _ = SetFocus(listView);
+        var f2 = new NativeMessage { Window = listView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+        var f2Hr = At<TranslateAccelerator>(view, 5)(view, ref f2);
+        var renameEditor = FindChildByClass(viewWindow, "Edit");
+        var renameDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        while (DateTime.UtcNow < renameDeadline && (renameEditor == 0 || GetFocus() != renameEditor))
+        {
+            Application.DoEvents();
+            renameEditor = FindChildByClass(viewWindow, "Edit");
+            if (renameEditor == 0 || GetFocus() != renameEditor) Thread.Sleep(10);
+        }
+        if (renameEditor == 0 || GetFocus() != renameEditor)
+        {
+            var focusedWindow = GetFocus();
+            var focusedClass = new System.Text.StringBuilder(128);
+            if (focusedWindow != 0) _ = GetClassNameW(focusedWindow, focusedClass, focusedClass.Capacity);
+            Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedCount));
+            throw new Exception($"The {modeName} view did not focus its inline rename editor after F2 (hr=0x{f2Hr:X8},editor=0x{renameEditor:X},focus=0x{focusedWindow:X}/{focusedClass},selected={selectedCount},list=0x{listView:X},view=0x{viewWindow:X}).");
+        }
+
+        var arrows = new[]
+        {
+            (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+            (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+            (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+            (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+        };
+        var results = new List<string>(arrows.Length);
+        try
+        {
+            foreach (var arrow in arrows)
+            {
+                var message = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                var hr = At<TranslateAccelerator>(view, 5)(view, ref message);
+                Application.DoEvents();
+                var retained = IsWindow(renameEditor) && GetFocus() == renameEditor;
+                results.Add($"{arrow.Name}:{hr:X8}/{retained}");
+                if (hr < 0 || !retained)
+                    throw new Exception($"The {modeName} view lost its inline rename editor or focus on {arrow.Name} (hr=0x{hr:X8}).");
+            }
+        }
+        finally
+        {
+            if (IsWindow(renameEditor))
+            {
+                var escape = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+                _ = At<TranslateAccelerator>(view, 5)(view, ref escape);
+                Application.DoEvents();
+            }
+            Check(At<SelectItem>(folderView, 15)(folderView, itemIndex, 0));
+        }
+        if (IsWindow(renameEditor)) throw new Exception($"The {modeName} view did not dismiss its cancelled inline rename editor.");
+        return results;
     }
 
     private static void VerifyNativeMenuCommands(nint view, nint folderView, nint owner, nint foreground)
