@@ -241,6 +241,13 @@ if (args.Length == 1 && args[0] == "--tree-width-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--tree-selection-auto-expand-smoke")
+{
+    ExplorerDirs.SettingsSmoke.TreeSelectionAutoExpandSmoke.Run();
+    Console.WriteLine("Tree selection auto-expand smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-tree-shortcut-smoke")
 {
     ExplorerDirs.SettingsSmoke.AddressTreeShortcutSmoke.Run();

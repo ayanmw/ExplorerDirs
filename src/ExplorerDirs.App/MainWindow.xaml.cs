@@ -39,10 +39,12 @@ public partial class MainWindow : Window
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
+    private readonly PortableBooleanPreference _treeSelectionAutoExpandPreferenceStore;
     private readonly NavigationTreeWidthsStore _treeWidthsStore;
     private NavigationTreeWidths _treeWidths;
     private readonly bool[] _paneTreeVisibility = new bool[4];
     private TreeDisplayMode _treeDisplayMode = TreeDisplayMode.PerPane;
+    private bool _treeSelectionAutoExpand = true;
     private ShellTreeHost? _sharedTreeHost;
     private readonly PinnedTabsStore _pinnedTabsStore;
     private readonly LayoutProportionsStore _layoutProportionsStore;
@@ -160,6 +162,10 @@ public partial class MainWindow : Window
                 ? addressBarWarning : $"{EnvironmentStatus.Text} {addressBarWarning}";
         _treePreferences = new PortableBooleanPreference(Path.Combine(
             _profileDirectory, "NavigationTree.ini"), "NavigationTree", "Visible", "目录树");
+        _treeSelectionAutoExpandPreferenceStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "NavigationTreeSelection.ini"), "NavigationTree", "SelectFromListAndExpand",
+            "目录树自动展开", defaultValue: true);
+        _treeSelectionAutoExpand = _treeSelectionAutoExpandPreferenceStore.Load();
         _treeWidthsStore = new NavigationTreeWidthsStore(Path.Combine(
             _profileDirectory, "NavigationTreeWidths.ini"));
         _treeWidths = _treeWidthsStore.Load();
@@ -171,6 +177,9 @@ public partial class MainWindow : Window
         if (_treePreferences.LoadWarning is { } treeWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeWarning : $"{EnvironmentStatus.Text} {treeWarning}";
+        if (_treeSelectionAutoExpandPreferenceStore.LoadWarning is { } treeSelectionWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? treeSelectionWarning : $"{EnvironmentStatus.Text} {treeSelectionWarning}";
         if (_treeWidthsStore.LoadWarning is { } treeWidthsWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeWidthsWarning : $"{EnvironmentStatus.Text} {treeWidthsWarning}";
@@ -208,6 +217,7 @@ public partial class MainWindow : Window
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
+            pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
             pane.TreeWidth = _treeWidths.GetPaneWidth(index);
             pane.TreeWidthChanged += (_, _) =>
@@ -250,6 +260,7 @@ public partial class MainWindow : Window
         UpdatePreviewPaneToggle();
         for (var index = 0; index < _panes.Length; index++)
         {
+            _panes[index].SetAutoExpandTreeSelection(_treeSelectionAutoExpand);
             _panes[index].SetTreeVisible(_treeDisplayMode == TreeDisplayMode.PerPane && _paneTreeVisibility[index]);
             _panes[index].SetPaneTreeButtonVisible(_treeDisplayMode == TreeDisplayMode.PerPane);
             var paneIndex = index;
@@ -667,6 +678,37 @@ public partial class MainWindow : Window
         TreeModeSharedMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.Shared;
         TreeModePerPaneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.PerPane;
         TreeModeNoneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.None;
+        TreeSelectionAutoExpandMenu.IsChecked = _treeSelectionAutoExpand;
+    }
+
+    private void TreeSelectionAutoExpand_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TreeSelectionAutoExpandMenu.IsChecked;
+        try
+        {
+            _treeSelectionAutoExpandPreferenceStore.Save(next);
+            _treeSelectionAutoExpand = next;
+            foreach (var pane in _panes) pane.SetAutoExpandTreeSelection(next);
+            EnvironmentStatus.Text = next ? "已启用从文件列表自动展开目录树。" : "已关闭从文件列表自动展开目录树。";
+        }
+        catch (Exception ex)
+        {
+            TreeSelectionAutoExpandMenu.IsChecked = _treeSelectionAutoExpand;
+            EnvironmentStatus.Text = $"目录树偏好保存失败：{ex.Message}";
+        }
+    }
+
+    private void Pane_SelectedFolderForTree(PaneControl pane, string identity)
+    {
+        var sharedTreeTarget = _treeDisplayMode == TreeDisplayMode.Shared && ReferenceEquals(pane, ActivePane);
+        var paneTreeTarget = _treeDisplayMode == TreeDisplayMode.PerPane && pane.TreeIsVisible;
+        if (!TreeSelectionAutoExpand.ShouldSync(_treeSelectionAutoExpand,
+                currentPane: pane.IsVisible && (_treeDisplayMode != TreeDisplayMode.Shared || sharedTreeTarget),
+                treeVisible: sharedTreeTarget || paneTreeTarget,
+                selectedCount: 1, selectedFolder: true)) return;
+
+        if (sharedTreeTarget) _sharedTreeHost?.SetSelectedFolderLocation(identity);
+        else if (paneTreeTarget) pane.ExpandTreeToSelectedFolder(identity);
     }
 
     private void ApplyTreeDisplayMode()

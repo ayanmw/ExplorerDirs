@@ -11,7 +11,8 @@ internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
 
 // Separate files let older releases preserve settings they do not understand.
-internal class PortableBooleanPreference(string path, string section, string keyName, string label)
+internal class PortableBooleanPreference(string path, string section, string keyName, string label,
+    bool defaultValue = false)
 {
     private readonly string _path = path;
     private string? _lastSeenContent;
@@ -24,7 +25,7 @@ internal class PortableBooleanPreference(string path, string section, string key
         LoadWarning = null;
         _canOverwrite = true;
         _lastSeenContent = null;
-        if (!File.Exists(_path)) return false;
+        if (!File.Exists(_path)) return defaultValue;
 
         var complete = true;
         var inAppearance = false;
@@ -70,7 +71,7 @@ internal class PortableBooleanPreference(string path, string section, string key
             {
                 _canOverwrite = false;
                 LoadWarning = $"{label}配置格式高于当前版本；已停止写入原文件。";
-                return false;
+                return defaultValue;
             }
             if (version != 1 || !compact.HasValue || !seenAppearance) complete = false;
         }
@@ -87,7 +88,7 @@ internal class PortableBooleanPreference(string path, string section, string key
             _canOverwrite = false;
             LoadWarning = $"{label}配置不完整且备份失败；本次不会覆盖原文件。";
         }
-        return compact ?? false;
+        return compact ?? defaultValue;
     }
 
     public void Save(bool compact)

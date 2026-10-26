@@ -4618,6 +4618,49 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
+    internal string? GetSelectedFolderLocation()
+    {
+        if (_browser is null || _viewReadiness.Pending) return null;
+        var folderViewId = FolderViewId;
+        if (_browser.GetCurrentView(ref folderViewId, out var viewObject) < 0 || viewObject is not IFolderView folderView)
+        {
+            if (viewObject is not null && Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+            return null;
+        }
+
+        try
+        {
+            var arrayId = ShellItemArrayId;
+            if (folderView.Items(1, ref arrayId, out var arrayObject) < 0 || arrayObject is not IShellItemArray items)
+            {
+                if (arrayObject is not null && Marshal.IsComObject(arrayObject)) Marshal.ReleaseComObject(arrayObject);
+                return null;
+            }
+            try
+            {
+                if (items.GetCount(out var count) < 0 || count != 1 || items.GetItemAt(0, out var item) < 0)
+                    return null;
+                try
+                {
+                    if (item.GetAttributes(0x20000000, out var attributes) < 0 || (attributes & 0x20000000) == 0 ||
+                        item.GetDisplayName(0x80028000, out var name) < 0 || name == IntPtr.Zero) return null;
+                    try
+                    {
+                        var identity = Marshal.PtrToStringUni(name);
+                        if (identity is null || !ShellLocationIdentity.TryGetFolderPidl(identity, out var pidl)) return null;
+                        Marshal.FreeCoTaskMem(pidl);
+                        return identity;
+                    }
+                    finally { Marshal.FreeCoTaskMem(name); }
+                }
+                finally { if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item); }
+            }
+            finally { if (Marshal.IsComObject(arrayObject)) Marshal.ReleaseComObject(arrayObject); }
+        }
+        catch (COMException) { return null; }
+        finally { if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject); }
+    }
+
     internal bool OpenSelectedFolderInNewTab(Action<string> openPath)
     {
         var selected = GetSelectedItem();

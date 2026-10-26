@@ -22,7 +22,7 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
-$settings = @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
+$settings = @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
 foreach ($name in $settings) {
     [IO.File]::WriteAllText((Join-Path $fixtureProfile $name), ('fixture-' + $name))
 }

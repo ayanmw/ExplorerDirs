@@ -27,6 +27,8 @@ public partial class PaneControl : UserControl
     private bool _addressNavigationPending;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
+    private bool _autoExpandTreeSelection = true;
+    private long _treeSelectionSyncRequestVersion;
     private ShellTreeHost? _treeHost;
     private double _treeWidth = 160;
     private Func<TreeFocusTarget>? _treeFocusTarget;
@@ -64,7 +66,14 @@ public partial class PaneControl : UserControl
     public event EventHandler? StateChanged;
     internal event EventHandler? CommandContextChanged;
     internal event EventHandler? TreeWidthChanged;
+    internal event Action<PaneControl, string>? SelectedFolderForTree;
     public event EventHandler? Activated;
+
+    internal void SetAutoExpandTreeSelection(bool enabled)
+    {
+        _autoExpandTreeSelection = enabled;
+        _treeSelectionSyncRequestVersion++;
+    }
 
     internal void SetActivePaneVisual(bool isActive)
     {
@@ -548,6 +557,11 @@ public partial class PaneControl : UserControl
         if (!TreeVisible || _treeHost is null || Current?.Browser.IsFileSystemLocation != true) return false;
         _treeHost.SetDirectory(CurrentPath);
         return true;
+    }
+
+    internal void ExpandTreeToSelectedFolder(string identity)
+    {
+        if (TreeVisible) _treeHost?.SetSelectedFolderLocation(identity);
     }
 
     private void SyncTreeToCurrent() { if (Current is { } state) SyncTreeToCurrent(state); }
@@ -1134,6 +1148,22 @@ public partial class PaneControl : UserControl
             {
                 CommandContextChanged?.Invoke(this, EventArgs.Empty);
                 QueueSelectionCountsRefresh(state);
+                if (_autoExpandTreeSelection && IsVisible)
+                {
+                    var requestVersion = ++_treeSelectionSyncRequestVersion;
+                    var selectionPath = state.Path;
+                    Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                    {
+                        if (!_autoExpandTreeSelection || requestVersion != _treeSelectionSyncRequestVersion ||
+                            Current != state || !IsVisible ||
+                            !string.Equals(state.Path, selectionPath, StringComparison.OrdinalIgnoreCase)) return;
+                        var folder = state.Browser.GetSelectedFolderLocation();
+                        if (folder is not null && _autoExpandTreeSelection &&
+                            requestVersion == _treeSelectionSyncRequestVersion && Current == state && IsVisible &&
+                            string.Equals(state.Path, selectionPath, StringComparison.OrdinalIgnoreCase))
+                            SelectedFolderForTree?.Invoke(this, folder);
+                    }));
+                }
             }
         };
         browser.FolderMiddleClicked += (_, folderPath) =>

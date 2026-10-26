@@ -87,7 +87,7 @@ if ($IsolatedProfile) {
     New-Item -ItemType Directory -Path $profileCopy -Force | Out-Null
     # Match the separate preference stores: omitting the tree setting made an
     # isolated preview silently revert the user's navigation preference.
-    foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
+    foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
         $source = Join-Path $profileSourceRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)

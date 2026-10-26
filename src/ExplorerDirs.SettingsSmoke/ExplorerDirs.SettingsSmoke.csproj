@@ -83,6 +83,7 @@
     <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/TreeSelectionAutoExpand.cs" Link="TreeSelectionAutoExpand.cs" />
     <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePreferenceStore.cs" Link="ThemePreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/SizeDisplayPreferenceStore.cs" Link="SizeDisplayPreferenceStore.cs" />

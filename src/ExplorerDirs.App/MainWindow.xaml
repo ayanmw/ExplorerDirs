@@ -57,6 +57,9 @@
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModePerPaneMenu" Header="每窗格各一棵树" IsCheckable="True" Tag="PerPane" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModeNoneMenu" Header="关闭目录树" IsCheckable="True" Tag="None" Click="TreeMode_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="TreeSelectionAutoExpandMenu" Header="从文件列表选择并展开" IsCheckable="True"
+                              Click="TreeSelectionAutoExpand_Click"/>
                 </MenuItem>
                 <MenuItem x:Name="PreviewPaneMenu" Header="预览窗格" InputGestureText="Alt+P" IsCheckable="True" Click="PreviewPaneMenu_Click"/>
                 <MenuItem x:Name="DetailsPaneMenu" Header="详情窗格" InputGestureText="Alt+Shift+P" IsCheckable="True" Click="DetailsPaneMenu_Click"/>

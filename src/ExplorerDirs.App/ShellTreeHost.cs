@@ -45,12 +45,26 @@ internal sealed class ShellTreeHost : HwndHost
 
     public void SetDirectory(string directory)
     {
+        _addressTreeMode = false;
         _directory = directory;
+        StartSynchronization();
+    }
+
+    internal void SetSelectedFolderLocation(string identity)
+    {
+        _addressTreeMode = !Path.IsPathFullyQualified(identity);
+        _directory = identity;
+        if (_addressTreeMode && _tree is not null)
+        {
+            _root = "shell:Desktop";
+            _tree.SetRoot(_root);
+        }
         StartSynchronization();
     }
 
     internal void SetVirtualLocation()
     {
+        _addressTreeMode = false;
         _directory = null;
         _root = null;
         CancelSynchronization();
