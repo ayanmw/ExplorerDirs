@@ -3282,3 +3282,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 修正前一次状态恢复原型的刺激方式：`IFolderView::SetCurrentViewMode` 返回成功，但当前 DefView 读回仍是模式 1；改用本项目已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前确认了期望查看模式。
 - 原生隔离容器在一个 top-level HWND 下创建 2×2 child pane HWND，分别托管真实 `IShellView`；探针断言四个 pane 是同一父窗口的不同子窗口，且每个 view window 都属于自己的 pane。首窗格恢复 Details、Name 降序、Type 升序分组和三列顺序/宽度，消费进程收到 Shell 4 次读流。第二窗格使用独立 session GUID 切换为 List 并写入 772 字节，销毁后按同 GUID 重建，收到 4 次读流并恢复 List；第三、第四窗格分别读回 Icon 和 Tile。四个 view 同时存活时模式为 Details/List/Icon/Tile (`4/3/1/6`)。首窗格对共享目录执行 Shell 复制、重命名、删除后，四个 view 的项目数逐项收敛，四种模式及首窗格排序、分组和列布局保持。Private Desktop watchdog 连续三轮退出码 0，主桌面前台 HWND 均未变；策略 smoke 通过，NativeProbe Release build 0 警告、0 错误。
 - 这证明四个真实 Shell view 能在同一原生父容器中以不同模式并存，第二窗格能按 session GUID 保存/销毁/恢复，同目录的 Shell 文件操作通知能令四个 view 同步更新。四个 pane 浏览同一目录，因此尚未验证跨目录通知隔离；这也不等同 WPF `PaneControl`、ExplorerDirs.App 正式标签 session-store 或生产四窗格协调，未验证真实物理焦点、可见菜单、拖放或键盘行为。消费进程退出时由 OS 回收隔离 Shell STA，生产探针负责清理本轮 fixture/state 目录。完整记录见 [`ishellview-color-spike.md`](ishellview-color-spike.md#2026-10-27-真实-ishellview-四窗格模式隔离状态往返与文件操作)。
+
+## 2026-10-27：四窗格 Shell 菜单回调按激活 pane 路由
+
+- 四窗格恢复探针逐个调用四个真实 `IShellView::UIActivate(SVUIA_ACTIVATE_FOCUS)`；三轮 Private Desktop watchdog 均退出码 0。每次目标 pane 宿主都收到 `InsertMenusSB` 与 `SetMenuSB`，离开 pane 时收到 `RemoveMenusSB`（每次增量分别为 `1/2/1`）；前台窗口句柄保持不变。四种模式与复制/重命名/删除后的四窗格通知收敛也在同轮继续通过。
+- 这证明 Shell 菜单生命周期回调能按当前被激活的原生 pane 进入各自宿主。没有展示或点击菜单，也没有验证菜单项实际合并、命令状态/分派、WPF 焦点、物理键盘、跨目录通知或拖放；不能据此判定原型已达到产品迁移门槛。产品 ExplorerBrowser、配置和 release 未改。

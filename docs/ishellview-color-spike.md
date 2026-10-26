@@ -742,3 +742,9 @@ NativeProbe 新增 `--ishellview-menu-activation-private-desktop`，在唯一临
 NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过；四窗格版本 Private Desktop watchdog 连续三轮退出码 0，每轮生产者和消费者 PID 不同，四个 view 读回 Details/List/Icon/Tile (`4/3/1/6`)，第二 session 重建 read=4/write=1；Shell 复制、重命名、删除后四个 pane 项目数都收敛，主桌面 foreground HWND 均保持 `0x81852`。日志：`20261027-003105-fc14fff6.stdout.log`、`20261027-003119-043d18b7.stdout.log`、`20261027-003129-2cc68611.stdout.log`。
 
 早期失败并非 Shell 忽略会话流：旧刺激调用 `IFolderView::SetCurrentViewMode` 虽返回成功，但保存前模式仍是 `1`；改用已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前和新进程新 view 都正确读回。消费者在四 pane 状态与文件操作检查后通过自身进程退出回收隔离 Shell STA，生产者再删除临时 fixture 和状态目录；同步释放该 STA 内的 Shell view 曾使消费者卡在清理阶段，所以不把未完成的同步清理当作恢复失败。该证据证明四个真实 Shell view 可在同一原生容器中以不同模式并存，第二 pane 能按 session GUID 独立保存/销毁/恢复，同目录 Shell 文件通知会使四个 view 的项目数都收敛。四个 pane 浏览同一路径，因此没有验证不同目录之间的通知隔离；它也不是 WPF `PaneControl` 或 ExplorerDirs.App 正式会话接线，不证明可见拖放、物理焦点/键盘或菜单体验。产品 ExplorerBrowser、INI 与 release 均未接入或修改。
+
+### 2026-10-27 四窗格菜单激活回调路由
+
+四窗格 session-restore consumer 在四个模式和各自 host 已建立后，依序对每个真实 `IShellView` 调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`。每轮在目标 pane 的 `ShellViewColorBrowserHost` 上分别观察到 `InsertMenusSB +1`、`SetMenuSB +2`；Shell 离开该 pane 时 `RemoveMenusSB +1`。Private Desktop watchdog 连续三轮通过，三轮都维持主桌面 foreground HWND `0x81852`。日志：`20261027-003403-1ceb1c1b.stdout.log`、`20261027-003416-58e4ebf2.stdout.log`、`20261027-003426-f3a24d83.stdout.log`。
+
+该结果只验证 `UIActivate` 的 Shell 回调进入对应原生 pane host；没有打开或点击菜单，不能证明菜单视觉合并、WPF 命令分派、键盘焦点或真实输入体验。四个 view 仍位于同一隔离进程且浏览相同 fixture，未验证生产宿主、不同路径通知、拖放，也未修改产品 ExplorerBrowser、INI 或 release。

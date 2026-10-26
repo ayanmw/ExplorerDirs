@@ -120,7 +120,7 @@ internal static class ShellViewColorSpike
                 group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
-            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane,
+            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
                 folderView, propertyFormatId, expectedSort, columnsExpected);
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
@@ -165,6 +165,7 @@ internal static class ShellViewColorSpike
 
     private static string VerifyConcurrentViewIsolation(string fixture, ShellViewStateStore store,
         Guid restoredSessionId, nint containerParent, nint restoredView, nint firstPane,
+        ShellViewColorBrowserHost restoredHost,
         nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
         IReadOnlyList<DisplayColumnState> columnsExpected)
     {
@@ -254,8 +255,11 @@ internal static class ShellViewColorSpike
         var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48);
         var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1);
         var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
+        var allHosts = new[] { restoredHost, host, pane3.Host, pane4.Host };
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
+        var menuRouting = VerifyFourPaneMenuActivation(
+            new[] { restoredView, view, pane3.View, pane4.View }, allHosts);
         var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
             expectedSort, columnsExpected, allViews);
         AssertPaneModes(allViews, expectedModes, "file operations");
@@ -264,7 +268,33 @@ internal static class ShellViewColorSpike
             $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
             $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
-            $"file-updates={allPaneCounts}; independent=True";
+            $"menu-routing={menuRouting}; file-updates={allPaneCounts}; independent=True";
+    }
+
+    private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
+        IReadOnlyList<ShellViewColorBrowserHost> hosts)
+    {
+        if (views.Count != 4 || hosts.Count != 4)
+            throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
+        var foreground = GetForegroundWindow();
+        var before = hosts.Select(host => (host.InsertMenusCallCount, host.SetMenuCallCount,
+            host.RemoveMenusCallCount)).ToArray();
+        var activations = new List<string>(views.Count);
+        for (var index = 0; index < views.Count; index++)
+        {
+            Check(At<ActivateView>(views[index], 7)(views[index], 2)); // SVUIA_ACTIVATE_FOCUS.
+            Pump(250);
+            var current = hosts[index];
+            var insertDelta = current.InsertMenusCallCount - before[index].InsertMenusCallCount;
+            var setDelta = current.SetMenuCallCount - before[index].SetMenuCallCount;
+            if (insertDelta <= 0 || setDelta <= 0)
+                throw new InvalidOperationException($"Activating pane {index + 1} did not route Shell menu callbacks to its own host: insert={insertDelta}; set={setDelta}.");
+            activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
+            before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
+        return $"per-pane-insert-set={string.Join(',', activations)}; foreground-unchanged=True";
     }
 
     private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
