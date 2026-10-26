@@ -1541,6 +1541,7 @@ internal static class ShellViewColorSpike
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0)
                 throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
             var filterSiteHr = Marshal.QueryInterface(view, in FolderFilterSiteId, out var filterSite);
             if (filterSite != 0) Marshal.Release(filterSite);
             Console.WriteLine($"ishellview-color-spike: direct-view-ifolderfiltersite={filterSiteHr:X8}");
@@ -1659,6 +1660,7 @@ internal static class ShellViewColorSpike
 
                 var oldView = view;
                 var oldFolder = folder;
+                host.RevokeDropTarget(viewWindow);
                 if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
                 if (contextMenu != 0) { Marshal.Release(contextMenu); contextMenu = 0; }
                 view = folder = viewWindow = 0;
@@ -1959,6 +1961,11 @@ internal static class ShellViewColorSpike
                 SetWindowLongPtrW(listView, -16, originalListStyle);
             if (view != 0)
             {
+                if (host is not null && viewWindow != 0)
+                {
+                    try { host.RevokeDropTarget(viewWindow); }
+                    catch (Exception ex) { Console.WriteLine("ishellview-color-spike cleanup: drop-target revoke threw: " + ex.Message); }
+                }
                 try
                 {
                     viewRetirement.RetireAfterCreateAttempt(view, folder, viewWindowCreateAttempted);

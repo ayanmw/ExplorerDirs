@@ -8,9 +8,9 @@ NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠�
 
 ## 2026-10-27：隔离四窗格文件夹 drop target 注册生命周期
 
-`StreamViewHost` 现按 view HWND 管理多份 STA 目标注册，通过 `OleInitialize` 和 `RegisterDragDrop` 将 Shell drop target 绑定到对应窗口，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 从每个当前 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级 drop target；`BrowseObject` 新建目标 view 时先注册新窗口，随后撤销旧窗口的注册，再退休旧 view。新 view 创建/注册失败时会尝试只清理新 HWND，保留原 view 的目标注册。宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
+`StreamViewHost` 现按 view HWND 管理多份 STA 目标注册，通过 `OleInitialize` 和 `RegisterDragDrop` 将 Shell drop target 绑定到对应窗口，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 的初始 view、同级 pane 创建/重建以及 `BrowseObject` 新建目标 view 时，均从对应 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级目标；导航先注册新窗口，再撤销旧窗口的注册并退休旧 view。新 view 创建/注册失败时会尝试只清理新 HWND，保留原 view 的目标注册。独立 color spike 的初始 view 和其 BrowseObject 替换路径也已接线。宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
 
-`--shell-view-drop-target-registration-smoke` 在同一个 host/STA 的四个隐藏普通 HWND 上验证多份 owner、选择性撤销、Dispose 撤销其余目标、重复 HWND 注册被 OLE 拒绝且不破坏原 owner，以及撤销后重新注册。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；新目录导航的真实目标注册仅完成源码接线/编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
+`--shell-view-drop-target-registration-smoke` 在同一个 host/STA 的四个隐藏普通 HWND 上验证多份 owner、选择性撤销、Dispose 撤销其余目标、重复 HWND 注册被 OLE 拒绝且不破坏原 owner，以及撤销后重新注册。源码审查确认本 spike 所有 `CreateViewWindow` 创建点均有目标注册入口。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；新目录导航的真实目标注册仅完成源码接线/编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
 
 依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize)、[`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop)、[`RevokeDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-revokedragdrop) 合同。
 

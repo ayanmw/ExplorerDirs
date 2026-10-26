@@ -3,6 +3,7 @@
 ## 2026-10-27：将 drop target 生命周期延伸到 Shell 目录导航
 
 - 源码审查发现 folder `BrowseObject` 创建替代 `IShellView` 的路径没有注册新目录 `IDropTarget`；旧 `StreamViewHost` 也只允许一份注册，无法在切换期间安全地让新旧 view 短暂并存。现按 HWND 保存多份 OLE 注册：成功创建新 view 后先注册新目标，再撤销旧 HWND 目标并退休旧 view；创建/注册失败时撤销新目标并保留原 view 注册。
+- 源码审查随后逐一核对 `ShellViewColorSpike` 的所有 `CreateViewWindow` 调用点，确认首次 session restore、四窗格 sibling 创建/重建、folder `BrowseObject` 替换和独立 color spike 初始 view 均建立 drop-target 注册，并在切换/退休时撤销对应 HWND。
 - 四个普通隐藏 HWND 的同 host 生命周期 smoke 通过，覆盖选择性撤销、Dispose 清理、重复 HWND 注册由 OLE 拒绝且不破坏原 owner、撤销后重新注册；NativeProbe Release build 0 警告/错误，完整 `--shell-view-color-policy-smoke` 通过。没有运行 Shell view；BrowseObject 的真实导航/拖放仍待隔离宿主验收。
 
 ## 2026-10-27：覆盖四窗格 OLE drop target 同 STA 生命周期
