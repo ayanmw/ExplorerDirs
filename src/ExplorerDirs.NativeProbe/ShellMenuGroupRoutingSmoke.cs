@@ -61,6 +61,7 @@ internal static class ShellMenuGroupRoutingSmoke
                 ShellViewColorSpike.ResolveMergedShellMenuCommandGroup(composite, 0x8125, groups[3]) != 3)
                 throw new InvalidOperationException("The selected menu handle must disambiguate duplicate IDs and retain non-view OLE group identity.");
             VerifyMenuSelectionContext(composite, groups, fileChild);
+            ShellViewColorBrowserHostSmoke.VerifyCoordinatorCommandMessagePath();
             if (ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8123) != MergedEditMenuCommandRoute.SelectAll ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8124) != MergedEditMenuCommandRoute.ShellView ||
                 ShellViewColorSpike.ResolveMergedEditMenuCommandRoute(composite, 0x8125) != MergedEditMenuCommandRoute.NotFound)

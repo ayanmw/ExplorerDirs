@@ -73,6 +73,9 @@ internal sealed class ShellViewColorBrowserHost : StreamViewHost,
 
 public static class ShellViewColorBrowserHostSmoke
 {
+    private static readonly CoordinatorCommandObserver CoordinatorCommandObserverProcedure = ObserveCoordinatorCommand;
+    private static uint _coordinatorObservedCommandId;
+
     internal static void Run()
     {
         VerifyPersistedSessionStream();
@@ -884,6 +887,114 @@ public static class ShellViewColorBrowserHostSmoke
         }
     }
 
+    internal static void VerifyCoordinatorCommandMessagePath()
+    {
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        nint frameWindow = 0, paneWindow = 0, baseMenu = 0, compositeMenu = 0, fileMenu = 0, viewMenu = 0;
+        nint fileChild = 0, descriptor = 0, activeObject = 0;
+        var groups = new nint[6];
+        StreamViewHost? host = null;
+        var observerInstalled = false;
+        try
+        {
+            frameWindow = CreateWindowExW(0, "STATIC", "merged menu message path smoke", 0,
+                0, 0, 320, 200, 0, 0, 0, 0);
+            paneWindow = CreateWindowExW(0, "STATIC", "synthetic shell pane", 0x40000000,
+                0, 0, 160, 100, frameWindow, 0, 0, 0);
+            baseMenu = CreateMenu();
+            compositeMenu = CreateMenu();
+            Check(frameWindow != 0 && paneWindow != 0 && baseMenu != 0 && compositeMenu != 0 &&
+                  SetMenu(frameWindow, baseMenu),
+                "the coordinator message path uses a hidden ordinary frame and pane");
+
+            for (var index = 0; index < groups.Length; index++)
+            {
+                groups[index] = CreatePopupMenu();
+                if (groups[index] == 0 || !AppendMenuW(compositeMenu, 0x10, groups[index], $"Group {index}"))
+                    throw new InvalidOperationException("Could not create the synthetic composite Shell menu groups.");
+            }
+            Check(GetMenuItemCount(compositeMenu) == 6,
+                "the synthetic composite Shell menu has six OLE menu groups");
+            fileMenu = groups[0];
+            viewMenu = groups[2];
+            fileChild = CreatePopupMenu();
+            Check(fileChild != 0 && AppendMenuW(fileChild, 0, (nint)0x7123, "New Item") &&
+                  AppendMenuW(fileMenu, 0x10, fileChild, "New") &&
+                  AppendMenuW(viewMenu, 0, (nint)0x7123, "Details"),
+                "File and View groups contain the same command ID under distinct menu handles");
+            descriptor = CreateOleDescriptor(compositeMenu);
+
+            using var coordinator = new ShellMenuFrameCoordinator(frameWindow);
+            host = new StreamViewHost(paneWindow, [], menuFrameWindow: frameWindow,
+                menuFrameCoordinator: coordinator);
+            activeObject = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(paneWindow),
+                typeof(IOleInPlaceActiveObjectProbe));
+            Check(host.SetActiveObject(activeObject, 0) == 0 &&
+                  host.SetMenuSB(compositeMenu, descriptor, paneWindow) == 0,
+                "the hidden frame installs the real coordinator subclass and merged menu descriptor");
+            host.View = activeObject;
+            Check(SetWindowSubclass(paneWindow, CoordinatorCommandObserverProcedure, 0xD17, 0),
+                "the fake pane observes deferred Shell WM_COMMAND delivery");
+            observerInstalled = true;
+
+            _coordinatorObservedCommandId = 0;
+            SendMessageW(frameWindow, 0x0211, 0, 0); // WM_ENTERMENULOOP.
+            SendMessageW(frameWindow, 0x011F, 0x00100000, compositeMenu); // File group popup.
+            SendMessageW(frameWindow, 0x011F, 0x7123, fileChild); // File leaf command selected.
+            SendMessageW(frameWindow, 0x0111, 0x7123, 0); // WM_COMMAND.
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=0", StringComparison.Ordinal) == true,
+                "the actual subclass message path defers and routes the duplicate ID to its File source");
+
+            _coordinatorObservedCommandId = 0;
+            SendMessageW(frameWindow, 0x0211, 0, 0);
+            SendMessageW(frameWindow, 0x011F, 0x00100002, compositeMenu); // View group popup.
+            SendMessageW(frameWindow, 0x011F, 0x7123, viewMenu); // View leaf command selected.
+            SendMessageW(frameWindow, 0x0111, 0x7123, 0);
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.LastOrDefault()?.Contains("group=2", StringComparison.Ordinal) == true,
+                "the same command ID is independently routed to its View source through the subclass");
+
+            SendMessageW(frameWindow, 0x0212, 0, 0); // WM_EXITMENULOOP.
+            Console.WriteLine("PASS coordinator WM_MENUSELECT -> WM_COMMAND -> posted dispatch on hidden Win32 windows");
+        }
+        finally
+        {
+            host?.Dispose();
+            if (activeObject != 0) Marshal.Release(activeObject);
+            if (observerInstalled && paneWindow != 0 && IsWindow(paneWindow))
+                _ = RemoveWindowSubclass(paneWindow, CoordinatorCommandObserverProcedure, 0xD17);
+            if (frameWindow != 0 && IsWindow(frameWindow) && GetMenu(frameWindow) != 0) SetMenu(frameWindow, 0);
+            if (descriptor != 0) OleDestroyMenuDescriptor(descriptor);
+            if (paneWindow != 0 && IsWindow(paneWindow)) DestroyWindow(paneWindow);
+            if (frameWindow != 0 && IsWindow(frameWindow)) DestroyWindow(frameWindow);
+            if (baseMenu != 0) DestroyMenu(baseMenu);
+            if (compositeMenu != 0) DestroyMenu(compositeMenu);
+            if (fileChild != 0) DestroyMenu(fileChild);
+            foreach (var group in groups) if (group != 0) DestroyMenu(group);
+            OleUninitialize();
+        }
+    }
+
+    private static void DispatchOnePostedCoordinatorMessage(nint frameWindow)
+    {
+        if (!PeekMessageW(out var message, frameWindow, 0x83A1, 0x83A1, 1))
+            throw new InvalidOperationException("The coordinator did not post its deferred Shell command message.");
+        _ = DispatchMessageW(ref message);
+    }
+
+    private static nint ObserveCoordinatorCommand(nint window, uint message, nuint wParam, nint lParam,
+        nuint subclassId, nint referenceData)
+    {
+        if (message == 0x0111)
+        {
+            _coordinatorObservedCommandId = (uint)(wParam & 0xFFFF);
+            return 0;
+        }
+        return DefSubclassProc(window, message, wParam, lParam);
+    }
+
     private static nint CreateViewCommandMenu(uint commandId)
     {
         var menu = CreateMenu();
@@ -1285,6 +1396,28 @@ public static class ShellViewColorBrowserHostSmoke
     [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
     [DllImport("user32.dll")] private static extern bool SetMenu(nint window, nint menu);
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nuint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern bool PeekMessageW(out NativeMessage message, nint window,
+        uint minimum, uint maximum, uint remove);
+    [DllImport("user32.dll")] private static extern nint DispatchMessageW(ref NativeMessage message);
+    [DllImport("user32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window,
+        CoordinatorCommandObserver callback, nuint subclassId, nint referenceData);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window,
+        CoordinatorCommandObserver callback, nuint subclassId);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMessage
+    {
+        public nint Window;
+        public uint Message;
+        public nuint WParam;
+        public nint LParam;
+        public uint Time;
+        public int PointX, PointY;
+        public uint Private;
+    }
+    private delegate nint CoordinatorCommandObserver(nint window, uint message, nuint wParam, nint lParam,
+        nuint subclassId, nint referenceData);
 
     [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
     private sealed class ActiveObjectFixture { }

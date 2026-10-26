@@ -1095,3 +1095,9 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 前一批为避免误派发，缺少来源信息且跨组 ID 重复时会拒绝命令；这保证了安全，却会让合法的重复 ID 项不可用。微软 `WM_MENUSELECT` 消息提供当前选中项 ID/弹出菜单索引及菜单句柄；现在 NativeProbe 保存该选择路径对应的子菜单来源，并在延迟命令队列中保留来源句柄。路由器先依来源菜单确定 OLE 组：File/Edit/View 按各自组执行，Object/Window/Help 不传给 Shell view；没有有效来源时仍只接受唯一归属的 ID。对设置 `MNS_NOTIFYBYPOS` 的路径也加入 `WM_MENUCOMMAND` 的 menu+index 识别。
 
 合成菜单 smoke 覆盖嵌套 `WM_MENUSELECT` 参数序列、File 与 View 同 ID 分派、Object 同 ID 拒绝、显式 Reset 清除来源状态、来源句柄随 FIFO 队列保存，以及真实隐藏假 HWND 收到原始命令 ID；NativeProbe Release build 与专用 smoke 通过。测试没有进入真实菜单模态循环，也没有创建 `IShellView`，所以实际 Shell/OLE 是否把菜单消息送到当前 frame、菜单退出与 `WM_COMMAND` 的时序仍待隔离宿主验证。依据：[WM_MENUSELECT](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menuselect)、[WM_COMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command)、[WM_MENUCOMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menucommand)。
+
+### 2026-10-27 隐藏 frame coordinator 消息链 smoke
+
+扩展专用 smoke：用普通隐藏 Win32 frame 与 pane、六组 synthetic HMENU、真实 OLE menu descriptor 和 `ShellMenuFrameCoordinator` subclass；发送合成 `WM_ENTERMENULOOP`、嵌套 `WM_MENUSELECT`、`WM_COMMAND`，再从消息队列分派 coordinator 实际投递的延迟消息。File 与 View 复用合法范围命令 ID `0x7123`，分别由来源菜单路由到隐藏假 pane HWND，并分别记录 group 0/group 2。此验证覆盖 subclass 收件、来源状态、排队、PostMessage 及最终 HWND 送达，未模拟系统菜单跟踪，也未创建 Shell view。
+
+NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。它补足 synthetic 消息链的集成证据；真实 OLE/DefView 模态菜单实际消息次序、命令 ID、接收 HWND 与用户可见行为仍未验证，迁移门槛不关闭。
