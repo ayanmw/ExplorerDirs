@@ -101,6 +101,7 @@ public static class ShellViewColorBrowserHostSmoke
         Check(host.IncludeObject(0, 0) == 0 && host.IncludeObjectCalls == 3,
             "missing Shell item metadata keeps the item visible through the color host callback");
 
+        VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
         VerifyBaseHostStatusText();
         VerifyBaseHostBrowseObject();
@@ -310,6 +311,52 @@ public static class ShellViewColorBrowserHostSmoke
         }
     }
 
+    private static void VerifyBaseHostControlRouting()
+    {
+        using var host = new StreamViewHost(0, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        try
+        {
+            var getControlWindow = GetComMethod<GetControlWindowCallback>(browser, 13);
+            var sendControlMessage = GetComMethod<SendControlMessageCallback>(browser, 14);
+            Check(getControlWindow(browser, 1, out var missingWindow) == unchecked((int)0x80004005) &&
+                  missingWindow == 0 && sendControlMessage(browser, 1, 0x500, 2, 3, out var missingResult) == unchecked((int)0x80004001) &&
+                  missingResult == 0,
+                "the generic StreamViewHost reports unsupported control windows and messages explicitly");
+
+            uint receivedWindowId = 0;
+            host.ControlWindowProvider = id => { receivedWindowId = id; return id == 2 ? 0x1234 : 0; };
+            Check(getControlWindow(browser, 2, out var controlWindow) == 0 &&
+                  controlWindow == 0x1234 && receivedWindowId == 2 &&
+                  getControlWindow(browser, 3, out var absentWindow) == unchecked((int)0x80004005) && absentWindow == 0,
+                "the generic StreamViewHost exposes only control windows supplied by its parent");
+
+            (uint Id, uint Message, nuint WParam, nint LParam) received = default;
+            host.ControlMessageHandler = (id, message, wParam, lParam) =>
+            {
+                received = (id, message, wParam, lParam);
+                return (0, 0xBEEF);
+            };
+            Check(sendControlMessage(browser, 2, 0x501, 7, 9, out var messageResult) == 0 &&
+                  messageResult == 0xBEEF && received == (2, 0x501, 7, 9),
+                "the generic StreamViewHost forwards control message parameters and result to its parent");
+            host.ControlMessageHandler = (_, _, _, _) => (unchecked((int)0x80070005), 0xCAFE);
+            Check(sendControlMessage(browser, 2, 0x502, 0, 0, out var failedResult) == unchecked((int)0x80070005) &&
+                  failedResult == 0xCAFE,
+                "the generic StreamViewHost preserves the parent's control-message HRESULT and result");
+            host.ControlMessageHandler = (_, _, _, _) => throw new InvalidOperationException("fixture failure");
+            Check(sendControlMessage(browser, 2, 0x503, 0, 0, out var exceptionResult) == unchecked((int)0x80004005) &&
+                  exceptionResult == 0,
+                "a parent control-message exception stays inside the COM boundary");
+            host.Dispose();
+            Check(getControlWindow(browser, 2, out var disposedWindow) == unchecked((int)0x80004005) &&
+                  disposedWindow == 0 && sendControlMessage(browser, 2, 0x504, 0, 0, out var disposedResult) == unchecked((int)0x80004001) &&
+                  disposedResult == 0,
+                "disposing the generic StreamViewHost disconnects parent control routes");
+        }
+        finally { Marshal.Release(browser); }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowserViewCallback(nint self, nint shellView);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -394,6 +441,10 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int SetStatusTextCallback(nint self, nint text);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int TranslateAcceleratorCallback(nint self, nint message, ushort id);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetControlWindowCallback(nint self, uint id, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SendControlMessageCallback(nint self, uint id, uint message, nuint wParam, nint lParam, out nint result);
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

@@ -202,6 +202,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal string? StatusText { get; private set; }
     internal event Action<string?>? StatusTextChanged;
     internal Func<nint, ushort, bool>? AcceleratorHandler { get; set; }
+    internal Func<uint, nint>? ControlWindowProvider { get; set; }
+    internal Func<uint, uint, nuint, nint, (int HResult, nint Result)>? ControlMessageHandler { get; set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -250,6 +252,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
                 var navigation = _navigation;
                 _navigation = null;
                 AcceleratorHandler = null;
+                ControlWindowProvider = null;
+                ControlMessageHandler = null;
                 StatusTextChanged = null;
                 navigation?.Dispose();
             }
@@ -339,9 +343,38 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
             return persisted;
         return _bytes;
     }
-    public int GetControlWindow(uint id, out nint window) { window = 0; return unchecked((int)0x80004005); }
+    public int GetControlWindow(uint id, out nint window)
+    {
+        window = 0;
+        if (ControlWindowProvider is not { } provider) return unchecked((int)0x80004005);
+        try
+        {
+            window = provider(id);
+            if (window != 0) return 0;
+            return unchecked((int)0x80004005);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell control-window lookup: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int SendControlMsg(uint id, uint message, nuint wParam, nint lParam, out nint result)
-    { result = 0; return unchecked((int)0x80004001); }
+    {
+        result = 0;
+        if (ControlMessageHandler is not { } handler) return unchecked((int)0x80004001);
+        try
+        {
+            var response = handler(id, message, wParam, lParam);
+            result = response.Result;
+            return response.HResult;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell control-message routing: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int QueryActiveShellView(out nint view)
     { view = View; if (view != 0) Marshal.AddRef(view); return view == 0 ? unchecked((int)0x80004005) : 0; }
     public int OnViewWindowActive(nint view) => 0;

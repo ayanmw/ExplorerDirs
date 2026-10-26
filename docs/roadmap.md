@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-26：补齐隔离宿主的 Shell 控制窗路由
+
+- `StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现可委托给外层宿主提供的控件窗口映射/消息处理器；未配置控件时分别返回 `E_FAIL` / `E_NOTIMPL`，异常留在 COM 边界内，释放宿主时解除委托。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 覆盖未知控件、HWND/ID 映射、消息参数与返回值、失败 HRESULT、异常及释放行为。未创建 Shell 视图，产品没有接入 Shell 控件 HWND；真实 Explorer 工具栏/状态栏集成与菜单合并仍待隔离宿主验证。
+
 ## 2026-10-26：为隔离 Shell 宿主接入应用快捷键路由
 
 - `StreamViewHost.TranslateAcceleratorSB` 现在可调用注入的宿主处理器：处理器返回已消费时返回 `S_OK`；返回未处理、未配置或抛异常时返回 `S_FALSE`，让 Shell 继续处理。释放宿主时断开处理器与状态回调，避免保留父级委托。
