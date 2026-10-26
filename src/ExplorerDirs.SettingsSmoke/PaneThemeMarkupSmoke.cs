@@ -16,7 +16,10 @@ internal static class PaneThemeMarkupSmoke
             ("MenuItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") }),
             ("ContextMenu", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("ToolBar", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
-            ("ToolBarTray", new[] { ("Background", "ExplorerDirs.WindowBackgroundBrush") })
+            ("ToolBarTray", new[] { ("Background", "ExplorerDirs.WindowBackgroundBrush") }),
+            ("TextBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush"), ("CaretBrush", "ExplorerDirs.ControlTextBrush"), ("SelectionBrush", "ExplorerDirs.AccentBrush"), ("SelectionTextBrush", "ExplorerDirs.AccentTextBrush") }),
+            ("ComboBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
+            ("ComboBoxItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") })
         })
         {
             var surfaceStyle = appResources.Descendants(presentation + "Style")

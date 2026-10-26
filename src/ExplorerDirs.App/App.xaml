@@ -25,5 +25,22 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
         </Style>
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+            <Setter Property="SelectionTextBrush" Value="{DynamicResource ExplorerDirs.AccentTextBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
+        </Style>
+        <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+        </Style>
     </Application.Resources>
 </Application>

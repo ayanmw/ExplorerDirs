@@ -27,6 +27,11 @@
 - 为 WPF `Menu`、`MenuItem`、`ContextMenu`、`ToolBar` 和 `ToolBarTray` 接入现有动态表面/文字/边框资源，不替换系统控件模板，不改变菜单命令及键盘行为；ExplorerBrowser 和 Shell 原生菜单保持原生绘制。
 - 增加五类控件的动态主题接线 smoke；定向主题 smoke、完整 Release `SettingsSmoke`、App Release 构建（0 警告、0 错误）和 `git diff --check` 通过。未操作 GUI，浅/深色实际弹出菜单、高对比度及 hover/selection 视觉仍待可见验收。计划见[菜单与工具栏主题表面计划](superpowers/plans/2026-10-27-themed-menu-toolbar-surfaces.md)。
 
+## 2026-10-27：文本输入与下拉控件接入动态主题
+
+- 文本框和下拉框表面、文字、边框消费语义主题；文本插入光标及选中文字消费动态主题/强调色。未替换模板，不改变输入事件、编辑模式、焦点或选择处理。
+- 主题接线 smoke 先按预期因缺少 TextBox 绑定失败，接入后 TextBox、ComboBox 和 ComboBoxItem 检查通过；完整 Release `SettingsSmoke` 与 App Release build（0 警告、0 错误）通过。没有操作 GUI，编辑态、下拉态、禁用态和高对比度颜色仍待验收。计划见[文本输入控件主题计划](superpowers/plans/2026-10-27-themed-text-entry-controls.md)。
+
 ## 2026-10-26：temp.62 隔离主题预览
 
 - 将照片打印窗口系统色适配和当前标签强调色下划线打包到 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.62`，使用独立 profile。发布隔离 smoke、全量 Release `SettingsSmoke` 和 App Release 构建均通过；EXE/DLL 哈希与包内清单一致。
