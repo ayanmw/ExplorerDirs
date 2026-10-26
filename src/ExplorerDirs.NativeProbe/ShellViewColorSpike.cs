@@ -311,9 +311,8 @@ internal static class ShellViewColorSpike
         if (views.Count != 4 || folderViews.Count != 4 || expectedModes.Count != 4)
             throw new ArgumentException("Menu command routing probe requires exactly four Shell panes.");
         var foreground = GetForegroundWindow();
-        var results = new List<string>(views.Count - 1);
-        // Pane 1 is the restored sort/group/column baseline; leave its serialized state untouched.
-        for (var targetIndex = 1; targetIndex < views.Count; targetIndex++)
+        var results = new List<string>(views.Count);
+        for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
         {
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
             Pump(150);
@@ -523,11 +522,15 @@ internal static class ShellViewColorSpike
             var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var group, out var ascending);
             Check(groupResult);
             Check(ShellColumnManager.Capture(folderView, out var columns));
+            // Opening Details through the Shell menu fits columns to the current viewport width.
+            // Preserve the persisted widths at initial restore, but after that transition compare column identity and order.
+            var expectedColumnKeys = expectedColumns.Select(column => column.Key);
+            var actualColumnKeys = columns?.Select(column => column.Key);
             if (mode != 4 || sorts[0].Key.FormatId != expectedSort.Key.FormatId ||
                 sorts[0].Key.PropertyId != expectedSort.Key.PropertyId || sorts[0].Direction != expectedSort.Direction ||
                 group.FormatId != propertyFormatId || group.PropertyId != 4 || ascending != 1 ||
-                columns is null || !expectedColumns.SequenceEqual(columns))
-                throw new IOException($"The Shell {operation} changed the restored mode, sort, group, or columns.");
+                actualColumnKeys is null || !expectedColumnKeys.SequenceEqual(actualColumnKeys))
+                throw new IOException($"The Shell {operation} changed the restored view settings: mode={mode}; sort={sorts[0].Key.FormatId}/{sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.FormatId}/{group.PropertyId}/{ascending}; columns={(columns is null ? "<null>" : string.Join(';', columns.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}")))}.");
         }
     }
 

@@ -770,4 +770,8 @@ NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-polic
 
 四窗格 consumer 为每个 Shell view 取得原生背景 `IContextMenu`，按 canonical verb `viewlogicaldetails` 调用 `IContextMenu::InvokeCommand`，验证 pane 2、3、4 各自从 List/Icon/Tile 切到 Details、其它 pane 仍保持既定模式，再恢复原模式。连续三轮 Private Desktop watchdog 退出码 0；四窗格状态、复制/重命名/删除、跨目录通知仍通过，foreground HWND 未变。日志：`20261027-004952-5e89970c.stdout.log`、`20261027-005008-7067c712.stdout.log`、`20261027-005020-58682019.stdout.log`。NativeProbe Release build 0 警告/错误，策略 smoke 与 diff check 通过。
 
-首次把同一往返也施加到首 pane 后，后续文件操作中的恢复列/排序/分组断言失败；当时未把失败细分到视图切换、命令自身或后续复制事件，因此当前探针保留该 pane 为状态基线，不称此路径已解决。测试不显示菜单，也不证明真实菜单外观、物理键盘或 WPF 活动 pane 集成；产品 ExplorerBrowser、配置与 release 未改。
+首 pane 也参加往返时，诊断采样确认：切到 List 后三列宽仍为 `280/120/160`；调用 Shell 的 Details 菜单 verb 后，Shell 按当前约 380 px 的 view 宽度把列宽调整为 `158/110/110`。排序、分组、模式和列身份/顺序均未改变。原失败是后续文件操作断言错误地要求宽度仍与初次恢复完全相同，不是复制改变了排序/分组或列结构。
+
+探针现在对四个 pane 都运行 List→Shell Details 菜单命令→恢复原模式；文件操作阶段继续检查 Details、排序、分组和列身份/顺序。精确列宽仍在独立进程首次恢复状态时严格检查。Release build 0 警告/错误；2026-10-27 00:53:05 Private Desktop watchdog 退出码 0，四 pane 命令路由、复制/重命名/删除和跨目录通知全部通过，主桌面 foreground HWND `0x81852` 未变。日志：`src/.state/native-probe-watchdog/20261027-005305-a64c57ff.stdout.log`。
+
+测试仍不显示菜单，也不证明真实菜单外观、物理键盘或 WPF 活动 pane 集成；产品 ExplorerBrowser、配置与 release 未改。

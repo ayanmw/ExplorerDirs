@@ -3306,5 +3306,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-27：四窗格标准 Shell 菜单命令路由
 
-- 经各 pane 自己的背景 `IContextMenu` 调用 canonical `viewlogicaldetails`，pane 2、3、4 分别只改变目标 view，其它 pane 的查看模式保持；还原各 pane 模式后，四窗格操作和跨目录通知 probe 连续三轮通过，主桌面前台句柄未变。
-- 首 pane 首次参与模式往返后，后续的恢复列/排序/分组断言失败，尚未定位是菜单模式往返还是随后的文件操作引发。当前将它留作恢复状态基线；这一结果不证明标准菜单视觉/点击或产品 WPF 集成。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格标准-shell-查看命令定向到目标-pane)。
+- 经各 pane 自己的背景 `IContextMenu` 调用 canonical `viewlogicaldetails`，四个 pane 都能分别从 List 切换到 Details，其他 pane 模式保持；还原各 pane 后，四窗格复制/重命名/删除和跨目录通知通过。诊断确定 Shell 在 Details 菜单命令后按当前 view 宽度重排列宽，但列身份、顺序、排序和分组不变。验证保留初次会话恢复的精确列宽断言，菜单往返后的文件操作断言改为检查列身份/顺序。Private Desktop watchdog 退出码 0，主桌面前台句柄未变。
+- 未展示或点击菜单，真实视觉合并、物理键盘与 WPF 活动 pane 集成仍未验证；产品 ExplorerBrowser、配置和 release 未改。详细记录见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格标准-shell-查看命令定向到目标-pane)。
