@@ -843,3 +843,9 @@ NativeProbe Release 构建 0 警告/错误；完整四窗格 Private Desktop wat
 NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 watchdog 连续三轮退出码 0，记录 `ctrl-a=pane1:2,pane2:2,pane3:2`，前台 HWND 保持 `0x81852`。日志：`20261027-010720-60883814.stdout.log`、`20261027-010744-e5a5e1ee.stdout.log`、`20261027-010803-f770a4fc.stdout.log`。
 
 该证据是直接合成 Ctrl+A 消息与线程 modifier 状态的 Shell accelerator 路径，不是物理键盘或完整产品消息循环验收；第四 pane 只有一个 fixture 项且未纳入全选断言。产品 ExplorerBrowser、WPF、剪贴板与 release 未修改。
+
+### 2026-10-27 背景菜单“新建文件夹”调用失败
+
+`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb；此前只查询过它的状态，没有执行。新增的隔离调用在执行 `IContextMenu::InvokeCommand` 时返回 `E_FAIL (0x80004005)`。加入 `CMIC_MASK_FLAG_NO_UI` 后同样返回 `E_FAIL`。前台句柄保持不变，探针按清理路径释放 Shell view 并删除唯一临时夹具；因为异常在项目枚举前发生，当前日志没有证明该命令是否先产生了磁盘副作用。
+
+因此不能把“菜单列出新建文件夹”计作可用，也不能仅凭隐藏视图中的 `E_FAIL` 推断可见 DefView/产品宿主一定失败。下一步应在临时夹具中记录 `InvokeCommand` 前后的目录项、`IShellBrowser` 服务回调及 Shell 返回码，并拆分为单命令短进程；确认创建结果和必要宿主服务后，再判断这是隐藏视图限制还是宿主契约缺项。ExplorerBrowser 产品视图、用户目录和 release 均未改动。

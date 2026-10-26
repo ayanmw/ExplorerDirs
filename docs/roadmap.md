@@ -3407,6 +3407,12 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 官方 `PSRegisterPropertySchema` / `PSUnregisterPropertySchema` 契约要求机器级 schema 和 `HKLM` 写权限，注册属于安装流程、注销属于卸载流程；不在日常开发机执行临时 schema 注册。逐行列仍是失败中的隔离实验，不接入产品。
 - 探针 Release build 通过（0 警告、0 错误）；私有桌面前台保护通过。详见[逐行文件夹大小列架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
 
+## 2026-10-27：隔离 IShellView 的“新建文件夹”调用仍未通过
+
+- 背景 Shell 菜单能返回 `newfolder` canonical verb，但在隔离 Private Desktop 的 `IContextMenu::InvokeCommand` 调用中返回 `E_FAIL (0x80004005)`；增加 `CMIC_MASK_FLAG_NO_UI` 后结果相同。此前已通过的查看、刷新、排序、分组命令不受影响，前台窗口保护通过。
+- 异常发生于调用返回后、视图项目枚举前；虽然临时夹具按清理路径删除，但本轮没有记录调用前后的目录内容，因此尚不能证明没有先创建文件夹。菜单中出现命令不代表命令已可用；隐藏视图失败也不足以断言用户可见 DefView 或 ExplorerBrowser 必然失败。
+- 下一步把该动作拆成单命令短进程，先对比调用前后临时目录内容，再记录调用期间的 `IShellBrowser` 服务回调与 HRESULT，定位是否为隐藏视图限制或隔离宿主缺少服务。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹调用失败)。
+
 ## 2026-10-27：布局工具栏选中态使用系统强调色
 
 - 当前布局按钮保留对比度检查过的选择背景，并将边框切换为动态 `ExplorerDirs.AccentBrush`；非选中布局仍使用中性边框。切换布局时按当前主题资源刷新，不新增持久化配置或改变布局行为。
