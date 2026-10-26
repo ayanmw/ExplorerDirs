@@ -32,17 +32,19 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
 
-### 2026-10-27：Edit → Select All 的 pane 路由尚未验证
+### 2026-10-27：隔离 Edit → Select All pane 路由
 
-真实合成菜单确认 Edit 组包含“全选 (Ctrl+A)”。尝试在四 pane 循环中把该菜单项 `WM_COMMAND` 分别发给目标 `IShellView::GetWindow` 与共享 frame；两种尝试都未满足“仅目标 pane 全选”，读回显示 pane 2 被选中。前一轮探针还曾用错 `IFolderView::SelectItem` 的取消选择标志，发现后已改正；整个临时全选断言与辅助代码已撤回，没有带入原型或产品。
+此前一次临时探针把 `IFolderView::SelectItem` 的标志 `0x1` 当成取消选择使用；实际 `SVSI_SELECT=0x1`，而 `SVSI_DESELECT=0`。因此旧记录中“pane 2 被误选”的结论被错误清选步骤污染，不能作为路由证据。恢复正确标志后，当前系统合成菜单实际将 Edit → 全选分配为 `0x7023`；原型 frame coordinator 收到命令后以当前 Edit 菜单项文字确认该命令，再调用项目现有 `ShellSelectionCommands.Apply(All)` 作用于当前 `IShellView` 的 `IFolderView2`，最后通过 `RestoreFocusedItem(..., takeFocus:false)` 保持原生项目焦点。
 
-该失败只说明当前隔离菜单/焦点准备不足以验证命令分派，不能据此断言 Shell 自身行为或 WPF 产品焦点路由。随后恢复原代码并构建 NativeProbe 成功；`session-restore-private-desktop` watchdog 两次在 consumer 的 accelerator 阶段后超时，分别为 60 秒和 120 秒（日志 `20261027-045951-b850b086.stdout.log`、`20261027-050020-1b584e44.stdout.log`）。较早的 `20261027-045900-3a3de998.stdout.log` 则因 pane 2 误选断言失败。主桌面 foreground HWND 始终未变化。下一步应先找到 consumer 停滞点并建立可靠的 pane 焦点准备，再单独验证 Edit 命令；全选路由目前仍属未验证项。
+NativeProbe Release 构建 0 警告、0 错误；无失效 owner 防护前，完整四 pane `session-restore-private-desktop` watchdog 连续两轮退出码 0：`20261027-051232-3a389403.stdout.log`、`20261027-051309-69db2ee8.stdout.log`。日志读回 pane1/2/3 各自 `2/2` 项被选中、pane4 `1/1`，每次只目标 pane 有选区，清理后所有 pane 均为空选区；原有 view-state、菜单、文件操作/目录通知、Ctrl+A、F2 焦点检查也通过，foreground HWND 未变。随后加入 pending command owner 仍为当前 pane 的检查；四次完整回归均走过 `menu-activation-complete`（Edit 全选断言在此前执行），因此新保护下的四 pane Edit 全选也通过：`20261027-051440-1b4c16df.stdout.log`、`20261027-051510-5c90b97d.stdout.log`、`20261027-051539-7154f511.stdout.log`、`20261027-051631-ff469050.stdout.log`。但这些回归之后分别在复制/重命名/删除阶段超时，不能算整套 session-restore 回归通过；卡点位置会变化，尚未找到原因。
+
+该实现只在 NativeProbe 隔离宿主，不接入产品 ExplorerBrowser。它通过合成 frame `WM_COMMAND` 与当前中文/英文菜单项目名识别全选，尚未覆盖其他本地化 Shell 菜单、真实菜单跟踪/鼠标点击、物理键盘或 WPF 产品焦点链；不能据此宣称产品迁移已完成。活跃 pane 的 owner 校验有四 pane 合成命令覆盖；切换 pane/视图后旧 pending 命令被丢弃的竞争分支、完整操作回归稳定性仍未验证。
 
 ### 2026-10-27：为恢复 consumer 增加逐阶段诊断
 
 在第二个完整超时后，恢复 consumer 停滞位置不稳定：一轮在四 pane 菜单命令后未进入文件操作完成标记；加入复制、重命名、删除的开始/完成/读回标记后，两轮完整 Private Desktop session-restore watchdog 退出码 0（`20261027-050416-d29a6157.stdout.log`、`20261027-050448-d6f3baa5.stdout.log`）。更早的 `20261027-050301-4d766a58.stdout.log` 也完整通过。三轮成功均覆盖四 pane 菜单、Shell 复制/重命名/删除、视图状态、焦点与目录通知，主桌面 foreground HWND 未变；间隔仍有一轮在文件操作阶段超时（`20261027-050333-52f9c29c.stdout.log`），故不能视为已修复的稳定性问题。
 
-诊断输出现在分别标记 view 创建/恢复、pane 创建、菜单路由和每项文件操作，不改变测试行为。全选菜单命令的目标 pane 问题仍独立未验证；隐藏原型通过也不代表产品 ExplorerBrowser 或可见用户桌面验收。
+诊断输出现在分别标记 view 创建/恢复、pane 创建、菜单路由和每项文件操作，帮助定位偶发 consumer 停滞。全选菜单的隔离 pane 路由已按上一节验证；超时原因仍未确认。隐藏原型通过也不代表产品 ExplorerBrowser 或可见用户桌面验收。
 
 ## 2026-10-27：Content 视图逐项颜色绘制像素验证
 

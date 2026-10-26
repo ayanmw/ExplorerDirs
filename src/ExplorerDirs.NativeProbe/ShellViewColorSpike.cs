@@ -282,6 +282,8 @@ internal static class ShellViewColorSpike
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         Console.WriteLine("session-restore-consumer-stage: four-panes-ready");
+        var selectionMenus = VerifyFourPaneSelectionMenus(
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews);
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, allHosts, expectedModes, containerParent,
             menuCoordinator);
@@ -303,7 +305,7 @@ internal static class ShellViewColorSpike
             $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
             $"menu-routing={menuRouting}; menu-commands={menuCommands}; file-updates={allPaneCounts}; " +
-            $"directory-notifications={directoryIsolation}; independent=True";
+            $"selection-menus={selectionMenus}; directory-notifications={directoryIsolation}; independent=True";
     }
 
     private static string ProbeShellBrowserAcceleratorForwarding(ShellViewColorBrowserHost host,
@@ -450,7 +452,10 @@ internal static class ShellViewColorSpike
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupAscendingId, 0);
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Group Ascending");
+            var selectAllCommandId = FindShellViewCommandId(GetSubMenu(GetMenu(menuFrameWindow), 1), "全选", "Select All");
+            var editSelectAll = VerifyEditSelectAllOnFrame(menuFrameWindow, folderViews, index, selectAllCommandId);
             shellMenuCommands.Add($"pane{index + 1}:details=0x{detailsCommandId:X4}/context=0x{backgroundVerbDetailsId:X4}/same={detailsCommandId == backgroundVerbDetailsId},sort={sortDescendingId:X4}/{sortAscendingId:X4},group={groupDescendingId:X4}/{groupAscendingId:X4}");
+            shellMenuCommands[^1] += $",edit-select-all={editSelectAll}";
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
             before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
         }
@@ -525,6 +530,42 @@ internal static class ShellViewColorSpike
         }
     }
 
+    private static string VerifyEditSelectAllOnFrame(nint menuFrameWindow,
+        IReadOnlyList<nint> folderViews, int activeIndex, uint commandId)
+    {
+        foreach (var folderView in folderViews)
+        {
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var itemCount)); // SVGIO_ALLVIEW.
+            for (var item = 0; item < itemCount; item++)
+                Check(At<SelectFolderItem>(folderView, 15)(folderView, item, 0)); // SVSI_DESELECT.
+        }
+
+        _ = SendMessageW(menuFrameWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        Pump(150);
+
+        Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 2, out var allItems));
+        Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 1, out var selectedItems)); // SVGIO_SELECTION.
+        if (allItems == 0 || selectedItems != allItems)
+            throw new InvalidOperationException($"Edit > Select All did not select every item in pane {activeIndex + 1}: command=0x{commandId:X4}; selected={selectedItems}; total={allItems}.");
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            if (index == activeIndex) continue;
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out var siblingSelection));
+            if (siblingSelection != 0)
+                throw new InvalidOperationException($"Edit > Select All in pane {activeIndex + 1} selected items in sibling pane {index + 1}: {siblingSelection}.");
+        }
+        for (var item = 0; item < allItems; item++)
+            Check(At<SelectFolderItem>(folderViews[activeIndex], 15)(folderViews[activeIndex], item, 0)); // SVSI_DESELECT.
+        Pump(150);
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out var remaining));
+            if (remaining != 0)
+                throw new InvalidOperationException($"Edit > Select All cleanup left pane {index + 1} selected: {remaining} items.");
+        }
+        return $"id=0x{commandId:X4};selected={selectedItems}/{allItems};target=pane{activeIndex + 1}";
+    }
+
     private static bool HasMenuGroup(nint menu, string caption)
     {
         if (menu == 0 || !IsMenu(menu)) return false;
@@ -594,13 +635,12 @@ internal static class ShellViewColorSpike
         var restoreGroupKey = typeKey;
         Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
         Pump(150);
-        var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
         var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
         var selectAllRouting = VerifyFourPaneCtrlARouting(views, folderViews);
         var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -706,6 +746,52 @@ internal static class ShellViewColorSpike
         owner.MenuTrace.Add($"shell-command id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
         return true;
     }
+
+    internal static bool TryInvokeMergedEditMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
+        var composite = GetMenu(owner.MenuFrameWindow);
+        var editMenu = composite == 0 ? 0 : GetSubMenu(composite, 1);
+        var caption = FindMenuItemCaption(editMenu, commandId);
+        var normalizedCaption = NormalizeMenuLabel(caption);
+        if (normalizedCaption is not ("全选" or "Select All")) return false;
+        if (!execute) return true;
+
+        var folderViewId = FolderView2Id;
+        Check(Marshal.QueryInterface(owner.View, in folderViewId, out var folderView));
+        try
+        {
+            var originalView = owner.View;
+            bool IsCurrent() => owner.View == originalView && originalView != 0 && (isStillActive?.Invoke() ?? true);
+            if (!IsCurrent()) return true;
+            if (!ShellSelectionCommands.Apply(folderView, ShellSelectionCommand.All,
+                    IsCurrent, IsCurrent))
+                throw new InvalidOperationException("The active Shell view changed while applying Edit > Select All.");
+            if (IsCurrent()) _ = ShellSelectionCommands.RestoreFocusedItem(folderView, takeFocus: false);
+        }
+        finally { Marshal.Release(folderView); }
+        owner.MenuTrace.Add($"edit-command id=0x{commandId:X4} path='Edit > {normalizedCaption}' target=active-view");
+        return true;
+    }
+
+    private static string? FindMenuItemCaption(nint menu, uint commandId)
+    {
+        for (var index = 0; menu != 0 && index < GetMenuItemCount(menu); index++)
+        {
+            if (unchecked((uint)GetMenuItemID(menu, index)) == commandId)
+            {
+                var caption = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400);
+                return caption.ToString();
+            }
+            var nested = GetSubMenu(menu, index);
+            var nestedCaption = FindMenuItemCaption(nested, commandId);
+            if (nestedCaption is not null) return nestedCaption;
+        }
+        return null;
+    }
+
     private static IReadOnlyList<string>? FindMenuCommandPath(nint menu, uint commandId,
         IReadOnlyList<string>? parents = null)
     {

@@ -878,6 +878,7 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
     }
 
     internal nint BaseMenu => _baseMenu;
+    internal bool IsCurrentOwner(StreamViewHost owner) => !_disposed && ReferenceEquals(_owner, owner);
 
     public void Dispose()
     {
@@ -909,8 +910,10 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     coordinator._pendingShellMenuCommandId = 0;
                     coordinator._pendingShellMenuCommandOwner = null;
                 }
-                if (owner is not null && commandId != 0)
-                    _ = ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId);
+                if (owner is not null && commandId != 0 &&
+                    !ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId))
+                    _ = ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId,
+                        isStillActive: () => coordinator?.IsCurrentOwner(owner) == true);
                 return 0;
             }
             if (message == WmCommand && referenceData != 0)
@@ -923,7 +926,8 @@ internal sealed class ShellMenuFrameCoordinator : IDisposable
                     return 0;
                 }
                 if (lParam == 0 && commandId <= 0x7FFF && coordinator?._owner is { } owner &&
-                    ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId, execute: false))
+                    (ShellViewColorSpike.TryInvokeMergedViewMenuCommand(owner, commandId, execute: false) ||
+                     ShellViewColorSpike.TryInvokeMergedEditMenuCommand(owner, commandId, execute: false)))
                 {
                     coordinator._pendingShellMenuCommandId = commandId;
                     coordinator._pendingShellMenuCommandOwner = owner;

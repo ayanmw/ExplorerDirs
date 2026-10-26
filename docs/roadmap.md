@@ -3549,12 +3549,12 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 源码追踪发现，Shell 文件操作的焦点恢复请求虽会在窗口失活期间保留并暂停 `SetFocus`，但原有 1.5 秒绝对期限仍持续计时；用户离开应用超过该期限后返回，请求可能先过期。现在失活轮询会更新计时检查点，期限只在窗口活动期间消耗；窗格/视图/导航/用户输入门控与激活后的 1.5 秒上限不变。
 - `ShellFocusRestoreGateSmoke` 对“失活时间超过期限”“持续失活轮询”“重新激活后恢复有界计时”新增回归；先因缺少计时检查点 API 按预期失败，再通过。完整 Release SettingsSmoke 通过，App Release build 0 警告/错误。未操作剪贴板、启动 ExplorerBrowser 或使用物理键盘；真实 Alt+Tab、Ctrl+C/V 和 Shift+Delete 后的方向键体验仍待可见验收，文件操作焦点 P0 保持开放。
 
-## 2026-10-27：IShellView Edit → Select All pane 路由未证实
+## 2026-10-27：隔离 IShellView Edit → Select All pane 路由
 
-- NativeProbe 菜单读取确认 Edit 组有“全选 (Ctrl+A)”。隔离四 pane 尝试分别将命令投递到目标 `IShellView` HWND 与共享 frame；两者均未只选中目标 pane，结果误选 pane 2。发现探针曾错误使用 `IFolderView::SelectItem` 的取消选择标志后已修正；临时断言代码撤回，没有修改产品路由。
-- 恢复代码后 NativeProbe Release 构建通过；完整 Private Desktop consumer 在 accelerator 探测之后两次超时，前台 HWND 未变。全选路由仍未验证；下一步先定位 consumer 停滞并确定可靠的 pane 焦点注入，再恢复针对性探针。详见[隔离 IShellView 原型记录](ishellview-color-spike.md#2026-10-27-edit--select-all-的-pane-路由尚未验证)。
+- 纠正早前探针误判：`IFolderView::SelectItem` 的 `SVSI_SELECT=0x1`，取消选择为 `0`；曾将 `0x1` 错当清选标志，旧“误选 pane 2”结果无效。当前 Shell 菜单实测将 Edit → 全选分配为 `0x7023`。NativeProbe frame coordinator 依据当前 Edit 菜单项识别该命令，再调用共享 `ShellSelectionCommands.Apply(All)` 到当前 pane 的 `IFolderView2`。
+- NativeProbe Release build 0 警告/错误；无 stale-owner 防护前两轮完整 `session-restore-private-desktop` watchdog 退出码 0。加入 pending owner 当前性检查后，四次回归均通过 `menu-activation-complete` 阶段（包含每 pane Edit → Select All 的选择数与 sibling 隔离断言），但之后分别在复制/重命名/删除阶段超时。新路由在隔离四窗格中已验证；完整回归的后续文件操作间歇性超时尚未查明，不能报告为整轮通过。
+- 该命令分派仍是 NativeProbe 原型，依赖当前中/英文 Shell 菜单项目文本；owner 变化竞态分支、其他本地化、真实菜单跟踪、物理键盘及 WPF 产品宿主尚未验证。完整迁移门槛仍开放，详见[隔离 IShellView 原型记录](ishellview-color-spike.md#2026-10-27隔离-edit--select-all-pane-路由)。
 
 ## 2026-10-27：恢复 consumer 增加逐阶段诊断并复核四窗格基线
 
-- 为恢复 consumer 增加 view/pane 创建、菜单验证和复制/重命名/删除阶段标记。NativeProbe Release build 0 警告/错误；`session-restore-private-desktop` 三轮通过（`20261027-050301-4d766a58.stdout.log`、`20261027-050416-d29a6157.stdout.log`、`20261027-050448-d6f3baa5.stdout.log`），一轮在菜单验证后、文件操作完成前超时（`20261027-050333-52f9c29c.stdout.log`）。通过轮均检查四 pane 菜单命令映射、文件复制/重命名/删除的视图收敛、视图状态、焦点和跨目录通知；foreground HWND 未变。
-- 阶段标记帮助确定失败发生于哪个阶段，但间歇超时原因尚未查明。全选菜单的 pane 目标也仍未证实；真实拖放、可见菜单交互和 WPF 产品宿主集成仍是迁移门槛。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27为恢复-consumer-增加逐阶段诊断)。
+- 为恢复 consumer 增加 view/pane 创建、菜单验证和复制/重命名/删除阶段标记。前次三轮通过、一轮文件操作阶段超时；随后新路由批次又有两轮完整回归通过。阶段标记帮助把超时定位到不同阶段，但间歇原因尚未查明。真实拖放、可见菜单交互和 WPF 产品宿主集成仍是迁移门槛。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27为恢复-consumer-增加逐阶段诊断)。
