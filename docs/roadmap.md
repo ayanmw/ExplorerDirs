@@ -5,16 +5,18 @@
 - 用户提供的 Preview 0.6.0 截图仍显示目录树图标区域空白。生产代码已返回 `SHGetFileInfo(SHGFI_SYSICONINDEX)` 的系统图像索引，但没有把该系统图像列表绑定到 `SysTreeView32`；原生树控件已有自己的默认图像列表，二者索引空间不能假定相同。
 - `NativeShellTree` 初始化时现在把 `SHGetFileInfo` 返回的共享系统图像列表句柄绑定到原生树控件。Smoke 直接验证真实临时文件夹解析出的普通/展开索引位于系统图像表范围内（本机索引 `3/3`，共 512 项）；NativeProbe 另有隐藏树断言，要求控件读回的图像列表句柄与系统图像列表一致。
 - 本批未操作可见 GUI。构建和 smoke 只能证明绑定逻辑接线及索引有效，不能证明当前发布包或虚拟 Shell 节点已在屏幕正确绘制；需下次预览验收。
+- 后续将 NativeProbe 的句柄断言延伸到根目录填充及子目录展开后；本次隐藏探针运行中两个阶段仍读回同一系统图像列表，但完整探针最后在前台窗口边界检查失败。它不证明图标已在屏幕正确绘制；不再运行此会改变隐藏焦点的探针，等待独立的可见验收。
 
 主题与应用图标的目标、实施顺序、Q-Dir 兼容边界及验收门槛见[主题与图标路线图](theme-icon-roadmap.md)。该工作排在核心 Shell 功能和组件交互之后；当前系统强调色接线只是基础，不表示主题或文件区着色已完成。
 
 ## 2026-10-26：隔离 Shell 静态数值列原型
 
 - NativeProbe 用四个固定 `UInt64` 样本 `2/10/100/10` 验证隔离 `IShellFolder2` shim。无窗口合同覆盖自定义 PROPERTYKEY 列，也覆盖系统标准 `PKEY_Size` 的 `GetDetailsOf` 文本、`GetDetailsEx` 类型/值和 `CompareIDs` 数值顺序；NativeProbe Release build 0 警告、0 错误。
-- Private Desktop DefView 检查确认视图持有 shim、列状态可读回，但实际项目顺序不变，DefView 未调用自定义 `GetDetailsEx` 或 `CompareIDs`；因此排序/显示门槛仍失败。不要接入产品 ExplorerBrowser，也不做递归计算。下一步查清 DefView 列求值的安全隔离前置条件；不得在用户桌面调用 `IShellView.UIActivate`。
-- 调查补充：实验列使用未登记的临时 PROPERTYKEY；微软 Explorer Data Provider 示例随自定义属性提供 `.propdesc`，其中声明属性类型和标签。`PSRegisterPropertySchema` 文档说明 schema 是机器级、安装期注册。**待验证假设：**DefView 未读取实验属性可能与缺少 property description schema 有关。现在已完成无窗口标准 `PKEY_Size` 直测；下一门槛是在安全隔离的 DefView 中观察该标准列的实际取值/排序回调，并与未登记自定义键对照。不得在日常系统注册测试 schema。
-- 下一轮探针补充：原生 shim 现对标准 Size 列逐项目文本回调 `GetDetailsOf` 单独计数；此前仅观测 `GetDetailsEx` 与 `CompareIDs`，不能据此排除 DefView 走文本接口。新计数已接入探针输出，待以后经明确授权的隔离桌面测试；本轮不运行 Shell 窗口。
-- 接口契约复核显示 `GetDetailsOf`/`GetDetailsEx` 是 Explorer 详情列路径，`IShellItem2::GetPropertyStore` 是另一入口；不在没有运行时证据时把 `GetUIObjectOf` 改造成属性存储代理。架构评审已记录该边界；下一步需要安全隔离视图的三回调观测，不接入产品。
+- Private Desktop 的未激活 DefView 检查确认视图持有 shim、列状态可读回，但实际项目顺序不变，且未调用适配器的逐项目列回调；因此未激活视图的排序/显示门槛失败。此结果不代表活动 DefView。不要接入产品 ExplorerBrowser，也不做递归计算。下一步查清列求值所需的激活条件及安全隔离方式；不得在用户桌面调用 `IShellView.UIActivate`。
+- 调查补充：实验列使用未登记的临时 PROPERTYKEY；微软 Explorer Data Provider 示例随自定义属性提供 `.propdesc`，其中声明属性类型和标签。`PSRegisterPropertySchema` 文档说明 schema 是机器级、安装期注册。**待验证假设：**DefView 未读取实验属性可能与缺少 property description schema 有关。现有无窗口标准 `PKEY_Size` 合同已通过；未激活 DefView 中的标准列消费仍为 0，schema 是否影响活动视图尚无证据。不得在日常系统注册测试 schema。
+- 原生 shim 现对标准 Size 列逐项目文本回调 `GetDetailsOf` 单独计数；此前仅观测 `GetDetailsEx` 与 `CompareIDs`。新计数已在 Private Desktop 未激活视图探针运行，Size 项目计数为 0；由于视图未激活，不能据此排除活动 DefView 使用该回调。
+- 接口契约复核显示 `GetDetailsOf`/`GetDetailsEx` 是 Explorer 详情列路径，`IShellItem2::GetPropertyStore` 是另一入口；没有证据时不把 `GetUIObjectOf` 改造成属性存储代理。三类列回调现已观测到未激活视图均未消费，下一步是查找不会触及用户前台的活动视图实验；不接入产品。
+- 隔离的未激活 DefView 探针现已实际运行：adapter 身份、排序键/方向读回通过，但 Size 项目 `GetDetailsOf`/`GetDetailsEx` 与 `CompareIDs` 均为 0，真实项目顺序没有变为请求的升序，排序门槛失败。前台窗口保持不变。因为未调用 `UIActivate`，该结果只说明未激活视图的消费行为；之前激活调用曾引起外层前台变化，不在用户桌面复试。
 
 ## 2026-10-26：修复原生目录树默认图标回退
 
