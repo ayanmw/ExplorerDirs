@@ -31,7 +31,7 @@ internal readonly record struct PaneFocusStopMap(
     internal static PaneFocusStopMap Create(bool searchVisible, bool quickFilterVisible,
         bool treeVisible, bool hasColumnHeader, bool paneTreeButtonVisible = false,
         bool paneViewStyleButtonVisible = true, bool addressHistoryButtonVisible = false,
-        bool addressPathButtonVisible = false)
+        bool addressPathButtonVisible = false, bool tabHeaderVisible = true)
     {
         var navigationStopCount = BaseNavigationStopCount + (paneTreeButtonVisible ? 1 : 0) +
             (paneViewStyleButtonVisible ? 1 : 0) +
@@ -48,15 +48,16 @@ internal readonly record struct PaneFocusStopMap(
         var filterCount = quickFilterVisible ? 8 : 0;
         var searchStart = navigationStopCount;
         var filterStart = searchStart + searchCount;
-        var tabHeader = filterStart + filterCount;
-        var tree = treeVisible ? tabHeader + 1 : -1;
-        var columnHeader = tabHeader + (treeVisible ? 2 : 1);
+        var nextStop = filterStart + filterCount;
+        var tabHeader = tabHeaderVisible ? nextStop : -1;
+        var tree = treeVisible ? nextStop + (tabHeaderVisible ? 1 : 0) : -1;
+        var columnHeader = nextStop + (tabHeaderVisible ? 1 : 0) + (treeVisible ? 1 : 0);
         var fileView = columnHeader + (hasColumnHeader ? 1 : 0);
         var statusTools = fileView + 1;
         var majorStops = new List<int> { address };
         if (searchVisible) majorStops.Add(searchStart);
         if (quickFilterVisible) majorStops.Add(filterStart);
-        majorStops.Add(tabHeader);
+        if (tabHeaderVisible) majorStops.Add(tabHeader);
         if (treeVisible) majorStops.Add(tree);
         if (hasColumnHeader) majorStops.Add(columnHeader);
         majorStops.Add(fileView);
