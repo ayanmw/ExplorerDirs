@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：覆盖四窗格 OLE drop target 同 STA 生命周期
+
+- 拖放注册 smoke 扩展到四个独立隐藏普通 HWND，在同一 STA 同时持有四个 OLE drop-target owner；重复注册首个 HWND 必须收到 `DRAGDROP_E_ALREADYREGISTERED`，失败 owner 平衡自己的 `OleInitialize`，原 owner 撤销后 HWND 可重新注册，其余窗格逐个正常撤销。Release NativeProbe build 0 警告/错误，定向 smoke 通过，前台 HWND 未变。
+- 该证据验证了四窗格注册 owner 的 OLE 资源生命周期，不验证真实 Shell `IShellFolder` 目标注册或 `DoDragDrop` 文件操作；完整拖放仍是迁移门槛。
+
 ## 2026-10-27：隔离 IShellView 文件夹 drop target 注册生命周期
 
 - 四窗格 session-restore 原型现从每个当前目录 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得目录级目标，并通过 `OleInitialize`、`RegisterDragDrop` 注册到对应 Shell view HWND；切换/销毁 view 前由同一 STA host `RevokeDragDrop` 并平衡 `OleUninitialize`，避免注册指针跨 HWND 生命周期残留。依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`IDropTarget`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idroptarget)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize) 与 [`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop) 合同。

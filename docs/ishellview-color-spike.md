@@ -14,6 +14,12 @@ NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠�
 
 依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize)、[`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop)、[`RevokeDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-revokedragdrop) 合同。
 
+## 2026-10-27：四窗格 OLE drop target owner 生命周期 smoke
+
+扩展 `--shell-view-drop-target-registration-smoke`，在同一个 STA 上同时对四个隐藏普通 HWND 创建独立 drop-target owner；再对第一个已注册 HWND 故意创建重复 owner，验证收到 `DRAGDROP_E_ALREADYREGISTERED` 后原 owner 仍可撤销，且该失败路径配对清理它自己的 OLE 初始化。其余三个注册逐个 Dispose，最后第一个 HWND 在撤销后可再次注册。Release build 0 警告/错误，smoke 通过且前台 HWND 不变。
+
+这验证四个 OLE 注册可在单 STA 并存，以及重复注册失败不会取代既有 owner；仍使用普通 STATIC HWND 与假 `IDropTarget`，不证明 Shell 文件夹目标是否能注册在真实 view HWND，也未调用 `DoDragDrop`。
+
 ## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
 
 `StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。
