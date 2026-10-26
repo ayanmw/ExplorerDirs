@@ -78,6 +78,15 @@ internal static class QdrImportSmoke
         Require(qdrColorInvalid.Warnings.Any(warning => warning.Contains("useColor") && warning.Contains("无法识别")) &&
                 qdrColorInvalid.Warnings.All(warning => !warning.Contains("maybe")),
             "invalid Q-Dir color switch values are reported without echoing the raw value");
+        var qdrColorRules = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nuseColor=1\nDir1=C:\\left\n" +
+            "[Filter2]\n0=*.jpg=1=FF0000=-1=1=-1=0\n1=#BG-A=1=-1=-1=1=-1=0\n",
+            (value, _) => value);
+        Require(qdrColorRules.Warnings.Any(warning => warning.Contains("Filter2") && warning.Contains("2") &&
+                    warning.Contains("颜色规则") && warning.Contains("未导入")) &&
+                qdrColorRules.Warnings.All(warning => !warning.Contains("FF0000")) &&
+                !qdrColorRules.Warnings.Any(warning => warning.Contains("未识别且未应用的字段名")),
+            "Q-Dir import preview counts Filter2 rules without interpreting or exposing their values");
         var previewDisabled = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\left\nVorschau=0\n", (value, _) => value);
         Require(!previewDisabled.Panes[0][0].PreviewPaneVisible &&

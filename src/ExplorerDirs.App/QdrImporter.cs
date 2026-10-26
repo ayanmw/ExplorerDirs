@@ -66,10 +66,24 @@ internal static class QdrImporter
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var warnings = new HashSet<string>();
         var duplicate = false;
+        var inFilter2 = false;
+        var filter2RuleCount = 0;
         foreach (var raw in text.Split('\n'))
         {
             var line = raw.Trim().TrimStart('\uFEFF');
             if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#')) continue;
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                inFilter2 = line.Equals("[Filter2]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            if (inFilter2)
+            {
+                var equals = line.IndexOf('=');
+                if (equals > 0 && int.TryParse(line.AsSpan(0, equals).Trim(), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out _)) filter2RuleCount++;
+                continue;
+            }
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
             // Plain Dir paths may legitimately contain &, so never split those.
             var fields = line.StartsWith("Folder", StringComparison.OrdinalIgnoreCase) ? line.Split('&') : [line];
@@ -236,6 +250,8 @@ internal static class QdrImporter
         }
         var proportions = QdrProportions.Read(values, layout, warnings);
         warnings.Add("不导入颜色规则、背景值、窗口位置及程序启动命令。");
+        if (filter2RuleCount > 0)
+            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；当前版本未导入。预览不会显示这些规则的值。");
         AddUnsupportedColorSwitchWarning(values, "useColor", warnings);
         AddUnsupportedColorSwitchWarning(values, "useTreeColor", warnings);
         var result = QdrExporter.ApplyExtension(values, duplicate,
