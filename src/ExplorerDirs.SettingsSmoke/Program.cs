@@ -121,6 +121,12 @@ if (args.Length == 1 && args[0] == "--photo-print-window-markup-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--pane-theme-markup-smoke")
+{
+    PaneThemeMarkupSmoke.Run();
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--roundtrip-qdr")
 {
     QdrRoundTripProbe.Run(args[1]);
@@ -395,6 +401,7 @@ try
     ExplorerDirs.SettingsSmoke.PhotoPrintImageLoaderSmoke.Run();
     ExplorerDirs.SettingsSmoke.PhotoPrintPreviewGateSmoke.Run();
     ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run();
+    PaneThemeMarkupSmoke.Run();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")

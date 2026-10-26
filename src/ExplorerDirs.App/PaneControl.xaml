@@ -130,6 +130,17 @@
                             <local:TabHeaderPanel/>
                         </ItemsPanelTemplate>
                     </TabControl.ItemsPanel>
+                    <TabControl.ItemContainerStyle>
+                        <Style TargetType="{x:Type TabItem}">
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TabControl.ItemContainerStyle>
                     <TabControl.Template>
                         <ControlTemplate TargetType="{x:Type TabControl}">
                             <Grid>
