@@ -3587,3 +3587,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 在本机 filesystem view 返回 `E_NOINTERFACE`；经 `IShellFolder::CreateViewObject` 取得并注册到 view HWND 的目录目标则接受 `SHCreateDataObject` 构造的临时 Shell 文件对象。`DragEnter/DragOver/Drop` 均成功，Copy effect 为 1，目标内容匹配、源文件保留。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog 退出码 0，`--shell-view-color-policy-smoke` 通过，foreground 未变。
 - 前两次 watchdog 超时根因为 Private Desktop top-level parent `DestroyWindow` 清理阻塞；遵从现有一次性探针进程清理规则后退出正常。两次超时留下的两个 `%TEMP%\ExplorerDirs-NativeProbe\<guid>` 测试夹具无法通过当前工具删除，详情见[探针记录](ishellview-color-spike.md#2026-10-27-ishellview-文件夹-drop-target-的-shell-数据对象接收)。
 - 这是文件夹目标接收 Shell `IDataObject` 的隔离证据，源对象通过 `SHCreateDataObject` 构造；没有验证从真实选择创建的数据对象、`DoDragDrop`、鼠标命中/修饰键/移动语义或用户可见跨窗格拖动，故拖放 P0 仍开放。
+
+## 2026-10-27：对比 IShellView 选中项数据对象
+
+- 修正探针对 `ILFindChild` 借用 PIDL 的错误释放，并在枚举前等待源 view 稳定到 3 个测试项目；Private Desktop watchdog 退出码 0，foreground 未变。
+- `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)` 成功返回选中项数据对象；将其直接传给注册的目标文件夹 `IDropTarget` 后，`DragEnter/DragOver/Drop` 均返回 `S_OK` 且 Copy effect=1，但目标中未出现文件。此前已知 `SHCreateDataObject` 构造对象在相同目标路径能真实复制，源文件保留。这个差异说明单纯的 Shell 方法成功码不足以证明拖放操作完成，选中项对象的格式/生命周期及真实 OLE drag loop 仍需调查。
+- NativeProbe Release build 0 警告/错误；本次仍未调用 `DoDragDrop`，没有用户桌面输入或产品宿主改动。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27对比-ishellview-选中项数据对象)。

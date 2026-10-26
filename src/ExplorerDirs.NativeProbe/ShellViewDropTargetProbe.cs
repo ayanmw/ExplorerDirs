@@ -7,10 +7,12 @@ internal static class ShellViewDropTargetProbe
 {
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
+    private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid DropTargetId = new("00000122-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private const uint DropEffectCopy = 1;
     private const uint DropEffectMask = 7;
+    private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
 
     internal static int Run()
     {
@@ -19,23 +21,32 @@ internal static class ShellViewDropTargetProbe
         var sourceFolderPath = Path.Combine(root, "source");
         var targetFolderPath = Path.Combine(root, "target");
         var sourcePath = Path.Combine(sourceFolderPath, "view-target.txt");
-        var registeredTargetPath = Path.Combine(targetFolderPath, "folder-target.txt");
+        var selectedSourcePath = Path.Combine(sourceFolderPath, "selected-view.txt");
+        var registeredSourcePath = Path.Combine(sourceFolderPath, "registered-target.txt");
+        var selectedTargetPath = Path.Combine(targetFolderPath, "selected-view.txt");
+        var registeredTargetPath = Path.Combine(targetFolderPath, "registered-target.txt");
         var viewTargetPath = Path.Combine(targetFolderPath, "view-target.txt");
-        nint parent = 0, pane = 0, sourceFolderPidl = 0, sourceItemPidl = 0, targetFolderPidl = 0;
-        nint sourceFolder = 0, targetFolder = 0, view = 0, viewWindow = 0, hostPointer = 0;
-        nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, childPidls = 0;
-        StreamViewHost? host = null;
-        var createAttempted = false;
+        nint parent = 0, sourcePane = 0, targetPane = 0, sourceFolderPidl = 0, sourceItemPidl = 0, targetFolderPidl = 0;
+        nint sourceFolder = 0, targetFolder = 0, sourceView = 0, targetView = 0;
+        nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
+        nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, childPidls = 0;
+        StreamViewHost? sourceHost = null, targetHost = null;
+        var sourceCreateAttempted = false;
+        var targetCreateAttempted = false;
         try
         {
+            Console.WriteLine("shell-view-drop-target-stage: fixture-start");
             Directory.CreateDirectory(sourceFolderPath);
             Directory.CreateDirectory(targetFolderPath);
             File.WriteAllText(sourcePath, "native-shell-drop-fixture");
+            File.WriteAllText(selectedSourcePath, "native-shell-selected-view-fixture");
+            File.WriteAllText(registeredSourcePath, "native-shell-folder-drop-fixture");
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourceFolderPath, 0, out sourceFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourcePath, 0, out sourceItemPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(targetFolderPath, 0, out targetFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, sourceFolderPidl, 0, in ShellFolderId, out sourceFolder));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, targetFolderPidl, 0, in ShellFolderId, out targetFolder));
+            Console.WriteLine("shell-view-drop-target-stage: shell-folders-bound");
 
             childPidls = Marshal.AllocHGlobal(IntPtr.Size);
             var relativeSource = ILFindChild(sourceFolderPidl, sourceItemPidl);
@@ -46,29 +57,85 @@ internal static class ShellViewDropTargetProbe
             parent = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop target probe",
                 0x90000000, 20, 20, 680, 500, 0, 0, 0, 0); // WS_POPUP | WS_VISIBLE; private Desktop only.
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            pane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop pane",
-                0x50000000 | 0x02000000 | 0x04000000, 10, 10, 640, 440, parent, 0, 0, 0);
-            if (pane == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            sourcePane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop source pane",
+                0x50000000 | 0x02000000 | 0x04000000, 10, 10, 315, 440, parent, 0, 0, 0);
+            if (sourcePane == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            targetPane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop target pane",
+                0x50000000 | 0x02000000 | 0x04000000, 330, 10, 315, 440, parent, 0, 0, 0);
+            if (targetPane == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
 
             var shellViewId = ShellViewId;
-            Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, pane, ref shellViewId, out view));
-            host = new StreamViewHost(pane, []);
-            host.View = view;
-            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            Marshal.ThrowExceptionForHR(At<CreateViewObject>(sourceFolder, 8)(sourceFolder, sourcePane, ref shellViewId, out sourceView));
+            sourceHost = new StreamViewHost(sourcePane, []);
+            sourceHost.View = sourceView;
+            sourceHostPointer = Marshal.GetComInterfaceForObject(sourceHost, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
-            var bounds = new StreamProbeRect { Right = 620, Bottom = 420 };
-            createAttempted = true;
-            Marshal.ThrowExceptionForHR(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
-            if (viewWindow == 0) throw new InvalidOperationException("CreateViewWindow returned no HWND.");
+            var bounds = new StreamProbeRect { Right = 305, Bottom = 420 };
+            sourceCreateAttempted = true;
+            Marshal.ThrowExceptionForHR(At<CreateViewWindow>(sourceView, 9)(sourceView, 0, ref settings, sourceHostPointer, ref bounds, out sourceViewWindow));
+            if (sourceViewWindow == 0) throw new InvalidOperationException("Source CreateViewWindow returned no HWND.");
+            Console.WriteLine("shell-view-drop-target-stage: source-view-created");
+            var folderViewId = FolderViewId;
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(sourceView, in folderViewId, out sourceFolderView));
+            var sourceChildPidl = ILFindChild(sourceFolderPidl, sourceItemPidl);
+            if (sourceChildPidl == 0) throw new InvalidOperationException("The selected source item is not a child of its folder.");
+            var sourceItemCount = 0;
+            var enumerationDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            do
+            {
+                System.Windows.Forms.Application.DoEvents();
+                Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 2, out sourceItemCount));
+                if (sourceItemCount == 3) break;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < enumerationDeadline);
+            Console.WriteLine($"shell-view-drop-target-stage: source-items={sourceItemCount}");
+            var sourceItemIndex = -1;
+            for (var index = 0; index < sourceItemCount; index++)
+            {
+                var getItemHr = At<GetItem>(sourceFolderView, 6)(sourceFolderView, index, out var itemPidl);
+                if (getItemHr < 0 || itemPidl == 0) continue;
+                try
+                {
+                    if (ILIsEqual(sourceChildPidl, itemPidl))
+                    {
+                        sourceItemIndex = index;
+                        break;
+                    }
+                }
+                finally { Marshal.FreeCoTaskMem(itemPidl); }
+            }
+            if (sourceItemIndex < 0) throw new InvalidOperationException("The Shell view did not enumerate the selected source file.");
+            Console.WriteLine($"shell-view-drop-target-stage: source-index={sourceItemIndex}");
+            Marshal.ThrowExceptionForHR(At<SelectItem>(sourceFolderView, 15)(sourceFolderView, sourceItemIndex, SelectAndFocus));
+            Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 1, out var selectedCount));
+            if (selectedCount != 1) throw new InvalidOperationException($"Expected one selected source file, observed {selectedCount}.");
+            Console.WriteLine("shell-view-drop-target-stage: source-selected");
+            var selectedDataObjectId = DataObjectId;
+            var selectedDataObjectHr = At<GetItemObject>(sourceView, 15)(sourceView, 1, ref selectedDataObjectId, out selectedDataObject);
+            if (selectedDataObjectHr < 0)
+                Console.WriteLine($"shell-view-drop-target-candidate: source=selected-view; get-data-object=0x{selectedDataObjectHr:X8}");
+            else
+                Console.WriteLine("shell-view-drop-target-stage: selected-data-object-acquired");
+
+            shellViewId = ShellViewId;
+            Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetPane, ref shellViewId, out targetView));
+            targetHost = new StreamViewHost(targetPane, []);
+            targetHost.View = targetView;
+            targetHostPointer = Marshal.GetComInterfaceForObject(targetHost, typeof(IStreamProbeBrowser));
+            settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            bounds = new StreamProbeRect { Right = 305, Bottom = 420 };
+            targetCreateAttempted = true;
+            Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
+            if (targetViewWindow == 0) throw new InvalidOperationException("Target CreateViewWindow returned no HWND.");
             var dropTargetId = DropTargetId;
-            Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, viewWindow, ref dropTargetId, out folderDropTarget));
-            host.RegisterDropTarget(viewWindow, folderDropTarget);
+            Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetViewWindow, ref dropTargetId, out folderDropTarget));
+            targetHost.RegisterDropTarget(targetViewWindow, folderDropTarget);
             var getItemObjectDropTargetId = DropTargetId;
-            var getItemObjectHr = At<GetItemObject>(view, 15)(view, 0, ref getItemObjectDropTargetId, out viewDropTarget);
+            var getItemObjectHr = At<GetItemObject>(targetView, 15)(targetView, 0, ref getItemObjectDropTargetId, out viewDropTarget);
             if (getItemObjectHr < 0)
                 Console.WriteLine($"shell-view-drop-target-candidate: target=IShellView.GetItemObject; query=0x{getItemObjectHr:X8}");
 
-            var windowResult = At<GetViewWindow>(view, 3)(view, out var targetWindow);
+            var windowResult = At<GetViewWindow>(targetView, 3)(targetView, out var targetWindow);
             Marshal.ThrowExceptionForHR(windowResult);
             if (!GetWindowRect(targetWindow, out var boundsOnScreen))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -76,9 +143,10 @@ internal static class ShellViewDropTargetProbe
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point, viewTargetPath, "IShellView.GetItemObject");
+            var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
+                selectedTargetPath, "selected view IDataObject");
             // Keep the registered folder target as a separate candidate with its own Shell data object.
-            var secondSourcePath = Path.Combine(sourceFolderPath, "folder-target.txt");
-            File.WriteAllText(secondSourcePath, "native-shell-folder-drop-fixture");
+            var secondSourcePath = registeredSourcePath;
             var secondSourcePidl = nint.Zero;
             var secondChildArray = Marshal.AllocHGlobal(IntPtr.Size);
             nint secondDataObject = 0;
@@ -101,33 +169,43 @@ internal static class ShellViewDropTargetProbe
             }
 
             var sourcePreserved = File.Exists(sourcePath) && File.ReadAllText(sourcePath) == "native-shell-drop-fixture" &&
+                File.Exists(selectedSourcePath) && File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
                 File.Exists(secondSourcePath) && File.ReadAllText(secondSourcePath) == "native-shell-folder-drop-fixture";
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; registered-folder-target-copy={folderTargetResult}; sources-preserved={sourcePreserved}; foreground-unchanged=True; actual-DoDragDrop=False");
+            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-copy={folderTargetResult}; sources-preserved={sourcePreserved}; foreground-unchanged=True; actual-DoDragDrop=False");
             if (!folderTargetResult || !sourcePreserved)
                 throw new InvalidOperationException("The registered folder drop target did not perform a non-destructive isolated copy.");
             return 0;
         }
         finally
         {
-            if (host is not null && viewWindow != 0)
-                host.RevokeDropTarget(viewWindow);
-            if (view != 0 && createAttempted)
-                Marshal.ThrowExceptionForHR(At<DestroyViewWindow>(view, 10)(view));
-            host?.Dispose();
-            if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (targetHost is not null && targetViewWindow != 0)
+                targetHost.RevokeDropTarget(targetViewWindow);
+            if (targetView != 0 && targetCreateAttempted)
+                Marshal.ThrowExceptionForHR(At<DestroyViewWindow>(targetView, 10)(targetView));
+            if (sourceView != 0 && sourceCreateAttempted)
+                Marshal.ThrowExceptionForHR(At<DestroyViewWindow>(sourceView, 10)(sourceView));
+            targetHost?.Dispose();
+            sourceHost?.Dispose();
+            if (targetHostPointer != 0) Marshal.Release(targetHostPointer);
+            if (sourceHostPointer != 0) Marshal.Release(sourceHostPointer);
             if (viewDropTarget != 0) Marshal.Release(viewDropTarget);
             if (folderDropTarget != 0) Marshal.Release(folderDropTarget);
+            if (selectedDataObject != 0) Marshal.Release(selectedDataObject);
             if (dataObject != 0) Marshal.Release(dataObject);
-            if (view != 0) Marshal.Release(view);
+            if (sourceFolderView != 0) Marshal.Release(sourceFolderView);
+            if (sourceView != 0) Marshal.Release(sourceView);
+            if (targetView != 0) Marshal.Release(targetView);
             if (sourceFolder != 0) Marshal.Release(sourceFolder);
             if (targetFolder != 0) Marshal.Release(targetFolder);
             if (sourceFolderPidl != 0) Marshal.FreeCoTaskMem(sourceFolderPidl);
             if (sourceItemPidl != 0) Marshal.FreeCoTaskMem(sourceItemPidl);
             if (targetFolderPidl != 0) Marshal.FreeCoTaskMem(targetFolderPidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
-            if (pane != 0 && !DestroyWindow(pane))
+            if (sourcePane != 0 && !DestroyWindow(sourcePane))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            if (targetPane != 0 && !DestroyWindow(targetPane))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             // Private Desktop top-level windows can block explicit DestroyWindow; the watchdog process owns final cleanup.
             try { Directory.Delete(root, recursive: true); }
@@ -163,7 +241,8 @@ internal static class ShellViewDropTargetProbe
         var dropHr = At<Drop>(target, 6)(target, dataObject, 0x0001, ref point, ref dropEffect);
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
         var copied = File.Exists(destination) && File.ReadAllText(destination).StartsWith("native-shell-", StringComparison.Ordinal);
-        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}");
+        var targetFiles = Directory.GetFiles(Path.GetDirectoryName(destination)!).Select(Path.GetFileName).Order().ToArray();
+        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
         return copied;
     }
 
@@ -176,6 +255,9 @@ internal static class ShellViewDropTargetProbe
         nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint itemPidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragEnter(nint self, nint dataObject, uint keyState, ref PointL point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragOver(nint self, uint keyState, ref PointL point, ref uint effect);
@@ -184,6 +266,7 @@ internal static class ShellViewDropTargetProbe
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string path, nint bind, out nint pidl, uint attributes, out uint result);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern nint ILFindChild(nint parent, nint child);
+    [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint first, nint second);
     [DllImport("shell32.dll")] private static extern int SHCreateDataObject(nint parent, uint count, nint children, nint sourceDataObject, in Guid iid, out nint dataObject);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint exStyle, string className, string windowName,
         uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);

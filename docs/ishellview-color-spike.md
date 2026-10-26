@@ -1037,3 +1037,11 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 前两次探针运行在文件操作完成后卡于 Private Desktop 顶层 parent 的 `DestroyWindow`，watchdog 以超时结束；诊断确认 drop 与 Shell view 的撤销/销毁均已完成。按现有 Private Desktop 约束改为由一次性进程退出回收 top-level parent 后，探针退出码 0。两次被 watchdog 结束的探针各遗留一个仅含测试文件的临时 fixture，路径为 `%TEMP%\ExplorerDirs-NativeProbe\81c4ff72648f49fba34e19442d1aa5d4` 与 `%TEMP%\ExplorerDirs-NativeProbe\a9ef35a4f4244e62bb1150f2ad1cbdf9`；当前工具拒绝删除这些用户 temp 目录，故未声称已清理。
 
 这项结果比单纯注册 smoke 多验证了文件夹目标确实能消费 Shell `IDataObject` 并执行复制；但数据对象由 `SHCreateDataObject` 构造，不是从真实源 view 当前选择取得。它不证明真实 OLE `DoDragDrop`、鼠标命中/修饰键源端交接、移动语义、第三方目标或可见多窗格行为；`DoDragDrop` 仍待可接收输入的独立桌面验收。
+
+### 2026-10-27 对比 IShellView 选中项数据对象
+
+扩展 Private Desktop 探针创建源 `IShellView`，等待临时目录条目完成枚举，选择一个文件并调用 `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)`。该调用成功；同一目标文件夹的 `IDropTarget` 对此数据对象的 `DragEnter`、`DragOver`、`Drop` 均返回 `S_OK` 且 Copy effect=1，但目标目录没有新增文件。作为对照，单独用 `SHCreateDataObject` 从同一源目录构造的数据对象仍能复制并保留源文件。`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 仍返回 `E_NOINTERFACE`。
+
+首次运行发现源 `sourceChildPidl` 是 `ILFindChild` 指向绝对 PIDL 内部的借用指针，不应释放；错误释放导致 heap corruption。移除释放并加入最多 3 秒的 Shell 枚举等待后，探针稳定运行。当前日志还会列出目标目录最终文件名，防止仅依赖 Drop 的成功码误判操作已完成。
+
+NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，因此不能区分该差异是合成调用缺少 OLE drag loop/数据对象生命周期，还是 view 选中对象的具体格式差异；也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步先枚举并记录选中数据对象的公开 `FORMATETC`，再决定是否值得申请隔离桌面的真实 OLE drag-loop 验收。
