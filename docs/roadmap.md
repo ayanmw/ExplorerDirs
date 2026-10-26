@@ -3511,3 +3511,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 恢复到上一已提交实现后，NativeProbe Release build 0 警告/错误，完整四窗格 `session-restore-private-desktop` watchdog 退出码 0（`20261027-041344-088dec96.stdout.log`）。各 pane 经背景 `IContextMenu` canonical verb 分别完成 Details、排序、分组；四窗格会话/菜单生命周期、自定义命令 active-pane 路由、文件操作/通知和 F2 方向键焦点隔离仍通过，前台 HWND 未变。
 - 这些原生命令走的是 context-menu `InvokeCommand`，不证明 frame 合成 View 菜单的 `WM_COMMAND` 已可用。后续先研究 Explorer 宿主处理 `FCIDM_SHVIEWFIRST..LAST` 的标准命令路径，再实现 frame dispatch 原型；Shell 菜单命令通过前不进入产品宿主迁移。
 - 详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-撤回-frame-转发实验后的四窗格原生命令基线复核)。
+
+## 2026-10-27：比较 Shell View 菜单与 context-menu 命令 ID
+
+- 在真实 composite View 菜单中读到 Details ID `0x704B`；同一 pane 的 `IContextMenu` canonical verb `viewlogicaldetails` 在 `idCmdFirst=0x7000` 时分配 ID `0x701B`。ID 不相同，不能把 View 菜单 ID 直接重解释成 context-menu verb ID。
+- 完整四窗格 watchdog 仍退出码 0（`20261027-041457-17b0712f.stdout.log`）；该检查只读比较 ID，不执行 frame View 菜单命令。下一步查 Windows Explorer 对标准 `FCIDM_SHVIEWFIRST..LAST` 命令的宿主处理/映射，再做最小 dispatch 实验。
+- 详情见[隔离原型记录](ishellview-color-spike.md#2026-10-27-撤回-frame-转发实验后的四窗格原生命令基线复核)。

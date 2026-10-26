@@ -383,6 +383,9 @@ internal static class ShellViewColorSpike
         }
         Pump(300);
         AssertSortAndGroupDirections(-1, 1, 1, "menu test baseline");
+        var topViewDetailsId = FindShellMenuCommandId(menuOwner, "详细信息", "Details");
+        var backgroundVerbDetailsId = FindBackgroundVerbCommandId(views[0], "viewlogicaldetails", 0x7000);
+        var detailsIdMapping = $"view-details=0x{topViewDetailsId:X4};background-verb=0x{backgroundVerbDetailsId:X4};same={topViewDetailsId == backgroundVerbDetailsId}";
         for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
         {
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
@@ -426,7 +429,7 @@ internal static class ShellViewColorSpike
         var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
-        return $"{string.Join(',', results)}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
+        return $"{string.Join(',', results)}; {detailsIdMapping}; selection-menus={selectionMenus}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
 
         void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
             IReadOnlyList<uint> expected, int activeIndex, string phase)
@@ -458,6 +461,54 @@ internal static class ShellViewColorSpike
                     throw new InvalidOperationException($"Shell menu command {phase} changed the wrong view state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSortDirection}/{expectedGroupDirection}.");
             }
         }
+    }
+
+    private static uint FindShellMenuCommandId(nint menuOwner, params string[] labels)
+    {
+        var composite = GetMenu(menuOwner);
+        var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
+        for (var index = 0; viewMenu != 0 && index < GetMenuItemCount(viewMenu); index++)
+        {
+            var text = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(viewMenu, (uint)index, text, text.Capacity, 0x400);
+            if (labels.Any(label => text.ToString().Contains(label, StringComparison.OrdinalIgnoreCase)))
+                return GetMenuItemID(viewMenu, index);
+        }
+        throw new InvalidOperationException($"The merged Shell View menu did not contain a command matching [{string.Join(',', labels)}].");
+    }
+
+    private static uint FindBackgroundVerbCommandId(nint view, string expectedVerb, uint firstCommandId)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create an in-memory Shell context menu for command-ID comparison.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0,
+                    firstCommandId, 0x7FFF, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xFFFF, 0x7FFF - firstCommandId);
+                var buffer = Marshal.AllocHGlobal(512);
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                            return firstCommandId + offset;
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+        throw new InvalidOperationException($"The Shell background context menu did not expose canonical verb '{expectedVerb}' in the requested command-ID range.");
     }
 
     private static string VerifyFourPaneSelectionMenus(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)

@@ -949,3 +949,5 @@ NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-col
 在恢复到已提交的应用菜单 probe 后，重新运行 Release build 与完整 `session-restore-private-desktop` watchdog。构建 0 警告/错误，watchdog 退出码 0，日志 `20261027-041344-088dec96.stdout.log`。四个 filesystem `IShellView` 通过 Shell 背景 `IContextMenu::InvokeCommand` 的 canonical verbs 分别执行 Details、排序和分组；会话恢复、菜单 merge 生命周期、自定义 app command active-pane 路由、复制/重命名/删除、目录通知及四 pane F2 方向键焦点隔离也全部通过，foreground HWND 未变。
 
 这轮确认撤回未损坏已通过的原生能力。但 `menu-commands=pane1:details/sort/group,...` 走的是逐 pane 背景 context menu canonical verb，不是 frame 上合成 View 菜单的 `WM_COMMAND`；两者必须分开记录。后续需查明 Explorer 宿主如何处理 standard `FCIDM_SHVIEWFIRST..LAST` 命令，并据此为自建 frame 建立受支持的执行路径。
+
+随后把两种 Details 命令 ID 做只读对比：真实 composite View 菜单项 ID 为 `0x704B`；查询同一 pane 的背景 `IContextMenu` 时以 `0x7000` 为 `idCmdFirst`，canonical verb `viewlogicaldetails` 对应 `0x701B`。二者不相同，因此不能把 View 菜单 ID 直接当作 context-menu verb ID。包含对比的四窗格 watchdog 再次退出码 0，日志 `20261027-041457-17b0712f.stdout.log`，所有既有 pane 操作/会话检查仍通过。该差异不证明 Explorer 具体如何执行 `0x704B`；仍需找到宿主命令表或标准分发实现。
