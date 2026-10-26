@@ -6,10 +6,10 @@
 
 ## 已有基础
 
-- profile 级 `Theme.ini` 保存 `System`、`Light`、`Dark`，缺省为 `System`。
-- `SystemThemeMonitor` 读取 Windows 当前明暗偏好和强调色，并监听颜色变化；`ApplicationThemeController` 将基础语义色应用到 WPF 系统资源。
-- 高对比度时移除应用自定义系统色，交还给 Windows。
-- 活动窗格边框已消费强调色资源；更多 WPF 控件仍未统一使用语义色。
+- profile 级 `Theme.ini` 保存 `System`、`Light`、`Dark` 和 Windows/自定义强调色，缺省为跟随系统；v1 主题配置仍可读。
+- `SystemThemeMonitor` 读取 Windows 当前明暗偏好和强调色，并监听颜色变化；`ApplicationThemeController` 将语义色应用到主窗口、菜单、工具栏、导航、标签、输入控件、选择控件、列表与辅助打印窗。
+- 高对比度时移除应用自定义系统色并恢复 DWM 窗口框默认色，交还给 Windows。
+- 活动窗格、选中项、标签提示和应用命令/查看方式图标使用强调色语义资源；应用图标已改为共享矢量几何。
 - 文件窗格继续使用 ExplorerBrowser。WPF 资源不会自动改变 Shell 子窗口的绘制。
 - 隔离 `IShellView` 原型验证了部分 Q-Dir 逐项颜色规则与像素绘制，但没有接入产品 ExplorerBrowser，也没有证明切换产品视图宿主后可保持现有导航、焦点、拖放和文件操作体验。
 

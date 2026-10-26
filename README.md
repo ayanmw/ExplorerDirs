@@ -1,10 +1,10 @@
 # Explorer Dirs
 
-### 2026-10-25 当前可预览版本：`preview-0.6.0-temp.55`
+### 2026-10-26 当前可预览版本：`preview-0.6.0-temp.63`
 
-[打开 temp.55 程序](releases/preview-0.6.0-temp.55/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。相较 temp.54，本版补上全局大小显示格式设置、F9 递归汇总数量开关，并修正独立预览 profile 漏带 `SizeDisplay.ini` 的打包问题。详情见[temp.55 说明](docs/releases/preview-0.6.0-temp.55.md)及[发布清单](releases/README.md)。
+[打开 temp.63 程序](releases/preview-0.6.0-temp.63/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。本版包括照片打印窗口系统色、当前标签强调色底边及预览 profile 来源修正。详情见[temp.63 说明](docs/releases/preview-0.6.0-temp.63.md)及[发布清单](releases/README.md)。
 
-temp.55 的 Release SettingsSmoke、App Release 构建和发布隔离 smoke 通过，包内版本与 EXE/DLL SHA-256 已核对。没有启动 GUI、ExplorerBrowser 或 Q-Dir；选项菜单、F9 状态栏更新及其他可见 Shell 行为仍待桌面验收。
+temp.63 的 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过，包内版本与 EXE/DLL SHA-256 已核对。没有启动 GUI、ExplorerBrowser 或 Q-Dir；多窗格视觉、系统主题变化、高对比度及 Shell 可见行为仍待桌面验收。当前开发源码在 temp.63 之后新增了窗口标题栏主题和自定义强调色，尚未进入预览包。
 
 源码还提供 Shell 原生文件视图和右键菜单、标签/多布局/独立窗口会话、`.qdr` 导入与状态导出、文件视图 CSV/TXT/HTML/XLS 导出、打印、搜索/筛选、目录树/预览/详情窗格、状态栏及大小显示格式设置，以及通过 Windows 系统对话框映射/断开网络驱动器的菜单入口。文件视图导出始终包含整份当前视图，即使已有选中项；该范围与用户确认一致。网络驱动器入口的分发 smoke 已通过，真实对话框、连接/断开后的驱动器刷新及凭据交互尚未验收。
 
@@ -98,7 +98,7 @@ temp.55 的 Release SettingsSmoke、App Release 构建和发布隔离 smoke 通�
 
 ## 预览发布版
 
-[当前可预览版本 temp.47](releases/preview-0.6.0-temp.47/app/ExplorerDirs.App.exe) 使用独立 `app/profile/`，说明及哈希见[发布清单](releases/README.md)。该版本没有启动 GUI、ExplorerBrowser 或 Q-Dir，不能视为真实桌面验收通过；文件区可见刷新、焦点/选区保持、右键目标、目录树、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
+最新已有预览包为 [temp.63](releases/preview-0.6.0-temp.63/app/ExplorerDirs.App.exe)；当前源码提交比该包更新，主题变化尚未打包。文件区可见刷新、焦点/选区保持、右键目标、目录树、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
 
 ## 开发调试
 
