@@ -14,7 +14,7 @@
 ## 2026-10-27：修正隔离 OLE 菜单组失败回滚
 
 - 原生菜单组部分插入失败时，按位置正序移除导致索引左移，留下自有菜单项。现在改为逆序回滚，并释放每个已插入 popup。
-- `--shell-view-color-policy-smoke` 的部分插入 HMENU 夹具按旧逻辑失败、修正后通过；验证保留外部 popup 且销毁全部自有 popup。构建和完整定向 smoke 通过。未创建 `IShellView`，真实 Shell 激活/可见菜单交互仍待独立桌面验收。
+- `--shell-view-color-policy-smoke` 的 HMENU 夹具覆盖 0–6 组插入前缀，按旧逻辑失败、逆序修正后通过；验证保留外部 popup、销毁全部自有 popup，并保留未插入 popup。构建和完整定向 smoke 通过。未创建 `IShellView`，真实 Shell 激活/可见菜单交互仍待独立桌面验收。
 
 ## 2026-10-26：用户授权推进隔离 IShellView 迁移原型
 

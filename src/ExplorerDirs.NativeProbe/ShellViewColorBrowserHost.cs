@@ -740,31 +740,34 @@ public static class ShellViewColorBrowserHostSmoke
 
     private static void VerifyNativeMenuRollback()
     {
-        var menu = CreateMenu();
-        var popups = new[] { CreatePopupMenu(), CreatePopupMenu(), CreatePopupMenu() };
-        var foreignPopup = CreatePopupMenu();
-        try
+        for (var inserted = 0; inserted <= 6; inserted++)
         {
-            Check(menu != 0 && popups.All(popup => popup != 0) && foreignPopup != 0,
-                "native popup fixtures are created for partial menu rollback");
-            for (var i = 0; i < popups.Length; i++)
-                Check(AppendMenuW(menu, 0x10, popups[i], $"owned {i}"),
-                    $"owned menu group {i} is appended before rollback");
-            Check(AppendMenuW(menu, 0x10, foreignPopup, "foreign"),
-                "an unrelated popup follows the partially inserted host groups");
+            var menu = CreateMenu();
+            var popups = Enumerable.Range(0, 6).Select(_ => CreatePopupMenu()).ToArray();
+            var foreignPopup = CreatePopupMenu();
+            try
+            {
+                Check(menu != 0 && popups.All(popup => popup != 0) && foreignPopup != 0,
+                    $"native popup fixtures are created for rollback after {inserted} inserted groups");
+                for (var i = 0; i < inserted; i++)
+                    Check(AppendMenuW(menu, 0x10, popups[i], $"owned {i}"),
+                        $"owned menu group {i} is appended before rollback");
+                Check(AppendMenuW(menu, 0x10, foreignPopup, "foreign"),
+                    "an unrelated popup follows the partially inserted host groups");
 
-            StreamViewHost.RollbackInsertedMenuGroups(menu, popups, popups.Length);
+                StreamViewHost.RollbackInsertedMenuGroups(menu, popups, inserted);
 
-            Check(GetMenuItemCount(menu) == 1 && GetSubMenu(menu, 0) == foreignPopup,
-                "partial rollback removes every owned popup and preserves the unrelated menu group");
-            Check(popups.All(popup => !IsMenu(popup)) && IsMenu(foreignPopup),
-                "partial rollback destroys only the owned popup handles");
-        }
-        finally
-        {
-            if (menu != 0) DestroyMenu(menu);
-            foreach (var popup in popups) if (popup != 0 && IsMenu(popup)) DestroyMenu(popup);
-            if (foreignPopup != 0 && IsMenu(foreignPopup)) DestroyMenu(foreignPopup);
+                Check(GetMenuItemCount(menu) == 1 && GetSubMenu(menu, 0) == foreignPopup &&
+                      popups.Take(inserted).All(popup => !IsMenu(popup)) &&
+                      popups.Skip(inserted).All(IsMenu) && IsMenu(foreignPopup),
+                    $"rollback after {inserted} groups removes only inserted popups and preserves external state");
+            }
+            finally
+            {
+                if (menu != 0) DestroyMenu(menu);
+                foreach (var popup in popups) if (popup != 0 && IsMenu(popup)) DestroyMenu(popup);
+                if (foreignPopup != 0 && IsMenu(foreignPopup)) DestroyMenu(foreignPopup);
+            }
         }
     }
 

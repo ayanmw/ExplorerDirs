@@ -50,7 +50,7 @@ COM vtable smoke 覆盖上述空指针、零值和非零请求；NativeProbe Rel
 
 源码审查发现 `InsertNativeMenuGroups` 的失败清理按正序移除菜单位置。每次删除会让后续项左移，可能遗留自有 popup 并错删紧邻的菜单项。现在通过共同的回滚函数按逆序撤销已插入组，释放相应 popup 句柄。
 
-新增原生 HMENU 回归夹具，先插入三个自有 popup，再追加一个外部 popup；夹具先按旧正序行为失败，逆序修正后完整清除自有组并保留外部项。`--shell-view-color-policy-smoke` 全部通过。此测试不创建 `IShellView`、不显示菜单，也不验证 Shell 可见菜单合并或产品菜单接线。
+新增原生 HMENU 回归夹具，对 0 到 6 个已插入组的全部失败前缀逐一验证；每种情况下都只移除已插入的自有 popup，保留外部菜单项，且未插入的 popup 仍有效。夹具先按旧正序行为失败，逆序修正后通过。`--shell-view-color-policy-smoke` 全部通过。此测试不创建 `IShellView`、不显示菜单，也不验证 Shell 可见菜单合并或产品菜单接线。
 
 ## 2026-10-26：补齐 IOleWindow 帮助回调路由
 
