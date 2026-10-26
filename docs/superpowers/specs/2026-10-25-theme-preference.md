@@ -1,5 +1,7 @@
 # 全局主题偏好设计
 
+> 本文记录 2026-10-25 初始 System/Light/Dark 范围。后续主题色、Q-Dir 兼容与图标路线见[扩展设计](2026-10-26-theme-and-icons-design.md)。
+
 ## 目标
 
 提供 profile 级 `System`、`Light`、`Dark` 主题选择，默认 `System`。`System` 跟随 Windows 应用颜色偏好，并在设置变化时更新；显式 Light/Dark 在本程序内保持固定。设置保存在便携 INI，不从或写入应用注册表。
