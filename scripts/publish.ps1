@@ -3,13 +3,22 @@ param(
     [string]$Version = 'preview-0.5.2',
     [switch]$IsolatedProfile,
     [string]$ReleaseNotes,
-    [string]$ReleaseRoot
+    [string]$ReleaseRoot,
+    [string]$ProfileRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseRoot = [System.IO.Path]::GetFullPath(
     $(if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) { Join-Path $projectRoot 'releases' } else { $ReleaseRoot }))
+$profileSourceRoot = if ([string]::IsNullOrWhiteSpace($ProfileRoot)) {
+    Join-Path $projectRoot 'profile'
+} else {
+    [System.IO.Path]::GetFullPath($ProfileRoot)
+}
+if ($IsolatedProfile -and -not (Test-Path -LiteralPath $profileSourceRoot -PathType Container)) {
+    throw "Profile source directory does not exist: $profileSourceRoot"
+}
 $releasePrefix = if ($releaseRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
     $releaseRoot
 } else {
@@ -79,12 +88,12 @@ if ($IsolatedProfile) {
     # Match the separate preference stores: omitting the tree setting made an
     # isolated preview silently revert the user's navigation preference.
     foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
-        $source = Join-Path (Join-Path $projectRoot 'profile') $name
+        $source = Join-Path $profileSourceRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
         }
     }
-    $windowRegistry = Join-Path (Join-Path $projectRoot 'profile') 'WindowSessions.ini'
+    $windowRegistry = Join-Path $profileSourceRoot 'WindowSessions.ini'
     if (Test-Path -LiteralPath $windowRegistry -PathType Leaf) {
         Copy-Item -LiteralPath $windowRegistry -Destination (Join-Path $profileCopy 'WindowSessions.ini')
         foreach ($line in [IO.File]::ReadAllLines($windowRegistry)) {
@@ -92,7 +101,7 @@ if ($IsolatedProfile) {
             if (-not $match.Success) { continue }
             $sessionName = $match.Groups[1].Value
             foreach ($name in @($sessionName, ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.PinnedTabs.ini'))) {
-                $source = Join-Path (Join-Path $projectRoot 'profile') $name
+                $source = Join-Path $profileSourceRoot $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) {
                     Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
                 }
@@ -101,7 +110,7 @@ if ($IsolatedProfile) {
     }
     # WorkspaceCatalog lists only top-level .qdr snapshots. Carry those into the
     # independent profile as well, without copying nested directories or unrelated files.
-    $workspaceSource = Join-Path (Join-Path $projectRoot 'profile') 'Workspaces'
+    $workspaceSource = Join-Path $profileSourceRoot 'Workspaces'
     if (Test-Path -LiteralPath $workspaceSource -PathType Container) {
         $workspaceFiles = @(Get-ChildItem -LiteralPath $workspaceSource -File -Force |
             Where-Object { $_.Extension -ieq '.qdr' })
@@ -115,7 +124,7 @@ if ($IsolatedProfile) {
     }
     # Quick Links are user-managed Shell shortcuts. Copy only the top-level
     # .lnk files the runtime menu reads; do not carry unrelated profile files.
-    $quickLinksSource = Join-Path (Join-Path $projectRoot 'profile') 'QuickLinks'
+    $quickLinksSource = Join-Path $profileSourceRoot 'QuickLinks'
     if (Test-Path -LiteralPath $quickLinksSource -PathType Container) {
         $quickLinks = @(Get-ChildItem -LiteralPath $quickLinksSource -File -Force |
             Where-Object { $_.Extension -ieq '.lnk' })

@@ -82,6 +82,37 @@ foreach ($path in $before.Keys) {
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $before[$path]) { throw 'Source profile was modified.' }
 }
 
+$externalProfile = Join-Path $fixture 'external-profile'
+New-Item -ItemType Directory -Path $externalProfile | Out-Null
+[IO.File]::WriteAllText((Join-Path $externalProfile 'ExplorerDirs.ini'), 'external-profile-session')
+[IO.File]::WriteAllText((Join-Path $externalProfile 'PinnedTabs.ini'), 'external-profile-pins')
+$externalSessionHash = (Get-FileHash -LiteralPath (Join-Path $externalProfile 'ExplorerDirs.ini') -Algorithm SHA256).Hash
+$externalPinsHash = (Get-FileHash -LiteralPath (Join-Path $externalProfile 'PinnedTabs.ini') -Algorithm SHA256).Hash
+$externalRelease = & $script -Version 'fixture-external-profile' -IsolatedProfile -ProfileRoot $externalProfile
+$externalCopy = Join-Path $externalRelease 'app/profile'
+foreach ($entry in @(@('ExplorerDirs.ini', $externalSessionHash), @('PinnedTabs.ini', $externalPinsHash))) {
+    $copiedPath = Join-Path $externalCopy $entry[0]
+    if (-not (Test-Path -LiteralPath $copiedPath -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $copiedPath -Algorithm SHA256).Hash -ne $entry[1]) {
+        throw "Isolated preview did not copy $($entry[0]) from the explicitly selected profile root."
+    }
+}
+foreach ($file in Get-ChildItem -LiteralPath $externalProfile -File) {
+    if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath (Join-Path $externalCopy $file.Name) -Algorithm SHA256).Hash) {
+        throw "Explicit profile source was modified during publishing: $($file.Name)"
+    }
+}
+$missingProfileRejected = $false
+try { & $script -Version 'fixture-missing-profile' -IsolatedProfile -ProfileRoot (Join-Path $fixture 'missing-profile') | Out-Null }
+catch {
+    if ($_.Exception.Message -notlike 'Profile source directory does not exist:*') { throw }
+    $missingProfileRejected = $true
+}
+if (-not $missingProfileRejected -or (Test-Path -LiteralPath (Join-Path $fixture 'releases/fixture-missing-profile'))) {
+    throw 'Publishing with an explicitly missing profile root was not rejected before creating a release.'
+}
+
 $rejectedExisting = $false
 try { & $script -Version 'fixture-v1' -IsolatedProfile | Out-Null }
 catch {
