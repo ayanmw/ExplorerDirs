@@ -938,8 +938,8 @@ NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-col
 
 ### 2026-10-27 Shell 原生菜单命令 frame 转发尚未通过
 
-在共享 frame subclass 中尝试把 Shell 菜单 ID `0x704B`（Details）转发给 coordinator 当前记录的 `hwndActiveObject`。Private Desktop 四 pane 探针能收到 `WM_COMMAND`，但目标 pane 2 仍为 Small Icons；回调轨迹显示菜单 coordinator 的 owner 和 active HWND 仍是 pane 1，因此不能把“菜单项 ID 可读”当作“目标 pane 正确”。追加 `IShellView::UIActivate(SVUIA_ACTIVATE_FOCUS)` 和给 view/list HWND 调用 `SetFocus` 也没有切换 coordinator owner；第二轮仍失败，日志为 `20261027-041021-6ff9cece.stdout.log`。
+在共享 frame subclass 中尝试把 Shell 菜单 ID `0x704B`（Details）转发给 coordinator 当前记录的 `hwndActiveObject`。Private Desktop 四 pane 探针能收到 `WM_COMMAND`，但目标 pane 2 仍为 Small Icons；回调轨迹显示菜单 coordinator 的 owner 和 active HWND 仍是 pane 1。随后尝试按焦点 HWND 映射 pane，目标模式仍未改变（日志 `20261027-041155-4116eada.stdout.log`）。因此不能把“菜单项 ID 可读”当作“Shell 命令已正确执行”。
 
-这轮失败揭示原探针缺少“焦点切换 → `OnViewWindowActive` → 当前 Shell 菜单 owner/命令接收者”的状态验证。微软文档指出 view 获取焦点时需调用 `IShellBrowser::OnViewWindowActive`，且 composite menu 命令分派取决于菜单项 ID；但当前测试中的协调器只在 `SetMenuSB` 建立 owner，未证明窗口焦点变化会正确更新 owner/活动 view。依据：[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[IShellBrowser::OnViewWindowActive](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-onviewwindowactive)。
+微软的 [Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 明确说明，Shell view 菜单的相关 `WM_COMMAND` 由 Explorer 宿主处理，不会传给 folder view 对象；因此把 frame 消息直接发给 `IShellView` 是错误的架构假设。`IShellBrowser::OnViewWindowActive` 用于通知宿主 view 获取焦点，`SetMenuSB` 安装 composite menu，但这两项文档本身没有定义我们这个自建宿主怎样执行 Details 命令。参考：[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[IShellBrowser::OnViewWindowActive](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-onviewwindowactive)。
 
-失败的 Shell 命令转发分支已撤回；上一节已通过的应用自定义 probe 命令 active-pane 路由保持。下一步先补齐宿主焦点/菜单 owner 的协议探针，再验证真实 Shell 命令；在此之前不将 Shell 菜单分派能力列为已完成，也不迁移产品宿主。
+失败的 Shell 命令转发分支已撤回；上一节已通过的应用自定义 probe 命令 active-pane 路由保持。下一步先从 Windows Explorer/Shell 实现和公开接口确定宿主必须承担的标准命令执行路径，再设计最小 pane dispatch probe；在此之前不将 Shell 菜单分派能力列为已完成，也不迁移产品宿主。
