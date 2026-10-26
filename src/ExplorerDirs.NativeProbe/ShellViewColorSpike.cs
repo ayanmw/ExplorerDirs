@@ -72,7 +72,7 @@ internal static class ShellViewColorSpike
                 windowStyle, 100, 100, 800, 560, 0, 0, 0, 0);
             if (parent == 0) throw new InvalidOperationException("Could not create the isolated consumer parent window.");
             pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 1",
-                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 540, parent, 0, 0, 0);
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265, parent, 0, 0, 0);
             if (pane == 0) throw new InvalidOperationException("Could not create the first child pane.");
             Check(SHParseDisplayName(fullFixture, 0, out pidl, 0, out _));
             Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
@@ -84,7 +84,7 @@ internal static class ShellViewColorSpike
             host.View = view;
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
-            var bounds = new StreamProbeRect { Right = 380, Bottom = 500 };
+            var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
             createAttempted = true;
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0) throw new InvalidOperationException("The consumer view was created without a window.");
@@ -120,13 +120,12 @@ internal static class ShellViewColorSpike
                 group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
             if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
-            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, pane, folderView);
-            var fileOperations = VerifySessionRestoreFileOperations(view, folderView, fullFixture, propertyFormatId,
-                expectedSort, columnsExpected);
+            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane,
+                folderView, propertyFormatId, expectedSort, columnsExpected);
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
                 $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
-                $"concurrent-views={concurrentViews}; shell-file-operations={fileOperations}");
+                $"four-pane-probe={concurrentViews}");
             result = 0;
         }
         catch (Exception ex)
@@ -165,13 +164,15 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyConcurrentViewIsolation(string fixture, ShellViewStateStore store,
-        Guid restoredSessionId, nint containerParent, nint firstPane, nint restoredFolderView)
+        Guid restoredSessionId, nint containerParent, nint restoredView, nint firstPane,
+        nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
+        IReadOnlyList<DisplayColumnState> columnsExpected)
     {
         // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
         nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
         ShellViewColorBrowserHost? host = null;
         pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 2",
-            0x50000000u | 0x02000000u | 0x04000000u, 400, 0, 390, 540, containerParent, 0, 0, 0);
+            0x50000000u | 0x02000000u | 0x04000000u, 400, 0, 390, 265, containerParent, 0, 0, 0);
         if (pane == 0) throw new InvalidOperationException("Could not create the second child pane.");
         if (GetParent(firstPane) != containerParent || GetParent(pane) != containerParent || firstPane == pane)
             throw new InvalidOperationException("The two Shell pane hosts are not distinct children of one container.");
@@ -190,7 +191,7 @@ internal static class ShellViewColorSpike
         host.View = view;
         hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         var settings = new StreamProbeSettings { Mode = uint.MaxValue };
-        var bounds = new StreamProbeRect { Right = 380, Bottom = 500 };
+        var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
         Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
         if (viewWindow == 0) throw new InvalidOperationException("The second Shell view was created without a window.");
         if (GetParent(viewWindow) != pane)
@@ -235,7 +236,7 @@ internal static class ShellViewColorSpike
         host.View = view;
         hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         settings = new StreamProbeSettings { Mode = uint.MaxValue };
-        bounds = new StreamProbeRect { Right = 380, Bottom = 500 };
+        bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
         Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
         if (viewWindow == 0) throw new InvalidOperationException("The sibling Shell view could not be recreated.");
         if (GetParent(viewWindow) != pane)
@@ -250,14 +251,73 @@ internal static class ShellViewColorSpike
         Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out restoredMode, out _));
         if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
             throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
+        var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48);
+        var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1);
+        var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
+        var expectedModes = new uint[] { 4, 3, 1, 6 };
+        AssertPaneModes(allViews, expectedModes, "four-pane setup");
+        var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
+            expectedSort, columnsExpected, allViews);
+        AssertPaneModes(allViews, expectedModes, "file operations");
         return $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
             $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
             $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
-            "same-container=True; panes=2; independent=True";
+            $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
+            $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
+            $"file-updates={allPaneCounts}; independent=True";
+    }
+
+    private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
+        nint containerParent, int x, int y, uint expectedMode, int iconSize)
+    {
+        var pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs session restore pane {expectedMode}",
+            0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, containerParent, 0, 0, 0);
+        if (pane == 0 || GetParent(pane) != containerParent)
+            throw new InvalidOperationException("Could not create another child pane under the shared container.");
+        var sessionId = Guid.NewGuid();
+        if (store.TryLoad(sessionId, out _))
+            throw new InvalidOperationException("A new pane unexpectedly reused a saved Shell session.");
+        Check(SHParseDisplayName(fixture, 0, out var pidl, 0, out _));
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out var folder));
+        var shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out var view));
+        var host = new ShellViewColorBrowserHost(pane, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: sessionId);
+        host.View = view;
+        var hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out var viewWindow));
+        if (viewWindow == 0 || GetParent(viewWindow) != pane)
+            throw new InvalidOperationException("The additional Shell view is not parented to its pane host.");
+        Check(At<ActivateView>(view, 7)(view, 1));
+        Pump(500);
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out var folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        if (host.Reads == 0)
+            throw new InvalidOperationException("The additional pane did not request a Shell stream for its session GUID.");
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, iconSize));
+        Pump(250);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var actualMode, out _));
+        if (actualMode != expectedMode)
+            throw new InvalidOperationException($"Pane session {sessionId:D} expected mode {expectedMode}, observed {actualMode}.");
+        return new LivePaneView(pane, view, viewWindow, folder, pidl, hostPointer, host, folderView, sessionId);
+    }
+
+    private static void AssertPaneModes(IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, string phase)
+    {
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out var mode, out _));
+            if (mode != expectedModes[index])
+                throw new InvalidOperationException($"Pane {index + 1} changed mode during {phase}: expected={expectedModes[index]}, observed={mode}.");
+        }
     }
 
     private static string VerifySessionRestoreFileOperations(nint view, nint folderView, string fixture,
-        Guid propertyFormatId, SortColumn expectedSort, IReadOnlyList<DisplayColumnState> expectedColumns)
+        Guid propertyFormatId, SortColumn expectedSort, IReadOnlyList<DisplayColumnState> expectedColumns,
+        IReadOnlyList<nint> allFolderViews)
     {
         const uint svgIoAllView = 2;
         var sourcePath = Path.Combine(fixture, "blue-rule-target.txt");
@@ -275,6 +335,7 @@ internal static class ShellViewColorSpike
             if (!WaitForShellView(folderView, initialCount + 1, copiedPath, null) &&
                 !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, copiedPath, null))
                 throw new IOException("The restored Shell view did not show the copied fixture after refresh.");
+            WaitForAllPaneCounts(allFolderViews, initialCount + 1, "copy");
             AssertViewSettings("copy");
 
             PerformShellFileOperation(operation =>
@@ -288,6 +349,7 @@ internal static class ShellViewColorSpike
             if (!WaitForShellView(folderView, initialCount + 1, renamedPath, copiedPath) &&
                 !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, renamedPath, copiedPath))
                 throw new IOException("The restored Shell view did not show the renamed fixture after refresh.");
+            WaitForAllPaneCounts(allFolderViews, initialCount + 1, "rename");
             AssertViewSettings("rename");
 
             PerformShellFileOperation(operation =>
@@ -301,13 +363,24 @@ internal static class ShellViewColorSpike
             if (!WaitForShellView(folderView, initialCount, null, renamedPath) &&
                 !RefreshUntilShellViewMatches(view, folderView, initialCount, null, renamedPath))
                 throw new IOException("The restored Shell view did not remove the deleted fixture after refresh.");
+            WaitForAllPaneCounts(allFolderViews, initialCount, "delete");
             AssertViewSettings("delete");
-            return "copy/rename/delete=passed; settings-preserved-after-each=True";
+            return "copy/rename/delete=all-4-panes-converged";
         }
         finally
         {
             Marshal.Release(destination);
             Marshal.Release(source);
+        }
+
+        static void WaitForAllPaneCounts(IReadOnlyList<nint> folderViews, int expectedCount, string operation)
+        {
+            for (var index = 0; index < folderViews.Count; index++)
+            {
+                var count = WaitForShellViewItemCount(folderViews[index], expectedCount);
+                if (count != expectedCount)
+                    throw new IOException($"Pane {index + 1} did not converge after {operation}: expected={expectedCount}, observed={count}.");
+            }
         }
 
         void AssertViewSettings(string operation)
@@ -327,6 +400,9 @@ internal static class ShellViewColorSpike
                 throw new IOException($"The Shell {operation} changed the restored mode, sort, group, or columns.");
         }
     }
+
+    private readonly record struct LivePaneView(nint Pane, nint View, nint ViewWindow, nint Folder, nint Pidl,
+        nint HostPointer, ShellViewColorBrowserHost Host, nint FolderView, Guid SessionId);
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
