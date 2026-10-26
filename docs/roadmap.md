@@ -3343,3 +3343,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在三个包含多项的真实 Shell pane 上逐一通过各自 `IShellView::TranslateAccelerator` 派发 Ctrl+A。每次仅目标 view 的两项全选，其他 pane 选择数为零；探针随后清空选择，并恢复线程键盘 modifier 状态。
 - Private Desktop 完整四窗格探针连续三轮退出码 0；方向键、各 pane Shell 菜单、文件操作和目录通知检查同步通过，主桌面前台不变；未操作系统剪贴板。
 - 这是合成按键与 modifier 状态的单次 Shell accelerator 路径，不证明物理 Ctrl+A、完整消息循环或 ExplorerBrowser 产品焦点接线。详见 [IShellView 原型](ishellview-color-spike.md#2026-10-27-四窗格-ctrl-a-选择路由)。
+
+## 2026-10-27：补齐 Q-Dir 普通鼠标滚轮焦点选项
+
+- 顶部“视图”菜单新增默认关闭的“鼠标悬停滚轮”，保存在独立 `MouseWheelFocus.ini`。开启后，普通垂直滚轮消息定向到指针所在的可见 Shell 文件视图或目录树；对逐窗格目标更新逻辑活动窗格，不抢键盘焦点；Ctrl+滚轮继续使用原有查看方式循环路径。
+- 完整 Release `SettingsSmoke`、定向 `--mouse-wheel-focus-smoke`、App Release 构建通过；本批已提交 `3ad1101`。这证明配置、消息决策和代码接线可构建，不代表真实鼠标、焦点、四窗格菜单行为通过；这些仍需可见桌面验收。对标依据：[Q-Dir FAQ 75](https://www.softwareok.com/?faq=75&seite=faq-Q-DIR)。

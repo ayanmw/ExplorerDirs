@@ -40,7 +40,7 @@
 - [x] Run the targeted smoke and confirm it fails because the router was not yet implemented.
 - [x] Implement the minimal pure decision helper.
 - [x] Run the targeted smoke and confirm it passes.
-- [ ] Commit the tested helper.
+- [x] Commit the tested helper (`5d5de67`).
 
 ### Task 2: Portable preference, menu toggle, and WPF message routing
 
@@ -54,9 +54,9 @@
 
 **Interfaces:** `PaneControl.TryGetWheelTarget(nint hwnd)` confirms the HWND belongs to its current file view or visible per-pane tree. `ExplorerBrowserHost.ContainsNativeWindow(nint hwnd)` and `ShellTreeHost.ContainsNativeWindow(nint hwnd)` use native parent/child identity. MainWindow's thread filter updates `MSG.hwnd` only after router approval and calls `SetActivePane` only for a matching per-pane target.
 
-- [ ] Write settings smoke for default-off INI load/save and router integration ownership cases.
-- [ ] Run settings smoke and confirm it fails before wiring.
-- [ ] Add `MouseWheelFocus.ini` with default-off `MouseWheelFocus` value, a checkable View-menu item, and save-failure feedback.
-- [ ] Subscribe/unsubscribe `ThreadFilterMessage` with the main window lifetime; use `GetCursorPos`/`WindowFromPoint`, fail closed for invalid or non-Shell HWNDs, and retarget without synthesizing messages.
-- [ ] Run SettingsSmoke and App Release build; confirm Ctrl+wheel routes remain unchanged.
-- [ ] Commit the integrated feature and update `docs/shell-parity.md` and `docs/roadmap.md` with implementation and GUI-acceptance boundaries.
+- [x] Write settings smoke for default-off INI load/save and the router decision cases; cross-window HWND ownership remains untested.
+- [x] Run the preference smoke before wiring and confirm it fails because the setting store is not yet connected.
+- [x] Add `MouseWheelFocus.ini` with default-off `FocusOnWheel`, a checkable View-menu item, and save-failure feedback.
+- [x] Subscribe/unsubscribe `ThreadFilterMessage` with the main window lifetime; use `GetCursorPos`/`WindowFromPoint`, fail closed for invalid or non-Shell HWNDs, and retarget without synthesizing messages.
+- [x] Run full Release SettingsSmoke and App Release build; actual Ctrl+wheel route is unchanged by source inspection and the existing router smoke.
+- [x] Commit the integrated feature (`3ad1101`) and update the shell-parity status. Roadmap log entry remains to be added.
