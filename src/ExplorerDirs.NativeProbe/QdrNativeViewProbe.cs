@@ -200,6 +200,7 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal nint View;
     internal ShellBrowserSite? BrowserSite;
     internal string? StatusText { get; private set; }
+    internal event Action<string?>? StatusTextChanged;
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -295,6 +296,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     public int SetStatusTextSB(nint text)
     {
         StatusText = text == 0 ? null : Marshal.PtrToStringUni(text);
+        try { StatusTextChanged?.Invoke(StatusText); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"Shell status notification: {ex.GetType().Name}"); }
         return 0;
     }
     public int EnableModelessSB(int enable) => 0;

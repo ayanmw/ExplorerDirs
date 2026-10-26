@@ -2,9 +2,9 @@
 
 ## 2026-10-26：接收 IShellBrowser 状态文本
 
-`StreamViewHost.SetStatusTextSB` 原先返回 `S_OK` 但丢弃传入文本。现将 LPCWSTR 复制到 host 的 `StatusText` 状态；空指针表示清除。这样 Shell 提供者的状态提示可被后续宿主 UI 消费，不涉及原生传入缓冲区的所有权。
+`StreamViewHost.SetStatusTextSB` 原先返回 `S_OK` 但丢弃传入文本。现将 LPCWSTR 复制到 host 的 `StatusText` 状态；空指针表示清除，并通过 `StatusTextChanged` 通知隔离宿主订阅者。通知异常会被限制在 native callback 边界内，不涉及原生传入缓冲区的所有权。
 
-`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser::SetStatusTextSB` CCW vtable 槽写入文本再传空指针清除，两个状态断言通过。没有创建 `IShellView` 或 WPF 状态栏；尚未验证 DefView/ provider 实际调用内容、调用时序或文本显示布局。
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser::SetStatusTextSB` CCW vtable 槽写入文本再传空指针清除，验证 host 状态和订阅事件中的两次更新。没有创建 `IShellView` 或 WPF 状态栏；尚未验证 DefView/provider 实际调用内容、调用时序或文本显示布局。
 
 ## 2026-10-26：通过 SID_SShellBrowser 暴露 CDB2/CDB3 服务
 

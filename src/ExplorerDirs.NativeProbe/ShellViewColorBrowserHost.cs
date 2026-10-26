@@ -247,6 +247,8 @@ public static class ShellViewColorBrowserHostSmoke
     private static void VerifyBaseHostStatusText()
     {
         using var host = new StreamViewHost(0, []);
+        var changes = new List<string?>();
+        host.StatusTextChanged += changes.Add;
         var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
         var message = Marshal.StringToHGlobalUni("Loading folder contents");
         try
@@ -255,9 +257,13 @@ public static class ShellViewColorBrowserHostSmoke
             var setHr = setStatusText(browser, message);
             Check(setHr == 0 && host.StatusText == "Loading folder contents",
                 "the generic StreamViewHost captures Shell status text through SetStatusTextSB");
+            Check(changes.SequenceEqual(["Loading folder contents"]),
+                "the generic StreamViewHost publishes Shell status text changes to its isolated host");
             var clearHr = setStatusText(browser, 0);
             Check(clearHr == 0 && host.StatusText is null,
                 "a null SetStatusTextSB argument clears the generic host status text");
+            Check(changes.SequenceEqual(new string?[] { "Loading folder contents", null }),
+                "clearing Shell status text publishes a null status update");
         }
         finally
         {
