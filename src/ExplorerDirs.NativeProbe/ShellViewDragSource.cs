@@ -54,16 +54,24 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
                 "the isolated OLE drag source continues while the initiating button remains down");
             check(continueDrag(dragSource, false, 0) == DragDropSDrop,
                 "the isolated OLE drag source completes when the initiating button is released");
-            check(feedback(dragSource, 1) == DragDropSUseDefaultCursors &&
+            check(feedback(dragSource, 0) == DragDropSUseDefaultCursors &&
+                  feedback(dragSource, 1) == DragDropSUseDefaultCursors &&
                   feedback(dragSource, 2) == DragDropSUseDefaultCursors,
-                "the isolated OLE drag source delegates Copy and Move cursor feedback to Windows");
+                "the isolated OLE drag source delegates None, Copy, and Move cursor feedback to Windows");
         }
         finally { Marshal.Release(dragSource); }
 
         var rightButtonSource = new ShellViewDragSource(MouseRightButton);
-        check(rightButtonSource.QueryContinueDrag(false, MouseLeftButton | MouseRightButton) == 0 &&
-              rightButtonSource.QueryContinueDrag(false, MouseLeftButton) == DragDropSDrop,
-            "the isolated OLE drag source tracks the initiating button for right-button drags");
+        var rightDragSource = Marshal.GetComInterfaceForObject(rightButtonSource, typeof(IShellViewDragSource));
+        try
+        {
+            var continueRightDrag = Marshal.GetDelegateForFunctionPointer<ContinueDragCallback>(
+                Marshal.ReadIntPtr(Marshal.ReadIntPtr(rightDragSource), 3 * nint.Size));
+            check(continueRightDrag(rightDragSource, false, MouseLeftButton | MouseRightButton) == 0 &&
+                  continueRightDrag(rightDragSource, false, MouseLeftButton) == DragDropSDrop,
+                "the isolated OLE COM source completes right-button drags only after the initiating button is released");
+        }
+        finally { Marshal.Release(rightDragSource); }
     }
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
