@@ -9,6 +9,8 @@ internal sealed class ShellViewDropTargetRegistration : IDisposable
     private readonly uint _threadId;
     private bool _registered = true;
 
+    internal nint Window => _window;
+
     internal ShellViewDropTargetRegistration(nint window, nint dropTarget)
     {
         if (window == 0 || !IsWindow(window))

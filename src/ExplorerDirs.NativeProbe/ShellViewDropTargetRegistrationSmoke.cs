@@ -13,7 +13,7 @@ internal static class ShellViewDropTargetRegistrationSmoke
         var foreground = GetForegroundWindow();
         var windows = new List<nint>();
         var targets = new List<nint>();
-        var registrations = new List<object>();
+        StreamViewHost? host = null;
         try
         {
             var registrationType = typeof(ShellViewDropTargetRegistrationSmoke).Assembly.GetType(
@@ -21,10 +21,12 @@ internal static class ShellViewDropTargetRegistrationSmoke
             if (registrationType is null)
                 throw new InvalidOperationException("The isolated Shell view host has no IDropTarget window registration owner.");
 
-            var constructor = registrationType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
-                binder: null, [typeof(nint), typeof(nint)], modifiers: null);
-            if (constructor is null || !typeof(IDisposable).IsAssignableFrom(registrationType))
+            if (registrationType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, [typeof(nint), typeof(nint)], modifiers: null) is null ||
+                !typeof(IDisposable).IsAssignableFrom(registrationType))
                 throw new InvalidOperationException("The Shell drop target registration owner must bind an HWND and IDropTarget, and revoke through IDisposable.");
+
+            host = new StreamViewHost(0, []);
 
             for (var pane = 0; pane < 4; pane++)
             {
@@ -34,37 +36,36 @@ internal static class ShellViewDropTargetRegistrationSmoke
                 windows.Add(window);
                 var target = Marshal.GetComInterfaceForObject(new SmokeDropTarget(), typeof(ISmokeDropTarget));
                 targets.Add(target);
-                registrations.Add(constructor.Invoke([window, target]));
+                host.RegisterDropTarget(window, target);
             }
 
+            using (var duplicateHost = new StreamViewHost(0, []))
             try
             {
-                _ = constructor.Invoke([windows[0], targets[0]]);
-                throw new InvalidOperationException("A duplicate host owner unexpectedly registered the same pane HWND.");
+                duplicateHost.RegisterDropTarget(windows[0], targets[0]);
+                throw new InvalidOperationException("A second pane host unexpectedly registered an already-owned HWND.");
             }
-            catch (TargetInvocationException exception) when (exception.InnerException?.HResult == DragDropAlreadyRegistered)
+            catch (COMException exception) when (exception.HResult == DragDropAlreadyRegistered)
             {
-                Console.WriteLine("PASS duplicate pane registration fails without replacing the existing owner");
+                Console.WriteLine("PASS duplicate host registration fails without replacing the existing owner");
             }
 
-            ((IDisposable)registrations[0]).Dispose();
-            registrations[0] = null!;
+            host.RevokeDropTarget(windows[0]);
             var reRegisterResult = RegisterDragDrop(windows[0], targets[0]);
             if (reRegisterResult < 0)
                 Marshal.ThrowExceptionForHR(reRegisterResult);
             Check(RevokeDragDrop(windows[0]));
-            for (var pane = registrations.Count - 1; pane >= 1; pane--)
-                ((IDisposable)registrations[pane]).Dispose();
+            host.Dispose();
+            host = null;
 
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The hidden drop-target registration smoke changed the foreground window.");
-            Console.WriteLine("shell-view-drop-target-registration-smoke=passed; four-pane-same-STA=True; duplicate-owner-rollback=True; revoke-before-window-destroy=True; foreground-unchanged=True");
+            Console.WriteLine("shell-view-drop-target-registration-smoke=passed; four-pane-single-host=True; duplicate-owner-rollback=True; selective-revoke=True; dispose-revokes-rest=True; foreground-unchanged=True");
             return 0;
         }
         finally
         {
-            foreach (var registration in registrations)
-                if (registration is IDisposable disposable) disposable.Dispose();
+            host?.Dispose();
             foreach (var target in targets) Marshal.Release(target);
             foreach (var window in windows) _ = DestroyWindow(window);
             if (GetForegroundWindow() != foreground)

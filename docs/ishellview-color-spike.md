@@ -8,17 +8,17 @@ NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠�
 
 ## 2026-10-27：隔离四窗格文件夹 drop target 注册生命周期
 
-`StreamViewHost` 现保留一份 STA 窗口目标注册所有权，通过 `OleInitialize` 和 `RegisterDragDrop` 将传入的 Shell drop target 绑定到对应 view HWND，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 从每个当前 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级 drop target，包括 pane 重建路径；宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
+`StreamViewHost` 现按 view HWND 管理多份 STA 目标注册，通过 `OleInitialize` 和 `RegisterDragDrop` 将 Shell drop target 绑定到对应窗口，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 从每个当前 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级 drop target；`BrowseObject` 新建目标 view 时先注册新窗口，随后撤销旧窗口的注册，再退休旧 view。新 view 创建/注册失败时会尝试只清理新 HWND，保留原 view 的目标注册。宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
 
-`--shell-view-drop-target-registration-smoke` 先按预期因缺少注册 owner 失败；实现后通过实际 OLE 注册 API 与普通隐藏 STATIC HWND 验证单次注册、重复注册拒绝、撤销后重新注册、重复 Dispose 和前台不变。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；四窗格接线只完成编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
+`--shell-view-drop-target-registration-smoke` 在同一个 host/STA 的四个隐藏普通 HWND 上验证多份 owner、选择性撤销、Dispose 撤销其余目标、重复 HWND 注册被 OLE 拒绝且不破坏原 owner，以及撤销后重新注册。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；新目录导航的真实目标注册仅完成源码接线/编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
 
 依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize)、[`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop)、[`RevokeDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-revokedragdrop) 合同。
 
 ## 2026-10-27：四窗格 OLE drop target owner 生命周期 smoke
 
-扩展 `--shell-view-drop-target-registration-smoke`，在同一个 STA 上同时对四个隐藏普通 HWND 创建独立 drop-target owner；再对第一个已注册 HWND 故意创建重复 owner，验证收到 `DRAGDROP_E_ALREADYREGISTERED` 后原 owner 仍可撤销，且该失败路径配对清理它自己的 OLE 初始化。其余三个注册逐个 Dispose，最后第一个 HWND 在撤销后可再次注册。Release build 0 警告/错误，smoke 通过且前台 HWND 不变。
+扩展 `--shell-view-drop-target-registration-smoke`，同一 `StreamViewHost`/STA 同时拥有四个隐藏普通 HWND 的 drop-target 注册；另一个 host 对首个 HWND 重复注册，验证收到 `DRAGDROP_E_ALREADYREGISTERED` 后原 owner 仍可撤销，失败路径也平衡自己的 OLE 初始化。host 对其中一个窗口定向撤销后，该窗口可再次注册；Dispose 再撤销其余目标。Release build 0 警告/错误，smoke 通过且前台 HWND 不变。
 
-这验证四个 OLE 注册可在单 STA 并存，以及重复注册失败不会取代既有 owner；仍使用普通 STATIC HWND 与假 `IDropTarget`，不证明 Shell 文件夹目标是否能注册在真实 view HWND，也未调用 `DoDragDrop`。
+这验证单一宿主可在同一 STA 并存管理四个 HWND 注册、选择性撤销及集中释放，重复注册失败不会取代既有 owner；仍使用普通 STATIC HWND 与假 `IDropTarget`，不证明 Shell 文件夹目标是否能注册在真实 view HWND，也未调用 `DoDragDrop`。
 
 ## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
 

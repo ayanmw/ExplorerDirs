@@ -208,7 +208,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private nint _customMenuPopup;
     private readonly nint[] _insertedMenuPopups = new nint[6];
     private ShellViewNavigationHistory? _navigation;
-    private ShellViewDropTargetRegistration? _dropTargetRegistration;
+    private readonly List<ShellViewDropTargetRegistration> _dropTargetRegistrations = [];
     private int _insertMenusCallCount;
     private int _setMenuCallCount;
     private int _removeMenusCallCount;
@@ -230,14 +230,21 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal nint BrowserParentWindow => _parent;
     internal void RegisterDropTarget(nint viewWindow, nint dropTarget)
     {
-        if (_dropTargetRegistration is not null)
-            throw new InvalidOperationException("This Shell host already owns a registered drop target.");
-        _dropTargetRegistration = new ShellViewDropTargetRegistration(viewWindow, dropTarget);
+        if (_dropTargetRegistrations.Any(registration => registration.Window == viewWindow))
+            throw new InvalidOperationException("This Shell view window already has a registered drop target.");
+        _dropTargetRegistrations.Add(new ShellViewDropTargetRegistration(viewWindow, dropTarget));
+    }
+    internal void RevokeDropTarget(nint viewWindow)
+    {
+        var registration = _dropTargetRegistrations.FirstOrDefault(item => item.Window == viewWindow);
+        if (registration is null) return;
+        registration.Dispose();
+        _dropTargetRegistrations.Remove(registration);
     }
     internal void RevokeDropTarget()
     {
-        _dropTargetRegistration?.Dispose();
-        _dropTargetRegistration = null;
+        while (_dropTargetRegistrations.Count > 0)
+            RevokeDropTarget(_dropTargetRegistrations[^1].Window);
     }
     internal nint MenuFrameWindow => _menuFrameWindow;
     internal bool OwnsAttachedCustomMenuGroup => _customMenuRoot != 0 && _customMenuPopup != 0 && HasSubMenu(_customMenuRoot, _customMenuPopup);

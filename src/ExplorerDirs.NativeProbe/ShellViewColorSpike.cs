@@ -1426,6 +1426,7 @@ internal static class ShellViewColorSpike
             var createViewWindowAttempted = false;
             var previousView = view;
             var previousFolder = folder;
+            var previousWindow = viewWindow;
             try
             {
                 Check(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out nextFolder));
@@ -1441,8 +1442,12 @@ internal static class ShellViewColorSpike
                 if (createHr < 0) Marshal.ThrowExceptionForHR(createHr);
                 if (nextWindow == 0)
                     throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
+                RegisterFolderDropTarget(nextFolder, nextWindow, host!);
                 var nextListView = FindChildByClass(nextWindow, "SysListView32");
                 if (nextListView != 0) _ = ApplyFixtureViewBackground(nextListView, isActiveView: true);
+
+                if (previousWindow != 0)
+                    host.RevokeDropTarget(previousWindow);
 
                 view = nextView;
                 folder = nextFolder;
@@ -1468,6 +1473,14 @@ internal static class ShellViewColorSpike
             catch (Exception ex)
             {
                 host!.View = previousView;
+                if (nextWindow != 0)
+                {
+                    try { host.RevokeDropTarget(nextWindow); }
+                    catch (Exception revokeException)
+                    {
+                        Console.WriteLine("ishellview-color-spike navigation: failed-view drop target cleanup threw: " + revokeException.Message);
+                    }
+                }
                 if (nextView != 0)
                     viewRetirement.RetireAfterCreateAttempt(nextView, nextFolder, createViewWindowAttempted);
                 else if (nextFolder != 0) Marshal.Release(nextFolder);

@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：将 drop target 生命周期延伸到 Shell 目录导航
+
+- 源码审查发现 folder `BrowseObject` 创建替代 `IShellView` 的路径没有注册新目录 `IDropTarget`；旧 `StreamViewHost` 也只允许一份注册，无法在切换期间安全地让新旧 view 短暂并存。现按 HWND 保存多份 OLE 注册：成功创建新 view 后先注册新目标，再撤销旧 HWND 目标并退休旧 view；创建/注册失败时撤销新目标并保留原 view 注册。
+- 四个普通隐藏 HWND 的同 host 生命周期 smoke 通过，覆盖选择性撤销、Dispose 清理、重复 HWND 注册由 OLE 拒绝且不破坏原 owner、撤销后重新注册；NativeProbe Release build 0 警告/错误，完整 `--shell-view-color-policy-smoke` 通过。没有运行 Shell view；BrowseObject 的真实导航/拖放仍待隔离宿主验收。
+
 ## 2026-10-27：覆盖四窗格 OLE drop target 同 STA 生命周期
 
 - 拖放注册 smoke 扩展到四个独立隐藏普通 HWND，在同一 STA 同时持有四个 OLE drop-target owner；重复注册首个 HWND 必须收到 `DRAGDROP_E_ALREADYREGISTERED`，失败 owner 平衡自己的 `OleInitialize`，原 owner 撤销后 HWND 可重新注册，其余窗格逐个正常撤销。Release NativeProbe build 0 警告/错误，定向 smoke 通过，前台 HWND 未变。
@@ -7,8 +12,8 @@
 
 ## 2026-10-27：隔离 IShellView 文件夹 drop target 注册生命周期
 
-- 四窗格 session-restore 原型现从每个当前目录 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得目录级目标，并通过 `OleInitialize`、`RegisterDragDrop` 注册到对应 Shell view HWND；切换/销毁 view 前由同一 STA host `RevokeDragDrop` 并平衡 `OleUninitialize`，避免注册指针跨 HWND 生命周期残留。依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`IDropTarget`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idroptarget)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize) 与 [`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop) 合同。
-- 定向普通隐藏 HWND smoke 通过：重复注册返回 `DRAGDROP_E_ALREADYREGISTERED`，撤销后同 HWND 可再次注册，重复 Dispose 不重复撤销，前台窗口未改变；NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。没有创建 Shell view、发起 `DoDragDrop` 或输入；四窗格真实目录目标接口是否可注册，以及实际拖放内容/通知仍待获准的隔离宿主运行。
+- 四窗格 session-restore 原型现从每个当前目录 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得目录级目标，并通过 `OleInitialize`、`RegisterDragDrop` 注册到对应 Shell view HWND；导航创建新 view 时也先注册新目标，退休/销毁旧 view 前定向撤销其 HWND 注册。Dispose 会撤销仍由 host 持有的所有目标，并平衡对应的 `OleUninitialize`。依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`IDropTarget`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idroptarget)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize) 与 [`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop) 合同。
+- 定向普通隐藏 HWND smoke 通过四个同 host 注册、选择性撤销、Dispose 清理、重复注册拒绝及前台不变；NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。没有创建 Shell view、发起 `DoDragDrop` 或输入；真实 `BrowseObject` 导航目标是否能注册，以及实际拖放内容/通知仍待隔离宿主运行。
 
 ## 2026-10-27：隔离 IShellView 菜单 frame 分离候选
 
