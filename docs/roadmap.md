@@ -3242,3 +3242,4 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - `StreamViewHost.InsertMenusSB` 的默认有效父窗口路径现在插入 File、Edit、View、Favorites、Tools、Help 六个原生弹出组，设置 Shell 标准菜单 ID 和 `OLEMENUGROUPWIDTHS=[2,0,3,0,1,0]`；`RemoveMenusSB`/`Dispose` 仅清理该 host 创建的组，显式外层回调优先。
 - `--shell-view-color-policy-smoke` 的 COM vtable 隐藏 HWND 检查覆盖标签、ID、分组计数、卸载、再次合并、卸载时保留同一 HMENU 上的外部 popup，以及以真实 `IOleInPlaceActiveObject` 接口安装/卸载 OLE composite。NativeProbe Release `dotnet run` 通过；尚未创建 `IShellView`，所以 Shell 命令填充、实际 OLE 菜单消息分派和可见菜单均未验证。ExplorerBrowser 产品 UI 和发布物未修改。
+- 直接向隐藏 frame 合成 WM_INITMENU/WM_INITMENUPOPUP/WM_MENUSELECT/WM_COMMAND 未把 WM_COMMAND 转发到 active-object 窗口；此路径绕过系统菜单跟踪，不能作为真实分派的失败或成功证据，已记入原型边界。

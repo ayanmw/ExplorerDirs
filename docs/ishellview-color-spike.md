@@ -6,6 +6,8 @@
 
 `--shell-view-color-policy-smoke` 先在隐藏 HWND 上经实际 COM vtable 验证菜单项、ID、分组宽度、移除/释放及重复合并；另在同一 HMENU 保留一个外部 popup，确认宿主卸载不会删除非自身菜单。OLE composite 安装也已用真正的 `IOleInPlaceActiveObject` COM 接口夹具，不再使用空活动对象。没有创建 `IShellView`，Shell 尚未向这些组添加自己的命令项；因此不证明 Shell 菜单项合并、OLE 命令消息触发、活动对象消息循环或可见交互。依据：[Microsoft Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 与 [OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)。
 
+进一步尝试在隐藏 HWND 上直接合成 `WM_INITMENU`、`WM_INITMENUPOPUP`、`WM_MENUSELECT` 与 `WM_COMMAND`。消息到达 frame，但没有转发到 active-object 窗口；这类直接 `SendMessage` 没有经过系统实际菜单跟踪流程，不能据此判定真实 OLE 菜单路由失败，也不能当作成功证据。移除此无效断言；真实用户菜单选择仍须在不共享桌面的隔离会话验证。
+
 ## 2026-10-26：为隔离 Shell 宿主提供 IOleInPlaceFrame
 
 `StreamViewHost` 现在也暴露 `IOleInPlaceFrame` IID。其菜单插入/安装/移除、状态文字、模态状态与 accelerator 方法复用 `IShellBrowser` 已验证的父级路由；`SetActiveObject` 走独立回调，父级接受后 host 保留一个 COM 引用并在替换/Dispose 时释放。边框空间的三个方法保留为 `E_NOTIMPL`，异常回调转成 `E_FAIL`。
