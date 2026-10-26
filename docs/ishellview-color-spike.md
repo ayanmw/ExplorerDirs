@@ -935,3 +935,11 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-color-policy-smoke` 通过；完整 `session-restore-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-040514-e132943a.stdout.log`。四个真实 filesystem `IShellView` 逐一激活后，frame 上当前 composite 均包含应用菜单组；向 frame 发送该命令的 `WM_COMMAND` 后，只有当前 pane 的计数递增，四个 pane 各为 1；最后停用所有 pane 后再发送则被忽略。每次切换会清理前一 host 自有 popup，并在最终停用后恢复原 frame 菜单。四 pane view-state 恢复、Shell Details/排序/分组命令、选中项 copy 菜单、Ctrl+A、F2 四方向键与选区隔离、文件复制/重命名/删除、目录通知检查均继续通过；foreground HWND 未变化。
 
 这证明 Private Desktop 隐藏原生宿主内应用菜单组与 Shell 菜单共存，且合成 `WM_COMMAND` 只分派给当前活动 pane；不等于真实点击菜单项，因为探针直接向 frame 发送消息。probe 命令没有产品功能语义；没有显示菜单、运行真实 OLE 菜单消息循环、验证快捷键、扩展菜单或 WPF 产品接线。ExplorerBrowser 产品、配置与 release 未改。依据：[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)、[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[SetWindowSubclass](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-setwindowsubclass)。
+
+### 2026-10-27 Shell 原生菜单命令 frame 转发尚未通过
+
+在共享 frame subclass 中尝试把 Shell 菜单 ID `0x704B`（Details）转发给 coordinator 当前记录的 `hwndActiveObject`。Private Desktop 四 pane 探针能收到 `WM_COMMAND`，但目标 pane 2 仍为 Small Icons；回调轨迹显示菜单 coordinator 的 owner 和 active HWND 仍是 pane 1，因此不能把“菜单项 ID 可读”当作“目标 pane 正确”。追加 `IShellView::UIActivate(SVUIA_ACTIVATE_FOCUS)` 和给 view/list HWND 调用 `SetFocus` 也没有切换 coordinator owner；第二轮仍失败，日志为 `20261027-041021-6ff9cece.stdout.log`。
+
+这轮失败揭示原探针缺少“焦点切换 → `OnViewWindowActive` → 当前 Shell 菜单 owner/命令接收者”的状态验证。微软文档指出 view 获取焦点时需调用 `IShellBrowser::OnViewWindowActive`，且 composite menu 命令分派取决于菜单项 ID；但当前测试中的协调器只在 `SetMenuSB` 建立 owner，未证明窗口焦点变化会正确更新 owner/活动 view。依据：[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[IShellBrowser::OnViewWindowActive](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-onviewwindowactive)。
+
+失败的 Shell 命令转发分支已撤回；上一节已通过的应用自定义 probe 命令 active-pane 路由保持。下一步先补齐宿主焦点/菜单 owner 的协议探针，再验证真实 Shell 命令；在此之前不将 Shell 菜单分派能力列为已完成，也不迁移产品宿主。

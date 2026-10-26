@@ -3499,3 +3499,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 隔离 `StreamViewHost` 在 `SetMenuSB` 安装前向 Shell composite HMENU 添加自有 `Explorer Dirs` 菜单组，并在活动 pane 切换/停用时经共享菜单协调器清理自有 popup；同线程 frame subclass 接收 probe 命令的 `WM_COMMAND` 并路由到当前 coordinator owner。该处理遵循 Shell 先构造菜单、宿主再修改 composite menu 的接口顺序。
 - NativeProbe Release build 0 警告、0 错误；无 Shell view 的 `--shell-view-color-policy-smoke` 通过；完整 `session-restore-private-desktop` 退出码 0。四个真实 filesystem `IShellView` 逐个激活时当前菜单均含应用组，合成 frame `WM_COMMAND` 每次只递增活动 pane，所有 pane 停用后命令被忽略；前一 owner 菜单清理、最终恢复原 frame 菜单均通过。view-state、Shell 菜单命令、文件操作/通知与焦点隔离检查继续通过，主桌面 foreground HWND 不变。最终日志：`src/.state/native-probe-watchdog/20261027-040514-e132943a.stdout.log`。
 - 仅为 Private Desktop 隔离宿主证据；没有显示/点击菜单、验证快捷键/OLE 菜单消息循环或接入 WPF 产品宿主。probe 命令没有产品功能语义。ExplorerBrowser 产品、配置与 release 未改。详细证据见[原型记录](ishellview-color-spike.md#2026-10-27-四窗格-shell-菜单合并应用菜单组)。
+
+## 2026-10-27：Shell 原生菜单命令路由仍待补齐
+
+- 尝试将 frame 收到的 Shell Details 命令 `0x704B` 转发到 coordinator 当前记录的活动视图。命令确实到达 frame subclass，但目标 pane 2 的视图模式没有变化；诊断显示 coordinator owner/活动 HWND 仍指向 pane 1。给 pane 2 调用 `UIActivate` 与 `SetFocus` 仍未切换菜单 owner，Private Desktop watchdog 退出码 1（日志 `20261027-041021-6ff9cece.stdout.log`）。失败分支已撤回，已通过的应用自定义命令路由不受影响。
+- 已证实缺口在“焦点/`OnViewWindowActive` 与共享菜单 owner 同步”，而不是 frame subclass 未收到消息。下一步先独立验证 Shell 激活通知、活动菜单 owner 与 frame 命令接收者的一致性，再继续全宿主迁移门槛。此项通过前，不宣称 Shell 原生菜单命令路由或产品 `IShellView` 迁移完成。
+- 详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27-shell-原生菜单命令-frame-转发尚未通过)。
