@@ -67,7 +67,7 @@
 
 2026-10-25 逐行文件夹派生列调查：`IFolderView2::SetViewProperty` 看起来可为当前视图项目缓存系统属性，可能让原生“大小”列显示计算值；微软将该接口标记为弃用，且不支持搜索结果/库视图，尚未在产品视图可见验证。系统 `System.FileCount` 不是列属性，不能直接成为“类型”列中的子项计数。实现边界和下一步验证条件见[专项调查](folder-size-column-investigation.md)。
 
-2026-10-24 Q-Dir 颜色高亮技术边界复核：[FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR)明确列出扩展名通配符、多扩展名分号列表、隐藏项 `#`、文件夹 `#DIR`、只读项 `#RO` 和多组颜色规则；[FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR)还列出背景占位符 `#BG`（视图背景）与 `#BG-A`（活动窗格背景），以及 `-1/0/1` 后续规则可否覆盖当前字段的标志。FAQ 47 说明从 Q-Dir 7.21 起，需先启用相应选项，颜色设置才会随收藏 `.qdr` 保存，因此这些字段并非每份工作区必有；当前导入器忽略颜色仍是明确兼容差距，不能假称 `.qdr` 全字段导入。2026-10-26 隔离规则匹配器又补入本机 `[Filter2]` 样本使用的 `#Hidden` 隐藏项别名，与公开 `#` 同义；该别名尚未接入 `.qdr` 导入。
+2026-10-24 Q-Dir 颜色高亮技术边界复核：[FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR)明确列出扩展名通配符、多扩展名分号列表、隐藏项 `#`、文件夹 `#DIR`、只读项 `#RO` 和多组颜色规则；[FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR)还列出背景占位符 `#BG`（视图背景）与 `#BG-A`（活动窗格背景），以及 `-1/0/1` 后续规则可否覆盖当前字段的标志。FAQ 47 说明从 Q-Dir 7.21 起，需先启用相应选项，颜色设置才会随收藏 `.qdr` 保存，因此这些字段并非每份工作区必有。现有可读 Q-Dir.ini 的 `[Filter2]` 有 12 条真实规则，包含 `#Hidden`、扩展名、`#DIR`、`#BG` 和 `#BG-A`；规则字段数值列的完整语义及含颜色规则的 `.qdr` 正向样本仍待确认，当前导入器尚未应用这些规则，不能假称全字段兼容。
 
 2026-10-25 Private Desktop 隔离颜色复验：`IShellView` 的 `SysListView32` 逐项颜色现于 Icon、Details、SmallIcon、List、Tile 五种同步模式中通过真实目标色像素检查，Name 降序及 Size 分组时五种模式也通过；Icon 的选中项目保留 Shell 默认颜色，未选中项目仍按规则着色。DefView 回调的 `CDIS_SELECTED` 在本机被错误地置于所有行，故探针在绘制前快照 ListView 的 `LVIS_SELECTED`，不能直接沿用回调标志。此为私有 Desktop 上的隔离默认 `IShellView` 证据，不证明 ExplorerBrowser DirectUI、Content 模式、其它 Shell provider 或产品宿主可迁移；文件区仍使用 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-10-25-defview-选择状态标志与同步视图颜色复验)。
 
