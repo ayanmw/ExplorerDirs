@@ -114,6 +114,12 @@ if (args.Length == 1 && args[0] == "--focus-traversal-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--mouse-wheel-focus-smoke")
+{
+    ExplorerDirs.SettingsSmoke.MouseWheelFocusSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--directory-watcher-startup-smoke")
 {
     ExplorerDirs.SettingsSmoke.DirectoryWatcherStartupSmoke.RunAsync().GetAwaiter().GetResult();

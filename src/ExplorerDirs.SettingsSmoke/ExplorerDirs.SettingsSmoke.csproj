@@ -85,6 +85,7 @@
     <Compile Include="../ExplorerDirs.App/AddressInputResolver.cs" Link="AddressInputResolver.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/MouseWheelFocusRouter.cs" Link="MouseWheelFocusRouter.cs" />
     <Compile Include="../ExplorerDirs.App/TabStripVisibilityPolicy.cs" Link="TabStripVisibilityPolicy.cs" />
     <Compile Include="../ExplorerDirs.App/TreeSelectionAutoExpand.cs" Link="TreeSelectionAutoExpand.cs" />
     <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
