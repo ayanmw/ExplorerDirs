@@ -8,6 +8,13 @@ internal static class ShellTreeIconIndexResolver
     private const uint SmallIcon = 0x00000001;
     private const uint OpenIcon = 0x00000002;
 
+    internal static nint GetSystemImageList()
+    {
+        var sample = Environment.SystemDirectory;
+        var size = (uint)Marshal.SizeOf<ShellFileInfo>();
+        return SHGetFileInfo(sample, 0, out _, size, SystemImageIndex | SmallIcon);
+    }
+
     internal static bool TryResolve(string parsingName, out int normal, out int open)
     {
         normal = open = -1;

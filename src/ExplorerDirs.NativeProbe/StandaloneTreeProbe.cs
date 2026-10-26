@@ -45,6 +45,13 @@ internal static class StandaloneTreeProbe
             File.WriteAllText(file, "isolated fixture");
             tree = new(parent, 320, 480);
             treeWindow = tree.WindowHandle;
+            var nativeTree = FindWindowExW(treeWindow, 0, "SysTreeView32", null);
+            if (nativeTree == 0) throw new Exception("Expected native tree view child is missing.");
+            var treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0); // TVM_GETIMAGELIST / TVSIL_NORMAL
+            var systemImageList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            Console.WriteLine($"tree-icons: system-image-list-bound={treeImageList != 0 && treeImageList == systemImageList}");
+            if (treeImageList == 0 || treeImageList != systemImageList)
+                throw new Exception("Native tree view is not using the system image list that supplies its Shell icon indices.");
             if (!SetWindowSubclass(treeWindow, observer, 42, 0))
                 throw new Exception("Tree notification observation failed.");
             if (FindWindowExW(treeWindow, 0, "SysTreeView32", null) == 0)

@@ -63,6 +63,10 @@ internal sealed class NativeShellTree : IDisposable
                 Check(At<GetObject>(window, 3)(window, out var hwnd));
                 if (hwnd == 0 || !IsChild(parent, hwnd)) throw new InvalidOperationException("目录树窗口不属于当前宿主。");
                 WindowHandle = hwnd;
+                var treeView = FindWindowEx(hwnd, 0, "SysTreeView32", null);
+                var systemImageList = ShellTreeIconIndexResolver.GetSystemImageList();
+                if (treeView != 0 && systemImageList != 0)
+                    _ = SendMessage(treeView, 0x1109, 0, systemImageList); // TVM_SETIMAGELIST / TVSIL_NORMAL
             }
             finally { Marshal.Release(window); }
             Check(Method<Advise>(4)(_tree, _events, out _cookie));
@@ -304,6 +308,10 @@ internal sealed class NativeShellTree : IDisposable
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid clsid, nint outer, uint context, ref Guid iid, out nint value);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string path, nint bind, ref Guid iid, out nint item);
     [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowExW")]
+    private static extern nint FindWindowEx(nint parent, nint after, string className, string? windowName);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
