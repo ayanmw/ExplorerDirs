@@ -341,6 +341,7 @@ if (args.Length == 1 && args[0] == "--environment-change-message-smoke")
 ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
+ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
 HiddenItemsPreferenceSmoke.Run();
 ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
 ExplorerDirs.SettingsSmoke.QuickLinkStoreSmoke.Run();

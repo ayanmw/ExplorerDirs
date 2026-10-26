@@ -536,6 +536,15 @@ public partial class PaneControl : UserControl
         if (current is not { } style) return false;
         return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, delta));
     }
+    private void RootBorder_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || e.Delta == 0) return;
+
+        // Native Shell views handle Ctrl+wheel in their HWND message path. This
+        // routed handler extends the same gesture to the pane's WPF chrome.
+        Activated?.Invoke(this, EventArgs.Empty);
+        if (CycleViewStyle(e.Delta)) e.Handled = true;
+    }
     public void NavigateTo(string path) => Navigate(path);
     public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
     internal void ApplySelectionCommand(ShellSelectionCommand command) => Current?.Browser.ApplySelectionCommand(command);
