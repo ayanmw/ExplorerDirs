@@ -90,6 +90,13 @@ internal static class StandaloneTreeProbe
             if (!selected) selected = tree.SelectDirectory(child);
             if (!selected) throw new Exception("Production tree did not select child.");
             Pump();
+            var caretItem = SendMessageW(nativeTree, 0x110a, 9, 0); // TVGN_CARET
+            var childImages = ReadTreeItemImages(nativeTree, caretItem);
+            Console.WriteLine($"tree-item-icons: normal={childImages.Normal}; selected={childImages.Selected}; image-count={ImageList_GetImageCount(systemImageList)}");
+            if (childImages.Normal < 0 || childImages.Selected < 0 ||
+                childImages.Normal >= ImageList_GetImageCount(systemImageList) ||
+                childImages.Selected >= ImageList_GetImageCount(systemImageList))
+                throw new Exception("The populated Shell tree item has no usable normal/selected image indices.");
             treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0);
             if (treeImageList != systemImageList)
                 throw new Exception("Expanding Shell tree nodes replaced the system image list used by Shell icon indices.");
@@ -312,6 +319,14 @@ internal static class StandaloneTreeProbe
         var value = new TreeItem { Mask = 8, Item = item, StateMask = 0x20 };
         if (SendMessageW(control, 0x110c, 0, ref value) == 0) throw new Exception("Could not read native tree item state.");
         return value.State;
+    }
+    private static (int Normal, int Selected) ReadTreeItemImages(nint control, nint item)
+    {
+        if (item == 0) throw new Exception("The populated Shell tree has no caret item for icon inspection.");
+        var value = new TreeItem { Mask = 0x22, Item = item }; // TVIF_IMAGE | TVIF_SELECTEDIMAGE
+        if (SendMessageW(control, 0x110c, 0, ref value) == 0)
+            throw new Exception("Could not read native Shell tree item image indices.");
+        return (value.Image, value.SelectedImage);
     }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct TreeItem
