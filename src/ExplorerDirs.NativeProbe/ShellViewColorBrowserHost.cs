@@ -525,6 +525,18 @@ public static class ShellViewColorBrowserHostSmoke
             var translateAccelerator = GetComMethod<TranslateAcceleratorCallback>(frame, 14);
             Check(getWindow(frame, out var window) == 0 && window == frameWindow,
                 "the isolated OLE frame exposes its parent HWND through IOleWindow");
+            using (var windowlessHost = new StreamViewHost(0, []))
+            {
+                var windowlessFrame = Marshal.GetComInterfaceForObject(windowlessHost, typeof(IStreamProbeOleInPlaceFrame));
+                try
+                {
+                    var getWindowless = GetComMethod<GetWindowCallback>(windowlessFrame, 3);
+                    Check(getWindowless(windowlessFrame, out var missingWindow) == unchecked((int)0x80004005) &&
+                          missingWindow == 0,
+                        "the isolated OLE frame reports E_FAIL when it has no parent HWND");
+                }
+                finally { Marshal.Release(windowlessFrame); }
+            }
             var borderPointer = Marshal.AllocHGlobal(Marshal.SizeOf<StreamProbeRect>());
             try
             {

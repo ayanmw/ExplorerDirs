@@ -330,7 +330,13 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         _stateId = stateId;
         _navigation = navigation;
     }
-    public int GetWindow(out nint window) { window = _parent; return 0; }
+    public int GetWindow(out nint window)
+    {
+        window = 0;
+        if (_parent == 0 || !IsWindow(_parent)) return unchecked((int)0x80004005);
+        window = _parent;
+        return 0;
+    }
     public int ContextSensitiveHelp(int enter)
     {
         if (ContextSensitiveHelpHandler is not { } handler) return unchecked((int)0x80004001);
