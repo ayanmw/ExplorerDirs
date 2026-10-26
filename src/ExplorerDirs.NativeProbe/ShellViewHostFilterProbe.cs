@@ -387,17 +387,21 @@ internal static class ShellViewHostFilterProbe
 
             void BrowseVirtualScope(string parsingName, string label)
             {
+                TraceVirtualScope($"{label}-parse-before", foreground);
                 if (label == "SearchFolder")
                     virtualFolderPidl = ShellSearchLocation.ParsePidl(parsingName);
                 else
                     Check(SHParseDisplayName(parsingName, 0, out virtualFolderPidl, 0, out _));
                 try
                 {
+                    TraceVirtualScope($"{label}-browse-before", foreground);
                     Check(host.BrowseObject(virtualFolderPidl, 0));
+                    TraceVirtualScope($"{label}-browse-after", foreground);
                     var itemCount = AdoptPendingView(expectedItemCount: null);
                     if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"The isolated host did not retain the {label} PIDL.");
                     Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; enumerated-items={itemCount}; {InspectNativeContracts(readVerbs: label != "ZipContainer")}");
+                    TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
                 {
@@ -412,6 +416,7 @@ internal static class ShellViewHostFilterProbe
                 using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
                 using var entry = archive.CreateEntry("archive.txt").Open();
                 entry.WriteByte(0x41);
+                TraceVirtualScope("zip-fixture-created", foreground);
                 return zipPath;
             }
 
@@ -505,16 +510,16 @@ internal static class ShellViewHostFilterProbe
         }
         finally
         {
-            TraceCleanup("pending-view-before");
+            TraceCleanup("pending-view-before", foreground);
             host?.DisposePendingView();
-            TraceCleanup("pending-view-after");
+            TraceCleanup("pending-view-after", foreground);
             if (created && view != 0)
             {
-                TraceCleanup("destroy-view-before");
+                TraceCleanup("destroy-view-before", foreground);
                 _ = At<DestroyViewWindow>(view, 10)(view);
-                TraceCleanup("destroy-view-after");
+                TraceCleanup("destroy-view-after", foreground);
             }
-            TraceCleanup("release-interfaces-before");
+            TraceCleanup("release-interfaces-before", foreground);
             if (folderView != 0) Marshal.Release(folderView);
             if (view != 0) Marshal.Release(view);
             if (viewPointer != 0) Marshal.Release(viewPointer);
@@ -528,32 +533,40 @@ internal static class ShellViewHostFilterProbe
             if (childFolderPidl != 0) Marshal.FreeCoTaskMem(childFolderPidl);
             if (filePidl != 0) Marshal.FreeCoTaskMem(filePidl);
             if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
-            TraceCleanup("release-interfaces-after");
+            TraceCleanup("release-interfaces-after", foreground);
             if (!leaveParentForThreadExit && parent != 0 && IsWindow(parent))
             {
-                TraceCleanup("destroy-parent-before");
+                TraceCleanup("destroy-parent-before", foreground);
                 DestroyWindow(parent);
-                TraceCleanup("destroy-parent-after");
+                TraceCleanup("destroy-parent-after", foreground);
             }
             else if (leaveParentForThreadExit && parent != 0 && IsWindow(parent))
             {
                 // DestroyWindow on the owning window of a non-input Desktop stalls even after
                 // the Shell view and child controls are gone; thread exit owns final HWND cleanup.
-                TraceCleanup("parent-cleanup-deferred-to-thread-exit");
+                TraceCleanup("parent-cleanup-deferred-to-thread-exit", foreground);
             }
-            TraceCleanup("fixture-delete-before");
+            TraceCleanup("fixture-delete-before", foreground);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
             if (zipPath is not null && File.Exists(zipPath)) File.Delete(zipPath);
-            TraceCleanup("fixture-delete-after");
-            TraceCleanup("keepalive-before");
+            TraceCleanup("fixture-delete-after", foreground);
+            TraceCleanup("keepalive-before", foreground);
             GC.KeepAlive(host);
-            TraceCleanup("keepalive-after");
+            TraceCleanup("keepalive-after", foreground);
         }
     }
 
-    private static void TraceCleanup(string phase)
+    private static void TraceCleanup(string phase, nint expectedForeground)
     {
-        Console.WriteLine($"ishellview-host-filter: cleanup={phase}");
+        var foreground = GetForegroundWindow();
+        Console.WriteLine($"ishellview-host-filter: cleanup={phase}; foreground=0x{foreground:X}; expected=0x{expectedForeground:X}; foreground-unchanged={foreground == expectedForeground}");
+        Console.Out.Flush();
+    }
+
+    private static void TraceVirtualScope(string phase, nint expectedForeground)
+    {
+        var foreground = GetForegroundWindow();
+        Console.WriteLine($"ishellview-host-filter: virtual-phase={phase}; foreground=0x{foreground:X}; expected=0x{expectedForeground:X}; foreground-unchanged={foreground == expectedForeground}");
         Console.Out.Flush();
     }
 
