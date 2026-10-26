@@ -4,7 +4,9 @@
 
 NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键，按键序号排序，并保留模式字符串及其后六个原始字段。这个结构依据本机可读 `Q-Dir.ini` 的 12 行样本；字段含义未确认的值不映射到颜色或样式开关。编号规则若字段数不符或序号重复，解析整体失败且不返回部分规则。
 
-颜色策略 smoke 覆盖样本中的 `#Hidden`、通配规则和 `#BG` 原始行，以及缺字段拒绝。该读取器仅供隔离原型使用，未接入产品 `.qdr` 导入器；不会导入 Q-Dir 颜色、也不证明 `IShellView` 可见绘制或迁移兼容性。产品当前仍对 `[Filter2]` 显示“未导入”警告。依据：本地 `C:\SoftwareOK\Q-Dir\Q-Dir.ini` 可读文本与 [Q-Dir FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR) 对颜色值状态的一般说明；其余字段的对应关系仍待确认。
+颜色策略 smoke 覆盖样本中的 `#Hidden`、通配规则和 `#BG` 原始行，以及缺字段拒绝。该读取器仅供隔离原型使用，未接入产品 `.qdr` 导入器；不会导入 Q-Dir 颜色、也不证明 `IShellView` 可见绘制或迁移兼容性。产品当前仍对 `[Filter2]` 显示“未导入”警告。
+
+复核 [Q-Dir FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR) 与 [FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR)：公开说明确认 `#BG`/`#BG-A` 背景规则、`#` 隐藏项、`#DIR` 文件夹、`#RO` 只读项，以及属性值 `-1` 允许后续匹配规则设置，`0` 表示不设置且锁定后续规则，`1` 表示设置并锁定后续规则。公开页面未说明 `[Filter2]` 行中这六个值各自对应的属性列；本机 INI 样本只能证明行形状。因此映射前仍须获得可公开验证的字段顺序证据，不能按样本猜列含义。
 
 ## 2026-10-26：为隔离 Shell 宿主插入标准 OLE 菜单组
 
