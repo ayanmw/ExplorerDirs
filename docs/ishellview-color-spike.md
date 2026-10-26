@@ -38,6 +38,12 @@ COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄
 
 该失败只说明当前隔离菜单/焦点准备不足以验证命令分派，不能据此断言 Shell 自身行为或 WPF 产品焦点路由。随后恢复原代码并构建 NativeProbe 成功；`session-restore-private-desktop` watchdog 两次在 consumer 的 accelerator 阶段后超时，分别为 60 秒和 120 秒（日志 `20261027-045951-b850b086.stdout.log`、`20261027-050020-1b584e44.stdout.log`）。较早的 `20261027-045900-3a3de998.stdout.log` 则因 pane 2 误选断言失败。主桌面 foreground HWND 始终未变化。下一步应先找到 consumer 停滞点并建立可靠的 pane 焦点准备，再单独验证 Edit 命令；全选路由目前仍属未验证项。
 
+### 2026-10-27：为恢复 consumer 增加逐阶段诊断
+
+在第二个完整超时后，恢复 consumer 停滞位置不稳定：一轮在四 pane 菜单命令后未进入文件操作完成标记；加入复制、重命名、删除的开始/完成/读回标记后，两轮完整 Private Desktop session-restore watchdog 退出码 0（`20261027-050416-d29a6157.stdout.log`、`20261027-050448-d6f3baa5.stdout.log`）。更早的 `20261027-050301-4d766a58.stdout.log` 也完整通过。三轮成功均覆盖四 pane 菜单、Shell 复制/重命名/删除、视图状态、焦点与目录通知，主桌面 foreground HWND 未变；间隔仍有一轮在文件操作阶段超时（`20261027-050333-52f9c29c.stdout.log`），故不能视为已修复的稳定性问题。
+
+诊断输出现在分别标记 view 创建/恢复、pane 创建、菜单路由和每项文件操作，不改变测试行为。全选菜单命令的目标 pane 问题仍独立未验证；隐藏原型通过也不代表产品 ExplorerBrowser 或可见用户桌面验收。
+
 ## 2026-10-27：Content 视图逐项颜色绘制像素验证
 
 在同一 NativeProbe 文件夹中切换到 `FVM_CONTENT`（Shell mode 8），确认原生 `SysListView32` 为 Content 样式且包含两个夹具项目；随后对每个项目读取其标签区域像素，并与按 Shell 项目身份匹配的规则背景色比较。首次采样可能发生在逐项绘制回调前，因此最多重试 10 次、每次间隔 100 ms。`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-044600-26c2494a.stdout.log` 报告 `shell=8/32;list-view=4;items=2;callbacks=2;attempts=2`，两项实际与预期颜色分别为 `0xF0E0D0`、`0xD0F0E0`。完整 NativeProbe Release 构建 0 警告/错误；该轮 session state 写回 772 字节，重建 host 恢复成功，Private Desktop 前台 HWND 不变。

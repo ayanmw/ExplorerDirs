@@ -181,6 +181,7 @@ internal static class ShellViewColorSpike
         nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
         IReadOnlyList<DisplayColumnState> columnsExpected, ShellMenuFrameCoordinator menuCoordinator)
     {
+        Console.WriteLine("session-restore-consumer-stage: concurrent-views-start");
         // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
         nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
         ShellViewColorBrowserHost? host = null;
@@ -212,6 +213,7 @@ internal static class ShellViewColorSpike
             throw new InvalidOperationException("The sibling Shell view is not hosted inside its child pane.");
         Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
         Pump(700);
+        Console.WriteLine("session-restore-consumer-stage: sibling-view-activated");
         Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
         _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
         if (host.Reads == 0)
@@ -266,25 +268,34 @@ internal static class ShellViewColorSpike
         Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out restoredMode, out _));
         if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
             throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
+        Console.WriteLine("session-restore-consumer-stage: sibling-state-restored");
         var otherFixture = GetNotificationIsolationFixture(fixture);
+        Console.WriteLine("session-restore-consumer-stage: creating-pane3");
         var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48,
             menuCoordinator: menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: pane3-created");
         var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1,
             otherFixture, expectedItemCount: 1, menuCoordinator: menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: pane4-created");
         var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
         var allHosts = new[] { restoredHost, host, pane3.Host, pane4.Host };
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
+        Console.WriteLine("session-restore-consumer-stage: four-panes-ready");
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, allHosts, expectedModes, containerParent,
             menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: menu-activation-complete");
         var menuCommands = VerifyFourPaneMenuCommandRouting(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
+        Console.WriteLine("session-restore-consumer-stage: menu-commands-complete");
         var rootFolderViews = allViews.Take(3).ToArray();
         var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
             expectedSort, columnsExpected, rootFolderViews);
+        Console.WriteLine("session-restore-consumer-stage: file-operations-complete");
         var directoryIsolation = VerifyDirectoryNotificationIsolation(rootFolderViews, pane4.FolderView,
             fixture, otherFixture);
+        Console.WriteLine("session-restore-consumer-stage: directory-notifications-complete");
         AssertPaneModes(allViews, expectedModes, "file operations");
         return $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
             $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
@@ -1125,8 +1136,10 @@ internal static class ShellViewColorSpike
         try
         {
             Check(At<ItemCount>(folderView, 7)(folderView, svgIoAllView, out var initialCount));
+            Console.WriteLine("session-restore-consumer-stage: file-copy-start");
             PerformShellFileOperation(operation =>
                 Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
+            Console.WriteLine("session-restore-consumer-stage: file-copy-performed");
             if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
                 throw new IOException("The restored Shell view session could not copy its fixture file through IFileOperation.");
             if (!WaitForShellView(folderView, initialCount + 1, copiedPath, null) &&
@@ -1134,13 +1147,16 @@ internal static class ShellViewColorSpike
                 throw new IOException("The restored Shell view did not show the copied fixture after refresh.");
             WaitForAllPaneCounts(allFolderViews, initialCount + 1, "copy");
             AssertViewSettings("copy");
+            Console.WriteLine("session-restore-consumer-stage: file-copy-verified");
 
+            Console.WriteLine("session-restore-consumer-stage: file-rename-start");
             PerformShellFileOperation(operation =>
             {
                 var item = CreateShellItem(copiedPath);
                 try { Check(At<RenameItem>(operation, 12)(operation, item, Path.GetFileName(renamedPath), 0)); }
                 finally { Marshal.Release(item); }
             });
+            Console.WriteLine("session-restore-consumer-stage: file-rename-performed");
             if (File.Exists(copiedPath) || !File.Exists(renamedPath))
                 throw new IOException("The restored Shell view session could not rename its fixture through IFileOperation.");
             if (!WaitForShellView(folderView, initialCount + 1, renamedPath, copiedPath) &&
@@ -1148,13 +1164,16 @@ internal static class ShellViewColorSpike
                 throw new IOException("The restored Shell view did not show the renamed fixture after refresh.");
             WaitForAllPaneCounts(allFolderViews, initialCount + 1, "rename");
             AssertViewSettings("rename");
+            Console.WriteLine("session-restore-consumer-stage: file-rename-verified");
 
+            Console.WriteLine("session-restore-consumer-stage: file-delete-start");
             PerformShellFileOperation(operation =>
             {
                 var item = CreateShellItem(renamedPath);
                 try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
                 finally { Marshal.Release(item); }
             });
+            Console.WriteLine("session-restore-consumer-stage: file-delete-performed");
             if (File.Exists(renamedPath))
                 throw new IOException("The restored Shell view session could not delete its fixture through IFileOperation.");
             if (!WaitForShellView(folderView, initialCount, null, renamedPath) &&
@@ -1162,6 +1181,7 @@ internal static class ShellViewColorSpike
                 throw new IOException("The restored Shell view did not remove the deleted fixture after refresh.");
             WaitForAllPaneCounts(allFolderViews, initialCount, "delete");
             AssertViewSettings("delete");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-verified");
             return "copy/rename/delete=all-4-panes-converged";
         }
         finally

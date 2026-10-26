@@ -3553,3 +3553,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - NativeProbe 菜单读取确认 Edit 组有“全选 (Ctrl+A)”。隔离四 pane 尝试分别将命令投递到目标 `IShellView` HWND 与共享 frame；两者均未只选中目标 pane，结果误选 pane 2。发现探针曾错误使用 `IFolderView::SelectItem` 的取消选择标志后已修正；临时断言代码撤回，没有修改产品路由。
 - 恢复代码后 NativeProbe Release 构建通过；完整 Private Desktop consumer 在 accelerator 探测之后两次超时，前台 HWND 未变。全选路由仍未验证；下一步先定位 consumer 停滞并确定可靠的 pane 焦点注入，再恢复针对性探针。详见[隔离 IShellView 原型记录](ishellview-color-spike.md#2026-10-27-edit--select-all-的-pane-路由尚未验证)。
+
+## 2026-10-27：恢复 consumer 增加逐阶段诊断并复核四窗格基线
+
+- 为恢复 consumer 增加 view/pane 创建、菜单验证和复制/重命名/删除阶段标记。NativeProbe Release build 0 警告/错误；`session-restore-private-desktop` 三轮通过（`20261027-050301-4d766a58.stdout.log`、`20261027-050416-d29a6157.stdout.log`、`20261027-050448-d6f3baa5.stdout.log`），一轮在菜单验证后、文件操作完成前超时（`20261027-050333-52f9c29c.stdout.log`）。通过轮均检查四 pane 菜单命令映射、文件复制/重命名/删除的视图收敛、视图状态、焦点和跨目录通知；foreground HWND 未变。
+- 阶段标记帮助确定失败发生于哪个阶段，但间歇超时原因尚未查明。全选菜单的 pane 目标也仍未证实；真实拖放、可见菜单交互和 WPF 产品宿主集成仍是迁移门槛。详见[IShellView 原型记录](ishellview-color-spike.md#2026-10-27为恢复-consumer-增加逐阶段诊断)。
