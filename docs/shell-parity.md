@@ -1,4 +1,4 @@
-> **多行标签栏（2026-10-27）：**“视图 → 多行标签栏”现可让标签标题按可用宽度换行，隐藏单行滚动箭头并启用纵向滚动；默认关闭，保存在独立便携 `MultilineTabHeaders.ini`。Release SettingsSmoke 覆盖默认值及配置往返，App Release build 通过。尚未运行可见 GUI；极窄窗格、拖动重排、标签标题动态变化和键盘焦点需人工验收。
+> **多行标签栏（2026-10-27）：**“视图 → 多行标签栏”现可让标签标题按可用宽度换行，隐藏单行滚动箭头并启用纵向滚动；默认关闭，保存在独立便携 `MultilineTabHeaders.ini`。Release SettingsSmoke 覆盖单行滚动范围、多行行列坐标及配置往返，App Release build 通过。尚未运行可见 GUI；极窄窗格、拖动重排、标签标题动态变化和键盘焦点需人工验收。
 
 > **IShellView 延迟 View 命令拒绝过期 pane（2026-10-27）：**隔离 NativeProbe 的共享菜单 frame 会把 `WM_COMMAND` 延迟到自定义消息执行；切换 pane 后，旧 View 菜单命令之前可能沿旧 owner 发给已不活动的 view。现有执行前再次核对 coordinator owner，过期命令被消费但不派发。新增隐藏 frame 两 pane 回归；NativeProbe Release build 与无 Shell-view 的 `--shell-view-color-policy-smoke` 通过。仅是迁移原型门控，不代表产品 ExplorerBrowser 或真实菜单交互验收。详见[原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。
 

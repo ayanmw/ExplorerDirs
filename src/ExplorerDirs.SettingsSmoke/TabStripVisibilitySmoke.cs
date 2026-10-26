@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using ExplorerDirs.App;
 
 namespace ExplorerDirs.SettingsSmoke;
@@ -15,6 +16,17 @@ internal static class TabStripVisibilitySmoke
             "multiple-tabs mode shows the strip at two tabs");
         Check(TabStripVisibilityPolicy.ShouldShow(alwaysShow: false, tabCount: 0) == false,
             "an empty pane does not show a tab strip");
+
+        var headerSizes = new[] { new Size(40, 10), new Size(35, 10), new Size(50, 10) };
+        var singleLine = TabHeaderLayout.Calculate(headerSizes, availableWidth: 80, multiline: false);
+        Check(singleLine.DesiredSize == new Size(125, 10) &&
+              singleLine.Items[0].X == 0 && singleLine.Items[1].X == 40 && singleLine.Items[2].X == 75,
+            "single-line tabs preserve their horizontal order and scrollable extent");
+        var multiline = TabHeaderLayout.Calculate(headerSizes, availableWidth: 80, multiline: true);
+        Check(multiline.DesiredSize == new Size(75, 20) &&
+              multiline.Items[0].X == 0 && multiline.Items[1].X == 40 &&
+              multiline.Items[2].X == 0 && multiline.Items[2].Y == 10,
+            "multiline tabs wrap in displayed order and report two row heights");
 
         var path = Path.Combine(root, "TabStripVisibility.ini");
         var store = new TabStripVisibilityStore(path);
