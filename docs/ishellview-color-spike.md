@@ -1044,6 +1044,8 @@ NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/nati
 
 两个对象的 `IDataObject::EnumFormatEtc(DATADIR_GET)` 结果相同，均含 7 种公开格式：`Shell IDList Array`、`CF_HDROP`、`FileName`、`FileContents`、`FileNameW`、`FileGroupDescriptorW`、`ZoneIdentifier`，且 aspect、index 和 tymed 属性一致。当前证据排除了“格式列表缺少常用 Shell 文件格式”这一简单解释，但没有比较延迟渲染的数据内容、`IDataObjectAsyncCapability` 或源端 `IDropSource`/OLE drag-loop 生命周期。
 
+继续读取 `CF_HDROP`：两个对象都返回同一个 `source\view-target.txt` 完整路径。两者均可查询到 `IDataObjectAsyncCapability`，`GetAsyncMode=False` 且 `InOperation=False`。因此当前比较过的公开格式列表、文件路径和异步接口初始状态一致；尚未比较 Shell IDList Array 的 PIDL 内容。直接 `IDropTarget.Drop` 成功码却没有复制文件，仍不能说明完整 `DoDragDrop` 会失败，因为探针没有 OLE drag source/loop。
+
 首次运行发现源 `sourceChildPidl` 是 `ILFindChild` 指向绝对 PIDL 内部的借用指针，不应释放；错误释放导致 heap corruption。移除释放并加入最多 3 秒的 Shell 枚举等待后，探针稳定运行。当前日志还会列出目标目录最终文件名，防止仅依赖 Drop 的成功码误判操作已完成。
 
-NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，因此不能区分该差异来自合成调用缺少 OLE drag loop/数据对象生命周期，还是具体格式内容/异步行为不同；也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步比较 `CF_HDROP`/Shell IDList 实际内容并查询 `IDataObjectAsyncCapability`，再评估完整 OLE drag-loop 验收。
+NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，因此不能区分该差异来自合成调用缺少 OLE drag loop/数据对象生命周期，还是尚未读取的 Shell IDList Array 内容；也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步比较 Shell IDList PIDL 内容，并在禁止合成用户输入的边界内评估可行的 OLE drag-loop 验证。

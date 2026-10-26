@@ -10,6 +10,7 @@ internal static class ShellViewDropTargetProbe
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid DropTargetId = new("00000122-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid AsyncDataObjectId = new("3D8B0590-F691-11D2-8EA9-006097DF5BD4");
     private static readonly Guid FormatEnumeratorId = new("00000103-0000-0000-C000-000000000046");
     private const uint DropEffectCopy = 1;
     private const uint DropEffectMask = 7;
@@ -119,6 +120,8 @@ internal static class ShellViewDropTargetProbe
                 Console.WriteLine("shell-view-drop-target-stage: selected-data-object-acquired");
             if (selectedDataObject != 0) LogDataObjectFormats("selected-view", selectedDataObject);
             LogDataObjectFormats("SHCreateDataObject", dataObject);
+            if (selectedDataObject != 0) LogDataObjectPayload("selected-view", selectedDataObject);
+            LogDataObjectPayload("SHCreateDataObject", dataObject);
 
             shellViewId = ShellViewId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetPane, ref shellViewId, out targetView));
@@ -276,6 +279,45 @@ internal static class ShellViewDropTargetProbe
         finally { Marshal.Release(enumerator); }
     }
 
+    private static void LogDataObjectPayload(string label, nint dataObject)
+    {
+        var asyncDataObjectId = AsyncDataObjectId;
+        var asyncHr = Marshal.QueryInterface(dataObject, in asyncDataObjectId, out var asyncDataObject);
+        if (asyncHr >= 0)
+        {
+            try
+            {
+                var modeHr = At<GetAsyncMode>(asyncDataObject, 4)(asyncDataObject, out var asyncMode);
+                var operationHr = At<InAsyncOperation>(asyncDataObject, 6)(asyncDataObject, out var inOperation);
+                Console.WriteLine($"shell-view-drop-target-async: source={label}; supported=True; mode-hr=0x{modeHr:X8}; async-mode={asyncMode}; operation-hr=0x{operationHr:X8}; in-operation={inOperation}");
+            }
+            finally { Marshal.Release(asyncDataObject); }
+        }
+        else Console.WriteLine($"shell-view-drop-target-async: source={label}; supported=False; query=0x{asyncHr:X8}");
+
+        var format = new FormatEtc { Format = 15, Aspect = 1, Index = -1, Medium = 1 }; // CF_HDROP / TYMED_HGLOBAL.
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0)
+        {
+            Console.WriteLine($"shell-view-drop-target-hdrop: source={label}; get=0x{getDataHr:X8}");
+            return;
+        }
+
+        try
+        {
+            var count = DragQueryFileW(medium.Handle, uint.MaxValue, null, 0);
+            var paths = new List<string>();
+            for (uint index = 0; index < count; index++)
+            {
+                var buffer = new System.Text.StringBuilder(1024);
+                var length = DragQueryFileW(medium.Handle, index, buffer, (uint)buffer.Capacity);
+                if (length > 0) paths.Add(buffer.ToString());
+            }
+            Console.WriteLine($"shell-view-drop-target-hdrop: source={label}; count={count}; paths={string.Join(';', paths)}");
+        }
+        finally { ReleaseStgMedium(ref medium); }
+    }
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -288,6 +330,12 @@ internal static class ShellViewDropTargetProbe
         public int Index;
         public uint Medium;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct StgMedium
+    {
+        public uint Tymed;
+        public nint Handle;
+        public nint ReleaseUnknown;
+    }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings,
         nint browser, ref StreamProbeRect bounds, out nint window);
@@ -299,6 +347,9 @@ internal static class ShellViewDropTargetProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumFormatEtc(nint self, uint direction, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NextFormatEtc(nint self, uint count, out FormatEtc format, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref FormatEtc format, out StgMedium medium);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAsyncMode(nint self, [MarshalAs(UnmanagedType.Bool)] out bool asyncMode);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InAsyncOperation(nint self, [MarshalAs(UnmanagedType.Bool)] out bool inOperation);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragEnter(nint self, nint dataObject, uint keyState, ref PointL point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragOver(nint self, uint keyState, ref PointL point, ref uint effect);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DragLeave(nint self);
@@ -314,5 +365,7 @@ internal static class ShellViewDropTargetProbe
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(nint window, out Rect bounds);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClipboardFormatNameW(ushort format, System.Text.StringBuilder name, int maxCount);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFileW(nint drop, uint file, System.Text.StringBuilder? path, uint pathLength);
+    [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref StgMedium medium);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
 }
