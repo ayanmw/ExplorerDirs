@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-27：OLE 拖放源端对象合同
+
+NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠标按钮判断继续或完成，Escape 返回取消，`GiveFeedback` 请求 OLE 使用系统默认光标。COM vtable smoke 覆盖左键/右键启动、按钮仍按下/已释放、Escape、Copy/Move 效果。
+
+依据 Microsoft [`IDropSource`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idropsource)、[`QueryContinueDrag`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-querycontinuedrag) 与 [`GiveFeedback`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-givefeedback) 合同。当前尚未连接 `DoDragDrop` 源数据对象，也未运行拖放消息循环；这不证明跨窗格拖放已完成或有效。
+
 ## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
 
 `StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。

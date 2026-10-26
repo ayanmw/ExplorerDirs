@@ -4,6 +4,7 @@ internal static class ShellViewColorPolicySmoke
 {
     internal static int Run()
     {
+        ShellViewDragSource.VerifyContract(Check);
         var qdrFilter2 = "[Filter2]\r\n0=#Hidden=1=-1=1=1=-1=0\r\n1=*.zip;*.rar;=1=00AA00=-1=1=-1=0\r\n10=#BG=1=-1=-1=1=-1=0\r\n[Other]\r\n0=not-a-filter";
         Check(QdrFilter2RawReader.TryParse(qdrFilter2, out var rawRules) && rawRules.Count == 3 &&
               rawRules[0].Index == 0 && rawRules[0].Pattern == "#Hidden" &&

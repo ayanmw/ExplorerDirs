@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：补齐隔离 OLE 拖放源端回调合同
+
+- NativeProbe 新增标准 `IDropSource` 实现：Escape 取消、发起拖动的鼠标按钮释放时完成，其余状态继续；Copy/Move 光标反馈交给 OLE 默认指针。COM vtable smoke 覆盖左键源、右键源与两种效果。
+- 这只补齐 `DoDragDrop` 需要的源端对象合同，没有调用 `DoDragDrop`、没有注入输入或启动 Shell view，也未修改产品 ExplorerBrowser。真实源/目标交接和跨窗格拖动仍待独立可接收输入的桌面验证。
+
 ## 2026-10-27：拒绝隔离 OLE 宿主的无效父窗口
 
 - `StreamViewHost.GetWindow` 对零值或已销毁的父 HWND 返回 `E_FAIL`，且输出句柄保持为零；有效父 HWND 仍正常返回。定向 COM vtable smoke 先按预期暴露旧行为，再通过修正验证，并分别覆盖零值与失效句柄；NativeProbe Release 构建 0 警告、0 错误。
