@@ -138,6 +138,6 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 用户随后明确授权继续推进隔离迁移原型。该授权允许 NativeProbe/临时夹具范围内的原型开发和验证，不代表产品 `ExplorerBrowserHost` 可以替换，也不代表可发布迁移版本。由于完整 Private Desktop 探针曾观察到前台句柄变化且原因未能归因，本机共享交互桌面上暂不启动任何新的 `IShellView` 宿主或 GUI 探针；需先准备独立 Windows 会话、VM 或其他不共享输入桌面的环境。期间可继续进行不启动 Shell view 的源码契约审查、纯逻辑 smoke 和构建验证。
 
-2026-10-26：NativeProbe 的 `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的内存流作为同宿主后续读请求的来源；第一次读仍使用导入的初始字节。无 Shell view 的 COM IStream smoke 先按预期因读回初始字节而失败，接线后通过；SettingsSmoke、NativeProbe/App Release build 与 `git diff --check` 通过。该改动只验证单个宿主生命周期内的 native stream 往返，不提供多标签隔离、磁盘持久化、重启恢复或产品会话编排证据。
+2026-10-26：NativeProbe 的 `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的内存流作为同宿主后续读请求的来源；第一次读使用构造时复制的初始字节。两个 host 共用调用方数组的回归证明外部变更不会污染已建 host，也验证一方更新不影响另一方。无 Shell view 的 COM IStream smoke 对旧值回读和共享数组污染先按预期失败，修复后通过；SettingsSmoke、NativeProbe/App Release build 与 `git diff --check` 通过。该改动只验证单个宿主生命周期内的 native stream 往返和实例内存隔离，不提供磁盘持久化、重启恢复或产品会话编排证据。
 
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。

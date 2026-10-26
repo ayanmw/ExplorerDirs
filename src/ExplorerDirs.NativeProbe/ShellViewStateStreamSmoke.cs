@@ -8,8 +8,16 @@ internal static class ShellViewStateStreamSmoke
     internal static int Run()
     {
         var initial = new byte[] { 1, 2, 3, 4 };
+        var initialSnapshot = (byte[])initial.Clone();
         var saved = new byte[] { 9, 8, 7, 6, 5 };
         using var host = new StreamViewHost(0, initial);
+        using var sibling = new StreamViewHost(0, initial);
+
+        initial[0] = 0xFF;
+        Check(ReadBytes(host, initialSnapshot.Length).SequenceEqual(initialSnapshot),
+            "a host snapshots its initial imported stream");
+        Check(ReadBytes(sibling, initialSnapshot.Length).SequenceEqual(initialSnapshot),
+            "separate hosts keep independent initial state snapshots");
 
         Check(host.GetViewStateStream(1, out var writePointer) == 0 && writePointer != 0,
             "write mode returns a stream");
@@ -51,8 +59,35 @@ internal static class ShellViewStateStreamSmoke
         }
         finally { Marshal.Release(readPointer); }
 
+        Check(ReadBytes(sibling, initialSnapshot.Length).SequenceEqual(initialSnapshot),
+            "writing one host does not replace another host's initial stream");
+
         Console.WriteLine("Shell view state stream smoke: PASS");
         return 0;
+    }
+
+    private static byte[] ReadBytes(StreamViewHost host, int length)
+    {
+        Check(host.GetViewStateStream(0, out var pointer) == 0 && pointer != 0,
+            "read mode returns a stream");
+        try
+        {
+            var stream = (IStream)Marshal.GetObjectForIUnknown(pointer);
+            try
+            {
+                var bytes = new byte[length];
+                var read = Marshal.AllocCoTaskMem(sizeof(int));
+                try
+                {
+                    stream.Read(bytes, bytes.Length, read);
+                    Check(Marshal.ReadInt32(read) == bytes.Length, "initial view-state bytes are complete");
+                    return bytes;
+                }
+                finally { Marshal.FreeCoTaskMem(read); }
+            }
+            finally { Marshal.ReleaseComObject(stream); }
+        }
+        finally { Marshal.Release(pointer); }
     }
 
     private static void Check(bool condition, string message)

@@ -2,9 +2,9 @@
 
 ## 2026-10-26：让同一探针宿主读回 Shell 写入的视图流
 
-`StreamViewHost.GetViewStateStream` 之前每次读取都返回固定的初始字节；即使 Shell 已写入新视图状态，后续在同一宿主生命周期内创建 view 仍读不到它。现在首次读取使用传入的初始流，之后若存在 Shell 写入则从保存的内存 `IStream` 读取最近字节。
+`StreamViewHost.GetViewStateStream` 之前每次读取都返回固定的初始字节；即使 Shell 已写入新视图状态，后续在同一宿主生命周期内创建 view 仍读不到它。现在首次读取使用传入的初始流，之后若存在 Shell 写入则从保存的内存 `IStream` 读取最近字节。构造时复制输入字节，避免两个标签/调用方共用同一数组后，外部修改污染每个 host 的初始回退状态。
 
-新增 `--shell-view-state-stream-smoke`，不创建 `IShellView`，直接通过真实 Windows `SHCreateMemStream`/COM `IStream` 接口写入字节，再请求读取流并逐字节比较。用例先因读回旧初始值失败，修复后通过。NativeProbe/App Release build 与完整 SettingsSmoke 通过，0 警告/错误。此结果只证明同一个 `StreamViewHost` 实例内存往返；没有多标签、跨进程/重启持久化或 Q-Dir 互操作证据。
+新增 `--shell-view-state-stream-smoke`，不创建 `IShellView`，直接通过真实 Windows `SHCreateMemStream`/COM `IStream` 接口写入字节，再请求读取流并逐字节比较；还以两个 host 共用一个初始数组后修改调用方数组的方式，验证每个 host 保留独立初始快照，且其中一个 host 的 stream 更新不会覆盖另一个 host。两项回归分别先因读回旧初始值、初始数组被外部修改而失败，修复后通过。NativeProbe/App Release build 与完整 SettingsSmoke 通过，0 警告/错误。此结果只证明同一个 `StreamViewHost` 实例内存往返及实例隔离；没有进程重启持久化或 Q-Dir 互操作证据。
 
 ## 2026-10-26：内存 DC 字体资源生命周期
 

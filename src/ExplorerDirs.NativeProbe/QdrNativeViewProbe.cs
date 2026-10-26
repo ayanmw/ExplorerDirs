@@ -234,7 +234,8 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         }
         return unchecked((int)0x80004002);
     }
-    internal StreamViewHost(nint parent, byte[] bytes) { _parent = parent; _bytes = bytes; }
+    // Imported view bytes can be shared by callers; snapshot them so later tab/source edits cannot mutate this host's fallback state.
+    internal StreamViewHost(nint parent, byte[] bytes) { _parent = parent; _bytes = (byte[])bytes.Clone(); }
     public int GetWindow(out nint window) { window = _parent; return 0; }
     public int ContextSensitiveHelp(int enter) => unchecked((int)0x80004001);
     public int InsertMenusSB(nint menu, nint widths) => 0;

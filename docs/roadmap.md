@@ -3165,5 +3165,6 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-26：隔离宿主同会话恢复 Shell view-state stream
 
 - `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的数据用于同一 host 后续的读取；初次读取仍返回调用方传入的初始状态流。新增 `--shell-view-state-stream-smoke`，通过 Windows 内存 IStream 的实际 Write/Read 验证同 host 往返；用例先因返回固定初始字节失败，修复后通过。
+- 构造器现在复制初始字节：两个 host 即使接到同一个输入数组，也会固定各自的初始回退状态。扩展的 COM IStream smoke 通过外部修改原数组、再更新一个 host 的 stream，验证另一 host 仍读到自己的原始初始状态；新增断言在修复前失败、修复后通过。
 - Release `SettingsSmoke`、NativeProbe/App Release build、`git diff --check` 通过，构建 0 警告/错误。没有创建 Shell view；这只是隔离宿主进程内的临时内存行为，未实现标签间隔离、INI/磁盘保存、跨重启恢复、产品接线或 Q-Dir 互操作。
 - 此原型改进不关闭迁移阶段门槛。下一步仍需在允许启动原生 Shell view 的独立 Windows 会话中验证新旧 view 切换的真实 stream 生命周期；产品 `ExplorerBrowser` 保持不变。
