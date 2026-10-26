@@ -82,9 +82,9 @@
 ## 2026-10-26：隔离 NamespaceTreeControl 图标绘制 A/B
 
 - 新增 `--tree-icon-render-ab`，在不创建 ExplorerBrowser、不开可见窗口、不发送输入的情况下，以同一个生产 `NativeShellTree` wrapper 比较两种图标路径：NamespaceTreeControl 默认回退（`OnGetDefaultIconIndex=E_NOTIMPL`、不替换系统图像列表）与当前显式系统索引/图像列表。
-- 两种路径的根节点 `TVIF_IMAGE/TVIF_SELECTEDIMAGE` 均为 `3/3`；对隐藏控件首行客户区调用 `WM_PRINTCLIENT` 后，80×32 ROI 两边均有 455 个非背景像素，16 像素横带计数完全一致（26/160/78/97/94），SHA-256 前缀均为 `9C0FAB159F83A144`；前台 HWND 未变化。结果说明直接 NamespaceTreeControl 宿主中两种实现没有可观察的首行像素差异，候选图标带（x=16–31）在两种路径中都包含绘制像素。
-- 该 ROI 也覆盖展开符号和标签文本，不能单独证明像素均来自文件夹图标；隐藏的直接树宿主不等于 WPF `HwndHost` 产品布局。探针第一次依赖隐藏状态下不可读的 `TVM_GETITEMRECT` 行范围而失败，随后改用固定客户区首行 ROI。NativeProbe/App Release build 均 0 警告、0 错误，完整 Release `SettingsSmoke` 通过，`git diff --check` 通过。
-- 未确认用户截图对应的发布包号，且截图所对应的 temp.58 早于源码显式图标路径变更。当前不能宣布图标缺失已修复，也没有移除产品回退或图像列表绑定；下一步应在确认过的较新预览包中检查 WPF 宿主实际绘制，再按实际结果定位裁剪/尺寸/像素来源。
+- 两种路径的根节点 `TVIF_IMAGE/TVIF_SELECTEDIMAGE` 均为 `3/3`；对隐藏控件首行客户区调用 `WM_PRINTCLIENT` 后，80×32 ROI 两边均有 455 个非背景像素，16 像素横带计数完全一致（26/160/78/97/94），SHA-256 前缀均为 `9C0FAB159F83A144`；前台 HWND 未变化。后续将统计范围细化为候选图标带 x=32–55：两边均有 122 个非背景像素，像素哈希前缀均为 `41689DFC10609924`，高频颜色也一致；这进一步说明两条隐藏绘制路径一致，但仍不能单凭颜色直方图把该区域像素认定为文件夹图标。
+- 隐藏的直接树宿主不等于 WPF `HwndHost` 产品布局。探针第一次依赖隐藏状态下不可读的 `TVM_GETITEMRECT` 行范围而失败，随后改用固定客户区首行 ROI。本轮 NativeProbe Release build 0 警告、0 错误；前台 HWND 未变化。此前 A/B 批次的 App Release build、完整 Release `SettingsSmoke` 和 diff 检查结果见前一提交。
+- 后续只读检查发现当前运行进程是 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.72\app\ExplorerDirs.App.exe`；temp.72 晚于 temp.69 图标路径变更，但没有读取或激活它的窗口，所以仍不构成用户可见绘制证据。当前不能宣布图标缺失已修复，也没有移除产品回退或图像列表绑定；下一步应在确认过的较新预览包中检查 WPF 宿主实际绘制，再按实际结果定位裁剪/尺寸/像素来源。
 
 ## 2026-10-26：静态 Shell 大小列适配器合同复验
 

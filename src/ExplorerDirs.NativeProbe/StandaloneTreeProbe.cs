@@ -49,7 +49,8 @@ internal static class StandaloneTreeProbe
         }
     }
 
-    private static (int Normal, int Selected, int ClientPixels, string PixelHash, string Row) CaptureIconMode(
+    private static (int Normal, int Selected, int ClientPixels, int IconBandPixels, string PixelHash,
+        string IconBandHash, string IconBandColors, string Row) CaptureIconMode(
         nint parent, string fixture, bool useExplicitIcons)
     {
         using var tree = new ExplorerDirs.App.NativeShellTree(parent, 320, 480, useExplicitIcons);
@@ -87,6 +88,7 @@ internal static class StandaloneTreeProbe
             var iconRight = Math.Min(80, width);
             var iconBottom = Math.Min(32, height);
             var pixels = new List<uint>();
+            var iconBandPixels = new List<uint>();
             var pixelBands = new int[5];
             for (var y = 0; y < iconBottom; y++)
             for (var x = 0; x < iconRight; x++)
@@ -96,12 +98,22 @@ internal static class StandaloneTreeProbe
                 {
                     pixels.Add(pixel);
                     pixelBands[Math.Min(x / 16, pixelBands.Length - 1)]++;
+                    // The tree's expando is near x=16 and the root text starts
+                    // beyond this band; isolate the expected Shell icon column.
+                    if (x is >= 32 and < 56 && y < 32) iconBandPixels.Add(pixel);
                 }
             }
             var bytes = new byte[pixels.Count * sizeof(uint)];
             Buffer.BlockCopy(pixels.ToArray(), 0, bytes, 0, bytes.Length);
+            var iconBandBytes = new byte[iconBandPixels.Count * sizeof(uint)];
+            Buffer.BlockCopy(iconBandPixels.ToArray(), 0, iconBandBytes, 0, iconBandBytes.Length);
             var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16];
-            return (images.Normal, images.Selected, pixels.Count, hash,
+            var iconBandHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(iconBandBytes))[..16];
+            var iconBandColors = string.Join(',', iconBandPixels.GroupBy(pixel => pixel)
+                .OrderByDescending(group => group.Count()).Take(8)
+                .Select(group => $"{group.Key:X6}:{group.Count()}"));
+            return (images.Normal, images.Selected, pixels.Count, iconBandPixels.Count, hash, iconBandHash,
+                iconBandColors,
                 $"0,0,{iconRight},{iconBottom}; bands16={string.Join(',', pixelBands)}");
         }
         finally
