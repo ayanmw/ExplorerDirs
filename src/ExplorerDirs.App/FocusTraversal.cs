@@ -9,6 +9,7 @@ internal readonly record struct PaneFocusStopMap(
     int FilterCount,
     int NavigationStopCount,
     int TreeButton,
+    int PaneViewStyle,
     int Address,
     int AddressMenu,
     int AddressHistory,
@@ -29,12 +30,15 @@ internal readonly record struct PaneFocusStopMap(
     // one index map so Tab and F6 cannot drift when a view's stops change.
     internal static PaneFocusStopMap Create(bool searchVisible, bool quickFilterVisible,
         bool treeVisible, bool hasColumnHeader, bool paneTreeButtonVisible = false,
-        bool addressHistoryButtonVisible = false, bool addressPathButtonVisible = false)
+        bool paneViewStyleButtonVisible = true, bool addressHistoryButtonVisible = false,
+        bool addressPathButtonVisible = false)
     {
         var navigationStopCount = BaseNavigationStopCount + (paneTreeButtonVisible ? 1 : 0) +
+            (paneViewStyleButtonVisible ? 1 : 0) +
             (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
         var treeButton = paneTreeButtonVisible ? 4 : -1;
-        var address = 4 + (paneTreeButtonVisible ? 1 : 0);
+        var paneViewStyle = paneViewStyleButtonVisible ? 4 + (paneTreeButtonVisible ? 1 : 0) : -1;
+        var address = 4 + (paneTreeButtonVisible ? 1 : 0) + (paneViewStyleButtonVisible ? 1 : 0);
         var addressMenu = addressPathButtonVisible ? address + 1 : -1;
         var addressHistory = addressHistoryButtonVisible ? address + 1 + (addressPathButtonVisible ? 1 : 0) : -1;
         var go = address + 1 + (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
@@ -58,7 +62,7 @@ internal readonly record struct PaneFocusStopMap(
         majorStops.Add(fileView);
         majorStops.Add(statusTools);
         return new PaneFocusStopMap(searchStart, searchCount, filterStart, filterCount,
-            navigationStopCount, treeButton, address, addressMenu, addressHistory, go, newTab, closeTab,
+            navigationStopCount, treeButton, paneViewStyle, address, addressMenu, addressHistory, go, newTab, closeTab,
             tabHeader, tree, columnHeader, fileView, statusTools, statusTools + 1, majorStops);
     }
 }

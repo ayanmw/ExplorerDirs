@@ -785,22 +785,25 @@ try
           KeyboardShortcuts.NextPane(0, 4, true) == 3 &&
           KeyboardShortcuts.NextPane(0, 1, false) == 0,
           "visible pane focus wraps");
-    var focusStops = new[] { 12, 11, 12, 11 };
+    var focusStops = new[] { 13, 12, 13, 12 };
     Check(FocusTraversal.Move(0, 9, focusStops, false) == (0, 10) &&
           FocusTraversal.Move(0, 10, focusStops, false) == (0, 11) &&
-          FocusTraversal.Move(0, 11, focusStops, false) == (1, 0) &&
-          FocusTraversal.Move(1, 0, focusStops, true) == (0, 11) &&
-          FocusTraversal.Move(0, 11, focusStops, true) == (0, 10) &&
-          FocusTraversal.Move(0, 0, focusStops, true) == (3, 10) &&
-          FocusTraversal.Move(2, -1, focusStops, true) == (2, 11),
+          FocusTraversal.Move(0, 11, focusStops, false) == (0, 12) &&
+          FocusTraversal.Move(0, 12, focusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, focusStops, true) == (0, 12) &&
+          FocusTraversal.Move(0, 12, focusStops, true) == (0, 11) &&
+          FocusTraversal.Move(0, 0, focusStops, true) == (3, 11) &&
+          FocusTraversal.Move(2, -1, focusStops, true) == (2, 12),
           "forward and reverse tab order includes Details header, status tools and wraps panes");
     var detailedPaneStops = PaneFocusStopMap.Create(false, false, false, hasColumnHeader: true,
         addressHistoryButtonVisible: true);
     var iconPaneStops = PaneFocusStopMap.Create(false, false, false, hasColumnHeader: false,
         addressHistoryButtonVisible: true);
-    Check(detailedPaneStops.FileView == 11 && detailedPaneStops.StatusTools == 12 && detailedPaneStops.Count == 13 &&
-          iconPaneStops.FileView == 10 && iconPaneStops.StatusTools == 11 && iconPaneStops.Count == 12,
-          "the address history button precedes file-view stops in every view mode");
+    Check(detailedPaneStops.PaneViewStyle == 4 && detailedPaneStops.Address == 5 &&
+          detailedPaneStops.FileView == 12 && detailedPaneStops.StatusTools == 13 && detailedPaneStops.Count == 14 &&
+          iconPaneStops.PaneViewStyle == 4 && iconPaneStops.Address == 5 &&
+          iconPaneStops.FileView == 11 && iconPaneStops.StatusTools == 12 && iconPaneStops.Count == 13,
+          "the pane view-style button and address controls precede file-view stops in every view mode");
     Check(FocusTraversal.Move(0, detailedPaneStops.FileView, [detailedPaneStops.Count, iconPaneStops.Count], false) == (0, detailedPaneStops.StatusTools) &&
           FocusTraversal.Move(0, detailedPaneStops.StatusTools, [detailedPaneStops.Count, iconPaneStops.Count], false) == (1, 0) &&
           FocusTraversal.Move(1, 0, [detailedPaneStops.Count, iconPaneStops.Count], true) == (0, detailedPaneStops.StatusTools),
@@ -886,7 +889,7 @@ try
           KeyboardShortcuts.Resolve(0x64, 2) != ExplorerShortcut.AutoFitColumns,
           "auto-fit columns requires Ctrl+VK_ADD and does not claim other numpad keys");
     ExplorerDirs.SettingsSmoke.ShellAutoColumnWidthRoutingSmoke.Run();
-    var searchFocusStops = new[] { 15, 14, 12, 11 };
+    var searchFocusStops = new[] { 16, 15, 13, 12 };
     Check(FocusTraversal.Move(0, 7, searchFocusStops, false) == (0, 8) &&
           FocusTraversal.Move(0, 8, searchFocusStops, false) == (0, 9) &&
           FocusTraversal.Move(0, 9, searchFocusStops, false) == (0, 10) &&
@@ -894,8 +897,9 @@ try
           FocusTraversal.Move(0, 11, searchFocusStops, true) == (0, 10) &&
           FocusTraversal.Move(0, 10, searchFocusStops, true) == (0, 9) &&
           FocusTraversal.Move(0, 13, searchFocusStops, false) == (0, 14) &&
-          FocusTraversal.Move(0, 14, searchFocusStops, false) == (1, 0) &&
-          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 14),
+          FocusTraversal.Move(0, 14, searchFocusStops, false) == (0, 15) &&
+          FocusTraversal.Move(0, 15, searchFocusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 15),
           "visible search controls extend each pane's reversible Tab order");
     var searchScope = Path.Combine(root, "search scope & 中文");
     Directory.CreateDirectory(searchScope);

@@ -580,6 +580,7 @@ public partial class PaneControl : UserControl
         CurrentTreeFocusTarget != TreeFocusTarget.None,
         Current?.Browser.HasColumnHeader() == true,
         TreeButton.Visibility == Visibility.Visible,
+        paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
         addressHistoryButtonVisible: true,
         addressPathButtonVisible: true);
     internal int FocusStopCount => FocusMap.Count;
@@ -599,9 +600,9 @@ public partial class PaneControl : UserControl
     {
         var focus = FocusMap;
         UIElement[] controls = focus.TreeButton >= 0
-            ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton,
+            ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton, ToolbarViewStyleButton,
                 Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
-            : [BackButton, ForwardButton, UpButton, RefreshButton,
+            : [BackButton, ForwardButton, UpButton, RefreshButton, ToolbarViewStyleButton,
                 Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
@@ -642,6 +643,7 @@ public partial class PaneControl : UserControl
             0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
             _ => null
         };
+        if (stop == focus.PaneViewStyle) target = ToolbarViewStyleButton;
         if (stop == focus.Address) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (stop == focus.AddressMenu) target = AddressMenuButton;
         if (stop == focus.AddressHistory) target = AddressHistoryButton;
