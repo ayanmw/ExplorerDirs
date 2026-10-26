@@ -17,7 +17,7 @@ internal static class PaneThemeMarkupSmoke
             ("ContextMenu", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("ToolBar", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("ToolBarTray", new[] { ("Background", "ExplorerDirs.WindowBackgroundBrush") }),
-            ("TextBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush"), ("CaretBrush", "ExplorerDirs.ControlTextBrush"), ("SelectionBrush", "ExplorerDirs.AccentBrush"), ("SelectionTextBrush", "ExplorerDirs.AccentTextBrush") }),
+            ("TextBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush"), ("CaretBrush", "ExplorerDirs.ControlTextBrush"), ("SelectionBrush", "ExplorerDirs.SelectionBackgroundBrush"), ("SelectionTextBrush", "ExplorerDirs.SelectionTextBrush") }),
             ("ComboBox", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
             ("ComboBoxItem", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush") }),
             ("Button", new[] { ("Background", "ExplorerDirs.ControlBackgroundBrush"), ("Foreground", "ExplorerDirs.ControlTextBrush"), ("BorderBrush", "ExplorerDirs.BorderBrush") }),
@@ -43,11 +43,11 @@ internal static class PaneThemeMarkupSmoke
                                         (string?)trigger.Attribute("Value") == "True");
         Check(listSelectedTrigger?.Elements(presentation + "Setter").Any(setter =>
                   (string?)setter.Attribute("Property") == "Background" &&
-                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentBrush}") == true &&
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.SelectionBackgroundBrush}") == true &&
               listSelectedTrigger.Elements(presentation + "Setter").Any(setter =>
                   (string?)setter.Attribute("Property") == "Foreground" &&
-                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.AccentTextBrush}"),
-            "selected WPF list items use the readable theme accent pair");
+                  (string?)setter.Attribute("Value") == "{DynamicResource ExplorerDirs.SelectionTextBrush}"),
+            "selected WPF list items use the contrast-checked selection palette");
         var tabControl = document.Descendants(presentation + "TabControl")
             .Single(element => (string?)element.Attribute(xaml + "Name") == "Tabs");
         var style = tabControl.Element(presentation + "TabControl.ItemContainerStyle")?

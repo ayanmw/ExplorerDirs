@@ -44,7 +44,7 @@
 
 ## 2026-10-27：应用自有 WPF 列表使用主题选中色
 
-- 将辅助窗口的 `ListBox` 表面和行绑定到语义颜色，选中行使用当前强调色与成对的可读文字色；不改变列表模板、选区逻辑或 ExplorerBrowser 文件列表。
+- 将辅助窗口的 `ListBox` 表面和行绑定到语义颜色，选中行使用当前强调色与成对的可读文字色；不改变列表模板、选区逻辑或 ExplorerBrowser 文件列表。后续对比度修正让 ListBox 选中行与 TextBox 选中文字改用满足对比度门槛的选中色板。
 - 定向接线 smoke 先因 ListBox 样式缺失失败，加入资源后通过；完整 Release `SettingsSmoke`、App Release build（0 警告、0 错误）和 `git diff --check` 均通过。未操作 GUI，列表可见效果待验收。计划见[WPF 列表主题计划](superpowers/plans/2026-10-27-themed-listbox.md)。
 
 ## 2026-10-27：Windows 11 标题栏同步应用主题

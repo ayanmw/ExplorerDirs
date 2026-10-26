@@ -30,8 +30,8 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
             <Setter Property="CaretBrush" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
-            <Setter Property="SelectionBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
-            <Setter Property="SelectionTextBrush" Value="{DynamicResource ExplorerDirs.AccentTextBrush}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource ExplorerDirs.SelectionBackgroundBrush}"/>
+            <Setter Property="SelectionTextBrush" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
         </Style>
         <Style TargetType="{x:Type ComboBox}">
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
@@ -68,8 +68,8 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.AccentTextBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource ExplorerDirs.SelectionBackgroundBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
