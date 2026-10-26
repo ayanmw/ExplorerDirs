@@ -25,6 +25,7 @@ internal static class ExplorerChromeIconSmoke
 
         var repoRoot = FindRepoRoot();
         var factory = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerChromeIcons.cs"));
+        var appMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "App.xaml"));
         var viewMenu = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ViewStyleMenu.cs"));
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
         var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
@@ -33,6 +34,11 @@ internal static class ExplorerChromeIconSmoke
         Check(factory.Contains("ExplorerDirs.ControlTextBrush", StringComparison.Ordinal) &&
               factory.Contains("SetResourceReference", StringComparison.Ordinal),
             "shared icon paths use a dynamic semantic theme brush");
+        Check(appMarkup.Contains("TargetType=\"{x:Type Path}\"", StringComparison.Ordinal) &&
+              appMarkup.Contains("RelativeSource AncestorType={x:Type Control}", StringComparison.Ordinal) &&
+              appMarkup.Contains("IsEnabled", StringComparison.Ordinal) &&
+              appMarkup.Contains("ExplorerDirs.MutedTextBrush", StringComparison.Ordinal),
+            "vector icons use the muted semantic color when their owning control is disabled");
         Check(viewMenu.Contains("ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               viewMenu.Contains("ExplorerChromeIcons.CreateButtonContent", StringComparison.Ordinal) &&
               viewMenu.Contains("item.Click += (_, _) => apply(style)", StringComparison.Ordinal),

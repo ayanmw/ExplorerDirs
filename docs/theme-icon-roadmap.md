@@ -82,6 +82,7 @@ WPF 语义色资源阶段的实施步骤见[实施计划](superpowers/plans/2026
 - 2026-10-27：应用自有 `ListBox` 背景/文字/边框消费语义资源，选中行使用强调色和可读强调文字色；随后将文本框选中文字及 ListBox 选中行改为使用通过对比度约束的选中色板，避免黑/白等极端强调色与底色过近。定向接线 smoke、完整 Release `SettingsSmoke`、App Release build（0 警告、0 错误）及 `git diff --check` 通过；未启动 GUI，选中行视觉、高对比度与辅助打印窗口可见效果仍待验收。ExplorerBrowser 文件列表未改。实现计划见[WPF 列表主题计划](superpowers/plans/2026-10-27-themed-listbox.md)。
 - 2026-10-27：主窗口与照片打印窗将现有调色板同步到 Windows 11 DWM 标题栏、标题文字和边框；主题变化重新应用，高对比度复位为系统默认颜色。使用公开的 Windows 11 22000+ DWM 颜色属性；不支持的系统保留系统窗口框颜色，WPF 客户区继续使用语义色。纯策略/接线 smoke、完整 Release `SettingsSmoke` 和 App Release build 通过（0 警告、0 错误）；未启动 GUI，Win11/旧 Windows、活动/非活动窗口及切换即时效果仍待可见验收。实现计划见[窗口标题栏主题计划](superpowers/plans/2026-10-27-themed-window-frame.md)。
 - 2026-10-27：完成应用其余命令图标：打印、递归目录大小、环境刷新和终端使用独立矢量图标；剪切、复制、粘贴、删除、重命名、属性、撤销、重做和新建文件夹在菜单及文字工具栏共用命令图标。保留原命令标识、标签文字、快捷键、点击处理、提示和 Shell 状态门控。图标 smoke 覆盖 25 个不同几何、九个 Shell 命令映射和既有事件接线；完整 Release `SettingsSmoke` 与 App Release 构建通过（0 警告、0 错误），`git diff --check` 通过。未启动 GUI，实际尺寸、DPI、禁用态、悬停与高对比度外观仍待可见验收。
+- 2026-10-26：WPF 矢量 `Path` 图标现在跟随最近父控件的禁用状态，禁用时使用动态 muted 文字色，避免按钮文字变灰但图标仍保持普通前景色。图标 smoke 覆盖禁用态语义资源接线，App Release 构建通过（0 警告、0 错误）；未启动 GUI，实际禁用态对比度仍待可见验收。
 - 2026-10-26：每个窗格当前选中的标签增加两 DIP 强调色下划线，使用动态 `ExplorerDirs.AccentBrush`；仅改 TabItem 边框样式，保留默认模板和原生文件视图。XAML smoke 与 Release 构建通过，未做可见多窗格/高对比度验收。
 - 2026-10-26：照片打印窗口改用 Windows 动态窗口/文字/边框系统色，减少辅助窗口在深色和高对比度环境中的硬编码浅色；`SettingsSmoke` 与 App Release 构建通过。此项仅覆盖该 WPF 窗口，尚无可见主题验收，也未改变 ExplorerBrowser 文件区。
 - ExplorerBrowser 文件区深色与逐项着色能力仍未确认，隔离 `IShellView` 探针不能证明产品可用。
