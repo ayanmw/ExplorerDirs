@@ -4,6 +4,19 @@
              xmlns:local="clr-namespace:ExplorerDirs.App">
     <Application.Resources>
         <!-- Keep app-owned navigation surfaces on the same live palette as the window chrome. -->
+        <Style x:Key="ExplorerDirs.FocusVisualStyle" TargetType="{x:Type Control}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate>
+                        <Grid Margin="1" IsHitTestVisible="False">
+                            <Rectangle Stroke="{DynamicResource ExplorerDirs.AccentBrush}"
+                                       StrokeThickness="2" StrokeDashArray="1,2"
+                                       SnapsToDevicePixels="True" IsHitTestVisible="False"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="{x:Type Menu}">
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
@@ -33,6 +46,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
         </Style>
         <Style TargetType="{x:Type TextBox}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
@@ -41,6 +55,7 @@
             <Setter Property="SelectionTextBrush" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
         </Style>
         <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
@@ -50,11 +65,13 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
         </Style>
         <Style TargetType="{x:Type Button}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
         </Style>
         <Style TargetType="{x:Type ToggleButton}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>

@@ -3396,3 +3396,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 目录树、预览和详情三个 ToggleButton 的启用态改为使用语义选择背景、对比前景与动态系统强调色边框，关闭态保持中性色。未改变各按钮命令、状态保存和焦点顺序。
 - `--pane-theme-markup-smoke` 新增启用态资源断言，先按预期失败，加入 ToggleButton 样式触发器后通过。完整 SettingsSmoke、App Release build 及差异检查通过；可见主题切换、高对比度和深色下检查仍待桌面验收。
+
+## 2026-10-27：键盘焦点框跟随主题强调色
+
+- TextBox、ComboBox、Button 和 ToggleButton 共用 Accent 色虚线焦点框；系统/自定义强调色变化通过动态资源反映，高对比度沿用系统 Highlight 资源。Shell 原生文件视图焦点绘制不受影响。
+- `--pane-theme-markup-smoke` 新增焦点样式及四类控件接线检查，旧实现下失败，接入后通过。真实键盘导航、放大缩放和高对比度外观仍待可见验收。

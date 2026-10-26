@@ -35,6 +35,17 @@ internal static class PaneThemeMarkupSmoke
                     (string?)setter.Attribute("Value") == $"{{DynamicResource {property.Item2}}}")),
                 $"{target} surfaces and text use dynamic semantic theme roles");
         }
+        var focusStyle = appResources.Descendants(presentation + "Style")
+            .SingleOrDefault(element => (string?)element.Attribute(xaml + "Key") == "ExplorerDirs.FocusVisualStyle");
+        Check(focusStyle?.Descendants(presentation + "Rectangle").Any(rectangle =>
+                  (string?)rectangle.Attribute("Stroke") == "{DynamicResource ExplorerDirs.AccentBrush}") == true &&
+              new[] { "TextBox", "ComboBox", "Button", "ToggleButton" }.All(target =>
+                  appResources.Descendants(presentation + "Style")
+                      .Single(style => (string?)style.Attribute("TargetType") == $"{{x:Type {target}}}")
+                      .Elements(presentation + "Setter")
+                      .Any(setter => (string?)setter.Attribute("Property") == "FocusVisualStyle" &&
+                                     (string?)setter.Attribute("Value") == "{StaticResource ExplorerDirs.FocusVisualStyle}")),
+            "keyboard focus rings on common controls use the dynamic system accent resource");
         var listItemStyle = appResources.Descendants(presentation + "Style")
             .SingleOrDefault(element => (string?)element.Attribute("TargetType") == "{x:Type ListBoxItem}");
         var listSelectedTrigger = listItemStyle?.Elements(presentation + "Style.Triggers")
