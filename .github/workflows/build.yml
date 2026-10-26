@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   windows-build:
     runs-on: windows-latest
@@ -14,3 +17,13 @@ jobs:
           dotnet-version: 10.0.x
       - name: Build
         run: dotnet build .\src\ExplorerDirs.App\ExplorerDirs.App.csproj --configuration Release
+      - name: Build host probe
+        run: dotnet build .\src\ExplorerDirs.HostProbe\ExplorerDirs.HostProbe.csproj --configuration Release
+      - name: Build native probe
+        run: dotnet build .\src\ExplorerDirs.NativeProbe\ExplorerDirs.NativeProbe.csproj --configuration Release
+      - name: Settings and logic smoke
+        run: dotnet run --project .\src\ExplorerDirs.SettingsSmoke\ExplorerDirs.SettingsSmoke.csproj --configuration Release
+      - name: Publish isolation smoke
+        run: pwsh -NoProfile -File .\scripts\publish-smoke.ps1
+      - name: Folder verb isolation smoke
+        run: pwsh -NoProfile -File .\scripts\folder-verb-smoke.ps1

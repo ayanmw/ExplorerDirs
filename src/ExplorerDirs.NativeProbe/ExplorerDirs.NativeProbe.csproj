@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Windows.Controls.Image" Alias="Image" />
+    <Using Include="System.Windows.HorizontalAlignment" Alias="HorizontalAlignment" />
+    <Compile Include="../ExplorerDirs.App/QdrViewWriter.cs" Link="QdrViewWriter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrViewSettings.cs" Link="QdrViewSettings.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellHistoryEvents.cs" Link="ShellHistoryEvents.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionSize.cs" Link="ShellSelectionSize.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFileCommands.cs" Link="ShellFileCommands.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionCommands.cs" Link="ShellSelectionCommands.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFocusRestoreGate.cs" Link="ShellFocusRestoreGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellMenuTargetTracker.cs" Link="ShellMenuTargetTracker.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionBatchRestore.cs" Link="ShellSelectionBatchRestore.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewSelectionSnapshot.cs" Link="ShellViewSelectionSnapshot.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeShellCommandMenu.cs" Link="NativeShellCommandMenu.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
+    <Compile Include="../ExplorerDirs.App/ExplorerPaneVisibility.cs" Link="ExplorerPaneVisibility.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellCurrentLocation.cs" Link="ShellCurrentLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeMiddleClick.cs" Link="ShellTreeMiddleClick.cs" />
+    <!-- NativeShellTree now validates selected locations through this shared identity decision. -->
+    <Compile Include="../ExplorerDirs.App/ShellTreeFolderLocation.cs" Link="ShellTreeFolderLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeShellTree.cs" Link="NativeShellTree.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
+    <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
+    <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewExport.cs" Link="FileViewExport.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewPrintLayout.cs" Link="FileViewPrintLayout.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewPrintDocument.cs" Link="FileViewPrintDocument.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFileViewExportCapture.cs" Link="ShellFileViewExportCapture.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFolderViewOptions.cs" Link="ShellFolderViewOptions.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeQueue.cs" Link="ShellDirectoryChangeQueue.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeBatch.cs" Link="ShellDirectoryChangeBatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeMonitorOptions.cs" Link="ShellDirectoryChangeMonitorOptions.cs" />
+  </ItemGroup>
+</Project>

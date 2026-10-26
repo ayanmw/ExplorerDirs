@@ -13,7 +13,8 @@ internal static class PortableIniWriter
         return @"Local\ExplorerDirs.Profile." + Convert.ToHexString(hash[..16]);
     }
 
-    public static void WriteIfUnchanged(string path, string? expected, string content, string conflictMessage)
+    public static void WriteIfUnchanged(string path, string? expected, string content, string conflictMessage,
+        Encoding? encoding = null, Func<string, string>? readExisting = null)
     {
         var fullPath = Path.GetFullPath(path);
         using var mutex = new Mutex(false, MutexName(fullPath));
@@ -24,7 +25,7 @@ internal static class PortableIniWriter
             catch (AbandonedMutexException) { acquired = true; }
             if (!acquired) throw new IOException("配置正在由其他实例写入，请稍后重试。");
 
-            var current = File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
+            var current = File.Exists(fullPath) ? (readExisting ?? File.ReadAllText)(fullPath) : null;
             if (current != expected) throw new IOException(conflictMessage);
             if (current == content) return;
 
@@ -32,7 +33,7 @@ internal static class PortableIniWriter
             var temp = fullPath + $".{Guid.NewGuid():N}.tmp";
             try
             {
-                File.WriteAllText(temp, content, new UTF8Encoding(false));
+                File.WriteAllText(temp, content, encoding ?? new UTF8Encoding(false));
                 File.Move(temp, fullPath, true);
             }
             finally

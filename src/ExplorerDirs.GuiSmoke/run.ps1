@@ -2,10 +2,18 @@
 # It never sends keyboard input, moves the pointer, or changes the clipboard.
 # Run only after the user reserves the desktop for testing:
 # pwsh -NoProfile -File .\src\ExplorerDirs.GuiSmoke\run.ps1 -AllowInteractiveDesktopControl
-param([switch]$AllowInteractiveDesktopControl)
+# Add -CaptureFocusTrace to retain keyboard/focus routing diagnostics in the run directory.
+param(
+    [switch]$AllowInteractiveDesktopControl,
+    [switch]$PrepareOnly,
+    [switch]$CaptureFocusTrace
+)
 
 $ErrorActionPreference = 'Stop'
-if (-not $AllowInteractiveDesktopControl) {
+if ($PrepareOnly -and $AllowInteractiveDesktopControl) {
+    throw 'Choose preparation only or interactive execution, not both.'
+}
+if (-not $PrepareOnly -and -not $AllowInteractiveDesktopControl) {
     throw 'GUI smoke test needs -AllowInteractiveDesktopControl and an idle desktop; no window was launched.'
 }
 if (-not $IsWindows) { throw 'This GUI smoke test requires Windows.' }
@@ -19,11 +27,52 @@ if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
     throw 'Test path escaped src/.state/gui-smoke.'
 }
 $appDirectory = Join-Path $runRoot 'app'
-$testDirectory = Join-Path $runRoot 'files'
-New-Item -ItemType Directory -Path $appDirectory, $testDirectory -Force | Out-Null
+$acceptanceDirectory = Join-Path $runRoot 'acceptance-files'
+$testDirectory = Join-Path $acceptanceDirectory 'pane-1'
+$recursiveSizeDirectory = Join-Path $acceptanceDirectory 'recursive-size-progress'
+$focusTracePath = Join-Path $runRoot 'focus-trace.log'
+New-Item -ItemType Directory -Path $appDirectory, $testDirectory, $recursiveSizeDirectory -Force | Out-Null
 $searchToken = 'ExplorerDirsSmoke' + [Guid]::NewGuid().ToString('N')
 $searchName = "$searchToken.txt"
 [IO.File]::WriteAllText((Join-Path $testDirectory $searchName), 'isolated search proof')
+
+# Keep manual file-operation acceptance inside four independent disposable folders.
+# Pane 1 also contains the search fixture used by the opt-in UI smoke steps.
+foreach ($pane in 1..4) {
+    $paneDirectory = Join-Path $acceptanceDirectory "pane-$pane"
+    New-Item -ItemType Directory -Path $paneDirectory -Force | Out-Null
+    foreach ($index in 1..5) {
+        $fixture = Join-Path $paneDirectory "sample-$index.txt"
+        if (-not (Test-Path -LiteralPath $fixture)) {
+            [IO.File]::WriteAllText($fixture, "Disposable pane $pane sample $index.", [Text.UTF8Encoding]::new($false))
+        }
+    }
+    New-Item -ItemType Directory -Path (Join-Path $paneDirectory 'empty-folder') -Force | Out-Null
+}
+# Keep the recursive-size stress fixture separate from normal pane operations so
+# it can exercise status progress without making startup or other tests heavy.
+foreach ($index in 1..10000) {
+    $fixture = Join-Path $recursiveSizeDirectory ("size-{0:D5}.bin" -f $index)
+    if (-not (Test-Path -LiteralPath $fixture)) {
+        [IO.File]::WriteAllBytes($fixture, [byte[]]::new(0))
+    }
+}
+$dropCopyFixture = Join-Path $acceptanceDirectory 'pane-1\cross-pane-copy-source.txt'
+$dropMoveFixture = Join-Path $acceptanceDirectory 'pane-1\cross-pane-move-source.txt'
+[IO.File]::WriteAllText($dropCopyFixture, 'Disposable copy drag-and-drop fixture.', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($dropMoveFixture, 'Disposable move drag-and-drop fixture.', [Text.UTF8Encoding]::new($false))
+$programStarterFixturePath = Join-Path $runRoot 'qdir-program-items.ini'
+[IO.File]::WriteAllLines($programStarterFixturePath, [string[]]@(
+    '[Program]',
+    'Preview Tool="C:\Program Files\Explorer Dirs Test\viewer.exe"=--preview="C:\Program Files\Explorer Dirs Test"',
+    'No Args Tool="C:\Program Files\Explorer Dirs Test\no-args.exe"'
+), [Text.UTF8Encoding]::new($false))
+$qdrColorBaseline = Join-Path $runRoot 'qdr-color-baseline.qdr'
+[IO.File]::WriteAllLines($qdrColorBaseline, [string[]]@(
+    'Q-Dir Version=12.79',
+    'ViewMode1=4',
+    "Dir1=$testDirectory"
+), [Text.UTF8Encoding]::new($false))
 
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
     --configuration Release --self-contained false --output $appDirectory
@@ -35,10 +84,24 @@ if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" 
 $profileDirectory = Join-Path $appDirectory 'profile'
 New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
 $iniPath = Join-Path $profileDirectory 'ExplorerDirs.ini'
+$otherPaneSettings = [Text.StringBuilder]::new()
+foreach ($pane in 1..3) {
+    $paneDirectory = Join-Path $acceptanceDirectory "pane-$($pane + 1)"
+    [void]$otherPaneSettings.AppendLine("[Pane$pane]")
+    [void]$otherPaneSettings.AppendLine('TabCount=1')
+    [void]$otherPaneSettings.AppendLine("[Pane$pane.Tab0]")
+    [void]$otherPaneSettings.AppendLine("Path=$paneDirectory")
+    [void]$otherPaneSettings.AppendLine('ViewMode=4')
+    [void]$otherPaneSettings.AppendLine('IconSize=-1')
+    [void]$otherPaneSettings.AppendLine('SortCount=0')
+    [void]$otherPaneSettings.AppendLine('GroupKey=')
+    [void]$otherPaneSettings.AppendLine('GroupAscending=true')
+    [void]$otherPaneSettings.AppendLine()
+}
 $ini = @"
 [General]
 FormatVersion=1
-Layout=1
+Layout=4
 DefaultViewMode=4
 
 [Pane0]
@@ -51,14 +114,52 @@ SortCount=0
 GroupKey=
 GroupAscending=true
 
-[Pane1]
-TabCount=0
-[Pane2]
-TabCount=0
-[Pane3]
-TabCount=0
+$($otherPaneSettings.ToString())
 "@
 [IO.File]::WriteAllText($iniPath, $ini, [Text.UTF8Encoding]::new($false))
+
+$manifest = [ordered]@{
+    SchemaVersion = 1
+    Status = 'prepared-not-run'
+    PreparedAtUtc = [DateTime]::UtcNow.ToString('o')
+    Executable = 'app/ExplorerDirs.App.exe'
+    Profile = 'app/profile/ExplorerDirs.ini'
+    ManualFixtures = 'acceptance-files'
+    RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
+    QdrColorBaseline = 'qdr-color-baseline.qdr'
+    QdrProgramFixture = 'qdir-program-items.ini'
+    QdrProgramFixtureSha256 = (Get-FileHash -LiteralPath $programStarterFixturePath -Algorithm SHA256).Hash
+    InitialLayout = 4
+    VisiblePaneCount = 4
+    ExecutableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    AssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $appDirectory 'ExplorerDirs.App.dll') -Algorithm SHA256).Hash
+    FocusTrace = if ($CaptureFocusTrace) { 'focus-trace.log' } else { $null }
+    PendingAcceptance = @(
+        'In each pane, paste a file and immediately press Up/Down without clicking first; then use Shift+Delete, confirm, and immediately press Up/Down. The same pane must move its file focus/selection after both operations. If either fails, Alt+Tab away and back, then repeat the arrow key and record whether window activation restores keyboard navigation. When FocusTrace is set, retain focus-trace.log and compare the key, IShellView accelerator result, HWND focus, Shell item focus, and focus-restore-poll content-focused/attempt values around the operation',
+        'In every pane, F2 then Left/Up/Right/Down keeps the native rename editor focused; Shift/Ctrl+Left/Right edits text; Escape cancels and Enter commits without changing another pane selection',
+        'With the file view focused, F10 opens the File menu; Escape closes it without running a command; F10 can open it again',
+        'Select one item, right-click unused viewport below the last row, then separately right-click empty trailing space inside a visible row. Compare the Shell native menu and custom command target for both positions; do not assume row-tail whitespace is background. Retain focus-trace.log coordinates/control types and record which Shell menu appears at each point',
+        'Ctrl-drag cross-pane-copy-source.txt from pane-1 to pane-2; confirm source and destination remain and destination content matches',
+        'Drag cross-pane-move-source.txt from pane-1 to pane-2; confirm the source disappears and destination content matches',
+        'Tab and Shift+Tab traverse all visible panes in reverse order',
+        'Address-history button and F4 show the same current-tab paths; selecting one navigates only that tab, Tab/Shift+Tab include the button, and address-edit right-click retains its text context menu',
+        'Per-tab history survives tab and layout switches',
+        'Ctrl+wheel view changes and independent per-tab view persistence',
+        'Open Tools > Options > Size display format; switch between Auto and fixed units, change decimal places and thousands separator, and verify selected-size, F9 total, and disk-capacity text refresh consistently. Toggle F9 file/subdirectory counts off and on; verify the summary changes while unreadable-item warnings remain. Restart the isolated app and confirm the saved unit/precision/count preferences load from SizeDisplay.ini',
+        'Navigate one pane to RecursiveSizeFixture, press F9 and verify the status counter advances before the final 10,000-file summary; start a second scan, press F9 to cancel, then navigate away and confirm stale progress does not return',
+        'Open Tools > Program Starter; add and save one inert test entry, then restart and verify it returns from the isolated profile ProgramStarter.ini. Import qdir-program-items.ini and verify both rows and all fields in preview; cancel and confirm ProgramStarter.ini is unchanged, then import again and explicitly apply. Verify the fixture SHA-256 is unchanged, the Q-Dir source was not modified, and imported programs were not launched',
+        'QDR import/export, cancellation, and native Q-Dir compatibility',
+        'Color diagnosis: on the same directory and Details view, compare the initial fresh view, an ordinary new tab created in the running window, import-dialog cancel, minimal qdr-color-baseline.qdr import, and restart; capture the DirectUI file-area pixels at the same screen region after each step, and note exactly which transition changes the color'
+    )
+}
+[IO.File]::WriteAllText((Join-Path $runRoot 'preparation.json'),
+    ($manifest | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+
+# This branch must remain before UI Automation loading and all window operations.
+if ($PrepareOnly) {
+    Write-Output "Prepared isolated GUI acceptance copy; no window launched: $runRoot"
+    return
+}
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -194,7 +295,11 @@ $measurements = [ordered]@{
 }
 try {
     $startupWatch = [Diagnostics.Stopwatch]::StartNew()
-    $app = Start-Process -FilePath $exe -PassThru
+    $startParameters = @{ FilePath = $exe; PassThru = $true }
+    if ($CaptureFocusTrace) {
+        $startParameters.Environment = @{ EXPLORER_DIRS_FOCUS_TRACE = $focusTracePath }
+    }
+    $app = Start-Process @startParameters
     Wait-Until {
         $app.Refresh()
         -not $app.HasExited -and $app.MainWindowHandle -ne [IntPtr]::Zero

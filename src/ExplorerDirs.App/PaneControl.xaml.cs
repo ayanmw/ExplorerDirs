@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 
@@ -10,18 +12,43 @@ public partial class PaneControl : UserControl
 {
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
-    private const int TabHeaderStop = 8;
     private readonly Stack<TabSettings> _closedTabs = new();
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
+    private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
+    private HiddenItemsPreference _hiddenItemsPreference;
+    private bool _updatingFilterPresets;
     private TabItem? _dragCandidate;
     private Point _dragStart;
     private TabItem? _draggedTab;
     private string? _dragToken;
     private bool _addressEditing;
+    private bool _classicAddressBar;
     private bool _addressNavigationPending;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
+    private ShellTreeHost? _treeHost;
+    private double _treeWidth = 160;
+    private Func<TreeFocusTarget>? _treeFocusTarget;
+    private Func<bool>? _sharedTreeHasFocus;
+    private Func<bool>? _focusSharedTree;
+    private readonly DiskSpaceTracker _diskSpace = new(DiskSpaceReader.Shared.ReadAsync);
+    private TabState? _diskSpaceOwner;
+    private readonly DispatcherTimer _itemCountsTimer = new(DispatcherPriority.Background)
+    {
+        Interval = TimeSpan.FromMilliseconds(750)
+    };
+    private readonly DispatcherTimer _selectionCountsRefreshTimer = new(DispatcherPriority.Background)
+    {
+        Interval = TimeSpan.FromMilliseconds(75)
+    };
+    private readonly ShellStatusCountRefreshGate _selectionCountsRefreshGate = new();
+    private CancellationTokenSource? _recursiveSizeCancellation;
+    private TabState? _recursiveSizeOwner;
+    private string? _recursiveSizePath;
+    private RecursiveDirectoryScanResult? _lastRecursiveSizeResult;
+    private string? _lastRecursiveSizePath;
+    private TabState? _lastRecursiveSizeOwner;
 
     private sealed class TabState
     {
@@ -30,29 +57,276 @@ public partial class PaneControl : UserControl
         public required string Path { get; set; }
         public bool IsPinned { get; set; }
         public bool SearchRequestPending { get; set; }
+        public string? SearchScopePath { get; set; }
+        public AddressPathHistory AddressHistory { get; init; } = new();
     }
 
     public event EventHandler? StateChanged;
+    internal event EventHandler? CommandContextChanged;
+    internal event EventHandler? TreeWidthChanged;
     public event EventHandler? Activated;
+    internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
-        IReadOnlySet<int>? pinnedIndices = null, int selectedTabIndex = 0)
+        IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
+        QuickFilterFavoritesStore quickFilterFavoritesStore,
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
     {
         InitializeComponent();
+        AddressTreeHost.DirectorySelected += identity =>
+        {
+            var owner = Current;
+            CloseAddressTree();
+            if (owner is not null && ReferenceEquals(owner, Current)) Navigate(identity);
+        };
+        AddressTreeHost.EscapeRequested += () => CloseAddressTree(focusAddress: true);
+        AddressTreeHost.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
+        AddressTreeHost.Error += message => Status.Text = message;
+        AddressTreeHost.SetAddressTreeLocation(null);
+        _diskSpace.Changed += ShowDiskSpace;
+        var viewMenu = new ContextMenu { PlacementTarget = ViewStyleButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top };
+        ViewStyleMenu.Populate(viewMenu, SetViewStyle);
+        viewMenu.Opened += (_, _) =>
+        {
+            Activated?.Invoke(this, EventArgs.Empty);
+            ViewStyleMenu.Update(viewMenu, ReadViewStyle());
+        };
+        ViewStyleButton.ContextMenu = viewMenu;
+        ToolbarViewStyleButton.ContextMenu = viewMenu;
         _newTabView = newTabView;
+        _quickFilterFavoritesStore = quickFilterFavoritesStore;
+        _hiddenItemsPreference = hiddenItemsPreference;
+        QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
-            AddTab(tab.Path, tab.View, false, pinnedIndices?.Contains(tabIndex++) == true);
+            AddTab(tab.Path, tab.View, false, pinnedIndices?.Contains(tabIndex++) == true,
+                quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
+                detailsPaneVisible: tab.DetailsPaneVisible);
         if (Tabs.Items.Count == 0)
             AddTab(Home, _newTabView(), false);
         Tabs.SelectedItem = _tabOrder[Math.Clamp(selectedTabIndex, 0, _tabOrder.Count - 1)];
         RenderBreadcrumb(CurrentPath);
+        _itemCountsTimer.Tick += (_, _) => { RefreshItemCounts(); RefreshDiskSpace(); };
+        _selectionCountsRefreshTimer.Tick += (_, _) =>
+        {
+            _selectionCountsRefreshTimer.Stop();
+            if (_selectionCountsRefreshGate.TryConsume(IsVisible)) RefreshItemCounts();
+        };
+        Loaded += (_, _) =>
+        {
+            if (IsVisible) { RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start(); }
+        };
+        Unloaded += (_, _) =>
+        {
+            CloseAddressTree();
+            CancelRecursiveDirectorySize();
+            CancelSelectionCountsRefresh();
+            _itemCountsTimer.Stop();
+            _diskSpace.Reset();
+        };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && IsLoaded) { RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start(); }
+            else
+            {
+                CloseAddressTree();
+                CancelRecursiveDirectorySize();
+                CancelSelectionCountsRefresh();
+                _itemCountsTimer.Stop(); ItemCounts.Text = ""; ItemCounts.ToolTip = null; _diskSpace.Reset();
+            }
+        };
+    }
+
+    private void RefreshDiskSpace()
+    {
+        if (!IsLoaded || !IsVisible) { _diskSpace.Reset(); return; }
+        if (Current != _diskSpaceOwner) _diskSpace.Reset();
+        _diskSpaceOwner = Current;
+        _ = _diskSpace.UpdateAsync(Current?.Browser.DiskSpaceDirectory);
+    }
+
+    private void ShowDiskSpace(DiskSpaceSnapshot snapshot)
+    {
+        if (snapshot.Path is null)
+        {
+            DiskSpace.Visibility = Visibility.Collapsed;
+            DiskSpace.Text = "";
+            DiskSpace.ToolTip = null;
+            return;
+        }
+        // Navigation may have started since the last timer tick. Do not
+        // display a completion for an old directory, even during that gap.
+        if (Current != _diskSpaceOwner || !IsVisible ||
+            !string.Equals(Current?.Browser.DiskSpaceDirectory, snapshot.Path, StringComparison.OrdinalIgnoreCase))
+            return;
+        DiskSpace.Visibility = Visibility.Visible;
+        DiskSpace.Text = snapshot.Pending ? "空间读取中…" : snapshot.Info?.DisplayText ?? "空间暂不可用";
+        DiskSpace.ToolTip = snapshot.Info?.Description ?? DiskSpace.Text;
+    }
+
+    private void RefreshItemCounts()
+    {
+        if (!IsLoaded || !IsVisible) return;
+        var state = Current;
+        var counts = state?.Browser.ReadItemCounts();
+        if (Current == state && IsLoaded && IsVisible)
+        {
+            ItemCounts.Text = counts?.DisplayText ?? "项目统计暂不可用";
+            ItemCounts.ToolTip = counts?.Description;
+        }
+    }
+
+    private void QueueSelectionCountsRefresh(TabState state)
+    {
+        if (!_selectionCountsRefreshGate.Request(Current == state, IsVisible)) return;
+        _selectionCountsRefreshTimer.Stop();
+        _selectionCountsRefreshTimer.Start();
+    }
+
+    private void CancelSelectionCountsRefresh()
+    {
+        _selectionCountsRefreshTimer.Stop();
+        _selectionCountsRefreshGate.Cancel();
+    }
+
+    public void ToggleRecursiveDirectorySize()
+    {
+        if (_recursiveSizeCancellation is not null)
+        {
+            CancelRecursiveDirectorySize();
+            return;
+        }
+        if (Current is not { } state || !state.Browser.IsFileSystemLocation)
+        {
+            RecursiveSizeStatus.Text = "递归大小仅支持文件系统目录。";
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var path = state.Path;
+        var cancellation = new CancellationTokenSource();
+        _recursiveSizeCancellation = cancellation;
+        _recursiveSizeOwner = state;
+        _recursiveSizePath = path;
+        _lastRecursiveSizeResult = null;
+        _lastRecursiveSizePath = null;
+        RecursiveSizeStatus.Text = "正在计算目录总大小… 已检查 0 项 · 再按 F9 取消";
+        RecursiveSizeStatus.ToolTip = path;
+        RecursiveSizeStatus.Visibility = Visibility.Visible;
+        _ = ScanRecursiveDirectoryAsync(state, path, cancellation);
+    }
+
+    private async Task ScanRecursiveDirectoryAsync(TabState owner, string path, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));
+            var result = await Task.Run(() => RecursiveDirectoryScanner.Scan(path, cancellation.Token, entriesChecked =>
+            {
+                if (!progressThrottle.ShouldReport(Stopwatch.GetTimestamp())) return;
+                Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
+                {
+                    if (IsCurrentRecursiveSizeScan(owner, path, cancellation))
+                        RecursiveSizeStatus.Text = $"正在计算目录总大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消";
+                }));
+            }), cancellation.Token).ConfigureAwait(false);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
+                _lastRecursiveSizeResult = result;
+                _lastRecursiveSizePath = path;
+                _lastRecursiveSizeOwner = owner;
+                RenderRecursiveSizeResult(path, result);
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _lastRecursiveSizeResult = null;
+            _lastRecursiveSizePath = null;
+            _lastRecursiveSizeOwner = null;
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
+                RecursiveSizeStatus.Text = $"无法计算目录大小：{ex.Message}";
+                RecursiveSizeStatus.ToolTip = path;
+            });
+        }
+        finally
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (ReferenceEquals(_recursiveSizeCancellation, cancellation))
+                {
+                    _recursiveSizeCancellation = null;
+                    _recursiveSizeOwner = null;
+                    _recursiveSizePath = null;
+                }
+                cancellation.Dispose();
+            });
+        }
+    }
+
+    private bool IsCurrentRecursiveSizeScan(TabState owner, string path, CancellationTokenSource cancellation) =>
+        ReferenceEquals(_recursiveSizeCancellation, cancellation) && ReferenceEquals(_recursiveSizeOwner, owner) &&
+        Current == owner && IsVisible && string.Equals(_recursiveSizePath, path, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(owner.Path, path, StringComparison.OrdinalIgnoreCase);
+
+    private void CancelRecursiveDirectorySize()
+    {
+        var cancellation = _recursiveSizeCancellation;
+        _recursiveSizeCancellation = null;
+        _recursiveSizeOwner = null;
+        _recursiveSizePath = null;
+        _lastRecursiveSizeResult = null;
+        _lastRecursiveSizePath = null;
+        _lastRecursiveSizeOwner = null;
+        if (cancellation is not null) cancellation.Cancel();
+        RecursiveSizeStatus.Text = "";
+        RecursiveSizeStatus.ToolTip = null;
+        RecursiveSizeStatus.Visibility = Visibility.Collapsed;
+    }
+
+    internal void RefreshSizeFormatting()
+    {
+        RefreshItemCounts();
+        RefreshDiskSpace();
+        if (_lastRecursiveSizeResult is { } result && _lastRecursiveSizePath is { } path)
+            RenderRecursiveSizeResult(path, result);
+    }
+
+    private void RenderRecursiveSizeResult(string path, RecursiveDirectoryScanResult result)
+    {
+        RecursiveSizeStatus.Text = ByteSizeFormatter.FormatRecursiveDirectorySummary(result, ByteSizeFormatter.Options);
+        RecursiveSizeStatus.ToolTip = $"{path}\n不跟随重解析点；无法读取或已跳过位置：{result.Unreadable:N0}";
+    }
+
+    private void RefreshNavigationAvailability()
+    {
+        BackButton.IsEnabled = Current?.Browser.CanGoBack == true;
+        ForwardButton.IsEnabled = Current?.Browser.CanGoForward == true;
     }
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
+    internal bool IsCurrentFileSystemLocation => Current?.Browser.IsFileSystemLocation == true;
+    internal bool TreeIsVisible => TreeVisible;
+    internal double TreeWidth
+    {
+        get => TreeVisible ? TreeColumn.Width.Value : _treeWidth;
+        set
+        {
+            if (!NavigationTreeWidths.IsWidth(value)) throw new ArgumentOutOfRangeException(nameof(value));
+            _treeWidth = value;
+            if (TreeVisible) TreeColumn.Width = new GridLength(value);
+        }
+    }
+
+    internal void SetPaneTreeButtonVisible(bool visible) =>
+        TreeButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     internal int SelectedTabIndex => Tabs.SelectedItem is TabItem tab
         ? Math.Max(0, _tabOrder.IndexOf(tab)) : 0;
     internal IReadOnlyList<TabSettings> SnapshotTabs()
@@ -63,8 +337,25 @@ public partial class PaneControl : UserControl
         return _tabOrder.Select(tab =>
         {
             var state = (TabState)tab.Tag;
-            return new TabSettings(state.Path, state.Browser.CachedViewState());
+            return new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+                state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible);
         }).ToArray();
+    }
+    internal ViewState CaptureCurrentViewState()
+    {
+        var state = Current ?? throw new IOException("当前窗格没有活动标签。");
+        CaptureViewState(state);
+        if (state.Browser.ViewCaptureFailed)
+            throw new IOException("当前标签的视图配置暂时不可读取。");
+        return state.Browser.CachedViewState();
+    }
+    internal bool ApplyViewPreset(ViewPreset preset)
+    {
+        var state = Current;
+        if (state?.Browser.ApplyViewPreset(preset) != true || Current != state) return false;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        FocusCurrentView();
+        return true;
     }
     internal void CaptureVisibleViewState()
     {
@@ -84,11 +375,16 @@ public partial class PaneControl : UserControl
 
     public void NewTab() => AddTab(Home, _newTabView());
     public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
-    internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex)
+    internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
+        IReadOnlySet<int>? pinned = null)
     {
-        var offset = _tabOrder.Count;
-        foreach (var tab in tabs) AddTab(tab.Path, tab.View.Copy(), select: false);
-        if (tabs.Count > 0) Tabs.SelectedItem = _tabOrder[offset + Math.Clamp(selectedIndex, 0, tabs.Count - 1)];
+        var imported = tabs.Select((tab, index) =>
+            AddTab(tab.Path, tab.View.Copy(), select: false, pinned: pinned?.Contains(index) == true,
+                quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
+                detailsPaneVisible: tab.DetailsPaneVisible)).ToArray();
+        // Pinned additions insert before ordinary existing tabs. Select by
+        // identity instead of a now-invalid appended numeric offset.
+        if (imported.Length > 0) Tabs.SelectedItem = imported[Math.Clamp(selectedIndex, 0, imported.Length - 1)];
     }
     public void DuplicateCurrentTab()
     {
@@ -105,7 +401,10 @@ public partial class PaneControl : UserControl
                 Status.Text = "视图配置暂时不可读取，未复制标签。";
                 return;
             }
-            AddTab(state.Path, view, pinned: state.IsPinned);
+            AddTab(state.Path, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+                previewPaneVisible: state.Browser.PreviewPaneVisible,
+                detailsPaneVisible: state.Browser.DetailsPaneVisible,
+                addressHistory: state.AddressHistory.Copy());
         }
         catch (Exception ex)
         {
@@ -113,80 +412,450 @@ public partial class PaneControl : UserControl
         }
     }
     public void RefreshCurrent() => Current?.Browser.Refresh();
-    internal void SetViewStyle(ViewStyle style)
+
+    internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
     {
-        if (Current?.Browser.SetViewStyle(style) != true) return;
+        if (_hiddenItemsPreference == preference) return [];
+        _hiddenItemsPreference = preference;
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try { state.Browser.SetHiddenItemsPreference(preference); }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> RefreshForWindowsHiddenItemsChange()
+    {
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try { state.Browser.RefreshForWindowsHiddenItemsChange(); }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+    internal ProgramStarterPaneContext CaptureProgramStarterPaneContext() => Current?.Browser.CaptureProgramStarterPaneContext()
+        ?? throw new InvalidOperationException("当前窗格没有可读取的文件视图。");
+    internal ExplorerBrowserHost.SelectedItem? GetSelectedQuickLinkItem() => Current?.Browser.GetSelectedItem();
+    internal FileViewExportSnapshot CaptureFileViewExportSnapshot() => Current?.Browser.CaptureFileViewExportSnapshot()
+        ?? throw new InvalidOperationException("当前窗格没有可导出的文件视图。");
+    internal FileViewPrintSnapshot CaptureFileViewPrintSnapshot() => Current?.Browser.CaptureFileViewPrintSnapshot()
+        ?? throw new InvalidOperationException("当前窗格没有可打印的文件视图。");
+    internal PhotoPrintSelectionResult CapturePhotoPrintSelection() => Current?.Browser.CapturePhotoPrintSelection()
+        ?? throw new InvalidOperationException("当前窗格没有可读取的文件视图。");
+    internal (uint Mode, int IconSize)? ReadViewStyle()
+    {
+        var state = Current;
+        var style = state?.Browser.ReadViewStyle();
+        return Current == state ? style : null;
+    }
+    internal bool PreviewPaneVisible => Current?.Browser.PreviewPaneVisible == true;
+    internal bool DetailsPaneVisible => Current?.Browser.DetailsPaneVisible == true;
+    internal bool SetPreviewPaneVisible(bool visible)
+    {
+        var state = Current;
+        if (state is null || state.Browser.SetPreviewPaneVisible(visible) != true || Current != state)
+            return false;
         StateChanged?.Invoke(this, EventArgs.Empty);
         FocusCurrentView();
+        return true;
+    }
+    internal bool SetDetailsPaneVisible(bool visible)
+    {
+        var state = Current;
+        if (state is null || state.Browser.SetDetailsPaneVisible(visible) != true || Current != state)
+            return false;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        FocusCurrentView();
+        return true;
+    }
+    private void ViewStyle_Click(object sender, RoutedEventArgs e)
+    {
+        Activated?.Invoke(this, EventArgs.Empty);
+        if (sender is FrameworkElement target) ViewStyleButton.ContextMenu.PlacementTarget = target;
+        ViewStyleButton.ContextMenu.IsOpen = true;
+    }
+    internal void SetViewStyle(ViewStyle style) => TrySetViewStyle(style);
+    private bool TrySetViewStyle(ViewStyle style)
+    {
+        var state = Current;
+        if (state?.Browser.SetViewStyle(style) != true || Current != state) return false;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        FocusCurrentView();
+        return true;
+    }
+    private bool CycleViewStyle(int delta)
+    {
+        var current = ReadViewStyle();
+        if (current is not { } style) return false;
+        return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, delta));
     }
     public void NavigateTo(string path) => Navigate(path);
     public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
+    internal void ApplySelectionCommand(ShellSelectionCommand command) => Current?.Browser.ApplySelectionCommand(command);
+    internal ShellItemCounts? ReadSelectionCounts()
+    {
+        var state = Current;
+        var counts = state?.Browser.ReadItemCounts(includeSelectionSize: false);
+        return Current == state ? counts : null;
+    }
+    internal Dictionary<ShellFileCommand, bool> QueryFileCommands()
+    {
+        var state = Current;
+        var result = state?.Browser.QueryFileCommands();
+        return Current == state && result is not null ? result
+            : ShellFileCommands.All.ToDictionary(info => info.Command, _ => false);
+    }
+    internal bool InvokeFileCommand(ShellFileCommand command)
+    {
+        var state = Current;
+        if (state is null) return false;
+        // FocusView can select a previously unselected focused item. Invoke against
+        // the existing Shell selection; restore content focus only after acceptance.
+        return Current == state && state.Browser.InvokeFileCommand(command);
+    }
+    internal bool NotifyCreatedClipboardFile(string path)
+    {
+        var state = Current;
+        if (state is null || !state.Browser.IsFileSystemLocation) return false;
+        var queued = state.Browser.NotifyCreatedClipboardFile(path);
+        return Current == state && queued;
+    }
     public void GoParent() => Current?.Browser.GoParent();
     public void GoBack() => Current?.Browser.GoBack();
     public void GoForward() => Current?.Browser.GoForward();
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
+    internal bool ExpandTreeToCurrent()
+    {
+        if (!TreeVisible || _treeHost is null || Current?.Browser.IsFileSystemLocation != true) return false;
+        _treeHost.SetDirectory(CurrentPath);
+        return true;
+    }
+
+    private void SyncTreeToCurrent() { if (Current is { } state) SyncTreeToCurrent(state); }
+
+    private void SyncTreeToCurrent(TabState state)
+    {
+        if (_treeHost is null) return;
+        if (state.Browser.IsFileSystemLocation) _treeHost.SetDirectory(state.Path);
+        else _treeHost.SetVirtualLocation();
+    }
     internal bool IsShellRenameEditorFocused => Current?.Browser.IsRenameEditorFocused() == true;
-    private int SearchStopCount => SearchBar.Visibility == Visibility.Visible ? 3 : 0;
-    private int HeaderStop => TabHeaderStop + SearchStopCount + 1;
-    internal int FocusStopCount => HeaderStop + (Current?.Browser.HasColumnHeader() == true ? 2 : 1);
-    internal IReadOnlyList<int> MajorFocusStops => SearchStopCount == 3
-        ? Current?.Browser.HasColumnHeader() == true
-            ? [4, TabHeaderStop, TabHeaderStop + 3, HeaderStop, FocusStopCount - 1]
-            : [4, TabHeaderStop, TabHeaderStop + 3, FocusStopCount - 1]
-        : Current?.Browser.HasColumnHeader() == true
-            ? [4, TabHeaderStop, HeaderStop, FocusStopCount - 1]
-            : [4, TabHeaderStop, FocusStopCount - 1];
+    private bool TreeVisible => _treeHost is not null && TreeContainer.Visibility == Visibility.Visible;
+    private PaneFocusStopMap FocusMap => PaneFocusStopMap.Create(
+        SearchBar.Visibility == Visibility.Visible,
+        QuickFilterBar.Visibility == Visibility.Visible,
+        CurrentTreeFocusTarget != TreeFocusTarget.None,
+        Current?.Browser.HasColumnHeader() == true,
+        TreeButton.Visibility == Visibility.Visible,
+        addressHistoryButtonVisible: true,
+        addressPathButtonVisible: true);
+    internal int FocusStopCount => FocusMap.Count;
+    internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
+    private TreeFocusTarget CurrentTreeFocusTarget =>
+        _treeFocusTarget?.Invoke() ?? (TreeVisible ? TreeFocusTarget.Pane : TreeFocusTarget.None);
+
+    internal void SetTreeFocusRouting(Func<TreeFocusTarget> target, Func<bool> sharedHasFocus,
+        Func<bool> focusSharedTree)
+    {
+        _treeFocusTarget = target;
+        _sharedTreeHasFocus = sharedHasFocus;
+        _focusSharedTree = focusSharedTree;
+    }
 
     internal int CurrentFocusStop()
     {
-        UIElement[] controls = [BackButton, ForwardButton, UpButton, RefreshButton,
-            Address, GoButton, NewTabButton, CloseTabButton];
+        var focus = FocusMap;
+        UIElement[] controls = focus.TreeButton >= 0
+            ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton,
+                Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
+            : [BackButton, ForwardButton, UpButton, RefreshButton,
+                Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
-        if (SearchStopCount == 3)
+        if (focus.SearchCount == 3)
         {
-            if (SearchBox.IsKeyboardFocusWithin) return TabHeaderStop;
-            if (SearchSubmitButton.IsKeyboardFocusWithin) return TabHeaderStop + 1;
-            if (CloseSearchButton.IsKeyboardFocusWithin) return TabHeaderStop + 2;
+            if (SearchBox.IsKeyboardFocusWithin) return focus.SearchStart;
+            if (SearchSubmitButton.IsKeyboardFocusWithin) return focus.SearchStart + 1;
+            if (CloseSearchButton.IsKeyboardFocusWithin) return focus.SearchStart + 2;
         }
-        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused) return TabHeaderStop + SearchStopCount;
+        if (focus.FilterCount == 8)
+        {
+            UIElement[] filterControls = [QuickFilterBox, QuickFilterMode, FilterFoldersCheckBox,
+                QuickFilterPresetCombo, SaveQuickFilterPresetButton, DeleteQuickFilterPresetButton,
+                ApplyQuickFilterButton, CloseQuickFilterButton];
+            for (var index = 0; index < filterControls.Length; index++)
+                if (filterControls[index].IsKeyboardFocusWithin) return focus.FilterStart + index;
+        }
+        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
+            return focus.TabHeader;
+        if (ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
+        if (CurrentTreeFocusTarget switch
+            {
+                TreeFocusTarget.Shared => _sharedTreeHasFocus?.Invoke() == true,
+                TreeFocusTarget.Pane => _treeHost?.HasNativeFocus() == true,
+                _ => false
+            }) return focus.Tree;
         if (Current?.Browser.HasNativeFocus() == true)
-            return Current.Browser.IsColumnHeaderFocused() ? HeaderStop : FocusStopCount - 1;
+            return Current.Browser.IsColumnHeaderFocused() ? focus.ColumnHeader : focus.FileView;
         return -1;
     }
 
     internal bool FocusStop(int stop)
     {
+        var focus = FocusMap;
+        if (stop == focus.TreeButton) return TreeButton.Focus();
         UIElement? target = stop switch
         {
             0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
-            4 => null, 5 => GoButton, 6 => NewTabButton, 7 => CloseTabButton,
             _ => null
         };
-        if (stop == 4) { FocusAddress(); return Address.IsKeyboardFocused; }
+        if (stop == focus.Address) { FocusAddress(); return Address.IsKeyboardFocused; }
+        if (stop == focus.AddressMenu) target = AddressMenuButton;
+        if (stop == focus.AddressHistory) target = AddressHistoryButton;
+        if (stop == focus.Go) target = GoButton;
+        if (stop == focus.NewTab) target = NewTabButton;
+        if (stop == focus.CloseTab) target = CloseTabButton;
         if (target is not null) return target.Focus();
-        if (SearchStopCount == 3)
+        if (focus.SearchCount == 3)
         {
-            if (stop == TabHeaderStop) return SearchBox.Focus();
-            if (stop == TabHeaderStop + 1) return SearchSubmitButton.Focus();
-            if (stop == TabHeaderStop + 2) return CloseSearchButton.Focus();
+            if (stop == focus.SearchStart) return SearchBox.Focus();
+            if (stop == focus.SearchStart + 1) return SearchSubmitButton.Focus();
+            if (stop == focus.SearchStart + 2) return CloseSearchButton.Focus();
         }
-        if (stop == TabHeaderStop + SearchStopCount)
+        if (focus.FilterCount == 8)
+        {
+            var filterStop = stop - focus.FilterStart;
+            UIElement[] filterControls = [QuickFilterBox, QuickFilterMode, FilterFoldersCheckBox,
+                QuickFilterPresetCombo, SaveQuickFilterPresetButton, DeleteQuickFilterPresetButton,
+                ApplyQuickFilterButton, CloseQuickFilterButton];
+            if (filterStop >= 0 && filterStop < filterControls.Length)
+                return filterControls[filterStop].Focus();
+        }
+        if (stop == focus.TabHeader)
             return (Tabs.SelectedItem as TabItem)?.Focus() == true;
-        if (stop == HeaderStop && Current?.Browser.HasColumnHeader() == true)
+        if (stop == focus.Tree)
+            return CurrentTreeFocusTarget switch
+            {
+                TreeFocusTarget.Shared => _focusSharedTree?.Invoke() == true,
+                TreeFocusTarget.Pane => _treeHost?.FocusTree() == true,
+                _ => false
+            };
+        if (stop == focus.ColumnHeader && Current?.Browser.HasColumnHeader() == true)
             return Current?.Browser.FocusColumnHeader() == true;
-        if (stop == FocusStopCount - 1)
-            return FocusCurrentView();
+        if (stop == focus.FileView) return FocusCurrentView();
+        if (stop == focus.StatusTools) return ViewStyleButton.Focus();
         return false;
     }
     public void FocusSearch()
     {
         if (Current is not { } state) return;
+        SetSearchScope(state, null);
+        FocusSearchInput(state);
+    }
+
+    public void FocusSearchInSelectedFolder()
+    {
+        if (Current is not { } state) return;
+        var scopePath = state.Browser.GetSelectedFolderSearchScope();
+        if (scopePath is null)
+        {
+            SetSearchScope(state, null);
+            Status.Text = "Alt+F3 需要在文件视图中只选择一个文件系统文件夹。";
+            return;
+        }
+
+        SetSearchScope(state, scopePath);
+        FocusSearchInput(state);
+    }
+
+    private void FocusSearchInput(TabState state)
+    {
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         SearchBar.Visibility = Visibility.Visible;
         SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
         SearchBox.Focus();
         SearchBox.SelectAll();
+    }
+
+    private void SetSearchScope(TabState state, string? scopePath)
+    {
+        state.SearchScopePath = scopePath;
+        var folderName = scopePath is null ? null : Path.GetFileName(
+            scopePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        SearchScopeLabel.Text = scopePath is null ? "范围：当前目录" : $"范围：{(string.IsNullOrEmpty(folderName) ? scopePath : folderName)}";
+        SearchScopeLabel.ToolTip = scopePath ?? state.Path;
+        SearchSubmitButton.ToolTip = scopePath is null ? "搜索当前标签目录" : $"搜索所选文件夹：{scopePath}";
+        SearchBox.ToolTip = scopePath is null
+            ? "输入关键词后按 Enter 搜索；Esc 返回目录"
+            : $"输入关键词后按 Enter 搜索所选文件夹：{scopePath}；Esc 返回原目录";
+        System.Windows.Automation.AutomationProperties.SetName(SearchBox,
+            scopePath is null ? "搜索当前目录" : $"搜索所选文件夹 {scopePath}");
+    }
+
+    internal bool IsQuickFilterInputFocused => QuickFilterBox.IsKeyboardFocusWithin;
+    internal bool HasFileViewFocus => _treeHost?.HasNativeFocus() != true && Current?.Browser.HasNativeFocus() == true;
+
+    public void FocusQuickFilter()
+    {
+        if (Current is not { } state) return;
+        QuickFilterBar.Visibility = Visibility.Visible;
+        RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
+        ShowQuickFilterEditor(state.Browser.QuickFilter);
+        QuickFilterBox.Focus();
+        QuickFilterBox.SelectAll();
+    }
+
+    private void ShowQuickFilterEditor(QuickFilterSettings settings)
+    {
+        QuickFilterBox.Text = settings.Pattern;
+        QuickFilterMode.SelectedIndex = settings.ExcludeMatches ? 1 : 0;
+        FilterFoldersCheckBox.IsChecked = settings.FilterFolders;
+    }
+
+    internal void ApplyQuickFilter()
+    {
+        if (Current is not { } state) return;
+        state.Browser.SetQuickFilter(new QuickFilterSettings(QuickFilterBox.Text,
+            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true));
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void QuickFilterBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            ApplyQuickFilter();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            ClearQuickFilter();
+            e.Handled = true;
+        }
+    }
+
+    private void ApplyQuickFilter_Click(object sender, RoutedEventArgs e) => ApplyQuickFilter();
+    private void ClearQuickFilter_Click(object sender, RoutedEventArgs e) => ClearQuickFilter();
+
+    private void RefreshQuickFilterPresets(string? textToKeep)
+    {
+        _updatingFilterPresets = true;
+        try
+        {
+            var favorites = _quickFilterFavoritesStore.Load();
+            QuickFilterPresetCombo.ItemsSource = favorites;
+            QuickFilterPresetCombo.SelectedItem = favorites.FirstOrDefault(item =>
+                string.Equals(item.Name, textToKeep, StringComparison.OrdinalIgnoreCase));
+            QuickFilterPresetCombo.Text = QuickFilterPresetCombo.SelectedItem is QuickFilterFavorite selected
+                ? selected.Name : textToKeep ?? string.Empty;
+            DeleteQuickFilterPresetButton.IsEnabled = QuickFilterPresetCombo.SelectedItem is QuickFilterFavorite;
+        }
+        finally { _updatingFilterPresets = false; }
+    }
+
+    private void QuickFilterPresetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingFilterPresets || e.Source != QuickFilterPresetCombo ||
+            QuickFilterPresetCombo.SelectedItem is not QuickFilterFavorite favorite) return;
+        ShowQuickFilterEditor(favorite.Settings);
+        QuickFilterPresetCombo.Text = favorite.Name;
+        DeleteQuickFilterPresetButton.IsEnabled = true;
+        Status.Text = $"已载入筛选预设“{favorite.Name}”；按筛选或 Enter 应用。";
+    }
+
+    private void SaveQuickFilterPreset_Click(object sender, RoutedEventArgs e)
+    {
+        var settings = new QuickFilterSettings(QuickFilterBox.Text,
+            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true);
+        if (!settings.HasPattern)
+        {
+            Status.Text = "请输入筛选模式后再保存预设。";
+            return;
+        }
+        var name = QuickFilterPresetCombo.Text;
+        try
+        {
+            _quickFilterFavoritesStore.Save([.. _quickFilterFavoritesStore.Load(),
+                new QuickFilterFavorite(name, settings)]);
+            RefreshQuickFilterPresets(name.Trim());
+            Status.Text = $"筛选预设“{name.Trim()}”已保存。";
+        }
+        catch (Exception ex) { Status.Text = $"保存筛选预设失败：{ex.Message}"; }
+    }
+
+    private void DeleteQuickFilterPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (QuickFilterPresetCombo.SelectedItem is not QuickFilterFavorite selected) return;
+        try
+        {
+            _quickFilterFavoritesStore.Save(_quickFilterFavoritesStore.Load().Where(item =>
+                !string.Equals(item.Name, selected.Name, StringComparison.OrdinalIgnoreCase)));
+            RefreshQuickFilterPresets(string.Empty);
+            Status.Text = $"筛选预设“{selected.Name}”已删除。";
+        }
+        catch (Exception ex) { Status.Text = $"删除筛选预设失败：{ex.Message}"; }
+    }
+
+    private void ClearQuickFilter()
+    {
+        if (Current is not { } state) return;
+        ShowQuickFilterEditor(QuickFilterSettings.Empty);
+        state.Browser.SetQuickFilter(QuickFilterSettings.Empty);
+        QuickFilterBar.Visibility = Visibility.Collapsed;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        RestoreFileFocusWhenActive();
+    }
+
+    internal void SetTreeVisible(bool visible)
+    {
+        if (visible && _treeHost is null)
+        {
+            _treeHost = new ShellTreeHost();
+            _treeHost.Activated += () => Activated?.Invoke(this, EventArgs.Empty);
+            _treeHost.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
+            _treeHost.Error += message => Status.Text = message;
+            _treeHost.FolderMiddleClicked += path =>
+            {
+                if (IsVisible && TreeVisible) OpenPathInNewTab(path);
+            };
+            _treeHost.DirectorySelected += path =>
+            {
+                if (!IsVisible || !TreeVisible || Current is not { } state) return;
+                try { state.Browser.Navigate(path); }
+                catch (Exception ex) { Status.Text = ex.Message; }
+            };
+            TreeContainer.Child = _treeHost;
+        }
+        var hadFocus = _treeHost?.HasNativeFocus() == true;
+        if (!visible) _treeHost?.CancelSynchronization();
+        TreeContainer.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        TreeColumn.MinWidth = visible ? NavigationTreeWidths.Minimum : 0;
+        TreeColumn.MaxWidth = NavigationTreeWidths.Maximum;
+        TreeColumn.Width = visible ? new GridLength(_treeWidth) : new GridLength(0);
+        TreeSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (visible) SyncTreeToCurrent();
+        else if (hadFocus && IsVisible) FocusCurrentView();
+        TreeButton.IsChecked = visible;
+    }
+
+    private void TreeSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        // GridSplitter commits the fixed pixel width before raising DragCompleted;
+        // ActualWidth can still be the previous layout pass at this point.
+        if (!TreeColumn.Width.IsAbsolute) return;
+        var width = TreeColumn.Width.Value;
+        if (!NavigationTreeWidths.IsWidth(width)) return;
+        _treeWidth = width;
+        TreeWidthChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Tree_Click(object sender, RoutedEventArgs e)
+    {
+        SetTreeVisible(TreeButton.IsChecked == true);
+        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void SearchBox_KeyDown(object sender, KeyEventArgs e)
@@ -211,7 +880,7 @@ public partial class PaneControl : UserControl
         state.SearchRequestPending = true;
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
-        state.Browser.Search(SearchBox.Text);
+        state.Browser.Search(SearchBox.Text, state.SearchScopePath);
     }
 
     private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearch();
@@ -222,6 +891,7 @@ public partial class PaneControl : UserControl
         _searchCloseFocusPending = state.SearchRequestPending || state.Browser.SearchQuery is not null
             ? state : null;
         state.SearchRequestPending = false;
+        SetSearchScope(state, null);
         if (_searchCloseFocusPending is not null)
             state.Browser.Navigate(state.Path);
         SearchBar.Visibility = Visibility.Collapsed;
@@ -236,10 +906,116 @@ public partial class PaneControl : UserControl
             _addressEditing = true;
             BreadcrumbScroll.Visibility = Visibility.Collapsed;
             Address.Visibility = Visibility.Visible;
+            Address.IsReadOnly = false;
             GoButton.Content = "转到";
         }
         Address.Focus();
         Address.SelectAll();
+    }
+
+    internal void HandleAddressTreeShortcut()
+    {
+        var action = AddressTreeShortcutState.Next(_classicAddressBar, AddressTreePopup.IsOpen);
+        if (action == AddressTreeShortcutAction.FocusAddressEdit)
+        {
+            CloseAddressTree();
+            FocusAddress();
+            return;
+        }
+
+        var identity = Current is { } state && ShellLocationIdentity.TryGetFolderPidl(state.Path, out var pidl)
+            ? FreeAddressTreePidl(pidl, state.Path) : null;
+        AddressTreeHost.SetAddressTreeLocation(identity);
+        AddressTreePopup.IsOpen = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (AddressTreePopup.IsOpen) AddressTreeHost.FocusTree();
+        }));
+    }
+
+    internal void CloseAddressTree(bool focusAddress = false)
+    {
+        if (AddressTreePopup.IsOpen) AddressTreePopup.IsOpen = false;
+        AddressTreeHost.CancelSynchronization();
+        if (focusAddress && IsLoaded && IsVisible) FocusAddress();
+    }
+
+    private static string FreeAddressTreePidl(nint pidl, string identity)
+    {
+        System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pidl);
+        return identity;
+    }
+
+    private void AddressTreePopup_Closed(object? sender, EventArgs e) => AddressTreeHost.CancelSynchronization();
+
+    internal void SetClassicAddressBar(bool classic)
+    {
+        _classicAddressBar = classic;
+        if (_addressEditing)
+        {
+            BreadcrumbScroll.Visibility = Visibility.Collapsed;
+            Address.Visibility = Visibility.Visible;
+            return;
+        }
+        ShowBreadcrumb();
+    }
+
+    public void ShowAddressHistory()
+    {
+        if (Current is not { } state) return;
+        var menu = new ContextMenu
+        {
+            PlacementTarget = AddressHost,
+            Placement = PlacementMode.Bottom,
+            DataContext = state
+        };
+        foreach (var path in state.AddressHistory.Paths)
+        {
+            var item = new MenuItem { Header = path, ToolTip = path };
+            item.Click += (_, _) => state.Browser.Navigate(path);
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void AddressHistory_Click(object sender, RoutedEventArgs e) => ShowAddressHistory();
+
+    private void AddressMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (Current is not { } state) return;
+        var menu = new ContextMenu
+        {
+            PlacementTarget = AddressHost,
+            Placement = PlacementMode.Bottom,
+            DataContext = state
+        };
+        var entries = AddressPathMenu.Build(state.Path);
+        var addedCommonSeparator = false;
+        foreach (var entry in entries)
+        {
+            if (!entry.IsAncestor && !addedCommonSeparator)
+            {
+                menu.Items.Add(new Separator());
+                addedCommonSeparator = true;
+            }
+            var item = new MenuItem
+            {
+                Header = entry.Header,
+                ToolTip = entry.Identity,
+                Icon = new Image
+                {
+                    Source = ShellIconProvider.GetIcon(entry.Identity, isDirectory: true),
+                    Width = 16,
+                    Height = 16
+                }
+            };
+            item.Click += (_, _) =>
+            {
+                if (ReferenceEquals(Current, state)) state.Browser.Navigate(entry.Identity);
+            };
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
     }
 
     internal void SetCompactMode(bool compact)
@@ -256,6 +1032,10 @@ public partial class PaneControl : UserControl
         ForwardButton.Width = navigationWidth;
         UpButton.Width = navigationWidth;
         RefreshButton.Width = navigationWidth;
+        AddressHistoryButton.Width = compact ? 20 : 24;
+        AddressMenuButton.Width = compact ? 20 : 24;
+        AddressMenuColumn.Width = new GridLength(compact ? 20 : 24);
+        AddressHistoryColumn.Width = new GridLength(compact ? 20 : 24);
         NewTabButton.Width = navigationWidth;
         CloseTabButton.Width = navigationWidth;
         GoButton.Padding = compact ? new Thickness(4, 0, 4, 0) : new Thickness(8, 2, 8, 2);
@@ -285,7 +1065,15 @@ public partial class PaneControl : UserControl
         FocusCurrentView();
     }
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
-    public void ReopenClosedTab() { if (_closedTabs.TryPop(out var tab)) AddTab(tab.Path, tab.View); }
+    public void ReopenClosedTab()
+    {
+        if (_closedTabs.TryPop(out var tab))
+            AddTab(tab.Path, tab.View, quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
+                detailsPaneVisible: tab.DetailsPaneVisible);
+    }
+
+    internal bool TryOpenSelectedFolderInNewTab() => Current?.Browser.OpenSelectedFolderInNewTab(
+        path => AddTab(path, _newTabView())) == true;
 
     public void CloseOtherTabs()
     {
@@ -297,13 +1085,54 @@ public partial class PaneControl : UserControl
         }
     }
 
-    private void AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false)
+    private TabItem AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false,
+        QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
+        AddressPathHistory? addressHistory = null)
     {
-        var browser = new ExplorerBrowserHost(path, view ?? _newTabView());
+        var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
+            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
-        var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned };
+        var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned,
+            AddressHistory = addressHistory ?? new AddressPathHistory() };
+        state.AddressHistory.Record(path);
         tab.Tag = state;
+        browser.QuickFilterChanged += settings =>
+        {
+            if (Current != state) return;
+            if (!QuickFilterBox.IsKeyboardFocusWithin) ShowQuickFilterEditor(settings);
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        };
+        browser.NavigationAvailabilityChanged += (_, _) =>
+        {
+            if (Current == state) RefreshNavigationAvailability();
+        };
+        browser.SelectionContextChanged += (_, _) =>
+        {
+            if (Current == state)
+            {
+                CommandContextChanged?.Invoke(this, EventArgs.Empty);
+                QueueSelectionCountsRefresh(state);
+            }
+        };
+        browser.FolderMiddleClicked += (_, folderPath) =>
+        {
+            if (Current == state && IsVisible) AddTab(folderPath, _newTabView());
+        };
+        browser.NavigationStarting += (_, _) =>
+        {
+            if (!state.SearchRequestPending && state.Browser.SearchQuery is null)
+                SetSearchScope(state, null);
+            if (ReferenceEquals(_recursiveSizeOwner, state) || ReferenceEquals(_lastRecursiveSizeOwner, state))
+                CancelRecursiveDirectorySize();
+            if (Current != state) return;
+            CancelSelectionCountsRefresh();
+            RefreshNavigationAvailability();
+            _treeHost?.CancelSynchronization();
+            _diskSpace.Reset();
+            ItemCounts.Text = "";
+            ItemCounts.ToolTip = null;
+        };
         browser.CustomCommands = selectedItem =>
         {
             var actions = new List<ExplorerBrowserHost.MenuAction>();
@@ -326,9 +1155,11 @@ public partial class PaneControl : UserControl
         browser.Navigated += (_, navigatedPath) =>
         {
             state.SearchRequestPending = false;
+            SetSearchScope(state, null);
             var restoreSearchCloseFocus = ReferenceEquals(_searchCloseFocusPending, state);
             if (restoreSearchCloseFocus) _searchCloseFocusPending = null;
             state.Path = navigatedPath;
+            state.AddressHistory.Record(navigatedPath);
             UpdateTabHeader(state);
             if (Current == state)
             {
@@ -343,12 +1174,16 @@ public partial class PaneControl : UserControl
                 _addressNavigationPending = false;
                 SearchBar.Visibility = Visibility.Collapsed;
                 Status.Text = "Shell 视图";
+                if (browser.IsFileSystemLocation) _treeHost?.SetDirectory(navigatedPath);
+                else _treeHost?.SetVirtualLocation();
+                QueueSelectionCountsRefresh(state);
                 if (restoreFocus)
                     Activated?.Invoke(this, EventArgs.Empty);
                 if (restoreFocus || restoreSearchCloseFocus)
                     RestoreFileFocusWhenActive();
             }
             StateChanged?.Invoke(this, EventArgs.Empty);
+            if (Current == state) CommandContextChanged?.Invoke(this, EventArgs.Empty);
         };
         browser.SearchNavigated += (_, query) =>
         {
@@ -368,6 +1203,8 @@ public partial class PaneControl : UserControl
             if (!SearchBox.IsKeyboardFocusWithin || SearchBox.Text == query)
                 SearchBox.Text = query;
             Status.Text = $"搜索结果：{query}";
+            QueueSelectionCountsRefresh(state);
+            CommandContextChanged?.Invoke(this, EventArgs.Empty);
         };
         browser.NavigationFailed += (_, message) =>
         {
@@ -383,15 +1220,23 @@ public partial class PaneControl : UserControl
                     SearchBox.Text = query;
                 }
                 Status.Text = message;
+                SyncTreeToCurrent(state);
+                QueueSelectionCountsRefresh(state);
             }
+            if (Current == state) CommandContextChanged?.Invoke(this, EventArgs.Empty);
         };
         browser.MenuError += (_, message) =>
         {
             if (Current == state) Status.Text = $"Shell 视图：{message}";
         };
         browser.Activated += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
-        browser.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
-        browser.MayRestoreFocus = () => Current == state && IsVisible && MayRestoreFileFocus?.Invoke() == true;
+        browser.HeaderPresetMenuRequested += point => HeaderPresetMenuRequested?.Invoke(this, point);
+        browser.ShortcutHandler = shortcut => shortcut == ExplorerShortcut.OpenSelectionInNewTab
+            ? TryOpenSelectedFolderInNewTab()
+            : ShortcutRequested?.Invoke(this, shortcut) == true;
+        browser.CtrlWheelHandler = CycleViewStyle;
+        browser.MayRestoreFocus = () => Current == state && IsVisible &&
+            _treeHost?.HasNativeFocus() != true && MayRestoreFileFocus?.Invoke() == true;
         UpdateTabHeader(state);
         tab.PreviewMouseLeftButtonDown += (_, e) =>
         {
@@ -409,11 +1254,12 @@ public partial class PaneControl : UserControl
         UpdateTabOrders();
         if (select) Tabs.SelectedItem = tab;
         StateChanged?.Invoke(this, EventArgs.Empty);
+        return tab;
     }
 
     private void UpdateTabHeader(TabState state)
     {
-        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(state.Path));
+        var name = ShellLocationIdentity.GetDisplayName(state.Path);
         var header = new StackPanel { Orientation = Orientation.Horizontal };
         header.Children.Add(new Image
         {
@@ -489,7 +1335,8 @@ public partial class PaneControl : UserControl
             ? _tabOrder[closingIndex + 1 < _tabOrder.Count ? closingIndex + 1 : closingIndex - 1]
             : null;
         CaptureViewState(state);
-        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CachedViewState()));
+        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+            state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible));
         while (_closedTabs.Count > 20)
         {
             var recent = _closedTabs.Take(20).Reverse().ToArray();
@@ -523,7 +1370,7 @@ public partial class PaneControl : UserControl
         try
         {
             Status.Text = "正在检查目录…";
-            Current?.Browser.Navigate(path);
+            Current?.Browser.Navigate(BreadcrumbPath.NormalizeAddressInput(path));
         }
         catch (Exception ex)
         {
@@ -621,6 +1468,35 @@ public partial class PaneControl : UserControl
         e.Handled = true;
     }
 
+    private void TabStrip_DragOver(object sender, DragEventArgs e)
+    {
+        // TabItem handles the app's private reorder payload; the strip only accepts Shell folders.
+        e.Effects = _draggedTab is null && ShellTabDropTarget.HasShellLocationData(e.Data)
+            ? GetTabStripDropEffect(e.AllowedEffects)
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void TabStrip_Drop(object sender, DragEventArgs e)
+    {
+        var effect = GetTabStripDropEffect(e.AllowedEffects);
+        if (_draggedTab is null && effect != DragDropEffects.None &&
+            ShellTabDropTarget.TryGetDroppedFolder(e.Data, out var location))
+        {
+            OpenPathInNewTab(location);
+            e.Effects = effect;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private static DragDropEffects GetTabStripDropEffect(DragDropEffects allowedEffects) =>
+        (allowedEffects & DragDropEffects.Link) != 0 ? DragDropEffects.Link :
+        (allowedEffects & DragDropEffects.Copy) != 0 ? DragDropEffects.Copy : DragDropEffects.None;
+
     private void ReorderTab(TabItem source, TabItem target, bool after)
     {
         var original = _tabOrder.ToArray();
@@ -651,19 +1527,34 @@ public partial class PaneControl : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        if (e.RemovedItems.Count != 0) CloseAddressTree();
         foreach (var previous in e.RemovedItems.OfType<TabItem>())
+        {
+            if (previous.Tag is TabState previousState &&
+                (ReferenceEquals(_recursiveSizeOwner, previousState) || ReferenceEquals(_lastRecursiveSizeOwner, previousState)))
+                CancelRecursiveDirectorySize();
             if (Tabs.Items.Contains(previous) && previous.Tag is TabState oldState && oldState.Browser.IsVisible)
                 CaptureViewState(oldState);
+        }
         BrowserLayer.Show(state.Browser);
+        RefreshNavigationAvailability();
+        SyncTreeToCurrent(state);
+        _diskSpace.Reset();
+        ItemCounts.Text = ""; // Never carry a previous tab's selection counts across a switch.
+        ItemCounts.ToolTip = null;
+        CancelSelectionCountsRefresh();
+        QueueSelectionCountsRefresh(state);
         _addressNavigationPending = false;
         Address.Text = state.Path;
         RenderBreadcrumb(state.Path);
         ShowBreadcrumb();
         SearchBar.Visibility = state.Browser.SearchQuery is null ? Visibility.Collapsed : Visibility.Visible;
         SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        if (QuickFilterBar.Visibility == Visibility.Visible) ShowQuickFilterEditor(state.Browser.QuickFilter);
         Status.Text = state.Browser.SearchQuery is { } query ? $"搜索结果：{query}" : "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        CommandContextChanged?.Invoke(this, EventArgs.Empty);
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if (Current != state) return;
@@ -747,11 +1638,14 @@ public partial class PaneControl : UserControl
     private void ShowBreadcrumb()
     {
         _addressEditing = false;
-        Address.Visibility = Visibility.Collapsed;
-        BreadcrumbScroll.Visibility = Visibility.Visible;
+        Address.Text = CurrentPath;
+        Address.IsReadOnly = true;
+        Address.Visibility = _classicAddressBar ? Visibility.Visible : Visibility.Collapsed;
+        BreadcrumbScroll.Visibility = _classicAddressBar ? Visibility.Collapsed : Visibility.Visible;
         GoButton.Content = "编辑";
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => { if (!_addressEditing) BreadcrumbScroll.ScrollToRightEnd(); }));
+        if (!_classicAddressBar)
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => { if (!_addressEditing) BreadcrumbScroll.ScrollToRightEnd(); }));
     }
 
     private void RestoreFileFocusWhenActive()
@@ -793,6 +1687,12 @@ public partial class PaneControl : UserControl
         }
         else if (e.Key == Key.Escape)
         {
+            if (AddressTreePopup.IsOpen)
+            {
+                CloseAddressTree(focusAddress: true);
+                e.Handled = true;
+                return;
+            }
             _addressNavigationPending = false;
             Address.Text = CurrentPath;
             ShowBreadcrumb();
@@ -800,6 +1700,11 @@ public partial class PaneControl : UserControl
             RestoreFileFocusWhenActive();
             e.Handled = true;
         }
+    }
+
+    private void Address_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_classicAddressBar && !_addressEditing) FocusAddress();
     }
 
     private void Address_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)

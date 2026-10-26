@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.IO;
 using System.Text;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Input;
@@ -19,70 +20,458 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
+    private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private const uint WmCommand = 0x0111;
     private const uint BrowseParent = 0x2000;
     private const uint BrowseBack = 0x4000;
     private const uint BrowseForward = 0x8000;
+    private const uint AncestorRootOwner = 3;
     // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
     private const int ShellCut = 0x7018;
     private const int ShellCopy = 0x7019;
     private const int ShellPaste = 0x701A;
     private const int ShellUndo = 0x701B;
+    private const int ShellRedo = 0x701C;
     private const int ShellSelectAll = 0x7021;
     private static readonly string? FocusTracePath = Environment.GetEnvironmentVariable("EXPLORER_DIRS_FOCUS_TRACE");
     private IExplorerBrowser? _browser;
+    private bool _folderHeaderWarningReported;
+    private QuickFilterSettings _quickFilterSettings = QuickFilterSettings.Empty;
+    private ShellFolderFilter? _quickFilter;
+    private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
+    private DispatcherTimer? _quickFilterGroupRestoreTimer;
+    private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
+    private long _quickFilterRequestVersion;
+    private const int QuickFilterGroupRestoreTimeoutMilliseconds = 5000;
+    private ShellHistoryEvents? _historyEvents;
     private bool _columnRestoreFailed;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
+    private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
+    private readonly Dictionary<uint, int> _nativeUserMessages = new();
+    private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
+    private readonly Dictionary<(uint Message, string WindowClass), (int Samples, long HostTotalTicks, long HostMaxTicks, long ShellTotalTicks, long ShellMaxTicks)> _nativeViewMessageTimings = new();
+    private readonly List<string> _nativeViewMessageSlowTimeline = new();
+    private readonly DiagnosticStageTiming _directoryQueueTiming = new();
+    private readonly DiagnosticStageTiming _directoryQueueDispatchTiming = new();
+    private readonly DiagnosticStageTiming _directoryChangeTimerTickTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryQueueDrainTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryCountCheckTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryRefreshCallTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryRefreshGetViewTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryRefreshSelectionCaptureTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryNativeRefreshTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryRefreshCompletionTiming = new(sampleStride: 1);
+    private readonly List<string> _directoryRefreshCallTimeline = new();
+    private readonly DiagnosticStageTiming _directoryCreateNotificationTiming = new(sampleStride: 1);
+    private readonly DiagnosticStageTiming _directoryDeleteNotificationTiming = new(sampleStride: 1);
+    private readonly List<string> _nativeUserMessageSamples = new();
+    private readonly List<string> _shellSelectionCallbackSamples = new();
+    private readonly List<string> _shellSelectionRestoreSamples = new();
+    private readonly bool _traceNativeUserMessages = Environment.GetEnvironmentVariable("EXPLORER_DIRS_SHELL_CALLBACK_TRACE") == "1";
+    private long _nativeUserMessageTraceStart = Stopwatch.GetTimestamp();
     private readonly SubclassProc _subclassProc;
     private readonly DirectoryNavigationGate _navigationGate = new();
+    // Shell parsing can pump STA messages. Invalidate preparation before any
+    // newer request, including one still waiting for a directory probe.
+    private long _navigationRequestVersion;
     private readonly ShellNavigationState _location;
     private readonly ShellBrowserSite _browserSite = new();
+    private readonly ShellSearchHistory _searchHistory = new();
     private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _issuedSearches = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
     {
         Interval = TimeSpan.FromMilliseconds(250)
     };
+    private FocusRestoreRequest? _pendingFileOperationFocusRestore;
+    private const double FileOperationFocusRestoreWindowMilliseconds = 1500;
+    private static readonly TimeSpan SelectionSizeRefreshInterval = TimeSpan.FromSeconds(5);
+    private ShellSelectionSizeCacheKey? _selectionSizeCacheKey;
+    private ulong? _selectionSizeCacheBytes;
+    private long _selectionSizeCacheReadAt;
     private bool _menuPrepared;
     private readonly ShellMenuTargetTracker _menuTarget = new();
+    private readonly ShellHeaderPresetMenuGate _headerPresetMenuGate = new();
     private DispatcherTimer? _newFolderRenameTimer;
+    private DispatcherTimer? _createdFileSelectionTimer;
+    private IntPtr _createdFileSelectionPidl;
+    private CreatedFileSelectionRequest? _createdFileSelectionRequest;
+    private int _createdFileSelectionAttempts;
     private FolderCreationObservation? _newFolderObservation;
+    private ShellNewFolderRefreshGate? _newFolderRefreshGate;
+    private ShellNewFolderEditGate? _newFolderEditGate;
+    private long _newFolderRequestVersion;
+    private FileSystemWatcher? _directoryChangeWatcher;
+    private readonly ShellDirectoryWatcherEventGate<FileSystemWatcher> _directoryChangeWatcherEventGate = new();
+    private DispatcherTimer? _directoryChangeWatcherRecoveryTimer;
+    private ShellDirectoryWatcherRecovery? _directoryChangeWatcherRecovery;
+    private DispatcherTimer? _directoryChangeStartTimer;
+    private DispatcherTimer? _directoryChangeTimer;
+    private DispatcherTimer? _directoryChangeCreateNotificationTimer;
+    private DispatcherTimer? _directoryChangeDeleteNotificationTimer;
+    private DispatcherTimer? _directoryChangeChangedItemNotificationTimer;
+    private ShellDirectoryChangeBatch? _directoryChangeBatch;
+    private ShellDirectoryChangeQueue? _directoryChangeQueue;
+    private ShellCreateNotificationBatch? _directoryChangeCreateNotificationBatch;
+    private ShellDeleteNotificationBatch? _directoryChangeDeleteNotificationBatch;
+    private ShellChangedItemNotificationBatch? _directoryChangeChangedItemNotificationBatch;
+    private bool _directoryRefreshInProgress;
+    private bool _directorySelectionRestorePending;
+    private DispatcherTimer? _deferredRefreshSelectionRestoreTimer;
+    private ShellViewSelectionSnapshot? _deferredRefreshSelectionSnapshot;
+    private DispatcherTimer? _naturalUpdateSelectionVerificationTimer;
+    private ShellViewSelectionSnapshot? _naturalUpdateSelectionVerificationSnapshot;
+    private long _naturalUpdateSelectionVerificationStartedAt;
+    private readonly ShellSelectionRecoverySuppression _selectionRecoverySuppression = new();
+    private long _nativeUserInputVersion;
+    private Task<string?>? _middleClickFolderProbe;
+    private string? _middleClickParentPath;
+    private long _middleClickNavigationVersion;
+    private long _middleClickInputVersion;
+    private long _settledNativeUserInputVersion;
+    private DispatcherOperation? _nativeInputSelectionCapture;
+    private ShellViewSelectionSnapshot? _lastNativeSelection;
+    private long _lastNativeSelectionInputVersion;
+    private long _lastNativeSelectionNavigationVersion;
+    private string? _lastNativeSelectionPath;
+    internal long NativeSelectionRestoreMilliseconds { get; private set; } = -1;
+    private bool _directoryChangeRecheckPending;
+    private int _directoryChangeStarting;
+    private long _directoryChangeVersion;
+    private long _directoryChangeLastEventAt;
+    private int _directoryChangeCreatedEvents;
+    private int _directoryChangeNativeCreateNotifications;
+    private int _directoryChangeNativeFolderDeleteNotifications;
+    private int _directoryChangeFolderDeleteLookupCount;
+    private string _directoryChangeLastFolderDeleteNotificationResult = "not-attempted";
+    private int _directoryChangeDeletedEvents;
+    private long _directoryChangeFallbackStartedAt;
+    private long _directoryChangeFallbackCompletedAt;
+    private long _directoryChangeNativeCreateNotificationStartedAt;
+    private long _directoryChangeNativeCreateNotificationCompletedAt;
+    private string _directoryChangeLastCreateNotificationResult = "not-attempted";
     private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
     private bool _hasNavigated;
+    private readonly ShellViewReadiness _viewReadiness = new();
+    private string? _completedDiskDirectory;
+    private bool _locationUnconfirmed;
     private string? _retryPath;
     private bool _focusWhenReady;
     private bool _restoreFocusAfterNavigation;
     private IntPtr _lastContentFocusWindow;
     private ViewState _viewState;
+    private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    internal bool IsFileSystemLocation => _location.IsFileSystemLocation;
+    internal FileViewExportSnapshot CaptureFileViewExportSnapshot()
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        try { return ShellFileViewExportCapture.Capture(view, quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasPattern); }
+        finally { Marshal.Release(view); }
+    }
+
+    internal ProgramStarterPaneContext CaptureProgramStarterPaneContext()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        return new ProgramStarterPaneContext(CurrentPath,
+            CaptureProgramStarterItemPaths(1), CaptureProgramStarterItemPaths(2));
+    }
+
+    internal PhotoPrintSelectionResult CapturePhotoPrintSelection()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        var viewId = FolderViewId;
+        if (_browser.GetCurrentView(ref viewId, out var viewObject) < 0)
+            throw new InvalidOperationException("当前 Shell 文件视图暂不可读取。");
+        try
+        {
+            var arrayId = ShellItemArrayId;
+            if (viewObject is not IFolderView view || view.Items(1, ref arrayId, out var arrayObject) < 0 ||
+                arrayObject is not IShellItemArray items)
+                throw new InvalidOperationException("当前 Shell 选择暂不可读取。");
+            try
+            {
+                if (items.GetCount(out var count) < 0 || count > int.MaxValue)
+                    throw new InvalidOperationException("当前 Shell 选择暂不可读取。");
+                List<PhotoPrintSelectionCandidate> candidates = new((int)count);
+                for (uint index = 0; index < count; index++)
+                {
+                    if (items.GetItemAt(index, out var item) < 0 || item is null)
+                        throw new InvalidOperationException("当前 Shell 选择快照不完整。");
+                    try
+                    {
+                        var attributesResult = item.GetAttributes(ShellItemKind.RequestedAttributes, out var attributes);
+                        var isFileSystem = attributesResult >= 0 &&
+                            (attributes & 0x40000000) != 0 && (attributes & 0x00400000) == 0;
+                        var path = GetShellItemPath(item, 0x80058000);
+                        var displayName = path is not null
+                            ? System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(path))
+                            : GetShellItemPath(item, 0) ?? "(未知项目)";
+                        candidates.Add(new PhotoPrintSelectionCandidate(displayName,
+                            isFileSystem ? path : null, isFileSystem,
+                            attributesResult >= 0 && (attributes & 0x20000000) != 0));
+                    }
+                    finally
+                    {
+                        if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item);
+                    }
+                }
+                return PhotoPrintSelection.Filter(candidates);
+            }
+            finally
+            {
+                if (Marshal.IsComObject(items)) Marshal.ReleaseComObject(items);
+            }
+        }
+        finally
+        {
+            if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+        }
+    }
+
+    private IReadOnlyList<string> CaptureProgramStarterItemPaths(uint flags)
+    {
+        var viewId = FolderViewId;
+        if (_browser is null || _browser.GetCurrentView(ref viewId, out var viewObject) < 0)
+            throw new InvalidOperationException("当前 Shell 文件视图暂不可读取。");
+        try
+        {
+            var arrayId = ShellItemArrayId;
+            if (viewObject is not IFolderView view || view.Items(flags, ref arrayId, out var arrayObject) < 0 ||
+                arrayObject is not IShellItemArray items)
+                throw new InvalidOperationException("当前 Shell 文件项暂不可读取。");
+            try
+            {
+                if (items.GetCount(out var count) < 0 || count > int.MaxValue)
+                    throw new InvalidOperationException("当前 Shell 文件项数量暂不可读取。");
+                List<string> paths = new((int)count);
+                for (uint index = 0; index < count; index++)
+                {
+                    if (items.GetItemAt(index, out var item) < 0 || item is null)
+                        throw new InvalidOperationException("当前 Shell 文件项快照不完整。");
+                    try
+                    {
+                        var path = GetShellItemPath(item, 0x80058000) ?? GetShellItemPath(item, 0x80028000);
+                        paths.Add(path ?? string.Empty);
+                    }
+                    finally
+                    {
+                        if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item);
+                    }
+                }
+                return paths;
+            }
+            finally
+            {
+                if (Marshal.IsComObject(items)) Marshal.ReleaseComObject(items);
+            }
+        }
+        finally
+        {
+            if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+        }
+    }
+
+    private static string? GetShellItemPath(IShellItem item, uint displayNameKind)
+    {
+        if (item.GetDisplayName(displayNameKind, out var name) < 0 || name == IntPtr.Zero) return null;
+        try { return Marshal.PtrToStringUni(name); }
+        finally { Marshal.FreeCoTaskMem(name); }
+    }
+    internal FileViewPrintSnapshot CaptureFileViewPrintSnapshot()
+    {
+        var style = ReadViewStyle() ?? throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        try
+        {
+            return ShellFileViewExportCapture.CaptureForPrint(view,
+                quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasPattern,
+                mode: style.Mode, iconSize: style.IconSize);
+        }
+        finally { Marshal.Release(view); }
+    }
+    internal string NativeUserMessageSnapshot => string.Join(',', _nativeUserMessages
+        .OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")) +
+        "; samples=" + string.Join('|', _nativeUserMessageSamples);
+    internal string LastShellRefreshStatus { get; private set; } = "not-started";
+    internal string LastQuickFilterStatus { get; private set; } = "not-started";
+    internal string NativeViewMessageTimingSnapshot => string.Join('|', _nativeViewMessageTimings.OrderByDescending(pair => pair.Value.ShellMaxTicks)
+        .ThenByDescending(pair => pair.Value.HostMaxTicks).Select(pair =>
+            $"{pair.Key.Message:X}/{pair.Key.WindowClass}:samples={pair.Value.Samples},host-total-ms={TicksToMilliseconds(pair.Value.HostTotalTicks):F2},host-max-ms={TicksToMilliseconds(pair.Value.HostMaxTicks):F2},shell-total-ms={TicksToMilliseconds(pair.Value.ShellTotalTicks):F2},shell-max-ms={TicksToMilliseconds(pair.Value.ShellMaxTicks):F2}"));
+    internal string NativeViewMessageSlowTimelineSnapshot => string.Join('|', _nativeViewMessageSlowTimeline);
+    internal string DirectoryRefreshCallTimelineSnapshot => string.Join('|', _directoryRefreshCallTimeline);
+    internal string DirectoryChangeStageTimingSnapshot => string.Join('|', new[]
+    {
+        $"watcher-queue={_directoryQueueTiming.Snapshot}",
+        $"dispatcher-queue={_directoryQueueDispatchTiming.Snapshot}",
+        $"directory-timer-tick={_directoryChangeTimerTickTiming.Snapshot}",
+        $"directory-queue-drain={_directoryQueueDrainTiming.Snapshot}",
+        $"count-check={_directoryCountCheckTiming.Snapshot}",
+        $"refresh-call={_directoryRefreshCallTiming.Snapshot}",
+        $"refresh-get-view={_directoryRefreshGetViewTiming.Snapshot}",
+        $"refresh-selection-capture={_directoryRefreshSelectionCaptureTiming.Snapshot}",
+        $"native-refresh={_directoryNativeRefreshTiming.Snapshot}",
+        $"refresh-completion={_directoryRefreshCompletionTiming.Snapshot}",
+        $"create-notification={_directoryCreateNotificationTiming.Snapshot}",
+        $"delete-notification={_directoryDeleteNotificationTiming.Snapshot}"
+    });
+    internal string ShellSelectionCallbackTimelineSnapshot => string.Join('|', _shellSelectionCallbackSamples);
+    internal string ShellSelectionRestoreTimelineSnapshot => string.Join('|', _shellSelectionRestoreSamples);
+    internal void ResetDiagnosticTrace()
+    {
+        if (!_traceNativeUserMessages) return;
+        _nativeUserMessages.Clear();
+        _nativeViewMessageTimings.Clear();
+        _nativeViewMessageSlowTimeline.Clear();
+        _nativeViewWindowClasses.Clear();
+        _nativeUserMessageSamples.Clear();
+        _shellSelectionCallbackSamples.Clear();
+        _shellSelectionRestoreSamples.Clear();
+        _directoryQueueTiming.Reset();
+        _directoryQueueDispatchTiming.Reset();
+        _directoryChangeTimerTickTiming.Reset();
+        _directoryQueueDrainTiming.Reset();
+        _directoryCountCheckTiming.Reset();
+        _directoryRefreshCallTiming.Reset();
+        _directoryRefreshGetViewTiming.Reset();
+        _directoryRefreshSelectionCaptureTiming.Reset();
+        _directoryNativeRefreshTiming.Reset();
+        _directoryRefreshCallTimeline.Clear();
+        _directoryRefreshCompletionTiming.Reset();
+        _directoryCreateNotificationTiming.Reset();
+        _directoryDeleteNotificationTiming.Reset();
+        _browserSite.ResetCallbackTimings();
+        _nativeUserMessageTraceStart = Stopwatch.GetTimestamp();
+        _directoryChangeFallbackStartedAt = 0;
+        _directoryChangeFallbackCompletedAt = 0;
+        _directoryChangeNativeCreateNotificationStartedAt = 0;
+        _directoryChangeNativeCreateNotificationCompletedAt = 0;
+    }
     public string? SearchQuery => _location.SearchQuery;
+    internal string? DiskSpaceDirectory => IsVisible && !_viewReadiness.Pending && _browser is not null
+        ? _completedDiskDirectory : null;
     public bool ViewCaptureFailed { get; private set; }
+    internal int DirectoryChangeFallbackRefreshCount { get; private set; }
+    // Hidden stress diagnostics: distinguish Shell selection loss before Refresh
+    // from a snapshot/restore failure inside our fallback path.
+    internal int DirectoryChangeLastRefreshSelectedCount { get; private set; } = -1;
+    internal bool DirectoryChangeLastRefreshHadFocus { get; private set; }
+    internal long DirectoryChangeLastRefreshRestoreMilliseconds { get; private set; } = -1;
+    internal int DirectoryChangeLastRefreshViewCountAtRestore { get; private set; } = -1;
+    internal bool DirectoryChangeLastRefreshSelectionRestored { get; private set; }
+    internal bool DirectoryChangeLastRefreshFocusRestored { get; private set; }
+    internal int? DirectoryChangeLastExpectedCount { get; private set; }
+    internal int? DirectoryChangeLastActualCount { get; private set; }
+    internal bool DirectoryChangeLastForcedRefresh { get; private set; }
+    internal string DirectoryChangeFallbackTimelineSnapshot => _directoryChangeFallbackStartedAt == 0
+        ? "none"
+        : $"start={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, _directoryChangeFallbackStartedAt).TotalMilliseconds:F1}ms;complete={(_directoryChangeFallbackCompletedAt == 0 ? "pending" : $"{Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, _directoryChangeFallbackCompletedAt).TotalMilliseconds:F1}ms")}";
+    internal string DirectoryChangeNativeCreateNotificationTimelineSnapshot => _directoryChangeNativeCreateNotificationStartedAt == 0
+        ? "none"
+        : $"start={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, _directoryChangeNativeCreateNotificationStartedAt).TotalMilliseconds:F1}ms;complete={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, _directoryChangeNativeCreateNotificationCompletedAt).TotalMilliseconds:F1}ms";
+    internal string DirectoryChangeLastCreateNotificationResult => _directoryChangeLastCreateNotificationResult;
+    internal int? DirectoryChangeInitialCount { get; private set; }
+    internal int DirectoryChangeStartSampleCount { get; private set; }
+    internal int DirectoryChangeCreatedEventCount => Volatile.Read(ref _directoryChangeCreatedEvents);
+    internal int DirectoryChangeNativeCreateNotificationCount => Volatile.Read(ref _directoryChangeNativeCreateNotifications);
+    internal int DirectoryChangeNativeFolderDeleteNotificationCount => Volatile.Read(ref _directoryChangeNativeFolderDeleteNotifications);
+    internal int DirectoryChangeFolderDeleteLookupCount => Volatile.Read(ref _directoryChangeFolderDeleteLookupCount);
+    internal string DirectoryChangeLastFolderDeleteNotificationResult => _directoryChangeLastFolderDeleteNotificationResult;
+    internal int DirectoryChangeDeletedEventCount => Volatile.Read(ref _directoryChangeDeletedEvents);
     public event EventHandler<string>? Navigated;
+    public event EventHandler? NavigationStarting;
+    public event EventHandler? NavigationAvailabilityChanged;
+    internal event EventHandler? SelectionContextChanged;
+    internal event Action<QuickFilterSettings>? QuickFilterChanged;
+    internal event Action<ShellMenuPoint>? HeaderPresetMenuRequested;
+    internal bool CanGoBack => CanNavigateHistory(true);
+    internal bool CanGoForward => CanNavigateHistory(false);
     public event EventHandler<string>? SearchNavigated;
     public event EventHandler<string>? NavigationFailed;
     public event EventHandler<string>? MenuError;
+    internal event EventHandler<string>? FolderMiddleClicked;
     public event EventHandler? Activated;
     public Func<SelectedItem?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
+    public Func<int, bool>? CtrlWheelHandler { get; set; }
     public Func<bool>? MayRestoreFocus { get; set; }
+    internal QuickFilterSettings QuickFilter => _quickFilterSettings;
+    internal HiddenItemsPreference HiddenItemsPreference => _hiddenItemsPreference;
+    internal bool PreviewPaneVisible => _visibleShellPane == ExplorerShellPane.Preview;
+    internal bool DetailsPaneVisible => _visibleShellPane == ExplorerShellPane.Details;
 
     public sealed record MenuAction(string Label, Action Action);
     public sealed record SelectedItem(string Path, bool IsFileSystemFolder);
 
     public ExplorerBrowserHost(string initialPath, ViewState initialView)
+        : this(initialPath, initialView, QuickFilterSettings.Empty, false) { }
+
+    internal ExplorerBrowserHost(string initialPath, ViewState initialView, bool showPreviewPane)
+        : this(initialPath, initialView, QuickFilterSettings.Empty, showPreviewPane) { }
+
+    internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
+        bool showPreviewPane = false, bool showDetailsPane = false,
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
     {
+        if (showPreviewPane && showDetailsPane)
+            throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
         _location = new ShellNavigationState(initialPath);
         _viewState = initialView.Copy();
+        _quickFilterSettings = quickFilter;
+        _hiddenItemsPreference = hiddenItemsPreference;
+        _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
+            showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
+        _browserSite.VisibleShellPane = _visibleShellPane;
         _subclassProc = ViewWindowProc;
+        _browserSite.SelectionChanged += OnShellSelectionChanged;
         _focusRestoreTimer.Tick += (_, _) =>
         {
-            _focusRestoreTimer.Stop();
-            RestoreContentFocusIfNeeded();
+            if (_pendingFileOperationFocusRestore is { } request)
+                TryRestoreFileOperationFocus(request);
+            else
+                _focusRestoreTimer.Stop();
         };
+    }
+
+    internal bool SetPreviewPaneVisible(bool visible)
+    {
+        return SetVisibleShellPane(visible ? ExplorerShellPane.Preview :
+            _visibleShellPane == ExplorerShellPane.Preview ? ExplorerShellPane.None : _visibleShellPane);
+    }
+
+    internal bool SetDetailsPaneVisible(bool visible)
+    {
+        return SetVisibleShellPane(visible ? ExplorerShellPane.Details :
+            _visibleShellPane == ExplorerShellPane.Details ? ExplorerShellPane.None : _visibleShellPane);
+    }
+
+    private bool SetVisibleShellPane(ExplorerShellPane pane)
+    {
+        if (_visibleShellPane == pane) return true;
+        var previous = _visibleShellPane;
+        _browserSite.VisibleShellPane = pane;
+        if (_browser is not null)
+        {
+            var options = 0x40u | 0x80u | (pane != ExplorerShellPane.None ? 0x2u : 0u); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_SHOWFRAMES
+            var hr = _browser.SetOptions(options);
+            if (hr < 0)
+            {
+                _browserSite.VisibleShellPane = previous;
+                return false;
+            }
+        }
+        _visibleShellPane = pane;
+        return true;
     }
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
@@ -97,13 +486,21 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             var browserType = Type.GetTypeFromCLSID(BrowserClassId, true)!;
             _browser = (IExplorerBrowser)Activator.CreateInstance(browserType)!;
+            var browserUnknown = Marshal.GetIUnknownForObject(_browser);
+            try
+            {
+                _historyEvents = ShellHistoryEvents.Subscribe(browserUnknown, QueueNavigationAvailability);
+                ReportFolderHeaderFailure(ShellFolderViewOptions.EnableCustomPosition(browserUnknown));
+            }
+            finally { Marshal.Release(browserUnknown); }
             ShellBrowserSite.SetSite(_browser, _browserSite);
             var rect = ClientRect();
             var settings = new FolderSettings { ViewMode = _viewState.Mode, Flags = 0 };
             Check(_browser.Initialize(_hostWindow, ref rect, ref settings));
-            Check(_browser.SetOptions(0x40 | 0x80)); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE
+            Check(_browser.SetOptions(0x40 | 0x80 | (_visibleShellPane != ExplorerShellPane.None ? 0x2u : 0u))); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_SHOWFRAMES
             Check(_browser.Advise(this, out _cookie));
             _advised = true;
+            UpdateQuickFilterAttachment(searchActive: false);
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (_browser is null) return;
@@ -124,6 +521,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
+        CancelCreatedFileSelection();
+        CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: false);
         DisposeBrowser();
         DestroyWindow(hwnd.Handle);
         _hostWindow = IntPtr.Zero;
@@ -153,12 +552,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var focusedClass = new StringBuilder(128);
         GetClassName(focused, focusedClass, focusedClass.Capacity);
         if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
+        {
+            // F2 + arrows escaped the native editor: returning false lets WPF
+            // navigate to a neighbouring HwndHost and ends the rename. Dispatch
+            // once to the focused editor, retaining Ctrl/Shift text selection.
+            if (ShellRenameKeyRouting.ShouldForwardArrowKeyDown(
+                    msg.message, unchecked((int)msg.wParam.ToInt64())))
+            {
+                SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
+                Trace($"rename-arrow-forward key={msg.wParam.ToInt64():X} mods={modifiers} " +
+                    $"host={_hostWindow} view={_viewWindow} editor={focused}/{focusedClass} focusAfter={GetFocus()}");
+                return true;
+            }
             return base.TranslateAcceleratorCore(ref msg, modifiers);
+        }
 
         if (msg.message == 0x0100 &&
             ((msg.wParam.ToInt64() == 0x5D && modifiers == ModifierKeys.None) ||
              (msg.wParam.ToInt64() == 0x79 && modifiers == ModifierKeys.Shift)))
-            _menuTarget.KeyboardMenuRequested(); // Menu key or Shift+F10.
+            _menuTarget.KeyboardMenuRequested(
+                allowCustomCommands: !IsNativeContextMenuExcludedWindow(focused)); // Menu key or Shift+F10.
 
         if (msg.message == 0x0100 || msg.message == 0x0104)
         {
@@ -189,24 +602,55 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
                 if (FocusTracePath is not null && IsTraceKey(msg.wParam.ToInt64()))
                     Trace($"shell result={shellResult:X8} focus={FocusClass()} item={FolderFocusState()}");
+                if (ShellArrowKeyRouting.ShouldForward(msg.message,
+                        unchecked((int)msg.wParam.ToInt64()), shellResult,
+                        IsFileContentInputWindow(focused), IsColumnHeaderInputWindow(focused),
+                        focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // When Shell declines an arrow, HwndHost's base route can treat it as
+                    // WPF focus navigation. Keep it in the focused native file-content control.
+                    SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
+                    Trace($"untranslated-arrow-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
+                    return true;
+                }
                 if (shellResult == 0)
                 {
                     QueueFocusRestoreAfterFileKey(msg, modifiers);
                     return true;
                 }
+                if (ShellAutoColumnWidthRouting.ShouldDispatchToListView(
+                        msg.message, unchecked((int)msg.wParam.ToInt64()), (int)modifiers, shellResult))
+                {
+                    IntPtr listView = IntPtr.Zero;
+                    EnumChildWindows(_viewWindow, (child, _) =>
+                    {
+                        var className = new StringBuilder(32);
+                        GetClassName(child, className, className.Capacity);
+                        if (className.ToString() != "SysListView32") return true;
+                        listView = child;
+                        return false;
+                    }, IntPtr.Zero);
+                    if (listView != IntPtr.Zero)
+                    {
+                        SendMessage(listView, (uint)msg.message, msg.wParam, msg.lParam);
+                        Trace($"auto-fit-columns forwarded to native ListView; focus={FocusClass()}");
+                        return true;
+                    }
+                }
             }
             finally { Marshal.FreeHGlobal(pointer); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
-        if (modifiers == ModifierKeys.Control && msg.message == 0x0100)
+        if (msg.message == 0x0100)
         {
-            var command = msg.wParam.ToInt64() switch
+            var command = ShellFileKeyboardActions.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers) switch
             {
-                0x41 => ShellSelectAll, // Ctrl+A
-                0x43 => ShellCopy,      // Ctrl+C
-                0x56 => ShellPaste,     // Ctrl+V
-                0x58 => ShellCut,       // Ctrl+X
-                0x5A => ShellUndo,      // Ctrl+Z
+                ShellFileKeyboardAction.SelectAll => ShellSelectAll,
+                ShellFileKeyboardAction.Copy => ShellCopy,
+                ShellFileKeyboardAction.Paste => ShellPaste,
+                ShellFileKeyboardAction.Cut => ShellCut,
+                ShellFileKeyboardAction.Undo => ShellUndo,
+                ShellFileKeyboardAction.Redo => ShellRedo,
                 _ => 0
             };
             if (command != 0)
@@ -240,7 +684,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (focused != IntPtr.Zero && IsChild(_viewWindow, focused) &&
             WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase))
             return true; // Shell rename field owns its editing keys and focus.
-        if (focused != target && !IsChild(target, focused))
+        var focusWithinContentWindow = focused != IntPtr.Zero &&
+            (focused == target || IsChild(target, focused));
+        if (ShellFocusRestoreGate.ShouldFocusContentWindow(focusWithinContentWindow,
+                IsColumnHeaderFocused()))
             SetFocus(target);
         var iid = ShellViewId;
         if (_browser.GetCurrentView(ref iid, out var viewObject) >= 0)
@@ -320,31 +767,23 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void FocusFolderItem()
     {
         if (_browser is null) return;
+        var view = GetFolderView2Pointer();
+        if (view == 0) return;
         try
         {
-            if (AutomationElement.FocusedElement?.Current.ControlType == ControlType.ListItem)
-                return;
+            // UIA can retain a ListItem focus while IFolderView has no focused index.
+            // Repair from Shell's focused/marked item and preserve its selected bit.
+            // Selection-menu testing exposed that unconditionally selecting the
+            // target changes Select None/Invert; RestoreFocusedItem retains its actual state.
+            var focusedIsSelected = ShellSelectionCommands.RestoreFocusedItem(view);
+            // Only the sole selected item can be the same focused item in UIA.
+            if (focusedIsSelected && ReadItemCounts(includeSelectionSize: false)?.Selected == 1)
+                FocusSelectedAutomationItem();
+            if (FocusTracePath is not null)
+                Trace($"focus-item selected={focusedIsSelected} foreground={GetForegroundWindow()} focus={FocusClass()} item={FolderFocusState()}");
         }
-        catch (ElementNotAvailableException) { }
-        catch (COMException) { }
-        catch (InvalidOperationException) { }
-        var iid = FolderViewId;
-        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return;
-        try
-        {
-            var view = (IFolderView)viewObject;
-            if (view.GetFocusedItem(out var index) >= 0 && index >= 0)
-            {
-                var hr = view.SelectItem(index, 0x11); // SVSI_SELECT | SVSI_FOCUSED: preserve other selections.
-                // UIA tree order does not identify Shell's focused item when several
-                // items are selected. Let IFolderView keep that focus in multi-select.
-                if (hr >= 0 && view.ItemCount(1, out var selectedCount) >= 0 && selectedCount == 1)
-                    FocusSelectedAutomationItem();
-                if (FocusTracePath is not null)
-                    Trace($"focus-item index={index} result={hr:X8} foreground={GetForegroundWindow()} focus={FocusClass()} item={FolderFocusState()}");
-            }
-        }
-        finally { Marshal.ReleaseComObject(viewObject); }
+        catch (COMException) { } // A failed focus repair must not change the selection.
+        finally { Marshal.Release(view); }
     }
 
     private void FocusSelectedAutomationItem()
@@ -386,36 +825,157 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void QueueFocusRestoreAfterFileKey(MSG msg, ModifierKeys modifiers)
     {
-        var key = msg.wParam.ToInt64();
-        if ((modifiers == ModifierKeys.Control && key is 0x41 or 0x43 or 0x56 or 0x58 or 0x5A) ||
-            (modifiers == ModifierKeys.Shift && key == 0x2E))
+        if (ShellFileKeyboardActions.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers) != ShellFileKeyboardAction.None ||
+            (modifiers == ModifierKeys.Shift && msg.wParam.ToInt64() == 0x2E))
             QueueFocusRestore();
     }
 
     private void QueueFocusRestore()
     {
-        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(RestoreContentFocusIfNeeded));
+        var browser = _browser;
+        if (browser is null || _viewWindow == IntPtr.Zero) return;
+        var request = new FocusRestoreRequest(browser, CurrentPath, _viewReadiness.NavigationVersion,
+            Interlocked.Read(ref _nativeUserInputVersion), Stopwatch.GetTimestamp());
+        _pendingFileOperationFocusRestore = request;
         _focusRestoreTimer.Stop();
+        _focusRestoreTimer.Interval = TimeSpan.FromMilliseconds(250);
         _focusRestoreTimer.Start();
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => TryRestoreFileOperationFocus(request)));
     }
+
+    private void TryRestoreFileOperationFocus(FocusRestoreRequest request)
+    {
+        if (!ReferenceEquals(_pendingFileOperationFocusRestore, request)) return;
+        var window = Window.GetWindow(this);
+        var focusStillDesired = MayRestoreFocus?.Invoke() == true && IsVisible && window?.IsActive == true;
+        var sameView = ReferenceEquals(request.Browser, _browser) &&
+            request.NavigationVersion == _viewReadiness.NavigationVersion &&
+            string.Equals(request.Path, CurrentPath, StringComparison.OrdinalIgnoreCase);
+        var userInputUnchanged = request.InputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        var withinRetryWindow = Stopwatch.GetElapsedTime(request.StartedAt).TotalMilliseconds <
+            FileOperationFocusRestoreWindowMilliseconds;
+        var canContinue = ShellFocusRestoreGate.CanContinue(focusStillDesired, sameView,
+            userInputUnchanged, withinRetryWindow);
+        if (!canContinue)
+        {
+            CompleteFileOperationFocusRestore(request);
+            return;
+        }
+
+        var fileContentFocused = IsFileContentFocused();
+        var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue, fileContentFocused);
+        if (FocusTracePath is not null)
+            Trace($"focus-restore-poll desired={focusStillDesired} same-view={sameView} input-unchanged={userInputUnchanged} " +
+                $"within-window={withinRetryWindow} content-focused={fileContentFocused} attempt={shouldAttemptRestore} " +
+                $"elapsed-ms={Stopwatch.GetElapsedTime(request.StartedAt).TotalMilliseconds:F0}");
+        if (shouldAttemptRestore)
+            RestoreContentFocusIfNeeded();
+
+        if (ReferenceEquals(_pendingFileOperationFocusRestore, request))
+            _focusRestoreTimer.Interval = TimeSpan.FromMilliseconds(100);
+    }
+
+    private bool IsFileContentFocused()
+    {
+        var focused = GetFocus();
+        var content = FindContentFocusWindow();
+        var hasNativeFocus = focused != IntPtr.Zero && _viewWindow != IntPtr.Zero &&
+            (focused == _viewWindow || IsChild(_viewWindow, focused));
+        var focusWithinContentWindow = focused != IntPtr.Zero && content != IntPtr.Zero &&
+            (focused == content || IsChild(content, focused));
+        var columnHeaderFocused = hasNativeFocus && IsColumnHeaderFocused();
+        var renameEditorFocused = hasNativeFocus && IsRenameEditorFocused();
+        // The native rename editor is already the desired keyboard target. Avoid
+        // a reentrant Shell focus query while the user is editing its text.
+        var (folderHasItems, folderItemFocused) = renameEditorFocused
+            ? (true, false)
+            : ReadFolderItemFocusState();
+        return ShellFocusRestoreGate.IsFileContentFocused(hasNativeFocus, focusWithinContentWindow,
+            columnHeaderFocused, folderHasItems, folderItemFocused, renameEditorFocused);
+    }
+
+    private (bool HasItems, bool ItemFocused) ReadFolderItemFocusState()
+    {
+        var browser = _browser;
+        var iid = FolderViewId;
+        if (browser is null) return (true, false);
+        object? viewObject = null;
+        try
+        {
+            if (browser.GetCurrentView(ref iid, out viewObject) < 0)
+                return (true, false);
+            if (viewObject is not IFolderView view)
+                return (true, false);
+            var itemCount = ShellItemCounts.ReadAllViewTotal(scope =>
+            {
+                var result = view.ItemCount(scope, out var count);
+                return (result, count);
+            });
+            if (itemCount is null) return (true, false);
+            if (itemCount == 0) return (false, false);
+            var result = view.GetFocusedItem(out var focusedIndex);
+            return (true, result >= 0 && (uint)focusedIndex < (uint)itemCount.Value);
+        }
+        catch (COMException) { return (true, false); }
+        finally
+        {
+            if (viewObject is not null) Marshal.ReleaseComObject(viewObject);
+        }
+    }
+
+    private void CompleteFileOperationFocusRestore(FocusRestoreRequest request)
+    {
+        if (!ReferenceEquals(_pendingFileOperationFocusRestore, request)) return;
+        _pendingFileOperationFocusRestore = null;
+        _focusRestoreTimer.Stop();
+    }
+
+    private sealed record FocusRestoreRequest(object Browser, string Path, long NavigationVersion,
+        long InputVersion, long StartedAt);
+
+    private sealed record PendingQuickFilterGroupRestore(PropertyKeyState Group, bool Ascending,
+        int InitialItemCount, ShellFolderFilter? Filter, string Path, long NavigationVersion, long RequestVersion, long StartedAt);
 
     private void RestoreContentFocusIfNeeded()
     {
         var window = Window.GetWindow(this);
-        if (MayRestoreFocus?.Invoke() != true || window?.IsActive != true ||
-            !IsVisible || _viewWindow == IntPtr.Zero)
+        var mayRestore = MayRestoreFocus?.Invoke() == true;
+        var windowActive = window?.IsActive == true;
+        var viewVisible = IsVisible;
+        var viewReady = _viewWindow != IntPtr.Zero;
+        if (!mayRestore || !windowActive || !viewVisible || !viewReady)
+        {
+            Trace($"restore-skip may-restore={mayRestore} window-active={windowActive} view-visible={viewVisible} view-ready={viewReady} focus={FocusClass()} foreground={GetForegroundWindow()}");
             return;
+        }
+        var foreground = GetForegroundWindow();
+        var windowHandle = new WindowInteropHelper(window).Handle;
+        var foregroundOwnedByWindow = foreground != IntPtr.Zero &&
+            GetAncestor(foreground, AncestorRootOwner) == windowHandle;
+        // A stale WPF IsActive value must not let a delayed Shell operation steal
+        // focus from another app or a different Explorer Dirs window.
+        if (!ShellFocusRestoreGate.CanRestoreForeground(foreground == IntPtr.Zero, foregroundOwnedByWindow))
+        {
+            Trace($"restore-skip foreground-owned-by-window={foregroundOwnedByWindow} foreground={foreground}");
+            return;
+        }
         // Shell file-operation windows can close with no foreground HWND while
         // WPF still regards this window as active. Reassert only in that gap.
-        if (GetForegroundWindow() == IntPtr.Zero)
-            SetForegroundWindow(new WindowInteropHelper(window).Handle);
+        if (foreground == IntPtr.Zero)
+            SetForegroundWindow(windowHandle);
         var focused = GetFocus();
         var target = FindContentFocusWindow();
-        Trace($"restore-check focus={FocusClass()} target={target}");
-        if (target != IntPtr.Zero && !IsColumnHeaderFocused() &&
-            (focused == target || IsChild(target, focused) || focused == IntPtr.Zero ||
-                focused == _viewWindow || !IsChild(_viewWindow, focused)))
-            FocusView();
+        var targetReady = target != IntPtr.Zero;
+        var columnHeaderFocused = targetReady && IsColumnHeaderFocused();
+        var focusEligible = targetReady && (focused == target || IsChild(target, focused) || focused == IntPtr.Zero ||
+            focused == _viewWindow || !IsChild(_viewWindow, focused) || columnHeaderFocused);
+        Trace($"restore-check focus={FocusClass()} target={target} foreground={GetForegroundWindow()} column-header={columnHeaderFocused} focus-eligible={focusEligible}");
+        if (targetReady && focusEligible)
+        {
+            var restored = FocusView();
+            Trace($"restore-result restored={restored} focus={FocusClass()} hwnd={GetFocus()} target={FindContentFocusWindow()}");
+        }
+        else Trace($"restore-skip target-ready={targetReady} column-header={columnHeaderFocused} focus-eligible={focusEligible}");
     }
 
     public bool GoParent()
@@ -429,50 +989,37 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public bool CreateNewFolder()
     {
-        if (_browser is null) return false;
+        var browser = _browser;
+        if (browser is null) return false;
         CancelPendingNewFolderRename();
+        var requestVersion = _newFolderRequestVersion;
+        var navigationVersion = _viewReadiness.NavigationVersion;
+        var userInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        bool IsCurrent() => ReferenceEquals(browser, _browser) && browser is not null &&
+            requestVersion == _newFolderRequestVersion &&
+            _viewReadiness.IsCurrent(navigationVersion) && !_locationUnconfirmed &&
+            IsVisible && MayRestoreFocus?.Invoke() == true && Window.GetWindow(this)?.IsActive == true &&
+            userInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        if (!IsCurrent()) return false;
         var parentPath = CurrentPath;
-        var viewId = ShellViewId;
-        if (_browser.GetCurrentView(ref viewId, out var viewObject) < 0) return false;
         var observation = FolderCreationObservation.TryStart(parentPath);
         try
         {
-            var menuId = ContextMenuId;
-            var itemResult = ((IShellView)viewObject).GetItemObject(0, ref menuId, out var menuObject); // SVGIO_BACKGROUND
-            Trace($"new-folder background={itemResult:X8}");
-            Check(itemResult);
-            try
+            if (!ShellNewFolderRefreshGate.TryFocusForCommand(IsCurrent, FocusView)) return false;
+            // Shell extension menu construction can pump messages. The shared
+            // command path checks native availability and IsCurrent immediately
+            // before invocation, including after lazy New submenu initialization.
+            var invokeResult = ShellFileCommands.Invoke(ShellFileCommand.NewFolder, OpenFileCommandMenu, IsCurrent);
+            if (invokeResult is null)
             {
-                var menu = CreatePopupMenu();
-                if (menu == IntPtr.Zero) throw new InvalidOperationException("无法创建 Shell 菜单。");
-                try
-                {
-                    var context = (IContextMenu)menuObject;
-                    var queryResult = context.QueryContextMenu(menu, 0, 1, 0x7fff, 0);
-                    Trace($"new-folder query={queryResult:X8}");
-                    Check(queryResult);
-                    var verb = Marshal.StringToHGlobalAnsi("NewFolder");
-                    try
-                    {
-                        var command = new NativeInvokeCommand
-                        {
-                            Size = (uint)Marshal.SizeOf<NativeInvokeCommand>(),
-                            Owner = Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : _hostWindow,
-                            Verb = verb,
-                            Show = 1
-                        };
-                        var invokeResult = context.InvokeCommand(ref command);
-                        Trace($"new-folder invoke={invokeResult:X8} focus={FolderFocusState()}");
-                        Check(invokeResult);
-                    }
-                    finally { Marshal.FreeHGlobal(verb); }
-                }
-                finally { DestroyMenu(menu); }
+                if (IsCurrent()) MenuError?.Invoke(this, "当前位置不支持新建文件夹。");
+                return false;
             }
-            finally { Marshal.ReleaseComObject(menuObject); }
-            if (observation is not null)
+            Trace($"new-folder invoke={invokeResult.Value:X8} focus={FolderFocusState()}");
+            Check(invokeResult.Value);
+            if (observation is not null && IsCurrent())
             {
-                BeginRenameNewFolder(parentPath, observation);
+                BeginRenameNewFolder(parentPath, observation, navigationVersion, userInputVersion);
                 observation = null; // The timer owns and disposes the observation.
             }
             return true;
@@ -480,29 +1027,309 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (Exception ex)
         {
             Trace($"new-folder exception={ex.GetType().Name}:{ex.Message}");
-            MenuError?.Invoke(this, $"新建文件夹失败：{ex.Message}");
+            if (IsCurrent()) MenuError?.Invoke(this, $"新建文件夹失败：{ex.Message}");
             return false;
         }
         finally
         {
             observation?.Dispose();
-            Marshal.ReleaseComObject(viewObject);
         }
     }
 
-    private void BeginRenameNewFolder(string parentPath, FolderCreationObservation observation)
+    internal bool ApplySelectionCommand(ShellSelectionCommand command)
+    {
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var selectionVersion = _browserSite.SelectionVersion;
+        bool SameView() => browser is not null && ReferenceEquals(browser, _browser) &&
+            generation == _viewReadiness.Generation && !_viewReadiness.Pending && !_locationUnconfirmed &&
+            IsVisible && MayRestoreFocus?.Invoke() == true && Window.GetWindow(this)?.IsActive == true &&
+            !IsRenameEditorFocused();
+        bool Current() => SameView() && selectionVersion == _browserSite.SelectionVersion;
+        if (!Current()) return false;
+        if (command == ShellSelectionCommand.All)
+        {
+            var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+            if (FocusView() && SameView() && inputVersion == Interlocked.Read(ref _nativeUserInputVersion))
+            {
+                // FocusView can reassert the existing focused PIDL and produce a selection notification;
+                // refresh the version only after confirming no newer user input arrived during focus routing.
+                selectionVersion = _browserSite.SelectionVersion;
+                NoteNativeUserInput();
+                if (TrySelectAllViaNativeAccelerator())
+                {
+                    if (SameView()) QueueFocusRestore();
+                    return true;
+                }
+            }
+        }
+        nint view = 0;
+        try
+        {
+            view = GetFolderView2Pointer();
+            if (view == 0 || !ShellSelectionCommands.Apply(view, command, Current, SameView)) return false;
+            // Apply may pump messages; never restore focus to a tab left meanwhile.
+            if (SameView()) QueueFocusRestore();
+            return true;
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException)
+        {
+            if (SameView()) MenuError?.Invoke(this, "选择操作未能完成，请检查当前选区后重试。");
+            return false;
+        }
+        finally { if (view != 0) Marshal.Release(view); }
+    }
+
+    internal bool TrySelectAllViaNativeAccelerator()
+    {
+        if (_browser is null || _viewWindow == IntPtr.Zero) return false;
+        var focused = GetFocus();
+        if (focused == IntPtr.Zero || (focused != _viewWindow && !IsChild(_viewWindow, focused))) return false;
+
+        var keyboardState = new byte[256];
+        if (!GetKeyboardState(keyboardState)) return false;
+        var originalKeyboardState = keyboardState.ToArray();
+        keyboardState[0x11] |= 0x80; // Ctrl is scoped to this UI thread and restored immediately after Shell translation.
+        if (!SetKeyboardState(keyboardState)) return false;
+        try
+        {
+            var iid = ShellViewId;
+            var result = _browser.GetCurrentView(ref iid, out var viewObject);
+            try
+            {
+                if (result < 0 || viewObject is null) return false;
+                var message = new NativeMessage
+                {
+                    Hwnd = focused,
+                    Message = 0x0100,
+                    WParam = (IntPtr)0x41,
+                    LParam = (IntPtr)1
+                };
+                var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMessage>());
+                try
+                {
+                    Marshal.StructureToPtr(message, pointer, false);
+                    return ((IShellView)viewObject).TranslateAccelerator(pointer) == 0;
+                }
+                finally { Marshal.FreeHGlobal(pointer); }
+            }
+            finally { if (viewObject is not null) Marshal.ReleaseComObject(viewObject); }
+        }
+        finally
+        {
+            if (!SetKeyboardState(originalKeyboardState))
+                throw new InvalidOperationException("Could not restore the UI thread keyboard state after Shell Select All.");
+        }
+    }
+
+    internal Dictionary<ShellFileCommand, bool> QueryFileCommands()
+    {
+        var generation = _viewReadiness.Generation;
+        var selectionVersion = _browserSite.SelectionVersion;
+        try
+        {
+            return ShellFileCommands.Query(OpenFileCommandMenu, () =>
+                generation == _viewReadiness.Generation && selectionVersion == _browserSite.SelectionVersion &&
+                IsVisible && !_viewReadiness.Pending && _browser is not null);
+        }
+        catch (Exception)
+        {
+            return ShellFileCommands.All.ToDictionary(info => info.Command, _ => false);
+        }
+    }
+
+    internal bool InvokeFileCommand(ShellFileCommand command)
+    {
+        if (command == ShellFileCommand.NewFolder) return CreateNewFolder();
+        try
+        {
+            var generation = _viewReadiness.Generation;
+            var selectionVersion = _browserSite.SelectionVersion;
+            var result = ShellFileCommands.Invoke(command, OpenFileCommandMenu, () =>
+                generation == _viewReadiness.Generation && selectionVersion == _browserSite.SelectionVersion &&
+                IsVisible && !_viewReadiness.Pending && MayRestoreFocus?.Invoke() == true &&
+                Window.GetWindow(this)?.IsActive == true);
+            if (result is null)
+            {
+                MenuError?.Invoke(this, "当前选区或位置不支持此命令。");
+                return false;
+            }
+            Check(result.Value);
+            QueueFocusRestore();
+            return true; // Accepted by Shell; not a file-operation completion report.
+        }
+        catch (Exception ex)
+        {
+            MenuError?.Invoke(this, $"Shell 命令未能执行：{ex.Message}");
+            return false;
+        }
+    }
+
+    internal bool NotifyCreatedClipboardFile(string path)
+    {
+        if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive || _viewReadiness.Pending ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(path) ?? string.Empty),
+                Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
+
+        CancelCreatedFileSelection();
+        var request = new CreatedFileSelectionRequest(_browser, CurrentPath, _viewReadiness.NavigationVersion,
+            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+        if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
+        {
+            if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
+            ShellCreatedItemNotification.NotifyCreatedFile(path);
+            return false;
+        }
+        try
+        {
+            if (!ShellCreatedItemNotification.NotifyCreatedFile(path, absolutePidl)) return false;
+
+            // Shell calls can pump messages. Keep the request tied to its original tab state.
+            if (_createdFileSelectionRequest is not null || !IsCreatedFileSelectionRequestCurrent(request)) return true;
+            _createdFileSelectionPidl = absolutePidl;
+            absolutePidl = IntPtr.Zero;
+            _createdFileSelectionRequest = request;
+        }
+        finally
+        {
+            if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
+        }
+
+        _createdFileSelectionAttempts = 0;
+        _createdFileSelectionTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _createdFileSelectionTimer.Tick += CreatedFileSelectionTimer_Tick;
+        _createdFileSelectionTimer.Start();
+        return true;
+    }
+
+    private void CreatedFileSelectionTimer_Tick(object? sender, EventArgs e)
+    {
+        var request = _createdFileSelectionRequest;
+        if (request is null || _createdFileSelectionPidl == IntPtr.Zero ||
+            !IsCreatedFileSelectionRequestCurrent(request) || !IsVisible ||
+            Window.GetWindow(this)?.IsActive != true || MayRestoreFocus?.Invoke() != true ||
+            IsRenameEditorFocused())
+        {
+            CancelCreatedFileSelection(request);
+            return;
+        }
+
+        _createdFileSelectionAttempts++;
+        if (!_viewReadiness.Pending)
+        {
+            var iid = ShellViewId;
+            if (_browser!.GetCurrentView(ref iid, out var viewObject) >= 0)
+            {
+                try
+                {
+                    if (!IsCreatedFileSelectionRequestCurrent(request))
+                    {
+                        CancelCreatedFileSelection(request);
+                        return;
+                    }
+                    // A nested Paste Special can replace/free the request while SelectItem pumps messages.
+                    var childPidl = ILClone(ILFindLastID(_createdFileSelectionPidl));
+                    if (childPidl != IntPtr.Zero)
+                    {
+                        int result;
+                        try { result = ((IShellView)viewObject).SelectItem(childPidl, 0x1d); }
+                        finally { Marshal.FreeCoTaskMem(childPidl); }
+                        if (result >= 0)
+                        {
+                            var stillOwnsRequest = ReferenceEquals(_createdFileSelectionRequest, request);
+                            CancelCreatedFileSelection(request);
+                            if (stillOwnsRequest && IsCreatedFileSelectionLocationCurrent(request) &&
+                                request.InputVersion == _nativeUserInputVersion && MayRestoreFocus?.Invoke() == true &&
+                                Window.GetWindow(this)?.IsActive == true)
+                                FocusView();
+                            return;
+                        }
+                    }
+                }
+                finally { Marshal.ReleaseComObject(viewObject); }
+            }
+        }
+
+        // A reentrant create may have replaced this request while Shell handled SelectItem.
+        if (!ReferenceEquals(_createdFileSelectionRequest, request)) return;
+
+        if (_createdFileSelectionAttempts >= 20) CancelCreatedFileSelection(request);
+    }
+
+    private bool IsCreatedFileSelectionRequestCurrent(CreatedFileSelectionRequest request) =>
+        request.IsCurrent(_browser, CurrentPath, _location.IsFileSystemLocation, _location.IsSearchActive,
+            _viewReadiness.Pending, _viewReadiness.NavigationVersion, _viewReadiness.Generation,
+            _browserSite.SelectionVersion, _nativeUserInputVersion);
+
+    private bool IsCreatedFileSelectionLocationCurrent(CreatedFileSelectionRequest request) =>
+        request.IsLocationCurrent(_browser, CurrentPath, _location.IsFileSystemLocation, _location.IsSearchActive,
+            _viewReadiness.Pending, _viewReadiness.NavigationVersion, _viewReadiness.Generation);
+
+    private void CancelCreatedFileSelection(CreatedFileSelectionRequest? expected = null)
+    {
+        if (expected is not null && !ReferenceEquals(_createdFileSelectionRequest, expected)) return;
+        if (_createdFileSelectionTimer is not null)
+        {
+            _createdFileSelectionTimer.Stop();
+            _createdFileSelectionTimer.Tick -= CreatedFileSelectionTimer_Tick;
+            _createdFileSelectionTimer = null;
+        }
+        if (_createdFileSelectionPidl != IntPtr.Zero)
+        {
+            Marshal.FreeCoTaskMem(_createdFileSelectionPidl);
+            _createdFileSelectionPidl = IntPtr.Zero;
+        }
+        _createdFileSelectionRequest = null;
+        _createdFileSelectionAttempts = 0;
+    }
+
+    private IShellCommandMenu? OpenFileCommandMenu(bool background)
+    {
+        if (!IsVisible || _viewReadiness.Pending || _browser is null || _viewWindow == 0)
+            return null;
+        // Menu availability needs a selection count, not aggregated file metadata.
+        // Keep selection-size property queries on the status-bar read path.
+        if (!background && ReadItemCounts(includeSelectionSize: false) is not { Selected: > 0 }) return null;
+        var viewId = ShellViewId;
+        if (_browser.GetCurrentView(ref viewId, out var viewObject) < 0) return null;
+        try
+        {
+            var contextId = ContextMenuId;
+            var hr = ((IShellView)viewObject).GetItemObject(background ? 0u : 1u, ref contextId, out var context);
+            if (hr < 0)
+            {
+                if (context is not null) Marshal.ReleaseComObject(context);
+                return null;
+            }
+            return new NativeShellCommandMenu(context,
+                Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : _hostWindow);
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private void BeginRenameNewFolder(string parentPath, FolderCreationObservation observation, long navigationVersion,
+        long userInputVersion)
     {
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(120)
         };
         _newFolderObservation = observation;
+        _newFolderRefreshGate = new ShellNewFolderRefreshGate();
+        _newFolderEditGate = new ShellNewFolderEditGate();
         _newFolderRenameTimer = timer;
         var attempts = 0;
         timer.Tick += (_, _) =>
         {
             if (!ReferenceEquals(_newFolderObservation, observation)) return;
-            if (TryRenameNewFolder(parentPath, observation))
+            var finished = TryRenameNewFolder(parentPath, observation, navigationVersion, userInputVersion);
+            // A nested new-folder command can replace this observer during COM.
+            // The old callback must not cancel or report for the new operation.
+            if (!ReferenceEquals(_newFolderObservation, observation)) return;
+            if (finished)
             {
                 CancelPendingNewFolderRename();
                 return;
@@ -514,10 +1341,21 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         timer.Start();
     }
 
-    private bool TryRenameNewFolder(string parentPath, FolderCreationObservation observation)
+    private bool TryRenameNewFolder(string parentPath, FolderCreationObservation observation, long navigationVersion,
+        long userInputVersion)
     {
-        if (_browser is null || CurrentPath != parentPath || !IsVisible) return true;
-        if (IsRenameEditorFocused()) return true;
+        var browser = _browser;
+        if (browser is null) return true;
+        bool IsCurrent() => ReferenceEquals(browser, _browser) && CurrentPath == parentPath &&
+            ReferenceEquals(_newFolderObservation, observation) &&
+            _viewReadiness.IsCurrent(navigationVersion) && !_locationUnconfirmed &&
+            IsVisible && MayRestoreFocus?.Invoke() == true && Window.GetWindow(this)?.IsActive == true &&
+            userInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+        if (!IsCurrent()) return true;
+        var renameEditorFocused = IsRenameEditorFocused();
+        if (_newFolderEditGate?.IsComplete(renameEditorFocused) == true) return true;
+        if (_newFolderEditGate?.ShouldWaitForEditor(renameEditorFocused) == true) return false;
+        if (renameEditorFocused) return true;
         try
         {
             var snapshot = observation.Snapshot();
@@ -533,20 +1371,41 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return true;
             }
             var created = snapshot.Directories[0];
+            var selectionVersion = _browserSite.SelectionVersion;
             var focusedPath = GetFocusedItemPath(parentPath);
+            if (!IsCurrent()) return true;
             Trace($"new-folder focused-match={string.Equals(focusedPath, created, StringComparison.OrdinalIgnoreCase)}");
-            if (!string.Equals(focusedPath, created, StringComparison.OrdinalIgnoreCase)) return false;
+            if (!string.Equals(focusedPath, created, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_newFolderRefreshGate?.TryRequestRefresh(snapshot, focusedPath, IsCurrent(),
+                        userInputVersion == Interlocked.Read(ref _nativeUserInputVersion)) == true)
+                {
+                    // The directory watcher starts after the Shell count settles, so a fast
+                    // NewFolder can precede it; refresh once only after the dedicated observer
+                    // confirms one directory and only while the user has not acted again.
+                    Trace("new-folder refreshing stale Shell view after observed creation");
+                    Refresh();
+                    // Wait one cycle for enumeration; a later attempt must select the observed PIDL
+                    // itself because some Shell command paths leave the old item focused.
+                    return false;
+                }
+            }
             Check(SHParseDisplayName(created, IntPtr.Zero, out var absolutePidl, 0, out _));
             try
             {
+                if (!IsCurrent()) return true;
                 var childPidl = ILFindLastID(absolutePidl);
                 var iid = ShellViewId;
-                if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return false;
+                if (browser.GetCurrentView(ref iid, out var viewObject) < 0) return false;
                 try
                 {
+                    if (!IsCurrent() || selectionVersion != _browserSite.SelectionVersion ||
+                        IsRenameEditorFocused()) return true;
                     var result = ((IShellView)viewObject).SelectItem(childPidl, 0x1f);
                     Trace($"new-folder edit={result:X8}");
-                    return result >= 0;
+                    if (result < 0) return false;
+                    _newFolderEditGate?.MarkEditAccepted();
+                    return _newFolderEditGate?.IsComplete(IsRenameEditorFocused()) ?? false;
                 }
                 finally { Marshal.ReleaseComObject(viewObject); }
             }
@@ -554,17 +1413,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         catch (Exception ex)
         {
-            MenuError?.Invoke(this, $"新建文件夹后无法进入重命名：{ex.Message}");
+            if (IsCurrent()) MenuError?.Invoke(this, $"新建文件夹后无法进入重命名：{ex.Message}");
             return true;
         }
     }
 
     private void CancelPendingNewFolderRename()
     {
+        _newFolderRequestVersion++;
         _newFolderRenameTimer?.Stop();
         _newFolderRenameTimer = null;
         _newFolderObservation?.Dispose();
         _newFolderObservation = null;
+        _newFolderRefreshGate = null;
+        _newFolderEditGate = null;
     }
 
     private string? GetFocusedItemPath(string parentPath)
@@ -605,82 +1467,164 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool BrowseRelative(uint flag)
     {
         if (_browser is null) return false;
+        if (flag == BrowseBack && !CanGoBack || flag == BrowseForward && !CanGoForward) return false;
+        _navigationRequestVersion++;
         var hr = _browser.BrowseToIDList(IntPtr.Zero, flag);
         if (hr < 0 && hr != unchecked((int)0x80004005))
             NavigationFailed?.Invoke(this, $"目录导航失败：0x{hr:X8}");
         return hr >= 0;
     }
 
+    private bool CanNavigateHistory(bool back) => _browser is not null &&
+        (_historyEvents?.CanNavigate(back, _viewReadiness.Pending, _locationUnconfirmed) ??
+         (!_viewReadiness.Pending && !_locationUnconfirmed));
+
+    private void QueueNavigationAvailability()
+    {
+        var owner = _historyEvents;
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            // Native notifications carry no request identity. Read current
+            // readiness and tab state at delivery, never a captured old value.
+            if (_browser is not null && ReferenceEquals(_historyEvents, owner))
+                NavigationAvailabilityChanged?.Invoke(this, EventArgs.Empty);
+        }));
+    }
+
     public void Navigate(string path)
     {
-        path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
+        path = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        if (!ShellLocationIdentity.TryNormalize(path, out path, out var isFileSystemPath))
+        {
+            NavigationFailed?.Invoke(this, "路径不是可识别的文件系统位置或受支持的 Shell 文件夹。");
+            return;
+        }
+        _navigationRequestVersion++;
+        _navigationGate.Cancel();
         if (_browser is null)
         {
-            _location.CompleteDirectory(path);
+            _location.CompleteDirectory(path, isFileSystemPath);
             _retryPath = path;
             return;
         }
 
         _retryPath = path;
-        _ = NavigateWhenAvailableAsync(path);
+        _ = NavigateWhenAvailableAsync(path, isFileSystemPath);
     }
 
-    public void Search(string query)
+    public void Search(string query, string? scopePath = null) => _ = SearchWhenAvailableAsync(query, scopePath);
+
+    private async Task SearchWhenAvailableAsync(string query, string? scopePath)
     {
+        if (!_location.CanSearchCurrentLocation)
+        {
+            NavigationFailed?.Invoke(this, "当前 Shell 位置暂不支持按目录搜索。");
+            return;
+        }
+        var request = ++_navigationRequestVersion;
+        var browser = _browser;
         if (_browser is null)
         {
             NavigationFailed?.Invoke(this, "搜索视图尚未就绪。");
             return;
         }
+        _navigationGate.Cancel();
+        bool IsCurrentRequest() => request == _navigationRequestVersion && ReferenceEquals(browser, _browser);
         try
         {
-            var uri = ShellSearchLocation.BuildUri(CurrentPath, query);
+            var uri = ShellSearchLocation.BuildUri(scopePath ?? CurrentPath, query);
             var pidl = ShellSearchLocation.ParsePidl(uri);
             try
             {
-                _navigationGate.Cancel();
+                if (!IsCurrentRequest()) return;
+                _searchHistory.Remember(pidl, uri);
+                if (!IsCurrentRequest()) return;
                 _retryPath = null;
                 _focusWhenReady = true;
-                Check(_browser.BrowseToIDList(pidl, 0));
+                _issuedSearches[uri] = _issuedSearches.GetValueOrDefault(uri) + 1;
+                try
+                {
+                    var result = await BrowseWhenAvailableAsync(browser!, pidl, IsCurrentRequest);
+                    if (result is null)
+                    {
+                        if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
+                        return;
+                    }
+                    Check(result.Value);
+                }
+                catch
+                {
+                    if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
+                    throw;
+                }
             }
             finally { Marshal.FreeCoTaskMem(pidl); }
         }
         catch (Exception ex)
         {
+            if (!IsCurrentRequest()) return;
             _focusWhenReady = false;
-            NavigationFailed?.Invoke(this, $"无法搜索当前目录：{ex.Message}");
+            NavigationFailed?.Invoke(this, $"无法搜索指定范围：{ex.Message}");
         }
     }
 
-    private async Task NavigateWhenAvailableAsync(string path)
+    private async Task NavigateWhenAvailableAsync(string path, bool isFileSystemPath)
     {
-        var probe = await _navigationGate.ProbeAsync(path);
+        var probe = await _navigationGate.ProbeAsync(path,
+            _ => isFileSystemPath ? DirectoryProbe.Check(path) : DirectoryProbeStatus.Unavailable);
         if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
-        if (!probe.CanNavigate)
-        {
-            NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
-            return;
-        }
-
+        nint pidl = 0;
         try
         {
-            Check(SHParseDisplayName(path, IntPtr.Zero, out var pidl, 0, out _));
+            if (probe.CanNavigate)
+                Check(SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out _));
+            else if (!ShellLocationIdentity.TryGetFolderPidl(path, out pidl))
+            {
+                NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
+                return;
+            }
+
+            // A newer search may cancel this probe while Shell parses.
+            if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
+            TrackIssuedPath(path);
+            int? result;
+            var browser = _browser;
             try
             {
-                TrackIssuedPath(path);
-                int result;
-                try { result = _browser.BrowseToIDList(pidl, 0); }
-                catch
-                {
-                    CompleteIssuedPath(path);
-                    throw;
-                }
-                if (result < 0) CompleteIssuedPath(path);
-                Check(result);
+                result = await BrowseWhenAvailableAsync(browser, pidl,
+                    () => _navigationGate.IsCurrent(probe) && ReferenceEquals(browser, _browser));
             }
-            finally { Marshal.FreeCoTaskMem(pidl); }
+            catch
+            {
+                if (ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+                throw;
+            }
+            if ((result is null || result < 0) && ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+            if (result is not null) Check(result.Value);
         }
-        catch (Exception ex) { NavigationFailed?.Invoke(this, $"无法打开目录：{ex.Message}"); }
+        catch (Exception ex)
+        {
+            if (_navigationGate.IsCurrent(probe) && _browser is not null)
+                NavigationFailed?.Invoke(this, $"无法打开目录：{ex.Message}");
+        }
+        finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }
+    }
+
+    // ExplorerBrowser rejects a second Browse while a search is starting with
+    // ERROR_BUSY. Yield the STA pump and retain only the still-current request;
+    // this retries navigation acceptance, never refreshes directory contents.
+    private static async Task<int?> BrowseWhenAvailableAsync(IExplorerBrowser browser, IntPtr pidl, Func<bool> isCurrent)
+    {
+        const int busy = unchecked((int)0x800700AA);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (isCurrent())
+        {
+            var result = browser.BrowseToIDList(pidl, 0);
+            if (result != busy || clock.ElapsedMilliseconds >= 5000) return result;
+            await Task.Delay(50);
+        }
+        return null;
     }
 
     public ViewState CaptureViewState()
@@ -695,6 +1639,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private ViewState CaptureViewStateCore()
     {
+        if (_locationUnconfirmed)
+        {
+            ViewCaptureFailed = true;
+            return _viewState.Copy();
+        }
         if (_location.IsSearchActive) return _viewState.Copy();
         if (_columnRestoreFailed)
         {
@@ -720,8 +1669,118 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CachedViewState() => _viewState.Copy();
 
+    internal ShellItemCounts? ReadItemCounts(bool includeSelectionSize = true)
+        => ReadItemCountsCore(includeSelectionSize, requireVisible: true);
+
+    private int? ReadDirectoryMonitorItemCount() =>
+        ReadItemCountsCore(includeSelectionSize: false, requireVisible: false)?.Total;
+
+    private ShellItemCounts? ReadItemCountsCore(bool includeSelectionSize, bool requireVisible)
+    {
+        if ((requireVisible && !IsVisible) || _viewReadiness.Pending || _browser is null || _viewWindow == IntPtr.Zero)
+            return null;
+        object? viewObject = null;
+        var generation = _viewReadiness.Generation;
+        var selectionVersion = _browserSite.SelectionVersion;
+        try
+        {
+            var iid = FolderViewId;
+            if (_browser.GetCurrentView(ref iid, out viewObject) != 0 || viewObject is not IFolderView view)
+                return null;
+            var counts = ShellItemCounts.Read(flags =>
+            {
+                var result = view.ItemCount(flags, out var count);
+                return (result, count);
+            });
+            ShellSelectionSizeCacheKey? sizeKey = null;
+            ulong? selectionBytes = null;
+            var readSelectionSize = false;
+            if (includeSelectionSize && counts is { Selected: > 0 } selectedCounts)
+            {
+                sizeKey = new ShellSelectionSizeCacheKey(generation, selectionVersion, selectedCounts.Selected);
+                var age = _selectionSizeCacheKey == sizeKey
+                    ? Stopwatch.GetElapsedTime(_selectionSizeCacheReadAt)
+                    : Timeout.InfiniteTimeSpan;
+                readSelectionSize = ShellSelectionSizeRefreshGate.ShouldRead(_selectionSizeCacheKey,
+                    sizeKey.Value, age, SelectionSizeRefreshInterval);
+                selectionBytes = readSelectionSize
+                    ? ReadSelectionSize(view, selectedCounts.Selected)
+                    : _selectionSizeCacheBytes;
+            }
+            // A Shell COM call may pump messages and complete another navigation.
+            if (generation != _viewReadiness.Generation || _viewReadiness.Pending ||
+                selectionVersion != _browserSite.SelectionVersion) return null;
+            if (includeSelectionSize)
+            {
+                if (sizeKey is { } key && counts is not null)
+                {
+                    if (readSelectionSize)
+                    {
+                        _selectionSizeCacheKey = key;
+                        _selectionSizeCacheBytes = selectionBytes;
+                        _selectionSizeCacheReadAt = Stopwatch.GetTimestamp();
+                    }
+                    counts = counts with { KnownSelectionBytes = selectionBytes };
+                }
+                else
+                {
+                    _selectionSizeCacheKey = null;
+                    _selectionSizeCacheBytes = null;
+                    _selectionSizeCacheReadAt = 0;
+                }
+            }
+            return counts;
+        }
+        catch (COMException) { return null; }
+        catch (InvalidComObjectException) { return null; }
+        finally { if (viewObject is not null) Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private static ulong? ReadSelectionSize(IFolderView view, int expectedCount)
+    {
+        object? array = null;
+        nint unknown = 0, items = 0;
+        try
+        {
+            var id = ShellItemArrayId;
+            if (view.Items(1, ref id, out array) != 0 || array is null) return null;
+            unknown = Marshal.GetIUnknownForObject(array);
+            if (Marshal.QueryInterface(unknown, in id, out items) != 0) return null;
+            return ShellSelectionSize.Read(items, expectedCount);
+        }
+        catch (COMException) { return null; }
+        catch (InvalidComObjectException) { return null; }
+        finally
+        {
+            if (items != 0) Marshal.Release(items);
+            if (unknown != 0) Marshal.Release(unknown);
+            if (array is not null) Marshal.ReleaseComObject(array);
+        }
+    }
+
+    internal (uint Mode, int IconSize)? ReadViewStyle()
+    {
+        if (!IsVisible || _viewReadiness.Pending || _browser is null || IsRenameEditorFocused())
+            return null;
+        var generation = _viewReadiness.Generation;
+        var view = IntPtr.Zero;
+        try
+        {
+            view = GetFolderView2Pointer();
+            if (view == IntPtr.Zero) return null;
+            var result = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var size);
+            return result == 0 && mode is >= 1 and <= 8 && size > 0 &&
+                generation == _viewReadiness.Generation && !_viewReadiness.Pending && IsVisible
+                ? (mode, size) : null;
+        }
+        catch (COMException) { return null; }
+        catch (InvalidComObjectException) { return null; }
+        finally { if (view != IntPtr.Zero) Marshal.Release(view); }
+    }
+
     public bool SetViewStyle(ViewStyle style)
     {
+        if (!IsVisible || _viewReadiness.Pending) return false;
         var view = IntPtr.Zero;
         try
         {
@@ -732,7 +1791,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return false;
             }
             // Change only mode/size: do not reapply cached sorting or grouping.
-            var result = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, style.Mode, style.IconSize);
+            var result = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, style.Mode,
+                ViewStyle.NativeIconSize(style.Mode, style.IconSize));
             if (result < 0)
             {
                 MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}");
@@ -755,6 +1815,56 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return true;
     }
 
+    public bool ApplyViewPreset(ViewPreset preset)
+    {
+        if (!IsVisible || _viewReadiness.Pending) return false;
+        var validated = preset.NormalizeAndValidate();
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero)
+        {
+            MenuError?.Invoke(this, "文件视图尚未就绪，未应用查看预设。");
+            return false;
+        }
+
+        try
+        {
+            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, validated.Mode,
+                ViewStyle.NativeIconSize(validated.Mode, validated.IconSize));
+            if (modeResult < 0)
+            {
+                MenuError?.Invoke(this, $"查看预设的查看方式未能应用：0x{modeResult:X8}");
+                return false;
+            }
+
+            // Mark the cached layout unsafe until every saved column has applied.
+            _columnRestoreFailed = true;
+            var columnResult = ShellColumnManager.Apply(view, validated.DisplayColumns);
+            if (columnResult < 0)
+            {
+                MenuError?.Invoke(this, $"查看预设的列设置未能完整应用；会话保存将等待重新读取。0x{columnResult:X8}");
+                return false;
+            }
+            _columnRestoreFailed = false;
+        }
+        catch (COMException ex)
+        {
+            MenuError?.Invoke(this, $"无法应用查看预设：0x{ex.HResult:X8}");
+            return false;
+        }
+        finally { Marshal.Release(view); }
+
+        try
+        {
+            CaptureViewState();
+            return !ViewCaptureFailed;
+        }
+        catch (Exception)
+        {
+            MenuError?.Invoke(this, "查看预设已发送给 Shell，但当前视图状态无法完整读取；会话保存将等待重试。");
+            return false;
+        }
+    }
+
     private void ApplyViewState()
     {
         // Keep a saved layout protected if the view is unavailable or COM fails
@@ -764,7 +1874,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (view == IntPtr.Zero) return;
         try
         {
-            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode, _viewState.IconSize);
+            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode,
+                ViewStyle.NativeIconSize(_viewState.Mode, _viewState.IconSize));
             if (modeResult < 0)
                 MenuError?.Invoke(this, $"查看方式未能恢复：0x{modeResult:X8}");
             if (_viewState.DisplayColumns is { Count: > 0 } columnsToRestore)
@@ -845,19 +1956,1893 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public void Refresh()
     {
+        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null), error =>
+        {
+            LastShellRefreshStatus = $"refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+            MenuError?.Invoke(this, $"Shell 文件视图刷新失败（0x{error.HResult:X8}）。请稍后重试。");
+        });
+    }
+
+    internal void SetQuickFilter(QuickFilterSettings settings)
+    {
+        var requestVersion = ++_quickFilterRequestVersion;
+        LastQuickFilterStatus = $"start pattern={settings.Pattern},exclude={settings.ExcludeMatches},folders={settings.FilterFolders}";
+        var pendingRestore = _pendingQuickFilterGroupRestore;
+        CancelPendingQuickFilterGroupRestore();
+        var searchActive = _location.IsSearchActive;
+        PropertyKeyState? group = pendingRestore?.Group;
+        var groupAscending = pendingRestore?.Ascending ?? false;
+        var hasGroup = !searchActive && (pendingRestore is not null ||
+            settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
+        var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
+        // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
+        // Keep the last confirmed user selection authoritative across that transition.
+        using var groupSelectionSuppression = hasGroup
+            ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
+            : null;
+        // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
+        var groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false);
+        LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={ReadCurrentGroupDiagnostic()}";
+        _quickFilterSettings = settings;
+        _quickFilter = null;
+        try { UpdateQuickFilterAttachment(searchActive); }
+        catch
+        {
+            if (groupCleared && group is not null) _ = TrySetGroup(group, groupAscending);
+            throw;
+        }
+        LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
+        QuickFilterChanged?.Invoke(_quickFilterSettings);
+        if (!searchActive)
+            Refresh(groupCleared && group is not null
+                ? () =>
+                {
+                    if (requestVersion == _quickFilterRequestVersion)
+                        QueueQuickFilterGroupRestore(group, groupAscending, initialItemCount, requestVersion);
+                }
+                : null);
+    }
+
+    internal void SetHiddenItemsPreference(HiddenItemsPreference preference)
+    {
+        var changed = _hiddenItemsPreference != preference;
+        if (!changed) return;
+        _hiddenItemsPreference = preference;
+        _quickFilter = null;
         if (_browser is null) return;
+        UpdateQuickFilterAttachment(_location.IsSearchActive);
+        if (!HiddenItemsPreferencePolicy.ShouldRefreshExistingView(changed, _viewWindow != IntPtr.Zero)) return;
+        Refresh();
+    }
+
+    internal void RefreshForWindowsHiddenItemsChange()
+    {
+        if (_viewWindow != IntPtr.Zero) Refresh();
+    }
+
+    private void QueueQuickFilterGroupRestore(PropertyKeyState group, bool ascending, int initialItemCount, long requestVersion)
+    {
+        CancelPendingQuickFilterGroupRestore();
+        var pending = new PendingQuickFilterGroupRestore(group, ascending, initialItemCount,
+            _quickFilter, _location.DirectoryPath, _viewReadiness.NavigationVersion, requestVersion, Stopwatch.GetTimestamp());
+        _pendingQuickFilterGroupRestore = pending;
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _quickFilterGroupRestoreTimer = timer;
+        timer.Tick += (_, _) => AdvanceQuickFilterGroupRestore(pending, timer);
+        timer.Start();
+        AdvanceQuickFilterGroupRestore(pending, timer);
+    }
+
+    private void AdvanceQuickFilterGroupRestore(PendingQuickFilterGroupRestore pending, DispatcherTimer timer)
+    {
+        if (!ReferenceEquals(_pendingQuickFilterGroupRestore, pending) ||
+            !ReferenceEquals(_quickFilterGroupRestoreTimer, timer)) return;
+        if (_quickFilterRequestVersion != pending.RequestVersion ||
+            _viewReadiness.NavigationVersion != pending.NavigationVersion ||
+            !string.Equals(CurrentPath, pending.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            CancelPendingQuickFilterGroupRestore();
+            LastQuickFilterStatus += "; stale group restore cancelled after navigation";
+            return;
+        }
+
+        var callbacks = pending.Filter is null ? -1 : pending.Filter.ShouldShowCalls;
+        var rows = ReadDirectoryMonitorItemCount() ?? 0;
+        var decision = QuickFilterEnumerationGate.Decide(pending.InitialItemCount, callbacks, rows,
+            Stopwatch.GetElapsedTime(pending.StartedAt), TimeSpan.FromMilliseconds(QuickFilterGroupRestoreTimeoutMilliseconds));
+        if (decision == QuickFilterEnumerationDecision.WaitForEnumeration) return;
+        timer.Stop();
+        _quickFilterGroupRestoreTimer = null;
+        _pendingQuickFilterGroupRestore = null;
+
+        if (decision == QuickFilterEnumerationDecision.RevertFilter && pending.Filter is not null)
+        {
+            LastQuickFilterStatus += "; Shell enumeration timed out; reverted filter to avoid an empty view";
+            _quickFilterSettings = QuickFilterSettings.Empty;
+            _quickFilter = null;
+            try { UpdateQuickFilterAttachment(searchActive: false); }
+            catch (Exception ex) { MenuError?.Invoke(this, $"超时后恢复文件视图失败：{ex.Message}"); }
+            QuickFilterChanged?.Invoke(_quickFilterSettings);
+            MenuError?.Invoke(this, "Shell 文件视图未完成筛选刷新，已清除筛选并恢复显示全部项目。");
+            try
+            {
+                Refresh(() =>
+                {
+                    if (pending.RequestVersion == _quickFilterRequestVersion)
+                        QueueQuickFilterGroupRestore(pending.Group, pending.Ascending, pending.InitialItemCount,
+                            pending.RequestVersion);
+                });
+            }
+            catch (Exception ex) { MenuError?.Invoke(this, $"筛选恢复刷新失败：0x{ex.HResult:X8}"); }
+            return;
+        }
+
+        var restored = TrySetGroup(pending.Group, pending.Ascending);
+        LastQuickFilterStatus += $"; restore-group={restored},rows={ReadDirectoryMonitorItemCount()},current-group={ReadCurrentGroupDiagnostic()}";
+    }
+
+    private void CancelPendingQuickFilterGroupRestore()
+    {
+        _quickFilterGroupRestoreTimer?.Stop();
+        _quickFilterGroupRestoreTimer = null;
+        _pendingQuickFilterGroupRestore = null;
+    }
+
+    private string ReadCurrentGroupDiagnostic() => TryReadGroup(out var key, out var ascending)
+        ? $"{key?.FormatId.ToString("B") ?? "none"}/{key?.PropertyId.ToString() ?? "-"},asc={ascending}"
+        : "unavailable";
+
+    private bool TryReadGroup(out PropertyKeyState? group, out bool ascending)
+    {
+        group = null;
+        ascending = false;
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return false;
+        try
+        {
+            if (GetMethod<GetGroupByDelegate>(view, 18)(view, out var key, out var direction) < 0) return false;
+            if (key.FormatId != Guid.Empty) group = new PropertyKeyState(key.FormatId, key.PropertyId);
+            ascending = direction != 0;
+            return true;
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private bool TrySetGroup(PropertyKeyState? group, bool ascending)
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return false;
+        try
+        {
+            var key = group is null ? default : new NativePropertyKey
+                { FormatId = group.FormatId, PropertyId = group.PropertyId };
+            var result = GetMethod<SetGroupByDelegate>(view, 17)(view, ref key, ascending ? 1 : 0);
+            if (result < 0) MenuError?.Invoke(this, $"调整筛选分组顺序失败：0x{result:X8}");
+            return result >= 0;
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private void UpdateQuickFilterAttachment(bool searchActive)
+    {
+        if (_browser is null) return;
+        var applyQuickFilter = ShellFolderFilter.ShouldApplyQuickFilter(searchActive, _quickFilterSettings.HasPattern);
+        var filter = ShellFolderFilter.ShouldAttachFilter(_quickFilterSettings.HasPattern, searchActive,
+            _hiddenItemsPreference)
+            ? _quickFilter ??= new ShellFolderFilter(
+                applyQuickFilter ? _quickFilterSettings : QuickFilterSettings.Empty, _hiddenItemsPreference)
+            : null;
+        _browserSite.QuickFilterActive = applyQuickFilter;
+        if (filter is null) _quickFilter = null;
+        var browserUnknown = Marshal.GetIUnknownForObject(_browser);
+        try
+        {
+            var iid = FolderFilterSiteId;
+            if (Marshal.QueryInterface(browserUnknown, in iid, out var site) < 0) return;
+            try
+            {
+                var filterUnknown = filter is null ? IntPtr.Zero : Marshal.GetIUnknownForObject(filter);
+                try
+                {
+                    if (filterUnknown != IntPtr.Zero)
+                    {
+                        var filterIid = new Guid("9CC22886-DC8E-11D2-B1D0-00C04F8EEB3E");
+                        Check(Marshal.QueryInterface(filterUnknown, in filterIid, out var filterInterface));
+                        Marshal.Release(filterInterface);
+                    }
+                    Check(GetMethod<SetFolderFilter>(site, 3)(site, filterUnknown));
+                }
+                finally { if (filterUnknown != IntPtr.Zero) Marshal.Release(filterUnknown); }
+            }
+            finally { Marshal.Release(site); }
+        }
+        finally { Marshal.Release(browserUnknown); }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetFolderFilter(nint self, nint filter);
+
+    private void Refresh(Action? afterRefresh)
+    {
+        if (_browser is null)
+        {
+            LastShellRefreshStatus = "browser-unavailable";
+            throw new InvalidOperationException("ExplorerBrowser is unavailable for refresh.");
+        }
         if (_retryPath is { } retryPath)
         {
+            LastShellRefreshStatus = $"retry-navigation:{retryPath}";
             Navigate(retryPath);
             return;
         }
+        var request = new ShellRefreshRequest(_browser, _viewReadiness.NavigationVersion, CurrentPath);
+        bool IsCurrentRefreshRequest() => request.IsCurrent(_browser, _viewReadiness.NavigationVersion, CurrentPath);
+        var browser = (IExplorerBrowser)request.Browser;
         var iid = ShellViewId;
-        if (_browser.GetCurrentView(ref iid, out var viewObject) >= 0)
+        object? viewObject = null;
+        var getViewStartedAt = _traceNativeUserMessages ? _directoryRefreshGetViewTiming.Start() : 0;
+        int currentViewResult;
+        try { currentViewResult = browser.GetCurrentView(ref iid, out viewObject); }
+        catch when (!IsCurrentRefreshRequest()) { return; }
+        finally { _directoryRefreshGetViewTiming.Stop(getViewStartedAt); }
+        if (!IsCurrentRefreshRequest())
         {
-            try { ((IShellView)viewObject).Refresh(); }
+            if (currentViewResult >= 0 && viewObject is not null) Marshal.ReleaseComObject(viewObject);
+            return;
+        }
+        if (currentViewResult < 0)
+        {
+            LastShellRefreshStatus = $"GetCurrentView=0x{currentViewResult:X8}";
+            throw ShellDirectoryRefreshRecovery.FailureForHResult(currentViewResult, "GetCurrentView")!;
+        }
+        try
+        {
+            var path = request.Path;
+            var navigationVersion = request.NavigationVersion;
+            var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+            ShellViewSelectionSnapshot? selection;
+            var hasCachedSelection = _lastNativeSelection is not null;
+            var cachedSelectionIsCurrent = ShellSelectionRestoreGate.ShouldUseRefreshSnapshot(
+                hasCachedSelection,
+                _lastNativeSelectionNavigationVersion == navigationVersion &&
+                    string.Equals(_lastNativeSelectionPath, path, StringComparison.OrdinalIgnoreCase),
+                _lastNativeSelectionInputVersion == inputVersion);
+            if (cachedSelectionIsCurrent)
+            {
+                // Preserve the confirmed user snapshot for later native selection-change recovery.
+                selection = _lastNativeSelection!.Clone();
+            }
+            else
+            {
+                var selectionCaptureStartedAt = _traceNativeUserMessages ? _directoryRefreshSelectionCaptureTiming.Start() : 0;
+                try
+                {
+                    var folderView = GetFolderView2Pointer();
+                    try { selection = folderView == IntPtr.Zero ? null : ShellViewSelectionSnapshot.Capture(folderView); }
+                    finally { if (folderView != IntPtr.Zero) Marshal.Release(folderView); }
+                }
+                finally { _directoryRefreshSelectionCaptureTiming.Stop(selectionCaptureStartedAt); }
+            }
+            if (!IsCurrentRefreshRequest())
+            {
+                selection?.Dispose();
+                return;
+            }
+            if (!cachedSelectionIsCurrent) ClearLastNativeSelection();
+            DirectoryChangeLastRefreshSelectedCount = selection?.SelectedCount ?? -1;
+            DirectoryChangeLastRefreshHadFocus = selection?.HasFocusedItem ?? false;
+
+            var shellView = (IShellView)viewObject;
+            if (!IsCurrentRefreshRequest())
+            {
+                selection?.Dispose();
+                return;
+            }
+            var selectionRecoverySuppression = _selectionRecoverySuppression.Acquire(navigationVersion);
+            int refreshResult;
+            var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
+            try { refreshResult = shellView.Refresh(); }
+            catch when (!IsCurrentRefreshRequest())
+            {
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                return;
+            }
+            catch
+            {
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                throw;
+            }
+            finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
+            if (!IsCurrentRefreshRequest())
+            {
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                return;
+            }
+            if (refreshResult < 0)
+            {
+                LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
+            }
+
+            // Shell rebuilds the item list asynchronously after Refresh. Run
+            // completion after the same dispatcher phase used for selection restore.
+            var selectionOwnershipTransferred = false;
+            var completionCleaned = 0;
+            void FinishRefreshCompletion()
+            {
+                if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
+                selectionRecoverySuppression.Dispose();
+                if (!selectionOwnershipTransferred) selection?.Dispose();
+            }
+            DispatcherOperation restore;
+            try
+            {
+                restore = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    try
+                    {
+                        ShellRefreshCompletion.Run(() =>
+                        {
+                            if (!IsCurrentRefreshRequest()) return;
+                            var rows = ReadDirectoryMonitorItemCount();
+                            if (!IsCurrentRefreshRequest()) return;
+                            LastShellRefreshStatus = $"refreshed; rows={rows}";
+                            if (selection is not null && inputVersion == Interlocked.Read(ref _nativeUserInputVersion))
+                            {
+                                DirectoryChangeLastRefreshViewCountAtRestore = ReadDirectoryMonitorItemCount() ?? -1;
+                                if (!IsCurrentRefreshRequest()) return;
+                                var restoreClock = Stopwatch.StartNew();
+                                var restored = RestoreSelectionAfterRefresh(selection, path, navigationVersion,
+                                    allowSelectedFocusFallback: false, source: "refresh");
+                                restoreClock.Stop();
+                                if (!IsCurrentRefreshRequest()) return;
+                                DirectoryChangeLastRefreshRestoreMilliseconds = restoreClock.ElapsedMilliseconds;
+                                DirectoryChangeLastRefreshSelectionRestored = restored.SelectionRestored;
+                                DirectoryChangeLastRefreshFocusRestored = restored.FocusRestored;
+                                if (!restored.SelectionRestored || !restored.FocusRestored)
+                                    selectionOwnershipTransferred = ScheduleDeferredRefreshSelectionRestore(
+                                        selection, path, navigationVersion, inputVersion, restored.SelectionRestored);
+                            }
+                            else if (selection is not null)
+                            {
+                                DirectoryChangeLastRefreshSelectionRestored = false;
+                                DirectoryChangeLastRefreshFocusRestored = false;
+                            }
+                        }, IsCurrentRefreshRequest, afterRefresh, error =>
+                        {
+                            LastShellRefreshStatus = $"refresh-completion-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+                            MenuError?.Invoke(this, $"Shell 文件视图刷新完成失败（0x{error.HResult:X8}）。");
+                        });
+                    }
+                    finally
+                    {
+                        FinishRefreshCompletion();
+                    }
+                }));
+            }
+            catch
+            {
+                FinishRefreshCompletion();
+                throw;
+            }
+            restore.Aborted += (_, _) => FinishRefreshCompletion();
+            if (restore.Status == DispatcherOperationStatus.Aborted)
+            {
+                FinishRefreshCompletion();
+                if (IsCurrentRefreshRequest())
+                {
+                    LastShellRefreshStatus = "dispatcher-completion-aborted";
+                    ShellRefreshCompletion.Run(static () => { }, IsCurrentRefreshRequest, afterRefresh, error =>
+                    {
+                        LastShellRefreshStatus = $"refresh-completion-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+                        MenuError?.Invoke(this, $"Shell 文件视图刷新完成失败（0x{error.HResult:X8}）。");
+                    });
+                }
+            }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private (bool SelectionRestored, bool FocusRestored) RestoreSelectionAfterRefresh(
+        ShellViewSelectionSnapshot selection, string path, long navigationVersion,
+        bool allowSelectedFocusFallback, string source, bool restoreSelection = true, bool restoreFocus = true,
+        bool allowEmptyViewSelectionRestore = false)
+    {
+        try
+        {
+            if (_browser is null || _viewReadiness.Pending ||
+                navigationVersion != _viewReadiness.NavigationVersion ||
+                !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase))
+                return (false, false);
+
+            var iid = ShellViewId;
+            if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return (false, false);
+            try
+            {
+                if (!allowEmptyViewSelectionRestore && selection.SelectedCount > 0 &&
+                    viewObject is IFolderView folderView)
+                {
+                    var itemCountResult = folderView.ItemCount(2, out var visibleItemCount);
+                    var sameViewAfterCount = _browser is not null && !_viewReadiness.Pending &&
+                        navigationVersion == _viewReadiness.NavigationVersion &&
+                        string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase);
+                    if (!sameViewAfterCount) return (false, false);
+                    if (itemCountResult == 0 &&
+                        ShellSelectionRestoreGate.ShouldDeferSelectionRestore(true, visibleItemCount))
+                    {
+                        if (_traceNativeUserMessages)
+                            TraceShellSelectionRestore(source, "selection-restore-deferred-empty-view count=0");
+                        return (false, false);
+                    }
+                }
+
+                var unknown = Marshal.GetIUnknownForObject(viewObject);
+                try
+                {
+                    var result = Marshal.QueryInterface(unknown, in ShellViewId, out var viewPointer);
+                    if (result < 0 || viewPointer == IntPtr.Zero) return (false, false);
+                    try
+                    {
+                        return selection.Restore(viewPointer,
+                            _traceNativeUserMessages ? step => TraceShellSelectionRestore(source, step) : null,
+                            allowSelectedFocusFallback, restoreSelection, restoreFocus);
+                    }
+                    finally { Marshal.Release(viewPointer); }
+                }
+                finally { Marshal.Release(unknown); }
+            }
             finally { Marshal.ReleaseComObject(viewObject); }
         }
+        catch (COMException) { return (false, false); }
     }
+
+    private string? ReadSelectionTargetReadiness(ShellViewSelectionSnapshot selection, string path,
+        long navigationVersion, string? knownReady, out int queryCount)
+    {
+        queryCount = 0;
+        try
+        {
+            if (_browser is null || _viewReadiness.Pending ||
+                navigationVersion != _viewReadiness.NavigationVersion ||
+                !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase))
+                return null;
+            var iid = ShellViewId;
+            if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return null;
+            try
+            {
+                var unknown = Marshal.GetIUnknownForObject(viewObject);
+                try
+                {
+                    if (Marshal.QueryInterface(unknown, in ShellViewId, out var viewPointer) < 0 || viewPointer == IntPtr.Zero)
+                        return null;
+                    try
+                    {
+                        var readiness = selection.ReadTargetReadiness(viewPointer, knownReady, out queryCount);
+                        return navigationVersion == _viewReadiness.NavigationVersion && !_viewReadiness.Pending &&
+                               string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase)
+                            ? readiness
+                            : null;
+                    }
+                    finally { Marshal.Release(viewPointer); }
+                }
+                finally { Marshal.Release(unknown); }
+            }
+            finally { Marshal.ReleaseComObject(viewObject); }
+        }
+        catch (COMException) { return null; }
+    }
+
+    private bool ScheduleDeferredRefreshSelectionRestore(
+        ShellViewSelectionSnapshot selection, string path, long navigationVersion, long inputVersion,
+        bool selectionAlreadyRestored)
+    {
+        if (_deferredRefreshSelectionSnapshot is not null) return false;
+
+        // ItemCount can reach its target before the refreshed Shell view can enumerate the saved focus PIDL.
+        const int retryWindowMilliseconds = 1500;
+        var startedAt = Stopwatch.GetTimestamp();
+        var lastSelectionVersion = _browserSite.SelectionVersion;
+        string? lastSelectionReadiness = null;
+        var retrySelectionForShellChange = false;
+        long lastSelectionRestoreAttemptAt = 0;
+        var selectionRestored = selectionAlreadyRestored || selection.SelectedCount == 0;
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _deferredRefreshSelectionSnapshot = selection;
+        _deferredRefreshSelectionRestoreTimer = timer;
+        _directorySelectionRestorePending = true;
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (!ReferenceEquals(timer, _deferredRefreshSelectionRestoreTimer)) return;
+
+            var sameView = _browser is not null && !_viewReadiness.Pending &&
+                navigationVersion == _viewReadiness.NavigationVersion &&
+                string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase);
+            var userInputUnchanged = inputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+            var elapsed = Stopwatch.GetElapsedTime(startedAt);
+            var withinRetryWindow = elapsed < TimeSpan.FromMilliseconds(retryWindowMilliseconds);
+            if (!ShellSelectionRestoreGate.CanRetryDeferredRestore(sameView, userInputUnchanged, withinRetryWindow))
+            {
+                if (sameView && userInputUnchanged)
+                {
+                    var finalSelectionRestore = ShellSelectionRestoreGate.ShouldAttemptSelectionRestore(
+                        selectionRestored, readinessChanged: false, selectionVersionChanged: false, finalAttempt: true);
+                    var fallback = RestoreSelectionAfterRefresh(selection, path, navigationVersion,
+                        allowSelectedFocusFallback: true, source: "deferred-fallback",
+                        restoreSelection: finalSelectionRestore,
+                        allowEmptyViewSelectionRestore: true);
+                    DirectoryChangeLastRefreshSelectionRestored = fallback.SelectionRestored;
+                    DirectoryChangeLastRefreshFocusRestored = fallback.FocusRestored;
+                }
+                CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: true);
+                return;
+            }
+
+            var currentSelectionVersion = _browserSite.SelectionVersion;
+            var selectionVersionChanged = currentSelectionVersion != lastSelectionVersion;
+            lastSelectionReadiness = ShellSelectionRestoreGate.ReadinessForSelectionVersion(
+                lastSelectionReadiness, selectionVersionChanged);
+            if (selectionVersionChanged)
+            {
+                lastSelectionVersion = currentSelectionVersion;
+                selectionRestored = false;
+                retrySelectionForShellChange = true;
+                timer.Start();
+                return;
+            }
+
+            var readinessQueryCount = 0;
+            string? readiness;
+            if (selection.SelectedCount == 0) readiness = string.Empty;
+            else if (ShellSelectionRestoreGate.ShouldQuerySelectionReadiness(selectionRestored, selection.SelectedCount))
+                readiness = ReadSelectionTargetReadiness(selection, path, navigationVersion, lastSelectionReadiness,
+                    out readinessQueryCount);
+            else readiness = lastSelectionReadiness;
+            var selectionVersionAfterReadiness = _browserSite.SelectionVersion;
+            if (ShellSelectionRestoreGate.ShouldDiscardReadinessObservation(
+                    currentSelectionVersion, selectionVersionAfterReadiness))
+            {
+                // A Shell callback can reenter while querying COM. Do not apply or cache
+                // PIDL readiness observed across two different selection generations.
+                lastSelectionReadiness = null;
+                lastSelectionVersion = selectionVersionAfterReadiness;
+                selectionRestored = false;
+                retrySelectionForShellChange = true;
+                timer.Start();
+                return;
+            }
+            var readinessChanged = readiness is null || lastSelectionReadiness is null ||
+                !string.Equals(readiness, lastSelectionReadiness, StringComparison.Ordinal);
+            lastSelectionReadiness = readiness;
+
+            var restoreClock = Stopwatch.StartNew();
+            var retryIntervalElapsed = ShellSelectionRestoreGate.ShouldRetryStableReadiness(
+                selectionRestored, readiness,
+                lastSelectionRestoreAttemptAt != 0 &&
+                    Stopwatch.GetElapsedTime(lastSelectionRestoreAttemptAt) >= TimeSpan.FromMilliseconds(100));
+            var restoreSelection = ShellSelectionRestoreGate.ShouldAttemptSelectionRestore(
+                selectionRestored, readinessChanged, retrySelectionForShellChange,
+                finalAttempt: false, retryIntervalElapsed: retryIntervalElapsed);
+            retrySelectionForShellChange = false;
+            if (_traceNativeUserMessages)
+                TraceShellSelectionRestore("deferred-refresh",
+                    $"selection-target-readiness state={readiness ?? "unavailable"},queries={readinessQueryCount},changed={readinessChanged},restore={restoreSelection}");
+            var restoreFocus = ShellSelectionRestoreGate.ShouldRestoreFocus(
+                selectionRestored, selection.SelectedCount == 0, selection.HasFocusedItem);
+            if (!restoreSelection && !restoreFocus)
+            {
+                timer.Start();
+                return;
+            }
+            var restored = RestoreSelectionAfterRefresh(selection, path, navigationVersion,
+                allowSelectedFocusFallback: false, source: "deferred-refresh",
+                restoreSelection: restoreSelection, restoreFocus: restoreFocus);
+            if (restoreSelection) lastSelectionRestoreAttemptAt = Stopwatch.GetTimestamp();
+            restoreClock.Stop();
+            DirectoryChangeLastRefreshRestoreMilliseconds = restoreClock.ElapsedMilliseconds;
+            DirectoryChangeLastRefreshSelectionRestored = restored.SelectionRestored;
+            DirectoryChangeLastRefreshFocusRestored = restored.FocusRestored;
+            if (restored.SelectionRestored || selection.SelectedCount == 0)
+            {
+                // A stable selection generation makes another native batch restore redundant during focus-only retries.
+                selectionRestored = true;
+                lastSelectionVersion = _browserSite.SelectionVersion;
+            }
+            if (selectionRestored && restored.FocusRestored)
+            {
+                CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: true);
+                return;
+            }
+
+            timer.Start();
+        };
+        timer.Start();
+        return true;
+    }
+
+    private void CancelDeferredRefreshSelectionRestore(bool restartDirectoryMonitor)
+    {
+        var hadPendingRestore = _directorySelectionRestorePending ||
+            _deferredRefreshSelectionRestoreTimer is not null || _deferredRefreshSelectionSnapshot is not null;
+        if (!hadPendingRestore) return;
+        var timer = _deferredRefreshSelectionRestoreTimer;
+        _deferredRefreshSelectionRestoreTimer = null;
+        timer?.Stop();
+        var selection = _deferredRefreshSelectionSnapshot;
+        _deferredRefreshSelectionSnapshot = null;
+        selection?.Dispose();
+        _directorySelectionRestorePending = false;
+        if (restartDirectoryMonitor && _directoryChangeTimer is { } directoryTimer)
+        {
+            directoryTimer.Interval = TimeSpan.FromMilliseconds(250);
+            directoryTimer.Stop();
+            directoryTimer.Start();
+        }
+    }
+
+    private void OnShellSelectionChanged(IntPtr shellView)
+    {
+        TraceShellSelectionCallback(shellView);
+        if (_browser is null || _selectionRecoverySuppression.IsSuppressed(_viewReadiness.NavigationVersion) || _viewReadiness.Pending ||
+            !ShellSelectionRestoreGate.ShouldObserveSelectionCallback(_directorySelectionRestorePending) ||
+            Interlocked.Read(ref _nativeUserInputVersion) != Interlocked.Read(ref _settledNativeUserInputVersion)) return;
+        if (Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView) < 0 || folderView == IntPtr.Zero)
+            return;
+
+        ShellViewSelectionSnapshot? snapshot;
+        try { snapshot = ShellViewSelectionSnapshot.Capture(folderView); }
+        finally { Marshal.Release(folderView); }
+        if (snapshot is null) return;
+        SelectionContextChanged?.Invoke(this, EventArgs.Empty);
+
+        if (snapshot.SelectedCount > 0)
+        {
+            var currentInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+            var sameView = _lastNativeSelectionNavigationVersion == _viewReadiness.NavigationVersion &&
+                string.Equals(_lastNativeSelectionPath, CurrentPath, StringComparison.OrdinalIgnoreCase);
+            var inputUnchanged = _lastNativeSelectionInputVersion == currentInputVersion;
+            var previousSelectedCount = _lastNativeSelection?.SelectedCount ?? 0;
+            var keepExistingSnapshot = ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(sameView,
+                inputUnchanged, previousSelectedCount, snapshot.SelectedCount);
+            TraceShellSelectionRestore("snapshot", $"decision={(keepExistingSnapshot ? "keep" : "replace")},previous={previousSelectedCount},current={snapshot.SelectedCount},same-view={sameView},input-unchanged={inputUnchanged}");
+            if (keepExistingSnapshot)
+            {
+                // Shell can publish an intermediate subset while rebuilding a large view; keep the full
+                // selection until user input, navigation, or a complete replacement snapshot is observed.
+                snapshot.Dispose();
+                return;
+            }
+
+            ClearLastNativeSelection();
+            _lastNativeSelection = snapshot;
+            _lastNativeSelectionInputVersion = currentInputVersion;
+            _lastNativeSelectionNavigationVersion = _viewReadiness.NavigationVersion;
+            _lastNativeSelectionPath = CurrentPath;
+            return;
+        }
+
+        snapshot.Dispose();
+        var previous = _lastNativeSelection;
+        var inputVersion = _lastNativeSelectionInputVersion;
+        var navigationVersion = _lastNativeSelectionNavigationVersion;
+        var path = _lastNativeSelectionPath;
+        if (!ShellSelectionRestoreGate.ShouldRetainSnapshotAfterEmptyCallback(previous is not null,
+                previous?.SelectedCount ?? 0, inputVersion, Interlocked.Read(ref _nativeUserInputVersion)))
+        {
+            ClearLastNativeSelection();
+            return;
+        }
+        var confirmedSelection = previous!;
+        TraceShellSelectionRestore("snapshot", $"decision=empty-restore,previous={confirmedSelection.SelectedCount}");
+
+        // Keep the confirmed snapshot cached while Shell emits transient empty or partial selection callbacks
+        // during refresh. The async attempt owns a clone so later input or replacement can safely dispose it.
+        var restoreSnapshot = confirmedSelection.Clone();
+        var restore = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            try
+            {
+                if (_browser is null || _viewReadiness.Pending ||
+                    navigationVersion != _viewReadiness.NavigationVersion ||
+                    Interlocked.Read(ref _nativeUserInputVersion) != inputVersion ||
+                    !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var currentFolderView = GetFolderView2Pointer();
+                if (currentFolderView == IntPtr.Zero) return;
+                try
+                {
+                    using var currentSelection = ShellViewSelectionSnapshot.Capture(currentFolderView);
+                    if (currentSelection is null || currentSelection.SelectedCount != 0) return;
+                }
+                finally { Marshal.Release(currentFolderView); }
+
+                var iid = ShellViewId;
+                if (_browser.GetCurrentView(ref iid, out var viewObject) < 0) return;
+                try
+                {
+                    var unknown = Marshal.GetIUnknownForObject(viewObject);
+                    try
+                    {
+                        if (Marshal.QueryInterface(unknown, in ShellViewId, out var currentView) < 0 || currentView == IntPtr.Zero)
+                            return;
+                        try
+                        {
+                            var currentNavigationVersion = _viewReadiness.NavigationVersion;
+                            var wasSuppressed = _selectionRecoverySuppression.IsSuppressed(currentNavigationVersion);
+                            using (_selectionRecoverySuppression.Acquire(currentNavigationVersion))
+                            {
+                                TraceShellSelectionRestore("native", $"restore-snapshot selected={restoreSnapshot.SelectedCount}");
+                                var restoreClock = Stopwatch.StartNew();
+                                restoreSnapshot.Restore(currentView, _traceNativeUserMessages ? step => TraceShellSelectionRestore("native", step) : null);
+                                restoreClock.Stop();
+                                NativeSelectionRestoreMilliseconds = restoreClock.ElapsedMilliseconds;
+                            }
+                            if (!wasSuppressed) OnShellSelectionChanged(currentView);
+                        }
+                        finally { Marshal.Release(currentView); }
+                    }
+                    finally { Marshal.Release(unknown); }
+                }
+                finally { Marshal.ReleaseComObject(viewObject); }
+            }
+            catch (COMException) { }
+            finally { restoreSnapshot.Dispose(); }
+        }));
+        if (restore.Status == DispatcherOperationStatus.Aborted) restoreSnapshot.Dispose();
+    }
+
+    private void TraceShellSelectionCallback(IntPtr shellView)
+    {
+        if (!_traceNativeUserMessages) return;
+        var selectedCount = -1;
+        var focused = false;
+        try
+        {
+            if (Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView) >= 0 && folderView != IntPtr.Zero)
+            {
+                try
+                {
+                    using var snapshot = ShellViewSelectionSnapshot.Capture(folderView);
+                    if (snapshot is not null)
+                    {
+                        selectedCount = snapshot.SelectedCount;
+                        focused = snapshot.HasFocusedItem;
+                    }
+                }
+                finally { Marshal.Release(folderView); }
+            }
+        }
+        catch (COMException) { }
+
+        if (_shellSelectionCallbackSamples.Count == 64) _shellSelectionCallbackSamples.RemoveAt(0);
+        _shellSelectionCallbackSamples.Add($"t={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms,ticks={Stopwatch.GetTimestamp()},selected={selectedCount},focused={focused},saved={_lastNativeSelection?.SelectedCount ?? 0},suppressed={_selectionRecoverySuppression.IsSuppressed(_viewReadiness.NavigationVersion)},pending={_viewReadiness.Pending},input={Interlocked.Read(ref _nativeUserInputVersion)}/{Interlocked.Read(ref _settledNativeUserInputVersion)}");
+    }
+
+    private void TraceShellSelectionRestore(string source, string step)
+    {
+        if (_shellSelectionRestoreSamples.Count == 128) _shellSelectionRestoreSamples.RemoveAt(0);
+        _shellSelectionRestoreSamples.Add($"t={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms,ticks={Stopwatch.GetTimestamp()},source={source},{step}");
+    }
+
+    private void TraceDirectoryRefreshCall(long startedAt)
+    {
+        if (!_traceNativeUserMessages || startedAt == 0) return;
+        var endedAt = Stopwatch.GetTimestamp();
+        if (_directoryRefreshCallTimeline.Count == 64) _directoryRefreshCallTimeline.RemoveAt(0);
+        _directoryRefreshCallTimeline.Add($"start={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, startedAt).TotalMilliseconds:F1}ms,start-ticks={startedAt}," +
+            $"end={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, endedAt).TotalMilliseconds:F1}ms,end-ticks={endedAt}," +
+            $"duration={Stopwatch.GetElapsedTime(startedAt, endedAt).TotalMilliseconds:F1}ms");
+    }
+
+    private void ClearLastNativeSelection()
+    {
+        _lastNativeSelection?.Dispose();
+        _lastNativeSelection = null;
+        _lastNativeSelectionPath = null;
+    }
+
+    private void NoteNativeUserInput(IntPtr inputHwnd = default)
+    {
+        CancelNaturalUpdateSelectionVerification();
+        CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: true);
+        var inputVersion = Interlocked.Increment(ref _nativeUserInputVersion);
+        if (_pendingFileOperationFocusRestore is { } pendingRestore)
+        {
+            var sameView = ReferenceEquals(pendingRestore.Browser, _browser) &&
+                pendingRestore.NavigationVersion == _viewReadiness.NavigationVersion &&
+                string.Equals(pendingRestore.Path, CurrentPath, StringComparison.OrdinalIgnoreCase);
+            var focusStillDesired = MayRestoreFocus?.Invoke() == true && IsVisible &&
+                Window.GetWindow(this)?.IsActive == true;
+            // A file-content key can arrive while the Shell still has a sibling or stale focus HWND.
+            // Do not let that first attempted navigation key invalidate the recovery that should make it work.
+            if (ShellFocusRestoreGate.ShouldKeepPendingRestoreAfterNativeInput(
+                    IsFileContentInputWindow(inputHwnd), IsColumnHeaderInputWindow(inputHwnd), sameView,
+                    focusStillDesired))
+                _pendingFileOperationFocusRestore = pendingRestore with { InputVersion = inputVersion };
+        }
+        ClearLastNativeSelection();
+        _nativeInputSelectionCapture?.Abort();
+        var path = CurrentPath;
+        var navigationVersion = _viewReadiness.NavigationVersion;
+        _nativeInputSelectionCapture = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _nativeInputSelectionCapture = null;
+            if (_browser is null || _selectionRecoverySuppression.IsSuppressed(_viewReadiness.NavigationVersion) || _viewReadiness.Pending ||
+                inputVersion != Interlocked.Read(ref _nativeUserInputVersion) ||
+                navigationVersion != _viewReadiness.NavigationVersion ||
+                !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
+
+            var folderView = GetFolderView2Pointer();
+            if (folderView == IntPtr.Zero) return;
+            ShellViewSelectionSnapshot? snapshot;
+            try { snapshot = ShellViewSelectionSnapshot.Capture(folderView); }
+            finally { Marshal.Release(folderView); }
+            if (inputVersion != Interlocked.Read(ref _nativeUserInputVersion))
+            {
+                snapshot?.Dispose();
+                return;
+            }
+
+            Interlocked.Exchange(ref _settledNativeUserInputVersion, inputVersion);
+            if (snapshot is null) return;
+            if (snapshot.SelectedCount == 0)
+            {
+                snapshot.Dispose();
+                return;
+            }
+            ClearLastNativeSelection();
+            _lastNativeSelection = snapshot;
+            _lastNativeSelectionInputVersion = inputVersion;
+            _lastNativeSelectionNavigationVersion = navigationVersion;
+            _lastNativeSelectionPath = path;
+        }));
+    }
+
+    private bool IsFileContentInputWindow(IntPtr hwnd)
+    {
+        var content = FindContentFocusWindow();
+        return hwnd != IntPtr.Zero && content != IntPtr.Zero &&
+            (hwnd == content || IsChild(content, hwnd));
+    }
+
+    private static bool IsColumnHeaderInputWindow(IntPtr hwnd) =>
+        hwnd != IntPtr.Zero && WindowClass(hwnd).Equals("SysHeader32", StringComparison.OrdinalIgnoreCase);
+
+    private void BeginMiddleClickFolderProbe()
+    {
+        _middleClickFolderProbe = null;
+        if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive ||
+            _viewWindow == IntPtr.Zero || !Path.IsPathFullyQualified(CurrentPath)) return;
+        _middleClickParentPath = CurrentPath;
+        _middleClickNavigationVersion = _viewReadiness.NavigationVersion;
+        _middleClickInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        _middleClickFolderProbe = GetCursorPos(out var point)
+            ? ProbeFileSystemFolderAtPoint(new ShellMenuPoint(point.X, point.Y), _middleClickParentPath, _viewWindow)
+            : Task.FromResult<string?>(null);
+    }
+
+    private void CompleteMiddleClickFolderProbe()
+    {
+        var probe = _middleClickFolderProbe;
+        var parentPath = _middleClickParentPath;
+        var navigationVersion = _middleClickNavigationVersion;
+        var inputVersion = _middleClickInputVersion;
+        var viewWindow = _viewWindow;
+        _middleClickFolderProbe = null;
+        _middleClickParentPath = null;
+        if (probe is null || parentPath is null) return;
+        _ = probe.ContinueWith(completed =>
+        {
+            var folderPath = completed.Status == TaskStatus.RanToCompletion ? completed.Result : null;
+            if (folderPath is null) return;
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (!ShellMiddleClickTarget.IsCurrentRequest(parentPath, navigationVersion, inputVersion,
+                        viewWindow, CurrentPath, _viewReadiness.NavigationVersion,
+                        Interlocked.Read(ref _nativeUserInputVersion), _viewWindow,
+                        browserAvailable: _browser is not null, searchActive: _location.IsSearchActive)) return;
+                FolderMiddleClicked?.Invoke(this, folderPath);
+            }));
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private void StartDirectoryChangeMonitor(string path, long navigationVersion)
+    {
+        StopDirectoryChangeMonitor();
+        DirectoryChangeInitialCount = null;
+        DirectoryChangeStartSampleCount = 0;
+        if (_location.IsSearchActive || !IsSupportedDirectoryChangePath(path)) return;
+        var version = _directoryChangeVersion;
+        var queue = new ShellDirectoryChangeQueue();
+        var request = new ShellDirectoryMonitorRequest(version, navigationVersion, path, queue);
+        var createNotificationBatch = new ShellCreateNotificationBatch();
+        var deleteNotificationBatch = new ShellDeleteNotificationBatch();
+        var changedItemNotificationBatch = new ShellChangedItemNotificationBatch();
+        var watcherRecovery = new ShellDirectoryWatcherRecovery();
+        _directoryChangeQueue = queue;
+        _directoryChangeCreateNotificationBatch = createNotificationBatch;
+        _directoryChangeDeleteNotificationBatch = deleteNotificationBatch;
+        _directoryChangeChangedItemNotificationBatch = changedItemNotificationBatch;
+        _directoryChangeWatcherRecovery = watcherRecovery;
+        Interlocked.Exchange(ref _directoryChangeCreatedEvents, 0);
+        Interlocked.Exchange(ref _directoryChangeDeletedEvents, 0);
+        Interlocked.Exchange(ref _directoryChangeLastEventAt, 0);
+        Interlocked.Exchange(ref _directoryChangeNativeCreateNotifications, 0);
+        _directoryChangeNativeCreateNotificationStartedAt = 0;
+        _directoryChangeNativeCreateNotificationCompletedAt = 0;
+        _directoryChangeLastCreateNotificationResult = "not-attempted";
+        Interlocked.Exchange(ref _directoryChangeNativeFolderDeleteNotifications, 0);
+        Interlocked.Exchange(ref _directoryChangeFolderDeleteLookupCount, 0);
+        _directoryChangeLastFolderDeleteNotificationResult = "not-attempted";
+        Interlocked.Exchange(ref _directoryChangeStarting, 1);
+        StartDirectoryChangeWatcher(path, version, navigationVersion, queue, createNotificationBatch,
+            deleteNotificationBatch, changedItemNotificationBatch, watcherRecovery, started =>
+            {
+                if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue,
+                        watcherRecovery)) return;
+                if (!started)
+                {
+                    ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                        createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch,
+                        watcherRecovery, expectedWatcher: null);
+                    return;
+                }
+
+                StartDirectoryChangeMonitorSampling(path, navigationVersion, request, queue);
+            });
+    }
+
+    private void StartDirectoryChangeMonitorSampling(string path, long navigationVersion,
+        ShellDirectoryMonitorRequest request, ShellDirectoryChangeQueue queue)
+    {
+        var startup = new ShellDirectoryMonitorStartup();
+        var retries = 0;
+        var startTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(250)
+        };
+        _directoryChangeStartTimer = startTimer;
+        void StopIfCurrentStartTimer()
+        {
+            startTimer.Stop();
+            if (!ReferenceEquals(startTimer, _directoryChangeStartTimer)) return;
+            _directoryChangeStartTimer = null;
+            if (ReferenceEquals(queue, _directoryChangeQueue)) StopDirectoryChangeMonitor();
+        }
+        startTimer.Tick += (_, _) =>
+        {
+            if (!request.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+                    _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory, _directoryChangeQueue))
+            {
+                StopIfCurrentStartTimer();
+                return;
+            }
+            retries++;
+            DirectoryChangeStartSampleCount = retries;
+            if (!ShellDirectoryMonitorStartup.TryReadCount(ReadDirectoryMonitorItemCount, out var sampledCount, error =>
+                {
+                    if (request.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+                            _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory, _directoryChangeQueue))
+                        LastShellRefreshStatus = $"directory-start-sample-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+                }))
+            {
+                if (!request.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+                        _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory, _directoryChangeQueue))
+                {
+                    StopIfCurrentStartTimer();
+                    return;
+                }
+                startup.Observe(null);
+                startTimer.Interval = TimeSpan.FromMilliseconds(startup.NextIntervalMilliseconds);
+                return;
+            }
+            // Reading IFolderView can reenter navigation; reject a stale sample before
+            // it can install a batch/timer over the new directory's monitor.
+            if (!request.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+                    _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory, _directoryChangeQueue))
+            {
+                StopIfCurrentStartTimer();
+                return;
+            }
+            if (startup.Observe(sampledCount) is { } initialCount)
+            {
+                startTimer.Stop();
+                _directoryChangeStartTimer = null;
+                DirectoryChangeInitialCount = initialCount;
+                StartDirectoryChangeMonitorCore(path, navigationVersion, initialCount, queue);
+            }
+            else startTimer.Interval = TimeSpan.FromMilliseconds(startup.NextIntervalMilliseconds);
+        };
+        startTimer.Start();
+    }
+
+    private async void StartDirectoryChangeWatcher(string path, long version, long navigationVersion,
+        ShellDirectoryChangeQueue queue, ShellCreateNotificationBatch createNotificationBatch,
+        ShellDeleteNotificationBatch deleteNotificationBatch,
+        ShellChangedItemNotificationBatch changedItemNotificationBatch,
+        ShellDirectoryWatcherRecovery recovery, Action<bool> completed)
+    {
+        var started = await ShellDirectoryWatcherStartup.StartAsync(
+            () => CreateDirectoryChangeWatcher(path, version, navigationVersion, queue,
+                createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch, recovery),
+            watcher => watcher.EnableRaisingEvents = true,
+            () => IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery),
+            watcher =>
+            {
+                _directoryChangeWatcherEventGate.SetCurrent(watcher);
+                _directoryChangeWatcher = watcher;
+            },
+            watcher =>
+            {
+                if (!ReferenceEquals(_directoryChangeWatcher, watcher)) return;
+                _directoryChangeWatcherEventGate.SetCurrent(null);
+                _directoryChangeWatcher = null;
+            },
+            DisposeDirectoryChangeWatcher);
+        if (IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery))
+            ShellDirectoryWatcherStartup.TryNotifyCompleted(completed, started, error =>
+            {
+                if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery))
+                    return;
+                LastShellRefreshStatus = $"directory-watcher-completion-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+                recovery.Complete(recovered: false);
+                ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                    createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch,
+                    recovery, expectedWatcher: _directoryChangeWatcher);
+            });
+    }
+
+    private FileSystemWatcher CreateDirectoryChangeWatcher(string path, long version, long navigationVersion,
+        ShellDirectoryChangeQueue queue, ShellCreateNotificationBatch createNotificationBatch,
+        ShellDeleteNotificationBatch deleteNotificationBatch,
+        ShellChangedItemNotificationBatch changedItemNotificationBatch,
+        ShellDirectoryWatcherRecovery recovery)
+    {
+        var watcher = new FileSystemWatcher(path)
+        {
+            IncludeSubdirectories = false,
+            NotifyFilter = ShellDirectoryChangeMonitorOptions.NotifyFilter,
+            InternalBufferSize = 16 * 1024
+        };
+        Action<Exception> onEventFailure = error =>
+        {
+            System.Diagnostics.Trace.TraceError(
+                $"Explorer Dirs: directory watcher callback failed; hr=0x{error.HResult:X8}");
+            ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch, recovery, watcher);
+        };
+        watcher.Created += (_, eventArgs) =>
+        {
+            _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
+            {
+                Interlocked.Increment(ref _directoryChangeCreatedEvents);
+                var change = ShellDirectoryChangeMonitorOptions.ForCreated();
+                QueueDirectoryChange(version, queue, change.Delta,
+                    change.ForceRefresh || Volatile.Read(ref _directoryChangeStarting) != 0);
+                QueueCreatedItemNotification(version, queue, eventArgs.FullPath, createNotificationBatch);
+            }, onEventFailure);
+        };
+        watcher.Deleted += (_, eventArgs) =>
+        {
+            _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
+            {
+                Interlocked.Increment(ref _directoryChangeDeletedEvents);
+                var change = ShellDirectoryChangeMonitorOptions.ForDeleted();
+                QueueDirectoryChange(version, queue, change.Delta,
+                    change.ForceRefresh || Volatile.Read(ref _directoryChangeStarting) != 0);
+                QueueDeletedItemNotification(version, queue, deleteNotificationBatch, eventArgs.FullPath);
+            }, onEventFailure);
+        };
+        watcher.Changed += (_, eventArgs) =>
+        {
+            _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
+            {
+                var change = ShellDirectoryChangeMonitorOptions.ForChanged();
+                QueueChangedItemNotification(version, queue, changedItemNotificationBatch, eventArgs.FullPath,
+                    change.Delta);
+            }, onEventFailure);
+        };
+        watcher.Renamed += (_, _) =>
+        {
+            _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
+            {
+                var change = ShellDirectoryChangeMonitorOptions.ForRenamed();
+                QueueDirectoryChange(version, queue, change.Delta, change.ForceRefresh);
+            }, onEventFailure);
+        };
+        watcher.Error += (_, _) =>
+        {
+            _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
+            {
+                var change = ShellDirectoryChangeMonitorOptions.ForError();
+                QueueDirectoryChange(version, queue, change.Delta, change.ForceRefresh);
+                ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                    createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch, recovery, watcher);
+            }, onEventFailure);
+        };
+        return watcher;
+    }
+
+    private static void DisposeDirectoryChangeWatcher(FileSystemWatcher watcher)
+    {
+        try { watcher.EnableRaisingEvents = false; }
+        catch (ObjectDisposedException) { }
+        finally { watcher.Dispose(); }
+    }
+
+    private void ScheduleDirectoryChangeWatcherRecovery(string path, long version, long navigationVersion,
+        ShellDirectoryChangeQueue queue, ShellCreateNotificationBatch createNotificationBatch,
+        ShellDeleteNotificationBatch deleteNotificationBatch,
+        ShellChangedItemNotificationBatch changedItemNotificationBatch,
+        ShellDirectoryWatcherRecovery recovery,
+        FileSystemWatcher? expectedWatcher)
+    {
+        if (!recovery.TryBegin(out var retryDelay)) return;
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                DispatcherTimer? timer = null;
+                ShellDirectoryWatcherRecovery.TryRunCallback(() =>
+                {
+                    if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery) ||
+                        !ReferenceEquals(_directoryChangeWatcher, expectedWatcher))
+                    {
+                        recovery.Complete(recovered: false);
+                        return;
+                    }
+
+                    timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = retryDelay };
+                    _directoryChangeWatcherRecoveryTimer = timer;
+                    timer.Tick += (_, _) => ShellDirectoryWatcherRecovery.TryRunCallback(() =>
+                    {
+                        timer.Stop();
+                        if (!ReferenceEquals(timer, _directoryChangeWatcherRecoveryTimer)) return;
+                        _directoryChangeWatcherRecoveryTimer = null;
+                        if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery) ||
+                            !ReferenceEquals(_directoryChangeWatcher, expectedWatcher))
+                        {
+                            recovery.Complete(recovered: _directoryChangeWatcher is not null);
+                            return;
+                        }
+
+                        if (_directoryChangeWatcher is { } failedWatcher)
+                        {
+                            _directoryChangeWatcherEventGate.SetCurrent(null);
+                            _directoryChangeWatcher = null;
+                            _ = ShellDirectoryWatcherStartup.DisposeSafelyAsync(
+                                () => DisposeDirectoryChangeWatcher(failedWatcher));
+                        }
+
+                        StartDirectoryChangeWatcher(path, version, navigationVersion, queue,
+                            createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch, recovery,
+                            recovered =>
+                            {
+                                if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue,
+                                        recovery)) return;
+                                recovery.Complete(recovered);
+                                if (recovered)
+                                {
+                                    // Reconcile changes that may have occurred while this watcher was detached.
+                                    QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
+                                }
+                                else
+                                {
+                                    ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                                        createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch,
+                                        recovery, expectedWatcher: null);
+                                }
+                            });
+                    }, error => RecoverScheduledWatcherAttempt(timer, error));
+                    timer.Start();
+                }, error => RecoverScheduledWatcherAttempt(timer, error));
+            }));
+        }
+        catch (Exception)
+        {
+            // If dispatch failed transiently, retry from the thread pool after backoff.
+            // A shutting-down dispatcher cannot accept a retry, so leave only state cleanup.
+            recovery.Complete(recovered: false);
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            _ = ShellDirectoryWatcherRecovery.RetryAfterDispatchFailureAsync(retryDelay, () =>
+                ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                    createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch,
+                    recovery, expectedWatcher));
+        }
+
+        void RecoverScheduledWatcherAttempt(DispatcherTimer? timer, Exception error)
+        {
+            recovery.CompleteFailedAttempt(() =>
+            {
+                if (timer is null) return;
+                try { timer.Stop(); }
+                finally
+                {
+                    if (ReferenceEquals(timer, _directoryChangeWatcherRecoveryTimer))
+                        _directoryChangeWatcherRecoveryTimer = null;
+                }
+            });
+            if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery)) return;
+            LastShellRefreshStatus = $"directory-watcher-recovery-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+            ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
+                createNotificationBatch, deleteNotificationBatch, changedItemNotificationBatch,
+                recovery, expectedWatcher: _directoryChangeWatcher);
+        }
+    }
+
+    private bool IsDirectoryChangeWatcherRecoveryCurrent(string path, long version, long navigationVersion,
+        ShellDirectoryChangeQueue queue, ShellDirectoryWatcherRecovery recovery) =>
+        version == _directoryChangeVersion && navigationVersion == _viewReadiness.NavigationVersion &&
+        _viewReadiness.IsCurrent(navigationVersion) &&
+        string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase) &&
+        ReferenceEquals(queue, _directoryChangeQueue) && ReferenceEquals(recovery, _directoryChangeWatcherRecovery);
+
+    private void StartDirectoryChangeMonitorCore(string path, long navigationVersion, int initialCount,
+        ShellDirectoryChangeQueue queue)
+    {
+        var batch = new ShellDirectoryChangeBatch(initialCount);
+        _directoryChangeBatch = batch;
+        var version = _directoryChangeVersion;
+        var timer = CreateDirectoryChangeTimer(path, navigationVersion, batch, queue, version);
+        _directoryChangeTimer = timer;
+        var startupChanges = queue.Drain();
+        Interlocked.Exchange(ref _directoryChangeStarting, 0);
+        batch.RecordChanges(startupChanges.Delta, startupChanges.ForceRefresh);
+        timer.Start();
+    }
+
+    private ShellDirectoryMonitorRequest? CaptureCurrentDirectoryMonitorRequest(long version)
+    {
+        if (version != _directoryChangeVersion || _completedDiskDirectory is not { } path ||
+            _directoryChangeQueue is not { } queue) return null;
+        var request = new ShellDirectoryMonitorRequest(version, _viewReadiness.NavigationVersion, path, queue);
+        return IsCurrentDirectoryMonitorRequest(request) ? request : null;
+    }
+
+    private bool IsCurrentDirectoryMonitorRequest(ShellDirectoryMonitorRequest request) =>
+        request.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+            _viewReadiness.IsCurrent(request.NavigationVersion), _completedDiskDirectory, _directoryChangeQueue);
+
+    private DispatcherTimer CreateDirectoryChangeTimer(string path, long navigationVersion,
+        ShellDirectoryChangeBatch batch, ShellDirectoryChangeQueue queue, long version)
+    {
+            var monitorRequest = new ShellDirectoryMonitorRequest(version, navigationVersion, path, queue);
+            var refreshRecovery = new ShellDirectoryRefreshRecovery();
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+        void RecoverRefreshFailure(Exception error)
+        {
+            if (!_viewReadiness.IsCurrent(navigationVersion) ||
+                !string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase) ||
+                version != _directoryChangeVersion || !ReferenceEquals(batch, _directoryChangeBatch) ||
+                !ReferenceEquals(timer, _directoryChangeTimer))
+                return;
+
+            // Refresh can throw before its asynchronous completion callback runs. Keep the
+            // monitor retryable and retain a forced refresh request instead of leaving the
+            // in-progress guard stuck or accepting a stale count as settled.
+            _directoryRefreshInProgress = false;
+            _directoryChangeRecheckPending = false;
+            batch.Failed();
+            var retryDelay = refreshRecovery.RecordFailure();
+            try
+            {
+                LastShellRefreshStatus = $"directory-refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
+                timer.Interval = retryDelay;
+                timer.Stop();
+                timer.Start();
+            }
+            catch (Exception recoveryError)
+            {
+                System.Diagnostics.Trace.TraceError(
+                    $"Explorer Dirs: directory monitor timer restart failed; hr=0x{recoveryError.HResult:X8}");
+                ScheduleRefreshTimerRetry(retryDelay);
+            }
+        }
+
+        void ScheduleRefreshTimerRetry(TimeSpan retryDelay)
+        {
+            _ = ShellDirectoryRefreshRecovery.RetryAfterRecoveryFailureAsync(retryDelay, () =>
+            {
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    if (!_viewReadiness.IsCurrent(navigationVersion) ||
+                        !string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase) ||
+                        version != _directoryChangeVersion || !ReferenceEquals(batch, _directoryChangeBatch) ||
+                        !ReferenceEquals(timer, _directoryChangeTimer)) return;
+
+                    ShellDirectoryRefreshRecovery.TryRunMonitorTick(() =>
+                    {
+                        timer.Stop();
+                        timer.Interval = retryDelay;
+                        timer.Start();
+                    }, RecoverRefreshFailure);
+                }));
+            }, retryError =>
+            {
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                System.Diagnostics.Trace.TraceError(
+                    $"Explorer Dirs: directory monitor retry dispatch failed; hr=0x{retryError.HResult:X8}");
+                ScheduleRefreshTimerRetry(refreshRecovery.RecordFailure());
+            });
+        }
+
+            timer.Tick += (_, _) =>
+            {
+                ShellDirectoryRefreshRecovery.TryRunMonitorTick(() =>
+                {
+                    var timerTickStartedAt = _traceNativeUserMessages ? _directoryChangeTimerTickTiming.Start() : 0;
+                    try
+                    {
+                        timer.Stop();
+                        if (!_viewReadiness.IsCurrent(navigationVersion) ||
+                            !string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase) ||
+                            !ReferenceEquals(_directoryChangeBatch, batch)) return;
+                        if (_directoryRefreshInProgress || _directorySelectionRestorePending) return;
+                        var queueDrainStartedAt = _traceNativeUserMessages ? _directoryQueueDrainTiming.Start() : 0;
+                        ShellDirectoryChangeBatchData queuedChanges;
+                        try { queuedChanges = queue.Drain(); }
+                        finally { _directoryQueueDrainTiming.Stop(queueDrainStartedAt); }
+                        batch.RecordChanges(queuedChanges.Delta, queuedChanges.ForceRefresh);
+                        var countCheckStartedAt = _traceNativeUserMessages ? _directoryCountCheckTiming.Start() : 0;
+                        var hasPendingDirectoryChanges = batch.HasPendingChanges;
+                        int? actualCount;
+                        bool shouldDefer;
+                        try
+                        {
+                            if (!ShellDirectoryMonitorCountRead.TryRead(ReadDirectoryMonitorItemCount, () =>
+                                monitorRequest.IsCurrent(_directoryChangeVersion, _viewReadiness.NavigationVersion,
+                                    _viewReadiness.IsCurrent(navigationVersion), _completedDiskDirectory,
+                                    _directoryChangeQueue), out actualCount)) return;
+                            var lastEventAt = Interlocked.Read(ref _directoryChangeLastEventAt);
+                            var largeBurstActive = lastEventAt != 0 &&
+                                Stopwatch.GetElapsedTime(lastEventAt) < TimeSpan.FromMilliseconds(750);
+                            shouldDefer = batch.ShouldDeferRefresh(actualCount, _directoryChangeRecheckPending, largeBurstActive);
+                        }
+                        finally { _directoryCountCheckTiming.Stop(countCheckStartedAt); }
+                        if (shouldDefer)
+                        {
+                            _directoryChangeRecheckPending = true;
+                            timer.Interval = TimeSpan.FromMilliseconds(500);
+                            timer.Start();
+                            return;
+                        }
+                        _directoryChangeRecheckPending = false;
+                        timer.Interval = TimeSpan.FromMilliseconds(250);
+                        var expectedCount = batch.ExpectedCountAfterChanges;
+                        var forceRefresh = batch.ForceRefresh;
+                        var shouldRefresh = batch.Complete(actualCount);
+                        if (!shouldRefresh && hasPendingDirectoryChanges)
+                        {
+                            // Shell may add the focused row to selection during a natural update without a final selection callback.
+                            RestoreSelectionAfterNaturalDirectoryUpdate(path, navigationVersion);
+                        }
+                        else if (shouldRefresh)
+                        {
+                            DirectoryChangeLastExpectedCount = expectedCount;
+                            DirectoryChangeLastActualCount = actualCount;
+                            DirectoryChangeLastForcedRefresh = forceRefresh;
+                            DirectoryChangeFallbackRefreshCount++;
+                            if (_traceNativeUserMessages) _directoryChangeFallbackStartedAt = Stopwatch.GetTimestamp();
+                            _directoryRefreshInProgress = true;
+                            var refreshCallStartedAt = _traceNativeUserMessages ? _directoryRefreshCallTiming.Start() : 0;
+                            try { Refresh(() =>
+                            {
+                                var completionStartedAt = _traceNativeUserMessages ? _directoryRefreshCompletionTiming.Start() : 0;
+                                try
+                                {
+                                    if (!_viewReadiness.IsCurrent(navigationVersion) ||
+                                        !string.Equals(_completedDiskDirectory, path, StringComparison.OrdinalIgnoreCase) ||
+                                        !ReferenceEquals(batch, _directoryChangeBatch) ||
+                                        !ReferenceEquals(timer, _directoryChangeTimer)) return;
+                                    // Refresh is asynchronous; drain queued watcher deltas before reconciling
+                                    // the count so ContextIdle cannot apply them after a new baseline is set.
+                                    batch.CompleteRefresh(queue, ReadDirectoryMonitorItemCount, () =>
+                                        IsCurrentDirectoryMonitorRequest(monitorRequest) &&
+                                        ReferenceEquals(batch, _directoryChangeBatch) &&
+                                        ReferenceEquals(timer, _directoryChangeTimer));
+                                    // Reading the count may have reentered navigation. A retired refresh
+                                    // callback must not clear state belonging to a newer monitor.
+                                    if (!IsCurrentDirectoryMonitorRequest(monitorRequest) ||
+                                        !ReferenceEquals(batch, _directoryChangeBatch) ||
+                                        !ReferenceEquals(timer, _directoryChangeTimer)) return;
+                                    refreshRecovery.RecordSuccess();
+                                    if (_traceNativeUserMessages) _directoryChangeFallbackCompletedAt = Stopwatch.GetTimestamp();
+                                    _directoryRefreshInProgress = false;
+                                    _directoryChangeRecheckPending = false;
+                                    timer.Interval = TimeSpan.FromMilliseconds(250);
+                                    timer.Stop();
+                                    timer.Start();
+                                }
+                                catch (Exception ex) { RecoverRefreshFailure(ex); }
+                                finally { _directoryRefreshCompletionTiming.Stop(completionStartedAt); }
+                            }); }
+                            catch (Exception ex) { RecoverRefreshFailure(ex); }
+                            finally
+                            {
+                                _directoryRefreshCallTiming.Stop(refreshCallStartedAt);
+                                TraceDirectoryRefreshCall(refreshCallStartedAt);
+                            }
+                        }
+                        if (!shouldRefresh && batch.ConsumeTransientEmptyViewRecheck())
+                        {
+                            timer.Interval = TimeSpan.FromMilliseconds(500);
+                            timer.Start();
+                        }
+                    }
+                    finally { _directoryChangeTimerTickTiming.Stop(timerTickStartedAt); }
+                }, RecoverRefreshFailure);
+            };
+        return timer;
+    }
+
+    private void RestoreSelectionAfterNaturalDirectoryUpdate(string path, long navigationVersion)
+    {
+        var snapshot = _lastNativeSelection;
+        var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        if (snapshot is null || snapshot.SelectedCount == 0 ||
+            !ShellSelectionRestoreGate.ShouldUseRefreshSnapshot(
+                hasSnapshot: true,
+                sameView: navigationVersion == _lastNativeSelectionNavigationVersion &&
+                    string.Equals(path, _lastNativeSelectionPath, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase),
+                userInputUnchanged: inputVersion == _lastNativeSelectionInputVersion))
+            return;
+
+        using var selection = snapshot.Clone();
+        using var selectionRecoverySuppression = _selectionRecoverySuppression.Acquire(navigationVersion);
+        RestoreSelectionAfterRefresh(selection, path, navigationVersion,
+            allowSelectedFocusFallback: false, source: "directory-update");
+        // Shell can clear a restored selection after its last watcher callback without another selection notification.
+        ScheduleNaturalUpdateSelectionVerification(snapshot, path, navigationVersion, inputVersion);
+    }
+
+    private void ScheduleNaturalUpdateSelectionVerification(ShellViewSelectionSnapshot selection, string path,
+        long navigationVersion, long inputVersion)
+    {
+        CancelNaturalUpdateSelectionVerification();
+        const int verificationWindowMilliseconds = 3000;
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(250)
+        };
+        _naturalUpdateSelectionVerificationSnapshot = selection.Clone();
+        _naturalUpdateSelectionVerificationStartedAt = Stopwatch.GetTimestamp();
+        _naturalUpdateSelectionVerificationTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            if (!ReferenceEquals(timer, _naturalUpdateSelectionVerificationTimer)) return;
+            var elapsed = Stopwatch.GetElapsedTime(_naturalUpdateSelectionVerificationStartedAt);
+            var sameView = _browser is not null && !_viewReadiness.Pending &&
+                navigationVersion == _viewReadiness.NavigationVersion &&
+                string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase);
+            var userInputUnchanged = inputVersion == Interlocked.Read(ref _nativeUserInputVersion);
+            if (!ShellSelectionRestoreGate.ShouldVerifyNaturalUpdateSelection(
+                    _naturalUpdateSelectionVerificationSnapshot is not null, sameView, userInputUnchanged,
+                    elapsed < TimeSpan.FromMilliseconds(verificationWindowMilliseconds)))
+            {
+                CancelNaturalUpdateSelectionVerification();
+                return;
+            }
+
+            var currentSelectedCount = ReadCurrentShellSelectionCount();
+            var pendingSelection = _naturalUpdateSelectionVerificationSnapshot;
+            if (pendingSelection is not null && currentSelectedCount is { } count &&
+                ShellSelectionRestoreGate.ShouldRestoreNaturalUpdateSelection(pendingSelection.SelectedCount, count))
+            {
+                using var suppression = _selectionRecoverySuppression.Acquire(navigationVersion);
+                RestoreSelectionAfterRefresh(pendingSelection, path, navigationVersion,
+                    allowSelectedFocusFallback: false, source: "natural-update-verification");
+            }
+
+            if (elapsed >= TimeSpan.FromMilliseconds(verificationWindowMilliseconds))
+                CancelNaturalUpdateSelectionVerification();
+        };
+        timer.Start();
+    }
+
+    private int? ReadCurrentShellSelectionCount()
+    {
+        if (_browser is null) return null;
+        var iid = ShellViewId;
+        object? viewObject = null;
+        try
+        {
+            if (_browser.GetCurrentView(ref iid, out viewObject) < 0 ||
+                viewObject is not IFolderView folderView || folderView.ItemCount(1, out var count) < 0)
+                return null;
+            return count;
+        }
+        catch (COMException) { return null; }
+        finally { if (viewObject is not null) Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private void CancelNaturalUpdateSelectionVerification()
+    {
+        _naturalUpdateSelectionVerificationTimer?.Stop();
+        _naturalUpdateSelectionVerificationTimer = null;
+        _naturalUpdateSelectionVerificationSnapshot?.Dispose();
+        _naturalUpdateSelectionVerificationSnapshot = null;
+        _naturalUpdateSelectionVerificationStartedAt = 0;
+    }
+
+    private void QueueCreatedItemNotification(long version, ShellDirectoryChangeQueue queue, string path,
+        ShellCreateNotificationBatch batch)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (!batch.TryRecordForDispatch(path)) return;
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+            {
+                if (version != _directoryChangeVersion || !ReferenceEquals(batch, _directoryChangeCreateNotificationBatch))
+                {
+                    _directoryChangeLastCreateNotificationResult = "stale-dispatch";
+                    return;
+                }
+                if (batch.TakeForDispatcher() is null)
+                {
+                    _directoryChangeLastCreateNotificationResult = "empty-dispatch-batch";
+                    return;
+                }
+                if (_directoryChangeCreateNotificationTimer is null)
+                {
+                    var timer = new DispatcherTimer(DispatcherPriority.ContextIdle)
+                    {
+                        Interval = TimeSpan.FromMilliseconds(60)
+                    };
+                    _directoryChangeCreateNotificationTimer = timer;
+                    timer.Tick += (_, _) => ShellDirectoryNotificationRecovery.TryRunTimerTick(() =>
+                    {
+                        timer.Stop();
+                        if (!ReferenceEquals(timer, _directoryChangeCreateNotificationTimer))
+                        {
+                            _directoryChangeLastCreateNotificationResult = "stale-timer";
+                            return;
+                        }
+                        if (!batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(60), out var createdPath))
+                        {
+                            timer.Start();
+                            return;
+                        }
+                        _directoryChangeCreateNotificationTimer = null;
+                        if (version != _directoryChangeVersion)
+                        {
+                            _directoryChangeLastCreateNotificationResult = "stale-version";
+                            return;
+                        }
+                        var monitorRequest = CaptureCurrentDirectoryMonitorRequest(version);
+                        if (monitorRequest is null)
+                        {
+                            _directoryChangeLastCreateNotificationResult = "stale-monitor";
+                            return;
+                        }
+                        if (createdPath is null)
+                        {
+                            _directoryChangeLastCreateNotificationResult = "empty-path-batch";
+                            return;
+                        }
+                        if (_directoryChangeBatch?.ExpectedCountAfterChanges is not { } expectedCount)
+                        {
+                            _directoryChangeLastCreateNotificationResult = "expected-count-unavailable";
+                            return;
+                        }
+                        if (!ShellDirectoryMonitorCountRead.TryRead(ReadDirectoryMonitorItemCount,
+                                () => IsCurrentDirectoryMonitorRequest(monitorRequest), out var actualCount))
+                        {
+                            _directoryChangeLastCreateNotificationResult = "stale-count-read";
+                            return;
+                        }
+                        if (actualCount is not { } actual)
+                        {
+                            _directoryChangeLastCreateNotificationResult = $"actual-count-unavailable;expected={expectedCount}";
+                            return;
+                        }
+                        if (actual >= expectedCount)
+                        {
+                            _directoryChangeLastCreateNotificationResult = $"already-current;expected={expectedCount};actual={actual}";
+                            return;
+                        }
+                        _directoryChangeNativeCreateNotificationStartedAt = Stopwatch.GetTimestamp();
+                        var notificationStartedAt = _traceNativeUserMessages ? _directoryCreateNotificationTiming.Start() : 0;
+                        bool notified;
+                        try { notified = ShellCreatedItemNotification.NotifyCreatedFile(createdPath); }
+                        finally { _directoryCreateNotificationTiming.Stop(notificationStartedAt); }
+                        if (notified)
+                        {
+                            _directoryChangeNativeCreateNotificationCompletedAt = Stopwatch.GetTimestamp();
+                            Interlocked.Increment(ref _directoryChangeNativeCreateNotifications);
+                            _directoryChangeLastCreateNotificationResult = $"notified;expected={expectedCount};actual={actual}";
+                        }
+                        else _directoryChangeLastCreateNotificationResult = $"path-rejected;expected={expectedCount};actual={actual}";
+                    }, error =>
+                    {
+                        timer.Stop();
+                        if (ReferenceEquals(timer, _directoryChangeCreateNotificationTimer))
+                            _directoryChangeCreateNotificationTimer = null;
+                        System.Diagnostics.Trace.TraceError(
+                            $"Explorer Dirs: create notification timer failed; hr=0x{error.HResult:X8}");
+                        QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
+                    });
+                }
+                _directoryChangeCreateNotificationTimer.Stop();
+                _directoryChangeCreateNotificationTimer.Start();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            // The watcher can race dispatcher shutdown after its initial check.
+        }
+    }
+
+    private void QueueDirectoryChange(long version, ShellDirectoryChangeQueue queue, int delta, bool forceRefresh)
+    {
+        var queueStartedAt = _traceNativeUserMessages ? _directoryQueueTiming.Start() : 0;
+        try
+        {
+            if (version != Interlocked.Read(ref _directoryChangeVersion) || !ReferenceEquals(queue, _directoryChangeQueue) ||
+                Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            Interlocked.Exchange(ref _directoryChangeLastEventAt, Stopwatch.GetTimestamp());
+            if (!queue.Enqueue(delta, forceRefresh)) return;
+            try
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+                {
+                    var dispatchStartedAt = _traceNativeUserMessages ? _directoryQueueDispatchTiming.Start() : 0;
+                    try
+                    {
+                        if (version != _directoryChangeVersion || !ReferenceEquals(queue, _directoryChangeQueue))
+                        {
+                            queue.Invalidate();
+                            return;
+                        }
+                        // During baseline sampling the watcher is already active. Leave its
+                        // coalesced startup delta queued until the stable count creates a batch.
+                        if (_directoryChangeBatch is not { } batch || _directoryChangeTimer is not { } timer)
+                            return;
+                        var changes = queue.DrainWhileDispatchPending();
+                        batch.RecordChanges(changes.Delta, changes.ForceRefresh);
+                        timer.Stop();
+                        timer.Start();
+                    }
+                    finally { _directoryQueueDispatchTiming.Stop(dispatchStartedAt); }
+                }));
+            }
+            catch (InvalidOperationException) { queue.Invalidate(); }
+        }
+        finally { _directoryQueueTiming.Stop(queueStartedAt); }
+    }
+
+    private void QueueChangedItemNotification(long version, ShellDirectoryChangeQueue queue,
+        ShellChangedItemNotificationBatch batch, string path, int delta)
+    {
+        if (!ShellChangedItemNotification.ShouldNotifyPath(path))
+        {
+            QueueDirectoryChange(version, queue, delta, forceRefresh: true);
+            return;
+        }
+
+        var dispatch = batch.TryRecordForDispatch(path, out _);
+        QueueDirectoryChange(version, queue, delta, forceRefresh: false);
+        if (!dispatch) return;
+
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+            {
+                if (version != _directoryChangeVersion ||
+                    !ReferenceEquals(batch, _directoryChangeChangedItemNotificationBatch)) return;
+
+                if (_directoryChangeChangedItemNotificationTimer is null)
+                {
+                    var timer = new DispatcherTimer(DispatcherPriority.Background)
+                    {
+                        Interval = TimeSpan.FromMilliseconds(250)
+                    };
+                    _directoryChangeChangedItemNotificationTimer = timer;
+                    timer.Tick += (_, _) => ShellDirectoryNotificationRecovery.TryRunTimerTick(() =>
+                    {
+                        timer.Stop();
+                        if (!ReferenceEquals(timer, _directoryChangeChangedItemNotificationTimer) ||
+                            version != _directoryChangeVersion ||
+                            !ReferenceEquals(batch, _directoryChangeChangedItemNotificationBatch)) return;
+                        if (!batch.TryTakeAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var paths,
+                                out var requiresRefresh))
+                        {
+                            timer.Start();
+                            return;
+                        }
+
+                        _directoryChangeChangedItemNotificationTimer = null;
+                        if (requiresRefresh)
+                        {
+                            QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
+                            return;
+                        }
+                        foreach (var changedPath in paths!)
+                            ShellChangedItemNotification.NotifyChangedItem(changedPath);
+                        var needsDirectorySortUpdate = true;
+                        try
+                        {
+                            var currentView = CaptureViewState();
+                            needsDirectorySortUpdate = ViewCaptureFailed ||
+                                ShellChangedItemNotification.RequiresDirectoryUpdate(currentView);
+                        }
+                        catch (Exception)
+                        {
+                            // If the active sort/group cannot be read, keep the
+                            // Changed batch correct with one directory update.
+                        }
+                        if (needsDirectorySortUpdate)
+                        {
+                            foreach (var directory in paths!.Select(Path.GetDirectoryName)
+                                         .Where(directory => !string.IsNullOrWhiteSpace(directory))
+                                         .Distinct(StringComparer.OrdinalIgnoreCase))
+                                ShellChangedItemNotification.NotifyChangedDirectory(directory!);
+                        }
+                    }, error =>
+                    {
+                        timer.Stop();
+                        if (ReferenceEquals(timer, _directoryChangeChangedItemNotificationTimer))
+                            _directoryChangeChangedItemNotificationTimer = null;
+                        System.Diagnostics.Trace.TraceError(
+                            $"Explorer Dirs: changed notification timer failed; hr=0x{error.HResult:X8}");
+                        QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
+                    });
+                }
+                _directoryChangeChangedItemNotificationTimer.Stop();
+                _directoryChangeChangedItemNotificationTimer.Start();
+            }));
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private void QueueDeletedItemNotification(long version, ShellDirectoryChangeQueue queue,
+        ShellDeleteNotificationBatch batch, string path)
+    {
+        // Watcher callbacks run on ThreadPool threads. Coalesce before posting
+        // to the STA so a large delete burst cannot flood its ContextIdle queue.
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (!batch.TryRecordForDispatch(path)) return;
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+            {
+                if (version != _directoryChangeVersion || !ReferenceEquals(batch, _directoryChangeDeleteNotificationBatch) ||
+                    batch.TakeForDispatcher() is null) return;
+                if (_directoryChangeDeleteNotificationTimer is null)
+                {
+                    var timer = new DispatcherTimer(DispatcherPriority.ContextIdle)
+                    {
+                        Interval = TimeSpan.FromMilliseconds(250)
+                    };
+                    _directoryChangeDeleteNotificationTimer = timer;
+                    timer.Tick += (_, _) => ShellDirectoryNotificationRecovery.TryRunTimerTick(() =>
+                    {
+                        timer.Stop();
+                        if (!ReferenceEquals(timer, _directoryChangeDeleteNotificationTimer)) return;
+                        if (version != _directoryChangeVersion || !ReferenceEquals(batch, _directoryChangeDeleteNotificationBatch))
+                        {
+                            _directoryChangeDeleteNotificationTimer = null;
+                            return;
+                        }
+                        if (!batch.TryTakeLatestAfterQuietPeriod(TimeSpan.FromMilliseconds(250), out var deletedPath))
+                        {
+                            if (batch.TakeForDispatcher() is not null)
+                                timer.Start();
+                            else
+                                _directoryChangeDeleteNotificationTimer = null;
+                            return;
+                        }
+                        _directoryChangeDeleteNotificationTimer = null;
+                        var monitorRequest = CaptureCurrentDirectoryMonitorRequest(version);
+                        if (deletedPath is null || monitorRequest is null ||
+                            _directoryChangeBatch?.ExpectedCountAfterChanges is not { } expectedCount ||
+                            _browser is null)
+                            return;
+                        if (!ShellDirectoryMonitorCountRead.TryRead(ReadDirectoryMonitorItemCount,
+                                () => IsCurrentDirectoryMonitorRequest(monitorRequest), out var actualCount) ||
+                            actualCount is not { } actual || actual == expectedCount)
+                            return;
+
+                        if (!ShellDeletedItemNotification.CanScanViewForDeletedFolder(actualCount, expectedCount))
+                        {
+                            _directoryChangeLastFolderDeleteNotificationResult = "SkippedLargeView";
+                            return;
+                        }
+
+                        Interlocked.Increment(ref _directoryChangeFolderDeleteLookupCount);
+                        var folderView = GetFolderView2Pointer();
+                        if (folderView == IntPtr.Zero) return;
+                        try
+                        {
+                            var notificationStartedAt = _traceNativeUserMessages ? _directoryDeleteNotificationTiming.Start() : 0;
+                            ShellDeletedItemNotificationResult result;
+                            try
+                            {
+                                result = ShellDeletedItemNotification.NotifyDeletedFolder(folderView, deletedPath,
+                                    _traceNativeUserMessages
+                                        ? step => TraceShellSelectionRestore("delete-identity", step)
+                                        : null);
+                            }
+                            finally { _directoryDeleteNotificationTiming.Stop(notificationStartedAt); }
+                            _directoryChangeLastFolderDeleteNotificationResult = result.ToString();
+                            if (result == ShellDeletedItemNotificationResult.Notified)
+                                Interlocked.Increment(ref _directoryChangeNativeFolderDeleteNotifications);
+                        }
+                        finally { Marshal.Release(folderView); }
+                    }, error =>
+                    {
+                        timer.Stop();
+                        if (ReferenceEquals(timer, _directoryChangeDeleteNotificationTimer))
+                            _directoryChangeDeleteNotificationTimer = null;
+                        System.Diagnostics.Trace.TraceError(
+                            $"Explorer Dirs: delete notification timer failed; hr=0x{error.HResult:X8}");
+                        QueueDirectoryChange(version, queue, delta: 0, forceRefresh: true);
+                    });
+                }
+                _directoryChangeDeleteNotificationTimer.Stop();
+                _directoryChangeDeleteNotificationTimer.Start();
+            }));
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private void StopDirectoryChangeMonitor()
+    {
+        Interlocked.Exchange(ref _directoryChangeStarting, 0);
+        CancelNaturalUpdateSelectionVerification();
+        CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: false);
+        _directoryChangeVersion++;
+        Interlocked.Exchange(ref _directoryChangeLastEventAt, 0);
+        _directoryChangeStartTimer?.Stop();
+        _directoryChangeStartTimer = null;
+        _directoryChangeWatcherRecoveryTimer?.Stop();
+        _directoryChangeWatcherRecoveryTimer = null;
+        _directoryChangeWatcherRecovery?.Retire();
+        _directoryChangeWatcherRecovery = null;
+        _directoryChangeTimer?.Stop();
+        _directoryChangeTimer = null;
+        _directoryChangeCreateNotificationTimer?.Stop();
+        _directoryChangeCreateNotificationTimer = null;
+        _directoryChangeDeleteNotificationTimer?.Stop();
+        _directoryChangeDeleteNotificationTimer = null;
+        _directoryChangeChangedItemNotificationTimer?.Stop();
+        _directoryChangeChangedItemNotificationTimer = null;
+        _directoryChangeBatch = null;
+        _directoryRefreshInProgress = false;
+        _directoryChangeRecheckPending = false;
+        _directoryChangeCreateNotificationBatch = null;
+        _directoryChangeDeleteNotificationBatch = null;
+        _directoryChangeChangedItemNotificationBatch = null;
+        _directoryChangeQueue?.Invalidate();
+        _directoryChangeQueue = null;
+        var watcher = _directoryChangeWatcher;
+        _directoryChangeWatcherEventGate.SetCurrent(null);
+        _directoryChangeWatcher = null;
+        if (watcher is not null)
+            _ = ShellDirectoryWatcherStartup.DisposeSafelyAsync(() => DisposeDirectoryChangeWatcher(watcher));
+    }
+
+    private static bool IsSupportedDirectoryChangePath(string path) =>
+        path.StartsWith(@"\\", StringComparison.Ordinal) ||
+        GetDriveType(Path.GetPathRoot(path) ?? string.Empty) is 3 or 4;
 
     private Rect ClientRect()
     {
@@ -874,11 +3859,27 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DisposeBrowser()
     {
+        _quickFilterRequestVersion++;
+        CancelPendingQuickFilterGroupRestore();
+        ClearLastNativeSelection();
+        _nativeInputSelectionCapture?.Abort();
+        _nativeInputSelectionCapture = null;
+        StopDirectoryChangeMonitor();
+        _navigationRequestVersion++;
+        var history = _historyEvents;
+        _historyEvents = null; // Invalidate already queued availability updates.
+        history?.Dispose();
+        _completedDiskDirectory = null;
+        _viewReadiness.Reset();
         _navigationGate.Cancel();
         CancelPendingNewFolderRename();
         _issuedBrowserPaths.Clear();
+        _issuedSearches.Clear();
+        _pendingFileOperationFocusRestore = null;
         _focusRestoreTimer.Stop();
         if (_browser is null) return;
+        try { UpdateQuickFilterAttachment(searchActive: true); }
+        catch (COMException) { /* The browser may already have released its filter site. */ }
         DetachViewWindow();
         if (_advised) { _browser.Unadvise(_cookie); _advised = false; }
         _browser.Destroy();
@@ -890,9 +3891,39 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationPending(IntPtr pidl)
     {
+        _quickFilterRequestVersion++;
+        CancelPendingQuickFilterGroupRestore();
+        ClearLastNativeSelection();
+        _nativeInputSelectionCapture?.Abort();
+        _nativeInputSelectionCapture = null;
+        StopDirectoryChangeMonitor();
+        var identity = NavigationIdentity(pidl);
         var targetPath = FileSystemPath(pidl);
-        if (targetPath is null || !_issuedBrowserPaths.ContainsKey(NormalizePathKey(targetPath)))
+        var isSearchTarget = _searchHistory.TryResolve(pidl, out _);
+        if (isSearchTarget)
+        {
+            try { UpdateQuickFilterAttachment(searchActive: true); }
+            catch (Exception ex) { MenuError?.Invoke(this, $"停用搜索视图筛选失败：{ex.Message}"); }
+        }
+        else if (targetPath is not null && _quickFilterSettings.HasPattern)
+        {
+            // GetViewFlags is queried while DefView creates the target view. Re-enable
+            // filtering before that transition; doing so only after completion is too late.
+            try { UpdateQuickFilterAttachment(searchActive: false); }
+            catch (Exception ex) { MenuError?.Invoke(this, $"为目标目录启用快速筛选失败：{ex.Message}"); }
+        }
+        var issuedByApp = targetPath is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(targetPath)) ||
+            identity is not null && _issuedSearches.ContainsKey(identity);
+        // An app-issued search can start after a later directory probe. Its
+        // delayed callback must not cancel that newer request as user input.
+        if (!issuedByApp)
+        {
+            _navigationRequestVersion++;
             _navigationGate.Cancel();
+        }
+        _viewReadiness.Begin(identity);
+        QueueNavigationAvailability();
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
         var focused = GetFocus();
         _restoreFocusAfterNavigation = _viewWindow != IntPtr.Zero &&
             (focused == _viewWindow || IsChild(_viewWindow, focused));
@@ -910,6 +3941,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var shellView = (IShellView)Marshal.GetObjectForIUnknown(view);
             try
             {
+                ReportFolderHeaderFailure(ShellFolderViewOptions.EnableAllViewHeaders(view));
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
                     AttachViewWindow(hwnd);
             }
@@ -918,59 +3950,143 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
         return 0;
     }
+
+    private void ReportFolderHeaderFailure(int result)
+    {
+        if (result >= 0 || _folderHeaderWarningReported) return;
+        _folderHeaderWarningReported = true;
+        MenuError?.Invoke(this, $"Shell 未能启用所有查看方式的列标题（0x{result:X8}）。");
+    }
+
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
-        var path = FileSystemPath(pidl);
-        if (!string.IsNullOrWhiteSpace(path))
+        var identity = NavigationIdentity(pidl);
+        CompleteIssuedSearch(identity);
+        var publish = _viewReadiness.Complete(identity);
+        QueueNavigationAvailability();
+        var navigationVersion = _viewReadiness.NavigationVersion;
+        var path = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var location, out _)
+            ? location : null;
+        var issuedByApp = path is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
+        if (path is not null) CompleteIssuedPath(path);
+        // Retire bookkeeping for every callback, but publish only the current
+        // settled visit. An older completion must not overwrite address/capacity.
+        if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
+        if (_viewReadiness.RequiresLocationRead)
         {
-            var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
-            CompleteIssuedPath(path);
-            _location.CompleteDirectory(path);
+            if (!ReconcileCurrentLocation(navigationVersion, clearRetry: true) &&
+                _viewReadiness.IsCurrent(navigationVersion))
+                NavigationFailed?.Invoke(this, "当前 Shell 目录位置暂时无法确认，请刷新重试。");
+            return 0;
+        }
+        return PublishNavigationLocation(pidl, navigationVersion, issuedByApp, clearRetry: true);
+    }
+
+    private int PublishNavigationLocation(IntPtr pidl, long navigationVersion, bool issuedByApp, bool clearRetry)
+    {
+        if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
+        if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out var isFileSystemLocation))
+        {
+            var returningFromSearch = _location.IsSearchActive;
+            _locationUnconfirmed = false;
+            _location.CompleteDirectory(path, isFileSystemLocation);
+            _completedDiskDirectory = isFileSystemLocation ? path : null;
+            try
+            {
+                UpdateQuickFilterAttachment(searchActive: false);
+                if (returningFromSearch && _quickFilterSettings.HasPattern) Refresh();
+            }
+            catch (Exception ex) { MenuError?.Invoke(this, $"应用快速筛选失败：{ex.Message}"); }
             _hasNavigated = true;
-            if (!issuedByApp || (_retryPath is not null &&
-                string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase)))
+            if (clearRetry && (!issuedByApp || (_retryPath is not null &&
+                string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))))
                 _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
-                if (CurrentPath != path || _location.IsSearchActive) return;
+                if (!_viewReadiness.IsCurrent(navigationVersion) || CurrentPath != path || _location.IsSearchActive) return;
                 try { ApplyViewState(); }
                 catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
+                if (!_viewReadiness.IsCurrent(navigationVersion)) return;
+                if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
+                else StopDirectoryChangeMonitor();
                 if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
                     FocusView();
-                _restoreFocusAfterNavigation = false;
+                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
-                if (CurrentPath == path && !_location.IsSearchActive) Navigated?.Invoke(this, path);
+                if (_viewReadiness.IsCurrent(navigationVersion) && CurrentPath == path && !_location.IsSearchActive)
+                    Navigated?.Invoke(this, path);
             }));
             return 0;
         }
-        if (ShellSearchLocation.TryGetParsingName(pidl, out var searchUri) &&
+        _completedDiskDirectory = null;
+        if (_searchHistory.TryResolve(pidl, out var searchUri) &&
+            _viewReadiness.IsCurrent(navigationVersion) &&
             _location.TryCompleteSearch(searchUri))
         {
+            try { UpdateQuickFilterAttachment(searchActive: true); }
+            catch (Exception ex) { MenuError?.Invoke(this, $"切换搜索视图筛选状态失败：{ex.Message}"); }
+            _locationUnconfirmed = false;
             _hasNavigated = true;
-            _retryPath = null;
+            if (clearRetry) _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
-                if (_location.SearchUri != searchUri) return;
+                if (!_viewReadiness.IsCurrent(navigationVersion) || _location.SearchUri != searchUri) return;
                 if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
                     FocusView();
-                _restoreFocusAfterNavigation = false;
+                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
-                if (_location.SearchUri == searchUri)
+                if (_viewReadiness.IsCurrent(navigationVersion) && _location.SearchUri == searchUri)
                     SearchNavigated?.Invoke(this, _location.SearchQuery!);
             }));
+            return 0;
         }
+        // The view is neither a supported directory nor one of our searches.
+        if (_viewReadiness.IsCurrent(navigationVersion)) _locationUnconfirmed = true;
         return 0;
     }
 
+    private bool ReconcileCurrentLocation(long navigationVersion, bool clearRetry)
+    {
+        nint unknown = 0, actual = 0;
+        try
+        {
+            if (_browser is null) return false;
+            unknown = Marshal.GetIUnknownForObject(_browser);
+            actual = ShellCurrentLocation.ReadPidl(unknown);
+            if (actual == 0 || !_viewReadiness.IsCurrent(navigationVersion)) return false;
+            _locationUnconfirmed = true;
+            PublishNavigationLocation(actual, navigationVersion, issuedByApp: true, clearRetry: clearRetry);
+            return !_locationUnconfirmed && _viewReadiness.IsCurrent(navigationVersion);
+        }
+        catch (COMException) { return false; }
+        catch (InvalidComObjectException) { return false; }
+        finally
+        {
+            if (actual != 0) Marshal.FreeCoTaskMem(actual);
+            if (unknown != 0) Marshal.Release(unknown);
+            // If native location is unavailable, never label the previous
+            // directory's capacity as belonging to this newly settled batch.
+            if (actual == 0 && _viewReadiness.IsCurrent(navigationVersion))
+            {
+                _completedDiskDirectory = null;
+                _locationUnconfirmed = true;
+                ViewCaptureFailed = true;
+            }
+        }
+    }
+
     private static string NormalizePathKey(string path) => Path.TrimEndingDirectorySeparator(path);
+    private string? NavigationIdentity(IntPtr pidl) =>
+        _searchHistory.TryResolve(pidl, out var searchUri) ? searchUri :
+        ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var identity, out _) ? identity : null;
 
     private void TrackIssuedPath(string path)
     {
@@ -986,6 +4102,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (!_issuedBrowserPaths.TryGetValue(key, out var count)) return;
         if (count <= 1) _issuedBrowserPaths.Remove(key);
         else _issuedBrowserPaths[key] = count - 1;
+    }
+
+    private void CompleteIssuedSearch(string? identity)
+    {
+        if (identity is null || !_issuedSearches.TryGetValue(identity, out var count)) return;
+        if (count <= 1) _issuedSearches.Remove(identity);
+        else _issuedSearches[identity] = count - 1;
     }
 
     private static string? FileSystemPath(IntPtr pidl)
@@ -1049,12 +4172,52 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
     {
+        // Diagnostic stress runs time every message so a rare slow Shell dispatch cannot hide between samples.
+        var timingSample = _traceNativeUserMessages;
+        var timingClass = timingSample ? GetDiagnosticWindowClass(hwnd) : string.Empty;
+        var timingStartedAt = timingSample ? Stopwatch.GetTimestamp() : 0;
         try
         {
+            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0204 or 0x0207)
+                NoteNativeUserInput(hwnd);
+            if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
+            {
+                var delta = unchecked((short)(wParam.ToInt64() >> 16));
+                if (delta != 0)
+                {
+                    var notches = _ctrlWheelAccumulator.Add(delta);
+                    if (notches == 0) return IntPtr.Zero;
+                    var viewStyleApplied = wheelHandler(notches * 120);
+                    var fallbackDelta = ViewStyleWheelDispatch.GetFallbackDelta(notches, viewStyleApplied);
+                    if (fallbackDelta == 0) return IntPtr.Zero;
+
+                    // The app consumed earlier fractional messages, so forward the accumulated
+                    // notch count rather than only this message's fraction if its switch failed.
+                    var forwardedWParam = (wParam.ToInt64() & 0xFFFF) | ((long)(short)fallbackDelta << 16);
+                    return DefSubclassProc(hwnd, message, new IntPtr(forwardedWParam), lParam);
+                }
+            }
+            // Diagnostic probes can compare message parameters with item-count
+            // changes; normal runs do not collect them. Bound samples per host.
+            if (_traceNativeUserMessages && message >= 0x0400)
+            {
+                _nativeUserMessages[message] = _nativeUserMessages.GetValueOrDefault(message) + 1;
+                if (_nativeUserMessageSamples.Count < 64)
+                    _nativeUserMessageSamples.Add($"{Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms/{message:X}/{WindowClass(hwnd)}/{wParam.ToInt64():X}/{lParam.ToInt64():X}");
+            }
             if (message == 0x0100 && IsTraceKey(wParam.ToInt64()))
                 Trace($"native key={wParam.ToInt64():X} hwnd={hwnd} class={WindowClass(hwnd)} focus={FocusClass()}");
             if (message is 0x0007 or 0x0008)
                 Trace($"native focus-message={message:X} hwnd={hwnd} class={WindowClass(hwnd)} next={wParam}");
+            if (message == 0x020A && !string.IsNullOrEmpty(FocusTracePath) &&
+                (wParam.ToInt64() & 0x0008) != 0) // WM_MOUSEWHEEL + MK_CONTROL
+            {
+                // Observe each native hop without consuming or forwarding it.
+                // Compare child/host hops to establish the actual route.
+                var delta = unchecked((short)(wParam.ToInt64() >> 16));
+                Trace($"wheel ctrl delta={delta} hwnd={hwnd} class={WindowClass(hwnd)} host={hwnd == _hostWindow} view={_viewWindow}");
+                QueueWheelViewTrace();
+            }
             switch (message)
             {
                 case 0x0007: // WM_SETFOCUS
@@ -1069,17 +4232,48 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
-                case 0x0207: // WM_MBUTTONDOWN
+                    _headerPresetMenuGate.Reset();
                     _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
                     break;
+                case 0x0207: // WM_MBUTTONDOWN
+                    _headerPresetMenuGate.Reset();
+                    _menuTarget.Reset();
+                    Activated?.Invoke(this, EventArgs.Empty);
+                    BeginMiddleClickFolderProbe();
+                    break;
+                case 0x0208: // WM_MBUTTONUP
+                    CompleteMiddleClickFolderProbe();
+                    break;
                 case 0x0204: // WM_RBUTTONDOWN
                     Activated?.Invoke(this, EventArgs.Empty);
-                    if (GetCursorPos(out var menuPoint))
-                        _menuTarget.MouseDown(new ShellMenuPoint(menuPoint.X, menuPoint.Y), ProbeMenuTarget);
+                    if (_headerPresetMenuGate.BeginRightClick(
+                        unchecked((nuint)wParam.ToInt64()), GetDiagnosticWindowClass(hwnd)))
+                    {
+                        _menuTarget.Reset();
+                        break;
+                    }
+                    // Always replace the previous hit test. If cursor retrieval fails,
+                    // the later WM_CONTEXTMENU must probe its own point instead of inheriting stale state.
+                    ShellMenuPoint? menuPoint = GetCursorPos(out var cursorPoint)
+                        ? new ShellMenuPoint(cursorPoint.X, cursorPoint.Y) : null;
+                    _menuTarget.MouseDown(menuPoint, ProbeMenuTarget,
+                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
                     break;
                 case 0x007B: // WM_CONTEXTMENU; (-1,-1) means keyboard invocation.
-                    _menuTarget.ContextMenu(lParam, ProbeMenuTarget);
+                    if (_headerPresetMenuGate.TryConsume(
+                        ShellMenuTargetTracker.DecodeContextPoint(lParam), out var headerMenuPoint))
+                    {
+                        Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                            new Action(() => HeaderPresetMenuRequested?.Invoke(headerMenuPoint)));
+                        return IntPtr.Zero;
+                    }
+                    _menuTarget.ContextMenu(lParam, ProbeMenuTarget,
+                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
+                    break;
+                case 0x0100: // WM_KEYDOWN
+                case 0x0104: // WM_SYSKEYDOWN
+                    _headerPresetMenuGate.Reset();
                     break;
                 case 0x0211: // WM_ENTERMENULOOP
                     _menuPrepared = false;
@@ -1111,6 +4305,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 case 0x0212: // WM_EXITMENULOOP
                     _menuPrepared = false;
                     _menuTarget.Reset();
+                    _headerPresetMenuGate.Reset();
                     break;
                 case 0x0082: // WM_NCDESTROY
                     if (hwnd == _viewWindow) _viewWindow = IntPtr.Zero;
@@ -1118,16 +4313,102 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
         }
         catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
-        return DefSubclassProc(hwnd, message, wParam, lParam);
+        var beforeShell = timingSample ? Stopwatch.GetTimestamp() : 0;
+        var result = DefSubclassProc(hwnd, message, wParam, lParam);
+        if (timingSample)
+        {
+            var shellElapsed = Stopwatch.GetTimestamp() - beforeShell;
+            var hostElapsed = beforeShell - timingStartedAt;
+            var timingKey = (message, timingClass);
+            var previous = _nativeViewMessageTimings.GetValueOrDefault(timingKey);
+            _nativeViewMessageTimings[timingKey] = (
+                previous.Samples + 1,
+                previous.HostTotalTicks + hostElapsed,
+                Math.Max(previous.HostMaxTicks, hostElapsed),
+                previous.ShellTotalTicks + shellElapsed,
+                Math.Max(previous.ShellMaxTicks, shellElapsed));
+            if (shellElapsed >= Stopwatch.Frequency / 100 && _nativeViewMessageSlowTimeline.Count < 256)
+            {
+                var shellEnd = beforeShell + shellElapsed;
+                _nativeViewMessageSlowTimeline.Add($"start={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, beforeShell).TotalMilliseconds:F1}ms,end={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart, shellEnd).TotalMilliseconds:F1}ms,msg={message:X}/{timingClass},hwnd={hwnd:X},w={wParam.ToInt64():X},l={lParam.ToInt64():X},shell-ms={TicksToMilliseconds(shellElapsed):F1}");
+            }
+        }
+        return result;
+    }
+
+    private static double TicksToMilliseconds(long ticks) => ticks * 1000d / Stopwatch.Frequency;
+
+    private string GetDiagnosticWindowClass(IntPtr hwnd)
+    {
+        if (_nativeViewWindowClasses.TryGetValue(hwnd, out var windowClass)) return windowClass;
+        windowClass = WindowClass(hwnd);
+        _nativeViewWindowClasses[hwnd] = windowClass;
+        return windowClass;
+    }
+
+    private sealed class DiagnosticStageTiming
+    {
+        private readonly int _sampleMask;
+        private long _calls;
+        private long _samples;
+        private long _sampledTicks;
+        private long _maxTicks;
+
+        internal DiagnosticStageTiming(int sampleStride = 64)
+        {
+            if (sampleStride < 1 || (sampleStride & (sampleStride - 1)) != 0)
+                throw new ArgumentOutOfRangeException(nameof(sampleStride), "Sample stride must be a power of two.");
+            _sampleMask = sampleStride - 1;
+        }
+
+        internal string Snapshot
+        {
+            get
+            {
+                var samples = Interlocked.Read(ref _samples);
+                var sampledTicks = Interlocked.Read(ref _sampledTicks);
+                var maxTicks = Interlocked.Read(ref _maxTicks);
+                return $"calls={Interlocked.Read(ref _calls)},samples={samples},sampled-ms={TicksToMilliseconds(sampledTicks):F3},max-ms={TicksToMilliseconds(maxTicks):F3}";
+            }
+        }
+
+        internal long Start()
+        {
+            var call = Interlocked.Increment(ref _calls);
+            return ((call - 1) & _sampleMask) == 0 ? Stopwatch.GetTimestamp() : 0;
+        }
+
+        internal void Stop(long startedAt)
+        {
+            if (startedAt == 0) return;
+            var elapsedTicks = Stopwatch.GetTimestamp() - startedAt;
+            Interlocked.Increment(ref _samples);
+            Interlocked.Add(ref _sampledTicks, elapsedTicks);
+            long observed;
+            do
+            {
+                observed = Interlocked.Read(ref _maxTicks);
+                if (elapsedTicks <= observed) return;
+            } while (Interlocked.CompareExchange(ref _maxTicks, elapsedTicks, observed) != observed);
+        }
+
+        internal void Reset()
+        {
+            Interlocked.Exchange(ref _calls, 0);
+            Interlocked.Exchange(ref _samples, 0);
+            Interlocked.Exchange(ref _sampledTicks, 0);
+            Interlocked.Exchange(ref _maxTicks, 0);
+        }
     }
 
     private void InjectCommands(IntPtr menu)
     {
-        if (menu == IntPtr.Zero || CustomCommands is null) return;
+        if (menu == IntPtr.Zero || CustomCommands is null || !_menuTarget.CanInjectCustomCommands) return;
         var target = _menuTarget.Resolve();
         Trace($"context-menu target={target}");
-        if (target == ShellMenuTarget.Unknown) return;
-        var selectedItem = target is ShellMenuTarget.Item or ShellMenuTarget.KeyboardSelection
+        // Unknown mouse hits still receive target-independent tab commands; only
+        // a confirmed item or keyboard target may expose the Shell selection.
+        var selectedItem = ShellMenuTargetTracker.CanUseSelectionForCommands(target)
             ? GetSelectedItem() : null;
         var commands = CustomCommands(selectedItem);
         if (commands.Count == 0) return;
@@ -1147,32 +4428,82 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             MenuError?.Invoke(this, "部分自定义右键菜单命令未能插入。");
     }
 
+    private static bool IsNativeContextMenuExcludedWindow(IntPtr hwnd)
+    {
+        var windowClass = WindowClass(hwnd);
+        return windowClass.Equals("SysHeader32", StringComparison.OrdinalIgnoreCase) ||
+            windowClass.Equals("ScrollBar", StringComparison.OrdinalIgnoreCase);
+    }
+
     private Task<ShellMenuTarget> ProbeMenuTarget(ShellMenuPoint point)
     {
         var viewWindow = _viewWindow;
         if (viewWindow == IntPtr.Zero) return Task.FromResult(ShellMenuTarget.Unknown);
+        // Empty values disable the writer too; avoid collecting UIA ancestry when nothing can be logged.
+        var traceHit = ShellMenuHitTrace.IsEnabled(FocusTracePath);
         // UI Automation queries against our own Shell view must not run inside
         // the view's menu/window procedure. An unfinished probe fails closed.
         return Task.Run(() =>
         {
-            try { return HitTestMenuTarget(point, viewWindow); }
-            catch { return ShellMenuTarget.Unknown; }
+            IReadOnlyList<ControlType> controls = [];
+            try
+            {
+                var target = HitTestMenuTarget(point, viewWindow, traceHit, out controls);
+                if (traceHit) Trace(ShellMenuHitTrace.Format(point, target, controls));
+                return target;
+            }
+            catch
+            {
+                if (traceHit) Trace(ShellMenuHitTrace.Format(point, ShellMenuTarget.Unknown, controls));
+                return ShellMenuTarget.Unknown;
+            }
         });
     }
 
-    private static ShellMenuTarget HitTestMenuTarget(ShellMenuPoint point, IntPtr viewWindow)
+    private Task<string?> ProbeFileSystemFolderAtPoint(ShellMenuPoint point, string parentPath, IntPtr viewWindow)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                var itemName = HitTestListItemName(point, viewWindow);
+                if (!ShellMiddleClickTarget.TryGetChildPath(parentPath, itemName, out var candidate)) return null;
+                var itemId = ShellItemId;
+                if (SHCreateItemFromParsingName(candidate, IntPtr.Zero, ref itemId, out var item) < 0)
+                    return null;
+                try
+                {
+                    if (item.GetAttributes(ShellItemKind.RequestedAttributes, out var attributes) < 0 ||
+                        !ShellItemKind.IsFileSystemFolder(attributes) ||
+                        item.GetDisplayName(0x80058000, out var pathPointer) < 0) return null;
+                    try
+                    {
+                        var path = Marshal.PtrToStringUni(pathPointer);
+                        return path is not null && ShellMiddleClickTarget.IsResolvedChild(parentPath, itemName, path)
+                            ? path : null;
+                    }
+                    finally { Marshal.FreeCoTaskMem(pathPointer); }
+                }
+                finally { Marshal.ReleaseComObject(item); }
+            }
+            catch { return null; }
+        });
+    }
+
+    private static string? HitTestListItemName(ShellMenuPoint point, IntPtr viewWindow)
     {
         try
         {
             var element = AutomationElement.FromPoint(new Point(point.X, point.Y));
-            var item = false;
+            string? itemName = null;
             var list = false;
             var owned = false;
             var headerOrScrollBar = false;
             for (var depth = 0; element is not null && depth < 32; depth++)
             {
                 var type = element.Current.ControlType;
-                item |= type == ControlType.ListItem || type == ControlType.DataItem;
+                if (itemName is null && (type == ControlType.ListItem || type == ControlType.DataItem))
+                    itemName = element.Current.Name;
                 list |= type == ControlType.List;
                 headerOrScrollBar |= type == ControlType.Header || type == ControlType.ScrollBar;
                 var handle = new IntPtr(element.Current.NativeWindowHandle);
@@ -1180,15 +4511,80 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     (handle == viewWindow || IsChild(viewWindow, handle));
                 element = TreeWalker.ControlViewWalker.GetParent(element);
             }
-            if (!owned || !list || headerOrScrollBar) return ShellMenuTarget.Unknown;
-            return item ? ShellMenuTarget.Item : ShellMenuTarget.Background;
+            return owned && list && !headerOrScrollBar ? itemName : null;
         }
-        catch (ElementNotAvailableException) { return ShellMenuTarget.Unknown; }
-        catch (COMException) { return ShellMenuTarget.Unknown; }
-        catch (InvalidOperationException) { return ShellMenuTarget.Unknown; }
+        catch (ElementNotAvailableException) { return null; }
+        catch (COMException) { return null; }
+        catch (InvalidOperationException) { return null; }
     }
 
-    private SelectedItem? GetSelectedItem()
+    private static ShellMenuTarget HitTestMenuTarget(ShellMenuPoint point, IntPtr viewWindow,
+        bool collectTrace, out IReadOnlyList<ControlType> controls)
+    {
+        List<ControlType>? ancestry = collectTrace ? [] : null;
+        try
+        {
+            var element = AutomationElement.FromPoint(new Point(point.X, point.Y));
+            var list = false;
+            var owned = false;
+            var headerOrScrollBar = false;
+            for (var depth = 0; element is not null && depth < 32; depth++)
+            {
+                var type = element.Current.ControlType;
+                ancestry?.Add(type);
+                list |= type == ControlType.List;
+                headerOrScrollBar |= type == ControlType.Header || type == ControlType.ScrollBar;
+                var handle = new IntPtr(element.Current.NativeWindowHandle);
+                owned |= handle != IntPtr.Zero &&
+                    (handle == viewWindow || IsChild(viewWindow, handle));
+                element = TreeWalker.ControlViewWalker.GetParent(element);
+            }
+            controls = ancestry ?? [];
+            if (!owned || !list || headerOrScrollBar) return ShellMenuTarget.Unknown;
+            if (TryHitTestNativeListView(point, viewWindow, out var nativeTarget))
+                return nativeTarget;
+            // UIA ListItem bounds may span a whole Details row. If the native list-view
+            // hit test is unavailable, neither an item nor background target is confirmed.
+            return ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: false, itemIndex: -1, hitFlags: 0);
+        }
+        catch (ElementNotAvailableException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
+        catch (COMException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
+        catch (InvalidOperationException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
+    }
+
+    private static bool TryHitTestNativeListView(ShellMenuPoint point, IntPtr viewWindow,
+        out ShellMenuTarget target)
+    {
+        // UIA ListItem bounds can cover the full Details row; the native hit flags distinguish
+        // its icon/text from the blank row area that must receive the Shell background menu.
+        var listView = IntPtr.Zero;
+        EnumChildWindows(viewWindow, (child, _) =>
+        {
+            var name = new StringBuilder(32);
+            GetClassName(child, name, name.Capacity);
+            if (name.ToString() != "SysListView32") return true;
+            listView = child;
+            return false;
+        }, IntPtr.Zero);
+        if (listView == IntPtr.Zero)
+        {
+            target = ShellMenuTarget.Unknown;
+            return false;
+        }
+
+        var clientPoint = new NativePoint { X = point.X, Y = point.Y };
+        if (!ScreenToClient(listView, ref clientPoint))
+        {
+            target = ShellMenuTarget.Unknown;
+            return true;
+        }
+        var hit = new NativeListViewHitTestInfo { X = clientPoint.X, Y = clientPoint.Y };
+        var itemIndex = SendMessage(listView, 0x1039, IntPtr.Zero, ref hit).ToInt32(); // LVM_SUBITEMHITTEST
+        target = ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: true, itemIndex, hit.Flags);
+        return true;
+    }
+
+    internal SelectedItem? GetSelectedItem()
     {
         if (_browser is null) return null;
         var folderViewId = FolderViewId;
@@ -1221,14 +4617,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         finally { Marshal.ReleaseComObject(viewObject); }
     }
+
+    internal bool OpenSelectedFolderInNewTab(Action<string> openPath)
+    {
+        var selected = GetSelectedItem();
+        if (selected is not { IsFileSystemFolder: true }) return false;
+        openPath(selected.Path);
+        return true;
+    }
+
+    internal string? GetSelectedFolderSearchScope() => GetSelectedItem() is { IsFileSystemFolder: true } selected
+        ? selected.Path
+        : null;
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
-        if (ShellSearchLocation.IsSearchPidl(pidl))
-        {
-            _focusWhenReady = false;
-            NavigationFailed?.Invoke(this, "无法打开搜索结果。");
-            return 0;
-        }
+        var identity = NavigationIdentity(pidl);
+        CompleteIssuedSearch(identity);
+        var publish = _viewReadiness.Fail(identity);
+        QueueNavigationAvailability();
+        var navigationVersion = _viewReadiness.NavigationVersion;
         if (FileSystemPath(pidl) is { } path)
         {
             var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
@@ -1237,7 +4644,29 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 !string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))
                 return 0;
         }
-        NavigationFailed?.Invoke(this, "无法打开目录。");
+        if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
+        var reconcile = _viewReadiness.RequiresLocationRead;
+        if (reconcile)
+        {
+            // A mixed success/failure batch has no per-request token. Its last
+            // callback cannot establish which folder the native view retained.
+            ReconcileCurrentLocation(navigationVersion, clearRetry: false);
+            if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
+        }
+        var isSearch = _searchHistory.TryResolve(pidl, out _);
+        if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
+        if (isSearch) _focusWhenReady = false;
+        void ReportFailure()
+        {
+            if (_viewReadiness.IsCurrent(navigationVersion))
+                NavigationFailed?.Invoke(this, _locationUnconfirmed
+                    ? "当前 Shell 目录位置暂时无法确认，请刷新重试。"
+                    : isSearch ? "无法打开搜索结果。" : "无法打开目录。");
+        }
+        // Reconciliation queues a location update which also resets status text.
+        // Queue the error after it so the older status cannot erase the failure.
+        if (reconcile) Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(ReportFailure));
+        else ReportFailure();
         return 0;
     }
 
@@ -1281,10 +4710,38 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch { /* Diagnostic output must not affect file operations. */ }
     }
 
+    private bool _wheelTraceQueued;
+    private void QueueWheelViewTrace()
+    {
+        if (_wheelTraceQueued || Dispatcher.HasShutdownStarted) return;
+        _wheelTraceQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _wheelTraceQueued = false;
+            var view = IntPtr.Zero;
+            try
+            {
+                view = GetFolderView2Pointer();
+                if (view == IntPtr.Zero) { Trace("wheel view-unavailable"); return; }
+                var hr = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var size);
+                Trace($"wheel after view={_viewWindow} result={hr:X8} mode={mode} size={size}");
+            }
+            catch (Exception ex) { Trace($"wheel read-failed={ex.HResult:X8}"); }
+            finally { if (view != IntPtr.Zero) Marshal.Release(view); }
+        }));
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeListViewHitTestInfo
+    {
+        public int X, Y;
+        public uint Flags;
+        public int Item, SubItem, Group;
+    }
     [StructLayout(LayoutKind.Sequential)]
     private struct FolderSettings { public uint ViewMode, Flags; }
     [StructLayout(LayoutKind.Sequential)]
@@ -1448,11 +4905,22 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetKeyboardState([Out] byte[] keyboardState);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetKeyboardState([In] byte[] keyboardState);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr hwnd, ref NativePoint point);
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -1466,8 +4934,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool IsChild(IntPtr parent, IntPtr child);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hwnd, StringBuilder className, int maximum);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItem item);
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam,
+        ref NativeListViewHitTestInfo lParam);
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")]
@@ -1482,8 +4956,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern bool DestroyWindow(IntPtr hwnd);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHParseDisplayName(string name, IntPtr bindContext, out IntPtr pidl, uint attributes, out uint receivedAttributes);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint GetDriveType(string rootPath);
     [DllImport("shell32.dll")]
     private static extern IntPtr ILFindLastID(IntPtr pidl);
+    [DllImport("shell32.dll")]
+    private static extern IntPtr ILClone(IntPtr pidl);
     [DllImport("shell32.dll")]
     private static extern IntPtr ILCombine(IntPtr parent, IntPtr child);
     [DllImport("shell32.dll", PreserveSig = true)]

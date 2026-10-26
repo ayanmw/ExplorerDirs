@@ -7,38 +7,133 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../ExplorerDirs.App/ShellHistoryEvents.cs" Link="ShellHistoryEvents.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellAutoColumnWidthRouting.cs" Link="ShellAutoColumnWidthRouting.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewShortcutDispatch.cs" Link="FileViewShortcutDispatch.cs" />
+    <Compile Include="../ExplorerDirs.App/AddressTreeShortcutState.cs" Link="AddressTreeShortcutState.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeFolderLocation.cs" Link="ShellTreeFolderLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/AddressPathHistory.cs" Link="AddressPathHistory.cs" />
+    <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
+    <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewStyleWheelCycle.cs" Link="ViewStyleWheelCycle.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewStyleWheelAccumulator.cs" Link="ViewStyleWheelAccumulator.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellItemCounts.cs" Link="ShellItemCounts.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionSizeRefreshGate.cs" Link="ShellSelectionSizeRefreshGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeBatch.cs" Link="ShellDirectoryChangeBatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeQueue.cs" Link="ShellDirectoryChangeQueue.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeMonitorOptions.cs" Link="ShellDirectoryChangeMonitorOptions.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryWatcherRecovery.cs" Link="ShellDirectoryWatcherRecovery.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryRefreshRecovery.cs" Link="ShellDirectoryRefreshRecovery.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryNotificationRecovery.cs" Link="ShellDirectoryNotificationRecovery.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellRefreshRequest.cs" Link="ShellRefreshRequest.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellRefreshCompletion.cs" Link="ShellRefreshCompletion.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryMonitorStartup.cs" Link="ShellDirectoryMonitorStartup.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryMonitorRequest.cs" Link="ShellDirectoryMonitorRequest.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryWatcherStartup.cs" Link="ShellDirectoryWatcherStartup.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellCreatedItemNotification.cs" Link="ShellCreatedItemNotification.cs" />
+    <Compile Include="../ExplorerDirs.App/PasteSpecialOutput.cs" Link="PasteSpecialOutput.cs" />
+    <Compile Include="../ExplorerDirs.App/CreatedFileSelectionRequest.cs" Link="CreatedFileSelectionRequest.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellCreateNotificationBatch.cs" Link="ShellCreateNotificationBatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDeleteNotificationBatch.cs" Link="ShellDeleteNotificationBatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDeletedItemNotification.cs" Link="ShellDeletedItemNotification.cs" />
+    <Compile Include="../ExplorerDirs.App/ByteSizeFormatter.cs" Link="ByteSizeFormatter.cs" />
+    <Compile Include="../ExplorerDirs.App/DiskSpaceStatus.cs" Link="DiskSpaceStatus.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFileCommands.cs" Link="ShellFileCommands.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellCommandRefreshGate.cs" Link="ShellCommandRefreshGate.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeShellCommandMenu.cs" Link="NativeShellCommandMenu.cs" />
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
+    <Compile Include="../ExplorerDirs.App/WorkspaceCatalog.cs" Link="WorkspaceCatalog.cs" />
     <Compile Include="../ExplorerDirs.App/QdrViewSettings.cs" Link="QdrViewSettings.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrViewWriter.cs" Link="QdrViewWriter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
     <Compile Include="../ExplorerDirs.App/FocusTraversal.cs" Link="FocusTraversal.cs" />
     <Compile Include="../ExplorerDirs.App/CrashLog.cs" Link="CrashLog.cs" />
     <Compile Include="../ExplorerDirs.App/EnvironmentRefresh.cs" Link="EnvironmentRefresh.cs" />
+    <Compile Include="../ExplorerDirs.App/SystemSettingChangeHook.cs" Link="SystemSettingChangeHook.cs" />
     <Compile Include="../ExplorerDirs.App/TerminalLauncher.cs" Link="TerminalLauncher.cs" />
+    <Compile Include="../ExplorerDirs.App/NetworkDriveDialogs.cs" Link="NetworkDriveDialogs.cs" />
     <Compile Include="../ExplorerDirs.App/DirectoryNavigationGate.cs" Link="DirectoryNavigationGate.cs" />
     <Compile Include="../ExplorerDirs.App/FavoritesStore.cs" Link="FavoritesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickLinkStore.cs" Link="QuickLinkStore.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickLinkAvailability.cs" Link="QuickLinkAvailability.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterEntry.cs" Link="ProgramStarterEntry.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterEntryCommit.cs" Link="ProgramStarterEntryCommit.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterStore.cs" Link="ProgramStarterStore.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterEntryFormatter.cs" Link="ProgramStarterEntryFormatter.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterArguments.cs" Link="ProgramStarterArguments.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrProgramImporter.cs" Link="QdrProgramImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterLauncher.cs" Link="ProgramStarterLauncher.cs" />
+    <Compile Include="../ExplorerDirs.App/ProgramStarterCommandState.cs" Link="ProgramStarterCommandState.cs" />
     <Compile Include="../ExplorerDirs.App/TabReorder.cs" Link="TabReorder.cs" />
     <Compile Include="../ExplorerDirs.App/TabHeaderPanel.cs" Link="TabHeaderPanel.cs" />
     <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
+    <Compile Include="../ExplorerDirs.App/ThemePreferenceStore.cs" Link="ThemePreferenceStore.cs" />
+    <Compile Include="../ExplorerDirs.App/SizeDisplayPreferenceStore.cs" Link="SizeDisplayPreferenceStore.cs" />
+    <Compile Include="../ExplorerDirs.App/ThemePalette.cs" Link="ThemePalette.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewPresetStore.cs" Link="ViewPresetStore.cs" />
     <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/StartupDirectory.cs" Link="StartupDirectory.cs" />
     <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeMiddleClick.cs" Link="ShellTreeMiddleClick.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeLocationTarget.cs" Link="ShellTreeLocationTarget.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellMiddleClickTarget.cs" Link="ShellMiddleClickTarget.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuCommand.cs" Link="ShellMenuCommand.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuTargetTracker.cs" Link="ShellMenuTargetTracker.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateCapture.cs" Link="ShellViewStateCapture.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNavigationState.cs" Link="ShellNavigationState.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickFilterEnumerationGate.cs" Link="QuickFilterEnumerationGate.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickFilterFavoritesStore.cs" Link="QuickFilterFavoritesStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionRecoverySuppression.cs" Link="ShellSelectionRecoverySuppression.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionBatchRestore.cs" Link="ShellSelectionBatchRestore.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFocusRestoreGate.cs" Link="ShellFocusRestoreGate.cs" />
+    <Compile Include="../ExplorerDirs.App/TabRecoveryShortcut.cs" Link="TabRecoveryShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/RunMarkerTracker.cs" Link="RunMarkerTracker.cs" />
     <Compile Include="../ExplorerDirs.App/PersistentTabHost.cs" Link="PersistentTabHost.cs" />
     <Compile Include="../ExplorerDirs.App/PaneLayoutHost.cs" Link="PaneLayoutHost.cs" />
+    <Compile Include="../ExplorerDirs.App/PaneLayoutGrid.cs" Link="PaneLayoutGrid.cs" />
+    <Compile Include="../ExplorerDirs.App/LayoutProportionsStore.cs" Link="LayoutProportionsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/NavigationTreeWidthsStore.cs" Link="NavigationTreeWidthsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowSessionRegistry.cs" Link="WindowSessionRegistry.cs" />
     <Compile Include="../ExplorerDirs.App/LayoutPreset.cs" Link="LayoutPreset.cs" />
     <Compile Include="../ExplorerDirs.App/FolderCreationObservation.cs" Link="FolderCreationObservation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellNewFolderRefreshGate.cs" Link="ShellNewFolderRefreshGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellNewFolderEditGate.cs" Link="ShellNewFolderEditGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ExplorerPaneVisibility.cs" Link="ExplorerPaneVisibility.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewExport.cs" Link="FileViewExport.cs" />
+    <Compile Include="../ExplorerDirs.App/PhotoPrintSelection.cs" Link="PhotoPrintSelection.cs" />
+    <Compile Include="../ExplorerDirs.App/PhotoPrintLayout.cs" Link="PhotoPrintLayout.cs" />
+    <Compile Include="../ExplorerDirs.App/PhotoPrintImageLoader.cs" Link="PhotoPrintImageLoader.cs" />
+    <Compile Include="../ExplorerDirs.App/PhotoPrintDocument.cs" Link="PhotoPrintDocument.cs" />
+    <Compile Include="../ExplorerDirs.App/PhotoPrintPreviewGate.cs" Link="PhotoPrintPreviewGate.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewPrintLayout.cs" Link="FileViewPrintLayout.cs" />
+    <Compile Include="../ExplorerDirs.App/FileViewPrintDocument.cs" Link="FileViewPrintDocument.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTabDropTarget.cs" Link="ShellTabDropTarget.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellChangedItemNotificationBatch.cs" Link="ShellChangedItemNotificationBatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFolderViewOptions.cs" Link="ShellFolderViewOptions.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellHeaderPresetShortcut.cs" Link="ShellHeaderPresetShortcut.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellHeaderPresetMenuGate.cs" Link="ShellHeaderPresetMenuGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellStatusCountRefreshGate.cs" Link="ShellStatusCountRefreshGate.cs" />
   </ItemGroup>
 </Project>

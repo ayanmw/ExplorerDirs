@@ -9,8 +9,8 @@ namespace ExplorerDirs.App;
 
 internal enum FolderForwardResult { Accepted, Rejected, Unavailable, Uncertain }
 
-// Routes one directory argument to an existing process using the same profile.
-// The pipe never lists or probes the target directory; the Shell does that later.
+// Routes directory arguments and activation requests to the process that owns a profile.
+// The pipe never lists or probes a target directory; the Shell does that later.
 internal sealed class FolderOpenRouter : IDisposable
 {
     private const int MaximumPathBytes = 128 * 1024;
@@ -21,16 +21,19 @@ internal sealed class FolderOpenRouter : IDisposable
     private readonly string _pipeName;
     private readonly FileStream _ownership;
     private readonly Func<string, Task<bool>> _openDirectory;
+    private readonly Func<Task<bool>>? _activateWindow;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _serveTask;
     private int _disposed;
 
     private FolderOpenRouter(string pipeName, FileStream ownership,
-        Func<string, Task<bool>> openDirectory, NamedPipeServerStream firstServer)
+        Func<string, Task<bool>> openDirectory, Func<Task<bool>>? activateWindow,
+        NamedPipeServerStream firstServer)
     {
         _pipeName = pipeName;
         _ownership = ownership;
         _openDirectory = openDirectory;
+        _activateWindow = activateWindow;
         _serveTask = ServeAsync(firstServer);
     }
 
@@ -44,7 +47,8 @@ internal sealed class FolderOpenRouter : IDisposable
         return "ExplorerDirs.Folder.v1." + Convert.ToHexString(hash[..16]);
     }
 
-    public static FolderOpenRouter? TryStart(string profilePath, Func<string, Task<bool>> openDirectory)
+    public static FolderOpenRouter? TryStart(string profilePath, Func<string, Task<bool>> openDirectory,
+        Func<Task<bool>>? activateWindow = null)
     {
         var pipeName = PipeName(profilePath);
         FileStream? ownership = null;
@@ -55,7 +59,7 @@ internal sealed class FolderOpenRouter : IDisposable
             ownership = new FileStream(Path.Combine(directory, pipeName + ".lock"),
                 FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             var firstServer = NewServer(pipeName, first: true);
-            return new FolderOpenRouter(pipeName, ownership, openDirectory, firstServer);
+            return new FolderOpenRouter(pipeName, ownership, openDirectory, activateWindow, firstServer);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -73,6 +77,15 @@ internal sealed class FolderOpenRouter : IDisposable
         if (payload.Length is < 1 or > MaximumPathBytes)
             return FolderForwardResult.Rejected;
 
+        return await SendRequestAsync(profilePath, payload, timeout).ConfigureAwait(false);
+    }
+
+    public static Task<FolderForwardResult> TryActivateAsync(string profilePath, TimeSpan timeout) =>
+        SendRequestAsync(profilePath, null, timeout);
+
+    private static async Task<FolderForwardResult> SendRequestAsync(string profilePath, byte[]? payload,
+        TimeSpan timeout)
+    {
         using var client = new NamedPipeClientStream(".", PipeName(profilePath), PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         using var deadline = new CancellationTokenSource(timeout);
@@ -86,9 +99,10 @@ internal sealed class FolderOpenRouter : IDisposable
         try
         {
             var header = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(header, payload is null ? -1 : payload.Length);
             await client.WriteAsync(header, deadline.Token).ConfigureAwait(false);
-            await client.WriteAsync(payload, deadline.Token).ConfigureAwait(false);
+            if (payload is not null)
+                await client.WriteAsync(payload, deadline.Token).ConfigureAwait(false);
             await client.FlushAsync(deadline.Token).ConfigureAwait(false);
             var response = new byte[1];
             await client.ReadExactlyAsync(response, deadline.Token).ConfigureAwait(false);
@@ -144,7 +158,16 @@ internal sealed class FolderOpenRouter : IDisposable
         await server.ReadExactlyAsync(header, readDeadline.Token).ConfigureAwait(false);
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
         var accepted = false;
-        if (length is > 0 and <= MaximumPathBytes)
+        if (length == -1)
+        {
+            if (_activateWindow is not null)
+            {
+                try { accepted = await _activateWindow().WaitAsync(stop).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
+                catch (Exception) { /* A failed activation must not masquerade as accepted. */ }
+            }
+        }
+        else if (length is > 0 and <= MaximumPathBytes)
         {
             var payload = new byte[length];
             readDeadline.CancelAfter(RequestReadTimeout);

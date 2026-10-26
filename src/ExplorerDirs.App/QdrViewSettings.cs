@@ -16,7 +16,7 @@ internal static class QdrViewSettings
         if (text.Length > 200000) return false;
         var fields = text.Split('|');
         if (fields.Length != 4 || fields[1] != "CODEMODE1" ||
-            !int.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+            !int.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var checksum) ||
             !int.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var length) ||
             length is < 60 or > 65536 || fields[0].Length != length * 3) return false;
         var bytes = new byte[length];
@@ -27,7 +27,8 @@ internal static class QdrViewSettings
             U32(bytes, 48) != length - 52) return false;
         foreach (var offset in new[] { 4, 8, 12, 16, 20, 24, 36, 40, 44 })
             if (U32(bytes, offset) != 0) return false;
-        // The signed field preceding the byte count is opaque, not a verified checksum.
+        // Q-Dir 12.79 verifies the complete envelope before consuming its stream.
+        if (ComputeChecksum(bytes) != checksum) return false;
         using var properties = new Properties(bytes.AsSpan(52).ToArray());
         try
         {
@@ -47,6 +48,24 @@ internal static class QdrViewSettings
         }
         catch (Exception ex) when (ex is InvalidDataException or COMException or InvalidCastException or ArgumentException)
         { return false; }
+    }
+
+    internal static int ComputeChecksum(ReadOnlySpan<byte> bytes)
+    {
+        // Format behavior verified against both native read/write paths and
+        // saved files: signed bytes, zero skips multiplication, 32-bit wrap.
+        // This is a compatibility check, not a cryptographic integrity check.
+        unchecked
+        {
+            var checksum = 0;
+            foreach (var value in bytes)
+            {
+                var signed = (sbyte)value;
+                if (signed != 0) checksum *= signed;
+                checksum += signed;
+            }
+            return checksum;
+        }
     }
 
     private static IReadOnlyList<SortColumnState> ReadSort(byte[] bytes)

@@ -8,6 +8,12 @@ namespace ExplorerDirs.App;
 internal sealed record PersistedVariable(string Value, bool Expand);
 internal sealed record EnvironmentRefreshPlan(
     IReadOnlyDictionary<string, string> Values, IReadOnlyList<string> Removed);
+internal sealed class EnvironmentRefreshRollbackException(
+    IReadOnlyList<string> unrestoredNames, IEnumerable<Exception> errors)
+    : AggregateException("环境变量刷新失败，且部分旧值未能恢复。", errors)
+{
+    public IReadOnlyList<string> UnrestoredNames { get; } = unrestoredNames;
+}
 
 internal sealed class EnvironmentRefresh
 {
@@ -27,11 +33,19 @@ internal sealed class EnvironmentRefresh
         var user = ReadPersisted(EnvironmentVariableTarget.User);
         var plan = BuildPlan(machine, user, ReadProcess(), _previousPersistedNames);
 
-        ApplyPlan(plan);
+        try { ApplyPlan(plan); }
+        catch (EnvironmentRefreshRollbackException error)
+        {
+            RememberUnrestoredNames(_previousPersistedNames, error.UnrestoredNames);
+            throw;
+        }
         _previousPersistedNames.Clear();
         _previousPersistedNames.UnionWith(plan.Values.Keys);
         return plan.Values.Count;
     }
+
+    internal static void RememberUnrestoredNames(HashSet<string> previousPersistedNames,
+        IEnumerable<string> unrestoredNames) => previousPersistedNames.UnionWith(unrestoredNames);
 
     internal static void ApplyPlan(EnvironmentRefreshPlan plan)
     {
@@ -68,15 +82,16 @@ internal sealed class EnvironmentRefresh
         }
         catch (Exception error)
         {
-            var rollbackFailures = new List<Exception>();
+            var rollbackFailures = new List<(string Name, Exception Error)>();
             foreach (var name in changed.AsEnumerable().Reverse().Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try { write(name, before[name]); }
-                catch (Exception rollbackError) { rollbackFailures.Add(rollbackError); }
+                catch (Exception rollbackError) { rollbackFailures.Add((name, rollbackError)); }
             }
             if (rollbackFailures.Count > 0)
-                throw new AggregateException("环境变量刷新失败，且部分旧值未能恢复。",
-                    new[] { error }.Concat(rollbackFailures));
+                throw new EnvironmentRefreshRollbackException(
+                    rollbackFailures.Select(failure => failure.Name).ToArray(),
+                    new[] { error }.Concat(rollbackFailures.Select(failure => failure.Error)));
             throw;
         }
     }

@@ -4,15 +4,20 @@ using System.Numerics;
 
 namespace ExplorerDirs.App;
 
-internal sealed class UiPreferencesStore
+internal sealed class UiPreferencesStore(string path)
+    : PortableBooleanPreference(path, "Appearance", "Compact", "外观");
+
+internal sealed class AddressBarStyleStore(string path)
+    : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
+
+// Separate files let older releases preserve settings they do not understand.
+internal class PortableBooleanPreference(string path, string section, string keyName, string label)
 {
-    private readonly string _path;
+    private readonly string _path = path;
     private string? _lastSeenContent;
     private bool _canOverwrite = true;
 
     public string? LoadWarning { get; private set; }
-
-    public UiPreferencesStore(string path) => _path = path;
 
     public bool Load()
     {
@@ -35,7 +40,7 @@ internal sealed class UiPreferencesStore
                 if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#')) continue;
                 if (line.StartsWith('[') && line.EndsWith(']'))
                 {
-                    inAppearance = line.Equals("[Appearance]", StringComparison.OrdinalIgnoreCase);
+                    inAppearance = line.Equals($"[{section}]", StringComparison.OrdinalIgnoreCase);
                     if (!inAppearance || seenAppearance) complete = false;
                     seenAppearance |= inAppearance;
                     continue;
@@ -54,7 +59,7 @@ internal sealed class UiPreferencesStore
                         version = BigInteger.Max(version, parsed);
                     }
                 }
-                else if (key.Equals("Compact", StringComparison.OrdinalIgnoreCase))
+                else if (key.Equals(keyName, StringComparison.OrdinalIgnoreCase))
                 {
                     if (compact.HasValue || !bool.TryParse(value, out var parsed)) complete = false;
                     else compact = parsed;
@@ -64,7 +69,7 @@ internal sealed class UiPreferencesStore
             if (version > 1)
             {
                 _canOverwrite = false;
-                LoadWarning = "外观配置格式高于当前版本；已停止写入原文件。";
+                LoadWarning = $"{label}配置格式高于当前版本；已停止写入原文件。";
                 return false;
             }
             if (version != 1 || !compact.HasValue || !seenAppearance) complete = false;
@@ -75,25 +80,25 @@ internal sealed class UiPreferencesStore
         try
         {
             File.Copy(_path, _path + $".invalid-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.bak");
-            LoadWarning = "外观配置不完整；已备份原文件并恢复可读取的设置。";
+            LoadWarning = $"{label}配置不完整；已备份原文件并恢复可读取的设置。";
         }
         catch (Exception)
         {
             _canOverwrite = false;
-            LoadWarning = "外观配置不完整且备份失败；本次不会覆盖原文件。";
+            LoadWarning = $"{label}配置不完整且备份失败；本次不会覆盖原文件。";
         }
         return compact ?? false;
     }
 
     public void Save(bool compact)
     {
-        if (!_canOverwrite) throw new IOException($"外观配置原文件受到保护，已停止覆盖：{_path}");
-        var content = "; Explorer Dirs portable appearance. Close the app before editing." + Environment.NewLine +
-            "[Appearance]" + Environment.NewLine +
+        if (!_canOverwrite) throw new IOException($"{label}配置原文件受到保护，已停止覆盖：{_path}");
+        var content = "; Explorer Dirs portable preference. Close the app before editing." + Environment.NewLine +
+            $"[{section}]" + Environment.NewLine +
             "FormatVersion=1" + Environment.NewLine +
-            $"Compact={compact.ToString().ToLowerInvariant()}" + Environment.NewLine;
+            $"{keyName}={compact.ToString().ToLowerInvariant()}" + Environment.NewLine;
         PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
-            "外观配置已被其他实例修改；请重启程序后再保存。");
+            $"{label}配置已被其他实例修改；请重启程序后再保存。");
         _lastSeenContent = content;
     }
 }

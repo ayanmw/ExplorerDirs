@@ -1,0 +1,65 @@
+<Window x:Class="ExplorerDirs.App.PhotoPrintWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="打印所选照片" Width="1080" Height="720" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterOwner" Loaded="Window_Loaded">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <DockPanel Grid.Column="0" Grid.RowSpan="2">
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock x:Name="PrinterLabel" Text="打印机" Margin="0,0,0,4"/>
+                <ComboBox x:Name="PrinterPicker" AutomationProperties.LabeledBy="{Binding ElementName=PrinterLabel}"
+                          SelectionChanged="PrinterPicker_SelectionChanged"/>
+                <TextBlock x:Name="PaperLabel" Text="纸张" Margin="0,10,0,4"/>
+                <ComboBox x:Name="PaperPicker" AutomationProperties.LabeledBy="{Binding ElementName=PaperLabel}"
+                          SelectionChanged="PaperPicker_SelectionChanged"/>
+                <TextBlock x:Name="PhotosPerPageLabel" Text="每页照片数" Margin="0,10,0,4"/>
+                <ComboBox x:Name="PhotosPerPagePicker"
+                          AutomationProperties.LabeledBy="{Binding ElementName=PhotosPerPageLabel}"
+                          SelectionChanged="Settings_SelectionChanged">
+                    <ComboBoxItem Content="1" Tag="1" IsSelected="True"/>
+                    <ComboBoxItem Content="2" Tag="2"/>
+                    <ComboBoxItem Content="4" Tag="4"/>
+                    <ComboBoxItem Content="6" Tag="6"/>
+                    <ComboBoxItem Content="9" Tag="9"/>
+                </ComboBox>
+                <TextBlock Text="照片尺寸（厘米；留空则适合版面）" Margin="0,10,0,4"/>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="8"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBox x:Name="CustomWidth" AutomationProperties.Name="照片宽度（厘米）"
+                             ToolTip="宽度（厘米）" TextChanged="Settings_TextChanged"/>
+                    <TextBox x:Name="CustomHeight" Grid.Column="2" AutomationProperties.Name="照片高度（厘米）"
+                             ToolTip="高度（厘米）" TextChanged="Settings_TextChanged"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <RadioButton x:Name="FitMode" Content="完整显示" IsChecked="True" Checked="Settings_SelectionChanged"/>
+                    <RadioButton x:Name="FillMode" Content="填满裁切" Margin="12,0,0,0" Checked="Settings_SelectionChanged"/>
+                </StackPanel>
+                <TextBlock x:Name="SettingsError" AutomationProperties.LiveSetting="Assertive"
+                           Foreground="Firebrick" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                <TextBlock x:Name="RejectedItemsLabel" Text="无法读取的项目" FontWeight="Bold" Margin="0,14,0,4"/>
+            </StackPanel>
+            <ListBox x:Name="RejectedItemsList" AutomationProperties.LabeledBy="{Binding ElementName=RejectedItemsLabel}"
+                     DisplayMemberPath="DisplayName"/>
+        </DockPanel>
+        <Border Grid.Column="2" Grid.Row="0" BorderBrush="#808080" BorderThickness="1" Background="#E8E8E8">
+            <DockPanel>
+                <TextBlock x:Name="PreviewSummary" AutomationProperties.Name="照片打印预览摘要"
+                           DockPanel.Dock="Top" Margin="8,5"/>
+                <DocumentViewer x:Name="PreviewViewer" AutomationProperties.Name="照片分页预览"/>
+            </DockPanel>
+        </Border>
+        <StackPanel Grid.Column="2" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="取消" IsCancel="True" MinWidth="90" Margin="0,0,8,0"/>
+            <Button x:Name="PrintButton" Content="打印" IsDefault="True" MinWidth="90" Click="PrintButton_Click" IsEnabled="False"/>
+        </StackPanel>
+    </Grid>
+</Window>

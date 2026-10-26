@@ -6,6 +6,7 @@ namespace ExplorerDirs.App;
 internal static class ShellColumnManager
 {
     private static readonly Guid InterfaceId = new("d8ec27bb-3f3b-4042-b10a-4acfd924d453");
+    private static readonly Guid PropertyDescriptionId = new("6F79D558-3E96-4549-A1D1-7D75D2288814");
     private const int NoInterface = unchecked((int)0x80004002);
     private const int InvalidData = unchecked((int)0x8007000D);
     private const uint VisibleColumns = 2;
@@ -38,6 +39,31 @@ internal static class ShellColumnManager
             return 0;
         }
         finally { Marshal.Release(manager); }
+    }
+
+    internal static int CaptureForExport(IntPtr folderView, out IReadOnlyList<ShellExportColumn>? columns)
+    {
+        columns = null;
+        var result = Capture(folderView, out var layout);
+        if (result != 0 || layout is null) return result;
+        columns = layout.Select(column => new ShellExportColumn(column.Key, GetDisplayName(column.Key))).ToArray();
+        return 0;
+    }
+
+    private static string GetDisplayName(PropertyKeyState propertyKey)
+    {
+        var key = new NativeKey { FormatId = propertyKey.FormatId, PropertyId = propertyKey.PropertyId };
+        var iid = PropertyDescriptionId;
+        if (PSGetPropertyDescription(in key, in iid, out var description) < 0 || description == IntPtr.Zero)
+            return $"{propertyKey.FormatId:B}:{propertyKey.PropertyId}";
+        try
+        {
+            var result = Method<GetDisplayNameMethod>(description, 6)(description, out var name);
+            if (result < 0 || name == IntPtr.Zero) return $"{propertyKey.FormatId:B}:{propertyKey.PropertyId}";
+            try { return Marshal.PtrToStringUni(name) ?? $"{propertyKey.FormatId:B}:{propertyKey.PropertyId}"; }
+            finally { Marshal.FreeCoTaskMem(name); }
+        }
+        finally { Marshal.Release(description); }
     }
 
     public static int Apply(IntPtr folderView, IReadOnlyList<DisplayColumnState> columns)
@@ -77,6 +103,7 @@ internal static class ShellColumnManager
         {
             Size = (uint)Marshal.SizeOf<ColumnInfo>(), Mask = 1, Width = width, Name = string.Empty
         };
+
     }
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
@@ -89,4 +116,11 @@ internal static class ShellColumnManager
         [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] NativeKey[] keys, uint count);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int ColumnInfoMethod(IntPtr self, ref NativeKey key, ref ColumnInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetDisplayNameMethod(IntPtr self, out IntPtr name);
+
+    [DllImport("propsys.dll", PreserveSig = true)]
+    private static extern int PSGetPropertyDescription(in NativeKey key, in Guid iid, out IntPtr description);
 }
+
+internal sealed record ShellExportColumn(PropertyKeyState Key, string Name);

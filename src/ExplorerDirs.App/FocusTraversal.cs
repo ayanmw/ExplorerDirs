@@ -1,7 +1,77 @@
 namespace ExplorerDirs.App;
 
+internal enum TreeFocusTarget { None, Pane, Shared }
+
+internal readonly record struct PaneFocusStopMap(
+    int SearchStart,
+    int SearchCount,
+    int FilterStart,
+    int FilterCount,
+    int NavigationStopCount,
+    int TreeButton,
+    int Address,
+    int AddressMenu,
+    int AddressHistory,
+    int Go,
+    int NewTab,
+    int CloseTab,
+    int TabHeader,
+    int Tree,
+    int ColumnHeader,
+    int FileView,
+    int StatusTools,
+    int Count,
+    IReadOnlyList<int> MajorStops)
+{
+    private const int BaseNavigationStopCount = 8;
+
+    // Keep optional bars, tab headers, the tree and native column headers in
+    // one index map so Tab and F6 cannot drift when a view's stops change.
+    internal static PaneFocusStopMap Create(bool searchVisible, bool quickFilterVisible,
+        bool treeVisible, bool hasColumnHeader, bool paneTreeButtonVisible = false,
+        bool addressHistoryButtonVisible = false, bool addressPathButtonVisible = false)
+    {
+        var navigationStopCount = BaseNavigationStopCount + (paneTreeButtonVisible ? 1 : 0) +
+            (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
+        var treeButton = paneTreeButtonVisible ? 4 : -1;
+        var address = 4 + (paneTreeButtonVisible ? 1 : 0);
+        var addressMenu = addressPathButtonVisible ? address + 1 : -1;
+        var addressHistory = addressHistoryButtonVisible ? address + 1 + (addressPathButtonVisible ? 1 : 0) : -1;
+        var go = address + 1 + (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
+        var newTab = go + 1;
+        var closeTab = go + 2;
+        var searchCount = searchVisible ? 3 : 0;
+        var filterCount = quickFilterVisible ? 8 : 0;
+        var searchStart = navigationStopCount;
+        var filterStart = searchStart + searchCount;
+        var tabHeader = filterStart + filterCount;
+        var tree = treeVisible ? tabHeader + 1 : -1;
+        var columnHeader = tabHeader + (treeVisible ? 2 : 1);
+        var fileView = columnHeader + (hasColumnHeader ? 1 : 0);
+        var statusTools = fileView + 1;
+        var majorStops = new List<int> { address };
+        if (searchVisible) majorStops.Add(searchStart);
+        if (quickFilterVisible) majorStops.Add(filterStart);
+        majorStops.Add(tabHeader);
+        if (treeVisible) majorStops.Add(tree);
+        if (hasColumnHeader) majorStops.Add(columnHeader);
+        majorStops.Add(fileView);
+        majorStops.Add(statusTools);
+        return new PaneFocusStopMap(searchStart, searchCount, filterStart, filterCount,
+            navigationStopCount, treeButton, address, addressMenu, addressHistory, go, newTab, closeTab,
+            tabHeader, tree, columnHeader, fileView, statusTools, statusTools + 1, majorStops);
+    }
+}
+
 internal static class FocusTraversal
 {
+    internal static TreeFocusTarget TreeTarget(TreeDisplayMode mode, bool paneTreeVisible) => mode switch
+    {
+        TreeDisplayMode.Shared => TreeFocusTarget.Shared,
+        TreeDisplayMode.PerPane when paneTreeVisible => TreeFocusTarget.Pane,
+        _ => TreeFocusTarget.None
+    };
+
     public static (int Pane, int Stop) Move(int pane, int stop, IReadOnlyList<int> stopCounts, bool reverse)
     {
         if (stopCounts.Count == 0 || stopCounts.Any(count => count < 1))
