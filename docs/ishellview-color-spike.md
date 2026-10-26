@@ -897,3 +897,9 @@ NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame
 在四窗格菜单循环末尾对最后一个 view 调用 `UIActivate(SVUIA_DEACTIVATE)`，新增断言要求 Shell 增加 `RemoveMenusSB` 回调、顶层 frame 菜单恢复到 coordinator 创建时的原始菜单。NativeProbe Release 构建 0 警告/错误；`session-restore-private-desktop` watchdog 连续三轮退出码 0，日志 `20261027-033747-45b38d47.stdout.log`、`20261027-033826-666e2fb3.stdout.log`、`20261027-033846-ea5e22c8.stdout.log`。每轮轨迹显示最后 pane 的 `SetMenuSB(menu=0)` 与 `RemoveMenusSB` 均返回 `S_OK`，`GetMenu(frame)` 从活动菜单变回 0；前台 HWND 未变化。完整四窗格会话、命令、文件操作及目录通知样本也通过。
 
 该检查补齐了原型的活动菜单卸载路径，但仍不显示或点击菜单，也不验证 WPF/ExplorerBrowser 产品宿主。Shell 拖放仍未通过 `DoDragDrop`：微软 [GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) 与 [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos) 文档要求调用线程位于 input desktop；Private Desktop 不是活动 input desktop，不能用它来定位拖动光标。没有切换用户桌面或注入输入；真实拖放仍需独占且获授权的可接收输入会话。
+
+### 2026-10-27 F2 编辑状态下四方向键隔离验证
+
+将原有的 Left/Right 检查扩展为 Left/Up/Right/Down。Private Desktop `host-newfolder-private-desktop` watchdog 通过：先用 Shell canonical `newfolder` 在临时目录创建项目，选中并聚焦它，向 `IShellView::TranslateAccelerator` 发送 F2，再把四个方向键分别发给原生 `Edit` 编辑框。四次返回 `S_OK`，编辑框持续存在且持续持有焦点；日志 `src/.state/native-probe-watchdog/20261027-034108-b117b401.stdout.log` 显示 `foreground-unchanged=True`。NativeProbe Release build 为 0 警告、0 错误。
+
+这只证明单个原生 filesystem `IShellView` 的合成消息路径；没有覆盖 List/Icon 等视图方式、真实物理键盘、多窗格邻窗焦点、WPF `HwndHost` 或产品 ExplorerBrowser。该证据可用于后续宿主迁移比较，不能宣称用户报告的多窗格 F2 缺陷已修复。

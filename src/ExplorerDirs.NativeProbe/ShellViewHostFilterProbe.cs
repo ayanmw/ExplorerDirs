@@ -224,7 +224,13 @@ internal static class ShellViewHostFilterProbe
                 if (renameEditor == 0) throw new Exception($"Shell TranslateAccelerator F2 did not open an inline rename editor: hr=0x{f2Hr:X8}.");
                 var focusInRenameEditor = GetFocus() == renameEditor;
                 var arrowResults = new List<string>();
-                foreach (var arrow in new[] { (Name: "left", Key: 0x25u, LParam: 0x004B0001u), (Name: "right", Key: 0x27u, LParam: 0x004D0001u) })
+                foreach (var arrow in new[]
+                {
+                    (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+                    (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+                    (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+                    (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+                })
                 {
                     var message = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
                     var arrowHr = At<TranslateAccelerator>(view, 5)(view, ref message);

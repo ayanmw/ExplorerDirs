@@ -280,3 +280,5 @@ Ctrl+N 已创建独立窗口会话：主窗口继续使用 `ExplorerDirs.ini`，
 2026-10-27 多窗格 Shell 重命名焦点防护：窗口级快捷键和文件命令状态刷新现检查所有窗格的原生重命名编辑框，而不只检查逻辑活动窗格。静态接线 smoke 通过；没有可见 F2/方向键验收，实际键盘路由仍为 P0 待验证项。
 
 2026-10-27 Q-Dir 重启快捷键：官方快捷键清单列出 Alt+F11 重启；本程序“文件 → 重启应用”现在标注并响应 Alt+F11，复用现有确认、所有窗口会话保存和重启逻辑。分派/接线 smoke、完整 Release `SettingsSmoke` 与 App Release 构建通过；没有触发真实重启或 GUI 验收。[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)
+
+2026-10-27 IShellView 原型 F2 编辑焦点：单个默认 Shell 视图在 F2 重命名编辑期间，Left/Up/Right/Down 四个合成按键均由 `TranslateAccelerator` 接收，编辑框与焦点保持。Private Desktop 临时夹具验证通过；这不覆盖多窗格/WPF 或 ExplorerBrowser 产品，因此现有多窗格重命名缺陷仍为 P0 待可见验收。[隔离原型记录](ishellview-color-spike.md#2026-10-27-f2-编辑状态下四方向键隔离验证)

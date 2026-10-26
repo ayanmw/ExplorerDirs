@@ -3473,3 +3473,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 在完整四窗格 session-restore 探针中记录每个 host 的菜单回调句柄与 HRESULT。四个 pane 的 `InsertMenusSB`/`SetMenuSB` 回调都到达，但 `SetMenuSB` 均返回 `0x8007059C`，frame 参数是 pane child HWND，安装后 `GetMenu` 为 0。其余已有多窗格会话、菜单 context command、键盘路由、文件操作和通知检查通过。
 - 结合 Microsoft `SetMenu` 契约，这个 HRESULT 对应 `ERROR_CHILD_WINDOW_MENU`：子窗口不能拥有菜单。原有“menu callback counts > 0”并未证明菜单成功安装；此前 frame split 试验缺少跨 host 协调。
 - 下一步拆分 Shell view pane parent 与顶层 OLE frame window，并实现共享菜单/descriptor 所有权与 active view 生命周期。详细证据和官方合同链接见 [IShellView 原型记录](ishellview-color-spike.md#2026-10-27-四窗格菜单-setmenu-子窗格错误根因确认)。
+
+## 2026-10-27：F2 编辑状态下四方向键隔离验证
+
+- 将原生重命名探针从 Left/Right 扩展到 Left/Up/Right/Down。`host-newfolder-private-desktop` watchdog 通过：Shell 创建临时文件夹，选中并聚焦后启动 F2 编辑，再将四个方向键交给编辑框；四键均返回 `S_OK`，编辑窗口和焦点保持，前台 HWND 未变化。NativeProbe Release build 0 警告、0 错误。
+- 这只覆盖合成消息下的单个原生 filesystem `IShellView`；List/Icon 等模式、真实键盘、多窗格、WPF `HwndHost` 与 ExplorerBrowser 产品行为仍待验收。它为迁移原型补充焦点兼容证据，不代表原产品问题已修复。详细日志和边界见[隔离原型记录](ishellview-color-spike.md#2026-10-27-f2-编辑状态下四方向键隔离验证)。
