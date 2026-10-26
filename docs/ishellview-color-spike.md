@@ -735,10 +735,10 @@ NativeProbe 新增 `--ishellview-menu-activation-private-desktop`，在唯一临
 
 这证明真实默认 Shell 视图激活会进入当前隔离 `IShellBrowser` 的菜单生命周期并安装共享菜单。它没有显示/点击菜单，也没有验证 Shell 菜单项与应用自定义命令合并后的排序、绘制、快捷键、启用状态或命令分派；未覆盖 ExplorerBrowser 产品宿主、Pane/WPF 容器或标签切换。实际可见菜单验收仍需之后获准的隔离输入会话，产品宿主、INI 和 release 未修改。日志：`src/.state/native-probe-watchdog/20261027-000439-ec670e37.stdout.log`、`20261027-000445-8a085849.stdout.log`、`20261027-000446-98774ea8.stdout.log`；独立状态流复验：`20261027-000447-38b83a8d.stdout.log`。
 
-### 2026-10-27 真实 IShellView 会话流跨进程恢复
+### 2026-10-27 真实 IShellView 会话流跨进程恢复及文件操作
 
-`--ishellview-session-restore-private-desktop` 生产者在临时文件夹 view 中设置 Details、Name 降序、Type 升序分组及 Name/Size/Type 三列顺序与宽度，调用 `IShellView::SaveViewState` 并将 session GUID 对应的流落盘。之后启动一个全新的 NativeProbe 消费进程，传入 fixture 路径、状态目录和相同 GUID；消费进程确认状态文件在启动前已存在，Shell 对新 host 请求 4 次读取 748 字节流，并从新建真实 view 读回 mode `4`、Name 降序、Type 升序分组及三列的相同顺序和宽度。
+`--ishellview-session-restore-private-desktop` 生产者在临时文件夹 view 中设置 Details、Name 降序、Type 升序分组及 Name/Size/Type 三列顺序与宽度，调用 `IShellView::SaveViewState` 并将 session GUID 对应的流落盘。之后启动一个全新的 NativeProbe 消费进程，传入 fixture 路径、状态目录和相同 GUID；消费进程确认状态文件在启动前已存在，Shell 对新 host 请求 4 次读取 748 字节流，并从新建真实 view 读回 mode `4`、Name 降序、Type 升序分组及三列的相同顺序和宽度。恢复后消费者通过 `IFileOperation` 复制、重命名、删除 fixture 文件，并在每项操作及必要刷新后确认这些视图设置仍保持。
 
-NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过；Private Desktop watchdog 连续三轮退出码 0，每轮生产者和消费者 PID 不同，主桌面 foreground HWND 均保持 `0x81852`。日志：`20261027-001651-292284ba.stdout.log`、`20261027-001659-45669d12.stdout.log`、`20261027-001703-47e09d99.stdout.log`。
+NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过；加入文件操作后 Private Desktop watchdog 连续三轮退出码 0，每轮生产者和消费者 PID 不同，主桌面 foreground HWND 均保持 `0x81852`。日志：`20261027-001847-bf66f40c.stdout.log`、`20261027-001855-b9382671.stdout.log`、`20261027-001900-8c8cc07c.stdout.log`。
 
-早期失败并非 Shell 忽略会话流：旧刺激调用 `IFolderView::SetCurrentViewMode` 虽返回成功，但保存前模式仍是 `1`；改用已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前和新进程新 view 都正确读回。消费者在读回后通过自身进程退出回收隔离 Shell STA，生产者再删除临时 fixture 和状态目录；同步释放该 STA 内的 Shell view 曾使消费者卡在清理阶段，所以不把未完成的同步清理当作恢复失败。该证据证明独立测试进程能消费已落盘流，不等同 ExplorerDirs.App 正式进程重启或生产标签 session-store 接线；多 Pane 协调和实际文件操作后的状态保持仍未验证。产品 ExplorerBrowser、INI 与 release 均未接入或修改。
+早期失败并非 Shell 忽略会话流：旧刺激调用 `IFolderView::SetCurrentViewMode` 虽返回成功，但保存前模式仍是 `1`；改用已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前和新进程新 view 都正确读回。消费者在读回与文件操作检查后通过自身进程退出回收隔离 Shell STA，生产者再删除临时 fixture 和状态目录；同步释放该 STA 内的 Shell view 曾使消费者卡在清理阶段，所以不把未完成的同步清理当作恢复失败。该证据证明独立测试进程能消费已落盘流，并在 Shell 文件操作后保持视图设置；不等同 ExplorerDirs.App 正式进程重启或生产标签 session-store 接线，也未验证多 Pane/标签协调、可见拖放或键盘行为。产品 ExplorerBrowser、INI 与 release 均未接入或修改。

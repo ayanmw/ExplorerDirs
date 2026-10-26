@@ -114,10 +114,13 @@ internal static class ShellViewColorSpike
                 sorts[0].Key.PropertyId == expectedSort.Key.PropertyId && sorts[0].Direction == expectedSort.Direction &&
                 group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
                 columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
+            if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
+            var fileOperations = VerifySessionRestoreFileOperations(view, folderView, fullFixture, propertyFormatId,
+                expectedSort, columnsExpected);
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
-                $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}");
-            if (!restored) throw new Exception("A new process did not restore the persisted Shell view mode, sort, group, and columns.");
+                $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
+                $"shell-file-operations={fileOperations}");
             result = 0;
         }
         catch (Exception ex)
@@ -153,6 +156,78 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
         }
         return result;
+    }
+
+    private static string VerifySessionRestoreFileOperations(nint view, nint folderView, string fixture,
+        Guid propertyFormatId, SortColumn expectedSort, IReadOnlyList<DisplayColumnState> expectedColumns)
+    {
+        const uint svgIoAllView = 2;
+        var sourcePath = Path.Combine(fixture, "blue-rule-target.txt");
+        var copiedPath = Path.Combine(fixture, "session-copy.txt");
+        var renamedPath = Path.Combine(fixture, "session-renamed.txt");
+        var source = CreateShellItem(sourcePath);
+        var destination = CreateShellItem(fixture);
+        try
+        {
+            Check(At<ItemCount>(folderView, 7)(folderView, svgIoAllView, out var initialCount));
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
+            if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
+                throw new IOException("The restored Shell view session could not copy its fixture file through IFileOperation.");
+            if (!WaitForShellView(folderView, initialCount + 1, copiedPath, null) &&
+                !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, copiedPath, null))
+                throw new IOException("The restored Shell view did not show the copied fixture after refresh.");
+            AssertViewSettings("copy");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(copiedPath);
+                try { Check(At<RenameItem>(operation, 12)(operation, item, Path.GetFileName(renamedPath), 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(copiedPath) || !File.Exists(renamedPath))
+                throw new IOException("The restored Shell view session could not rename its fixture through IFileOperation.");
+            if (!WaitForShellView(folderView, initialCount + 1, renamedPath, copiedPath) &&
+                !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, renamedPath, copiedPath))
+                throw new IOException("The restored Shell view did not show the renamed fixture after refresh.");
+            AssertViewSettings("rename");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(renamedPath);
+                try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(renamedPath))
+                throw new IOException("The restored Shell view session could not delete its fixture through IFileOperation.");
+            if (!WaitForShellView(folderView, initialCount, null, renamedPath) &&
+                !RefreshUntilShellViewMatches(view, folderView, initialCount, null, renamedPath))
+                throw new IOException("The restored Shell view did not remove the deleted fixture after refresh.");
+            AssertViewSettings("delete");
+            return "copy/rename/delete=passed; settings-preserved-after-each=True";
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+
+        void AssertViewSettings(string operation)
+        {
+            Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out _));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            if (sortCount != 1) throw new IOException($"View settings changed after {operation}: sort count={sortCount}.");
+            var sorts = new SortColumn[sortCount];
+            Check(At<GetSortColumns>(folderView, 28)(folderView, sorts, sortCount));
+            var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var group, out var ascending);
+            Check(groupResult);
+            Check(ShellColumnManager.Capture(folderView, out var columns));
+            if (mode != 4 || sorts[0].Key.FormatId != expectedSort.Key.FormatId ||
+                sorts[0].Key.PropertyId != expectedSort.Key.PropertyId || sorts[0].Direction != expectedSort.Direction ||
+                group.FormatId != propertyFormatId || group.PropertyId != 4 || ascending != 1 ||
+                columns is null || !expectedColumns.SequenceEqual(columns))
+                throw new IOException($"The Shell {operation} changed the restored mode, sort, group, or columns.");
+        }
     }
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
