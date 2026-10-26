@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：复选框设置汇报 Shell 应用失败
+
+- 源码复核发现，现有标签的 Shell 视图拒绝复选框设置时，宿主只触发内部菜单错误事件，没有把失败传回 Pane 的汇总器；全局 INI 已保存后，状态文本可能仍报告所有标签都已应用。现在宿主返回 HRESULT，Pane 将失败与对应路径汇总到状态文本；未创建的视图仍只保存偏好，待 `OnViewCreated` 时应用。
+- 完整 Release `SettingsSmoke` 和 App Release build 通过（0 警告、0 错误），`git diff --check` 通过。没有创建 ExplorerBrowser 或 GUI；Shell 拒绝调用的故障注入与可见错误文本仍待隔离验收。
+
 ## 2026-10-27：补齐 Q-Dir 文件视图复选框选择
 
 - Q-Dir FAQ 77 说明可在列表视图开启复选框选择，并支持 Ctrl+A 全选、Ctrl+Shift+A 反选。项目原有 Ctrl+Shift+A 反选命令已经由 Shell 选区命令实现；本批补上 View 菜单“使用复选框选择项目”，默认关闭，便携配置写入 `SelectionCheckBoxes.ini`，并应用于所有现有、隐藏及新建标签的 Shell view。

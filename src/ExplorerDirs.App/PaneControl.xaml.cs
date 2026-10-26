@@ -490,7 +490,11 @@ public partial class PaneControl : UserControl
         List<string> failures = [];
         foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
         {
-            try { state.Browser.SetSelectionCheckBoxes(enabled); }
+            try
+            {
+                var result = state.Browser.SetSelectionCheckBoxes(enabled);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
             catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
         }
         return failures;

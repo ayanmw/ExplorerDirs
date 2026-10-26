@@ -454,25 +454,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _visibleShellPane == ExplorerShellPane.Preview ? ExplorerShellPane.None : _visibleShellPane);
     }
 
-    internal void SetSelectionCheckBoxes(bool enabled)
+    internal int SetSelectionCheckBoxes(bool enabled)
     {
         _selectionCheckBoxes = enabled;
-        if (_browser is null || _viewWindow == IntPtr.Zero) return;
+        if (_browser is null || _viewWindow == IntPtr.Zero) return 0;
         var viewId = ShellViewId;
         var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
         if (viewResult < 0 || viewObject is null)
         {
-            MenuError?.Invoke(this, $"无法读取当前 Shell 视图以切换复选框选择（0x{viewResult:X8}）。");
-            return;
+            return viewResult < 0 ? viewResult : unchecked((int)0x80004005);
         }
         try
         {
             var view = Marshal.GetIUnknownForObject(viewObject);
-            try
-            {
-                var result = ShellFolderViewOptions.SetCheckSelect(view, enabled);
-                if (result < 0) MenuError?.Invoke(this, $"Shell 未能切换复选框选择（0x{result:X8}）。");
-            }
+            try { return ShellFolderViewOptions.SetCheckSelect(view, enabled); }
             finally { Marshal.Release(view); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
