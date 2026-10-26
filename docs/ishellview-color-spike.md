@@ -883,3 +883,5 @@ NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 wa
 NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame，四个 `IShellView` 共用 `ShellMenuFrameCoordinator`。协调器负责当前 owner 的 OLE descriptor 和菜单切换；迟到的非 owner `RemoveMenusSB` 不应卸载活动 pane 的菜单，切换安装失败会尝试恢复上一 owner。四窗格探针现会断言 Browser `GetWindow` 仍返回 pane，OLE frame `GetWindow` 返回共同顶层 HWND，并要求 `SetMenuSB` 成功且 frame 上确实有菜单。
 
 当前仅 `dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 通过（0 警告、0 错误）；没有启动 Shell view 或隔离桌面，因此 menu coordinator 的真实 COM/OLE 生命周期、连续 pane 激活、旧 owner 延迟移除和 frame 菜单恢复尚未验证。产品 ExplorerBrowser、INI 与 release 未改；本候选代码未接入产品。
+
+随后为协调器增加非 Shell hidden-window 回归：两个 child pane 的菜单依次接管同一 top-level frame；旧 pane 对旧菜单的迟到 `RemoveMenusSB` 不会拆除新菜单；当前 owner 移除后恢复 frame 原菜单；同一 host 的 Browser `GetWindow` 与 OLE frame `GetWindow` 分别返回 child 与 top-level HWND。`dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --shell-view-color-policy-smoke` 退出码 0，完整定向 smoke 的 198 条检查通过。它只验证 Win32/OLE coordinator 状态机和 COM vtable，不创建 `IShellView`、不显示菜单、不运行 Shell 激活，所以仍需前述真实四窗格隔离验证。

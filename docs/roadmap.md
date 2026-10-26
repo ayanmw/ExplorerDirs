@@ -3,7 +3,7 @@
 ## 2026-10-27：隔离 IShellView 菜单 frame 分离候选
 
 - 按用户授权继续隔离迁移原型。已将每 pane 的 `IShellBrowser.GetWindow` 与 OLE 菜单 frame HWND 分开，并给四个 native view 接入共享菜单协调器；探针新增真实激活后的窗口层级、HRESULT 和顶层菜单断言。
-- NativeProbe Release 构建通过（0 警告/错误），但本次没有启动 Shell view 或 GUI，协调器实际生命周期尚未验证。产品仍使用 ExplorerBrowser，未发布；下步需在独占隔离桌面运行四窗格激活/切换、旧 pane 延迟移除、菜单命令回路，并补测故障回滚后再评估是否继续向产品迁移。
+- 隐藏 HWND/OLE vtable smoke 已验证两 pane 菜单交接、旧 owner 迟到移除保护、原始 frame 菜单恢复及 Browser/OLE frame HWND 分离；NativeProbe Release 构建与 `--shell-view-color-policy-smoke` 均通过。该 smoke 不创建 Shell view 或 GUI，因此真实 `UIActivate` 菜单生命周期仍未验证。产品仍使用 ExplorerBrowser，未发布；下步需在独占隔离桌面运行四窗格激活/切换、菜单命令回路，并补测故障回滚后再评估是否继续向产品迁移。
 
 ## 2026-10-27：多窗格重命名期间阻止窗口级快捷键和 Shell 状态查询
 

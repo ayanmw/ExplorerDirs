@@ -111,6 +111,7 @@ public static class ShellViewColorBrowserHostSmoke
         VerifyNativeSharedMenuGroups();
         VerifyNativeMenuRollback();
         VerifyNativeSharedMenuInstallation();
+        VerifySharedMenuFrameCoordination();
         VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
@@ -718,6 +719,88 @@ public static class ShellViewColorBrowserHostSmoke
             if (previousMenu != 0) DestroyMenu(previousMenu);
             OleUninitialize();
         }
+    }
+
+    private static void VerifySharedMenuFrameCoordination()
+    {
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        nint frameWindow = 0, paneOne = 0, paneTwo = 0, baseMenu = 0, menuOne = 0, menuTwo = 0;
+        nint descriptorOne = 0, descriptorTwo = 0, activeOne = 0, activeTwo = 0;
+        StreamViewHost? hostOne = null, hostTwo = null;
+        try
+        {
+            frameWindow = CreateWindowExW(0, "STATIC", "shared frame menu coordinator smoke", 0,
+                0, 0, 320, 200, 0, 0, 0, 0);
+            Check(frameWindow != 0 && !IsWindowVisible(frameWindow),
+                "the shared menu coordinator uses a hidden top-level frame");
+            paneOne = CreateWindowExW(0, "STATIC", "pane one", 0x40000000, 0, 0, 100, 80, frameWindow, 0, 0, 0);
+            paneTwo = CreateWindowExW(0, "STATIC", "pane two", 0x40000000, 100, 0, 100, 80, frameWindow, 0, 0, 0);
+            baseMenu = CreateMenu();
+            menuOne = CreateMenu();
+            menuTwo = CreateMenu();
+            Check(paneOne != 0 && paneTwo != 0 && baseMenu != 0 && menuOne != 0 && menuTwo != 0 &&
+                  AppendMenuW(baseMenu, 0, 1, "base") && AppendMenuW(menuOne, 0, 2, "pane one") &&
+                  AppendMenuW(menuTwo, 0, 3, "pane two") && SetMenu(frameWindow, baseMenu),
+                "two child panes and three independent native menu bars are created");
+
+            descriptorOne = CreateOleDescriptor(menuOne);
+            descriptorTwo = CreateOleDescriptor(menuTwo);
+            var coordinator = new ShellMenuFrameCoordinator(frameWindow);
+            hostOne = new StreamViewHost(paneOne, [], menuFrameWindow: frameWindow,
+                menuFrameCoordinator: coordinator);
+            hostTwo = new StreamViewHost(paneTwo, [], menuFrameWindow: frameWindow,
+                menuFrameCoordinator: coordinator);
+            activeOne = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(paneOne),
+                typeof(IOleInPlaceActiveObjectProbe));
+            activeTwo = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(paneTwo),
+                typeof(IOleInPlaceActiveObjectProbe));
+            Check(hostOne.SetActiveObject(activeOne, 0) == 0 && hostTwo.SetActiveObject(activeTwo, 0) == 0,
+                "each pane host retains its own active OLE object");
+
+            Check(hostOne.SetMenuSB(menuOne, descriptorOne, paneOne) == 0 && GetMenu(frameWindow) == menuOne,
+                "the first pane installs its menu on the shared top-level frame");
+            Check(hostTwo.SetMenuSB(menuTwo, descriptorTwo, paneTwo) == 0 && GetMenu(frameWindow) == menuTwo,
+                "activating the second pane transfers the frame menu and OLE descriptor");
+            Check(hostOne.RemoveMenusSB(menuOne) == 0 && GetMenu(frameWindow) == menuTwo,
+                "a late RemoveMenusSB from the inactive first pane leaves the second pane menu installed");
+            Check(hostTwo.RemoveMenusSB(menuTwo) == 0 && GetMenu(frameWindow) == baseMenu,
+                "deactivating the active pane restores the frame's pre-existing menu");
+            Check(((IStreamProbeBrowser)hostOne).GetWindow(out var browserWindow) == 0 && browserWindow == paneOne &&
+                  ((IStreamProbeOleInPlaceFrame)hostOne).GetWindow(out var oleFrameWindow) == 0 &&
+                  oleFrameWindow == frameWindow,
+                "IShellBrowser retains its pane HWND while IOleInPlaceFrame exposes the shared top-level HWND");
+            Console.WriteLine("PASS shared frame menu transfer, stale-owner removal, and restoration");
+        }
+        finally
+        {
+            hostOne?.Dispose();
+            hostTwo?.Dispose();
+            if (activeOne != 0) Marshal.Release(activeOne);
+            if (activeTwo != 0) Marshal.Release(activeTwo);
+            if (frameWindow != 0 && IsWindow(frameWindow) && GetMenu(frameWindow) != 0) SetMenu(frameWindow, 0);
+            if (descriptorOne != 0) OleDestroyMenuDescriptor(descriptorOne);
+            if (descriptorTwo != 0) OleDestroyMenuDescriptor(descriptorTwo);
+            if (frameWindow != 0 && IsWindow(frameWindow)) DestroyWindow(frameWindow);
+            if (baseMenu != 0) DestroyMenu(baseMenu);
+            if (menuOne != 0) DestroyMenu(menuOne);
+            if (menuTwo != 0) DestroyMenu(menuTwo);
+            OleUninitialize();
+        }
+    }
+
+    private static nint CreateOleDescriptor(nint menu)
+    {
+        var widths = Marshal.AllocHGlobal(6 * sizeof(int));
+        try
+        {
+            for (var index = 0; index < 6; index++) Marshal.WriteInt32(widths, index * sizeof(int), 0);
+            Marshal.WriteInt32(widths, 0, 1);
+            var descriptor = OleCreateMenuDescriptor(menu, widths);
+            if (descriptor == 0) throw new InvalidOperationException("OLE could not create a menu descriptor fixture.");
+            return descriptor;
+        }
+        finally { Marshal.FreeHGlobal(widths); }
     }
 
     private static void VerifyNativeSharedMenuGroups()
