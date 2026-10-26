@@ -3409,8 +3409,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-27：隔离 IShellView 通过 canonical verb 新建文件夹
 
-- `GetCommandString` 返回 `newfolder` 对应 offset `115`；用该 MAKEINTRESOURCE offset 调用 `IContextMenu::InvokeCommand` 得到 `E_FAIL (0x80004005)`，改用 ANSI canonical verb `newfolder` 得到 `S_OK`，并在唯一临时目录创建“新建文件夹”，Shell 视图由 2 项更新到 3 项。调用带 `CMIC_MASK_FLAG_NO_UI`；没有 `GetControlWindow` 请求或状态文本回调，Private Desktop 外前台句柄保持不变。NativeProbe Release build 0 警告/错误，单命令 watchdog 退出码 0；既有查看/刷新/排序/分组命令复跑退出码 0。
-- 已证明隔离默认 filesystem `IShellView` 可通过 canonical verb 执行创建并让视图收敛；尚未证明真实菜单弹出/点击、Inline Rename/焦点、ExplorerBrowser 产品接线或完整多窗格行为。offset 调用失败原因仍未知，不据单一命令推广全局调用规则。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹-canonical-verb-原型通过)。
+- 列表焦点已确认后，使用不带 `CMIC_MASK_FLAG_NO_UI` 的 ANSI canonical verb 创建成功；Shell 视图从 2 项变为 3 项，但选中数为 0、focused index 仍在原 `child` 项，且没有 `Edit` 重命名窗口。不同菜单构造样本的命令 offset 为 113/115；各自按 offset 调用都失败，canonical verb 成功。Private Desktop 前台句柄未变，探针夹具清理完成。NativeProbe Release build 0 警告/错误，单命令 watchdog 退出码 0。
+- 已证明隔离默认 filesystem `IShellView` 可通过 canonical verb 执行创建并让视图收敛；程序化调用没有复现菜单后的自动选中和内联重命名。offset 会随菜单构造变化，且逐次重新查询后调用仍失败，具体原因未知。真实菜单弹出/点击、ExplorerBrowser 产品接线与完整多窗格行为仍未验证，不据单一命令推广全局调用规则。未修改产品代码、用户目录或 release。详见[IShellView 隔离原型记录](ishellview-color-spike.md#2026-10-27-背景菜单新建文件夹-canonical-verb-原型通过)。
 
 ## 2026-10-27：布局工具栏选中态使用系统强调色
 
