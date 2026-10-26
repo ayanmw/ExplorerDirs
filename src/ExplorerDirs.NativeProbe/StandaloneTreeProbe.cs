@@ -3,6 +3,27 @@ using System.Runtime.InteropServices;
 // Capability experiment only. No ExplorerBrowser, visible parent, input, or user files.
 internal static class StandaloneTreeProbe
 {
+    internal static int RunIconContract()
+    {
+        var folder = Path.GetTempPath();
+        var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+        var hr = SHCreateItemFromParsingName(folder, 0, ref itemId, out var item);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        if (item == 0) throw new InvalidOperationException("Shell returned no item for the temporary folder.");
+        try
+        {
+            var events = new ExplorerDirs.App.NativeTreeEvents(() => { }, () => { }, (_, _, _) => false);
+            var iconHr = events.OnGetDefaultIconIndex(item, out var normal, out var open);
+            var imageList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            var imageCount = imageList == 0 ? 0 : ImageList_GetImageCount(imageList);
+            Console.WriteLine($"tree-icon-callback: hr=0x{iconHr:X8}; normal={normal}; open={open}; image-count={imageCount}");
+            if (iconHr != 0 || normal < 0 || open < 0 || normal >= imageCount || open >= imageCount)
+                throw new Exception("The production namespace-tree icon callback did not return valid system image indices.");
+            return 0;
+        }
+        finally { Marshal.Release(item); }
+    }
+
     internal static int RunCore()
     {
         var foreground = GetForegroundWindow();
@@ -330,6 +351,7 @@ internal static class StandaloneTreeProbe
     [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
     private delegate bool EnumChildCallback(nint window, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildCallback callback, nint parameter);
+    [DllImport("comctl32.dll")] private static extern int ImageList_GetImageCount(nint imageList);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
