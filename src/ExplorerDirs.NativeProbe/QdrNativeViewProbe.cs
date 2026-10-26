@@ -204,6 +204,11 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     internal Func<nint, ushort, bool>? AcceleratorHandler { get; set; }
     internal Func<uint, nint>? ControlWindowProvider { get; set; }
     internal Func<uint, uint, nuint, nint, (int HResult, nint Result)>? ControlMessageHandler { get; set; }
+    internal Func<nint, nint, int>? InsertMenusHandler { get; set; }
+    internal Func<nint, nint, nint, int>? SetMenuHandler { get; set; }
+    internal Func<nint, int>? RemoveMenusHandler { get; set; }
+    internal Func<bool, int>? EnableModelessHandler { get; set; }
+    internal Func<nint, uint, uint, int>? ToolbarItemsHandler { get; set; }
     internal ShellViewNavigationHistory? NavigationHistory
     {
         get => _navigation;
@@ -254,6 +259,11 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
                 AcceleratorHandler = null;
                 ControlWindowProvider = null;
                 ControlMessageHandler = null;
+                InsertMenusHandler = null;
+                SetMenuHandler = null;
+                RemoveMenusHandler = null;
+                EnableModelessHandler = null;
+                ToolbarItemsHandler = null;
                 StatusTextChanged = null;
                 navigation?.Dispose();
             }
@@ -297,9 +307,36 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     }
     public int GetWindow(out nint window) { window = _parent; return 0; }
     public int ContextSensitiveHelp(int enter) => unchecked((int)0x80004001);
-    public int InsertMenusSB(nint menu, nint widths) => 0;
-    public int SetMenuSB(nint menu, nint oleMenu, nint active) => 0;
-    public int RemoveMenusSB(nint menu) => 0;
+    public int InsertMenusSB(nint menu, nint widths)
+    {
+        if (InsertMenusHandler is not { } handler) return 0;
+        try { return handler(menu, widths); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell menu insertion: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
+    public int SetMenuSB(nint menu, nint oleMenu, nint active)
+    {
+        if (SetMenuHandler is not { } handler) return 0;
+        try { return handler(menu, oleMenu, active); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell menu activation: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
+    public int RemoveMenusSB(nint menu)
+    {
+        if (RemoveMenusHandler is not { } handler) return 0;
+        try { return handler(menu); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell menu removal: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int SetStatusTextSB(nint text)
     {
         StatusText = text == 0 ? null : Marshal.PtrToStringUni(text);
@@ -307,7 +344,16 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
         catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"Shell status notification: {ex.GetType().Name}"); }
         return 0;
     }
-    public int EnableModelessSB(int enable) => 0;
+    public int EnableModelessSB(int enable)
+    {
+        if (EnableModelessHandler is not { } handler) return 0;
+        try { return handler(enable != 0); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell modeless state: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     public int TranslateAcceleratorSB(nint msg, ushort id)
     {
         if (AcceleratorHandler is not { } handler) return 1; // S_FALSE leaves the key with Shell.
@@ -378,7 +424,16 @@ public class StreamViewHost : IStreamProbeBrowser, IShellServiceProvider, IDispo
     public int QueryActiveShellView(out nint view)
     { view = View; if (view != 0) Marshal.AddRef(view); return view == 0 ? unchecked((int)0x80004005) : 0; }
     public int OnViewWindowActive(nint view) => 0;
-    public int SetToolbarItems(nint buttons, uint count, uint flags) => 0;
+    public int SetToolbarItems(nint buttons, uint count, uint flags)
+    {
+        if (ToolbarItemsHandler is not { } handler) return 0;
+        try { return handler(buttons, count, flags); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"Shell toolbar items: {ex.GetType().Name}");
+            return unchecked((int)0x80004005);
+        }
+    }
     [DllImport("shlwapi.dll")] private static extern nint SHCreateMemStream(byte[] bytes, uint count);
 }
 

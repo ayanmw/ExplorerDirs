@@ -1,5 +1,17 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-26：接入 Shell 模态与工具栏状态回调
+
+`StreamViewHost.EnableModelessSB` 和 `SetToolbarItems` 现在可选调用外层宿主回调：前者传递 Shell 请求的启用/禁用状态，后者传递原生按钮结构指针、数量和标志；回调 HRESULT 原样返回。未配置回调仍返回原有的 `S_OK`，异常转换成 `E_FAIL`，释放时清除委托。
+
+`--shell-view-color-policy-smoke` 通过实际 `IShellBrowser` CCW vtable 验证参数、返回值、异常边界和释放后的默认行为。没有创建窗口或可见工具栏，也没有接入产品框架控件；这不证明工具栏合并、按钮绘制或模态交互已经实现。
+
+## 2026-10-26：为 IShellBrowser 接入外层菜单生命周期路由
+
+`StreamViewHost.InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 现可选调用外层宿主处理器；未配置处理器时继续返回原来的 `S_OK`，表示宿主不提供共享菜单。处理器收到原始 HMENU、`OLEMENU`、活动窗口 HWND 和菜单组宽度指针，返回的 HRESULT 被保留；异常转成 `E_FAIL`，释放时清除三个处理器。
+
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser` CCW vtable 验证三个方法的参数传递、HRESULT、异常边界与释放后的空菜单行为。没有创建 `IShellView` 或实际 HMENU，也没有将 WPF 菜单转换成 Win32 共享菜单；这只提供浏览器框架路由，不证明菜单已经合并、显示或可交互。产品右键菜单实现不受影响。
+
 ## 2026-10-26：为 Shell 控制窗提供外层宿主路由
 
 `StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现在可选委托给外层宿主：控件映射只返回显式提供的 HWND；未提供的窗口返回 `E_FAIL`，没有消息处理器时返回 `E_NOTIMPL`。成功的消息处理保留原始 HRESULT 和返回值；委托异常转换为 `E_FAIL`，不跨越 COM 边界。释放时清理两个委托。

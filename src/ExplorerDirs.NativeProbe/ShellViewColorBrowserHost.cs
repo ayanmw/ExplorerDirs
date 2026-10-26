@@ -101,6 +101,8 @@ public static class ShellViewColorBrowserHostSmoke
         Check(host.IncludeObject(0, 0) == 0 && host.IncludeObjectCalls == 3,
             "missing Shell item metadata keeps the item visible through the color host callback");
 
+        VerifyBaseHostFrameStateRouting();
+        VerifyBaseHostMenuMergeRouting();
         VerifyBaseHostControlRouting();
         VerifyBaseHostAcceleratorRouting();
         VerifyBaseHostStatusText();
@@ -357,6 +359,87 @@ public static class ShellViewColorBrowserHostSmoke
         finally { Marshal.Release(browser); }
     }
 
+    private static void VerifyBaseHostMenuMergeRouting()
+    {
+        using var host = new StreamViewHost(0, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        try
+        {
+            var insertMenus = GetComMethod<InsertMenusCallback>(browser, 5);
+            var setMenu = GetComMethod<SetMenuCallback>(browser, 6);
+            var removeMenus = GetComMethod<RemoveMenusCallback>(browser, 7);
+            Check(insertMenus(browser, 0x111, 0x222) == 0 && setMenu(browser, 0x111, 0x333, 0x444) == 0 &&
+                  removeMenus(browser, 0x111) == 0,
+                "the generic StreamViewHost accepts Shell menu lifecycle calls when no parent menu is configured");
+
+            (nint Menu, nint Widths) inserted = default;
+            host.InsertMenusHandler = (menu, widths) => { inserted = (menu, widths); return 0; };
+            Check(insertMenus(browser, 0x123, 0x456) == 0 && inserted == (0x123, 0x456),
+                "the generic StreamViewHost forwards shared menu and group-width pointers");
+
+            (nint Menu, nint OleMenu, nint Active) installed = default;
+            host.SetMenuHandler = (menu, oleMenu, active) =>
+            {
+                installed = (menu, oleMenu, active);
+                return 1;
+            };
+            Check(setMenu(browser, 0x234, 0x567, 0x89A) == 1 && installed == (0x234, 0x567, 0x89A),
+                "the generic StreamViewHost forwards shared menu, OLE menu, and active-window handles");
+
+            nint removedMenu = 0;
+            host.RemoveMenusHandler = menu => { removedMenu = menu; return unchecked((int)0x80070005); };
+            Check(removeMenus(browser, 0x345) == unchecked((int)0x80070005) && removedMenu == 0x345,
+                "the generic StreamViewHost preserves the parent's RemoveMenus HRESULT");
+            host.InsertMenusHandler = (_, _) => throw new InvalidOperationException("fixture failure");
+            Check(insertMenus(browser, 0x111, 0x222) == unchecked((int)0x80004005),
+                "a parent menu merge exception stays inside the COM boundary");
+            host.Dispose();
+            Check(insertMenus(browser, 0x111, 0x222) == 0 && setMenu(browser, 0x111, 0x333, 0x444) == 0 &&
+                  removeMenus(browser, 0x111) == 0,
+                "disposing the generic StreamViewHost disconnects parent menu routes");
+        }
+        finally { Marshal.Release(browser); }
+    }
+
+    private static void VerifyBaseHostFrameStateRouting()
+    {
+        using var host = new StreamViewHost(0, []);
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        try
+        {
+            var enableModeless = GetComMethod<EnableModelessCallback>(browser, 9);
+            var setToolbarItems = GetComMethod<SetToolbarItemsCallback>(browser, 17);
+            Check(enableModeless(browser, 0) == 0 && setToolbarItems(browser, 0x111, 2, 3) == 0,
+                "the generic StreamViewHost accepts modeless and toolbar callbacks when no parent UI is configured");
+
+            bool? modeless = null;
+            host.EnableModelessHandler = enabled =>
+            {
+                modeless = enabled;
+                return enabled ? 0 : unchecked((int)0x80070005);
+            };
+            Check(enableModeless(browser, 1) == 0 && modeless == true &&
+                  enableModeless(browser, 0) == unchecked((int)0x80070005) && modeless == false,
+                "the generic StreamViewHost forwards modeless state and preserves the parent's HRESULT");
+
+            (nint Buttons, uint Count, uint Flags) toolbar = default;
+            host.ToolbarItemsHandler = (buttons, count, flags) =>
+            {
+                toolbar = (buttons, count, flags);
+                return 1;
+            };
+            Check(setToolbarItems(browser, 0x222, 4, 5) == 1 && toolbar == (0x222, 4, 5),
+                "the generic StreamViewHost forwards Shell toolbar button data and flags");
+            host.ToolbarItemsHandler = (_, _, _) => throw new InvalidOperationException("fixture failure");
+            Check(setToolbarItems(browser, 0x222, 4, 5) == unchecked((int)0x80004005),
+                "a parent toolbar callback exception stays inside the COM boundary");
+            host.Dispose();
+            Check(enableModeless(browser, 1) == 0 && setToolbarItems(browser, 0x222, 4, 5) == 0,
+                "disposing the generic StreamViewHost disconnects modeless and toolbar routes");
+        }
+        finally { Marshal.Release(browser); }
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int BrowserViewCallback(nint self, nint shellView);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -445,6 +528,16 @@ public static class ShellViewColorBrowserHostSmoke
     private delegate int GetControlWindowCallback(nint self, uint id, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int SendControlMessageCallback(nint self, uint id, uint message, nuint wParam, nint lParam, out nint result);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int InsertMenusCallback(nint self, nint menu, nint widths);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetMenuCallback(nint self, nint menu, nint oleMenu, nint active);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int RemoveMenusCallback(nint self, nint menu);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int EnableModelessCallback(nint self, int enable);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int SetToolbarItemsCallback(nint self, nint buttons, uint count, uint flags);
 
     private static void CheckIncludeObject(string displayName, int expected, string message,
         int getFolderResult = 0, int getAttributesResult = 0, int getDisplayNameResult = 0)

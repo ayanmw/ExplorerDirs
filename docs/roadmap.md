@@ -1,5 +1,15 @@
 # 路线图
 
+## 2026-10-26：为隔离 Shell 宿主接入菜单生命周期回调
+
+- `InsertMenusSB`、`SetMenuSB`、`RemoveMenusSB` 现在可选委托给外层宿主；保留无菜单宿主时原有的 `S_OK` 空菜单行为，委托 HRESULT 原样返回，异常转换为 `E_FAIL`，释放时断开回调。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 验证菜单句柄、组宽指针、活动窗口、HRESULT、异常和释放行为。它只打通 `IShellBrowser` 的主菜单生命周期路由，没有创建/合并可见菜单或连接 WPF 菜单；产品右键菜单路径未改。
+
+## 2026-10-26：为隔离 Shell 宿主接入框架状态回调
+
+- `EnableModelessSB` 与 `SetToolbarItems` 现可选择转发到外层宿主，保留原始 HRESULT；无宿主回调时仍返回原来的 `S_OK`，异常转换为 `E_FAIL`，释放时断开委托。
+- NativeProbe 的 `--shell-view-color-policy-smoke` 通过真实 COM vtable 检查模态开关值、工具栏按钮数据/计数/标志、HRESULT、异常与释放行为。没有创建窗口或可见工具栏，也没有接入产品控件；这只是隔离框架路由。
+
 ## 2026-10-26：补齐隔离宿主的 Shell 控制窗路由
 
 - `StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现可委托给外层宿主提供的控件窗口映射/消息处理器；未配置控件时分别返回 `E_FAIL` / `E_NOTIMPL`，异常留在 COM 边界内，释放宿主时解除委托。
