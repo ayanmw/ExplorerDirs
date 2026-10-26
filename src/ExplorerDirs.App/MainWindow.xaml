@@ -121,6 +121,10 @@
                 <MenuItem Header="刷新环境变量" Click="RefreshEnvironment_Click"/>
                 <MenuItem Header="在当前目录打开命令行" Click="OpenTerminal_Click"/>
             </MenuItem>
+            <MenuItem Header="开发者(_D)">
+                <MenuItem Header="优化内存（一次）" ToolTip="释放可安全重建的闲置文件视图；不保存设置。"
+                          Click="OptimizeMemoryOnce_Click"/>
+            </MenuItem>
         </Menu>
         <ToolBarTray DockPanel.Dock="Top">
             <ToolBar x:Name="MainToolBar">

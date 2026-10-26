@@ -388,6 +388,25 @@ public partial class PaneControl : UserControl
         if (IsVisible && Current is { } state && state.Browser.IsVisible)
             CaptureViewState(state);
     }
+
+    internal (int Released, int Skipped) OptimizeInactiveViews()
+    {
+        var released = 0;
+        var skipped = 0;
+        foreach (var tab in _tabOrder)
+        {
+            var state = (TabState)tab.Tag;
+            if (ReferenceEquals(state, Current) || !state.Browser.HasLiveShellView) continue;
+            if (!state.Browser.CanReleaseForMemoryOptimization())
+            {
+                skipped++;
+                continue;
+            }
+            BrowserLayer.Remove(state.Browser);
+            released++;
+        }
+        return (released, skipped);
+    }
     private void CaptureViewState(TabState state)
     {
         try { state.Browser.CaptureViewState(); }

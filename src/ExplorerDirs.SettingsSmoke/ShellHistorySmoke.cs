@@ -20,12 +20,18 @@ internal static class ShellHistorySmoke
             Check(history.Back == true, "IDispatch marshals native command and VARIANT_BOOL");
             sink.CommandStateChange(2, false);
             sink.CommandStateChange(1, true);
+            Check(!history.HasKnownEmptyHistory, "an available direction is not treated as empty history");
             Check(!history.CanNavigate(true, false, false) && history.CanNavigate(false, false, false),
                 "native directions remain independent");
             Check(!history.CanNavigate(false, true, false) && !history.CanNavigate(false, false, true),
                 "pending or unavailable view blocks actions without losing native state");
             sink.CommandStateChange(2, true);
             Check(history.CanNavigate(true, false, false), "pending-period notification remains available when settled");
+            sink.CommandStateChange(1, false);
+            sink.CommandStateChange(2, false);
+            Check(history.HasKnownEmptyHistory, "known disabled back and forward commands confirm empty history");
+            sink.CommandStateChange(2, true);
+            sink.CommandStateChange(1, true);
             var beforeUnknown = notifications;
             sink.CommandStateChange(-1, false);
             Check(notifications == beforeUnknown && history.Back == true && history.Forward == true,

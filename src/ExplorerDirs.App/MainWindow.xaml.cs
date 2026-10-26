@@ -1438,6 +1438,15 @@ public partial class MainWindow : Window
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
+    private void OptimizeMemoryOnce_Click(object sender, RoutedEventArgs e)
+    {
+        var results = _panes.Select(pane => pane.OptimizeInactiveViews()).ToArray();
+        var released = results.Sum(result => result.Released);
+        var skipped = results.Sum(result => result.Skipped);
+        MessageBox.Show(this,
+            $"本次已释放 {released} 个闲置文件视图；{skipped} 个视图因导航历史、选择状态、滚动位置或视图状态无法安全确认而跳过。\n\n切回已释放的标签时，Shell 文件视图会重新加载，可能需要等待。",
+            "内存优化", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void FavoritesMenu_SubmenuOpened(object sender, RoutedEventArgs e)

@@ -3,8 +3,8 @@ using System.Windows.Controls;
 
 namespace ExplorerDirs.App;
 
-// Keep visited HwndHost views attached while another tab is selected. Removing
-// one from the visual tree can destroy its HWND and the Shell travel log.
+// Keep visited HwndHost views attached while switching tabs. The explicit
+// developer memory command may detach only a view proven safe to recreate.
 public sealed class PersistentTabHost : Grid
 {
     public void Show(UIElement element)

@@ -13,6 +13,7 @@ internal sealed class ShellHistoryEvents : IDisposable
     internal bool Connected => _advised && !_disposed;
     internal bool? Back { get; private set; }
     internal bool? Forward { get; private set; }
+    internal bool HasKnownEmptyHistory => Connected && Back == false && Forward == false;
     internal int LastResult { get; private set; }
 
     private ShellHistoryEvents(Action changed)

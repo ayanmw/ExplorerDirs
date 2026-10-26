@@ -169,6 +169,40 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public string CurrentPath => _location.DirectoryPath;
     internal bool IsFileSystemLocation => _location.IsFileSystemLocation;
+    internal bool HasLiveShellView => _browser is not null && _viewWindow != IntPtr.Zero;
+
+    internal bool CanReleaseForMemoryOptimization()
+    {
+        if (!HasLiveShellView || _viewReadiness.Pending || _locationUnconfirmed ||
+            !_location.IsFileSystemLocation || _location.IsSearchActive ||
+            _historyEvents?.HasKnownEmptyHistory != true)
+            return false;
+
+        try
+        {
+            var state = CaptureViewState();
+            if (ViewCaptureFailed || state.Mode is not (3 or 4)) return false;
+            var counts = ReadItemCountsCore(includeSelectionSize: false, requireVisible: false);
+            if (counts is null || counts.Selected != 0) return false;
+
+            // Releasing a Shell view does not currently retain scroll position. Only
+            // detach a top-of-list view, where rebuilding it preserves what the user sees.
+            var listView = IntPtr.Zero;
+            EnumChildWindows(_viewWindow, (child, _) =>
+            {
+                var className = new StringBuilder(64);
+                GetClassName(child, className, className.Capacity);
+                if (className.ToString().Equals("SysListView32", StringComparison.Ordinal))
+                {
+                    listView = child;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return listView != IntPtr.Zero && SendMessage(listView, 0x1027, IntPtr.Zero, IntPtr.Zero).ToInt64() == 0;
+        }
+        catch (Exception) { return false; }
+    }
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot()
     {
         var view = GetFolderView2Pointer();
