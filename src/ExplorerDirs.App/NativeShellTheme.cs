@@ -10,7 +10,72 @@ internal static class NativeShellTheme
     private static bool _dark;
     private static readonly Subclass HeaderParentProcedure = HeaderParentMessage;
     private static readonly Subclass BackgroundProcedure = BackgroundMessage;
-    private static readonly Subclass MenuFrameProcedure = MenuFrameMessage;
+    private static readonly MenuReturnHook MenuHookProcedure = MenuReturned;
+    private static nint _menuHook;
+    private static bool _handlingMenuHook;
+    private static int _menuDepth;
+    private static long _lastMenuPaintTimestamp;
+
+    // Observe only our current STA while its native menu loop is active. Menu
+    // windows can bypass the ordinary comctl32 subclass paint path on Windows 11.
+    internal static void BeginMenu(nint owner = default)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041) || System.Windows.SystemParameters.HighContrast) return;
+        _menuDepth++;
+        if (_menuDepth > 1) return;
+        try { RefreshImmersiveColorPolicyState(); SetPreferredAppMode(_dark ? 2 : 3); FlushMenuThemes(); }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+        if (owner != 0) SendMessage(owner, 0x031A, 0, 0); // Invalidate this Shell owner's cached menu theme.
+        if (_menuHook == 0)
+            _menuHook = SetWindowsHookEx(12, MenuHookProcedure, 0, GetCurrentThreadId());
+    }
+
+    internal static void EndMenu()
+    {
+        if (_menuDepth == 0 || --_menuDepth > 0) return;
+        if (_menuHook != 0) UnhookWindowsHookEx(_menuHook);
+        _menuHook = 0;
+    }
+
+    private static nint MenuReturned(int code, nuint wParam, nint lParam)
+    {
+        var result = CallNextHookEx(_menuHook, code, wParam, lParam);
+        if (code < 0 || _handlingMenuHook || lParam == 0) return result;
+        var call = Marshal.PtrToStructure<MenuReturnMessage>(lParam);
+        if ((call.Message == 0x0121 && call.WParam == 2) || call.Message == 0x011F)
+        {
+            var now = Environment.TickCount64;
+            if (now - _lastMenuPaintTimestamp < 16) return result;
+            _lastMenuPaintTimestamp = now;
+            _handlingMenuHook = true;
+            try { ApplyMenuFrames(repaint: true); }
+            finally { _handlingMenuHook = false; }
+            return result;
+        }
+        if (call.Message is not (0x000F or 0x0085 or 0x0047)) return result;
+        var name = new StringBuilder(32);
+        GetClassName(call.Window, name, name.Capacity);
+        if (name.ToString() != "#32768") return result;
+        _handlingMenuHook = true;
+        try
+        {
+            ApplyMenuWindow(call.Window);
+            DrawMenuFrame(call.Window);
+        }
+        finally { _handlingMenuHook = false; }
+        return result;
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct MenuReturnMessage
+    {
+        public nint Result, LParam; public nuint WParam; public uint Message; public nint Window;
+    }
+    private delegate nint MenuReturnHook(int code, nuint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern nint SetWindowsHookEx(int kind, MenuReturnHook callback, nint module, uint thread);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(nint hook);
+    [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nuint wParam, nint lParam);
+    [DllImport("uxtheme.dll", EntryPoint = "#104")] private static extern void RefreshImmersiveColorPolicyState();
     internal static void SetProcessTheme(bool dark)
     {
         _dark = dark;
@@ -86,7 +151,7 @@ internal static class NativeShellTheme
         finally { Marshal.Release(properties); }
     }
 
-    internal static void ApplyMenuFrames()
+    internal static void ApplyMenuFrames(bool repaint = false)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
@@ -95,6 +160,7 @@ internal static class NativeShellTheme
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
             ApplyMenuWindow(window);
+            if (repaint) DrawMenuFrame(window);
             return true;
         }, 0);
     }
@@ -105,41 +171,28 @@ internal static class NativeShellTheme
         var token = _dark ? (nint)2 : (nint)1;
         if (GetProp(window, property) == token || !SetProp(window, property, token)) return false;
         AllowDarkModeForWindow(window, _dark);
-        SetWindowTheme(window, _dark ? "DarkMode_Explorer" : "Explorer", null);
-        // Restore the system-owned border when leaving dark mode, not a fixed light color.
-        var color = _dark ? 0x404040u : 0xFFFFFFFFu;
-        _ = DwmSetWindowAttribute(window, 34, ref color, sizeof(uint));
-        if (_dark)
-        {
-            _ = SetWindowSubclass(window, MenuFrameProcedure, 0xED7602, 0);
-            DrawMenuFrame(window);
-        }
-        else
-            RemoveWindowSubclass(window, MenuFrameProcedure, 0xED7602);
+        var themeResult = SetWindowTheme(window, _dark ? "DarkMode_Explorer" : "Explorer", null);
+        if (themeResult < 0) { RemoveProp(window, property); return false; }
         return true;
     }
-    private static nint MenuFrameMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nint data)
-    {
-        var result = DefSubclassProc(window, message, wParam, lParam);
-        if (message == 0x0082) RemoveWindowSubclass(window, MenuFrameProcedure, id);
-        else if (_dark && message is 0x000F or 0x0085) DrawMenuFrame(window);
-        return result;
-    }
-
     private static void DrawMenuFrame(nint window)
     {
         if (!GetWindowRect(window, out var bounds)) return;
         var dc = GetWindowDC(window);
         if (dc == 0) return;
-        var previous = SetDCBrushColor(dc, 0x404040);
+        var previous = SetDCBrushColor(dc, _dark ? 0x404040u : 0xB0B0B0u);
         try
         {
             var rect = new NativeRect { Right = bounds.Right - bounds.Left, Bottom = bounds.Bottom - bounds.Top };
-            var width = Math.Max(1, GetSystemMetricsForDpi(45, GetDpiForWindow(window))); // SM_CXEDGE
+            // Use the measured nonclient thickness (3 px in the failing popup),
+            // rather than assuming SM_CXEDGE covers the entire menu surround.
+            var clientWidth = GetClientRect(window, out var client) ? client.Right - client.Left : rect.Right;
+            var width = Math.Max(1, (rect.Right - clientWidth) / 2);
             for (var i = 0; i < width; i++)
             {
                 FrameRect(dc, ref rect, GetStockObject(18)); // DC_BRUSH; no retained GDI allocation.
                 rect.Left++; rect.Top++; rect.Right--; rect.Bottom--;
+                SetDCBrushColor(dc, _dark ? 0x2B2B2Bu : 0xF9F9F9u);
             }
         }
         finally { SetDCBrushColor(dc, previous); ReleaseDC(window, dc); }
@@ -149,8 +202,6 @@ internal static class NativeShellTheme
     [DllImport("user32.dll")] private static extern nint GetWindowDC(nint window);
     [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
     [DllImport("user32.dll")] private static extern int FrameRect(nint dc, ref NativeRect rect, nint brush);
-    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
-    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DllImport("gdi32.dll")] private static extern nint GetStockObject(int index);
     [DllImport("gdi32.dll")] private static extern uint SetDCBrushColor(nint dc, uint color);
 
@@ -181,8 +232,8 @@ internal static class NativeShellTheme
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetProp(nint window, string name);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool SetProp(nint window, string name, nint value);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint RemoveProp(nint window, string name);
     [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nuint wParam, nint lParam);
-    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref uint value, int size);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] private static extern bool EnumThreadWindows(uint thread, EnumWindow callback, nint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetColor(nint self, uint flags, uint color);

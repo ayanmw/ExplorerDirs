@@ -31,8 +31,32 @@ internal static class NativeThemeColorProbe
         }
         finally { Marshal.Release(unsupported); }
         CheckTooltipNotifications(type, members);
+        CheckMenuHookLifetime(type, members);
         Console.WriteLine("Native theme colors: PASS (COM fixture and hidden tooltip; no visible windows or Shell views)");
         return 0;
+    }
+
+    private static void CheckMenuHookLifetime(Type type, BindingFlags members)
+    {
+        if (System.Windows.SystemParameters.HighContrast) return;
+        var begin = type.GetMethod("BeginMenu", members)!;
+        var end = type.GetMethod("EndMenu", members)!;
+        var field = type.GetField("_menuHook", members)!;
+        try
+        {
+            begin.Invoke(null, [(nint)0]);
+            var handle = (nint)field.GetValue(null)!;
+            Check(handle != 0, "native menu observer installs on the current probe thread without showing a menu");
+            begin.Invoke(null, [(nint)0]);
+            Check((nint)field.GetValue(null)! == handle, "nested menu loops share one thread-local installation");
+            end.Invoke(null, null);
+            Check((nint)field.GetValue(null)! == handle, "leaving a nested menu keeps the outer observer alive");
+            end.Invoke(null, null);
+            Check((nint)field.GetValue(null)! == 0, "leaving the outer menu releases the native hook");
+            end.Invoke(null, null);
+            Check((nint)field.GetValue(null)! == 0, "repeated menu cleanup is harmless");
+        }
+        finally { end.Invoke(null, null); end.Invoke(null, null); }
     }
 
     private static void CheckTooltipNotifications(Type type, BindingFlags members)

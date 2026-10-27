@@ -4650,6 +4650,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     _headerPresetMenuGate.Reset();
                     break;
                 case 0x0211: // WM_ENTERMENULOOP
+                    NativeShellTheme.BeginMenu(hwnd);
                     _menuPrepared = false;
                     _menuActions.Clear();
                     break;
@@ -4689,6 +4690,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     }
                     break;
                 case 0x0212: // WM_EXITMENULOOP
+                    NativeShellTheme.EndMenu();
                     _menuPrepared = false;
                     _menuTarget.Reset();
                     _headerPresetMenuGate.Reset();
