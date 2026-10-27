@@ -5,15 +5,18 @@ internal enum ShellFileKeyboardAction { None, SelectAll, Copy, Paste, Cut, Undo,
 
 internal static class ShellRenameKeyRouting
 {
-    internal static bool ShouldForwardArrowKeyDown(int message, int key) =>
-        message == 0x0100 && key is >= 0x25 and <= 0x28;
+    internal static bool ShouldForwardNavigationKeyDown(int message, int key) =>
+        message == 0x0100 && ShellNavigationKeyRouting.IsNavigationKey(key);
 }
 
-internal static class ShellArrowKeyRouting
+internal static class ShellNavigationKeyRouting
 {
+    // VK_PRIOR through VK_DOWN include paging, Home/End and the four arrows.
+    internal static bool IsNavigationKey(int key) => key is >= 0x21 and <= 0x28;
+
     internal static bool ShouldForward(int message, int key, int shellResult,
         bool fileContentFocused, bool columnHeaderFocused, bool editFocused) =>
-        message == 0x0100 && key is >= 0x25 and <= 0x28 && shellResult == 1 &&
+        message == 0x0100 && IsNavigationKey(key) && shellResult == 1 &&
         fileContentFocused && !columnHeaderFocused && !editFocused;
 }
 

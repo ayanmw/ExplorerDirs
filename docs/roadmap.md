@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：Home/End 与翻页键保留原生输入路径
+
+- 原兜底只覆盖四方向，Home/End/PageUp/PageDown 被 Shell 拒绝后仍可能进入 WPF 焦点导航。共享导航键判定扩为 VK_PRIOR～VK_DOWN 八键：文件内容仍只在 TranslateAccelerator 返回 S_FALSE 时补发一次；重命名编辑框直接接收同组 keydown，保留原消息及 Ctrl/Shift 状态。不改 Tab/Enter/Escape，也不拦截 Alt 系统键。
+- 专项 `--shell-file-commands-smoke` 先在 PageUp 未转发用例失败，修正后验证八键路由、S_OK/错误/keyup/系统键不补发、列头/编辑框/非内容窗口排除和重命名入口。没有创建 Shell view 或注入键鼠；这里只证明策略与接线，实际 Home/End 文本选择、文件列表范围选择、翻页、不同查看方式及物理焦点仍待可见验收。本批未发布。
+
 ## 2026-10-27：当前目录操作消除标签路径副本
 
 - 上批修正快照后，继续发现 Pane.CurrentPath 和搜索关闭等操作仍通过单独的 TabState.Path 读取滞后路径。现移除该可变副本，让 Path 直接来自 Browser.CurrentPath；新标签当前目录模式、地址编辑/祖先树、目录扫描、菜单路径与对外当前目录消费者统一使用已确认位置，界面仍按原通知更新。

@@ -629,13 +629,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
         {
             // F2 + arrows escaped the native editor: returning false lets WPF
-            // navigate to a neighbouring HwndHost and ends the rename. Dispatch
-            // once to the focused editor, retaining Ctrl/Shift text selection.
-            if (ShellRenameKeyRouting.ShouldForwardArrowKeyDown(
+            // navigate to a neighbouring HwndHost and ends the rename. Home/End
+            // and paging keys need the same protection. Dispatch once to the
+            // focused editor, retaining Ctrl/Shift text selection.
+            if (ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(
                     msg.message, unchecked((int)msg.wParam.ToInt64())))
             {
                 SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
-                Trace($"rename-arrow-forward key={msg.wParam.ToInt64():X} mods={modifiers} " +
+                Trace($"rename-navigation-forward key={msg.wParam.ToInt64():X} mods={modifiers} " +
                     $"host={_hostWindow} view={_viewWindow} editor={focused}/{focusedClass} focusAfter={GetFocus()}");
                 return true;
             }
@@ -677,15 +678,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
                 if (FocusTracePath is not null && IsTraceKey(msg.wParam.ToInt64()))
                     Trace($"shell result={shellResult:X8} focus={FocusClass()} item={FolderFocusState()}");
-                if (ShellArrowKeyRouting.ShouldForward(msg.message,
+                if (ShellNavigationKeyRouting.ShouldForward(msg.message,
                         unchecked((int)msg.wParam.ToInt64()), shellResult,
                         IsFileContentInputWindow(focused), IsColumnHeaderInputWindow(focused),
                         focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase)))
                 {
-                    // When Shell declines an arrow, HwndHost's base route can treat it as
-                    // WPF focus navigation. Keep it in the focused native file-content control.
+                    // When Shell declines an arrow, Home/End or paging key,
+                    // HwndHost's base route can treat it as WPF focus navigation.
+                    // Keep it in the focused native file-content control.
                     SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
-                    Trace($"untranslated-arrow-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
+                    Trace($"untranslated-navigation-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
                     return true;
                 }
                 if (shellResult == 0)

@@ -2,6 +2,10 @@
 
 日期：2026-10-15
 
+## 2026-10-27 原生导航键边界
+
+ShellNavigationKeyRouting 统一识别 PageUp/PageDown/End/Home/四方向（VK 0x21～0x28）。原生命名编辑框在宿主快捷键和 IShellView accelerator 前直接接收这些 WM_KEYDOWN，沿用原消息及系统 Ctrl/Shift 状态；普通文件区先交 Shell，只有 S_FALSE 且当前为文件内容、非列标题/编辑框时才补发。S_OK、错误、WM_KEYUP 和 WM_SYSKEYDOWN 不进入补发。保持 Tab、确认、取消及其它编辑键原有分派；策略 smoke 不等同真实键盘、原生选区或多窗格物理焦点验收。
+
 ## 2026-10-27 数据快照与排队标签呈现分离
 
 Browser 的 ShellNavigationState 是已确认目录来源。Pane.TabState.Path 曾是 Navigated 后更新的独立缓存，与浏览器在 Dispatcher Background 通知前可能不同；现在该属性直接派生自 Browser.CurrentPath，删除构造与通知中的重复赋值。当前目录命令、扫描、地址栏、新标签和搜索关闭从同一来源读取；界面元素仍可以保留旧呈现直到通知到达，不把界面文字作为操作目标。

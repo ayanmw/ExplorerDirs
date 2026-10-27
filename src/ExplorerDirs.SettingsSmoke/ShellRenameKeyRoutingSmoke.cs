@@ -4,16 +4,17 @@ internal static class ShellRenameKeyRoutingSmoke
 {
     internal static void Run()
     {
-        foreach (var key in new[] { 0x25, 0x26, 0x27, 0x28 })
-            Check(ShellRenameKeyRouting.ShouldForwardArrowKeyDown(0x0100, key),
-                $"rename editor receives arrow keydown 0x{key:X2}");
+        foreach (var key in new[] { 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28 })
+        {
+            Check(ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(0x0100, key),
+                $"rename editor receives navigation keydown 0x{key:X2}");
+            Check(!ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(0x0101, key) &&
+                !ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(0x0104, key),
+                $"rename navigation key 0x{key:X2} does not forward keyup or Alt system messages");
+        }
 
-        Check(!ShellRenameKeyRouting.ShouldForwardArrowKeyDown(0x0101, 0x25),
-            "rename arrow keyup is not redispatched");
-        Check(!ShellRenameKeyRouting.ShouldForwardArrowKeyDown(0x0104, 0x25),
-            "system keydown is not treated as a rename arrow");
-        Check(!ShellRenameKeyRouting.ShouldForwardArrowKeyDown(0x0100, 0x41),
-            "non-arrow keydown remains on the normal accelerator path");
+        Check(!ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(0x0100, 0x41),
+            "non-navigation keydown remains on the normal accelerator path");
     }
 
     private static void Check(bool value, string description)

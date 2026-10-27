@@ -4,23 +4,23 @@ internal static class ShellFileCommandsSmoke
 {
     internal static void Run()
     {
-        foreach (var key in new[] { 0x25, 0x26, 0x27, 0x28 })
-            Check(ShellArrowKeyRouting.ShouldForward(0x0100, key, shellResult: 1,
+        foreach (var key in new[] { 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28 })
+        {
+            Check(ShellNavigationKeyRouting.ShouldForward(0x0100, key, shellResult: 1,
                     fileContentFocused: true, columnHeaderFocused: false, editFocused: false),
-                $"an untranslated arrow key 0x{key:X2} stays in native file content");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, shellResult: 0,
-                fileContentFocused: true, columnHeaderFocused: false, editFocused: false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, shellResult: unchecked((int)0x80004005),
-                fileContentFocused: true, columnHeaderFocused: false, editFocused: false),
-            "only S_FALSE, never success or a Shell error, enables arrow fallback");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0101, 0x25, 1, true, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0104, 0x25, 1, true, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x41, 1, true, false, false),
-            "key-up, system-key and non-arrow messages stay on their existing routes");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, false, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, true, true, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, true, false, true),
-            "arrows do not bypass WPF navigation outside file content, in headers or in editors");
+                $"an untranslated navigation key 0x{key:X2} stays in native file content");
+            Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, key, 0, true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, unchecked((int)0x80004005), true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0101, key, 1, true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0104, key, 1, true, false, false),
+                $"navigation key 0x{key:X2} never duplicates success, errors, keyup or system-key input");
+            Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, false, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, true, true, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, true, false, true),
+                $"navigation key 0x{key:X2} fallback is exclusive to file content");
+        }
+        Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, 0x41, 1, true, false, false),
+            "non-navigation messages stay on their existing routes");
 
         Check(ShellFileKeyboardActions.Resolve(0x41, 2) == ShellFileKeyboardAction.SelectAll &&
             ShellFileKeyboardActions.Resolve(0x58, 2) == ShellFileKeyboardAction.Cut,
