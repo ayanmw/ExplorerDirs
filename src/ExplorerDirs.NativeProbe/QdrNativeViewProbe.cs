@@ -198,6 +198,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private readonly ShellMenuFrameCoordinator? _menuFrameCoordinator;
     private readonly byte[] _bytes;
     private readonly ShellViewStateStore? _stateStore;
+    private readonly byte[]? _expectedState;
     private readonly Guid? _stateId;
     private nint _activeObject;
     private nint _installedSharedMenu;
@@ -301,7 +302,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         {
             RevokeDropTarget();
             if (_savedStream != 0 && _stateStore is not null && _stateId is Guid stateId)
-                _stateStore.Save(stateId, ReadSavedBytes());
+                _stateStore.Save(stateId, ReadSavedBytes(), _expectedState);
         }
         finally
         {
@@ -375,9 +376,14 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         _parent = parent;
         _menuFrameWindow = menuFrameWindow == 0 ? parent : menuFrameWindow;
         _menuFrameCoordinator = menuFrameCoordinator;
-        _bytes = (byte[])bytes.Clone();
         _stateStore = stateStore;
         _stateId = stateId;
+        if (stateStore is not null && stateId is Guid id && stateStore.TryLoad(id, out var persisted))
+        {
+            _bytes = persisted;
+            _expectedState = persisted;
+        }
+        else _bytes = (byte[])bytes.Clone();
         _navigation = navigation;
     }
     public int GetWindow(out nint window)
@@ -518,8 +524,6 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     private byte[] GetReadStateBytes()
     {
         if (_savedStream != 0) return ReadSavedBytes();
-        if (_stateStore is not null && _stateId is Guid stateId && _stateStore.TryLoad(stateId, out var persisted))
-            return persisted;
         return _bytes;
     }
     public int GetControlWindow(uint id, out nint window)

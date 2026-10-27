@@ -1163,3 +1163,8 @@ StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟�
 状态流关闭保护之后，继续核对 IShellBrowser QueryActiveShellView 与 IOleInPlaceFrame SetActiveObject：前者原在 Dispose 后仍 AddRef 借用 View，后者可重新持有 COM 对象，甚至 handler 已关闭宿主后外层仍继续持有。现退休时清空借用 View，关闭查询返回 E_ABORT/空输出，设置活动对象在 handler 前后检查退休。
 
 有效假 COM 对象配合 CCW slot 15/slot 8 回归先复现旧查询仍成功，修正后验证关闭拒绝及 handler 关闭后不持有。借用 View 清空不代表释放调用者自己的引用。NativeProbe Release build 零警告错误，完整颜色策略、菜单消息链、状态流 smoke 通过；无真实 Shell view，原生生命周期顺序及 WPF 产品迁移仍需单独验收。
+### 2026-10-27 视图状态按打开快照检查保存冲突
+
+新增两宿主同 stateId 回归先复现：二者均打开旧状态，先关闭者保存后，后关闭者会覆盖它。现在宿主创建时只读取一次持久化状态，读流使用这份初始快照，保存则比较同一份基线（缺失以 null 区分空数组）。已有 `_bytes` 与 expected baseline 共享引用，不额外复制已保存的 64 KiB 状态。未读到持久化状态时仍克隆调用方 fallback。
+
+存储沿用应用 PortableIniWriter 的 mutex 路径命名，500 ms 有界等待，持锁核对当前存在性/内容后保留原有临时文件写入/flush/原子替换。回归覆盖旧宿主保存拒绝、活动快照不被另一宿主保存替换、重新打开后可保存、外部创建及删除保持。NativeProbe Release build 零警告错误，完整状态流与颜色策略 smoke 通过；跨进程证据仍是顺序读写，未证明同时竞争锁的行为。非协作外部写入者不受该 mutex 控制；真实 Shell view/冲突 UI/产品接线未验证，产品和 release 不变。

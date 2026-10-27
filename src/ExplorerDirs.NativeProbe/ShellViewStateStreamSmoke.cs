@@ -70,6 +70,7 @@ internal static class ShellViewStateStreamSmoke
         VerifyReadWriteMode();
         VerifySnapshotPreservesWriterPosition();
         VerifyClosedHostRejectsStreams();
+        VerifyConcurrentSessionProtection();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
 
@@ -94,6 +95,50 @@ internal static class ShellViewStateStreamSmoke
         var actual = ReadBytes(host, bytes.Length);
         Check(actual.SequenceEqual(bytes), "a separate process reads the exact persisted view-state stream");
         return 0;
+    }
+
+    private static void VerifyConcurrentSessionProtection()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+        var id = Guid.NewGuid();
+        var store = new ShellViewStateStore(directory);
+        store.Save(id, [1, 2]);
+        try
+        {
+            using var first = new StreamViewHost(0, [], new ShellViewStateStore(directory), id);
+            using var stale = new StreamViewHost(0, [], new ShellViewStateStore(directory), id);
+            using var reader = new StreamViewHost(0, [], new ShellViewStateStore(directory), id);
+            WriteBytes(first, [3, 4]);
+            WriteBytes(stale, [5, 6]);
+            first.Dispose();
+            Check(ReadBytes(reader, 2).SequenceEqual(new byte[] { 1, 2 }),
+                "an opened host keeps its own initial state when another host saves");
+            var rejected = false;
+            try { stale.Dispose(); } catch (IOException) { rejected = true; }
+            Check(rejected && store.TryLoad(id, out var actual) && actual.SequenceEqual(new byte[] { 3, 4 }),
+                "a stale host cannot replace a newer persisted session stream on close");
+            using (var current = new StreamViewHost(0, [], new ShellViewStateStore(directory), id))
+                WriteBytes(current, [7, 8]);
+            Check(store.TryLoad(id, out var updated) && updated.SequenceEqual(new byte[] { 7, 8 }),
+                "a freshly loaded host can save the next session generation");
+
+            foreach (var initiallyExists in new[] { false, true })
+            {
+                var changedId = Guid.NewGuid();
+                if (initiallyExists) store.Save(changedId, [10]);
+                using var changedHost = new StreamViewHost(0, [], new ShellViewStateStore(directory), changedId);
+                var changedPath = Path.Combine(directory, changedId.ToString("N") + ".viewstate");
+                if (initiallyExists) File.Delete(changedPath);
+                else store.Save(changedId, [20]);
+                WriteBytes(changedHost, [30]);
+                var conflict = false;
+                try { changedHost.Dispose(); } catch (IOException) { conflict = true; }
+                Check(conflict && (initiallyExists ? !File.Exists(changedPath) :
+                        File.ReadAllBytes(changedPath).SequenceEqual(new byte[] { 20 })),
+                    $"external {(initiallyExists ? "deletion" : "creation")} is preserved on host close");
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     private static void VerifyClosedHostRejectsStreams()
