@@ -17,6 +17,16 @@
 
 原始 JSON `src/.state/memory-samples/live-58888-20261028.json` 不入 Git，SHA-256 `E09290FCE5FE760EAEEBB86BD99070FEBEBE01F442002C07A0D766405C12BDB7`。
 
+同日稍后又对同一 PID/版本被动采样 60.29 秒，13 点、间隔 5 秒。Working Set 全为 230.09 MiB，Private Bytes 全为 115.28 MiB，虚拟字节、句柄（1112）和线程（33）也无变化。原始 CSV `src/.state/memory-samples/ExplorerDirs-memory-20261028-003229.csv` 不入 Git，SHA-256 `8F70B0C2ECBCFB559D8E781EA50E55F3253CED64E8D5AEEF970F053C93EF8264`。这只是相邻短窗口的静止进程级计数；没有记录用户操作、GDI/USER、托管堆或原生分配栈，不据此推断整晚/长期无增长。
+
+### 同一进程的托管计数与采集器后复采
+
+在上述复采后，对相同 PID 58888 使用 `dotnet-counters` 采集 55 秒。托管累计分配量增加 20,775,592 字节（约 19.81 MiB）；发生 1 次 Gen0，Gen1/Gen2 均为 0，GC 暂停累计约 1 ms，GC 提交量报告为 28,872,704 字节（约 27.54 MiB）。各代 `last_collection.heap.size` 合计从 14.49 MiB 到 18.25 MiB；这些是该指标报告的上次回收大小，不能直接解读为存活对象或泄漏增长。进程 Working Set 在 232.00–234.50 MiB 范围内。
+
+`dotnet-counters` 结束后立即再用进程采样器观察同一 PID 60.32 秒：Working Set 稳定在 233.31 MiB、Private Bytes 稳定在 117.55 MiB、句柄 1121、线程 34。与此前未附加运行时计数器时的稳定读数相比，之后读数高约 3.22 MiB Working Set 和 2.27 MiB Private Bytes；变化发生在计数器采集前后，但当时没有记录用户操作，也没有独立对照，不能归因于采集器或应用活动。
+
+两份本地原始 CSV：`managed-live-58888-02.csv` SHA-256 `038F2E7202104FDF14B10685683AE5F8FE44DD04A2014CBF7123749BB5D126C3`；`ExplorerDirs-memory-20261028-003540.csv` SHA-256 `F3F7EF92CD1CC44A34013A4A2B596E6674F9953D1A49D688C62C72BE64A34276`。均位于 `src/.state/memory-samples/`，不入 Git。该被动采样没有用户操作标记，也没有托管/原生分配栈，不能定位分配来源或证明长期趋势。
+
 ## 2026-10-27：同一日常进程的后续资源观察
 
 北京时间 22:41:47–22:42:48，以现有 perf-sample 对仍在运行的 PID 58888 补采 13 点、约 60.25 秒。与前段 JSON 比较，ProcessStartUtc 和磁盘 DLL SHA-256 相同（temp.76/4dcafc2）；未重启、强制 GC、裁剪工作集或操作窗口。
