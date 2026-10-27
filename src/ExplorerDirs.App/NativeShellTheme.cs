@@ -223,14 +223,26 @@ internal static class NativeShellTheme
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         const string property = "ExplorerDirs.MenuBorder";
         var token = _dark ? (nint)2 : (nint)1;
-        if (GetProp(window, property) == token) return;
-        // Keep one system-composed boundary. Only the redundant native surround
-        // is clipped; borderless menus lose their outline against nearby views.
+        // The DWM outline follows the original HWND, outside our clipped fill.
+        // Suppress that detached outline and draw one pixel INSIDE the visible
+        // region, so no transparent gutter separates the boundary from content.
+        if (GetProp(window, property) != token)
+        {
+            uint none = 0xFFFFFFFE;
+            if (DwmSetWindowAttribute(window, 34, ref none, sizeof(uint)) >= 0)
+                SetProp(window, property, token);
+        }
+        if (GetWindowRgnBox(window, out var edge) == 0) return;
+        var dc = GetWindowDC(window);
+        if (dc == 0) return;
         var colors = ThemePalette.For(_dark ? ResolvedTheme.Dark : ResolvedTheme.Light);
-        var border = NativeWindowFrameTheme.ToColorRef(colors.Border);
-        SetProp(window, property, token);
-        if (DwmSetWindowAttribute(window, 34, ref border, sizeof(uint)) < 0) RemoveProp(window, property);
+        var previous = SetDCBrushColor(dc, NativeWindowFrameTheme.ToColorRef(colors.Border));
+        try { FrameRect(dc, ref edge, GetStockObject(18)); }
+        finally { SetDCBrushColor(dc, previous); ReleaseDC(window, dc); }
     }
+    [DllImport("user32.dll")] private static extern nint GetWindowDC(nint window);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
+    [DllImport("user32.dll")] private static extern int FrameRect(nint dc, ref NativeRect rect, nint brush);
     [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref NativeRect rect, uint count);
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);

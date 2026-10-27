@@ -107,3 +107,7 @@
 
 
 - 202de0b 的干净源候选 20261027-103339-131-b02116 已通过 Computer Use 启动；真实截图确认原生文件菜单内容、深色主体和单层灰边显示，子菜单也已展开。未取得用户对这一候选横向视觉间距的最终确认；原生坐标已不受应用移动，但裁剪区域与系统外框的视觉差别仍需验收。原 temp.76 尚未覆盖。
+
+### Border-to-fill gutter clarification
+The user clarified that the unwanted transparent gap is inside each menu boundary, not the parent/submenu placement. The candidate suppresses the DWM outline at the original HWND bounds and draws a one-pixel FrameRect inside the existing visible region after native paint. No window size, position, item geometry or submenu offset changes. Hidden native fixtures pass; real popup visual acceptance remains pending.
+
