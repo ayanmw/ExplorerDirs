@@ -11,6 +11,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -21,6 +22,7 @@ internal static class StaticShellFolderAdapterProbe
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
         var stage = "sort-matrix-isolation";
+        var cloneBehavior = "not-tested";
         nint folderPidl = 0, folder = 0, adapter = 0, nativeLibrary = 0;
         var items = new Dictionary<string, nint>(StringComparer.OrdinalIgnoreCase);
         try
@@ -41,27 +43,44 @@ internal static class StaticShellFolderAdapterProbe
             if (wrappedPidls)
             {
                 stage = "wrapped-enumeration";
+                var rawEnumHr = At<EnumObjects>(folder, 4)(folder, 0, 0x60, out var rawEnumerator);
+                if (rawEnumHr < 0) throw new Exception($"Filesystem IEnumIDList creation failed: 0x{rawEnumHr:X8}.");
+                int rawCloneHr;
+                try { rawCloneHr = At<EnumClone>(rawEnumerator, 6)(rawEnumerator, out var rawClone); if (rawClone != 0) Marshal.Release(rawClone); }
+                finally { Marshal.Release(rawEnumerator); }
+
                 var enumerate = At<EnumObjects>(adapter, 4);
                 var enumHr = enumerate(adapter, 0, 0x60, out var enumerator);
                 if (enumHr < 0) throw new Exception($"Wrapped EnumObjects failed: 0x{enumHr:X8}.");
                 try
                 {
+                    var cloneHr = At<EnumClone>(enumerator, 6)(enumerator, out var clone);
+                    if (cloneHr < 0)
+                    {
+                        if (cloneHr != rawCloneHr) throw new Exception($"Wrapped enumerator changed the underlying Clone result: raw=0x{rawCloneHr:X8}, wrapped=0x{cloneHr:X8}.");
+                        cloneBehavior = $"inner-result-preserved-0x{cloneHr:X8}";
+                    }
+                    else
+                    {
+                        cloneBehavior = "supported";
+                        try
+                        {
+                            var cloneNextHr = At<EnumNext>(clone, 3)(clone, 1, out var clonedChild, out var cloneFetched);
+                            if (cloneNextHr < 0 || cloneFetched != 1 || clonedChild == 0)
+                                throw new Exception($"Wrapped enumerator clone did not preserve its cursor: hr=0x{cloneNextHr:X8}, fetched={cloneFetched}.");
+                            try { VerifyWrappedShellItemObjects(adapter, clonedChild); }
+                            finally { ILFree(clonedChild); }
+                        }
+                        finally { Marshal.Release(clone); }
+                    }
+
                     stage = "wrapped-enumerator-next";
                     var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var child, out var fetched);
                     if (nextHr < 0) throw new Exception($"Wrapped IEnumIDList.Next failed: 0x{nextHr:X8}.");
                     if (fetched != 1 || child == 0) throw new Exception("Wrapped adapter enumeration returned no child PIDL.");
                     try
                     {
-                        var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
-                        try
-                        {
-                            Marshal.WriteIntPtr(childArray, child);
-                            stage = "wrapped-enumerator-attributes";
-                            uint attributes = 0x40000000; // SFGAO_FILESYSTEM; request one ordinary filesystem property only.
-                            var attributesHr = At<GetAttributesOf>(adapter, 9)(adapter, 1, childArray, ref attributes);
-                            if (attributesHr < 0) throw new Exception($"Wrapped GetAttributesOf failed: 0x{attributesHr:X8}.");
-                        }
-                        finally { Marshal.FreeCoTaskMem(childArray); }
+                        VerifyWrappedShellItemObjects(adapter, child);
                     }
                     finally { ILFree(child); }
                 }
@@ -278,7 +297,7 @@ internal static class StaticShellFolderAdapterProbe
             var documentByteCount = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
                 { FormatId = DocumentSummaryFormat, PropertyId = 4 });
 
-            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; " +
+            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; enum-clone={cloneBehavior}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
@@ -722,6 +741,24 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(text); }
     }
 
+    private static void VerifyWrappedShellItemObjects(nint adapter, nint child)
+    {
+        var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+        try
+        {
+            Marshal.WriteIntPtr(childArray, child);
+            uint attributes = 0x40000000; // SFGAO_FILESYSTEM; request one ordinary filesystem property only.
+            var attributesHr = At<GetAttributesOf>(adapter, 9)(adapter, 1, childArray, ref attributes);
+            if (attributesHr < 0) throw new Exception($"Wrapped GetAttributesOf failed: 0x{attributesHr:X8}.");
+
+            var dataObjectHr = At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out var dataObject);
+            if (dataObjectHr < 0) throw new Exception($"Wrapped GetUIObjectOf(IDataObject) failed: 0x{dataObjectHr:X8}.");
+            if (dataObject == 0) throw new Exception("Wrapped GetUIObjectOf(IDataObject) returned a null interface.");
+            Marshal.Release(dataObject);
+        }
+        finally { Marshal.FreeCoTaskMem(childArray); }
+    }
+
     private static string ReadDetailsText(nint details)
     {
         if (Marshal.ReadInt32(details, 8) != 0) throw new Exception("Expected STRRET_WSTR.");
@@ -830,7 +867,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetNameOf(nint self, nint owner, nint item, nint name, uint flags, out nint renamed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TransformPidl(nint source, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyViewFolder(nint view, nint adapter, out int matches);
