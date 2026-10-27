@@ -109,6 +109,7 @@ internal static class ShellViewColorSpike
                 if (createAttempted)
                 {
                     Console.WriteLine("single-pane-cleanup: destroy-view-start");
+                    DumpChildWindowTree("single-pane-before-view-destroy", pane);
                     var destroyHr = At<DestroyViewWindow>(view, 10)(view);
                     Console.WriteLine($"single-pane-cleanup: destroy-view-hr=0x{destroyHr:X8}; view-window-valid={IsWindow(viewWindow)}");
                     if (destroyHr < 0 || IsWindow(viewWindow)) result = 1;
@@ -148,9 +149,12 @@ internal static class ShellViewColorSpike
 
     internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
         bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
-        bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false)
+        bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false,
+        bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
+        if (disableImeForProbeThread)
+            Console.WriteLine($"multi-pane-cleanup: ime-disabled={ImmDisableIME(GetCurrentThreadId())}; thread={GetCurrentThreadId()}");
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-{Guid.NewGuid():N}");
@@ -258,6 +262,8 @@ internal static class ShellViewColorSpike
                 Marshal.Release(item.FolderView);
                 item.Host.RevokeDropTarget();
                 item.Host.View = 0;
+                DumpChildWindowTree($"before-view-destroy pane={item.Pane:X}", item.Pane);
+                if (detachShellViewImeContexts) DetachImeContextTree(item.Pane);
                 var destroyHr = At<DestroyViewWindow>(item.View, 10)(item.View);
                 Console.WriteLine($"multi-pane-cleanup: view-destroy-hr=0x{destroyHr:X8}; view-valid={IsWindow(item.ViewWindow)}");
                 if (destroyHr < 0 || IsWindow(item.ViewWindow)) result = 1;
@@ -323,6 +329,41 @@ internal static class ShellViewColorSpike
         };
         _ = EnumChildWindows(parent, callback, 0);
         Console.WriteLine($"teardown-window-state: child-count={childIndex}");
+    }
+
+    private static void DumpChildWindowTree(string label, nint root)
+    {
+        var rootClass = new System.Text.StringBuilder(128);
+        _ = GetClassNameW(root, rootClass, rootClass.Capacity);
+        var rootContext = ImmGetContext(root);
+        if (rootContext != 0) _ = ImmReleaseContext(root, rootContext);
+        Console.WriteLine($"shell-window-tree: stage={label}; hwnd=0x{root:X}; class={rootClass}; ime-context={rootContext != 0}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var childClass = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(child, childClass, childClass.Capacity);
+            var childContext = ImmGetContext(child);
+            if (childContext != 0) _ = ImmReleaseContext(child, childContext);
+            Console.WriteLine($"shell-window-tree: stage={label}; index={++childIndex}; hwnd=0x{child:X}; class={childClass}; visible={IsWindowVisible(child)}; ime-context={childContext != 0}");
+            return true;
+        };
+        _ = EnumChildWindows(root, callback, 0);
+        Console.WriteLine($"shell-window-tree: stage={label}; child-count={childIndex}");
+    }
+
+    private static void DetachImeContextTree(nint root)
+    {
+        var detachedRootContext = ImmAssociateContext(root, 0);
+        Console.WriteLine($"shell-window-tree: ime-detach root=0x{root:X}; previous-context=0x{detachedRootContext:X}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var detachedContext = ImmAssociateContext(child, 0);
+            Console.WriteLine($"shell-window-tree: ime-detach child={++childIndex}; hwnd=0x{child:X}; previous-context=0x{detachedContext:X}");
+            return true;
+        };
+        _ = EnumChildWindows(root, callback, 0);
     }
 
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
@@ -4180,4 +4221,6 @@ internal static class ShellViewColorSpike
     [DllImport("imm32.dll")] private static extern nint ImmGetContext(nint window);
     [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(nint window, nint context);
     [DllImport("imm32.dll")] private static extern nint ImmAssociateContext(nint window, nint context);
+    [DllImport("imm32.dll")] private static extern bool ImmDisableIME(uint threadId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 }

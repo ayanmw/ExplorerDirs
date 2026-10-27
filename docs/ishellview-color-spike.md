@@ -1180,6 +1180,10 @@ NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产�
 追加差分：跳过显式 `SVUIA_DEACTIVATE`，让菜单仍处于 active 状态并由 coordinator 在 pane/view 释放后清理，父窗口仍在 `WM_DESTROY` 返回后挂起，WCT 链同样到 `ChsIME`。`SVUIA_ACTIVATE_NOFOCUS` 加显式停用的三轮结果为两次挂起、一次完成；完成轮的断言已修正为“未安装共享菜单是预期”，不把它误报成菜单安装失败。因此焦点激活、显式停用都不是必要单一条件；仍未验证的是菜单激活历史与 Private Desktop COM/IME 环境的组合效应。新加入的参数化隔离 probe 保留作后续对照入口。
 
 窗口状态检查补充：普通清理基线与菜单挂起样本在父窗口销毁前都为 `Static` 顶层窗、零子窗、IME context 存在；菜单样本的 Shell view/pane 已销毁、coordinator 无 owner、active object 为 0、窗口菜单句柄为 0。为检验窗口 IME context 是否是直接触发条件，另一个隔离变体在父窗口销毁前调用 `ImmAssociateContext(hwnd, NULL)` 并确认当前 context 为空；挂起与同一 COM→`svchost`/`ChsIME` 链仍复现。此差分削弱了“父窗口当前关联 HIMC 直接导致挂起”的解释，但不能排除线程级输入法/COM 服务交互或 Private Desktop 环境因素。日志：`20261028-054952-9aed3674.stdout.log`、`20261028-054958-29b528b9.stdout.log`、`20261028-055117-d1b709b7.stdout.log`。
+
+随后在 `DestroyViewWindow` 前枚举 pane 子窗：`SHELLDLL_DefView`、`SysListView32`、`SysHeader32` 均有 IME context；挂起样本与不挂起的 no-menu 基线结构一致。测试隔离地从 pane 与这些 Shell 子窗逐一解除 HIMC 后，父窗口销毁仍挂起，WCT 仍指向同一 COM activation 链。另一变体在探针 STA 线程创建任何 Shell 窗口前调用 `ImmDisableIME(threadId)`，连续 3 次菜单激活与完整窗口清理全部通过；窗口 HIMC 仍存在。结合线程 IME 启用时的重复挂起，这强烈指向线程级 IME/COM 集成与该 Private Desktop 生命周期交互，而不是残留菜单、子窗口或单个 HIMC；仍不能证明 ChsIME 服务本身有缺陷，也不能外推为当前 ExplorerBrowser 产品问题。尝试用系统 WPR CPU profile 采集原生切换栈时，因缺少 `SeSystemProfilePrivilege` 失败（`0xc5585011`）；确认 WPR 未开始记录。日志：`20261028-055513-466f35ab.stdout.log`、`20261028-055539-4215b539.stdout.log`、`20261028-055433-e74b8cc7.stdout.log`、`20261028-055443-56672aa0.stdout.log`、`20261028-055450-a748daf7.stdout.log`、`20261028-055650-24a14d94.stdout.log`。
+
+`ImmDisableIME` 只用于私有探针 STA，不作为产品修复：在应用共用 UI STA 上禁用输入法会破坏中文输入，且逐窗 detach HIMC 已证明不足。当前 IShellView 迁移仍需解决/规避这一线程级生命周期交互；由于缺少系统采样权限，下一步优先检查 WPF/UI STA 与私有 STA 的 COM/IME 初始化差异，并评估是否能让 Shell host 在自身可回收的 STA 上运行，而不是降低 Shell 功能或把全局禁用输入法带入产品。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
