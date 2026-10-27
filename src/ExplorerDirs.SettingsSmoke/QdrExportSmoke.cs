@@ -25,7 +25,22 @@ internal static class QdrExportSmoke
             widthRoundTrip.NavigationTreeWidths == treeWidths &&
             widthRoundTrip.Proportions?.GetValueOrDefault(state.Layout) == proportions[state.Layout],
             "extension v4 round-trips all five independent navigation-tree widths with layout proportions");
-        var proportionsOnlyText = QdrExporter.Render(state, pins, proportions);
+        var backupPath = Path.Combine(root, "qdr-background-backup", "session.bak");
+        var backupWarnings = Task.Run(() => QdrExporter.SaveBackup(backupPath, state, pins,
+            proportions, treeWidths)).GetAwaiter().GetResult();
+        var backupImport = QdrImporter.Parse(QdrImporter.ReadText(backupPath + ".qdr"), (value, _) => value);
+        Check(backupWarnings == 0 && File.ReadAllText(backupPath) == SessionStore.Render(state) &&
+            backupImport.ExtendedState is not null && backupImport.NavigationTreeWidths == treeWidths &&
+            backupImport.Proportions?.GetValueOrDefault(state.Layout) == proportions[state.Layout],
+            "background import backup preserves the exact session and complete QDR snapshot");
+        var failedBackup = Path.Combine(root, "qdr-background-backup", "partial.bak");
+        Directory.CreateDirectory(failedBackup + ".qdr");
+        var backupFailed = false;
+        try { Task.Run(() => QdrExporter.SaveBackup(failedBackup, state, pins,
+            proportions, treeWidths)).GetAwaiter().GetResult(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { backupFailed = true; }
+        Check(backupFailed && File.ReadAllText(failedBackup) == SessionStore.Render(state),
+            "a QDR backup write failure preserves the exact session recovery file and reports failure");        var proportionsOnlyText = QdrExporter.Render(state, pins, proportions);
         var v3State = state with { Layout = 4 };
         var v3Text = QdrExporter.Render(v3State, pins,
             new Dictionary<int, LayoutProportions> { [4] = new(0.6, 0.4, BottomHorizontal: 0.55) });

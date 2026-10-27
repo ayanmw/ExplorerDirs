@@ -2382,12 +2382,28 @@ public partial class MainWindow : Window
             if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > SessionStore.MaximumTabsPerPane))
                 throw new InvalidOperationException($"导入后单窗格将超过 {SessionStore.MaximumTabsPerPane} 个标签，请先关闭一些标签再导入。");
             var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
-            Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-            File.WriteAllText(backup, SessionStore.Render(snapshot));
-            File.WriteAllText(backup + ".qdr", QdrExporter.Render(snapshot,
-                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(), SnapshotLayoutProportions(),
-                _treeWidths), System.Text.Encoding.Unicode);
+            var backupPins = _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
+            var backupProportions = SnapshotLayoutProportions();
+            var backupWidths = _treeWidths;
+            var baseline = QdrExporter.Render(snapshot, backupPins, backupProportions, backupWidths);
+            var unresolvedBackupPaths = await WindowBackgroundOperation.RunAsync((Path: backup, Session: snapshot,
+                Pins: backupPins, Proportions: backupProportions, Widths: backupWidths),
+                static state => QdrExporter.SaveBackup(state.Path, state.Session, state.Pins,
+                    state.Proportions, state.Widths), _windowOperationStop.Token);
+            if (_closed) return;
             backupPath = backup;
+            if (!IsVisible || !IsActive)
+            {
+                EnvironmentStatus.Text = "导入前备份已完成；窗口未激活，未追加标签。返回后可重新导入。";
+                return;
+            }
+            // Shell navigation and user input can change the session while the backup worker runs.
+            // Append only if the completed backup still describes the state we are about to modify.
+            var current = QdrExporter.Render(SnapshotSession(),
+                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                SnapshotLayoutProportions(), _treeWidths);
+            if (!string.Equals(baseline, current, StringComparison.Ordinal))
+                throw new InvalidOperationException("备份期间工作区状态已变化，未追加标签；请重新导入。旧快照备份已保留。");
             appending = true;
             for (var pane = 0; pane < 4; pane++)
                 _panes[pane].ImportTabs(import.Panes[pane], import.SelectedTabs[pane],
@@ -2432,7 +2448,8 @@ public partial class MainWindow : Window
             }
             if (import.ActivePane is { } activePane) SetActivePane(_panes[activePane]);
             ScheduleSave();
-            EnvironmentStatus.Text = $"已导入 {import.TabCount} 个标签；原会话已备份。未支持的配置未导入。";
+            EnvironmentStatus.Text = $"已导入 {import.TabCount} 个标签；原会话已备份。未支持的配置未导入。" +
+                (unresolvedBackupPaths == 0 ? "" : $" 备份中 {unresolvedBackupPaths} 个目录使用文本路径；本程序扩展保留原路径。");
         }
         catch (Exception ex)
         {

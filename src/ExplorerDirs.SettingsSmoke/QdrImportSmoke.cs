@@ -293,7 +293,17 @@ internal static class QdrImportSmoke
                 var offlineRoundTrip = QdrImporter.Parse(offlinePrepared.Text, (value, _) => value);
                 Require(offlinePrepared.UnencodedLocationCount == 1 && offlineRoundTrip.ExtendedState is not null &&
                     offlineRoundTrip.TabCount == 4 && offlineRoundTrip.Panes.All(pane => pane[0].Path == offlinePath),
-                    "unavailable percent paths retain every tab and report one distinct unresolved identity");                var malformedRejected = false;
+                    "unavailable percent paths retain every tab and report one distinct unresolved identity");                var literalBackup = Path.Combine(root, "literal-backup.bak");
+                var literalBackupWarnings = Task.Run(() => QdrExporter.SaveBackup(literalBackup,
+                    literalState, [], new Dictionary<int, LayoutProportions> { [4] = new(0.5, 0.5) },
+                    NavigationTreeWidths.Defaults)).GetAwaiter().GetResult();
+                var literalBackupText = QdrImporter.ReadText(literalBackup + ".qdr");
+                var literalBackupBase = string.Join("\n", literalBackupText.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                Require(literalBackupWarnings == 0 && File.ReadAllText(literalBackup) == SessionStore.Render(literalState) &&
+                    QdrImporter.Parse(literalBackupBase, QdrImporter.ResolveLocation).Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "background backup retains literal percent identities in its interoperable base fields");                var malformedRejected = false;
                 try { QdrExporter.Render(literalState, [], encodedLocations:
                     new Dictionary<string, string> { [literalFolder] = "%01" }); }
                 catch (FormatException) { malformedRejected = true; }
