@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 namespace ExplorerDirs.NativeProbe;
 
@@ -37,6 +38,15 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
     }
 
     public int GiveFeedback(uint effect) => DragDropSUseDefaultCursors;
+
+    internal static int RunOleLoop(ComDataObject dataObject, uint allowedEffects, uint initiatingButton, out uint performedEffect)
+    {
+        ArgumentNullException.ThrowIfNull(dataObject);
+        var source = new ShellViewDragSource(initiatingButton);
+        // DoDragDrop owns target discovery and input tracking; callers must run this on an OLE-initialized STA.
+        // This probe entry point deliberately does not move the cursor or synthesize input.
+        return DoDragDrop(dataObject, source, allowedEffects, out performedEffect);
+    }
 
     internal static void VerifyContract(Action<bool, string> check)
     {
@@ -79,4 +89,11 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int FeedbackCallback(nint self, uint effect);
+
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int DoDragDrop(
+        [MarshalAs(UnmanagedType.Interface)] ComDataObject dataObject,
+        [MarshalAs(UnmanagedType.Interface)] IShellViewDragSource dragSource,
+        uint allowedEffects,
+        out uint performedEffect);
 }

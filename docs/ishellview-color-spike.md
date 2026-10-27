@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-27 OLE `DoDragDrop` 调用入口接线
+
+`ShellViewDragSource.RunOleLoop` 现将传入的 Shell COM `IDataObject` 与 `IDropSource` 交给 `ole32!DoDragDrop`，并原样返回 HRESULT 与最终 effect。调用方必须在已初始化的 STA 运行。该方法不设置光标、不注入输入，也没有在本轮执行；构建只验证了 P/Invoke 和 COM 接口编组的类型正确性。真实 OLE source/target 交接、Copy/Move/Link 效果、视图通知及物理输入仍未验证。
+
 ## 2026-10-27：OLE 拖放源端对象合同
 
 NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠标按钮判断继续或完成，Escape 返回取消，`GiveFeedback` 请求 OLE 使用系统默认光标。COM vtable smoke 覆盖左键/右键启动、按钮仍按下/已释放、Escape，以及 None/Copy/Move 效果。

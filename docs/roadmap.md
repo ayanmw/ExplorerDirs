@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：接通隔离 OLE DoDragDrop 调用入口
+
+- `ShellViewDragSource` 现提供隔离原型调用 `ole32!DoDragDrop` 的入口，可接收 COM `IDataObject`、本项目 `IDropSource` 与允许效果并交给系统 OLE 循环。调用要求在已初始化的 STA 中进行；入口不移动光标、不合成键鼠输入，也未从当前 Private Desktop 或用户桌面调用。
+- NativeProbe Release build 通过（0 警告、0 错误）。这只证明 COM 参数编组与调用声明可编译，不证明 `DoDragDrop` 实际运行、源/目标效果正确、跨 pane 文件状态收敛或可见交互；真实循环仍需独占且获授权的隔离输入桌面。产品继续使用 ExplorerBrowser，未发布。
+
 ## 2026-10-27：补齐 Q-Dir 整行选择选项
 
 - “视图 → 整行选择”使用 `IFolderView2::SetCurrentFolderFlags(FWF_FULLROWSELECT)` 控制 Shell 行选择；只改 `0x00200000` 位，保留其它 folder flags。单独的 `FullRowSelection.ini` 保存显式偏好；文件缺失或无效（已尝试备份）时跟随 Shell 默认，新建标签继承显式设置。
