@@ -62,7 +62,32 @@ internal static class WindowPlacementSmoke
             "damaged geometry is backed up before falling back to the default window");
         invalidStore.Save(leftMonitor);
         Check(new WindowPlacementStore(invalidPath).Load() == leftMonitor, "a valid new position can replace backed-up damaged data");
+        CheckCascade();
         Console.WriteLine("Window placement smoke: PASS (configuration/native data only; no windows created)");
+    }
+
+    private static void CheckCascade()
+    {
+        var right = new WindowCascade.Rect { Left = 1920, Top = 0, Right = 4480, Bottom = 1400 };
+        var source = new WindowCascade.Rect { Left = 2200, Top = 100, Right = 3400, Bottom = 900 };
+        Check(WindowCascade.Calculate(source, right, 1200, 800, 32) == (2232, 132),
+            "a new window stays on the source's right-hand monitor");
+        var left = new WindowCascade.Rect { Left = -1920, Top = -200, Right = 0, Bottom = 840 };
+        source = new WindowCascade.Rect { Left = -1800, Top = -150 };
+        Check(WindowCascade.Calculate(source, left, 1200, 800, 32) == (-1768, -118),
+            "left and upper monitor coordinates remain signed");
+        source = new WindowCascade.Rect { Left = -2500, Top = -500 };
+        Check(WindowCascade.Calculate(source, left, 1200, 800, 32) == (-1920, -200),
+            "a partially offscreen source does not hide the new window's title bar");
+        source = new WindowCascade.Rect { Left = -200, Top = 700 };
+        Check(WindowCascade.Calculate(source, left, 1200, 800, 32) == (-1200, 40),
+            "right and bottom edges constrain the cascade on the same monitor");
+        Check(WindowCascade.Calculate(source, left, 2400, 1400, 32) == (-1920, -200),
+            "an oversized new window keeps its title bar at the work area's origin");
+        var above = new WindowCascade.Rect { Left = 0, Top = -1440, Right = 2560, Bottom = -40 };
+        source = new WindowCascade.Rect { Left = 100, Top = -1400 };
+        Check(WindowCascade.Calculate(source, above, 1200, 800, 48) == (148, -1352),
+            "the cascade accepts the source monitor's DPI-scaled offset and upper taskbar boundary");
     }
 
     private static void ExpectIOException(Action action, string message)

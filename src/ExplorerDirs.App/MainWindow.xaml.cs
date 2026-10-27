@@ -485,6 +485,26 @@ public partial class MainWindow : Window
             ? WindowState.Maximized : WindowState.Normal;
     }
 
+    internal void CascadeFrom(MainWindow source)
+    {
+        if (HasSavedWindowPlacement) return;
+        // All new-window routes previously clamped WPF coordinates to the
+        // primary work area, pulling windows away from a secondary monitor.
+        // Wait for a native target handle, and keep this operation in pixels.
+        SourceInitialized += Position;
+        void Position(object? sender, EventArgs args)
+        {
+            SourceInitialized -= Position;
+            try
+            {
+                var sourceHandle = new WindowInteropHelper(source).Handle;
+                if (sourceHandle != 0)
+                    WindowCascade.Place(new WindowInteropHelper(this).Handle, sourceHandle);
+            }
+            catch (Exception ex) { EnvironmentStatus.Text = $"新窗口定位失败：{ex.Message}"; }
+        }
+    }
+
     private void SetActivePane(PaneControl pane)
     {
         var changed = !ReferenceEquals(ActivePane, pane);

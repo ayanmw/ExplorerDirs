@@ -2,6 +2,12 @@
 
 日期：2026-10-15
 
+## 2026-10-27 新窗口的显示器归属
+
+三类新窗口入口复用 `CascadeFrom`，在目标 SourceInitialized 后一次执行并撤销订阅；有已存窗口位置时不登记错位操作。`WindowCascade.Place` 以 MonitorFromWindow/GetMonitorInfo 取得来源屏幕工作区，GetWindowRect 与 SetWindowPos 保持屏幕像素坐标。32 DIP 错位量按来源 DPI 换算，约束左上和右下边界；窗口大于工作区时优先保留标题栏入口，不缩小窗口。定位后根据实际尺寸再约束一次，使用 NOACTIVATE/NOSIZE/NOZORDER；来源最小化时改从同屏工作区起点错位，避免使用 iconic 伪坐标，不还原来源。
+
+此路径与持久化的 WINDOWPLACEMENT 工作区坐标互不转换。依据：[Microsoft WINDOWPLACEMENT 坐标约定](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-windowplacement)。普通不可见 HWND 验证原生定位，纯坐标用例覆盖模拟多屏；真实 WPF 跨 DPI 初始化、窗口显示后的坐标和显示器拔插仍需可见验收。
+
 ## 2026-10-27 已有窗口的最小化恢复
 
 无参数单实例激活与目录转发统一调用 `MainWindow.RestoreFromMinimized`，再由各入口保留原有激活行为。仅最小化时修改 WindowState；普通/最大化按已记录的 `_lastNonMinimizedMaximized` 恢复。F11 使用普通无边框窗口，存在 `_fullScreenRestoreState` 时恢复 Normal，并保留退出时的原呈现记录。不新增配置。未显示实际窗口回归覆盖状态决策；实际激活、双屏坐标与 F11 呈现另行可见验收。

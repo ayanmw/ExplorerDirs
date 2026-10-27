@@ -136,8 +136,7 @@ public partial class App : Application
                 if (index > 0 && !window.HasSavedWindowPlacement)
                 {
                     var previous = _openWindows[^2];
-                    window.Left = Math.Min(previous.Left + 32, SystemParameters.WorkArea.Right - window.Width);
-                    window.Top = Math.Min(previous.Top + 32, SystemParameters.WorkArea.Bottom - window.Height);
+                    window.CascadeFrom(previous);
                 }
                 if (index == 0) MainWindow = window;
                 window.Show();
@@ -231,8 +230,7 @@ public partial class App : Application
             var source = _folderTargetWindow ?? _openWindows.FirstOrDefault(candidate => !ReferenceEquals(candidate, window));
             if (source is not null)
             {
-                window.Left = Math.Min(source.Left + 32, SystemParameters.WorkArea.Right - window.Width);
-                window.Top = Math.Min(source.Top + 32, SystemParameters.WorkArea.Bottom - window.Height);
+                window.CascadeFrom(source);
             }
             window.Show();
             window.Activate();
@@ -260,8 +258,7 @@ public partial class App : Application
         {
             sessionPath = _windowSessions.Create(source.SnapshotSession(), source.SnapshotPinnedTabs());
             var window = CreateWindow(sessionPath, null, null);
-            window.Left = Math.Min(source.Left + 32, SystemParameters.WorkArea.Right - window.Width);
-            window.Top = Math.Min(source.Top + 32, SystemParameters.WorkArea.Bottom - window.Height);
+            window.CascadeFrom(source);
             window.Show();
             window.Activate();
         }

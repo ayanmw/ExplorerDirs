@@ -18,6 +18,7 @@ internal static class WindowCloseLifetimeProbe
         var foreground = GetForegroundWindow();
         var failures = new List<string>();
         RunCase(CheckParentDestruction, "native parent destruction");
+        RunCase(CheckNativeCascade, "same-monitor native cascade");
         RunCase(CheckUnshownWindowClose, "closing one application window");
         if (GetForegroundWindow() != foreground) failures.Add("probe changed foreground");
         foreach (var failure in failures) Console.Error.WriteLine(failure);
@@ -49,6 +50,38 @@ internal static class WindowCloseLifetimeProbe
             "source disposal parks the native child without disposing its HwndHost");
         child.Dispose();
         Ensure(child.DestroyCount == 1, "explicit host disposal releases the native child");
+    }
+
+    private static void CheckNativeCascade()
+    {
+        using var source = new HwndSource(new HwndSourceParameters("non-Shell cascade source")
+        {
+            WindowStyle = unchecked((int)0x80000000), ExtendedWindowStyle = 0x08000000,
+            PositionX = 100, PositionY = 100, Width = 600, Height = 400
+        });
+        using var target = new HwndSource(new HwndSourceParameters("non-Shell cascade target")
+        {
+            WindowStyle = unchecked((int)0x80000000), ExtendedWindowStyle = 0x08000000,
+            PositionX = 0, PositionY = 0, Width = 500, Height = 300
+        });
+        Ensure(GetWindowRect(source.Handle, out var beforeSource), "plain hidden source has a native rectangle");
+        Ensure(GetWindowRect(target.Handle, out var beforeTarget), "plain hidden target has a native rectangle");
+        var monitor = MonitorFromWindow(source.Handle, 2);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        Ensure(GetMonitorInfo(monitor, ref info), "source monitor has a native work area");
+        typeof(MainWindow).Assembly.GetType("ExplorerDirs.App.WindowCascade", true)!
+            .GetMethod("Place", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [target.Handle, source.Handle]);
+        Ensure(GetWindowRect(target.Handle, out var afterTarget), "cascade leaves its target valid");
+        Ensure(GetWindowRect(source.Handle, out var afterSource), "cascade leaves its source valid");
+        Ensure(afterTarget.Right - afterTarget.Left == beforeTarget.Right - beforeTarget.Left &&
+            afterTarget.Bottom - afterTarget.Top == beforeTarget.Bottom - beforeTarget.Top,
+            "same-DPI cascade preserves target size");
+        Ensure(afterTarget.Left >= info.Work.Left && afterTarget.Top >= info.Work.Top &&
+            afterTarget.Right <= info.Work.Right && afterTarget.Bottom <= info.Work.Bottom,
+            "native target is constrained to the source monitor's work area");
+        Ensure(afterSource.Equals(beforeSource), "cascade does not move its source window");
+        Ensure(!IsWindowVisible(source.Handle) && !IsWindowVisible(target.Handle), "cascade never shows either window");
     }
 
     private static void CheckUnshownWindowClose()
@@ -178,4 +211,20 @@ internal static class WindowCloseLifetimeProbe
     private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint window, uint flags);
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(nint window, out NativeRect rect);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(nint window);
 }
