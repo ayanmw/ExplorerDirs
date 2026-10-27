@@ -2342,11 +2342,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         // Filtering temporarily clears native grouping. Keep the confirmed intent
         // even when navigation cancels its timer, so save/copy never store "None".
         _quickFilterGroupToRestore = (group, ascending);
-        _viewState = PreserveQuickFilterGroup(_viewState);
+        _viewState = _viewState with { GroupKey = group, GroupAscending = ascending };
     }
 
-    private ViewState PreserveQuickFilterGroup(ViewState captured) => _quickFilterGroupToRestore is { } group
-        ? captured with { GroupKey = group.Group, GroupAscending = group.Ascending } : captured;
+    private ViewState PreserveQuickFilterGroup(ViewState captured)
+    {
+        if (_quickFilterGroupToRestore is not { } group) return captured;
+        if (captured.GroupKey is not null &&
+            (captured.GroupKey != group.Group || captured.GroupAscending != group.Ascending))
+        {
+            // Native state has moved beyond the temporary "None" phase. Honor
+            // the newly observed group/direction instead of restoring over it.
+            CancelPendingQuickFilterGroupRestore();
+            _quickFilterGroupToRestore = null;
+            _quickFilterRequestVersion++;
+            return captured;
+        }
+        return captured with { GroupKey = group.Group, GroupAscending = group.Ascending };
+    }
 
     private void CancelPendingQuickFilterGroupRestore()
     {

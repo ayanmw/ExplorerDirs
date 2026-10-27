@@ -350,6 +350,31 @@ internal static class PaneTabTransferProbe
             Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(savedView), key) &&
                 !(bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(savedView)!,
                 "a failed group restore still saves the intended key and direction rather than None");
+            hostType.GetMethod("QueueQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, [key, false, 5, request]);
+            var observed = viewType.GetMethod("Copy", InstanceMembers)!.Invoke(cached, null)!;
+            viewType.GetProperty("GroupKey", InstanceMembers)!.SetValue(observed, retiredKey);
+            viewType.GetProperty("GroupAscending", InstanceMembers)!.SetValue(observed, true);
+            var accepted = merge.Invoke(browser, [observed])!;
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(accepted), retiredKey) &&
+                (bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(accepted)!,
+                "a newly observed native group takes precedence over the filter's older intent");
+            Ensure(hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser) is null &&
+                hostType.GetField("_pendingQuickFilterGroupRestore", InstanceMembers)!.GetValue(browser) is null &&
+                (long)hostType.GetField("_quickFilterRequestVersion", InstanceMembers)!.GetValue(browser)! > request,
+                "accepting a different native group retires the old timer and queued refresh request");
+            request = (long)hostType.GetField("_quickFilterRequestVersion", InstanceMembers)!.GetValue(browser)!;
+            hostType.GetMethod("QueueQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, [retiredKey, true, 5, request]);
+            var remembered = hostType.GetMethod("CachedViewState", InstanceMembers)!.Invoke(browser, null)!;
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(remembered), retiredKey) &&
+                (bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(remembered)! &&
+                hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser) is not null,
+                "remembering a newly confirmed group replaces an older cache without cancelling its own queue");
+            viewType.GetProperty("GroupAscending", InstanceMembers)!.SetValue(observed, false);
+            accepted = merge.Invoke(browser, [observed])!;
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(accepted), retiredKey) &&
+                !(bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(accepted)! &&
+                hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser) is null,
+                "a native direction-only change also takes precedence over the old restore intent");
             Ensure(hostType.GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
                 (nint)hostType.GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
                 "group snapshot checks never create a native view");
