@@ -29,6 +29,8 @@ namespace
     volatile LONG g_standardSizeDetailsOf = 0;
     volatile LONG g_customDetailsOf = 0;
     volatile LONG g_propertyStoreQueryInterfaceRequests = 0;
+    volatile LONG g_persistClassIdRequests = 0;
+    volatile LONG g_persistRootRequests = 0;
     volatile LONG g_propertyStoreBindToObjectRequests = 0;
     volatile LONG g_propertyStoreBindToStorageRequests = 0;
     volatile LONG g_propertyStoreUiObjectRequests = 0;
@@ -95,8 +97,8 @@ namespace
     class StaticShellFolderAdapter final : public IShellFolder2, public IPersistFolder2
     {
     public:
-        explicit StaticShellFolderAdapter(IShellFolder2* inner, bool strictInterfaces = false)
-            : _inner(inner), _strictInterfaces(strictInterfaces)
+        explicit StaticShellFolderAdapter(IShellFolder2* inner, bool strictInterfaces = false, bool prototypeClass = false)
+            : _inner(inner), _strictInterfaces(strictInterfaces), _prototypeClass(prototypeClass)
         {
             if (_inner) _inner->AddRef();
             if (_inner)
@@ -154,7 +156,14 @@ namespace
 
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id) override
         {
+            InterlockedIncrement(&g_persistClassIdRequests);
             if (!id) return E_POINTER;
+            if (_prototypeClass)
+            {
+                // Unregistered diagnostic identity: keeps the filesystem root PIDL unchanged.
+                *id = { 0xE319CE20, 0x65C4, 0x41F7, { 0xA4, 0x96, 0x37, 0x5E, 0xBE, 0x0B, 0x2F, 0xC1 } };
+                return S_OK;
+            }
             IPersistFolder2* persist = nullptr;
             auto result = _inner->QueryInterface(IID_PPV_ARGS(&persist));
             if (FAILED(result)) return result;
@@ -173,6 +182,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* pidl) override
         {
+            InterlockedIncrement(&g_persistRootRequests);
             if (!pidl) return E_POINTER;
             *pidl = nullptr;
             IPersistFolder2* persist = nullptr;
@@ -338,6 +348,7 @@ namespace
         volatile LONG _refs = 1;
         IShellFolder2* _inner = nullptr;
         const bool _strictInterfaces;
+        const bool _prototypeClass;
         UINT _columnCount = 0;
     };
 }
@@ -402,6 +413,18 @@ extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreUiObjectRequestCoun
     return InterlockedCompareExchange(&g_propertyStoreUiObjectRequests, 0, 0);
 }
 
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellPersistClassRequestCount()
+{
+    return InterlockedCompareExchange(&g_persistClassIdRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellPersistRootRequestCount()
+{
+    return InterlockedCompareExchange(&g_persistRootRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) UINT WINAPI GetStaticShellDetailsSize()
+{
+    return static_cast<UINT>(sizeof(SHELLDETAILS));
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
     IShellFolder2* folder, IShellFolder2** adapter)
 {
@@ -420,6 +443,16 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateStrictShellFolderAdapter(
     if (!folder || !adapter) return E_POINTER;
     *adapter = nullptr;
     auto* instance = new (std::nothrow) StaticShellFolderAdapter(folder, true);
+    if (!instance) return E_OUTOFMEMORY;
+    *adapter = instance;
+    return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateClassIdentityShellFolderAdapter(
+    IShellFolder2* folder, IShellFolder2** adapter)
+{
+    if (!folder || !adapter) return E_POINTER;
+    *adapter = nullptr;
+    auto* instance = new (std::nothrow) StaticShellFolderAdapter(folder, true, true);
     if (!instance) return E_OUTOFMEMORY;
     *adapter = instance;
     return S_OK;

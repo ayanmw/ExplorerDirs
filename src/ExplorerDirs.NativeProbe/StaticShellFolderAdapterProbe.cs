@@ -14,7 +14,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const uint SvgioAllView = 2;
 
-    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false)
+    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false)
     {
         VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -29,8 +29,9 @@ internal static class StaticShellFolderAdapterProbe
             Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
+            var shellDetailsSize = GetShellDetailsSize(nativeLibrary);
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
             if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
             foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
@@ -40,12 +41,13 @@ internal static class StaticShellFolderAdapterProbe
             {
                 File.WriteAllText(Path.Combine(fixture, name), "value pending");
                 items.Add(name, ParseChild(adapter, name));
-            }            var columnIndex = GetColumnCount(folder);
+            }
+            var columnIndex = GetColumnCount(folder, shellDetailsSize);
             var property = StaticShellColumnContract.PropertyKey;
             var expectedKey = new ShellColumnManager.NativeKey { FormatId = property.FormatId, PropertyId = property.PropertyId };
             var keyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
             var variant = Marshal.AllocCoTaskMem(24);
-            var details = Marshal.AllocCoTaskMem(272);
+            var details = Marshal.AllocCoTaskMem(shellDetailsSize);
             try
             {
                 Marshal.StructureToPtr(expectedKey, keyPointer, false);
@@ -61,10 +63,10 @@ internal static class StaticShellFolderAdapterProbe
                     ("two.bin", 2UL), ("ten.bin", 10UL), ("hundred.bin", 100UL), ("ten-copy.bin", 10UL)
                 })
                 {
-                    Marshal.Copy(new byte[272], 0, details, 272);
+                    Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
                     Check(At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)columnIndex, details));
                     if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
-                    Marshal.Copy(new byte[272], 0, details, 272);
+                    Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
                     Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], (uint)columnIndex, details));
                     if (ReadDetailsText(details) != expectedValue.ToString()) throw new Exception($"Display text mismatch for {name}.");
 
@@ -84,7 +86,7 @@ internal static class StaticShellFolderAdapterProbe
 
             var missingVariant = Marshal.AllocCoTaskMem(24);
             var missingKey = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
-            var missingDetails = Marshal.AllocCoTaskMem(272);
+            var missingDetails = Marshal.AllocCoTaskMem(shellDetailsSize);
             try
             {
                 Marshal.StructureToPtr(expectedKey, missingKey, false);
@@ -93,7 +95,7 @@ internal static class StaticShellFolderAdapterProbe
                 if (pendingHr < 0) throw new Exception($"Pending custom GetDetailsEx failed: 0x{pendingHr:X8}.");
                 if (Marshal.ReadInt16(missingVariant) != 0)
                     throw new Exception("An uncomputed custom value must be VT_EMPTY rather than a fabricated zero.");
-                Marshal.Copy(new byte[272], 0, missingDetails, 272);
+                Marshal.Copy(new byte[shellDetailsSize], 0, missingDetails, shellDetailsSize);
                 Check(At<GetDetailsOf>(adapter, 18)(adapter, items["pending-a.bin"], (uint)columnIndex, missingDetails));
                 if (ReadDetailsText(missingDetails) != string.Empty)
                     throw new Exception("An uncomputed custom value must have blank display text.");
@@ -103,9 +105,12 @@ internal static class StaticShellFolderAdapterProbe
                 Marshal.FreeCoTaskMem(missingDetails);
                 Marshal.FreeCoTaskMem(missingKey);
                 Marshal.FreeCoTaskMem(missingVariant);
-            }            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            }
+            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
             var sizeKeyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
             var sizeVariant = Marshal.AllocCoTaskMem(24);
+            // The first details buffer was freed after the custom-column checks; use a fresh buffer for the standard Size control.
+            var sizeDetails = Marshal.AllocCoTaskMem(shellDetailsSize);
             try
             {
                 Marshal.StructureToPtr(sizeKey, sizeKeyPointer, false);
@@ -114,9 +119,9 @@ internal static class StaticShellFolderAdapterProbe
                     ("two.bin", 2UL), ("ten.bin", 10UL), ("hundred.bin", 100UL), ("ten-copy.bin", 10UL)
                 })
                 {
-                    Marshal.Copy(new byte[272], 0, details, 272);
-                    Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], 1, details));
-                    if (ReadDetailsText(details) != expectedValue.ToString())
+                    Marshal.Copy(new byte[shellDetailsSize], 0, sizeDetails, shellDetailsSize);
+                    Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], 1, sizeDetails));
+                    if (ReadDetailsText(sizeDetails) != expectedValue.ToString())
                         throw new Exception($"Standard Size display mismatch for {name}.");
 
                     Marshal.GetNativeVariantForObject(0UL, sizeVariant);
@@ -130,6 +135,7 @@ internal static class StaticShellFolderAdapterProbe
             {
                 Marshal.FreeCoTaskMem(sizeVariant);
                 Marshal.FreeCoTaskMem(sizeKeyPointer);
+                Marshal.FreeCoTaskMem(sizeDetails);
             }
 
             var compare = At<CompareIDs>(adapter, 7);
@@ -185,7 +191,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    internal static int Run(bool strictInterfaces = false)
+    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -209,8 +215,9 @@ internal static class StaticShellFolderAdapterProbe
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
 
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
+            var shellDetailsSize = GetShellDetailsSize(nativeLibrary);
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
 
             var property = StaticShellColumnContract.PropertyKey;
@@ -220,18 +227,18 @@ internal static class StaticShellFolderAdapterProbe
             try
             {
                 Marshal.StructureToPtr(nativeKey, keyPointer, false);
-                var details = Marshal.AllocCoTaskMem(272);
+                var details = Marshal.AllocCoTaskMem(shellDetailsSize);
                 try
                 {
-                    Marshal.Copy(new byte[272], 0, details, 272);
-                    var customColumn = GetColumnCount(folder);
+                    Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
+                    var customColumn = GetColumnCount(folder, shellDetailsSize);
                     var titleHr = At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)customColumn, details);
                     if (titleHr < 0) throw new COMException($"Custom column title query failed at index {customColumn}.", titleHr);
                     if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
                 }
                 finally { Marshal.FreeCoTaskMem(details); }
 
-                var columnIndex = GetColumnCount(folder);
+                var columnIndex = GetColumnCount(folder, shellDetailsSize);
                 Check(At<GetDefaultColumnState>(adapter, 16)(adapter, (uint)columnIndex, out var columnState));
                 if (columnState != 0x12) throw new Exception($"Unexpected custom column state 0x{columnState:X}.");
                 Check(At<MapColumn>(adapter, 19)(adapter, (uint)columnIndex, keyPointer));
@@ -269,7 +276,7 @@ internal static class StaticShellFolderAdapterProbe
             Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
             Check(At<SetMode>(folderView, 35)(folderView, 4, 16)); // Details view.
 
-            var columnIndexForView = GetColumnCount(folder);
+            var columnIndexForView = GetColumnCount(folder, shellDetailsSize);
             var columns = new DisplayColumnState[]
             {
                 new(new(NameKeyFormat, 10), 220),
@@ -294,7 +301,7 @@ internal static class StaticShellFolderAdapterProbe
             Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
             var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
             // A failed custom-schema check must not suppress the standard-schema control evidence.
-            VerifySortMatrix((standard, direction) => ReadSortedValues(folderView, adapter,
+            VerifySortMatrix((standard, direction) => ReadSortedValues(view, folderView, adapter,
                 standard ? sizeKey : nativeKey, direction), Console.WriteLine);
             Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-column-visible=True; " +
                 "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=True; foreground-unchanged=True");
@@ -419,15 +426,15 @@ internal static class StaticShellFolderAdapterProbe
         }
         VerifySortMatrix((_, direction) => direction == 1 ? [2, 10, 10, 100] : [100, 10, 10, 2], _ => { });
     }
-    private static int GetColumnCount(nint adapter)
+    private static int GetColumnCount(nint adapter, int shellDetailsSize)
     {
-        var details = Marshal.AllocCoTaskMem(272);
+        var details = Marshal.AllocCoTaskMem(shellDetailsSize);
         try
         {
             var count = 0;
             for (uint index = 0; index < 64; index++)
             {
-                Marshal.Copy(new byte[272], 0, details, 272);
+                Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
                 if (At<GetDetailsOf>(adapter, 18)(adapter, 0, index, details) < 0) break;
                 if (ReadDetailsText(details).Length == 0) break;
                 count++;
@@ -438,7 +445,16 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(details); }
     }
 
-    private static ulong[] ReadSortedValues(nint folderView, nint adapter, ShellColumnManager.NativeKey key, int direction)
+    private static int GetShellDetailsSize(nint module)
+    {
+        // SHELLDETAILS embeds STRRET, whose x64 alignment makes the full structure larger than 272 bytes.
+        var size = Marshal.GetDelegateForFunctionPointer<GetShellDetailsSizeNative>(
+            NativeLibrary.GetExport(module, "GetStaticShellDetailsSize"))();
+        if (size < 272 || size > 512) throw new Exception($"Unexpected native SHELLDETAILS size: {size}.");
+        return checked((int)size);
+    }
+
+    private static ulong[] ReadSortedValues(nint view, nint folderView, nint adapter, ShellColumnManager.NativeKey key, int direction)
     {
         Console.WriteLine($"native-static-shell-column: callbacks-before-sort={ReadNativeComparisonStats()}");
         var sortPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
@@ -450,6 +466,10 @@ internal static class StaticShellFolderAdapterProbe
             Check(setSortHr);
         }
         finally { Marshal.FreeCoTaskMem(sortPointer); }
+        // SetSortColumns updates view state; explicitly request the DefView refresh before checking its item order.
+        var refreshHr = At<RefreshView>(view, 8)(view);
+        Console.WriteLine($"native-static-shell-column: refresh-after-sort-hr=0x{refreshHr:X8}");
+        Check(refreshHr);
         Pump(300);
         var sortCountHr = At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount);
         Console.WriteLine($"native-static-shell-column: SetSortColumns hr=0x{setSortHr:X8}; GetSortColumnCount hr=0x{sortCountHr:X8}; count={sortCount}");
@@ -598,7 +618,9 @@ internal static class StaticShellFolderAdapterProbe
             var propertyStoreBindObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToObjectRequestCount"))();
             var propertyStoreBindStorage = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToStorageRequestCount"))();
             var propertyStoreUiObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreUiObjectRequestCount"))();
-            return $"compare={total}/{custom}/{index}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; " +
+            var persistClass = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistClassRequestCount"))();
+            var persistRoot = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistRootRequestCount"))();
+            return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; " +
                 $"GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
                 $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}";
         }
@@ -642,6 +664,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIDs(nint self, nint sortColumn, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint GetShellDetailsSizeNative();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumn(nint self, uint column, nint key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bind, nint name, nint eaten, out nint item, out uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
