@@ -18,6 +18,12 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 再次核对 [Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)：当前仍为 12.82，更新日期 2026-10-24；版本说明只具体提到改进地址栏目录树使用，其余为一般 Quad-Explorer 优化和语言文件更新，没有给出可据此实现的新交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑、祖先导航及“此电脑”驱动器子项。本轮不据笼统的“优化”文字推测新行为；当前实际差距应通过之后的可见 Q-Dir/Explorer Dirs 对照记录，而不是再扩写未经证实的版本功能。
 
+## 2026-10-27 Win+E 入口对照
+
+Q-Dir 帮助页概述支持把 Win+E 设为启动 Q-Dir；更具体的 [FAQ 81](https://www.softwareok.com/?faq=81&seite=faq-Q-DIR) 给出的做法是使用 QuickTextPaste，把 `E+L-Win` 绑定到 `run:%PATH%/q-dir.exe`。因此，公开证据确认的是可通过外部快捷键工具转发 Win+E，并未说明 Q-Dir 自身注册全局热键、替换 Explorer 或改写文件夹关联。此处是基于官方操作步骤的判断，不推断 Q-Dir 的内部实现。
+
+Explorer Dirs 已具备单目录命令行启动和可选、可逆的每用户文件夹/磁盘菜单脚本；这与 Win+E 热键路由是不同入口。鉴于 Win+E 是系统级组合键且可能与其他快捷键工具冲突，后续设计须先明确应用自身的可逆启停与冲突恢复流程，不使用未经验证的全局键盘钩子或注册表键。当前仍未接管 Win+E；系统入口验收继续列在 [路线图 M3](roadmap.md#系统入口接管) 中。
+
 ## 2026-10-27 Q-Dir 文件筛选行为对照
 
 复核 Q-Dir 官方 [FAQ 37](https://www.softwareok.com/?faq=37&seite=faq-Q-DIR) 与 [FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)：Q-Dir 说明每个文件视图分别保存筛选设置；筛选支持多个 `*`/`?` 通配模式、正向或反向匹配、可选择是否筛选文件夹、保存筛选收藏，并可通过列表列标题筛选。FAQ 37 还把其筛选称作 “effective tagging filter”，但没有解释这个术语是否意味着仅高亮、选择标记或额外筛选行为，因此不据此增加新的“标记”模式。
