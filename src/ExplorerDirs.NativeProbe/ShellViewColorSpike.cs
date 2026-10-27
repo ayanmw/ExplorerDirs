@@ -15,6 +15,9 @@ internal enum MergedEditMenuCommandRoute
 
 internal static class ShellViewColorSpike
 {
+    [ThreadStatic]
+    private static bool _useWpfDispatcherPump;
+
     private const uint ShellRenameItem = 0x00000001;
     private const uint ShellCreate = 0x00000002;
     private const uint ShellDelete = 0x00000004;
@@ -150,9 +153,13 @@ internal static class ShellViewColorSpike
     internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
         bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
         bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false,
-        bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false)
+        bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false,
+        bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
+        var previousPumpMode = _useWpfDispatcherPump;
+        _useWpfDispatcherPump = useWpfDispatcherPump;
+        Console.WriteLine($"multi-pane-cleanup: pump-mode={(useWpfDispatcherPump ? "wpf-dispatcher" : "winforms-doevents")}");
         if (disableImeForProbeThread)
             Console.WriteLine($"multi-pane-cleanup: ime-disabled={ImmDisableIME(GetCurrentThreadId())}; thread={GetCurrentThreadId()}");
         var foreground = GetForegroundWindow();
@@ -162,14 +169,30 @@ internal static class ShellViewColorSpike
         var stateStore = new ShellViewStateStore(stateDirectory);
         var panes = new List<(nint Pane, nint Pidl, nint Folder, nint View, nint HostPointer, nint ViewWindow, nint FolderView, ShellViewColorBrowserHost Host)>();
         nint parent = 0;
+        System.Windows.Interop.HwndSource? wpfParentSource = null;
         ShellMenuFrameCoordinator? menuCoordinator = null;
         var result = 1;
         try
         {
             Directory.CreateDirectory(fixture);
             File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
-            parent = CreateWindowExW(0x08000080u, "STATIC", $"ExplorerDirs {paneCount}-pane cleanup",
-                0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            if (useWpfHwndSourceParent)
+            {
+                var parameters = new System.Windows.Interop.HwndSourceParameters("ExplorerDirs WPF cleanup root")
+                {
+                    Width = 800,
+                    Height = 560,
+                    WindowStyle = unchecked((int)0x10CF0000u)
+                };
+                wpfParentSource = new System.Windows.Interop.HwndSource(parameters);
+                parent = wpfParentSource.Handle;
+            }
+            else
+            {
+                parent = CreateWindowExW(0x08000080u, "STATIC", $"ExplorerDirs {paneCount}-pane cleanup",
+                    0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            }
+            Console.WriteLine($"multi-pane-cleanup: parent-kind={(useWpfHwndSourceParent ? "wpf-hwndsource" : "native-static")}; hwnd=0x{parent:X}");
             if (parent == 0) throw new InvalidOperationException("Could not create the isolated cleanup parent.");
             menuCoordinator = new ShellMenuFrameCoordinator(parent);
             for (var index = 0; index < paneCount; index++)
@@ -291,16 +314,26 @@ internal static class ShellViewColorSpike
                     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                         "Could not install the parent teardown observer.");
                 Console.WriteLine("multi-pane-cleanup: destroy-parent-start");
-                var parentDestroyed = DestroyWindow(parent);
+                var parentDestroyed = DestroyCleanupParent(parent, ref wpfParentSource);
                 Console.WriteLine($"multi-pane-cleanup: parent-destroy-returned={parentDestroyed}; still-valid={IsWindow(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (!parentDestroyed || IsWindow(parent) || GetForegroundWindow() != foreground) result = 1;
-                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
             }
             if (!disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            if (wpfParentSource is not null) DestroyCleanupParent(parent, ref wpfParentSource);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
             if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
+            _useWpfDispatcherPump = previousPumpMode;
         }
         return result;
+    }
+
+    private static bool DestroyCleanupParent(nint parent, ref System.Windows.Interop.HwndSource? wpfParentSource)
+    {
+        if (wpfParentSource is null) return DestroyWindow(parent);
+        wpfParentSource.Dispose();
+        wpfParentSource = null;
+        return !IsWindow(parent);
     }
 
     private static void DumpTeardownWindowState(nint parent, ShellMenuFrameCoordinator? coordinator,
@@ -2606,6 +2639,11 @@ internal static class ShellViewColorSpike
 
     private static void Pump(int milliseconds = 350, string? diagnosticLabel = null)
     {
+        if (_useWpfDispatcherPump)
+        {
+            PumpWithWpfDispatcher(milliseconds);
+            return;
+        }
         var messageFilter = diagnosticLabel is null ? null : new PumpMessageTraceFilter(diagnosticLabel);
         if (messageFilter is not null) System.Windows.Forms.Application.AddMessageFilter(messageFilter);
         var until = Environment.TickCount64 + milliseconds;
@@ -2621,6 +2659,27 @@ internal static class ShellViewColorSpike
         {
             if (messageFilter is not null) System.Windows.Forms.Application.RemoveMessageFilter(messageFilter);
         }
+    }
+
+    private static void PumpWithWpfDispatcher(int milliseconds)
+    {
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background,
+            dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(Math.Max(1, milliseconds))
+        };
+        EventHandler? onTick = null;
+        onTick = (_, _) =>
+        {
+            timer.Stop();
+            timer.Tick -= onTick;
+            frame.Continue = false;
+        };
+        timer.Tick += onTick;
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
     }
 
     private sealed class PumpMessageTraceFilter(string label) : System.Windows.Forms.IMessageFilter

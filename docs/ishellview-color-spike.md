@@ -1181,7 +1181,7 @@ NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产�
 
 窗口状态检查补充：普通清理基线与菜单挂起样本在父窗口销毁前都为 `Static` 顶层窗、零子窗、IME context 存在；菜单样本的 Shell view/pane 已销毁、coordinator 无 owner、active object 为 0、窗口菜单句柄为 0。为检验窗口 IME context 是否是直接触发条件，另一个隔离变体在父窗口销毁前调用 `ImmAssociateContext(hwnd, NULL)` 并确认当前 context 为空；挂起与同一 COM→`svchost`/`ChsIME` 链仍复现。此差分削弱了“父窗口当前关联 HIMC 直接导致挂起”的解释，但不能排除线程级输入法/COM 服务交互或 Private Desktop 环境因素。日志：`20261028-054952-9aed3674.stdout.log`、`20261028-054958-29b528b9.stdout.log`、`20261028-055117-d1b709b7.stdout.log`。
 
-随后在 `DestroyViewWindow` 前枚举 pane 子窗：`SHELLDLL_DefView`、`SysListView32`、`SysHeader32` 均有 IME context；挂起样本与不挂起的 no-menu 基线结构一致。测试隔离地从 pane 与这些 Shell 子窗逐一解除 HIMC 后，父窗口销毁仍挂起，WCT 仍指向同一 COM activation 链。另一变体在探针 STA 线程创建任何 Shell 窗口前调用 `ImmDisableIME(threadId)`，连续 3 次菜单激活与完整窗口清理全部通过；窗口 HIMC 仍存在。结合线程 IME 启用时的重复挂起，这强烈指向线程级 IME/COM 集成与该 Private Desktop 生命周期交互，而不是残留菜单、子窗口或单个 HIMC；仍不能证明 ChsIME 服务本身有缺陷，也不能外推为当前 ExplorerBrowser 产品问题。尝试用系统 WPR CPU profile 采集原生切换栈时，因缺少 `SeSystemProfilePrivilege` 失败（`0xc5585011`）；确认 WPR 未开始记录。日志：`20261028-055513-466f35ab.stdout.log`、`20261028-055539-4215b539.stdout.log`、`20261028-055433-e74b8cc7.stdout.log`、`20261028-055443-56672aa0.stdout.log`、`20261028-055450-a748daf7.stdout.log`、`20261028-055650-24a14d94.stdout.log`。
+随后在 `DestroyViewWindow` 前枚举 pane 子窗：`SHELLDLL_DefView`、`SysListView32`、`SysHeader32` 均有 IME context；挂起样本与不挂起的 no-menu 基线结构一致。测试隔离地从 pane 与这些 Shell 子窗逐一解除 HIMC 后，父窗口销毁仍挂起，WCT 仍指向同一 COM activation 链。另一变体在探针 STA 线程创建任何 Shell 窗口前调用 `ImmDisableIME(threadId)`，连续 3 次菜单激活与完整窗口清理全部通过；窗口 HIMC 仍存在。当时的结果一度提示线程级 IME/COM 交互，但后续 WPF HwndSource 根窗对照在 IME 启用时 3/3 正常销毁，削弱了该解释；现阶段不能把 ChsIME 或线程级 IME/COM 认定为根因。尝试用系统 WPR CPU profile 采集原生切换栈时，因缺少 `SeSystemProfilePrivilege` 失败（`0xc5585011`）；确认 WPR 未开始记录。日志：`20261028-055513-466f35ab.stdout.log`、`20261028-055539-4215b539.stdout.log`、`20261028-055433-e74b8cc7.stdout.log`、`20261028-055443-56672aa0.stdout.log`、`20261028-055450-a748daf7.stdout.log`、`20261028-055650-24a14d94.stdout.log`。
 
 `ImmDisableIME` 只用于私有探针 STA，不作为产品修复：在应用共用 UI STA 上禁用输入法会破坏中文输入，且逐窗 detach HIMC 已证明不足。当前 IShellView 迁移仍需解决/规避这一线程级生命周期交互；由于缺少系统采样权限，下一步优先检查 WPF/UI STA 与私有 STA 的 COM/IME 初始化差异，并评估是否能让 Shell host 在自身可回收的 STA 上运行，而不是降低 Shell 功能或把全局禁用输入法带入产品。
 
@@ -1190,6 +1190,12 @@ NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产�
 为区分“隔离 STA 没有 OLE 初始化”与“WPF STA/消息环境差异”，新增仅供 NativeProbe 使用的 opt-in `private-desktop-single-pane-menu-ole-init-sync-cleanup`。它在隔离 worker STA、创建 Shell 窗口之前调用 `OleInitialize`，保持输入法启用，并在探针正常返回时配对 `OleUninitialize`；没有修改产品 ExplorerBrowser 或共享 WPF UI 线程。
 
 Release NativeProbe 构建 0 警告/错误。该用例连续两次在父窗口 `WM_DESTROY` 回调正常返回后卡于 `DestroyWindow`，均由 50 秒 watchdog 结束；两次 WCT 快照都显示同进程线程等待 → COM → `svchost` COM activation → `ChsIME`，`cycle=False`，前台 HWND 未变化。日志为 `20261028-060248-029d195c.stdout.log` 和 `20261028-060400-db16b703.stdout.log`。因此“仅缺少 OleInitialize”不能解释这组复现；这仍是等待链快照，不是调用栈，也不能证明产品 ExplorerBrowser 有同一问题。下一步应单独检查 WPF Dispatcher/消息泵差异，再决定是否值得继续专用 STA 架构验证；不得把 `ImmDisableIME` 带入产品。
+
+### 2026-10-28：WPF HwndSource 根窗下同步清理通过
+
+在前一轮“显式 OLE + WPF DispatcherFrame”仍挂起的基础上，只将顶层窗口从原生 `STATIC` 改为 WPF `HwndSource`；其下仍创建同样的 pane `STATIC`、真实 `IShellView` 和共享菜单 coordinator，输入法保持启用。新路线连续 3/3 完成 `DestroyViewWindow`、pane `DestroyWindow` 与根 `HwndSource.Dispose`；根窗均经过 `WM_DESTROY` 和 `WM_NCDESTROY`，`IsWindow` 变为 false，前台 HWND 不变。日志：`20261028-061036-7b7cb8f2.stdout.log`、`20261028-061047-2181c798.stdout.log`、`20261028-061049-8c00b176.stdout.log`。
+
+这是一项强差分：显式 OLE 与 WPF DispatcherFrame 单独及组合用于原生 `STATIC` 根窗时仍挂起，而 WPF 根窗组合 3/3 成功；此前将现象归因为线程级 IME/COM 交互过强，现已修正为尚无根因结论。探针日志中的 `focus-restored-to-parent=False` 也未作为通过条件，故仍需检查 pane 焦点/活动状态及更完整的产品 WPF 层级。此结果只覆盖单 pane 隔离原型，不证明多窗格菜单切换、真实输入、OLE 拖放或 Explorer Dirs 产品迁移已通过；不据此修改产品实现。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。

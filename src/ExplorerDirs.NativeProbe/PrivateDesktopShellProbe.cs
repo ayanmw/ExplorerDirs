@@ -64,6 +64,15 @@ internal static class PrivateDesktopShellProbe
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true),
         TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunSinglePaneMenuWpfDispatcherSynchronousCleanup(bool initializeOle = false) => Run(
+        initializeOle ? "single-pane-menu-wpf-ole-sync-cleanup" : "single-pane-menu-wpf-dispatcher-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
+            useWpfDispatcherPump: true), TimeSpan.FromSeconds(45), initializeOle);
+
+    internal static int RunSinglePaneMenuWpfHostSynchronousCleanup() => Run("single-pane-menu-wpf-host-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
+            useWpfDispatcherPump: true, useWpfHwndSourceParent: true), TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunSinglePaneMenuDetachedViewImeSynchronousCleanup() => Run("single-pane-menu-detached-view-ime-sync-cleanup",
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             detachShellViewImeContexts: true), TimeSpan.FromSeconds(45));
