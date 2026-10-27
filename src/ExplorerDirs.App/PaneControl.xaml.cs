@@ -1713,6 +1713,16 @@ public partial class PaneControl : UserControl
 
     private void Tabs_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => _dragCandidate = null;
 
+    private void TabHeaderScroll_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2 || e.ChangedButton != MouseButton.Left ||
+            ItemsControl.ContainerFromElement(Tabs, e.OriginalSource as DependencyObject ?? Tabs) is TabItem)
+            return;
+
+        NewTab();
+        e.Handled = true;
+    }
+
     private void Tabs_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.Modifiers != ModifierKeys.None || Keyboard.FocusedElement is not TabItem focused) return;
