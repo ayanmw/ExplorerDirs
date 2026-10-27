@@ -68,6 +68,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedFilterGroupSnapshot(sourcePane);
                 CheckUnhostedHiddenHover(sourcePane);
                 CheckUnhostedRetiredScanFailure(sourcePane, root);
+                CheckUnhostedDeferredFocus(sourcePane);
                 CheckUnhostedTabLimit(sourcePane, targetPane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
@@ -552,6 +553,46 @@ internal static class PaneTabTransferProbe
             Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
                 (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
                 "closed-tab history checks never create a native Shell view");
+        }
+    }
+
+    private static void CheckUnhostedDeferredFocus(UIElement pane)
+    {
+        var type = pane.GetType();
+        var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var selected = tabs.SelectedItem;
+        var other = tabs.Items.Cast<TabItem>().First(tab => !ReferenceEquals(tab, selected));
+        var permission = type.GetProperty("MayRestoreFileFocus", InstanceMembers)!;
+        var previous = permission.GetValue(pane);
+        var reads = 0;
+        permission.SetValue(pane, (Func<bool>)(() => { reads++; return true; }));
+        var queue = type.GetMethod("RestoreFileFocusWhenActive", InstanceMembers)!;
+        void Drain()
+        {
+            var frame = new DispatcherFrame();
+            pane.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,
+                new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+        }
+        try
+        {
+            queue.Invoke(pane, null);
+            tabs.SelectedItem = other;
+            Drain();
+            Ensure(reads == 0, "a deferred focus request cannot authorize focus for a replacement tab");
+            queue.Invoke(pane, null);
+            Drain();
+            Ensure(reads == 1, "the unchanged tab still reaches the current focus-intent gate");
+            foreach (var tab in tabs.Items.Cast<TabItem>())
+            {
+                var browser = (HwndHost)tab.Tag.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!;
+                Ensure(browser.Handle == 0, "deferred-focus checks create no HWND");
+            }
+        }
+        finally
+        {
+            permission.SetValue(pane, previous);
+            tabs.SelectedItem = selected;
         }
     }
 

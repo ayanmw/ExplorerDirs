@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：延迟文件焦点请求绑定原标签
+
+- 关闭地址编辑/搜索或清除筛选等路径会排队 ContextIdle 文件焦点恢复。旧回调执行时直接 FocusCurrentView，未绑定发起标签；排队后切换标签可令旧请求授权给新标签。现在捕获发起 TabState，执行时确认仍为当前标签，再按现有窗口/焦点意图门控聚焦该标签的 Browser。
+- 真实生产 PaneControl 的未挂窗测试通过 Dispatcher 实际排队：旧实现下切换标签后仍读取新标签焦点许可，回归先失败；修复后不读取该许可，同一标签的有效请求仍进入当前意图检查。所有 Browser HWND=0，前台不变。完整 Release SettingsSmoke、App Release build（零警告错误）、扩展 pane-tab-copy-order 均通过。日志 src/.state/deferred-tab-focus-{red,green,settings}.log。
+- 这是后台排队/身份隔离证据，不是实际焦点外观验收；关闭搜索/地址栏后快速切标签的可见体验加入集中清单。未启动窗口或更新发布包。
+
 ## 2026-10-27：普通查看切换与 Ctrl+滚轮过期输入保护
 
 - 普通 SetViewStyle 现在与查看预设共用受当前性保护的模式写入步骤：浏览实例/导航代次变化后不报旧错误、不读回新目录状态、不报告旧切换成功。ReadViewStyle 也在取得 COM view 后、调用模式 getter 前检查实例/代次，避免导航重入后继续访问已退休目标。

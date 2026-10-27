@@ -2398,9 +2398,14 @@ public partial class PaneControl : UserControl
 
     private void RestoreFileFocusWhenActive()
     {
+        var state = Current;
+        if (state is null) return;
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
         {
-            if (MayRestoreFileFocus?.Invoke() == true) FocusCurrentView();
+            // Closing address/search UI can queue this before the user switches
+            // tabs. The old request must not focus its replacement tab.
+            if (Current == state && MayRestoreFileFocus?.Invoke() == true)
+                state.Browser.FocusView();
         }));
     }
 
