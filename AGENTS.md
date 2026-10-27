@@ -9,6 +9,8 @@
 
 - Native theme application must be symmetric: dark-to-light must restore the native theme class, dark-mode allowance, theme stamp and any custom frame subclass/DWM color. Do not skip menu processing merely because the current mode is light. Verify both directions on an already used HWND; hidden state tests do not replace per-pane visible menu acceptance.
 
+- Native context menus must retain a single subtle visible boundary matching the resolved theme. Removing an abnormal bright/double surround does not authorize a borderless final design. Verify visible border-to-content spacing and parent/submenu overlap separately; preserve Shell command rendering and hit testing.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.
