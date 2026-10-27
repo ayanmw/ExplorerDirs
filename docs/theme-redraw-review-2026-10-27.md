@@ -103,3 +103,5 @@
 第二步：明确标记本程序的空 Shell 宿主，只有该标记的宿主在深色下接管 WM_PAINT/WM_PRINTCLIENT 底板（BeginPaint/EndPaint 成对），Shell 自有控件保持原绘制。宿主添加 WS_CLIPCHILDREN/WS_CLIPSIBLINGS，避免底板覆盖子窗口；不隐藏窗口、不增加固定等待、不等待目录枚举完毕。离屏用例通过：无 Shell view 时底板已经是深色。原生主题专项、系统主题专项通过；完整配置检查单独记录。
 
 当前 124603/4c7eec 无诊断日志候选已启动，真实冷启动效果待用户反馈。两次未挂接窗格回归中的几何/资源引用断言通过，但最终 foreground-unchanged 断言失败，日志 early-background-pane.log 和 early-background-pane-repeat.log 已保留；未判定是用户操作还是程序原因，不据此声称整轮通过，也没有降低断言。正式 temp.76 尚未覆盖滚动条和本轮首次底色优化。
+
+最终确认：用户明确反馈 124603/4c7eec 冷启动已无白底，关闭此项可见验收待办；此前滚动条端部及复制标签也已确认通过。按同批次规则继续覆盖 temp.76。
