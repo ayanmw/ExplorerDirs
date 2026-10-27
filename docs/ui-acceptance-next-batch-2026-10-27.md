@@ -8,6 +8,12 @@
 
 后台证据分别在[键盘验收记录](gui-acceptance-2026-10-27-shell-baseline.md)、[路线图](roadmap.md)及[内存采样](memory-sampling.md)。此前指定候选中的局部键盘通过结果保留，新候选仍需代表性回归。产品继续 ExplorerBrowser，不包含 IShellView 宿主迁移。
 
+## 2026-10-28 后台补充：四窗格 F2 编辑器键路由
+
+Release HostProbe 对 pane 0–3 分别运行隐藏 ExplorerBrowser 宿主，逐窗格选中样本、经生产 `TranslateAcceleratorCore` 投递 F2 和方向键，并在原生重命名编辑框内检查 Left/Right 插入点、Shift+Left/Right 文本选区、四方向键焦点保持及其它窗格未误认焦点。四个 pane 场景均退出码 0；原始日志在 `%TEMP%\explorer-dirs-rename-editor-four-pane-20261028.log`。
+
+这是四窗格宿主共存时逐一运行的合成消息/隐藏 Shell 回归，不等于同时编辑多个 pane、物理键盘输入、可见布局焦点或 List/图标视图的 UI 验收；集中验收清单仍保留这些边界。
+
 ## 第一段：核心键盘与已接受主题回归
 
 1. 四个窗格分别选样本：文件 → Shift+Tab → 列标题 → Right → Tab → 原文件 → Up/Down。核对焦点与选择，Tab/Shift+Tab 和 F6/Shift+F6 分别跨窗格循环；禁用导航按钮不占停靠点。
