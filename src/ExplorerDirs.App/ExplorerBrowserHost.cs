@@ -1770,6 +1770,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private ViewState CaptureViewStateCore()
     {
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool IsCurrentCapture() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         if (_locationUnconfirmed)
         {
             ViewCaptureFailed = true;
@@ -1784,13 +1787,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero)
         {
-            if (_hasNavigated) ViewCaptureFailed = true;
+            if (_hasNavigated || !IsCurrentCapture()) ViewCaptureFailed = true;
             return _viewState.Copy();
         }
         try
         {
             var captured = ShellViewStateCapture.Capture(_viewState,
-                new NativeViewStateSource(view), out var complete);
+                new NativeViewStateSource(view), out var complete, IsCurrentCapture);
             ViewCaptureFailed = !complete;
             if (complete) _viewState = captured;
             return _viewState.Copy();

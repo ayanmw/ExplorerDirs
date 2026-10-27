@@ -591,6 +591,7 @@ try
         "column COM structures match Windows SDK layout");
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
+    ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
     var shellView = new FakeShellViewStateSource
     {
         Mode = 3,
@@ -2093,9 +2094,11 @@ internal delegate int NativeGetViewFlags(IntPtr self, out uint flags);
 
 internal sealed class FakeShellViewStateSource : IShellViewStateSource
 {
+    public Action<string>? ReadStep { get; set; }
     public IReadOnlyList<DisplayColumnState>? DisplayColumns { get; set; }
     public int GetDisplayColumns(out IReadOnlyList<DisplayColumnState>? columns)
     {
+        ReadStep?.Invoke("display");
         columns = DisplayColumns;
         return FailedStep == "display-columns" ? -1 : columns is null ? 1 : 0;
     }
@@ -2108,6 +2111,7 @@ internal sealed class FakeShellViewStateSource : IShellViewStateSource
 
     public int GetMode(out uint mode, out int iconSize)
     {
+        ReadStep?.Invoke("mode");
         mode = Mode;
         iconSize = IconSize;
         return FailedStep == "mode" ? -1 : 0;
@@ -2115,18 +2119,21 @@ internal sealed class FakeShellViewStateSource : IShellViewStateSource
 
     public int GetSortColumnCount(out int count)
     {
+        ReadStep?.Invoke("count");
         count = FailedStep == "invalid-count" ? 17 : Sorts.Count;
         return FailedStep == "count" ? -1 : 0;
     }
 
     public int GetSortColumns(int count, out IReadOnlyList<SortColumnState> columns)
     {
+        ReadStep?.Invoke("sorts");
         columns = FailedStep == "short-columns" ? [] : Sorts;
         return FailedStep == "columns" ? -1 : 0;
     }
 
     public int GetGroupBy(out PropertyKeyState? key, out bool ascending)
     {
+        ReadStep?.Invoke("group");
         key = Group;
         ascending = GroupAscending;
         return FailedStep == "group" ? -1 : 0;

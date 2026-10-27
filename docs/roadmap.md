@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：视图配置捕获拒绝跨导航数据
+
+- 捕获模式、排序、分组和显示列原先只检查返回码与数据完整性，没有核对 COM getter 期间发生的导航。宿主现于 GetCurrentView 前记录 browser 实例和 Shell read generation，读取组件在每个 getter 后核对；访问变化立即停止后续读取，标记捕获失败并保留最后完整缓存，后续稳定捕获可恢复正常保存。
+- 新 ViewCaptureGenerationSmoke 在五类 getter 中用实际 ShellViewReadiness 代际变化模拟导航重入，旧逻辑先复现“过期快照被认为完整”；修复后拒绝整份旧数据、停止继续读取、保留缓存全部字段，并验证稳定重试及读取前已过期时不调用 getter。完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）、未挂接标签复制/恢复与目录回调检查通过。没有创建 Shell view 或操作桌面；真实 COM 重入/慢目录切换、可见排序与配置保存仍待验收，本批未发布。
+
 ## 2026-10-27：恢复关闭标签保留地址栏记录
 
 - 源码发现关闭快照只保留 TabSettings，“恢复关闭的标签”重建标签时会丢失原地址栏最近访问记录，而复制标签已保留该记录。关闭快照现同时保存独立的 AddressPathHistory 副本，恢复后交给新标签；不保留已关闭的 Browser/TabState，不增加跨重启持久化，仍最多保留 20 个关闭标签、每份地址记录最多 20 条。

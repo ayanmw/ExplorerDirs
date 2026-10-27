@@ -2,6 +2,10 @@
 
 日期：2026-10-15
 
+## 2026-10-27 原子视图快照的访问范围
+
+ExplorerBrowserHost 在取得 IFolderView2 之前记录 browser 实例及 `_viewReadiness.Generation`，通过有效性回调交给既有 ShellViewStateCapture。捕获入口及各原生 getter 返回后检查，访问代际变化或 browser 替换即返回不完整结果；宿主只在 complete 时替换 `_viewState`，失败时沿用缓存并通过既有 ViewCaptureFailed 阻止不可靠保存/复制。保持 OnNavigationPending 对离开视图的捕获时机，不把 Pending 本身当作所有捕获失败；要求的是一次捕获内访问不变。无窗口回归仅模拟 getter 重入与代际变化，不证明真实原生回调顺序。
+
 ## 2026-10-27 关闭标签的轻量地址快照
 
 窗格关闭栈由 TabSettings 扩为设置与 AddressPathHistory 的组合快照，关闭前复制地址 MRU，恢复时传入 AddTab，与复制标签的行为一致。快照不引用 TabState/ExplorerBrowserHost，关闭时仍立即 Dispose 原生宿主；不为恢复历史而驻留 Shell 视图。关闭栈最多 20 项，单份地址记录最多 20 项，仅在进程内存在；Shell Travel Log 的前进/后退历史不在这份快照中。未挂接真实 PaneControl 检查快照和副本的可变状态隔离，可见交互另行验收。
