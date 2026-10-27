@@ -231,6 +231,8 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal nint BrowserParentWindow => _parent;
     internal void RegisterDropTarget(nint viewWindow, nint dropTarget)
     {
+        // A late navigation callback must not add OLE resources after disposal has finished.
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_dropTargetRegistrations.Any(registration => registration.Window == viewWindow))
             throw new InvalidOperationException("This Shell view window already has a registered drop target.");
         _dropTargetRegistrations.Add(new ShellViewDropTargetRegistration(viewWindow, dropTarget));

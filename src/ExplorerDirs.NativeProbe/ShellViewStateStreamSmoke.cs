@@ -70,6 +70,7 @@ internal static class ShellViewStateStreamSmoke
         VerifyReadWriteMode();
         VerifySnapshotPreservesWriterPosition();
         VerifyClosedHostRejectsStreams();
+        VerifyClosedHostRejectsDropRegistration();
         VerifyConcurrentSessionProtection();
         VerifyStoredStateSizeBoundaries();
         VerifyPersistedSessions();
@@ -200,6 +201,23 @@ internal static class ShellViewStateStreamSmoke
             host.Dispose();
         }
         finally { Marshal.Release(browser); }
+    }
+
+    private static void VerifyClosedHostRejectsDropRegistration()
+    {
+        using var host = new StreamViewHost(0, []);
+        host.Dispose();
+        try
+        {
+            // Zero handles prove retirement is checked before HWND/OLE validation, without creating windows.
+            host.RegisterDropTarget(0, 0);
+            throw new Exception("A retired host accepted a new drop registration.");
+        }
+        catch (ObjectDisposedException)
+        {
+            Check(true, "a retired host rejects drop registration before accessing HWND/OLE resources");
+        }
+        host.Dispose();
     }
 
     private static void VerifySnapshotPreservesWriterPosition()

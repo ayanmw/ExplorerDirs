@@ -1173,3 +1173,10 @@ StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟�
 此前状态冲突检查仅验证同进程宿主与跨进程顺序读写。本批增加独立 race-writer 子命令，创建宿主后通过 ready/go 文件屏障确保两个进程都持有同一初始快照，再并发保存。三轮均一成功、一明确内容冲突；磁盘字节属于成功者。另由父进程持有实际同名路径 mutex，确认子进程已读基线后放行，子进程在 500 ms 写锁等待后失败，原文件不变；释放锁后新子进程正常保存。
 
 完整状态流 smoke 和 NativeProbe Release build 通过，构建零警告错误。进程不创建窗口，runner 15 秒上限且超时递归 Kill，父进程清理前 join 两个 runner。此证据补足协作进程争锁及超时，不覆盖非协作写入者的检查后竞争、异常退出或磁盘故障；无真实 Shell view/产品宿主/GUI 验收，已固定产品候选不变。
+
+### 2026-10-27：关闭后拒绝迟到的拖放注册（后台验证）
+
+- `StreamViewHost.RegisterDropTarget` 现在先检查宿主退休状态。此前 Dispose 已完成撤销且重复 Dispose 短路，但注册入口仍能继续构造 OLE 注册，存在迟到调用新增资源后无人撤销的生命周期缺口。
+- 无窗口回归用已 Dispose 的宿主和零句柄验证：修复前进入 HWND 参数检查并抛 ArgumentException；修复后先抛 ObjectDisposedException。未创建 HWND、Shell view 或执行 RegisterDragDrop，不声称已复现真实 OLE 泄漏。
+- 完整 `--shell-view-state-stream-smoke` 通过，包含原有 COM stream、跨进程持久化、并发写保护与锁超时检查。日志：`src/.state/drop-retirement-red.log`、`src/.state/drop-retirement-green.log`。
+- 仅隔离原型改变；真实导航/关闭重入与拖放交互仍待集中 UI 验收，不归因为产品内存增长或无响应的根因。固定 UI 候选和 temp.76 发布目录未更新。
