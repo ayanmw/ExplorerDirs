@@ -50,6 +50,18 @@ internal static class ViewStateRestoreSmoke
                 $"{step} failure is protected without any custom columns");
         }
         var preset = new ViewPreset("Details", 4, 16, [new(key, 240)]);
+        var modeTarget = new Target();
+        Check(ShellViewStateRestore.ApplyMode(2, -1, modeTarget, _ => throw new Exception("unexpected mode error"), () => true) &&
+            modeTarget.Calls.SequenceEqual([ShellViewRestoreStep.Mode]) && modeTarget.Mode == (2u, 16),
+            "view-style changes normalize small icons and write no sorting, grouping or columns");
+        var modeCurrent = true;
+        var retiredMode = new Target { FailedStep = ShellViewRestoreStep.Mode, DuringWrite = _ => modeCurrent = false };
+        Check(!ShellViewStateRestore.ApplyMode(4, -1, retiredMode,
+                _ => throw new Exception("retired mode must not report errors"), () => modeCurrent),
+            "a view-style setter that navigates cannot report success or an obsolete error");
+        var oldMode = new Target();
+        Check(!ShellViewStateRestore.ApplyMode(4, -1, oldMode, _ => { }, () => false) && oldMode.Calls.Count == 0,
+            "an obsolete view-style request never calls the native setter");
         var presetTarget = new Target();
         Check(ShellViewStateRestore.ApplyPreset(preset, presetTarget, (_, _) => throw new Exception("unexpected preset failure"), () => true) &&
             presetTarget.Calls.SequenceEqual([ShellViewRestoreStep.Mode, ShellViewRestoreStep.Columns]),

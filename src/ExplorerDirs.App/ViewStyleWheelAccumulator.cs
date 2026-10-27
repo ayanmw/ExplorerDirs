@@ -16,6 +16,6 @@ internal sealed class ViewStyleWheelAccumulator
 
 internal static class ViewStyleWheelDispatch
 {
-    internal static int GetFallbackDelta(int completedNotches, bool viewStyleApplied) =>
-        viewStyleApplied ? 0 : completedNotches * 120;
+    internal static int GetFallbackDelta(int completedNotches, bool viewStyleApplied, bool targetCurrent = true) =>
+        viewStyleApplied || !targetCurrent ? 0 : completedNotches * 120;
 }

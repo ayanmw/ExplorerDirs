@@ -17,6 +17,9 @@ internal static class ViewStyleWheelRoutingSmoke
               paneCode.Contains("CycleViewStyle(e.Delta)", StringComparison.Ordinal) &&
               paneCode.Contains("e.Handled = true", StringComparison.Ordinal),
             "Ctrl+wheel uses the existing per-pane view cycle and consumes only successful changes");
+        Check(paneCode.Contains("browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.CycleViewStyle(style);",
+                StringComparison.Ordinal),
+            "a delayed wheel callback from an inactive tab cannot change its active sibling");
 
         Console.WriteLine("View style wheel routing smoke: PASS");
 

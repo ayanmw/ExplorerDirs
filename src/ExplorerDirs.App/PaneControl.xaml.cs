@@ -1645,7 +1645,7 @@ public partial class PaneControl : UserControl
         browser.ShortcutHandler = shortcut => shortcut == ExplorerShortcut.OpenSelectionInNewTab
             ? state.Owner.TryOpenSelectedFolderInNewTab()
             : state.Owner.ShortcutRequested?.Invoke(state.Owner, shortcut) == true;
-        browser.CtrlWheelHandler = style => state.Owner.CycleViewStyle(style);
+        browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.CycleViewStyle(style);
         browser.MayRestoreFocus = () => state.Owner.Current == state && state.Owner.IsVisible &&
             state.Owner._treeHost?.HasNativeFocus() != true && state.Owner.MayRestoreFileFocus?.Invoke() == true;
         browser.MayContinueFileOperationFocusRestore = () => state.Owner.Current == state && state.Owner.IsVisible &&

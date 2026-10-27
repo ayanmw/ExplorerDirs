@@ -12,6 +12,9 @@ internal static class ViewStyleWheelSmoke
             "a failed multi-notch switch forwards the accumulated wheel distance to Shell");
         Check(ViewStyleWheelDispatch.GetFallbackDelta(-1, false) == -120,
             "a failed reverse switch preserves the reverse wheel direction for Shell");
+        Check(ViewStyleWheelDispatch.GetFallbackDelta(2, false, targetCurrent: false) == 0 &&
+            ViewStyleWheelDispatch.GetFallbackDelta(-1, false, targetCurrent: false) == 0,
+            "a retired wheel target never receives accumulated fallback input");
 
         Check(ViewStyleWheelCycle.Next(4, 16, 120) == ViewStyle.All[4], "wheel up from Details cycles to List");
         Check(ViewStyleWheelCycle.Next(4, 16, -120) == ViewStyle.All[6], "wheel down from Details cycles to Tiles");

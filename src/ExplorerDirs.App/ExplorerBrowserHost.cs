@@ -1995,15 +1995,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!IsVisible || _viewReadiness.Pending || _browser is null || IsRenameEditorFocused())
             return null;
+        var browser = _browser;
         var generation = _viewReadiness.Generation;
         var view = IntPtr.Zero;
         try
         {
             view = GetFolderView2Pointer();
-            if (view == IntPtr.Zero) return null;
+            // Getting the COM view itself may pump a navigation callback.
+            if (view == IntPtr.Zero || !ReferenceEquals(browser, _browser) ||
+                generation != _viewReadiness.Generation) return null;
             var result = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var size);
             return result == 0 && mode is >= 1 and <= 8 && size > 0 &&
-                generation == _viewReadiness.Generation && !_viewReadiness.Pending && IsVisible
+                ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation && !_viewReadiness.Pending && IsVisible
                 ? (mode, size) : null;
         }
         catch (COMException) { return null; }
@@ -2014,38 +2017,37 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool SetViewStyle(ViewStyle style)
     {
         if (!IsVisible || _viewReadiness.Pending) return false;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = IntPtr.Zero;
         try
         {
             view = GetFolderView2Pointer();
             if (view == IntPtr.Zero)
             {
-                MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
+                if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
             // Change only mode/size: do not reapply cached sorting or grouping.
-            var result = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, style.Mode,
-                ViewStyle.NativeIconSize(style.Mode, style.IconSize));
-            if (result < 0)
-            {
-                MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}");
-                return false;
-            }
+            if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
+                    result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
         }
         catch (COMException ex)
         {
-            MenuError?.Invoke(this, $"无法切换查看方式：0x{ex.HResult:X8}");
+            if (Current()) MenuError?.Invoke(this, $"无法切换查看方式：0x{ex.HResult:X8}");
             return false;
         }
         finally { if (view != IntPtr.Zero) Marshal.Release(view); }
 
         // Read back what Shell actually accepted. Search views remain runtime-only.
+        if (!Current()) return false;
         try { CaptureViewState(); }
         catch (Exception)
         {
-            MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
+            if (Current()) MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
         }
-        return true;
+        return Current();
     }
 
     public bool ApplyViewPreset(ViewPreset preset)
@@ -4587,8 +4589,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 {
                     var notches = _ctrlWheelAccumulator.Add(delta);
                     if (notches == 0) return IntPtr.Zero;
+                    var wheelBrowser = _browser;
+                    var wheelView = _viewWindow;
+                    var wheelGeneration = _viewReadiness.Generation;
                     var viewStyleApplied = wheelHandler(notches * 120);
-                    var fallbackDelta = ViewStyleWheelDispatch.GetFallbackDelta(notches, viewStyleApplied);
+                    // A setter may navigate or close this host while pumping COM.
+                    // Never forward the old accumulated wheel to its replacement.
+                    var targetCurrent = ReferenceEquals(wheelBrowser, _browser) && wheelView == _viewWindow &&
+                        wheelGeneration == _viewReadiness.Generation && IsVisible;
+                    var fallbackDelta = ViewStyleWheelDispatch.GetFallbackDelta(notches, viewStyleApplied, targetCurrent);
                     if (fallbackDelta == 0) return IntPtr.Zero;
 
                     // The app consumed earlier fractional messages, so forward the accumulated
