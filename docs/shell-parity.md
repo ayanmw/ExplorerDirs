@@ -376,3 +376,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 2026-10-27 列标题菜单契约复核：Microsoft `IShellView::GetItemObject` 使用 `_SVGIO` 范围，官方枚举只有背景、选中、全部和已勾选项目；没有列标题范围。因此列标题菜单不是缺少一个 `GetItemObject` 参数，而是独立表头 `WM_CONTEXTMENU` 的创建、命令来源和执行路由问题。现有 Private Desktop 探针只捕获 popup、初始化查看/排序/分组子菜单并比较其命令 ID 偏移，随后取消菜单；尚未验证实际命令分发、排序列身份或用户可见行为。[Microsoft GetItemObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-getitemobject) · [Microsoft _SVGIO](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-_svgio)
 
 2026-10-27 OLE 宿主边框合同复核：隔离 `StreamViewHost` 的 `GetBorder` 返回父客户区；`RequestBorderSpace` / `SetBorderSpace` 接受零边框占用，并对非零工具栏空间返回 `INPLACE_E_NOTOOLSPACE`。`--shell-view-color-policy-smoke` 经真实 COM vtable 覆盖了有效/空参数及返回码，没有创建 `IShellView`。这只验证宿主合同，不证明 Shell 实际激活流程会按该顺序调用，也不代表完整宿主迁移门槛通过。
+
+### 2026-10-27 鼠标空白取消选择（候选，待实机验收）
+
+鼠标选择手势按下至抬起期间不保存中间快照用于恢复，抬起后捕获 Shell 最终状态。已通过策略检查与构建；空白点击取消、再框选连续两项及原生刷新保留选择仍待实机验收。原生菜单白框仍未解决。
