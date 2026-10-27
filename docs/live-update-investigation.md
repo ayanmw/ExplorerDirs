@@ -1881,3 +1881,11 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 交替运行四轮隐藏 HostProbe `--live-shell-directory-stress`（Shell callback trace 关闭/开启各两轮）。四轮创建均无回退刷新，产品 watcher 与独立 observer 各收到完整 `3000/3000` 创建/删除事件；四轮文件可见、删除后收敛、选区和焦点恢复均通过。删除阶段四轮各有一次回退刷新：三轮记录 `expected=3002 / actual=3003 / forced=False`，表示已删除文件仍暂时出现在 ExplorerBrowser 的计数中；另一轮为 `expected=3002 / actual=3002 / forced=True`，说明增删通知合并后净数量相等，不能仅靠计数发现内容变化。刷新后各轮均收敛到磁盘的 3 项。
 
 这不是无条件减少刷新就能安全解决的单纯重绘开销：前期精确文件删除对照的 6 轮中，发送或不发送精确 `SHCNE_DELETE` 后，Shell 均未在 700ms 内自然移除条目，之后由计数回退刷新修复。当前证据支持保留回退；关闭或再延迟这类回退可能让已删除条目继续留在列表中。本轮没有改产品代码，也没有打开可见窗口；记录属于本机隐藏 ExplorerBrowser 压力验证，不覆盖其它 Shell provider、可见刷新观感或长时间运行。
+
+### 2026-10-28：复验不注入显式 Flush 的 Changed 元数据排序
+
+Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `ShellColumnManager.Apply` 新增的可选上下文参数而在夹具设置阶段退出；修复只影响 HostProbe，改为显式传入 `null`，不改产品代码。Release HostProbe 构建 0 警告/错误后，在 `EXPLORER_DIRS_HOSTPROBE_SKIP_FLUSH=1` 下运行 `--live-shell-changed-metadata`，退出码 0。
+
+生产 watcher 改写并观察到 `initial.txt`（7 B → 128 KiB）和 `second.txt`（6 B → 64 KiB）；没有额外注入通知。真实生产 `ExplorerBrowserHost` 当前行快照读到两个新大小，大小升序从 `second.txt|initial.txt` 自然变为 `initial.txt|second.txt`，约 1,122 ms 收敛。选区、焦点保持，整视图 Refresh fallback 增量为 0；父 HWND 隐藏且前台句柄未变。此次 observer 收到两条 `SHCNE_UPDATEITEM` 和一条目录更新。
+
+这补强了本机普通目录 Changed → 按项更新及元数据排序的后台链路，不覆盖 DirectUI 可见绘制、其他 Shell provider、网络/云目录或长时间稳定性。完整输出在 `src/.state/changed-metadata-no-flush-20261028.log`；失败的首轮未记录日志，且只证明了探针入口问题。

@@ -3745,8 +3745,9 @@ internal static class Program
                 columns.Add(columnConstructor.Invoke([key, width]));
             }
             var columnManagerType = assembly.GetType("ExplorerDirs.App.ShellColumnManager", throwOnError: true)!;
+            // Reflection does not supply optional parameter defaults; pass the production guard explicitly.
             var applyResult = (int)columnManagerType.GetMethod("Apply", BindingFlags.Static | BindingFlags.Public)!
-                .Invoke(null, [view, columns])!;
+                .Invoke(null, [view, columns, null])!;
             Marshal.ThrowExceptionForHR(applyResult);
         }
         finally { Marshal.Release(view); }

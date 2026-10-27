@@ -4228,3 +4228,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 查阅 Q-Dir 官方 FAQ 101 后确认，其用户提问区有人询问如何显示已移入新组的标签；该 FAQ 实际只回答标签栏的显隐，并未解释标签组。官方英文字符串页仍只提供 Tab Group、Move、Copy、Use 等菜单名称。
 - 这项证据支持继续将标签组列为 P2 待评估：语义需要在集中 Q-Dir UI 验收时实测，不能据同名浏览器标签组推断分组、显示或持久化方式。更新了[功能对照](shell-parity.md#标签组)；本轮没有启动 Q-Dir 或改产品行为。
+
+## 2026-10-28：复验 Changed 元数据无额外 Flush 的排序更新
+
+- Release HostProbe 的反射调用未传 `ShellColumnManager.Apply` 新增的可选上下文参数，先修复 HostProbe-only 调用并通过 Release build（0 警告/错误）。没有改产品逻辑。
+- 设置 `EXPLORER_DIRS_HOSTPROBE_SKIP_FLUSH=1` 后运行真实生产 `ExplorerBrowserHost` 隐藏夹具：两文件大小更新，大小排序随之自然重排，选区/焦点保留，约 1,122 ms 收敛，整视图 fallback 为 0；父 HWND 隐藏且前台未变。详情及完整日志见[自动刷新调查](live-update-investigation.md#2026-10-28-复验不注入显式-flush-的-changed-元数据排序)。此证据不覆盖可见像素刷新、其他 Shell provider 或网络/云目录，自动刷新 P0 仍开放。
