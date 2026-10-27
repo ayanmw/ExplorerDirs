@@ -14,6 +14,9 @@ internal enum FolderForwardResult { Accepted, Rejected, Unavailable, Uncertain }
 internal sealed class FolderOpenRouter : IDisposable
 {
     private const int MaximumPathBytes = 128 * 1024;
+    private const int RequestIdHandshake = -3;
+    private const byte RequestIdHandshakeAccepted = 2;
+    private const int CompletedRequestCapacity = 256;
     // The launcher's second forwarding attempt waits two seconds; release a
     // connected client that stops sending before that attempt expires.
     private static readonly TimeSpan RequestReadTimeout = TimeSpan.FromSeconds(1);
@@ -23,6 +26,8 @@ internal sealed class FolderOpenRouter : IDisposable
     private readonly Func<string, Task<bool>> _openDirectory;
     private readonly Func<string, Task<bool>>? _openQdr;
     private readonly Func<Task<bool>>? _activateWindow;
+    private readonly Dictionary<Guid, bool> _completedRequests = [];
+    private readonly Queue<Guid> _completedRequestOrder = [];
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _serveTask;
     private int _disposed;
@@ -70,49 +75,49 @@ internal sealed class FolderOpenRouter : IDisposable
         }
     }
 
-    public static async Task<FolderForwardResult> TryForwardAsync(string profilePath, string path,
-        TimeSpan timeout)
+    public static Task<FolderForwardResult> TryForwardAsync(string profilePath, string path,
+        TimeSpan timeout, Guid? requestId = null)
     {
         byte[] payload;
         try { payload = Utf8.GetBytes(path); }
-        catch (EncoderFallbackException) { return FolderForwardResult.Rejected; }
+        catch (EncoderFallbackException) { return Task.FromResult(FolderForwardResult.Rejected); }
         if (payload.Length is < 1 or > MaximumPathBytes)
-            return FolderForwardResult.Rejected;
+            return Task.FromResult(FolderForwardResult.Rejected);
 
-        return await SendRequestAsync(profilePath, payload, timeout).ConfigureAwait(false);
+        return SendRequestAsync(profilePath, payload, timeout, requestId: requestId ?? Guid.NewGuid());
     }
 
-    public static async Task<FolderForwardResult> TryForwardQdrAsync(string profilePath, string path,
-        TimeSpan timeout)
+    public static Task<FolderForwardResult> TryForwardQdrAsync(string profilePath, string path,
+        TimeSpan timeout, Guid? requestId = null)
     {
         byte[] payload;
         try
         {
             var fullPath = Path.GetFullPath(path);
             if (!Path.GetExtension(fullPath).Equals(".qdr", StringComparison.OrdinalIgnoreCase))
-                return FolderForwardResult.Rejected;
+                return Task.FromResult(FolderForwardResult.Rejected);
             payload = Utf8.GetBytes(fullPath);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or
             PathTooLongException or EncoderFallbackException)
         {
-            return FolderForwardResult.Rejected;
+            return Task.FromResult(FolderForwardResult.Rejected);
         }
         if (payload.Length is < 1 or > MaximumPathBytes)
-            return FolderForwardResult.Rejected;
+            return Task.FromResult(FolderForwardResult.Rejected);
 
-        return await SendRequestAsync(profilePath, payload, timeout, qdr: true).ConfigureAwait(false);
+        return SendRequestAsync(profilePath, payload, timeout, qdr: true, requestId: requestId ?? Guid.NewGuid());
     }
 
-    public static Task<FolderForwardResult> TryActivateAsync(string profilePath, TimeSpan timeout) =>
-        SendRequestAsync(profilePath, null, timeout);
+    public static Task<FolderForwardResult> TryActivateAsync(string profilePath, TimeSpan timeout,
+        Guid? requestId = null) => SendRequestAsync(profilePath, null, timeout, requestId: requestId ?? Guid.NewGuid());
 
     private static async Task<FolderForwardResult> SendRequestAsync(string profilePath, byte[]? payload,
-        TimeSpan timeout, bool qdr = false)
+        TimeSpan timeout, bool qdr = false, Guid? requestId = null)
     {
+        using var deadline = new CancellationTokenSource(timeout);
         using var client = new NamedPipeClientStream(".", PipeName(profilePath), PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        using var deadline = new CancellationTokenSource(timeout);
         try { await client.ConnectAsync(deadline.Token).ConfigureAwait(false); }
         catch (Exception exception) when (exception is IOException or TimeoutException or
             UnauthorizedAccessException or OperationCanceledException)
@@ -122,32 +127,82 @@ internal sealed class FolderOpenRouter : IDisposable
 
         try
         {
-            var header = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(header, payload is null ? -1 : qdr ? -2 : payload.Length);
-            await client.WriteAsync(header, deadline.Token).ConfigureAwait(false);
-            if (payload is not null)
-            {
-                if (qdr)
-                {
-                    BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
-                    await client.WriteAsync(header, deadline.Token).ConfigureAwait(false);
-                }
-                await client.WriteAsync(payload, deadline.Token).ConfigureAwait(false);
-            }
+            var marker = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(marker, RequestIdHandshake);
+            await client.WriteAsync(marker, deadline.Token).ConfigureAwait(false);
             await client.FlushAsync(deadline.Token).ConfigureAwait(false);
-            var response = new byte[1];
-            await client.ReadExactlyAsync(response, deadline.Token).ConfigureAwait(false);
-            return response[0] switch
+            var handshake = new byte[1];
+            await client.ReadExactlyAsync(handshake, deadline.Token).ConfigureAwait(false);
+            if (handshake[0] == 0)
             {
-                1 => FolderForwardResult.Accepted,
-                0 => FolderForwardResult.Rejected,
-                _ => FolderForwardResult.Uncertain
-            };
+                // A legacy receiver rejects this marker before dispatching any request.
+                client.Dispose();
+                return await SendLegacyRequestAsync(profilePath, payload, qdr, deadline.Token).ConfigureAwait(false);
+            }
+            if (handshake[0] != RequestIdHandshakeAccepted)
+                return FolderForwardResult.Uncertain;
+
+            await client.WriteAsync((requestId ?? Guid.NewGuid()).ToByteArray(), deadline.Token).ConfigureAwait(false);
+            await WriteRequestAsync(client, payload, qdr, deadline.Token).ConfigureAwait(false);
+            return await ReadRequestResultAsync(client, deadline.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or OperationCanceledException)
         {
             return FolderForwardResult.Uncertain;
         }
+    }
+
+    private static async Task<FolderForwardResult> SendLegacyRequestAsync(string profilePath,
+        byte[]? payload, bool qdr, CancellationToken deadline)
+    {
+        using var client = new NamedPipeClientStream(".", PipeName(profilePath), PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        try { await client.ConnectAsync(deadline).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or TimeoutException or
+            UnauthorizedAccessException or OperationCanceledException)
+        {
+            return FolderForwardResult.Unavailable;
+        }
+        try
+        {
+            await WriteRequestAsync(client, payload, qdr, deadline).ConfigureAwait(false);
+            return await ReadRequestResultAsync(client, deadline).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            return FolderForwardResult.Uncertain;
+        }
+    }
+
+    private static async Task WriteRequestAsync(NamedPipeClientStream client, byte[]? payload,
+        bool qdr, CancellationToken token)
+    {
+        var header = new byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(header, payload is null ? -1 : qdr ? -2 : payload.Length);
+        await client.WriteAsync(header, token).ConfigureAwait(false);
+        if (payload is not null)
+        {
+            if (qdr)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
+                await client.WriteAsync(header, token).ConfigureAwait(false);
+            }
+            await client.WriteAsync(payload, token).ConfigureAwait(false);
+        }
+        await client.FlushAsync(token).ConfigureAwait(false);
+    }
+
+    private static async Task<FolderForwardResult> ReadRequestResultAsync(NamedPipeClientStream client,
+        CancellationToken token)
+    {
+        var response = new byte[1];
+        await client.ReadExactlyAsync(response, token).ConfigureAwait(false);
+        return response[0] switch
+        {
+            1 => FolderForwardResult.Accepted,
+            0 => FolderForwardResult.Rejected,
+            _ => FolderForwardResult.Uncertain
+        };
     }
 
     private static NamedPipeServerStream NewServer(string pipeName, bool first) =>
@@ -185,17 +240,36 @@ internal sealed class FolderOpenRouter : IDisposable
     {
         using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
         readDeadline.CancelAfter(RequestReadTimeout);
-        var header = new byte[4];
+        var header = new byte[sizeof(int)];
         await server.ReadExactlyAsync(header, readDeadline.Token).ConfigureAwait(false);
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
+        Guid? requestId = null;
+        if (length == RequestIdHandshake)
+        {
+            await server.WriteAsync(new[] { RequestIdHandshakeAccepted }, stop).ConfigureAwait(false);
+            await server.FlushAsync(stop).ConfigureAwait(false);
+            var idBytes = new byte[16];
+            readDeadline.CancelAfter(RequestReadTimeout);
+            await server.ReadExactlyAsync(idBytes, readDeadline.Token).ConfigureAwait(false);
+            requestId = new Guid(idBytes);
+            await server.ReadExactlyAsync(header, readDeadline.Token).ConfigureAwait(false);
+            length = BinaryPrimitives.ReadInt32LittleEndian(header);
+        }
+
         var accepted = false;
         if (length == -1)
         {
-            if (_activateWindow is not null)
+            if (requestId is { } activationId && _completedRequests.TryGetValue(activationId, out var previous))
+                accepted = previous;
+            else
             {
-                try { accepted = await _activateWindow().WaitAsync(stop).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
-                catch (Exception) { /* A failed activation must not masquerade as accepted. */ }
+                if (_activateWindow is not null)
+                {
+                    try { accepted = await _activateWindow().WaitAsync(stop).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
+                    catch (Exception) { /* A failed activation must not masquerade as accepted. */ }
+                }
+                if (requestId is { } completedActivationId) RememberResult(completedActivationId, accepted);
             }
         }
         else if (length is > 0 and <= MaximumPathBytes || length == -2)
@@ -214,19 +288,40 @@ internal sealed class FolderOpenRouter : IDisposable
             {
                 var path = Utf8.GetString(payload);
                 if (!Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path) goto Respond;
-                if (length == -2)
+                if (length == -2 && !Path.GetExtension(path).Equals(".qdr", StringComparison.OrdinalIgnoreCase))
+                    goto Respond;
+                if (requestId is { } directoryRequestId && _completedRequests.TryGetValue(directoryRequestId, out var previous))
+                    accepted = previous;
+                else
                 {
-                    if (_openQdr is not null && Path.GetExtension(path).Equals(".qdr", StringComparison.OrdinalIgnoreCase))
-                        accepted = await _openQdr(path).WaitAsync(stop).ConfigureAwait(false);
+                    try
+                    {
+                        if (length == -2)
+                        {
+                            if (_openQdr is not null)
+                                accepted = await _openQdr(path).WaitAsync(stop).ConfigureAwait(false);
+                        }
+                        else accepted = await _openDirectory(path).WaitAsync(stop).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
+                    catch (Exception) { /* Cache the rejection so an ambiguous retry cannot repeat a side effect. */ }
+                    if (requestId is { } completedRequestId) RememberResult(completedRequestId, accepted);
                 }
-                else accepted = await _openDirectory(path).WaitAsync(stop).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
             catch (Exception) { /* Invalid request or failed UI dispatch: reject it. */ }
         }
     Respond:
-        await server.WriteAsync(new byte[] { accepted ? (byte)1 : (byte)0 }, stop).ConfigureAwait(false);
+        await server.WriteAsync(new[] { accepted ? (byte)1 : (byte)0 }, stop).ConfigureAwait(false);
         await server.FlushAsync(stop).ConfigureAwait(false);
+    }
+
+    private void RememberResult(Guid requestId, bool accepted)
+    {
+        _completedRequests[requestId] = accepted;
+        _completedRequestOrder.Enqueue(requestId);
+        while (_completedRequestOrder.Count > CompletedRequestCapacity)
+            _completedRequests.Remove(_completedRequestOrder.Dequeue());
     }
 
     public void Dispose()

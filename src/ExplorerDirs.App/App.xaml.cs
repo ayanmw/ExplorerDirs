@@ -23,13 +23,15 @@ public partial class App : Application
         base.OnStartup(e);
         var startupRequest = StartupDirectory.Parse(e.Args);
         var profilePath = new SessionStore().Path;
+        // A launch retry is the same logical request, while a second launch gets a fresh id.
+        var startupRequestId = Guid.NewGuid();
         var initialForward = FolderForwardResult.Unavailable;
         if (startupRequest.Directory is { } target)
         {
             try
             {
                 initialForward = FolderOpenRouter.TryForwardAsync(profilePath, target,
-                    TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult();
+                    TimeSpan.FromMilliseconds(150), startupRequestId).GetAwaiter().GetResult();
                 if (initialForward == FolderForwardResult.Accepted)
                 {
                     Shutdown();
@@ -43,7 +45,7 @@ public partial class App : Application
             try
             {
                 initialForward = FolderOpenRouter.TryForwardQdrAsync(profilePath, qdrPath,
-                    TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult();
+                    TimeSpan.FromMilliseconds(150), startupRequestId).GetAwaiter().GetResult();
                 if (initialForward == FolderForwardResult.Accepted)
                 {
                     Shutdown();
@@ -57,7 +59,7 @@ public partial class App : Application
             try
             {
                 initialForward = FolderOpenRouter.TryActivateAsync(profilePath,
-                    TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult();
+                    TimeSpan.FromMilliseconds(150), startupRequestId).GetAwaiter().GetResult();
                 if (initialForward == FolderForwardResult.Accepted)
                 {
                     Shutdown();
@@ -101,12 +103,12 @@ public partial class App : Application
             try
             {
                 retry = startupRequest.Directory is { } retryTarget
-                    ? FolderOpenRouter.TryForwardAsync(profilePath, retryTarget, TimeSpan.FromSeconds(2))
+                    ? FolderOpenRouter.TryForwardAsync(profilePath, retryTarget, TimeSpan.FromSeconds(2), startupRequestId)
                         .GetAwaiter().GetResult()
                     : startupRequest.QdrFile is { } retryQdr
-                        ? FolderOpenRouter.TryForwardQdrAsync(profilePath, retryQdr, TimeSpan.FromSeconds(2))
+                        ? FolderOpenRouter.TryForwardQdrAsync(profilePath, retryQdr, TimeSpan.FromSeconds(2), startupRequestId)
                             .GetAwaiter().GetResult()
-                        : FolderOpenRouter.TryActivateAsync(profilePath, TimeSpan.FromSeconds(2))
+                        : FolderOpenRouter.TryActivateAsync(profilePath, TimeSpan.FromSeconds(2), startupRequestId)
                             .GetAwaiter().GetResult();
                 if (retry == FolderForwardResult.Accepted)
                 {

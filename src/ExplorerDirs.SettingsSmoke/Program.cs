@@ -42,6 +42,12 @@ if (args is ["--window-placement-smoke"])
     return;
 }
 
+if (args is ["--folder-open-router-protocol-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.FolderOpenRouterProtocolSmoke.Run();
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
 {
     var resultPath = args[1];
@@ -741,6 +747,51 @@ try
     }
     Check(routedPaths.Count == 6 && routedPaths[0] == routedPath,
           "only valid absolute folder requests reach the window callback");
+    var retryProfile = Path.Combine(root, "router-retry", "ExplorerDirs.ini");
+    var retryPath = Path.Combine(root, "retry-folder");
+    var retryId = Guid.NewGuid();
+    var retryCallbackCount = 0;
+    var allowFirstRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using (var retryRouter = FolderOpenRouter.TryStart(retryProfile, async _ =>
+           {
+               Interlocked.Increment(ref retryCallbackCount);
+               await allowFirstRetry.Task;
+               return true;
+           }) ?? throw new Exception("retry folder router did not start"))
+    {
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromMilliseconds(500), retryId)
+                  .GetAwaiter().GetResult() == FolderForwardResult.Uncertain,
+              "a sender timeout preserves an uncertain result while the first callback is pending");
+        allowFirstRetry.SetResult(true);
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromSeconds(2), retryId)
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && retryCallbackCount == 1,
+              "retrying the same logical request returns its result without dispatching twice");
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromSeconds(2), Guid.NewGuid())
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && retryCallbackCount == 2,
+              "a separate launch of the same path remains a separate request");
+    }
+    var legacyProfile = Path.Combine(root, "router-legacy-sender", "ExplorerDirs.ini");
+    var legacyCallbackCount = 0;
+    using (var legacyRouter = FolderOpenRouter.TryStart(legacyProfile, _ =>
+           {
+               Interlocked.Increment(ref legacyCallbackCount);
+               return Task.FromResult(true);
+           }) ?? throw new Exception("legacy compatibility router did not start"))
+    using (var legacyClient = new NamedPipeClientStream(".", FolderOpenRouter.PipeName(legacyProfile),
+               PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+    {
+        legacyClient.Connect(2000);
+        var legacyBytes = System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(retryPath));
+        var legacyHeader = new byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(legacyHeader, legacyBytes.Length);
+        legacyClient.Write(legacyHeader);
+        legacyClient.Write(legacyBytes);
+        legacyClient.Flush();
+        var legacyResponse = new byte[1];
+        legacyClient.ReadExactly(legacyResponse);
+        Check(legacyResponse[0] == 1 && legacyCallbackCount == 1,
+              "legacy directory clients continue to route to the request-id receiver");
+    }
     var activationProfile = Path.Combine(root, "router-activate", "ExplorerDirs.ini");
     var activationCount = 0;
     using (var activationRouter = FolderOpenRouter.TryStart(activationProfile,
@@ -784,6 +835,13 @@ try
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await unexpectedServer.WaitForConnectionAsync(deadline.Token);
             var header = new byte[4];
+            await unexpectedServer.ReadExactlyAsync(header, deadline.Token);
+            Check(BinaryPrimitives.ReadInt32LittleEndian(header) == -3,
+                  "new senders negotiate request IDs before sending a request");
+            await unexpectedServer.WriteAsync(new byte[] { 0 }, deadline.Token);
+            await unexpectedServer.FlushAsync(deadline.Token);
+            unexpectedServer.Disconnect();
+            await unexpectedServer.WaitForConnectionAsync(deadline.Token);
             await unexpectedServer.ReadExactlyAsync(header, deadline.Token);
             var payload = new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
             await unexpectedServer.ReadExactlyAsync(payload, deadline.Token);
