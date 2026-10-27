@@ -475,6 +475,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
         _subclassProc = ViewWindowProc;
+        IsVisibleChanged += (_, _) => { if (IsVisible) QueueNativeThemeRefresh(); };
         _browserSite.SelectionChanged += OnShellSelectionChanged;
         _focusRestoreTimer.Tick += (_, _) =>
         {

@@ -36,6 +36,7 @@ internal static class NativeThemeColorProbe
         CheckMenuClip(type, members);
         CheckMenuPrint(type, members);
         CheckTreeColors(type, members);
+        CheckScrollFrame(type, members);
         CheckSubmenuPlacement(type, members);
         Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
         return 0;
@@ -161,6 +162,39 @@ internal static class NativeThemeColorProbe
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
 
+    private static void CheckScrollFrame(Type type, BindingFlags members)
+    {
+        var window = CreateWindowEx(0, "STATIC", "", 0x80100000, 0, 0, 300, 200, 0, 0, 0, 0);
+        var frames = 0; var content = 0;
+        var refresh = type.GetMethod("RefreshScrollFrame", members)!;
+        ThemeSubclass callback = (hwnd, message, wp, lp, id, data) =>
+        {
+            if (message == 0x0085)
+            {
+                frames++;
+                refresh.Invoke(null, [hwnd, true]); // Reentrant native frame notification must not recurse.
+            }
+            if (message is 0x000F or 0x0014) content++;
+            return ThemeDefSubclassProc(hwnd, message, wp, lp);
+        };
+        Check(window != 0 && ThemeSetWindowSubclass(window, callback, 73, 0), "hidden scrollbar frame fixture observes native paint messages");
+        try
+        {
+            refresh.Invoke(null, [window, false]);
+            Check(frames == 1 && content == 0, "scrollbar repair requests one frame paint without client paint or erase");
+            for (var i = 0; i < 20; i++) refresh.Invoke(null, [window, false]);
+            Check(frames == 1, "20 unchanged frame checks produce no additional repaint");
+            refresh.Invoke(null, [window, true]);
+            Check(frames == 2 && content == 0, "a new native paint bypasses the theme-scan cache without recursing");
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [false]);
+            refresh.Invoke(null, [window, false]);
+            Check(frames == 3 && content == 0, "light theme change repaints only the scrollbar frame");
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [true]);
+            refresh.Invoke(null, [window, false]);
+            Check(frames == 4 && content == 0, "dark theme return repaints only the scrollbar frame");
+        }
+        finally { ThemeRemoveWindowSubclass(window, callback, 73); DestroyWindow(window); GC.KeepAlive(callback); }
+    }
     private static void CheckMenuPrint(Type type, BindingFlags members)
     {
         var window = CreateWindowEx(0x181, "STATIC", "", 0x84800000, 0, 0, 300, 200, 0, 0, 0, 0);

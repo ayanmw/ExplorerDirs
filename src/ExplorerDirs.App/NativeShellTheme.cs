@@ -14,6 +14,7 @@ internal static class NativeShellTheme
     private static nint _menuHook;
     private static nint _creationHook;
     private static nint _printingMenu;
+    private static nint _paintingScrollFrame;
     private static readonly MenuReturnHook CreationProcedure = CreationMessage;
     private static readonly Subclass InitialMenuProcedure = InitialMenuMessage;
     private static bool _handlingMenuHook;
@@ -187,11 +188,43 @@ internal static class NativeShellTheme
         {
             ApplyOne(window);
             EnumChildWindows(window, (child, _) => { ApplyOne(child); return true; }, 0);
+            EnumChildWindows(window, (child, _) =>
+            {
+                var name = new StringBuilder(32);
+                GetClassName(child, name, name.Capacity);
+                if (name.ToString() == "SysListView32" && IsWindowVisible(child))
+                    RefreshScrollFrame(child, invalidated: false);
+                return true;
+            }, 0);
         }
         catch (EntryPointNotFoundException) { }
         catch (DllNotFoundException) { }
     }
 
+    private static void RefreshScrollFrame(nint window, bool invalidated)
+    {
+        if (_paintingScrollFrame == window) return;
+        // A list view's native scrollbars are nonclient areas, not child HWNDs.
+        // Theme setup can leave their first arrow-button image stale until hover.
+        var bars = GetWindowLongPtr(window, -16).ToInt64() & 0x00300000;
+        if (bars == 0) { RemoveProp(window, "ExplorerDirs.ScrollFrameTheme"); return; }
+        if (!GetWindowRect(window, out var bounds)) return;
+        var width = bounds.Right - bounds.Left;
+        var height = bounds.Bottom - bounds.Top;
+        var stamp = (nint)(bars | (_dark ? 2L : 1L));
+        if (!invalidated && GetProp(window, "ExplorerDirs.ScrollFrameTheme") == stamp &&
+            GetProp(window, "ExplorerDirs.ScrollFrameWidth") == width &&
+            GetProp(window, "ExplorerDirs.ScrollFrameHeight") == height) return;
+        SetProp(window, "ExplorerDirs.ScrollFrameTheme", stamp);
+        SetProp(window, "ExplorerDirs.ScrollFrameWidth", width);
+        SetProp(window, "ExplorerDirs.ScrollFrameHeight", height);
+        // Paint only the frame; never erase, refresh or resize file content.
+        var previous = _paintingScrollFrame;
+        _paintingScrollFrame = window;
+        try { SendMessage(window, 0x0085, 1, 0); }
+        finally { _paintingScrollFrame = previous; }
+    }
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
     private static void ApplyOne(nint window)
     {
         // Applying the same theme sends WM_THEMECHANGED again and can recreate
@@ -199,11 +232,13 @@ internal static class NativeShellTheme
         const string property = "ExplorerDirs.NativeTheme";
         var token = _dark ? (nint)2 : (nint)1;
         if (GetProp(window, property) == token || !SetProp(window, property, token)) return;
+        RemoveProp(window, "ExplorerDirs.ScrollFrameTheme");
         _ = SetWindowSubclass(window, BackgroundProcedure, 0xED7603, 0);
         AllowDarkModeForWindow(window, _dark);
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
         SetWindowTheme(window, _dark ? (name.ToString() == "SysHeader32" ? "DarkMode_ItemsView" : "DarkMode_Explorer") : "Explorer", null);
+        RemoveProp(window, "ExplorerDirs.ScrollFrameTheme");
         if (name.ToString() == "SysTreeView32")
         {
             SendMessage(window, 0x111D, 0, (nint)(_dark ? 0x202020u : GetSysColor(5))); // TVM_SETBKCOLOR
@@ -225,7 +260,21 @@ internal static class NativeShellTheme
             return 1;
         }
         if (message == 0x0082) RemoveWindowSubclass(window, BackgroundProcedure, id);
-        return DefSubclassProc(window, message, wParam, lParam);
+        var result = DefSubclassProc(window, message, wParam, lParam);
+        // Repair the first visible frame synchronously, before returning from
+        // native show/nonclient painting; ContextIdle is too late for startup.
+        if (message is 0x0047 or 0x0085 or 0x000F && IsWindowVisible(window) && _paintingScrollFrame != window)
+        {
+            var name = new StringBuilder(32);
+            GetClassName(window, name, name.Capacity);
+            if (name.ToString() == "SysListView32")
+            {
+                // Item population can repaint arrows without changing geometry.
+                // A real native paint is new evidence, not a duplicate theme scan.
+                RefreshScrollFrame(window, invalidated: message is 0x0085 or 0x000F);
+            }
+        }
+        return result;
     }
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref NativeRect rect, nint brush);
