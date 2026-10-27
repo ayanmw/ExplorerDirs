@@ -185,6 +185,7 @@ internal static class ShellViewColorSpike
                     WindowStyle = unchecked((int)0x10CF0000u)
                 };
                 wpfParentSource = new System.Windows.Interop.HwndSource(parameters);
+                wpfParentSource.RootVisual = new System.Windows.Controls.Grid();
                 parent = wpfParentSource.Handle;
             }
             else
@@ -269,7 +270,11 @@ internal static class ShellViewColorSpike
                         throw new InvalidOperationException($"Pane {index + 1} menu activation did not match state {menuActivationState}.");
                 }
                 var restoredFocus = SetFocus(parent);
-                Console.WriteLine($"multi-pane-cleanup: focus-restored-to-parent={GetFocus() == parent}; previous-focus=0x{restoredFocus:X}");
+                var currentFocus = GetFocus();
+                Console.WriteLine($"multi-pane-cleanup: focus-on-root-hwnd={currentFocus == parent}; " +
+                    $"focus-on-root-descendant={(currentFocus != 0 && IsChild(parent, currentFocus))}; " +
+                    $"focused-class={WindowClassName(currentFocus)}; current-focus=0x{currentFocus:X}; " +
+                    $"previous-focus=0x{restoredFocus:X}");
             }
             result = 0;
         }
@@ -4233,6 +4238,7 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll")] private static extern bool GetKeyboardState([Out] byte[] state);
     [DllImport("user32.dll")] private static extern bool SetKeyboardState([In] byte[] state);

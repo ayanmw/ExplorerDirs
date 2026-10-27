@@ -1195,7 +1195,7 @@ Release NativeProbe 构建 0 警告/错误。该用例连续两次在父窗口 `
 
 在前一轮“显式 OLE + WPF DispatcherFrame”仍挂起的基础上，只将顶层窗口从原生 `STATIC` 改为 WPF `HwndSource`；其下仍创建同样的 pane `STATIC`、真实 `IShellView` 和共享菜单 coordinator，输入法保持启用。新路线连续 3/3 完成 `DestroyViewWindow`、pane `DestroyWindow` 与根 `HwndSource.Dispose`；根窗均经过 `WM_DESTROY` 和 `WM_NCDESTROY`，`IsWindow` 变为 false，前台 HWND 不变。日志：`20261028-061036-7b7cb8f2.stdout.log`、`20261028-061047-2181c798.stdout.log`、`20261028-061049-8c00b176.stdout.log`。
 
-这是一项强差分：显式 OLE 与 WPF DispatcherFrame 单独及组合用于原生 `STATIC` 根窗时仍挂起，而 WPF 根窗组合 3/3 成功；此前将现象归因为线程级 IME/COM 交互过强，现已修正为尚无根因结论。探针日志中的 `focus-restored-to-parent=False` 也未作为通过条件，故仍需检查 pane 焦点/活动状态及更完整的产品 WPF 层级。此结果只覆盖单 pane 隔离原型，不证明多窗格菜单切换、真实输入、OLE 拖放或 Explorer Dirs 产品迁移已通过；不据此修改产品实现。
+这是一项强差分：显式 OLE 与 WPF DispatcherFrame 单独及组合用于原生 `STATIC` 根窗时仍挂起，而 WPF 根窗组合 3/3 成功；此前将现象归因为线程级 IME/COM 交互过强，现已修正为尚无根因结论。随后给根 `HwndSource` 加上 WPF `Grid` 根视觉再运行 3 次，销毁仍为 3/3 成功；`SetFocus(root)` 后当前焦点 HWND 稳定落在其 `STATIC` pane 子窗，不是 Shell `SysListView32`，因此不能把它记作文件焦点恢复通过。当前 pane 只是直接子 HWND，尚未由真正的 WPF `HwndHost` 托管；下一步需匹配这一层级并读取活动 Shell 列表焦点。此结果只覆盖单 pane 隔离原型，不证明多窗格菜单切换、真实输入、OLE 拖放或 Explorer Dirs 产品迁移已通过；不据此修改产品实现。根视觉复跑日志：`20261028-061316-1ffadb4a.stdout.log`、`20261028-061346-94890773.stdout.log`、`20261028-061348-629817a8.stdout.log`。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
