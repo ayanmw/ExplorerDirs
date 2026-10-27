@@ -1,5 +1,15 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-27：应用图标缓存容量检查
+
+源码定位到一处确定的长期引用：ShellIconProvider 的静态 Dictionary 在虚拟 Shell 解析名称或新扩展名不断出现时没有上限，缓存不会随关闭标签清理。当前生产调用主要是标签标题与地址位置菜单；普通文件系统目录共用一张文件夹图标，因此不能把此前普通目录工作负载的数百 MiB 占用归因于这张缓存。
+
+已将该应用缓存换为 256 项 LRU，不裁剪 Shell Travel Log、搜索身份或文件视图。已有控件继续持有 ImageSource，淘汰仅移除缓存引用；需要时重新加载，Native HICON 仍在复制成冻结 ImageSource 后立即 DestroyIcon。它约束的是一个可重新获取的数据缓存，容量上限是条目数，不是进程内存的 MiB 上限。
+
+专项 `--shell-icon-provider-smoke` 在实际生产缓存中插入 1,024 个合成键，旧实现保留 1,027 项，修复后保留 256 项；没有遍历 1,024 个真实 Shell 目录。被淘汰的“此电脑”图标经 Shell 重新加载后像素一致。独立缓存实例继续插入 4,096 个键，验证 LRU、大小写等价替换、缺失不插入、冻结图像消费者引用保持。测试图像和键是合成工作负载，没有强制 GC、工作集裁剪、Shell 文件视图或用户桌面输入。
+
+此结果只关闭一条无界引用路径，不是用户进程的前后 A/B，也未测量释放了多少托管/原生内存。常规本地目录使用下收益预计有限；实际驻留/提交量是否变化仍需同一新构建、固定目录与操作序列的长期采样，继续按下文的进程/GC/原生分配边界定位。
+
 Use the read-only sampler to collect a time series while the app is already running:
 
 ```powershell

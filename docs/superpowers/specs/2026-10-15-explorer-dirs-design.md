@@ -2,6 +2,10 @@
 
 日期：2026-10-15
 
+## 2026-10-27 应用图标的引用上限
+
+ShellIconProvider 使用 UI 线程内的 ShellIconCache，固定保留最多 256 个大小写不敏感的键；字典定位节点，双向链表维护 LRU，命中/替换移至最近端，新增超限移除最旧项。缓存不持有 HWND/PIDL/HICON，不主动 Dispose ImageSource；冻结图像被控件继续引用时保持有效，缺失仍由既有 Shell 加载流程重建。原 HICON 的 finally DestroyIcon 保持不变，不增加配置、手动回收入口或原生浏览历史上限。压力检查验证引用数量与重载，实际 WPF 渲染/原生内存收益另行验收。
+
 ## 2026-10-27 过滤枚举期间的分组意图
 
 `_quickFilterGroupToRestore` 与枚举计时分开：清组前用已确认 key/ascending 更新缓存，捕获成功后仅合并该意图，不冻结模式/图标/排序/列。取消旧 timer 不等于用户选择“无分组”，因此导航交接仍保留缓存和意图，供下一视图恢复；当前分组恢复或整份视图恢复成功后才解除，失败时继续保留，DisposeBrowser 清理。

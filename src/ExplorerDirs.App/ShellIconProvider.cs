@@ -15,7 +15,7 @@ internal static class ShellIconProvider
     private const uint ShgfiUseFileAttributes = 0x000000010;
     private const uint FileAttributeDirectory = 0x00000010;
     private const uint FileAttributeNormal = 0x00000080;
-    private static readonly Dictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ShellIconCache Cache = new();
 
     public static ImageSource? GetIcon(string path, bool isDirectory)
     {
