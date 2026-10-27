@@ -134,6 +134,15 @@ internal static class NativeThemeColorProbe
             clip.Invoke(null, [window]);
             GetWindowRgn(window, region); GetRgnBox(region, out box);
             Check(box.Equals(expected), "a native popup region reset is repaired even when its size did not change");
+            foreach (var dark in new[] { false, true })
+            {
+                type.GetMethod("SetProcessTheme", members)!.Invoke(null, [dark]);
+                clip.Invoke(null, [window]);
+                Check(GetProp(window, "ExplorerDirs.MenuBorder") == (dark ? 2 : 1),
+                    "single menu boundary updates its theme even when clipping geometry is unchanged");
+                GetWindowRgn(window, region); GetRgnBox(region, out box);
+                Check(box.Equals(expected), "changing the boundary theme preserves the native clipping region");
+            }
         }
         finally { DeleteObject(region); DestroyWindow(window); }
     }

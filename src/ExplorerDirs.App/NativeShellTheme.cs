@@ -247,16 +247,34 @@ internal static class NativeShellTheme
         // Native popup animation can replace the region without resizing the
         // HWND. Validate the actual region instead of trusting our old stamp.
         if (GetProp(window, "ExplorerDirs.MenuClipWidth") == width && GetProp(window, "ExplorerDirs.MenuClipHeight") == height &&
-            GetWindowRgnBox(window, out var current) != 0 && current.Left == left && current.Top == top && current.Right == right && current.Bottom == bottom) return;
+            GetWindowRgnBox(window, out var current) != 0 && current.Left == left && current.Top == top && current.Right == right && current.Bottom == bottom)
+        {
+            ApplyMenuBorder(window);
+            return;
+        }
         // Preserve Shell item geometry and hit testing; exclude only its measured
         // surround and inner theme edge. Windows owns the region after transfer.
         var region = CreateRectRgn(left, top, right, bottom);
         if (region == 0) return;
         if (SetWindowRgn(window, region, true) == 0) { DeleteObject(region); return; }
-        var noBorder = 0xFFFFFFFEu; // DWMWA_COLOR_NONE, not DWMWA_COLOR_DEFAULT.
-        _ = DwmSetWindowAttribute(window, 34, ref noBorder, sizeof(uint));
+        RemoveProp(window, "ExplorerDirs.MenuBorder");
+        ApplyMenuBorder(window);
         SetProp(window, "ExplorerDirs.MenuClipWidth", width);
         SetProp(window, "ExplorerDirs.MenuClipHeight", height);
+    }
+
+    private static void ApplyMenuBorder(nint window)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
+        const string property = "ExplorerDirs.MenuBorder";
+        var token = _dark ? (nint)2 : (nint)1;
+        if (GetProp(window, property) == token) return;
+        // Keep one system-composed boundary. Only the redundant native surround
+        // is clipped; borderless menus lose their outline against nearby views.
+        var colors = ThemePalette.For(_dark ? ResolvedTheme.Dark : ResolvedTheme.Light);
+        var border = NativeWindowFrameTheme.ToColorRef(colors.Border);
+        SetProp(window, property, token);
+        if (DwmSetWindowAttribute(window, 34, ref border, sizeof(uint)) < 0) RemoveProp(window, property);
     }
     [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref NativeRect rect, uint count);
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
