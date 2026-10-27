@@ -23,6 +23,7 @@ public partial class PaneControl : UserControl
     private readonly DispatcherTimer _tabHoverActivationTimer = new();
     private readonly TabHoverActivationGate _tabHoverActivationGate = new();
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
+    private bool _newTabUsesCurrentFolder;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
@@ -104,6 +105,8 @@ public partial class PaneControl : UserControl
         if (delayMilliseconds > 0)
             _tabHoverActivationTimer.Interval = TimeSpan.FromMilliseconds(delayMilliseconds);
     }
+
+    internal void SetNewTabUsesCurrentFolder(bool enabled) => _newTabUsesCurrentFolder = enabled;
 
     public bool MultilineTabHeaders
     {
@@ -531,7 +534,7 @@ public partial class PaneControl : UserControl
         .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Path)).ToArray();
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
-    public void NewTab() => AddTab(Home, _newTabView());
+    public void NewTab() => AddTab(_newTabUsesCurrentFolder ? CurrentPath : Home, _newTabView());
     public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
     internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
         IReadOnlySet<int>? pinned = null)

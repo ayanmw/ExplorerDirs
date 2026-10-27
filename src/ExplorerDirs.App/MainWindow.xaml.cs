@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly TabHoverActivationPreference _tabHoverActivationPreference;
+    private readonly PortableBooleanPreference _newTabLocationPreference;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
     private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
     private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
@@ -51,6 +52,7 @@ public partial class MainWindow : Window
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
+    private bool _newTabUsesCurrentFolder;
     private bool _showStatusBar = true;
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
@@ -194,6 +196,13 @@ public partial class MainWindow : Window
         if (_tabHoverActivationPreference.LoadWarning is { } tabHoverWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? tabHoverWarning : $"{EnvironmentStatus.Text} {tabHoverWarning}";
+        _newTabLocationPreference = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "NewTabLocation.ini"), "Tabs", "UseCurrentFolder", "新标签目录");
+        _newTabUsesCurrentFolder = _newTabLocationPreference.Load();
+        NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+        if (_newTabLocationPreference.LoadWarning is { } newTabLocationWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? newTabLocationWarning : $"{EnvironmentStatus.Text} {newTabLocationWarning}";
         _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
             _profileDirectory, "StatusBar.ini"));
         _showStatusBar = _statusBarVisibilityStore.Load();
@@ -351,6 +360,7 @@ public partial class MainWindow : Window
         ApplyStatusBarVisibility();
         ApplyTabStripVisibility();
         ApplyTabHoverActivationDelay();
+        ApplyNewTabLocationPreference();
         ApplyMultilineTabHeaders();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
@@ -1002,6 +1012,25 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NewTabUsesCurrentFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var next = NewTabUsesCurrentFolderMenu.IsChecked;
+        try
+        {
+            _newTabLocationPreference.Save(next);
+            _newTabUsesCurrentFolder = next;
+            ApplyNewTabLocationPreference();
+            EnvironmentStatus.Text = next
+                ? "新建标签将使用当前窗格的文件夹。"
+                : "新建标签将从用户文件夹开始。";
+        }
+        catch (Exception ex)
+        {
+            NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+            EnvironmentStatus.Text = $"新标签目录设置保存失败：{ex.Message}";
+        }
+    }
+
     private void StatusBar_Click(object sender, RoutedEventArgs e)
     {
         var next = StatusBarMenu.IsChecked;
@@ -1116,6 +1145,13 @@ public partial class MainWindow : Window
         foreach (var pane in _panes)
             pane.SetTabHoverActivationDelay(_tabHoverActivationDelayMilliseconds);
         UpdateTabHoverActivationMenu();
+    }
+
+    private void ApplyNewTabLocationPreference()
+    {
+        NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+        foreach (var pane in _panes)
+            pane.SetNewTabUsesCurrentFolder(_newTabUsesCurrentFolder);
     }
 
     private void UpdateTabHoverActivationMenu()

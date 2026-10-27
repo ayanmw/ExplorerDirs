@@ -11,6 +11,8 @@
 
 > **空白标签栏双击新建标签（2026-10-27）：**在标签标题滚动区域的空白处左键双击，复用 `NewTab()` 创建 Home/默认视图标签；标签标题双击仍走原关闭逻辑。接线 smoke 与 Release build 通过。真实鼠标命中和视觉仍待 GUI 验收。
 
+> **新建标签使用当前文件夹（2026-10-27）：**“标签页”菜单可选择普通新建标签从当前窗格目录开始，默认关闭；便携设置保存在 profile 的 `NewTabLocation.ini`。指定目录新建和复制标签不受影响。Release SettingsSmoke 与 App Release build 通过，菜单与跨重启行为仍待可见验收。来源：[Q-Dir 官方英文功能表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)。
+
 > **隔离 Shell 菜单命令队列（2026-10-27）：**共享 frame coordinator 现在按 FIFO 保存每条延迟 `WM_COMMAND` 的 pane owner 与命令 ID，防止 STA 处理前新命令覆盖旧槽。隐藏 frame smoke 验证两个 owner/ID 的顺序与身份，NativeProbe Release build 和完整 `--shell-view-color-policy-smoke` 通过；未创建 `IShellView`，真实菜单回调时序仍待验证。产品未改。
 
 > **IShellView 延迟 View 命令拒绝过期 pane（2026-10-27）：**隔离 NativeProbe 的共享菜单 frame 会把 `WM_COMMAND` 延迟到自定义消息执行；切换 pane 后，旧 View 菜单命令之前可能沿旧 owner 发给已不活动的 view。现有执行前再次核对 coordinator owner，过期命令被消费但不派发。新增隐藏 frame 两 pane 回归；NativeProbe Release build 与无 Shell-view 的 `--shell-view-color-policy-smoke` 通过。仅是迁移原型门控，不代表产品 ExplorerBrowser 或真实菜单交互验收。详见[原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。

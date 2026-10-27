@@ -31,6 +31,9 @@
             </MenuItem>
             <MenuItem Header="标签页(_T)">
                 <MenuItem Header="复制当前标签" InputGestureText="Ctrl+K" Click="DuplicateTab_Click"/>
+                <MenuItem x:Name="NewTabUsesCurrentFolderMenu" Header="新建标签时使用当前文件夹" IsCheckable="True"
+                          ToolTip="启用后，普通新建标签从当前窗格的活动目录开始。"
+                          Click="NewTabUsesCurrentFolder_Click"/>
                 <MenuItem Header="关闭其他标签" Click="CloseOtherTabs_Click"/>
                 <MenuItem Header="恢复关闭的标签" InputGestureText="Ctrl+Shift+T"
                           ToolTip="文件视图聚焦且单选文件夹时，Ctrl+Shift+T 在新标签打开该文件夹；其他情况下恢复关闭的标签。"
