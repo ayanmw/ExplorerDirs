@@ -12,6 +12,9 @@ internal static class NativeShellTheme
     private static readonly Subclass BackgroundProcedure = BackgroundMessage;
     private static readonly MenuReturnHook MenuHookProcedure = MenuReturned;
     private static nint _menuHook;
+    private static nint _creationHook;
+    private static readonly MenuReturnHook CreationProcedure = CreationMessage;
+    private static readonly Subclass InitialMenuProcedure = InitialMenuMessage;
     private static bool _handlingMenuHook;
     private static int _menuDepth;
     private static long _lastMenuPaintTimestamp;
@@ -27,6 +30,7 @@ internal static class NativeShellTheme
         // Opening a menu is not a theme change. Re-sending WM_THEMECHANGED to
         // its Shell owner here invalidated the file view on every right click.
         // Process cache/policy updates belong to SetProcessTheme instead.
+        if (_creationHook == 0) _creationHook = SetWindowsHookEx(5, CreationProcedure, 0, GetCurrentThreadId());
         if (_menuHook == 0)
             _menuHook = SetWindowsHookEx(12, MenuHookProcedure, 0, GetCurrentThreadId());
     }
@@ -34,10 +38,80 @@ internal static class NativeShellTheme
     internal static void EndMenu()
     {
         if (_menuDepth == 0 || --_menuDepth > 0) return;
+        if (_creationHook != 0) UnhookWindowsHookEx(_creationHook);
+        _creationHook = 0;
         if (_menuHook != 0) UnhookWindowsHookEx(_menuHook);
         _menuHook = 0;
     }
 
+    private static nint CreationMessage(int code, nuint wp, nint lp)
+    {
+        // HCBT_CREATEWND precedes WM_NCCREATE/WM_CREATE and the first show.
+        // Attaching here observes menu messages that a late subclass misses.
+        if (code == 3 && !_handlingMenuHook)
+        {
+            var name = new StringBuilder(32);
+            GetClassName((nint)wp, name, name.Capacity);
+            if (name.ToString() == "#32768")
+            {
+                _handlingMenuHook = true;
+                try
+                {
+                    ApplyMenuWindow((nint)wp);
+                    SetWindowSubclass((nint)wp, InitialMenuProcedure, 0xED7604, 0);
+                    ApplyMenuBorder((nint)wp);
+                }
+                finally { _handlingMenuHook = false; }
+            }
+        }
+        return CallNextHookEx(_creationHook, code, wp, lp);
+    }
+
+    private static nint InitialMenuMessage(nint window, uint message, nuint wp, nint lp, nuint id, nint data)
+    {
+        // AnimateWindow captures a hidden popup through WM_PRINT/PRINTCLIENT.
+        // Drawing only to GetWindowDC leaves its outline out of that first image.
+        if (message is 0x0317 or 0x0318 && wp != 0 &&
+            ((lp.ToInt64() & 1) == 0 || IsWindowVisible(window)))
+        {
+            if (!_handlingMenuHook)
+            {
+                _handlingMenuHook = true;
+                try { ClipMenuFrame(window); }
+                finally { _handlingMenuHook = false; }
+            }
+            if (GetWindowRgnBox(window, out var printEdge) != 0)
+            {
+                if (message == 0x0318 && GetWindowRect(window, out var bounds))
+                {
+                    MapWindowPoints(0, window, ref bounds, 2);
+                    printEdge.Left += bounds.Left; printEdge.Right += bounds.Left;
+                    printEdge.Top += bounds.Top; printEdge.Bottom += bounds.Top;
+                }
+                var saved = SaveDC((nint)wp);
+                if (saved != 0)
+                {
+                    try
+                    {
+                        IntersectClipRect((nint)wp, printEdge.Left, printEdge.Top, printEdge.Right, printEdge.Bottom);
+                        var printed = DefSubclassProc(window, message, wp, lp);
+                        DrawMenuBorder((nint)wp, printEdge);
+                        return printed;
+                    }
+                    finally { RestoreDC((nint)wp, saved); }
+                }
+            }
+        }
+        var result = DefSubclassProc(window, message, wp, lp);
+        if (message == 0x0082) RemoveWindowSubclass(window, InitialMenuProcedure, id);
+        if (!_handlingMenuHook && message is 0x0047 or 0x000F or 0x0085)
+        {
+            _handlingMenuHook = true;
+            try { ClipMenuFrame(window); }
+            finally { _handlingMenuHook = false; }
+        }
+        return result;
+    }
     private static nint MenuReturned(int code, nuint wParam, nint lParam)
     {
         var result = CallNextHookEx(_menuHook, code, wParam, lParam);
@@ -267,7 +341,9 @@ internal static class NativeShellTheme
         // surround and inner theme edge. Windows owns the region after transfer.
         var region = CreateRectRgn(left, top, right, bottom);
         if (region == 0) return;
-        if (SetWindowRgn(window, region, true) == 0) { DeleteObject(region); return; }
+        // The native position/paint pass already renders the popup; changing
+        // only its region must not request another erase/paint cycle.
+        if (SetWindowRgn(window, region, false) == 0) { DeleteObject(region); return; }
         RemoveProp(window, "ExplorerDirs.MenuBorder");
         ApplyMenuBorder(window);
         SetProp(window, "ExplorerDirs.MenuClipWidth", width);
@@ -291,11 +367,20 @@ internal static class NativeShellTheme
         if (GetWindowRgnBox(window, out var edge) == 0) return;
         var dc = GetWindowDC(window);
         if (dc == 0) return;
+        try { DrawMenuBorder(dc, edge); }
+        finally { ReleaseDC(window, dc); }
+    }
+
+    private static void DrawMenuBorder(nint dc, NativeRect edge)
+    {
         var colors = ThemePalette.For(_dark ? ResolvedTheme.Dark : ResolvedTheme.Light);
         var previous = SetDCBrushColor(dc, NativeWindowFrameTheme.ToColorRef(colors.Border));
         try { FrameRect(dc, ref edge, GetStockObject(18)); }
-        finally { SetDCBrushColor(dc, previous); ReleaseDC(window, dc); }
+        finally { SetDCBrushColor(dc, previous); }
     }
+    [DllImport("gdi32.dll")] private static extern int SaveDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern bool RestoreDC(nint dc, int saved);
+    [DllImport("gdi32.dll")] private static extern int IntersectClipRect(nint dc, int left, int top, int right, int bottom);
     [DllImport("user32.dll")] private static extern nint GetWindowDC(nint window);
     [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
     [DllImport("user32.dll")] private static extern int FrameRect(nint dc, ref NativeRect rect, nint brush);

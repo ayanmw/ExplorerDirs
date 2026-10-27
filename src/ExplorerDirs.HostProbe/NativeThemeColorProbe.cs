@@ -34,6 +34,7 @@ internal static class NativeThemeColorProbe
         CheckMenuOpeningDoesNotRethemeOwner(type, members);
         CheckMenuHookLifetime(type, members);
         CheckMenuClip(type, members);
+        CheckMenuPrint(type, members);
         CheckTreeColors(type, members);
         CheckSubmenuPlacement(type, members);
         Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
@@ -160,6 +161,62 @@ internal static class NativeThemeColorProbe
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
 
+    private static void CheckMenuPrint(Type type, BindingFlags members)
+    {
+        var window = CreateWindowEx(0x181, "STATIC", "", 0x84800000, 0, 0, 300, 200, 0, 0, 0, 0);
+        var dc = CreateCompatibleDC(0);
+        var bitmap = CreateBitmap(300, 200, 1, 32, 0);
+        var previous = SelectObject(dc, bitmap);
+        var callback = (Delegate)type.GetField("InitialMenuProcedure", members)!.GetValue(null)!;
+        var pointer = Marshal.GetFunctionPointerForDelegate(callback);
+        try
+        {
+            Check(window != 0 && dc != 0 && bitmap != 0 && SetSubclassPointer(window, pointer, 0xED7604, 0),
+                "hidden menu print fixture uses a supplied offscreen DC");
+            type.GetMethod("ClipMenuFrame", members)!.Invoke(null, [window]);
+            GetWindowRgnBoxForPrint(window, out var edge);
+            foreach (var dark in new[] { true, false, true })
+            foreach (var message in new uint[] { 0x0317, 0x0318 })
+            {
+                type.GetMethod("SetProcessTheme", members)!.Invoke(null, [dark]);
+                var area = new RegionRect { Right = 300, Bottom = 200 };
+                SetDCBrushColor(dc, 0xFF00FF);
+                FillRectForPrint(dc, ref area, GetStockObject(18));
+                var printedEdge = edge;
+                if (message == 0x0318)
+                {
+                    GetWindowRect(window, out var bounds);
+                    MapWindowPoints(0, window, ref bounds, 2);
+                    printedEdge.Left += bounds.Left; printedEdge.Top += bounds.Top;
+                }
+                SendMessage(window, message, (nuint)dc, 0xE);
+                Check(GetPixel(dc, printedEdge.Left, printedEdge.Top) == (dark ? 0x565656u : 0xA0A0A0u),
+                    $"{message:X} animation image contains the final {(dark ? "dark" : "light")} outline before show");
+                Check(GetPixel(dc, 0, 0) == 0xFF00FF,
+                    "menu print excludes the old outer frame instead of painting a second border");
+                GetClipBox(dc, out var afterClip);
+                Check(afterClip.Left == 0 && afterClip.Top == 0 && afterClip.Right == 300 && afterClip.Bottom == 200 &&
+                    SetDCBrushColor(dc, 0xFF00FF) == 0xFF00FF,
+                    "menu print restores the caller DC clipping and brush color");
+            }        }
+        finally
+        {
+            RemoveSubclassPointer(window, pointer, 0xED7604);
+            SelectObject(dc, previous); DeleteObject(bitmap); DeleteDC(dc); DestroyWindow(window); GC.KeepAlive(callback);
+        }
+    }
+    [DllImport("comctl32.dll", EntryPoint = "SetWindowSubclass")] private static extern bool SetSubclassPointer(nint window, nint callback, nuint id, nint data);
+    [DllImport("comctl32.dll", EntryPoint = "RemoveWindowSubclass")] private static extern bool RemoveSubclassPointer(nint window, nint callback, nuint id);
+    [DllImport("user32.dll", EntryPoint = "GetWindowRgnBox")] private static extern int GetWindowRgnBoxForPrint(nint window, out RegionRect rect);
+    [DllImport("user32.dll", EntryPoint = "FillRect")] private static extern int FillRectForPrint(nint dc, ref RegionRect rect, nint brush);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern nint CreateBitmap(int width, int height, uint planes, uint bits, nint data);
+    [DllImport("gdi32.dll")] private static extern nint SelectObject(nint dc, nint value);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern uint SetDCBrushColor(nint dc, uint color);
+    [DllImport("gdi32.dll")] private static extern int GetClipBox(nint dc, out RegionRect rect);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
+    [DllImport("gdi32.dll")] private static extern nint GetStockObject(int index);
     private static void CheckMenuOpeningDoesNotRethemeOwner(Type type, BindingFlags members)
     {
         if (System.Windows.SystemParameters.HighContrast) return;
@@ -198,11 +255,14 @@ internal static class NativeThemeColorProbe
         var begin = type.GetMethod("BeginMenu", members)!;
         var end = type.GetMethod("EndMenu", members)!;
         var field = type.GetField("_menuHook", members)!;
+        var creation = type.GetField("_creationHook", members)!;
         try
         {
             begin.Invoke(null, [(nint)0]);
             var handle = (nint)field.GetValue(null)!;
             Check(handle != 0, "native menu observer installs on the current probe thread without showing a menu");
+            var creationHandle = (nint)creation.GetValue(null)!;
+            Check(creationHandle != 0, "early menu creation hook installs on the same thread");
             Check(!(bool)type.GetMethod("ApplyMenuFramesFromOwner", members)!.Invoke(null, null)!,
                 "owner message skips a duplicate frame pass while the return hook is installed");
             var receiver = CreateWindowEx(0, "STATIC", "", 0x80000000, 0, 0, 10, 10, 0, 0, 0, 0);
@@ -217,11 +277,13 @@ internal static class NativeThemeColorProbe
             }
             finally { DestroyWindow(receiver); }
             begin.Invoke(null, [(nint)0]);
-            Check((nint)field.GetValue(null)! == handle, "nested menu loops share one thread-local installation");
+            Check((nint)field.GetValue(null)! == handle && (nint)creation.GetValue(null)! == creationHandle,
+                "nested menu loops share both thread-local hook installations");
             end.Invoke(null, null);
             Check((nint)field.GetValue(null)! == handle, "leaving a nested menu keeps the outer observer alive");
             end.Invoke(null, null);
-            Check((nint)field.GetValue(null)! == 0, "leaving the outer menu releases the native hook");
+            Check((nint)field.GetValue(null)! == 0 && (nint)creation.GetValue(null)! == 0,
+                "leaving the outer menu releases both native hooks");
             end.Invoke(null, null);
             Check((nint)field.GetValue(null)! == 0, "repeated menu cleanup is harmless");
             Check((bool)type.GetMethod("ApplyMenuFramesFromOwner", members)!.Invoke(null, null)!,

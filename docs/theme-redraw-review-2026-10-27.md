@@ -56,3 +56,15 @@
 用户在已发布 temp.76 中观察右键时文件区及菜单闪白。源码确认 BeginMenu 每次都刷新进程主题策略/菜单缓存并向 Shell owner 发送 WM_THEMECHANGED。隐藏 owner 子类消息计数回归在旧逻辑下失败，移除逐次无条件刷新后连续 10 次菜单开关没有 owner 主题失效消息；显式 SetProcessTheme + Apply 仍能发送原生主题变化。将 RefreshImmersiveColorPolicyState 移至真正应用进程主题的入口，保留主题切换时缓存刷新。
 
 菜单返回钩子原先只在首轮 WM_PAINT/WM_NCPAINT/WM_WINDOWPOSCHANGED 等之后尝试主题；现增加 WM_CREATE 完成阶段，为新菜单窗口在首次显示/绘制前应用主题。原有边框、裁剪及子菜单补偿保持。该时序调整需要真实新建菜单与深浅往返验收，静态截图不能证明短暂白帧已消失。
+
+### 菜单内容与外框分两次出现的进一步证据
+
+- 112450 诊断未观察到创建钩子：只有 WM_ENTERMENULOOP 装钩子不足。将范围提前到 ViewWindowProc 的 WM_CONTEXTMENU / WM_RBUTTONUP 调用 DefSubclassProc 前后并用 finally 平衡后，112702 捕获 HCBT_CREATEWND，visible=False。
+- 112854 诊断在创建阶段成功应用主题和挂接菜单子类，之后收到隐藏状态的定位消息。日志也显示区域修改可再入定位，最终代码增加重入保护、SetWindowRgn 使用 redraw=false。
+- 用户确认 113054/beb2d0 文件区不再闪白，但边框仍晚出现；后来截图确认主/子菜单各有两套边框。不能把该版记为边框同步验收通过。
+- 113324 诊断实际捕获每次弹出先收到 WM_PRINT(0x317) 和 WM_PRINTCLIENT(0x318)，visible=False，flags=0xE。系统先将菜单绘入动画用 DC，而旧代码只向真实窗口 GetWindowDC 描边，所以临时图像仍有旧外围，后续真实窗口才补最终线。
+- 最终候选对两个打印消息保存/恢复调用方 DC，在同一可见区域内调用原生绘制，再将同一条细边框画入给定 DC；PRINTCLIENT 转为客户区坐标。没有关闭系统动画、修改全局参数或改动菜单命令。
+- 新离屏像素回归先失败后通过：317/318 的深→浅→深图像均有对应 #565656 / #A0A0A0 边框，旧外围像素未被重画，DC 裁剪和画刷颜色恢复。原生专项再次运行通过，系统主题专项及完整 SettingsSmoke 通过。
+- 113617/e12b4b 是移除诊断文件写入后的候选（其后只有测试扩展）。打开调用被 Computer Use 物理 ESC 硬停止拦截；不得记为已启动或边框同步通过。现有 temp.76 保持不变，待实际动画验收后按同批规则覆盖。
+
+参考：[WM_PRINT](https://learn.microsoft.com/en-us/windows/win32/gdi/wm-print) 与 [WM_PRINTCLIENT](https://learn.microsoft.com/en-us/windows/win32/gdi/wm-printclient)，后者文档明确涉及 AnimateWindow 的绘制要求。

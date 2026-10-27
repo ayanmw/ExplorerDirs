@@ -4702,7 +4702,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
         var beforeShell = timingSample ? Stopwatch.GetTimestamp() : 0;
-        var result = DefSubclassProc(hwnd, message, wParam, lParam);
+        // Some Shell menus use an internal owner that does not forward
+        // WM_ENTERMENULOOP through our view subclass. Observe the dispatch before
+        // Shell can create/show its popup, and balance it even on failure.
+        var contextDispatch = message is 0x007B or 0x0205; // WM_CONTEXTMENU / WM_RBUTTONUP
+        if (contextDispatch) NativeShellTheme.BeginMenu(hwnd);
+        IntPtr result;
+        try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
+        finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
         if (timingSample)
         {
             var shellElapsed = Stopwatch.GetTimestamp() - beforeShell;
