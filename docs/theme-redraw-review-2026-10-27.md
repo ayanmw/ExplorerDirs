@@ -75,3 +75,5 @@
 ### 活动窗格切换引起两个内容区重排
 用户确认右键文件区刷新及菜单双框已解决后，报告窗格切换时两个窗格同时闪烁。SetActivePaneVisual 原先将边框从 1 像素改为 2 像素，导致旧/新窗格内容区域都变化，ExplorerBrowserHost.OnRenderSizeChanged 随后调用 Shell SetRect。修复为 inactive 边框1+Padding1、active 边框2+Padding0，总内缩始终2；缓存活动状态，重复激活不重设动态画刷引用。原边框视觉与Shell刷新恢复流程保留。
 未挂接生产 PaneControl 的布局回归在旧代码先失败，修复后连续10次激活/取消均保持 RootBorder.Child.RenderSize，相同状态保留资源引用；未创建 HWND/Shell view，前台不变。115332/0fd4d2 隔离候选已启动，真实窗格切换闪烁效果待用户反馈。原生主题、系统主题、未挂接标签流程均通过。
+
+最终用户验收：115332/0fd4d2 的窗格切换闪烁已解决，允许本版本落地；本轮右键文件区刷新、菜单动画单框贴合与窗格切换均获用户确认，按既有同批次规则更新 temp.76。
