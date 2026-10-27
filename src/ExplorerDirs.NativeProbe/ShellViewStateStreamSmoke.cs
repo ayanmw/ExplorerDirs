@@ -74,6 +74,8 @@ internal static class ShellViewStateStreamSmoke
         VerifyStoredStateSizeBoundaries();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
+        VerifyCrossProcessContention();
+        VerifyCrossProcessLockTimeout();
 
         Console.WriteLine("Shell view state stream smoke: PASS");
         return 0;
@@ -86,6 +88,17 @@ internal static class ShellViewStateStreamSmoke
         var bytes = Convert.FromHexString(args[3]);
         var store = new ShellViewStateStore(args[1]);
         using var host = new StreamViewHost(0, [], store, sessionId);
+        if (args[0] == "--shell-view-state-store-child-race-write")
+        {
+            WriteBytes(host, bytes);
+            File.WriteAllText(Path.Combine(args[1], args[3] + ".ready"), "loaded");
+            var release = Path.Combine(args[1], "writers.go");
+            var wait = Stopwatch.StartNew();
+            while (!File.Exists(release) && wait.Elapsed < TimeSpan.FromSeconds(8)) Thread.Sleep(10);
+            if (!File.Exists(release)) throw new TimeoutException("State writer barrier was not released.");
+            try { host.Dispose(); Console.WriteLine("race-saved=" + args[3]); return 0; }
+            catch (IOException ex) { Console.WriteLine("race-conflict=" + ex.Message); return 3; }
+        }
         if (args[0] == "--shell-view-state-store-child-write")
         {
             WriteBytes(host, bytes);
@@ -336,6 +349,84 @@ internal static class ShellViewStateStreamSmoke
         finally
         {
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void VerifyCrossProcessContention()
+    {
+        for (var round = 0; round < 3; round++)
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+            var id = Guid.NewGuid();
+            var store = new ShellViewStateStore(directory);
+            store.Save(id, [0]);
+            var payloads = new[] { "112233", "445566" };
+            var children = payloads.Select(payload => Task.Run(() => RunChild(
+                "--shell-view-state-store-child-race-write", directory, id.ToString("N"), payload))).ToArray();
+            var release = Path.Combine(directory, "writers.go");
+            try
+            {
+                var wait = Stopwatch.StartNew();
+                while (!payloads.All(payload => File.Exists(Path.Combine(directory, payload + ".ready"))) &&
+                       wait.Elapsed < TimeSpan.FromSeconds(8) && !children.Any(child => child.IsCompleted))
+                    Thread.Sleep(10);
+                Check(payloads.All(payload => File.Exists(Path.Combine(directory, payload + ".ready"))),
+                    "both independent writers loaded the same baseline before release");
+                File.WriteAllText(release, "save");
+                var results = Task.WhenAll(children).GetAwaiter().GetResult();
+                Check(results.Count(result => result.ExitCode == 0) == 1 &&
+                      results.Count(result => result.ExitCode == 3) == 1,
+                    $"contention round {round + 1} has exactly one successful process and one rejected writer");
+                var winner = Array.FindIndex(results, result => result.ExitCode == 0);
+                Check(store.TryLoad(id, out var saved) && Convert.ToHexString(saved) == payloads[winner] &&
+                      results[1 - winner].Output.Contains("state changed after this host loaded it", StringComparison.Ordinal),
+                    "the persisted bytes belong to the successful writer and the loser reports a conflict");
+            }
+            finally
+            {
+                // Release and join both bounded child runners before deleting their fixture.
+                File.WriteAllText(release, "cleanup");
+                try { Task.WhenAll(children).GetAwaiter().GetResult(); }
+                finally { Directory.Delete(directory, recursive: true); }
+            }
+        }
+    }
+
+    private static void VerifyCrossProcessLockTimeout()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+        var id = Guid.NewGuid();
+        var store = new ShellViewStateStore(directory);
+        store.Save(id, [0]);
+        var statePath = Path.Combine(directory, id.ToString("N") + ".viewstate");
+        using var mutex = new Mutex(false, ExplorerDirs.App.PortableIniWriter.MutexName(statePath));
+        var ownsLock = mutex.WaitOne(TimeSpan.FromSeconds(1));
+        Check(ownsLock, "the parent holds the same per-path mutex used by the child writer");
+        var child = Task.Run(() => RunChild("--shell-view-state-store-child-race-write", directory,
+            id.ToString("N"), "99"));
+        try
+        {
+            var ready = Path.Combine(directory, "99.ready");
+            var wait = Stopwatch.StartNew();
+            while (!File.Exists(ready) && wait.Elapsed < TimeSpan.FromSeconds(8) && !child.IsCompleted) Thread.Sleep(10);
+            Check(File.Exists(ready), "the child loaded state while its save mutex was held");
+            File.WriteAllText(Path.Combine(directory, "writers.go"), "save");
+            var result = child.GetAwaiter().GetResult();
+            Check(result.ExitCode == 3 && result.Output.Contains("being saved by another instance", StringComparison.Ordinal) &&
+                  store.TryLoad(id, out var saved) && saved.SequenceEqual(new byte[] { 0 }),
+                "a blocked independent writer times out without altering the destination");
+            mutex.ReleaseMutex();
+            ownsLock = false;
+            var retry = RunChild("--shell-view-state-store-child-write", directory, id.ToString("N"), "99");
+            Check(retry.ExitCode == 0 && store.TryLoad(id, out saved) && saved.SequenceEqual(new byte[] { 0x99 }),
+                "releasing the mutex permits a fresh child writer to save normally");
+        }
+        finally
+        {
+            if (ownsLock) mutex.ReleaseMutex();
+            File.WriteAllText(Path.Combine(directory, "writers.go"), "cleanup");
+            try { child.GetAwaiter().GetResult(); }
+            finally { Directory.Delete(directory, recursive: true); }
         }
     }
 
