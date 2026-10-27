@@ -1,9 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using ExplorerDirs.NativeProbe;
+using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 // Compares Shell drop targets exposed by a direct IShellView against its folder target.
-// All transfers are confined to a fresh temporary fixture; this does not use desktop input.
+// The default path uses direct COM calls in the Private Desktop; visible OLE drag input requires explicit opt-in.
 internal static class ShellViewDropTargetProbe
 {
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
@@ -16,9 +17,18 @@ internal static class ShellViewDropTargetProbe
     private const uint DropEffectCopy = 1;
     private const uint DropEffectMask = 7;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
+    private const int DragDropSDrop = 0x00040100;
+    private const int DragDropSCancel = 0x00040101;
 
-    internal static int Run()
+    internal static int Run() => RunCore(interactiveOleCopy: false);
+
+    internal static int RunInteractiveOleCopy() => RunCore(interactiveOleCopy: true);
+
+    private static int RunCore(bool interactiveOleCopy)
     {
+        if (interactiveOleCopy && Console.IsInputRedirected)
+            throw new InvalidOperationException("The interactive OLE drop probe requires an attached console for its explicit start prompt.");
+
         var foreground = GetForegroundWindow();
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-NativeProbe", Guid.NewGuid().ToString("N"));
         var sourceFolderPath = Path.Combine(root, "source");
@@ -59,8 +69,10 @@ internal static class ShellViewDropTargetProbe
             Marshal.WriteIntPtr(childPidls, relativeSource);
             Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, childPidls, 0, in DataObjectId, out dataObject));
 
-            parent = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop target probe",
-                0x90000000, 20, 20, 680, 500, 0, 0, 0, 0); // WS_POPUP | WS_VISIBLE; private Desktop only.
+            parent = CreateWindowExW(0, "STATIC", interactiveOleCopy
+                    ? "Explorer Dirs interactive OLE drop probe (temporary files only)"
+                    : "Explorer Dirs isolated Shell drop target probe",
+                0x90000000, 20, 20, 680, 500, 0, 0, 0, 0); // WS_POPUP | WS_VISIBLE; interactive mode is CLI opt-in.
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             sourcePane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop source pane",
                 0x50000000 | 0x02000000 | 0x04000000, 10, 10, 315, 440, parent, 0, 0, 0);
@@ -168,6 +180,35 @@ internal static class ShellViewDropTargetProbe
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
             var point = new PointL { X = boundsOnScreen.Left + Math.Max(1, boundsOnScreen.Right - boundsOnScreen.Left) / 2,
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
+
+            if (interactiveOleCopy)
+            {
+                System.Windows.Forms.Application.DoEvents();
+                Console.WriteLine("Move the pointer over the selected source file without clicking. Press Enter here, then press and drag the left mouse button into the target pane; release there. Escape cancels.");
+                if (Console.ReadLine() is null)
+                    throw new InvalidOperationException("The interactive OLE drop probe did not receive its explicit start confirmation.");
+
+                var dataObjectRcw = Marshal.GetObjectForIUnknown(selectedDataObject) as ComDataObject ??
+                    throw new InvalidOperationException("The selected Shell IDataObject could not be marshaled to the OLE interface.");
+                int dragResult;
+                uint performedEffect;
+                try
+                {
+                    dragResult = ShellViewDragSource.RunOleLoop(dataObjectRcw, DropEffectCopy, 0x0001, out performedEffect);
+                }
+                finally { _ = Marshal.ReleaseComObject(dataObjectRcw); }
+
+                System.Windows.Forms.Application.DoEvents();
+                var copied = File.Exists(selectedTargetPath) &&
+                    File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture";
+                var sourceStillExists = File.Exists(selectedSourcePath) &&
+                    File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture";
+                Console.WriteLine($"shell-view-ole-drop-copy: result=0x{dragResult:X8}; effect=0x{performedEffect:X}; copied={copied}; source-preserved={sourceStillExists}; interactive-input=True");
+
+                if (dragResult == DragDropSCancel) return 0;
+                if (dragResult < 0) Marshal.ThrowExceptionForHR(dragResult);
+                return dragResult == DragDropSDrop && performedEffect == DropEffectCopy && copied && sourceStillExists ? 0 : 1;
+            }
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point,
                 viewTargetPath, "IShellView.GetItemObject", "native-shell-drop-fixture");

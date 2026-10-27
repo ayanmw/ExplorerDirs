@@ -5,6 +5,11 @@
 - `IDropSource::QueryContinueDrag` 现先确认指定的启动鼠标键曾按下，再于释放时返回 `DRAGDROP_S_DROP`；启动 OLE 循环时鼠标键尚未按下则继续等待，Escape 仍取消。原生 COM vtable smoke 在旧实现下按预期失败，修正后 Release NativeProbe build 与 `--shell-view-color-policy-smoke` 通过。
 - 这是 IDropSource 状态机证据，不是实际 `DoDragDrop` 或鼠标拖放验收；未创建 Shell view、没有输入或改变前台窗口。交互探针与可接收输入隔离桌面仍待实现/授权验收。
 
+## 2026-10-27：增加显式授权的 Shell OLE 拖放探针入口
+
+- NativeProbe 新增 `--shell-view-ole-drop-copy --AllowInteractiveDesktopControl`：在新建的临时源/目标目录及两个真实 `IShellView` 中选择测试文件，通过 `RunOleLoop` 执行实际 OLE Copy 循环，再核对目标内容与源文件是否保留。没有授权参数或控制台输入被重定向时不会进入交互探针；Escape 取消，默认只允许 Copy。
+- NativeProbe Release build 通过（0 警告、0 错误），本轮没有运行该命令或输入鼠标/键盘。命令使用当前交互桌面，必须只在用户明确授权且可隔离操作的测试会话中运行；如果鼠标拖到目标窗格外，Windows 的其它 Shell drop target 仍可能接收这个临时文本文件，因此真实产品拖放门槛仍未通过。
+
 ## 2026-10-27：接通隔离 OLE DoDragDrop 调用入口
 
 - `ShellViewDragSource` 现提供隔离原型调用 `ole32!DoDragDrop` 的入口，可接收 COM `IDataObject`、本项目 `IDropSource` 与允许效果并交给系统 OLE 循环。调用要求在已初始化的 STA 中进行；入口不移动光标、不合成键鼠输入，也未从当前 Private Desktop 或用户桌面调用。
