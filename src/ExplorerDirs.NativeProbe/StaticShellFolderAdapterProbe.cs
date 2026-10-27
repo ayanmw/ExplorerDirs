@@ -34,7 +34,11 @@ internal static class StaticShellFolderAdapterProbe
             foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
                 items.Add(name, ParseChild(adapter, name));
 
-            var columnIndex = GetColumnCount(folder);
+            foreach (var name in new[] { "pending-a.bin", "pending-b.bin" })
+            {
+                File.WriteAllText(Path.Combine(fixture, name), "value pending");
+                items.Add(name, ParseChild(adapter, name));
+            }            var columnIndex = GetColumnCount(folder);
             var property = StaticShellColumnContract.PropertyKey;
             var expectedKey = new ShellColumnManager.NativeKey { FormatId = property.FormatId, PropertyId = property.PropertyId };
             var keyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
@@ -76,7 +80,28 @@ internal static class StaticShellFolderAdapterProbe
                 Marshal.FreeCoTaskMem(keyPointer);
             }
 
-            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            var missingVariant = Marshal.AllocCoTaskMem(24);
+            var missingKey = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
+            var missingDetails = Marshal.AllocCoTaskMem(272);
+            try
+            {
+                Marshal.StructureToPtr(expectedKey, missingKey, false);
+                Marshal.GetNativeVariantForObject(0UL, missingVariant);
+                var pendingHr = At<GetDetailsEx>(adapter, 17)(adapter, items["pending-a.bin"], missingKey, missingVariant);
+                if (pendingHr < 0) throw new Exception($"Pending custom GetDetailsEx failed: 0x{pendingHr:X8}.");
+                if (Marshal.ReadInt16(missingVariant) != 0)
+                    throw new Exception("An uncomputed custom value must be VT_EMPTY rather than a fabricated zero.");
+                Marshal.Copy(new byte[272], 0, missingDetails, 272);
+                Check(At<GetDetailsOf>(adapter, 18)(adapter, items["pending-a.bin"], (uint)columnIndex, missingDetails));
+                if (ReadDetailsText(missingDetails) != string.Empty)
+                    throw new Exception("An uncomputed custom value must have blank display text.");
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(missingDetails);
+                Marshal.FreeCoTaskMem(missingKey);
+                Marshal.FreeCoTaskMem(missingVariant);
+            }            var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
             var sizeKeyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
             var sizeVariant = Marshal.AllocCoTaskMem(24);
             try
@@ -115,7 +140,17 @@ internal static class StaticShellFolderAdapterProbe
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["ten-copy.bin"]), 0, "equal values");
             CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
 
-            var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+            CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["two.bin"]), -1, "pending before computed");
+            CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["pending-a.bin"]), 1, "computed after pending");
+            CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["pending-a.bin"]), 0, "pending self equality");
+            var nativeMissingOrder = At<CompareIDs>(folder, 7)(folder, 0, items["pending-a.bin"], items["pending-b.bin"]);
+            Check(nativeMissingOrder);
+            CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["pending-b.bin"]),
+                unchecked((short)(nativeMissingOrder & 0xffff)), "pending values retain native name order");
+            var canonical = compare(adapter, 0x10000000, items["ten.bin"], items["ten-copy.bin"]);
+            Check(canonical);
+            if (unchecked((short)(canonical & 0xffff)) == 0)
+                throw new Exception("Distinct items with equal custom numbers must retain native canonical identity.");            var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = property.FormatId, PropertyId = property.PropertyId });
             var sizeSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = SizeKeyFormat, PropertyId = 12 });

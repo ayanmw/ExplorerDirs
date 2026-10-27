@@ -1180,3 +1180,11 @@ StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟�
 - 无窗口回归用已 Dispose 的宿主和零句柄验证：修复前进入 HWND 参数检查并抛 ArgumentException；修复后先抛 ObjectDisposedException。未创建 HWND、Shell view 或执行 RegisterDragDrop，不声称已复现真实 OLE 泄漏。
 - 完整 `--shell-view-state-stream-smoke` 通过，包含原有 COM stream、跨进程持久化、并发写保护与锁超时检查。日志：`src/.state/drop-retirement-red.log`、`src/.state/drop-retirement-green.log`。
 - 仅隔离原型改变；真实导航/关闭重入与拖放交互仍待集中 UI 验收，不归因为产品内存增长或无响应的根因。固定 UI 候选和 temp.76 发布目录未更新。
+
+### 2026-10-27：自定义列尚无数值时的原生契约
+
+无窗口 RunFolderContract 扩展两个真实临时文件，二者不在静态数值表。旧适配层 GetDetailsEx 返回 E_FAIL，红测明确记录 Pending custom GetDetailsEx failed: 0x80004005。修复仅针对自定义列：未知值返回 S_OK/VT_EMPTY，显示文本为空；排序时空值排在已知值前，两个空值沿用底层名称比较，不用零字节伪装未完成结果。用于诊断的标准 PKEY_Size 替换控制保持原行为。
+
+真实 native IShellFolder2 COM 调用验证空值类型、空白文本、空↔已知比较反对称、空值自比较、两个空值与原生名称排序一致，以及原有 2/10/100 和同值比较。另用 SHCIDS_CANONICALONLY 确认 ten.bin 与 ten-copy.bin 虽有相同自定义数值仍是不同原生身份；[微软 CompareIDs 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)区分列排序规则与 canonical identity 比较，修复未改写后一条委托路径。
+
+C++ /W4 /WX 构建及 --static-shell-column-folder-smoke、--static-shell-column-contract-smoke 通过。原生结果 window-created=False；本次未运行创建视图的 Run/Private Desktop 分支，未接入产品。日志 src/.state/static-missing-{red,green,native-build}.log。静态空值基础不能代替异步目录扫描/完成后重新排序、通知、可见焦点与迁移验收；递归目录大小与颜色 P0 仍未完成。

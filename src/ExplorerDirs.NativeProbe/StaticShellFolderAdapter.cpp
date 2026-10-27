@@ -144,7 +144,14 @@ namespace
             bool leftFound = false, rightFound = false;
             const auto leftValue = ValueForName(leftName, leftFound);
             const auto rightValue = ValueForName(rightName, rightFound);
-            if (!leftFound || !rightFound) return E_FAIL;
+            if (!leftFound || !rightFound)
+            {
+                if (columnIndex != _columnCount) return E_FAIL; // Keep the standard-size control unchanged.
+                // Pending custom values are empty, not errors or fabricated zero-byte results.
+                if (!leftFound && !rightFound) return _inner->CompareIDs(0, left, right);
+                const short comparison = leftFound ? 1 : -1;
+                return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
+            }
             const short comparison = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
         }
@@ -186,8 +193,9 @@ namespace
             if (!NameFromPidl(_inner, item, name)) return E_FAIL;
             bool found = false;
             const auto number = ValueForName(name, found);
-            if (!found) return E_FAIL;
+            if (!found && *column == kSizeKey) return E_FAIL;
             VariantInit(value);
+            if (!found) return S_OK; // VT_EMPTY while the custom result is unavailable.
             value->vt = VT_UI8;
             value->ullVal = number;
             return S_OK;
@@ -240,8 +248,7 @@ namespace
                 if (!NameFromPidl(_inner, item, name)) return E_FAIL;
                 bool found = false;
                 const auto number = ValueForName(name, found);
-                if (!found) return E_FAIL;
-                valueText = std::to_wstring(number);
+                valueText = found ? std::to_wstring(number) : L"";
                 text = valueText.c_str();
             }
             const auto length = wcslen(text) + 1;
