@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：修正跟随 Windows 深浅主题
+
+- 用户要求跟随 Windows/固定浅色/固定深色；现有三态入口和 INI 已有，SystemThemeMonitor 对 Foreground 亮度错误取反，导致当前 Windows 深色解析成浅色。修正取反，选项名称明确三态，保留现有事件监听、强调色和高对比度处理。
+- 实际 `--system-theme` 先复现监测链路失败，修正后当前 WindowsIsDark=True，实际 controller 的三态及重新加载 Theme.ini 均通过。没有创建窗口/Shell view，前台不变；真实系统主题切换与文件区深色绘制未验收。依据：[Microsoft Windows themes](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-windows-themes)。打包 temp.76，范围/限制见[版本说明](releases/preview-0.6.0-temp.76.md)。
+
 ## 2026-10-27：发布 temp.75 与整体计划
 
 - 用户要求整体进度/近期远期计划及新预览；已整理[进度报告](progress-2026-10-27.md)，明确实现、原型、可见验收和缺失项。按 652d35e 干净源码发布[preview-0.6.0-temp.75](releases/preview-0.6.0-temp.75.md)到指定 releases，新包独立 profile 来自 temp.74，三份配置及原文件哈希核对通过。

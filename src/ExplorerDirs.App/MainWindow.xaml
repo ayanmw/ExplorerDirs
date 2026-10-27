@@ -111,9 +111,9 @@
                 <Separator/>
                 <MenuItem Header="选项">
                     <MenuItem Header="主题">
-                        <MenuItem x:Name="SystemThemeMenu" Header="跟随系统" IsCheckable="True" Tag="System" Click="ThemePreference_Click"/>
-                        <MenuItem x:Name="LightThemeMenu" Header="浅色" IsCheckable="True" Tag="Light" Click="ThemePreference_Click"/>
-                        <MenuItem x:Name="DarkThemeMenu" Header="深色" IsCheckable="True" Tag="Dark" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="SystemThemeMenu" Header="跟随 Windows" IsCheckable="True" Tag="System" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="LightThemeMenu" Header="固定浅色" IsCheckable="True" Tag="Light" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="DarkThemeMenu" Header="固定深色" IsCheckable="True" Tag="Dark" Click="ThemePreference_Click"/>
                         <Separator/>
                         <MenuItem Header="强调色">
                             <MenuItem x:Name="WindowsAccentMenu" Header="跟随 Windows 强调色"

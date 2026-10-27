@@ -16,7 +16,8 @@ internal sealed class SystemThemeMonitor : IDisposable
         get
         {
             var foreground = _settings.GetColorValue(UIColorType.Foreground);
-            return !ThemePalette.IsLightForeground(foreground.R, foreground.G, foreground.B);
+            // Windows exposes light foreground text in dark mode, not light mode.
+            return ThemePalette.IsLightForeground(foreground.R, foreground.G, foreground.B);
         }
     }
 
