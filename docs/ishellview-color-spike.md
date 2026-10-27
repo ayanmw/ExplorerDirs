@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：Private Desktop drop-target 数据对象复验
+
+当前 Release NativeProbe 的 `drop-target-private-desktop` 通过真实 Shell `IDataObject` 直接调用目标 `IDropTarget::DragEnter/DragOver/Drop`。选中视图项的数据对象成功复制到另一 `IShellView` 的目标目录及由目标 `IShellFolder::CreateViewObject` 创建并注册的 HWND；目标文件内容正确、源文件保留，Copy effect 被接受。把源 `IShellView.GetItemObject` 当作 drop target 查询返回 `E_NOINTERFACE`，因此源数据对象与目录 drop target 的角色已分别确认。
+
+watchdog 退出码 0、stderr 为空、前台 HWND 不变，探针退出后无残留。日志 `src/.state/native-probe-watchdog/20261028-015722-7a54f99f.stdout.log` 的 SHA-256 为 `EBBC62316BE8F80FB84B85C9C1633ABC090AE699011CDDAD4B7C386824EF9EA6`。这直接调用 COM drop callbacks，没有执行 `DoDragDrop`、鼠标命中测试或物理拖动；不视作真实 OLE 拖放或产品接线通过。
+
 ## 2026-10-28：四窗格会话恢复探针复验
 
 使用当前 Release 构建运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，退出码 0，stderr 为空。隔离 consumer 确认状态流恢复到四个 pane；四个 pane 的 Shell 菜单路由通过，键盘命令与 Ctrl+A 覆盖 pane 1–3，F2 编辑及方向键焦点隔离覆盖四个 pane；Copy、Rename、Delete 后四窗格计数收敛，目录通知与 sibling-pane 隔离通过。前台 HWND 前后相同，NativeProbe/consumer 子进程退出后无残留。
