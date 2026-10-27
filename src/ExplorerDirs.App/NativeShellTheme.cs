@@ -61,7 +61,7 @@ internal static class NativeShellTheme
         try
         {
             ApplyMenuWindow(call.Window);
-            DrawMenuFrame(call.Window);
+            ClipMenuFrame(call.Window);
         }
         finally { _handlingMenuHook = false; }
         return result;
@@ -160,7 +160,7 @@ internal static class NativeShellTheme
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
             ApplyMenuWindow(window);
-            if (repaint) DrawMenuFrame(window);
+            if (repaint) ClipMenuFrame(window);
             return true;
         }, 0);
     }
@@ -175,33 +175,33 @@ internal static class NativeShellTheme
         if (themeResult < 0) { RemoveProp(window, property); return false; }
         return true;
     }
-    private static void DrawMenuFrame(nint window)
+    private static void ClipMenuFrame(nint window)
     {
-        if (!GetWindowRect(window, out var bounds)) return;
-        var dc = GetWindowDC(window);
-        if (dc == 0) return;
-        var previous = SetDCBrushColor(dc, _dark ? 0x404040u : 0xB0B0B0u);
-        try
-        {
-            var rect = new NativeRect { Right = bounds.Right - bounds.Left, Bottom = bounds.Bottom - bounds.Top };
-            // Use the measured nonclient thickness (3 px in the failing popup),
-            // rather than assuming SM_CXEDGE covers the entire menu surround.
-            var clientWidth = GetClientRect(window, out var client) ? client.Right - client.Left : rect.Right;
-            var width = Math.Max(1, (rect.Right - clientWidth) / 2);
-            for (var i = 0; i < width; i++)
-            {
-                FrameRect(dc, ref rect, GetStockObject(18)); // DC_BRUSH; no retained GDI allocation.
-                rect.Left++; rect.Top++; rect.Right--; rect.Bottom--;
-                SetDCBrushColor(dc, _dark ? 0x2B2B2Bu : 0xF9F9F9u);
-            }
-        }
-        finally { SetDCBrushColor(dc, previous); ReleaseDC(window, dc); }
+        if (!GetWindowRect(window, out var bounds) || !GetClientRect(window, out var client)) return;
+        var width = bounds.Right - bounds.Left;
+        var height = bounds.Bottom - bounds.Top;
+        if (GetProp(window, "ExplorerDirs.MenuClipWidth") == width && GetProp(window, "ExplorerDirs.MenuClipHeight") == height) return;
+        if (client.Right <= client.Left || client.Bottom <= client.Top) return;
+        MapWindowPoints(window, 0, ref client, 2);
+        var left = client.Left - bounds.Left;
+        var top = client.Top - bounds.Top;
+        var right = client.Right - bounds.Left;
+        var bottom = client.Bottom - bounds.Top;
+        if (left < 0 || top < 0 || right > width || bottom > height) return;
+        // Preserve Shell item geometry and hit testing; exclude only its measured
+        // nonclient surround. Windows owns the region after a successful transfer.
+        var region = CreateRectRgn(left, top, right, bottom);
+        if (region == 0) return;
+        if (SetWindowRgn(window, region, true) == 0) { DeleteObject(region); return; }
+        SetProp(window, "ExplorerDirs.MenuClipWidth", width);
+        SetProp(window, "ExplorerDirs.MenuClipHeight", height);
     }
+    [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref NativeRect rect, uint count);
+    [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
+    [DllImport("user32.dll")] private static extern int SetWindowRgn(nint window, nint region, bool redraw);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect rect);
-    [DllImport("user32.dll")] private static extern nint GetWindowDC(nint window);
-    [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
-    [DllImport("user32.dll")] private static extern int FrameRect(nint dc, ref NativeRect rect, nint brush);
     [DllImport("gdi32.dll")] private static extern nint GetStockObject(int index);
     [DllImport("gdi32.dll")] private static extern uint SetDCBrushColor(nint dc, uint color);
 

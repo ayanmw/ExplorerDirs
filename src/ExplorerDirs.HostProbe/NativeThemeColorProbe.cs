@@ -32,9 +32,49 @@ internal static class NativeThemeColorProbe
         finally { Marshal.Release(unsupported); }
         CheckTooltipNotifications(type, members);
         CheckMenuHookLifetime(type, members);
-        Console.WriteLine("Native theme colors: PASS (COM fixture and hidden tooltip; no visible windows or Shell views)");
+        CheckMenuClip(type, members);
+        Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
         return 0;
     }
+
+    private static void CheckMenuClip(Type type, BindingFlags members)
+    {
+        var window = CreateWindowEx(0x181, "STATIC", "", 0x84800000, 100, 100, 300, 200, 0, 0, 0, 0);
+        Check(window != 0, "hidden bordered HWND fixture is available for native region clipping");
+        var region = CreateRectRgn(0, 0, 0, 0);
+        try
+        {
+            GetWindowRect(window, out var outer);
+            GetClientRect(window, out var client);
+            var originalClient = client;
+            MapWindowPoints(window, 0, ref client, 2);
+            var expected = new RegionRect { Left = client.Left - outer.Left, Top = client.Top - outer.Top,
+                Right = client.Right - outer.Left, Bottom = client.Bottom - outer.Top };
+            var style = GetWindowLongPtr(window, -16);
+            var extended = GetWindowLongPtr(window, -20);
+            var clip = type.GetMethod("ClipMenuFrame", members)!;
+            clip.Invoke(null, [window]);
+            Check(GetWindowRgn(window, region) != 0 && GetRgnBox(region, out var box) != 0 && box.Equals(expected),
+                "window region excludes precisely the measured nonclient surround");
+            GetWindowRect(window, out var afterOuter); GetClientRect(window, out var afterClient);
+            Check(outer.Equals(afterOuter) && originalClient.Equals(afterClient) &&
+                  style == GetWindowLongPtr(window, -16) && extended == GetWindowLongPtr(window, -20),
+                "clipping preserves native window/client geometry and window styles");
+            clip.Invoke(null, [window]);
+            GetWindowRgn(window, region); GetRgnBox(region, out box);
+            Check(box.Equals(expected), "repeat menu clipping retains the same native client region");
+        }
+        finally { DeleteObject(region); DestroyWindow(window); }
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct RegionRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out RegionRect rect);
+    [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out RegionRect rect);
+    [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref RegionRect rect, uint count);
+    [DllImport("user32.dll")] private static extern int GetWindowRgn(nint window, nint region);
+    [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern int GetRgnBox(nint region, out RegionRect rect);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
 
     private static void CheckMenuHookLifetime(Type type, BindingFlags members)
     {
