@@ -34,6 +34,15 @@ internal static class QdrImportSmoke
                 conflictingLocations.Warnings.Any(warning => warning.Contains("同时包含") && warning.Contains("已跳过")),
                 "ambiguous Dir/Folder aliases skip only the conflicting QDR location regardless of field order");
         }
+        var numberedAliasConflict = QdrImporter.Parse(
+            "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\current\nDir1_0=C:\\ambiguous\n" +
+            "Folder1_0=%0600FF00\nDir1_1=C:\\keep\nCurPos1=0\nCurPos1_1=1\n",
+            (value, encoded) => encoded ? @"C:\encoded-pidl" : value);
+        Require(numberedAliasConflict.Panes[0].Count == 2 &&
+            numberedAliasConflict.Panes[0][0].Path == @"C:\current" &&
+            numberedAliasConflict.Panes[0][1].Path == @"C:\keep" &&
+            numberedAliasConflict.SelectedTabs[0] == 0,
+            "a numbered Dir/Folder collision is skipped without reusing its index for the current tab");
         var launchState = QdrLaunchSession.Create(imported, @"C:\Users\marvin");
         Require(launchState.Layout == 4 && launchState.Panes[0].Count == 3 &&
                 launchState.Panes[1][0].Path == imported.Panes[1][0].Path &&
