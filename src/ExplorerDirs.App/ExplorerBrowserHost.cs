@@ -1689,9 +1689,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
 
-            // A newer search may cancel this probe while Shell parses.
+            // Inputs such as shell:Downloads can resolve to a filesystem path,
+            // while virtual folders have no filesystem path at all. Register
+            // the same confirmed identity used by navigation callbacks.
+            var issuedPath = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var canonicalPath, out _)
+                ? canonicalPath : path;
+            // A newer request may cancel this probe while Shell parses or
+            // reads the folder identity; do not register stale preparation.
             if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
-            TrackIssuedPath(path);
+            TrackIssuedPath(issuedPath);
             int? result;
             var browser = _browser;
             try
@@ -1701,10 +1707,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch
             {
-                if (ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+                if (ReferenceEquals(browser, _browser)) CompleteIssuedPath(issuedPath);
                 throw;
             }
-            if ((result is null || result < 0) && ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+            if ((result is null || result < 0) && ReferenceEquals(browser, _browser)) CompleteIssuedPath(issuedPath);
             if (result is not null) Check(result.Value);
         }
         catch (Exception ex)
@@ -4047,10 +4053,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try { UpdateQuickFilterAttachment(searchActive: false); }
             catch (Exception ex) { MenuError?.Invoke(this, $"为目标目录启用快速筛选失败：{ex.Message}"); }
         }
-        var issuedByApp = targetPath is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(targetPath)) ||
-            identity is not null && _issuedSearches.ContainsKey(identity);
-        // An app-issued search can start after a later directory probe. Its
-        // delayed callback must not cancel that newer request as user input.
+        var issuedByApp = identity is not null &&
+            (_issuedBrowserPaths.ContainsKey(NormalizePathKey(identity)) || _issuedSearches.ContainsKey(identity));
+        // An app-issued folder/search can start after a later directory probe.
+        // Its delayed callback must not cancel that newer request as user input.
         if (!issuedByApp)
         {
             _navigationRequestVersion++;
@@ -4230,6 +4236,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void TrackIssuedPath(string path)
     {
+        // Keep retries in the callback identity too, so a successful alias
+        // navigation stops retrying and an older failure cannot replace it.
+        _retryPath = path;
         var key = NormalizePathKey(path);
         _issuedBrowserPaths[key] = _issuedBrowserPaths.GetValueOrDefault(key) + 1;
         if (_issuedBrowserPaths.Count > 32)
@@ -4832,7 +4841,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var publish = _viewReadiness.Fail(identity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
-        if (FileSystemPath(pidl) is { } path)
+        if (identity is { } path)
         {
             var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
             CompleteIssuedPath(path);

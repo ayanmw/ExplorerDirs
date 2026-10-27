@@ -25,6 +25,7 @@ internal static class Program
 
     private static int Run(string[] args)
     {
+        if (args is ["--folder-navigation-callbacks"]) return FolderNavigationCallbacksProbe.Run();
         if (args is ["--pane-tab-transfer"]) return PaneTabTransferProbe.Run();
         if (args is ["--tab-host-lifetime"]) return TabHostLifetimeProbe.Run();
         if (args is ["--pane-tab-copy-order"]) return PaneTabTransferProbe.Run(unhostedCopyOrder: true);
