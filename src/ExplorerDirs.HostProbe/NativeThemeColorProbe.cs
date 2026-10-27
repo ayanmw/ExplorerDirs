@@ -56,6 +56,13 @@ internal static class NativeThemeColorProbe
             var frame = new System.Windows.Threading.DispatcherFrame();
             dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() => frame.Continue = false));
             System.Windows.Threading.Dispatcher.PushFrame(frame);
+            var applyNative = type.GetMethod("Apply", members)!;
+            applyNative.Invoke(null, [window]);
+            Check(GetProp(window, "ExplorerDirs.NativeTheme") == 2,
+                "native child theme is stamped before repeat refreshes");
+            applyNative.Invoke(null, [window]);
+            Check(GetProp(window, "ExplorerDirs.NativeTheme") == 2,
+                "repeat native child refresh retains the same applied-theme stamp");
             posted = 0;
             apply.Invoke(null, [notification]);
             Check(posted == 0, "an already themed tooltip does not requeue SetWindowTheme");

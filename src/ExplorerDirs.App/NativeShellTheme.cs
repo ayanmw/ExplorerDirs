@@ -34,6 +34,11 @@ internal static class NativeShellTheme
 
     private static void ApplyOne(nint window)
     {
+        // Applying the same theme sends WM_THEMECHANGED again and can recreate
+        // child controls. Stamp before the native call to break refresh reentrancy.
+        const string property = "ExplorerDirs.NativeTheme";
+        var token = _dark ? (nint)2 : (nint)1;
+        if (GetProp(window, property) == token || !SetProp(window, property, token)) return;
         _ = SetWindowSubclass(window, BackgroundProcedure, 0xED7603, 0);
         AllowDarkModeForWindow(window, _dark);
         var name = new StringBuilder(64);
@@ -89,6 +94,8 @@ internal static class NativeShellTheme
             var name = new StringBuilder(32);
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
+            const string property = "ExplorerDirs.MenuTheme";
+            if (GetProp(window, property) == 2 || !SetProp(window, property, 2)) return true;
             AllowDarkModeForWindow(window, true);
             SetWindowTheme(window, "DarkMode_Explorer", null);
             var color = _dark ? 0x404040u : GetSysColor(16);
