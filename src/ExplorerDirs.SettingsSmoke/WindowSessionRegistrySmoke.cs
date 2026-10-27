@@ -46,20 +46,23 @@ internal static class WindowSessionRegistrySmoke
                 .Count(path => !path.EndsWith(".PinnedTabs.ini", StringComparison.OrdinalIgnoreCase)) == 1,
             "failed registry writes clean up the unpublished session file");
 
-        var futureFolder = Path.Combine(root, "window-sessions-future-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(futureFolder);
-        var futureProfile = Path.Combine(futureFolder, "ExplorerDirs.ini");
-        var futureRegistryPath = Path.Combine(futureFolder, "WindowSessions.ini");
-        var futureRegistry = "[WindowSessions]\nFormatVersion=2\nCount=1\nSession0=ExplorerDirs.ini\n";
-        File.WriteAllText(futureRegistryPath, futureRegistry);
-        var future = new WindowSessionRegistry(futureProfile);
-        Require(future.Load().SequenceEqual([futureProfile]) && future.LoadWarning is not null,
-            "newer registry formats fall back to the readable primary session");
-        var futureProtected = false;
-        try { future.Create(State(@"C:\window-future"), []); }
-        catch (IOException) { futureProtected = true; }
-        Require(futureProtected && File.ReadAllText(futureRegistryPath) == futureRegistry,
-            "newer registry formats stay untouched and reject writes");
+        foreach (var futureVersion in new[] { "2", "2147483648", "999999999999999999999999999999999999999999" })
+        {
+            var futureFolder = Path.Combine(root, "window-sessions-future-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(futureFolder);
+            var futureProfile = Path.Combine(futureFolder, "ExplorerDirs.ini");
+            var futureRegistryPath = Path.Combine(futureFolder, "WindowSessions.ini");
+            var futureRegistry = $"[WindowSessions]\nFormatVersion={futureVersion}\nCount=1\nSession0=ExplorerDirs.ini\n";
+            File.WriteAllText(futureRegistryPath, futureRegistry);
+            var future = new WindowSessionRegistry(futureProfile);
+            Require(future.Load().SequenceEqual([futureProfile]) && future.LoadWarning is not null,
+                "newer registry formats fall back to the readable primary session");
+            var futureProtected = false;
+            try { future.Create(State(@"C:\window-future"), []); }
+            catch (IOException) { futureProtected = true; }
+            Require(futureProtected && File.ReadAllText(futureRegistryPath) == futureRegistry,
+                "newer registry formats stay untouched and reject writes");
+        }
 
         var missingFolder = Path.Combine(root, "window-sessions-missing-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(missingFolder);

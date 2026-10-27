@@ -13,6 +13,11 @@
 
 本轮基于 2ac23d5 源码重跑完整 Release SettingsSmoke、无 HWND 的 pane-tab-copy-order 和 App Release build，全部通过，构建零警告错误。日志分别为 `src/.state/background-current-settings.log`、`background-current-pane.log`、`background-current-app.log`。未启动窗口、未改变发布版本。上批拖放退休修复属于隔离原型，设备地址字面量修复属于后续产品批次，均不改动已经固定的 UI 候选。
 
+## 2026-10-27：多窗口清单的超大未来版本保护
+
+- 复核重启链路时发现 WindowSessions.ini 的 FormatVersion 用 Int32 解析，2147483648 等未知未来版本溢出后被视为损坏格式，备份后仍允许 Create 覆盖清单。改为与其他便携配置一致的 BigInteger 版本解析，保留未知版本的只读保护，不改变窗口数或会话格式。
+- 扩展现有未来版本回归，覆盖 2、Int32 上界之外及 42 位数字；旧实现先在写入保护断言失败，修复后完整 Release SettingsSmoke 通过，App Release build 零警告错误。测试仅使用独立临时配置，未启动窗口或修改用户 profile。日志：src/.state/window-registry-version-{red,green,build}.log。
+- 这是配置读写保护证据，不替代真实多窗口重启/多屏位置恢复验收；固定 141624 UI 候选和 temp.76 不变，本修复进入后续产品批次。
 ## 2026-10-27：设备地址保留百分号字面量
 
 - 官方 Q-Dir FAQ 146 的相对路径、环境变量、空地址刷新与盘符根目录规则，当前代码早已由 AddressInputResolver 实现（a11a37e）。不能仅从 BreadcrumbPath 的分隔符规范化函数推断这些功能缺失；本次完整调用链核对后没有重复实现。

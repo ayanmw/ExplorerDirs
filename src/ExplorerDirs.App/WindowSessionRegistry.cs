@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Text;
 
 namespace ExplorerDirs.App;
@@ -157,7 +158,8 @@ internal sealed class WindowSessionRegistry
         var values = new Dictionary<int, string>();
         var inSection = false;
         var seenSection = false;
-        var version = -1;
+        // Preserve unknown future formats even when the version exceeds Int32.
+        BigInteger version = -1;
         var count = -1;
         var complete = true;
         foreach (var raw in content.Split('\n'))
@@ -177,8 +179,8 @@ internal sealed class WindowSessionRegistry
             var value = line[(equals + 1)..].Trim();
             if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
             {
-                if (version >= 0 || !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
-                else version = version < 0 ? parsed : Math.Max(version, parsed);
+                if (version >= 0 || !BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
+                else version = version < 0 ? parsed : BigInteger.Max(version, parsed);
             }
             else if (key.Equals("Count", StringComparison.OrdinalIgnoreCase))
             {
