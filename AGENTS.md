@@ -13,6 +13,8 @@
 
 - File-area submenu placement starts with Windows Shell geometry. On 2026-10-27 the user explicitly authorized compensating for our clipped popup edges: move a child toward its parent by the sum of their adjacent hidden widths, preserving the native overlap, direction and work-area limits. Do not introduce independent fixed spacing; repeated processing must not accumulate offsets. Keep the single gray boundary flush with menu fill.
 
+- System theme notifications must coalesce on the Dispatcher and skip unchanged resolved palettes/preferences. Queued work must recheck disposal. Preserve equal-color brush identities; a System-to-fixed preference change still updates menu state even when colors match. Keep high-contrast system-resource refresh semantics.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.

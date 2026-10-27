@@ -25,7 +25,16 @@ internal static class SystemThemeProbe
         try
         {
             var appType = assembly.GetType("ExplorerDirs.App.App", true)!;
-            var app = (Application)Activator.CreateInstance(appType)!;
+            // App construction queues production startup. Abort that initial work
+            // before pumping lifecycle callbacks: the fixture must open no sessions.
+            var initialOperations = new List<System.Windows.Threading.DispatcherOperation>();
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            System.Windows.Threading.DispatcherHookEventHandler posted = (_, e) => initialOperations.Add(e.Operation);
+            dispatcher.Hooks.OperationPosted += posted;
+            Application app;
+            try { app = (Application)Activator.CreateInstance(appType)!; }
+            finally { dispatcher.Hooks.OperationPosted -= posted; }
+            foreach (var operation in initialOperations) operation.Abort();
             appType.GetMethod("InitializeComponent")!.Invoke(app, null);
             var controllerType = assembly.GetType("ExplorerDirs.App.ApplicationThemeController", true)!;
             var preferenceType = assembly.GetType("ExplorerDirs.App.ThemePreference", true)!;
@@ -43,6 +52,7 @@ internal static class SystemThemeProbe
                     controllerType.GetProperty("Resolved")!.GetValue(restored)!.ToString() == expected,
                     $"{mode} survives controller recreation through portable Theme.ini");
             }
+            CheckRefreshLifecycle(app, controllerType, preferenceType, root);
             Check(app.Windows.Count == 0, "theme checks create no application windows");
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -51,6 +61,64 @@ internal static class SystemThemeProbe
         return 0;
     }
 
+    private static void CheckRefreshLifecycle(Application app, Type controllerType, Type preferenceType, string root)
+    {
+        var members = BindingFlags.NonPublic | BindingFlags.Instance;
+        var controller = (IDisposable)Activator.CreateInstance(controllerType, app, root)!;
+        var changes = 0;
+        EventHandler changed = (_, _) => changes++;
+        controllerType.GetEvent("ThemeChanged")!.AddEventHandler(controller, changed);
+        var brush = app.Resources["ExplorerDirs.WindowBackgroundBrush"];
+        var parameters = controllerType.GetMethod("OnSystemParametersChanged", members)!;
+        var systemColor = controllerType.GetMethod("OnSystemColorValuesChanged", members)!;
+        void Drain() => app.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        try
+        {
+            var queued = 0;
+            System.Windows.Threading.DispatcherHookEventHandler posted = (_, e) =>
+            {
+                if (e.Operation.Priority == System.Windows.Threading.DispatcherPriority.Background) queued++;
+            };
+            app.Dispatcher.Hooks.OperationPosted += posted;
+            for (var i = 0; i < 20; i++)
+                parameters.Invoke(controller, [null, new System.ComponentModel.PropertyChangedEventArgs("WindowGlassColor")]);
+            systemColor.Invoke(controller, [null, EventArgs.Empty]);
+            app.Dispatcher.Hooks.OperationPosted -= posted;
+            Check(queued == 1, "a burst of system property and color notifications queues one theme pass");
+            Drain();
+            if (!SystemParameters.HighContrast)
+                Check(changes == 0 && ReferenceEquals(brush, app.Resources["ExplorerDirs.WindowBackgroundBrush"]),
+                    "unchanged system notifications preserve brushes and do not refresh every pane");
+            changes = 0;
+            var current = controllerType.GetProperty("Resolved")!.GetValue(controller)!.ToString();
+            controllerType.GetMethod("SetPreference")!.Invoke(controller, [Enum.Parse(preferenceType, current!)]);
+            Check(changes == 1 && ReferenceEquals(brush, app.Resources["ExplorerDirs.WindowBackgroundBrush"]),
+                "switching System to the same fixed colors updates preference UI without replacing brushes");
+            changes = 0;
+            var next = current == "Dark" ? "Light" : "Dark";
+            controllerType.GetMethod("SetPreference")!.Invoke(controller, [Enum.Parse(preferenceType, next)]);
+            Check(changes == 1, "an actual theme preference change still publishes its update");
+            if (!SystemParameters.HighContrast)
+            {
+                brush = app.Resources["ExplorerDirs.WindowBackgroundBrush"];
+                var accent = Color.FromRgb(41, 103, 167);
+                controllerType.GetMethod("SetCustomAccentColor")!.Invoke(controller, [accent]);
+                Check(ReferenceEquals(brush, app.Resources["ExplorerDirs.WindowBackgroundBrush"]),
+                    "accent changes preserve neutral surface brush identity");
+                changes = 0;
+                controllerType.GetMethod("SetCustomAccentColor")!.Invoke(controller, [accent]);
+                Check(changes == 0, "reapplying an identical accent does not request another theme repaint");
+            }
+            parameters.Invoke(controller, [null, new System.ComponentModel.PropertyChangedEventArgs("HighContrast")]);
+            controller.Dispose();
+            changes = 0;
+            brush = app.Resources["ExplorerDirs.WindowBackgroundBrush"];
+            Drain();
+            Check(changes == 0 && ReferenceEquals(brush, app.Resources["ExplorerDirs.WindowBackgroundBrush"]),
+                "a queued system callback cannot repaint after controller disposal");
+        }
+        finally { controller.Dispose(); }
+    }
     private static void Check(bool value, string message)
     {
         if (!value) throw new InvalidOperationException(message);

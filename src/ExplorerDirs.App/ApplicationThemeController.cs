@@ -16,6 +16,9 @@ internal sealed class ApplicationThemeController : IDisposable
     private Color _systemAccent = ThemePalette.DefaultAccent;
     private Color? _customAccentColor;
     private int _disposed;
+    private int _systemRefreshQueued;
+    private bool _hasAppliedTheme;
+    private ThemePreference _appliedPreference;
 
     public ThemePreference Preference { get; private set; }
     public ResolvedTheme Resolved { get; private set; }
@@ -73,11 +76,18 @@ internal sealed class ApplicationThemeController : IDisposable
         }
     }
 
-    private void OnSystemColorValuesChanged(object? sender, EventArgs e)
+    private void OnSystemColorValuesChanged(object? sender, EventArgs e) => QueueSystemRefresh();
+
+    private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs e) => QueueSystemRefresh();
+
+    private void QueueSystemRefresh()
     {
-        if (Volatile.Read(ref _disposed) != 0) return;
-        _dispatcher.BeginInvoke(new Action(() =>
+        // UISettings can notify on a worker thread and Windows emits several
+        // property changes per update. One dispatcher pass reads the latest state.
+        if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _systemRefreshQueued, 1) != 0) return;
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
+            Interlocked.Exchange(ref _systemRefreshQueued, 0);
             if (Volatile.Read(ref _disposed) != 0) return;
             try { if (_systemThemeMonitor is not null) _systemIsDark = _systemThemeMonitor.IsDark; }
             catch (Exception) { }
@@ -87,26 +97,29 @@ internal sealed class ApplicationThemeController : IDisposable
         }));
     }
 
-    private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (Volatile.Read(ref _disposed) != 0) return;
-        _dispatcher.BeginInvoke(new Action(Apply));
-    }
-
     private void Apply()
     {
-        Resolved = ThemePalette.Resolve(Preference, _systemIsDark);
-        NativeShellTheme.SetProcessTheme(Resolved == ResolvedTheme.Dark && !SystemParameters.HighContrast);
-        if (SystemParameters.HighContrast)
+        // A queued SystemParameters callback may outlive its controller. It must
+        // not replace resources or notify windows after disposal.
+        if (Volatile.Read(ref _disposed) != 0) return;
+        var resolved = ThemePalette.Resolve(Preference, _systemIsDark);
+        var highContrast = SystemParameters.HighContrast;
+        ThemeColors? colors = highContrast ? null : ThemePalette.For(resolved, _customAccentColor ?? _systemAccent);
+        var visualChanged = !_hasAppliedTheme || colors != CurrentColors || highContrast;
+        var preferenceChanged = !_hasAppliedTheme || Preference != _appliedPreference;
+        Resolved = resolved;
+        if (!visualChanged && !preferenceChanged) return;
+        _hasAppliedTheme = true;
+        _appliedPreference = Preference;
+        if (visualChanged)
         {
-            CurrentColors = null;
-            ClearThemeResources();
+            NativeShellTheme.SetProcessTheme(resolved == ResolvedTheme.Dark && !highContrast);
+            CurrentColors = colors;
+            if (colors is { } palette) SetThemeResources(palette);
+            else ClearThemeResources();
         }
-        else
-        {
-            CurrentColors = ThemePalette.For(Resolved, _customAccentColor ?? _systemAccent);
-            SetThemeResources(CurrentColors.Value);
-        }
+        // System -> fixed can resolve to the same colors; menus must still
+        // reflect the saved preference even though resources need no repaint.
         ThemeChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -139,6 +152,9 @@ internal sealed class ApplicationThemeController : IDisposable
 
     private void SetBrush(object key, Color color)
     {
+        // Preserve unchanged brush identities so accent-only updates do not
+        // invalidate every neutral surface through DynamicResource replacement.
+        if (_application.Resources[key] is SolidColorBrush existing && existing.Color == color) return;
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         _application.Resources[key] = brush;
