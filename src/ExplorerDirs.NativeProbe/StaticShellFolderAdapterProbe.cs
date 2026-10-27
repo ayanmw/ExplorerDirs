@@ -781,7 +781,30 @@ internal static class StaticShellFolderAdapterProbe
             var dataObjectHr = At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out var dataObject);
             if (dataObjectHr < 0) throw new Exception($"Wrapped GetUIObjectOf(IDataObject) failed: 0x{dataObjectHr:X8}.");
             if (dataObject == 0) throw new Exception("Wrapped GetUIObjectOf(IDataObject) returned a null interface.");
-            Marshal.Release(dataObject);
+            try
+            {
+                var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
+                var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+                if (getDataHr < 0) throw new Exception($"Wrapped IDataObject.GetData(CF_HDROP) failed: 0x{getDataHr:X8}.");
+                try
+                {
+                    if (medium.Tymed != 1 || medium.Value == 0) throw new Exception("Wrapped CF_HDROP did not use a valid TYMED_HGLOBAL.");
+                    var dropFiles = GlobalLock(medium.Value);
+                    if (dropFiles == 0) throw new Exception("Could not lock the wrapped CF_HDROP memory.");
+                    try
+                    {
+                        var pathOffset = Marshal.ReadInt32(dropFiles);
+                        var isWide = Marshal.ReadInt32(dropFiles, 16);
+                        if (pathOffset < 20 || isWide != 1) throw new Exception("Wrapped CF_HDROP did not contain a valid Unicode DROPFILES block.");
+                        var path = Marshal.PtrToStringUni(dropFiles + pathOffset);
+                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                            throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path.");
+                    }
+                    finally { GlobalUnlock(medium.Value); }
+                }
+                finally { ReleaseStgMedium(ref medium); }
+            }
+            finally { Marshal.Release(dataObject); }
         }
         finally { Marshal.FreeCoTaskMem(childArray); }
     }
@@ -872,6 +895,20 @@ internal static class StaticShellFolderAdapterProbe
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeFormatEtc
+    {
+        public ushort Format;
+        public nint TargetDevice;
+        public uint Aspect;
+        public int Index;
+        public uint Tymed;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeStorageMedium
+    {
+        public uint Tymed;
+        public nint Value;
+        public nint ReleaseUnknown;
+    }
     private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint ColumnState, int ColumnStateHResult);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
@@ -897,6 +934,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref NativeFormatEtc format, out NativeStorageMedium medium);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetNameOf(nint self, nint owner, nint item, nint name, uint flags, out nint renamed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TransformPidl(nint source, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyViewFolder(nint view, nint adapter, out int matches);
@@ -936,6 +974,9 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
+    [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref NativeStorageMedium medium);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     private delegate bool EnumChildProc(nint window, nint parameter);
     [DllImport("propsys.dll", PreserveSig = true)] private static extern int PSGetPropertyDescription(

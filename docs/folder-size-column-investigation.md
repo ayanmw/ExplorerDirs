@@ -176,7 +176,7 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 
 按“改变项目身份”假设新增仅供 NativeProbe 的私有子 PIDL 包装层：枚举器和 `ParseDisplayName` 返回含原始 PIDL 副本的私有单项 PIDL；`IShellFolder2` 的比较、属性、显示名、绑定、UI 对象和重命名入口会先还原原始项目身份，再委托文件系统 Shell folder。包装格式只在进程内实验使用，不写入 profile 或 `.qdr`。
 
-无窗口合同验证通过：真实文件 PIDL 往返后 `ILIsEqual` 保持身份；错误 marker 被拒绝；包装枚举项通过 `GetAttributesOf` 和 `GetUIObjectOf(IDataObject)`；包装解析得到的项目维持既有列文本、`VT_UI8`、数值排序合同；`SetNameOf` 将夹具文件重命名并返回可还原的新 PIDL。底层文件系统枚举器的 `Clone` 返回 `E_NOTIMPL`，包装器原样保留，不伪造成功。原始 PIDL adapter 合同也继续通过，NativeProbe C++ `/W4 /WX` 与 Release 构建为 0 警告/错误，`git diff --check` 通过。
+无窗口合同验证通过：真实文件 PIDL 往返后 `ILIsEqual` 保持身份；错误 marker 被拒绝；包装枚举项通过 `GetAttributesOf`；`GetUIObjectOf(IDataObject)` 返回的数据对象可读取 `CF_HDROP`，其中 Unicode 路径指向现存夹具文件；包装解析得到的项目维持既有列文本、`VT_UI8`、数值排序合同；`SetNameOf` 将夹具文件重命名并返回可还原的新 PIDL。底层文件系统枚举器的 `Clone` 返回 `E_NOTIMPL`，包装器原样保留，不伪造成功。原始 PIDL adapter 合同也继续通过，NativeProbe C++ `/W4 /WX` 与 Release 构建为 0 警告/错误，`git diff --check` 通过。
 
 随后对同一包装项执行绝对 PIDL 路径解析：原始文件的绝对 PIDL 由 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 正确解析；`ILCombine(原始父目录 PIDL, 包装子 PIDL)` 则返回 `E_INVALIDARG`。这说明当前包装 child 身份不能直接用于普通 Shell API 解析绝对路径。适配器内部的列/重命名/DataObject 合同通过，不能据此推断该包装项可在 Shell 组件之间自由传递。
 
