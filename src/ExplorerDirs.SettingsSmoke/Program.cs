@@ -100,6 +100,12 @@ if (args.Length == 1 && args[0] == "--native-shell-tree-icon-fallback-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--shell-icon-provider-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
 {
     AddressPathMenuSmoke.Run();
@@ -486,6 +492,7 @@ try
     ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
     ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
     ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")

@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：虚拟 Shell 标签和快捷链接使用位置图标
+
+- `ShellIconProvider` 现对可解析的虚拟文件夹身份（例如“此电脑”和“回收站”）通过 PIDL 请求对应 Shell 小图标，并按位置身份缓存；常规文件夹和文件类型图标仍沿用原扩展名/目录缓存。
+- 定向 Release smoke 在 Windows Shell 上确认普通目录、“此电脑”和“回收站”均能取得图标，且三者像素不同；完整 Release SettingsSmoke、App Release build（0 警告、0 错误）和 `git diff --check` 通过。没有启动 GUI，标签和快捷链接中的可见绘制仍待验收。
+
 ## 2026-10-27：目录树虚拟 Shell 文件夹图标索引
 
 - 对“此电脑”和“回收站”的真实 Shell 解析名调用 `SHGetFileInfo` 文件路径重载会返回无效的通用图标索引；原目录树回调把 `IShellItem` 解析名当路径传入，导致虚拟节点的显式图标缺失。现改为从回调中的 `IShellItem` 取得绝对 PIDL，再以 `SHGFI_PIDL` 读取 Windows 系统图像列表的普通/展开索引。
