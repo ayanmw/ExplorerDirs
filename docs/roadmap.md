@@ -13,6 +13,11 @@
 
 本轮基于 2ac23d5 源码重跑完整 Release SettingsSmoke、无 HWND 的 pane-tab-copy-order 和 App Release build，全部通过，构建零警告错误。日志分别为 `src/.state/background-current-settings.log`、`background-current-pane.log`、`background-current-app.log`。未启动窗口、未改变发布版本。上批拖放退休修复属于隔离原型，设备地址字面量修复属于后续产品批次，均不改动已经固定的 UI 候选。
 
+## 2026-10-28：目录树系统图像列表后台集成复核
+
+- 在既有图标索引 smoke 上补充生产 `NativeShellTree` 控件级检查：专用 STA 线程中创建隐藏父 HWND，读取真实 `SysTreeView32` 的 `TVM_GETIMAGELIST`，确认控件使用与 `SHGetFileInfo` 索引解析器相同的系统图像列表；创建和释放前后前台 HWND 不变。
+- 定向图标 smoke 与完整 Release `SettingsSmoke` 通过。该结果加强了索引到原生树控件的后台接线证据，但不能证明 WPF `HwndHost` 中最终像素正确；普通目录及虚拟节点的可见图标仍纳入集中 UI 验收，本轮未启动窗口或更新预览包。
+
 ## 2026-10-28：隔离验证环境变量设置变更刷新
 
 - 首次后台探针构造 `MainWindow` 以获得消息 HWND，触发了窗口可见性假设失败；该失败属于探针设计，不是产品刷新失败证据。现改为独立不可见的 1×1 `HwndSource`，直接挂载生产 `SystemSettingChangeHook` 和 `EnvironmentRefresh.Reload`；不创建主窗口/Shell 文件视图、不触碰 profile，也不向其他应用广播消息。

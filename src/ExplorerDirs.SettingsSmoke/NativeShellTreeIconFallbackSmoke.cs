@@ -44,10 +44,52 @@ internal static class NativeShellTreeIconFallbackSmoke
             finally { System.Runtime.InteropServices.Marshal.Release(shellItem); }
         }
 
+        RunHiddenTreeControlImageListSmoke();
+
         static void Check(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);
         }
+    }
+
+    private static void RunHiddenTreeControlImageListSmoke()
+    {
+        var foregroundBefore = GetForegroundWindow();
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var parent = new System.Windows.Interop.HwndSource(
+                    new System.Windows.Interop.HwndSourceParameters("ExplorerDirs.HiddenShellTreeIconSmoke")
+                    {
+                        Width = 320,
+                        Height = 240,
+                        WindowStyle = 0 // Keep the parent off-screen and non-visible.
+                    });
+                using var tree = new NativeShellTree(parent.Handle, 320, 240);
+                var treeView = FindWindowEx(tree.WindowHandle, 0, "SysTreeView32", null);
+                Require(treeView != 0, "the production NamespaceTreeControl exposes its native tree view");
+                var boundImageList = SendMessage(treeView, 0x1108, 0, 0); // TVM_GETIMAGELIST / TVSIL_NORMAL
+                Require(boundImageList == ShellTreeIconIndexResolver.GetSystemImageList(),
+                    "the production tree control binds the same system image list used by SHGetFileInfo icon indices");
+                Require(GetForegroundWindow() == foregroundBefore,
+                    "creating the hidden production tree control leaves the user's foreground window unchanged");
+            }
+            catch (Exception ex) { failure = ex; }
+        }) { IsBackground = true, Name = "ExplorerDirs hidden Shell tree icon smoke" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new InvalidOperationException("Hidden Shell tree icon integration smoke failed.", failure);
+        Require(GetForegroundWindow() == foregroundBefore,
+            "disposing the hidden production tree control leaves the user's foreground window unchanged");
+        Console.WriteLine("Native Shell tree control image-list smoke: PASS (hidden parent; foreground unchanged)");
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 
     private static bool TryGetPidlIconIndices(string parsingName, out int normal, out int open)
@@ -91,4 +133,13 @@ internal static class NativeShellTreeIconFallbackSmoke
 
     [System.Runtime.InteropServices.DllImport("comctl32.dll")]
     private static extern int ImageList_GetImageCount(nint imageList);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "FindWindowExW")]
+    private static extern nint FindWindowEx(nint parent, nint after, string className, string? windowName);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
 }
