@@ -55,6 +55,27 @@ internal static class AddressPathHistorySmoke
               AddressInputResolver.Resolve(@"C:relative", addressBase) == @"C:relative",
             "Shell locations, protocol inputs and drive-relative paths are not joined to the current folder");
 
+        var variable = "ExplorerDirsAddressLiteral_" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Environment.SetEnvironmentVariable(variable, "expanded-name", EnvironmentVariableTarget.Process);
+            foreach (var literal in new[]
+            {
+                $@"\\?\C:\literal\%{variable}%\name",
+                $@"\\?\UNC\server\share\%{variable}%\name",
+                $@"\\.\C:\literal\%{variable}%\name"
+            })
+                Check(AddressInputResolver.Resolve(literal, addressBase) == literal &&
+                    AddressInputResolver.Resolve("\"" + literal + "\"", addressBase) == literal,
+                    "explicit device paths keep percent-named components literal, including quoted input");
+            Check(AddressInputResolver.Resolve("%" + variable + "%", addressBase) == Path.Combine(addressBase, "expanded-name"),
+                "ordinary address input still expands process environment variables");
+            Environment.SetEnvironmentVariable(variable, "changed-name", EnvironmentVariableTarget.Process);
+            Check(AddressInputResolver.Resolve("%" + variable + "%", addressBase) == Path.Combine(addressBase, "changed-name"),
+                "ordinary address expansion reads the current environment rather than a cached value");
+        }
+        finally { Environment.SetEnvironmentVariable(variable, null, EnvironmentVariableTarget.Process); }
+
         static void Check(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);

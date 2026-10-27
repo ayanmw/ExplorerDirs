@@ -1,3 +1,5 @@
+> **地址输入复核（2026-10-27）：**相对目录、环境变量与 `C:` 根目录规则早已在 AddressInputResolver 实现，与仅处理分隔符的 BreadcrumbPath 分开理解。本次仅修复显式 `\\?\` / `\\.\` 路径在前缀识别前被环境变量展开的问题，保留百分号目录字面量；普通输入继续展开当前进程变量。纯字符串回归与完整 SettingsSmoke 通过，未验证 Shell 对具体设备地址的支持。参考 [Q-Dir FAQ 146](https://www.softwareok.com/?faq=146&seite=faq-Q-DIR)、[Windows 路径命名空间](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。本项不在此前已固定的 141624 候选中。
+
 > **可见键盘验收补充（2026-10-27）：**用户在 125449/179260 四窗格 Details 夹具中确认一个样本 F2 可进入重命名，方向键保持编辑。只关闭该样本范围，未外推所有模式/窗格或全部 P0；F6 续测前隔离窗口已关闭。见[本轮证据](gui-acceptance-2026-10-27-shell-baseline.md)。
 
 > **文件键错误分支（2026-10-27）：**全选/剪贴板/撤销/重做只在 Shell S_FALSE 后补发，错误/未知结果不再映射额外文件命令或排队恢复；COM 前后复核原输入目标。策略回归先失败后通过，构建通过；真实 accelerator、焦点与重入未运行，不能据此宣称实际文件操作已验收。

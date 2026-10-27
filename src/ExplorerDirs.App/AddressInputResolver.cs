@@ -6,8 +6,12 @@ internal static class AddressInputResolver
 {
     internal static string Resolve(string input, string? currentFileSystemPath)
     {
-        var value = BreadcrumbPath.NormalizeAddressInput(
-            Environment.ExpandEnvironmentVariables((input ?? string.Empty).Trim().Trim('"')));
+        var value = (input ?? string.Empty).Trim().Trim('"');
+        // Explicit device paths are verbatim. Expanding a percent-named component
+        // before recognizing the prefix can silently redirect it to another folder.
+        if (value.StartsWith("\\\\?\\", StringComparison.Ordinal) ||
+            value.StartsWith("\\\\.\\", StringComparison.Ordinal)) return value;
+        value = BreadcrumbPath.NormalizeAddressInput(Environment.ExpandEnvironmentVariables(value));
         if (value.Length == 0) return string.Empty;
 
         if (value.Length == 2 && char.IsAsciiLetter(value[0]) && value[1] == ':')

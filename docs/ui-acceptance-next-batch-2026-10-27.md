@@ -35,6 +35,8 @@
 
 ## 已固定副本：准备完成，尚未运行
 
+后续的显式设备路径百分号字面量修复不在这份固定副本中；该项等待下一批候选，不覆盖本目录或将其结果混入本批。
+
 - 目录：`D:\projects\explorer-dirs-worktrees\windows-accent-theme\src\.state\gui-smoke\20261027-141624-675-4ec809`，程序位于其 `app\ExplorerDirs.App.exe`；便携 profile 与用户 releases 分开。
 - 干净源码：`359d86cd3085889efc233bd9cfba8601a24c1186`，SourceWorkingTreeDirty=false。
 - BuildIdentity / DLL ProductVersion：`gui-acceptance.20261027-141624-675-4ec809+359d86cd3085889efc233bd9cfba8601a24c1186`。
