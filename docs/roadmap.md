@@ -3178,6 +3178,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - [x] 窗口接收回调一直等待时，路由器关闭会取消对它的等待并释放配置锁；控制台回归先复现旧路由无法重启，再验证修复。仍在运行的接收窗口若长时间不就绪，单实例管道可能排队且客户端回执不确定；避免迟到重复标签的超时/重试协议仍待设计与真实窗口验收。
 - [ ] 在独立测试环境验证 Win+E 与文件夹打开路由。
 - 2026-10-27 对照官方 [Q-Dir FAQ 81](https://www.softwareok.com/?faq=81&seite=faq-Q-DIR)：公开步骤建议用 QuickTextPaste 将 Win+E 映射到 Q-Dir 命令，未说明 Q-Dir 自身注册全局热键或替换文件夹关联。Explorer Dirs 的单目录启动参数和每用户文件夹菜单不是 Win+E 路由。考虑快捷键冲突，先设计并验证本程序自身可逆的启停/冲突恢复；不假设未文档化的注册表键或全局键盘钩子。
+- 2026-10-28 官方 Windows API 复核补充：`RegisterHotKey` 的 Windows 键组合属于系统保留快捷键类别，重复注册通常失败；`WH_KEYBOARD_LL` 虽可拦截并吞掉按键，但依赖全局 hook 链与消息线程，处理超时后 Windows 7 及之后可能静默移除 hook。文件关联 API 处理文件类型/协议默认应用，并没有提供替换 Win+E Explorer 命令的通用接口。因此当前不把全局键盘钩子或默认关联当作安全的默认方案；若后续实现，只能作为用户显式启用、可撤销且具备冲突恢复的独立实验，并单独验证实际路由。[RegisterHotKey](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)、[LowLevelKeyboardProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)、[文件类型和 URI 关联模型](https://learn.microsoft.com/en-us/windows/compatibility/file-type-and-protocol-associations-model)
 - [ ] 提供可逆的启用、禁用和故障恢复流程；不得依赖替换系统 `explorer.exe` 文件。
 - [ ] 覆盖本地目录、UNC、快捷方式、文件选择对话框和其他程序唤起目录的行为。
 
