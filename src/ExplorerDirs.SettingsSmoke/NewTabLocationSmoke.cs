@@ -40,12 +40,12 @@ internal static class NewTabLocationSmoke
         Check(windowCode.Contains("NewTabLocation.ini", StringComparison.Ordinal) &&
               windowCode.Contains("SetNewTabUsesCurrentFolder", StringComparison.Ordinal),
             "the preference loads from the profile and is applied to panes");
-        Check(paneCode.Contains("public void NewTab() => AddTab(_newTabUsesCurrentFolder ? CurrentPath : Home, _newTabView());",
+        Check(paneCode.Contains("public void NewTab() => OpenPathInNewTab(_newTabUsesCurrentFolder ? CurrentPath : Home);",
                 StringComparison.Ordinal),
             "regular new tabs use the active pane path only when enabled");
-        Check(paneCode.Contains("public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());",
-                StringComparison.Ordinal),
-            "explicit open-in-new-tab keeps its requested folder");
+        Check(paneCode.Contains("public void OpenPathInNewTab(string path)", StringComparison.Ordinal) &&
+              paneCode.Contains("if (CanAddTabs(1)) AddTab(path, _newTabView());", StringComparison.Ordinal),
+            "explicit open-in-new-tab keeps its requested folder through the shared capacity guard");
     }
 
     private static string FindRepoRoot()

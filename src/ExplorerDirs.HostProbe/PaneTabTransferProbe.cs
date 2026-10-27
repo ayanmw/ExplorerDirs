@@ -68,6 +68,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedFilterGroupSnapshot(sourcePane);
                 CheckUnhostedHiddenHover(sourcePane);
                 CheckUnhostedRetiredScanFailure(sourcePane, root);
+                CheckUnhostedTabLimit(sourcePane, targetPane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -551,6 +552,62 @@ internal static class PaneTabTransferProbe
             Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
                 (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
                 "closed-tab history checks never create a native Shell view");
+        }
+    }
+
+    private static void CheckUnhostedTabLimit(UIElement source, UIElement destination)
+    {
+        var type = destination.GetType();
+        var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(destination)!;
+        var sourceTabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(source)!;
+        var create = type.GetMethod("NewTab", InstanceMembers)!;
+        while (tabs.Items.Count < 99) create.Invoke(destination, null);
+        var snapshots = ((System.Collections.IEnumerable)type.GetMethod("SnapshotTabs", InstanceMembers)!
+            .Invoke(source, null)!).Cast<object>().Take(2).ToArray();
+        Ensure(snapshots.Length == 2, "import limit fixture has two source tabs");
+        var incoming = Array.CreateInstance(snapshots[0].GetType(), 2);
+        incoming.SetValue(snapshots[0], 0);
+        incoming.SetValue(snapshots[1], 1);
+        var beforeImport = tabs.SelectedItem;
+        var rejected = false;
+        try { type.GetMethod("ImportTabs", InstanceMembers)!.Invoke(destination, [incoming, 0, null]); }
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException) { rejected = true; }
+        Ensure(rejected && tabs.Items.Count == 99 && ReferenceEquals(tabs.SelectedItem, beforeImport),
+            "an oversized import batch is rejected before adding any tab or changing selection");
+        var finalSlot = Array.CreateInstance(snapshots[0].GetType(), 1);
+        finalSlot.SetValue(snapshots[0], 0);
+        type.GetMethod("ImportTabs", InstanceMembers)!.Invoke(destination, [finalSlot, 0, null]);
+        Ensure(tabs.Items.Count == 100, "an import can fill the final supported slot");
+        var selected = tabs.SelectedItem;
+        create.Invoke(destination, null);
+        Ensure(tabs.Items.Count == 100 && ReferenceEquals(tabs.SelectedItem, selected),
+            "NewTab at the persisted limit preserves count and selection");
+        type.GetMethod("OpenPathInNewTab", InstanceMembers)!.Invoke(destination, [ReadBrowserPath(selected!)]);
+        type.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(destination, null);
+        Ensure(tabs.Items.Count == 100, "open-path and duplicate cannot create unsavable tabs");
+        var sourceTab = (TabItem)sourceTabs.Items[0];
+        var sourceCount = sourceTabs.Items.Count;
+        Ensure(!(bool)type.GetMethod("CopyTabFrom", InstanceMembers)!.Invoke(destination, [sourceTab.Tag, null, true])!,
+            "cross-pane copy rejects a full destination");
+        Ensure(!(bool)type.GetMethod("TransferTabTo", InstanceMembers)!.Invoke(source, [sourceTab.Tag, destination, null, true])! &&
+            sourceTabs.Items.Count == sourceCount && tabs.Items.Count == 100 && sourceTabs.Items.Contains(sourceTab),
+            "cross-pane move rejects before detaching the source tab");
+        type.GetMethod("CloseCurrentTab", InstanceMembers)!.Invoke(destination, null);
+        var closed = type.GetField("_closedTabs", InstanceMembers)!.GetValue(destination)!;
+        var count = closed.GetType().GetProperty("Count")!;
+        var closedBefore = (int)count.GetValue(closed)!;
+        create.Invoke(destination, null);
+        type.GetMethod("ReopenClosedTab", InstanceMembers)!.Invoke(destination, null);
+        Ensure(tabs.Items.Count == 100 && (int)count.GetValue(closed)! == closedBefore,
+            "reopen at capacity keeps the closed-tab snapshot for later");
+        type.GetMethod("CloseCurrentTab", InstanceMembers)!.Invoke(destination, null);
+        type.GetMethod("ReopenClosedTab", InstanceMembers)!.Invoke(destination, null);
+        Ensure(tabs.Items.Count == 100 && (int)count.GetValue(closed)! == closedBefore,
+            "after freeing a slot the most recently closed tab can be restored normally");
+        foreach (var tab in tabs.Items.Cast<TabItem>())
+        {
+            var browser = (HwndHost)tab.Tag.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!;
+            Ensure(browser.Handle == 0, "tab-limit checks create no HWND");
         }
     }
 

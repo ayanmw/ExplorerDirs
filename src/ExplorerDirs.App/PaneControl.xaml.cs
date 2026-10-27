@@ -556,11 +556,22 @@ public partial class PaneControl : UserControl
 
     private sealed record TabDragPayload(PaneControl Source, TabItem Tab, string Token);
 
-    public void NewTab() => AddTab(_newTabUsesCurrentFolder ? CurrentPath : Home, _newTabView());
-    public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
+    private bool CanAddTabs(int count)
+    {
+        if (count <= SessionStore.MaximumTabsPerPane - _tabOrder.Count) return true;
+        Status.Text = $"单窗格最多保留 {SessionStore.MaximumTabsPerPane} 个标签；请关闭一些标签后重试。";
+        return false;
+    }
+    public void NewTab() => OpenPathInNewTab(_newTabUsesCurrentFolder ? CurrentPath : Home);
+    public void OpenPathInNewTab(string path)
+    {
+        if (CanAddTabs(1)) AddTab(path, _newTabView());
+    }
     internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
         IReadOnlySet<int>? pinned = null)
     {
+        // Validate the whole incoming batch before the first AddTab event.
+        if (!CanAddTabs(tabs.Count)) throw new InvalidOperationException(Status.Text);
         var imported = tabs.Select((tab, index) =>
             AddTab(tab.Path, tab.View.Copy(), select: false, pinned: pinned?.Contains(index) == true,
                 quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
@@ -576,6 +587,7 @@ public partial class PaneControl : UserControl
     }
     private void DuplicateTab(TabState state)
     {
+        if (!CanAddTabs(1)) return;
         try
         {
             var view = state.Browser.CaptureViewState();
@@ -1428,6 +1440,8 @@ public partial class PaneControl : UserControl
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
     public void ReopenClosedTab()
     {
+        // A full pane must not consume a snapshot that can be reopened later.
+        if (_closedTabs.Count == 0 || !CanAddTabs(1)) return;
         if (_closedTabs.TryPop(out var closed))
         {
             var tab = closed.Settings;
@@ -1437,7 +1451,7 @@ public partial class PaneControl : UserControl
     }
 
     internal bool TryOpenSelectedFolderInNewTab() => Current?.Browser.OpenSelectedFolderInNewTab(
-        path => AddTab(path, _newTabView())) == true;
+        OpenPathInNewTab) == true;
 
     public void CloseOtherTabs()
     {
@@ -1453,6 +1467,7 @@ public partial class PaneControl : UserControl
         QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
         AddressPathHistory? addressHistory = null)
     {
+        if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection);
         var tab = new TabItem();
@@ -1509,7 +1524,7 @@ public partial class PaneControl : UserControl
         browser.FolderMiddleClicked += (_, folderPath) =>
         {
             var owner = state.Owner;
-            if (owner.Current == state && owner.IsVisible) owner.AddTab(folderPath, owner._newTabView());
+            if (owner.Current == state && owner.IsVisible) owner.OpenPathInNewTab(folderPath);
         };
         browser.NavigationStarting += (_, _) =>
         {
@@ -2125,6 +2140,7 @@ public partial class PaneControl : UserControl
         if (ReferenceEquals(this, destination) || !Tabs.Items.Contains(state.Tab) ||
             (target is not null && (!destination.Tabs.Items.Contains(target) || target.Tag is not TabState targetState ||
                 targetState.IsPinned != state.IsPinned)) || Tabs.Items.Count <= 1) return false;
+        if (!destination.CanAddTabs(1)) return false;
         var originalIndex = _tabOrder.IndexOf(state.Tab);
         var originalSelected = ReferenceEquals(Current, state);
         try
@@ -2182,6 +2198,7 @@ public partial class PaneControl : UserControl
     {
         if (target is not null && (target.Tag is not TabState targetState ||
             targetState.IsPinned != source.IsPinned)) return false;
+        if (!CanAddTabs(1)) return false;
         try
         {
             var view = source.Browser.CaptureViewState();

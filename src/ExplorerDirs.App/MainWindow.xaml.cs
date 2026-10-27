@@ -2379,8 +2379,8 @@ public partial class MainWindow : Window
                 _panes.Select(pane => pane.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
                 _panes.Select(pane => pane.SelectedTabIndex).ToArray(), _defaultIconSize,
                 _paneTreeVisibility.ToArray(), _treeDisplayMode);
-            if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > 100))
-                throw new InvalidOperationException("导入后单窗格将超过 100 个标签，请先关闭一些标签再导入。");
+            if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > SessionStore.MaximumTabsPerPane))
+                throw new InvalidOperationException($"导入后单窗格将超过 {SessionStore.MaximumTabsPerPane} 个标签，请先关闭一些标签再导入。");
             var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
             Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
             File.WriteAllText(backup, SessionStore.Render(snapshot));

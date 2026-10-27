@@ -2,8 +2,14 @@
 
 ## 2026-10-27：阻止超限标签会话覆盖
 
-- 后台追踪发现会话读取器每窗格只接受 100 标签，而保存器能写出 101 标签；QDR 追加等路径可令运行态越过该边界。新增回归先复现旧保存覆盖，再为 SessionStore.Save 增加同一上限的写前拒绝，保留原完整文件及写入基线。101 拒绝/原字节保留、修正后继续保存、100 正常读回均通过；完整 Release SettingsSmoke、App Release build（零警告错误）、未建 HWND 的 pane-tab-copy-order 通过。日志在 src/.state/session-write-limit-{red,green,boundary}.log。
-- 此批只修复持久化端的数据保护，没有自动关闭标签或限制新增。后续需统一新增、QDR 追加及跨窗格移动入口，避免用户运行态累积到无法保存；尚未视为完整解决数量边界。未启动窗口、未更新 release。
+- 后台追踪发现会话读取器每窗格只接受 100 标签，而保存器能写出 101 标签；普通新增、复制等路径可令运行态越过该边界。新增回归先复现旧保存覆盖，再为 SessionStore.Save 增加同一上限的写前拒绝，保留原完整文件及写入基线。101 拒绝/原字节保留、修正后继续保存、100 正常读回均通过；完整 Release SettingsSmoke、App Release build（零警告错误）、未建 HWND 的 pane-tab-copy-order 通过。日志在 src/.state/session-write-limit-{red,green,boundary}.log。
+- 该提交只修复持久化端的数据保护；后续入口修复见下项。核对完整源码后确认主窗口 QDR 追加原已有四窗格总量检查，此前对该路径缺少保护的判断不准确。未启动窗口、未更新 release。
+
+## 2026-10-27：标签入口统一数量边界
+
+- 普通新建、显式路径/中键开新标签、复制、恢复关闭标签和跨窗格移动/复制均检查同一 SessionStore 上限；AddTab 保留最终检查，ImportTabs 在新增第一项前检查整批。主窗口原有 QDR 四窗格总量预检改用同一常量。被拒绝时保留选择、源标签实例及关闭标签快照，不自动关闭用户标签。
+- 真实生产 PaneControl 的未挂窗测试先复现 NewTab 开出第 101 项，修复后验证满额拒绝新增/复制/移动、99+2 整批拒绝且选择不变、99+1 成功、恢复被拒绝不消耗关闭快照、腾出位置后恢复正常；所有宿主 HWND=0。完整 Release SettingsSmoke 通过；旧新标签位置静态接线断言更新到经过容量检查的新调用链，当前目录/指定路径语义保留。App Release build 零警告错误。日志：src/.state/pane-tab-limit-{red,green,batch,settings-final}.log。
+- 本批不扩大既有每窗格 100 标签的持久化能力；如以后提高上限，需要同时评审 Session/QDR/资源成本。提示文字、中键、真实拖放及满额 UI 行为归入集中可见验收，未操作桌面或更新发布包。
 
 ## 2026-10-27：后台优先与真实 QDR 样本基线
 

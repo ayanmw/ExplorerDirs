@@ -168,7 +168,7 @@ internal sealed class SessionStore
     {
         if (!_canOverwrite)
             throw new IOException($"无法备份损坏的配置文件，已停止覆盖：{_path}");
-        // Appending a valid QDR can exceed the reader's per-pane bound.
+        // New and duplicated tabs must stay within the reader's per-pane bound.
         // Never replace a recoverable session with a file we cannot fully reload.
         if (state.Panes.Any(pane => pane.Count > MaximumTabsPerPane))
             throw new InvalidDataException($"单窗格超过 {MaximumTabsPerPane} 个标签，未覆盖会话配置；请减少标签后再保存。");
