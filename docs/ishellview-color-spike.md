@@ -1143,3 +1143,8 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
 
 合成 PIDL 池回归先失败后通过，并检查下一次普通请求能继续、关闭期间 Back 目标可读及返回后清空。NativeProbe Release build 0 warning/error，完整 `--shell-view-color-policy-smoke` 通过。本次没有创建 Shell view 或运行 Private Desktop；真实 Shell 扩展重入、宿主关闭与历史/视图一致性仍需隔离原生验收，产品 ExplorerBrowser 不变。
+### 2026-10-27 延迟菜单命令绑定安装代次
+
+隐藏 frame coordinator 的新增合成消息回归先复现：命令排队后 RemoveMenusSB、再 SetMenuSB 同一个 host/HMENU，owner 再次相等，旧命令被送到假 pane HWND。现在 queue 保存 menu generation，SetMenu 的有效替换尝试及当前 owner Deactivate 递增代次，解析和最终执行均检查 owner+generation。重新安装失败而恢复旧菜单也不恢复旧队列执行资格；无效输入菜单在替换开始前拒绝，保持既有有效 owner。
+
+回归验证重激活拒绝旧命令、新命令正常，以及没有独立 RemoveMenusSB 的同菜单重装拒绝旧命令。NativeProbe Release 构建零警告错误，专用菜单消息链与完整颜色策略 smoke 通过。仅使用普通隐藏 HWND、合成 HMENU/OLE descriptor、假 pane 接收命令；没有真实 IShellView、系统菜单跟踪或产品迁移验收。

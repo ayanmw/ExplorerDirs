@@ -988,6 +988,30 @@ public static class ShellViewColorBrowserHostSmoke
             Check(_coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
                 "a queued command from a retired pane is consumed without reaching its old view HWND");
 
+            Check(host.SetMenuSB(compositeMenu, descriptor, paneWindow) == 0,
+                "the same pane can reactivate its menu after retirement");
+            SendMessageW(frameWindow, 0x0126, 0, fileChild);
+            Check(host.RemoveMenusSB(compositeMenu) == 0 &&
+                  host.SetMenuSB(compositeMenu, descriptor, paneWindow) == 0,
+                "the queued command spans retirement and reactivation of the same owner and menu");
+            traceCount = host.MenuTrace.Count;
+            _coordinatorObservedCommandId = 0;
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
+                "reactivating the same pane does not revive its previous menu's queued command");
+            SendMessageW(frameWindow, 0x0126, 0, fileChild);
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0x7123 && host.MenuTrace.Count == traceCount + 1,
+                "a command queued after reactivation reaches the current menu normally");
+            SendMessageW(frameWindow, 0x0126, 0, viewMenu);
+            Check(host.SetMenuSB(compositeMenu, descriptor, paneWindow) == 0,
+                "the active pane can reinstall its menu without a separate retirement call");
+            traceCount = host.MenuTrace.Count;
+            _coordinatorObservedCommandId = 0;
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
+                "reinstalling the same menu also invalidates commands from its prior installation");
+
             SendMessageW(frameWindow, 0x0212, 0, 0); // WM_EXITMENULOOP.
             Console.WriteLine("PASS coordinator WM_MENUSELECT/WM_COMMAND and WM_MENUCOMMAND posted dispatch on hidden Win32 windows");
         }

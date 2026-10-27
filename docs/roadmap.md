@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：菜单重新激活不复活旧命令
+
+- 隔离 frame 旧检查只比较 pane owner；同一 owner 停用后重新安装同一 HMENU 时，旧延迟命令会重新获得执行资格。现在队列保存安装代次，安装/有效 owner 停用时使旧代次失效；解析与延迟执行都核对 owner+代次，失败替换回滚也不恢复旧命令资格。
+- 隐藏普通 HWND 的真实 coordinator 消息链先复现重新激活后旧命令送达假 pane，修复后拒绝，之后新命令正常执行；另覆盖无显式停用的同菜单重装。NativeProbe Release build 零警告错误，专用 `--shell-menu-group-routing-smoke` 和完整 `--shell-view-color-policy-smoke` 通过。未创建 Shell view 或运行真实菜单模态循环，产品 ExplorerBrowser 与 release 未改。
+
 ## 2026-10-27：隔离导航历史处理回调重入与关闭
 
 - NativeProbe 的 `ShellViewNavigationHistory` 在导航回调内可再次修改同一历史，外层随后仍提交旧结果；现在单次导航持有 busy gate，嵌套请求返回 HRESULT_FROM_WIN32(ERROR_BUSY)，完成/异常后解除。回调中 Dispose 标记关闭，借用历史 PIDL 延迟到回调退出后释放，外层返回 E_ABORT 且不提交，后续导航也拒绝。
