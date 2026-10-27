@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ExplorerDirs.NativeProbe;
 
@@ -59,6 +60,83 @@ internal static class PrivateDesktopShellProbe
         var passed = originalDesktop != 0 && probeDesktop != 0 && originalDesktop == currentDesktop &&
             originalForeground == currentForeground && closed;
         Console.WriteLine($"private-desktop-owner-smoke: original-thread-desktop=0x{originalDesktop:X}; current-thread-desktop=0x{currentDesktop:X}; foreground-before=0x{originalForeground:X}; foreground-after=0x{currentForeground:X}; close-created-desktop={closed}; passed={passed}");
+        return passed ? 0 : 1;
+    }
+
+    internal static int RunWindowDestroyControl() => Run("window-destroy-control", () =>
+    {
+        var foreground = GetForegroundWindow();
+        var window = CreateWindowExW(0x00000080u, "STATIC", "ExplorerDirs isolated destroy control",
+            0x10CF0000u, 20, 20, 160, 80, 0, 0, 0, 0);
+        if (window == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the isolated STATIC control.");
+
+        Console.WriteLine($"window-destroy-control: hwnd=0x{window:X}; class=Static; visible={IsWindowVisible(window)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+        var destroyed = DestroyWindow(window);
+        var remainsValid = IsWindow(window);
+        Console.WriteLine($"window-destroy-control: destroy-returned={destroyed}; still-valid={remainsValid}; foreground-unchanged={GetForegroundWindow() == foreground}");
+        return destroyed && !remainsValid && GetForegroundWindow() == foreground ? 0 : 1;
+    }, TimeSpan.FromSeconds(10));
+
+    internal static int RunSharedDesktopWindowDestroyControl() => Run("shared-desktop-window-destroy-control", () =>
+    {
+        var foreground = GetForegroundWindow();
+        var sentinel = CreateWindowExW(0x00000080u, "STATIC", "ExplorerDirs isolated parent sentinel",
+            0x10CF0000u, 20, 20, 160, 80, 0, 0, 0, 0);
+        if (sentinel == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the parent sentinel.");
+
+        using var child = StartWindowDestroyChild();
+        if (!child.WaitForExit(15_000))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            Console.Error.WriteLine("shared-desktop-window-destroy-control: child-timeout=True");
+            _ = DestroyWindow(sentinel);
+            return 124;
+        }
+
+        var output = child.StandardOutput.ReadToEnd();
+        var error = child.StandardError.ReadToEnd();
+        if (!string.IsNullOrWhiteSpace(output)) Console.Write(output);
+        if (!string.IsNullOrWhiteSpace(error)) Console.Error.Write(error);
+        var parentDestroyed = DestroyWindow(sentinel);
+        var passed = child.ExitCode == 0 && parentDestroyed && !IsWindow(sentinel) && GetForegroundWindow() == foreground;
+        Console.WriteLine($"shared-desktop-window-destroy-control: child-exit={child.ExitCode}; parent-destroyed={parentDestroyed}; foreground-unchanged={GetForegroundWindow() == foreground}; passed={passed}");
+        return passed ? 0 : 1;
+    }, TimeSpan.FromSeconds(20));
+
+    private static Process StartWindowDestroyChild()
+    {
+        var executable = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Could not determine the NativeProbe executable.");
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(typeof(PrivateDesktopShellProbe).Assembly.Location);
+        start.ArgumentList.Add("--window-destroy-current-desktop-child");
+        return Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the window-destroy child.");
+    }
+
+    internal static int RunWindowDestroyControlOnCurrentDesktop()
+    {
+        var foreground = GetForegroundWindow();
+        var desktop = GetThreadDesktop(GetCurrentThreadId());
+        var window = CreateWindowExW(0x00000080u, "STATIC", "ExplorerDirs shared-desktop child control",
+            0x10CF0000u, 30, 30, 160, 80, 0, 0, 0, 0);
+        if (window == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the child control.");
+        Console.WriteLine($"shared-desktop-window-destroy-child: pid={Environment.ProcessId}; tid={GetCurrentThreadId()}; desktop=0x{desktop:X}; hwnd=0x{window:X}; visible={IsWindowVisible(window)}");
+        var destroyed = DestroyWindow(window);
+        var remainsValid = IsWindow(window);
+        var passed = destroyed && !remainsValid && GetForegroundWindow() == foreground;
+        Console.WriteLine($"shared-desktop-window-destroy-child: destroy-returned={destroyed}; still-valid={remainsValid}; foreground-unchanged={GetForegroundWindow() == foreground}; passed={passed}");
         return passed ? 0 : 1;
     }
 
@@ -146,6 +224,19 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetThreadDesktop(nint desktop);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName,
+        uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(nint window);
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
