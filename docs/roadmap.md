@@ -4161,3 +4161,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 用户已决定文件区右键菜单只使用 Windows Shell 原生内容，不恢复标签/路径自定义项。清除 ExplorerBrowserHost 中未接线的命令注入、目标 UIA 探测、临时菜单命令分派及其状态；保留 Shell 菜单主题/tooltip 处理、列头预设菜单门控和中键文件夹命中逻辑。删除不再使用的 `ShellMenuCommand`，保留隔离 NativeProbe 仍需的 ListView 命中解析纯函数及其坐标/命中 smoke。
 - 后台验证：定向 `--shell-menu-target-smoke`、完整 SettingsSmoke 和 App Release 构建通过；未启动窗口。产品文件区空白/条目/键盘菜单的可见原生行为、浅深主题及多窗格一致性仍列入集中 UI 验收，不以编译或 smoke 代替。
+
+## 2026-10-28：更正跨窗格拖放探针证据范围
+
+- 后台复核发现 `docs/shell-parity.md` 曾记录当前探针覆盖 Copy|Move 和三种修饰键，但 `ShellViewDropTargetProbe.TryTransfer` 实际只允许 Copy；复跑日志也显示目标 `IShellView` 查询 `IID_IDropTarget` 返回 `E_NOINTERFACE`。使用真实 `SVGIO_SELECTION` `IDataObject` 调用已注册文件夹目标的 `DragEnter/DragOver/Drop` 可复制并保留源文件，另一路 `SHCreateDataObject` Copy 也通过。探针未运行 OLE `DoDragDrop`，不覆盖 Move 或产品跨窗格行为。
+- 已修正文档表格，保留鼠标拖放、修饰键效果、源端效果交接和产品宿主为待集中 UI 验收。复跑在 Private Desktop 中完成，前台句柄不变；未启动产品 GUI。
