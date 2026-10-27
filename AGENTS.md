@@ -11,6 +11,8 @@
 
 - Native context menus must retain a single subtle visible boundary matching the resolved theme. Removing an abnormal bright/double surround does not authorize a borderless final design. Verify visible border-to-content spacing and parent/submenu overlap separately; preserve Shell command rendering and hit testing.
 
+- File-area submenu horizontal placement follows the Windows Shell without application-level SetWindowPos offsets. Do not introduce a fixed gap merely to compensate for themed clipping. If independent spacing is explicitly added later, provide a native-following default and a zero-gap choice; do not silently replace native placement.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.

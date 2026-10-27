@@ -15,7 +15,6 @@ internal static class NativeShellTheme
     private static bool _handlingMenuHook;
     private static int _menuDepth;
     private static long _lastMenuPaintTimestamp;
-    private static long _lastMenuPlacementTimestamp;
 
     // Observe only our current STA while its native menu loop is active. Menu
     // windows can bypass the ordinary comctl32 subclass paint path on Windows 11.
@@ -164,7 +163,6 @@ internal static class NativeShellTheme
         _handlingMenuHook = true;
         try
         {
-            List<(nint Window, nint Menu)> popups = [];
             EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
             {
                 var name = new StringBuilder(32);
@@ -172,54 +170,11 @@ internal static class NativeShellTheme
                 if (name.ToString() != "#32768") return true;
                 ApplyMenuWindow(window);
                 ClipMenuFrame(window);
-                if (IsWindowVisible(window)) popups.Add((window, SendMessage(window, 0x01E1, 0, 0))); // MN_GETHMENU
                 return true;
             }, 0);
-            var now = Environment.TickCount64;
-            if (popups.Count > 1 && now - _lastMenuPlacementTimestamp >= 16)
-            {
-                _lastMenuPlacementTimestamp = now;
-                foreach (var child in popups)
-                foreach (var parent in popups)
-                {
-                    if (child.Window == parent.Window || child.Menu == 0 || parent.Menu == 0) continue;
-                    var count = GetMenuItemCount(parent.Menu);
-                    for (var index = 0; index < count; index++)
-                        if (GetSubMenu(parent.Menu, index) == child.Menu) { PositionSubmenu(parent.Window, child.Window); break; }
-                }
-            }
         }
         finally { _handlingMenuHook = previousHandling; }
     }
-
-    private static void PositionSubmenu(nint parent, nint child)
-    {
-        if (!GetWindowRect(parent, out var parentBounds) || !GetWindowRect(child, out var bounds) ||
-            GetWindowRgnBox(parent, out var parentRegion) == 0 || GetWindowRgnBox(child, out var childRegion) == 0) return;
-        if (GetProp(child, "ExplorerDirs.SubmenuParent") == parent &&
-            GetProp(child, "ExplorerDirs.SubmenuX") == bounds.Left && GetProp(child, "ExplorerDirs.SubmenuY") == bounds.Top) return;
-        int shift;
-        if (bounds.Left >= parentBounds.Left && bounds.Right > parentBounds.Right)
-            shift = -(parentBounds.Right - parentBounds.Left - parentRegion.Right) - childRegion.Left;
-        else if (bounds.Left < parentBounds.Left && bounds.Right <= parentBounds.Right)
-            shift = parentRegion.Left + bounds.Right - bounds.Left - childRegion.Right;
-        else return; // Leave overlapping/ambiguous native placement alone.
-        var monitor = new MenuMonitorInfo { Size = Marshal.SizeOf<MenuMonitorInfo>() };
-        if (!GetMonitorInfo(MonitorFromWindow(child, 2), ref monitor)) return;
-        var width = bounds.Right - bounds.Left;
-        var target = (int)Math.Clamp((long)bounds.Left + shift, monitor.Work.Left, Math.Max((long)monitor.Work.Left, (long)monitor.Work.Right - width));
-        if (target != bounds.Left && !SetWindowPos(child, 0, target, bounds.Top, 0, 0, 0x0015)) return;
-        SetProp(child, "ExplorerDirs.SubmenuParent", parent);
-        SetProp(child, "ExplorerDirs.SubmenuX", target);
-        SetProp(child, "ExplorerDirs.SubmenuY", bounds.Top);
-    }
-    [StructLayout(LayoutKind.Sequential)] private struct MenuMonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
-    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
-    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
-    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
-    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfo(nint monitor, ref MenuMonitorInfo info);
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
 
     private static bool ApplyMenuWindow(nint window)
     {
