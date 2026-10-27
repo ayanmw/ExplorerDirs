@@ -265,17 +265,28 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     {
         if (_savedStream == 0) return [];
         var stream = (System.Runtime.InteropServices.ComTypes.IStream)Marshal.GetObjectForIUnknown(_savedStream);
-        var count = Marshal.AllocCoTaskMem(4);
+        var count = Marshal.AllocCoTaskMem(16);
         try
         {
-            stream.Stat(out var stat, 1);
-            if (stat.cbSize is < 0 or > 65536) throw new Exception("Native saved stream exceeds probe limit.");
-            var data = new byte[(int)stat.cbSize];
-            stream.Seek(0, 0, 0);
-            Marshal.WriteInt32(count, 0);
-            stream.Read(data, data.Length, count);
-            if (Marshal.ReadInt32(count) != data.Length) throw new Exception("Incomplete native saved stream.");
-            return data;
+            stream.Seek(0, 1, count + 8);
+            var previousPosition = Marshal.ReadInt64(count + 8);
+            try
+            {
+                stream.Stat(out var stat, 1);
+                if (stat.cbSize is < 0 or > 65536) throw new Exception("Native saved stream exceeds probe limit.");
+                var data = new byte[(int)stat.cbSize];
+                stream.Seek(0, 0, 0);
+                Marshal.WriteInt32(count, 0);
+                stream.Read(data, data.Length, count);
+                if (Marshal.ReadInt32(count) != data.Length) throw new Exception("Incomplete native saved stream.");
+                return data;
+            }
+            finally
+            {
+                // Shell may still hold this same writable stream. Snapshotting
+                // must not redirect a later write, including on capture failure.
+                stream.Seek(previousPosition, 0, 0);
+            }
         }
         finally { Marshal.FreeCoTaskMem(count); Marshal.ReleaseComObject(stream); }
     }

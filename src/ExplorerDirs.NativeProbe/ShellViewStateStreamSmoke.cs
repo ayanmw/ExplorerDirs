@@ -68,6 +68,7 @@ internal static class ShellViewStateStreamSmoke
             "writing one host does not replace another host's initial stream");
 
         VerifyReadWriteMode();
+        VerifySnapshotPreservesWriterPosition();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
 
@@ -92,6 +93,29 @@ internal static class ShellViewStateStreamSmoke
         var actual = ReadBytes(host, bytes.Length);
         Check(actual.SequenceEqual(bytes), "a separate process reads the exact persisted view-state stream");
         return 0;
+    }
+
+    private static void VerifySnapshotPreservesWriterPosition()
+    {
+        using var host = new StreamViewHost(0, []);
+        Check(host.GetViewStateStream(2, out var pointer) == 0 && pointer != 0,
+            "the snapshot-position fixture opens a native read-write memory stream");
+        try
+        {
+            var writer = (IStream)Marshal.GetObjectForIUnknown(pointer);
+            try
+            {
+                writer.Write([1, 2, 3], 3, 0);
+                writer.Seek(1, 0, 0);
+                Check(host.ReadSavedBytes().SequenceEqual(new byte[] { 1, 2, 3 }),
+                    "a snapshot captures the entire stream independently of the writer position");
+                writer.Write([9], 1, 0);
+                Check(host.ReadSavedBytes().SequenceEqual(new byte[] { 1, 9, 3 }),
+                    "reading a snapshot preserves the Shell writer position for its next write");
+            }
+            finally { Marshal.ReleaseComObject(writer); }
+        }
+        finally { Marshal.Release(pointer); }
     }
 
     private static void VerifyPersistedSessions()

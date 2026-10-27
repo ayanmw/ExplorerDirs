@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：原生状态快照保留 Shell 写入位置
+
+- 原型 `ReadSavedBytes` 对 Shell 仍持有的同一 IStream Seek(0)/Read，未恢复位置，快照后继续写入会从末尾追加。现在记录原 64 位 seek position，在 finally 恢复；大小/完整性检查仍保留。当前磁盘状态按 session GUID 独立保存且单份限制 64 KiB，没有在此处发现按目录无界缓存；这不代表原型总体内存已评估完毕。
+- 实际 SHCreateMemStream 回归先复现中间位置读取快照后再写一字节导致结果不同，修复后得到预期原位覆盖。完整 `--shell-view-state-stream-smoke`（含独立 session 与跨进程最新代次恢复）、`--shell-view-color-policy-smoke` 通过；NativeProbe Release build 零警告错误。没有创建 Shell view，真实 SaveViewState 回调顺序及产品接线仍待验收，产品/release 未改。
+
 ## 2026-10-27：菜单重新激活不复活旧命令
 
 - 隔离 frame 旧检查只比较 pane owner；同一 owner 停用后重新安装同一 HMENU 时，旧延迟命令会重新获得执行资格。现在队列保存安装代次，安装/有效 owner 停用时使旧代次失效；解析与延迟执行都核对 owner+代次，失败替换回滚也不恢复旧命令资格。

@@ -1148,3 +1148,8 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 隐藏 frame coordinator 的新增合成消息回归先复现：命令排队后 RemoveMenusSB、再 SetMenuSB 同一个 host/HMENU，owner 再次相等，旧命令被送到假 pane HWND。现在 queue 保存 menu generation，SetMenu 的有效替换尝试及当前 owner Deactivate 递增代次，解析和最终执行均检查 owner+generation。重新安装失败而恢复旧菜单也不恢复旧队列执行资格；无效输入菜单在替换开始前拒绝，保持既有有效 owner。
 
 回归验证重激活拒绝旧命令、新命令正常，以及没有独立 RemoveMenusSB 的同菜单重装拒绝旧命令。NativeProbe Release 构建零警告错误，专用菜单消息链与完整颜色策略 smoke 通过。仅使用普通隐藏 HWND、合成 HMENU/OLE descriptor、假 pane 接收命令；没有真实 IShellView、系统菜单跟踪或产品迁移验收。
+### 2026-10-27 读取状态快照不改变原生写流位置
+
+`ReadSavedBytes` 原直接移动保存的 SHCreateMemStream 游标到 0 并读取，留下末尾位置。新增真实 IStream 回归：写入 1/2/3，将游标移到 1，读取快照，再写 9；旧行为得到追加内容，修正后为 1/9/3。现在以 64 位位置记录游标，并在 finally 恢复，避免读取快照干扰 Shell 后续写入。
+
+NativeProbe Release build 零警告错误，完整状态流 smoke（包括 session 隔离、读写更新、跨进程重开）及颜色策略 smoke 通过；没有创建 Shell view。当前状态存储是按 session GUID 保存的单流，保存与加载限制 64 KiB；没有在此处新增缓存或改变产品内存策略。真实 Shell SaveViewState/导航交接与 WPF 产品集成仍需单独验收。
