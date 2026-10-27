@@ -69,46 +69,59 @@ internal static class QdrImporter
         var inFilter2 = false;
         var filter2RuleCount = 0;
         var filter2Patterns = new List<string>(6);
-        foreach (var raw in text.Split('\n'))
+        var remaining = text.AsSpan();
+        while (!remaining.IsEmpty)
         {
-            var line = raw.Trim().TrimStart('\uFEFF');
-            if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#')) continue;
+            var newline = remaining.IndexOf('\n');
+            var rawLine = newline < 0 ? remaining : remaining[..newline];
+            remaining = newline < 0 ? ReadOnlySpan<char>.Empty : remaining[(newline + 1)..];
+            var line = rawLine.Trim().TrimStart('\uFEFF');
+            if (line.IsEmpty || line.StartsWith(";".AsSpan(), StringComparison.Ordinal) ||
+                line.StartsWith("#".AsSpan(), StringComparison.Ordinal)) continue;
             if (line.StartsWith('[') && line.EndsWith(']'))
             {
-                inFilter2 = line.Equals("[Filter2]", StringComparison.OrdinalIgnoreCase);
+                inFilter2 = line.Equals("[Filter2]".AsSpan(), StringComparison.OrdinalIgnoreCase);
                 continue;
             }
             if (inFilter2)
             {
                 var equals = line.IndexOf('=');
-                if (equals > 0 && int.TryParse(line.AsSpan(0, equals).Trim(), NumberStyles.None,
+                if (equals > 0 && int.TryParse(line[..equals].Trim(), NumberStyles.None,
                     CultureInfo.InvariantCulture, out _))
                 {
                     filter2RuleCount++;
                     var patternStart = equals + 1;
-                    var patternEnd = line.IndexOf('=', patternStart);
+                    var patternEnd = line[patternStart..].IndexOf('=');
+                    if (patternEnd >= 0) patternEnd += patternStart;
                     if (patternEnd > patternStart && filter2Patterns.Count < 6)
                     {
                         var pattern = line[patternStart..patternEnd].Trim();
-                        filter2Patterns.Add(pattern.Length <= 64 ? pattern : pattern[..61] + "…");
+                        filter2Patterns.Add(pattern.Length <= 64 ? pattern.ToString() : pattern[..61].ToString() + "…");
                     }
                 }
                 continue;
             }
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
             // Plain Dir paths may legitimately contain &, so never split those.
-            var fields = line.StartsWith("Folder", StringComparison.OrdinalIgnoreCase) ? line.Split('&') : [line];
-            foreach (var field in fields)
+            var splitMetadata = line.StartsWith("Folder".AsSpan(), StringComparison.OrdinalIgnoreCase);
+            while (true)
             {
+                var separator = splitMetadata ? line.IndexOf('&') : -1;
+                var field = separator < 0 ? line : line[..separator];
+                if (separator >= 0) line = line[(separator + 1)..];
+                else splitMetadata = false;
                 var equals = field.IndexOf('=');
-                if (equals < 1) continue;
-                var key = field[..equals].Trim();
-                if (values.ContainsKey(key) && !key.Equals("UNICODE", StringComparison.OrdinalIgnoreCase))
+                if (equals > 0)
                 {
-                    duplicate = true;
-                    warnings.Add("重复字段使用最后一个值。");
+                    var key = field[..equals].Trim().ToString();
+                    if (values.ContainsKey(key) && !key.Equals("UNICODE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        duplicate = true;
+                        warnings.Add("重复字段使用最后一个值。");
+                    }
+                    values[key] = field[(equals + 1)..].Trim().ToString();
                 }
-                values[key] = field[(equals + 1)..].Trim();
+                if (!splitMetadata) break;
             }
         }
         if (!values.ContainsKey("Q-Dir Version")) throw new InvalidDataException("缺少 Q-Dir 配置标识，未导入。");

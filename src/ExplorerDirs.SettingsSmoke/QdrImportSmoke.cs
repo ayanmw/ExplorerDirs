@@ -7,6 +7,22 @@ internal static class QdrImportSmoke
 {
     public static void Run(string root)
     {
+        // The 8 MB input bound must also keep line parsing from allocating a second object per newline.
+        var blankLines = new string('\n', 1_000_000);
+        var allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        try
+        {
+            QdrImporter.Parse(blankLines, (value, _) => value);
+            throw new Exception("QDR without a version marker was accepted");
+        }
+        catch (InvalidDataException)
+        {
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+            Require(allocated < 2_000_000,
+                $"QDR line scanning avoids allocating a split array for newline-heavy input (allocated {allocated} bytes)");
+            Console.WriteLine($"Q-Dir parser newline scan allocation: {allocated} bytes for 1,000,000 LF characters");
+        }
+
         var plain = "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\current\nDir1_0=C:\\first\nDir1_2=C:\\third\n" +
             "ViewMode1=3\nCurPos1_2=0\nCurPos1_0=2\nDir2=D:\\名字 & 目录\nColsAndSort1=unknown";
         var imported = QdrImporter.Parse(plain, (value, _) => value);
