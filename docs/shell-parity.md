@@ -294,7 +294,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 2026-10-26 地址与查看入口：窗格工具栏现在提供每标签查看方式按钮，并复用原 Shell 查看方式菜单；地址位置下拉显示当前路径及所有上级、常用系统目录和 Shell 位置，历史菜单继续独立。现代地址栏保留独立编辑按钮，经典完整路径可点击编辑；位置下拉是单独 Tab 停靠点。路径菜单模型与焦点顺序 smoke、Release 构建通过；弹出菜单图标、布局和虚拟位置的可见行为仍待桌面验收。[Q-Dir 地址栏/上级目录 FAQ](https://www.softwareok.com/?faq=53&seite=faq-Q-DIR) · [Microsoft Explorer 地址栏与面包屑](https://learn.microsoft.com/en-us/windows/win32/shell/developing-with-windows-explorer)
 
-2026-10-27 多窗格 Shell 重命名焦点防护：窗口级快捷键和文件命令状态刷新现检查所有窗格的原生重命名编辑框，而不只检查逻辑活动窗格。静态接线 smoke 通过；没有可见 F2/方向键验收，实际键盘路由仍为 P0 待验证项。
+2026-10-27 多窗格 Shell 重命名焦点防护：窗口级快捷键和文件命令状态刷新现检查所有窗格的原生重命名编辑框，而不只检查逻辑活动窗格。静态接线 smoke 通过。另据[当前 Release 四窗格 HostProbe](roadmap.md#2026-10-26当前四窗格生产宿主-f2-方向键复验)记录，四个生产 ExplorerBrowser pane 的隐藏宿主均用合成消息验证方向键后原生编辑框保持焦点；这不验证物理 F2 消息进入路径、可见多布局窗口或真实键盘，故 F2/方向键仍是 P0 可见验收项。
 
 2026-10-27 Q-Dir 重启快捷键：官方快捷键清单列出 Alt+F11 重启；本程序“文件 → 重启应用”现在标注并响应 Alt+F11，复用现有确认、所有窗口会话保存和重启逻辑。分派/接线 smoke、完整 Release `SettingsSmoke` 与 App Release 构建通过；没有触发真实重启或 GUI 验收。[Q-Dir 官方快捷键清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)
 
