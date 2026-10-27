@@ -68,3 +68,6 @@
 - 113617/e12b4b 是移除诊断文件写入后的候选（其后只有测试扩展）。打开调用被 Computer Use 物理 ESC 硬停止拦截；不得记为已启动或边框同步通过。现有 temp.76 保持不变，待实际动画验收后按同批规则覆盖。
 
 参考：[WM_PRINT](https://learn.microsoft.com/en-us/windows/win32/gdi/wm-print) 与 [WM_PRINTCLIENT](https://learn.microsoft.com/en-us/windows/win32/gdi/wm-printclient)，后者文档明确涉及 AnimateWindow 的绘制要求。
+
+### 单框贴合最终验收
+113617 的动画同步获确认，但仍有双框间隙。修复嵌套 PRINTCLIENT 重复装饰，并补回归证明内部不再出现第二条内缩线；真实截图 114802 仍有外层合成框，因此没有记为全部解决。最终在动画取图前和定位完成后重置合成边框抑制缓存，避免创建/显示重置默认状态后仍仅凭颜色戳跳过。114915/4abaf6 用户明确确认：同步、单框、无间隙；随后再次确认右键文件区闪白和菜单双框均已解决。原生专项通过；现继续处理用户新增的窗格切换闪烁，尚未覆盖 temp.76。

@@ -13,6 +13,7 @@ internal static class NativeShellTheme
     private static readonly MenuReturnHook MenuHookProcedure = MenuReturned;
     private static nint _menuHook;
     private static nint _creationHook;
+    private static nint _printingMenu;
     private static readonly MenuReturnHook CreationProcedure = CreationMessage;
     private static readonly Subclass InitialMenuProcedure = InitialMenuMessage;
     private static bool _handlingMenuHook;
@@ -69,6 +70,10 @@ internal static class NativeShellTheme
 
     private static nint InitialMenuMessage(nint window, uint message, nuint wp, nint lp, nuint id, nint data)
     {
+        // WM_PRINT invokes WM_PRINTCLIENT internally. Its caller DC is already
+        // clipped and decorated by the outer pass: do not add another outline.
+        if (message is 0x0317 or 0x0318 && _printingMenu == window)
+            return DefSubclassProc(window, message, wp, lp);
         // AnimateWindow captures a hidden popup through WM_PRINT/PRINTCLIENT.
         // Drawing only to GetWindowDC leaves its outline out of that first image.
         if (message is 0x0317 or 0x0318 && wp != 0 &&
@@ -77,7 +82,13 @@ internal static class NativeShellTheme
             if (!_handlingMenuHook)
             {
                 _handlingMenuHook = true;
-                try { ClipMenuFrame(window); }
+                try
+                {
+                    // Creation/show can replace DWM defaults without changing
+                    // our color token. Reassert suppression before the snapshot.
+                    RemoveProp(window, "ExplorerDirs.MenuBorder");
+                    ClipMenuFrame(window);
+                }
                 finally { _handlingMenuHook = false; }
             }
             if (GetWindowRgnBox(window, out var printEdge) != 0)
@@ -94,7 +105,11 @@ internal static class NativeShellTheme
                     try
                     {
                         IntersectClipRect((nint)wp, printEdge.Left, printEdge.Top, printEdge.Right, printEdge.Bottom);
-                        var printed = DefSubclassProc(window, message, wp, lp);
+                        var previousMenu = _printingMenu;
+                        _printingMenu = window;
+                        nint printed;
+                        try { printed = DefSubclassProc(window, message, wp, lp); }
+                        finally { _printingMenu = previousMenu; }
                         DrawMenuBorder((nint)wp, printEdge);
                         return printed;
                     }
@@ -107,7 +122,11 @@ internal static class NativeShellTheme
         if (!_handlingMenuHook && message is 0x0047 or 0x000F or 0x0085)
         {
             _handlingMenuHook = true;
-            try { ClipMenuFrame(window); }
+            try
+            {
+                if (message == 0x0047) RemoveProp(window, "ExplorerDirs.MenuBorder");
+                ClipMenuFrame(window);
+            }
             finally { _handlingMenuHook = false; }
         }
         return result;

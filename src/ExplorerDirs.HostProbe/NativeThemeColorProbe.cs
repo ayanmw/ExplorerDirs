@@ -169,6 +169,22 @@ internal static class NativeThemeColorProbe
         var previous = SelectObject(dc, bitmap);
         var callback = (Delegate)type.GetField("InitialMenuProcedure", members)!.GetValue(null)!;
         var pointer = Marshal.GetFunctionPointerForDelegate(callback);
+        // Model a renderer forwarding its supplied DC to PRINTCLIENT. The outer
+        // print pass must own decoration, regardless of the nested DC origin.
+        ThemeSubclass renderer = (hwnd, message, wp, lp, id, data) =>
+        {
+            if (message == 0x0317) return SendMessage(hwnd, 0x0318, wp, lp);
+            if (message == 0x0318)
+            {
+                var fill = new RegionRect { Right = 300, Bottom = 200 };
+                var previousColor = SetDCBrushColor((nint)wp, 0x202020);
+                try { FillRectForPrint((nint)wp, ref fill, GetStockObject(18)); }
+                finally { SetDCBrushColor((nint)wp, previousColor); }
+                return 0;
+            }
+            return ThemeDefSubclassProc(hwnd, message, wp, lp);
+        };
+        Check(ThemeSetWindowSubclass(window, renderer, 72, 0), "nested print renderer fixture attaches below the menu decoration");
         try
         {
             Check(window != 0 && dc != 0 && bitmap != 0 && SetSubclassPointer(window, pointer, 0xED7604, 0),
@@ -194,14 +210,21 @@ internal static class NativeThemeColorProbe
                     $"{message:X} animation image contains the final {(dark ? "dark" : "light")} outline before show");
                 Check(GetPixel(dc, 0, 0) == 0xFF00FF,
                     "menu print excludes the old outer frame instead of painting a second border");
+                if (message == 0x0317)
+                    Check(GetPixel(dc, edge.Right - 4, edge.Top + 10) == 0x202020,
+                        "nested PRINTCLIENT leaves no second inset border inside the menu fill");
+                Check((nint)type.GetField("_printingMenu", members)!.GetValue(null)! == 0,
+                    "print decoration ownership is restored after nested rendering");
                 GetClipBox(dc, out var afterClip);
                 Check(afterClip.Left == 0 && afterClip.Top == 0 && afterClip.Right == 300 && afterClip.Bottom == 200 &&
                     SetDCBrushColor(dc, 0xFF00FF) == 0xFF00FF,
                     "menu print restores the caller DC clipping and brush color");
-            }        }
+            }
+        }
         finally
         {
             RemoveSubclassPointer(window, pointer, 0xED7604);
+            ThemeRemoveWindowSubclass(window, renderer, 72);
             SelectObject(dc, previous); DeleteObject(bitmap); DeleteDC(dc); DestroyWindow(window); GC.KeepAlive(callback);
         }
     }
