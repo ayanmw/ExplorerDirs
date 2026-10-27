@@ -129,3 +129,5 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 修正后，`--static-shell-column-classid-smoke` 在 3 个独立进程中均以 exitCode=0 完成，严格身份基线也以 exitCode=0 完成，未再出现堆损坏。随后在独立 Desktop 上比较仅改变 `IPersist::GetClassID` 返回值的原型：DefView 确实使用 adapter，名称、系统 Size、日期及自定义列的属性回调均可读取；但四种自定义列/`PKEY_Size` 升降序仍不改变列表顺序。排序前后直接读取 DefView 内 `SysListView32` 的可见文件名，均为原始名称序；`CompareIDs` 计数为 0。显式调用 `IShellView::Refresh` 也未改变结果（返回 `S_FALSE`）。故类身份不是目前排序失败的修复点；隔离原型仍未达到逐行列的消费/排序门槛，不能接入产品。该私有 Desktop 探针退出码为 1，前台窗口句柄保持不变。
 
 此结果修正了此前被损坏探针污染的判断边界：无窗口合同现可重复通过，但实际 DefView 消费与排序仍失败。产品代码、发布候选及用户配置均未改动。
+
+为建立普通文件系统 ExplorerBrowser 对照，本轮也尝试既有隐藏 `--view-data-capability` 探针；它在排序断言之前，于导航夹具检查处以未处理异常退出：预期 3 项、实际 4 项。该次没有产生排序证据，也没有显示父窗口或改变前台。需先查明该夹具为何多出一项，再把它作为同环境的普通 Shell 排序对照；当前 adapter 排序失败的结论只基于隔离 DefView 中可见 ListView 的直接行序。
