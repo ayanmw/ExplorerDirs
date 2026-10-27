@@ -637,6 +637,8 @@ public partial class PaneControl : UserControl
 
     internal void RefreshTheme()
     {
+        _treeHost?.RefreshTheme();
+        AddressTreeHost.RefreshTheme();
         foreach (var tab in _tabOrder.ToArray()) ((TabState)tab.Tag).Browser.RefreshTheme();
     }
 

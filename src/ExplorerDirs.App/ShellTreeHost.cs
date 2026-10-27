@@ -46,6 +46,11 @@ internal sealed class ShellTreeHost : HwndHost
     internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 && _tree is { WindowHandle: not 0 } tree &&
         (hwnd == tree.WindowHandle || IsChild(tree.WindowHandle, hwnd));
 
+    internal void RefreshTheme()
+    {
+        if (_parent != 0) NativeShellTheme.Apply(_parent);
+    }
+
     public void SetDirectory(string directory)
     {
         _addressTreeMode = false;
@@ -155,7 +160,9 @@ internal sealed class ShellTreeHost : HwndHost
         if (_parent == 0) throw new InvalidOperationException("无法创建目录树宿主窗口。");
         try
         {
+            NativeShellTheme.Apply(_parent);
             _tree = new NativeShellTree(_parent, 1, 1);
+            RefreshTheme();
             if (_addressTreeMode)
             {
                 _root = "shell:Desktop";

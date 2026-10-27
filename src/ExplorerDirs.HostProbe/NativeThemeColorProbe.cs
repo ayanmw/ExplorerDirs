@@ -33,9 +33,31 @@ internal static class NativeThemeColorProbe
         CheckTooltipNotifications(type, members);
         CheckMenuHookLifetime(type, members);
         CheckMenuClip(type, members);
+        CheckTreeColors(type, members);
         Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
         return 0;
     }
+
+    private static void CheckTreeColors(Type type, BindingFlags members)
+    {
+        var tree = CreateWindowEx(0, "SysTreeView32", "", 0x80000000, 0, 0, 200, 200, 0, 0, 0, 0);
+        Check(tree != 0, "hidden native tree fixture is available without a Shell namespace host");
+        try
+        {
+            foreach (var dark in new[] { true, false, true })
+            {
+                type.GetMethod("SetProcessTheme", members)!.Invoke(null, [dark]);
+                type.GetMethod("Apply", members)!.Invoke(null, [tree]);
+                var background = (uint)SendMessage(tree, 0x111F, 0, 0).ToInt64();
+                var text = (uint)SendMessage(tree, 0x1120, 0, 0).ToInt64();
+                Check(background == (dark ? 0x202020u : GetSysColor(5)) && text == (dark ? 0xEEEEEEu : GetSysColor(8)),
+                    $"native tree reads back matching {(dark ? "dark" : "light")} background and text");
+            }
+        }
+        finally { DestroyWindow(tree); }
+    }
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")] private static extern nint SendMessage(nint window, uint message, nuint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern uint GetSysColor(int index);
 
     private static void CheckMenuClip(Type type, BindingFlags members)
     {

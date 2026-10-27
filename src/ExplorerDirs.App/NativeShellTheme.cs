@@ -109,6 +109,11 @@ internal static class NativeShellTheme
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
         SetWindowTheme(window, _dark ? (name.ToString() == "SysHeader32" ? "DarkMode_ItemsView" : "DarkMode_Explorer") : "Explorer", null);
+        if (name.ToString() == "SysTreeView32")
+        {
+            SendMessage(window, 0x111D, 0, (nint)(_dark ? 0x202020u : GetSysColor(5))); // TVM_SETBKCOLOR
+            SendMessage(window, 0x111E, 0, (nint)(_dark ? 0xEEEEEEu : GetSysColor(8))); // TVM_SETTEXTCOLOR
+        }
         if (name.ToString() == "SysHeader32")
             _ = SetWindowSubclass(GetParent(window), HeaderParentProcedure, 0xED7601, 0);
     }
