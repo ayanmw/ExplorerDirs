@@ -32,3 +32,16 @@
 - 记录版本、PID/启动时间和窗格/已访问标签负载，再采 Private Bytes、GDI/USER 与句柄。100 个未访问宿主与已访问 Shell 视图不是同一负载，不混成内存优化 A/B。
 
 使用准备清单的 `prepared-not-run` 状态起步，按实际行为逐项记录通过、失败、未运行及环境；不将整份清单一次标为通过。
+
+## 已固定副本：准备完成，尚未运行
+
+- 目录：`D:\projects\explorer-dirs-worktrees\windows-accent-theme\src\.state\gui-smoke\20261027-141624-675-4ec809`，程序位于其 `app\ExplorerDirs.App.exe`；便携 profile 与用户 releases 分开。
+- 干净源码：`359d86cd3085889efc233bd9cfba8601a24c1186`，SourceWorkingTreeDirty=false。
+- BuildIdentity / DLL ProductVersion：`gui-acceptance.20261027-141624-675-4ec809+359d86cd3085889efc233bd9cfba8601a24c1186`。
+- EXE SHA-256：`B7F43E50AA40431223EBF1C1C5618547F0DB611E50722AA2038CC743A5FBEFD8`。
+- DLL SHA-256：`02B2103F3519710B0E21AFFA0542C86D15A70D4E3767A11CECEB136EDD96767B`。
+- 99 标签 QDR SHA-256：`3032AAF6EA271573347276C1D99FB11DE7C3DCE4CBA7FA5AA8253350148B7ECF`。
+
+执行 `pwsh -NoProfile -File src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly -CaptureFocusTrace` 成功。独立复核 manifest 的 EXE/DLL/夹具哈希及版本一致，23 项 PendingAcceptance 均未运行；该 EXE 进程数为 0，focus-trace.log 和 performance.json 不存在。PrepareOnly 在 UIAutomation 装载与启动进程之前返回。
+
+实际 `--inspect-qdr` 加完整 Release SettingsSmoke 通过：新夹具识别 99 标签，窗格计数 99/0/0/0，完整视图快照为 0（夹具只指定路径/查看模式，故意不捏造 Shell 排序/列宽）。此后台检查没有应用导入确认或打开标签，不算容量 UI 验收。日常 temp.76 没有覆盖或重启。
