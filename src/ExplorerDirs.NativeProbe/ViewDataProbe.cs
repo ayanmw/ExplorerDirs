@@ -6,6 +6,7 @@ using ExplorerDirs.App;
 internal static class ViewDataProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
+    private static readonly Guid PersistFolder2Id = new("1AC3D9F0-175C-11D1-95BE-00609797EA4F");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
@@ -129,12 +130,20 @@ internal static class ViewDataProbe
         try
         {
             Navigate(browser, fixture);
+            WaitForLocation(browser, fixture, TimeSpan.FromSeconds(3));
             var folderView2Id = FolderView2Id;
             Check(At<GetCurrentView>(browser, 17)(browser, ref folderView2Id, out var view));
             try
             {
                 var initialCount = WaitForItemCount(view, 3, TimeSpan.FromSeconds(3));
-                if (initialCount != 3) throw new Exception($"View-data fixture navigation did not settle; expected 3 entries, found {initialCount}.");
+                if (initialCount != 3)
+                {
+                    var diskEntries = Directory.EnumerateFileSystemEntries(fixture)
+                        .Select(Path.GetFileName).OrderBy(name => name, StringComparer.OrdinalIgnoreCase);
+                    var shellEntries = ReadIndexedNames(view);
+                    throw new Exception($"View-data fixture navigation did not settle; expected 3 entries, found {initialCount}. " +
+                        $"disk=[{string.Join(',', diskEntries)}]; shell=[{string.Join(',', shellEntries)}].");
+                }
                 var noGroup = default(PropertyKey);
                 Check(At<SetGroup>(view, 17)(view, ref noGroup, 0));
                 var ascending = new SortColumn { Key = NameKey, Direction = 1 };
@@ -180,6 +189,7 @@ internal static class ViewDataProbe
         finally
         {
             Navigate(browser, parentFolder);
+            WaitForLocation(browser, parentFolder, TimeSpan.FromSeconds(3));
             Directory.Delete(fixture, recursive: true);
         }
     }
@@ -258,14 +268,17 @@ internal static class ViewDataProbe
             Marshal.Release(configuredView);
             configuredView = 0;
             currentViewId = FolderView2Id;
-            Check(At<GetCurrentView>(browser, 17)(browser, ref currentViewId, out currentView));
+            currentView = WaitForCurrentViewNames(browser, expected, TimeSpan.FromSeconds(3));
             count = WaitForItemCount(currentView, 2, TimeSpan.FromSeconds(3));
             if (count != 2) throw new Exception($"Grouped then filtered view expected 2 items, found {count}.");
             ProbeFilteredItemArrays(shellView, currentView);
             var groupedThenFilteredSnapshot = ShellFileViewExportCapture.Capture(currentView, quickFilterActive: true);
             var groupedThenFilteredNames = groupedThenFilteredSnapshot.Rows.Select(row => row[0]).ToArray();
             if (groupedThenFilteredSnapshot.Rows.Count != 2 || !groupedThenFilteredNames.SequenceEqual(expected, StringComparer.OrdinalIgnoreCase))
-                throw new Exception("Grouped then filtered export rows differ from the Shell result.");
+                throw new Exception($"Grouped then filtered export rows differ from the Shell result. " +
+                    $"shell=[{string.Join(',', ReadIndexedNames(currentView))}]; " +
+                    $"export-columns=[{string.Join(',', groupedThenFilteredSnapshot.Columns)}]; " +
+                    $"export-rows=[{string.Join(',', groupedThenFilteredNames)}].");
             Console.WriteLine($"view-export: stage=details-grouped-then-filtered; count={count}; order={string.Join("|", groupedThenFilteredNames)}; export=PASS");
             Check(At<SetGroup>(currentView, 17)(currentView, ref noGroup, 0));
             groupedKey = TypeKey;
@@ -379,6 +392,56 @@ internal static class ViewDataProbe
             Thread.Sleep(10);
         } while (DateTime.UtcNow < until);
         return count;
+    }
+
+    private static nint WaitForCurrentViewNames(nint browser, string[] expected, TimeSpan timeout)
+    {
+        var until = DateTime.UtcNow + timeout;
+        var consecutiveMatches = 0;
+        IReadOnlyList<string> last = [];
+        string? lastError = null;
+        do
+        {
+            Application.DoEvents();
+            var viewId = FolderView2Id;
+            nint view = 0;
+            var getView = At<GetCurrentView>(browser, 17)(browser, ref viewId, out view);
+            if (getView >= 0 && view != 0)
+            {
+                var keepView = false;
+                try
+                {
+                    last = ReadIndexedNames(view);
+                    lastError = null;
+                    if (last.SequenceEqual(expected, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (++consecutiveMatches == 3)
+                        {
+                            keepView = true;
+                            return view;
+                        }
+                    }
+                    else consecutiveMatches = 0;
+                }
+                catch (COMException ex)
+                {
+                    lastError = $"0x{ex.HResult:X8} {ex.Message}";
+                    consecutiveMatches = 0;
+                }
+                finally
+                {
+                    if (!keepView) Marshal.Release(view);
+                }
+            }
+            else
+            {
+                lastError = $"GetCurrentView returned 0x{getView:X8}.";
+                consecutiveMatches = 0;
+            }
+            PumpFor(TimeSpan.FromMilliseconds(40));
+        } while (DateTime.UtcNow < until);
+        throw new TimeoutException($"Grouped filtered Shell view did not stabilize at [{string.Join(',', expected)}]; " +
+            $"last=[{string.Join(',', last)}]; error={lastError ?? "none"}.");
     }
 
     private static void VerifyExportSnapshot(nint view, string[] expectedNames, string stage)
@@ -541,9 +604,61 @@ internal static class ViewDataProbe
     private static void Navigate(nint browser, string path)
     {
         Check(SHParseDisplayName(path, 0, out var pidl, 0, out _));
-        try { Check(At<Browse>(browser, 13)(browser, pidl, 0x4000)); }
+        // 0x4000 is SBSP_NAVIGATEBACK; an absolute PIDL uses SBSP_ABSOLUTE (0).
+        try { Check(At<Browse>(browser, 13)(browser, pidl, 0)); }
         finally { Marshal.FreeCoTaskMem(pidl); }
         Pump();
+    }
+
+    private static void WaitForLocation(nint browser, string expectedPath, TimeSpan timeout)
+    {
+        Check(SHParseDisplayName(expectedPath, 0, out var expectedPidl, 0, out _));
+        try
+        {
+            var until = DateTime.UtcNow + timeout;
+            do
+            {
+                Application.DoEvents();
+                var viewId = FolderView2Id;
+                var getView = At<GetCurrentView>(browser, 17)(browser, ref viewId, out var view);
+                if (getView >= 0 && view != 0)
+                {
+                    try
+                    {
+                        var shellFolderId = new Guid("000214E6-0000-0000-C000-000000000046");
+                        var getFolder = At<GetFolder>(view, 5)(view, ref shellFolderId, out var folder);
+                        if (getFolder >= 0 && folder != 0)
+                        {
+                            try
+                            {
+                                var queryPersist = Marshal.QueryInterface(folder, in PersistFolder2Id, out var persist);
+                                if (queryPersist >= 0 && persist != 0)
+                                {
+                                    try
+                                    {
+                                        var getCurrent = At<GetCurFolder>(persist, 5)(persist, out var currentPidl);
+                                        if (getCurrent >= 0 && currentPidl != 0)
+                                        {
+                                            try
+                                            {
+                                                if (ILIsEqual(expectedPidl, currentPidl)) return;
+                                            }
+                                            finally { Marshal.FreeCoTaskMem(currentPidl); }
+                                        }
+                                    }
+                                    finally { Marshal.Release(persist); }
+                                }
+                            }
+                            finally { Marshal.Release(folder); }
+                        }
+                    }
+                    finally { Marshal.Release(view); }
+                }
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < until);
+            throw new TimeoutException($"Shell view did not navigate to '{expectedPath}' before the location wait expired.");
+        }
+        finally { Marshal.FreeCoTaskMem(expectedPidl); }
     }
 
     private static void Check(int hr)
@@ -584,12 +699,14 @@ internal static class ViewDataProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetValue(nint self, ref PropertyKey key, out Variant value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Browse(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurFolder(nint self, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemPidl(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewProperty(nint self, nint pidl, ref PropertyKey key, ref Variant value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewProperty(nint self, nint pidl, ref PropertyKey key, out Variant value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDisplayNameOf(nint self, nint pidl, uint flags, nint strret);
     [DllImport("ole32.dll")] private static extern int PropVariantClear(ref Variant value);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint requested, out uint attributes);
+    [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint first, nint second);
     [DllImport("shlwapi.dll", EntryPoint = "StrRetToBufW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int StrRetToBuf(nint strret, nint pidl, System.Text.StringBuilder buffer, uint capacity);
 }

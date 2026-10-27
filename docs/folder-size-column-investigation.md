@@ -130,4 +130,8 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 
 此结果修正了此前被损坏探针污染的判断边界：无窗口合同现可重复通过，但实际 DefView 消费与排序仍失败。产品代码、发布候选及用户配置均未改动。
 
-为建立普通文件系统 ExplorerBrowser 对照，本轮也尝试既有隐藏 `--view-data-capability` 探针；它在排序断言之前，于导航夹具检查处以未处理异常退出：预期 3 项、实际 4 项。该次没有产生排序证据，也没有显示父窗口或改变前台。需先查明该夹具为何多出一项，再把它作为同环境的普通 Shell 排序对照；当前 adapter 排序失败的结论只基于隔离 DefView 中可见 ListView 的直接行序。
+为建立普通文件系统 ExplorerBrowser 对照，追查发现隐藏 `--view-data-capability` 的导航 helper 将绝对 PIDL 与 `0x4000` 一起传入；Windows 定义该值为 `SBSP_NAVIGATEBACK`（忽略 PIDL），所以 Shell 实际仍留在父夹具目录，误把新建的 `.view-data-*` 子目录计为第四项。改用绝对 PIDL 标志 0，并等待当前 `IPersistFolder2::GetCurFolder` 与目标 PIDL 相等后，夹具导航和详情排序名称升降序均恢复正确。
+
+分组/筛选组合期间 Shell 会替换当前 `IFolderView2`；持有旧指针读取时得到空项或 `E_FAIL`，单次 `ItemCount` 命中也可能只是过渡值。探针现每次从 `IExplorerBrowser::GetCurrentView` 取新接口，并要求三次连续读取都得到预期 PIDL 行序，才继续检查导出。`--view-data-capability` 随后在 3 个独立隐藏 ExplorerBrowser 进程中全部以 exitCode=0 完成，含普通名称排序、筛选、分组、分组后启用筛选及导出行序；父 HWND 未显示，前台未变。
+
+单独的 `--view-property-refresh-capability` 以 exitCode=0 完成，系统 `PKEY_Size` 以实际 5/3 字节文件得到 `five.txt|three.txt|child` 的降序；注入 `IFolderView2::SetViewProperty` 后仍为相同顺序，刷新后缓存清空。修正后普通 Shell 的标准排序控制已通过；与之对照，自定义 adapter 的 DefView 可见行序仍保持原名序，排序失败不能归因于初始夹具导航错位。
