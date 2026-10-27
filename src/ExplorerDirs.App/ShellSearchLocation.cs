@@ -127,6 +127,17 @@ internal sealed class ShellSearchHistory
         namedLocations.Clear();
     }
 
+    internal void Forget(nint pidl, string uri)
+    {
+        if (pidl == 0) return;
+        var identity = Identity(pidl);
+        if (locations.TryGetValue(identity, out var mappedUri) && mappedUri == uri)
+            locations.Remove(identity);
+        if (ShellSearchLocation.TryGetParsingName(pidl, out var name) &&
+            namedLocations.TryGetValue(name, out mappedUri) && mappedUri == uri)
+            namedLocations.Remove(name);
+    }
+
     internal bool TryResolve(nint pidl, out string uri)
     {
         uri = string.Empty;

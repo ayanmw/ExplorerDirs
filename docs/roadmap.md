@@ -4198,3 +4198,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 源码审查发现右键诊断会按 HWND 缓存 Shell 子窗口类名；视图拆卸和 `WM_NCDESTROY` 原先没有同步移除映射，反复导航重建窗口时会在仍存活的宿主对象中留住旧句柄与字符串。本批在两种退休路径清理对应缓存。
 - App Release build（0 警告/错误）和完整 Release `SettingsSmoke` 通过，未启动窗口或 ExplorerBrowser。此项只界定并消除一个可确认的有界诊断缓存生命周期问题；没有运行长时操作采样，不能声称它造成了用户观察到的显著内存增长或测得 MB 级收益。
+
+## 2026-10-28：回收未提交的搜索位置映射
+
+- 长会话源码追踪发现，搜索 URI/PIDL 身份在 `BrowseToIDList` 前登记，以便同步 Shell 导航回调能映射身份；若该阶段遇到 COM 重入而请求过期，或 Shell 持续返回 `ERROR_BUSY` 直到请求被新搜索取代，未进入 TravelLog 的映射仍会留到浏览器销毁。成功提交的历史映射仍必须保留，不能通过任意容量上限牺牲 Back/Forward。
+- 现在只对被取代、未提交、失败或抛错的搜索请求按 PIDL 与 URI 精确移除两种别名；已成功提交的搜索映射保持原样。新增原生 PIDL smoke 在旧行为下先失败，修复后验证目标映射被移除、其他查询不受影响、释放的 Shell 名称别名可由后续搜索复用；完整 Release `SettingsSmoke` 与 App Release build 通过（0 警告/错误）。
+- 一次 SettingsSmoke 与 App build 并行运行时，旧的 Program Starter 临时夹具清理报告目录被占用；串行重跑完整 SettingsSmoke 通过。未创建产品窗口或 ExplorerBrowser。该修复消除的是已确认的失败请求身份累积，尚未量化它对真实工作负载 Private Bytes 的影响，也不能替代操作期间的长期采样。

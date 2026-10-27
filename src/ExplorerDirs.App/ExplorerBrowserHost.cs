@@ -1724,13 +1724,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (!IsCurrentRequest()) return;
                 _searchHistory.Remember(pidl, uri);
-                if (!IsCurrentRequest()) return;
+                if (!IsCurrentRequest())
+                {
+                    // Remember may pump Shell callbacks; a superseded request not yet submitted to BrowseToIDList is not TravelLog history.
+                    _searchHistory.Forget(pidl, uri);
+                    return;
+                }
                 _retryPath = null;
                 _focusWhenReady = true;
                 TrackIssuedSearch(uri);
                 try
                 {
                     var result = await BrowseWhenAvailableAsync(browser!, pidl, IsCurrentRequest);
+                    if (result is null || result.Value < 0)
+                        _searchHistory.Forget(pidl, uri);
                     if (result is null)
                     {
                         if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
@@ -1741,6 +1748,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 catch
                 {
                     if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
+                    _searchHistory.Forget(pidl, uri);
                     throw;
                 }
             }

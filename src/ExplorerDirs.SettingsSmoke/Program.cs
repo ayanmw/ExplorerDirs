@@ -1072,6 +1072,23 @@ try
                   searchHistory.TryResolve(otherPidl, out var secondSearchUri) && secondSearchUri == otherUri &&
                   !new ShellSearchHistory().TryResolve(searchPidl, out _),
                 "search query history remains distinct and browser-local");
+            searchHistory.Forget(otherPidl, otherUri);
+            Check(!searchHistory.TryResolve(otherPidl, out _) &&
+                  searchHistory.TryResolve(searchPidl, out var retainedSearchUri) && retainedSearchUri == searchUri,
+                "retiring an uncommitted search removes only its matching native aliases");
+            var aliasUri = ShellSearchLocation.BuildUri(searchScope, "alias-query");
+            aliasUri = aliasUri[..aliasUri.IndexOf("&displayname=", StringComparison.Ordinal)] +
+                       otherUri[otherUri.IndexOf("&displayname=", StringComparison.Ordinal)..];
+            var aliasPidl = ShellSearchLocation.ParsePidl(aliasUri);
+            try
+            {
+                searchHistory.Remember(aliasPidl, aliasUri);
+                Check(searchHistory.TryResolve(aliasPidl, out var aliasSearchUri) && aliasSearchUri == aliasUri,
+                    "retiring a cancelled search also releases its named Shell alias for a later query");
+                searchHistory.Forget(aliasPidl, aliasUri);
+            }
+            finally { Marshal.FreeCoTaskMem(aliasPidl); }
+            searchHistory.Remember(otherPidl, otherUri);
             searchHistory.Clear();
             Check(!searchHistory.TryResolve(searchPidl, out _) && !searchHistory.TryResolve(otherPidl, out _),
                 "disposing a Shell browser releases its search identity mappings");
