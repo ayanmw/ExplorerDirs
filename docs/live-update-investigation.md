@@ -1859,3 +1859,11 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 在上节状态机修正及身份扫描门控之后，当前 Release HostProbe 连续两次运行 `--live-shell-directory-stress-large 10000`。两轮均退出码 0；独立 observer 对 burst 文件创建/删除均为 `10,000/10,000`，产品 watcher 含额外测试子文件夹事件为 `10,001/10,001`。128 项批量删除目标 `burst-0127.txt` 在 Shell 视图仍有 10,002 项时被确认是文件，单次查询分别耗时 4 ms；两轮 `batch-visible=True`。大视图目录删除扫描计数均为 0、结果 `SkippedLargeView`，由计数协调器完成收敛。
 
 两轮最终目标窗格计数均为 3，四窗格计数为 `10003/3`；`second.txt`、`third.txt` 选区和未选中的 `initial.txt` 焦点在创建、单项删除及批量删除后保持。批量删除收敛分别使用 2 次与 1 次 fallback；Dispatcher 最大间隔也有波动（ContextIdle 108/128 ms，Input 83/85 ms，Normal 77/85 ms）。这加强了 128 项删除状态机修复在本机隐藏生产宿主上的重复证据，但不证明可见交互、慢速/网络位置、其它 Shell provider 或跨机器稳定性；自动刷新 P0 仍开放，无 release。
+
+### 2026-10-28 HostProbe 刷新序列误报修正
+
+本轮 `HostProbe --live-updates` 第一次运行中，真实产品 `ExplorerBrowserHost` 的四窗格创建已读到 `2,2,2,2`，随后探针在取项目名时抛出“2 items exceeds the probe limit 0”。根因是 `hosts.Select(Names)` 绑定到了 LINQ 的带索引 `Select` 重载，pane 序号被当作 `Names` 的 `maximumItems` 参数；不是 Shell 列表项目上限或产品刷新失败。创建/删除两处均改为显式单参数 lambda。
+
+修正后同一隐藏生产宿主序列连续 4 次退出码 0，每轮四窗格均从 `1,1,1,1` 收敛至创建后的 `2,2,2,2`，删除夹具文件后回到 `1,1,1,1`；创建收敛约 0.87–1.03 秒，删除约 0.45–0.59 秒。完整 Release SettingsSmoke 也通过。没有显示 MainWindow 或发送用户输入；这是隐藏 HwndSource 中的真实 ExplorerBrowserHost 与本地临时目录证据，不是可见刷新体验验收。
+
+另一次 `NativeProbe --live-updates-wpf` 最小四窗格对照仍观察到未收敛计数（无站点控制通过，生产站点创建 `1,2,2,2`、删除 `0,1,1,1`）；这条不同的最小宿主路径不能覆盖或推翻 HostProbe 结果，也不能据此给产品刷新逻辑加补丁。它继续作为独立调查项，需先隔离隐藏 DefView/消息泵差异。

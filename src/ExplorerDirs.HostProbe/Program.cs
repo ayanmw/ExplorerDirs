@@ -3193,7 +3193,8 @@ internal static class Program
                         break;
                     case 2 when counts.All(c => c == 2) || elapsed >= 20000:
                         Console.WriteLine($"production-create counts={string.Join(',', counts)} elapsed-ms={elapsed} notifications={notifications()}");
-                        var createdNames = hosts.Select(Names).ToArray();
+                        // Keep the pane index from binding to Names' optional maximumItems parameter.
+                        var createdNames = hosts.Select(host => Names(host)).ToArray();
                         Console.WriteLine("create-identities=" + string.Join(';', createdNames));
                         passed &= counts.All(c => c == 2) && createdNames.All(n => n == "created.txt|initial.txt");
                         beforeDelete();
@@ -3205,7 +3206,7 @@ internal static class Program
                         break;
                     case 3 when (passed && counts.All(c => c == 1)) || elapsed >= 20000:
                         Console.WriteLine($"production-delete counts={string.Join(',', counts)} elapsed-ms={elapsed} notifications={notifications()}");
-                        var deletedNames = hosts.Select(Names).ToArray();
+                        var deletedNames = hosts.Select(host => Names(host)).ToArray();
                         Console.WriteLine("delete-identities=" + string.Join(';', deletedNames));
                         passed &= counts.All(c => c == 1) && deletedNames.All(n => n == "created.txt");
                         frame.Continue = false;

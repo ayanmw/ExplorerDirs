@@ -4162,6 +4162,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 用户已决定文件区右键菜单只使用 Windows Shell 原生内容，不恢复标签/路径自定义项。清除 ExplorerBrowserHost 中未接线的命令注入、目标 UIA 探测、临时菜单命令分派及其状态；保留 Shell 菜单主题/tooltip 处理、列头预设菜单门控和中键文件夹命中逻辑。删除不再使用的 `ShellMenuCommand`，保留隔离 NativeProbe 仍需的 ListView 命中解析纯函数及其坐标/命中 smoke。
 - 后台验证：定向 `--shell-menu-target-smoke`、完整 SettingsSmoke 和 App Release 构建通过；未启动窗口。产品文件区空白/条目/键盘菜单的可见原生行为、浅深主题及多窗格一致性仍列入集中 UI 验收，不以编译或 smoke 代替。
 
+## 2026-10-28：修复四窗格刷新探针的名称读取误报
+
+- `HostProbe --live-updates` 曾在创建收敛为 `2,2,2,2` 后因 `hosts.Select(Names)` 将 pane 索引传成 `Names(maximumItems)` 而失败。改为显式单参数 lambda 后，真实产品 `ExplorerBrowserHost` 隐藏宿主连续 4 轮创建 `1→2`、删除 `2→1` 四窗格收敛均通过；创建约 0.87–1.03 秒，删除约 0.45–0.59 秒。完整 Release SettingsSmoke 通过。
+- 本轮没有显示产品窗口或输入用户桌面。另一个更小的 NativeProbe/WPF 隐藏视图对照仍出现计数不收敛，暂按独立隐藏 DefView/消息泵差异调查；不据此改产品刷新代码，也不关闭可见 UI 验收。
+
 ## 2026-10-28：更正跨窗格拖放探针证据范围
 
 - 后台复核发现 `docs/shell-parity.md` 曾记录当前探针覆盖 Copy|Move 和三种修饰键，但 `ShellViewDropTargetProbe.TryTransfer` 实际只允许 Copy；复跑日志也显示目标 `IShellView` 查询 `IID_IDropTarget` 返回 `E_NOINTERFACE`。使用真实 `SVGIO_SELECTION` `IDataObject` 调用已注册文件夹目标的 `DragEnter/DragOver/Drop` 可复制并保留源文件，另一路 `SHCreateDataObject` Copy 也通过。探针未运行 OLE `DoDragDrop`，不覆盖 Move 或产品跨窗格行为。
