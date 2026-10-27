@@ -48,6 +48,47 @@ internal static class ShellViewNavigationHistorySmoke
                   history.Count == countBeforeFailure && pool.Read(history.CurrentPidl) == 3,
                 "a failed navigation leaves the current history unchanged");
 
+            ShellViewNavigationHistory? reentrant = null;
+            var nestedResult = 0;
+            var callbackCount = 0;
+            using (reentrant = new ShellViewNavigationHistory(root, pool.Clone, pool.Free, pool.Equal,
+                pool.Parent, pool.Combine, (_, _) =>
+                {
+                    if (++callbackCount == 1) nestedResult = reentrant!.BrowseObject(branch, 0);
+                    return 0;
+                }))
+            {
+                Check(reentrant.BrowseObject(child, 0) == 0 && nestedResult == unchecked((int)0x800700AA) &&
+                    callbackCount == 1 && reentrant.Count == 2 && reentrant.Index == 1 &&
+                    pool.Read(reentrant.CurrentPidl) == 2,
+                    "nested navigation is rejected as busy without corrupting the outer history");
+                Check(reentrant.BrowseObject(branch, 0) == 0 && reentrant.Count == 3 &&
+                    callbackCount == 2 && pool.Read(reentrant.CurrentPidl) == 3,
+                    "a completed outer navigation releases the busy gate for subsequent requests");
+            }
+
+            ShellViewNavigationHistory? disposedDuringBrowse = null;
+            var closeDuringCallback = false;
+            using (disposedDuringBrowse = new ShellViewNavigationHistory(root, pool.Clone, pool.Free, pool.Equal,
+                pool.Parent, pool.Combine, (target, _) =>
+                {
+                    if (closeDuringCallback)
+                    {
+                        disposedDuringBrowse!.Dispose();
+                        Check(pool.Read(target) == 1, "closing retains the borrowed back target until its callback returns");
+                    }
+                    return 0;
+                }))
+            {
+                Check(disposedDuringBrowse.BrowseObject(child, 0) == 0, "disposal fixture has back history");
+                closeDuringCallback = true;
+                Check(disposedDuringBrowse.BrowseObject(0, Back) == unchecked((int)0x80004004) &&
+                    disposedDuringBrowse.Count == 0 && disposedDuringBrowse.Index == 0,
+                    "closing during navigation aborts history commit and releases retained locations");
+                Check(disposedDuringBrowse.BrowseObject(branch, 0) == unchecked((int)0x80004004),
+                    "a closed history rejects later navigation");
+            }
+
             var throwingTarget = pool.Create(7);
             using var throwingHistory = new ShellViewNavigationHistory(
                 root, pool.Clone, pool.Free, pool.Equal, pool.Parent, pool.Combine,

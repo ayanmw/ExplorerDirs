@@ -16,6 +16,8 @@ internal sealed class ShellViewNavigationHistory : IDisposable
     private const uint UnsupportedBrowseFlags = SbspNewBrowser | SbspHelpMode | SbspKeepSameTemplate;
     private const uint SbspCreateNoHistory = 0x00100000;
     private const int ENotImpl = unchecked((int)0x80004001);
+    private const int EAbort = unchecked((int)0x80004004);
+    private const int EBusy = unchecked((int)0x800700AA);
 
     private readonly Func<nint, nint> _clone;
     private readonly Action<nint> _free;
@@ -25,6 +27,8 @@ internal sealed class ShellViewNavigationHistory : IDisposable
     private readonly Func<nint, uint, int> _navigate;
     private readonly List<nint> _locations = [];
     private int _index;
+    private bool _navigating;
+    private bool _disposed;
 
     internal ShellViewNavigationHistory(nint rootPidl, Func<nint, nint> clone,
         Action<nint> free, Func<nint, nint, bool> equals, Func<nint, nint> getParent,
@@ -47,6 +51,19 @@ internal sealed class ShellViewNavigationHistory : IDisposable
     internal nint CurrentPidl => _locations[_index];
 
     internal int BrowseObject(nint pidl, uint flags)
+    {
+        if (_disposed) return EAbort;
+        if (_navigating) return EBusy;
+        _navigating = true;
+        try { return BrowseCore(pidl, flags); }
+        finally
+        {
+            _navigating = false;
+            if (_disposed) ReleaseLocations();
+        }
+    }
+
+    private int BrowseCore(nint pidl, uint flags)
     {
         // Never downgrade unsupported requests into navigation that replaces the
         // current view. New-browser hosting is absent; HELPMODE and KEEPSAMETEMPLATE
@@ -91,6 +108,7 @@ internal sealed class ShellViewNavigationHistory : IDisposable
             if ((flags & SbspSameBrowser) != 0)
                 navigateFlags &= ~(SbspOpenMode | SbspExploreMode);
             var hr = _navigate(target, navigateFlags);
+            if (_disposed) return EAbort;
             if (hr < 0) return hr;
             RecordSuccessfulNavigation(flags, stagedLocation);
             stagedLocation = 0;
@@ -138,6 +156,14 @@ internal sealed class ShellViewNavigationHistory : IDisposable
     }
 
     public void Dispose()
+    {
+        _disposed = true;
+        // A Shell callback can close its host while a history PIDL is borrowed.
+        // Defer release until the active navigation has unwound.
+        if (!_navigating) ReleaseLocations();
+    }
+
+    private void ReleaseLocations()
     {
         foreach (var location in _locations) _free(location);
         _locations.Clear();

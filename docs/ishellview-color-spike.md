@@ -1138,3 +1138,8 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 现只为 `session-restore` 和它派生的 consumer 将 Private Desktop runner deadline 调为 110 秒与 100 秒，并把父进程等待 consumer 的时间调为 100 秒；其余 probe 保持 25 秒。NativeProbe Release build 0 warning/error。`scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120` 退出码 0，Private Desktop foreground HWND 前后相同。成功日志 `20261027-084330-8968e6b6.stdout.log` 的 consumer 总结确认：状态流恢复、四 pane 菜单项逐窗格路由、方向键/Ctrl+A/F2 路由、copy/rename/delete 四 pane 收敛、目录通知及 sibling pane 隔离均通过。
 
 本次通过只覆盖隔离 NativeProbe 中的 IShellView 宿主，不表示已接入 Explorer Dirs 产品；未运行可见 UI，也没有验证 OLE `DoDragDrop` 的鼠标源端、WPF 焦点链或用户实际拖放。
+### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
+
+`ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
+
+合成 PIDL 池回归先失败后通过，并检查下一次普通请求能继续、关闭期间 Back 目标可读及返回后清空。NativeProbe Release build 0 warning/error，完整 `--shell-view-color-policy-smoke` 通过。本次没有创建 Shell view 或运行 Private Desktop；真实 Shell 扩展重入、宿主关闭与历史/视图一致性仍需隔离原生验收，产品 ExplorerBrowser 不变。

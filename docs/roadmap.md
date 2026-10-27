@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：隔离导航历史处理回调重入与关闭
+
+- NativeProbe 的 `ShellViewNavigationHistory` 在导航回调内可再次修改同一历史，外层随后仍提交旧结果；现在单次导航持有 busy gate，嵌套请求返回 HRESULT_FROM_WIN32(ERROR_BUSY)，完成/异常后解除。回调中 Dispose 标记关闭，借用历史 PIDL 延迟到回调退出后释放，外层返回 E_ABORT 且不提交，后续导航也拒绝。
+- 回归先复现嵌套请求改变历史，修正后验证嵌套拒绝、外层正确提交、随后普通导航正常、Back 回调关闭期间 PIDL 可读、返回后历史已释放及关闭后拒绝。NativeProbe Release build 零警告错误，完整 `--shell-view-color-policy-smoke` 通过；仅合成指针池/回调，不创建 Shell view，不等于真实 COM 重入或产品迁移验收。产品 ExplorerBrowser 和 release 未改。
+
 ## 2026-10-27：退休的递归扫描失败不清除新结果
 
 - `ScanRecursiveDirectoryAsync` 失败分支原在后台线程先清空最近结果，再进入 dispatcher 检查当前扫描；旧 worker 的迟到失败可覆盖新结果。清理现在与错误显示一起在 UI 线程进行，先确认 token/owner/path/当前标签及可见性，再修改字段。
