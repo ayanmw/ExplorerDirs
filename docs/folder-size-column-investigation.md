@@ -146,6 +146,12 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 
 后续评估 schema 方案时还要考虑部署边界：微软 [`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 文档要求安装时注册机器本地 `.propdesc`，schema 为机器级、不能按用户注册，且 API 需要包含 `HKLM` 写权限的权限上下文。这与项目当前便携配置、不改系统注册表的原则冲突；不能把 schema 注册作为普通启动行为。若未来证明确实是唯一技术路线，需先单独审视安装/卸载和系统影响策略，再决定是否做可选安装能力。
 
+### 2026-10-28：系统已知属性 schema 无窗口核验
+
+为形成后续 DefView 对照，本轮只扩展无窗口文件夹合同探针：通过 `PSGetPropertyDescription` 查询 `System.Document.ByteCount`（`{D5CDD502-2E9C-101B-9397-08002B2CF9AE},4`）。Windows SDK 10.0.26100.0 的 `propkey.h` 将其声明为 `VT_I4`；当前机器解析结果为 `S_OK`。同一探针中的私有测试属性仍返回 `TYPE_E_ELEMENTNOTFOUND`，而 `System.Size`、`System.DateCreated` 与 `System.Document.ByteCount` 均能解析。
+
+该结果只证明系统有此属性描述，不证明它可作为此文件夹视图列，也不证明 DefView 会读取适配器提供的该值。`VT_I4` 也不适合真实文件夹总大小。没有注册 schema、创建窗口或改动产品；NativeProbe Release 构建及 `--static-shell-column-folder-smoke` 通过，输出 `window-created=False`。如后续安排隔离 DefView 对照，需把这个属性仅用作“已知 schema”诊断控制，并与 64 位大小语义严格区分。
+
 ### 2026-10-28 激活视图仍不触发逐项属性回调
 
 为排除“DefView 尚未激活所以不读取列值”的解释，NativeProbe 增加 `--static-shell-column-adapter-activated-strict-private-desktop` 对照。它在独立、未切换的 Windows Desktop 上创建同一严格接口适配器和文件夹夹具，显示父窗口后调用 `IShellView::UIActivate(SVUIA_ACTIVATE_NOFOCUS)`，再执行同一列显示与四向排序矩阵；没有把输入焦点交给视图，也未操作用户桌面。

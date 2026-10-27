@@ -13,6 +13,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+    private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
 
     internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false)
     {
@@ -165,11 +166,17 @@ internal static class StaticShellFolderAdapterProbe
                 { FormatId = SizeKeyFormat, PropertyId = 12 });
             var dateCreatedSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = SizeKeyFormat, PropertyId = 15 });
+            // The Windows SDK declares System.Document.ByteCount as VT_I4. Its
+            // registered schema is a useful system-property control, but not a
+            // suitable production size property (folder sizes exceed Int32).
+            var documentByteCountSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+                { FormatId = DocumentSummaryFormat, PropertyId = 4 });
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; " +
-                $"property-description(custom/size/date-created)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}; window-created=False");
+                $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCountSchema:X8}; " +
+                "document-byte-count-sdk-type=VT_I4; window-created=False");
             return 0;
         }
         catch (Exception ex)
