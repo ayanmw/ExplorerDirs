@@ -38,6 +38,13 @@ $parentDirectoryItem = [IO.Path]::GetFileName($testDirectory)
 $recursiveSizeDirectory = Join-Path $acceptanceDirectory 'recursive-size-progress'
 $focusTracePath = Join-Path $runRoot 'focus-trace.log'
 New-Item -ItemType Directory -Path $appDirectory, $testDirectory, $recursiveSizeDirectory -Force | Out-Null
+# Choose the literal folder through the Shell tree/list during later acceptance.
+# Set this variable only in the launched test process, never in the user's global environment.
+$percentVariable = 'ExplorerDirsQdrAcceptance'
+$percentFixtureParent = Join-Path $acceptanceDirectory 'percent-paths'
+$percentLiteralFixture = Join-Path $percentFixtureParent ('%' + $percentVariable + '%')
+$percentExpandedFixture = Join-Path $percentFixtureParent 'expanded-target'
+New-Item -ItemType Directory -Path $percentLiteralFixture, $percentExpandedFixture -Force | Out-Null
 $searchToken = 'ExplorerDirsSmoke' + [Guid]::NewGuid().ToString('N')
 $searchName = "$searchToken.txt"
 [IO.File]::WriteAllText((Join-Path $testDirectory $searchName), 'isolated search proof')
@@ -158,6 +165,9 @@ $manifest = [ordered]@{
     RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
     QdrColorBaseline = 'qdr-color-baseline.qdr'
     TabCapacityFixture = 'qdr-tab-capacity-99.qdr'
+    PercentPathFixture = 'acceptance-files/percent-paths'
+    PercentPathProcessVariable = $percentVariable
+    PercentPathProcessValue = 'expanded-target'
     TabCapacityFixtureSha256 = (Get-FileHash -LiteralPath $tabCapacityFixture -Algorithm SHA256).Hash
     QdrProgramFixture = 'qdir-program-items.ini'
     QdrProgramFixtureSha256 = (Get-FileHash -LiteralPath $programStarterFixturePath -Algorithm SHA256).Hash
@@ -167,6 +177,10 @@ $manifest = [ordered]@{
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     FocusTrace = if ($CaptureFocusTrace) { 'focus-trace.log' } else { $null }
     PendingAcceptance = @(
+        'For percent-paths, set PercentPathProcessVariable=PercentPathProcessValue only in the isolated launched process. Navigate through the file list/tree into the literal percent-named folder; export ordinary QDR and a desktop workspace shortcut. Open their base Folder fields in Q-Dir and verify the literal directory rather than expanded-target. Cancel an unresolved-path compatibility prompt and verify no target was written',
+        'During import backup preparation, change a tab/view/layout or switch to a sibling window: keep the backup but do not append. Repeat with a stable session and verify the exact session plus QDR backup, then append normally. Force a disposable backup output failure and verify no imported tabs appear',
+        'Close one isolated window during QDR preparation or desktop workspace publication; no late UI changes appear. While a sibling window keeps the process alive, inspect confirmed output and ensure shortcut/QDR match or failed publication cleans its new QDR',
+        'For the updated window registry, restart multiple isolated windows and verify per-window placement/session restoration; the background unknown-version protection checks do not replace normal restart acceptance',
         'In each pane, paste a file and immediately press Up/Down without clicking first; then use Shift+Delete, confirm, and immediately press Up/Down. The same pane must move its file focus/selection after both operations. If either fails, Alt+Tab away and back, then repeat the arrow key and record whether window activation restores keyboard navigation. When FocusTrace is set, retain focus-trace.log and compare the key, IShellView accelerator result, HWND focus, Shell item focus, and focus-restore-poll content-focused/attempt values around the operation',
         'In every pane and view style, F2 then Left/Up/Right/Down/Home/End/PageUp/PageDown keeps the native rename editor focused; Shift/Ctrl+Left/Right/Home/End edits text; Escape cancels and Enter commits without changing another pane selection. In file content verify Home/End/PageUp/PageDown and their Ctrl/Shift variants keep selection and physical focus in that pane',
         'With the file view focused, F10 opens the File menu; Escape closes it without running a command; F10 can open it again',
