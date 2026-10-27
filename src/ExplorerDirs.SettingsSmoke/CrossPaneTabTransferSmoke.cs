@@ -27,14 +27,10 @@ internal static class CrossPaneTabTransferSmoke
     {
         var repoRoot = FindRepoRoot();
         var pane = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
-        var browser = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
         Check(pane.Contains("TabTransferPolicy.Resolve", StringComparison.Ordinal) &&
               pane.Contains("TransferTabTo", StringComparison.Ordinal) &&
               pane.Contains("TabDragPayload", StringComparison.Ordinal),
             "tab drag payload routes between pane owners");
-        Check(pane.Contains("PrepareForRehost", StringComparison.Ordinal) &&
-              browser.Contains("_retainBrowserOnDetach", StringComparison.Ordinal),
-            "moving a tab retains its native ExplorerBrowser host for reparenting");
         Check(pane.Contains("CopyTabFrom", StringComparison.Ordinal) &&
               pane.Contains("AddressHistory.Copy()", StringComparison.Ordinal),
             "copying a tab creates an independent view from its captured settings");

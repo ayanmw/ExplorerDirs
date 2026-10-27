@@ -10,10 +10,11 @@
 
 ## 原生宿主
 
-跨窗格移动只从源 `PersistentTabHost` 暂时卸下 HwndHost，`ExplorerBrowserHost` 保留原 COM browser 和 host HWND。目标挂载时复用原 HWND；只有关闭标签或正常销毁时才销毁浏览器。
+跨窗格移动只从源 `PersistentTabHost` 暂时卸下 HwndHost。由 WPF 自身将原 HWND 暂存到隐藏宿主，再挂接目标；原 COM browser 和 host HWND 保留。不能以保留标记跳过 `DestroyWindowCore`：此路径不会再次调用 `BuildWindowCore` 清除标记，之后关闭标签会漏掉清理。关闭标签或正常销毁时仍须销毁浏览器和原 HWND。依据：[WPF HwndHost 的 BuildOrReparentWindow](https://source.dot.net/PresentationFramework/System/Windows/Interop/HwndHost.cs.html)。
 
 ## 验收
 
 - Release SettingsSmoke 覆盖移动/复制/最后标签/固定分区策略和源码接线。
 - 隐藏 HostProbe 通过真实 PaneControl 与 ExplorerBrowser 验证同一 TabState、同一 host 对象/HWND、可调整大小以及移动前的 Shell 后退历史仍可用；Ctrl 复制创建独立 host。
 - 不操作可见桌面。真实拖动输入、指针游标、不同 DPI 和多个显示器仍待可见验收。
+- 2026-10-27 生命周期补验：非 Shell 隐藏普通 HWND 连续 8 次重挂保留身份；产品宿主清理入口旧代码在保留标记下跳过销毁，修复后销毁成功。真实 Shell 探针已加入移动后关闭的 HWND/COM 释放检查，当前无桌面授权，未重跑。

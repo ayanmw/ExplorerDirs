@@ -139,8 +139,14 @@ internal static class PaneTabTransferProbe
             Ensure(!ReferenceEquals(copiedState, state) && !ReferenceEquals(copiedBrowser, browser),
                 "copy creates an independent tab and Shell host");
 
+            paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [state]);
+            Ensure(targetTabsControl.Items.Count == 1 && !targetTabsControl.Items.Contains(movedTab),
+                "the transferred tab can be closed normally");
+            Ensure(!IsWindow(shellHostWindow) && browserType.GetField("_browser", InstanceMembers)!.GetValue(browser) is null,
+                "closing the transferred tab destroys the original HWND and releases the browser");
+
             EnsureForegroundUnchanged(foregroundBefore, "moving and navigating a tab");
-            Console.WriteLine("Cross-pane tab transfer host probe: PASS (move retains TabState/HWND/Shell back history; Ctrl-copy creates an independent host)");
+            Console.WriteLine("Cross-pane tab transfer host probe: PASS (move retains TabState/HWND/history; copy is independent; close releases the moved host)");
             return 0;
         }
         catch (Exception ex)

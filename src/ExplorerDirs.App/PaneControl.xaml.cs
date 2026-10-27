@@ -2022,7 +2022,6 @@ public partial class PaneControl : UserControl
             CancelTabHoverActivation();
             if (ReferenceEquals(_recursiveSizeOwner, state) || ReferenceEquals(_lastRecursiveSizeOwner, state))
                 CancelRecursiveDirectorySize();
-            state.Browser.PrepareForRehost();
             BrowserLayer.Remove(state.Browser);
             Tabs.Items.Remove(state.Tab);
             _tabOrder.Remove(state.Tab);

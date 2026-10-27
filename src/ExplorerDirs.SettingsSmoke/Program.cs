@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--tab-transfer-policy-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
+    return;
+}
+
 if (args is ["--window-placement-smoke"])
 {
     var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
