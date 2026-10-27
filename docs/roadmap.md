@@ -4204,3 +4204,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 长会话源码追踪发现，搜索 URI/PIDL 身份在 `BrowseToIDList` 前登记，以便同步 Shell 导航回调能映射身份；若该阶段遇到 COM 重入而请求过期，或 Shell 持续返回 `ERROR_BUSY` 直到请求被新搜索取代，未进入 TravelLog 的映射仍会留到浏览器销毁。成功提交的历史映射仍必须保留，不能通过任意容量上限牺牲 Back/Forward。
 - 现在只对被取代、未提交、失败或抛错的搜索请求按 PIDL 与 URI 精确移除两种别名；已成功提交的搜索映射保持原样。新增原生 PIDL smoke 在旧行为下先失败，修复后验证目标映射被移除、其他查询不受影响、释放的 Shell 名称别名可由后续搜索复用；完整 Release `SettingsSmoke` 与 App Release build 通过（0 警告/错误）。
 - 一次 SettingsSmoke 与 App build 并行运行时，旧的 Program Starter 临时夹具清理报告目录被占用；串行重跑完整 SettingsSmoke 通过。未创建产品窗口或 ExplorerBrowser。该修复消除的是已确认的失败请求身份累积，尚未量化它对真实工作负载 Private Bytes 的影响，也不能替代操作期间的长期采样。
+
+## 2026-10-28：补充 Q-Dir 标签组的公开语义证据
+
+- 查阅 Q-Dir 官方 FAQ 101 后确认，其用户提问区有人询问如何显示已移入新组的标签；该 FAQ 实际只回答标签栏的显隐，并未解释标签组。官方英文字符串页仍只提供 Tab Group、Move、Copy、Use 等菜单名称。
+- 这项证据支持继续将标签组列为 P2 待评估：语义需要在集中 Q-Dir UI 验收时实测，不能据同名浏览器标签组推断分组、显示或持久化方式。更新了[功能对照](shell-parity.md#标签组)；本轮没有启动 Q-Dir 或改产品行为。
