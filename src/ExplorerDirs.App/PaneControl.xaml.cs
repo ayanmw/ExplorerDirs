@@ -1518,26 +1518,7 @@ public partial class PaneControl : UserControl
             owner.ItemCounts.Text = "";
             owner.ItemCounts.ToolTip = null;
         };
-        browser.CustomCommands = selectedItem =>
-        {
-            var owner = state.Owner;
-            var actions = new List<ExplorerBrowserHost.MenuAction>();
-            if (selectedItem is { IsFileSystemFolder: true })
-                actions.Add(new("在新标签页中打开", () => owner.AddTab(selectedItem.Path, owner._newTabView())));
-            actions.Add(new("新建标签页", owner.NewTab));
-            actions.Add(new("复制当前标签", () => owner.DuplicateTab(state)));
-            actions.Add(new(state.IsPinned ? "取消固定当前标签" : "固定当前标签", () => owner.TogglePinned(state)));
-            if (!state.IsPinned) actions.Add(new("关闭当前标签", () => owner.CloseTab(state)));
-            actions.Add(new("关闭其他标签", () =>
-            {
-                owner.Tabs.SelectedItem = state.Tab;
-                owner.CloseOtherTabs();
-            }));
-            actions.Add(new("恢复关闭的标签", owner.ReopenClosedTab));
-            actions.Add(new(selectedItem is null ? "复制当前文件夹路径" : "复制完整路径",
-                () => Clipboard.SetText(selectedItem?.Path ?? state.Path)));
-            return actions;
-        };
+        // File-area menus remain native-only while menu theme behavior is verified.
         browser.Navigated += (_, notice) =>
         {
             var owner = state.Owner;

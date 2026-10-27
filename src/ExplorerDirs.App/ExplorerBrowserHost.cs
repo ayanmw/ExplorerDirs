@@ -4825,6 +4825,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private Task<ShellMenuTarget> ProbeMenuTarget(ShellMenuPoint point)
     {
+        if (CustomCommands is null) return Task.FromResult(ShellMenuTarget.Unknown);
         var viewWindow = _viewWindow;
         if (viewWindow == IntPtr.Zero) return Task.FromResult(ShellMenuTarget.Unknown);
         // Empty values disable the writer too; avoid collecting UIA ancestry when nothing can be logged.
