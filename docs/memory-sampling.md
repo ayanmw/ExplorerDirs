@@ -166,3 +166,10 @@ dnx dotnet-counters@10.0.750501 --source https://api.nuget.org/v3/index.json -- 
 - UTC `2026-10-28T16:50:16Z` 至 `16:51:16Z`，13 个样本、约每 5 秒一次，覆盖 60.296 秒。Working Set 全程 `244,547,584` B（233.31 MiB），Private Bytes `123,265,024` B（117.55 MiB），虚拟内存 `2,342,109,573,120` B，句柄 `1121`，线程 `34`；五项计数在本窗口的首末值及最小/最大值相同。
 - 这是无交互的只读进程采样；没有记录窗格/标签数量或用户操作，也没有采集 CPU、GC 或原生分配栈。它表明该窗口内这些计数稳定，不构成长时间无泄漏证明，也不能用于组件归因或优化前后 A/B。
 - CSV 保留在忽略目录 `src/.state/memory-samples/ExplorerDirs-memory-20261028-background.csv`，SHA-256 `E7D809DD7A290B673C788AEA79B86A9C39414966DE822D34A3D777DECF8A03BB`。后续仍需在记录固定操作序列的情况下观察同一 PID 的曲线，再按 Private Bytes/GDI/USER/句柄变化选择 profiler 路径。
+
+## 2026-10-28 CST：temp.76 后续 60 秒同 PID 只读采样
+
+- 再次采样同一 `preview-0.6.0-temp.76` PID `58888`，进程启动时间 `2026-10-27T13:43:03Z`。EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`；应用 DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+- UTC `2026-10-27T20:33:28Z` 至 `20:34:28Z`，13 个样本、覆盖 60.457 秒。Working Set 全程 `244,539,392` B（233.30 MiB），Private Bytes `123,273,216` B（117.55 MiB），虚拟内存 `2,342,109,507,584` B，句柄 `1120`，线程 `34`；每项首末、最小和最大值相同，与前一段 60 秒采样基本一致。
+- 采样全程只读且未操作桌面，但没有记录窗格/标签数量和用户负载，也没有 GC 或原生分配栈。因此只支持两个短时静置窗口内计数稳定，不排除长时间增长，不能归因或作为改版 A/B。
+- 原始 CSV 留在忽略目录 `src/.state/memory-samples/ExplorerDirs-memory-followup-20261028.csv`，SHA-256 `47B59CB1D5F97CDDF52B972C27D0F7F40F8D48B2505EECC3EF669E1CFE77089F`。后续要判断运行期间增长，仍需在固定操作序列下采样同一进程并结合分配类别；本次没有启动、重启或操作应用。

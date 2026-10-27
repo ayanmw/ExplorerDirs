@@ -4233,3 +4233,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - Release HostProbe 的反射调用未传 `ShellColumnManager.Apply` 新增的可选上下文参数，先修复 HostProbe-only 调用并通过 Release build（0 警告/错误）。没有改产品逻辑。
 - 设置 `EXPLORER_DIRS_HOSTPROBE_SKIP_FLUSH=1` 后运行真实生产 `ExplorerBrowserHost` 隐藏夹具：两文件大小更新，大小排序随之自然重排，选区/焦点保留，约 1,122 ms 收敛，整视图 fallback 为 0；父 HWND 隐藏且前台未变。详情及完整日志见[自动刷新调查](live-update-investigation.md#2026-10-28-复验不注入显式-flush-的-changed-元数据排序)。此证据不覆盖可见像素刷新、其他 Shell provider 或网络/云目录，自动刷新 P0 仍开放。
+
+## 2026-10-28：temp.76 同一 PID 内存后续采样
+
+- 对仍在运行的 temp.76/PID 58888 做 60 秒只读采样，13 个点的 Working Set、Private Bytes、虚拟内存、句柄和线程数在窗口内完全不变；与前一段 60 秒窗口接近，Private Bytes 高 8 KiB。未启动、重启或操作应用。
+- 这只说明短时静置窗口稳定；没有固定标签/窗格和操作负载，不能据此排除运行期间增长或归因组件。原始 CSV 与哈希见[内存调查](memory-sampling.md#2026-10-28-csttemp76-后续-60-秒同-pid-只读采样)。
