@@ -197,7 +197,7 @@ internal static class StaticShellFolderAdapterProbe
         try
         {
             Directory.CreateDirectory(fixture);
-            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
+            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "a-ten-copy.bin" })
                 File.WriteAllText(Path.Combine(fixture, name), "static-column fixture");
 
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs static Shell-column probe",
@@ -297,7 +297,7 @@ internal static class StaticShellFolderAdapterProbe
                 standard ? sizeKey : nativeKey, direction), Console.WriteLine);
             Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-column-visible=True; " +
                 "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=True; foreground-unchanged=True");
-            CheckBoundary(parent, foreground, "static column sorting");
+            CheckBoundary(parent, foreground, "static column sorting", expectVisible: true);
         }
         catch (Exception ex)
         {
@@ -399,6 +399,7 @@ internal static class StaticShellFolderAdapterProbe
 
     private static ulong[] ReadSortedValues(nint folderView, nint adapter, ShellColumnManager.NativeKey key, int direction)
     {
+        Console.WriteLine($"native-static-shell-column: callbacks-before-sort={ReadNativeComparisonStats()}");
         var sortPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
         var setSortHr = 0;
         try
@@ -425,7 +426,7 @@ internal static class StaticShellFolderAdapterProbe
             }
             finally { Marshal.FreeCoTaskMem(currentSort); }
         }
-        Console.WriteLine($"native-static-shell-column: CompareIDs total/custom/last-index={ReadNativeComparisonStats()}");
+        Console.WriteLine($"native-static-shell-column: callbacks-after-sort-before-probe-read={ReadNativeComparisonStats()}");
         Check(At<ItemCount>(folderView, 7)(folderView, SvgioAllView, out var count));
         if (count != 4) throw new Exception($"Expected four fixture items, got {count}.");
         var variant = Marshal.AllocCoTaskMem(24);

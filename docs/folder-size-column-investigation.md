@@ -81,3 +81,23 @@ Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将 Size 列�
 探针现分别执行四组检查并逐项报告，每个错误保留在 AggregateException 中，任意一组失败仍令整个实验失败；没有降低升/降序预期。无窗口自检注入首次异常、随后三个错误结果，确认四组都执行并最终报告四个失败；全正确的矩阵也通过。该自检随真实无窗口 folder-contract smoke 通过，日志 src/.state/static-sort-matrix.log，原生属性/空值合同亦通过。修正最终成功日志的 parent-visible 标志，与该实验实际 ShowWindow/边界检查一致。
 
 尚未运行创建视图的矩阵，未加入动态值缓存、递归扫描、IPropertyStore 装饰器或产品迁移。当前关键缺口仍是 DefView 是否在安全隔离环境中实际读取和排序适配列；应在后续集中实验分别取得 custom 与标准 Size 的四组结果，而不是继续扩展未被消费的数据通道。
+## 2026-10-27：独立 Desktop 四组排序实测（门槛未通过）
+
+通过新增 watchdog 模式 `static-shell-column-adapter-private-desktop` 在独立 Windows Desktop 执行；未调用 SwitchDesktop、SetForegroundWindow 或键鼠输入。私有 Desktop 内允许窗口显示以满足 DefView 条件，不等于无 HWND。超时外层 35 秒/内部 25 秒；两次均正常返回失败 exitCode=1，非挂死或超时。前后前台均 0x14A111A。
+
+首轮 20261027-232708-9067d0e3 完整执行四组：custom/Size 升序失败，两个降序表面通过。但初始名称顺序 hundred/ten/ten-copy/two 恰好对应 100/10/10/2，降序通过不能证明发生重排。改用 a-ten-copy/hundred/ten/two，使初始数值为 10/100/10/2，与任何预期方向均不同；仅为此夹具增加等值文件名别名，不改数值断言。修正排序结束的 visible 边界检查，与既有 ShowWindow 保持一致。
+
+最终记录：`src/.state/native-probe-watchdog/20261027-232840-a9f01e28.stdout.log`，SHA-256 `52C42DB67877FD1CC2A95F45B197D3A0AEE6A865DE0B12D005A2C9424E5F7E50`。DLL SHA-256 `87BEC6A41112A6093E5B9AAA744F790E98877D5D056B9AE835A9A14F0A44272F`。
+
+| 检查 | 请求/读回 | 实际项目数值顺序 | 结果 |
+| --- | --- | --- | --- |
+| custom 升序 | S_OK，方向 +1 | 10,100,10,2 | 失败 |
+| custom 降序 | S_OK，方向 -1 | 10,100,10,2 | 失败 |
+| PKEY_Size 升序 | S_OK，方向 +1 | 10,100,10,2 | 失败 |
+| PKEY_Size 降序 | S_OK，方向 -1 | 10,100,10,2 | 失败 |
+
+列表实际读出的 Size 文本仍均为 1 KB，自定义子项文本为空，名称与日期列可读；view-uses-adapter=1。每组排序前、排序完成且探针尚未自行读取数值时，CompareIDs/GetDetailsEx/GetDetailsOf/IPropertyStore 各计数无增量。每组完成后四次直接 GetDetailsEx 读回由探针自身造成，现已用明确的阶段标签区分，不能误称 DefView 开始消费属性。
+
+结论：静态 folder contract 仍通过，但 DefView 消费/排序门槛未通过。标准 PKEY_Size 对照也失败，使“仅缺自定义 schema”不足以解释结果；不能因此直接注册 schema、添加 IPropertyStore 装饰器或投入动态扫描缓存。仍需不同且有依据的视图身份/属性读取路径假设；当前证据不证明所有自定义 namespace 都不可行。产品架构、发布版与固定候选均未改变。
+
+C++ /W4 /WX、NativeProbe Release build 零警告错误，最终无窗口 folder-contract smoke 继续通过。独立 Desktop 实验是后台原生组件负向证据，不是用户可见文件管理体验验收。
