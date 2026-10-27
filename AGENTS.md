@@ -5,6 +5,8 @@
 
 - Windows UISettings light Foreground means dark theme. Test the actual SystemThemeMonitor/controller chain, not only the palette brightness helper; System/Light/Dark preferences stay portable in Theme.ini. Do not claim ExplorerBrowser/third-party menus are fully dark from WPF resource checks alone.
 
+- Native tooltip theme changes must leave synchronous TTN notifications before calling SetWindowTheme. Stamp each HWND before queuing so duplicate/reentrant notifications do not requeue the same theme. Native child/menu theme refreshes must also skip already applied themes; theme changes themselves may recreate children. A transient GUI timeout alone does not prove a background-paint callback caused a hang; preserve a dump before attributing cause.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.
