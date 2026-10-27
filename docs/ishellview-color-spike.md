@@ -24,6 +24,12 @@ watchdog 退出码 0、stderr 为空、前台 HWND 不变，探针退出后无�
 
 对直接调用序列尝试追加 Shift/Move 断言时，Drop 创建了目标副本但返回 `DROPEFFECT_NONE`，源文件仍存在。微软文档说明 `DragEnter`/`DragOver`/`Drop` 由 `DoDragDrop` 驱动，不能直接调用来代表完整 OLE 操作；因此该结果只说明当前 direct-callback 探针无法验证 Move，不表示真实 Shell 拖动不能移动文件。临时失败断言已撤回，原 Copy 探针重建后复验通过：日志 `src/.state/native-probe-watchdog/20261028-020200-80fea4fb.stdout.log` SHA-256 `9C4DF26603542BE3B674039139F13C03B2F4ED53E6C372ACA2988E1B0F06A0D8`。失败样本日志 `src/.state/native-probe-watchdog/20261028-020120-da410929.stdout.log` SHA-256 `3725D5070D986A5DD3FC1DE2A02499D2FCDF8A5E06F72BED9056F9B1E8D3BE90`。[IDropTarget::DragEnter](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idroptarget-dragenter)
 
+## 2026-10-28：直接 Drop 探针核验最终 effect
+
+复核发现 direct-callback Copy 探针此前只核对目标文件内容，尽管记录了 `IDropTarget::Drop` 输出的 `pdwEffect`，却未把最终 effect 纳入成功条件。现在每个 Copy 转移必须同时满足目标内容一致和 Drop 返回的 effect 为 `DROPEFFECT_COPY`。Release NativeProbe 构建 0 警告/错误；Private Desktop 探针退出码 0，选中项数据对象与已注册目录目标均返回 effect `0x1`、内容一致且源文件保留，主桌面前台未变。日志 `src/.state/native-probe-watchdog/20261028-062221-3b07c034.stdout.log`。其他未支持的 `IShellView.GetItemObject` drop-target 查询仍为预期失败。
+
+该修正只防止隔离探针把“文件出现但 Drop 未接受 Copy”误报为成功；仍直接调用 Drop 回调，不覆盖 `DoDragDrop`、鼠标命中、Move 源清理或产品宿主拖放。
+
 ## 2026-10-28：四窗格会话恢复探针复验
 
 使用当前 Release 构建运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，退出码 0，stderr 为空。隔离 consumer 确认状态流恢复到四个 pane；四个 pane 的 Shell 菜单路由通过，键盘命令与 Ctrl+A 覆盖 pane 1–3，F2 编辑及方向键焦点隔离覆盖四个 pane；Copy、Rename、Delete 后四窗格计数收敛，目录通知与 sibling-pane 隔离通过。前台 HWND 前后相同，NativeProbe/consumer 子进程退出后无残留。

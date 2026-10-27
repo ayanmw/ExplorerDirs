@@ -329,9 +329,11 @@ internal static class ShellViewDropTargetProbe
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
         LogAsyncOperationState(label, dataObject, "after-drop");
         var copied = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
+        // A created file alone does not prove the Shell accepted Copy; Drop may return a different final effect.
+        var copyEffectAccepted = (dropEffect & DropEffectMask) == DropEffectCopy;
         var targetFiles = Directory.GetFiles(Path.GetDirectoryName(destination)!).Select(Path.GetFileName).Order().ToArray();
-        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop-key-state=0x{dropKeyState:X}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
-        return copied;
+        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop-key-state=0x{dropKeyState:X}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copy-effect-accepted={copyEffectAccepted}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
+        return copyEffectAccepted && copied;
     }
 
     private static void LogAsyncOperationState(string label, nint dataObject, string stage)
