@@ -21,7 +21,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-    private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private const uint WmCommand = 0x0111;
     private const uint BrowseParent = 0x2000;
     private const uint BrowseBack = 0x4000;
@@ -2139,44 +2138,94 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         });
     }
 
-    internal void SetQuickFilter(QuickFilterSettings settings)
+    internal bool SetQuickFilter(QuickFilterSettings settings)
     {
         var requestVersion = ++_quickFilterRequestVersion;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => requestVersion == _quickFilterRequestVersion && ReferenceEquals(browser, _browser) &&
+            generation == _viewReadiness.Generation;
+        var previousSettings = _quickFilterSettings;
+        var previousFilter = _quickFilter;
+        var previousActive = _browserSite.QuickFilterActive;
+        var attachmentAttempted = false;
         LastQuickFilterStatus = $"start pattern={settings.Pattern},exclude={settings.ExcludeMatches},folders={settings.FilterFolders}";
         var pendingRestore = _pendingQuickFilterGroupRestore;
         CancelPendingQuickFilterGroupRestore();
         var searchActive = _location.IsSearchActive;
         PropertyKeyState? group = pendingRestore?.Group;
         var groupAscending = pendingRestore?.Ascending ?? false;
-        var hasGroup = !searchActive && (pendingRestore is not null ||
-            settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
-        var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
-        // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
-        // Keep the last confirmed user selection authoritative across that transition.
-        using var groupSelectionSuppression = hasGroup
-            ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
-            : null;
-        // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
-        var groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false);
-        LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={ReadCurrentGroupDiagnostic()}";
-        _quickFilterSettings = settings;
-        _quickFilter = null;
-        try { UpdateQuickFilterAttachment(searchActive); }
-        catch
+        var groupCleared = pendingRestore is not null;
+        IDisposable? groupSelectionSuppression = pendingRestore is not null
+            ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion) : null;
+        try
         {
-            if (groupCleared && group is not null) _ = TrySetGroup(group, groupAscending);
+            var hasGroup = !searchActive && (pendingRestore is not null ||
+                settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
+            var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
+            if (!Current()) return false;
+            // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
+            // Keep the last confirmed user selection authoritative across that transition.
+            groupSelectionSuppression ??= hasGroup
+                ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
+                : null;
+            // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
+            groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false);
+            if (!Current()) return false;
+            LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={ReadCurrentGroupDiagnostic()}";
+            if (!Current()) return false;
+            _quickFilterSettings = settings;
+            _quickFilter = null;
+            attachmentAttempted = true;
+            UpdateQuickFilterAttachment(searchActive);
+            if (!Current()) return false;
+            LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
+            QuickFilterChanged?.Invoke(_quickFilterSettings);
+            if (!Current()) return false;
+            // An uncreated tab keeps this preference for BuildWindowCore; there
+            // is no native view to refresh yet.
+            if (!searchActive && browser is not null)
+                Refresh(groupCleared && group is not null
+                    ? () =>
+                    {
+                        if (requestVersion == _quickFilterRequestVersion)
+                            QueueQuickFilterGroupRestore(group, groupAscending, initialItemCount, requestVersion);
+                    }
+                    : null);
+            return Current();
+        }
+        catch (Exception original)
+        {
+            if (!Current()) return false;
+            // A rejected attachment or refresh must not leave the new settings
+            // eligible for session/history saving. Reapply the previous filter;
+            // native failure does not guarantee that no state changed.
+            _quickFilterSettings = previousSettings;
+            _quickFilter = previousFilter;
+            _browserSite.QuickFilterActive = previousActive;
+            var failures = new List<Exception> { original };
+            try { if (attachmentAttempted) UpdateQuickFilterAttachment(searchActive); }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原筛选失败。", ex)); }
+            if (!Current()) return false;
+            try
+            {
+                if (groupCleared && group is not null && !TrySetGroup(group, groupAscending))
+                    failures.Add(new InvalidOperationException("恢复原分组失败。"));
+            }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原分组失败。", ex)); }
+            if (!Current()) return false;
+            CancelPendingQuickFilterGroupRestore();
+            var rollbackVersion = ++_quickFilterRequestVersion;
+            try { QuickFilterChanged?.Invoke(previousSettings); }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复筛选界面失败。", ex)); }
+            if (rollbackVersion != _quickFilterRequestVersion || !ReferenceEquals(browser, _browser) ||
+                generation != _viewReadiness.Generation) return false;
+            LastQuickFilterStatus += failures.Count == 1 ? "; previous-filter-restored" : "; rollback-incomplete";
+            if (failures.Count > 1)
+                throw new AggregateException("筛选失败，恢复原状态也未完整完成。", failures);
             throw;
         }
-        LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
-        QuickFilterChanged?.Invoke(_quickFilterSettings);
-        if (!searchActive)
-            Refresh(groupCleared && group is not null
-                ? () =>
-                {
-                    if (requestVersion == _quickFilterRequestVersion)
-                        QueueQuickFilterGroupRestore(group, groupAscending, initialItemCount, requestVersion);
-                }
-                : null);
+        finally { groupSelectionSuppression?.Dispose(); }
     }
 
     internal void SetHiddenItemsPreference(HiddenItemsPreference preference)
@@ -2316,30 +2365,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var browserUnknown = Marshal.GetIUnknownForObject(_browser);
         try
         {
-            var iid = FolderFilterSiteId;
-            if (Marshal.QueryInterface(browserUnknown, in iid, out var site) < 0) return;
-            try
-            {
-                var filterUnknown = filter is null ? IntPtr.Zero : Marshal.GetIUnknownForObject(filter);
-                try
-                {
-                    if (filterUnknown != IntPtr.Zero)
-                    {
-                        var filterIid = new Guid("9CC22886-DC8E-11D2-B1D0-00C04F8EEB3E");
-                        Check(Marshal.QueryInterface(filterUnknown, in filterIid, out var filterInterface));
-                        Marshal.Release(filterInterface);
-                    }
-                    Check(GetMethod<SetFolderFilter>(site, 3)(site, filterUnknown));
-                }
-                finally { if (filterUnknown != IntPtr.Zero) Marshal.Release(filterUnknown); }
-            }
-            finally { Marshal.Release(site); }
+            var filterUnknown = filter is null ? IntPtr.Zero : Marshal.GetIUnknownForObject(filter);
+            try { ShellFilterAttachment.Apply(browserUnknown, filterUnknown); }
+            finally { if (filterUnknown != IntPtr.Zero) Marshal.Release(filterUnknown); }
         }
         finally { Marshal.Release(browserUnknown); }
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int SetFolderFilter(nint self, nint filter);
 
     private void Refresh(Action? afterRefresh)
     {

@@ -967,7 +967,16 @@ public partial class PaneControl : UserControl
         if (Current is not { } state) return;
         var settings = new QuickFilterSettings(QuickFilterBox.Text,
             QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true);
-        state.Browser.SetQuickFilter(settings);
+        try { if (!state.Browser.SetQuickFilter(settings)) return; }
+        catch (Exception ex)
+        {
+            if (Current == state)
+            {
+                ShowQuickFilterEditor(state.Browser.QuickFilter);
+                Status.Text = $"应用筛选失败：{ex.Message}";
+            }
+            return;
+        }
         try
         {
             _quickFilterHistoryStore.Record(settings.Pattern);
@@ -1096,8 +1105,17 @@ public partial class PaneControl : UserControl
     {
         QuickFilterBox.IsDropDownOpen = false;
         if (Current is not { } state) return;
+        try { if (!state.Browser.SetQuickFilter(QuickFilterSettings.Empty)) return; }
+        catch (Exception ex)
+        {
+            if (Current == state)
+            {
+                ShowQuickFilterEditor(state.Browser.QuickFilter);
+                Status.Text = $"清除筛选失败：{ex.Message}";
+            }
+            return;
+        }
         ShowQuickFilterEditor(QuickFilterSettings.Empty);
-        state.Browser.SetQuickFilter(QuickFilterSettings.Empty);
         QuickFilterBar.Visibility = Visibility.Collapsed;
         StateChanged?.Invoke(this, EventArgs.Empty);
         RestoreFileFocusWhenActive();

@@ -21,6 +21,12 @@ if (args is ["--view-state-restore-smoke"])
     return;
 }
 
+if (args is ["--filter-attachment-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
+    return;
+}
+
 if (args is ["--window-placement-smoke"])
 {
     var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
@@ -599,6 +605,7 @@ try
           "cached view state keeps independent sort columns after its source changes");
     ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
     ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
+    ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
     var shellView = new FakeShellViewStateSource
     {
         Mode = 3,

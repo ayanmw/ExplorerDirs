@@ -63,6 +63,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
                 CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
+                CheckUnhostedFilterFailures(sourcePane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -291,6 +292,74 @@ internal static class PaneTabTransferProbe
                 (nint)host.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(host)! == 0,
                 "settled-path snapshot checks never create a native Shell view");
         }
+    }
+
+    private static void CheckUnhostedFilterFailures(UIElement pane)
+    {
+        var paneType = pane.GetType();
+        var tabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var state = ((TabItem)tabs.SelectedItem!).Tag;
+        var browser = state.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(state)!;
+        var hostType = browser.GetType();
+        var filterProperty = hostType.GetProperty("QuickFilter", InstanceMembers)!;
+        var filterType = filterProperty.PropertyType;
+        var pattern = filterType.GetProperty("Pattern", InstanceMembers)!;
+        var initial = Activator.CreateInstance(filterType, ["*.txt", false, false])!;
+        Ensure((bool)hostType.GetMethod("SetQuickFilter", InstanceMembers)!.Invoke(browser, [initial])!,
+            "an unattached tab accepts a filter for its future view");
+        paneType.GetMethod("FocusQuickFilter", InstanceMembers)!.Invoke(pane, null);
+        var editor = (ComboBox)paneType.GetField("QuickFilterBox", InstanceMembers)!.GetValue(pane)!;
+        var bar = (FrameworkElement)paneType.GetField("QuickFilterBar", InstanceMembers)!.GetValue(pane)!;
+        var status = (TextBlock)paneType.GetField("Status", InstanceMembers)!.GetValue(pane)!;
+        var changed = hostType.GetEvent("QuickFilterChanged", InstanceMembers)!;
+        var reject = false;
+        var rejectRollback = false;
+        Action failOnce = () =>
+        {
+            if (!reject && !rejectRollback) return;
+            reject = false;
+            throw new COMException("synthetic filter notification failure", unchecked((int)0x80004005));
+        };
+        var callback = System.Linq.Expressions.Expression.Lambda(changed.EventHandlerType!,
+            System.Linq.Expressions.Expression.Invoke(System.Linq.Expressions.Expression.Constant(failOnce)),
+            System.Linq.Expressions.Expression.Parameter(filterType)).Compile();
+        changed.GetAddMethod(true)!.Invoke(browser, [callback]);
+        try
+        {
+            reject = true;
+            editor.Text = "*.log";
+            var mode = (ComboBox)paneType.GetField("QuickFilterMode", InstanceMembers)!.GetValue(pane)!;
+            var folders = (CheckBox)paneType.GetField("FilterFoldersCheckBox", InstanceMembers)!.GetValue(pane)!;
+            mode.SelectedIndex = 1;
+            folders.IsChecked = true;
+            paneType.GetMethod("ApplyQuickFilter", InstanceMembers)!.Invoke(pane, null);
+            Ensure(ReferenceEquals(filterProperty.GetValue(browser), initial) && editor.Text == "*.txt" &&
+                mode.SelectedIndex == 0 && folders.IsChecked == false &&
+                status.Text.StartsWith("应用筛选失败", StringComparison.Ordinal),
+                "failed apply rolls back settings/editor and reports locally without escaping the pane");
+            var history = paneType.GetField("_quickFilterHistoryStore", InstanceMembers)!.GetValue(pane)!;
+            Ensure(!((IEnumerable<string>)history.GetType().GetMethod("Load", InstanceMembers)!.Invoke(history, null)!).Contains("*.log"),
+                "rejected filter changes are not recorded as successful history");
+            reject = true;
+            paneType.GetMethod("ClearQuickFilter", InstanceMembers)!.Invoke(pane, null);
+            Ensure((string)pattern.GetValue(filterProperty.GetValue(browser))! == "*.txt" && editor.Text == "*.txt" &&
+                bar.Visibility == Visibility.Visible && status.Text.StartsWith("清除筛选失败", StringComparison.Ordinal),
+                "failed clear keeps the previous filter and its editor available");
+            rejectRollback = true;
+            editor.Text = "*.bad";
+            paneType.GetMethod("ApplyQuickFilter", InstanceMembers)!.Invoke(pane, null);
+            Ensure((string)pattern.GetValue(filterProperty.GetValue(browser))! == "*.txt" &&
+                status.Text.Contains("恢复原状态也未完整完成", StringComparison.Ordinal),
+                "rollback notification failure is reported explicitly without escaping the pane");
+        }
+        finally { changed.GetRemoveMethod(true)!.Invoke(browser, [callback]); }
+        editor.Text = "*.csv";
+        paneType.GetMethod("ApplyQuickFilter", InstanceMembers)!.Invoke(pane, null);
+        Ensure((string)pattern.GetValue(filterProperty.GetValue(browser))! == "*.csv",
+            "a later successful filter can replace the restored one");
+        Ensure(hostType.GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
+            (nint)hostType.GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
+            "filter failure checks never create a Shell view");
     }
 
     private static void CheckUnhostedReopenHistory(UIElement pane)
