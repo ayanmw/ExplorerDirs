@@ -20,12 +20,16 @@ internal sealed class ShellViewStateStore
             return false;
         }
 
-        var length = new FileInfo(path).Length;
+        // Inspect and read the same open file; atomic replacement may change
+        // the path, but cannot redirect this handle to an unchecked payload.
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        var length = stream.Length;
         if (length > MaxStreamBytes)
             throw new InvalidDataException("Saved native Shell view state exceeds the probe stream limit.");
 
-        bytes = File.ReadAllBytes(path);
-        if (bytes.Length != length)
+        bytes = new byte[(int)length];
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() != -1)
             throw new InvalidDataException("Saved native Shell view state changed while it was being read.");
         return true;
     }

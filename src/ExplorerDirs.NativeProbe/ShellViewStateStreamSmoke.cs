@@ -71,6 +71,7 @@ internal static class ShellViewStateStreamSmoke
         VerifySnapshotPreservesWriterPosition();
         VerifyClosedHostRejectsStreams();
         VerifyConcurrentSessionProtection();
+        VerifyStoredStateSizeBoundaries();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
 
@@ -95,6 +96,31 @@ internal static class ShellViewStateStreamSmoke
         var actual = ReadBytes(host, bytes.Length);
         Check(actual.SequenceEqual(bytes), "a separate process reads the exact persisted view-state stream");
         return 0;
+    }
+
+    private static void VerifyStoredStateSizeBoundaries()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ExplorerDirs.NativeProbe", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var store = new ShellViewStateStore(directory);
+        var id = Guid.NewGuid();
+        var path = Path.Combine(directory, id.ToString("N") + ".viewstate");
+        try
+        {
+            foreach (var size in new[] { 0, 65_536 })
+            {
+                var expected = Enumerable.Repeat((byte)0x5A, size).ToArray();
+                File.WriteAllBytes(path, expected);
+                Check(store.TryLoad(id, out var loaded) && loaded.SequenceEqual(expected),
+                    $"stored state reads exactly {size} bytes within the size limit");
+            }
+            File.WriteAllBytes(path, new byte[65_537]);
+            var oversizedRejected = false;
+            try { store.TryLoad(id, out _); } catch (InvalidDataException) { oversizedRejected = true; }
+            Check(oversizedRejected && new FileInfo(path).Length == 65_537,
+                "oversized input is rejected without modifying the saved state");
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     private static void VerifyConcurrentSessionProtection()
