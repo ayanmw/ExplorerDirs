@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：隔离原型真实 F2 方向键确认
+
+用户在隔离候选窗口 `125449 / 179260` 中选取 sample 文件，手动按 F2 后确认进入重命名，使用方向键时编辑状态保持。该次只覆盖一个样本及当前查看方式；未覆盖四方向键逐项、Shift/Ctrl 组合、跨窗格竞争焦点、ExplorerBrowser 产品宿主或不同视图模式，因此仅记为隔离原型的可见交互证据，不关闭产品焦点验收。
+
 ## 2026-10-28：Private Desktop drop-target 数据对象复验
 
 当前 Release NativeProbe 的 `drop-target-private-desktop` 通过真实 Shell `IDataObject` 直接调用目标 `IDropTarget::DragEnter/DragOver/Drop`。选中视图项的数据对象成功复制到另一 `IShellView` 的目标目录及由目标 `IShellFolder::CreateViewObject` 创建并注册的 HWND；目标文件内容正确、源文件保留，Copy effect 被接受。把源 `IShellView.GetItemObject` 当作 drop target 查询返回 `E_NOINTERFACE`，因此源数据对象与目录 drop target 的角色已分别确认。
