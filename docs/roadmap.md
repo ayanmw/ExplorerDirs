@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：加入 Q-Dir 式拖动悬停标签自动切换
+
+- Q-Dir 官方英文菜单表列出 “Auto select drag-over time” 及 0.2、0.5、1、1.5、2、3 秒档位；Explorer Dirs 在“标签页”菜单提供相同档位及关闭选项。默认 1 秒是本项目的体验选择，官网字符串未说明 Q-Dir 的默认值。
+- 每个窗格只有在可识别的 Shell 文件/文件夹拖动悬停到另一个标签时才启动计时；应用自己的标签重排不触发。拖出、换目标、放下或窗格卸载会取消；计时到期只切换标签，不执行文件操作。设置写入独立便携 `TabHoverActivation.ini`。
+- 配置、目标替换/陈旧 DragLeave、取消和接线 SettingsSmoke 通过，App Release build 0 警告/错误；没有启动 GUI，因此鼠标悬停时序、拖放游标反馈和切换后是否顺利落入文件区仍待可见验收。[Q-Dir 官方功能表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)。
+
 ## 2026-10-27：复核 Q-Dir 当前官方版本与地址栏树基线
 
 - 官方产品页仍列 Q-Dir 12.82（2026-10-24）；最近版本说明提到地址栏目录树改进，但没有详细交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑和驱动器/祖先定位，本轮未发现仅凭版本说明即可确认的新代码差距。下一步应把重点放在当前版本的可见对照验收与已记录的 Shell P0 缺口，避免将泛化优化说明当作具体需求。依据：[Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)；调研记录：[竞品调研](competitive-research.md#2026-10-27-官方版本基线复核)。

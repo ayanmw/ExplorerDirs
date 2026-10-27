@@ -35,6 +35,17 @@
                 <MenuItem Header="恢复关闭的标签" InputGestureText="Ctrl+Shift+T"
                           ToolTip="文件视图聚焦且单选文件夹时，Ctrl+Shift+T 在新标签打开该文件夹；其他情况下恢复关闭的标签。"
                           Click="ReopenTab_Click"/>
+                <MenuItem x:Name="TabHoverActivationMenu" Header="拖动悬停自动切换"
+                          ToolTip="拖动文件到其他标签上时，停留指定时间后切换到该标签。"
+                          SubmenuOpened="TabHoverActivationMenu_SubmenuOpened">
+                    <MenuItem Header="关闭" Tag="0" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="0.2 秒" Tag="200" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="0.5 秒" Tag="500" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="1 秒" Tag="1000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="1.5 秒" Tag="1500" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="2 秒" Tag="2000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="3 秒" Tag="3000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                </MenuItem>
             </MenuItem>
             <MenuItem x:Name="QuickLinksMenu" Header="快速链接(_Q)" InputGestureText="Ctrl+Q" SubmenuOpened="QuickLinksMenu_SubmenuOpened"/>
             <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>

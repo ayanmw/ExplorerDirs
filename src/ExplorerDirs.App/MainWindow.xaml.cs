@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
+    private readonly TabHoverActivationPreference _tabHoverActivationPreference;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
     private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
     private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
@@ -49,6 +50,7 @@ public partial class MainWindow : Window
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
+    private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private bool _showStatusBar = true;
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
@@ -186,6 +188,12 @@ public partial class MainWindow : Window
         _multilineTabHeadersStore = new MultilineTabHeadersStore(Path.Combine(
             _profileDirectory, "MultilineTabHeaders.ini"));
         _multilineTabHeaders = _multilineTabHeadersStore.Load();
+        _tabHoverActivationPreference = new TabHoverActivationPreference(Path.Combine(
+            _profileDirectory, "TabHoverActivation.ini"));
+        _tabHoverActivationDelayMilliseconds = _tabHoverActivationPreference.Load();
+        if (_tabHoverActivationPreference.LoadWarning is { } tabHoverWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? tabHoverWarning : $"{EnvironmentStatus.Text} {tabHoverWarning}";
         _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
             _profileDirectory, "StatusBar.ini"));
         _showStatusBar = _statusBarVisibilityStore.Load();
@@ -342,6 +350,7 @@ public partial class MainWindow : Window
         ApplyCompactMode();
         ApplyStatusBarVisibility();
         ApplyTabStripVisibility();
+        ApplyTabHoverActivationDelay();
         ApplyMultilineTabHeaders();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
@@ -971,6 +980,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TabHoverActivationMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
+        UpdateTabHoverActivationMenu();
+
+    private void TabHoverActivation_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: int delayMilliseconds }) return;
+        try
+        {
+            _tabHoverActivationPreference.Save(delayMilliseconds);
+            _tabHoverActivationDelayMilliseconds = delayMilliseconds;
+            ApplyTabHoverActivationDelay();
+            EnvironmentStatus.Text = delayMilliseconds == 0
+                ? "已关闭拖动悬停标签自动切换。"
+                : $"拖动悬停 {delayMilliseconds / 1000d:0.##} 秒后切换标签。";
+        }
+        catch (Exception ex)
+        {
+            UpdateTabHoverActivationMenu();
+            EnvironmentStatus.Text = $"标签悬停设置保存失败：{ex.Message}";
+        }
+    }
+
     private void StatusBar_Click(object sender, RoutedEventArgs e)
     {
         var next = StatusBarMenu.IsChecked;
@@ -1078,6 +1109,20 @@ public partial class MainWindow : Window
     {
         MultilineTabHeadersMenu.IsChecked = _multilineTabHeaders;
         foreach (var pane in _panes) pane.SetMultilineTabHeaders(_multilineTabHeaders);
+    }
+
+    private void ApplyTabHoverActivationDelay()
+    {
+        foreach (var pane in _panes)
+            pane.SetTabHoverActivationDelay(_tabHoverActivationDelayMilliseconds);
+        UpdateTabHoverActivationMenu();
+    }
+
+    private void UpdateTabHoverActivationMenu()
+    {
+        foreach (var item in TabHoverActivationMenu.Items.OfType<MenuItem>())
+            item.IsChecked = int.TryParse(item.Tag?.ToString(), out var delay) &&
+                delay == _tabHoverActivationDelayMilliseconds;
     }
 
     private void UpdateTabStripVisibilityMenu()

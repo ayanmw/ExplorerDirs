@@ -512,6 +512,7 @@ try
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
     QuickFilterHistoryStoreSmoke.Run(root);
+    TabHoverActivationSmoke.Run(root);
     if (args.Length == 2 && args[0] == "--inspect-qdr")
     {
         var inspectedQdr = QdrImporter.Load(args[1]);

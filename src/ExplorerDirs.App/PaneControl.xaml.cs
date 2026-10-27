@@ -20,6 +20,9 @@ public partial class PaneControl : UserControl
     private readonly Func<ViewState> _newTabView;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
+    private readonly DispatcherTimer _tabHoverActivationTimer = new();
+    private readonly TabHoverActivationGate _tabHoverActivationGate = new();
+    private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
@@ -90,6 +93,16 @@ public partial class PaneControl : UserControl
     {
         _alwaysShowTabStrip = alwaysShow;
         UpdateTabStripVisibility();
+    }
+
+    internal void SetTabHoverActivationDelay(int delayMilliseconds)
+    {
+        if (!TabHoverActivationPreference.AllowedDelayMilliseconds.Contains(delayMilliseconds))
+            throw new ArgumentOutOfRangeException(nameof(delayMilliseconds));
+        CancelTabHoverActivation();
+        _tabHoverActivationDelayMilliseconds = delayMilliseconds;
+        if (delayMilliseconds > 0)
+            _tabHoverActivationTimer.Interval = TimeSpan.FromMilliseconds(delayMilliseconds);
     }
 
     public bool MultilineTabHeaders
@@ -169,6 +182,8 @@ public partial class PaneControl : UserControl
         _newTabView = newTabView;
         _quickFilterFavoritesStore = quickFilterFavoritesStore;
         _quickFilterHistoryStore = quickFilterHistoryStore;
+        _tabHoverActivationTimer.Tick += TabHoverActivationTimer_Tick;
+        Unloaded += (_, _) => CancelTabHoverActivation();
         QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
@@ -1529,6 +1544,7 @@ public partial class PaneControl : UserControl
         tab.PreviewMouseRightButtonDown += (_, _) => Tabs.SelectedItem = tab;
         tab.AllowDrop = true;
         tab.DragOver += Tab_DragOver;
+        tab.DragLeave += Tab_DragLeave;
         tab.Drop += Tab_Drop;
         tab.ContextMenu = CreateTabContextMenu(state);
         Tabs.Items.Add(tab);
@@ -1729,13 +1745,49 @@ public partial class PaneControl : UserControl
 
     private void Tab_DragOver(object sender, DragEventArgs e)
     {
-        if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source ||
-            ((TabState)source.Tag).IsPinned != ((TabState)target.Tag).IsPinned)
+        if (sender is not TabItem target)
         {
             e.Effects = DragDropEffects.None;
             e.Handled = true;
             return;
         }
+
+        if (IsOwnTabDrag(e.Data))
+        {
+            CancelTabHoverActivation();
+            if (_draggedTab is not { } source || ((TabState)source.Tag).IsPinned != ((TabState)target.Tag).IsPinned)
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+        }
+        else
+        {
+            if (ReferenceEquals(Tabs.SelectedItem, target))
+            {
+                CancelTabHoverActivation();
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+            var started = _tabHoverActivationGate.Begin(target, isOwnTabDrag: false,
+                hasShellLocationData: ShellTabDropTarget.HasShellLocationData(e.Data),
+                delayMilliseconds: _tabHoverActivationDelayMilliseconds);
+            if (started)
+            {
+                _tabHoverActivationTimer.Interval = TimeSpan.FromMilliseconds(_tabHoverActivationDelayMilliseconds);
+                _tabHoverActivationTimer.Start();
+            }
+            else if (!_tabHoverActivationGate.HasPendingTarget)
+            {
+                _tabHoverActivationTimer.Stop();
+            }
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         e.Effects = DragDropEffects.Move;
         e.Handled = true;
         if (TabHeaderScroll is not { } scroll) return;
@@ -1748,6 +1800,7 @@ public partial class PaneControl : UserControl
 
     private void Tab_Drop(object sender, DragEventArgs e)
     {
+        CancelTabHoverActivation();
         if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source)
         {
             e.Effects = DragDropEffects.None;
@@ -1759,8 +1812,28 @@ public partial class PaneControl : UserControl
         e.Handled = true;
     }
 
+    private void Tab_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is TabItem target && _tabHoverActivationGate.Leave(target))
+            _tabHoverActivationTimer.Stop();
+    }
+
+    private void TabHoverActivationTimer_Tick(object? sender, EventArgs e)
+    {
+        _tabHoverActivationTimer.Stop();
+        if (_tabHoverActivationGate.TakeTarget() is TabItem target && Tabs.Items.Contains(target))
+            Tabs.SelectedItem = target;
+    }
+
+    private void CancelTabHoverActivation()
+    {
+        _tabHoverActivationTimer.Stop();
+        _tabHoverActivationGate.Cancel();
+    }
+
     private void TabStrip_DragOver(object sender, DragEventArgs e)
     {
+        CancelTabHoverActivation();
         // TabItem handles the app's private reorder payload; the strip only accepts Shell folders.
         e.Effects = _draggedTab is null && ShellTabDropTarget.HasShellLocationData(e.Data)
             ? GetTabStripDropEffect(e.AllowedEffects)
@@ -1770,6 +1843,7 @@ public partial class PaneControl : UserControl
 
     private void TabStrip_Drop(object sender, DragEventArgs e)
     {
+        CancelTabHoverActivation();
         var effect = GetTabStripDropEffect(e.AllowedEffects);
         if (_draggedTab is null && effect != DragDropEffects.None &&
             ShellTabDropTarget.TryGetDroppedFolder(e.Data, out var location))
@@ -1829,6 +1903,7 @@ public partial class PaneControl : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        CancelTabHoverActivation();
         if (e.RemovedItems.Count != 0) CloseAddressTree();
         foreach (var previous in e.RemovedItems.OfType<TabItem>())
         {
