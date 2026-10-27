@@ -182,9 +182,14 @@ internal static class AddressEditingProbe
         Ensure(address.Text == "unsubmitted current-tab text", "a background tab cannot replace the active tab's draft");
     }
 
-    private static void Notify(object browser, string eventName, string value, long? requestVersion = null) =>
+    private static void Notify(object browser, string eventName, string value, long? requestVersion = null)
+    {
+        // Production commits the host location before delivering its queued
+        // notice. Keep this synthetic fixture faithful to that ordering.
+        if (eventName == "Navigated") Call(Field(browser, "_location")!, "CompleteDirectory", value, true);
         ((EventHandler<ShellNavigationNotice>?)Field(browser, eventName))?.Invoke(browser,
             new(value, requestVersion ?? (long)Field(browser, "_navigationRequestVersion")!));
+    }
 
     private static void RaiseMouseDown(UIElement element, MouseButton button) => element.RaiseEvent(
         new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button) { RoutedEvent = Mouse.MouseDownEvent });

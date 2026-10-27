@@ -4,7 +4,9 @@
 
 ## 2026-10-27 数据快照与排队标签呈现分离
 
-Browser 的 ShellNavigationState 是已确认目录来源，Pane.TabState.Path 是 Navigated 后更新的呈现缓存。两者在 Dispatcher Background 通知前可能不同。SnapshotTabs、SnapshotPins、DuplicateTab、CopyTabFrom、CloseTab 的持久化/新标签路径改用 Browser.CurrentPath；前两者使用同一来源，使固定元数据不因路径滞后而在恢复时失配。查看状态仍走既有捕获和失败拒绝逻辑，搜索位置仍使用真实范围目录，不保存 search URI。不为消除这个时差而同步执行界面通知或改变焦点时序。
+Browser 的 ShellNavigationState 是已确认目录来源。Pane.TabState.Path 曾是 Navigated 后更新的独立缓存，与浏览器在 Dispatcher Background 通知前可能不同；现在该属性直接派生自 Browser.CurrentPath，删除构造与通知中的重复赋值。当前目录命令、扫描、地址栏、新标签和搜索关闭从同一来源读取；界面元素仍可以保留旧呈现直到通知到达，不把界面文字作为操作目标。
+
+SnapshotTabs、SnapshotPins、DuplicateTab、CopyTabFrom、CloseTab 的持久化/新标签路径也明确使用 Browser.CurrentPath；前两者使用同一来源，使固定元数据不因路径滞后而在恢复时失配。查看状态仍走既有捕获和失败拒绝逻辑，搜索位置仍使用真实范围目录，不保存 search URI。不为消除这个时差而同步执行界面通知或改变焦点时序。合成目录通知夹具先更新浏览器位置再通知 Pane，遵循生产的 commit-before-notify 顺序。
 
 ## 2026-10-27 原子视图快照的访问范围
 

@@ -246,8 +246,15 @@ internal static class PaneTabTransferProbe
         // the pane notice. This models the production interval before queued
         // Navigated delivery; it does not model native navigation timing.
         browser.GetType().GetMethod("Navigate", InstanceMembers)!.Invoke(browser, [nextPath]);
-        Ensure((string)stateType.GetProperty("Path", InstanceMembers)!.GetValue(state)! == oldPath,
+        var address = (TextBox)paneType.GetField("Address", InstanceMembers)!.GetValue(source)!;
+        Ensure(address.Text == oldPath,
             "pane presentation still has the earlier directory before notification");
+        Ensure((string)paneType.GetProperty("CurrentPath", InstanceMembers)!.GetValue(source)! == nextPath,
+            "current-directory commands use the settled path before pane notification");
+        stateType.GetProperty("SearchRequestPending", InstanceMembers)!.SetValue(state, true);
+        paneType.GetMethod("CloseSearch", InstanceMembers)!.Invoke(source, null);
+        Ensure(ReadBrowserPath(original) == nextPath,
+            "closing a pending search does not navigate back to the stale pane directory");
         var snapshots = ((System.Collections.IEnumerable)paneType.GetMethod("SnapshotTabs", InstanceMembers)!
             .Invoke(source, null)!).Cast<object>().ToArray();
         Ensure((string)snapshots[0].GetType().GetProperty("Path", InstanceMembers)!.GetValue(snapshots[0])! == nextPath,
@@ -258,6 +265,13 @@ internal static class PaneTabTransferProbe
         Ensure(pins.Length == 1 && (string)pins[0].GetType().GetProperty("Path", InstanceMembers)!.GetValue(pins[0])! == nextPath,
             "pinned metadata agrees with the settled session directory");
         paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [state]);
+        paneType.GetField("_newTabUsesCurrentFolder", InstanceMembers)!.SetValue(source, true);
+        paneType.GetMethod("NewTab", InstanceMembers)!.Invoke(source, null);
+        Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
+            "new-tab current-folder mode follows the settled directory");
+        tabs.SelectedItem = original;
+        paneType.GetMethod("FocusAddress", InstanceMembers)!.Invoke(source, null);
+        Ensure(address.Text == nextPath, "address editing starts from the settled directory");
         paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(source, null);
         Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
             "duplicating before notice delivery opens the settled directory");

@@ -74,7 +74,9 @@ public partial class PaneControl : UserControl
         public required PaneControl Owner { get; set; }
         public required TabItem Tab { get; init; }
         public required ExplorerBrowserHost Browser { get; init; }
-        public required string Path { get; set; }
+        // Shell confirms location before the queued pane notification updates
+        // the chrome. Commands must not use a second, lagging directory model.
+        public string Path => Browser.CurrentPath;
         public bool IsPinned { get; set; }
         public bool SearchRequestPending { get; set; }
         public string? SearchScopePath { get; set; }
@@ -1417,7 +1419,7 @@ public partial class PaneControl : UserControl
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
-        var state = new TabState { Owner = this, Tab = tab, Browser = browser, Path = path, IsPinned = pinned,
+        var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,
             AddressHistory = addressHistory ?? new AddressPathHistory() };
         state.AddressHistory.Record(path);
         tab.Tag = state;
@@ -1519,7 +1521,6 @@ public partial class PaneControl : UserControl
             }
             var restoreSearchCloseFocus = completesInput && ReferenceEquals(owner._searchCloseFocusPending, state);
             if (restoreSearchCloseFocus) owner._searchCloseFocusPending = null;
-            state.Path = navigatedPath;
             state.AddressHistory.Record(navigatedPath);
             owner.UpdateTabHeader(state);
             if (owner.Current == state)
@@ -1560,7 +1561,6 @@ public partial class PaneControl : UserControl
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
             if (completesInput) state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state)) return;
-            state.Path = browser.CurrentPath;
             owner.UpdateTabHeader(state);
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
             if (owner.Current != state) return;
