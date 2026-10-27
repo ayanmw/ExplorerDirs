@@ -128,13 +128,26 @@ internal static class QdrImporter
         for (var pane = 1; pane <= 4; pane++)
         {
             var entries = new Dictionary<int, (string Suffix, string Raw, bool Encoded)>();
+            var ambiguousLocations = new HashSet<int>();
             foreach (var pair in values)
             {
                 var match = LocationKey.Match(pair.Key);
                 if (!match.Success || int.Parse(match.Groups[2].Value) != pane) continue;
                 var index = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : -1;
+                if (ambiguousLocations.Contains(index)) continue;
                 var encoded = match.Groups[1].Value.Equals("Folder", StringComparison.OrdinalIgnoreCase);
-                if (entries.TryGetValue(index, out var previous) && !previous.Encoded) continue;
+                if (entries.TryGetValue(index, out var previous))
+                {
+                    if (previous.Encoded != encoded)
+                    {
+                        // DirN and FolderN are alternate encodings of one location, not separate tabs.
+                        // Their conflict has no documented precedence, so never silently redirect the import.
+                        entries.Remove(index);
+                        ambiguousLocations.Add(index);
+                        warnings.Add("同一标签同时包含明文路径与编码 Shell 路径，已跳过该标签。");
+                    }
+                    continue;
+                }
                 entries[index] = (pane + (index < 0 ? "" : "_" + index), pair.Value, encoded);
             }
             var resolved = new SortedDictionary<int, TabSettings>();
@@ -186,7 +199,8 @@ internal static class QdrImporter
             if (current is not null)
             {
                 // Q-Dir omits the active tab's numbered Folder entry in saved files.
-                currentIndex = Enumerable.Range(0, 100).FirstOrDefault(index => !entries.ContainsKey(index), -1);
+                currentIndex = Enumerable.Range(0, 100).FirstOrDefault(index =>
+                    !entries.ContainsKey(index) && !ambiguousLocations.Contains(index), -1);
                 if (currentIndex >= 0) resolved[currentIndex] = current;
                 else warnings.Add("单窗格标签超过 100 个，已跳过超出部分。");
             }

@@ -15,6 +15,25 @@ internal static class QdrImportSmoke
             imported.Panes[0][1].View.Mode == 3 && imported.Panes[1][0].Path == @"D:\名字 & 目录",
             "QDR preserves pane mapping, active tab gap, reordered tabs, Unicode and ampersand paths");
         Require(imported.Warnings.Any(warning => warning.Contains("排序")), "private view blobs are reported as unsupported");
+        foreach (var locations in new[]
+        {
+            "Dir1=C:\\text-path\nFolder1=%0600FF00\n",
+            "Folder1=%0600FF00\nDir1=C:\\text-path\n"
+        })
+        {
+            var resolverCalls = 0;
+            var conflictingLocations = QdrImporter.Parse(
+                "Q-Dir Version=12.79\nViewMode=0\n" + locations + "Dir2=D:\\keep\n",
+                (value, encoded) =>
+                {
+                    resolverCalls++;
+                    return encoded ? @"C:\encoded-pidl" : value;
+                });
+            Require(conflictingLocations.TabCount == 1 &&
+                conflictingLocations.Panes[1][0].Path == @"D:\keep" && resolverCalls == 1 &&
+                conflictingLocations.Warnings.Any(warning => warning.Contains("同时包含") && warning.Contains("已跳过")),
+                "ambiguous Dir/Folder aliases skip only the conflicting QDR location regardless of field order");
+        }
         var launchState = QdrLaunchSession.Create(imported, @"C:\Users\marvin");
         Require(launchState.Layout == 4 && launchState.Panes[0].Count == 3 &&
                 launchState.Panes[1][0].Path == imported.Panes[1][0].Path &&
