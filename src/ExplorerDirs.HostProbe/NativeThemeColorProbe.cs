@@ -30,9 +30,55 @@ internal static class NativeThemeColorProbe
                 "a provider without IVisualProperties is explicitly unsupported");
         }
         finally { Marshal.Release(unsupported); }
-        Console.WriteLine("Native theme colors: PASS (COM fixture; no windows or Shell views)");
+        CheckTooltipNotifications(type, members);
+        Console.WriteLine("Native theme colors: PASS (COM fixture and hidden tooltip; no visible windows or Shell views)");
         return 0;
     }
+
+    private static void CheckTooltipNotifications(Type type, BindingFlags members)
+    {
+        InitCommonControls();
+        var window = CreateWindowEx(0, "tooltips_class32", "", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        Check(window != 0, "hidden native tooltip fixture is created without a Shell view");
+        var notification = Marshal.AllocHGlobal(Marshal.SizeOf<TooltipHeader>());
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        var posted = 0;
+        System.Windows.Threading.DispatcherHookEventHandler hook = (_, _) => posted++;
+        dispatcher.Hooks.OperationPosted += hook;
+        try
+        {
+            Marshal.StructureToPtr(new TooltipHeader { Window = window, Code = -530 }, notification, false);
+            var apply = type.GetMethod("ApplyTooltip", members)!;
+            apply.Invoke(null, [notification]);
+            apply.Invoke(null, [notification]);
+            Check(posted == 1 && GetProp(window, "ExplorerDirs.TooltipTheme") == 2,
+                "repeated tooltip notifications coalesce before deferred theme application");
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+            posted = 0;
+            apply.Invoke(null, [notification]);
+            Check(posted == 0, "an already themed tooltip does not requeue SetWindowTheme");
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [false]);
+            apply.Invoke(null, [notification]);
+            Check(posted == 1 && GetProp(window, "ExplorerDirs.TooltipTheme") == 1,
+                "switching to light invalidates the tooltip color stamp once");
+            frame = new System.Windows.Threading.DispatcherFrame();
+            dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+        }
+        finally
+        {
+            dispatcher.Hooks.OperationPosted -= hook;
+            Marshal.FreeHGlobal(notification);
+            DestroyWindow(window);
+        }
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct TooltipHeader { public nint Window; public nuint Id; public int Code; }
+    [DllImport("comctl32.dll")] private static extern void InitCommonControls();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowEx(uint ex, string cls, string name, uint style, int x, int y, int w, int h, nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetProp(nint window, string name);
 
     private static void Check(bool condition, string message)
     {

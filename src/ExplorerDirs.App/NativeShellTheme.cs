@@ -9,6 +9,7 @@ internal static class NativeShellTheme
 {
     private static bool _dark;
     private static readonly Subclass HeaderParentProcedure = HeaderParentMessage;
+    private static readonly Subclass BackgroundProcedure = BackgroundMessage;
     private static readonly Subclass MenuFrameProcedure = MenuFrameMessage;
     internal static void SetProcessTheme(bool dark)
     {
@@ -33,6 +34,7 @@ internal static class NativeShellTheme
 
     private static void ApplyOne(nint window)
     {
+        _ = SetWindowSubclass(window, BackgroundProcedure, 0xED7603, 0);
         AllowDarkModeForWindow(window, _dark);
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
@@ -40,6 +42,23 @@ internal static class NativeShellTheme
         if (name.ToString() == "SysHeader32")
             _ = SetWindowSubclass(GetParent(window), HeaderParentProcedure, 0xED7601, 0);
     }
+
+    // Newly created hosts can erase before OnViewCreated supplies IVisualProperties.
+    // Fill only the native erase pass; leave Shell content, input and painting intact.
+    private static nint BackgroundMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nint data)
+    {
+        if (_dark && message == 0x0014 && wParam != 0 && GetClientRect(window, out var rect))
+        {
+            var previous = SetDCBrushColor((nint)wParam, 0x202020);
+            try { FillRect((nint)wParam, ref rect, GetStockObject(18)); }
+            finally { SetDCBrushColor((nint)wParam, previous); }
+            return 1;
+        }
+        if (message == 0x0082) RemoveWindowSubclass(window, BackgroundProcedure, id);
+        return DefSubclassProc(window, message, wParam, lParam);
+    }
+    [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out NativeRect rect);
+    [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref NativeRect rect, nint brush);
 
     internal static int ApplyView(nint view)
     {
@@ -124,12 +143,25 @@ internal static class NativeShellTheme
         var name = new StringBuilder(32);
         GetClassName(header.Window, name, name.Capacity);
         if (name.ToString() != "tooltips_class32") return;
-        try { AllowDarkModeForWindow(header.Window, _dark); }
-        catch (EntryPointNotFoundException) { }
-        SetWindowTheme(header.Window, _dark ? "DarkMode_Explorer" : "Explorer", null);
-        SendMessage(header.Window, 0x0413, _dark ? 0x2D2D2Du : GetSysColor(24), 0);
-        SendMessage(header.Window, 0x0414, _dark ? 0xF1F1F1u : GetSysColor(23), 0);
+        // TTN notifications are synchronous. SetWindowTheme may generate another
+        // tooltip request; mark before queuing and never retheme from that callback.
+        const string property = "ExplorerDirs.TooltipTheme";
+        var token = _dark ? (nint)2 : (nint)1;
+        if (GetProp(header.Window, property) == token || !SetProp(header.Window, property, token)) return;
+        var window = header.Window;
+        System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!IsWindow(window) || GetProp(window, property) != token || (_dark ? 2 : 1) != token) return;
+            try { AllowDarkModeForWindow(window, _dark); }
+            catch (EntryPointNotFoundException) { }
+            SetWindowTheme(window, _dark ? "DarkMode_Explorer" : "Explorer", null);
+            SendMessage(window, 0x0413, _dark ? 0x2D2D2Du : GetSysColor(24), 0);
+            SendMessage(window, 0x0414, _dark ? 0xF1F1F1u : GetSysColor(23), 0);
+        }));
     }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetProp(nint window, string name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool SetProp(nint window, string name, nint value);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nuint wParam, nint lParam);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref uint value, int size);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();

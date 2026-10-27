@@ -51,6 +51,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
+    private bool _nativeThemeRefreshQueued;
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
     private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
@@ -4197,6 +4198,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _nativeInputSelectionCapture?.Abort();
         _nativeInputSelectionCapture = null;
         StopDirectoryChangeMonitor();
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var targetPath = FileSystemPath(pidl);
         var isSearchTarget = _searchHistory.TryResolve(pidl, out _);
@@ -4257,6 +4259,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 {
                     AttachViewWindow(hwnd);
                     NativeShellTheme.Apply(hwnd);
+                    QueueNativeThemeRefresh();
                 }
             }
             finally { Marshal.ReleaseComObject(shellView); }
@@ -4274,6 +4277,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Complete(identity);
@@ -4485,6 +4489,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
+    private void QueueNativeThemeRefresh()
+    {
+        if (_nativeThemeRefreshQueued) return;
+        _nativeThemeRefreshQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            _nativeThemeRefreshQueued = false;
+            // Scrollbar children may not exist yet during OnViewCreated.
+            if (_browser is not null && _hostWindow != IntPtr.Zero)
+                NativeShellTheme.Apply(_hostWindow);
+        }));
+    }
+
     private void AttachViewWindow(IntPtr hwnd)
     {
         if (hwnd == _viewWindow) return;
@@ -4638,6 +4655,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         _menuPrepared = true;
                         InjectCommands(wParam);
                     }
+                    break;
+                case 0x0210: // WM_PARENTNOTIFY: apply theme to newly created native children.
+                    if ((wParam.ToInt64() & 0xFFFF) == 1) QueueNativeThemeRefresh();
                     break;
                 case 0x011F: // WM_MENUSELECT: style only this thread's native popup frames.
                     NativeShellTheme.ApplyMenuFrames();
@@ -5036,6 +5056,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         : null;
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Fail(identity);
