@@ -58,6 +58,35 @@ internal static class StatusBarVisibilitySmoke
         checkBoxes.Save(true);
         Require(new SelectionCheckBoxesStore(checkBoxesPath).Load(),
             "item checkbox preference round-trips through its portable INI");
+
+        var fullRowPath = Path.Combine(root, "FullRowSelection.ini");
+        var fullRow = new FullRowSelectionStore(fullRowPath);
+        Require(!fullRow.Load() && !fullRow.HasExplicitValue && fullRow.LoadWarning is null,
+            "missing full-row selection preference follows the Shell default without an explicit override");
+        fullRow.Save(true);
+        var enabledFullRow = new FullRowSelectionStore(fullRowPath);
+        Require(enabledFullRow.Load() && enabledFullRow.HasExplicitValue,
+            "full-row selection preference explicitly enables and round-trips");
+        enabledFullRow.Save(false);
+        var disabledFullRow = new FullRowSelectionStore(fullRowPath);
+        Require(!disabledFullRow.Load() && disabledFullRow.HasExplicitValue,
+            "full-row selection preference explicitly disables and round-trips");
+
+        File.WriteAllText(fullRowPath, "[FullRowSelection]\nFormatVersion=2\nFullRowSelect=true\n");
+        var futureFullRow = new FullRowSelectionStore(fullRowPath);
+        Require(!futureFullRow.Load() && !futureFullRow.HasExplicitValue && futureFullRow.LoadWarning is not null,
+            "future full-row selection formats fall back to the Shell default and warn");
+        var futureFullRowConflict = false;
+        try { futureFullRow.Save(true); }
+        catch (IOException) { futureFullRowConflict = true; }
+        Require(futureFullRowConflict && File.ReadAllText(fullRowPath).Contains("FormatVersion=2", StringComparison.Ordinal),
+            "future full-row selection preference data is not overwritten");
+
+        File.WriteAllText(fullRowPath, "[FullRowSelection]\nFormatVersion=1\nFullRowSelect=invalid\n");
+        var invalidFullRow = new FullRowSelectionStore(fullRowPath);
+        Require(!invalidFullRow.Load() && !invalidFullRow.HasExplicitValue && invalidFullRow.LoadWarning is not null &&
+                Directory.GetFiles(root, "FullRowSelection.ini.invalid-*.bak").Length == 1,
+            "invalid full-row selection settings are backed up and return to following Shell defaults");
     }
 
     private static void Require(bool value, string message)

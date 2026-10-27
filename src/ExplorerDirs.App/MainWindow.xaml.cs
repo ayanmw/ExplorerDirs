@@ -44,6 +44,7 @@ public partial class MainWindow : Window
     private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
     private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
     private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
+    private readonly FullRowSelectionStore _fullRowSelectionStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
@@ -51,6 +52,7 @@ public partial class MainWindow : Window
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
     private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -192,6 +194,14 @@ public partial class MainWindow : Window
             _profileDirectory, "SelectionCheckBoxes.ini"));
         _selectionCheckBoxes = _selectionCheckBoxesStore.Load();
         SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
+        _fullRowSelectionStore = new FullRowSelectionStore(Path.Combine(
+            _profileDirectory, "FullRowSelection.ini"));
+        var fullRowSelectionValue = _fullRowSelectionStore.Load();
+        _fullRowSelection = _fullRowSelectionStore.HasExplicitValue ? fullRowSelectionValue : null;
+        FullRowSelectionMenu.IsChecked = _fullRowSelection == true;
+        if (_fullRowSelectionStore.LoadWarning is { } fullRowSelectionWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? fullRowSelectionWarning : $"{EnvironmentStatus.Text} {fullRowSelectionWarning}";
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -276,7 +286,7 @@ public partial class MainWindow : Window
                 () => ViewState.Default(_defaultViewMode, _defaultIconSize),
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
-                _quickFilterFavoritesStore, _hiddenItemsPreference, _selectionCheckBoxes);
+                _quickFilterFavoritesStore, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
@@ -1028,6 +1038,25 @@ public partial class MainWindow : Window
         {
             SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
             EnvironmentStatus.Text = $"复选框选择设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void FullRowSelection_Click(object sender, RoutedEventArgs e)
+    {
+        var next = FullRowSelectionMenu.IsChecked == true;
+        try
+        {
+            _fullRowSelectionStore.Save(next);
+            _fullRowSelection = next;
+            var failures = _panes.SelectMany(pane => pane.SetFullRowSelection(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已为文件视图启用整行选择。" : "已关闭文件视图整行选择。"
+                : $"整行选择设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            FullRowSelectionMenu.IsChecked = _fullRowSelection == true;
+            EnvironmentStatus.Text = $"整行选择设置保存失败：{ex.Message}";
         }
     }
 

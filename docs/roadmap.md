@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：补齐 Q-Dir 整行选择选项
+
+- “视图 → 整行选择”使用 `IFolderView2::SetCurrentFolderFlags(FWF_FULLROWSELECT)` 控制 Shell 行选择；只改 `0x00200000` 位，保留其它 folder flags。单独的 `FullRowSelection.ini` 保存显式偏好；文件缺失或无效（已尝试备份）时跟随 Shell 默认，新建标签继承显式设置。
+- `SettingsSmoke` 的 flag、便携设置与视图生命周期路由专项通过；SettingsSmoke/App Release 构建均通过（0 警告、0 错误）。完整 SettingsSmoke 后续在既有 Program Starter launcher 清理阶段因工作目录被子进程占用而中断；整行专项 smoke 已独立通过。没有启动 ExplorerBrowser/GUI，故详细信息/列表像素、高亮命中、右键、重启持久化仍待可见验收。设计：[整行选择](superpowers/specs/2026-10-27-qdir-full-row-selection-design.md)。
+
 ## 2026-10-27：文件操作后重新激活 Shell 视图候选
 
 - 用户曾反馈复制/粘贴后新文件似乎已获焦点，但方向键不工作，切出再切回应用后恢复。源码对照发现，焦点恢复器在内容 HWND 和项目焦点都报告正常时会跳过 `FocusView()`；而 `FocusView()` 会调用 `IShellView.UIActivate(SVUIA_ACTIVATE_FOCUS)`，窗口重新激活路径也会执行它。这与“项目焦点正确但 Shell 键盘路由未激活”的现象相符，仍是源码假设，尚无用户可见复现证据。

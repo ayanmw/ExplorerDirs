@@ -21,6 +21,7 @@ public partial class PaneControl : UserControl
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
     private bool _updatingFilterPresets;
@@ -128,7 +129,7 @@ public partial class PaneControl : UserControl
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
         QuickFilterFavoritesStore quickFilterFavoritesStore,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
-        bool selectionCheckBoxes = false)
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null)
     {
         InitializeComponent();
         BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
@@ -167,6 +168,7 @@ public partial class PaneControl : UserControl
         _quickFilterFavoritesStore = quickFilterFavoritesStore;
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
+        _fullRowSelection = fullRowSelection;
         QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
@@ -572,6 +574,23 @@ public partial class PaneControl : UserControl
             try
             {
                 var result = state.Browser.SetSelectionCheckBoxes(enabled);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> SetFullRowSelection(bool? enabled)
+    {
+        _fullRowSelection = enabled;
+        if (enabled is not { } value) return [];
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try
+            {
+                var result = state.Browser.SetFullRowSelection(value);
                 if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
             }
             catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
@@ -1279,7 +1298,7 @@ public partial class PaneControl : UserControl
         AddressPathHistory? addressHistory = null)
     {
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
-            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes);
+            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned,

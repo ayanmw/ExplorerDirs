@@ -46,6 +46,19 @@ internal static class FolderHeaderFlagsSmoke
                 throw new InvalidOperationException($"Check-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
         }
 
+        var fullRowSelectCases = new (uint Input, bool Enabled, uint Expected)[]
+        {
+            (0x40040008, true, 0x40240008),
+            (0x40240008, false, 0x40040008),
+            (0xFFFFFFFF, false, 0xFFDFFFFF)
+        };
+        foreach (var (input, enabled, expected) in fullRowSelectCases)
+        {
+            var actual = ShellFolderViewOptions.SetFullRowSelect(input, enabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"Full-row-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
+        }
+
         Console.WriteLine("Folder header flags smoke: PASS");
     }
 }

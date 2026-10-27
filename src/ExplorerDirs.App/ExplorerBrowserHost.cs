@@ -41,6 +41,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ShellFolderFilter? _quickFilter;
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
     private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
     private long _quickFilterRequestVersion;
@@ -435,7 +436,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
         bool showPreviewPane = false, bool showDetailsPane = false,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
-        bool selectionCheckBoxes = false)
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null)
     {
         if (showPreviewPane && showDetailsPane)
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
@@ -444,6 +445,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _quickFilterSettings = quickFilter;
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
+        _fullRowSelection = fullRowSelection;
         _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
@@ -478,6 +480,23 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             var view = Marshal.GetIUnknownForObject(viewObject);
             try { return ShellFolderViewOptions.SetCheckSelect(view, enabled); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    internal int SetFullRowSelection(bool? enabled)
+    {
+        _fullRowSelection = enabled;
+        if (enabled is not { } value || _browser is null || _viewWindow == IntPtr.Zero) return 0;
+        var viewId = ShellViewId;
+        var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
+        if (viewResult < 0 || viewObject is null)
+            return viewResult < 0 ? viewResult : unchecked((int)0x80004005);
+        try
+        {
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { return ShellFolderViewOptions.SetFullRowSelect(view, value); }
             finally { Marshal.Release(view); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
@@ -4057,6 +4076,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var checkSelectResult = ShellFolderViewOptions.SetCheckSelect(view, _selectionCheckBoxes);
                 if (checkSelectResult < 0)
                     MenuError?.Invoke(this, $"Shell 未能应用复选框选择设置（0x{checkSelectResult:X8}）。");
+                if (_fullRowSelection is { } fullRowSelection)
+                {
+                    var fullRowResult = ShellFolderViewOptions.SetFullRowSelect(view, fullRowSelection);
+                    if (fullRowResult < 0)
+                        MenuError?.Invoke(this, $"Shell 未能应用整行选择设置（0x{fullRowResult:X8}）。");
+                }
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
                     AttachViewWindow(hwnd);
             }

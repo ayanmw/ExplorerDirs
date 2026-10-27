@@ -25,6 +25,9 @@ internal sealed class StatusBarFolderSizeWhenEmptyStore(string path)
 internal sealed class SelectionCheckBoxesStore(string path)
     : PortableBooleanPreference(path, "Selection", "CheckBoxes", "复选框选择");
 
+internal sealed class FullRowSelectionStore(string path)
+    : PortableBooleanPreference(path, "FullRowSelection", "FullRowSelect", "整行选择");
+
 internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
 
@@ -37,10 +40,12 @@ internal class PortableBooleanPreference(string path, string section, string key
     private bool _canOverwrite = true;
 
     public string? LoadWarning { get; private set; }
+    public bool HasExplicitValue { get; private set; }
 
     public bool Load()
     {
         LoadWarning = null;
+        HasExplicitValue = false;
         _canOverwrite = true;
         _lastSeenContent = null;
         if (!File.Exists(_path)) return defaultValue;
@@ -94,7 +99,11 @@ internal class PortableBooleanPreference(string path, string section, string key
             if (version != 1 || !compact.HasValue || !seenAppearance) complete = false;
         }
         catch (Exception) { complete = false; }
-        if (complete) return compact!.Value;
+        if (complete)
+        {
+            HasExplicitValue = true;
+            return compact!.Value;
+        }
 
         try
         {
