@@ -6,6 +6,13 @@ using ExplorerDirs.NativeProbe;
 // This keeps SetFocus activation inside the probe desktop instead of the user's desktop.
 internal static class PrivateDesktopShellProbe
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int WctCoGetCallState(int threadId, out uint callState);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int WctCoGetActivationState(Guid classId, uint processId, out uint activationState);
+    private static WctCoGetCallState? CoGetCallStateCallback;
+    private static WctCoGetActivationState? CoGetActivationStateCallback;
+
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
 
     internal static int RunHostMenuCommands() => Run("host-menu-commands", ShellViewHostFilterProbe.RunMenuCommandsForPrivateDesktop);
@@ -168,9 +175,11 @@ internal static class PrivateDesktopShellProbe
 
         var result = 1;
         Exception? failure = null;
+        var workerThreadId = 0;
         var probeReturned = new ManualResetEventSlim(false);
         var worker = new Thread(() =>
         {
+            Interlocked.Exchange(ref workerThreadId, unchecked((int)GetCurrentThreadId()));
             if (!SetThreadDesktop(desktop))
             {
                 failure = new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the probe thread to its isolated desktop.");
@@ -203,7 +212,9 @@ internal static class PrivateDesktopShellProbe
         if (!probeReturned.Wait(timeout ?? TimeSpan.FromSeconds(25)))
         {
             var foregroundAtTimeout = GetForegroundWindow();
-            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
+            var threadId = unchecked((uint)Volatile.Read(ref workerThreadId));
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
+            CaptureWaitChain(threadId);
             return 124;
         }
 
@@ -221,6 +232,110 @@ internal static class PrivateDesktopShellProbe
             return 1;
 
         return result;
+    }
+
+    private static void CaptureWaitChain(uint threadId)
+    {
+        if (threadId == 0)
+        {
+            Console.Error.WriteLine("wait-chain: worker thread id unavailable");
+            return;
+        }
+
+        var session = OpenThreadWaitChainSession(0, 0);
+        if (session == 0)
+        {
+            Console.Error.WriteLine($"wait-chain: OpenThreadWaitChainSession failed; win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+
+        try
+        {
+            RegisterWaitChainCOMCallback(GetComCallStateCallback(), GetComActivationStateCallback());
+            const uint nodeCapacity = 16;
+            var nodes = new WaitChainNode[nodeCapacity];
+            var count = nodeCapacity;
+            var flags = 0x1u | 0x2u | 0x4u; // Include out-of-process, COM, and critical-section owners.
+            if (!GetThreadWaitChain(session, 0, flags, threadId, ref count, nodes, out var cycle))
+            {
+                Console.Error.WriteLine($"wait-chain: query failed; tid={threadId}; win32={Marshal.GetLastWin32Error()}");
+                return;
+            }
+
+            Console.Error.WriteLine($"wait-chain: tid={threadId}; nodes={count}; cycle={cycle}");
+            for (var index = 0; index < Math.Min(count, nodeCapacity); index++)
+            {
+                var node = nodes[index];
+                if (node.ObjectType == 8) // WctThreadType, from the Windows SDK wct.h enum.
+                {
+                    Console.Error.WriteLine($"wait-chain: [{index}] type={WaitChainObjectType(node.ObjectType)} status={node.ObjectStatus}; pid={node.ProcessId}; tid={node.ThreadId}; switches={node.ContextSwitches}");
+                    DescribeWaitChainThread(node.ProcessId, node.ThreadId);
+                }
+                else
+                    Console.Error.WriteLine($"wait-chain: [{index}] type={WaitChainObjectType(node.ObjectType)} status={node.ObjectStatus}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"wait-chain: capture failed; {exception.GetType().Name}: {exception.Message}");
+        }
+        finally
+        {
+            CloseThreadWaitChainSession(session);
+        }
+    }
+
+    private static void DescribeWaitChainThread(uint processId, uint threadId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(unchecked((int)processId));
+            if (processId == Environment.ProcessId)
+            {
+                var thread = process.Threads.Cast<ProcessThread>()
+                    .FirstOrDefault(candidate => candidate.Id == unchecked((int)threadId));
+                Console.Error.WriteLine(thread is null
+                    ? $"wait-chain-thread: pid={processId}; tid={threadId}; state=not-found"
+                    : $"wait-chain-thread: pid={processId}; tid={threadId}; state={thread.ThreadState}; wait-reason={(thread.ThreadState == System.Diagnostics.ThreadState.Wait ? thread.WaitReason.ToString() : "n/a")}");
+            }
+            else
+            {
+                Console.Error.WriteLine($"wait-chain-process: pid={processId}; name={process.ProcessName}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"wait-chain-owner: pid={processId}; tid={threadId}; lookup={exception.GetType().Name}");
+        }
+    }
+
+    private static string WaitChainObjectType(uint type) => type switch
+    {
+        1 => "CriticalSection",
+        2 => "SendMessage",
+        3 => "Mutex",
+        4 => "ALPC",
+        5 => "COM",
+        6 => "ThreadWait",
+        7 => "ProcessWait",
+        8 => "Thread",
+        9 => "COMActivation",
+        10 => "Unknown",
+        11 => "SocketIO",
+        12 => "SMBIO",
+        _ => $"Unknown({type})"
+    };
+
+    private static WctCoGetCallState GetComCallStateCallback()
+    {
+        return CoGetCallStateCallback ??= Marshal.GetDelegateForFunctionPointer<WctCoGetCallState>(
+            GetProcAddress(GetModuleHandleW("ole32.dll"), "CoGetCallState"));
+    }
+
+    private static WctCoGetActivationState GetComActivationStateCallback()
+    {
+        return CoGetActivationStateCallback ??= Marshal.GetDelegateForFunctionPointer<WctCoGetActivationState>(
+            GetProcAddress(GetModuleHandleW("ole32.dll"), "CoGetActivationState"));
     }
 
     private static nint CreateProbeDesktop(string name)
@@ -267,6 +382,39 @@ internal static class PrivateDesktopShellProbe
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint GetModuleHandleW(string moduleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    private static extern nint GetProcAddress(nint module, string procedureName);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool CloseDesktop(nint desktop);
+
+    [StructLayout(LayoutKind.Explicit, Size = 280)]
+    private struct WaitChainNode
+    {
+        [FieldOffset(0)] public uint ObjectType;
+        [FieldOffset(4)] public uint ObjectStatus;
+        [FieldOffset(8)] public uint ProcessId;
+        [FieldOffset(12)] public uint ThreadId;
+        [FieldOffset(16)] public uint WaitTime;
+        [FieldOffset(20)] public uint ContextSwitches;
+    }
+
+    [DllImport("advapi32.dll")]
+    private static extern nint OpenThreadWaitChainSession(uint flags, nint callback);
+
+    [DllImport("advapi32.dll")]
+    private static extern void CloseThreadWaitChainSession(nint session);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetThreadWaitChain(nint session, nuint context, uint flags, uint threadId,
+        ref uint nodeCount, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 4)] WaitChainNode[] nodeInfo,
+        [MarshalAs(UnmanagedType.Bool)] out bool isCycle);
+
+    [DllImport("advapi32.dll")]
+    private static extern void RegisterWaitChainCOMCallback(WctCoGetCallState callStateCallback,
+        WctCoGetActivationState activationStateCallback);
 }

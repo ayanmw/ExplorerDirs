@@ -1168,6 +1168,12 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 现只为 `session-restore` 和它派生的 consumer 将 Private Desktop runner deadline 调为 110 秒与 100 秒，并把父进程等待 consumer 的时间调为 100 秒；其余 probe 保持 25 秒。NativeProbe Release build 0 warning/error。`scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120` 退出码 0，Private Desktop foreground HWND 前后相同。成功日志 `20261027-084330-8968e6b6.stdout.log` 的 consumer 总结确认：状态流恢复、四 pane 菜单项逐窗格路由、方向键/Ctrl+A/F2 路由、copy/rename/delete 四 pane 收敛、目录通知及 sibling pane 隔离均通过。
 
 本次通过只覆盖隔离 NativeProbe 中的 IShellView 宿主，不表示已接入 Explorer Dirs 产品；未运行可见 UI，也没有验证 OLE `DoDragDrop` 的鼠标源端、WPF 焦点链或用户实际拖放。
+
+### 2026-10-28 捕获菜单清理挂起的 WCT 等待链
+
+为给 `single-pane-menu-sync-cleanup` 的稳定挂起补充线程级证据，NativeProbe 在其 Private Desktop watchdog 超时点调用 Windows Wait Chain Traversal，并注册 OLE32 的 COM 状态回调。SDK `wct.h` 校正了节点枚举：`WctThreadType=8`；查询显示 `cycle=False`，探针线程 58152 处于线程等待，目标为同进程线程 58168；目标线程也在等待，后续节点为 COM → `svchost` PID 1832、COM activation → `ChsIME` PID 49244。当前快照不能证明循环死锁；WCT 只报告调用时的等待链，也不能单凭进程名确定具体 COM 类或组件责任。[Microsoft WCT sample](https://learn.microsoft.com/en-us/windows/win32/debug/using-wct)、[GetThreadWaitChain](https://learn.microsoft.com/en-us/windows/win32/api/wct/nf-wct-getthreadwaitchain)
+
+本次仍复现：Shell view 销毁和 pane 销毁均返回成功，菜单协调器已释放 owner/active object 且 RemoveMenus 回调成功；父窗口收到并返回 `WM_DESTROY` 后，`DestroyWindow` 未返回，最终被 watchdog 终止。该最小复现包含 `ActivateView(SVUIA_ACTIVATE_FOCUS)` / `ActivateView(SVUIA_DEACTIVATE)`；不能据此宣称 Explorer Dirs 产品发生死循环，也尚不能证明真实输入法或 RPCSS 是根因。NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产品 GUI，Private Desktop 前台 HWND 保持不变。产品 ExplorerBrowser、release 和主题代码未改。下一步应在同一隔离宿主中逐项对照菜单激活、父窗口销毁及输入法 COM 激活条件；在拿到可归属的原生调用栈或差分结果前，不做产品规避改动。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
