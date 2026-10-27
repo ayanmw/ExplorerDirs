@@ -145,3 +145,11 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 微软文档将 `Rearrange` 标为弃用接口，并说明系统文件视图会以其低 16 位指定排序列；本轮实际试验表明调用成功本身不代表 adapter 获得了比较回调。[`IShellFolderView::Rearrange`](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-rearrange)。因此当前可确认：普通文件夹的标准大小排序可用；此 adapter 的自定义属性显示/排序尚未打通；两条排序入口都未调用 adapter 比较函数。自定义属性 schema 是否是原因仍只是推测，本轮没有注册 schema，也没有证明所有自定义 namespace 都不可行。产品仍使用 ExplorerBrowser，未接入原型。
 
 后续评估 schema 方案时还要考虑部署边界：微软 [`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 文档要求安装时注册机器本地 `.propdesc`，schema 为机器级、不能按用户注册，且 API 需要包含 `HKLM` 写权限的权限上下文。这与项目当前便携配置、不改系统注册表的原则冲突；不能把 schema 注册作为普通启动行为。若未来证明确实是唯一技术路线，需先单独审视安装/卸载和系统影响策略，再决定是否做可选安装能力。
+
+### 2026-10-28 激活视图仍不触发逐项属性回调
+
+为排除“DefView 尚未激活所以不读取列值”的解释，NativeProbe 增加 `--static-shell-column-adapter-activated-strict-private-desktop` 对照。它在独立、未切换的 Windows Desktop 上创建同一严格接口适配器和文件夹夹具，显示父窗口后调用 `IShellView::UIActivate(SVUIA_ACTIVATE_NOFOCUS)`，再执行同一列显示与四向排序矩阵；没有把输入焦点交给视图，也未操作用户桌面。
+
+最终运行记录为 `src/.state/native-probe-watchdog/20261028-013132-ca617853.stdout.log`（SHA-256 `F6EDBAF5663419115E6DB3E29756ADCED0AF75A7B2EC21D69926A4C4E3204952`），NativeProbe DLL SHA-256 `15D68CD4647CFC01BC6F79D650F22F805B39954D442BBE9520CD2FFAD914558E`。NativeProbe Release build 为 0 警告、0 错误。`UIActivate` 返回 `S_OK`，view 仍使用严格适配器，私有 Desktop 边界与主桌面前台句柄检查通过。标准 `PKEY_Size` 升/降序按真实 2/10/10/100 字节重排通过；自定义列升/降序仍保持名称顺序并使整个探针以预期的门槛失败退出。视图显示的自定义列各项文本为空；排序前后适配器 `GetDetailsEx(custom/size)`、子项 `GetDetailsOf`、`CompareIDs` 计数都没有由 DefView 增加，只有探针自身的少量显式检查调用。
+
+这排除了本探针采用的“激活后 DefView 会开始消费该适配器逐项列值”路径，但不证明任意自定义 Shell namespace 或自定义 PIDL/属性存储路线不可行。下一步需改变项目身份/属性提供路径来形成新的可证伪假设；不再仅重复激活同一 adapter，不注册系统级 property schema、不增加递归扫描缓存，也不接入产品 ExplorerBrowser。该隔离结果不是用户桌面 UI 验收。

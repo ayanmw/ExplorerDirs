@@ -2,8 +2,8 @@ using System.Runtime.InteropServices;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
-// Opt-in capability probe. Never shows its parent window or sends input.
-// Results concern the native component, not the application's GUI/focus behavior.
+// Opt-in capability probes; individual commands define their window and input boundaries.
+// Results concern native components, not the application's GUI/focus behavior.
 internal static class Program
 {
     static Guid BrowserClass = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
@@ -49,6 +49,8 @@ internal static class Program
             return StaticShellFolderAdapterProbe.RunFolderContract();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
+        if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true, activateView: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")
             return ShellViewColorSpike.Run();
         if (args.Length == 1 && args[0] == "--shell-view-color-policy-smoke")

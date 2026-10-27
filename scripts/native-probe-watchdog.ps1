@@ -3,7 +3,7 @@ param(
     [int]$TimeoutSeconds = 30,
     [ValidateSet('Desktop', 'ThisPC', 'RecycleBin', 'Libraries', 'NetworkPlaces', 'SearchFolder', 'ZipContainer')]
     [string]$VirtualScope,
-    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop')]
+    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop')]
     [string]$Probe = 'color',
     [switch]$TestTimeoutPath
 )
@@ -36,6 +36,7 @@ else {
     $executable = (Get-Command dotnet -ErrorAction Stop).Source
     $probeArgument = switch ($Probe) {
         'static-shell-column-adapter-private-desktop' { '--static-shell-column-adapter-private-desktop' }
+        'static-shell-column-adapter-activated-strict-private-desktop' { '--static-shell-column-adapter-activated-strict-private-desktop' }
         'static-shell-column-adapter-strict-private-desktop' { '--static-shell-column-adapter-strict-private-desktop' }
         'static-shell-column-classid-private-desktop' { '--static-shell-column-classid-private-desktop' }
         'auto-column-width' { '--auto-column-width' }

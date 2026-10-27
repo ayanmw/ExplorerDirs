@@ -35,9 +35,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunCommandStateReadOnly() =>
         Run("command-state-readonly", () => ShellViewColorSpike.Run(queryCommandStatesOnly: true));
 
-    internal static int RunStaticShellColumnAdapter(bool strictInterfaces = false, bool prototypeClass = false) =>
-        Run(prototypeClass ? "static-shell-column-adapter-classid" : strictInterfaces ? "static-shell-column-adapter-strict" : "static-shell-column-adapter",
-            () => StaticShellFolderAdapterProbe.Run(strictInterfaces, prototypeClass));
+    internal static int RunStaticShellColumnAdapter(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false) =>
+        Run(activateView ? "static-shell-column-adapter-activated-strict" : prototypeClass ? "static-shell-column-adapter-classid" : strictInterfaces ? "static-shell-column-adapter-strict" : "static-shell-column-adapter",
+            () => StaticShellFolderAdapterProbe.Run(strictInterfaces, prototypeClass, activateView));
 
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);

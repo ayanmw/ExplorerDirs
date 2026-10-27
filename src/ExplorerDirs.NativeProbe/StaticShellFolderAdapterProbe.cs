@@ -190,7 +190,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false)
+    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -266,6 +266,14 @@ internal static class StaticShellFolderAdapterProbe
             _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the private desktop.
             Pump(800);
             CheckBoundary(parent, foreground, "DefView creation", expectVisible: true);
+            if (activateView)
+            {
+                var activateHr = At<ActivateView>(view, 7)(view, 2); // SVUIA_ACTIVATE_NOFOCUS; confined to the private desktop.
+                Console.WriteLine($"native-static-shell-column: UIActivate(SVUIA_ACTIVATE_NOFOCUS)=0x{activateHr:X8}");
+                Check(activateHr);
+                Pump(500);
+                CheckBoundary(parent, foreground, "DefView no-focus activation", expectVisible: true);
+            }
             var verifyViewFolder = Marshal.GetDelegateForFunctionPointer<VerifyViewFolder>(
                 NativeLibrary.GetExport(nativeLibrary, "VerifyStaticShellViewFolder"));
             Check(verifyViewFolder(view, adapter, out var adapterBackedView));
@@ -675,6 +683,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect rect, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetMode(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDefaultColumnState(nint self, uint column, out uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
