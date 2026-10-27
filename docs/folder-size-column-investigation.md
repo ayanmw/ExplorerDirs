@@ -189,3 +189,9 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 folder smoke 和 `git diff --check` 全部通过；未创建窗口、未触碰产品代码。进一步调用包装 folder 的 `CreateViewObject(IID_IShellView)` 后，不调用 `CreateViewWindow`，`IFolderView2::GetFolder` 仍报告该视图持有包装 adapter，且 `window-created=False`。这确认可在不建 HWND 的情况下构造 DefView COM 对象并核对根 folder 身份，但不测试列表读取或绘制。新增的第二层相对绑定也通过：根→子目录→孙目录每一级都取得包装 adapter，末端文件仍可经 Shell 数据对象返回。该结果只证明直接 folder 对象持有者可沿两层相对目录继续委托，不修复包装 PIDL 的普通绝对路径解析失败。
 
 微软文档将绝对 PIDL 定义为从 Desktop namespace root 开始的完整身份；自定义 namespace 扩展需要在 Shell namespace 中声明根位置，文档列出的入口包括 CLSID junction。当前实验没有注册扩展，也只把 adapter 直接交给调用者，因此尚无从 Desktop 解析私有包装 PIDL 的路径。参考[PIDL namespace 说明](https://learn.microsoft.com/en-us/windows/win32/shell/namespace-intro)、[IShellFolder 接口范围](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellfolder)及[namespace junction](https://learn.microsoft.com/en-us/windows/win32/shell/nse-junction)。DefView 的列表读取、导航、上下文菜单、拖放、通知与自定义列消费仍待后续隔离宿主/集中 UI 验收。
+
+### 2026-10-28：包装 PIDL 的 DefView 列消费对照
+
+为确认“DefView 是否因为项目 PIDL 身份不同而开始读取 adapter 属性”，新增独立 Private Desktop 包装 adapter 命令，并与原始 PIDL adapter 使用相同夹具各跑一轮。两轮 DefView 都报告 `view-uses-adapter=1`，但自定义列子项仍为空；读完列表后计数均为 `GetDetailsOf(custom header/item)=1/0`、`GetDetailsEx=0`、`CompareIDs=0`、`IPropertyStore=0`。自定义列升序和 `System.Document.ByteCount` 升序都因行序未改变而失败。包装项直连 adapter 的显示/比较合同仍通过，所以差异发生在 DefView 消费路径，而不是包装 PIDL 解码入口。
+
+完整日志位于 `src/.state/native-probe-watchdog/20261028-wrapped-pidl-defview.log`（SHA-256 `41BCDC57A2C424603529F180772CDF1CEE36A78D1F3A7F3CCA6617B9FED60C1D`）和原始基线 `20261028-static-adapter-defview.log`（SHA-256 `188246C3C72A486D8C13ECDBE7EFB4EE2874F0347304845EFF99B7D229B45C59`）。两次探针都按未通过列显示/排序门槛返回 exit code 1；前台 HWND 均保持不变，Private Desktop 在子进程结束时清理。结果说明仅改变 child PIDL 身份不足以让 DefView 逐项读取或排序这些列；包装 adapter 及列路继续仅作隔离研究，不接入产品。进一步推进需要新的、可证伪的属性提供架构假设，并评审完整 Shell 行为成本，不能把当前失败改成软性通过。

@@ -408,7 +408,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false)
+    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false, bool wrappedPidls = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -433,7 +433,7 @@ internal static class StaticShellFolderAdapterProbe
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             var shellDetailsSize = GetShellDetailsSize(nativeLibrary);
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, wrappedPidls ? "CreateWrappedPidlShellFolderAdapter" : prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
 
             var property = StaticShellColumnContract.PropertyKey;
