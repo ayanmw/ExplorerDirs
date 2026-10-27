@@ -58,7 +58,9 @@ internal static class StaticShellFolderAdapterProbe
                 stage = "wrapped-nested-folder-adapter";
                 var nestedFolderPath = Path.Combine(fixture, "nested-folder");
                 Directory.CreateDirectory(nestedFolderPath);
-                File.WriteAllBytes(Path.Combine(nestedFolderPath, "two.bin"), new byte[2]);
+                var childFolderPath = Path.Combine(nestedFolderPath, "child-folder");
+                Directory.CreateDirectory(childFolderPath);
+                File.WriteAllBytes(Path.Combine(childFolderPath, "two.bin"), new byte[2]);
                 var nestedPidl = ParseChild(adapter, "nested-folder");
                 nint nestedFolder = 0;
                 try
@@ -84,9 +86,22 @@ internal static class StaticShellFolderAdapterProbe
                             throw new Exception("A folder opened through the wrapped adapter did not retain its adapter column metadata.");
                     }
                     finally { Marshal.FreeCoTaskMem(nestedHeader); }
-                    var nestedChild = ParseChild(nestedFolder, "two.bin");
-                    try { VerifyWrappedShellItemObjects(nestedFolder, nestedChild); }
-                    finally { ILFree(nestedChild); }
+                    var childFolderPidl = ParseChild(nestedFolder, "child-folder");
+                    nint childFolder = 0;
+                    try
+                    {
+                        var childBindHr = At<BindToObject>(nestedFolder, 5)(nestedFolder, childFolderPidl, 0, in ShellFolder2Id, out childFolder);
+                        if (childBindHr < 0 || childFolder == 0)
+                            throw new Exception($"Second-level wrapped folder BindToObject failed: hr=0x{childBindHr:X8}, folder=0x{childFolder:X}.");
+                        var nestedChild = ParseChild(childFolder, "two.bin");
+                        try { VerifyWrappedShellItemObjects(childFolder, nestedChild); }
+                        finally { ILFree(nestedChild); }
+                    }
+                    finally
+                    {
+                        if (childFolder != 0) Marshal.Release(childFolder);
+                        ILFree(childFolderPidl);
+                    }
                 }
                 finally
                 {
