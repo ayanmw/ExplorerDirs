@@ -6,7 +6,7 @@
 
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |
-| 1 | 核心产品集中验收 | 已固定 141624/4ec809 候选。用户在隔离样本确认过 Details 模式 F2；另有隐藏 HostProbe 对 pane 0–3 × 8 个查看预设共 32 组方向键/文本选区回归通过，但物理输入与可见焦点仍待集中验收。剪贴板后方向键、逐标签状态、QDR 独立互操作及主题回归继续按[清单](ui-acceptance-next-batch-2026-10-27.md)逐项验收；不因局部通过而整体打勾。后续后台优先。 |
+| 1 | 核心产品集中验收 | 已准备当前候选 `20261027-193147-376-c83af6`（源码 `dbc3bfb`，干净构建，待运行）；旧的 141624/4ec809 记录仅保留为历史副本。用户在隔离样本确认过 Details 模式 F2；隐藏 HostProbe 对 pane 0–3 × 8 个查看预设共 32 组方向键/文本选区回归通过，但物理输入与可见焦点仍待集中验收。剪贴板后方向键、逐标签状态、QDR 独立互操作及主题回归继续按[清单](ui-acceptance-next-batch-2026-10-27.md)逐项验收；不因局部通过而整体打勾。后续后台优先。 |
 | 2 | 产品稳定性与内存增长归因 | 图标缓存有界和可见标签轮询已实现；外部采样记录版本、Private Bytes、Working Set、句柄及线程。temp.76 同一 PID 于 UTC 2026-10-27 19:27 的 60 秒只读复采中，Working Set 为 244.54–244.56 MB、Private Bytes 为 123.27–123.31 MB、句柄 1120–1123、线程 34–35；未记录具体操作负载，仍缺操作期间的长期曲线与故障栈，不能据此排除增长或归因优化收益。以[内存采样](memory-sampling.md)和[可靠性方案](reliability-isolation-design.md)为入口。 |
 | 3 | IShellView 隔离迁移门槛 | 2026-10-28 当前 Release NativeProbe 的 Private Desktop 四窗格 consumer 复验通过：状态流恢复、四 pane 菜单路由、pane 1–3 键盘/Ctrl+A、四 pane F2 焦点隔离、Copy/Rename/Delete 收敛、目录通知及 sibling 隔离通过，前台不变且无遗留进程。另用真实选中项 `IDataObject` 直接调用已注册目录 `IDropTarget` 的 DragEnter/Over/Drop，目标文件内容与 Copy effect 通过；直接 Shift/Move 调用不是有效 `DoDragDrop` 代替，源清理/Move effect 仍待完整拖放闭环。仍未通过真实鼠标 OLE 拖放、可见焦点键盘、同步清理可靠性及完整产品接线；完成隔离探针不等于批准或完成迁移。逐项颜色能力也仍未决。严格 adapter 的 Private Desktop 激活探针中，DefView 仍不请求自定义列逐项值或比较；即使把有系统 schema 且类型为 `VT_I4` 的 `System.Document.ByteCount` 作为列，结果仍空白且无相关回调。标准 `PKEY_Size` 升降序通过，ByteCount 排序不动。当前 adapter 列路暂不进入产品；此结果也不证明其他 Shell namespace 设计均不可行。见[原型记录](ishellview-color-spike.md)及[逐行列调查](folder-size-column-investigation.md)。 |
 | 4 | Explorer 系统入口 | 可选文件夹右键入口、目录参数和管道转发已有代码及后台证据。默认文件夹打开与 Win+E 接管仍是后续工作，可逆恢复和真实启动链路尚待验证；不自动修改系统入口。见本文件 M3。 |

@@ -72,3 +72,12 @@
 - 百分号夹具：`acceptance-files\percent-paths\%ExplorerDirsQdrAcceptance%` 与同级 `expanded-target`。后续仅向被启动的测试进程传入 `ExplorerDirsQdrAcceptance=expanded-target`，通过文件列表/树进入字面量文件夹；不要写用户/系统环境，也不要将地址栏主动展开变量误判为目录选择错误。
 
 执行 PrepareOnly 成功；独立核对源码、ProductVersion、两个哈希与夹具目录通过。该 EXE 对应进程数为 0，focus-trace.log、performance.json 不存在。本次不做可见验收、不更新日常 temp.76。新候选包含最新 QDR 后台导出/桌面项/备份及多窗口版本保护，但不因打包完成宣称 UI 或 Q-Dir 独立互操作通过。
+
+## 当前集中验收候选：193147/c83af6（仅准备，未启动）
+
+- 路径：`D:\projects\explorer-dirs-worktrees\windows-accent-theme\src\.state\gui-smoke\20261027-193147-376-c83af6`，程序位于 `app\ExplorerDirs.App.exe`。
+- 干净源码：`dbc3bfbed2541503a155930cf512cd2867774ea1`；BuildIdentity：`gui-acceptance.20261027-193147-376-c83af6+dbc3bfbed2541503a155930cf512cd2867774ea1`；文件版本 `0.6.0.0`。
+- EXE SHA-256：`09DDC52C9C249833209942C79E1B2E20DEEA155122B9734614E5FCE26BC1E304`；App DLL SHA-256：`FD362FC209402EA9F1A1094811392AC76BEE30F2FD28A2268277A71115B766CF`。
+- `preparation.json` 状态为 `prepared-not-run`，列有 27 项待验收；隔离 profile 在副本 `app\profile\ExplorerDirs.ini`。四窗格样本与 QDR 夹具均位于副本目录。
+- PrepareOnly 构建成功；独立复核 EXE/DLL 哈希与 manifest 一致，且该 EXE 进程数为 0。本次没有打开窗口、运行 GUI 验收或覆盖用户 `releases`。
+- 目录树图标的隐藏控件接线已有后台证据，图标像素和主题跟随仍在第一段第 5 项可见验收中；其它待验收项按 manifest 逐项记录，不预先标记通过。
