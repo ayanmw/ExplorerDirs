@@ -803,6 +803,38 @@ internal static class StaticShellFolderAdapterProbe
                     finally { GlobalUnlock(medium.Value); }
                 }
                 finally { ReleaseStgMedium(ref medium); }
+
+                var shellIdListFormat = checked((ushort)RegisterClipboardFormatW("Shell IDList Array"));
+                var shellIdListEtc = new NativeFormatEtc { Format = shellIdListFormat, Aspect = 1, Index = -1, Tymed = 1 };
+                var shellIdListHr = At<GetData>(dataObject, 3)(dataObject, ref shellIdListEtc, out var shellIdListMedium);
+                if (shellIdListHr < 0) throw new Exception($"Wrapped IDataObject.GetData(Shell IDList Array) failed: 0x{shellIdListHr:X8}.");
+                try
+                {
+                    if (shellIdListMedium.Tymed != 1 || shellIdListMedium.Value == 0) throw new Exception("Shell IDList Array did not use a valid TYMED_HGLOBAL.");
+                    var cida = GlobalLock(shellIdListMedium.Value);
+                    if (cida == 0) throw new Exception("Could not lock the Shell IDList Array memory.");
+                    try
+                    {
+                        var cidaBytes = GlobalSize(shellIdListMedium.Value).ToUInt64();
+                        var childCount = unchecked((uint)Marshal.ReadInt32(cida));
+                        if (childCount != 1 || cidaBytes < 12) throw new Exception($"Expected one CIDA child, got {childCount} in {cidaBytes} bytes.");
+                        var parentOffset = unchecked((uint)Marshal.ReadInt32(cida, 4));
+                        var childOffset = unchecked((uint)Marshal.ReadInt32(cida, 8));
+                        if (parentOffset >= cidaBytes || childOffset >= cidaBytes)
+                            throw new Exception("CIDA item offsets were outside the storage medium.");
+                        var absolute = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
+                        if (absolute == 0) throw new Exception("Could not combine CIDA parent and child PIDLs.");
+                        try
+                        {
+                            var path = DescribeFileSystemPath(absolute);
+                            if (path.StartsWith("unresolved-", StringComparison.Ordinal) || !File.Exists(path))
+                                throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
+                        }
+                        finally { ILFree(absolute); }
+                    }
+                    finally { GlobalUnlock(shellIdListMedium.Value); }
+                }
+                finally { ReleaseStgMedium(ref shellIdListMedium); }
             }
             finally { Marshal.Release(dataObject); }
         }
@@ -976,7 +1008,9 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
     [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref NativeStorageMedium medium);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string formatName);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     private delegate bool EnumChildProc(nint window, nint parameter);
     [DllImport("propsys.dll", PreserveSig = true)] private static extern int PSGetPropertyDescription(
