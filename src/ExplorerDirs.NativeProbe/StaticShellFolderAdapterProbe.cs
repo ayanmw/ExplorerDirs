@@ -43,6 +43,18 @@ internal static class StaticShellFolderAdapterProbe
             if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
             if (wrappedPidls)
             {
+                stage = "wrapped-folder-shell-view-object";
+                Check(At<CreateViewObject>(adapter, 8)(adapter, 0, in ShellViewId, out var unopenedView));
+                try
+                {
+                    var verifyViewFolder = Marshal.GetDelegateForFunctionPointer<VerifyViewFolder>(
+                        NativeLibrary.GetExport(nativeLibrary, "VerifyStaticShellViewFolder"));
+                    Check(verifyViewFolder(unopenedView, adapter, out var adapterBackedView));
+                    if (adapterBackedView == 0)
+                        throw new Exception("The unopened Shell view object did not retain the wrapped folder adapter.");
+                }
+                finally { Marshal.Release(unopenedView); }
+
                 stage = "wrapped-nested-folder-adapter";
                 var nestedFolderPath = Path.Combine(fixture, "nested-folder");
                 Directory.CreateDirectory(nestedFolderPath);

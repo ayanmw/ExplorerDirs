@@ -186,4 +186,4 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 
 无窗口复核发现包装 adapter 的 `BindToObject` 还会把子文件夹直接返回为普通 filesystem folder；因此即使根级 DefView 将来能使用包装身份，浏览进子目录也会离开实验 adapter。新增回归合同后，旧实现先因子目录缺少 adapter 专属 `Registered schema control` 列而失败。修复后，包装模式下对子文件夹的 `BindToObject(IShellFolder/IShellFolder2)` 会建立另一个包装 adapter；探针确认子 folder 保留该列元数据，且继续可解析其文件并取得正常 Shell 数据对象。未包装模式和其他非文件夹接口仍沿用原委托路径。
 
-NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 folder smoke 和 `git diff --check` 全部通过；未创建窗口、未触碰产品代码。该结果只证明 adapter 树中一层子目录可继续委托，不修复包装 PIDL 的普通绝对路径解析失败，也没有证明 DefView 可消费该树；Explorer 导航、上下文菜单、拖放、通知与自定义列仍待后续隔离宿主/集中 UI 验收。
+NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 folder smoke 和 `git diff --check` 全部通过；未创建窗口、未触碰产品代码。进一步调用包装 folder 的 `CreateViewObject(IID_IShellView)` 后，不调用 `CreateViewWindow`，`IFolderView2::GetFolder` 仍报告该视图持有包装 adapter，且 `window-created=False`。这确认可在不建 HWND 的情况下构造 DefView COM 对象并核对根 folder 身份，但不测试列表读取或绘制。该结果只证明 adapter 树一层子目录可继续委托，不修复包装 PIDL 的普通绝对路径解析失败，也没有证明 DefView 可消费该树；Explorer 导航、上下文菜单、拖放、通知与自定义列仍待后续隔离宿主/集中 UI 验收。
