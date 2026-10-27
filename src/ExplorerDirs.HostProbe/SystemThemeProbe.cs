@@ -83,6 +83,13 @@ internal static class SystemThemeProbe
         Check(ReadPixel(tip, 200, 6) == ColorFor("ControlBackground") &&
               ((SolidColorBrush)tip.Foreground).Color == ColorFor("ControlText"),
             "WPF tooltip renders matching background and readable text without opening a popup");
+        foreach (var control in new Control[] { new DataGrid(), new DataGridRow(), new DataGridCell(), new System.Windows.Controls.Primitives.DataGridColumnHeader() })
+        {
+            control.Style = app.TryFindResource(control.GetType()) as Style;
+            Check(control.Background is SolidColorBrush background && background.Color == ColorFor("ControlBackground") &&
+                  control.Foreground is SolidColorBrush foreground && foreground.Color == ColorFor("ControlText"),
+                $"{control.GetType().Name} uses paired palette colors in secondary windows");
+        }
         var toolbar = new ToolBar { Width = 260, Style = (Style)app.FindResource(typeof(ToolBar)) };
         toolbar.Items.Add(new Button { Content = "导航" });
         toolbar.Measure(new Size(260, 28));
