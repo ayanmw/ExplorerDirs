@@ -65,6 +65,8 @@ internal static class AddressEditingProbe
                 Ensure(address.Visibility == Visibility.Visible && address.IsReadOnly,
                     "leaving classic editing restores its path display");
 
+                CheckLateNavigationResults(pane, root);
+
                 foreach (TabItem tab in ((TabControl)Field(pane, "Tabs")!).Items)
                 {
                     var browser = (HwndHost)tab.Tag.GetType().GetProperty("Browser", Members)!.GetValue(tab.Tag)!;
@@ -74,7 +76,7 @@ internal static class AddressEditingProbe
             }
             Ensure(new WindowInteropHelper(window).Handle == 0, "the test window has no HWND");
             Ensure(GetForegroundWindow() == foreground, "the foreground window is unchanged");
-            Console.WriteLine("Address editing: PASS (four unshown panes; routed events only, no Shell view or desktop input)");
+            Console.WriteLine("Address editing: PASS (four unshown panes; routed edits and delayed result notifications, no Shell view or desktop input)");
             return 0;
         }
         finally
@@ -85,6 +87,68 @@ internal static class AddressEditingProbe
             Directory.Delete(root, recursive: true);
         }
     }
+
+    private static void CheckLateNavigationResults(PaneControl pane, string root)
+    {
+        var state = pane.GetType().GetProperty("Current", Members)!.GetValue(pane)!;
+        var browser = state.GetType().GetProperty("Browser", Members)!.GetValue(state)!;
+        var address = (TextBox)Field(pane, "Address")!;
+        var firstPath = Path.Combine(root, "first");
+        var nextPath = Path.Combine(root, "next");
+        pane.FocusAddress();
+        address.Text = firstPath;
+        Call(pane, "Go_Click", Field(pane, "GoButton")!, new RoutedEventArgs());
+        address.Text = nextPath;
+        Notify(browser, "Navigated", firstPath);
+        Ensure(address.Text == nextPath && !address.IsReadOnly && pane.CurrentPath == firstPath,
+            "a completed directory updates tab identity without replacing a newer address draft");
+        Call(pane, "Go_Click", Field(pane, "GoButton")!, new RoutedEventArgs());
+        Notify(browser, "Navigated", nextPath);
+        Ensure(address.Text == nextPath && address.IsReadOnly && pane.CurrentPath == nextPath,
+            "an unchanged address submission still leaves editing after completion");
+
+        var search = (TextBox)Field(pane, "SearchBox")!;
+        var location = Field(browser, "_location")!;
+        void CompleteSearch(string query)
+        {
+            Call(location, "TryCompleteSearch", "search-ms:query=" + Uri.EscapeDataString(query) +
+                "&crumb=location:" + Uri.EscapeDataString(nextPath));
+            Notify(browser, "SearchNavigated", query);
+        }
+        CompleteSearch("earlier");
+        search.Text = "new draft";
+        CompleteSearch("earlier");
+        Ensure(search.Text == "new draft", "late search success preserves newer text even after input loses focus");
+        Notify(browser, "NavigationFailed", "probe failure");
+        Ensure(search.Text == "new draft", "late search failure also preserves newer text");
+        pane.FocusSearch();
+        Ensure(search.Text == "new draft", "refocusing search does not reset its draft");
+        search.Text = "  new draft  ";
+        Call(pane, "SubmitSearch");
+        Ensure(search.Text == "new draft", "explicit submit normalizes query whitespace without reverting to the old query");
+        CompleteSearch("earlier");
+        Ensure(search.Text == "new draft", "an older search result cannot replace the newer submitted query");
+        CompleteSearch("new draft");
+        Ensure(!(bool)Field(pane, "_searchTextDirty")!, "the matching result acknowledges submitted search text");
+        search.Text = string.Empty;
+        Notify(browser, "NavigationFailed", "probe failure");
+        Ensure(search.Text.Length == 0, "clearing the search input is also a draft, not permission to restore the old query");
+        Call(pane, "CloseSearch");
+        pane.FocusSearch();
+        Ensure(search.Text.Length == 0, "closing search discards the draft and returns to the directory query state");
+
+        search.Text = "old-tab draft";
+        pane.OpenPathInNewTab(root);
+        Ensure(search.Text.Length == 0 && !(bool)Field(pane, "_searchTextDirty")!,
+            "switching tabs resets the search editor to the selected tab's query");
+        pane.FocusAddress();
+        address.Text = "unsubmitted current-tab text";
+        Notify(browser, "Navigated", firstPath);
+        Ensure(address.Text == "unsubmitted current-tab text", "a background tab cannot replace the active tab's draft");
+    }
+
+    private static void Notify(object browser, string eventName, string value) =>
+        ((EventHandler<string>?)Field(browser, eventName))?.Invoke(browser, value);
 
     private static void RaiseMouseDown(UIElement element, MouseButton button) => element.RaiseEvent(
         new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button) { RoutedEvent = Mouse.MouseDownEvent });

@@ -38,6 +38,8 @@ public partial class PaneControl : UserControl
     private bool _classicAddressBar;
     private bool _alwaysShowTabStrip = true;
     private bool _addressNavigationPending;
+    private bool _searchTextDirty;
+    private bool _updatingSearchText;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
     private bool _autoExpandTreeSelection = true;
@@ -890,9 +892,33 @@ public partial class PaneControl : UserControl
     {
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         SearchBar.Visibility = Visibility.Visible;
-        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        if (!_searchTextDirty) SetSearchText(state.Browser.SearchQuery ?? string.Empty);
         SearchBox.Focus();
         SearchBox.SelectAll();
+    }
+
+    private void SetSearchText(string text)
+    {
+        _updatingSearchText = true;
+        try
+        {
+            SearchBox.Text = text;
+            _searchTextDirty = false;
+        }
+        finally { _updatingSearchText = false; }
+    }
+
+    private void SyncSearchText(string query)
+    {
+        // Focus can already be on the submit button or another pane. Only a
+        // matching result may acknowledge edited text; older results leave it alone.
+        if (!_searchTextDirty || string.Equals(SearchBox.Text, query, StringComparison.Ordinal))
+            SetSearchText(query);
+    }
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_updatingSearchText) _searchTextDirty = true;
     }
 
     private void SetSearchScope(TabState state, string? scopePath)
@@ -1141,6 +1167,10 @@ public partial class PaneControl : UserControl
     private void SubmitSearch()
     {
         if (Current is not { } state || string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+        // Shell searches trim the submitted query. Normalize on explicit submit,
+        // then keep it protected until its matching result acknowledges the text.
+        SearchBox.Text = SearchBox.Text.Trim();
+        _searchTextDirty = true;
         state.SearchRequestPending = true;
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
@@ -1161,6 +1191,7 @@ public partial class PaneControl : UserControl
     private void CloseSearch()
     {
         if (Current is not { } state) return;
+        _searchTextDirty = false;
         _searchCloseFocusPending = state.SearchRequestPending || state.Browser.SearchQuery is not null
             ? state : null;
         state.SearchRequestPending = false;
@@ -1521,8 +1552,7 @@ public partial class PaneControl : UserControl
                 owner.ShowBreadcrumb();
             }
             owner.SearchBar.Visibility = Visibility.Visible;
-            if (!owner.SearchBox.IsKeyboardFocusWithin || owner.SearchBox.Text == query)
-                owner.SearchBox.Text = query;
+            owner.SyncSearchText(query);
             owner.Status.Text = $"搜索结果：{query}";
             owner.QueueSelectionCountsRefresh(state);
             owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
@@ -1539,7 +1569,7 @@ public partial class PaneControl : UserControl
                 if (state.Browser.SearchQuery is { } query)
                 {
                     owner.SearchBar.Visibility = Visibility.Visible;
-                    owner.SearchBox.Text = query;
+                    owner.SyncSearchText(query);
                 }
                 owner.Status.Text = message;
                 owner.SyncTreeToCurrent(state);
@@ -2200,7 +2230,7 @@ public partial class PaneControl : UserControl
         RenderBreadcrumb(state.Path);
         ShowBreadcrumb();
         SearchBar.Visibility = state.Browser.SearchQuery is null ? Visibility.Collapsed : Visibility.Visible;
-        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        SetSearchText(state.Browser.SearchQuery ?? string.Empty);
         if (QuickFilterBar.Visibility == Visibility.Visible) ShowQuickFilterEditor(state.Browser.QuickFilter);
         Status.Text = state.Browser.SearchQuery is { } query ? $"搜索结果：{query}" : "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
@@ -2361,6 +2391,13 @@ public partial class PaneControl : UserControl
             RestoreFileFocusWhenActive();
             e.Handled = true;
         }
+    }
+
+    private void Address_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Continuing to edit after submission revokes the old completion's
+        // permission to replace the draft or leave address editing.
+        if (_addressEditing) _addressNavigationPending = false;
     }
 
     private void Address_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
