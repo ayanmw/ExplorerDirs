@@ -174,6 +174,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    internal long ViewGeneration => _viewReadiness.Generation;
     internal bool IsFileSystemLocation => _location.IsFileSystemLocation;
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot()
     {

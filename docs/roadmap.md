@@ -19,6 +19,12 @@
 - 现在累加器按读取代际清空余量；原生滚轮消息在累加前传入当前代际。回归用真实 `ShellViewReadiness.Begin` 夹在两次半刻度之间，确认旧余量丢弃且新视图内仍可累加。旧实现先因缺少代际入口构建失败，完整 Release `SettingsSmoke` 与 App Release build 随后通过，0 警告/错误；日志 `src/.state/view-style-wheel-generation-settings.log`、`view-style-wheel-generation-app.log`。
 - 未创建窗口/Shell view、未运行物理滚轮或更新 release；物理高精度输入及 WPF 窗格表面仍归集中 UI 验收。此修改只影响视图样式循环，不改变普通滚轮或标签配置。
 
+## 2026-10-28：WPF 窗格控件按完整滚轮刻度切换视图
+
+- 继续检查窗格的 WPF 预览滚轮路径时发现它直接把单次 `MouseWheelEventArgs.Delta` 交给循环函数；该函数对小于 120 的增量也至少切换一个预设。现改为每标签累积 WPF 表面输入，只在完整刻度时应用视图切换，并按该标签的 Shell 视图代际丢弃导航前余量。
+- 新 smoke 覆盖半刻度不调用切换、累计完整一格只调用一次，并静态确认窗格事件接入该路由。接入前因路由方法缺失按预期构建失败；完整 Release `SettingsSmoke` 与 App Release build 通过，0 警告/错误。日志 `src/.state/view-style-wheel-chrome-settings.log`、`view-style-wheel-chrome-app.log`。
+- 未启动窗口或模拟物理滚轮；原生 HWND 与 WPF 表面的真实设备路由、滚动焦点和可见切换效果仍待集中 UI 验收。
+
 ## 2026-10-27：多窗口清单的超大未来版本保护
 
 - 复核重启链路时发现 WindowSessions.ini 的 FormatVersion 用 Int32 解析，2147483648 等未知未来版本溢出后被视为损坏格式，备份后仍允许 Create 覆盖清单。改为与其他便携配置一致的 BigInteger 版本解析，保留未知版本的只读保护，不改变窗口数或会话格式。

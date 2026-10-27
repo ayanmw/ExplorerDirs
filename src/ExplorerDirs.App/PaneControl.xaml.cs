@@ -75,6 +75,7 @@ public partial class PaneControl : UserControl
         public required PaneControl Owner { get; set; }
         public required TabItem Tab { get; init; }
         public required ExplorerBrowserHost Browser { get; init; }
+        public ViewStyleWheelAccumulator ChromeWheelAccumulator { get; } = new();
         // Shell confirms location before the queued pane notification updates
         // the chrome. Commands must not use a second, lagging directory model.
         public string Path => Browser.CurrentPath;
@@ -723,9 +724,16 @@ public partial class PaneControl : UserControl
     }
     private bool CycleViewStyle(int delta)
     {
-        var current = ReadViewStyle();
-        if (current is not { } style) return false;
-        return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, delta));
+        var state = Current;
+        if (state is null) return false;
+        return ViewStyleWheelDispatch.TryApplyAccumulated(state.ChromeWheelAccumulator, delta,
+            state.Browser.ViewGeneration, completedDelta =>
+            {
+                if (Current != state) return false;
+                var current = state.Browser.ReadViewStyle();
+                if (Current != state || current is not { } style) return false;
+                return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, completedDelta));
+            });
     }
     private void RootBorder_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {

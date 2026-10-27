@@ -15,8 +15,9 @@ internal static class ViewStyleWheelRoutingSmoke
             "pane WPF chrome routes preview wheel input");
         Check(paneCode.Contains("(Keyboard.Modifiers & ModifierKeys.Control) == 0", StringComparison.Ordinal) &&
               paneCode.Contains("CycleViewStyle(e.Delta)", StringComparison.Ordinal) &&
+              paneCode.Contains("ViewStyleWheelDispatch.TryApplyAccumulated(state.ChromeWheelAccumulator", StringComparison.Ordinal) &&
               paneCode.Contains("e.Handled = true", StringComparison.Ordinal),
-            "Ctrl+wheel uses the existing per-pane view cycle and consumes only successful changes");
+            "Ctrl+wheel uses a per-tab accumulator and consumes only partial or successful changes");
         Check(paneCode.Contains("browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.CycleViewStyle(style);",
                 StringComparison.Ordinal),
             "a delayed wheel callback from an inactive tab cannot change its active sibling");
