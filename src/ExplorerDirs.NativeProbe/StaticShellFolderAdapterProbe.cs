@@ -310,6 +310,8 @@ internal static class StaticShellFolderAdapterProbe
             }
             finally { Marshal.FreeCoTaskMem(keyPointer); Marshal.FreeCoTaskMem(variant); }
 
+            Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
+                NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"))();
             Check(At<CreateViewObject>(adapter, 8)(adapter, parent, in ShellViewId, out view));
             host = new StreamViewHost(parent, []) { View = view };
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
@@ -342,7 +344,8 @@ internal static class StaticShellFolderAdapterProbe
                 new(new(NameKeyFormat, 10), 220),
                 new(new(SizeKeyFormat, 12), 110),
                 new(new(property.FormatId, property.PropertyId), 150),
-                new(new(SizeKeyFormat, 15), 180)
+                new(new(SizeKeyFormat, 15), 180),
+                new(new(DocumentSummaryFormat, 4), 170)
             };
             Check(ShellColumnManager.Apply(folderView, columns));
             Check(ShellColumnManager.Capture(folderView, out var captured));
@@ -353,7 +356,7 @@ internal static class StaticShellFolderAdapterProbe
             Pump(500);
             // Read the actual DefView ListView subitems to distinguish a missing
             // Shell column callback from an inactive view that cannot serve any text.
-            var displayedColumns = new[] { 0, 1, 2, 3 }
+            var displayedColumns = new[] { 0, 1, 2, 3, 4 }
                 .Select(subItem => (SubItem: subItem, Values: ReadDisplayedColumnValues(view, subItem)))
                 .ToArray();
             foreach (var column in displayedColumns)
@@ -361,11 +364,18 @@ internal static class StaticShellFolderAdapterProbe
             Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
             VerifyLegacyColumnRearrange(view, columnIndexForView);
             var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
-            // A failed custom-schema check must not suppress the standard-schema control evidence.
-            VerifySortMatrix((standard, direction) => ReadSortedValues(view, folderView, adapter,
-                standard ? sizeKey : nativeKey, direction), Console.WriteLine);
-            Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-column-visible=True; " +
-                "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=True; foreground-unchanged=True");
+            var documentByteCountKey = new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 };
+            // A failed custom-schema check must not suppress either known-schema control.
+            VerifySortMatrix((keyName, direction) => ReadSortedValues(view, folderView, adapter,
+                keyName switch
+                {
+                    "custom" => nativeKey,
+                    "PKEY_Size" => sizeKey,
+                    "System.Document.ByteCount" => documentByteCountKey,
+                    _ => throw new ArgumentOutOfRangeException(nameof(keyName), keyName, "Unknown sort control.")
+                }, direction), Console.WriteLine);
+            Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-and-known-schema-columns-visible=True; " +
+                "custom-and-PKEY_Size=UInt64; System.Document.ByteCount=Int32; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=True; foreground-unchanged=True");
             CheckBoundary(parent, foreground, "static column sorting", expectVisible: true);
         }
         catch (Exception ex)
@@ -441,16 +451,16 @@ internal static class StaticShellFolderAdapterProbe
             if (parent != 0) Marshal.Release(parent);
         }
     }
-    private static void VerifySortMatrix(Func<bool, int, IReadOnlyList<ulong>> read, Action<string> report)
+    private static void VerifySortMatrix(Func<string, int, IReadOnlyList<ulong>> read, Action<string> report)
     {
         var failures = new List<Exception>();
-        foreach (var standard in new[] { false, true })
+        foreach (var keyName in new[] { "custom", "PKEY_Size", "System.Document.ByteCount" })
         foreach (var direction in new[] { 1, -1 })
         {
-            var label = $"{(standard ? "PKEY_Size" : "custom")}/{(direction == 1 ? "ascending" : "descending")}";
+            var label = $"{keyName}/{(direction == 1 ? "ascending" : "descending")}";
             try
             {
-                var values = read(standard, direction);
+                var values = read(keyName, direction);
                 var expected = direction == 1 ? new ulong[] { 2, 10, 10, 100 } : [100, 10, 10, 2];
                 if (!values.SequenceEqual(expected))
                     throw new Exception("Unexpected numeric order: " + string.Join(',', values));
@@ -467,13 +477,13 @@ internal static class StaticShellFolderAdapterProbe
 
     private static void VerifySortMatrixIsolation()
     {
-        var calls = new List<(bool Standard, int Direction)>();
+        var calls = new List<(string KeyName, int Direction)>();
         var reported = new List<string>();
         try
         {
-            VerifySortMatrix((standard, direction) =>
+            VerifySortMatrix((keyName, direction) =>
             {
-                calls.Add((standard, direction));
+                calls.Add((keyName, direction));
                 if (calls.Count == 1) throw new InvalidOperationException("synthetic initial failure");
                 return [];
             }, reported.Add);
@@ -481,8 +491,13 @@ internal static class StaticShellFolderAdapterProbe
         }
         catch (AggregateException ex)
         {
-            if (ex.InnerExceptions.Count != 4 || reported.Count != 4 ||
-                !calls.SequenceEqual(new[] { (false, 1), (false, -1), (true, 1), (true, -1) }))
+            if (ex.InnerExceptions.Count != 6 || reported.Count != 6 ||
+                !calls.SequenceEqual(new[]
+                {
+                    ("custom", 1), ("custom", -1),
+                    ("PKEY_Size", 1), ("PKEY_Size", -1),
+                    ("System.Document.ByteCount", 1), ("System.Document.ByteCount", -1)
+                }))
                 throw new Exception("Sort failure skipped a later direction or standard-schema control.");
         }
         VerifySortMatrix((_, direction) => direction == 1 ? [2, 10, 10, 100] : [100, 10, 10, 2], _ => { });
@@ -703,6 +718,8 @@ internal static class StaticShellFolderAdapterProbe
             var index = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetLastShellColumnComparisonIndex"))();
             var detailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsExCount"))();
             var detailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsOfCount"))();
+            var customItemDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellItemDetailsOfCount"))();
+            var customHeaderDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellHeaderDetailsOfCount"))();
             var documentCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellComparisonCount"))();
             var documentDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsExCount"))();
             var documentDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsOfCount"))();
@@ -717,7 +734,7 @@ internal static class StaticShellFolderAdapterProbe
             var persistRoot = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistRootRequestCount"))();
             return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; " +
                 $"document-byte-count(CompareIDs/GetDetailsEx/GetDetailsOf)={documentCompare}/{documentDetailsEx}/{documentDetailsOf}; " +
-                $"GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
+                $"GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom total/header/item, size-item)={detailsOf}/{customHeaderDetailsOf}/{customItemDetailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
                 $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}";
         }
         finally { NativeLibrary.Free(module); }
@@ -764,6 +781,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyType(nint self, out ushort variantType);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProbeCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint GetShellDetailsSizeNative();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumn(nint self, uint column, nint key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bind, nint name, nint eaten, out nint item, out uint attributes);

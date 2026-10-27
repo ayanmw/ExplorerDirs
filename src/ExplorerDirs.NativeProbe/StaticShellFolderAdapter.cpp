@@ -30,6 +30,8 @@ namespace
     volatile LONG g_standardSizeComparisons = 0;
     volatile LONG g_standardSizeDetailsOf = 0;
     volatile LONG g_customDetailsOf = 0;
+    volatile LONG g_customItemDetailsOf = 0;
+    volatile LONG g_customHeaderDetailsOf = 0;
     volatile LONG g_documentByteCountComparisons = 0;
     volatile LONG g_documentByteCountDetailsEx = 0;
     volatile LONG g_documentByteCountDetailsOf = 0;
@@ -352,6 +354,8 @@ namespace
             if (column < _columnCount) return _inner->GetDetailsOf(item, column, details);
             if (column != _columnCount) return E_INVALIDARG;
             InterlockedIncrement(&g_customDetailsOf);
+            if (item) InterlockedIncrement(&g_customItemDetailsOf);
+            else InterlockedIncrement(&g_customHeaderDetailsOf);
             details->fmt = LVCFMT_RIGHT;
             details->cxChar = 16;
             details->str.uType = STRRET_WSTR;
@@ -398,6 +402,29 @@ extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellColumnComparisonCount
     return InterlockedCompareExchange(&g_staticColumnComparisons, 0, 0);
 }
 
+extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters()
+{
+    InterlockedExchange(&g_staticColumnComparisons, 0);
+    InterlockedExchange(&g_allComparisons, 0);
+    InterlockedExchange(&g_lastCompareColumn, -1);
+    InterlockedExchange(&g_customDetailsEx, 0);
+    InterlockedExchange(&g_standardSizeDetailsEx, 0);
+    InterlockedExchange(&g_standardSizeComparisons, 0);
+    InterlockedExchange(&g_standardSizeDetailsOf, 0);
+    InterlockedExchange(&g_customDetailsOf, 0);
+    InterlockedExchange(&g_customItemDetailsOf, 0);
+    InterlockedExchange(&g_customHeaderDetailsOf, 0);
+    InterlockedExchange(&g_documentByteCountComparisons, 0);
+    InterlockedExchange(&g_documentByteCountDetailsEx, 0);
+    InterlockedExchange(&g_documentByteCountDetailsOf, 0);
+    InterlockedExchange(&g_propertyStoreQueryInterfaceRequests, 0);
+    InterlockedExchange(&g_persistClassIdRequests, 0);
+    InterlockedExchange(&g_persistRootRequests, 0);
+    InterlockedExchange(&g_propertyStoreBindToObjectRequests, 0);
+    InterlockedExchange(&g_propertyStoreBindToStorageRequests, 0);
+    InterlockedExchange(&g_propertyStoreUiObjectRequests, 0);
+}
+
 extern "C" __declspec(dllexport) LONG WINAPI GetAllShellColumnComparisonCount()
 {
     return InterlockedCompareExchange(&g_allComparisons, 0, 0);
@@ -431,6 +458,16 @@ extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsOfCount(
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customDetailsOf, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellItemDetailsOfCount()
+{
+    return InterlockedCompareExchange(&g_customItemDetailsOf, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellHeaderDetailsOfCount()
+{
+    return InterlockedCompareExchange(&g_customHeaderDetailsOf, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellComparisonCount()

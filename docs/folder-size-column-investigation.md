@@ -152,6 +152,12 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 
 隔离 adapter 现在另提供一个仅供实验的 `System.Document.ByteCount` 列，使用与 schema 一致的 `VT_I4` 值；无窗口合同已验证该列状态、键映射、显示文本、类型和数值比较。该结果证明适配器可以按系统 schema 契约提供一列，但仍不证明 DefView 会消费该值。`VT_I4` 也不适合真实文件夹总大小。没有注册 schema、创建窗口或改动产品；NativeProbe Release 构建、原生 adapter 构建及 `--static-shell-column-folder-smoke` 通过，输出 `window-created=False`。后续隔离 DefView 对照只能把它用作“已知 schema”诊断控制，并与产品 64 位大小语义严格区分。
 
+### 2026-10-28：已知 schema 列的 DefView 消费检查
+
+将 `System.Document.ByteCount` 以其系统描述的 `VT_I4` 类型加入严格 `IShellFolder2` adapter 的 Details 列后，在独立 Private Desktop 上激活 DefView 检查。运行记录为 `src/.state/native-probe-watchdog/20261028-014424-registered-schema-column.stdout.log`（SHA-256 `8E51A3CE311D5AED4BCDBEC5C3024FBC62D151D99DF8A28D72B3B6FD77C16A8B`）。`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 成功，DefView 确认使用 adapter，用户桌面的前台窗口句柄前后不变。
+
+DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图前重置的计数器观察，显示列及排序前后，该属性对应的 `GetDetailsOf`、`GetDetailsEx` 和 `CompareIDs` 计数均为 0。未注册测试列只收到一次列标题 `GetDetailsOf`，没有逐项读取。标准 `PKEY_Size` 升降序都通过；`System.Document.ByteCount` 两个方向仍保持初始名称顺序，严格探针以 exit code 1 报告未达自定义列排序门槛。可确认：即使系统 schema 已知、属性类型和列状态匹配，当前严格 filesystem adapter 路径仍未让 DefView 消费该自定义列。不能据此排除其他 Shell namespace/宿主设计，也不构成产品迁移依据；产品仍使用 ExplorerBrowser。
+
 ### 2026-10-28 激活视图仍不触发逐项属性回调
 
 为排除“DefView 尚未激活所以不读取列值”的解释，NativeProbe 增加 `--static-shell-column-adapter-activated-strict-private-desktop` 对照。它在独立、未切换的 Windows Desktop 上创建同一严格接口适配器和文件夹夹具，显示父窗口后调用 `IShellView::UIActivate(SVUIA_ACTIVATE_NOFOCUS)`，再执行同一列显示与四向排序矩阵；没有把输入焦点交给视图，也未操作用户桌面。
