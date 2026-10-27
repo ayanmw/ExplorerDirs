@@ -12,7 +12,6 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
-    private const uint SvgioAllView = 2;
 
     internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false)
     {
@@ -488,30 +487,18 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(currentSort); }
         }
         Console.WriteLine($"native-static-shell-column: callbacks-after-sort-before-probe-read={ReadNativeComparisonStats()}");
-        Check(At<ItemCount>(folderView, 7)(folderView, SvgioAllView, out var count));
-        if (count != 4) throw new Exception($"Expected four fixture items, got {count}.");
-        var variant = Marshal.AllocCoTaskMem(24);
-        var keyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
-        try
+        var names = ReadDisplayedColumnValues(view, 0);
+        Console.WriteLine($"native-static-shell-column: visible-name-order=[{string.Join(',', names)}]");
+        var valuesByName = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
         {
-            Marshal.StructureToPtr(key, keyPointer, false);
-            var values = new List<ulong>(count);
-            for (var index = 0; index < count; index++)
-            {
-                Check(At<GetItem>(folderView, 6)(folderView, index, out var pidl));
-                try
-                {
-                    Marshal.GetNativeVariantForObject(0UL, variant);
-                    Check(At<GetDetailsEx>(adapter, 17)(adapter, pidl, keyPointer, variant));
-                    var value = Marshal.GetObjectForNativeVariant(variant);
-                    if (value is not ulong number) throw new Exception("DefView returned a non-UInt64 sort value.");
-                    values.Add(number);
-                }
-                finally { ILFree(pidl); }
-            }
-            return values.ToArray();
-        }
-        finally { Marshal.FreeCoTaskMem(keyPointer); Marshal.FreeCoTaskMem(variant); }
+            ["a-ten-copy.bin"] = 10,
+            ["hundred.bin"] = 100,
+            ["ten.bin"] = 10,
+            ["two.bin"] = 2
+        };
+        if (names.Length != valuesByName.Count || names.Any(name => !valuesByName.ContainsKey(name)))
+            throw new Exception($"Unexpected visible fixture rows: [{string.Join(',', names)}].");
+        return names.Select(name => valuesByName[name]).ToArray();
     }
 
     private static string[] ReadDisplayedColumnValues(nint view, int subItem)
@@ -671,8 +658,6 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);

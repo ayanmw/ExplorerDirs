@@ -126,6 +126,6 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 
 前一轮新增的原生 folder-contract 探针在输出 PASS 后以 `0xC0000374`（heap corruption）退出，因此该次结果无效。复查发现探针将 `SHELLDETAILS` 固定按 272 字节分配；x64 SDK 下 `STRRET` 的对齐使完整结构大于该值。另外，标准 `PKEY_Size` 对照还复用了已经释放的 details 缓冲区。现在由同一 C++ 编译单元导出 `sizeof(SHELLDETAILS)`，托管探针按实际大小分配；标准 Size 检查使用单独分配、释放的缓冲区。
 
-修正后，`--static-shell-column-classid-smoke` 在 3 个独立进程中均以 exitCode=0 完成，严格身份基线也以 exitCode=0 完成，未再出现堆损坏。随后在独立 Desktop 上比较仅改变 `IPersist::GetClassID` 返回值的原型：DefView 确实使用 adapter，名称、系统 Size、日期及自定义列的属性回调均可读取；但四种自定义列/`PKEY_Size` 升降序仍不改变列表顺序，`CompareIDs` 计数为 0，排序前后仍是 `10,100,10,2`。显式调用 `IShellView::Refresh` 也未改变结果（返回 `S_FALSE`）。故类身份不是目前排序失败的修复点；隔离原型仍未达到逐行列的消费/排序门槛，不能接入产品。该私有 Desktop 探针退出码为 1，前台窗口句柄保持不变。
+修正后，`--static-shell-column-classid-smoke` 在 3 个独立进程中均以 exitCode=0 完成，严格身份基线也以 exitCode=0 完成，未再出现堆损坏。随后在独立 Desktop 上比较仅改变 `IPersist::GetClassID` 返回值的原型：DefView 确实使用 adapter，名称、系统 Size、日期及自定义列的属性回调均可读取；但四种自定义列/`PKEY_Size` 升降序仍不改变列表顺序。排序前后直接读取 DefView 内 `SysListView32` 的可见文件名，均为原始名称序；`CompareIDs` 计数为 0。显式调用 `IShellView::Refresh` 也未改变结果（返回 `S_FALSE`）。故类身份不是目前排序失败的修复点；隔离原型仍未达到逐行列的消费/排序门槛，不能接入产品。该私有 Desktop 探针退出码为 1，前台窗口句柄保持不变。
 
 此结果修正了此前被损坏探针污染的判断边界：无窗口合同现可重复通过，但实际 DefView 消费与排序仍失败。产品代码、发布候选及用户配置均未改动。
