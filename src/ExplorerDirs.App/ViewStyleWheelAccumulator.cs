@@ -3,6 +3,17 @@ namespace ExplorerDirs.App;
 internal sealed class ViewStyleWheelAccumulator
 {
     private int _remainder;
+    private long? _targetGeneration;
+
+    internal int Add(int delta, long targetGeneration)
+    {
+        if (_targetGeneration != targetGeneration)
+        {
+            _remainder = 0;
+            _targetGeneration = targetGeneration;
+        }
+        return Add(delta);
+    }
 
     internal int Add(int delta)
     {

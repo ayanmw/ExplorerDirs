@@ -40,6 +40,15 @@ internal static class ViewStyleWheelSmoke
         Check(separateTab.Add(60) == 0 && new ViewStyleWheelAccumulator().Add(60) == 0 &&
             separateTab.Add(60) == 1,
             "partial wheel motion remains isolated to its owning tab");
+
+        var navigated = new ViewStyleWheelAccumulator();
+        var readiness = new ShellViewReadiness();
+        Check(navigated.Add(60, readiness.Generation) == 0,
+            "partial wheel motion waits for another delta in the same view generation");
+        readiness.Begin("next-directory");
+        Check(navigated.Add(60, readiness.Generation) == 0 &&
+            navigated.Add(60, readiness.Generation) == 1,
+            "partial wheel motion from a retired view is discarded after navigation");
     }
 
     private static void Check(bool condition, string message)

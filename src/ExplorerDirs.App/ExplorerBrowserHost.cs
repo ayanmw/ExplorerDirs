@@ -4575,7 +4575,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var delta = unchecked((short)(wParam.ToInt64() >> 16));
                 if (delta != 0)
                 {
-                    var notches = _ctrlWheelAccumulator.Add(delta);
+                    var notches = _ctrlWheelAccumulator.Add(delta, _viewReadiness.Generation);
                     if (notches == 0) return IntPtr.Zero;
                     var wheelBrowser = _browser;
                     var wheelView = _viewWindow;
