@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-28：temp.76 五分钟被动采样
+
+- 北京时间 06:23:50–06:28:51（UTC 2026-10-27 22:23:50–22:28:51），对仍运行的 PID `58888` 采样 61 点、间隔 5 秒；进程启动时间全程为 UTC `2026-10-27T13:43:03.531Z`。采样器未启动、重启、聚焦或操作应用，也未附加运行时计数器。
+- 实例仍为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`。EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`，DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+- Working Set 全程 `244,535,296` 字节（233.25 MiB），Private Bytes 全程 `123,269,120` 字节（117.55 MiB），句柄 `1120`、线程 `34` 全程不变。
+- 原始 CSV 留在忽略目录 `src/.state/memory-samples/passive-goal-20261028.csv`，SHA-256 `1F422BA8D0582739D69EDD60521FDF8E4B206F1BAC9DCBC7C14D06CEDEFEEE38`。脚本没有记录操作、窗格或标签负载；稳定的进程级计数不能排除操作期间的短时峰值、增长后回落或更长周期变化，也不能定位分配来源。
+
 ## 2026-10-28：temp.76 再次被动复采
 
 - 北京时间 03:27:13–03:28:13（UTC 2026-10-27 19:27:13–19:28:13），对仍在运行的 PID `58888` 采样 13 点、间隔约 5 秒；进程启动时间保持 UTC `2026-10-27T13:43:03.531Z`。没有启动/重启或操作窗口，没有强制 GC、裁剪工作集或附加运行时计数器。
