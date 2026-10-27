@@ -122,12 +122,14 @@ internal static class ShellSelectionRestoreGateSmoke
         Check(UseRefreshSnapshot(false, true, true), expected: false,
             "refresh captures the live selection when no confirmed snapshot exists");
 
+        Check(ShellSelectionRestoreGate.ShouldObserveSelectionCallback(false, true), false,
+            "mouse range selection in progress must not trigger snapshot recovery");
         var shouldObserveCallback = gateType.GetMethod("ShouldObserveSelectionCallback", System.Reflection.BindingFlags.Static |
             System.Reflection.BindingFlags.NonPublic)
             ?? throw new Exception("Selection callbacks must be ignored while deferred refresh restoration is pending.");
-        Check((bool)shouldObserveCallback.Invoke(null, [false])!, expected: true,
+        Check((bool)shouldObserveCallback.Invoke(null, [false, false])!, expected: true,
             "Shell selection callbacks are observed outside deferred refresh restoration");
-        Check(!(bool)shouldObserveCallback.Invoke(null, [true])!, expected: true,
+        Check(!(bool)shouldObserveCallback.Invoke(null, [true, false])!, expected: true,
             "Shell selection callbacks are ignored while deferred refresh restoration is pending");
 
         var verifyNaturalUpdate = gateType.GetMethod("ShouldVerifyNaturalUpdateSelection", System.Reflection.BindingFlags.Static |

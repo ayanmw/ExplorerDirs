@@ -10,8 +10,8 @@ internal static class ShellSelectionRestoreGate
     internal static bool ShouldUseRefreshSnapshot(bool hasSnapshot, bool sameView, bool userInputUnchanged)
         => hasSnapshot && sameView && userInputUnchanged;
 
-    internal static bool ShouldObserveSelectionCallback(bool deferredRefreshRestorePending)
-        => !deferredRefreshRestorePending;
+    internal static bool ShouldObserveSelectionCallback(bool deferredRefreshRestorePending, bool pointerSelectionInProgress = false)
+        => !deferredRefreshRestorePending && !pointerSelectionInProgress;
 
     internal static bool ShouldRestore(bool hasSnapshot, int selectedCount, long snapshotInputVersion, long currentInputVersion)
         => hasSnapshot && selectedCount > 0 && snapshotInputVersion == currentInputVersion;

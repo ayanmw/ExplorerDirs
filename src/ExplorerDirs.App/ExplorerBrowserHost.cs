@@ -2893,7 +2893,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         TraceShellSelectionCallback(shellView);
         if (_browser is null || _selectionRecoverySuppression.IsSuppressed(_viewReadiness.NavigationVersion) || _viewReadiness.Pending ||
-            !ShellSelectionRestoreGate.ShouldObserveSelectionCallback(_directorySelectionRestorePending) ||
+            !ShellSelectionRestoreGate.ShouldObserveSelectionCallback(_directorySelectionRestorePending, GetKeyState(1) < 0) ||
             Interlocked.Read(ref _nativeUserInputVersion) != Interlocked.Read(ref _settledNativeUserInputVersion)) return;
         if (Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView) < 0 || folderView == IntPtr.Zero)
             return;
@@ -3082,6 +3082,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 navigationVersion != _viewReadiness.NavigationVersion ||
                 !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
 
+            if (GetKeyState(1) < 0) return; // Wait for WM_LBUTTONUP before caching the final mouse selection.
             var folderView = GetFolderView2Pointer();
             if (folderView == IntPtr.Zero) return;
             ShellViewSelectionSnapshot? snapshot;
@@ -3107,6 +3108,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _lastNativeSelectionPath = path;
         }));
     }
+
+    [DllImport("user32.dll")] private static extern short GetKeyState(int key);
 
     private bool IsFileContentInputWindow(IntPtr hwnd)
     {
@@ -4548,7 +4551,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var timingStartedAt = timingSample ? Stopwatch.GetTimestamp() : 0;
         try
         {
-            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0204 or 0x0207)
+            // Finish the mouse gesture before caching selection; a button-down snapshot can be an intermediate range.
+            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0204 or 0x0207)
                 NoteNativeUserInput(hwnd);
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {
