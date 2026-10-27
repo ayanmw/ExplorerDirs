@@ -26,6 +26,8 @@ internal static class Program
             return LiveUpdateProbe.Run(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--live-updates-view-flags")
             return LiveUpdateProbe.RunViewFlagMatrix();
+        if (args.Length == 1 && args[0] == "--live-updates-view-flags-wpf")
+            return LiveUpdateProbe.RunViewFlagMatrix(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--qdr-native-stream")
             return QdrNativeViewProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
@@ -135,6 +137,7 @@ internal static class Program
             Console.WriteLine("Usage: --navigation-capability (hidden native Shell; creates isolated fixture folders)");
             Console.WriteLine("       --live-updates / --live-updates-wpf (four hidden views, native file changes, optional WPF pump)");
             Console.WriteLine("       --live-updates-view-flags (same matrix plus production site with CDB2GVF_NOINCLUDEITEM disabled)");
+            Console.WriteLine("       --live-updates-view-flags-wpf (same view-flag matrix with a WPF Dispatcher pump)");
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
             Console.WriteLine("       --shell-view-state-stream-smoke (IShellBrowser view-state stream save/restore without a Shell view)");
             Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");

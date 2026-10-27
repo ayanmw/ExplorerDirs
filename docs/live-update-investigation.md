@@ -1866,4 +1866,6 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 
 修正后同一隐藏生产宿主序列连续 4 次退出码 0，每轮四窗格均从 `1,1,1,1` 收敛至创建后的 `2,2,2,2`，删除夹具文件后回到 `1,1,1,1`；创建收敛约 0.87–1.03 秒，删除约 0.45–0.59 秒。完整 Release SettingsSmoke 也通过。没有显示 MainWindow 或发送用户输入；这是隐藏 HwndSource 中的真实 ExplorerBrowserHost 与本地临时目录证据，不是可见刷新体验验收。
 
-另一次 `NativeProbe --live-updates-wpf` 最小四窗格对照仍观察到未收敛计数（无站点控制通过，生产站点创建 `1,2,2,2`、删除 `0,1,1,1`）；这条不同的最小宿主路径不能覆盖或推翻 HostProbe 结果，也不能据此给产品刷新逻辑加补丁。它继续作为独立调查项，需先隔离隐藏 DefView/消息泵差异。
+另一次 `NativeProbe --live-updates-wpf` 最小四窗格对照曾观察到未收敛计数（无站点控制通过，生产站点创建 `1,2,2,2`、删除 `0,1,1,1`）；后续连续多轮同一路径及本轮新加的 `--live-updates-view-flags-wpf` 矩阵均通过。最新矩阵中，无站点、生产 `NOINCLUDEITEM` 站点、零视图标志站点的四窗格创建计数均为 `2,2,2,2`，删除均回到 `1,1,1,1`，进程退出码 0。当前结论是该最小探针路径存在过间歇观测，尚无证据将它稳定归因于某组视图标志；它与产品 HostProbe 的 watcher/recovery 路径不同，不据此改产品刷新逻辑。详细日志位于 `%TEMP%\explorer-dirs-live-updates-view-flags-wpf.log`。
+
+本轮只增加 NativeProbe 的 WPF 消息泵矩阵命令并做隐藏后台验证；没有显示 MainWindow、操作用户桌面或发布。隐藏 Shell 计数不代表可见 UI 刷新体验验收。

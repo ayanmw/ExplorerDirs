@@ -4171,3 +4171,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 后台复核发现 `docs/shell-parity.md` 曾记录当前探针覆盖 Copy|Move 和三种修饰键，但 `ShellViewDropTargetProbe.TryTransfer` 实际只允许 Copy；复跑日志也显示目标 `IShellView` 查询 `IID_IDropTarget` 返回 `E_NOINTERFACE`。使用真实 `SVGIO_SELECTION` `IDataObject` 调用已注册文件夹目标的 `DragEnter/DragOver/Drop` 可复制并保留源文件，另一路 `SHCreateDataObject` Copy 也通过。探针未运行 OLE `DoDragDrop`，不覆盖 Move 或产品跨窗格行为。
 - 已修正文档表格，保留鼠标拖放、修饰键效果、源端效果交接和产品宿主为待集中 UI 验收。复跑在 Private Desktop 中完成，前台句柄不变；未启动产品 GUI。
+
+## 2026-10-28：补充 WPF 隐藏视图刷新矩阵
+
+- 为 NativeProbe 增加 `--live-updates-view-flags-wpf`，让已有的三种 Shell 视图标志对照可使用 WPF Dispatcher pump。后台矩阵退出码 0；三种场景四窗格创建与删除计数都收敛。此前该最小探针出现过一次间歇不收敛，后续重复通过仍不能证明产品可见 UI 或确定根因；不改产品刷新策略。细节见[自动刷新调查](live-update-investigation.md#2026-10-28-hostprobe-刷新序列误报修正)。
+- 本批无可见窗口操作；可见多窗格刷新、启动和复制标签的 UI 验收留待集中进行。
