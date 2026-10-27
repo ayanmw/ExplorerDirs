@@ -61,6 +61,7 @@ internal static class PaneTabTransferProbe
             if (unhostedCopyOrder)
             {
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
+                CheckUnhostedReopenHistory(sourcePane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -225,6 +226,50 @@ internal static class PaneTabTransferProbe
             Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
                 (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
                 "unattached panes never created a Shell browser or native host");
+        }
+    }
+
+    private static void CheckUnhostedReopenHistory(UIElement pane)
+    {
+        var paneType = pane.GetType();
+        var tabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var original = (TabItem)tabs.Items[0];
+        var stateType = original.Tag.GetType();
+        var historyProperty = stateType.GetProperty("AddressHistory", InstanceMembers)!;
+        var originalHistory = historyProperty.GetValue(original.Tag)!;
+        var historyType = originalHistory.GetType();
+        var record = historyType.GetMethod("Record", InstanceMembers)!;
+        var paths = historyType.GetProperty("Paths", InstanceMembers)!;
+        var currentPath = ReadBrowserPath(original);
+        record.Invoke(originalHistory, [Path.GetDirectoryName(currentPath)!]);
+        record.Invoke(originalHistory, [currentPath]);
+        var expected = ((IEnumerable<string>)paths.GetValue(originalHistory)!).ToArray();
+        Ensure(expected.Length > 1, "closed-tab fixture has more than its current address");
+
+        paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(pane, [original.Tag]);
+        Ensure(!tabs.Items.Contains(original), "ordinary tab closes before restoration");
+        // The closed snapshot must not retain mutable history from its disposed
+        // tab, nor share it with a later duplicate of the reopened tab.
+        record.Invoke(originalHistory, ["shell:RecycleBinFolder"]);
+        paneType.GetMethod("ReopenClosedTab", InstanceMembers)!.Invoke(pane, null);
+        var reopened = (TabItem)tabs.SelectedItem!;
+        var reopenedHistory = historyProperty.GetValue(reopened.Tag)!;
+        Ensure(((IEnumerable<string>)paths.GetValue(reopenedHistory)!).SequenceEqual(expected),
+            "reopening a closed tab preserves its complete address dropdown history");
+        Ensure(!ReferenceEquals(originalHistory, reopenedHistory) && ReadBrowserPath(reopened) == currentPath,
+            "restored history is independent and the closed directory is retained");
+        paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(pane, null);
+        var duplicate = (TabItem)tabs.SelectedItem!;
+        var duplicateHistory = historyProperty.GetValue(duplicate.Tag)!;
+        record.Invoke(duplicateHistory, ["shell:ThisPCFolder"]);
+        Ensure(((IEnumerable<string>)paths.GetValue(reopenedHistory)!).SequenceEqual(expected),
+            "editing a duplicate's history does not change the restored tab");
+        foreach (var tab in new[] { reopened, duplicate })
+        {
+            var browser = stateType.GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!;
+            Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
+                (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
+                "closed-tab history checks never create a native Shell view");
         }
     }
 

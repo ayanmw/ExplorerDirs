@@ -2,6 +2,10 @@
 
 日期：2026-10-15
 
+## 2026-10-27 关闭标签的轻量地址快照
+
+窗格关闭栈由 TabSettings 扩为设置与 AddressPathHistory 的组合快照，关闭前复制地址 MRU，恢复时传入 AddTab，与复制标签的行为一致。快照不引用 TabState/ExplorerBrowserHost，关闭时仍立即 Dispose 原生宿主；不为恢复历史而驻留 Shell 视图。关闭栈最多 20 项，单份地址记录最多 20 项，仅在进程内存在；Shell Travel Log 的前进/后退历史不在这份快照中。未挂接真实 PaneControl 检查快照和副本的可变状态隔离，可见交互另行验收。
+
 ## 2026-10-27 新窗口的显示器归属
 
 三类新窗口入口复用 `CascadeFrom`，在目标 SourceInitialized 后一次执行并撤销订阅；有已存窗口位置时不登记错位操作。`WindowCascade.Place` 以 MonitorFromWindow/GetMonitorInfo 取得来源屏幕工作区，GetWindowRect 与 SetWindowPos 保持屏幕像素坐标。32 DIP 错位量按来源 DPI 换算，约束左上和右下边界；窗口大于工作区时优先保留标题栏入口，不缩小窗口。定位后根据实际尺寸再约束一次，使用 NOACTIVATE/NOSIZE/NOZORDER；来源最小化时改从同屏工作区起点错位，避免使用 iconic 伪坐标，不还原来源。

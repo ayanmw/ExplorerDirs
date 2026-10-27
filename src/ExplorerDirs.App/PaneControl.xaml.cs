@@ -15,7 +15,7 @@ public partial class PaneControl : UserControl
 
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
-    private readonly Stack<TabSettings> _closedTabs = new();
+    private readonly Stack<(TabSettings Settings, AddressPathHistory AddressHistory)> _closedTabs = new();
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
@@ -1386,9 +1386,12 @@ public partial class PaneControl : UserControl
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
     public void ReopenClosedTab()
     {
-        if (_closedTabs.TryPop(out var tab))
+        if (_closedTabs.TryPop(out var closed))
+        {
+            var tab = closed.Settings;
             AddTab(tab.Path, tab.View, quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
-                detailsPaneVisible: tab.DetailsPaneVisible);
+                detailsPaneVisible: tab.DetailsPaneVisible, addressHistory: closed.AddressHistory);
+        }
     }
 
     internal bool TryOpenSelectedFolderInNewTab() => Current?.Browser.OpenSelectedFolderInNewTab(
@@ -1733,8 +1736,10 @@ public partial class PaneControl : UserControl
             ? _tabOrder[closingIndex + 1 < _tabOrder.Count ? closingIndex + 1 : closingIndex - 1]
             : null;
         CaptureViewState(state);
-        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
-            state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible));
+        // Reopening previously kept only the current address, unlike DuplicateTab.
+        // Retain an independent dropdown history without keeping the native host alive.
+        _closedTabs.Push((new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+            state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible), state.AddressHistory.Copy()));
         while (_closedTabs.Count > 20)
         {
             var recent = _closedTabs.Take(20).Reverse().ToArray();
