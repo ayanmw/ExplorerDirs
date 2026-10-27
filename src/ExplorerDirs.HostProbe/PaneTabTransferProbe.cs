@@ -61,6 +61,7 @@ internal static class PaneTabTransferProbe
             if (unhostedCopyOrder)
             {
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
+                CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
@@ -226,6 +227,55 @@ internal static class PaneTabTransferProbe
             Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
                 (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
                 "unattached panes never created a Shell browser or native host");
+        }
+    }
+
+    private static void CheckUnhostedSettledPath(UIElement source, UIElement destination)
+    {
+        var paneType = source.GetType();
+        var tabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(source)!;
+        var original = (TabItem)tabs.Items[0];
+        tabs.SelectedItem = original;
+        var state = original.Tag;
+        var stateType = state.GetType();
+        var browser = stateType.GetProperty("Browser", InstanceMembers)!.GetValue(state)!;
+        var oldPath = (string)stateType.GetProperty("Path", InstanceMembers)!.GetValue(state)!;
+        var nextPath = ReadBrowserPath(tabs.Items[1]);
+        Ensure(oldPath != nextPath, "settled-path fixture starts with distinct directories");
+        // An unattached host's Navigate updates its directory without publishing
+        // the pane notice. This models the production interval before queued
+        // Navigated delivery; it does not model native navigation timing.
+        browser.GetType().GetMethod("Navigate", InstanceMembers)!.Invoke(browser, [nextPath]);
+        Ensure((string)stateType.GetProperty("Path", InstanceMembers)!.GetValue(state)! == oldPath,
+            "pane presentation still has the earlier directory before notification");
+        var snapshots = ((System.Collections.IEnumerable)paneType.GetMethod("SnapshotTabs", InstanceMembers)!
+            .Invoke(source, null)!).Cast<object>().ToArray();
+        Ensure((string)snapshots[0].GetType().GetProperty("Path", InstanceMembers)!.GetValue(snapshots[0])! == nextPath,
+            "session snapshot uses the browser's settled directory before its pane notice");
+        paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [state]);
+        var pins = ((System.Collections.IEnumerable)paneType.GetMethod("SnapshotPins", InstanceMembers)!
+            .Invoke(source, [0])!).Cast<object>().ToArray();
+        Ensure(pins.Length == 1 && (string)pins[0].GetType().GetProperty("Path", InstanceMembers)!.GetValue(pins[0])! == nextPath,
+            "pinned metadata agrees with the settled session directory");
+        paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [state]);
+        paneType.GetMethod("DuplicateCurrentTab", InstanceMembers)!.Invoke(source, null);
+        Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
+            "duplicating before notice delivery opens the settled directory");
+        Ensure((bool)paneType.GetMethod("CopyTabFrom", InstanceMembers)!.Invoke(destination, [state, null, true])!,
+            "cross-pane copy accepts the settled tab");
+        var targetTabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(destination)!;
+        Ensure(ReadBrowserPath(targetTabs.SelectedItem!) == nextPath,
+            "cross-pane copy also opens the settled directory");
+        paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(source, [state]);
+        paneType.GetMethod("ReopenClosedTab", InstanceMembers)!.Invoke(source, null);
+        Ensure(ReadBrowserPath(tabs.SelectedItem!) == nextPath,
+            "close and reopen before notice delivery retain the settled directory");
+        foreach (var tab in tabs.Items.Cast<TabItem>().Concat(targetTabs.Items.Cast<TabItem>()))
+        {
+            var host = stateType.GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!;
+            Ensure(host.GetType().GetField("_browser", InstanceMembers)!.GetValue(host) is null &&
+                (nint)host.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(host)! == 0,
+                "settled-path snapshot checks never create a native Shell view");
         }
     }
 

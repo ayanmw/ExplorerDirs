@@ -500,7 +500,9 @@ public partial class PaneControl : UserControl
         return _tabOrder.Select(tab =>
         {
             var state = (TabState)tab.Tag;
-            return new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+            // Native completion updates the browser before its queued pane notice.
+            // Persist its confirmed directory, not the lagging presentation path.
+            return new TabSettings(state.Browser.CurrentPath, state.Browser.CachedViewState(), state.Browser.QuickFilter,
                 state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible);
         }).ToArray();
     }
@@ -534,7 +536,7 @@ public partial class PaneControl : UserControl
     internal IReadOnlyList<PinnedTabEntry> SnapshotPins(int paneIndex) => _tabOrder
         .Select((tab, index) => (State: (TabState)tab.Tag, Index: index))
         .Where(item => item.State.IsPinned)
-        .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Path)).ToArray();
+        .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Browser.CurrentPath)).ToArray();
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
     private sealed record TabDragPayload(PaneControl Source, TabItem Tab, string Token);
@@ -567,7 +569,7 @@ public partial class PaneControl : UserControl
                 Status.Text = "视图配置暂时不可读取，未复制标签。";
                 return;
             }
-            AddTab(state.Path, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+            AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
                 addressHistory: state.AddressHistory.Copy());
@@ -1738,7 +1740,7 @@ public partial class PaneControl : UserControl
         CaptureViewState(state);
         // Reopening previously kept only the current address, unlike DuplicateTab.
         // Retain an independent dropdown history without keeping the native host alive.
-        _closedTabs.Push((new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+        _closedTabs.Push((new TabSettings(state.Browser.CurrentPath, state.Browser.CachedViewState(), state.Browser.QuickFilter,
             state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible), state.AddressHistory.Copy()));
         while (_closedTabs.Count > 20)
         {
@@ -2163,7 +2165,7 @@ public partial class PaneControl : UserControl
             var view = source.Browser.CaptureViewState();
             if (source.Browser.ViewCaptureFailed)
                 throw new InvalidOperationException("Shell 视图状态暂时不可读取；未复制标签。");
-            var copy = AddTab(source.Path, view, select: false, pinned: source.IsPinned,
+            var copy = AddTab(source.Browser.CurrentPath, view, select: false, pinned: source.IsPinned,
                 quickFilter: source.Browser.QuickFilter,
                 previewPaneVisible: source.Browser.PreviewPaneVisible,
                 detailsPaneVisible: source.Browser.DetailsPaneVisible,

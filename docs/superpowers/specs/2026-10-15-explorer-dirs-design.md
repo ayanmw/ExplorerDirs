@@ -2,6 +2,10 @@
 
 日期：2026-10-15
 
+## 2026-10-27 数据快照与排队标签呈现分离
+
+Browser 的 ShellNavigationState 是已确认目录来源，Pane.TabState.Path 是 Navigated 后更新的呈现缓存。两者在 Dispatcher Background 通知前可能不同。SnapshotTabs、SnapshotPins、DuplicateTab、CopyTabFrom、CloseTab 的持久化/新标签路径改用 Browser.CurrentPath；前两者使用同一来源，使固定元数据不因路径滞后而在恢复时失配。查看状态仍走既有捕获和失败拒绝逻辑，搜索位置仍使用真实范围目录，不保存 search URI。不为消除这个时差而同步执行界面通知或改变焦点时序。
+
 ## 2026-10-27 原子视图快照的访问范围
 
 ExplorerBrowserHost 在取得 IFolderView2 之前记录 browser 实例及 `_viewReadiness.Generation`，通过有效性回调交给既有 ShellViewStateCapture。捕获入口及各原生 getter 返回后检查，访问代际变化或 browser 替换即返回不完整结果；宿主只在 complete 时替换 `_viewState`，失败时沿用缓存并通过既有 ViewCaptureFailed 阻止不可靠保存/复制。保持 OnNavigationPending 对离开视图的捕获时机，不把 Pending 本身当作所有捕获失败；要求的是一次捕获内访问不变。无窗口回归仅模拟 getter 重入与代际变化，不证明真实原生回调顺序。
