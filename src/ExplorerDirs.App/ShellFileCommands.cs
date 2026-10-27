@@ -22,6 +22,9 @@ internal static class ShellNavigationKeyRouting
 
 internal static class ShellFileKeyboardActions
 {
+    internal static ShellFileKeyboardAction ResolveFallback(int message, int key, int modifiers, int shellResult) =>
+        message == 0x0100 && shellResult == 1 ? Resolve(key, modifiers) : ShellFileKeyboardAction.None;
+
     internal static ShellFileKeyboardAction Resolve(int key, int modifiers) => (key, modifiers) switch
     {
         (0x41, 2) => ShellFileKeyboardAction.SelectAll, // Ctrl+A

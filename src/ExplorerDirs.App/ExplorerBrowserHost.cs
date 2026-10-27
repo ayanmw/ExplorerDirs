@@ -648,6 +648,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return base.TranslateAcceleratorCore(ref msg, modifiers);
         }
 
+        var inputBrowser = _browser;
+        var inputView = _viewWindow;
+        var inputVersion = _viewReadiness.NavigationVersion;
+        bool SameVisit() => ReferenceEquals(inputBrowser, _browser) && inputView != 0 &&
+            inputView == _viewWindow && inputVersion == _viewReadiness.NavigationVersion;
+        bool SameInputTarget() => SameVisit() && GetFocus() == focused;
+
         if (msg.message == 0x0100 &&
             ((msg.wParam.ToInt64() == 0x5D && modifiers == ModifierKeys.None) ||
              (msg.wParam.ToInt64() == 0x79 && modifiers == ModifierKeys.Shift)))
@@ -661,11 +668,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return true;
         }
 
+        if (inputBrowser is null || !SameInputTarget()) return true;
         var iid = ShellViewId;
-        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0)
-            return base.TranslateAcceleratorCore(ref msg, modifiers);
+        if (inputBrowser.GetCurrentView(ref iid, out var viewObject) < 0)
+            return SameInputTarget() ? base.TranslateAcceleratorCore(ref msg, modifiers) : true;
+        int shellResult;
         try
         {
+            if (!SameInputTarget()) return true;
             var nativeMessage = new NativeMessage
             {
                 Hwnd = msg.hwnd,
@@ -680,9 +690,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 Marshal.StructureToPtr(nativeMessage, pointer, false);
-                var shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
+                shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
                 if (FocusTracePath is not null && IsTraceKey(msg.wParam.ToInt64()))
                     Trace($"shell result={shellResult:X8} focus={FocusClass()} item={FolderFocusState()}");
+                if (shellResult == 0)
+                {
+                    // A handled operation may legitimately move native focus.
+                    // Keep its existing restore path, but never target a new visit.
+                    if (SameVisit()) QueueFocusRestoreAfterFileKey(msg, modifiers);
+                    return true;
+                }
+                if (!SameInputTarget()) return true;
                 if (ShellNavigationKeyRouting.ShouldForward(msg.message,
                         unchecked((int)msg.wParam.ToInt64()), shellResult,
                         IsFileContentInputWindow(focused), IsColumnHeaderInputWindow(focused),
@@ -693,11 +711,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     // Keep it in the focused native file-content control.
                     SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
                     Trace($"untranslated-navigation-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
-                    return true;
-                }
-                if (shellResult == 0)
-                {
-                    QueueFocusRestoreAfterFileKey(msg, modifiers);
                     return true;
                 }
                 if (ShellAutoColumnWidthRouting.ShouldDispatchToListView(
@@ -723,9 +736,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.FreeHGlobal(pointer); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+        // COM translation/release can pump a navigation or focus change. An old
+        // key must not issue a file command against the newly focused directory.
+        if (!SameInputTarget()) return true;
         if (msg.message == 0x0100)
         {
-            var command = ShellFileKeyboardActions.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers) switch
+            var command = ShellFileKeyboardActions.ResolveFallback(msg.message,
+                unchecked((int)msg.wParam.ToInt64()), (int)modifiers, shellResult) switch
             {
                 ShellFileKeyboardAction.SelectAll => ShellSelectAll,
                 ShellFileKeyboardAction.Copy => ShellCopy,
@@ -739,11 +756,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 SendMessage(_viewWindow, WmCommand, (IntPtr)command, IntPtr.Zero);
                 Trace($"fallback command={command:X} focus={FocusClass()}");
-                QueueFocusRestore();
+                if (SameVisit()) QueueFocusRestore();
                 return true;
             }
         }
-        QueueFocusRestoreAfterFileKey(msg, modifiers);
+        if (shellResult == 1) QueueFocusRestoreAfterFileKey(msg, modifiers);
         return base.TranslateAcceleratorCore(ref msg, modifiers);
     }
 

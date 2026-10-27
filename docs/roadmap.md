@@ -1,5 +1,12 @@
 # 路线图
 
+## 2026-10-27：文件快捷键补发仅接受 Shell S_FALSE
+
+- 原方向/列宽兜底已限制 S_FALSE，但剪贴板/全选/撤销/重做在 accelerator 错误后仍进入命令映射。统一为仅 WM_KEYDOWN + 精确 S_FALSE 可补发，S_OK、错误、未知状态、keyup 和系统键不发额外文件命令，错误路径不新建文件操作焦点恢复请求。
+- 输入固定原 browser/view/navigation visit/焦点 HWND，在 GetCurrentView、原生 accelerator 和释放 COM 后复核；已退休输入直接消费，避免把旧键发到新目录。S_OK 文件操作允许正常移动焦点，只在同访问内保留既有恢复路径。契约依据：[Microsoft IShellView::TranslateAccelerator](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)。
+- 专项 `--shell-file-commands-smoke` 先复现 HRESULT 错误仍映射文件命令，修正后覆盖八组快捷键/别名与各状态、消息类型。App/HostProbe Release build 0 警告/错误。测试是策略与源码接线，不调用真实 IShellView accelerator；COM 重入、窗口输入的物理目标和文件操作后焦点仍待可见验收，本批未发布。
+- 完整 Release SettingsSmoke 通过。导航焦点与标签状态探针首次并行时均在最后的前台不变断言失败，来源未确定，不能记为通过；完整配置检查结束后分别顺序复跑均通过。未显示窗口/未创建 Shell view 的断言保留，前台保护不放宽；这不是实际 accelerator 或键盘端到端验证。
+
 ## 2026-10-27：新确认的原生分组优先于旧筛选意图
 
 - 保留临时分组的合并此前会无条件覆盖捕获值，包括 Shell 已呈现的另一种非空分组或方向。现在完整捕获读到不同的非空 key/ascending 时接受新状态、取消旧 timer 并递增筛选请求，防止后续旧刷新重新排队覆盖；临时 None 仍用已确认意图保护。记住新意图时直接更新缓存，避免把旧缓存误当作新观测值触发取消。

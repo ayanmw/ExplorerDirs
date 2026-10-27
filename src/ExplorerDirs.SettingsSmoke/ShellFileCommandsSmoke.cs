@@ -25,6 +25,20 @@ internal static class ShellFileCommandsSmoke
         Check(ShellFileKeyboardActions.Resolve(0x41, 2) == ShellFileKeyboardAction.SelectAll &&
             ShellFileKeyboardActions.Resolve(0x58, 2) == ShellFileKeyboardAction.Cut,
             "Ctrl+A and Ctrl+X stay on the native Shell file-view command path");
+        foreach (var (key, modifiers) in new[] { (0x41, 2), (0x43, 2), (0x56, 2), (0x58, 2),
+                     (0x5A, 2), (0x59, 2), (0x2D, 2), (0x2D, 4) })
+        {
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, unchecked((int)0x80004005)) ==
+                ShellFileKeyboardAction.None, "a Shell error never authorizes a fallback file command");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 0) == ShellFileKeyboardAction.None &&
+                ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 2) == ShellFileKeyboardAction.None,
+                "success and unknown status never duplicate a handled file command");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 1) ==
+                ShellFileKeyboardActions.Resolve(key, modifiers), "S_FALSE retains the normal native command fallback");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0101, key, modifiers, 1) == ShellFileKeyboardAction.None &&
+                ShellFileKeyboardActions.ResolveFallback(0x0104, key, modifiers, 1) == ShellFileKeyboardAction.None,
+                "keyup and system messages cannot issue fallback file commands");
+        }
         Check(KeyboardShortcuts.Resolve(0x2E, 4) == ExplorerShortcut.None,
             "Shift+Delete is not consumed by the application shortcut table");
         Check(ShellFileKeyboardActions.Resolve(0x43, 2) == ShellFileKeyboardAction.Copy &&

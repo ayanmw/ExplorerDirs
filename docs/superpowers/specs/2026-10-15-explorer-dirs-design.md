@@ -2,6 +2,12 @@
 
 日期：2026-10-15
 
+## 2026-10-27 accelerator 的文件命令授权范围
+
+ShellFileKeyboardActions.ResolveFallback 只把 WM_KEYDOWN 且 HRESULT 为 S_FALSE 的已知组合映射到 Shell 文件命令；正常 Resolve 继续用于识别已处理操作所需的焦点恢复，二者不混用。S_OK 在当前 visit 内按原逻辑安排恢复，允许文件操作导致短暂失焦；错误/未知状态不发补充 WM_COMMAND 或新恢复请求。
+
+键进入 Shell 前固定 browser/view/NavigationVersion/焦点 HWND，GetCurrentView、TranslateAccelerator 与 ReleaseComObject 后再核对。未处理键一旦访问或目标改变即消费，不转发新目标；已处理键只复核访问，因为正常操作会改变焦点。策略基于 [IShellView accelerator 契约](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)，单元状态矩阵不代替原生消息、物理焦点及文件操作验收。
+
 ## 2026-10-27 应用图标的引用上限
 
 ShellIconProvider 使用 UI 线程内的 ShellIconCache，固定保留最多 256 个大小写不敏感的键；字典定位节点，双向链表维护 LRU，命中/替换移至最近端，新增超限移除最旧项。缓存不持有 HWND/PIDL/HICON，不主动 Dispose ImageSource；冻结图像被控件继续引用时保持有效，缺失仍由既有 Shell 加载流程重建。原 HICON 的 finally DestroyIcon 保持不变，不增加配置、手动回收入口或原生浏览历史上限。压力检查验证引用数量与重载，实际 WPF 渲染/原生内存收益另行验收。
