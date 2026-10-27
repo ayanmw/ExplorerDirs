@@ -49,6 +49,28 @@ internal static class ViewStateRestoreSmoke
             Check(!ShellViewStateRestore.Restore(noColumns, new Target { FailedStep = step }, (_, _) => { }, () => true),
                 $"{step} failure is protected without any custom columns");
         }
+        var preset = new ViewPreset("Details", 4, 16, [new(key, 240)]);
+        var presetTarget = new Target();
+        Check(ShellViewStateRestore.ApplyPreset(preset, presetTarget, (_, _) => throw new Exception("unexpected preset failure"), () => true) &&
+            presetTarget.Calls.SequenceEqual([ShellViewRestoreStep.Mode, ShellViewRestoreStep.Columns]),
+            "a preset changes only mode and columns, retaining native sorting and grouping");
+        foreach (var step in new[] { ShellViewRestoreStep.Mode, ShellViewRestoreStep.Columns })
+        {
+            var current = true;
+            var retired = new Target { DuringWrite = called => { if (called == step) current = false; }, FailedStep = step };
+            Check(!ShellViewStateRestore.ApplyPreset(preset, retired,
+                    (_, _) => throw new Exception("obsolete preset must not publish an error"), () => current) &&
+                retired.Calls[^1] == step,
+                "navigation during a preset stops subsequent writes and suppresses obsolete errors");
+            var failing = new Target { FailedStep = step };
+            var failures = new List<ShellViewRestoreStep>();
+            Check(!ShellViewStateRestore.ApplyPreset(preset, failing, (failed, _) => failures.Add(failed), () => true) &&
+                failures.SequenceEqual([step]) && failing.Calls[^1] == step,
+                $"current preset {step} failure stops before later stages");
+        }
+        var stalePreset = new Target();
+        Check(!ShellViewStateRestore.ApplyPreset(preset, stalePreset, (_, _) => { }, () => false) && stalePreset.Calls.Count == 0,
+            "a retired preset performs no writes");
         Console.WriteLine("View state restore smoke: PASS (fake native target; no Shell view created)");
     }
 

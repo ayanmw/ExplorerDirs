@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：查看预设与列宽写入拒绝过期回调
+
+- 源码审查发现手动 ApplyViewPreset 未像完整恢复一样核对浏览实例/导航代次；原生设置器重入导航后，旧调用仍可能进入列设置、清除新的恢复失败保护或读回新目录。现在预设按既有 IShellViewStateTarget 分阶段写 Mode/Columns，每阶段前后检查当前性，失效后不进入下一阶段、不发布旧错误、不清除新访问的保存保护。其他排序/分组不随预设重写。
+- ShellColumnManager.Apply 增加可选当前性检查，QueryInterface 后、SetColumns 后、每列宽度写入前后均拒绝失效操作。原生完整恢复与手动预设均传入各自代次门控；无门控的既有调用保持原行为。真实 SDK 形状 COM 服务器回归先复现 SetColumns 回调失效后仍写宽度，再验证失效时零宽度写入、首列宽度回调失效后不写第二列。
+- 假目标预设测试覆盖正常只写模式/列、Mode/Columns 各阶段失效不报旧错误、当前失败停止及初始过期不写；完整 Release SettingsSmoke 通过，App/NativeProbe Release build 均零警告错误。日志：src/.state/view-preset-{retirement-red,retirement-green,columns-behavior-red,columns-green}.log。未创建 Shell view/窗口或更新发布包；物理 Shell 回调顺序、快速导航与预设操作归入集中 UI 验收。Ctrl+滚轮/普通 SetViewStyle 的同类调用链仍待单独审查。
+
 ## 2026-10-27：阻止超限标签会话覆盖
 
 - 后台追踪发现会话读取器每窗格只接受 100 标签，而保存器能写出 101 标签；普通新增、复制等路径可令运行态越过该边界。新增回归先复现旧保存覆盖，再为 SessionStore.Save 增加同一上限的写前拒绝，保留原完整文件及写入基线。101 拒绝/原字节保留、修正后继续保存、100 正常读回均通过；完整 Release SettingsSmoke、App Release build（零警告错误）、未建 HWND 的 pane-tab-copy-order 通过。日志在 src/.state/session-write-limit-{red,green,boundary}.log。

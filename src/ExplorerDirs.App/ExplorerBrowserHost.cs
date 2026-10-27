@@ -2052,48 +2052,47 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!IsVisible || _viewReadiness.Pending) return false;
         var validated = preset.NormalizeAndValidate();
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero)
         {
-            MenuError?.Invoke(this, "文件视图尚未就绪，未应用查看预设。");
+            if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未应用查看预设。");
             return false;
         }
 
         try
         {
+            if (!Current()) return false;
             // Do not capture a partial preset over the previous complete state.
+            // Native setters can pump a navigation callback, just like getters.
             _viewRestoreFailed = true;
-            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, validated.Mode,
-                ViewStyle.NativeIconSize(validated.Mode, validated.IconSize));
-            if (modeResult < 0)
+            var applied = ShellViewStateRestore.ApplyPreset(validated, new NativeViewStateTarget(view, Current), (step, result) =>
             {
-                MenuError?.Invoke(this, $"查看预设的查看方式未能应用：0x{modeResult:X8}");
-                return false;
-            }
-
-            var columnResult = ShellColumnManager.Apply(view, validated.DisplayColumns);
-            if (columnResult < 0)
-            {
-                MenuError?.Invoke(this, $"查看预设的列设置未能完整应用；会话保存将等待重新读取。0x{columnResult:X8}");
-                return false;
-            }
-            _viewRestoreFailed = false;
+                var label = step == ShellViewRestoreStep.Mode ? "查看方式" : "列设置";
+                MenuError?.Invoke(this, $"查看预设的{label}未能完整应用；会话保存将等待重新读取。0x{result:X8}");
+            }, Current);
+            if (!Current()) return false;
+            _viewRestoreFailed = !applied;
+            if (!applied) return false;
         }
         catch (COMException ex)
         {
-            MenuError?.Invoke(this, $"无法应用查看预设：0x{ex.HResult:X8}");
+            if (Current()) MenuError?.Invoke(this, $"无法应用查看预设：0x{ex.HResult:X8}");
             return false;
         }
         finally { Marshal.Release(view); }
 
         try
         {
+            if (!Current()) return false;
             CaptureViewState();
-            return !ViewCaptureFailed;
+            return Current() && !ViewCaptureFailed;
         }
         catch (Exception)
         {
-            MenuError?.Invoke(this, "查看预设已发送给 Shell，但当前视图状态无法完整读取；会话保存将等待重试。");
+            if (Current()) MenuError?.Invoke(this, "查看预设已发送给 Shell，但当前视图状态无法完整读取；会话保存将等待重试。");
             return false;
         }
     }
@@ -2113,7 +2112,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (view == IntPtr.Zero) return;
         try
         {
-            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view), (step, result) =>
+            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view, Current), (step, result) =>
             {
                 var label = step switch
                 {
@@ -2131,11 +2130,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(view); }
     }
 
-    private sealed class NativeViewStateTarget(nint view) : IShellViewStateTarget
+    private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent) : IShellViewStateTarget
     {
         public int SetMode(uint mode, int iconSize) =>
             GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, mode, iconSize);
-        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) => ShellColumnManager.Apply(view, columns);
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) => ShellColumnManager.Apply(view, columns, isCurrent);
         public int SetSorting(IReadOnlyList<SortColumnState> columns)
         {
             var native = columns.Select(sort => new NativeSortColumn

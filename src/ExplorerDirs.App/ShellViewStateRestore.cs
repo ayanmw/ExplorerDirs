@@ -12,6 +12,26 @@ internal interface IShellViewStateTarget
 
 internal static class ShellViewStateRestore
 {
+    internal static bool ApplyPreset(ViewPreset preset, IShellViewStateTarget target,
+        Action<ShellViewRestoreStep, int> failed, Func<bool> isCurrent)
+    {
+        bool Apply(ShellViewRestoreStep step, Func<int> write)
+        {
+            if (!isCurrent()) return false;
+            var result = write();
+            if (!isCurrent()) return false;
+            if (result < 0)
+            {
+                failed(step, result);
+                return false;
+            }
+            return true;
+        }
+        return Apply(ShellViewRestoreStep.Mode,
+                   () => target.SetMode(preset.Mode, ViewStyle.NativeIconSize(preset.Mode, preset.IconSize))) &&
+               Apply(ShellViewRestoreStep.Columns, () => target.SetColumns(preset.DisplayColumns));
+    }
+
     internal static bool Restore(ViewState saved, IShellViewStateTarget target,
         Action<ShellViewRestoreStep, int> failed, Func<bool> isCurrent)
     {

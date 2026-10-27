@@ -66,21 +66,29 @@ internal static class ShellColumnManager
         finally { Marshal.Release(description); }
     }
 
-    public static int Apply(IntPtr folderView, IReadOnlyList<DisplayColumnState> columns)
+    public static int Apply(IntPtr folderView, IReadOnlyList<DisplayColumnState> columns, Func<bool>? isCurrent = null)
     {
+        bool Current() => isCurrent?.Invoke() ?? true;
+        const int aborted = unchecked((int)0x80004004);
+        if (!Current()) return aborted;
         if (!ColumnLayout.IsValid(columns)) return InvalidData;
         var result = Marshal.QueryInterface(folderView, in InterfaceId, out var manager);
         if (result < 0) return result;
         try
         {
+            if (!Current()) return aborted;
             var keys = columns.Select(column => new NativeKey
                 { FormatId = column.Key.FormatId, PropertyId = column.Key.PropertyId }).ToArray();
             result = Method<SetColumns>(manager, 7)(manager, keys, (uint)keys.Length);
+            // COM setters can reenter navigation; stop before touching another field.
+            if (!Current()) return aborted;
             if (result != 0) return result < 0 ? result : InvalidData;
             for (var index = 0; index < keys.Length; index++)
             {
+                if (!Current()) return aborted;
                 var info = ColumnInfo.ForWidth(unchecked((uint)columns[index].Width));
                 result = Method<ColumnInfoMethod>(manager, 3)(manager, ref keys[index], ref info);
+                if (!Current()) return aborted;
                 if (result != 0) return result < 0 ? result : InvalidData;
             }
             return 0;

@@ -27,6 +27,17 @@ internal static class NativeColumnSmoke
             Require(ShellColumnManager.Apply(unknown, reordered) < 0 && server.WriteCalls == writes,
                 "SetColumns failure prevents width writes");
             server.FailSet = false;
+            var current = true;
+            writes = server.WriteCalls;
+            server.AfterSet = () => current = false;
+            Require(ShellColumnManager.Apply(unknown, reordered, () => current) < 0 && server.WriteCalls == writes,
+                "navigation during SetColumns prevents all retired width writes");
+            server.AfterSet = null;
+            current = true;
+            server.AfterWidth = () => current = false;
+            Require(ShellColumnManager.Apply(unknown, reordered, () => current) < 0 && server.WriteCalls == writes + 1,
+                "navigation during one column width prevents writes to later columns");
+            server.AfterWidth = null;
             server.CountOverride = ColumnLayout.MaximumColumns + 1;
             Require(ShellColumnManager.Capture(unknown, out failed) < 0 && failed is null,
                 "unreasonable native column count is rejected before allocation");
@@ -78,11 +89,13 @@ public sealed class ColumnTestServer : IColumnTest
     public bool FailRead, FailSet;
     public uint? CountOverride;
     public int WriteCalls;
+    public Action? AfterSet, AfterWidth;
     public int SetColumnInfo(ref TestColumnKey key, ref TestColumnInfo info)
     {
         if (info.Size != 184 || info.Mask != 1) return unchecked((int)0x80070057);
         _widths[key.PropertyId] = info.Width;
         WriteCalls++;
+        AfterWidth?.Invoke();
         return 0;
     }
     public int GetColumnInfo(ref TestColumnKey key, ref TestColumnInfo info)
@@ -107,6 +120,7 @@ public sealed class ColumnTestServer : IColumnTest
     {
         if (FailSet) return unchecked((int)0x80004005);
         _keys = keys.Take((int)count).ToArray();
+        AfterSet?.Invoke();
         return 0;
     }
 }
