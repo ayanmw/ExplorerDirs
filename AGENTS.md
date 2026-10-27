@@ -17,6 +17,8 @@
 
 - Opening a context menu must not refresh process theme caches or send WM_THEMECHANGED to the file-view owner. Scope thread-local menu observation around Shell context/right-button dispatch as well as menu-loop notifications: internal Shell owners can bypass the latter. Prepare new popup theming before show, and render the same clipped outline into WM_PRINT/WM_PRINTCLIENT supplied DCs used by menu animations; preserve caller DC state and guard region-change reentrancy. Verify animation and live-window boundaries separately.
 
+- Active/inactive pane highlighting must preserve the same total border/padding inset so focus transfer cannot resize both Shell views. Skip repeated application of an unchanged active state; native selection/focus repaint remains Shell-owned.
+
 ## Product boundary
 
 - Build a Windows file browsing window replacement with Q-Dir style multi-pane workflows. Do not replace the desktop, taskbar, login shell, or the `explorer.exe` system file.

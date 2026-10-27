@@ -60,6 +60,7 @@ internal static class PaneTabTransferProbe
 
             if (unhostedCopyOrder)
             {
+                CheckUnhostedActivePaneGeometry(sourcePane);
                 CheckUnhostedCopyOrder(sourcePane, targetPane);
                 CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
@@ -591,6 +592,30 @@ internal static class PaneTabTransferProbe
         if (!succeeded) throw new TimeoutException($"Timed out waiting for {description}.");
     }
 
+    private static void CheckUnhostedActivePaneGeometry(UIElement pane)
+    {
+        var type = pane.GetType();
+        var activate = type.GetMethod("SetActivePaneVisual", InstanceMembers)!;
+        var border = (Border)type.GetField("RootBorder", InstanceMembers)!.GetValue(pane)!;
+        Size Arrange(bool active)
+        {
+            activate.Invoke(pane, [active]);
+            pane.Measure(new Size(800, 600));
+            pane.Arrange(new Rect(0, 0, 800, 600));
+            pane.UpdateLayout();
+            return border.Child.RenderSize;
+        }
+        var inactive = Arrange(false);
+        var active = Arrange(true);
+        Ensure(active == inactive, "activating a pane must not resize its navigation/file-view content");
+        for (var i = 0; i < 10; i++)
+            Ensure(Arrange(i % 2 == 0) == inactive, "repeated pane activation must keep the native host allocation stable");
+        var expression = border.ReadLocalValue(Border.BorderBrushProperty);
+        Arrange(false);
+        Ensure(ReferenceEquals(expression, border.ReadLocalValue(Border.BorderBrushProperty)),
+            "repeated inactive notifications preserve the existing resource reference");
+        Console.WriteLine("PASS unhosted pane activation preserves content geometry and duplicate highlight references");
+    }
     private static void EnsureForegroundUnchanged(IntPtr expected, string action) =>
         Ensure(GetForegroundWindow() == expected, $"foreground changed while {action}");
 

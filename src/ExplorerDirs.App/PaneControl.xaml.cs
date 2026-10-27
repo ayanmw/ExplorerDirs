@@ -42,6 +42,7 @@ public partial class PaneControl : UserControl
     private bool _updatingSearchText;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
+    private bool? _activePaneVisual;
     private bool _autoExpandTreeSelection = true;
     private long _treeSelectionSyncRequestVersion;
     private ShellTreeHost? _treeHost;
@@ -138,9 +139,15 @@ public partial class PaneControl : UserControl
 
     internal void SetActivePaneVisual(bool isActive)
     {
+        if (_activePaneVisual == isActive) return;
+        _activePaneVisual = isActive;
+        // Active/inactive borders used to change the content inset by one pixel,
+        // resizing both Shell views on every focus transfer. Reserve two pixels
+        // in either state while keeping the existing one/two-pixel visual border.
+        RootBorder.Padding = isActive ? new Thickness(0) : new Thickness(1);
+        RootBorder.BorderThickness = isActive ? new Thickness(2) : new Thickness(1);
         RootBorder.SetResourceReference(Border.BorderBrushProperty,
             isActive ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
-        RootBorder.BorderThickness = isActive ? new Thickness(2) : new Thickness(1);
     }
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
