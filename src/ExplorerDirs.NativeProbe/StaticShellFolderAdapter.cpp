@@ -37,7 +37,7 @@ namespace
     GUID g_forwardedQueryIds[64]{};
     UINT g_forwardedQueryCount = 0;
 
-    void TraceForwardedQuery(REFIID iid, HRESULT result)
+    void TraceForwardedQuery(REFIID iid, HRESULT result, bool forwarded)
     {
         // Prototype diagnostics only: bounded distinct interfaces, no retained COM references.
         AcquireSRWLockExclusive(&g_queryTraceLock);
@@ -52,8 +52,8 @@ namespace
             g_forwardedQueryIds[g_forwardedQueryCount++] = iid;
             wchar_t name[40]{};
             StringFromGUID2(iid, name, ARRAYSIZE(name));
-            std::printf("native-static-shell-column: forwarded-QI=%ls; hr=0x%08lX\n",
-                name, static_cast<unsigned long>(result));
+            std::printf("native-static-shell-column: extra-QI=%ls; source=%s; hr=0x%08lX\n",
+                name, forwarded ? "inner" : "unsupported", static_cast<unsigned long>(result));
             std::fflush(stdout);
         }
         ReleaseSRWLockExclusive(&g_queryTraceLock);
@@ -92,10 +92,11 @@ namespace
         return 0;
     }
 
-    class StaticShellFolderAdapter final : public IShellFolder2
+    class StaticShellFolderAdapter final : public IShellFolder2, public IPersistFolder2
     {
     public:
-        explicit StaticShellFolderAdapter(IShellFolder2* inner) : _inner(inner)
+        explicit StaticShellFolderAdapter(IShellFolder2* inner, bool strictInterfaces = false)
+            : _inner(inner), _strictInterfaces(strictInterfaces)
         {
             if (_inner) _inner->AddRef();
             if (_inner)
@@ -134,8 +135,13 @@ namespace
                 AddRef();
                 return S_OK;
             }
-            const auto result = _inner ? _inner->QueryInterface(iid, object) : E_NOINTERFACE;
-            TraceForwardedQuery(iid, result);
+            if (_strictInterfaces && (iid == IID_IPersist || iid == IID_IPersistFolder || iid == IID_IPersistFolder2))
+            {
+                *object = static_cast<IPersistFolder2*>(this);
+                AddRef();
+                return S_OK;
+            }            const auto result = !_strictInterfaces && _inner ? _inner->QueryInterface(iid, object) : E_NOINTERFACE;
+            TraceForwardedQuery(iid, result, !_strictInterfaces);
             return result;
         }
         ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_refs); }
@@ -146,6 +152,36 @@ namespace
             return refs;
         }
 
+        HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id) override
+        {
+            if (!id) return E_POINTER;
+            IPersistFolder2* persist = nullptr;
+            auto result = _inner->QueryInterface(IID_PPV_ARGS(&persist));
+            if (FAILED(result)) return result;
+            result = persist->GetClassID(id);
+            persist->Release();
+            return result;
+        }
+        HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE pidl) override
+        {
+            IPersistFolder2* persist = nullptr;
+            auto result = _inner->QueryInterface(IID_PPV_ARGS(&persist));
+            if (FAILED(result)) return result;
+            result = persist->Initialize(pidl);
+            persist->Release();
+            return result;
+        }
+        HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* pidl) override
+        {
+            if (!pidl) return E_POINTER;
+            *pidl = nullptr;
+            IPersistFolder2* persist = nullptr;
+            auto result = _inner->QueryInterface(IID_PPV_ARGS(&persist));
+            if (FAILED(result)) return result;
+            result = persist->GetCurFolder(pidl);
+            persist->Release();
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND hwnd, IBindCtx* bind, LPWSTR name, ULONG* eaten, PIDLIST_RELATIVE* item, ULONG* attributes) override
         { return _inner->ParseDisplayName(hwnd, bind, name, eaten, item, attributes); }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND hwnd, SHCONTF flags, IEnumIDList** enumerator) override
@@ -301,6 +337,7 @@ namespace
         ~StaticShellFolderAdapter() { if (_inner) _inner->Release(); }
         volatile LONG _refs = 1;
         IShellFolder2* _inner = nullptr;
+        const bool _strictInterfaces;
         UINT _columnCount = 0;
     };
 }
@@ -376,6 +413,17 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateStaticShellFolderAdapter(
     return S_OK;
 }
 
+// Isolated A/B control only: ordinary Shell-folder methods still delegate, but no raw inner interface escapes.
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateStrictShellFolderAdapter(
+    IShellFolder2* folder, IShellFolder2** adapter)
+{
+    if (!folder || !adapter) return E_POINTER;
+    *adapter = nullptr;
+    auto* instance = new (std::nothrow) StaticShellFolderAdapter(folder, true);
+    if (!instance) return E_OUTOFMEMORY;
+    *adapter = instance;
+    return S_OK;
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
     IShellView* view, IShellFolder2* adapter, BOOL* matches)
 {

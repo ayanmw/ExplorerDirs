@@ -110,3 +110,14 @@ IID 名称经本机 Windows SDK 10.0.26100.0 ShObjIdl_core.h 核对；[IParentAn
 新增独立无窗口入口 `--static-shell-column-identity-smoke`，从同一个 adapter 及其成功返回的 IParentAndItem 分别 QueryInterface(IUnknown)，比较真实指针并逐个 Release。结果 `same-IUnknown=False`，以失败退出；日志 src/.state/static-identity-red.log。根据[微软 QueryInterface 实现规则](https://learn.microsoft.com/en-us/windows/win32/com/rules-for-implementing-queryinterface)，同一对象的各接口必须有相同 IUnknown 身份。因此当前“任意未知接口直接返回 inner 指针”的包装方式至少存在 COM 身份合同缺陷；原数值 folder-contract 通过不能覆盖该门槛。
 
 本批只加诊断和独立失败门槛，未伪造修复、未降低要求。下一步应在隔离策略中只暴露正确包装的接口或对不支持接口返回 E_NOINTERFACE，再验证视图创建、原生操作与列消费是否仍可保留。若必须实现自己的 namespace 身份，应按架构门槛评审，不能把简单隐藏接口造成的功能丢失当作迁移成功。未证明该缺陷是所有排序失败的唯一原因；产品 ExplorerBrowser 不使用此 shim。
+## 2026-10-27：严格接口策略与持久化包装对照
+
+新增独立 CreateStrictShellFolderAdapter 工厂；旧工厂保留为身份缺陷的负向对照，不改产品。严格对象只暴露自己实现的接口，不直接返回 inner 的任意 QI 指针。新增 --static-shell-column-identity-strict-smoke 与 watchdog 的 static-shell-column-adapter-strict-private-desktop 模式。
+
+第一阶段严格拒绝未知接口，直接数值合同/基础身份可通过，但独立 Desktop 的 SHCreateShellFolderView/CreateViewObject 返回 E_NOINTERFACE，无法进入文件视图（20261027-233706-08c1579f）。这不是迁移成功，也不能用“不支持接口”掩盖必需能力缺失。
+
+第二阶段在严格对象上实际实现 IPersistFolder2（包括 IPersist/IPersistFolder 的 QI），各接口的 IUnknown 都返回同一适配层身份；GetClassID/Initialize/GetCurFolder 的功能调用委托给底层并逐次释放引用。原生文件夹操作仍通过已有 IShellFolder2 方法委托。直接检查同时验证文件夹与 persistence 接口身份一致、不再暴露未实现的 IParentAndItem；完整数值合同继续通过，exitCode=0，日志 src/.state/static-strict-final-identity.log。
+
+最终独立 Desktop 实测（20261027-233824-e77f264e）恢复视图创建，view-uses-adapter=1，名称/原始 Size/日期可读，但自定义列仍空、四组排序仍为 10/100/10/2，最终失败退出 1，前台前后不变。证明 COM 身份缺陷确实可以隔离修正，但修正它并保留最小 persistence 路径仍不足以修复列消费。不能把该缺陷称为排序问题唯一原因，也不能把“严格接口直接测试通过”当作视图门槛通过。
+
+C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与新的严格身份检查均通过。严格模式仅为隔离 A/B，未证明快捷键、菜单、拖放和通知等整体功能保留；不能替换产品宿主。下一步仍需调查文件系统解析身份/属性缓存如何影响 DefView 消费，不继续无依据扩展动态扫描缓存。候选和发布版不变。

@@ -14,7 +14,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const uint SvgioAllView = 2;
 
-    internal static int RunFolderContract(bool requireIdentity = false)
+    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false)
     {
         VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -30,9 +30,9 @@ internal static class StaticShellFolderAdapterProbe
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
-            if (requireIdentity) VerifyForwardedIdentity(adapter);
+            if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
             foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
                 items.Add(name, ParseChild(adapter, name));
 
@@ -185,7 +185,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    internal static int Run()
+    internal static int Run(bool strictInterfaces = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -210,7 +210,7 @@ internal static class StaticShellFolderAdapterProbe
 
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
 
             var property = StaticShellColumnContract.PropertyKey;
@@ -333,18 +333,37 @@ internal static class StaticShellFolderAdapterProbe
         return result;
     }
 
-    private static void VerifyForwardedIdentity(nint adapter)
+    private static void VerifyForwardedIdentity(nint adapter, bool strictInterfaces)
     {
         var parentId = new Guid("b3a4b685-b685-4805-99d9-5dead2873236");
         var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
         nint parent = 0, owner = 0, parentOwner = 0;
         try
         {
-            Check(Marshal.QueryInterface(adapter, in parentId, out parent));
+            var testedId = strictInterfaces ? ShellFolder2Id : parentId;
+            Check(Marshal.QueryInterface(adapter, in testedId, out parent));
             Check(Marshal.QueryInterface(adapter, in unknownId, out owner));
             Check(Marshal.QueryInterface(parent, in unknownId, out parentOwner));
-            Console.WriteLine($"native-static-shell-folder-identity: forwarded=IParentAndItem; same-IUnknown={owner == parentOwner}; window-created=False");
-            if (owner != parentOwner)
+            Console.WriteLine($"native-static-shell-folder-identity: strict={strictInterfaces}; same-IUnknown={owner == parentOwner}; window-created=False");
+            if (strictInterfaces)
+            {
+                var persistId = new Guid("1AC3D9F0-175C-11d1-95BE-00609797EA4F");
+                nint persist = 0, persistOwner = 0;
+                try
+                {
+                    Check(Marshal.QueryInterface(adapter, in persistId, out persist));
+                    Check(Marshal.QueryInterface(persist, in unknownId, out persistOwner));
+                    if (persistOwner != owner) throw new Exception("Wrapped persistence exposed another COM identity.");
+                }
+                finally
+                {
+                    if (persistOwner != 0) Marshal.Release(persistOwner);
+                    if (persist != 0) Marshal.Release(persist);
+                }                var result = Marshal.QueryInterface(adapter, in parentId, out var unsupported);
+                if (unsupported != 0) Marshal.Release(unsupported);
+                if (result != unchecked((int)0x80004002) || unsupported != 0)
+                    throw new Exception("Strict policy exposed an unimplemented raw inner interface.");
+            }            if (owner != parentOwner)
                 throw new InvalidOperationException("The forwarded interface exposes a different COM identity from the adapter.");
         }
         finally
