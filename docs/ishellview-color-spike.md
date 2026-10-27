@@ -10,6 +10,8 @@
 
 为拆分 Private Desktop 本身及多进程共用因素，新增两个无 Shell 对照：独立新 Desktop 中单进程创建/销毁 childless `STATIC`，以及同一新 Desktop 中父、子两个进程分别创建/销毁普通 `STATIC`。两者均退出码 0、`DestroyWindow=True`、HWND 随后无效，主桌面前台 HWND 不变；日志分别为 `20261028-051206-525873e7.stdout.log` 与 `20261028-051211-6f0dc803.stdout.log`。因此普通窗口销毁和跨进程共用隔离 Desktop 本身可通过；早先对照卡住时 producer 正持有另一个 Shell view，当前差异更集中在共享该 Shell 状态的 Desktop，但仍不足以判定是 Shell view、隐藏消息/窗口还是其间接影响。同步清理根因和产品接入门槛仍未通过。
 
+后续最小化对照中，真实 `IShellView` 活动时销毁另一个无关普通 `STATIC` 也通过（`20261028-051446-befd5744.stdout.log`）；一至四个普通 Shell pane 依次执行 `DestroyViewWindow`、释放接口、销毁 pane 和 parent 同样通过（单 pane `20261028-051544-bd6f51c4.stdout.log`，2/3/4 pane 分别 `20261028-051702-7327ae7a.stdout.log`、`20261028-051708-328c2391.stdout.log`、`20261028-051715-b43f629f.stdout.log`）。但仅对单个 pane 调用 `ActivateView(SVUIA_ACTIVATE_FOCUS)` 安装共享 Shell 菜单、再 `ActivateView(SVUIA_DEACTIVATE)` 卸载菜单，完整释放 Shell view 与 pane 后销毁 parent 即可重现：`WM_DESTROY` 进入并从子类返回，随后 watchdog 超时，未见 `WM_NCDESTROY`。该卡顿在协调器于 parent 销毁前释放、延后到 parent 销毁后释放，以及销毁前将焦点显式移回 parent 时都仍存在（`20261028-052155-03d19fa3.stdout.log`、`20261028-052337-04a4fa62.stdout.log`、`20261028-052441-64abb555.stdout.log`）。日志确认基础菜单已恢复、协调器 owner 已清空、active object 为空、RemoveMenus 回调成功。因此菜单激活/卸载后的 OLE/Shell 生命周期是当前最小可复现触发序列，尚无线程栈证据确认卡住的具体系统调用；原四窗格完整 consumer 仍不接入产品。
+
 ## 2026-10-28：隔离原型真实 F2 方向键确认
 
 用户在隔离候选窗口 `125449 / 179260` 中选取 sample 文件，手动按 F2 后确认进入重命名，使用方向键时编辑状态保持。该次只覆盖一个样本及当前查看方式；未覆盖四方向键逐项、Shift/Ctrl 组合、跨窗格竞争焦点、ExplorerBrowser 产品宿主或不同视图模式，因此仅记为隔离原型的可见交互证据，不关闭产品焦点验收。

@@ -87,6 +87,19 @@ internal static class Program
             return PrivateDesktopShellProbe.RunWindowDestroyControl();
         if (args.Length == 1 && args[0] == "--private-desktop-shared-window-destroy-control")
             return PrivateDesktopShellProbe.RunSharedDesktopWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-shell-view-window-destroy-control")
+            return PrivateDesktopShellProbe.RunShellViewWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneSynchronousCleanup();
+        if (args.Length == 2 && args[0] == "--private-desktop-multi-pane-sync-cleanup" &&
+            int.TryParse(args[1], out var cleanupPaneCount))
+            return PrivateDesktopShellProbe.RunMultiPaneSynchronousCleanup(cleanupPaneCount);
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-menu-sync-cleanup")
+            return PrivateDesktopShellProbe.RunFourPaneMenuSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-late-coordinator-dispose")
+            return PrivateDesktopShellProbe.RunSinglePaneLateCoordinatorDispose();
         if (args.Length == 1 && args[0] == "--window-destroy-current-desktop-child")
             return PrivateDesktopShellProbe.RunWindowDestroyControlOnCurrentDesktop();
         if (args.Length == 1 && args[0] == "--ishellview-menu-command-private-desktop")
@@ -176,6 +189,10 @@ internal static class Program
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --private-desktop-window-destroy-control (create and destroy one isolated STATIC window without Shell view creation or foreground change)");
             Console.WriteLine("       --private-desktop-shared-window-destroy-control (two processes create/destroy STATIC windows on one isolated Desktop, without Shell views)");
+            Console.WriteLine("       --private-desktop-shell-view-window-destroy-control (destroy a plain STATIC window while one real IShellView is active on the same isolated Desktop)");
+            Console.WriteLine("       --private-desktop-single-pane-sync-cleanup (synchronously destroy one IShellView, its pane, and its parent on an isolated Desktop)");
+            Console.WriteLine("       --private-desktop-multi-pane-sync-cleanup <2|3|4> (synchronously destroy multiple IShellViews and their parent on an isolated Desktop)");
+            Console.WriteLine("       --private-desktop-four-pane-menu-sync-cleanup (activate and route native Shell menus in four panes, then synchronously clean them up)");
             Console.WriteLine("       --ishellview-host-filter-virtual-private-desktop <scope> (one virtual Shell scope on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");

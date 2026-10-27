@@ -13,7 +13,7 @@
 
 2026-10-28：Private Desktop 对照已让包装 PIDL adapter 进入真实 DefView 消费路径，并确认它只请求列标题、不请求逐项属性或比较；原始 adapter 对照相同，列显示/排序门槛均未通过。此结果关闭“只改子 PIDL 身份即可打通 DefView 派生列”的假设，逐行派生列继续留在产品之外。后续先评审新的属性供应架构；其余 Q-Dir 差距按后台可验证性继续推进，用户可见验收仍集中安排。
 
-2026-10-28：同步清理追踪将停滞进一步缩小：顶层窗口销毁前没有子窗口，parent `WM_DESTROY` 的子类回调已从 `DefSubclassProc` 返回，但 70 秒内未出现 `WM_NCDESTROY` 或 `DestroyWindow` 返回。此前同 Desktop `STATIC` 对照与 producer 共享了另一个 Shell view，证据不足。新增独立 Desktop 单进程及同 Desktop 双进程普通 `STATIC` 销毁对照，两者均通过且前台不变；这排除了普通 HWND teardown 和单纯双进程共用作为稳定复现条件，但仍不能区分 producer Shell view、其窗口/消息状态或间接影响。日志、超时边界及准确结论见[原型诊断记录](ishellview-color-spike.md#2026-10-28：四窗格同步清理停滞位置诊断)。清理根因仍开放；正常 process-exit consumer 仍作为隔离测试回收方式，不接入产品。
+2026-10-28：同步清理追踪已排除普通 HWND teardown、单纯多进程共用 Private Desktop、Shell view 存在本身及 1–4 个 pane 的数量作为稳定触发条件。最小可复现序列缩到单 pane 真实 Shell view 经 `SVUIA_ACTIVATE_FOCUS` 安装、再经 `SVUIA_DEACTIVATE` 卸载共享菜单后，同步销毁 parent：`WM_DESTROY` 子类回调正常返回，但未收到 `WM_NCDESTROY`。协调器销毁时机和焦点还原均未改变结果；当前证据指向菜单激活/卸载后的 OLE/Shell 生命周期，仍缺挂起线程栈以确认具体系统调用。process-exit 方式继续只作为隔离探针回收，不接入产品。完整矩阵、日志与证据边界见[原型诊断记录](ishellview-color-spike.md)。
 
 本轮基于 2ac23d5 源码重跑完整 Release SettingsSmoke、无 HWND 的 pane-tab-copy-order 和 App Release build，全部通过，构建零警告错误。日志分别为 `src/.state/background-current-settings.log`、`background-current-pane.log`、`background-current-app.log`。未启动窗口、未改变发布版本。上批拖放退休修复属于隔离原型，设备地址字面量修复属于后续产品批次，均不改动已经固定的 UI 候选。
 

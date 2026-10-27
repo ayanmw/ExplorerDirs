@@ -47,6 +47,241 @@ internal static class ShellViewColorSpike
     private static int _customDrawPrepaint;
     private static int _customDrawItems;
 
+    internal static int RunSinglePaneSynchronousCleanup()
+    {
+        var foreground = GetForegroundWindow();
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, "single-pane-cleanup-" + Guid.NewGuid().ToString("N"));
+        var stateDirectory = Path.Combine(fixturesRoot, "single-pane-cleanup-state-" + Guid.NewGuid().ToString("N"));
+        var sessionId = Guid.NewGuid();
+        nint parent = 0, pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        var createAttempted = false;
+        ShellViewColorBrowserHost? host = null;
+        ShellMenuFrameCoordinator? menuCoordinator = null;
+        var result = 1;
+        try
+        {
+            Directory.CreateDirectory(fixture);
+            File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
+            var stateStore = new ShellViewStateStore(stateDirectory);
+            parent = CreateWindowExW(0x08000080u, "STATIC", "ExplorerDirs single-pane synchronous cleanup",
+                0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated cleanup parent.");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
+            pane = CreateWindowExW(0, "STATIC", "ExplorerDirs single-pane host",
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 780, 520, parent, 0, 0, 0);
+            if (pane == 0) throw new InvalidOperationException("Could not create the isolated pane host.");
+            Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+            Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+            var shellViewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+            host = new ShellViewColorBrowserHost(pane, [],
+                new ShellFolderFilter(new QuickFilterSettings("*", false, false)),
+                stateStore: stateStore, stateId: sessionId, menuFrameWindow: parent,
+                menuFrameCoordinator: menuCoordinator);
+            host.View = view;
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 760, Bottom = 500 };
+            createAttempted = true;
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+            if (viewWindow == 0) throw new InvalidOperationException("CreateViewWindow returned no window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
+            ShowWindow(parent, 4);
+            Check(At<ActivateView>(view, 7)(view, 1));
+            Pump(500);
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            _ = WaitForShellViewItemCount(folderView, expectedCount: 1);
+            Console.WriteLine($"single-pane-cleanup: ready; parent=0x{parent:X}; pane=0x{pane:X}; view=0x{viewWindow:X}; foreground-unchanged={GetForegroundWindow() == foreground}");
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("single-pane-cleanup failure: " + ex.Message);
+        }
+        finally
+        {
+            Console.WriteLine("single-pane-cleanup: teardown-start");
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0)
+            {
+                if (host is not null) host.RevokeDropTarget();
+                if (createAttempted)
+                {
+                    Console.WriteLine("single-pane-cleanup: destroy-view-start");
+                    var destroyHr = At<DestroyViewWindow>(view, 10)(view);
+                    Console.WriteLine($"single-pane-cleanup: destroy-view-hr=0x{destroyHr:X8}; view-window-valid={IsWindow(viewWindow)}");
+                    if (destroyHr < 0 || IsWindow(viewWindow)) result = 1;
+                }
+                if (host is not null) host.View = 0;
+                Marshal.Release(view);
+            }
+            if (folder != 0) Marshal.Release(folder);
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            host?.Dispose();
+            menuCoordinator?.Dispose();
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (pane != 0 && IsWindow(pane))
+            {
+                Console.WriteLine("single-pane-cleanup: destroy-pane-start");
+                var paneDestroyed = DestroyWindow(pane);
+                Console.WriteLine($"single-pane-cleanup: destroy-pane-returned={paneDestroyed}; still-valid={IsWindow(pane)}");
+                if (!paneDestroyed || IsWindow(pane)) result = 1;
+            }
+            if (parent != 0 && IsWindow(parent))
+            {
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not install the parent teardown observer.");
+                Console.WriteLine("single-pane-cleanup: destroy-parent-start");
+                var parentDestroyed = DestroyWindow(parent);
+                Console.WriteLine($"single-pane-cleanup: destroy-parent-returned={parentDestroyed}; still-valid={IsWindow(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (!parentDestroyed || IsWindow(parent) || GetForegroundWindow() != foreground) result = 1;
+                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
+        }
+        return result;
+    }
+
+    internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
+        bool disposeMenuCoordinatorBeforeParent = true)
+    {
+        if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
+        var foreground = GetForegroundWindow();
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-{Guid.NewGuid():N}");
+        var stateDirectory = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-state-{Guid.NewGuid():N}");
+        var stateStore = new ShellViewStateStore(stateDirectory);
+        var panes = new List<(nint Pane, nint Pidl, nint Folder, nint View, nint HostPointer, nint ViewWindow, nint FolderView, ShellViewColorBrowserHost Host)>();
+        nint parent = 0;
+        ShellMenuFrameCoordinator? menuCoordinator = null;
+        var result = 1;
+        try
+        {
+            Directory.CreateDirectory(fixture);
+            File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
+            parent = CreateWindowExW(0x08000080u, "STATIC", $"ExplorerDirs {paneCount}-pane cleanup",
+                0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated cleanup parent.");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
+            for (var index = 0; index < paneCount; index++)
+            {
+                nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+                ShellViewColorBrowserHost? host = null;
+                try
+                {
+                    var x = index % 2 * 400;
+                    var y = index / 2 * 275;
+                    pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs cleanup pane {index + 1}",
+                        0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, parent, 0, 0, 0);
+                    if (pane == 0) throw new InvalidOperationException($"Could not create pane {index + 1}.");
+                    Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+                    Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+                    var shellViewId = ShellViewId;
+                    Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+                    host = new ShellViewColorBrowserHost(pane, [],
+                        new ShellFolderFilter(new QuickFilterSettings("*", false, false)),
+                        stateStore: stateStore, stateId: Guid.NewGuid(), menuFrameWindow: parent,
+                        menuFrameCoordinator: menuCoordinator);
+                    host.View = view;
+                    hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+                    var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+                    var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+                    Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+                    if (viewWindow == 0) throw new InvalidOperationException($"Pane {index + 1} returned no Shell view window.");
+                    RegisterFolderDropTarget(folder, viewWindow, host);
+                    Check(At<ActivateView>(view, 7)(view, 1));
+                    Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+                    _ = WaitForShellViewItemCount(folderView, expectedCount: 1);
+                    panes.Add((pane, pidl, folder, view, hostPointer, viewWindow, folderView, host));
+                    pane = pidl = folder = view = hostPointer = viewWindow = folderView = 0;
+                    host = null;
+                    Console.WriteLine($"multi-pane-cleanup: pane-created={index + 1}");
+                }
+                finally
+                {
+                    if (folderView != 0) Marshal.Release(folderView);
+                    if (view != 0)
+                    {
+                        if (host is not null) host.RevokeDropTarget();
+                        if (viewWindow != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+                        if (host is not null) host.View = 0;
+                        Marshal.Release(view);
+                    }
+                    if (folder != 0) Marshal.Release(folder);
+                    if (hostPointer != 0) Marshal.Release(hostPointer);
+                    host?.Dispose();
+                    if (pane != 0 && IsWindow(pane)) _ = DestroyWindow(pane);
+                    if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+                }
+                Pump(250);
+            }
+            if (activateMenus)
+            {
+                for (var index = 0; index < panes.Count; index++)
+                {
+                    var beforeInsert = panes[index].Host.InsertMenusCallCount;
+                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 2)); // SVUIA_ACTIVATE_FOCUS.
+                    Pump(200);
+                    var installed = GetMenu(parent);
+                    var activated = panes[index].Host.InsertMenusCallCount > beforeInsert && installed != 0;
+                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 0)); // SVUIA_DEACTIVATE.
+                    Pump(200);
+                    var restored = GetMenu(parent) == menuCoordinator.BaseMenu;
+                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activated={activated}; deactivated={restored}; coordinator-owner={menuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
+                    if (!activated || !restored)
+                        throw new InvalidOperationException($"Pane {index + 1} did not install and remove its native composite menu.");
+                }
+                var restoredFocus = SetFocus(parent);
+                Console.WriteLine($"multi-pane-cleanup: focus-restored-to-parent={GetFocus() == parent}; previous-focus=0x{restoredFocus:X}");
+            }
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("multi-pane-cleanup failure: " + ex.Message);
+        }
+        finally
+        {
+            Console.WriteLine($"multi-pane-cleanup: teardown-start; created={panes.Count}; requested={paneCount}");
+            foreach (var item in panes.AsEnumerable().Reverse())
+            {
+                Marshal.Release(item.FolderView);
+                item.Host.RevokeDropTarget();
+                item.Host.View = 0;
+                var destroyHr = At<DestroyViewWindow>(item.View, 10)(item.View);
+                Console.WriteLine($"multi-pane-cleanup: view-destroy-hr=0x{destroyHr:X8}; view-valid={IsWindow(item.ViewWindow)}");
+                if (destroyHr < 0 || IsWindow(item.ViewWindow)) result = 1;
+                Marshal.Release(item.View);
+                Marshal.Release(item.Folder);
+                Marshal.Release(item.HostPointer);
+                item.Host.Dispose();
+                var paneDestroyed = DestroyWindow(item.Pane);
+                Console.WriteLine($"multi-pane-cleanup: pane-destroy-returned={paneDestroyed}; still-valid={IsWindow(item.Pane)}");
+                if (!paneDestroyed || IsWindow(item.Pane)) result = 1;
+                Marshal.FreeCoTaskMem(item.Pidl);
+            }
+            if (disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            if (parent != 0 && IsWindow(parent))
+            {
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not install the parent teardown observer.");
+                Console.WriteLine("multi-pane-cleanup: destroy-parent-start");
+                var parentDestroyed = DestroyWindow(parent);
+                Console.WriteLine($"multi-pane-cleanup: parent-destroy-returned={parentDestroyed}; still-valid={IsWindow(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (!parentDestroyed || IsWindow(parent) || GetForegroundWindow() != foreground) result = 1;
+                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
+            if (!disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
+        }
+        return result;
+    }
+
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
         bool terminateProcessAfterProbe = false, bool synchronousCleanupProbe = false)
     {
@@ -1620,7 +1855,8 @@ internal static class ShellViewColorSpike
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
-        bool probeSessionRestore = false, bool synchronousCleanupProbe = false)
+        bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
+        bool probeWindowDestroyWithShellView = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -1773,6 +2009,20 @@ internal static class ShellViewColorSpike
             {
                 ShowWindow(parent, 4); // SW_SHOWNOACTIVATE
                 Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS
+            }
+            if (probeWindowDestroyWithShellView)
+            {
+                var plainWindow = CreateWindowExW(0x00000080u, "STATIC",
+                    "ExplorerDirs plain window beside Shell view", 0x10CF0000u,
+                    20, 20, 160, 80, 0, 0, 0, 0);
+                if (plainWindow == 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not create the plain-window comparison beside the Shell view.");
+                Console.WriteLine($"shell-view-window-destroy-control: shell-view=0x{viewWindow:X}; plain-window=0x{plainWindow:X}; destroy-start");
+                var destroyReturned = DestroyWindow(plainWindow);
+                var stillValid = IsWindow(plainWindow);
+                Console.WriteLine($"shell-view-window-destroy-control: destroy-returned={destroyReturned}; still-valid={stillValid}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                return destroyReturned && !stillValid && GetForegroundWindow() == foreground ? 0 : 1;
             }
             if (probeMenuActivation)
             {
@@ -2238,7 +2488,8 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    if (!probeMenuActivation && !probeSessionRestore && (shellWrites == 0 || !persisted || !restored))
+                    if (!probeMenuActivation && !probeSessionRestore && !probeWindowDestroyWithShellView &&
+                        (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
                     GC.KeepAlive(host);
                 }

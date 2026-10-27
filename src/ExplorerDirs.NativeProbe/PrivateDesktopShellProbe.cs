@@ -21,6 +21,26 @@ internal static class PrivateDesktopShellProbe
     internal static int RunMenuActivation() => Run("menu-activation", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, probeMenuActivation: true));
 
+    internal static int RunShellViewWindowDestroyControl() => Run("shell-view-window-destroy-control",
+        () => ShellViewColorSpike.Run(visible: true, deferParentCleanup: true,
+            probeWindowDestroyWithShellView: true), TimeSpan.FromSeconds(30));
+
+    internal static int RunSinglePaneSynchronousCleanup() => Run("single-pane-sync-cleanup",
+        ShellViewColorSpike.RunSinglePaneSynchronousCleanup, TimeSpan.FromSeconds(35));
+
+    internal static int RunMultiPaneSynchronousCleanup(int paneCount) => Run($"{paneCount}-pane-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(paneCount), TimeSpan.FromSeconds(45));
+
+    internal static int RunFourPaneMenuSynchronousCleanup() => Run("four-pane-menu-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(4, activateMenus: true), TimeSpan.FromSeconds(60));
+
+    internal static int RunSinglePaneMenuSynchronousCleanup() => Run("single-pane-menu-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true), TimeSpan.FromSeconds(45));
+
+    internal static int RunSinglePaneLateCoordinatorDispose() => Run("single-pane-menu-late-coordinator-dispose",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
+            disposeMenuCoordinatorBeforeParent: false), TimeSpan.FromSeconds(45));
+
     internal static int RunSessionRestore(bool synchronousCleanupProbe = false) => Run(
         synchronousCleanupProbe ? "session-restore-sync-cleanup" : "session-restore",
         () => ShellViewColorSpike.Run(visible: true, deferParentCleanup: true, probeSessionRestore: true,
