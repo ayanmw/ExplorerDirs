@@ -41,7 +41,8 @@ internal static class AddressPathMenu
         {
             new("桌面", "shell:Desktop"),
             new("用户文件夹", profile),
-            new("下载", Path.Combine(profile, "Downloads")),
+            // The known folder may be redirected; do not assume its default profile path.
+            new("下载", "shell:Downloads"),
             new("文档", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)),
             new("此电脑", ThisPcIdentity)
         };

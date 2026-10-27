@@ -1,3 +1,5 @@
+> **下载系统目录定位（2026-10-27）：**地址位置菜单使用 `shell:Downloads`，不再拼接默认用户目录。只读解析结果与 [SHGetKnownFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath) 的当前下载目录相同，现有祖先/驱动器菜单 smoke 通过；未修改 Windows 重定向设置，实际迁移及菜单导航待可见验收。
+
 > **现代地址栏点击编辑（2026-10-27）：**空白区域和分隔符左键点击现在进入完整路径编辑并全选；路径按钮继续导航，右键不触发编辑。四个未显示的实际 PaneControl 路由事件回归先复现旧实现失败，修正后通过；没有 HWND、Shell view 或桌面输入。物理鼠标命中与键盘焦点待可见验收，尚未发布。
 
 > **窗口关闭与资源释放（2026-10-27）：**普通隐藏 HWND 验证父 HwndSource 释放后子宿主仍被暂存，显式 Dispose 才销毁。窗口 Closed 现释放全部自有文件视图（包括非活动标签）、目录树、地址弹出树和共享树，停止后台任务/定时器及迟到保存；两个未显示的实际 MainWindow 回归验证关闭一个窗口不影响另一个，会话先保存。未创建真实 Shell 文件视图，实际 Ctrl+N/关闭后的 COM 释放和内存收益仍待验收。生命周期依据：[WPF HwndHost 源码](https://source.dot.net/PresentationFramework/System/Windows/Interop/HwndHost.cs.html)。

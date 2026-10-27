@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.Runtime.InteropServices;
 
 internal static class AddressPathMenuSmoke
 {
@@ -33,6 +34,7 @@ internal static class AddressPathMenuSmoke
             "logical drives are nested beneath This PC");
 
         var liveLocations = AddressPathMenu.Build("shell:RecycleBinFolder");
+        CheckDownloadsLocation(liveLocations.Single(entry => entry.Header == "下载").Identity);
         var listedDrives = liveLocations.Where(entry =>
             !entry.IsAncestor && entry.ParentIdentity == "shell:MyComputerFolder").Select(entry => entry.Identity);
         Check(Environment.GetLogicalDrives().All(rootPath => listedDrives.Contains(rootPath,
@@ -51,4 +53,29 @@ internal static class AddressPathMenuSmoke
             if (!condition) throw new InvalidOperationException(message);
         }
     }
+
+    private static void CheckDownloadsLocation(string identity)
+    {
+        // Independently compare the menu target with Windows' current known-folder
+        // mapping. Read only: never redirect the user's Downloads folder for a test.
+        var downloads = new Guid("374DE290-123F-4565-9164-39C4925E467B");
+        nint expectedPath = 0, pidl = 0;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHGetKnownFolderPath(in downloads, 0, 0, out expectedPath));
+            if (!ShellLocationIdentity.TryGetFolderPidl(identity, out pidl) ||
+                !ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var actual, out var isFileSystem) ||
+                !isFileSystem || !string.Equals(actual, Marshal.PtrToStringUni(expectedPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Downloads menu must resolve to the current Windows known folder");
+            Console.WriteLine("Downloads target matches the current Windows known-folder mapping (read only)");
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(expectedPath);
+            Marshal.FreeCoTaskMem(pidl);
+        }
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern int SHGetKnownFolderPath(in Guid folderId, uint flags, nint token, out nint path);
 }
