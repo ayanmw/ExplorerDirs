@@ -1,3 +1,5 @@
+> **窗口关闭与资源释放（2026-10-27）：**普通隐藏 HWND 验证父 HwndSource 释放后子宿主仍被暂存，显式 Dispose 才销毁。窗口 Closed 现释放全部自有文件视图（包括非活动标签）、目录树、地址弹出树和共享树，停止后台任务/定时器及迟到保存；两个未显示的实际 MainWindow 回归验证关闭一个窗口不影响另一个，会话先保存。未创建真实 Shell 文件视图，实际 Ctrl+N/关闭后的 COM 释放和内存收益仍待验收。生命周期依据：[WPF HwndHost 源码](https://source.dot.net/PresentationFramework/System/Windows/Interop/HwndHost.cs.html)。
+
 > **递归计算所选项目大小（2026-10-27）：**“工具 → 计算所选项目递归大小”汇总当前文件视图选择中的文件和文件夹；父子目录重叠选择只计一次，不跟随重解析点，也会跳过路径祖先中的 junction。选择变化会取消扫描；F9 继续扫描当前目录并可取消当前递归扫描。复用状态栏格式，只有用户显式触发才运行。专项扫描器 smoke、完整 Release SettingsSmoke 与 App build 通过；菜单可见性及大目录交互尚未 GUI 验收。
 
 > **状态栏当前目录大小提示（2026-10-27）：**新增默认关闭的“视图 → 未选中时显示当前目录可取得大小”，仅用 Shell 当前视图直接子项的可用属性汇总；选区存在时优先显示选中大小，不递归目录。完整 Release SettingsSmoke、App/NativeProbe Release build 通过；隐藏 ExplorerBrowser `SVGIO_ALLVIEW` 探针验证 3 个直接条目中两文件大小合计 8 字节、目录未纳入，前台未改变。未做可见 GUI 验收；属性缓存 5 秒，同数目内容变化可能短暂陈旧。详见[路线图](roadmap.md#2026-10-27未选中时显示当前目录可取得大小)。

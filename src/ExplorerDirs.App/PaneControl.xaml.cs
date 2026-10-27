@@ -1570,6 +1570,33 @@ public partial class PaneControl : UserControl
         return tab;
     }
 
+    internal void DisposeViews()
+    {
+        CloseAddressTree();
+        CancelTabHoverActivation();
+        CancelRecursiveDirectorySize();
+        CancelSelectionCountsRefresh();
+        _itemCountsTimer.Stop();
+        _diskSpace.Reset();
+
+        // Window closure does not dispose HwndHost children: WPF can park them
+        // under its hidden window. Release every tab, including inactive ones.
+        foreach (var tab in Tabs.Items.Cast<TabItem>())
+            DisposeHost(((TabState)tab.Tag).Browser);
+        DisposeHost(_treeHost);
+        DisposeHost(AddressTreeHost);
+
+        static void DisposeHost(IDisposable? host)
+        {
+            try { host?.Dispose(); }
+            catch (Exception ex)
+            {
+                // One failing Shell extension must not prevent other hosts from closing.
+                Trace.WriteLine($"Pane host cleanup: {ex.GetType().Name} (0x{ex.HResult:X8})");
+            }
+        }
+    }
+
     private void UpdateTabHeader(TabState state)
     {
         var name = ShellLocationIdentity.GetDisplayName(state.Path);

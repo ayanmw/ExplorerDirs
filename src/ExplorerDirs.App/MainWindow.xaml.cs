@@ -100,6 +100,7 @@ public partial class MainWindow : Window
     private bool _classicAddressBar;
     private bool _mouseWheelFocusEnabled;
     private bool _initializing = true;
+    private bool _closed;
     private bool _fileViewFocusDesired;
     private bool _openingTerminal;
     private bool _importingQdr;
@@ -438,6 +439,11 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _closed = true;
+            _saveTimer.Stop();
+            foreach (var pane in _panes) pane.DisposeViews();
+            try { _sharedTreeHost?.Dispose(); }
+            catch (Exception ex) { Trace.WriteLine($"Shared tree cleanup: {ex.GetType().Name} (0x{ex.HResult:X8})"); }
             MouseWheelFocusMessageHook.Unregister(this);
             if (_themeController is not null)
                 _themeController.ThemeChanged -= ThemeController_ThemeChanged;
@@ -2275,7 +2281,7 @@ public partial class MainWindow : Window
 
     private void ScheduleSave()
     {
-        if (!_initializing)
+        if (!_initializing && !_closed)
         {
             _saveTimer.Stop();
             _saveTimer.Start();

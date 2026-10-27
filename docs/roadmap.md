@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：关闭窗口时显式释放全部原生宿主
+
+- 发现窗口 `Closed` 原先只撤销部分订阅，没有释放各标签及目录树的 HwndHost。普通隐藏 STATIC 子窗口实验确认：HwndSource 释放后，子 HWND 仍存在且 DestroyWindowCore 未调用；显式 Dispose 才执行销毁。不能依赖窗口消失或 GC 清理 Shell 宿主。
+- 现保持 Closing 的会话保存，Closed 时释放该窗口所有活动/非活动标签、各窗格目录树、地址弹出树及共享树，同时取消窗格后台任务和定时器；停止延迟保存，并拒绝关闭后的保存调度。其他独立窗口保持运行。
+- 新 `--window-close-lifetime` 先复现原实现未释放宿主，修复后通过两个未显示的实际 MainWindow 验证所有权隔离、全部宿主 Dispose、保存先于清理和迟到保存拒绝。既有 `--tab-host-lifetime`、`--pane-tab-copy-order` 通过，App/HostProbe Release build 0 警告/错误。本轮未创建真实 Shell 文件视图，未量化释放内存；实际 Ctrl+N/关闭窗口后的 HWND/COM、进程内存与可见操作仍待验收。
+
 ## 2026-10-27：取得 temp.74 的三分钟运行内存样本
 
 - 对已运行 PID 17608 只读采样 37 次并核对进程生命周期、EXE/DLL 哈希。Working Set 为 268.01→272.55 MiB，Private Bytes 为 158.44→158.89 MiB；Private Bytes 范围 153.06–162.65 MiB，句柄 1368→1355、线程 45→44，见[采样记录](memory-sampling.md)。
