@@ -170,6 +170,19 @@ internal static class NativeThemeColorProbe
             begin.Invoke(null, [(nint)0]);
             var handle = (nint)field.GetValue(null)!;
             Check(handle != 0, "native menu observer installs on the current probe thread without showing a menu");
+            Check(!(bool)type.GetMethod("ApplyMenuFramesFromOwner", members)!.Invoke(null, null)!,
+                "owner message skips a duplicate frame pass while the return hook is installed");
+            var receiver = CreateWindowEx(0, "STATIC", "", 0x80000000, 0, 0, 10, 10, 0, 0, 0, 0);
+            Check(receiver != 0, "hidden native menu message receiver is available");
+            try
+            {
+                var timestamp = type.GetField("_lastMenuPaintTimestamp", members)!;
+                timestamp.SetValue(null, 0L);
+                SendMessage(receiver, 0x011F, 0, 0);
+                Check((long)timestamp.GetValue(null)! != 0,
+                    "actual sent menu message reaches the thread return hook after native processing");
+            }
+            finally { DestroyWindow(receiver); }
             begin.Invoke(null, [(nint)0]);
             Check((nint)field.GetValue(null)! == handle, "nested menu loops share one thread-local installation");
             end.Invoke(null, null);
@@ -178,6 +191,8 @@ internal static class NativeThemeColorProbe
             Check((nint)field.GetValue(null)! == 0, "leaving the outer menu releases the native hook");
             end.Invoke(null, null);
             Check((nint)field.GetValue(null)! == 0, "repeated menu cleanup is harmless");
+            Check((bool)type.GetMethod("ApplyMenuFramesFromOwner", members)!.Invoke(null, null)!,
+                "owner frame processing remains available when no hook is installed");
         }
         finally { end.Invoke(null, null); end.Invoke(null, null); }
     }

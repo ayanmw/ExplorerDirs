@@ -157,6 +157,14 @@ internal static class NativeShellTheme
         finally { Marshal.Release(properties); }
     }
 
+    internal static bool ApplyMenuFramesFromOwner()
+    {
+        // The installed return hook handles this message after native processing.
+        // Retain the owner path only if installing that hook was unavailable.
+        if (_menuHook != 0) return false;
+        ApplyMenuFrames();
+        return true;
+    }
     internal static void ApplyMenuFrames()
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;

@@ -4665,10 +4665,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     if ((wParam.ToInt64() & 0xFFFF) == 1) QueueNativeThemeRefresh();
                     break;
                 case 0x011F: // WM_MENUSELECT: style only this thread's native popup frames.
-                    NativeShellTheme.ApplyMenuFrames();
+                    NativeShellTheme.ApplyMenuFramesFromOwner();
                     break;
                 case 0x0121: // WM_ENTERIDLE after the native popup HWND has been created.
-                    if (wParam == 2) NativeShellTheme.ApplyMenuFrames(); // MSGF_MENU
+                    if (wParam == 2) NativeShellTheme.ApplyMenuFramesFromOwner(); // MSGF_MENU
                     break;
                 case 0x004E: // WM_NOTIFY: native file-information tips are created lazily.
                     NativeShellTheme.ApplyTooltip(lParam);
