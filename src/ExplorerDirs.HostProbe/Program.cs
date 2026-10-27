@@ -2479,7 +2479,8 @@ internal static class Program
                 var fallbackDetailsAfterDelete = LastFallbackDetails();
                 var selectionRestoreTrace = (string)shellSelectionRestoreTimeline.GetValue(hosts[0])!;
                 var directFocusRestoreObserved = selectionRestoreTrace.Contains("focused-item-lookup=direct-select", StringComparison.Ordinal);
-                var shellCallbackTraceEnabled = Environment.GetEnvironmentVariable("EXPLORER_DIRS_SHELL_CALLBACK_TRACE") != "0";
+                // This is opt-in in ExplorerBrowserHost; an unset variable must not require trace-only events.
+                var shellCallbackTraceEnabled = Environment.GetEnvironmentVariable("EXPLORER_DIRS_SHELL_CALLBACK_TRACE") == "1";
                 heartbeat.Stop();
                 foreach (var timer in dispatcherPriorityTimers) timer.Stop();
                 dedicatedHeartbeat.Stop();

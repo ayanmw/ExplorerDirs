@@ -19,6 +19,12 @@
 - 通过真实 `WM_SETTINGCHANGE` HWND 消息验证当前用户环境变量新增后刷新到本进程、由 `TerminalLauncher` 启动的 `cmd.exe` 可继承；删除注册表值并再次刷新后，本进程和新 `cmd.exe` 均不再包含该变量。探针结束后 HKCU 与进程中对应临时变量数量均为 0。
 - HostProbe Release 构建（0 警告/错误）、该隔离探针及完整 Release `SettingsSmoke` 通过。证据覆盖生产消息 hook/service 的进程内刷新与子进程继承；不代表可见窗口提示、系统广播接收或跨进程刷新已做 UI 验收。
 
+## 2026-10-28：修正 3,000 项自动刷新探针的追踪断言
+
+- 首次隐藏生产 HostProbe `--live-shell-directory-stress 3000` 退出码为 1，但日志中的创建/删除收敛、watcher/observer 事件和最终选区/焦点均通过。源码追踪发现探针把追踪变量“未设置”误当成追踪开启；产品只在值明确为 `1` 时记录 direct-select 事件。相同负载显式关闭 trace 后通过，确认失败来自探针门控而不是产品操作断言。
+- 将断言条件改为与产品一致的显式 opt-in。修正后默认设置与 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE=1` 两轮均退出码 0；两轮 watcher/observer 创建与删除均为 `3,000/3,000`，目标及其它窗格最终为 `3/3`，原有两项选择和未选中的 `initial.txt` 焦点恢复。创建计数短暂滞后后于约 1.1 秒内收敛；删除侧发生一次 fallback 刷新。HostProbe Release 构建 0 警告/错误。
+- 运行于未显示的四窗格 ExplorerBrowser 宿主和临时 fixture，没有桌面输入、可见 UI 或发布更新。该结果只证明本地 3,000 项样本，不关闭跨 provider/网络目录/用户实际交互的自动刷新 P0。
+
 ## 2026-10-28：Ctrl+滚轮余量不跨导航复用
 
 - 源码追踪发现每个 ExplorerBrowser 宿主持有高精度 Ctrl+滚轮累加余量，但导航开始、完成和宿主重置都会递增 `ShellViewReadiness.Generation`，累加器此前未绑定此代际。用户在同一窗格导航前后的两次半刻度输入，可能被合并为新视图的一次切换。
