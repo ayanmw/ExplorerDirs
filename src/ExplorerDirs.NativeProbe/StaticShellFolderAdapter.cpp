@@ -7,6 +7,7 @@
 #include <strsafe.h>
 #include <new>
 #include <string>
+#include <vector>
 #include <cstdio>
 
 namespace
@@ -22,6 +23,8 @@ namespace
     constexpr PROPERTYKEY kDocumentByteCountKey =
     { { 0xD5CDD502, 0x2E9C, 0x101B, { 0x93, 0x97, 0x08, 0x00, 0x2B, 0x2C, 0xF9, 0xAE } }, 4 };
     constexpr UINT kColumnLimit = 64;
+    constexpr DWORD kWrappedPidlMagic = 0x4C445045; // "EPDL"; diagnostic adapter identity, not a persisted format.
+    constexpr UINT kWrappedPidlHeaderSize = sizeof(USHORT) + sizeof(DWORD) + sizeof(UINT);
     volatile LONG g_staticColumnComparisons = 0;
     volatile LONG g_allComparisons = 0;
     volatile LONG g_lastCompareColumn = -1;
@@ -45,6 +48,24 @@ namespace
     SRWLOCK g_queryTraceLock = SRWLOCK_INIT;
     GUID g_forwardedQueryIds[64]{};
     UINT g_forwardedQueryCount = 0;
+
+    HRESULT WrapChildPidl(PCUIDLIST_RELATIVE source, PIDLIST_RELATIVE* wrapped);
+    HRESULT UnwrapChildPidlView(PCUIDLIST_RELATIVE source, PCUIDLIST_RELATIVE* original);
+
+    bool IsBoundedPidl(const BYTE* bytes, UINT length)
+    {
+        if (!bytes || length < sizeof(USHORT)) return false;
+        UINT offset = 0;
+        while (offset + sizeof(USHORT) <= length)
+        {
+            USHORT itemSize = 0;
+            CopyMemory(&itemSize, bytes + offset, sizeof(itemSize));
+            if (!itemSize) return offset + sizeof(USHORT) == length;
+            if (itemSize < sizeof(USHORT) || itemSize > length - offset) return false;
+            offset += itemSize;
+        }
+        return false;
+    }
 
     void TraceForwardedQuery(REFIID iid, HRESULT result, bool forwarded)
     {
@@ -89,6 +110,123 @@ namespace
         return false;
     }
 
+    class WrappedEnumIdList final : public IEnumIDList
+    {
+    public:
+        explicit WrappedEnumIdList(IEnumIDList* inner) : _inner(inner) { if (_inner) _inner->AddRef(); }
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
+        {
+            if (!object) return E_POINTER;
+            *object = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IEnumIDList) return E_NOINTERFACE;
+            *object = static_cast<IEnumIDList*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_refs); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto refs = InterlockedDecrement(&_refs);
+            if (!refs) delete this;
+            return refs;
+        }
+        HRESULT STDMETHODCALLTYPE Next(ULONG count, PITEMID_CHILD* items, ULONG* fetched) override
+        {
+            if (!items || (count != 1 && !fetched)) return E_POINTER;
+            if (fetched) *fetched = 0;
+            for (ULONG index = 0; index < count; ++index) items[index] = nullptr;
+            std::vector<PITEMID_CHILD> raw;
+            try { raw.assign(count, nullptr); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            ULONG rawFetched = 0;
+            auto result = _inner->Next(count, raw.data(), &rawFetched);
+            if (FAILED(result))
+            {
+                for (auto* item : raw) if (item) CoTaskMemFree(item);
+                return result;
+            }
+            for (ULONG index = 0; index < rawFetched; ++index)
+            {
+                const auto wrapResult = WrapChildPidl(raw[index], &items[index]);
+                CoTaskMemFree(raw[index]);
+                raw[index] = nullptr;
+                if (FAILED(wrapResult))
+                {
+                    for (ULONG rest = index + 1; rest < rawFetched; ++rest) CoTaskMemFree(raw[rest]);
+                    for (ULONG made = 0; made < index; ++made) CoTaskMemFree(items[made]);
+                    return wrapResult;
+                }
+            }
+            if (fetched) *fetched = rawFetched;
+            return result;
+        }
+        HRESULT STDMETHODCALLTYPE Skip(ULONG count) override { return _inner->Skip(count); }
+        HRESULT STDMETHODCALLTYPE Reset() override { return _inner->Reset(); }
+        HRESULT STDMETHODCALLTYPE Clone(IEnumIDList** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            IEnumIDList* clone = nullptr;
+            auto result = _inner->Clone(&clone);
+            if (FAILED(result)) return result;
+            auto* wrapped = new (std::nothrow) WrappedEnumIdList(clone);
+            clone->Release();
+            if (!wrapped) return E_OUTOFMEMORY;
+            *value = wrapped;
+            return S_OK;
+        }
+    private:
+        ~WrappedEnumIdList() { if (_inner) _inner->Release(); }
+        volatile LONG _refs = 1;
+        IEnumIDList* _inner = nullptr;
+    };
+
+    HRESULT WrapChildPidl(PCUIDLIST_RELATIVE source, PIDLIST_RELATIVE* wrapped)
+    {
+        if (!source || !wrapped) return E_POINTER;
+        *wrapped = nullptr;
+        const auto sourceSize = ILGetSize(source);
+        if (sourceSize < sizeof(USHORT) || sourceSize > USHRT_MAX - kWrappedPidlHeaderSize) return E_INVALIDARG;
+        const auto itemSize = static_cast<USHORT>(kWrappedPidlHeaderSize + sourceSize);
+        const auto allocationSize = static_cast<SIZE_T>(itemSize) + sizeof(USHORT);
+        auto* result = static_cast<BYTE*>(CoTaskMemAlloc(allocationSize));
+        if (!result) return E_OUTOFMEMORY;
+        auto* cursor = result;
+        CopyMemory(cursor, &itemSize, sizeof(itemSize));
+        cursor += sizeof(USHORT);
+        CopyMemory(cursor, &kWrappedPidlMagic, sizeof(kWrappedPidlMagic));
+        cursor += sizeof(DWORD);
+        CopyMemory(cursor, &sourceSize, sizeof(sourceSize));
+        cursor += sizeof(UINT);
+        CopyMemory(cursor, source, sourceSize);
+        const USHORT terminator = 0;
+        CopyMemory(result + itemSize, &terminator, sizeof(terminator));
+        *wrapped = reinterpret_cast<PITEMID_CHILD>(result);
+        return S_OK;
+    }
+
+    HRESULT UnwrapChildPidlView(PCUIDLIST_RELATIVE source, PCUIDLIST_RELATIVE* original)
+    {
+        if (!original) return E_POINTER;
+        *original = source;
+        if (!source) return S_OK;
+        const auto itemSize = source->mkid.cb;
+        if (itemSize < sizeof(USHORT) + sizeof(DWORD)) return S_OK;
+        DWORD magic = 0;
+        CopyMemory(&magic, reinterpret_cast<const BYTE*>(source) + sizeof(USHORT), sizeof(magic));
+        if (magic != kWrappedPidlMagic) return S_OK;
+        if (itemSize < kWrappedPidlHeaderSize + sizeof(USHORT)) return E_INVALIDARG;
+        UINT payloadSize = 0;
+        CopyMemory(&payloadSize, reinterpret_cast<const BYTE*>(source) + sizeof(USHORT) + sizeof(DWORD), sizeof(payloadSize));
+        if (payloadSize < sizeof(USHORT) || kWrappedPidlHeaderSize + payloadSize != itemSize) return E_INVALIDARG;
+        const auto* payload = reinterpret_cast<PCUIDLIST_RELATIVE>(reinterpret_cast<const BYTE*>(source) + kWrappedPidlHeaderSize);
+        USHORT outerTerminator = 1;
+        CopyMemory(&outerTerminator, reinterpret_cast<const BYTE*>(source) + itemSize, sizeof(outerTerminator));
+        if (outerTerminator != 0 || !IsBoundedPidl(reinterpret_cast<const BYTE*>(payload), payloadSize)) return E_INVALIDARG;
+        *original = payload;
+        return S_OK;
+    }
+
     ULONGLONG ValueForName(const std::wstring& name, bool& found)
     {
         found = true;
@@ -104,8 +242,8 @@ namespace
     class StaticShellFolderAdapter final : public IShellFolder2, public IPersistFolder2
     {
     public:
-        explicit StaticShellFolderAdapter(IShellFolder2* inner, bool strictInterfaces = false, bool prototypeClass = false)
-            : _inner(inner), _strictInterfaces(strictInterfaces), _prototypeClass(prototypeClass)
+        explicit StaticShellFolderAdapter(IShellFolder2* inner, bool strictInterfaces = false, bool prototypeClass = false, bool wrappedPidls = false)
+            : _inner(inner), _strictInterfaces(strictInterfaces), _prototypeClass(prototypeClass), _wrappedPidls(wrappedPidls)
         {
             if (_inner) _inner->AddRef();
             if (_inner)
@@ -200,21 +338,54 @@ namespace
             return result;
         }
         HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND hwnd, IBindCtx* bind, LPWSTR name, ULONG* eaten, PIDLIST_RELATIVE* item, ULONG* attributes) override
-        { return _inner->ParseDisplayName(hwnd, bind, name, eaten, item, attributes); }
+        {
+            if (!item) return E_POINTER;
+            *item = nullptr;
+            PIDLIST_RELATIVE raw = nullptr;
+            auto result = _inner->ParseDisplayName(hwnd, bind, name, eaten, &raw, attributes);
+            if (FAILED(result) || !_wrappedPidls) { *item = raw; return result; }
+            result = WrapChildPidl(raw, item);
+            CoTaskMemFree(raw);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND hwnd, SHCONTF flags, IEnumIDList** enumerator) override
-        { return _inner->EnumObjects(hwnd, flags, enumerator); }
+        {
+            if (!enumerator) return E_POINTER;
+            *enumerator = nullptr;
+            IEnumIDList* raw = nullptr;
+            auto result = _inner->EnumObjects(hwnd, flags, &raw);
+            if (FAILED(result)) { if (raw) raw->Release(); return result; }
+            if (!_wrappedPidls) { *enumerator = raw; return result; }
+            if (!raw) return E_UNEXPECTED;
+            auto* wrapped = new (std::nothrow) WrappedEnumIdList(raw);
+            raw->Release();
+            if (!wrapped) return E_OUTOFMEMORY;
+            *enumerator = wrapped;
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {
             if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToObjectRequests);
-            return _inner->BindToObject(item, bind, iid, value);
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto result = UnwrapChildPidlView(item, &original);
+            return FAILED(result) ? result : _inner->BindToObject(original, bind, iid, value);
         }
         HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {
             if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToStorageRequests);
-            return _inner->BindToStorage(item, bind, iid, value);
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto result = UnwrapChildPidlView(item, &original);
+            return FAILED(result) ? result : _inner->BindToStorage(original, bind, iid, value);
         }
         HRESULT STDMETHODCALLTYPE CompareIDs(LPARAM column, PCUIDLIST_RELATIVE left, PCUIDLIST_RELATIVE right) override
         {
+            PCUIDLIST_RELATIVE originalLeft = nullptr, originalRight = nullptr;
+            auto unwrapResult = UnwrapChildPidlView(left, &originalLeft);
+            if (FAILED(unwrapResult)) return unwrapResult;
+            unwrapResult = UnwrapChildPidlView(right, &originalRight);
+            if (FAILED(unwrapResult)) return unwrapResult;
+            left = originalLeft;
+            right = originalRight;
             InterlockedIncrement(&g_allComparisons);
             InterlockedExchange(&g_lastCompareColumn, LOWORD(column));
             const auto columnIndex = LOWORD(column);
@@ -248,16 +419,49 @@ namespace
             return SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
         }
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
-        { return _inner->GetAttributesOf(count, items, attributes); }
+        {
+            std::vector<PCUITEMID_CHILD> original;
+            try { original.resize(count); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            for (UINT index = 0; index < count; ++index)
+            {
+                auto result = UnwrapChildPidlView(items[index], &original[index]);
+                if (FAILED(result)) return result;
+            }
+            return _inner->GetAttributesOf(count, original.data(), attributes);
+        }
         HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
         {
             if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreUiObjectRequests);
-            return _inner->GetUIObjectOf(owner, count, items, iid, reserved, value);
+            std::vector<PCUITEMID_CHILD> original;
+            try { original.resize(count); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            for (UINT index = 0; index < count; ++index)
+            {
+                auto result = UnwrapChildPidlView(items[index], &original[index]);
+                if (FAILED(result)) return result;
+            }
+            return _inner->GetUIObjectOf(owner, count, original.data(), iid, reserved, value);
         }
         HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF flags, STRRET* name) override
-        { return _inner->GetDisplayNameOf(item, flags, name); }
+        {
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto result = UnwrapChildPidlView(item, &original);
+            return FAILED(result) ? result : _inner->GetDisplayNameOf(original, flags, name);
+        }
         HRESULT STDMETHODCALLTYPE SetNameOf(HWND owner, PCUITEMID_CHILD item, LPCWSTR name, SHGDNF flags, PITEMID_CHILD* renamed) override
-        { return _inner->SetNameOf(owner, item, name, flags, renamed); }
+        {
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto result = UnwrapChildPidlView(item, &original);
+            if (FAILED(result) || !_wrappedPidls || !renamed) return FAILED(result) ? result : _inner->SetNameOf(owner, original, name, flags, renamed);
+            *renamed = nullptr;
+            PIDLIST_RELATIVE raw = nullptr;
+            result = _inner->SetNameOf(owner, original, name, flags, &raw);
+            if (FAILED(result)) return result;
+            result = WrapChildPidl(raw, renamed);
+            CoTaskMemFree(raw);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE GetDefaultSearchGUID(GUID* value) override { return _inner->GetDefaultSearchGUID(value); }
         HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch** enumerator) override { return _inner->EnumSearches(enumerator); }
         HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD reserved, ULONG* sort, ULONG* display) override { return _inner->GetDefaultColumn(reserved, sort, display); }
@@ -270,6 +474,10 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* column, VARIANT* value) override
         {
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto unwrapResult = UnwrapChildPidlView(item, &original);
+            if (FAILED(unwrapResult)) return unwrapResult;
+            item = original;
             if (!column || (*column != kStaticSizeKey && *column != kSizeKey && *column != kDocumentByteCountKey)) return _inner->GetDetailsEx(item, column, value);
             if (*column == kSizeKey) InterlockedIncrement(&g_standardSizeDetailsEx);
             else if (*column == kDocumentByteCountKey) InterlockedIncrement(&g_documentByteCountDetailsEx);
@@ -297,6 +505,10 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
         {
             if (!details) return E_POINTER;
+            PCUIDLIST_RELATIVE original = nullptr;
+            auto unwrapResult = UnwrapChildPidlView(item, &original);
+            if (FAILED(unwrapResult)) return unwrapResult;
+            item = original;
             if (column == _columnCount + 1)
             {
                 if (item) return _inner->GetDetailsOf(item, 15, details);
@@ -393,8 +605,32 @@ namespace
         IShellFolder2* _inner = nullptr;
         const bool _strictInterfaces;
         const bool _prototypeClass;
+        const bool _wrappedPidls;
         UINT _columnCount = 0;
     };
+}
+
+// No-window contract exports let the managed probe validate the exact PIDL envelope
+// before it is used by the isolated adapter. The payload is an owned copy of the
+// complete original PIDL, including its terminator.
+extern "C" __declspec(dllexport) HRESULT WINAPI WrapStaticShellChildPidl(
+    PCUIDLIST_RELATIVE source, PIDLIST_RELATIVE* wrapped)
+{ return WrapChildPidl(source, wrapped); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI UnwrapStaticShellChildPidl(
+    PCUIDLIST_RELATIVE wrapped, PIDLIST_RELATIVE* original)
+{
+    if (!wrapped || !original) return E_POINTER;
+    *original = nullptr;
+    PCUIDLIST_RELATIVE view = nullptr;
+    auto result = UnwrapChildPidlView(wrapped, &view);
+    if (FAILED(result) || view == wrapped) return FAILED(result) ? result : E_INVALIDARG;
+    const auto payloadSize = ILGetSize(view);
+    auto* copy = static_cast<BYTE*>(CoTaskMemAlloc(payloadSize));
+    if (!copy) return E_OUTOFMEMORY;
+    CopyMemory(copy, view, payloadSize);
+    *original = reinterpret_cast<PITEMID_CHILD>(copy);
+    return S_OK;
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellColumnComparisonCount()
@@ -545,6 +781,16 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateClassIdentityShellFolderAd
     if (!folder || !adapter) return E_POINTER;
     *adapter = nullptr;
     auto* instance = new (std::nothrow) StaticShellFolderAdapter(folder, true, true);
+    if (!instance) return E_OUTOFMEMORY;
+    *adapter = instance;
+    return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateWrappedPidlShellFolderAdapter(
+    IShellFolder2* folder, IShellFolder2** adapter)
+{
+    if (!folder || !adapter) return E_POINTER;
+    *adapter = nullptr;
+    auto* instance = new (std::nothrow) StaticShellFolderAdapter(folder, false, false, true);
     if (!instance) return E_OUTOFMEMORY;
     *adapter = instance;
     return S_OK;

@@ -171,3 +171,11 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 最终运行记录为 `src/.state/native-probe-watchdog/20261028-013132-ca617853.stdout.log`（SHA-256 `F6EDBAF5663419115E6DB3E29756ADCED0AF75A7B2EC21D69926A4C4E3204952`），NativeProbe DLL SHA-256 `15D68CD4647CFC01BC6F79D650F22F805B39954D442BBE9520CD2FFAD914558E`。NativeProbe Release build 为 0 警告、0 错误。`UIActivate` 返回 `S_OK`，view 仍使用严格适配器，私有 Desktop 边界与主桌面前台句柄检查通过。标准 `PKEY_Size` 升/降序按真实 2/10/10/100 字节重排通过；自定义列升/降序仍保持名称顺序并使整个探针以预期的门槛失败退出。视图显示的自定义列各项文本为空；排序前后适配器 `GetDetailsEx(custom/size)`、子项 `GetDetailsOf`、`CompareIDs` 计数都没有由 DefView 增加，只有探针自身的少量显式检查调用。
 
 这排除了本探针采用的“激活后 DefView 会开始消费该适配器逐项列值”路径，但不证明任意自定义 Shell namespace 或自定义 PIDL/属性存储路线不可行。下一步需改变项目身份/属性提供路径来形成新的可证伪假设；不再仅重复激活同一 adapter，不注册系统级 property schema、不增加递归扫描缓存，也不接入产品 ExplorerBrowser。该隔离结果不是用户桌面 UI 验收。
+
+### 2026-10-28 包装子 PIDL 的后台合同原型
+
+按“改变项目身份”假设新增仅供 NativeProbe 的私有子 PIDL 包装层：枚举器和 `ParseDisplayName` 返回含原始 PIDL 副本的私有单项 PIDL；`IShellFolder2` 的比较、属性、显示名、绑定、UI 对象和重命名入口会先还原原始项目身份，再委托文件系统 Shell folder。包装格式只在进程内实验使用，不写入 profile 或 `.qdr`。
+
+无窗口合同验证通过：真实文件 PIDL 往返后 `ILIsEqual` 保持身份；错误 marker 被拒绝；包装枚举项通过 `GetAttributesOf`；包装解析得到的项目维持既有列文本、`VT_UI8`、数值排序合同；`SetNameOf` 将夹具文件重命名并返回可还原的新 PIDL。原始 PIDL adapter 合同也继续通过，NativeProbe C++ `/W4 /WX` 与 Release 构建为 0 警告/错误，`git diff --check` 通过。
+
+这只证明私有 PIDL 包装的编码/解码及被测 `IShellFolder2` 委托入口，不证明 DefView 会消费新身份下的自定义列，也未覆盖打开、菜单、属性对话框、剪贴板、OLE 拖放、导航和通知。下一个判别点是集中批次在隔离 DefView 中复测实际自定义列读取与数值排序；窗口级证据产生前，不把该 adapter 接入产品。

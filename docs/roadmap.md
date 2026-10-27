@@ -13,6 +13,12 @@
 
 本轮基于 2ac23d5 源码重跑完整 Release SettingsSmoke、无 HWND 的 pane-tab-copy-order 和 App Release build，全部通过，构建零警告错误。日志分别为 `src/.state/background-current-settings.log`、`background-current-pane.log`、`background-current-app.log`。未启动窗口、未改变发布版本。上批拖放退休修复属于隔离原型，设备地址字面量修复属于后续产品批次，均不改动已经固定的 UI 候选。
 
+## 2026-10-28：改变隔离列原型的项目 PIDL 身份
+
+- 在 NativeProbe 原生 `IShellFolder2` adapter 增加 opt-in 子 PIDL 包装实验；包装真实 filesystem PIDL，并在 `ParseDisplayName`、`EnumObjects` 及比较、属性、绑定、显示名、UI 对象、重命名入口解包后委托。普通 adapter 路径保持原行为，产品 `ExplorerBrowser` 未改。
+- 无窗口包装合同验证通过：PIDL 身份往返、损坏 marker 拒绝、枚举项属性查询、既有逐行静态列合同及夹具文件重命名；原始 PIDL 合同仍通过。C++ `/W4 /WX`、NativeProbe Release 构建及 `git diff --check` 通过。
+- 这尚未验证 DefView 是否会因子 PIDL 身份改变而请求自定义列值或排序，也未覆盖 Shell 菜单、剪贴板、OLE 拖放和导航通知。按用户当前要求，DefView 窗口验证暂存入集中 UI/隔离视图验收批次。
+
 ## 2026-10-28：目录树系统图像列表后台集成复核
 
 - 在既有图标索引 smoke 上补充生产 `NativeShellTree` 控件级检查：专用 STA 线程中创建隐藏父 HWND，读取真实 `SysTreeView32` 的 `TVM_GETIMAGELIST`，确认控件使用与 `SHGetFileInfo` 索引解析器相同的系统图像列表；创建和释放前后前台 HWND 不变。

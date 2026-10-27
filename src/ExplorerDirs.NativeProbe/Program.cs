@@ -37,6 +37,8 @@ internal static class Program
             return ShellViewStateStreamSmoke.RunChildCommand(args);
         if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
             return StaticShellColumnContractSmoke.Run();
+        if (args.Length == 1 && args[0] == "--wrapped-pidl-contract-smoke")
+            return WrappedPidlContractSmoke.Run();
         if (args.Length == 1 && args[0] == "--static-shell-column-classid-smoke")
             return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true, strictInterfaces: true, prototypeClass: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-classid-private-desktop")
@@ -49,6 +51,8 @@ internal static class Program
             return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
             return StaticShellFolderAdapterProbe.RunFolderContract();
+        if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-folder-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(wrappedPidls: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
@@ -141,7 +145,9 @@ internal static class Program
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
             Console.WriteLine("       --shell-view-state-stream-smoke (IShellBrowser view-state stream save/restore without a Shell view)");
             Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");
+            Console.WriteLine("       --wrapped-pidl-contract-smoke (child-PIDL envelope round-trip; no Shell view or window)");
             Console.WriteLine("       --static-shell-column-folder-smoke (native IShellFolder2 adapter CompareIDs; no window)");
+            Console.WriteLine("       --static-shell-column-wrapped-folder-smoke (wrapped child PIDLs through native adapter contracts; no window)");
             Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");

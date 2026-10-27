@@ -15,25 +15,59 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
 
-    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false)
+    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false, bool wrappedPidls = false)
     {
         VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
+        var stage = "sort-matrix-isolation";
         nint folderPidl = 0, folder = 0, adapter = 0, nativeLibrary = 0;
         var items = new Dictionary<string, nint>(StringComparer.OrdinalIgnoreCase);
         try
         {
             Directory.CreateDirectory(fixture);
             WriteSortableFixtures(fixture, "ten-copy.bin");
+            stage = "parse-fixture-folder";
             Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
+            stage = "bind-filesystem-folder";
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
+            stage = "load-native-adapter";
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
             var shellDetailsSize = GetShellDetailsSize(nativeLibrary);
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
-                NativeLibrary.GetExport(nativeLibrary, prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
+                NativeLibrary.GetExport(nativeLibrary, wrappedPidls ? "CreateWrappedPidlShellFolderAdapter" : prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
             if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
+            if (wrappedPidls)
+            {
+                stage = "wrapped-enumeration";
+                var enumerate = At<EnumObjects>(adapter, 4);
+                var enumHr = enumerate(adapter, 0, 0x60, out var enumerator);
+                if (enumHr < 0) throw new Exception($"Wrapped EnumObjects failed: 0x{enumHr:X8}.");
+                try
+                {
+                    stage = "wrapped-enumerator-next";
+                    var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var child, out var fetched);
+                    if (nextHr < 0) throw new Exception($"Wrapped IEnumIDList.Next failed: 0x{nextHr:X8}.");
+                    if (fetched != 1 || child == 0) throw new Exception("Wrapped adapter enumeration returned no child PIDL.");
+                    try
+                    {
+                        var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+                        try
+                        {
+                            Marshal.WriteIntPtr(childArray, child);
+                            stage = "wrapped-enumerator-attributes";
+                            uint attributes = 0x40000000; // SFGAO_FILESYSTEM; request one ordinary filesystem property only.
+                            var attributesHr = At<GetAttributesOf>(adapter, 9)(adapter, 1, childArray, ref attributes);
+                            if (attributesHr < 0) throw new Exception($"Wrapped GetAttributesOf failed: 0x{attributesHr:X8}.");
+                        }
+                        finally { Marshal.FreeCoTaskMem(childArray); }
+                    }
+                    finally { ILFree(child); }
+                }
+                finally { Marshal.Release(enumerator); }
+            }
+            stage = "parse-and-validate-items";
             foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
                 items.Add(name, ParseChild(adapter, name));
 
@@ -42,7 +76,9 @@ internal static class StaticShellFolderAdapterProbe
                 File.WriteAllText(Path.Combine(fixture, name), "value pending");
                 items.Add(name, ParseChild(adapter, name));
             }
+            stage = "validate-adapter-columns";
             var columnIndex = GetColumnCount(folder, shellDetailsSize);
+            stage = "custom-column-metadata";
             var property = StaticShellColumnContract.PropertyKey;
             var expectedKey = new ShellColumnManager.NativeKey { FormatId = property.FormatId, PropertyId = property.PropertyId };
             var keyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
@@ -63,6 +99,7 @@ internal static class StaticShellFolderAdapterProbe
                     ("two.bin", 2UL), ("ten.bin", 10UL), ("hundred.bin", 100UL), ("ten-copy.bin", 10UL)
                 })
                 {
+                    stage = $"custom-column-{name}-text";
                     Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
                     Check(At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)columnIndex, details));
                     if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
@@ -70,6 +107,7 @@ internal static class StaticShellFolderAdapterProbe
                     Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], (uint)columnIndex, details));
                     if (ReadDetailsText(details) != expectedValue.ToString()) throw new Exception($"Display text mismatch for {name}.");
 
+                    stage = $"custom-column-{name}-value";
                     Marshal.GetNativeVariantForObject(0UL, variant);
                     Check(At<GetDetailsEx>(adapter, 17)(adapter, items[name], keyPointer, variant));
                     var value = Marshal.GetObjectForNativeVariant(variant);
@@ -181,6 +219,7 @@ internal static class StaticShellFolderAdapterProbe
             }
 
             var compare = At<CompareIDs>(adapter, 7);
+            stage = "numeric-comparison-contracts";
             CheckCompare(compare(adapter, 1, items["two.bin"], items["ten.bin"]), -1, "standard Size 2 before 10");
             CheckCompare(compare(adapter, 1, items["ten.bin"], items["hundred.bin"]), -1, "standard Size 10 before 100");
             CheckCompare(compare(adapter, 1, items["ten.bin"], items["ten-copy.bin"]), 0, "standard Size equal values");
@@ -197,7 +236,7 @@ internal static class StaticShellFolderAdapterProbe
             CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["two.bin"]), -1, "pending before computed");
             CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["pending-a.bin"]), 1, "computed after pending");
             CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["pending-a.bin"]), 0, "pending self equality");
-            var nativeMissingOrder = At<CompareIDs>(folder, 7)(folder, 0, items["pending-a.bin"], items["pending-b.bin"]);
+            var nativeMissingOrder = At<CompareIDs>(adapter, 7)(adapter, 0, items["pending-a.bin"], items["pending-b.bin"]);
             Check(nativeMissingOrder);
             CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["pending-b.bin"]),
                 unchecked((short)(nativeMissingOrder & 0xffff)), "pending values retain native name order");
@@ -205,6 +244,27 @@ internal static class StaticShellFolderAdapterProbe
             Check(canonical);
             if (unchecked((short)(canonical & 0xffff)) == 0)
                 throw new Exception("Distinct items with equal custom numbers must retain native canonical identity.");
+
+            if (wrappedPidls)
+            {
+                stage = "wrapped-rename-round-trip";
+                var newName = Marshal.StringToCoTaskMemUni("pending-renamed-b.bin");
+                try
+                {
+                    var renameHr = At<SetNameOf>(adapter, 12)(adapter, 0, items["pending-b.bin"], newName, 0, out var renamed);
+                    if (renameHr < 0) throw new Exception($"Wrapped SetNameOf failed: 0x{renameHr:X8}.");
+                    try
+                    {
+                        var unwrap = Marshal.GetDelegateForFunctionPointer<TransformPidl>(NativeLibrary.GetExport(nativeLibrary, "UnwrapStaticShellChildPidl"));
+                        Check(unwrap(renamed, out var restoredName));
+                        ILFree(restoredName);
+                        if (!File.Exists(Path.Combine(fixture, "pending-renamed-b.bin")))
+                            throw new Exception("The wrapped Shell rename did not change the fixture file name.");
+                    }
+                    finally { if (renamed != 0) ILFree(renamed); }
+                }
+                finally { Marshal.FreeCoTaskMem(newName); }
+            }
 
             var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = property.FormatId, PropertyId = property.PropertyId });
@@ -218,7 +278,7 @@ internal static class StaticShellFolderAdapterProbe
             var documentByteCount = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
                 { FormatId = DocumentSummaryFormat, PropertyId = 4 });
 
-            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
+            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
@@ -228,7 +288,7 @@ internal static class StaticShellFolderAdapterProbe
         }
         catch (Exception ex)
         {
-            Console.WriteLine("native-static-shell-folder-contract failure: " + ex);
+            Console.WriteLine($"native-static-shell-folder-contract failure at {stage}: " + ex);
             return 1;
         }
         finally
@@ -768,6 +828,11 @@ internal static class StaticShellFolderAdapterProbe
         public int Group;
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetNameOf(nint self, nint owner, nint item, nint name, uint flags, out nint renamed);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TransformPidl(nint source, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifyViewFolder(nint view, nint adapter, out int matches);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCompareCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint value);
