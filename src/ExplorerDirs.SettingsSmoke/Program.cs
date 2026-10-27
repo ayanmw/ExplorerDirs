@@ -1274,6 +1274,27 @@ try
           "UNC path skips the extra directory watcher");
     store.Save(state);
     var loaded = store.Load() ?? throw new Exception("INI did not load");
+    var limitIni = Path.Combine(root, "session-tab-limit.ini");
+    var limitStore = new SessionStore(limitIni, Path.Combine(root, "missing-limit-legacy.json"));
+    limitStore.Save(state);
+    var beforeLimit = File.ReadAllBytes(limitIni);
+    var overLimitPanes = state.Panes.Select(pane => pane.ToList()).ToList();
+    overLimitPanes[0] = Enumerable.Range(0, 101).Select(_ => first).ToList();
+    var overLimit = state with { Panes = overLimitPanes };
+    Check(SessionStore.ParseComplete(SessionStore.Render(overLimit)) is null,
+        "101 tabs exceed the existing session reader's per-pane format limit");
+    var overLimitRejected = false;
+    try { limitStore.Save(overLimit); }
+    catch (InvalidDataException) { overLimitRejected = true; }
+    Check(overLimitRejected && File.ReadAllBytes(limitIni).SequenceEqual(beforeLimit),
+        "saving an unreadable 101-tab session is rejected without overwriting the complete profile");
+    limitStore.Save(state with { DefaultViewMode = 4 });
+    Check(limitStore.Load()?.DefaultViewMode == 4,
+        "rejected oversized session leaves the save baseline usable for a corrected state");
+    overLimitPanes[0] = overLimitPanes[0].Take(100).ToList();
+    limitStore.Save(state with { Panes = overLimitPanes });
+    Check(limitStore.Load()?.Panes[0].Count == 100 && limitStore.LoadWarning is null,
+        "the supported 100-tab boundary still saves and reloads without recovery");
     Check(store.LoadWarning is null, "complete INI needs no recovery");
     Check(loaded.Layout == 2 && loaded.DefaultViewMode == 3, "global settings");
     Check(loaded.Panes[0].Count == 2, "two tabs with same path");

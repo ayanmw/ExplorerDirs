@@ -66,6 +66,7 @@ internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<
 
 internal sealed class SessionStore
 {
+    internal const int MaximumTabsPerPane = 100;
     private readonly string _path;
     private readonly string _legacyPath;
     private bool _canOverwrite = true;
@@ -167,6 +168,10 @@ internal sealed class SessionStore
     {
         if (!_canOverwrite)
             throw new IOException($"无法备份损坏的配置文件，已停止覆盖：{_path}");
+        // Appending a valid QDR can exceed the reader's per-pane bound.
+        // Never replace a recoverable session with a file we cannot fully reload.
+        if (state.Panes.Any(pane => pane.Count > MaximumTabsPerPane))
+            throw new InvalidDataException($"单窗格超过 {MaximumTabsPerPane} 个标签，未覆盖会话配置；请减少标签后再保存。");
         var content = Render(state);
         if (!_olderVersionBackedUp && _lastSeenContent is not null &&
             ParseProfile(_lastSeenContent).Version is >= 1 and <= 9)
@@ -301,14 +306,14 @@ internal sealed class SessionStore
             var tabs = new List<TabSettings>();
             var paneName = $"Pane{paneIndex}";
             sections.TryGetValue(paneName, out var pane);
-            var count = ReadRequiredInt(pane, "TabCount", 0, 0, 100, ref complete);
+            var count = ReadRequiredInt(pane, "TabCount", 0, 0, MaximumTabsPerPane, ref complete);
             var indices = new SortedSet<int>(Enumerable.Range(0, count));
             var tabPrefix = paneName + ".Tab";
             foreach (var sectionName in sections.Keys.Where(name =>
                 name.StartsWith(tabPrefix, StringComparison.OrdinalIgnoreCase)))
             {
                 if (!int.TryParse(sectionName[tabPrefix.Length..], NumberStyles.None,
-                        CultureInfo.InvariantCulture, out var index) || index is < 0 or >= 100)
+                        CultureInfo.InvariantCulture, out var index) || index < 0 || index >= MaximumTabsPerPane)
                 {
                     complete = false;
                     continue;
