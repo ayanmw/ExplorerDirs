@@ -192,6 +192,10 @@ public partial class PaneControl : UserControl
         _quickFilterHistoryStore = quickFilterHistoryStore;
         _tabHoverActivationTimer.Tick += TabHoverActivationTimer_Tick;
         Unloaded += (_, _) => CancelTabHoverActivation();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible) CancelTabHoverActivation();
+        };
         QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
@@ -2008,7 +2012,10 @@ public partial class PaneControl : UserControl
     private void TabHoverActivationTimer_Tick(object? sender, EventArgs e)
     {
         _tabHoverActivationTimer.Stop();
-        if (_tabHoverActivationGate.TakeTarget() is TabItem target && Tabs.Items.Contains(target))
+        // Layout changes may hide a pane without unloading it. A queued drag
+        // timer must not select a hidden tab or activate that pane afterward.
+        if (_tabHoverActivationGate.TakeTarget() is TabItem target && IsLoaded && IsVisible &&
+            Tabs.Items.Contains(target))
             Tabs.SelectedItem = target;
     }
 

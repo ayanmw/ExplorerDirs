@@ -65,6 +65,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedReopenHistory(sourcePane);
                 CheckUnhostedFilterFailures(sourcePane);
                 CheckUnhostedFilterGroupSnapshot(sourcePane);
+                CheckUnhostedHiddenHover(sourcePane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -177,6 +178,31 @@ internal static class PaneTabTransferProbe
             try { (sourcePane as IDisposable)?.Dispose(); } catch { }
             try { (targetPane as IDisposable)?.Dispose(); } catch { }
             try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    private static void CheckUnhostedHiddenHover(UIElement pane)
+    {
+        var type = pane.GetType();
+        var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var original = tabs.SelectedItem;
+        var target = tabs.Items.OfType<TabItem>().First(tab => !ReferenceEquals(tab, original));
+        var gate = type.GetField("_tabHoverActivationGate", InstanceMembers)!.GetValue(pane)!;
+        var previousVisibility = pane.Visibility;
+        pane.Visibility = Visibility.Collapsed;
+        try
+        {
+            gate.GetType().GetMethod("Begin", InstanceMembers)!.Invoke(gate, [target, false, true, 1000]);
+            type.GetMethod("TabHoverActivationTimer_Tick", InstanceMembers)!.Invoke(pane, [null, EventArgs.Empty]);
+            Ensure(ReferenceEquals(tabs.SelectedItem, original),
+                "a retired hover timer cannot switch tabs in a hidden pane");
+            Ensure(!(bool)gate.GetType().GetProperty("HasPendingTarget", InstanceMembers)!.GetValue(gate)!,
+                "a hidden pane consumes its obsolete hover target");
+        }
+        finally
+        {
+            pane.Visibility = previousVisibility;
+            tabs.SelectedItem = original;
         }
     }
 
