@@ -1,3 +1,5 @@
+> **标签切换延迟焦点（2026-10-27）：**选中标签后的 Loaded 回调现在复核窗口当前的文件区焦点意图，避免仅凭标签仍选中/可见就把焦点从其它窗格、地址编辑或标签标题抢回。App/HostProbe Release build、既有焦点遍历与未显示地址编辑检查通过；真实输入竞争尚未复现，鼠标/Ctrl+Tab/标题方向键及跨窗格焦点仍待可见验收。
+
 > **下载系统目录定位（2026-10-27）：**地址位置菜单使用 `shell:Downloads`，不再拼接默认用户目录。只读解析结果与 [SHGetKnownFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath) 的当前下载目录相同，现有祖先/驱动器菜单 smoke 通过；未修改 Windows 重定向设置，实际迁移及菜单导航待可见验收。
 
 > **现代地址栏点击编辑（2026-10-27）：**空白区域和分隔符左键点击现在进入完整路径编辑并全选；路径按钮继续导航，右键不触发编辑。四个未显示的实际 PaneControl 路由事件回归先复现旧实现失败，修正后通过；没有 HWND、Shell view 或桌面输入。物理鼠标命中与键盘焦点待可见验收，尚未发布。

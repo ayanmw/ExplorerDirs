@@ -2202,7 +2202,9 @@ public partial class PaneControl : UserControl
             if (Current != state) return;
             state.Tab.BringIntoView();
             UpdateTabScrollButtons();
-            if (IsLoaded && IsVisible) FocusCurrentView();
+            // A later click or Tab/arrow move may have chosen another pane,
+            // address box or tab header while this callback was queued.
+            if (IsLoaded && IsVisible && MayRestoreFileFocus?.Invoke() == true) FocusCurrentView();
         }));
     }
 
