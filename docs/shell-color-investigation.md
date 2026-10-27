@@ -194,4 +194,12 @@ ListView 的直接通知父级为 `SHELLDLL_DefView`，而列表子窗口创建�
 
 运行现有 `ExplorerDirs.NativeProbe --color-capability`，在不可见父窗口中导航到仅含隔离文件的目录，并在菜单查询及再次导航后枚举视图子窗口。三阶段控件树一致：`ExplorerBrowserControl`、`SHELLDLL_DefView`、`DirectUIHWND`、两个 `CtrlNotifySink` 和两个 `ScrollBar`；没有 `SysListView32` 或 `SysHeader32`。探针报告 `parent-visible=False`、`foreground-unchanged=True`，未创建产品窗口，也未读取/修改用户文件。
 
-因此，针对当前这套 ExplorerBrowser/Windows 视图，依赖标准 ListView `NM_CUSTOMDRAW` 或 `SysHeader32` 的逐项颜色接点没有对应控件；探针也无法读取 ListView 专属颜色属性。此结果支持暂不向现有 `NativeShellTheme` 添加 ListView 着色代码，并把 Q-Dir 规则着色留在隔离 `IShellView` 架构评审中。控件树快照没有直接记录所有 `WM_NOTIFY`，也不能证明 DirectUI 不存在任何私有/未文档化绘制扩展；它只否定了“当前视图含标准 ListView，可直接挂 NM_CUSTOMDRAW”的假设。
+因此，针对当前这套 ExplorerBrowser/Windows 视图，依赖标准 ListView `NM_CUSTOMDRAW` 或 `SysHeader32` 的逐项颜色接点没有对应控件；探针也无法读取 ListView 专属颜色属性。此结果支持暂不向现有 `NativeShellTheme` 添加 ListView 着色代码，并把 Q-Dir 规则着色留在隔离 `IShellView` 架构评审中。后续 Private Desktop 通知普查见下节；没有发现 `WM_NOTIFY` 不等于排除 DirectUI 的私有/未文档化绘制扩展。
+
+### 2026-10-28 Private Desktop ExplorerBrowser 通知普查
+
+新增仅用于 NativeProbe 的观察器，在不切换到用户桌面的 Private Desktop 上创建可见 ExplorerBrowser，并对子视图窗口、父链和后代安装额外的只读 Win32 子类。探针依次运行生产 `ViewStyleProbe` 的八种查看预设、排序/分组组合、选择及整树强制重绘，记录所有到达这些窗口的 `WM_NOTIFY` 接收类、发送窗口类和通知码；不吞消息、不改变绘制参数。
+
+结果仍为 `DirectUIHWND`、`CtrlNotifySink` 和 `ScrollBar`，没有 `SysListView32`；全部矩阵后记录到的 `WM_NOTIFY` 为 0，`NM_CUSTOMDRAW` 为 0。查看方式、列、排序/分组和选中项状态断言均通过，Private Desktop 父窗可见、用户前台 HWND 未变化，临时夹具删除成功。由此可在本机当前 Windows/ExplorerBrowser 配置下否定“现有子类链收到标准逐项 custom draw 通知”这条集成假设；不能据此证明其他 Windows 版本或 DirectUI 私有绘制扩展不存在，也未实现产品颜色规则。
+
+探针的 `IExplorerBrowser::Destroy` 与 COM 释放均正常返回，但 `DestroyWindow` 同步销毁包含已退休 Shell 子视图的父容器曾卡住，等待链落在 COM activation（系统 `svchost` / `ChsIME`）。因此此隔离进程将父 HWND 回收交给进程退出；该清理限制记录为探针边界，不改动产品宿主关闭路径。

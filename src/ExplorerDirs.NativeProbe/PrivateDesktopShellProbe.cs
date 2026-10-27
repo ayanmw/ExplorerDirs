@@ -25,6 +25,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunColor() => Run("color", () => ShellViewColorSpike.Run(visible: true,
         deferParentCleanup: true));
 
+    internal static int RunExplorerBrowserColorNotifications() =>
+        Run("explorerbrowser-color-notifications", ExplorerBrowserNotifyProbe.Run, TimeSpan.FromSeconds(25));
+
     internal static int RunMenuActivation() => Run("menu-activation", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, probeMenuActivation: true));
 
