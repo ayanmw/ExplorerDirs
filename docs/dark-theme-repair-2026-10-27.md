@@ -110,4 +110,4 @@
 
 ### Border-to-fill gutter clarification
 The user clarified that the unwanted transparent gap is inside each menu boundary, not the parent/submenu placement. The candidate suppresses the DWM outline at the original HWND bounds and draws a one-pixel FrameRect inside the existing visible region after native paint. No window size, position, item geometry or submenu offset changes. Hidden native fixtures pass; real popup visual acceptance remains pending.
-
+Candidate 20261027-103936-700-af19fe (code 4fcfd7e) was launched through Computer Use. Captured dark main and child native menus show a thin boundary touching the menu fill. User acceptance and light-mode visual verification remain pending; no parent/submenu position override is installed.
