@@ -1,6 +1,6 @@
 # Explorer Dirs
 
-最新主题修正版：[temp.76](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.76/app/ExplorerDirs.App.exe)。已完成本轮深浅主题、目录树与原生右键菜单修复；最新隔离候选的菜单效果获用户确认。文件区继续使用原生右键菜单，不恢复自定义前置命令。见[temp.76 说明](docs/releases/preview-0.6.0-temp.76.md)。
+最新主题修正版：[temp.76](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.76/app/ExplorerDirs.App.exe)。本批已验收并发布：右键文件区不闪白、原生菜单同步且单框贴合、窗格切换不闪、滚动条端部无白块、复制标签与冷启动无整片白底。文件区保留原生右键菜单。见[temp.76 说明](docs/releases/preview-0.6.0-temp.76.md)。
 
 2026-10-27 已发布 `preview-0.6.0-temp.75`：[启动预览程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.75/app/ExplorerDirs.App.exe)。使用本版独立 profile，从 temp.74 复制会话、固定标签和紧凑布局配置。完整进度及近期/远期安排见[整体报告](docs/progress-2026-10-27.md)，版本差异见[temp.75 说明](docs/releases/preview-0.6.0-temp.75.md)。本包构建、配置/打包检查及哈希核对通过，未启动 GUI。
 

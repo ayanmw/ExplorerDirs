@@ -105,3 +105,5 @@
 当前 124603/4c7eec 无诊断日志候选已启动，真实冷启动效果待用户反馈。两次未挂接窗格回归中的几何/资源引用断言通过，但最终 foreground-unchanged 断言失败，日志 early-background-pane.log 和 early-background-pane-repeat.log 已保留；未判定是用户操作还是程序原因，不据此声称整轮通过，也没有降低断言。正式 temp.76 尚未覆盖滚动条和本轮首次底色优化。
 
 最终确认：用户明确反馈 124603/4c7eec 冷启动已无白底，关闭此项可见验收待办；此前滚动条端部及复制标签也已确认通过。按同批次规则继续覆盖 temp.76。
+
+发布完成：源码 4dcafc2，temp.76 已覆盖本轮滚动条和首次底色修复；旧包完整备份 releases/.history/preview-0.6.0-temp.76-before-startup-fix-20261027-125232。5个 active INI 原位保留，旧包与发布文件哈希通过；确切 release EXE 通过 Computer Use 启动并观察四窗格会话恢复。
