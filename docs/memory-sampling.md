@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-28：temp.76 同一进程被动复采
+
+- 北京时间 01:47:34–01:48:34（UTC 2026-10-27 17:47:34–17:48:34），对 PID `58888` 采样 13 点、间隔约 5 秒。进程启动时间、EXE/DLL SHA-256 与前次 temp.76 记录一致；本次仍是 `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`，没有重启、触碰窗口、强制 GC 或裁剪工作集。
+- Working Set 全程 `244,477,952` B（233.25 MiB），Private Bytes 全程 `123,269,120` B（117.55 MiB），句柄 `1120`、线程 `34`、GDI `191` 全程稳定；USER 对象范围 `114–115`。CPU 累计增加 `0.016` 秒。
+- 这再次支持该约一分钟空闲区间没有明显进程级增长；此前样本负载同样未固定，因此不能推出实际浏览操作期间稳定、排除长期增长，或将占用归因到托管堆/Shell/WPF/扩展。该采样没有采集运行时计数器或原生分配栈。
+- 原始 JSON 位于忽略目录 [`ExplorerDirs-memory-58888-20261027-1747Z.json`](../src/.state/memory-samples/ExplorerDirs-memory-58888-20261027-1747Z.json)，SHA-256 `7BC0CD32B66674D1F0095AC46C12EE73872C6EC1CF722BAA7C680FBFEC5B1D1F`。
+
 ## 2026-10-28：temp.76 空闲短时复采
 
 北京时间 00:24:27–00:25:22，对仍在运行的同一进程 PID 58888 采样 12 点、每 5 秒一次。启动时间仍为 UTC 2026-10-27 13:43:03；EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`，DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`，ProductVersion `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`。未重启、强制 GC、裁剪工作集、操作窗口或触碰用户数据。
