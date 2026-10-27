@@ -50,3 +50,9 @@
 用户授权同一批次优化经重复验证后覆盖同一预览版本；本次继续更新 temp.76，完整保留配置及旧包。
 
 发布完成：temp.76 构建来源 2b9bcc6；系统主题及原生主题专项各连续两轮通过，完整 SettingsSmoke 通过。旧包完整备份至 releases/.history/preview-0.6.0-temp.76-before-redraw-opt-20261027-111749；替换前校验 active INI，保持原 profile 原位，发布文件与 staging 哈希一致。通过 Computer Use 启动确切 release EXE，截图观察四窗格、深色原生主/子菜单及贴合边界，随后归还桌面；未做完整浅色/所有交互的本轮 GUI 复测，不宣称全部闪烁消失。
+
+## 右键打开时文件区与菜单闪白
+
+用户在已发布 temp.76 中观察右键时文件区及菜单闪白。源码确认 BeginMenu 每次都刷新进程主题策略/菜单缓存并向 Shell owner 发送 WM_THEMECHANGED。隐藏 owner 子类消息计数回归在旧逻辑下失败，移除逐次无条件刷新后连续 10 次菜单开关没有 owner 主题失效消息；显式 SetProcessTheme + Apply 仍能发送原生主题变化。将 RefreshImmersiveColorPolicyState 移至真正应用进程主题的入口，保留主题切换时缓存刷新。
+
+菜单返回钩子原先只在首轮 WM_PAINT/WM_NCPAINT/WM_WINDOWPOSCHANGED 等之后尝试主题；现增加 WM_CREATE 完成阶段，为新菜单窗口在首次显示/绘制前应用主题。原有边框、裁剪及子菜单补偿保持。该时序调整需要真实新建菜单与深浅往返验收，静态截图不能证明短暂白帧已消失。

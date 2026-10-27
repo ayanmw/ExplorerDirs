@@ -31,6 +31,7 @@ internal static class NativeThemeColorProbe
         }
         finally { Marshal.Release(unsupported); }
         CheckTooltipNotifications(type, members);
+        CheckMenuOpeningDoesNotRethemeOwner(type, members);
         CheckMenuHookLifetime(type, members);
         CheckMenuClip(type, members);
         CheckTreeColors(type, members);
@@ -159,6 +160,38 @@ internal static class NativeThemeColorProbe
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
 
+    private static void CheckMenuOpeningDoesNotRethemeOwner(Type type, BindingFlags members)
+    {
+        if (System.Windows.SystemParameters.HighContrast) return;
+        var owner = CreateWindowEx(0, "STATIC", "", 0x80000000, 0, 0, 100, 100, 0, 0, 0, 0);
+        var themeChanges = 0;
+        ThemeSubclass callback = (window, message, wp, lp, id, data) =>
+        {
+            if (message == 0x031A) themeChanges++;
+            return ThemeDefSubclassProc(window, message, wp, lp);
+        };
+        Check(owner != 0 && ThemeSetWindowSubclass(owner, callback, 71, 0), "hidden owner observes actual WM_THEMECHANGED messages");
+        var begin = type.GetMethod("BeginMenu", members)!;
+        var end = type.GetMethod("EndMenu", members)!;
+        try
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                begin.Invoke(null, [owner]);
+                end.Invoke(null, null);
+            }
+            Check(themeChanges == 0, "opening 10 menus does not invalidate the file-view owner's theme");
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [false]);
+            type.GetMethod("Apply", members)!.Invoke(null, [owner]);
+            Check(themeChanges > 0, "an explicit theme application still sends its native theme change");
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [true]);
+        }
+        finally { end.Invoke(null, null); ThemeRemoveWindowSubclass(owner, callback, 71); DestroyWindow(owner); GC.KeepAlive(callback); }
+    }
+    private delegate nint ThemeSubclass(nint window, uint message, nuint wp, nint lp, nuint id, nint data);
+    [DllImport("comctl32.dll", EntryPoint = "SetWindowSubclass")] private static extern bool ThemeSetWindowSubclass(nint window, ThemeSubclass callback, nuint id, nint data);
+    [DllImport("comctl32.dll", EntryPoint = "RemoveWindowSubclass")] private static extern bool ThemeRemoveWindowSubclass(nint window, ThemeSubclass callback, nuint id);
+    [DllImport("comctl32.dll", EntryPoint = "DefSubclassProc")] private static extern nint ThemeDefSubclassProc(nint window, uint message, nuint wp, nint lp);
     private static void CheckMenuHookLifetime(Type type, BindingFlags members)
     {
         if (System.Windows.SystemParameters.HighContrast) return;

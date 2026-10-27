@@ -24,10 +24,9 @@ internal static class NativeShellTheme
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041) || System.Windows.SystemParameters.HighContrast) return;
         _menuDepth++;
         if (_menuDepth > 1) return;
-        try { RefreshImmersiveColorPolicyState(); SetPreferredAppMode(_dark ? 2 : 3); FlushMenuThemes(); }
-        catch (EntryPointNotFoundException) { }
-        catch (DllNotFoundException) { }
-        if (owner != 0) SendMessage(owner, 0x031A, 0, 0); // Invalidate this Shell owner's cached menu theme.
+        // Opening a menu is not a theme change. Re-sending WM_THEMECHANGED to
+        // its Shell owner here invalidated the file view on every right click.
+        // Process cache/policy updates belong to SetProcessTheme instead.
         if (_menuHook == 0)
             _menuHook = SetWindowsHookEx(12, MenuHookProcedure, 0, GetCurrentThreadId());
     }
@@ -54,13 +53,15 @@ internal static class NativeShellTheme
             finally { _handlingMenuHook = false; }
             return result;
         }
-        if (call.Message is not (0x000F or 0x0085 or 0x0047)) return result;
+        if (call.Message is not (0x0001 or 0x000F or 0x0085 or 0x0047)) return result;
         var name = new StringBuilder(32);
         GetClassName(call.Window, name, name.Capacity);
         if (name.ToString() != "#32768") return result;
         _handlingMenuHook = true;
         try
         {
+            // WM_CREATE completes before the popup is shown or first painted.
+            // Keep paint handling for border/region repair, not first-time theming.
             ApplyMenuWindow(call.Window);
             ClipMenuFrame(call.Window);
         }
@@ -81,7 +82,7 @@ internal static class NativeShellTheme
     {
         _dark = dark;
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) return;
-        try { SetPreferredAppMode(dark ? 2 : 3); FlushMenuThemes(); ApplyMenuFrames(); }
+        try { RefreshImmersiveColorPolicyState(); SetPreferredAppMode(dark ? 2 : 3); FlushMenuThemes(); ApplyMenuFrames(); }
         catch (EntryPointNotFoundException) { }
         catch (DllNotFoundException) { }
     }
