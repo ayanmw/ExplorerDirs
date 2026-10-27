@@ -2,6 +2,10 @@
 
 ## 最新临时预览包（2026-10-27）
 
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.75\app\ExplorerDirs.App.exe`，独立 profile 从 temp.74 复制，三份 INI 哈希核对一致，源配置未改变。累计包含窗口位置记忆、工具栏精简、跨窗格/多行/悬停标签、地址编辑、状态栏/扫描和原生交互/配置保护修复。产品版本 `0.6.0-preview.temp.75+652d35e50b6bddf0cb2f60f78ee8ee9b393c4a07`；完整 SettingsSmoke、发布隔离检查、实际 publish 和 EXE/DLL 哈希核对通过。未启动 GUI，IShellView 原型未接入。详情见[temp.75 说明](../docs/releases/preview-0.6.0-temp.75.md)和[整体进度](../docs/progress-2026-10-27.md)。
+
+## 此前临时预览包（2026-10-27）
+
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.74\app\ExplorerDirs.App.exe`，使用独立 profile。新增地址历史入口和 Q-Dir 路径输入规则、标签栏显示模式及对应 Tab 顺序、每窗格 Shell 状态提示，以及 `.qdr` 颜色规则模式导入预览。产品版本 `0.6.0-preview.temp.74+e74ad26a950edaf291730abb30dc3a00978dc769`，EXE SHA-256 `37BC65EE5234C5F1754A56BBE85FB3D104AB8C9E4AF6C4033B04274208A98701`，DLL SHA-256 `8E696F29B81547A1DE98AC21101B6CB1767A477FACB1F39369AAAFA1433837D0`，与包内清单一致。完整 Release `SettingsSmoke` 和 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；实际菜单、焦点、Shell 状态提示、文件区颜色及 Q-Dir 互操作仍待可见验收。详见[temp.74 说明](../docs/releases/preview-0.6.0-temp.74.md)及包内 `RELEASE-NOTES.md`。
 
 ## 此前临时预览包（2026-10-26）
