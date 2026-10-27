@@ -241,6 +241,34 @@ internal static class QdrImportSmoke
         Require(QdrImporter.Load(qdrPath).TabCount == 1, "UTF16 QDR import of an existing directory");
         File.WriteAllText(qdrPath, loadable, new UTF8Encoding(true));
         Require(QdrImporter.Load(qdrPath).TabCount == 1, "UTF8 BOM QDR import of an existing directory");
+        var literalVariable = "ExplorerDirsQdrLiteral_" + Guid.NewGuid().ToString("N");
+        var literalFolder = Path.Combine(root, "%" + literalVariable + "%");
+        var replacementFolder = Path.Combine(root, "expanded-target");
+        Directory.CreateDirectory(literalFolder);
+        Directory.CreateDirectory(replacementFolder);
+        Environment.SetEnvironmentVariable(literalVariable, "expanded-target");
+        try
+        {
+            var expandedResult = QdrImporter.Parse($"Q-Dir Version=12.79\nDir1={literalFolder}\n",
+                QdrImporter.ResolveLocation);
+            Require(expandedResult.Panes[0][0].Path.Equals(replacementFolder, StringComparison.OrdinalIgnoreCase),
+                "plain QDR text paths intentionally expand environment variables");
+            nint literalPidl = 0;
+            try
+            {
+                // Encoded PIDLs carry a filesystem identity; percent signs here are not variable syntax.
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(literalFolder, 0, out literalPidl, 0, out _));
+                var literalBytes = new byte[ILGetSize(literalPidl)];
+                Marshal.Copy(literalPidl, literalBytes, 0, literalBytes.Length);
+                var literalEncoded = string.Concat(literalBytes.Select(value => "%" + value.ToString("X2")));
+                var literalResult = QdrImporter.Parse($"Q-Dir Version=12.79\nFolder1={literalEncoded}\n",
+                    QdrImporter.ResolveLocation);
+                Require(literalResult.Panes[0][0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase),
+                    "QDR PIDLs preserve percent-named folder identity despite a matching environment variable");
+            }
+            finally { if (literalPidl != 0) Marshal.FreeCoTaskMem(literalPidl); }
+        }
+        finally { Environment.SetEnvironmentVariable(literalVariable, null); }
         var pidl = IntPtr.Zero;
         try
         {
