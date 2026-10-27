@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：关闭原型宿主拒绝重新创建状态流
+
+- StreamViewHost 原没有退休状态，Dispose 后 GetViewStateStream 仍会创建流，写请求还能重新挂入 `_savedStream`。现在在清理前标记关闭，重复 Dispose 短路，关闭后的 read/write/readwrite 统一 E_ABORT、空指针，不增加成功请求计数。
+- 实际 CCW IShellBrowser slot 12 回归先复现关闭后 read 模式仍成功，修正后覆盖三种模式与计数，完整状态流 smoke（含跨进程）和颜色策略 smoke 通过，NativeProbe Release build 零警告错误。未创建真实 Shell view；不会强行撤销调用方已持有的 IStream，原生 view 释放顺序仍需单独验收。产品/release 未改。
+
 ## 2026-10-27：原生状态快照保留 Shell 写入位置
 
 - 原型 `ReadSavedBytes` 对 Shell 仍持有的同一 IStream Seek(0)/Read，未恢复位置，快照后继续写入会从末尾追加。现在记录原 64 位 seek position，在 finally 恢复；大小/完整性检查仍保留。当前磁盘状态按 session GUID 独立保存且单份限制 64 KiB，没有在此处发现按目录无界缓存；这不代表原型总体内存已评估完毕。

@@ -261,6 +261,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     internal int Reads;
     internal int Writes;
     private nint _savedStream;
+    private bool _disposed;
     internal byte[] ReadSavedBytes()
     {
         if (_savedStream == 0) return [];
@@ -292,6 +293,9 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public void Dispose()
     {
+        if (_disposed) return;
+        // Mark retirement before COM/menu cleanup can pump callbacks into us.
+        _disposed = true;
         try
         {
             RevokeDropTarget();
@@ -492,6 +496,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     public int GetViewStateStream(uint mode, out nint stream)
     {
         stream = 0;
+        if (_disposed) return unchecked((int)0x80004004);
         var access = mode & 3;
         if (access == 3) return unchecked((int)0x80070057);
         var read = access is 0 or 2;

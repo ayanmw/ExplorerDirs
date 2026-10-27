@@ -1153,3 +1153,8 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 `ReadSavedBytes` 原直接移动保存的 SHCreateMemStream 游标到 0 并读取，留下末尾位置。新增真实 IStream 回归：写入 1/2/3，将游标移到 1，读取快照，再写 9；旧行为得到追加内容，修正后为 1/9/3。现在以 64 位位置记录游标，并在 finally 恢复，避免读取快照干扰 Shell 后续写入。
 
 NativeProbe Release build 零警告错误，完整状态流 smoke（包括 session 隔离、读写更新、跨进程重开）及颜色策略 smoke 通过；没有创建 Shell view。当前状态存储是按 session GUID 保存的单流，保存与加载限制 64 KiB；没有在此处新增缓存或改变产品内存策略。真实 Shell SaveViewState/导航交接与 WPF 产品集成仍需单独验收。
+### 2026-10-27 宿主关闭后拒绝新状态流
+
+StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟到 GetViewStateStream 仍可创建 native stream，write 模式还会重新持有 `_savedStream`。现清理前标记关闭，重复 Dispose 短路，新的 read/write/readwrite 请求均返回 E_ABORT 与空输出指针，计数不增加。
+
+真实 CCW 的 IShellBrowser slot 12 回归先观察关闭后 read 请求仍成功，修正后覆盖三种模式；完整状态流（含跨进程）与颜色策略 smoke、NativeProbe Release build 通过，构建零警告错误。本次无 Shell view，不据此确认原生 SaveViewState/DestroyViewWindow 的清理顺序；调用方已持有的 IStream 仍按原有 COM 引用计数有效，不被强制撤销。产品 ExplorerBrowser 与 release 未改。

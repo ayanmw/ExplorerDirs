@@ -69,6 +69,7 @@ internal static class ShellViewStateStreamSmoke
 
         VerifyReadWriteMode();
         VerifySnapshotPreservesWriterPosition();
+        VerifyClosedHostRejectsStreams();
         VerifyPersistedSessions();
         VerifyCrossProcessPersistence();
 
@@ -93,6 +94,28 @@ internal static class ShellViewStateStreamSmoke
         var actual = ReadBytes(host, bytes.Length);
         Check(actual.SequenceEqual(bytes), "a separate process reads the exact persisted view-state stream");
         return 0;
+    }
+
+    private static void VerifyClosedHostRejectsStreams()
+    {
+        using var host = new StreamViewHost(0, [1, 2]);
+        host.Dispose();
+        var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        try
+        {
+            var getStream = GetBrowserMethod<GetViewStateStreamCallback>(browser, 12);
+            foreach (var mode in new uint[] { 0, 1, 2 })
+            {
+                var hr = getStream(browser, mode, out var pointer);
+                if (pointer != 0) Marshal.Release(pointer);
+                Check(hr == unchecked((int)0x80004004) && pointer == 0,
+                    $"a disposed COM host rejects mode {mode} without creating a new state stream");
+            }
+            Check(host.Reads == 0 && host.Writes == 0,
+                "retired stream requests do not count as accepted reads or writes");
+            host.Dispose();
+        }
+        finally { Marshal.Release(browser); }
     }
 
     private static void VerifySnapshotPreservesWriterPosition()
