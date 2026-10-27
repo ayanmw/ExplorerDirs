@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：固定当前源码的隔离验收候选
+
+- 修正 GuiSmoke 上级目录检查仍等待旧夹具 `files` 的错误，改为从实际初始目录推导；更新 Modern F4、原生导航键、窗口位置及标签交接的待验收清单。准备清单增加源码提交、dirty 状态与唯一构建标识，并检查 DLL ProductVersion，避免沿用旧默认 temp.3 文字。
+- PrepareOnly 成功生成 `20261027-045305-773-a09a78` 候选，独立核对 EXE/DLL 哈希、构建身份、四窗格路径/样本、10,000 文件夹具与上级定位条目；候选未启动、无运行测量/焦点日志。产品源码为 `62274bc`，准备时仅脚本有未提交差异，清单据实保留 dirty=true。具体产物身份、八阶段验收顺序及未运行结果见[验收准备记录](gui-acceptance-2026-10-27-prepared.md)。未创建 release，P0 与真实 GUI 门槛不变。
+
 ## 2026-10-27：Home/End 与翻页键保留原生输入路径
 
 - 原兜底只覆盖四方向，Home/End/PageUp/PageDown 被 Shell 拒绝后仍可能进入 WPF 焦点导航。共享导航键判定扩为 VK_PRIOR～VK_DOWN 八键：文件内容仍只在 TranslateAccelerator 返回 S_FALSE 时补发一次；重命名编辑框直接接收同组 keydown，保留原消息及 Ctrl/Shift 状态。不改 Tab/Enter/Escape，也不拦截 Alt 系统键。

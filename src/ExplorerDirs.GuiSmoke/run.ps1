@@ -19,8 +19,13 @@ if (-not $PrepareOnly -and -not $AllowInteractiveDesktopControl) {
 if (-not $IsWindows) { throw 'This GUI smoke test requires Windows.' }
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$sourceCommit = & git -C $projectRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot record the acceptance source revision.' }
+$sourceChanges = & git -C $projectRoot status --porcelain
+if ($LASTEXITCODE -ne 0) { throw 'Cannot record acceptance source cleanliness.' }
 $stateRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src\.state\gui-smoke'))
 $runName = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6)
+$buildIdentity = "gui-acceptance.$runName+$($sourceCommit.Trim())"
 $runRoot = [IO.Path]::GetFullPath((Join-Path $stateRoot $runName))
 if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
     [StringComparison]::OrdinalIgnoreCase)) {
@@ -29,6 +34,7 @@ if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
 $appDirectory = Join-Path $runRoot 'app'
 $acceptanceDirectory = Join-Path $runRoot 'acceptance-files'
 $testDirectory = Join-Path $acceptanceDirectory 'pane-1'
+$parentDirectoryItem = [IO.Path]::GetFileName($testDirectory)
 $recursiveSizeDirectory = Join-Path $acceptanceDirectory 'recursive-size-progress'
 $focusTracePath = Join-Path $runRoot 'focus-trace.log'
 New-Item -ItemType Directory -Path $appDirectory, $testDirectory, $recursiveSizeDirectory -Force | Out-Null
@@ -75,10 +81,15 @@ $qdrColorBaseline = Join-Path $runRoot 'qdr-color-baseline.qdr'
 ), [Text.UTF8Encoding]::new($false))
 
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
-    --configuration Release --self-contained false --output $appDirectory
+    --configuration Release --self-contained false --output $appDirectory `
+    "-p:InformationalVersion=$buildIdentity" -p:IncludeSourceRevisionInInformationalVersion=false
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 $exe = Join-Path $appDirectory 'ExplorerDirs.App.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" }
+$assemblyPath = Join-Path $appDirectory 'ExplorerDirs.App.dll'
+if ((Get-Item -LiteralPath $assemblyPath).VersionInfo.ProductVersion -ne $buildIdentity) {
+    throw 'Acceptance assembly does not contain its unique build identity.'
+}
 
 # A Release app copied outside releases/ uses the profile beside its executable.
 $profileDirectory = Join-Path $appDirectory 'profile'
@@ -122,9 +133,13 @@ $manifest = [ordered]@{
     SchemaVersion = 1
     Status = 'prepared-not-run'
     PreparedAtUtc = [DateTime]::UtcNow.ToString('o')
+    SourceCommit = $sourceCommit.Trim()
+    SourceWorkingTreeDirty = [bool]$sourceChanges
+    BuildIdentity = $buildIdentity
     Executable = 'app/ExplorerDirs.App.exe'
     Profile = 'app/profile/ExplorerDirs.ini'
     ManualFixtures = 'acceptance-files'
+    ParentDirectoryItem = $parentDirectoryItem
     RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
     QdrColorBaseline = 'qdr-color-baseline.qdr'
     QdrProgramFixture = 'qdir-program-items.ini'
@@ -132,17 +147,20 @@ $manifest = [ordered]@{
     InitialLayout = 4
     VisiblePaneCount = 4
     ExecutableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-    AssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $appDirectory 'ExplorerDirs.App.dll') -Algorithm SHA256).Hash
+    AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     FocusTrace = if ($CaptureFocusTrace) { 'focus-trace.log' } else { $null }
     PendingAcceptance = @(
         'In each pane, paste a file and immediately press Up/Down without clicking first; then use Shift+Delete, confirm, and immediately press Up/Down. The same pane must move its file focus/selection after both operations. If either fails, Alt+Tab away and back, then repeat the arrow key and record whether window activation restores keyboard navigation. When FocusTrace is set, retain focus-trace.log and compare the key, IShellView accelerator result, HWND focus, Shell item focus, and focus-restore-poll content-focused/attempt values around the operation',
-        'In every pane, F2 then Left/Up/Right/Down keeps the native rename editor focused; Shift/Ctrl+Left/Right edits text; Escape cancels and Enter commits without changing another pane selection',
+        'In every pane and view style, F2 then Left/Up/Right/Down/Home/End/PageUp/PageDown keeps the native rename editor focused; Shift/Ctrl+Left/Right/Home/End edits text; Escape cancels and Enter commits without changing another pane selection. In file content verify Home/End/PageUp/PageDown and their Ctrl/Shift variants keep selection and physical focus in that pane',
         'With the file view focused, F10 opens the File menu; Escape closes it without running a command; F10 can open it again',
         'Select one item, right-click unused viewport below the last row, then separately right-click empty trailing space inside a visible row. Compare the Shell native menu and custom command target for both positions; do not assume row-tail whitespace is background. Retain focus-trace.log coordinates/control types and record which Shell menu appears at each point',
         'Ctrl-drag cross-pane-copy-source.txt from pane-1 to pane-2; confirm source and destination remain and destination content matches',
         'Drag cross-pane-move-source.txt from pane-1 to pane-2; confirm the source disappears and destination content matches',
         'Tab and Shift+Tab traverse all visible panes in reverse order',
-        'Address-history button and F4 show the same current-tab paths; selecting one navigates only that tab, Tab/Shift+Tab include the button, and address-edit right-click retains its text context menu',
+        'The address-history button shows current-tab recent paths and selecting one navigates only that tab; Tab/Shift+Tab include the button and address-edit right-click retains its text context menu. In Modern style F4 opens the directory tree and a second F4 edits the full path; clicking breadcrumb blank space also edits, while clicking an ancestor navigates. Classic style keeps directly editable paths',
+        'Visit two fixture folders, close and reopen the tab, and verify its address dropdown keeps those entries. Duplicate it, visit another folder in the copy, and verify the original dropdown is unchanged; this does not assert restoration of the disposed Shell Travel Log',
+        'Immediately after directory navigation, duplicate the tab, create a current-folder tab, close/reopen it, open its address editor and close a pending search; verify every operation uses the confirmed directory. Save/restart and check both the path and pinned metadata, without replacing a newer address/search draft',
+        'Move and resize each window on a secondary monitor, including a negative-coordinate monitor where available, restart the isolated app, and verify normal bounds and maximized state. Minimize a maximized window and relaunch the same isolated executable; verify it restores maximized. Ctrl+N and a new QDR workspace must appear on the source monitor; also cover F11 and mixed DPI without altering the daily-use profile',
         'Per-tab history survives tab and layout switches',
         'Ctrl+wheel view changes and independent per-tab view persistence',
         'Open Tools > Options > Size display format; switch between Auto and fixed units, change decimal places and thousands separator, and verify selected-size, F9 total, and disk-capacity text refresh consistently. Toggle F9 file/subdirectory counts off and on; verify the summary changes while unreadable-item warnings remain. Restart the isolated app and confirm the saved unit/precision/count preferences load from SizeDisplay.ini',
@@ -321,7 +339,7 @@ try {
     Invoke-TestButton $app $mainWindow 'PaneGoParent'
     Wait-Until {
         Assert-TestForeground $app $mainWindow
-        $null -ne (Find-ShellItem $mainWindow 'files')
+        $null -ne (Find-ShellItem $mainWindow $parentDirectoryItem)
     } 'parent directory item' 20000
     $measurements.DirectoryUpToItemMs = [Math]::Round($directoryWatch.Elapsed.TotalMilliseconds, 1)
     $directoryWatch.Restart()
