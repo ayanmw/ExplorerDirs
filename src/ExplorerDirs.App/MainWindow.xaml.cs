@@ -2500,6 +2500,7 @@ public partial class MainWindow : Window
 
     private async void ExportFileView_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed) return;
         try
         {
             // Capture before opening the dialog so the export reflects the active Shell view at invocation time.
@@ -2522,13 +2523,21 @@ public partial class MainWindow : Window
                 4 => FileViewExportFormat.Xls,
                 _ => throw new InvalidOperationException("未知的导出格式。")
             };
-            await Task.Run(() =>
-                FileViewExportFile.WriteAtomically(dialog.FileName,
-                    output => FileViewExportWriter.Write(output, format, snapshot)));
+            // Like QDR export, a confirmed file write may outlive its window;
+            // keep the worker independent of both the window and save dialog.
+            await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Format: format, Snapshot: snapshot),
+                static state =>
+                {
+                    FileViewExportFile.WriteAtomically(state.Path,
+                        output => FileViewExportWriter.Write(output, state.Format, state.Snapshot));
+                    return true;
+                }, _windowOperationStop.Token);
+            if (_closed) return;
             EnvironmentStatus.Text = $"已导出 {snapshot.Rows.Count:N0} 项，{snapshot.Columns.Count} 列到 {Path.GetFileName(dialog.FileName)}。导出整个活动视图，当前选区不缩小导出范围。";
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"文件视图导出失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
