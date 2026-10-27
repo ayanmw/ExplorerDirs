@@ -164,13 +164,13 @@ internal static class NativeShellTheme
         try
         {
             EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
-        {
-            var name = new StringBuilder(32);
-            GetClassName(window, name, name.Capacity);
-            if (name.ToString() != "#32768") return true;
-            ApplyMenuWindow(window);
-            ClipMenuFrame(window);
-            return true;
+            {
+                var name = new StringBuilder(32);
+                GetClassName(window, name, name.Capacity);
+                if (name.ToString() != "#32768") return true;
+                ApplyMenuWindow(window);
+                ClipMenuFrame(window);
+                return true;
             }, 0);
         }
         finally { _handlingMenuHook = previousHandling; }
@@ -193,20 +193,23 @@ internal static class NativeShellTheme
         var height = bounds.Bottom - bounds.Top;
         if (client.Right <= client.Left || client.Bottom <= client.Top) return;
         MapWindowPoints(window, 0, ref client, 2);
-        var left = client.Left - bounds.Left;
-        var top = client.Top - bounds.Top;
-        var right = client.Right - bounds.Left;
-        var bottom = client.Bottom - bounds.Top;
-        if (left < 0 || top < 0 || right > width || bottom > height) return;
+        var inset = Math.Max(1, GetSystemMetricsForDpi(45, GetDpiForWindow(window))); // SM_CXEDGE: the themed popup also draws an inner edge.
+        var left = client.Left - bounds.Left + inset;
+        var top = client.Top - bounds.Top + inset;
+        var right = client.Right - bounds.Left - inset;
+        var bottom = client.Bottom - bounds.Top - inset;
+        if (left < 0 || top < 0 || right > width || bottom > height || right <= left || bottom <= top) return;
         // Native popup animation can replace the region without resizing the
         // HWND. Validate the actual region instead of trusting our old stamp.
         if (GetProp(window, "ExplorerDirs.MenuClipWidth") == width && GetProp(window, "ExplorerDirs.MenuClipHeight") == height &&
             GetWindowRgnBox(window, out var current) != 0 && current.Left == left && current.Top == top && current.Right == right && current.Bottom == bottom) return;
         // Preserve Shell item geometry and hit testing; exclude only its measured
-        // nonclient surround. Windows owns the region after a successful transfer.
+        // surround and inner theme edge. Windows owns the region after transfer.
         var region = CreateRectRgn(left, top, right, bottom);
         if (region == 0) return;
         if (SetWindowRgn(window, region, true) == 0) { DeleteObject(region); return; }
+        var noBorder = 0xFFFFFFFEu; // DWMWA_COLOR_NONE, not DWMWA_COLOR_DEFAULT.
+        _ = DwmSetWindowAttribute(window, 34, ref noBorder, sizeof(uint));
         SetProp(window, "ExplorerDirs.MenuClipWidth", width);
         SetProp(window, "ExplorerDirs.MenuClipHeight", height);
     }
@@ -214,6 +217,9 @@ internal static class NativeShellTheme
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll")] private static extern int SetWindowRgn(nint window, nint region, bool redraw);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
+    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref uint value, int size);
     [DllImport("user32.dll")] private static extern int GetWindowRgnBox(nint window, out NativeRect rect);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect rect);

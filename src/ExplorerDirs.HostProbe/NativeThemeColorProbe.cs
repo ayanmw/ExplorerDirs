@@ -70,14 +70,16 @@ internal static class NativeThemeColorProbe
             GetClientRect(window, out var client);
             var originalClient = client;
             MapWindowPoints(window, 0, ref client, 2);
-            var expected = new RegionRect { Left = client.Left - outer.Left, Top = client.Top - outer.Top,
-                Right = client.Right - outer.Left, Bottom = client.Bottom - outer.Top };
+
+            var inset = Math.Max(1, GetSystemMetricsForDpi(45, GetDpiForWindow(window)));
+            var expected = new RegionRect { Left = client.Left - outer.Left + inset, Top = client.Top - outer.Top + inset,
+                Right = client.Right - outer.Left - inset, Bottom = client.Bottom - outer.Top - inset };
             var style = GetWindowLongPtr(window, -16);
             var extended = GetWindowLongPtr(window, -20);
             var clip = type.GetMethod("ClipMenuFrame", members)!;
             clip.Invoke(null, [window]);
             Check(GetWindowRgn(window, region) != 0 && GetRgnBox(region, out var box) != 0 && box.Equals(expected),
-                "window region excludes precisely the measured nonclient surround");
+                "window region excludes the measured surround and one system edge width");
             GetWindowRect(window, out var afterOuter); GetClientRect(window, out var afterClient);
             Check(outer.Equals(afterOuter) && originalClient.Equals(afterClient) &&
                   style == GetWindowLongPtr(window, -16) && extended == GetWindowLongPtr(window, -20),
@@ -97,6 +99,8 @@ internal static class NativeThemeColorProbe
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out RegionRect rect);
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out RegionRect rect);
     [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref RegionRect rect, uint count);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
+    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DllImport("user32.dll")] private static extern int GetWindowRgn(nint window, nint region);
     [DllImport("user32.dll")] private static extern int SetWindowRgn(nint window, nint region, bool redraw);
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
