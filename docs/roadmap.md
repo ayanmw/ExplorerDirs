@@ -4238,3 +4238,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 对仍在运行的 temp.76/PID 58888 做 60 秒只读采样，13 个点的 Working Set、Private Bytes、虚拟内存、句柄和线程数在窗口内完全不变；与前一段 60 秒窗口接近，Private Bytes 高 8 KiB。未启动、重启或操作应用。
 - 这只说明短时静置窗口稳定；没有固定标签/窗格和操作负载，不能据此排除运行期间增长或归因组件。原始 CSV 与哈希见[内存调查](memory-sampling.md#2026-10-28-csttemp76-后续-60-秒同-pid-只读采样)。
+
+## 2026-10-28：temp.76 同一 PID 的 .NET 运行时计数
+
+- 对同一运行进程做 30 秒只读 `dotnet-counters` 采样：进程 Working Set 约 244.61–244.65 MB，Private Bytes 约 117.55 MiB；GC committed 约 27.54 MiB，最近一次 GC 报告的堆大小合计约 17.94 MiB，托管分配流量约 9.63 MiB/25 秒，窗口内没有 GC。未注入用户操作、没有强制 GC。
+- 这说明短时进程 Private Bytes 大于 GC 最近提交值，但不能将差额归因于特定组件；分配流量不等于保留量。后续需固定窗格/标签操作并结合原生分配类别采样。原始数据与哈希见[内存调查](memory-sampling.md#2026-10-28-csttemp76-同一-pid-的短时-net-运行时计数)。
