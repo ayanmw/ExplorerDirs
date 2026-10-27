@@ -11,7 +11,7 @@
 
 - Native context menus must retain a single subtle visible boundary matching the resolved theme. Removing an abnormal bright/double surround does not authorize a borderless final design. Verify visible border-to-content spacing and parent/submenu overlap separately; preserve Shell command rendering and hit testing.
 
-- File-area submenu horizontal placement follows the Windows Shell without application-level SetWindowPos offsets. Do not introduce a fixed gap merely to compensate for themed clipping. If independent spacing is explicitly added later, provide a native-following default and a zero-gap choice; do not silently replace native placement.
+- File-area submenu placement starts with Windows Shell geometry. On 2026-10-27 the user explicitly authorized compensating for our clipped popup edges: move a child toward its parent by the sum of their adjacent hidden widths, preserving the native overlap, direction and work-area limits. Do not introduce independent fixed spacing; repeated processing must not accumulate offsets. Keep the single gray boundary flush with menu fill.
 
 ## Product boundary
 

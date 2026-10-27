@@ -34,8 +34,50 @@ internal static class NativeThemeColorProbe
         CheckMenuHookLifetime(type, members);
         CheckMenuClip(type, members);
         CheckTreeColors(type, members);
+        CheckSubmenuPlacement(type, members);
         Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
         return 0;
+    }
+
+    private static void CheckSubmenuPlacement(Type type, BindingFlags members)
+    {
+        var parent = CreateWindowEx(0x181, "STATIC", "", 0x84800000, 500, 200, 300, 200, 0, 0, 0, 0);
+        Check(parent != 0, "hidden submenu parent fixture is created");
+        try
+        {
+            var clip = type.GetMethod("ClipMenuFrame", members)!;
+            var place = type.GetMethod("PositionSubmenu", members)!;
+            clip.Invoke(null, [parent]);
+            GetWindowRect(parent, out var parentBounds);
+            var region = CreateRectRgn(0, 0, 0, 0);
+            try
+            {
+                GetWindowRgn(parent, region); GetRgnBox(region, out var parentRegion);
+                foreach (var right in new[] { true, false })
+                {
+                    var child = CreateWindowEx(0x181, "STATIC", "", 0x84800000,
+                        right ? parentBounds.Right - 3 : parentBounds.Left + 3 - 150, 240, 150, 120, 0, 0, 0, 0);
+                    Check(child != 0, "hidden submenu fixture is created");
+                    try
+                    {
+                        clip.Invoke(null, [child]);
+                        GetWindowRect(child, out var before); GetWindowRgn(child, region); GetRgnBox(region, out var childRegion);
+                        var overlap = right ? parentBounds.Right - before.Left : before.Right - parentBounds.Left;
+                        place.Invoke(null, [parent, child]);
+                        GetWindowRect(child, out var after);
+                        var visibleOverlap = right ? parentBounds.Left + parentRegion.Right - after.Left - childRegion.Left
+                            : after.Left + childRegion.Right - parentBounds.Left - parentRegion.Left;
+                        Check(visibleOverlap == overlap && after.Top == before.Top && after.Right - after.Left == before.Right - before.Left,
+                            $"{(right ? "right" : "left")} submenu restores native overlap between visible edges without resizing");
+                        place.Invoke(null, [parent, child]); GetWindowRect(child, out var repeated);
+                        Check(repeated.Equals(after), "repeated submenu placement does not accumulate an offset");
+                    }
+                    finally { DestroyWindow(child); }
+                }
+            }
+            finally { DeleteObject(region); }
+        }
+        finally { DestroyWindow(parent); }
     }
 
     private static void CheckTreeColors(Type type, BindingFlags members)

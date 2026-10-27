@@ -111,3 +111,6 @@
 ### Border-to-fill gutter clarification
 The user clarified that the unwanted transparent gap is inside each menu boundary, not the parent/submenu placement. The candidate suppresses the DWM outline at the original HWND bounds and draws a one-pixel FrameRect inside the existing visible region after native paint. No window size, position, item geometry or submenu offset changes. Hidden native fixtures pass; real popup visual acceptance remains pending.
 Candidate 20261027-103936-700-af19fe (code 4fcfd7e) was launched through Computer Use. Captured dark main and child native menus show a thin boundary touching the menu fill. User acceptance and light-mode visual verification remain pending; no parent/submenu position override is installed.
+
+### 2026-10-27 用户授权恢复裁剪补偿
+用户明确授权：父子菜单按实际相邻裁剪宽度之和靠近，抵消本程序引入的透明距离，保留系统原始重叠量。不增加独立间距配置。保留当前贴合底色的单像素灰边。隐藏 HWND 用例验证向左/右展开的可见重叠量、尺寸/纵坐标不变及重复调用不累积位移；真实 Shell 父子识别、多级展开、边缘避让与不同 DPI 仍待用户验收。本批只准备隔离候选，不启动 GUI。
