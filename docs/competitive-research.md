@@ -18,6 +18,12 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 再次核对 [Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)：当前仍为 12.82，更新日期 2026-10-24；版本说明只具体提到改进地址栏目录树使用，其余为一般 Quad-Explorer 优化和语言文件更新，没有给出可据此实现的新交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑、祖先导航及“此电脑”驱动器子项。本轮不据笼统的“优化”文字推测新行为；当前实际差距应通过之后的可见 Q-Dir/Explorer Dirs 对照记录，而不是再扩写未经证实的版本功能。
 
+## 2026-10-28 官方大小信息行为复核
+
+Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字可带同一目录中文件与文件夹大小的相对百分比。官方说明没有定义百分比的精确分母、隐藏项/失败扫描的处理及舍入策略，因此这些规则仍需可见行为确认。
+
+Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树到状态栏，和 Q-Dir 的“切换逐行大小信息”不是同一行为；继续保留用户选定的 F9 语义。逐行列仍受 [Shell 视图架构门槛](folder-size-column-investigation.md)限制，本轮没有引入猜测公式或代码实现。
+
 ## 2026-10-27 Win+E 入口对照
 
 Q-Dir 帮助页概述支持把 Win+E 设为启动 Q-Dir；更具体的 [FAQ 81](https://www.softwareok.com/?faq=81&seite=faq-Q-DIR) 给出的做法是使用 QuickTextPaste，把 `E+L-Win` 绑定到 `run:%PATH%/q-dir.exe`。因此，公开证据确认的是可通过外部快捷键工具转发 Win+E，并未说明 Q-Dir 自身注册全局热键、替换 Explorer 或改写文件夹关联。此处是基于官方操作步骤的判断，不推断 Q-Dir 的内部实现。
