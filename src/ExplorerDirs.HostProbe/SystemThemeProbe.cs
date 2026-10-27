@@ -76,15 +76,30 @@ internal static class SystemThemeProbe
         Check(ReadPixel(item) == ColorFor("ControlBackground") &&
               ((SolidColorBrush)item.Foreground).Color == ColorFor("MutedText"),
             "disabled menu keeps its themed surface and muted text");
+        var tip = new ToolTip { Content = "文件信息", Width = 260, Height = 28,
+            Style = (Style)app.FindResource(typeof(ToolTip)) };
+        tip.Measure(new Size(260, 28));
+        tip.Arrange(new Rect(0, 0, 260, 28));
+        Check(ReadPixel(tip, 200, 6) == ColorFor("ControlBackground") &&
+              ((SolidColorBrush)tip.Foreground).Color == ColorFor("ControlText"),
+            "WPF tooltip renders matching background and readable text without opening a popup");
+        var toolbar = new ToolBar { Width = 260, Style = (Style)app.FindResource(typeof(ToolBar)) };
+        toolbar.Items.Add(new Button { Content = "导航" });
+        toolbar.Measure(new Size(260, 28));
+        toolbar.Arrange(new Rect(0, 0, 260, 28));
+        toolbar.ApplyTemplate();
+        Check(toolbar.Template.FindName("PART_ToolBarPanel", toolbar) is not null &&
+              toolbar.Template.FindName("PART_ToolBarOverflowPanel", toolbar) is not null,
+            "the themed toolbar instantiates both required native WPF layout parts");
     }
 
-    private static Color ReadPixel(FrameworkElement element)
+    private static Color ReadPixel(FrameworkElement element, int x = 3, int y = 3)
     {
         element.UpdateLayout();
         var bitmap = new RenderTargetBitmap(260, 28, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(element);
         var pixel = new byte[4];
-        bitmap.CopyPixels(new Int32Rect(3, 3, 1, 1), pixel, 4, 0);
+        bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
         return Color.FromArgb(pixel[3], pixel[2], pixel[1], pixel[0]);
     }
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
