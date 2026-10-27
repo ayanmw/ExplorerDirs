@@ -77,3 +77,5 @@
 未挂接生产 PaneControl 的布局回归在旧代码先失败，修复后连续10次激活/取消均保持 RootBorder.Child.RenderSize，相同状态保留资源引用；未创建 HWND/Shell view，前台不变。115332/0fd4d2 隔离候选已启动，真实窗格切换闪烁效果待用户反馈。原生主题、系统主题、未挂接标签流程均通过。
 
 最终用户验收：115332/0fd4d2 的窗格切换闪烁已解决，允许本版本落地；本轮右键文件区刷新、菜单动画单框贴合与窗格切换均获用户确认，按既有同批次规则更新 temp.76。
+
+最终发布：temp.76 源码提交 da6b3c3；2026-10-27 完成原目录覆盖，旧包完整备份于 releases/.history/preview-0.6.0-temp.76-before-final-redraw-20261027-120303。5个 active INI 保留原位并在发布前校验一致，旧包全文件及 staging/目标发布文件哈希通过。精确 release EXE 经 Computer Use 启动并观察四窗格会话恢复；已归还桌面。
