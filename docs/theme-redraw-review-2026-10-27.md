@@ -91,3 +91,15 @@
 用户随后拒绝 121215/118a22：列表填充后再次绘制出白块，且不再自动消失。主题/尺寸/滚动条位缓存不足以表示实际绘制失效。现将“重复主题扫描”与“实际 WM_PAINT/WM_NCPAINT”分开：前者按状态去重，后者在 native DefSubclassProc 返回前同步补画非客户区，不按旧扫描印记跳过。独立 HWND 级正在绘制标记在 finally 恢复，补画产生的再次 NC 通知不递归。
 
 新增真实隐藏消息计数回归：缓存相同但新 paint 失效仍会增加一次 frame paint；frame 回调内部再次请求强制补画会被重入门控拒绝；没有客户区 paint/erase。原生专项、系统主题专项通过。121630/31e686 打开被 Computer Use 物理 ESC 硬停止拦截，因此没有新的可见验收证据；不继续桌面输入、不覆盖 temp.76。后续将使用提交后的最终准备候选，只有用户验证首次显示和列表填充后均无白块才关闭此项。
+
+## 首次整片白底：提前列表颜色与自有宿主绘制
+
+用户确认 121834/b6a235 滚动条端部白块已解决；另要求评估并授权继续优化冷启动阶段整片白底。本批不把启动成功或最终深色截图当作首次帧通过。
+
+第一步：宿主主题提前到 COM 激活前；利用现有 WM_PARENTNOTIFY/WM_CREATE 在已准备的父窗口内同步为已知 Shell 子窗口应用主题，SysListView32 通过公开 LVM_SETBKCOLOR/SETTEXTBKCOLOR/SETTEXTCOLOR 设色，不等 OnViewCreated/ContextIdle。真实隐藏列表回归先失败后通过：创建后立即读回深色背景，浅/深往返仍正确。用户反馈 123652/fa19ce 复制标签已不闪，但重启仍有白底，故未将冷启动标为通过。
+
+124113 诊断记录四个列表都在 visible=False 时从 FFFFFF 设为 202020，后续 WM_PAINT 时始终为 202020，没有观测到列表颜色被重置白色。124254 全类诊断显示自有 Static 宿主先收到 WM_PAINT，之后才创建列表。旧 WM_ERASEBKGND 深色处理不能覆盖 Static 的自身绘制路径；独立隐藏 Static 的 WM_PRINTCLIENT 像素用例也先失败。
+
+第二步：明确标记本程序的空 Shell 宿主，只有该标记的宿主在深色下接管 WM_PAINT/WM_PRINTCLIENT 底板（BeginPaint/EndPaint 成对），Shell 自有控件保持原绘制。宿主添加 WS_CLIPCHILDREN/WS_CLIPSIBLINGS，避免底板覆盖子窗口；不隐藏窗口、不增加固定等待、不等待目录枚举完毕。离屏用例通过：无 Shell view 时底板已经是深色。原生主题专项、系统主题专项通过；完整配置检查单独记录。
+
+当前 124603/4c7eec 无诊断日志候选已启动，真实冷启动效果待用户反馈。两次未挂接窗格回归中的几何/资源引用断言通过，但最终 foreground-unchanged 断言失败，日志 early-background-pane.log 和 early-background-pane-repeat.log 已保留；未判定是用户操作还是程序原因，不据此声称整轮通过，也没有降低断言。正式 temp.76 尚未覆盖滚动条和本轮首次底色优化。

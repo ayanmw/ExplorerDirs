@@ -572,7 +572,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
-        _hostWindow = CreateWindowEx(0, "STATIC", "", 0x50000000,
+        // Child/visible plus child/sibling clipping: the blank backdrop must not paint over Shell HWNDs.
+        _hostWindow = CreateWindowEx(0, "STATIC", "", 0x56000000,
             0, 0, Math.Max(1, (int)ActualWidth), Math.Max(1, (int)ActualHeight),
             hwndParent.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         if (_hostWindow == IntPtr.Zero)
@@ -580,6 +581,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
         try
         {
+            // COM activation may pump messages before Initialize; theme the
+            // visible native container before entering that initialization.
+            NativeShellTheme.PrepareHost(_hostWindow);
             var browserType = Type.GetTypeFromCLSID(BrowserClassId, true)!;
             _browser = (IExplorerBrowser)Activator.CreateInstance(browserType)!;
             var browserUnknown = Marshal.GetIUnknownForObject(_browser);
@@ -593,7 +597,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             ShellBrowserSite.SetSite(_browser, _browserSite);
             var rect = ClientRect();
             var settings = new FolderSettings { ViewMode = _viewState.Mode, Flags = 0 };
-            NativeShellTheme.Apply(_hostWindow);
             Check(_browser.Initialize(_hostWindow, ref rect, ref settings));
             Check(_browser.SetOptions(0x40 | 0x80 | (_visibleShellPane != ExplorerShellPane.None ? 0x2u : 0u))); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_SHOWFRAMES
             Check(_browser.Advise(this, out _cookie));

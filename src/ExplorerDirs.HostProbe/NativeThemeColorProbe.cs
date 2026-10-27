@@ -36,6 +36,8 @@ internal static class NativeThemeColorProbe
         CheckMenuClip(type, members);
         CheckMenuPrint(type, members);
         CheckTreeColors(type, members);
+        CheckNewListBackground(type, members);
+        CheckOwnedHostBackground(type, members);
         CheckScrollFrame(type, members);
         CheckSubmenuPlacement(type, members);
         Console.WriteLine("Native theme colors: PASS (COM and hidden native fixtures; no visible windows or Shell views)");
@@ -162,6 +164,46 @@ internal static class NativeThemeColorProbe
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint window, int index);
 
+    private static void CheckOwnedHostBackground(Type type, BindingFlags members)
+    {
+        var window = CreateWindowEx(0, "STATIC", "", 0x80000000, 0, 0, 100, 80, 0, 0, 0, 0);
+        var dc = CreateCompatibleDC(0);
+        var bitmap = CreateBitmap(100, 80, 1, 32, 0);
+        var previous = SelectObject(dc, bitmap);
+        try
+        {
+            Check(window != 0 && dc != 0 && bitmap != 0 && SetHostProp(window, "ExplorerDirs.OwnedShellHost", 1),
+                "an owned blank native host has an offscreen print target");
+            type.GetMethod("Apply", members)!.Invoke(null, [window]);
+            SendMessage(window, 0x0318, (nuint)dc, 0x4);
+            Check(GetPixel(dc, 50, 40) == 0x202020,
+                "owned host prints a dark background before any Shell view exists");
+        }
+        finally { SelectObject(dc, previous); DeleteObject(bitmap); DeleteDC(dc); DestroyWindow(window); }
+    }
+    [DllImport("user32.dll", EntryPoint = "SetPropW", CharSet = CharSet.Unicode)] private static extern bool SetHostProp(nint window, string name, nint value);
+    private static void CheckNewListBackground(Type type, BindingFlags members)
+    {
+        var parent = CreateWindowEx(0, "STATIC", "", 0x80000000, 0, 0, 300, 200, 0, 0, 0, 0);
+        try
+        {
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [true]);
+            type.GetMethod("Apply", members)!.Invoke(null, [parent]);
+            var child = CreateWindowEx(0, "SysListView32", "", 0x40000001, 0, 0, 300, 200, parent, 0, 0, 0);
+            Check(child != 0, "a hidden native list is created below an already themed parent");
+            Check((uint)SendMessage(child, 0x1000, 0, 0).ToInt64() == 0x202020 &&
+                (uint)SendMessage(child, 0x1025, 0, 0).ToInt64() == 0x202020,
+                "new list background and text background are dark before any delayed or OnViewCreated callback");
+            foreach (var dark in new[] { false, true })
+            {
+                type.GetMethod("SetProcessTheme", members)!.Invoke(null, [dark]);
+                type.GetMethod("Apply", members)!.Invoke(null, [parent]);
+                Check((uint)SendMessage(child, 0x1000, 0, 0).ToInt64() == (dark ? 0x202020u : GetSysColor(5)),
+                    "early native list colors still restore on explicit light/dark changes");
+            }
+        }
+        finally { DestroyWindow(parent); }
+    }
     private static void CheckScrollFrame(Type type, BindingFlags members)
     {
         var window = CreateWindowEx(0, "STATIC", "", 0x80100000, 0, 0, 300, 200, 0, 0, 0, 0);

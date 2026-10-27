@@ -181,6 +181,11 @@ internal static class NativeShellTheme
         catch (DllNotFoundException) { }
     }
 
+    internal static void PrepareHost(nint window)
+    {
+        SetProp(window, "ExplorerDirs.OwnedShellHost", 1);
+        Apply(window);
+    }
     internal static void Apply(nint window)
     {
         if (window == 0 || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) return;
@@ -239,6 +244,15 @@ internal static class NativeShellTheme
         GetClassName(window, name, name.Capacity);
         SetWindowTheme(window, _dark ? (name.ToString() == "SysHeader32" ? "DarkMode_ItemsView" : "DarkMode_Explorer") : "Explorer", null);
         RemoveProp(window, "ExplorerDirs.ScrollFrameTheme");
+        if (name.ToString() == "SysListView32")
+        {
+            // ExplorerBrowser's OnViewCreated can follow the native list's first
+            // paint. Set its public colors while processing child creation too.
+            var background = _dark ? 0x202020u : GetSysColor(5);
+            SendMessage(window, 0x1001, 0, (nint)background); // LVM_SETBKCOLOR
+            SendMessage(window, 0x1026, 0, (nint)background); // LVM_SETTEXTBKCOLOR
+            SendMessage(window, 0x1024, 0, (nint)(_dark ? 0xEEEEEEu : GetSysColor(8))); // LVM_SETTEXTCOLOR
+        }
         if (name.ToString() == "SysTreeView32")
         {
             SendMessage(window, 0x111D, 0, (nint)(_dark ? 0x202020u : GetSysColor(5))); // TVM_SETBKCOLOR
@@ -252,6 +266,43 @@ internal static class NativeShellTheme
     // Fill only the native erase pass; leave Shell content, input and painting intact.
     private static nint BackgroundMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nint data)
     {
+        // STATIC has its own paint path, separate from WM_ERASEBKGND. Only our
+        // empty containers may replace it; never paint over Shell-owned content.
+        if (_dark && GetProp(window, "ExplorerDirs.OwnedShellHost") != 0 &&
+            message is 0x000F or 0x0318 && GetClientRect(window, out var hostRect))
+        {
+            if (message == 0x0318)
+            {
+                if (wParam != 0)
+                {
+                    var previous = SetDCBrushColor((nint)wParam, 0x202020);
+                    try { FillRect((nint)wParam, ref hostRect, GetStockObject(18)); }
+                    finally { SetDCBrushColor((nint)wParam, previous); }
+                }
+                return 0;
+            }
+            var dc = BeginPaint(window, out var paint);
+            try
+            {
+                if (dc != 0)
+                {
+                    var previous = SetDCBrushColor(dc, 0x202020);
+                    try { FillRect(dc, ref hostRect, GetStockObject(18)); }
+                    finally { SetDCBrushColor(dc, previous); }
+                }
+            }
+            finally { EndPaint(window, ref paint); }
+            return 0;
+        }
+        if (message == 0x0210 && (wParam & 0xFFFF) == 1 && lParam != 0) // WM_PARENTNOTIFY / WM_CREATE
+        {
+            var childClass = new StringBuilder(64);
+            GetClassName(lParam, childClass, childClass.Capacity);
+            // Propagate through known Shell containers before their next child
+            // is created; leave tooltip notification timing on its deferred path.
+            if (childClass.ToString() is "ExplorerBrowserControl" or "SHELLDLL_DefView" or "SysListView32" or "SysHeader32")
+                Apply(lParam);
+        }
         if (_dark && message == 0x0014 && wParam != 0 && GetClientRect(window, out var rect))
         {
             var previous = SetDCBrushColor((nint)wParam, 0x202020);
@@ -276,6 +327,13 @@ internal static class NativeShellTheme
         }
         return result;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct NativePaint
+    {
+        public nint Dc; public int Erase; public NativeRect Rect; public int Restore, Incremental;
+        public int Reserved0, Reserved1, Reserved2, Reserved3, Reserved4, Reserved5, Reserved6, Reserved7;
+    }
+    [DllImport("user32.dll")] private static extern nint BeginPaint(nint window, out NativePaint paint);
+    [DllImport("user32.dll")] private static extern bool EndPaint(nint window, ref NativePaint paint);
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref NativeRect rect, nint brush);
 
