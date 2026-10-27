@@ -15,7 +15,7 @@ internal static class NativeShellTheme
     {
         _dark = dark;
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)) return;
-        try { SetPreferredAppMode(dark ? 2 : 3); FlushMenuThemes(); }
+        try { SetPreferredAppMode(dark ? 2 : 3); FlushMenuThemes(); ApplyMenuFrames(); }
         catch (EntryPointNotFoundException) { }
         catch (DllNotFoundException) { }
     }
@@ -88,24 +88,36 @@ internal static class NativeShellTheme
 
     internal static void ApplyMenuFrames()
     {
-        if (!_dark || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
         EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
         {
             var name = new StringBuilder(32);
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
-            const string property = "ExplorerDirs.MenuTheme";
-            if (GetProp(window, property) == 2 || !SetProp(window, property, 2)) return true;
-            AllowDarkModeForWindow(window, true);
-            SetWindowTheme(window, "DarkMode_Explorer", null);
-            var color = _dark ? 0x404040u : GetSysColor(16);
-            _ = DwmSetWindowAttribute(window, 34, ref color, sizeof(uint));
-            _ = SetWindowSubclass(window, MenuFrameProcedure, 0xED7602, 0);
-            DrawMenuFrame(window);
+            ApplyMenuWindow(window);
             return true;
         }, 0);
     }
 
+    private static bool ApplyMenuWindow(nint window)
+    {
+        const string property = "ExplorerDirs.MenuTheme";
+        var token = _dark ? (nint)2 : (nint)1;
+        if (GetProp(window, property) == token || !SetProp(window, property, token)) return false;
+        AllowDarkModeForWindow(window, _dark);
+        SetWindowTheme(window, _dark ? "DarkMode_Explorer" : "Explorer", null);
+        // Restore the system-owned border when leaving dark mode, not a fixed light color.
+        var color = _dark ? 0x404040u : 0xFFFFFFFFu;
+        _ = DwmSetWindowAttribute(window, 34, ref color, sizeof(uint));
+        if (_dark)
+        {
+            _ = SetWindowSubclass(window, MenuFrameProcedure, 0xED7602, 0);
+            DrawMenuFrame(window);
+        }
+        else
+            RemoveWindowSubclass(window, MenuFrameProcedure, 0xED7602);
+        return true;
+    }
     private static nint MenuFrameMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nint data)
     {
         var result = DefSubclassProc(window, message, wParam, lParam);

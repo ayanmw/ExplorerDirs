@@ -66,13 +66,23 @@ internal static class NativeThemeColorProbe
             posted = 0;
             apply.Invoke(null, [notification]);
             Check(posted == 0, "an already themed tooltip does not requeue SetWindowTheme");
+            var menuTheme = type.GetMethod("ApplyMenuWindow", members)!;
+            Check((bool)menuTheme.Invoke(null, [window])! && GetProp(window, "ExplorerDirs.MenuTheme") == 2,
+                "native menu theme applies dark once (hidden HWND state fixture)");
+            Check(!(bool)menuTheme.Invoke(null, [window])!, "repeat dark application is skipped");
             type.GetMethod("SetProcessTheme", members)!.Invoke(null, [false]);
+            Check((bool)menuTheme.Invoke(null, [window])! && GetProp(window, "ExplorerDirs.MenuTheme") == 1,
+                "native menu restores light on the same HWND after dark");
+            Check(!(bool)menuTheme.Invoke(null, [window])!, "repeat light application is skipped");
             apply.Invoke(null, [notification]);
             Check(posted == 1 && GetProp(window, "ExplorerDirs.TooltipTheme") == 1,
                 "switching to light invalidates the tooltip color stamp once");
             frame = new System.Windows.Threading.DispatcherFrame();
             dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() => frame.Continue = false));
             System.Windows.Threading.Dispatcher.PushFrame(frame);
+            type.GetMethod("SetProcessTheme", members)!.Invoke(null, [true]);
+            Check((bool)menuTheme.Invoke(null, [window])! && GetProp(window, "ExplorerDirs.MenuTheme") == 2,
+                "native menu can return to dark after light on the same HWND");
         }
         finally
         {
