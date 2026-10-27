@@ -101,8 +101,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ShellFolderSizeCacheKey? _folderSizeCacheKey;
     private ulong? _folderSizeCacheBytes;
     private long _folderSizeCacheReadAt;
-    private bool _menuPrepared;
-    private readonly ShellMenuTargetTracker _menuTarget = new();
     private readonly ShellHeaderPresetMenuGate _headerPresetMenuGate = new();
     private DispatcherTimer? _newFolderRenameTimer;
     private DispatcherTimer? _createdFileSelectionTimer;
@@ -162,7 +160,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _directoryChangeNativeCreateNotificationStartedAt;
     private long _directoryChangeNativeCreateNotificationCompletedAt;
     private string _directoryChangeLastCreateNotificationResult = "not-attempted";
-    private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
     private bool _hasNavigated;
@@ -439,7 +436,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public event EventHandler<string>? MenuError;
     internal event EventHandler<string>? FolderMiddleClicked;
     public event EventHandler? Activated;
-    public Func<SelectedItem?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
     public Func<int, bool>? CtrlWheelHandler { get; set; }
     public Func<bool>? MayRestoreFocus { get; set; }
@@ -677,12 +673,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         bool SameVisit() => ReferenceEquals(inputBrowser, _browser) && inputView != 0 &&
             inputView == _viewWindow && inputVersion == _viewReadiness.NavigationVersion;
         bool SameInputTarget() => SameVisit() && GetFocus() == focused;
-
-        if (msg.message == 0x0100 &&
-            ((msg.wParam.ToInt64() == 0x5D && modifiers == ModifierKeys.None) ||
-             (msg.wParam.ToInt64() == 0x79 && modifiers == ModifierKeys.Shift)))
-            _menuTarget.KeyboardMenuRequested(
-                allowCustomCommands: !IsNativeContextMenuExcludedWindow(focused)); // Menu key or Shift+F10.
 
         if (msg.message == 0x0100 || msg.message == 0x0104)
         {
@@ -4567,8 +4557,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _subclassedWindows.Clear();
         _viewWindow = IntPtr.Zero;
         _lastContentFocusWindow = IntPtr.Zero;
-        _menuActions.Clear();
-        _menuTarget.Reset();
     }
 
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
@@ -4642,12 +4630,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
                     _headerPresetMenuGate.Reset();
-                    _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0207: // WM_MBUTTONDOWN
                     _headerPresetMenuGate.Reset();
-                    _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
                     BeginMiddleClickFolderProbe();
                     break;
@@ -4658,16 +4644,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     Activated?.Invoke(this, EventArgs.Empty);
                     if (_headerPresetMenuGate.BeginRightClick(
                         unchecked((nuint)wParam.ToInt64()), GetDiagnosticWindowClass(hwnd)))
-                    {
-                        _menuTarget.Reset();
                         break;
-                    }
-                    // Always replace the previous hit test. If cursor retrieval fails,
-                    // the later WM_CONTEXTMENU must probe its own point instead of inheriting stale state.
-                    ShellMenuPoint? menuPoint = GetCursorPos(out var cursorPoint)
-                        ? new ShellMenuPoint(cursorPoint.X, cursorPoint.Y) : null;
-                    _menuTarget.MouseDown(menuPoint, ProbeMenuTarget,
-                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
                     break;
                 case 0x007B: // WM_CONTEXTMENU; (-1,-1) means keyboard invocation.
                     if (_headerPresetMenuGate.TryConsume(
@@ -4677,8 +4654,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             new Action(() => HeaderPresetMenuRequested?.Invoke(headerMenuPoint)));
                         return IntPtr.Zero;
                     }
-                    _menuTarget.ContextMenu(lParam, ProbeMenuTarget,
-                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
                     break;
                 case 0x0100: // WM_KEYDOWN
                 case 0x0104: // WM_SYSKEYDOWN
@@ -4686,15 +4661,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     break;
                 case 0x0211: // WM_ENTERMENULOOP
                     NativeShellTheme.BeginMenu(hwnd);
-                    _menuPrepared = false;
-                    _menuActions.Clear();
-                    break;
-                case 0x0117: // WM_INITMENUPOPUP
-                    if (!_menuPrepared)
-                    {
-                        _menuPrepared = true;
-                        InjectCommands(wParam);
-                    }
                     break;
                 case 0x0210: // WM_PARENTNOTIFY: apply theme to newly created native children.
                     if ((wParam.ToInt64() & 0xFFFF) == 1) QueueNativeThemeRefresh();
@@ -4708,26 +4674,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 case 0x004E: // WM_NOTIFY: native file-information tips are created lazily.
                     NativeShellTheme.ApplyTooltip(lParam);
                     break;
-                case 0x0111: // WM_COMMAND
-                    if (ShellMenuCommand.TryGetMenuId(wParam, lParam, out var commandId))
-                    {
-                        var customCommand = _menuActions.TryGetValue(commandId, out var action);
-                        _menuActions.Clear();
-                        if (customCommand)
-                        {
-                            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
-                            {
-                                try { action!(); }
-                                catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
-                            }));
-                            return IntPtr.Zero;
-                        }
-                    }
-                    break;
                 case 0x0212: // WM_EXITMENULOOP
                     NativeShellTheme.EndMenu();
-                    _menuPrepared = false;
-                    _menuTarget.Reset();
                     _headerPresetMenuGate.Reset();
                     break;
                 case 0x0082: // WM_NCDESTROY
@@ -4831,66 +4779,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
-    private void InjectCommands(IntPtr menu)
-    {
-        if (menu == IntPtr.Zero || CustomCommands is null || !_menuTarget.CanInjectCustomCommands) return;
-        var target = _menuTarget.Resolve();
-        Trace($"context-menu target={target}");
-        // Unknown mouse hits still receive target-independent tab commands; only
-        // a confirmed item or keyboard target may expose the Shell selection.
-        var selectedItem = ShellMenuTargetTracker.CanUseSelectionForCommands(target)
-            ? GetSelectedItem() : null;
-        var commands = CustomCommands(selectedItem);
-        if (commands.Count == 0) return;
-
-        var inserted = 0;
-        for (var index = commands.Count - 1; index >= 0; index--)
-        {
-            var id = checked((ushort)(0xE000 + index));
-            if (!InsertMenu(menu, 0, 0x400, id, commands[index].Label))
-                continue;
-            _menuActions[id] = commands[index].Action;
-            inserted++;
-        }
-        if (inserted > 0)
-            InsertMenu(menu, (uint)inserted, 0x400 | 0x800, 0, null);
-        if (inserted != commands.Count)
-            MenuError?.Invoke(this, "部分自定义右键菜单命令未能插入。");
-    }
-
-    private static bool IsNativeContextMenuExcludedWindow(IntPtr hwnd)
-    {
-        var windowClass = WindowClass(hwnd);
-        return windowClass.Equals("SysHeader32", StringComparison.OrdinalIgnoreCase) ||
-            windowClass.Equals("ScrollBar", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private Task<ShellMenuTarget> ProbeMenuTarget(ShellMenuPoint point)
-    {
-        if (CustomCommands is null) return Task.FromResult(ShellMenuTarget.Unknown);
-        var viewWindow = _viewWindow;
-        if (viewWindow == IntPtr.Zero) return Task.FromResult(ShellMenuTarget.Unknown);
-        // Empty values disable the writer too; avoid collecting UIA ancestry when nothing can be logged.
-        var traceHit = ShellMenuHitTrace.IsEnabled(FocusTracePath);
-        // UI Automation queries against our own Shell view must not run inside
-        // the view's menu/window procedure. An unfinished probe fails closed.
-        return Task.Run(() =>
-        {
-            IReadOnlyList<ControlType> controls = [];
-            try
-            {
-                var target = HitTestMenuTarget(point, viewWindow, traceHit, out controls);
-                if (traceHit) Trace(ShellMenuHitTrace.Format(point, target, controls));
-                return target;
-            }
-            catch
-            {
-                if (traceHit) Trace(ShellMenuHitTrace.Format(point, ShellMenuTarget.Unknown, controls));
-                return ShellMenuTarget.Unknown;
-            }
-        });
-    }
-
     private Task<string?> ProbeFileSystemFolderAtPoint(ShellMenuPoint point, string parentPath, IntPtr viewWindow)
     {
         return Task.Run(() =>
@@ -4947,72 +4835,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (ElementNotAvailableException) { return null; }
         catch (COMException) { return null; }
         catch (InvalidOperationException) { return null; }
-    }
-
-    private static ShellMenuTarget HitTestMenuTarget(ShellMenuPoint point, IntPtr viewWindow,
-        bool collectTrace, out IReadOnlyList<ControlType> controls)
-    {
-        List<ControlType>? ancestry = collectTrace ? [] : null;
-        try
-        {
-            var element = AutomationElement.FromPoint(new Point(point.X, point.Y));
-            var list = false;
-            var owned = false;
-            var headerOrScrollBar = false;
-            for (var depth = 0; element is not null && depth < 32; depth++)
-            {
-                var type = element.Current.ControlType;
-                ancestry?.Add(type);
-                list |= type == ControlType.List;
-                headerOrScrollBar |= type == ControlType.Header || type == ControlType.ScrollBar;
-                var handle = new IntPtr(element.Current.NativeWindowHandle);
-                owned |= handle != IntPtr.Zero &&
-                    (handle == viewWindow || IsChild(viewWindow, handle));
-                element = TreeWalker.ControlViewWalker.GetParent(element);
-            }
-            controls = ancestry ?? [];
-            if (!owned || !list || headerOrScrollBar) return ShellMenuTarget.Unknown;
-            if (TryHitTestNativeListView(point, viewWindow, out var nativeTarget))
-                return nativeTarget;
-            // UIA ListItem bounds may span a whole Details row. If the native list-view
-            // hit test is unavailable, neither an item nor background target is confirmed.
-            return ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: false, itemIndex: -1, hitFlags: 0);
-        }
-        catch (ElementNotAvailableException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-        catch (COMException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-        catch (InvalidOperationException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-    }
-
-    private static bool TryHitTestNativeListView(ShellMenuPoint point, IntPtr viewWindow,
-        out ShellMenuTarget target)
-    {
-        // UIA ListItem bounds can cover the full Details row; the native hit flags distinguish
-        // its icon/text from the blank row area that must receive the Shell background menu.
-        var listView = IntPtr.Zero;
-        EnumChildWindows(viewWindow, (child, _) =>
-        {
-            var name = new StringBuilder(32);
-            GetClassName(child, name, name.Capacity);
-            if (name.ToString() != "SysListView32") return true;
-            listView = child;
-            return false;
-        }, IntPtr.Zero);
-        if (listView == IntPtr.Zero)
-        {
-            target = ShellMenuTarget.Unknown;
-            return false;
-        }
-
-        var clientPoint = new NativePoint { X = point.X, Y = point.Y };
-        if (!ScreenToClient(listView, ref clientPoint))
-        {
-            target = ShellMenuTarget.Unknown;
-            return true;
-        }
-        var hit = new NativeListViewHitTestInfo { X = clientPoint.X, Y = clientPoint.Y };
-        var itemIndex = SendMessage(listView, 0x1039, IntPtr.Zero, ref hit).ToInt32(); // LVM_SUBITEMHITTEST
-        target = ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: true, itemIndex, hit.Flags);
-        return true;
     }
 
     internal SelectedItem? GetSelectedItem()
@@ -5203,13 +5025,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)]
-    private struct NativeListViewHitTestInfo
-    {
-        public int X, Y;
-        public uint Flags;
-        public int Item, SubItem, Group;
-    }
-    [StructLayout(LayoutKind.Sequential)]
     private struct FolderSettings { public uint ViewMode, Flags; }
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePropertyKey { public Guid FormatId; public uint PropertyId; }
@@ -5367,9 +5182,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumChildWindows(IntPtr parent, EnumWindowProc callback, IntPtr data);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
     [DllImport("user32.dll", SetLastError = true)]
@@ -5381,9 +5193,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ScreenToClient(IntPtr hwnd, ref NativePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
@@ -5408,9 +5217,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")]
-    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam,
-        ref NativeListViewHitTestInfo lParam);
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")]

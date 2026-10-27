@@ -4130,3 +4130,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 对仍运行的 PID 58888 被动采集 55 秒 .NET runtime counters：累计托管分配约 19.81 MiB、1 次 Gen0、无 Gen1/Gen2，GC 提交量约 27.54 MiB、暂停约 1 ms；这些数值不能等同于存活堆或泄漏量。采集器退出后同 PID 再采样 60 秒，Working Set 与 Private Bytes 均稳定，但较前一段空闲基线高约 3.22/2.27 MiB；由于没有固定用户操作对照，暂不归因给采集器或应用活动。
 - 全部采样只读，没有打开/操作 GUI。原始 CSV 留在忽略的 `src/.state/memory-samples/`，详见[内存调查记录](memory-sampling.md)。下一步需在记录明确操作序列后对照托管与进程指标，再考虑分配栈分析。
+
+## 2026-10-28：移除闲置的文件区自定义菜单注入代码
+
+- 用户已决定文件区右键菜单只使用 Windows Shell 原生内容，不恢复标签/路径自定义项。清除 ExplorerBrowserHost 中未接线的命令注入、目标 UIA 探测、临时菜单命令分派及其状态；保留 Shell 菜单主题/tooltip 处理、列头预设菜单门控和中键文件夹命中逻辑。删除不再使用的 `ShellMenuCommand`，保留隔离 NativeProbe 仍需的 ListView 命中解析纯函数及其坐标/命中 smoke。
+- 后台验证：定向 `--shell-menu-target-smoke`、完整 SettingsSmoke 和 App Release 构建通过；未启动窗口。产品文件区空白/条目/键盘菜单的可见原生行为、浅深主题及多窗格一致性仍列入集中 UI 验收，不以编译或 smoke 代替。

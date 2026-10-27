@@ -112,7 +112,6 @@
     <Compile Include="../ExplorerDirs.App/ShellTreeMiddleClick.cs" Link="ShellTreeMiddleClick.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeLocationTarget.cs" Link="ShellTreeLocationTarget.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMiddleClickTarget.cs" Link="ShellMiddleClickTarget.cs" />
-    <Compile Include="../ExplorerDirs.App/ShellMenuCommand.cs" Link="ShellMenuCommand.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuTargetTracker.cs" Link="ShellMenuTargetTracker.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateCapture.cs" Link="ShellViewStateCapture.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />

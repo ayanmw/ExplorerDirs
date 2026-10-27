@@ -858,12 +858,6 @@ try
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&
           !ShellItemKind.IsFileSystemFolder(0x20000000),
           "only ordinary filesystem folders get the new-tab directory command");
-    Check(ShellMenuCommand.TryGetMenuId((nint)0xE000, IntPtr.Zero, out var menuId) &&
-          menuId == 0xE000 &&
-          !ShellMenuCommand.TryGetMenuId((nint)0x1E000, IntPtr.Zero, out _) &&
-          !ShellMenuCommand.TryGetMenuId((nint)0xE000, (nint)123, out _) &&
-          !ShellMenuCommand.TryGetMenuId(IntPtr.Zero, IntPtr.Zero, out _),
-          "custom menu commands ignore accelerators, control notifications, and separator IDs");
     ShellMenuTargetTrackerSmoke.Run();
     ExplorerDirs.SettingsSmoke.RestartShortcutSmoke.Run();
     ShellStatusCountRefreshGateSmoke.Run();
