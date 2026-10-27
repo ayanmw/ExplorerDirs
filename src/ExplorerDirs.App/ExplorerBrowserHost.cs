@@ -910,6 +910,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return;
         }
 
+        var shellViewActivationAttempted = false;
+        if (ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue, windowActive,
+                request.ShellActivationAttempted, IsRenameEditorFocused()))
+        {
+            // The content HWND and focused item can look correct while the Shell view is not UI-activated;
+            // a user's Alt+Tab round trip reactivates it, so do that once after file operations too.
+            request = request with { ShellActivationAttempted = true };
+            _pendingFileOperationFocusRestore = request;
+            shellViewActivationAttempted = true;
+            if (FocusTracePath is not null) Trace("focus-restore shell-view-activation-attempt");
+            RestoreContentFocusIfNeeded();
+        }
+
         var fileContentFocused = windowActive && IsFileContentFocused();
         var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue,
             windowActive, fileContentFocused);
@@ -917,7 +930,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             Trace($"focus-restore-poll desired={focusStillDesired} window-active={windowActive} same-view={sameView} input-unchanged={userInputUnchanged} " +
                 $"within-window={withinRetryWindow} content-focused={fileContentFocused} attempt={shouldAttemptRestore} " +
                 $"elapsed-ms={Stopwatch.GetElapsedTime(request.StartedAt).TotalMilliseconds:F0}");
-        if (shouldAttemptRestore)
+        if (shouldAttemptRestore && !shellViewActivationAttempted)
             RestoreContentFocusIfNeeded();
 
         if (ReferenceEquals(_pendingFileOperationFocusRestore, request))
@@ -980,7 +993,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
 
     private sealed record FocusRestoreRequest(object Browser, string Path, long NavigationVersion,
-        long InputVersion, long StartedAt);
+        long InputVersion, long StartedAt, bool ShellActivationAttempted = false);
 
     private sealed record PendingQuickFilterGroupRestore(PropertyKeyState Group, bool Ascending,
         int InitialItemCount, ShellFolderFilter? Filter, string Path, long NavigationVersion, long RequestVersion, long StartedAt);

@@ -20,6 +20,10 @@ internal static class ShellFocusRestoreGate
     internal static bool ShouldAttemptRestore(bool canContinue, bool windowActive,
         bool fileContentAlreadyFocused) => canContinue && windowActive && !fileContentAlreadyFocused;
 
+    internal static bool ShouldActivateShellViewForOperationRestore(bool canContinue, bool windowActive,
+        bool activationAlreadyAttempted, bool renameEditorFocused) =>
+        canContinue && windowActive && !activationAlreadyAttempted && !renameEditorFocused;
+
     internal static long ResolveRetryWindowStartTimestamp(long startedAt, long now, bool windowActive) =>
         windowActive ? startedAt : now;
 

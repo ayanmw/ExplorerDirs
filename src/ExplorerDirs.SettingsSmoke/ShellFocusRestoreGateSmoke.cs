@@ -89,6 +89,21 @@ internal static class ShellFocusRestoreGateSmoke
         Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
                 fileContentAlreadyFocused: true), expected: false,
             "focus monitor skips redundant SetFocus when file content already owns focus");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: false), expected: true,
+            "file-operation recovery reactivates a Shell view once even when its content HWND already reports focus");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: true, renameEditorFocused: false), expected: false,
+            "a pending file-operation recovery does not repeatedly activate the Shell view");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: false, activationAlreadyAttempted: false, renameEditorFocused: false), expected: false,
+            "Shell view activation waits while the application window is inactive");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: true), expected: false,
+            "file-operation recovery never interrupts an active rename editor");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: false,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: false), expected: false,
+            "a stale file-operation request cannot reactivate a Shell view");
         Check(ShellFocusRestoreGate.CanRestoreForeground(foregroundIsEmpty: true, foregroundOwnedByThisWindow: false), expected: true,
             "file-operation focus may recover when Windows has no foreground window");
         Check(ShellFocusRestoreGate.CanRestoreForeground(foregroundIsEmpty: false, foregroundOwnedByThisWindow: true), expected: true,

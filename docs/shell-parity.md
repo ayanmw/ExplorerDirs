@@ -16,7 +16,7 @@
 
 > **Shell 命令状态查询重入刷新（2026-10-26）：**Shell 原生命令查询期间若重入事件改变选区/活动上下文，查询会丢弃过期快照。现有合并刷新门控会保留查询期间到达的刷新请求，避免嵌套 timer 消费后令工具栏停留在旧启用状态；外层查询结束后只补一次刷新。纯逻辑回归和完整 Release SettingsSmoke、App Release build 通过；COM 重入与可见工具栏状态未验收。详见[路线图](roadmap.md#2026-10-26shell-命令状态查询期间保留刷新请求)。
 
-> **Alt+Tab 期间保留文件操作焦点恢复（2026-10-27）：**窗口失焦不再销毁仍有效的文件操作焦点恢复请求；后台暂停 Shell 焦点读取和 `SetFocus`，恢复期限只累计窗口活动时间，切回后只在活动窗格、文件视图焦点意图、标签/路径及用户输入代数仍有效时继续最多 1.5 秒的恢复。状态 smoke、完整 Release SettingsSmoke、App Release 构建通过；没有使用剪贴板或可见 GUI，真实 Ctrl+C/V、Shift+Delete 与 Alt+Tab 时序仍待验收，文件操作焦点 P0 未关闭。详见[路线图](roadmap.md#2026-10-27alt-tab-时暂停文件操作焦点恢复期限)。
+> **Alt+Tab 与 Shell view 重新激活的文件操作焦点恢复（2026-10-27）：**窗口失焦不再销毁仍有效的恢复请求；后台暂停 Shell 焦点读取和 `SetFocus`，期限只累计窗口活动时间。另发现内容 HWND 与 focused item 即使看似正常，`IShellView` 仍可能未重新 UIActivate；每个文件操作恢复请求现只尝试一次 `UIActivate(SVUIA_ACTIVATE_FOCUS)`，已进入重命名、窗口失活或请求过期时跳过，后续轮询不重复。新状态 smoke、完整 Release SettingsSmoke 和 App Release build 通过；没有使用剪贴板或可见 GUI，真实 Ctrl+C/V、Shift+Delete、Alt+Tab 与多窗格方向键时序仍待验收，文件操作焦点 P0 未关闭。详见[路线图](roadmap.md#2026-10-27文件操作后重新激活-shell-视图候选) 与 [Alt+Tab 恢复记录](roadmap.md#2026-10-27alt-tab-时暂停文件操作焦点恢复期限)。
 
 > **按目标 PIDL readiness 节制刷新选区重试（2026-10-25）：**两次 20,000 项隔离 stock `IShellView` 样本中，`ItemCount` 已达到 20,000 后，4 个分散目标 PIDL 仍在随后约 17–20 ms 内才依次可由 `GetItemPosition` 定位。生产 deferred restore 现复用当前 Shell 选区代际内已成功定位的 PIDL，只探测未定位目标；`SelectionVersion` 变化清空缓存。选区完整恢复后只剩焦点重试，现跳过后续 readiness 扫描；该门控有 SettingsSmoke 与 App/HostProbe Release 编译验证，但未取得新的运行时延迟样本。readiness 不可用时保留旧行为，1.5 秒最终回退仍尝试恢复。完整 SettingsSmoke、App/HostProbe/NativeProbe Release 构建和隔离 NativeProbe 通过；没有运行 ExplorerBrowser 产品 HostProbe 或可见 GUI，故多窗格真实刷新/延迟收益未验证，自动刷新 P0 仍开放。详见[路线图](roadmap.md#2026-10-25按目标-pidl-可定位状态节制选区重试)。
 

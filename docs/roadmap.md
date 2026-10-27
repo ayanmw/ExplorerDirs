@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：文件操作后重新激活 Shell 视图候选
+
+- 用户曾反馈复制/粘贴后新文件似乎已获焦点，但方向键不工作，切出再切回应用后恢复。源码对照发现，焦点恢复器在内容 HWND 和项目焦点都报告正常时会跳过 `FocusView()`；而 `FocusView()` 会调用 `IShellView.UIActivate(SVUIA_ACTIVATE_FOCUS)`，窗口重新激活路径也会执行它。这与“项目焦点正确但 Shell 键盘路由未激活”的现象相符，仍是源码假设，尚无用户可见复现证据。
+- 每个文件操作恢复请求现会在窗口活动时尝试一次 Shell view activation，即使 HWND/项目焦点看似正常；请求过期、窗口失活或已进入原生命名编辑时不会激活，后续轮询也不重复。回归先按预期因新策略缺失而构建失败；完整 Release `SettingsSmoke` 和 App Release build 通过（0 警告、0 错误）。
+- 没有运行 ExplorerBrowser、使用剪贴板或操作可见窗口，因此 Ctrl+C/V、Shift+Delete 确认框、Alt+Tab 和多窗格方向键结果仍待可见复验；文件操作焦点 P0 未关闭。对照说明见 [shell-parity](shell-parity.md)。
+
 ## 2026-10-27：延长隔离四窗格恢复探针的专用执行预算
 
 - 追踪此前停点漂移后确认共同原因是 `PrivateDesktopShellProbe.Run()` 固定 25 秒等待：完整 session-restore 由四窗格创建、原生菜单命令、键盘/重命名路由和多轮文件操作组成，测试尚未完成便被内部 deadline 中止。不是某个 pane 固定的 Shell 调用死锁。
