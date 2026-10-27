@@ -189,3 +189,9 @@ ListView 的直接通知父级为 `SHELLDLL_DefView`，而列表子窗口创建�
 这提供了一个比替换整个 ExplorerBrowser 更窄的待验证接点：若当前 Windows/ExplorerBrowser 的 `SysListView32` 将逐项绘制通知发给已被子类化的父窗口，宿主理论上可以在调用 `DefSubclassProc` 前识别来自该 ListView 的 `NM_CUSTOMDRAW`，应用已解析的 Q-Dir 规则，并让其余通知继续由 Shell 默认处理。当前证据仅是源码中的窗口覆盖范围与消息分支；它**不证明**生产 DefView 会发送 `CDDS_ITEMPREPAINT`，也不证明 DirectUI/图标/平铺/内容视图会采用相同路径。
 
 按当前无可见窗口约束，本轮没有创建 ExplorerBrowser 宿主或合成/注入通知，没有修改产品代码。下一步应在获准的隔离宿主中只观察 `WM_NOTIFY` 的 `hwndFrom`、控件类和通知码，再确认是否出现逐项绘制阶段及回调 DC。若不存在稳定逐项通知，继续沿用隔离 `IShellView` 迁移门槛；若存在，也必须先覆盖八种视图、选择态、排序/分组、导航替换和无规则默认绘制，才评估产品接入。
+
+### 2026-10-28 隐藏 ExplorerBrowser 控件树快照
+
+运行现有 `ExplorerDirs.NativeProbe --color-capability`，在不可见父窗口中导航到仅含隔离文件的目录，并在菜单查询及再次导航后枚举视图子窗口。三阶段控件树一致：`ExplorerBrowserControl`、`SHELLDLL_DefView`、`DirectUIHWND`、两个 `CtrlNotifySink` 和两个 `ScrollBar`；没有 `SysListView32` 或 `SysHeader32`。探针报告 `parent-visible=False`、`foreground-unchanged=True`，未创建产品窗口，也未读取/修改用户文件。
+
+因此，针对当前这套 ExplorerBrowser/Windows 视图，依赖标准 ListView `NM_CUSTOMDRAW` 或 `SysHeader32` 的逐项颜色接点没有对应控件；探针也无法读取 ListView 专属颜色属性。此结果支持暂不向现有 `NativeShellTheme` 添加 ListView 着色代码，并把 Q-Dir 规则着色留在隔离 `IShellView` 架构评审中。控件树快照没有直接记录所有 `WM_NOTIFY`，也不能证明 DirectUI 不存在任何私有/未文档化绘制扩展；它只否定了“当前视图含标准 ListView，可直接挂 NM_CUSTOMDRAW”的假设。
