@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：刷新固定产品验收候选
+
+- 准备脚本补充筛选分组、隐藏窗格悬停与慢 IO 关闭清单，提交 5a6f3d2 后从干净源码执行 PrepareOnly；新候选身份、哈希、夹具及未运行证据见[本批记录](gui-acceptance-2026-10-27-current-source-prepared.md)。包含旧候选之后 11 批产品修复，仍使用 ExplorerBrowser，不包含 NativeProbe 宿主迁移。
+- Publish/脚本解析、版本/哈希/四窗格独立路径/10,000 文件夹具检查通过；没有候选进程、焦点或性能运行记录。全部 21 项仍待验收，不据准备成功关闭 P0。旧候选保留为历史，本批未更新 releases 日常版本。
+
 ## 2026-10-27：状态文件按同一句柄有界读取
 
 - ShellViewStateStore 原对路径 FileInfo.Length 检查后另用 ReadAllBytes，路径替换/增长可能令实际读取越过先前检查。现在单个 FileStream（Read + Delete sharing）取得长度、分配不超过 64 KiB、ReadExactly 并检查末尾；路径原子替换不改变已打开句柄。不会把检查后的新大文件直接全部读入。
