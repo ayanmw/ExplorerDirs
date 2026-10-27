@@ -1,5 +1,7 @@
 # Explorer Dirs
 
+最新主题修正版：[temp.76](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.76/app/ExplorerDirs.App.exe)。在“工具 → 选项 → 主题”选择跟随 Windows、固定浅色或固定深色；修复了系统深浅检测取反。当前系统深色下的实际检测/控制器/INI 恢复检查通过；原生 Shell 文件区完整深色仍未验收。见[temp.76 说明](docs/releases/preview-0.6.0-temp.76.md)。
+
 2026-10-27 已发布 `preview-0.6.0-temp.75`：[启动预览程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.75/app/ExplorerDirs.App.exe)。使用本版独立 profile，从 temp.74 复制会话、固定标签和紧凑布局配置。完整进度及近期/远期安排见[整体报告](docs/progress-2026-10-27.md)，版本差异见[temp.75 说明](docs/releases/preview-0.6.0-temp.75.md)。本包构建、配置/打包检查及哈希核对通过，未启动 GUI。
 
 temp.75 包含现代地址栏点击编辑、Shell 下载目录定位、窗口位置/大小/最大化状态记忆、新窗口跟随来源屏幕、主工具栏精简、跨窗格标签转移、多行标签与悬停切换、状态栏/递归统计，以及焦点、导航、配置保护和资源关闭修复。真实多屏/DPI、F2、文件操作后焦点和 Q-Dir 互操作仍待可见验收。

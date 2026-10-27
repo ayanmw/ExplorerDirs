@@ -1,5 +1,7 @@
 # 可使用版本
 
+最新主题修正版为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，独立 profile 来自 temp.75。修正 Windows Foreground 深浅检测取反，选项明确三态，详见[temp.76](../docs/releases/preview-0.6.0-temp.76.md)。未启动 GUI；应用主题与原生 Shell 文件区适配分开验收。下列 temp.75 保留为上一版累计功能说明。
+
 ## 最新临时预览包（2026-10-27）
 
 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.75\app\ExplorerDirs.App.exe`，独立 profile 从 temp.74 复制，三份 INI 哈希核对一致，源配置未改变。累计包含窗口位置记忆、工具栏精简、跨窗格/多行/悬停标签、地址编辑、状态栏/扫描和原生交互/配置保护修复。产品版本 `0.6.0-preview.temp.75+652d35e50b6bddf0cb2f60f78ee8ee9b393c4a07`；完整 SettingsSmoke、发布隔离检查、实际 publish 和 EXE/DLL 哈希核对通过。未启动 GUI，IShellView 原型未接入。详情见[temp.75 说明](../docs/releases/preview-0.6.0-temp.75.md)和[整体进度](../docs/progress-2026-10-27.md)。

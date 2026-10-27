@@ -11,3 +11,5 @@ temp.75 已有三态菜单与保存，但系统检测把浅色前景文字误判
 范围：应用自身 WPF 界面、已接入主题的弹窗和标题栏。仍使用 ExplorerBrowser；本批没有引入未公开 Shell 深色接口，不能保证原生文件列表、目录树、系统对话框和第三方菜单全部同步深色，也不代表逐项颜色原型已接入。
 
 本包使用从 temp.75 复制的独立 profile，不改旧版本配置，不自动启动程序。
+
+发布核对：版本 `0.6.0-preview.temp.76+1d4fbadb559ad22220ec68df42e60323d3ea44ab`；EXE SHA-256 `DA173D6E7EAA0C6485535198BA5E9A8CC1D2BAC8EA4C9B8F471FA8D586EF0ACA`；DLL SHA-256 `CFB6B30C0FF8BBB241C684E692886D4CEB64D2F654B21ED2FF3F66A6A974ECBF`，与包内 SHA256.txt 一致。完整 Release SettingsSmoke 与 publish 通过；profile 包含会话、位置、固定标签和界面偏好四份 INI，没有 Theme.ini 时默认跟随 Windows。程序未由本任务启动。
