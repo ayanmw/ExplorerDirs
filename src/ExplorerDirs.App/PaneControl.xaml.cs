@@ -1145,6 +1145,15 @@ public partial class PaneControl : UserControl
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
         state.Browser.Search(SearchBox.Text, state.SearchScopePath);
+        if (state.SearchRequestPending && Current == state && IsVisible && Window.GetWindow(this)?.IsActive == true &&
+            (SearchBox.IsKeyboardFocusWithin || SearchSubmitButton.IsKeyboardFocusWithin))
+        {
+            // Transfer the explicit submit to the file view now. Returning to an
+            // editor afterwards cancels that intent through the normal focus route;
+            // late search results must not reactivate it independently.
+            Activated?.Invoke(this, EventArgs.Empty);
+            FocusCurrentView();
+        }
     }
 
     private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearch();

@@ -101,7 +101,7 @@ public partial class MainWindow : Window
     private bool _mouseWheelFocusEnabled;
     private bool _initializing = true;
     private bool _closed;
-    private bool _fileViewFocusDesired;
+    private bool _fileViewFocusDesired = true;
     private bool _openingTerminal;
     private bool _importingQdr;
     private bool _exportingQdr;
@@ -389,7 +389,10 @@ public partial class MainWindow : Window
         }
         ApplyTreeDisplayMode();
         Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => ActivePane.FocusCurrentView()));
+            new Action(() =>
+            {
+                if (_fileViewFocusDesired && IsActive) ActivePane.FocusCurrentView();
+            }));
         _initializing = false;
         _saveTimer.Tick += (_, _) =>
         {
@@ -1402,8 +1405,12 @@ public partial class MainWindow : Window
         _lastFocusedPaneByLayout[_layout] = Array.IndexOf(_panes, ActivePane);
         _layout = LayoutPreset.Find(id).Id;
         BuildLayout();
+        _fileViewFocusDesired = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => ActivePane.FocusCurrentView()));
+            new Action(() =>
+            {
+                if (_fileViewFocusDesired && IsActive) ActivePane.FocusCurrentView();
+            }));
         ScheduleSave();
     }
 

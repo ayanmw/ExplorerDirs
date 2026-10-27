@@ -30,6 +30,7 @@ internal static class Program
         if (args is ["--pane-tab-copy-order"]) return PaneTabTransferProbe.Run(unhostedCopyOrder: true);
         if (args is ["--window-close-lifetime"]) return WindowCloseLifetimeProbe.Run();
         if (args is ["--address-editing"]) return AddressEditingProbe.Run();
+        if (args is ["--navigation-focus-requests"]) return NavigationFocusRequestProbe.Run();
         if (args is ["--shell-update-notification-smoke"])
             return ShellUpdateNotificationProbe.Run();
         if (args is ["--shell-change-registration-stress"])

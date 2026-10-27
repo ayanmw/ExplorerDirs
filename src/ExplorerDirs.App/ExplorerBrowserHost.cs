@@ -735,7 +735,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var target = FindContentFocusWindow();
         if (target == IntPtr.Zero) return false;
         Trace($"focus-view before={FocusClass()} target={target}");
-        _focusWhenReady = false;
+        // An explicit focus while navigation is pending can still target the old
+        // view. Keep that intent until the destination view has completed.
+        _focusWhenReady = _viewReadiness.Pending;
         var focused = GetFocus();
         if (focused != IntPtr.Zero && IsChild(_viewWindow, focused) &&
             WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase))
@@ -4153,9 +4155,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!_viewReadiness.IsCurrent(navigationVersion)) return;
                 if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
                 else StopDirectoryChangeMonitor();
-                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
-                    FocusView();
-                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
+                RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
@@ -4179,9 +4179,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!_viewReadiness.IsCurrent(navigationVersion) || _location.SearchUri != searchUri) return;
-                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
-                    FocusView();
-                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
+                RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
@@ -4259,6 +4257,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return null;
         try { return Marshal.PtrToStringUni(pointer); }
         finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
+    private void RestoreNavigationFocus(long navigationVersion)
+    {
+        if (!_viewReadiness.IsCurrent(navigationVersion)) return;
+        var requested = _focusWhenReady || _restoreFocusAfterNavigation;
+        // Retire this visit's intent before native activation can reenter. A
+        // hidden tab or a user who moved to another input must not leave stale
+        // intent for a later visit. Explicit tab/window activation requests focus anew.
+        _focusWhenReady = false;
+        _restoreFocusAfterNavigation = false;
+        if (requested && !IsRenameEditorFocused() && !IsColumnHeaderFocused())
+            RestoreContentFocusIfNeeded();
     }
 
     private void AttachCurrentViewWindow()
