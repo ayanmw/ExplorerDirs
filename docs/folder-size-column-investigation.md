@@ -148,9 +148,9 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 
 ### 2026-10-28：系统已知属性 schema 无窗口核验
 
-为形成后续 DefView 对照，本轮只扩展无窗口文件夹合同探针：通过 `PSGetPropertyDescription` 查询 `System.Document.ByteCount`（`{D5CDD502-2E9C-101B-9397-08002B2CF9AE},4`）。Windows SDK 10.0.26100.0 的 `propkey.h` 将其声明为 `VT_I4`；当前机器解析结果为 `S_OK`。同一探针中的私有测试属性仍返回 `TYPE_E_ELEMENTNOTFOUND`，而 `System.Size`、`System.DateCreated` 与 `System.Document.ByteCount` 均能解析。
+为形成后续 DefView 对照，本轮只扩展无窗口文件夹合同探针：通过 `PSGetPropertyDescription` 查询 `System.Document.ByteCount`（`{D5CDD502-2E9C-101B-9397-08002B2CF9AE},4`）。Windows SDK 10.0.26100.0 的 `propkey.h` 将其声明为 `VT_I4`；当前机器解析结果为 `S_OK`，`IPropertyDescription::GetPropertyType` 返回 `VT_I4`，`GetColumnState` 返回 `SHCOLSTATE_TYPE_INT`。同一探针中的私有测试属性仍返回 `TYPE_E_ELEMENTNOTFOUND`，而 `System.Size`、`System.DateCreated` 与 `System.Document.ByteCount` 均能解析。
 
-该结果只证明系统有此属性描述，不证明它可作为此文件夹视图列，也不证明 DefView 会读取适配器提供的该值。`VT_I4` 也不适合真实文件夹总大小。没有注册 schema、创建窗口或改动产品；NativeProbe Release 构建及 `--static-shell-column-folder-smoke` 通过，输出 `window-created=False`。如后续安排隔离 DefView 对照，需把这个属性仅用作“已知 schema”诊断控制，并与 64 位大小语义严格区分。
+隔离 adapter 现在另提供一个仅供实验的 `System.Document.ByteCount` 列，使用与 schema 一致的 `VT_I4` 值；无窗口合同已验证该列状态、键映射、显示文本、类型和数值比较。该结果证明适配器可以按系统 schema 契约提供一列，但仍不证明 DefView 会消费该值。`VT_I4` 也不适合真实文件夹总大小。没有注册 schema、创建窗口或改动产品；NativeProbe Release 构建、原生 adapter 构建及 `--static-shell-column-folder-smoke` 通过，输出 `window-created=False`。后续隔离 DefView 对照只能把它用作“已知 schema”诊断控制，并与产品 64 位大小语义严格区分。
 
 ### 2026-10-28 激活视图仍不触发逐项属性回调
 

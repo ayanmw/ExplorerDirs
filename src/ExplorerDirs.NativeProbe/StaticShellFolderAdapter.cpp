@@ -12,13 +12,15 @@
 namespace
 {
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
-    // filesystem PIDLs and Shell operations while adding one deterministic column.
+    // filesystem PIDLs and Shell operations while adding deterministic test columns.
     constexpr PROPERTYKEY kStaticSizeKey =
     { { 0xA38B883C, 0xFA8A, 0x4E1C, { 0x8B, 0x52, 0xC6, 0x05, 0xE5, 0xD0, 0x12, 0x34 } }, 1 };
     constexpr PROPERTYKEY kSizeKey =
     { { 0xB725F130, 0x47EF, 0x101A, { 0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC } }, 12 };
     constexpr PROPERTYKEY kDateCreatedKey =
     { { 0xB725F130, 0x47EF, 0x101A, { 0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC } }, 15 };
+    constexpr PROPERTYKEY kDocumentByteCountKey =
+    { { 0xD5CDD502, 0x2E9C, 0x101B, { 0x93, 0x97, 0x08, 0x00, 0x2B, 0x2C, 0xF9, 0xAE } }, 4 };
     constexpr UINT kColumnLimit = 64;
     volatile LONG g_staticColumnComparisons = 0;
     volatile LONG g_allComparisons = 0;
@@ -28,6 +30,9 @@ namespace
     volatile LONG g_standardSizeComparisons = 0;
     volatile LONG g_standardSizeDetailsOf = 0;
     volatile LONG g_customDetailsOf = 0;
+    volatile LONG g_documentByteCountComparisons = 0;
+    volatile LONG g_documentByteCountDetailsEx = 0;
+    volatile LONG g_documentByteCountDetailsOf = 0;
     volatile LONG g_propertyStoreQueryInterfaceRequests = 0;
     volatile LONG g_persistClassIdRequests = 0;
     volatile LONG g_persistRootRequests = 0;
@@ -212,8 +217,10 @@ namespace
             InterlockedExchange(&g_lastCompareColumn, LOWORD(column));
             const auto columnIndex = LOWORD(column);
             if (columnIndex == _columnCount + 1) return _inner->CompareIDs(15, left, right);
-            if (columnIndex != _columnCount && columnIndex != 1) return _inner->CompareIDs(column, left, right);
+            const bool isStaticNumeric = columnIndex == _columnCount || columnIndex == _columnCount + 2;
+            if (!isStaticNumeric && columnIndex != 1) return _inner->CompareIDs(column, left, right);
             if (columnIndex == 1) InterlockedIncrement(&g_standardSizeComparisons);
+            else if (columnIndex == _columnCount + 2) InterlockedIncrement(&g_documentByteCountComparisons);
             else InterlockedIncrement(&g_staticColumnComparisons);
             std::wstring leftName, rightName;
             if (!NameFromPidl(_inner, left, leftName) || !NameFromPidl(_inner, right, rightName)) return E_FAIL;
@@ -222,8 +229,7 @@ namespace
             const auto rightValue = ValueForName(rightName, rightFound);
             if (!leftFound || !rightFound)
             {
-                if (columnIndex != _columnCount) return E_FAIL; // Keep the standard-size control unchanged.
-                // Pending custom values are empty, not errors or fabricated zero-byte results.
+                // Pending diagnostic values are empty, not errors or fabricated zero-byte results.
                 if (!leftFound && !rightFound) return _inner->CompareIDs(0, left, right);
                 const short comparison = leftFound ? 1 : -1;
                 return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
@@ -257,23 +263,33 @@ namespace
         {
             if (column == _columnCount) { *state = SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
             if (column == _columnCount + 1) { *state = SHCOLSTATE_TYPE_DATE | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
+            if (column == _columnCount + 2) { *state = SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
             return column < _columnCount ? _inner->GetDefaultColumnState(column, state) : E_INVALIDARG;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* column, VARIANT* value) override
         {
-            if (!column || (*column != kStaticSizeKey && *column != kSizeKey)) return _inner->GetDetailsEx(item, column, value);
+            if (!column || (*column != kStaticSizeKey && *column != kSizeKey && *column != kDocumentByteCountKey)) return _inner->GetDetailsEx(item, column, value);
             if (*column == kSizeKey) InterlockedIncrement(&g_standardSizeDetailsEx);
+            else if (*column == kDocumentByteCountKey) InterlockedIncrement(&g_documentByteCountDetailsEx);
             else InterlockedIncrement(&g_customDetailsEx);
             if (!item) return E_INVALIDARG;
             std::wstring name;
             if (!NameFromPidl(_inner, item, name)) return E_FAIL;
             bool found = false;
             const auto number = ValueForName(name, found);
-            if (!found && *column == kSizeKey) return E_FAIL;
+            if (!found && (*column == kSizeKey || *column == kDocumentByteCountKey)) return E_FAIL;
             VariantInit(value);
             if (!found) return S_OK; // VT_EMPTY while the custom result is unavailable.
-            value->vt = VT_UI8;
-            value->ullVal = number;
+            if (*column == kDocumentByteCountKey)
+            {
+                value->vt = VT_I4;
+                value->lVal = static_cast<LONG>(number);
+            }
+            else
+            {
+                value->vt = VT_UI8;
+                value->ullVal = number;
+            }
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
@@ -290,6 +306,29 @@ namespace
                 details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(length * sizeof(wchar_t)));
                 if (!details->str.pOleStr) return E_OUTOFMEMORY;
                 StringCchCopyW(details->str.pOleStr, length, title);
+                return S_OK;
+            }
+            if (column == _columnCount + 2)
+            {
+                if (item) InterlockedIncrement(&g_documentByteCountDetailsOf);
+                details->fmt = LVCFMT_RIGHT;
+                details->cxChar = 18;
+                details->str.uType = STRRET_WSTR;
+                const wchar_t* text = L"Registered schema control";
+                std::wstring valueText;
+                if (item)
+                {
+                    std::wstring name;
+                    if (!NameFromPidl(_inner, item, name)) return E_FAIL;
+                    bool found = false;
+                    const auto number = ValueForName(name, found);
+                    valueText = found ? std::to_wstring(number) : L"";
+                    text = valueText.c_str();
+                }
+                const auto length = wcslen(text) + 1;
+                details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(length * sizeof(wchar_t)));
+                if (!details->str.pOleStr) return E_OUTOFMEMORY;
+                StringCchCopyW(details->str.pOleStr, length, text);
                 return S_OK;
             }
             if (column == 1 && item) InterlockedIncrement(&g_standardSizeDetailsOf);
@@ -339,6 +378,7 @@ namespace
             if (column < _columnCount) return _inner->MapColumnToSCID(column, id);
             if (column == _columnCount) *id = kStaticSizeKey;
             else if (column == _columnCount + 1) *id = kDateCreatedKey;
+            else if (column == _columnCount + 2) *id = kDocumentByteCountKey;
             else return E_INVALIDARG;
             return S_OK;
         }
@@ -391,6 +431,21 @@ extern "C" __declspec(dllexport) LONG WINAPI GetStandardSizeShellDetailsOfCount(
 extern "C" __declspec(dllexport) LONG WINAPI GetCustomShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_customDetailsOf, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellComparisonCount()
+{
+    return InterlockedCompareExchange(&g_documentByteCountComparisons, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsExCount()
+{
+    return InterlockedCompareExchange(&g_documentByteCountDetailsEx, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsOfCount()
+{
+    return InterlockedCompareExchange(&g_documentByteCountDetailsOf, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreQueryInterfaceRequestCount()

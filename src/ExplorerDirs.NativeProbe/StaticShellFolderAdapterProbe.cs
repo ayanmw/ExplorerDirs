@@ -138,6 +138,48 @@ internal static class StaticShellFolderAdapterProbe
                 Marshal.FreeCoTaskMem(sizeDetails);
             }
 
+            var documentColumn = columnIndex + 2;
+            var documentByteCountKey = new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 };
+            var documentKeyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
+            var documentVariant = Marshal.AllocCoTaskMem(24);
+            var documentDetails = Marshal.AllocCoTaskMem(shellDetailsSize);
+            try
+            {
+                Marshal.StructureToPtr(documentByteCountKey, documentKeyPointer, false);
+                Check(At<GetDefaultColumnState>(adapter, 16)(adapter, (uint)documentColumn, out var state));
+                if (state != 0x12) throw new Exception($"Unexpected registered-schema column state 0x{state:X}.");
+                Check(At<MapColumn>(adapter, 19)(adapter, (uint)documentColumn, documentKeyPointer));
+                var mappedKey = Marshal.PtrToStructure<ShellColumnManager.NativeKey>(documentKeyPointer);
+                if (mappedKey.FormatId != documentByteCountKey.FormatId || mappedKey.PropertyId != documentByteCountKey.PropertyId)
+                    throw new Exception("Registered-schema control column did not map to System.Document.ByteCount.");
+
+                Marshal.Copy(new byte[shellDetailsSize], 0, documentDetails, shellDetailsSize);
+                Check(At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)documentColumn, documentDetails));
+                if (ReadDetailsText(documentDetails) != "Registered schema control")
+                    throw new Exception("Registered-schema column title mismatch.");
+                foreach (var (name, expectedValue) in new[]
+                {
+                    ("two.bin", 2), ("ten.bin", 10), ("hundred.bin", 100), ("ten-copy.bin", 10)
+                })
+                {
+                    Marshal.Copy(new byte[shellDetailsSize], 0, documentDetails, shellDetailsSize);
+                    Check(At<GetDetailsOf>(adapter, 18)(adapter, items[name], (uint)documentColumn, documentDetails));
+                    if (ReadDetailsText(documentDetails) != expectedValue.ToString())
+                        throw new Exception($"Registered-schema display value mismatch for {name}.");
+                    Marshal.GetNativeVariantForObject(0, documentVariant);
+                    Check(At<GetDetailsEx>(adapter, 17)(adapter, items[name], documentKeyPointer, documentVariant));
+                    var value = Marshal.GetObjectForNativeVariant(documentVariant);
+                    if (value is not int number || number != expectedValue)
+                        throw new Exception($"Registered-schema value must be Int32 for {name}: {value}.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(documentDetails);
+                Marshal.FreeCoTaskMem(documentVariant);
+                Marshal.FreeCoTaskMem(documentKeyPointer);
+            }
+
             var compare = At<CompareIDs>(adapter, 7);
             CheckCompare(compare(adapter, 1, items["two.bin"], items["ten.bin"]), -1, "standard Size 2 before 10");
             CheckCompare(compare(adapter, 1, items["ten.bin"], items["hundred.bin"]), -1, "standard Size 10 before 100");
@@ -147,6 +189,10 @@ internal static class StaticShellFolderAdapterProbe
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["hundred.bin"]), -1, "10 before 100");
             CheckCompare(compare(adapter, columnIndex, items["ten.bin"], items["ten-copy.bin"]), 0, "equal values");
             CheckCompare(compare(adapter, columnIndex, items["hundred.bin"], items["two.bin"]), 1, "100 after 2");
+            CheckCompare(compare(adapter, documentColumn, items["two.bin"], items["ten.bin"]), -1, "registered-schema 2 before 10");
+            CheckCompare(compare(adapter, documentColumn, items["ten.bin"], items["hundred.bin"]), -1, "registered-schema 10 before 100");
+            CheckCompare(compare(adapter, documentColumn, items["ten.bin"], items["ten-copy.bin"]), 0, "registered-schema equal values");
+            CheckCompare(compare(adapter, documentColumn, items["hundred.bin"], items["two.bin"]), 1, "registered-schema 100 after 2");
 
             CheckCompare(compare(adapter, columnIndex, items["pending-a.bin"], items["two.bin"]), -1, "pending before computed");
             CheckCompare(compare(adapter, columnIndex, items["two.bin"], items["pending-a.bin"]), 1, "computed after pending");
@@ -169,14 +215,15 @@ internal static class StaticShellFolderAdapterProbe
             // The Windows SDK declares System.Document.ByteCount as VT_I4. Its
             // registered schema is a useful system-property control, but not a
             // suitable production size property (folder sizes exceed Int32).
-            var documentByteCountSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+            var documentByteCount = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
                 { FormatId = DocumentSummaryFormat, PropertyId = 4 });
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
-                $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; " +
-                $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCountSchema:X8}; " +
-                "document-byte-count-sdk-type=VT_I4; window-created=False");
+                $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
+                $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
+                $"document-byte-count-type=0x{documentByteCount.VariantType:X4}(hr=0x{documentByteCount.TypeHResult:X8}); " +
+                $"column-state=0x{documentByteCount.ColumnState:X8}(hr=0x{documentByteCount.ColumnStateHResult:X8}); window-created=False");
             return 0;
         }
         catch (Exception ex)
@@ -616,6 +663,20 @@ internal static class StaticShellFolderAdapterProbe
         return result;
     }
 
+    private static PropertyDescriptionEvidence GetPropertyDescriptionEvidence(ShellColumnManager.NativeKey key)
+    {
+        var interfaceId = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
+        var result = PSGetPropertyDescription(in key, in interfaceId, out var description);
+        if (result < 0 || description == 0) return new(result, 0, result, 0, result);
+        try
+        {
+            var typeResult = At<GetPropertyType>(description, 5)(description, out var variantType);
+            var columnStateResult = At<GetPropertyColumnState>(description, 12)(description, out var columnState);
+            return new(result, variantType, typeResult, columnState, columnStateResult);
+        }
+        finally { Marshal.Release(description); }
+    }
+
     private static void CheckCompare(int hr, short expected, string label)
     {
         if (hr < 0 || unchecked((short)(hr & 0xffff)) != expected)
@@ -642,6 +703,9 @@ internal static class StaticShellFolderAdapterProbe
             var index = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetLastShellColumnComparisonIndex"))();
             var detailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsExCount"))();
             var detailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetCustomShellDetailsOfCount"))();
+            var documentCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellComparisonCount"))();
+            var documentDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsExCount"))();
+            var documentDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsOfCount"))();
             var sizeDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsExCount"))();
             var sizeCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellComparisonCount"))();
             var sizeDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsOfCount"))();
@@ -651,8 +715,9 @@ internal static class StaticShellFolderAdapterProbe
             var propertyStoreUiObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreUiObjectRequestCount"))();
             var persistClass = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistClassRequestCount"))();
             var persistRoot = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistRootRequestCount"))();
-            return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; " +
-                $"GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
+            return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; " +
+                $"document-byte-count(CompareIDs/GetDetailsEx/GetDetailsOf)={documentCompare}/{documentDetailsEx}/{documentDetailsOf}; " +
+                $"GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom/size-items)={detailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
                 $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}";
         }
         finally { NativeLibrary.Free(module); }
@@ -666,6 +731,7 @@ internal static class StaticShellFolderAdapterProbe
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint ColumnState, int ColumnStateHResult);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask;
@@ -696,6 +762,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIDs(nint self, nint sortColumn, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyType(nint self, out ushort variantType);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint GetShellDetailsSizeNative();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumn(nint self, uint column, nint key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bind, nint name, nint eaten, out nint item, out uint attributes);
