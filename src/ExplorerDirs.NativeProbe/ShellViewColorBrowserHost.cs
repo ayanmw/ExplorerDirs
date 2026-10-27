@@ -111,6 +111,7 @@ public static class ShellViewColorBrowserHostSmoke
 
         VerifyBaseHostFrameStateRouting();
         VerifyOleInPlaceFrameSurface();
+        VerifyRetiredActiveReferences();
         VerifyNativeSharedMenuGroups();
         VerifyNativeMenuRollback();
         VerifyNativeSharedMenuInstallation();
@@ -136,6 +137,43 @@ public static class ShellViewColorBrowserHostSmoke
         CheckIndependentPaneNavigationHistories();
         CheckNavigationExceptionComBoundary();
     }
+
+    private static void VerifyRetiredActiveReferences()
+    {
+        var active = Marshal.GetComInterfaceForObject(new ActiveObjectInterfaceFixture(0),
+            typeof(IOleInPlaceActiveObjectProbe));
+        try
+        {
+            using var host = new StreamViewHost(0, []);
+            host.View = active; // Valid borrowed COM pointer, not a Shell view.
+            Check(host.SetActiveObject(active, 0) == 0, "the retirement fixture retains its active object");
+            host.Dispose();
+            var browser = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var frame = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeOleInPlaceFrame));
+            try
+            {
+                var query = GetComMethod<QueryActiveViewCallback>(browser, 15);
+                var hr = query(browser, out var returned);
+                if (returned != 0) Marshal.Release(returned);
+                Check(hr == unchecked((int)0x80004004) && returned == 0 && host.View == 0,
+                    "a retired COM host never AddRefs or exposes its borrowed active view");
+                var setActive = GetComMethod<SetActiveObjectCallback>(frame, 8);
+                Check(setActive(frame, active, 0) == unchecked((int)0x80004004) && host.ActiveObjectPointer == 0,
+                    "a retired COM host cannot acquire another active object");
+            }
+            finally { Marshal.Release(frame); Marshal.Release(browser); }
+
+            using var closing = new StreamViewHost(0, []);
+            closing.ActiveObjectHandler = (_, _) => { closing.Dispose(); return 0; };
+            Check(closing.SetActiveObject(active, 0) == unchecked((int)0x80004004) &&
+                closing.ActiveObjectPointer == 0,
+                "a callback that closes its host prevents the outer active-object acquisition");
+        }
+        finally { Marshal.Release(active); }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int QueryActiveViewCallback(nint self, out nint view);
 
     private static void VerifyPersistedSessionStream()
     {

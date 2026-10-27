@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：关闭宿主不返回或重新持有活动对象
+
+- 隔离 StreamViewHost Dispose 后仍保留借用 View 字段，QueryActiveShellView 可对旧指针 AddRef；SetActiveObject 也可在关闭后或 handler 内关闭后重新持有对象。现在关闭标记后清空借用 View，查询关闭宿主返回 E_ABORT/空指针，设置活动对象在 handler 前后检查关闭状态，避免新引用进入已退休宿主。
+- 使用有效假 COM 对象的 CCW IShellBrowser slot 15 回归先失败后通过；IOleInPlaceFrame slot 8 验证关闭后拒绝，受控 handler 关闭后外层也不持有对象。没有使用失效指针或创建 Shell view。NativeProbe Release build 零警告错误，完整颜色策略、菜单消息链与状态流 smoke 通过；真实 view 生命周期、回调重入与产品迁移仍待验收，release 未改。
+
 ## 2026-10-27：关闭原型宿主拒绝重新创建状态流
 
 - StreamViewHost 原没有退休状态，Dispose 后 GetViewStateStream 仍会创建流，写请求还能重新挂入 `_savedStream`。现在在清理前标记关闭，重复 Dispose 短路，关闭后的 read/write/readwrite 统一 E_ABORT、空指针，不增加成功请求计数。

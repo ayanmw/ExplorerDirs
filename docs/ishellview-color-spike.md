@@ -1158,3 +1158,8 @@ NativeProbe Release build 零警告错误，完整状态流 smoke（包括 sessi
 StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟到 GetViewStateStream 仍可创建 native stream，write 模式还会重新持有 `_savedStream`。现清理前标记关闭，重复 Dispose 短路，新的 read/write/readwrite 请求均返回 E_ABORT 与空输出指针，计数不增加。
 
 真实 CCW 的 IShellBrowser slot 12 回归先观察关闭后 read 请求仍成功，修正后覆盖三种模式；完整状态流（含跨进程）与颜色策略 smoke、NativeProbe Release build 通过，构建零警告错误。本次无 Shell view，不据此确认原生 SaveViewState/DestroyViewWindow 的清理顺序；调用方已持有的 IStream 仍按原有 COM 引用计数有效，不被强制撤销。产品 ExplorerBrowser 与 release 未改。
+### 2026-10-27 关闭后的活动视图和对象接口
+
+状态流关闭保护之后，继续核对 IShellBrowser QueryActiveShellView 与 IOleInPlaceFrame SetActiveObject：前者原在 Dispose 后仍 AddRef 借用 View，后者可重新持有 COM 对象，甚至 handler 已关闭宿主后外层仍继续持有。现退休时清空借用 View，关闭查询返回 E_ABORT/空输出，设置活动对象在 handler 前后检查退休。
+
+有效假 COM 对象配合 CCW slot 15/slot 8 回归先复现旧查询仍成功，修正后验证关闭拒绝及 handler 关闭后不持有。借用 View 清空不代表释放调用者自己的引用。NativeProbe Release build 零警告错误，完整颜色策略、菜单消息链、状态流 smoke 通过；无真实 Shell view，原生生命周期顺序及 WPF 产品迁移仍需单独验收。

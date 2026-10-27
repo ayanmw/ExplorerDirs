@@ -296,6 +296,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         if (_disposed) return;
         // Mark retirement before COM/menu cleanup can pump callbacks into us.
         _disposed = true;
+        View = 0; // Borrowed view pointers belong to the caller's native lifecycle.
         try
         {
             RevokeDropTarget();
@@ -554,7 +555,13 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         }
     }
     public int QueryActiveShellView(out nint view)
-    { view = View; if (view != 0) Marshal.AddRef(view); return view == 0 ? unchecked((int)0x80004005) : 0; }
+    {
+        view = 0;
+        if (_disposed) return unchecked((int)0x80004004);
+        view = View;
+        if (view != 0) Marshal.AddRef(view);
+        return view == 0 ? unchecked((int)0x80004005) : 0;
+    }
     public int OnViewWindowActive(nint view)
     {
         if (ViewWindowActiveHandler is not { } handler) return 0;
@@ -603,6 +610,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     public int SetActiveObject(nint activeObject, nint name)
     {
+        if (_disposed) return unchecked((int)0x80004004);
         var result = 0;
         try
         {
@@ -613,6 +621,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
             System.Diagnostics.Trace.WriteLine($"Shell active object: {ex.GetType().Name}");
             return unchecked((int)0x80004005);
         }
+        if (_disposed) return unchecked((int)0x80004004);
         if (result < 0) return result;
         if (activeObject != 0) Marshal.AddRef(activeObject);
         var previous = _activeObject;
