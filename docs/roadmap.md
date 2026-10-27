@@ -25,6 +25,12 @@
 - 新 smoke 覆盖半刻度不调用切换、累计完整一格只调用一次，并静态确认窗格事件接入该路由。接入前因路由方法缺失按预期构建失败；完整 Release `SettingsSmoke` 与 App Release build 通过，0 警告/错误。日志 `src/.state/view-style-wheel-chrome-settings.log`、`view-style-wheel-chrome-app.log`。
 - 未启动窗口或模拟物理滚轮；原生 HWND 与 WPF 表面的真实设备路由、滚动焦点和可见切换效果仍待集中 UI 验收。
 
+## 2026-10-28：WPF 与原生 Ctrl+滚轮共用余量
+
+- 复核上项后发现，原生 Shell HWND 与 WPF 窗格表面分别累加高精度滚轮余量；用户把鼠标跨过控件边界时，同一手势的半刻度可能分散在两个累加器而无法触发切换。原生路径回调给 PaneControl 的已完成刻度也不能再经过 WPF 累加，否则会重复累计。
+- 现在每个 ExplorerBrowserHost 持有唯一、按视图代际隔离的累加器；原生 HWND 与 WPF 窗格表面都写入它，原生路径完成整刻度后直接应用视图切换。SettingsSmoke 覆盖两路半刻度合并为整刻度，源码接线检查确认 WPF/原生共用入口且原生完成刻度不二次累计。Release SettingsSmoke、App Release build 通过，0 警告/错误；日志 `src/.state/view-style-wheel-shared-settings.log`、`view-style-wheel-shared-app.log`，`git diff --check` 通过。
+- 未启动窗口或模拟物理滚轮；真实跨控件滚动、焦点目标、可见绘制仍留待集中 UI 验收。普通滚轮和标签配置未改变。
+
 ## 2026-10-27：多窗口清单的超大未来版本保护
 
 - 复核重启链路时发现 WindowSessions.ini 的 FormatVersion 用 Int32 解析，2147483648 等未知未来版本溢出后被视为损坏格式，备份后仍允许 Create 覆盖清单。改为与其他便携配置一致的 BigInteger 版本解析，保留未知版本的只读保护，不改变窗口数或会话格式。

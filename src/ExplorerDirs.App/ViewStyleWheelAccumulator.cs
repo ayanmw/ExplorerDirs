@@ -27,13 +27,6 @@ internal sealed class ViewStyleWheelAccumulator
 
 internal static class ViewStyleWheelDispatch
 {
-    internal static bool TryApplyAccumulated(ViewStyleWheelAccumulator accumulator, int delta,
-        long targetGeneration, Func<int, bool> apply)
-    {
-        var notches = accumulator.Add(delta, targetGeneration);
-        return notches == 0 || apply(notches * 120);
-    }
-
     internal static int GetFallbackDelta(int completedNotches, bool viewStyleApplied, bool targetCurrent = true) =>
         viewStyleApplied || !targetCurrent ? 0 : completedNotches * 120;
 }

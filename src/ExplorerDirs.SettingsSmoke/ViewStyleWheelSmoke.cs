@@ -50,20 +50,9 @@ internal static class ViewStyleWheelSmoke
             navigated.Add(60, readiness.Generation) == 1,
             "partial wheel motion from a retired view is discarded after navigation");
 
-        var chromeWheel = new ViewStyleWheelAccumulator();
-        var appliedDelta = 0;
-        var applyCalls = 0;
-        bool Apply(int delta)
-        {
-            appliedDelta = delta;
-            applyCalls++;
-            return true;
-        }
-        Check(ViewStyleWheelDispatch.TryApplyAccumulated(chromeWheel, 60, 1, Apply) && applyCalls == 0,
-            "WPF chrome consumes a partial delta without switching the view");
-        Check(ViewStyleWheelDispatch.TryApplyAccumulated(chromeWheel, 60, 1, Apply) &&
-            applyCalls == 1 && appliedDelta == 120,
-            "WPF chrome switches once after one full accumulated notch");
+        var sharedWheel = new ViewStyleWheelAccumulator();
+        Check(sharedWheel.Add(60, 1) == 0 && sharedWheel.Add(60, 1) == 1,
+            "partial deltas from native and WPF surfaces complete one shared notch");
     }
 
     private static void Check(bool condition, string message)

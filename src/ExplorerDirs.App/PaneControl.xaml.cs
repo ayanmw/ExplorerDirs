@@ -75,7 +75,6 @@ public partial class PaneControl : UserControl
         public required PaneControl Owner { get; set; }
         public required TabItem Tab { get; init; }
         public required ExplorerBrowserHost Browser { get; init; }
-        public ViewStyleWheelAccumulator ChromeWheelAccumulator { get; } = new();
         // Shell confirms location before the queued pane notification updates
         // the chrome. Commands must not use a second, lagging directory model.
         public string Path => Browser.CurrentPath;
@@ -726,14 +725,15 @@ public partial class PaneControl : UserControl
     {
         var state = Current;
         if (state is null) return false;
-        return ViewStyleWheelDispatch.TryApplyAccumulated(state.ChromeWheelAccumulator, delta,
-            state.Browser.ViewGeneration, completedDelta =>
-            {
-                if (Current != state) return false;
-                var current = state.Browser.ReadViewStyle();
-                if (Current != state || current is not { } style) return false;
-                return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, completedDelta));
-            });
+        var notches = state.Browser.AccumulateCtrlWheel(delta);
+        return notches == 0 || ApplyCompletedViewStyleDelta(state, notches * 120);
+    }
+    private bool ApplyCompletedViewStyleDelta(TabState state, int delta)
+    {
+        if (Current != state) return false;
+        var current = state.Browser.ReadViewStyle();
+        if (Current != state || current is not { } style) return false;
+        return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, delta));
     }
     private void RootBorder_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -1653,7 +1653,7 @@ public partial class PaneControl : UserControl
         browser.ShortcutHandler = shortcut => shortcut == ExplorerShortcut.OpenSelectionInNewTab
             ? state.Owner.TryOpenSelectedFolderInNewTab()
             : state.Owner.ShortcutRequested?.Invoke(state.Owner, shortcut) == true;
-        browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.CycleViewStyle(style);
+        browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.ApplyCompletedViewStyleDelta(state, style);
         browser.MayRestoreFocus = () => state.Owner.Current == state && state.Owner.IsVisible &&
             state.Owner._treeHost?.HasNativeFocus() != true && state.Owner.MayRestoreFileFocus?.Invoke() == true;
         browser.MayContinueFileOperationFocusRestore = () => state.Owner.Current == state && state.Owner.IsVisible &&

@@ -10,17 +10,19 @@ internal static class ViewStyleWheelRoutingSmoke
         var repoRoot = FindRepoRoot();
         var paneMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml"));
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        var browserCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
 
         Check(paneMarkup.Contains("PreviewMouseWheel=\"RootBorder_PreviewMouseWheel\"", StringComparison.Ordinal),
             "pane WPF chrome routes preview wheel input");
         Check(paneCode.Contains("(Keyboard.Modifiers & ModifierKeys.Control) == 0", StringComparison.Ordinal) &&
               paneCode.Contains("CycleViewStyle(e.Delta)", StringComparison.Ordinal) &&
-              paneCode.Contains("ViewStyleWheelDispatch.TryApplyAccumulated(state.ChromeWheelAccumulator", StringComparison.Ordinal) &&
+              paneCode.Contains("state.Browser.AccumulateCtrlWheel(delta)", StringComparison.Ordinal) &&
               paneCode.Contains("e.Handled = true", StringComparison.Ordinal),
-            "Ctrl+wheel uses a per-tab accumulator and consumes only partial or successful changes");
-        Check(paneCode.Contains("browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.CycleViewStyle(style);",
+            "WPF chrome uses the browser's shared accumulator and consumes partial or successful changes");
+        Check(browserCode.Contains("_ctrlWheelAccumulator.Add(delta, _viewReadiness.Generation)", StringComparison.Ordinal) &&
+              paneCode.Contains("browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.ApplyCompletedViewStyleDelta(state, style);",
                 StringComparison.Ordinal),
-            "a delayed wheel callback from an inactive tab cannot change its active sibling");
+            "native view and WPF chrome share one accumulator without reaccumulating completed notches");
 
         Console.WriteLine("View style wheel routing smoke: PASS");
 
