@@ -35,7 +35,36 @@ internal static class DesktopWorkspaceShortcutSmoke
         thread.Start();
         thread.Join();
         if (failure is not null) throw new InvalidOperationException("Desktop workspace shortcut smoke failed.", failure);
-        Console.WriteLine("Desktop workspace shortcut smoke: PASS");
+        var backgroundLink = Path.Combine(root, "Background Workspace.lnk");
+        var backgroundQdr = Path.Combine(root, "background-workspace.qdr");
+        const string backgroundText = "Q-Dir Version=12.79\nDir1=C:\\background\n";
+        Task.Run(() => DesktopWorkspaceShortcut.CreateWithWorkspace(backgroundLink,
+            @"C:\ExplorerDirs.App.exe", null, backgroundQdr, root, backgroundText)).GetAwaiter().GetResult();
+        Require(QdrImporter.ReadText(backgroundQdr) == backgroundText &&
+                DesktopWorkspaceShortcut.ReadTargetAndArguments(backgroundLink).Arguments == '"' + backgroundQdr + '"',
+            "ThreadPool worker writes a workspace and a matching native shortcut without a window");
+        var originalLink = File.ReadAllBytes(backgroundLink);
+        var failedQdr = Path.Combine(root, "failed-shortcut-workspace.qdr");
+        var refused = false;
+        try
+        {
+            Task.Run(() => DesktopWorkspaceShortcut.CreateWithWorkspace(backgroundLink,
+                @"C:\ExplorerDirs.App.exe", null, failedQdr, root, backgroundText)).GetAwaiter().GetResult();
+        }
+        catch (IOException) { refused = true; }
+        Require(refused && !File.Exists(failedQdr) && File.ReadAllBytes(backgroundLink).SequenceEqual(originalLink),
+            "failed shortcut publication removes only its new workspace and preserves the existing shortcut");
+        var existingText = QdrImporter.ReadText(backgroundQdr);
+        refused = false;
+        try
+        {
+            Task.Run(() => DesktopWorkspaceShortcut.CreateWithWorkspace(Path.Combine(root, "must-not-exist.lnk"),
+                @"C:\ExplorerDirs.App.exe", null, backgroundQdr, root, "different")).GetAwaiter().GetResult();
+        }
+        catch (IOException) { refused = true; }
+        Require(refused && QdrImporter.ReadText(backgroundQdr) == existingText &&
+                !File.Exists(Path.Combine(root, "must-not-exist.lnk")),
+            "an existing workspace conflict is preserved and never publishes a shortcut");        Console.WriteLine("Desktop workspace shortcut smoke: PASS");
     }
 
     private static void Require(bool condition, string message)

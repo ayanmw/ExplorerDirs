@@ -47,3 +47,12 @@ ExportQdrAsync 已通过 WindowBackgroundOperation 的静态 state-only 委托�
 实际 ThreadPool 后台准备回归：真实百分号目录在四窗格基础字段中保持身份，无扩展也能正确导入；不存在的百分号目录报告一个不同失败路径，四个标签和扩展全部保留。普通离线/网络假路径无 `%` 的输出与原 Render 逐字相同。完整 Release SettingsSmoke 与 App Release build 通过，零警告错误；日志 src/.state/qdr-prepare-{green,final,build}.log。
 
 范围限制：普通“导出 .qdr”及其保存工作区入口已接入；“保存到桌面”的快捷方式生成及导入前自动备份仍使用原纯 Render。后两处需要各自的后台/失败语义，不将普通导出完成当作三个入口全部完成。UI 进度、失败确认、关闭时行为和 Q-Dir 独立读取仍待集中验收。本修复不包含在固定 141624 候选或 temp.76 中。
+### 桌面工作区入口：后台准备及写入生命周期
+
+保存桌面工作区现在使用与普通导出相同的静态状态快照后台 Prepare 和兼容性确认；准备与文件发布期间共用导出 busy gate，不把窗口或对话框传入工作线程。只有确认后的路径/应用参数/文本进入静态后台委托。
+
+DesktopWorkspaceShortcut.CreateWithWorkspace 在同一个工作线程保存新的 QDR 并创建 .lnk；后一步失败时由该工作线程删除它刚写入的 QDR。QDR 保存冲突发生在清理 try 之前，不会删除已存在的配置。UI 关闭仅取消等待、不清理后台仍在写的文件，迟到成功/失败不更新关闭窗口，沿用 WindowBackgroundOperation 的异常观察。快捷方式发布仍沿用既有不覆盖现存 .lnk 的行为；本轮不改变覆盖语义。
+
+真实 ThreadPool 回归创建并读回 QDR/.lnk 配对；目标 .lnk 已存在时发布失败，原快捷方式字节保留，新 QDR 清理；目标 QDR 已存在时保留其内容且不发布新 .lnk。完整 Release SettingsSmoke 通过，App Release build 零警告错误，日志 src/.state/qdr-desktop-{worker,final,build}.log。测试只操作临时目录、读取快捷方式目标，不启动快捷方式或应用窗口。
+
+剩余入口是导入前自动备份；仍需处理等待期间会话变化及备份之后的追加原子边界。普通导出/桌面项的实际确认、关闭时 UI 行为及 Q-Dir 读取仍待集中验收。固定 UI 候选和 temp.76 不变。

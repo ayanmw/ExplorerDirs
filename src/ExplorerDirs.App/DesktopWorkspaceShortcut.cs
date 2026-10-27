@@ -7,6 +7,19 @@ namespace ExplorerDirs.App;
 
 internal static class DesktopWorkspaceShortcut
 {
+    internal static void CreateWithWorkspace(string shortcutPath, string executablePath, string? assemblyPath,
+        string qdrPath, string workingDirectory, string text)
+    {
+        QdrExporter.Save(qdrPath, expected: null, text);
+        try { Create(shortcutPath, executablePath, assemblyPath, qdrPath, workingDirectory); }
+        catch
+        {
+            // Keep cleanup on the same worker that completed the write; UI cancellation cannot race it.
+            try { File.Delete(qdrPath); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
+    }
     internal static void Create(string shortcutPath, string executablePath, string? assemblyPath,
         string qdrPath, string workingDirectory)
     {

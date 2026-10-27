@@ -2450,8 +2450,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SaveWorkspaceToDesktop_Click(object sender, RoutedEventArgs e)
+    private async void SaveWorkspaceToDesktop_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed || _importingQdr || _exportingQdr) return;
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
@@ -2461,44 +2462,60 @@ public partial class MainWindow : Window
             AddExtension = true,
             OverwritePrompt = true,
             InitialDirectory = desktop,
-            FileName = "Explorer Dirs 工作区.lnk"
+            FileName = "ExplorerDirs 工作区.lnk"
         };
         if (dialog.ShowDialog(this) != true) return;
-
-        string? qdrPath = null;
+        _exportingQdr = true;
+        ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = false;
         try
         {
-            var snapshot = SnapshotSession();
-            var workspaceDirectory = WorkspaceCatalog.DirectoryFor(_sessionStore.Path);
-            Directory.CreateDirectory(workspaceDirectory);
-            qdrPath = Path.Combine(workspaceDirectory, $"Desktop-{Guid.NewGuid():N}.qdr");
-            var text = QdrExporter.Render(snapshot,
-                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
-                SnapshotLayoutProportions(), _treeWidths);
-            QdrExporter.Save(qdrPath, expected: null, text);
-
+            var document = await WindowBackgroundOperation.RunAsync((Session: SnapshotSession(),
+                Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                _windowOperationStop.Token);
+            if (!ConfirmQdrCompatibility(document)) return;
+            var qdrPath = Path.Combine(WorkspaceCatalog.DirectoryFor(_sessionStore.Path), $"Desktop-{Guid.NewGuid():N}.qdr");
             var executable = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
             var isDotnetHost = Path.GetFileNameWithoutExtension(executable)
                 .Equals("dotnet", StringComparison.OrdinalIgnoreCase);
-            DesktopWorkspaceShortcut.Create(dialog.FileName, executable,
-                isDotnetHost ? Environment.GetCommandLineArgs()[0] : null,
-                qdrPath, AppContext.BaseDirectory);
+            await WindowBackgroundOperation.RunAsync((Shortcut: dialog.FileName, Executable: executable,
+                Assembly: isDotnetHost ? Environment.GetCommandLineArgs()[0] : null, Qdr: qdrPath,
+                WorkingDirectory: AppContext.BaseDirectory, Text: document.Text),
+                static state =>
+                {
+                    DesktopWorkspaceShortcut.CreateWithWorkspace(state.Shortcut, state.Executable,
+                        state.Assembly, state.Qdr, state.WorkingDirectory, state.Text);
+                    return true;
+                }, _windowOperationStop.Token);
+            if (_closed) return;
             EnvironmentStatus.Text = $"已创建桌面工作区项；状态文件保存在 {Path.GetFileName(qdrPath)}。";
         }
         catch (Exception ex)
         {
-            if (qdrPath is not null)
-            {
-                try { File.Delete(qdrPath); }
-                catch (Exception cleanupException) when (cleanupException is IOException or UnauthorizedAccessException) { }
-            }
+            if (_closed) return;
             EnvironmentStatus.Text = $"创建桌面工作区项失败：{ex.Message}";
             if (IsActive)
                 MessageBox.Show(this, EnvironmentStatus.Text, "创建桌面工作区项失败",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        finally
+        {
+            _exportingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
     }
 
+    private bool ConfirmQdrCompatibility(QdrExportDocument document)
+    {
+        if (_closed) return false;
+        if (document.UnencodedLocationCount == 0) return true;
+        var warning = $"{document.UnencodedLocationCount} 个含百分号的目录未能取得 Shell 编码身份（可能已离线）。\n\n" +
+            "全部标签仍会保留，但 Q-Dir 读取文本路径时可能展开同名环境变量。本程序扩展保留原路径。\n\n继续导出？";
+        EnvironmentStatus.Text = warning;
+        return IsActive && MessageBox.Show(this, warning, "QDR 路径兼容性提示",
+            MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
+    }
     private async void ExportQdr_Click(object sender, RoutedEventArgs e) => await ExportQdrAsync(false);
 
     private async void ExportFileView_Click(object sender, RoutedEventArgs e)
@@ -2669,15 +2686,7 @@ public partial class MainWindow : Window
                 static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
                 _windowOperationStop.Token);
             if (_closed) return;
-            if (document.UnencodedLocationCount > 0)
-            {
-                var warning = $"{document.UnencodedLocationCount} 个含百分号的目录未能取得 Shell 编码身份（可能已离线）。\n\n" +
-                    "全部标签仍会保留，但 Q-Dir 读取文本路径时可能展开同名环境变量。本程序扩展保留原路径。\n\n继续导出？";
-                EnvironmentStatus.Text = warning;
-                if (!IsActive || MessageBox.Show(this, warning, "QDR 路径兼容性提示",
-                        MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK)
-                    return;
-            }
+            if (!ConfirmQdrCompatibility(document)) return;
             var text = document.Text;
             await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Expected: expected, Text: text),
                 static state => { QdrExporter.Save(state.Path, state.Expected, state.Text); return true; },
