@@ -1101,3 +1101,9 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 扩展专用 smoke：用普通隐藏 Win32 frame 与 pane、六组 synthetic HMENU、真实 OLE menu descriptor 和 `ShellMenuFrameCoordinator` subclass；发送合成 `WM_ENTERMENULOOP`、嵌套 `WM_MENUSELECT`、`WM_COMMAND`，再从消息队列分派 coordinator 实际投递的延迟消息。File 与 View 复用合法范围命令 ID `0x7123`，分别由来源菜单路由到隐藏假 pane HWND，并分别记录 group 0/group 2。此验证覆盖 subclass 收件、来源状态、排队、PostMessage 及最终 HWND 送达，未模拟系统菜单跟踪，也未创建 Shell view。
 
 随后把同一 coordinator smoke 扩展到按位置通知的 `WM_MENUCOMMAND`：File 与 View 的重复 ID `0x7123` 分别按各自 `HMENU` 派发，Object 组的同 ID 则不投递命令。再连续提交 File 与 View 两个 `WM_COMMAND`，在消息泵派发前改变当前选中来源；FIFO 两次延迟派发仍分别保留 File、View 的来源组。追加“命令排队后停用 pane，再处理延迟消息”场景；已退休菜单的命令不会到达旧 view HWND。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。它补足 synthetic 消息链的集成证据；真实 OLE/DefView 模态菜单实际消息次序、命令 ID、接收 HWND 与用户可见行为仍未验证，迁移门槛不关闭。
+
+### 2026-10-27 四窗格恢复探针停滞阶段追踪
+
+为区分全套恢复探针中偶发超时的具体边界，增加菜单选择、四 pane 菜单激活/命令、文件操作和各 pane 计数等待日志；计数等待可选记录 WinForms message filter 看到的消息号、HWND 和窗口类。NativeProbe Release 构建通过（0 警告、0 错误），Private Desktop watchdog 多轮退出码 124。停滞点并不固定：样本曾停在菜单激活前后、pane 菜单命令、复制/重命名/删除，以及删除后的消息泵/其它窗格计数等待。`20261027-083314-807898ed` 的删除主视图到第 5 次轮询后匹配，Pane 1 收敛后转到 Pane 2 等待；`20261027-083437-2c3cd84f` 使用 120 秒预算，推进至 `file-delete-start` 后仍超时，尚无 `file-delete-performed`。Private Desktop 前台窗口保持不变。
+
+这些分布式停滞日志不能确定共同根因，也不能证明是固定 Shell 命令、文件操作或 `Pump` 消息派发失败；目前没有加入规避逻辑或延长产品超时。后续需用可取得原生线程栈的手段捕获一次真实停滞，之后才能定位 COM 调用、DefView 消息处理或测试夹具生命周期。完整四窗格 Shell 宿主迁移仍未过可靠性门槛，产品 ExplorerBrowser 未改。

@@ -294,8 +294,10 @@ internal static class ShellViewColorSpike
         var expectedModes = new uint[] { 4, 3, 1, 6 };
         AssertPaneModes(allViews, expectedModes, "four-pane setup");
         Console.WriteLine("session-restore-consumer-stage: four-panes-ready");
+        Console.WriteLine("session-restore-consumer-stage: selection-menu-check-start");
         var selectionMenus = VerifyFourPaneSelectionMenus(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews);
+        Console.WriteLine("session-restore-consumer-stage: selection-menu-check-complete");
         var menuRouting = VerifyFourPaneMenuActivation(
             new[] { restoredView, view, pane3.View, pane4.View }, allViews, allHosts, expectedModes, containerParent,
             menuCoordinator);
@@ -374,6 +376,7 @@ internal static class ShellViewColorSpike
         IReadOnlyList<uint> expectedModes, nint menuFrameWindow,
         ShellMenuFrameCoordinator menuCoordinator)
     {
+        Console.WriteLine("session-restore-consumer-stage: menu-activation-check-start");
         if (views.Count != 4 || folderViews.Count != 4 || hosts.Count != 4 || expectedModes.Count != 4)
             throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
         var foreground = GetForegroundWindow();
@@ -395,6 +398,7 @@ internal static class ShellViewColorSpike
         Pump(250);
         for (var index = 0; index < views.Count; index++)
         {
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-activate-start");
             var menuBeingReplaced = GetMenu(menuFrameWindow);
             Check(At<ActivateView>(views[index], 7)(views[index], 2)); // SVUIA_ACTIVATE_FOCUS.
             Pump(250);
@@ -418,6 +422,7 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Pane {index + 1} did not install the merged Shell and app menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; custom-menu={customMenuPresent}; trace=[{string.Join(';', current.MenuTrace)}].");
             if (index > 0 && hosts[index - 1].OwnsAttachedCustomMenuGroup)
                 throw new InvalidOperationException($"The previous pane retained its app-owned custom menu group after pane {index + 1} became active; previous-menu=0x{menuBeingReplaced:X}; previous-host=[{string.Join(';', hosts[index - 1].MenuTrace)}].");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-activated");
             var commandCountsBefore = hosts.Select(host => host.ApplicationMenuCommandCount).ToArray();
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)StreamViewHost.ProbeApplicationCommandId, 0);
             if (hosts.Select((host, hostIndex) => (host, hostIndex))
@@ -425,6 +430,7 @@ internal static class ShellViewColorSpike
                 current.ApplicationMenuCommandCount != commandCountsBefore[index] + 1)
                 throw new InvalidOperationException($"The merged app menu command did not dispatch only to active pane {index + 1}: before={string.Join(',', commandCountsBefore)}; after={string.Join(',', hosts.Select(host => host.ApplicationMenuCommandCount))}.");
 
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-details-start");
             var detailsCommandId = FindShellViewCommandId(GetSubMenu(installedMenu, 2), "详细信息", "Details");
             var backgroundVerbDetailsId = FindBackgroundVerbCommandId(views[index], "viewlogicaldetails", 0x7000);
             Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], 2, 16)); // FVM_SMALLICON.
@@ -441,31 +447,38 @@ internal static class ShellViewColorSpike
                 if (siblingMode != expectedModes[siblingIndex])
                     throw new InvalidOperationException($"The merged Shell Details command for pane {index + 1} changed sibling pane {siblingIndex + 1}: mode={siblingMode}; expected={expectedModes[siblingIndex]}.");
             }
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-details-verified");
             Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], expectedModes[index],
                 expectedModes[index] == 1 ? 48 : expectedModes[index] == 3 ? 16 : -1));
             Pump(150);
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-descending-start");
             var viewMenu = GetSubMenu(installedMenu, 2);
             var sortDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递减");
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortDescendingId, 0);
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, -1, 1, nameKey, typeKey, "Sort Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-descending-verified");
             viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
             var sortAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递增");
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortAscendingId, 0);
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Sort Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-ascending-verified");
             viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
             var groupDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递减");
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupDescendingId, 0);
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, 1, 0, nameKey, typeKey, "Group Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-group-descending-verified");
             viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
             var groupAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递增");
             _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupAscendingId, 0);
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Group Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-group-ascending-verified");
             var selectAllCommandId = FindShellViewCommandId(GetSubMenu(GetMenu(menuFrameWindow), 1), "全选", "Select All");
             var editSelectAll = VerifyEditSelectAllOnFrame(menuFrameWindow, folderViews, index, selectAllCommandId);
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-verified");
             shellMenuCommands.Add($"pane{index + 1}:details=0x{detailsCommandId:X4}/context=0x{backgroundVerbDetailsId:X4}/same={detailsCommandId == backgroundVerbDetailsId},sort={sortDescendingId:X4}/{sortAscendingId:X4},group={groupDescendingId:X4}/{groupAscendingId:X4}");
             shellMenuCommands[^1] += $",edit-select-all={editSelectAll}";
             activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
@@ -594,6 +607,7 @@ internal static class ShellViewColorSpike
         IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, nint menuOwner,
         SortColumn expectedOriginalSort)
     {
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-start");
         if (views.Count != 4 || folderViews.Count != 4 || expectedModes.Count != 4)
             throw new ArgumentException("Menu command routing probe requires exactly four Shell panes.");
         var foreground = GetForegroundWindow();
@@ -608,10 +622,13 @@ internal static class ShellViewColorSpike
             var groupKey = typeKey;
             Check(At<SetGroupBy>(folderView, 17)(folderView, ref groupKey, 1));
         }
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-baseline-set");
         Pump(300);
         AssertSortAndGroupDirections(-1, 1, 1, "menu test baseline");
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-baseline-verified");
         for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
         {
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-start");
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
             Pump(150);
             Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var listMode, out _));
@@ -619,6 +636,7 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Pane {targetIndex + 1} could not enter List before its Shell menu command.");
             AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "before");
 
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "viewlogicaldetails");
             Pump(250);
             Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var commandMode, out _));
@@ -626,18 +644,24 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"The Shell Details menu command did not affect pane {targetIndex + 1}: mode={commandMode}.");
             AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "after");
             AssertSortAndGroupDirections(-1, 1, 1, $"pane {targetIndex + 1} Details");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortdescending");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, -1, 1, $"pane {targetIndex + 1} Sort Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortascending");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Sort Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupdescending");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 0, $"pane {targetIndex + 1} Group Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-ascending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupascending");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Group Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-group-verified");
             Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex],
                 expectedModes[targetIndex], expectedModes[targetIndex] == 1 ? 48 : expectedModes[targetIndex] == 3 ? 16 : -1));
             Pump(150);
@@ -936,6 +960,7 @@ internal static class ShellViewColorSpike
         var verified = new List<string>(views.Count);
         for (var index = 0; index < views.Count; index++)
         {
+            Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-start");
             const uint svgIoAllView = 2;
             Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], svgIoAllView, out var itemCount));
             if (itemCount == 0) throw new InvalidOperationException($"Pane {index + 1} has no item for its selection menu probe.");
@@ -952,13 +977,16 @@ internal static class ShellViewColorSpike
                         throw new InvalidOperationException($"Selecting pane {index + 1} leaked selection into pane {pane + 1}: expected={expectedSelection}, observed={selectedCount}.");
                 }
                 var contextMenuId = ContextMenuId;
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-get-context-start");
                 Check(At<GetItemObject>(views[index], 15)(views[index], 1, ref contextMenuId, out contextMenu)); // SVGIO_SELECTION.
                 if (contextMenu == 0)
                     throw new InvalidOperationException($"Pane {index + 1} did not provide a selected-item IContextMenu.");
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-query-start");
                 var commands = QueryMenuCommands(contextMenu, out popup, out _);
                 if (!commands.Any(command => command.Verb.Equals("copy", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidOperationException($"Pane {index + 1} selected-item menu did not expose the standard copy command.");
                 verified.Add($"pane{index + 1}:copy");
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-verified");
             }
             finally
             {
@@ -1400,7 +1428,8 @@ internal static class ShellViewColorSpike
             for (var index = 0; index < folderViews.Count; index++)
             {
                 Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-start");
-                var count = WaitForShellViewItemCount(folderViews[index], expectedCount);
+                var count = WaitForShellViewItemCount(folderViews[index], expectedCount,
+                    diagnosticLabel: $"file-{operation}-pane{index + 1}");
                 Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-result={count}");
                 if (count != expectedCount)
                     throw new IOException($"Pane {index + 1} did not converge after {operation}: expected={expectedCount}, observed={count}.");
@@ -2143,10 +2172,35 @@ internal static class ShellViewColorSpike
         }
     }
 
-    private static void Pump(int milliseconds = 350)
+    private static void Pump(int milliseconds = 350, string? diagnosticLabel = null)
     {
+        var messageFilter = diagnosticLabel is null ? null : new PumpMessageTraceFilter(diagnosticLabel);
+        if (messageFilter is not null) System.Windows.Forms.Application.AddMessageFilter(messageFilter);
         var until = Environment.TickCount64 + milliseconds;
-        while (Environment.TickCount64 < until) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(10); }
+        try
+        {
+            while (Environment.TickCount64 < until)
+            {
+                System.Windows.Forms.Application.DoEvents();
+                Thread.Sleep(10);
+            }
+        }
+        finally
+        {
+            if (messageFilter is not null) System.Windows.Forms.Application.RemoveMessageFilter(messageFilter);
+        }
+    }
+
+    private sealed class PumpMessageTraceFilter(string label) : System.Windows.Forms.IMessageFilter
+    {
+        private int _messages;
+
+        public bool PreFilterMessage(ref System.Windows.Forms.Message message)
+        {
+            if (_messages++ < 128)
+                Console.WriteLine($"session-restore-consumer-stage: {label}; pump-message=0x{message.Msg:X4}; hwnd=0x{message.HWnd:X}; class={WindowClassName(message.HWnd)}");
+            return false;
+        }
     }
 
     private static (int ExitCode, string Output) RunSessionRestoreConsumerProcess(
@@ -3356,7 +3410,7 @@ internal static class ShellViewColorSpike
         {
             attempt++;
             TraceWaitPhase("pump-start");
-            Pump(100);
+            Pump(100, diagnosticLabel);
             TraceWaitPhase($"item-count-start; attempt={attempt}");
             Check(At<ItemCount>(folderView, 7)(folderView, SvgIoAllView, out observedCount));
             if (observedCount != expectedCount) continue;
@@ -3437,15 +3491,24 @@ internal static class ShellViewColorSpike
         return result < 0 ? null : count;
     }
 
-    private static int WaitForShellViewItemCount(nint folderView, int expectedCount, int timeoutMilliseconds = 5000)
+    private static int WaitForShellViewItemCount(nint folderView, int expectedCount,
+        int timeoutMilliseconds = 5000, string? diagnosticLabel = null)
     {
         // DefView enumeration can finish after CreateViewWindow and the first message pump.
         var deadline = Environment.TickCount64 + timeoutMilliseconds;
         var observedCount = -1;
+        var attempt = 0;
         while (Environment.TickCount64 < deadline)
         {
-            Pump(50);
+            attempt++;
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; pump-start; attempt={attempt}");
+            Pump(50, diagnosticLabel);
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; item-count-start; attempt={attempt}");
             Check(At<ItemCount>(folderView, 7)(folderView, 2, out observedCount));
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; item-count={observedCount}; attempt={attempt}");
             if (observedCount == expectedCount) return observedCount;
         }
         throw new Exception($"The isolated Shell fixture did not finish initial enumeration: expected={expectedCount}, observed={observedCount}.");
