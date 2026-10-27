@@ -8,10 +8,10 @@ namespace ExplorerDirs.App;
 internal static class DesktopWorkspaceShortcut
 {
     internal static void CreateWithWorkspace(string shortcutPath, string executablePath, string? assemblyPath,
-        string qdrPath, string workingDirectory, string text)
+        string qdrPath, string workingDirectory, string text, byte[]? expectedShortcut = null)
     {
         QdrExporter.Save(qdrPath, expected: null, text);
-        try { Create(shortcutPath, executablePath, assemblyPath, qdrPath, workingDirectory); }
+        try { Create(shortcutPath, executablePath, assemblyPath, qdrPath, workingDirectory, expectedShortcut); }
         catch
         {
             // Keep cleanup on the same worker that completed the write; UI cancellation cannot race it.
@@ -20,8 +20,9 @@ internal static class DesktopWorkspaceShortcut
             throw;
         }
     }
+
     internal static void Create(string shortcutPath, string executablePath, string? assemblyPath,
-        string qdrPath, string workingDirectory)
+        string qdrPath, string workingDirectory, byte[]? expectedShortcut = null)
     {
         var fullShortcut = Path.GetFullPath(shortcutPath);
         var fullExecutable = Path.GetFullPath(executablePath);
@@ -52,7 +53,7 @@ internal static class DesktopWorkspaceShortcut
             link.SetWorkingDirectory(fullWorkingDirectory);
             link.SetDescription("Explorer Dirs · 打开已保存的多窗格工作区");
             ((IPersistFile)link).Save(temporary, false);
-            File.Move(temporary, fullShortcut);
+            Publish(temporary, fullShortcut, expectedShortcut);
         }
         finally
         {
@@ -62,6 +63,23 @@ internal static class DesktopWorkspaceShortcut
         }
     }
 
+    private static void Publish(string temporary, string target, byte[]? expected)
+    {
+        using var mutex = new Mutex(false, PortableIniWriter.MutexName(target));
+        var acquired = false;
+        try
+        {
+            try { acquired = mutex.WaitOne(TimeSpan.FromMilliseconds(500)); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired) throw new IOException("快捷方式正由其他实例写入，请稍后重试。");
+            var current = File.Exists(target) ? File.ReadAllBytes(target) : null;
+            // Overwrite permission belongs to the exact bytes confirmed by the user, not just a filename.
+            if (current is null ? expected is not null : expected is null || !current.SequenceEqual(expected))
+                throw new IOException("快捷方式在确认后已被修改，未覆盖；请重新选择保存位置。");
+            File.Move(temporary, target, overwrite: expected is not null);
+        }
+        finally { if (acquired) mutex.ReleaseMutex(); }
+    }
     internal static (string Target, string Arguments) ReadTargetAndArguments(string shortcutPath)
     {
         var shellLinkType = Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"),

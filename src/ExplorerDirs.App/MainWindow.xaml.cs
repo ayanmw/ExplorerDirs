@@ -2477,7 +2477,7 @@ public partial class MainWindow : Window
             Filter = "Explorer Dirs 桌面项 (*.lnk)|*.lnk",
             DefaultExt = ".lnk",
             AddExtension = true,
-            OverwritePrompt = true,
+            OverwritePrompt = false,
             InitialDirectory = desktop,
             FileName = "ExplorerDirs 工作区.lnk"
         };
@@ -2486,6 +2486,13 @@ public partial class MainWindow : Window
         ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = false;
         try
         {
+            var expectedShortcut = await WindowBackgroundOperation.RunAsync(dialog.FileName,
+                static path => File.Exists(path) ? File.ReadAllBytes(path) : null, _windowOperationStop.Token);
+            if (_closed) return;
+            if (expectedShortcut is not null && (!IsActive || MessageBox.Show(this,
+                    "目标快捷方式已存在，确认替换？其原有工作区状态文件将保留。",
+                    "替换桌面工作区项", MessageBoxButton.OKCancel, MessageBoxImage.Question,
+                    MessageBoxResult.Cancel) != MessageBoxResult.OK)) return;
             var document = await WindowBackgroundOperation.RunAsync((Session: SnapshotSession(),
                 Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
                 Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
@@ -2498,11 +2505,11 @@ public partial class MainWindow : Window
                 .Equals("dotnet", StringComparison.OrdinalIgnoreCase);
             await WindowBackgroundOperation.RunAsync((Shortcut: dialog.FileName, Executable: executable,
                 Assembly: isDotnetHost ? Environment.GetCommandLineArgs()[0] : null, Qdr: qdrPath,
-                WorkingDirectory: AppContext.BaseDirectory, Text: document.Text),
+                WorkingDirectory: AppContext.BaseDirectory, Text: document.Text, Expected: expectedShortcut),
                 static state =>
                 {
                     DesktopWorkspaceShortcut.CreateWithWorkspace(state.Shortcut, state.Executable,
-                        state.Assembly, state.Qdr, state.WorkingDirectory, state.Text);
+                        state.Assembly, state.Qdr, state.WorkingDirectory, state.Text, state.Expected);
                     return true;
                 }, _windowOperationStop.Token);
             if (_closed) return;
