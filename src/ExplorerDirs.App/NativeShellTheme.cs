@@ -49,7 +49,7 @@ internal static class NativeShellTheme
             if (now - _lastMenuPaintTimestamp < 16) return result;
             _lastMenuPaintTimestamp = now;
             _handlingMenuHook = true;
-            try { ApplyMenuFrames(repaint: true); }
+            try { ApplyMenuFrames(); }
             finally { _handlingMenuHook = false; }
             return result;
         }
@@ -156,18 +156,24 @@ internal static class NativeShellTheme
         finally { Marshal.Release(properties); }
     }
 
-    internal static void ApplyMenuFrames(bool repaint = false)
+    internal static void ApplyMenuFrames()
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
-        EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
+        var previousHandling = _handlingMenuHook;
+        _handlingMenuHook = true;
+        try
+        {
+            EnumThreadWindows(GetCurrentThreadId(), (window, data) =>
         {
             var name = new StringBuilder(32);
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
             ApplyMenuWindow(window);
-            if (repaint) ClipMenuFrame(window);
+            ClipMenuFrame(window);
             return true;
-        }, 0);
+            }, 0);
+        }
+        finally { _handlingMenuHook = previousHandling; }
     }
 
     private static bool ApplyMenuWindow(nint window)
@@ -185,7 +191,6 @@ internal static class NativeShellTheme
         if (!GetWindowRect(window, out var bounds) || !GetClientRect(window, out var client)) return;
         var width = bounds.Right - bounds.Left;
         var height = bounds.Bottom - bounds.Top;
-        if (GetProp(window, "ExplorerDirs.MenuClipWidth") == width && GetProp(window, "ExplorerDirs.MenuClipHeight") == height) return;
         if (client.Right <= client.Left || client.Bottom <= client.Top) return;
         MapWindowPoints(window, 0, ref client, 2);
         var left = client.Left - bounds.Left;
@@ -193,6 +198,10 @@ internal static class NativeShellTheme
         var right = client.Right - bounds.Left;
         var bottom = client.Bottom - bounds.Top;
         if (left < 0 || top < 0 || right > width || bottom > height) return;
+        // Native popup animation can replace the region without resizing the
+        // HWND. Validate the actual region instead of trusting our old stamp.
+        if (GetProp(window, "ExplorerDirs.MenuClipWidth") == width && GetProp(window, "ExplorerDirs.MenuClipHeight") == height &&
+            GetWindowRgnBox(window, out var current) != 0 && current.Left == left && current.Top == top && current.Right == right && current.Bottom == bottom) return;
         // Preserve Shell item geometry and hit testing; exclude only its measured
         // nonclient surround. Windows owns the region after a successful transfer.
         var region = CreateRectRgn(left, top, right, bottom);
@@ -205,6 +214,7 @@ internal static class NativeShellTheme
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     [DllImport("user32.dll")] private static extern int SetWindowRgn(nint window, nint region, bool redraw);
+    [DllImport("user32.dll")] private static extern int GetWindowRgnBox(nint window, out NativeRect rect);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect rect);
     [DllImport("gdi32.dll")] private static extern nint GetStockObject(int index);

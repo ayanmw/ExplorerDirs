@@ -85,6 +85,11 @@ internal static class NativeThemeColorProbe
             clip.Invoke(null, [window]);
             GetWindowRgn(window, region); GetRgnBox(region, out box);
             Check(box.Equals(expected), "repeat menu clipping retains the same native client region");
+            var resetRegion = CreateRectRgn(0, 0, outer.Right - outer.Left, outer.Bottom - outer.Top);
+            if (SetWindowRgn(window, resetRegion, true) == 0) { DeleteObject(resetRegion); throw new InvalidOperationException("Cannot simulate a native region reset."); }
+            clip.Invoke(null, [window]);
+            GetWindowRgn(window, region); GetRgnBox(region, out box);
+            Check(box.Equals(expected), "a native popup region reset is repaired even when its size did not change");
         }
         finally { DeleteObject(region); DestroyWindow(window); }
     }
@@ -93,6 +98,7 @@ internal static class NativeThemeColorProbe
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out RegionRect rect);
     [DllImport("user32.dll")] private static extern int MapWindowPoints(nint from, nint to, ref RegionRect rect, uint count);
     [DllImport("user32.dll")] private static extern int GetWindowRgn(nint window, nint region);
+    [DllImport("user32.dll")] private static extern int SetWindowRgn(nint window, nint region, bool redraw);
     [DllImport("gdi32.dll")] private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")] private static extern int GetRgnBox(nint region, out RegionRect rect);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
