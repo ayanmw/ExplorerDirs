@@ -21,7 +21,7 @@ $raw = powershell.exe -NoProfile -File $sampler -ProcessId $sampledPid `
     -AllowOtherProcess -Samples 3 -IntervalMilliseconds 100 -AsJson | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Process sampler failed.' }
 $report = $raw | ConvertFrom-Json
-if ($report.SchemaVersion -ne 3 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
+if ($report.SchemaVersion -ne 4 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
     $report.Samples.Count -ne 3 -or $report.Origin -ne 'other-process' -or
     $report.ExecutablePath -ne $expectedExecutablePath -or
     $report.PeakWorkingSetBytes -le 0 -or $report.PeakPrivateBytes -le 0 -or
@@ -33,6 +33,24 @@ if ($report.SchemaVersion -ne 3 -or $report.Status -ne 'completed' -or $report.C
     $report.Samples[1].ElapsedSeconds -le $report.Samples[0].ElapsedSeconds -or
     $raw.Contains($projectRoot)) {
     throw 'Process sampler returned invalid data or leaked its executable path.'
+}
+foreach ($sample in $report.Samples) {
+    if ($sample.PSObject.Properties.Name -notcontains 'GdiObjectCount' -or
+        $sample.PSObject.Properties.Name -notcontains 'UserObjectCount' -or
+        ($null -ne $sample.GdiObjectCount -and $sample.GdiObjectCount -lt 0) -or
+        ($null -ne $sample.UserObjectCount -and $sample.UserObjectCount -lt 0)) {
+        throw 'GUI resource counts must distinguish unavailable data from nonnegative counts.'
+    }
+}
+if ($report.BinaryIdentitySource -ne 'on-disk-at-start' -or
+    $null -ne $report.ManagedAssemblyPath -or $null -ne $report.ManagedAssemblySha256) {
+    throw 'Non-app sampling must not invent an Explorer Dirs managed binary identity.'
+}
+$localRaw = & $sampler -ProcessId $PID -AllowOtherProcess -Samples 2 -IntervalMilliseconds 100 -AsJson
+$localReport = $localRaw | ConvertFrom-Json
+if ($localReport.CollectedSamples -ne 2 -or
+    $null -ne [ExplorerDirs.Diagnostics.GuiResources]::Read([IntPtr]::Zero, 0)) {
+    throw 'An invalid GUI-resource handle must report unavailable, while normal process sampling still works.'
 }
 
 $previousErrorAction = $ErrorActionPreference
@@ -52,8 +70,12 @@ if ($ReleaseProcessId -gt 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Release process sampler failed.' }
     $releaseReport = $releaseRaw | ConvertFrom-Json
     $releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'releases')) + [IO.Path]::DirectorySeparatorChar
-    if ($releaseReport.SchemaVersion -ne 3 -or $releaseReport.Origin -ne 'release' -or
+    $expectedAssembly = Join-Path ([IO.Path]::GetDirectoryName($expectedReleasePath)) 'ExplorerDirs.App.dll'
+    if ($releaseReport.SchemaVersion -ne 4 -or $releaseReport.Origin -ne 'release' -or
         $releaseReport.ExecutablePath -ne $expectedReleasePath -or
+        $releaseReport.ManagedAssemblyPath -ne $expectedAssembly -or
+        $releaseReport.ManagedAssemblySha256 -ne (Get-FileHash -LiteralPath $expectedAssembly).Hash -or
+        $releaseReport.ManagedAssemblyProductVersion -ne [Diagnostics.FileVersionInfo]::GetVersionInfo($expectedAssembly).ProductVersion -or
         -not $expectedReleasePath.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Release process was not identified against the main repository releases directory.'
     }

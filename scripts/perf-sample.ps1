@@ -11,6 +11,25 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not ('ExplorerDirs.Diagnostics.GuiResources' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace ExplorerDirs.Diagnostics {
+    public static class GuiResources {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetGuiResources(IntPtr process, uint flags);
+        [DllImport("kernel32.dll", EntryPoint = "SetLastError")]
+        private static extern void ResetLastError(uint error);
+        public static uint? Read(IntPtr process, uint flags) {
+            ResetLastError(0);
+            uint count = GetGuiResources(process, flags);
+            return count != 0 || Marshal.GetLastWin32Error() == 0 ? (uint?)count : null;
+        }
+    }
+}
+'@
+}
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 try {
     $commonGitDir = (& git -C $PSScriptRoot rev-parse --path-format=absolute --git-common-dir 2>$null)
@@ -35,6 +54,9 @@ try {
     } else { 'other-copy' }
     $executablePath = $null
     $binarySha256 = $null
+    $managedAssemblyPath = $null
+    $managedAssemblySha256 = $null
+    $managedAssemblyProductVersion = $null
     try {
         $executablePath = [IO.Path]::GetFullPath($process.MainModule.FileName)
         $releaseRoot = (Join-Path $projectRoot 'releases') + [IO.Path]::DirectorySeparatorChar
@@ -44,6 +66,14 @@ try {
             elseif ($executablePath.StartsWith($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) { $origin = 'source-test' }
         }
         $binarySha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash
+        if ($process.ProcessName -eq 'ExplorerDirs.App') {
+            $assemblyPath = Join-Path ([IO.Path]::GetDirectoryName($executablePath)) 'ExplorerDirs.App.dll'
+            if (Test-Path -LiteralPath $assemblyPath -PathType Leaf) {
+                $managedAssemblyPath = $assemblyPath
+                $managedAssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
+                $managedAssemblyProductVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($assemblyPath).ProductVersion
+            }
+        }
     }
     catch { } # A protected executable can still be sampled by PID.
 
@@ -64,6 +94,13 @@ try {
             $cpuSeconds = $process.TotalProcessorTime.TotalSeconds
             $workingSetBytes = [long]$process.WorkingSet64
             $privateBytes = [long]$process.PrivateMemorySize64
+            $gdiObjects = $null
+            $userObjects = $null
+            try {
+                $gdiObjects = [ExplorerDirs.Diagnostics.GuiResources]::Read($process.Handle, 0)
+                $userObjects = [ExplorerDirs.Diagnostics.GuiResources]::Read($process.Handle, 1)
+            }
+            catch [ComponentModel.Win32Exception] { } # Keep memory sampling when GUI queries are unavailable.
             if ($index -eq 0) {
                 $firstWorkingSetBytes = $workingSetBytes
                 $firstPrivateBytes = $privateBytes
@@ -90,6 +127,8 @@ try {
                 CpuPercentOfMachine = $cpuPercent
                 HandleCount = [int]$process.HandleCount
                 ThreadCount = [int]$process.Threads.Count
+                GdiObjectCount = $gdiObjects
+                UserObjectCount = $userObjects
             })
             $previousSeconds = $seconds
             $previousCpuSeconds = $cpuSeconds
@@ -97,12 +136,16 @@ try {
         catch [System.InvalidOperationException] { $status = 'exited'; break }
     }
     $result = [pscustomobject]@{
-        SchemaVersion = 3
+        SchemaVersion = 4
         ProcessId = $ProcessId
         ProcessName = $process.ProcessName
         Origin = $origin
         ExecutablePath = $executablePath
         ExecutableSha256 = $binarySha256
+        BinaryIdentitySource = 'on-disk-at-start'
+        ManagedAssemblyPath = $managedAssemblyPath
+        ManagedAssemblySha256 = $managedAssemblySha256
+        ManagedAssemblyProductVersion = $managedAssemblyProductVersion
         ProcessStartUtc = $processStart.ToString('o')
         Status = $status
         RequestedSamples = $Samples

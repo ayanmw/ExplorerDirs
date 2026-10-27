@@ -1,5 +1,30 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-27：托管版本与 GUI 对象计数
+
+`scripts/perf-sample.ps1` JSON schema 升至 4：保留 PID/启动时间、发布目录归属、内存/CPU/句柄/线程指标，补充同目录 `ExplorerDirs.App.dll` 路径、SHA-256、ProductVersion，以及每个样本的 `GdiObjectCount` / `UserObjectCount`。DLL 身份只对 Explorer Dirs 进程记录；其他进程仍需 `-AllowOtherProcess`，不会推断其托管程序集。
+
+`BinaryIdentitySource=on-disk-at-start` 明确版本/哈希来自开始采样时的磁盘文件，不能证明映射模块在启动后未被外部替换。GUI 对象通过只读 [GetGuiResources](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguiresources) 取得：成功且无对象为 0，失败为 null。对象数不能换算成字节，也不能仅凭增长归因于 Shell、WPF 或扩展。
+
+后台 `src/ExplorerDirs.DiagnosticsSmoke/perf.ps1` 覆盖 schema、样本/增量一致性、非应用进程默认拒绝、其他进程不伪造 DLL 身份、无效 GUI 资源句柄返回 null、当前 release DLL 哈希/版本读回。Windows PowerShell 子进程和当前 PowerShell 调用均通过；不启动应用窗口或注入输入。查询仅在外部采样时运行，不增加产品常驻开销，不执行 GC/工作集裁剪或重启。
+
+### 本次只读运行基线
+
+PID 58888，启动于 UTC 13:43:03.531；采样为北京时间 22:09:32–22:10:32（约 60.28 秒，13 个样本）。磁盘 DLL ProductVersion 为 `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`，不是最近后台开发提交的新构建。DLL SHA-256 为 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+
+| 指标 | 开始 | 结束 | 最低 | 最高 |
+|---|---:|---:|---:|---:|
+| Working Set / MiB | 233.00 | 235.86 | 233.00 | 235.86 |
+| Private Bytes / MiB | 160.46 | 132.66 | 132.59 | 160.46 |
+| 进程句柄 | 1215 | 1262 | 1215 | 1266 |
+| 线程 | 38 | 49 | 38 | 49 |
+| GDI 对象 | 205 | 191 | 191 | 205 |
+| USER 对象 | 117 | 135 | 117 | 138 |
+
+本窗口没有呈现 Private Bytes 或 GDI 单调上涨；USER 对象与进程句柄增加，但用户操作、菜单/窗格/标签数量没有固定记录，不能据此判为泄漏或归因。Working Set 与 Private Bytes 方向不同，不把两者混为“内存一直涨”。没有采集托管 GC 或原生分配栈，不能解释本次提交量下降的具体来源；也不是任何修复的前后 A/B。
+
+原始 JSON 留在工作树 `src/.state/memory-samples/resource-live-58888-20261027.json`，不入 Git，SHA-256 为 `4CA0E6A1422481F90B2CC4433FA3B254905C07966735DF5E0BA4FD3CA0D5890E`。后续固定同版本与同操作序列，优先观察 Private Bytes、GDI/USER 与句柄在操作后是否回落，再选择需要分配栈的类别。
+
 ## 2026-10-27：应用图标缓存容量检查
 
 源码定位到一处确定的长期引用：ShellIconProvider 的静态 Dictionary 在虚拟 Shell 解析名称或新扩展名不断出现时没有上限，缓存不会随关闭标签清理。当前生产调用主要是标签标题与地址位置菜单；普通文件系统目录共用一张文件夹图标，因此不能把此前普通目录工作负载的数百 MiB 占用归因于这张缓存。
