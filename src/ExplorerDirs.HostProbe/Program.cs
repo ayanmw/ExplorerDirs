@@ -128,7 +128,7 @@ internal static class Program
             try { return ProcessFixtureOperations.RunChild(args); }
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
         }
-        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
+        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-mode" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
         var acceptsLargeSelectionArgument = args.Length == 2 && args[0] == "--live-shell-selection-large" &&
             int.TryParse(args[1], out var requestedSelectionCount) && requestedSelectionCount is >= 4 and <= 10001;
         var acceptsBurstArgument = args.Length == 2 &&
@@ -136,7 +136,13 @@ internal static class Program
             int.TryParse(args[1], out _);
         var acceptsRmdirBoundaryArgument = args.Length == 2 && args[0] == "--live-shell-product-monitor-rmdir-boundary" &&
             int.TryParse(args[1], out var requestedRmdirViewCount) && requestedRmdirViewCount is 512 or 513;
-        if (args.Length != 1 && !acceptsBurstArgument && !acceptsLargeSelectionArgument && !acceptsRmdirBoundaryArgument && (args.Length != 3 || args[1] != "--profile")) return 2;
+        var renameModeIndexes = args.Length == 2 && args[0] == "--live-shell-rename-editor-mode"
+            ? args[1].Split(':') : Array.Empty<string>();
+        var acceptsRenameEditorModeArgument = renameModeIndexes.Length == 2 &&
+            int.TryParse(renameModeIndexes[0], out var requestedRenamePane) && requestedRenamePane is >= 0 and <= 3 &&
+            int.TryParse(renameModeIndexes[1], out var requestedRenameStyle) && requestedRenameStyle is >= 0 and <= 7;
+        if (args.Length != 1 && !acceptsBurstArgument && !acceptsLargeSelectionArgument && !acceptsRmdirBoundaryArgument &&
+            !acceptsRenameEditorModeArgument && (args.Length != 3 || args[1] != "--profile")) return 2;
         var traceShellDiagnostics = args[0] is "--live-updates" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--live-shell-changed-metadata" ||
             args[0] is "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-user-clear" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-selection-large" ||
             args[0].StartsWith("--live-shell-refresh", StringComparison.Ordinal) || args[0].StartsWith("--live-shell-delete-selected", StringComparison.Ordinal);
@@ -2795,6 +2801,19 @@ internal static class Program
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
                 return 0;
             }
+            if (args[0] == "--live-shell-rename-editor-mode")
+            {
+                if (!WaitForAttachedViews(hostType, hosts, TimeSpan.FromSeconds(10)))
+                    throw new Exception("Shell view HWNDs were not attached before the Shell rename view-mode probe.");
+                if (!WaitForCounts(hosts, expected: 1, TimeSpan.FromSeconds(10)))
+                    throw new Exception("Rename fixture item did not appear in the Shell view.");
+                var probeIndexes = args[1].Split(':');
+                var paneIndex = int.Parse(probeIndexes[0]);
+                var styleIndex = int.Parse(probeIndexes[1]);
+                VerifyRenameEditorAcrossViewStyles(hostType, hosts, folders, paneIndex, styleIndex);
+                if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
+                return 0;
+            }
             if (args[0] == "--live-shell-rename-editor" ||
                 args[0].StartsWith("--live-shell-rename-editor-pane-", StringComparison.Ordinal))
             {
@@ -3538,6 +3557,93 @@ internal static class Program
                 !otherPanesPreserved)
                 throw new Exception($"Native Select All failed or changed view/other panes in {name} mode.");
         }
+    }
+
+    private static void VerifyRenameEditorAcrossViewStyles(Type hostType,
+        IReadOnlyList<HwndHost> hosts, IReadOnlyList<string> folders, int paneIndex, int styleIndex)
+    {
+        var assembly = hostType.Assembly;
+        var styleType = assembly.GetType("ExplorerDirs.App.ViewStyle", true)!;
+        var styles = ((System.Collections.IEnumerable)styleType.GetProperty("All")!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        var style = styles[styleIndex];
+        var setStyle = hostType.GetMethod("SetViewStyle", BindingFlags.Instance | BindingFlags.Public)!;
+        var readStyle = hostType.GetMethod("ReadViewStyle", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var isRenameFocused = hostType.GetMethod("IsRenameEditorFocused", BindingFlags.Instance | BindingFlags.Public)!;
+        var translate = hostType.GetMethod("TranslateAcceleratorCore", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var viewWindow = (nint)hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(hosts[paneIndex])!;
+        var name = (string)styleType.GetProperty("Name")!.GetValue(style)!;
+        var expectedMode = (uint)styleType.GetProperty("Mode")!.GetValue(style)!;
+        if (!Equals(setStyle.Invoke(hosts[paneIndex], [style]), true))
+            throw new Exception($"Pane {paneIndex} Shell rejected the {name} baseline for the rename editor probe.");
+        if (!WaitForPredicate(() =>
+            {
+                var current = readStyle.Invoke(hosts[paneIndex], null);
+                return current is not null && (uint)current.GetType().GetField("Item1")!.GetValue(current)! == expectedMode;
+            }, TimeSpan.FromSeconds(5)))
+            throw new Exception($"Pane {paneIndex} Shell did not settle into {name} mode before F2.");
+
+        SelectOnlyItem(hostType, hosts[paneIndex], folders[paneIndex], "initial.txt", takeFocus: true);
+        var selectedBeforeRename = SelectedPaths(hostType, hosts[paneIndex], folders[paneIndex])
+            .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var f2 = new MSG { hwnd = viewWindow, message = 0x0100, wParam = (nint)0x71, lParam = (nint)1 };
+        if (!Equals(translate.Invoke(hosts[paneIndex], [f2, ModifierKeys.None]), true) ||
+            !WaitForPredicate(() => (bool)isRenameFocused.Invoke(hosts[paneIndex], null)!, TimeSpan.FromSeconds(2)))
+            throw new Exception($"Pane {paneIndex} did not enter rename mode in {name} view.");
+
+        var editor = GetFocus();
+        SendMessage(editor, 0x00B1, (nint)4, (nint)4);
+        foreach (var (key, expectedCaret) in new[] { (0x25, (3, 3)), (0x27, (5, 5)) })
+        {
+            var message = new MSG { hwnd = editor, message = 0x0100, wParam = (nint)key, lParam = (nint)1 };
+            if (!Equals(translate.Invoke(hosts[paneIndex], [message, ModifierKeys.None]), true) ||
+                GetFocus() != editor || ReadEditSelection(editor) != expectedCaret)
+                throw new Exception($"Pane {paneIndex} {name} rename arrow {key:X} moved focus or failed to edit the caret.");
+            SendMessage(editor, 0x00B1, (nint)4, (nint)4);
+        }
+        foreach (var key in new[] { 0x26, 0x28 })
+        {
+            var message = new MSG { hwnd = editor, message = 0x0100, wParam = (nint)key, lParam = (nint)1 };
+            if (!Equals(translate.Invoke(hosts[paneIndex], [message, ModifierKeys.None]), true) ||
+                GetFocus() != editor || !(bool)isRenameFocused.Invoke(hosts[paneIndex], null)!)
+                throw new Exception($"Pane {paneIndex} {name} rename arrow {key:X} escaped the editor.");
+        }
+
+        var keyboardState = new byte[256];
+        if (!GetKeyboardState(keyboardState))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not capture keyboard state for the rename view-mode probe.");
+        try
+        {
+            var shifted = keyboardState.ToArray();
+            shifted[0x10] |= 0x80;
+            shifted[0xA0] |= 0x80;
+            if (!SetKeyboardState(shifted))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not set Shift state for the rename view-mode probe.");
+            foreach (var (key, expectedSelection) in new[] { (0x25, (3, 4)), (0x27, (4, 5)) })
+            {
+                SendMessage(editor, 0x00B1, (nint)4, (nint)4);
+                var message = new MSG { hwnd = editor, message = 0x0100, wParam = (nint)key, lParam = (nint)1 };
+                if (!Equals(translate.Invoke(hosts[paneIndex], [message, ModifierKeys.Shift]), true) ||
+                    GetFocus() != editor || ReadEditSelection(editor) != expectedSelection)
+                    throw new Exception($"Pane {paneIndex} {name} rename Shift+arrow {key:X} failed to select editor text.");
+            }
+        }
+        finally
+        {
+            if (!SetKeyboardState(keyboardState))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not restore keyboard state after the rename view-mode probe.");
+        }
+
+        foreach (var otherPane in Enumerable.Range(0, hosts.Count).Where(index => index != paneIndex))
+            if ((bool)isRenameFocused.Invoke(hosts[otherPane], null)!)
+                throw new Exception($"Pane {paneIndex} {name} rename editor focus was attributed to pane {otherPane}.");
+        var selectedAfterRenameKeys = SelectedPaths(hostType, hosts[paneIndex], folders[paneIndex])
+            .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!selectedBeforeRename.SequenceEqual(selectedAfterRenameKeys, StringComparer.OrdinalIgnoreCase))
+            throw new Exception($"Pane {paneIndex} {name} rename arrows changed the selected file set.");
+
+        Console.WriteLine($"rename-editor-view-mode pane={paneIndex} name={name} mode={expectedMode} caret-left-right=True up-down-contained=True shift-selection=True focus-retained=True selection-preserved=True");
     }
 
     private static void SelectNone(Type hostType, HwndHost host)

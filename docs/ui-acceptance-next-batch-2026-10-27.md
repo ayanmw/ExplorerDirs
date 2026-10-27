@@ -10,9 +10,9 @@
 
 ## 2026-10-28 后台补充：四窗格 F2 编辑器键路由
 
-Release HostProbe 对 pane 0–3 分别运行隐藏 ExplorerBrowser 宿主，逐窗格选中样本、经生产 `TranslateAcceleratorCore` 投递 F2 和方向键，并在原生重命名编辑框内检查 Left/Right 插入点、Shift+Left/Right 文本选区、四方向键焦点保持及其它窗格未误认焦点。四个 pane 场景均退出码 0；原始日志在 `%TEMP%\explorer-dirs-rename-editor-four-pane-20261028.log`。
+扩展 Release HostProbe，在 pane 0–3 的隐藏 ExplorerBrowser 宿主中分别切换 `ViewStyle.All` 的 8 个预设，共 32 组：超大/大/中等/小图标、列表、详细信息、平铺、内容。逐组经生产 `TranslateAcceleratorCore` 投递 F2；在原生重命名编辑框内检查 Left/Right 插入点移动、Up/Down 不逃离编辑器、Shift+Left/Right 文本选区、焦点保持以及文件选择集不变。最终源码完整矩阵 32/32 退出码 0；日志在 `%TEMP%\explorer-dirs-rename-editor-view-modes-final-20261028-rerun.log`。pane 3 中等图标首次矩阵有一次 2 秒内未观察到编辑焦点的失败，随后该组合单独复跑 13 次通过，最终完整矩阵复跑也通过；保留这次间歇观测，不据此修改产品。
 
-这是四窗格宿主共存时逐一运行的合成消息/隐藏 Shell 回归，不等于同时编辑多个 pane、物理键盘输入、可见布局焦点或 List/图标视图的 UI 验收；集中验收清单仍保留这些边界。
+这是逐窗格、逐预设运行的合成消息/隐藏 Shell 回归，不等于同时编辑多个 pane、物理键盘输入或可见焦点体验。方向键视图矩阵已有后台覆盖，但物理输入和可见模式仍留在集中验收范围。
 
 ## 第一段：核心键盘与已接受主题回归
 
