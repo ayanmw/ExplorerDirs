@@ -9,6 +9,15 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--window-placement-smoke"])
+{
+    var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
+    Directory.CreateDirectory(placementRoot);
+    try { ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(placementRoot); }
+    finally { Directory.Delete(placementRoot, recursive: true); }
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
 {
     var resultPath = args[1];
@@ -514,6 +523,7 @@ try
     QuickFilterHistoryStoreSmoke.Run(root);
     TabHoverActivationSmoke.Run(root);
     ExplorerDirs.SettingsSmoke.NewTabLocationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(root);
     ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
     QDirBlankTabDoubleClickSmoke.Run();
     if (args.Length == 2 && args[0] == "--inspect-qdr")

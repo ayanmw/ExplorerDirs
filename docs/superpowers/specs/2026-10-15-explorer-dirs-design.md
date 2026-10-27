@@ -2,6 +2,14 @@
 
 日期：2026-10-15
 
+## 2026-10-27 默认窗口位置持久化
+
+每个窗口在自己的会话旁保存 `<session-stem>.WindowPlacement.ini`，默认启用，不增加设置开关。记录普通窗口四边坐标和最大化状态；使用原生 `WINDOWPLACEMENT` 工作区坐标成对读取/恢复，保留负坐标，不混用 WPF DIP 或 `SetWindowPos` 的屏幕坐标。位置恢复在 `SourceInitialized` 时执行；多窗口启动只对缺少有效位置记录的窗口使用旧的错位排列。
+
+周期保存、关闭和重启写入位置。最小化时保留最后非最小化状态；进入 F11 前捕获原生位置，全屏期间仍保存该快照。新旧会话格式不变，位置为独立版本化 INI，并沿用外部编辑冲突保护、未知高版本拒写和损坏文件备份。隔离预览复制已注册窗口的位置文件。
+
+使用 [GetWindowPlacement](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowplacement) 与 [SetWindowPlacement](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowplacement)；后者由系统调整完全离屏位置。无窗口 smoke 验证配置、负坐标、状态归一化和 ABI，不能替代真实双屏、DPI、拔屏和 F11/最大化重启验收。
+
 ## 2026-10-21 内嵌搜索位置修正
 
 search-ms 作为请求元数据，使用文件夹优先绑定上下文解析并验证 Shell 文件夹属性，避免导航协议启动项。每浏览器保留已发出的查询/目录位置映射，跨原生 PIDL 规范化恢复查询；精确原生名称碰撞拒绝。搜索 URI 不写入目录会话。源码与原生组件结果已验证，真实窗口未验收，详见 [搜索记录](../../search-folder-investigation.md)。

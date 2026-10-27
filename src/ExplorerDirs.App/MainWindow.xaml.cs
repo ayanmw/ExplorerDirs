@@ -24,6 +24,11 @@ public partial class MainWindow : Window
     private readonly ShellCommandRefreshGate _fileCommandRefreshGate = new();
     private PaneControl? _fileCommandRefreshPane;
     private readonly SessionStore _sessionStore;
+    private readonly WindowPlacementStore _windowPlacementStore;
+    private readonly WindowPlacementState? _savedWindowPlacement;
+    private WindowPlacementState? _fullScreenWindowPlacement;
+    private bool _windowPlacementReady;
+    private bool _lastNonMinimizedMaximized;
     private readonly ApplicationThemeController? _themeController;
     private readonly string _profileDirectory;
     private readonly Action<MainWindow>? _createWindow;
@@ -103,6 +108,7 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _terminalLaunchStop = new();
 
     public string SessionPath => _sessionStore.Path;
+    internal bool HasSavedWindowPlacement => _savedWindowPlacement is not null;
 
     public MainWindow(string? startupDirectory = null, string? startupWarning = null)
         : this(null, startupDirectory, startupWarning) { }
@@ -136,6 +142,10 @@ public partial class MainWindow : Window
         _fileCommandRefreshTimer.Tick += FileCommandRefreshTimer_Tick;
         var primarySessionPath = new SessionStore().Path;
         _sessionStore = new SessionStore(sessionPath ?? primarySessionPath);
+        _windowPlacementStore = new WindowPlacementStore(WindowPlacementStore.PathForSession(_sessionStore.Path));
+        _savedWindowPlacement = _windowPlacementStore.Load();
+        _lastNonMinimizedMaximized = _savedWindowPlacement?.Maximized == true;
+        if (HasSavedWindowPlacement) WindowStartupLocation = WindowStartupLocation.Manual;
         _profileDirectory = Path.GetFullPath(profileDirectory ?? Path.GetDirectoryName(primarySessionPath)!);
         _sizeDisplayPreferenceStore = new SizeDisplayPreferenceStore(Path.Combine(_profileDirectory, "SizeDisplay.ini"));
         ByteSizeFormatter.SetOptions(_sizeDisplayPreferenceStore.Load());
@@ -399,6 +409,7 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) =>
         {
+            RestoreSavedWindowPlacement();
             try { MouseWheelFocusMessageHook.Register(this, _mouseWheelFocusEnabled); }
             catch (Exception ex)
             {
@@ -412,6 +423,11 @@ public partial class MainWindow : Window
                 _systemSettingChangeHook = new SystemSettingChangeHook(source, RefreshEnvironment,
                     RefreshFollowedWindowsHiddenItems);
             ApplyWindowFrameTheme();
+        };
+        StateChanged += (_, _) =>
+        {
+            if (_windowPlacementReady && _fullScreenRestoreState is null && WindowState != WindowState.Minimized)
+                _lastNonMinimizedMaximized = WindowState == WindowState.Maximized;
         };
         Closing += (_, _) =>
         {
@@ -1546,6 +1562,7 @@ public partial class MainWindow : Window
         {
             RestoreWindowPresentation(saved);
             _fullScreenRestoreState = null;
+            _fullScreenWindowPlacement = null;
             return;
         }
 
@@ -1558,6 +1575,8 @@ public partial class MainWindow : Window
 
         try
         {
+            _fullScreenWindowPlacement = NativeWindowPlacement.Capture(new WindowInteropHelper(this).Handle,
+                _lastNonMinimizedMaximized);
             _fullScreenRestoreState = original;
             WindowState = fullScreen.WindowState;
             WindowStyle = fullScreen.WindowStyle;
@@ -1582,6 +1601,7 @@ public partial class MainWindow : Window
         {
             RestoreWindowPresentation(original);
             _fullScreenRestoreState = null;
+            _fullScreenWindowPlacement = null;
             FullScreenMenu.IsChecked = false;
             EnvironmentStatus.Text = $"无法切换全屏：{ex.Message}";
         }
@@ -2582,8 +2602,41 @@ public partial class MainWindow : Window
         return snapshot;
     }
 
+    private void RestoreSavedWindowPlacement()
+    {
+        try
+        {
+            if (_savedWindowPlacement is { } placement)
+            {
+                NativeWindowPlacement.Restore(new WindowInteropHelper(this).Handle, placement);
+                WindowState = placement.Maximized ? WindowState.Maximized : WindowState.Normal;
+            }
+            if (_windowPlacementStore.LoadWarning is { } warning) EnvironmentStatus.Text = warning;
+        }
+        catch (Exception ex)
+        {
+            EnvironmentStatus.Text = $"恢复窗口位置失败：{ex.Message}";
+        }
+        finally { _windowPlacementReady = true; }
+    }
+
+    private void SaveWindowPlacement()
+    {
+        if (!_windowPlacementReady) return;
+        // F11 has its own transient geometry; restarting from full screen must
+        // retain the window placement captured before entering immersive mode.
+        var placement = _fullScreenWindowPlacement ?? NativeWindowPlacement.Capture(
+            new WindowInteropHelper(this).Handle, _lastNonMinimizedMaximized);
+        _windowPlacementStore.Save(placement);
+    }
+
     private bool SaveSession()
     {
+        // The placement sidecar has an independent external-edit guard. A
+        // placement conflict must not prevent the existing tab session saving.
+        string? placementFailure = null;
+        try { SaveWindowPlacement(); }
+        catch (Exception ex) { placementFailure = $"窗口位置保存失败：{ex.Message}"; }
         try
         {
             _sessionStore.Save(new SessionState(_layout, _defaultViewMode,
@@ -2592,11 +2645,17 @@ public partial class MainWindow : Window
                 _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
                 _paneTreeVisibility.ToArray(), _treeDisplayMode));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
+            if (placementFailure is not null)
+            {
+                EnvironmentStatus.Text = placementFailure;
+                return false;
+            }
             return true;
         }
         catch (Exception ex)
         {
-            EnvironmentStatus.Text = $"配置保存失败：{ex.Message}";
+            EnvironmentStatus.Text = $"配置保存失败：{ex.Message}" +
+                (placementFailure is null ? "" : $"；{placementFailure}");
             return false;
         }
     }

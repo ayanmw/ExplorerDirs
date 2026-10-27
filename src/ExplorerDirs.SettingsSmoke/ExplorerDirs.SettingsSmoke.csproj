@@ -14,6 +14,8 @@
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowPlacement.cs" Link="WindowPlacement.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowPlacementStore.cs" Link="WindowPlacementStore.cs" />
     <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
     <Compile Include="../ExplorerDirs.App/FullScreenPresentation.cs" Link="FullScreenPresentation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellAutoColumnWidthRouting.cs" Link="ShellAutoColumnWidthRouting.cs" />

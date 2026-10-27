@@ -1,5 +1,7 @@
 # Explorer Dirs
 
+2026-10-27 未发布源码更新：默认记住各窗口的位置、大小和最大化状态，保存到对应会话旁的 `*.WindowPlacement.ini`；最小化/F11 全屏不会覆盖原还原位置。主工具栏已移除剪切、复制、粘贴、删除、重命名、撤销、重做，操作继续保留在编辑菜单及快捷键中。构建与无窗口专项检查通过，真实双屏/DPI 恢复待可见验收；下列已发布预览尚未包含这批改动。
+
 ### 2026-10-27 当前可预览版本：`preview-0.6.0-temp.74`
 
 [打开 temp.74 程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.74/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。本版对齐地址历史与路径输入、标签栏显示模式和 Tab 顺序，增加每窗格 Shell 状态提示，并让 `.qdr` 导入预览列出识别到的颜色规则。详情见[temp.74 说明](docs/releases/preview-0.6.0-temp.74.md)及[发布清单](releases/README.md)。

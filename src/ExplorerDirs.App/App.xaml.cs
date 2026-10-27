@@ -133,7 +133,7 @@ public partial class App : Application
                 var window = CreateWindow(sessionPaths[index],
                     index == 0 ? startupRequest.Directory : null,
                     index == 0 && warnings.Count > 0 ? string.Join(" ", warnings) : null);
-                if (index > 0)
+                if (index > 0 && !window.HasSavedWindowPlacement)
                 {
                     var previous = _openWindows[^2];
                     window.Left = Math.Min(previous.Left + 32, SystemParameters.WorkArea.Right - window.Width);

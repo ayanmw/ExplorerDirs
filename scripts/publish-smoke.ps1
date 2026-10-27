@@ -22,7 +22,7 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
-$settings = @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
+$settings = @('ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
 foreach ($name in $settings) {
     [IO.File]::WriteAllText((Join-Path $fixtureProfile $name), ('fixture-' + $name))
 }
@@ -30,6 +30,7 @@ $extraWindowName = 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.ini'
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'WindowSessions.ini'), "[WindowSessions]`nFormatVersion=1`nCount=2`nSession0=ExplorerDirs.ini`nSession1=$extraWindowName`n")
 [IO.File]::WriteAllText((Join-Path $fixtureProfile $extraWindowName), 'fixture extra window session')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini'), 'fixture extra window pins')
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.WindowPlacement.ini'), 'fixture extra window placement')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'), 'unregistered window session')
 $workspaces = Join-Path $fixtureProfile 'Workspaces'
 New-Item -ItemType Directory -Path $workspaces, (Join-Path $workspaces 'nested') | Out-Null
@@ -57,7 +58,7 @@ foreach ($name in $settings) {
         throw "Isolated preview did not preserve $name."
     }
 }
-foreach ($name in @($extraWindowName, 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini')) {
+foreach ($name in @($extraWindowName, 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini', 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.WindowPlacement.ini')) {
     if (-not (Test-Path -LiteralPath (Join-Path $copied $name) -PathType Leaf)) {
         throw "Isolated preview did not carry registered window state $name."
     }

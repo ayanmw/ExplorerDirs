@@ -87,7 +87,7 @@ if ($IsolatedProfile) {
     New-Item -ItemType Directory -Path $profileCopy -Force | Out-Null
     # Match the separate preference stores: omitting the tree setting made an
     # isolated preview silently revert the user's navigation preference.
-    foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
+    foreach ($name in @('ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
         $source = Join-Path $profileSourceRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
@@ -100,7 +100,7 @@ if ($IsolatedProfile) {
             $match = [regex]::Match($line, '^Session\d+=(ExplorerDirs\.window-[0-9a-fA-F]{32}\.ini)$')
             if (-not $match.Success) { continue }
             $sessionName = $match.Groups[1].Value
-            foreach ($name in @($sessionName, ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.PinnedTabs.ini'))) {
+            foreach ($name in @($sessionName, ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.PinnedTabs.ini'), ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.WindowPlacement.ini'))) {
                 $source = Join-Path $profileSourceRoot $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) {
                     Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
