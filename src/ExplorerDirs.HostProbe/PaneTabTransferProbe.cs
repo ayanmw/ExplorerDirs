@@ -10,7 +10,7 @@ internal static class PaneTabTransferProbe
 {
     private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
-    internal static int Run()
+    internal static int Run(bool unhostedCopyOrder = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs.TabTransferProbe", Guid.NewGuid().ToString("N"));
         var sourceA = Path.Combine(root, "source-current");
@@ -57,6 +57,14 @@ internal static class PaneTabTransferProbe
                 [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null], null)!;
             targetPane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
                 [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null], null)!;
+
+            if (unhostedCopyOrder)
+            {
+                CheckUnhostedCopyOrder(sourcePane, targetPane);
+                EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
+                Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
+                return 0;
+            }
 
             var rootGrid = new Grid();
             rootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(500) });
@@ -156,11 +164,76 @@ internal static class PaneTabTransferProbe
         }
         finally
         {
+            if (unhostedCopyOrder)
+            {
+                DisposeUnhostedBrowsers(sourcePane);
+                DisposeUnhostedBrowsers(targetPane);
+            }
             try { host?.Dispose(); } catch { }
             try { (sourcePane as IDisposable)?.Dispose(); } catch { }
             try { (targetPane as IDisposable)?.Dispose(); } catch { }
             try { Directory.Delete(root, recursive: true); } catch { }
         }
+    }
+
+    private static void CheckUnhostedCopyOrder(UIElement source, UIElement destination)
+    {
+        var paneType = source.GetType();
+        var sourceTabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(source)!;
+        var targetTabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(destination)!;
+        var order = (List<TabItem>)paneType.GetField("_tabOrder", InstanceMembers)!.GetValue(destination)!;
+        var original = (TabItem)sourceTabs.Items[0];
+        var ordinary = (TabItem)targetTabs.Items[0];
+        paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [original.Tag]);
+        var copyMethod = paneType.GetMethod("CopyTabFrom", InstanceMembers)!;
+
+        TabItem Copy(TabItem? target, bool after)
+        {
+            Ensure((bool)copyMethod.Invoke(destination, [original.Tag, target, after])!, "copy accepted");
+            return (TabItem)targetTabs.SelectedItem!;
+        }
+
+        var first = Copy(null, true);
+        Ensure(order.SequenceEqual(new[] { first, ordinary }),
+            "a copied pinned tab stays before ordinary tabs when dropped on blank tab-strip space");
+        var before = Copy(first, false);
+        var after = Copy(first, true);
+        var appended = Copy(null, true);
+        Ensure(order.SequenceEqual(new[] { before, first, after, appended, ordinary }),
+            "before, after and blank-space copies all preserve the pinned partition");
+        Ensure((int)paneType.GetProperty("SelectedTabIndex", InstanceMembers)!.GetValue(destination)! == 3,
+            "selected-tab persistence follows the displayed copy position");
+        var snapshot = (System.Collections.IEnumerable)paneType.GetMethod("SnapshotTabs", InstanceMembers)!
+            .Invoke(destination, null)!;
+        var savedPaths = snapshot.Cast<object>().Select(tab =>
+            (string)tab.GetType().GetProperty("Path", InstanceMembers)!.GetValue(tab)!).ToArray();
+        Ensure(savedPaths.SequenceEqual(order.Select(ReadBrowserPath)), "session snapshot follows displayed order");
+
+        paneType.GetMethod("TogglePinned", InstanceMembers)!.Invoke(source, [original.Tag]);
+        var beforeOrdinary = Copy(ordinary, false);
+        var afterOrdinary = Copy(ordinary, true);
+        var appendedOrdinary = Copy(null, true);
+        Ensure(order.SequenceEqual(new[] { before, first, after, appended,
+            beforeOrdinary, ordinary, afterOrdinary, appendedOrdinary }),
+            "ordinary copies preserve target-relative positions and append after the pinned partition");
+        Ensure(sourceTabs.Items.Count == 2 && sourceTabs.Items.Contains(original), "copy preserves the source tab");
+        var browsers = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        foreach (var tab in sourceTabs.Items.Cast<TabItem>().Concat(targetTabs.Items.Cast<TabItem>()))
+        {
+            var browser = tab.Tag.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!;
+            Ensure(browsers.Add(browser), "each copied tab owns an independent host object");
+            Ensure(browser.GetType().GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
+                (nint)browser.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
+                "unattached panes never created a Shell browser or native host");
+        }
+    }
+
+    private static void DisposeUnhostedBrowsers(UIElement? pane)
+    {
+        if (pane is null) return;
+        var tabs = (TabControl)pane.GetType().GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        foreach (var tab in tabs.Items.Cast<TabItem>())
+            ((IDisposable)tab.Tag.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(tab.Tag)!).Dispose();
     }
 
     private static string ReadBrowserPath(object tab)

@@ -27,6 +27,7 @@ internal static class Program
     {
         if (args is ["--pane-tab-transfer"]) return PaneTabTransferProbe.Run();
         if (args is ["--tab-host-lifetime"]) return TabHostLifetimeProbe.Run();
+        if (args is ["--pane-tab-copy-order"]) return PaneTabTransferProbe.Run(unhostedCopyOrder: true);
         if (args is ["--shell-update-notification-smoke"])
             return ShellUpdateNotificationProbe.Run();
         if (args is ["--shell-change-registration-stress"])

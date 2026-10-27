@@ -2078,8 +2078,10 @@ public partial class PaneControl : UserControl
                 previewPaneVisible: source.Browser.PreviewPaneVisible,
                 detailsPaneVisible: source.Browser.DetailsPaneVisible,
                 addressHistory: source.AddressHistory.Copy());
-            var destinationIndex = GetTabInsertionIndex(source.IsPinned, target, after);
             _tabOrder.Remove(copy);
+            // AddTab already inserted the copy. Exclude it before counting the
+            // pinned partition, or a blank-strip copy lands after an ordinary tab.
+            var destinationIndex = GetTabInsertionIndex(source.IsPinned, target, after);
             _tabOrder.Insert(Math.Clamp(destinationIndex, 0, _tabOrder.Count), copy);
             UpdateTabOrders();
             Tabs.SelectedItem = copy;
