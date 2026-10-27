@@ -64,6 +64,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedSettledPath(sourcePane, targetPane);
                 CheckUnhostedReopenHistory(sourcePane);
                 CheckUnhostedFilterFailures(sourcePane);
+                CheckUnhostedFilterGroupSnapshot(sourcePane);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -292,6 +293,68 @@ internal static class PaneTabTransferProbe
                 (nint)host.GetType().GetField("_hostWindow", InstanceMembers)!.GetValue(host)! == 0,
                 "settled-path snapshot checks never create a native Shell view");
         }
+    }
+
+    private static void CheckUnhostedFilterGroupSnapshot(UIElement pane)
+    {
+        var paneType = pane.GetType();
+        var tabs = (TabControl)paneType.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var state = ((TabItem)tabs.SelectedItem!).Tag;
+        var browser = state.GetType().GetProperty("Browser", InstanceMembers)!.GetValue(state)!;
+        var hostType = browser.GetType();
+        var keyType = hostType.Assembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
+        var key = Activator.CreateInstance(keyType, [Guid.NewGuid(), 42u])!;
+        var request = (long)hostType.GetField("_quickFilterRequestVersion", InstanceMembers)!.GetValue(browser)!;
+        hostType.GetMethod("QueueQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, [key, false, 5, request]);
+        try
+        {
+            var cached = hostType.GetMethod("CachedViewState", InstanceMembers)!.Invoke(browser, null)!;
+            var viewType = cached.GetType();
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(cached), key) &&
+                !(bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(cached)!,
+                "pending filter grouping is retained in the saved cache before any native capture");
+            var timer = hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser);
+            var retiredKey = Activator.CreateInstance(keyType, [Guid.NewGuid(), 43u])!;
+            hostType.GetMethod("QueueQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser,
+                [retiredKey, true, 5, request - 1]);
+            var afterRetired = hostType.GetMethod("CachedViewState", InstanceMembers)!.Invoke(browser, null)!;
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(afterRetired), key) &&
+                ReferenceEquals(timer, hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser)),
+                "a retired refresh callback cannot replace the current group intent or timer");
+            // Model a complete native snapshot taken while grouping is disabled.
+            // Other fields must still come from that snapshot, not the old cache.
+            viewType.GetProperty("GroupKey", InstanceMembers)!.SetValue(cached, null);
+            viewType.GetProperty("Mode", InstanceMembers)!.SetValue(cached, 3u);
+            viewType.GetProperty("IconSize", InstanceMembers)!.SetValue(cached, 24);
+            var merge = hostType.GetMethod("PreserveQuickFilterGroup", InstanceMembers)!;
+            void Check(object merged)
+            {
+                Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(merged), key) &&
+                    !(bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(merged)! &&
+                    (uint)viewType.GetProperty("Mode", InstanceMembers)!.GetValue(merged)! == 3 &&
+                    (int)viewType.GetProperty("IconSize", InstanceMembers)!.GetValue(merged)! == 24,
+                    "temporary ungrouping preserves group identity without discarding the current view mode");
+            }
+            Check(merge.Invoke(browser, [cached])!);
+            hostType.GetMethod("CancelPendingQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, null);
+            Check(merge.Invoke(browser, [cached])!);
+            Ensure(hostType.GetField("_quickFilterGroupRestoreTimer", InstanceMembers)!.GetValue(browser) is null,
+                "retiring a group timer keeps the desired settings without leaving the timer alive");
+            hostType.GetMethod("QueueQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, [key, false, 0, request]);
+            // Zero initial rows tries to restore immediately; without a native
+            // view it fails, but that must not erase the saved grouping intent.
+            var snapshots = ((System.Collections.IEnumerable)paneType.GetMethod("SnapshotTabs", InstanceMembers)!
+                .Invoke(pane, null)!).Cast<object>().ToArray();
+            var selected = (int)paneType.GetProperty("SelectedTabIndex", InstanceMembers)!.GetValue(pane)!;
+            var savedView = snapshots[selected].GetType().GetProperty("View", InstanceMembers)!.GetValue(snapshots[selected])!;
+            Ensure(Equals(viewType.GetProperty("GroupKey", InstanceMembers)!.GetValue(savedView), key) &&
+                !(bool)viewType.GetProperty("GroupAscending", InstanceMembers)!.GetValue(savedView)!,
+                "a failed group restore still saves the intended key and direction rather than None");
+            Ensure(hostType.GetField("_browser", InstanceMembers)!.GetValue(browser) is null &&
+                (nint)hostType.GetField("_hostWindow", InstanceMembers)!.GetValue(browser)! == 0,
+                "group snapshot checks never create a native view");
+        }
+        finally { hostType.GetMethod("CancelPendingQuickFilterGroupRestore", InstanceMembers)!.Invoke(browser, null); }
     }
 
     private static void CheckUnhostedFilterFailures(UIElement pane)

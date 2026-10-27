@@ -43,6 +43,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool? _fullRowSelection;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
+    private (PropertyKeyState Group, bool Ascending)? _quickFilterGroupToRestore;
     private long _quickFilterRequestVersion;
     private const int QuickFilterGroupRestoreTimeoutMilliseconds = 5000;
     private ShellHistoryEvents? _historyEvents;
@@ -1801,7 +1802,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var captured = ShellViewStateCapture.Capture(_viewState,
                 new NativeViewStateSource(view), out var complete, IsCurrentCapture);
             ViewCaptureFailed = !complete;
-            if (complete) _viewState = captured;
+            if (complete) _viewState = PreserveQuickFilterGroup(captured);
             return _viewState.Copy();
         }
         finally { Marshal.Release(view); }
@@ -2042,7 +2043,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var browser = _browser;
         var generation = _viewReadiness.Generation;
         var saved = _viewState.Copy();
-        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
+        var filterRequest = _quickFilterRequestVersion;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
+            filterRequest == _quickFilterRequestVersion;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return;
         try
@@ -2056,7 +2059,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 };
                 MenuError?.Invoke(this, $"{label}恢复失败，暂未保存会话；请重新打开目录后重试。0x{result:X8}");
             }, Current);
-            if (Current()) _viewRestoreFailed = !restored;
+            if (Current())
+            {
+                _viewRestoreFailed = !restored;
+                if (restored) _quickFilterGroupToRestore = null;
+            }
         }
         finally { Marshal.Release(view); }
     }
@@ -2153,14 +2160,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var pendingRestore = _pendingQuickFilterGroupRestore;
         CancelPendingQuickFilterGroupRestore();
         var searchActive = _location.IsSearchActive;
-        PropertyKeyState? group = pendingRestore?.Group;
-        var groupAscending = pendingRestore?.Ascending ?? false;
+        PropertyKeyState? group = pendingRestore?.Group ?? _quickFilterGroupToRestore?.Group;
+        var groupAscending = pendingRestore?.Ascending ?? _quickFilterGroupToRestore?.Ascending ?? false;
         var groupCleared = pendingRestore is not null;
         IDisposable? groupSelectionSuppression = pendingRestore is not null
             ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion) : null;
         try
         {
-            var hasGroup = !searchActive && (pendingRestore is not null ||
+            var hasGroup = !searchActive && (pendingRestore is not null || _quickFilterGroupToRestore is not null ||
                 settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
             var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
             if (!Current()) return false;
@@ -2169,11 +2176,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             groupSelectionSuppression ??= hasGroup
                 ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
                 : null;
+            if (hasGroup && group is not null) RememberQuickFilterGroup(group, groupAscending);
             // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
-            groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false);
+            groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false, Current);
             if (!Current()) return false;
-            LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={ReadCurrentGroupDiagnostic()}";
+            var groupDiagnostic = ReadCurrentGroupDiagnostic();
             if (!Current()) return false;
+            LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={groupDiagnostic}";
             _quickFilterSettings = settings;
             _quickFilter = null;
             attachmentAttempted = true;
@@ -2209,8 +2218,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (!Current()) return false;
             try
             {
-                if (groupCleared && group is not null && !TrySetGroup(group, groupAscending))
-                    failures.Add(new InvalidOperationException("恢复原分组失败。"));
+                if (groupCleared && group is not null)
+                {
+                    if (!TrySetGroup(group, groupAscending, Current))
+                        failures.Add(new InvalidOperationException("恢复原分组失败。"));
+                    else if (Current()) _quickFilterGroupToRestore = null;
+                }
             }
             catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原分组失败。", ex)); }
             if (!Current()) return false;
@@ -2247,7 +2260,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void QueueQuickFilterGroupRestore(PropertyKeyState group, bool ascending, int initialItemCount, long requestVersion)
     {
+        if (requestVersion != _quickFilterRequestVersion) return;
         CancelPendingQuickFilterGroupRestore();
+        RememberQuickFilterGroup(group, ascending);
         var pending = new PendingQuickFilterGroupRestore(group, ascending, initialItemCount,
             _quickFilter, _location.DirectoryPath, _viewReadiness.NavigationVersion, requestVersion, Stopwatch.GetTimestamp());
         _pendingQuickFilterGroupRestore = pending;
@@ -2263,11 +2278,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void AdvanceQuickFilterGroupRestore(PendingQuickFilterGroupRestore pending, DispatcherTimer timer)
     {
+        bool VisitCurrent() => _quickFilterRequestVersion == pending.RequestVersion &&
+            _viewReadiness.NavigationVersion == pending.NavigationVersion &&
+            string.Equals(CurrentPath, pending.Path, StringComparison.OrdinalIgnoreCase);
         if (!ReferenceEquals(_pendingQuickFilterGroupRestore, pending) ||
             !ReferenceEquals(_quickFilterGroupRestoreTimer, timer)) return;
-        if (_quickFilterRequestVersion != pending.RequestVersion ||
-            _viewReadiness.NavigationVersion != pending.NavigationVersion ||
-            !string.Equals(CurrentPath, pending.Path, StringComparison.OrdinalIgnoreCase))
+        if (!VisitCurrent())
         {
             CancelPendingQuickFilterGroupRestore();
             LastQuickFilterStatus += "; stale group restore cancelled after navigation";
@@ -2276,6 +2292,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
         var callbacks = pending.Filter is null ? -1 : pending.Filter.ShouldShowCalls;
         var rows = ReadDirectoryMonitorItemCount() ?? 0;
+        // Count queries can pump COM callbacks and retire this timer/visit.
+        if (!VisitCurrent() || !ReferenceEquals(_pendingQuickFilterGroupRestore, pending) ||
+            !ReferenceEquals(_quickFilterGroupRestoreTimer, timer)) return;
         var decision = QuickFilterEnumerationGate.Decide(pending.InitialItemCount, callbacks, rows,
             Stopwatch.GetElapsedTime(pending.StartedAt), TimeSpan.FromMilliseconds(QuickFilterGroupRestoreTimeoutMilliseconds));
         if (decision == QuickFilterEnumerationDecision.WaitForEnumeration) return;
@@ -2289,9 +2308,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _quickFilterSettings = QuickFilterSettings.Empty;
             _quickFilter = null;
             try { UpdateQuickFilterAttachment(searchActive: false); }
-            catch (Exception ex) { MenuError?.Invoke(this, $"超时后恢复文件视图失败：{ex.Message}"); }
+            catch (Exception ex) { if (VisitCurrent()) MenuError?.Invoke(this, $"超时后恢复文件视图失败：{ex.Message}"); }
+            if (!VisitCurrent()) return;
             QuickFilterChanged?.Invoke(_quickFilterSettings);
+            if (!VisitCurrent()) return;
             MenuError?.Invoke(this, "Shell 文件视图未完成筛选刷新，已清除筛选并恢复显示全部项目。");
+            if (!VisitCurrent()) return;
             try
             {
                 Refresh(() =>
@@ -2301,13 +2323,30 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             pending.RequestVersion);
                 });
             }
-            catch (Exception ex) { MenuError?.Invoke(this, $"筛选恢复刷新失败：0x{ex.HResult:X8}"); }
+            catch (Exception ex) { if (VisitCurrent()) MenuError?.Invoke(this, $"筛选恢复刷新失败：0x{ex.HResult:X8}"); }
             return;
         }
 
-        var restored = TrySetGroup(pending.Group, pending.Ascending);
-        LastQuickFilterStatus += $"; restore-group={restored},rows={ReadDirectoryMonitorItemCount()},current-group={ReadCurrentGroupDiagnostic()}";
+        var restored = TrySetGroup(pending.Group, pending.Ascending, VisitCurrent);
+        if (!VisitCurrent()) return;
+        if (restored) _quickFilterGroupToRestore = null;
+        var currentRows = ReadDirectoryMonitorItemCount();
+        if (!VisitCurrent()) return;
+        var currentGroup = ReadCurrentGroupDiagnostic();
+        if (!VisitCurrent()) return;
+        LastQuickFilterStatus += $"; restore-group={restored},rows={currentRows},current-group={currentGroup}";
     }
+
+    private void RememberQuickFilterGroup(PropertyKeyState group, bool ascending)
+    {
+        // Filtering temporarily clears native grouping. Keep the confirmed intent
+        // even when navigation cancels its timer, so save/copy never store "None".
+        _quickFilterGroupToRestore = (group, ascending);
+        _viewState = PreserveQuickFilterGroup(_viewState);
+    }
+
+    private ViewState PreserveQuickFilterGroup(ViewState captured) => _quickFilterGroupToRestore is { } group
+        ? captured with { GroupKey = group.Group, GroupAscending = group.Ascending } : captured;
 
     private void CancelPendingQuickFilterGroupRestore()
     {
@@ -2336,15 +2375,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(view); }
     }
 
-    private bool TrySetGroup(PropertyKeyState? group, bool ascending)
+    private bool TrySetGroup(PropertyKeyState? group, bool ascending, Func<bool> isCurrent)
     {
+        if (!isCurrent()) return false;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return false;
         try
         {
+            if (!isCurrent()) return false;
             var key = group is null ? default : new NativePropertyKey
                 { FormatId = group.FormatId, PropertyId = group.PropertyId };
             var result = GetMethod<SetGroupByDelegate>(view, 17)(view, ref key, ascending ? 1 : 0);
+            if (!isCurrent()) return false;
             if (result < 0) MenuError?.Invoke(this, $"调整筛选分组顺序失败：0x{result:X8}");
             return result >= 0;
         }
@@ -4068,6 +4110,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         _quickFilterRequestVersion++;
         CancelPendingQuickFilterGroupRestore();
+        _quickFilterGroupToRestore = null;
         ClearLastNativeSelection();
         _nativeInputSelectionCapture?.Abort();
         _nativeInputSelectionCapture = null;

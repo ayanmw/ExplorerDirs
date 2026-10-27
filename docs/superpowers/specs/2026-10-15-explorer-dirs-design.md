@@ -2,6 +2,12 @@
 
 日期：2026-10-15
 
+## 2026-10-27 过滤枚举期间的分组意图
+
+`_quickFilterGroupToRestore` 与枚举计时分开：清组前用已确认 key/ascending 更新缓存，捕获成功后仅合并该意图，不冻结模式/图标/排序/列。取消旧 timer 不等于用户选择“无分组”，因此导航交接仍保留缓存和意图，供下一视图恢复；当前分组恢复或整份视图恢复成功后才解除，失败时继续保留，DisposeBrowser 清理。
+
+队列入口先拒绝过期 filter request，再替换 timer；计数查询后重新核对 request/navigation/path 与 timer 对象。分组写入在 GetCurrentView 前后及 SetGroupBy 后检查访问，旧错误不交给新访问。完整视图恢复也绑定筛选请求，避免与新的临时清组交错后错误清除意图。回归使用未挂接实际宿主、真实计时对象和模拟完整捕获，不证明真实 Shell 分组恢复、用户在枚举时主动改组或原生消息顺序。
+
 ## 2026-10-27 快速筛选的失败边界
 
 ShellFilterAttachment 管理 IFolderFilterSite/IFolderFilter 查询与 SetFilter 槽位调用，失败必须交回宿主，不以缺少接口当成功。SetQuickFilter 返回是否完成当前请求，固定 filter request/browser/read generation，原设置与筛选对象只作为本次回滚快照；准备、附加、通知或刷新异常时尝试恢复，保留原始与回滚错误。回滚包含分组和界面通知，选区抑制直到 finally 才释放；新的访问/筛选优先，旧回滚与旧错误不再继续。没有原生浏览器时仅记录配置供创建时应用，不调用 Refresh。
