@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格同步清理停滞位置诊断
+
+新增 `session-restore-sync-cleanup-private-desktop` 诊断入口，让四窗格 consumer 在真实 Shell 操作完成后显式清理，并逐阶段输出进度。三轮中，`DestroyViewWindow`、view/folder/browser-site COM 引用释放、菜单协调器释放及 pane 子窗口销毁均返回；随后卡在 consumer 的顶层 parent `DestroyWindow`。第二、三轮还逐一销毁 pane 2–4 的 Shell view 与 pane 1 子窗口，结果相同。consumer 被其 100 秒期限终止，诊断轮次退出码 1；主桌面 foreground HWND 未变，无遗留 NativeProbe 子进程。日志：`20261028-045213-6af1c87c.stdout.log`、`20261028-045600-3606f1d1.stdout.log`、`20261028-045802-31f0f211.stdout.log`。
+
+因此当前证据把停滞点缩小到顶层 parent 窗口销毁调用期间，尚未确定它是 Shell/窗口消息重入、线程等待还是其他根因；不能把它归结为 `Marshal.Release` 卡住。随后原有 process-exit 清理路径完整复验通过，日志 `20261028-050007-1af1a06f.stdout.log`，退出码 0、前台不变。该诊断仅作用于隔离 NativeProbe；产品宿主未改，同步清理门槛仍未通过。
+
 ## 2026-10-28：隔离原型真实 F2 方向键确认
 
 用户在隔离候选窗口 `125449 / 179260` 中选取 sample 文件，手动按 F2 后确认进入重命名，使用方向键时编辑状态保持。该次只覆盖一个样本及当前查看方式；未覆盖四方向键逐项、Shift/Ctrl 组合、跨窗格竞争焦点、ExplorerBrowser 产品宿主或不同视图模式，因此仅记为隔离原型的可见交互证据，不关闭产品焦点验收。

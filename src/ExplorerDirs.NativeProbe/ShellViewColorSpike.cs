@@ -47,7 +47,7 @@ internal static class ShellViewColorSpike
     private static int _customDrawItems;
 
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
-        bool terminateProcessAfterProbe = false)
+        bool terminateProcessAfterProbe = false, bool synchronousCleanupProbe = false)
     {
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -139,7 +139,8 @@ internal static class ShellViewColorSpike
             var shellAcceleratorRoute = ProbeShellBrowserAcceleratorForwarding(host, view, viewWindow);
             Console.WriteLine("session-restore-consumer-stage: shell-accelerator-route=" + shellAcceleratorRoute);
             var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
-                folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator);
+                folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator,
+                synchronousCleanupProbe);
             Console.WriteLine("session-restore-consumer-stage: four-pane-finished");
             Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
                 $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
@@ -161,24 +162,41 @@ internal static class ShellViewColorSpike
                 Console.Error.Flush();
                 Environment.Exit(result);
             }
+            Console.WriteLine("session-restore-consumer-cleanup: start");
+            if (folderView != 0) Console.WriteLine("session-restore-consumer-cleanup: release-folder-view");
             if (folderView != 0) Marshal.Release(folderView);
             if (view != 0)
             {
                 if (host is not null) host.RevokeDropTarget();
                 if (createAttempted)
                 {
+                    Console.WriteLine("session-restore-consumer-cleanup: destroy-view-window-start");
                     try { _ = At<DestroyViewWindow>(view, 10)(view); }
                     catch (Exception ex) { Console.Error.WriteLine("session-restore-consumer destroy: " + ex.Message); }
+                    Console.WriteLine("session-restore-consumer-cleanup: destroy-view-window-complete");
                 }
                 if (host is not null) host.View = 0;
+                Console.WriteLine("session-restore-consumer-cleanup: release-view");
                 Marshal.Release(view);
             }
+            if (folder != 0) Console.WriteLine("session-restore-consumer-cleanup: release-folder");
             if (folder != 0) Marshal.Release(folder);
+            if (hostPointer != 0) Console.WriteLine("session-restore-consumer-cleanup: release-browser-site");
             if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (host is not null) Console.WriteLine("session-restore-consumer-cleanup: dispose-browser-site");
             if (host is not null) host.Dispose();
+            if (menuCoordinator is not null) Console.WriteLine("session-restore-consumer-cleanup: dispose-menu-coordinator");
             menuCoordinator?.Dispose();
             if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (pane != 0 && IsWindow(pane))
+            {
+                Console.WriteLine("session-restore-consumer-cleanup: destroy-primary-pane");
+                _ = DestroyWindow(pane);
+                Console.WriteLine("session-restore-consumer-cleanup: destroy-primary-pane-complete");
+            }
+            if (parent != 0 && IsWindow(parent)) Console.WriteLine("session-restore-consumer-cleanup: destroy-parent-window");
             if (parent != 0 && IsWindow(parent)) _ = DestroyWindow(parent);
+            Console.WriteLine("session-restore-consumer-cleanup: complete");
             Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
         }
         return result;
@@ -188,7 +206,8 @@ internal static class ShellViewColorSpike
         Guid restoredSessionId, nint containerParent, nint restoredView, nint firstPane,
         ShellViewColorBrowserHost restoredHost,
         nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
-        IReadOnlyList<DisplayColumnState> columnsExpected, ShellMenuFrameCoordinator menuCoordinator)
+        IReadOnlyList<DisplayColumnState> columnsExpected, ShellMenuFrameCoordinator menuCoordinator,
+        bool synchronousCleanupProbe)
     {
         Console.WriteLine("session-restore-consumer-stage: concurrent-views-start");
         // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
@@ -313,13 +332,46 @@ internal static class ShellViewColorSpike
             fixture, otherFixture);
         Console.WriteLine("session-restore-consumer-stage: directory-notifications-complete");
         AssertPaneModes(allViews, expectedModes, "file operations");
-        return $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
+        var result = $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
             $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
             $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
             $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
             $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
             $"menu-routing={menuRouting}; menu-commands={menuCommands}; file-updates={allPaneCounts}; " +
             $"selection-menus={selectionMenus}; directory-notifications={directoryIsolation}; independent=True";
+        if (synchronousCleanupProbe)
+        {
+            RetirePaneForSynchronousCleanup("pane-2", pane, view, viewWindow, folder, pidl,
+                hostPointer, host, folderView);
+            view = viewWindow = folder = pidl = hostPointer = folderView = 0;
+            RetirePaneForSynchronousCleanup("pane-3", pane3.Pane, pane3.View, pane3.ViewWindow,
+                pane3.Folder, pane3.Pidl, pane3.HostPointer, pane3.Host, pane3.FolderView);
+            RetirePaneForSynchronousCleanup("pane-4", pane4.Pane, pane4.View, pane4.ViewWindow,
+                pane4.Folder, pane4.Pidl, pane4.HostPointer, pane4.Host, pane4.FolderView);
+        }
+        return result;
+    }
+
+    private static void RetirePaneForSynchronousCleanup(string name, nint pane, nint view,
+        nint viewWindow, nint folder, nint pidl, nint hostPointer,
+        ShellViewColorBrowserHost host, nint folderView)
+    {
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-start");
+        host.RevokeDropTarget();
+        host.View = 0;
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-destroy-view-start");
+        var destroyHr = At<DestroyViewWindow>(view, 10)(view);
+        if (destroyHr < 0)
+            throw new InvalidOperationException($"{name} DestroyViewWindow failed: {destroyHr:X8}.");
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-destroy-view-complete/valid={IsWindow(viewWindow)}");
+        Marshal.Release(folderView);
+        Marshal.Release(view);
+        Marshal.Release(folder);
+        Marshal.Release(hostPointer);
+        host.Dispose();
+        if (pane != 0 && IsWindow(pane)) _ = DestroyWindow(pane);
+        if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-complete");
     }
 
     private static string ProbeShellBrowserAcceleratorForwarding(ShellViewColorBrowserHost host,
@@ -1547,7 +1599,7 @@ internal static class ShellViewColorSpike
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
-        bool probeSessionRestore = false)
+        bool probeSessionRestore = false, bool synchronousCleanupProbe = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -1832,7 +1884,8 @@ internal static class ShellViewColorSpike
                 if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
                     throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
                 Console.WriteLine("ishellview-session-restore-stage: starting-consumer");
-                var consumer = RunSessionRestoreConsumerProcess(fixture, stateDirectory, sessionId);
+                var consumer = RunSessionRestoreConsumerProcess(fixture, stateDirectory, sessionId,
+                    synchronousCleanupProbe);
                 Console.WriteLine($"ishellview-session-restore: producer-pid={Environment.ProcessId}; " +
                     $"shell-write-callbacks={shellWrites}; persisted-bytes={savedState.Length}; " +
                     $"mode-before-save={modeBeforeSave}; sort={sortCountBeforeSave}; " +
@@ -2227,7 +2280,7 @@ internal static class ShellViewColorSpike
     }
 
     private static (int ExitCode, string Output) RunSessionRestoreConsumerProcess(
-        string fixture, string stateDirectory, Guid sessionId)
+        string fixture, string stateDirectory, Guid sessionId, bool synchronousCleanupProbe)
     {
         var executable = Environment.ProcessPath
             ?? throw new InvalidOperationException("Could not determine the NativeProbe process executable.");
@@ -2245,6 +2298,7 @@ internal static class ShellViewColorSpike
         start.ArgumentList.Add(fixture);
         start.ArgumentList.Add(stateDirectory);
         start.ArgumentList.Add(sessionId.ToString("D"));
+        if (synchronousCleanupProbe) start.ArgumentList.Add("--sync-cleanup");
 
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");

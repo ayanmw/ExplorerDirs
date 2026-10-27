@@ -20,14 +20,19 @@ internal static class PrivateDesktopShellProbe
     internal static int RunMenuActivation() => Run("menu-activation", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, probeMenuActivation: true));
 
-    internal static int RunSessionRestore() => Run("session-restore", () => ShellViewColorSpike.Run(
-        visible: true, deferParentCleanup: true, probeSessionRestore: true), TimeSpan.FromSeconds(110));
+    internal static int RunSessionRestore(bool synchronousCleanupProbe = false) => Run(
+        synchronousCleanupProbe ? "session-restore-sync-cleanup" : "session-restore",
+        () => ShellViewColorSpike.Run(visible: true, deferParentCleanup: true, probeSessionRestore: true,
+            synchronousCleanupProbe: synchronousCleanupProbe), TimeSpan.FromSeconds(110));
 
     internal static int RunDropTarget() => Run("drop-target", ShellViewDropTargetProbe.Run);
 
-    internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId) =>
-        Run("session-restore-consumer", () => ShellViewColorSpike.RunSessionRestoreConsumer(
-            fixture, stateDirectory, sessionId, terminateProcessAfterProbe: true), TimeSpan.FromSeconds(100));
+    internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
+        bool synchronousCleanupProbe = false) =>
+        Run(synchronousCleanupProbe ? "session-restore-consumer-sync-cleanup" : "session-restore-consumer",
+            () => ShellViewColorSpike.RunSessionRestoreConsumer(fixture, stateDirectory, sessionId,
+                terminateProcessAfterProbe: !synchronousCleanupProbe,
+                synchronousCleanupProbe: synchronousCleanupProbe), TimeSpan.FromSeconds(100));
 
     internal static int RunReadOnlyColorRule() => Run("color-readonly-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, readOnlyRuleProbe: true));
