@@ -60,6 +60,10 @@ internal static class PrivateDesktopShellProbe
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             disableImeForProbeThread: true), TimeSpan.FromSeconds(45));
 
+    internal static int RunSinglePaneMenuOleInitializedSynchronousCleanup() => Run("single-pane-menu-ole-init-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true),
+        TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunSinglePaneMenuDetachedViewImeSynchronousCleanup() => Run("single-pane-menu-detached-view-ime-sync-cleanup",
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             detachShellViewImeContexts: true), TimeSpan.FromSeconds(45));
@@ -187,7 +191,7 @@ internal static class PrivateDesktopShellProbe
         return passed ? 0 : 1;
     }
 
-    private static int Run(string kind, Func<int> probe, TimeSpan? timeout = null)
+    private static int Run(string kind, Func<int> probe, TimeSpan? timeout = null, bool initializeOle = false)
     {
         var foregroundBefore = GetForegroundWindow();
         var desktopName = "ExplorerDirs-Probe-" + Guid.NewGuid().ToString("N");
@@ -207,8 +211,16 @@ internal static class PrivateDesktopShellProbe
                 return;
             }
 
+            var oleInitialized = false;
             try
             {
+                if (initializeOle)
+                {
+                    var oleResult = OleInitialize(0);
+                    Console.WriteLine($"private-desktop-probe: ole-initialize=0x{oleResult:X8}; thread={GetCurrentThreadId()}");
+                    if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+                    oleInitialized = true;
+                }
                 result = probe();
             }
             catch (Exception exception)
@@ -217,6 +229,7 @@ internal static class PrivateDesktopShellProbe
             }
             finally
             {
+                if (oleInitialized) OleUninitialize();
                 // Returning from the Shell probe is enough to report assertions. The STA
                 // may stall while tearing down its private Desktop, so process exit owns cleanup.
                 probeReturned.Set();
@@ -410,6 +423,12 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool CloseDesktop(nint desktop);
+
+    [DllImport("ole32.dll")]
+    private static extern int OleInitialize(nint reserved);
+
+    [DllImport("ole32.dll")]
+    private static extern void OleUninitialize();
 
     [StructLayout(LayoutKind.Explicit, Size = 280)]
     private struct WaitChainNode

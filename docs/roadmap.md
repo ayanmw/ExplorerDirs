@@ -4245,3 +4245,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 对同一运行进程做 30 秒只读 `dotnet-counters` 采样：进程 Working Set 约 244.61–244.65 MB，Private Bytes 约 117.55 MiB；GC committed 约 27.54 MiB，最近一次 GC 报告的堆大小合计约 17.94 MiB，托管分配流量约 9.63 MiB/25 秒，窗口内没有 GC。未注入用户操作、没有强制 GC。
 - 这说明短时进程 Private Bytes 大于 GC 最近提交值，但不能将差额归因于特定组件；分配流量不等于保留量。后续需固定窗格/标签操作并结合原生分配类别采样。原始数据与哈希见[内存调查](memory-sampling.md#2026-10-28-csttemp76-同一-pid-的短时-net-运行时计数)。
+
+## 2026-10-28：显式 OLE 初始化未改变 IShellView 菜单后销毁挂起
+
+- 为隔离 NativeProbe 的 STA 在 Shell 窗口创建前显式执行 `OleInitialize` 增加 opt-in 对照，输入法保持启用；连续两次菜单激活/停用后的同步销毁都在顶层 parent `DestroyWindow` 挂起，50 秒 watchdog 后终止。WCT 均重复看到 COM activation → `ChsIME` 等待链，`cycle=False`，主桌面前台未变。
+- 因而“仅缺少 OLE 初始化”不是充分解释。该等待链不是线程栈，且只发生在 Private Desktop 的隔离 `IShellView` 探针，不据此推断当前 ExplorerBrowser 产品故障。下一步单独评估 WPF Dispatcher/消息泵差异；`ImmDisableIME` 仍仅为诊断对照，不能用作产品修复。详细记录见[隔离原型诊断](ishellview-color-spike.md#2026-10-28显式-ole-初始化未改变菜单后销毁挂起)。
