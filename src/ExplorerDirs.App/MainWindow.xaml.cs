@@ -1718,6 +1718,7 @@ public partial class MainWindow : Window
             item.Click += (_, _) => InvokeFileCommand(info.Command);
             FileCommandsMenu.Items.Add(item);
             _fileCommandMenus[info.Command] = item;
+            if (info.Command is not (ShellFileCommand.Properties or ShellFileCommand.NewFolder)) continue;
             var button = new Button
             {
                 Content = ExplorerChromeIcons.CreateLabeledButtonContent(info.Command, info.Label),
@@ -1877,7 +1878,7 @@ public partial class MainWindow : Window
             foreach (var (command, enabled) in states)
             {
                 _fileCommandMenus[command].IsEnabled = enabled;
-                _fileCommandButtons[command].IsEnabled = enabled;
+                if (_fileCommandButtons.TryGetValue(command, out var button)) button.IsEnabled = enabled;
             }
             NewFolderMenu.IsEnabled = states.GetValueOrDefault(ShellFileCommand.NewFolder);
             var counts = renameEditorFocused ? null : pane.ReadSelectionCounts();
