@@ -21,6 +21,19 @@ internal static class NavigationFocusRequestProbe
         var viewType = app.GetType("ExplorerDirs.App.ViewState", true)!;
         var view = viewType.GetMethod("Default", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!
             .Invoke(null, [4u, -1]);
+        using (var unavailable = (HwndHost)Activator.CreateInstance(hostType, Members, null,
+                   [Path.GetTempPath(), view!], null)!)
+        {
+            hostType.GetMethod("ApplyViewState", Members)!.Invoke(unavailable, null);
+            Ensure((bool)hostType.GetProperty("ViewCaptureFailed", Members)!.GetValue(unavailable)!,
+                "background-tab save protection is visible before any later capture");
+            var captured = hostType.GetMethod("CaptureViewState", Members)!.Invoke(unavailable, null)!;
+            Ensure((bool)hostType.GetProperty("ViewCaptureFailed", Members)!.GetValue(unavailable)!,
+                "an unavailable restore target protects saved view settings even without custom columns");
+            Ensure((uint)viewType.GetProperty("Mode", Members)!.GetValue(captured)! == 4 &&
+                unavailable.Handle == 0 && Field(unavailable, "_browser") is null,
+                "failed restore preserves the saved mode without creating a native view");
+        }
         using var host = (HwndHost)Activator.CreateInstance(hostType, Members, null, [Path.GetTempPath(), view!], null)!;
         var readiness = Field(host, "_viewReadiness")!;
         var readyType = readiness.GetType();

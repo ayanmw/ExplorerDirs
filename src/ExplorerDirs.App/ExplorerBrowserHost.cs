@@ -47,7 +47,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _quickFilterRequestVersion;
     private const int QuickFilterGroupRestoreTimeoutMilliseconds = 5000;
     private ShellHistoryEvents? _historyEvents;
-    private bool _columnRestoreFailed;
+    private bool _viewRestoreFailed;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
@@ -375,7 +375,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public string? SearchQuery => _location.SearchQuery;
     internal string? DiskSpaceDirectory => IsVisible && !_viewReadiness.Pending && _browser is not null
         ? _completedDiskDirectory : null;
-    public bool ViewCaptureFailed { get; private set; }
+    private bool _viewCaptureFailed;
+    public bool ViewCaptureFailed
+    {
+        get => _viewCaptureFailed || _viewRestoreFailed;
+        private set => _viewCaptureFailed = value;
+    }
     internal int DirectoryChangeFallbackRefreshCount { get; private set; }
     // Hidden stress diagnostics: distinguish Shell selection loss before Refresh
     // from a snapshot/restore failure inside our fallback path.
@@ -1781,7 +1786,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return _viewState.Copy();
         }
         if (_location.IsSearchActive) return _viewState.Copy();
-        if (_columnRestoreFailed)
+        if (_viewRestoreFailed)
         {
             ViewCaptureFailed = true;
             return _viewState.Copy();
@@ -1993,6 +1998,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
         try
         {
+            // Do not capture a partial preset over the previous complete state.
+            _viewRestoreFailed = true;
             var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, validated.Mode,
                 ViewStyle.NativeIconSize(validated.Mode, validated.IconSize));
             if (modeResult < 0)
@@ -2001,15 +2008,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return false;
             }
 
-            // Mark the cached layout unsafe until every saved column has applied.
-            _columnRestoreFailed = true;
             var columnResult = ShellColumnManager.Apply(view, validated.DisplayColumns);
             if (columnResult < 0)
             {
                 MenuError?.Invoke(this, $"查看预设的列设置未能完整应用；会话保存将等待重新读取。0x{columnResult:X8}");
                 return false;
             }
-            _columnRestoreFailed = false;
+            _viewRestoreFailed = false;
         }
         catch (COMException ex)
         {
@@ -2032,44 +2037,50 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ApplyViewState()
     {
-        // Keep a saved layout protected if the view is unavailable or COM fails
-        // before restoration finishes. A subsequent navigation retries it.
-        _columnRestoreFailed = _viewState.DisplayColumns is { Count: > 0 };
+        // All saved fields need protection, not only custom columns. Otherwise
+        // a mode/sort/group failure can be captured over the user's settings.
+        _viewRestoreFailed = true;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var saved = _viewState.Copy();
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return;
         try
         {
-            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode,
-                ViewStyle.NativeIconSize(_viewState.Mode, _viewState.IconSize));
-            if (modeResult < 0)
-                MenuError?.Invoke(this, $"查看方式未能恢复：0x{modeResult:X8}");
-            if (_viewState.DisplayColumns is { Count: > 0 } columnsToRestore)
+            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view), (step, result) =>
             {
-                // A failed/partial restore must not be captured over the saved layout.
-                var columnResult = ShellColumnManager.Apply(view, columnsToRestore);
-                _columnRestoreFailed = columnResult < 0;
-                if (columnResult < 0)
-                    MenuError?.Invoke(this, $"列设置恢复失败，暂未保存会话；请重新打开目录后重试。0x{columnResult:X8}");
-            }
-            if (_viewState.SortColumns.Count > 0)
-            {
-                var columns = _viewState.SortColumns.Select(sort => new NativeSortColumn
+                var label = step switch
                 {
-                    Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
-                    Direction = sort.Direction
-                }).ToArray();
-                var sortResult = GetMethod<SetSortColumnsDelegate>(view, 27)(view, columns, columns.Length);
-                if (sortResult < 0)
-                    MenuError?.Invoke(this, $"排序方式未能恢复：0x{sortResult:X8}");
-            }
-            var group = _viewState.GroupKey is { } savedGroup
-                ? new NativePropertyKey { FormatId = savedGroup.FormatId, PropertyId = savedGroup.PropertyId }
-                : default;
-            var groupResult = GetMethod<SetGroupByDelegate>(view, 17)(view, ref group, _viewState.GroupAscending ? 1 : 0);
-            if (groupResult < 0)
-                MenuError?.Invoke(this, $"分组方式未能恢复：0x{groupResult:X8}");
+                    ShellViewRestoreStep.Mode => "查看方式", ShellViewRestoreStep.Columns => "列设置",
+                    ShellViewRestoreStep.Sorting => "排序方式", _ => "分组方式"
+                };
+                MenuError?.Invoke(this, $"{label}恢复失败，暂未保存会话；请重新打开目录后重试。0x{result:X8}");
+            }, Current);
+            if (Current()) _viewRestoreFailed = !restored;
         }
         finally { Marshal.Release(view); }
+    }
+
+    private sealed class NativeViewStateTarget(nint view) : IShellViewStateTarget
+    {
+        public int SetMode(uint mode, int iconSize) =>
+            GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, mode, iconSize);
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) => ShellColumnManager.Apply(view, columns);
+        public int SetSorting(IReadOnlyList<SortColumnState> columns)
+        {
+            var native = columns.Select(sort => new NativeSortColumn
+            {
+                Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
+                Direction = sort.Direction
+            }).ToArray();
+            return GetMethod<SetSortColumnsDelegate>(view, 27)(view, native, native.Length);
+        }
+        public int SetGrouping(PropertyKeyState? key, bool ascending)
+        {
+            var native = key is null ? default : new NativePropertyKey { FormatId = key.FormatId, PropertyId = key.PropertyId };
+            return GetMethod<SetGroupByDelegate>(view, 17)(view, ref native, ascending ? 1 : 0);
+        }
     }
 
     private IntPtr GetFolderView2Pointer()

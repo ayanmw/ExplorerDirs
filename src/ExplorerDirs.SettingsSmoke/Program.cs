@@ -15,6 +15,12 @@ if (args is ["--tab-transfer-policy-smoke"])
     return;
 }
 
+if (args is ["--view-state-restore-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
+    return;
+}
+
 if (args is ["--window-placement-smoke"])
 {
     var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
@@ -592,6 +598,7 @@ try
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
     ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
     var shellView = new FakeShellViewStateSource
     {
         Mode = 3,

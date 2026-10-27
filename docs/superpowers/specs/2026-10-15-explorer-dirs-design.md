@@ -2,6 +2,12 @@
 
 日期：2026-10-15
 
+## 2026-10-27 整份视图恢复的保存保护
+
+`_viewRestoreFailed` 取代仅针对列的标记，进入自动恢复前即置位；视图不可用、任一 setter 失败或 COM 异常均保留缓存保护。`ShellViewStateRestore` 按模式、可选显示列、可选排序、分组顺序调用原生目标，任一步 HRESULT 失败可继续尝试其他字段，但整份恢复不会标记成功；默认空列/排序仍沿用 Shell，不增设覆盖。
+
+恢复前固定 view state/browser/read generation，每次调用前后复核，过期则停止后续写入与报错，不覆盖新访问的恢复结果。宿主只在当前恢复全部成功时解除标记；后续导航重试。ViewCaptureFailed 同时反映捕获与恢复失败，使未再次捕获的后台标签也立即阻止会话覆盖。预设应用在第一次写入前保护缓存，完整模式/列成功后再允许捕获。回归分别覆盖真实未挂接宿主的保存门控和模拟原生目标的 HRESULT/重入逻辑，真实 Shell setters 的拒绝与恢复外观仍需可见验收。
+
 ## 2026-10-27 原生导航键边界
 
 ShellNavigationKeyRouting 统一识别 PageUp/PageDown/End/Home/四方向（VK 0x21～0x28）。原生命名编辑框在宿主快捷键和 IShellView accelerator 前直接接收这些 WM_KEYDOWN，沿用原消息及系统 Ctrl/Shift 状态；普通文件区先交 Shell，只有 S_FALSE 且当前为文件内容、非列标题/编辑框时才补发。S_OK、错误、WM_KEYUP 和 WM_SYSKEYDOWN 不进入补发。保持 Tab、确认、取消及其它编辑键原有分派；策略 smoke 不等同真实键盘、原生选区或多窗格物理焦点验收。

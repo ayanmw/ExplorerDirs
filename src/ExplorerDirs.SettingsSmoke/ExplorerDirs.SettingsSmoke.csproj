@@ -113,6 +113,7 @@
     <Compile Include="../ExplorerDirs.App/ShellMenuCommand.cs" Link="ShellMenuCommand.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuTargetTracker.cs" Link="ShellMenuTargetTracker.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateCapture.cs" Link="ShellViewStateCapture.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNavigationState.cs" Link="ShellNavigationState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
