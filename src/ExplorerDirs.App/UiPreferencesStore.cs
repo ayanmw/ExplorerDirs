@@ -16,6 +16,9 @@ internal sealed class MultilineTabHeadersStore(string path)
 internal sealed class TabHeaderMaximumWidthStore(string path)
     : PortableBooleanPreference(path, "Tabs", "LimitMaximumWidth", "标签最大宽度", defaultValue: true);
 
+internal sealed class TabCloseButtonStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "ShowCloseButton", "标签关闭按钮");
+
 internal sealed class StatusBarVisibilityStore(string path)
     : PortableBooleanPreference(path, "StatusBar", "Show", "状态栏", defaultValue: true);
 

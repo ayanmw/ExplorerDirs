@@ -57,6 +57,8 @@
 
 > **标签标题最大宽度（2026-10-28）：**“视图 → 限制标签标题最大宽度”默认开启，保持原有 180 DIP 上限；关闭后标题可按文件夹全名自然扩展，遵循 Q-Dir 提供的最大宽度开关。偏好单独保存在便携 `TabHeaderMaximumWidth.ini`，发布隔离 profile 白名单已纳入该文件。Release SettingsSmoke 覆盖 INI 往返及 WPF 面板测量上限，完整发布 smoke、App Release build 通过；可见菜单/长标题布局仍待集中 UI 验收。
 
+> **标签关闭按钮（2026-10-28）：**“标签页 → 显示标签关闭按钮”按需在可关闭标签上加入 × 按钮；默认关闭，固定标签和窗格中最后一个标签不显示按钮。保留原有中键/双击关闭行为，偏好独立保存在便携 `TabCloseButton.ini` 并复制到隔离预览 profile。配置/显示资格 smoke、完整 Release SettingsSmoke、App Release build 与发布隔离 smoke 通过；按钮命中、视觉密度、标签移动后状态及不同主题仍待集中 UI 验收。对标依据：[Q-Dir 12.55 功能历史](https://www.softwareok.com/?seite=Freeware/Q-Dir/History)。
+
 > **拖动悬停标签自动切换（2026-10-27）：**“标签页 → 拖动悬停自动切换”提供关闭和 0.2–3 秒六个延时档位，默认 1 秒，保存在独立便携 `TabHoverActivation.ini`。每窗格仅为 Shell 文件/文件夹拖动启动可取消的 dispatcher timer；应用内标签重排保持原行为。偏好、拖放目标 gate 与接线 SettingsSmoke 和 App Release build 通过。鼠标悬停是否持续收到 WPF DragOver、切换后的 Shell drop target 和实体文件拖放仍待 GUI 验收。
 
 > **空白标签栏双击新建标签（2026-10-27）：**在标签标题滚动区域的空白处左键双击，复用 `NewTab()` 创建 Home/默认视图标签；标签标题双击仍走原关闭逻辑。接线 smoke 与 Release build 通过。真实鼠标命中和视觉仍待 GUI 验收。

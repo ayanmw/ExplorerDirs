@@ -26,6 +26,7 @@ public partial class PaneControl : UserControl
     private readonly TabHoverActivationGate _tabHoverActivationGate = new();
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private bool _newTabUsesCurrentFolder;
+    private bool _showTabCloseButtons;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
@@ -81,6 +82,7 @@ public partial class PaneControl : UserControl
         // the chrome. Commands must not use a second, lagging directory model.
         public string Path => Browser.CurrentPath;
         public bool IsPinned { get; set; }
+        public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
@@ -115,6 +117,18 @@ public partial class PaneControl : UserControl
     }
 
     internal void SetNewTabUsesCurrentFolder(bool enabled) => _newTabUsesCurrentFolder = enabled;
+
+    internal void SetShowTabCloseButtons(bool enabled)
+    {
+        _showTabCloseButtons = enabled;
+        foreach (var tab in _tabOrder)
+        {
+            var state = (TabState)tab.Tag;
+            if (enabled) AddTabCloseButton(state);
+            else RemoveTabCloseButton(state);
+        }
+        UpdateTabCloseButtonStates();
+    }
 
     public bool MultilineTabHeaders
     {
@@ -1679,6 +1693,7 @@ public partial class PaneControl : UserControl
         var insertion = pinned ? _tabOrder.TakeWhile(item => ((TabState)item.Tag).IsPinned).Count() : _tabOrder.Count;
         _tabOrder.Insert(insertion, tab);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         if (select) Tabs.SelectedItem = tab;
         StateChanged?.Invoke(this, EventArgs.Empty);
         return tab;
@@ -1729,8 +1744,12 @@ public partial class PaneControl : UserControl
             Text = string.IsNullOrEmpty(name) ? state.Path : name,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
+        state.CloseButton = null;
+        if (_showTabCloseButtons)
+            AddTabCloseButton(state, header);
         header.MouseDown += (_, e) =>
         {
+            if (state.CloseButton?.IsMouseOver == true) return;
             if (e.ChangedButton == MouseButton.Middle ||
                 (e.ChangedButton == MouseButton.Left && e.ClickCount == 2))
             {
@@ -1743,6 +1762,54 @@ public partial class PaneControl : UserControl
         if (state.Tab.IsSelected)
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
                 new Action(() => { if (state.Tab.IsSelected) state.Tab.BringIntoView(); }));
+    }
+
+    private void AddTabCloseButton(TabState state, StackPanel? header = null)
+    {
+        if (state.CloseButton is not null) return;
+        header ??= state.Tab.Header as StackPanel;
+        if (header is null) return;
+        var closeButton = new Button
+        {
+            Content = "×",
+            Width = 18,
+            Height = 18,
+            Padding = new Thickness(0),
+            Margin = new Thickness(4, 0, 0, 0),
+            BorderThickness = new Thickness(0),
+            Background = System.Windows.Media.Brushes.Transparent,
+            Focusable = false,
+            IsTabStop = false,
+            ToolTip = "关闭标签页"
+        };
+        closeButton.SetResourceReference(Control.ForegroundProperty, "ExplorerDirs.ControlTextBrush");
+        System.Windows.Automation.AutomationProperties.SetName(closeButton, "关闭标签页");
+        closeButton.Click += (_, e) =>
+        {
+            state.Owner.CloseTab(state);
+            e.Handled = true;
+        };
+        header.Children.Add(closeButton);
+        state.CloseButton = closeButton;
+    }
+
+    private static void RemoveTabCloseButton(TabState state)
+    {
+        if (state.CloseButton?.Parent is Panel parent)
+            parent.Children.Remove(state.CloseButton);
+        state.CloseButton = null;
+    }
+
+    private void UpdateTabCloseButtonStates()
+    {
+        foreach (var tab in _tabOrder)
+        {
+            var state = (TabState)tab.Tag;
+            if (state.CloseButton is null) continue;
+            state.CloseButton.Visibility = TabCloseButtonPolicy.IsVisible(
+                _showTabCloseButtons, state.IsPinned, _tabOrder.Count)
+                ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private ContextMenu CreateTabContextMenu(TabState state)
@@ -1801,6 +1868,7 @@ public partial class PaneControl : UserControl
         Tabs.Items.Remove(state.Tab);
         _tabOrder.Remove(state.Tab);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         if (adjacent is not null) Tabs.SelectedItem = adjacent;
         BrowserLayer.Remove(state.Browser);
         state.Browser.Dispose();
@@ -1816,6 +1884,7 @@ public partial class PaneControl : UserControl
         _tabOrder.Insert(insertion, state.Tab);
         UpdateTabHeader(state);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         state.Tab.BringIntoView();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -2172,6 +2241,7 @@ public partial class PaneControl : UserControl
             Tabs.Items.Remove(state.Tab);
             _tabOrder.Remove(state.Tab);
             UpdateTabOrders();
+            UpdateTabCloseButtonStates();
 
             state.Owner = destination;
             destination.Tabs.Items.Add(state.Tab);
@@ -2182,6 +2252,8 @@ public partial class PaneControl : UserControl
             destination.BrowserLayer.Show(state.Browser);
             destination.Tabs.SelectedItem = state.Tab;
             destination.UpdateTabHeader(state);
+            destination.UpdateTabCloseButtonStates();
+            UpdateTabCloseButtonStates();
             destination.StateChanged?.Invoke(destination, EventArgs.Empty);
             StateChanged?.Invoke(this, EventArgs.Empty);
             return true;
@@ -2194,6 +2266,7 @@ public partial class PaneControl : UserControl
                 destination.Tabs.Items.Remove(state.Tab);
                 destination._tabOrder.Remove(state.Tab);
                 destination.UpdateTabOrders();
+                destination.UpdateTabCloseButtonStates();
             }
             state.Owner = this;
             if (!Tabs.Items.Contains(state.Tab))
@@ -2201,6 +2274,7 @@ public partial class PaneControl : UserControl
                 Tabs.Items.Insert(Math.Clamp(_tabOrder.Count == 0 ? 0 : originalIndex, 0, Tabs.Items.Count), state.Tab);
                 _tabOrder.Insert(Math.Clamp(originalIndex, 0, _tabOrder.Count), state.Tab);
                 UpdateTabOrders();
+                UpdateTabCloseButtonStates();
                 state.Tab.ContextMenu = CreateTabContextMenu(state);
                 BrowserLayer.Show(state.Browser);
                 if (originalSelected) Tabs.SelectedItem = state.Tab;

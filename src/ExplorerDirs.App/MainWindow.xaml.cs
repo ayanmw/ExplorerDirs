@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly TabHeaderMaximumWidthStore _tabHeaderMaximumWidthStore;
+    private readonly TabCloseButtonStore _tabCloseButtonStore;
     private readonly TabHoverActivationPreference _tabHoverActivationPreference;
     private readonly PortableBooleanPreference _newTabLocationPreference;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private bool _limitTabHeaderWidth = true;
+    private bool _showTabCloseButtons;
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private bool _newTabUsesCurrentFolder;
     private bool _showStatusBar = true;
@@ -207,6 +209,9 @@ public partial class MainWindow : Window
         _tabHeaderMaximumWidthStore = new TabHeaderMaximumWidthStore(Path.Combine(
             _profileDirectory, "TabHeaderMaximumWidth.ini"));
         _limitTabHeaderWidth = _tabHeaderMaximumWidthStore.Load();
+        _tabCloseButtonStore = new TabCloseButtonStore(Path.Combine(
+            _profileDirectory, "TabCloseButton.ini"));
+        _showTabCloseButtons = _tabCloseButtonStore.Load();
         _tabHoverActivationPreference = new TabHoverActivationPreference(Path.Combine(
             _profileDirectory, "TabHoverActivation.ini"));
         _tabHoverActivationDelayMilliseconds = _tabHoverActivationPreference.Load();
@@ -380,6 +385,7 @@ public partial class MainWindow : Window
         ApplyNewTabLocationPreference();
         ApplyMultilineTabHeaders();
         ApplyTabHeaderMaximumWidth();
+        ApplyTabCloseButtons();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
         UpdatePreviewPaneToggle();
@@ -1072,6 +1078,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TabsMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
+        TabCloseButtonMenu.IsChecked = _showTabCloseButtons;
+
+    private void TabCloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TabCloseButtonMenu.IsChecked;
+        try
+        {
+            _tabCloseButtonStore.Save(next);
+            _showTabCloseButtons = next;
+            ApplyTabCloseButtons();
+            EnvironmentStatus.Text = next ? "标签关闭按钮已显示。" : "标签关闭按钮已隐藏。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabCloseButtons();
+            EnvironmentStatus.Text = $"标签关闭按钮设置保存失败：{ex.Message}";
+        }
+    }
+
     private void TabHoverActivationMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
         UpdateTabHoverActivationMenu();
 
@@ -1226,6 +1252,12 @@ public partial class MainWindow : Window
     {
         TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
         foreach (var pane in _panes) pane.SetLimitTabHeaderWidth(_limitTabHeaderWidth);
+    }
+
+    private void ApplyTabCloseButtons()
+    {
+        TabCloseButtonMenu.IsChecked = _showTabCloseButtons;
+        foreach (var pane in _panes) pane.SetShowTabCloseButtons(_showTabCloseButtons);
     }
 
     private void ApplyTabHoverActivationDelay()

@@ -4259,6 +4259,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 对照 Q-Dir [FAQ 65](https://www.softwareok.com/?faq=65&seite=faq-Q-DIR)，将原本固定的 180 DIP 标签标题测量上限改为“视图 → 限制标签标题最大宽度”选项；默认开启以保留现有布局，关闭后允许标题按完整目录名自然测量。状态保存到独立便携 `TabHeaderMaximumWidth.ini`，隔离预览配置白名单也已加入该文件。
 - 专项 smoke 覆盖偏好往返和 WPF 面板的实际 Measure 上限；完整 Release SettingsSmoke、App Release 构建与发布脚本隔离配置 smoke 均通过，构建 0 警告/错误，差异检查通过。未打开产品窗口；菜单可见状态、超长标题截断/自然扩展以及多行组合效果仍待集中 UI 验收。
 
+## 2026-10-28：标签栏关闭按钮
+
+- 对照 Q-Dir 12.55 的可选标签关闭按钮，为“标签页”菜单增加“显示标签关闭按钮”；默认关闭以保留现有紧凑标签栏。仅当窗格有多个标签且该标签未固定时显示 ×，最后一个标签仍保留，固定标签继续使用既有关闭限制。按钮直接关闭对应标签，不改变中键/双击快捷关闭。
+- 设置存入独立便携 `TabCloseButton.ini` 并加入隔离预览复制清单。Release SettingsSmoke 覆盖配置往返与按钮显示资格；App Release build、完整 SettingsSmoke、发布脚本隔离 smoke 通过（构建 0 警告/错误）。没有打开窗口；按钮点击目标、移动标签后的呈现、浅/深主题视觉和可用空间仍待集中 UI 验收。
+
 ## 2026-10-28：减少 `.qdr` 导入的行拆分分配
 
 - 源码审查发现，8 MB 输入上限之外，`string.Split('\n')` 还会同时保留行数组和逐行字符串。换行密集的 1,000,000 字符输入在修复前单次解析分配 16,385,488 字节。现在改用 `ReadOnlySpan<char>` 顺序扫描并只为实际字段分配字符串；同一 SettingsSmoke 复测分配 680 字节。完整 Release SettingsSmoke 通过，App Release 构建 0 警告/错误，`git diff --check` 通过。

@@ -82,6 +82,18 @@ internal static class TabStripVisibilitySmoke
         measureThread.Start();
         measureThread.Join();
         if (measureFailure is not null) throw measureFailure;
+
+        Check(TabCloseButtonPolicy.IsVisible(showCloseButton: true, isPinned: false, tabCount: 2) &&
+              !TabCloseButtonPolicy.IsVisible(showCloseButton: false, isPinned: false, tabCount: 2) &&
+              !TabCloseButtonPolicy.IsVisible(showCloseButton: true, isPinned: true, tabCount: 2) &&
+              !TabCloseButtonPolicy.IsVisible(showCloseButton: true, isPinned: false, tabCount: 1),
+            "tab close button is shown only when enabled and the tab can actually close");
+        var closeButtonPath = Path.Combine(root, "TabCloseButton.ini");
+        var closeButtonStore = new TabCloseButtonStore(closeButtonPath);
+        Check(!closeButtonStore.Load(), "tab close buttons remain hidden by default");
+        closeButtonStore.Save(true);
+        Check(new TabCloseButtonStore(closeButtonPath).Load(),
+            "tab close-button preference round-trips through an independent portable INI");
     }
 
     private static void Check(bool condition, string message)

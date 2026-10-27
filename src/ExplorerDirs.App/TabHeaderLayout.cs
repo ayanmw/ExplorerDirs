@@ -12,6 +12,12 @@ internal static class TabHeaderWidthPolicy
         limitMaximumWidth ? MaximumWidth : double.PositiveInfinity;
 }
 
+internal static class TabCloseButtonPolicy
+{
+    internal static bool IsVisible(bool showCloseButton, bool isPinned, int tabCount) =>
+        showCloseButton && !isPinned && tabCount > 1;
+}
+
 internal static class TabHeaderLayout
 {
     internal static TabHeaderLayoutResult Calculate(IReadOnlyList<Size> sizes, double availableWidth,
