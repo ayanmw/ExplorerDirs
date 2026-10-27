@@ -105,6 +105,7 @@ public partial class MainWindow : Window
     private bool _openingTerminal;
     private bool _importingQdr;
     private bool _exportingQdr;
+    private bool _loadingPrintPhotos;
     private Task<WorkspaceListing>? _workspaceListingTask;
     private readonly CancellationTokenSource _windowOperationStop = new();
 
@@ -2564,12 +2565,19 @@ public partial class MainWindow : Window
 
     private void RefreshPhotoPrintCommandState()
     {
+        if (_closed || _loadingPrintPhotos)
+        {
+            PrintSelectedPhotosMenu.IsEnabled = false;
+            return;
+        }
         try { PrintSelectedPhotosMenu.IsEnabled = ActivePane.CapturePhotoPrintSelection().CandidatePaths.Count > 0; }
         catch (Exception) { PrintSelectedPhotosMenu.IsEnabled = false; }
     }
 
     private async void PrintSelectedPhotos_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed || _loadingPrintPhotos) return;
+        _loadingPrintPhotos = true;
         try
         {
             var selection = ActivePane.CapturePhotoPrintSelection();
@@ -2583,7 +2591,14 @@ public partial class MainWindow : Window
 
             PrintSelectedPhotosMenu.IsEnabled = false;
             EnvironmentStatus.Text = $"正在读取 {selection.CandidatePaths.Count:N0} 个所选文件…";
-            var decoded = await PhotoPrintImageLoader.DecodeAsync(selection.CandidatePaths);
+            var decoded = await PhotoPrintImageLoader.DecodeAsync(selection.CandidatePaths, _windowOperationStop.Token)
+                .WaitAsync(_windowOperationStop.Token);
+            if (_closed || !IsVisible) return;
+            if (!IsActive)
+            {
+                EnvironmentStatus.Text = "图片读取已结束；窗口未激活，未打开打印预览。返回后可重新选择打印。";
+                return;
+            }
             var rejected = selection.RejectedItems.Concat(decoded.RejectedItems).ToArray();
             if (decoded.Images.Count == 0)
             {
@@ -2600,10 +2615,15 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"打印所选照片失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "打印所选照片失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { RefreshPhotoPrintCommandState(); }
+        finally
+        {
+            _loadingPrintPhotos = false;
+            if (!_closed) RefreshPhotoPrintCommandState();
+        }
     }
 
     private async Task ExportQdrAsync(bool saveWorkspace)

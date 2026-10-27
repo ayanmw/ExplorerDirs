@@ -100,6 +100,7 @@ internal static class WindowCloseLifetimeProbe
                 var window = (MainWindow)Activator.CreateInstance(typeof(MainWindow), Members, null,
                     [null, null, null, Path.Combine(profile, "ExplorerDirs.ini"), profile, null, null], null)!;
                 windows.Add(window);
+                CheckPhotoPrintBusyGuard(window);
                 var panes = (PaneControl[])Field(window, "_panes")!;
                 panes[0].OpenPathInNewTab(root);
                 panes[0].GetType().GetMethod("SetTreeVisible", Members)!.Invoke(panes[0], [true]);
@@ -159,6 +160,25 @@ internal static class WindowCloseLifetimeProbe
                 throw new InvalidOperationException("Fixture cleanup escaped its test directory.");
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static void CheckPhotoPrintBusyGuard(MainWindow window)
+    {
+        var busy = typeof(MainWindow).GetField("_loadingPrintPhotos", Members)!;
+        var menu = (MenuItem)Field(window, "PrintSelectedPhotosMenu")!;
+        var status = (TextBlock)Field(window, "EnvironmentStatus")!;
+        var previousStatus = status.Text;
+        busy.SetValue(window, true);
+        try
+        {
+            typeof(MainWindow).GetMethod("RefreshPhotoPrintCommandState", Members)!.Invoke(window, null);
+            Ensure(!menu.IsEnabled, "photo command stays disabled during decoding");
+            typeof(MainWindow).GetMethod("PrintSelectedPhotos_Click", Members)!
+                .Invoke(window, [null, new RoutedEventArgs()]);
+            Ensure((bool)busy.GetValue(window)! && status.Text == previousStatus,
+                "duplicate photo invocation returns without accessing an uncreated Shell view");
+        }
+        finally { busy.SetValue(window, false); }
     }
 
     private static void CheckMinimizedRestoration(MainWindow window)
