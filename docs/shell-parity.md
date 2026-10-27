@@ -49,6 +49,8 @@
 > **刷新调用失败处理（2026-10-25）：**`GetCurrentView` / `IShellView.Refresh` 返回失败码或 ExplorerBrowser 宿主不可用时，不再触发成功完成回调；目录 watcher 将保留强制刷新并按退避重试，手动刷新和筛选恢复会报告失败。Release SettingsSmoke 与 App 构建通过；真实 Shell HRESULT 及 GUI 更新仍待验收，自动刷新 P0 未关闭。
 # Q-Dir / Explorer 核心操作对照
 
+> **OLE 拖放源按键状态（2026-10-27）：**`IDropSource` 现在等待启动鼠标键先按下再于释放时完成，避免 OLE 循环启动时键尚未按下便立即结束；Release COM vtable smoke 通过。没有运行拖放循环或输入，真实 OLE 拖放仍是 P0 未验收。
+
 > **隔离拖放原型接线（2026-10-27）：**NativeProbe 的 `ShellViewDragSource.RunOleLoop` 已将真实 Shell `IDataObject` 与 `IDropSource` 接到 `ole32!DoDragDrop` 调用入口，NativeProbe Release build 通过；本轮没有执行调用，也没有移动光标或注入输入。真实 OLE 拖放、操作效果、视图收敛和可见交互仍为 P0 未验收，产品继续使用 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-10-27-ole-dodragdrop-调用入口接线)。
 
 > **虚拟 Shell 标签和快捷链接图标（2026-10-27）：**标签标题与快捷链接现在按 Shell 位置 PIDL 读取虚拟文件夹图标；普通文件夹和文件扩展名图标维持原逻辑。定向 Windows Shell smoke 确认文件夹、“此电脑”和“回收站”图像不同。当前没有 GUI 验收，实际控件绘制仍待检查。详见[路线图](roadmap.md#2026-10-27虚拟-shell-标签和快捷链接使用位置图标)。

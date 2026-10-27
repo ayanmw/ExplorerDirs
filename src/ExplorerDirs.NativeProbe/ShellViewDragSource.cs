@@ -20,6 +20,7 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
     private const int DragDropSCancel = 0x00040101;
     private const int DragDropSUseDefaultCursors = 0x00040102;
     private readonly uint _initiatingButton;
+    private bool _initiatingButtonPressed;
 
     internal ShellViewDragSource(uint initiatingButton = MouseLeftButton)
     {
@@ -34,7 +35,11 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
         if (escapePressed)
             return DragDropSCancel;
 
-        return (keyState & _initiatingButton) == 0 ? DragDropSDrop : 0;
+        if ((keyState & _initiatingButton) != 0)
+            _initiatingButtonPressed = true;
+
+        return !_initiatingButtonPressed ? 0 :
+            (keyState & _initiatingButton) == 0 ? DragDropSDrop : 0;
     }
 
     public int GiveFeedback(uint effect) => DragDropSUseDefaultCursors;
@@ -63,6 +68,8 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
                 Marshal.ReadIntPtr(Marshal.ReadIntPtr(dragSource), 4 * nint.Size));
             check(continueDrag(dragSource, true, MouseLeftButton) == DragDropSCancel,
                 "the isolated OLE drag source cancels when Escape is pressed");
+            check(continueDrag(dragSource, false, 0) == 0,
+                "the isolated OLE drag source waits for its initiating mouse button before completing");
             check(continueDrag(dragSource, false, MouseLeftButton) == 0,
                 "the isolated OLE drag source continues while the initiating button remains down");
             check(continueDrag(dragSource, false, 0) == DragDropSDrop,
@@ -80,7 +87,8 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
         {
             var continueRightDrag = Marshal.GetDelegateForFunctionPointer<ContinueDragCallback>(
                 Marshal.ReadIntPtr(Marshal.ReadIntPtr(rightDragSource), 3 * nint.Size));
-            check(continueRightDrag(rightDragSource, false, MouseLeftButton | MouseRightButton) == 0 &&
+            check(continueRightDrag(rightDragSource, false, 0) == 0 &&
+                  continueRightDrag(rightDragSource, false, MouseLeftButton | MouseRightButton) == 0 &&
                   continueRightDrag(rightDragSource, false, MouseLeftButton) == DragDropSDrop,
                 "the isolated OLE COM source completes right-button drags only after the initiating button is released");
         }

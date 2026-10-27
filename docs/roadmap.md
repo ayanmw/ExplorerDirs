@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：OLE 拖放源等待启动按键
+
+- `IDropSource::QueryContinueDrag` 现先确认指定的启动鼠标键曾按下，再于释放时返回 `DRAGDROP_S_DROP`；启动 OLE 循环时鼠标键尚未按下则继续等待，Escape 仍取消。原生 COM vtable smoke 在旧实现下按预期失败，修正后 Release NativeProbe build 与 `--shell-view-color-policy-smoke` 通过。
+- 这是 IDropSource 状态机证据，不是实际 `DoDragDrop` 或鼠标拖放验收；未创建 Shell view、没有输入或改变前台窗口。交互探针与可接收输入隔离桌面仍待实现/授权验收。
+
 ## 2026-10-27：接通隔离 OLE DoDragDrop 调用入口
 
 - `ShellViewDragSource` 现提供隔离原型调用 `ole32!DoDragDrop` 的入口，可接收 COM `IDataObject`、本项目 `IDropSource` 与允许效果并交给系统 OLE 循环。调用要求在已初始化的 STA 中进行；入口不移动光标、不合成键鼠输入，也未从当前 Private Desktop 或用户桌面调用。

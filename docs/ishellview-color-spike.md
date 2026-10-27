@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-27 IDropSource 等待启动鼠标键
+
+`QueryContinueDrag` 现在区分“启动 OLE 循环时尚未按下启动键”和“启动键已按下后释放”：前者继续等待，后者完成拖放；Escape 仍返回取消。`--shell-view-color-policy-smoke` 通过 COM vtable 覆盖左键与右键顺序。没有启动 `DoDragDrop`、创建 `IShellView` 或进行物理输入。真实 source/target 交接、效果协商和视图更新尚未验证。
+
 ## 2026-10-27 OLE `DoDragDrop` 调用入口接线
 
 `ShellViewDragSource.RunOleLoop` 现将传入的 Shell COM `IDataObject` 与 `IDropSource` 交给 `ole32!DoDragDrop`，并原样返回 HRESULT 与最终 effect。调用方必须在已初始化的 STA 运行。该方法不设置光标、不注入输入，也没有在本轮执行；构建只验证了 P/Invoke 和 COM 接口编组的类型正确性。真实 OLE source/target 交接、Copy/Move/Link 效果、视图通知及物理输入仍未验证。
