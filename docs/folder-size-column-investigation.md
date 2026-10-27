@@ -195,3 +195,11 @@ NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 f
 为确认“DefView 是否因为项目 PIDL 身份不同而开始读取 adapter 属性”，新增独立 Private Desktop 包装 adapter 命令，并与原始 PIDL adapter 使用相同夹具各跑一轮。两轮 DefView 都报告 `view-uses-adapter=1`，但自定义列子项仍为空；读完列表后计数均为 `GetDetailsOf(custom header/item)=1/0`、`GetDetailsEx=0`、`CompareIDs=0`、`IPropertyStore=0`。自定义列升序和 `System.Document.ByteCount` 升序都因行序未改变而失败。包装项直连 adapter 的显示/比较合同仍通过，所以差异发生在 DefView 消费路径，而不是包装 PIDL 解码入口。
 
 完整日志位于 `src/.state/native-probe-watchdog/20261028-wrapped-pidl-defview.log`（SHA-256 `41BCDC57A2C424603529F180772CDF1CEE36A78D1F3A7F3CCA6617B9FED60C1D`）和原始基线 `20261028-static-adapter-defview.log`（SHA-256 `188246C3C72A486D8C13ECDBE7EFB4EE2874F0347304845EFF99B7D229B45C59`）。两次探针都按未通过列显示/排序门槛返回 exit code 1；前台 HWND 均保持不变，Private Desktop 在子进程结束时清理。结果说明仅改变 child PIDL 身份不足以让 DefView 逐项读取或排序这些列；包装 adapter 及列路继续仅作隔离研究，不接入产品。进一步推进需要新的、可证伪的属性提供架构假设，并评审完整 Shell 行为成本，不能把当前失败改成软性通过。
+
+### 2026-10-28：旧 `IShellFolderViewCB` 逐项列回退探针
+
+核对 Windows SDK 与 Microsoft Learn 后，增加一个只供 NativeProbe 的 Private Desktop A/B 命令：`SFV_CREATE.psfvcb` 安装 `IShellFolderViewCB`；仅在此模式下，让测试自定义列的 `IShellFolder2::GetDetailsOf` 返回 `E_NOTIMPL`，由 `MessageSFVCB` 为 `SFVM_GETDETAILSOF` 提供测试标题与文本。其他模式及产品代码不变。官方接口说明该回调只在 `IShellFolder2::GetDetailsOf` 失败且无 `IShellDetails::GetDetailsOf` 时作为后备；该消息另列于微软弃用 API 清单。
+
+Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date 列，但未调用 `SFVM_GETDETAILSOF`（请求/标题/项目均为 0），测试自定义列各项文本为空；前台 HWND 前后相同，探针退出并清理其 Private Desktop。完整日志 `src/.state/native-probe-watchdog/20261028-legacy-details-callback-private-desktop.log` 的 SHA-256 为 `4D5BFDFA9B061E9116CDE122DF87E0F9C6F492A448A1605A254861BB2466F640`。NativeProbe Release 构建 0 警告/错误，命令退出码 0 表示隔离观察完整完成，并不表示该列路线通过。结论：当前 `SHCreateShellFolderView` 视图没有采用此回调补读该自定义列；加上回调的弃用状态，不将其作为产品列实现路线。该结果不能推广为所有自定义 Shell namespace 架构都不可行。
+
+参考：[SFV_CREATE](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/ns-shlobj_core-sfv_create)、[LPFNVIEWCALLBACK 的 SFVM_GETDETAILSOF 说明](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nc-shlobj_core-lpfnviewcallback)、[弃用 Shell API](https://learn.microsoft.com/en-us/windows/win32/shell/deprecated-api)。

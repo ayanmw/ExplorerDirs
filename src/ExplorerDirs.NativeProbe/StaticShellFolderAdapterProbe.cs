@@ -408,7 +408,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false, bool wrappedPidls = false)
+    internal static int Run(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false, bool wrappedPidls = false, bool legacyDetailsCallbackProbe = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -435,6 +435,11 @@ internal static class StaticShellFolderAdapterProbe
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
                 NativeLibrary.GetExport(nativeLibrary, wrappedPidls ? "CreateWrappedPidlShellFolderAdapter" : prototypeClass ? "CreateClassIdentityShellFolderAdapter" : strictInterfaces ? "CreateStrictShellFolderAdapter" : "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
+            if (legacyDetailsCallbackProbe)
+            {
+                Marshal.GetDelegateForFunctionPointer<SetLegacyDetailsCallbackProbe>(
+                    NativeLibrary.GetExport(nativeLibrary, "SetStaticShellLegacyDetailsCallbackProbe"))(1);
+            }
 
             var property = StaticShellColumnContract.PropertyKey;
             var nativeKey = new ShellColumnManager.NativeKey { FormatId = property.FormatId, PropertyId = property.PropertyId };
@@ -449,8 +454,15 @@ internal static class StaticShellFolderAdapterProbe
                     Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
                     var customColumn = GetColumnCount(folder, shellDetailsSize);
                     var titleHr = At<GetDetailsOf>(adapter, 18)(adapter, 0, (uint)customColumn, details);
-                    if (titleHr < 0) throw new COMException($"Custom column title query failed at index {customColumn}.", titleHr);
-                    if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
+                    if (legacyDetailsCallbackProbe)
+                    {
+                        if (titleHr != unchecked((int)0x80004001)) throw new Exception($"Legacy callback A/B expected E_NOTIMPL from GetDetailsOf, got 0x{titleHr:X8}.");
+                    }
+                    else
+                    {
+                        if (titleHr < 0) throw new COMException($"Custom column title query failed at index {customColumn}.", titleHr);
+                        if (ReadDetailsText(details) != "Static numeric test") throw new Exception("Custom column title mismatch.");
+                    }
                 }
                 finally { Marshal.FreeCoTaskMem(details); }
 
@@ -525,6 +537,18 @@ internal static class StaticShellFolderAdapterProbe
                 .ToArray();
             foreach (var column in displayedColumns)
                 Console.WriteLine($"native-static-shell-column: list-view-subitem-{column.SubItem}-text=[{string.Join(',', column.Values)}]");
+            if (legacyDetailsCallbackProbe)
+            {
+                var getCount = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(nativeLibrary, "GetStaticShellLegacyDetailsCallbackRequestCount"));
+                var getHeaders = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(nativeLibrary, "GetStaticShellLegacyDetailsCallbackHeaderRequestCount"));
+                var getItems = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(nativeLibrary, "GetStaticShellLegacyDetailsCallbackItemRequestCount"));
+                var getLastColumn = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(nativeLibrary, "GetStaticShellLegacyDetailsCallbackLastColumn"));
+                Console.WriteLine($"native-static-shell-column: legacy-SFVM_GETDETAILSOF-requests={getCount()}; headers={getHeaders()}; items={getItems()}; last-column={getLastColumn()}; callback-fallback-probe=True");
+                Console.WriteLine($"native-static-shell-column: legacy-callback-fallback-observed={getCount() > 0}; custom-column-values=[{string.Join(',', displayedColumns[2].Values)}]; legacy-callback-route-usable={getCount() > 0 && displayedColumns[2].Values.Any(value => value == "callback-item")}");
+                // This A/B answers only whether the legacy callback supplies custom-column text.
+                // The fallback is documented as deprecated, so do not run unrelated sort gates in this mode.
+                return 0;
+            }
             Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
             VerifyLegacyColumnRearrange(view, columnIndexForView);
             var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
@@ -1050,6 +1074,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyType(nint self, out ushort variantType);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProbeCounters();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetLegacyDetailsCallbackProbe(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate uint GetShellDetailsSizeNative();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumn(nint self, uint column, nint key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bind, nint name, nint eaten, out nint item, out uint attributes);

@@ -55,6 +55,8 @@ internal static class Program
             return StaticShellFolderAdapterProbe.RunFolderContract(wrappedPidls: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
+        if (args.Length == 1 && args[0] == "--static-shell-column-legacy-details-callback-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(legacyDetailsCallbackProbe: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(wrappedPidls: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")

@@ -15,6 +15,8 @@
 
 2026-10-28：Private Desktop 对照已让包装 PIDL adapter 进入真实 DefView 消费路径，并确认它只请求列标题、不请求逐项属性或比较；原始 adapter 对照相同，列显示/排序门槛均未通过。此结果关闭“只改子 PIDL 身份即可打通 DefView 派生列”的假设，逐行派生列继续留在产品之外。后续先评审新的属性供应架构；其余 Q-Dir 差距按后台可验证性继续推进，用户可见验收仍集中安排。
 
+2026-10-28：补测 `SFV_CREATE.psfvcb` 的 `IShellFolderViewCB::MessageSFVCB(SFVM_GETDETAILSOF)` 回退：隔离自定义列让 `GetDetailsOf` 返回 `E_NOTIMPL` 后，Private Desktop DefView 的回调请求仍为 0，测试列内容为空；标准列和前台隔离不受影响。该回调只作为旧兼容后备，且微软将 `SFVM_GETDETAILSOF` 列为可能变更/不可用的弃用接口，因此否决其作为列实现路线。下一步暂停同一 `SHCreateShellFolderView` DefView 上的列消费变体，先评审需要完整 namespace 属性供应的新架构；不要把这一结论外推到所有 Shell namespace 方案。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-28-旧-ishellfolderviewcb-逐项列回退探针)。
+
 2026-10-28：现有隐藏 ExplorerBrowser `--color-capability` 探针在菜单查询和二次导航后均观测到 `DirectUIHWND`，没有 `SysListView32` 或 `SysHeader32`；父窗不可见且前台不变。故当前视图没有标准 ListView `NM_CUSTOMDRAW` 可挂接；这不排除 DirectUI 的私有消息机制，也不是 Q-Dir 逐项着色已支持的证据。详见[主题接点调查](shell-color-investigation.md#2026-10-28-隐藏-explorerbrowser-控件树快照)。
 
 2026-10-28：同步清理追踪已排除普通 HWND teardown、单纯多进程共用 Private Desktop、Shell view 存在本身及 1–4 个 pane 的数量作为稳定触发条件。最小可复现序列缩到单 pane 真实 Shell view 经 `SVUIA_ACTIVATE_FOCUS` 安装、再经 `SVUIA_DEACTIVATE` 卸载共享菜单后，同步销毁 parent：`WM_DESTROY` 子类回调正常返回，但未收到 `WM_NCDESTROY`。协调器销毁时机和焦点还原均未改变结果；当前证据指向菜单激活/卸载后的 OLE/Shell 生命周期，仍缺挂起线程栈以确认具体系统调用。process-exit 方式继续只作为隔离探针回收，不接入产品。完整矩阵、日志与证据边界见[原型诊断记录](ishellview-color-spike.md)。

@@ -44,6 +44,52 @@ namespace
     volatile LONG g_propertyStoreBindToObjectRequests = 0;
     volatile LONG g_propertyStoreBindToStorageRequests = 0;
     volatile LONG g_propertyStoreUiObjectRequests = 0;
+    volatile LONG g_legacyDetailsCallbackRequests = 0;
+    volatile LONG g_legacyDetailsCallbackHeaderRequests = 0;
+    volatile LONG g_legacyDetailsCallbackItemRequests = 0;
+    volatile LONG g_legacyDetailsCallbackLastColumn = -1;
+    volatile LONG g_legacyDetailsCallbackEnabled = 0;
+
+    class LegacyDetailsCallback final : public IShellFolderViewCB
+    {
+    public:
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IShellFolderViewCB) return E_NOINTERFACE;
+            *value = static_cast<IShellFolderViewCB*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE MessageSFVCB(UINT message, WPARAM column, LPARAM data) override
+        {
+            if (message != SFVM_GETDETAILSOF || !data) return E_NOTIMPL;
+            auto* details = reinterpret_cast<DETAILSINFO*>(data);
+            InterlockedIncrement(&g_legacyDetailsCallbackRequests);
+            InterlockedExchange(&g_legacyDetailsCallbackLastColumn, static_cast<LONG>(column));
+            if (details->pidl) InterlockedIncrement(&g_legacyDetailsCallbackItemRequests);
+            else InterlockedIncrement(&g_legacyDetailsCallbackHeaderRequests);
+            details->fmt = LVCFMT_RIGHT;
+            details->cxChar = 16;
+            details->str.uType = STRRET_WSTR;
+            const wchar_t* text = details->pidl ? L"callback-item" : L"Callback column";
+            const auto length = wcslen(text) + 1;
+            details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(length * sizeof(wchar_t)));
+            if (!details->str.pOleStr) return E_OUTOFMEMORY;
+            StringCchCopyW(details->str.pOleStr, length, text);
+            return S_OK;
+        }
+    private:
+        volatile LONG _references = 1;
+    };
 
     SRWLOCK g_queryTraceLock = SRWLOCK_INIT;
     GUID g_forwardedQueryIds[64]{};
@@ -433,7 +479,16 @@ namespace
             SFV_CREATE create{};
             create.cbSize = sizeof(create);
             create.pshf = static_cast<IShellFolder*>(this);
-            return SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            LegacyDetailsCallback* callback = nullptr;
+            if (InterlockedCompareExchange(&g_legacyDetailsCallbackEnabled, 0, 0))
+            {
+                callback = new (std::nothrow) LegacyDetailsCallback();
+                if (!callback) return E_OUTOFMEMORY;
+                create.psfvcb = callback;
+            }
+            const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            if (callback) callback->Release();
+            return result;
         }
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
         {
@@ -582,6 +637,8 @@ namespace
             }
             if (column < _columnCount) return _inner->GetDetailsOf(item, column, details);
             if (column != _columnCount) return E_INVALIDARG;
+            // Isolated A/B only: make the native view try its documented legacy callback fallback.
+            if (InterlockedCompareExchange(&g_legacyDetailsCallbackEnabled, 0, 0)) return E_NOTIMPL;
             InterlockedIncrement(&g_customDetailsOf);
             if (item) InterlockedIncrement(&g_customItemDetailsOf);
             else InterlockedIncrement(&g_customHeaderDetailsOf);
@@ -676,6 +733,31 @@ extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters
     InterlockedExchange(&g_propertyStoreBindToObjectRequests, 0);
     InterlockedExchange(&g_propertyStoreBindToStorageRequests, 0);
     InterlockedExchange(&g_propertyStoreUiObjectRequests, 0);
+    InterlockedExchange(&g_legacyDetailsCallbackRequests, 0);
+    InterlockedExchange(&g_legacyDetailsCallbackHeaderRequests, 0);
+    InterlockedExchange(&g_legacyDetailsCallbackItemRequests, 0);
+    InterlockedExchange(&g_legacyDetailsCallbackLastColumn, -1);
+}
+
+extern "C" __declspec(dllexport) void WINAPI SetStaticShellLegacyDetailsCallbackProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_legacyDetailsCallbackEnabled, enabled ? 1 : 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackRequestCount()
+{
+    return InterlockedCompareExchange(&g_legacyDetailsCallbackRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackHeaderRequestCount()
+{
+    return InterlockedCompareExchange(&g_legacyDetailsCallbackHeaderRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackItemRequestCount()
+{
+    return InterlockedCompareExchange(&g_legacyDetailsCallbackItemRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackLastColumn()
+{
+    return InterlockedCompareExchange(&g_legacyDetailsCallbackLastColumn, 0, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetAllShellColumnComparisonCount()

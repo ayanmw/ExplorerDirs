@@ -110,9 +110,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunCommandStateReadOnly() =>
         Run("command-state-readonly", () => ShellViewColorSpike.Run(queryCommandStatesOnly: true));
 
-    internal static int RunStaticShellColumnAdapter(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false, bool wrappedPidls = false) =>
-        Run(wrappedPidls ? "static-shell-column-wrapped-adapter" : activateView ? "static-shell-column-adapter-activated-strict" : prototypeClass ? "static-shell-column-adapter-classid" : strictInterfaces ? "static-shell-column-adapter-strict" : "static-shell-column-adapter",
-            () => StaticShellFolderAdapterProbe.Run(strictInterfaces, prototypeClass, activateView, wrappedPidls));
+    internal static int RunStaticShellColumnAdapter(bool strictInterfaces = false, bool prototypeClass = false, bool activateView = false, bool wrappedPidls = false, bool legacyDetailsCallbackProbe = false) =>
+        Run(legacyDetailsCallbackProbe ? "static-shell-column-legacy-details-callback" : wrappedPidls ? "static-shell-column-wrapped-adapter" : activateView ? "static-shell-column-adapter-activated-strict" : prototypeClass ? "static-shell-column-adapter-classid" : strictInterfaces ? "static-shell-column-adapter-strict" : "static-shell-column-adapter",
+            () => StaticShellFolderAdapterProbe.Run(strictInterfaces, prototypeClass, activateView, wrappedPidls, legacyDetailsCallbackProbe));
 
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);
