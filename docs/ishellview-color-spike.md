@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格会话恢复探针复验
+
+使用当前 Release 构建运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，退出码 0，stderr 为空。隔离 consumer 确认状态流恢复到四个 pane；四个 pane 的 Shell 菜单路由通过，键盘命令与 Ctrl+A 覆盖 pane 1–3，F2 编辑及方向键焦点隔离覆盖四个 pane；Copy、Rename、Delete 后四窗格计数收敛，目录通知与 sibling-pane 隔离通过。前台 HWND 前后相同，NativeProbe/consumer 子进程退出后无残留。
+
+原始日志 `src/.state/native-probe-watchdog/20261028-015505-730c1f9b.stdout.log` 的 SHA-256 为 `CF58E5A5628C3413F1A6CDF4B24F1DA76E1A521E43D8A93A6610EB6670F68D8F`。这是 Private Desktop 上的 IShellView 原型证据；不代表已接入 Explorer Dirs 产品或可见 UI 已验收。鼠标 OLE 拖放、实际 WPF 焦点链、系统主题/DPI 与第三方扩展兼容仍未通过。
+
 ## 2026-10-27：交互 OLE 探针顶层窗口清理
 
 源码复核发现，可见交互 OLE Copy 探针退出时未销毁它创建的顶层 STATIC 窗口；Private Desktop watchdog 清理约定不能用于用户桌面入口。现在交互路径销毁顶层窗口及 pane 子窗格，Private Desktop 路径保留由 watchdog 回收的行为。`--shell-view-drop-target-cleanup-smoke` 使用隐藏普通 HWND 验证两种清理策略，前台不变；NativeProbe Release build 通过。本轮未运行可见 OLE 探针或 Shell 拖放，闭环仍未验收。
