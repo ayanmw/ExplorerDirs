@@ -274,15 +274,27 @@ internal static class ShellViewDropTargetProbe
             if (targetFolderPidl != 0) Marshal.FreeCoTaskMem(targetFolderPidl);
             if (selectedSourcePidl != 0) Marshal.FreeCoTaskMem(selectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
-            if (sourcePane != 0 && !DestroyWindow(sourcePane))
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            if (targetPane != 0 && !DestroyWindow(targetPane))
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            // Private Desktop top-level windows can block explicit DestroyWindow; the watchdog process owns final cleanup.
+            if (interactiveOleCopy)
+                CleanupParentWindow(parent, interactiveOleCopy: true);
+            else
+            {
+                if (sourcePane != 0 && !DestroyWindow(sourcePane))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                if (targetPane != 0 && !DestroyWindow(targetPane))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                // Private Desktop top-level windows can block explicit DestroyWindow; the watchdog process owns final cleanup.
+            }
             try { Directory.Delete(root, recursive: true); }
             catch (DirectoryNotFoundException) { }
             catch (IOException) { }
         }
+    }
+
+    internal static void CleanupParentWindow(nint parent, bool interactiveOleCopy)
+    {
+        if (!interactiveOleCopy || parent == 0) return;
+        if (!DestroyWindow(parent))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
 
     private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label,

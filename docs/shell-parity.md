@@ -53,6 +53,8 @@
 
 > **显式授权 OLE Copy 探针（2026-10-27）：**NativeProbe 提供 `--shell-view-ole-drop-copy --AllowInteractiveDesktopControl`，以临时目录、真实双 `IShellView` 和选中项 `IDataObject` 执行 Copy 后核对内容；NativeProbe Release build 通过，命令未运行。它用当前交互桌面，鼠标若放到目标窗格外可被其它 Shell target 接收，只能在明确授权且可隔离操作的会话中手动运行，不属于产品拖放验收。
 
+> **交互 OLE 探针窗口清理（2026-10-27）：**交互模式现在在退出时销毁可见顶层窗口及 pane 子窗格；Private Desktop 模式继续让 watchdog 回收顶层 HWND。隐藏窗口生命周期 smoke 与 NativeProbe Release build 通过，未运行真实 Shell view 或拖放。详见[隔离原型记录](ishellview-color-spike.md#2026-10-27交互-ole-探针顶层窗口清理)。
+
 > **隔离拖放原型接线（2026-10-27）：**NativeProbe 的 `ShellViewDragSource.RunOleLoop` 已将真实 Shell `IDataObject` 与 `IDropSource` 接到 `ole32!DoDragDrop` 调用入口，NativeProbe Release build 通过；本轮没有执行调用，也没有移动光标或注入输入。真实 OLE 拖放、操作效果、视图收敛和可见交互仍为 P0 未验收，产品继续使用 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-10-27-ole-dodragdrop-调用入口接线)。
 
 > **虚拟 Shell 标签和快捷链接图标（2026-10-27）：**标签标题与快捷链接现在按 Shell 位置 PIDL 读取虚拟文件夹图标；普通文件夹和文件扩展名图标维持原逻辑。定向 Windows Shell smoke 确认文件夹、“此电脑”和“回收站”图像不同。当前没有 GUI 验收，实际控件绘制仍待检查。详见[路线图](roadmap.md#2026-10-27虚拟-shell-标签和快捷链接使用位置图标)。

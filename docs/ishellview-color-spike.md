@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-27：交互 OLE 探针顶层窗口清理
+
+源码复核发现，可见交互 OLE Copy 探针退出时未销毁它创建的顶层 STATIC 窗口；Private Desktop watchdog 清理约定不能用于用户桌面入口。现在交互路径销毁顶层窗口及 pane 子窗格，Private Desktop 路径保留由 watchdog 回收的行为。`--shell-view-drop-target-cleanup-smoke` 使用隐藏普通 HWND 验证两种清理策略，前台不变；NativeProbe Release build 通过。本轮未运行可见 OLE 探针或 Shell 拖放，闭环仍未验收。
+
 ## 2026-10-27 IDropSource 等待启动鼠标键
 
 `QueryContinueDrag` 现在区分“启动 OLE 循环时尚未按下启动键”和“启动键已按下后释放”：前者继续等待，后者完成拖放；Escape 仍返回取消。`--shell-view-color-policy-smoke` 通过 COM vtable 覆盖左键与右键顺序。没有启动 `DoDragDrop`、创建 `IShellView` 或进行物理输入。真实 source/target 交接、效果协商和视图更新尚未验证。

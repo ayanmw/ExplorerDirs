@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：交互 OLE 拖放探针退出时销毁顶层窗口
+
+- 源码复核发现，显式交互 OLE Copy 探针与 Private Desktop 直接目标探针共用清理路径；交互探针原先只销毁 pane 子窗口，没有销毁可见顶层 `STATIC` HWND，因此退出后可能留下空白窗口。现仅交互模式销毁顶层窗口及其子窗格，Private Desktop 模式继续将顶层窗口交由 watchdog 清理。
+- 新增隐藏普通 HWND smoke；修正前因缺少清理入口而按预期构建失败，修正后确认交互顶层已销毁、Private Desktop 顶层仍存在且前台未变化。NativeProbe Release build 0 警告/错误。没有启动真实 Shell view、交互探针或物理输入；实际 OLE 拖放仍未验证。
+
 ## 2026-10-27：OLE 拖放源等待启动按键
 
 - `IDropSource::QueryContinueDrag` 现先确认指定的启动鼠标键曾按下，再于释放时返回 `DRAGDROP_S_DROP`；启动 OLE 循环时鼠标键尚未按下则继续等待，Escape 仍取消。原生 COM vtable smoke 在旧实现下按预期失败，修正后 Release NativeProbe build 与 `--shell-view-color-policy-smoke` 通过。

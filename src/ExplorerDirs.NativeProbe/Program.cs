@@ -46,6 +46,8 @@ internal static class Program
             return ShellMenuGroupRoutingSmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-registration-smoke")
             return ShellViewDropTargetRegistrationSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-cleanup-smoke")
+            return ShellViewDropTargetCleanupSmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-private-desktop")
             return PrivateDesktopShellProbe.RunDropTarget();
         if (args.Length == 2 && args[0] == "--shell-view-ole-drop-copy" && args[1] == "--AllowInteractiveDesktopControl")
@@ -128,6 +130,7 @@ internal static class Program
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");
             Console.WriteLine("       --shell-view-color-policy-smoke (selection snapshot and rule-color policy only; no Shell window or files)");
+            Console.WriteLine("       --shell-view-drop-target-cleanup-smoke (hidden HWND cleanup contract for interactive and Private Desktop probes)");
             Console.WriteLine("       --shell-view-ole-drop-copy --AllowInteractiveDesktopControl (visible temporary Shell source/target; waits for a physical copy drag)");
             Console.WriteLine("       --ishellview-command-state-readonly (query background Undo/Redo twice; no file operations)");
             Console.WriteLine("       --ishellview-command-state-readonly-private-desktop (same read-only query on a separate Windows Desktop)");
