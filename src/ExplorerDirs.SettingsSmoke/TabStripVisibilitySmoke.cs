@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using ExplorerDirs.App;
 
 namespace ExplorerDirs.SettingsSmoke;
@@ -45,6 +46,42 @@ internal static class TabStripVisibilitySmoke
         multilineStore.Save(false);
         Check(!new MultilineTabHeadersStore(multilinePath).Load(),
             "multiline tab-header preference can be disabled again");
+
+        var maximumWidthPath = Path.Combine(root, "TabHeaderMaximumWidth.ini");
+        var maximumWidthStore = new TabHeaderMaximumWidthStore(maximumWidthPath);
+        Check(maximumWidthStore.Load(), "tab-header maximum width remains enabled by default");
+        maximumWidthStore.Save(false);
+        Check(!new TabHeaderMaximumWidthStore(maximumWidthPath).Load(),
+            "unlimited tab-header width round-trips through an independent portable INI");
+        Check(TabHeaderWidthPolicy.MeasureConstraint(limitMaximumWidth: true) == 180 &&
+              double.IsPositiveInfinity(TabHeaderWidthPolicy.MeasureConstraint(limitMaximumWidth: false)),
+            "Q-Dir-style maximum width toggle selects the existing 180 DIP cap or full folder-name width");
+
+        Exception? measureFailure = null;
+        var measureThread = new Thread(() =>
+        {
+            try
+            {
+                var header = new TextBlock { Text = new string('X', 300) };
+                var panel = new TabHeaderPanel();
+                panel.Children.Add(header);
+                panel.Measure(new Size(double.PositiveInfinity, 24));
+                Check(header.DesiredSize.Width <= TabHeaderWidthPolicy.MaximumWidth,
+                    "tab-header panel applies its configured maximum width during WPF measure");
+                panel.LimitMaximumWidth = false;
+                panel.Measure(new Size(double.PositiveInfinity, 24));
+                Check(header.DesiredSize.Width > TabHeaderWidthPolicy.MaximumWidth,
+                    "unlimited tab-header mode lets long titles measure to their natural width");
+            }
+            catch (Exception ex)
+            {
+                measureFailure = ex;
+            }
+        });
+        measureThread.SetApartmentState(ApartmentState.STA);
+        measureThread.Start();
+        measureThread.Join();
+        if (measureFailure is not null) throw measureFailure;
     }
 
     private static void Check(bool condition, string message)

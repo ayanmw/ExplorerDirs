@@ -11,6 +11,10 @@ public sealed class TabHeaderPanel : Panel
         nameof(Multiline), typeof(bool), typeof(TabHeaderPanel),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsMeasure));
 
+    public static readonly DependencyProperty LimitMaximumWidthProperty = DependencyProperty.Register(
+        nameof(LimitMaximumWidth), typeof(bool), typeof(TabHeaderPanel),
+        new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsMeasure));
+
     public static readonly DependencyProperty OrderProperty = DependencyProperty.RegisterAttached(
         "Order", typeof(int), typeof(TabHeaderPanel),
         new FrameworkPropertyMetadata(int.MaxValue, FrameworkPropertyMetadataOptions.AffectsParentArrange));
@@ -24,11 +28,18 @@ public sealed class TabHeaderPanel : Panel
         set => SetValue(MultilineProperty, value);
     }
 
+    public bool LimitMaximumWidth
+    {
+        get => (bool)GetValue(LimitMaximumWidthProperty);
+        set => SetValue(LimitMaximumWidthProperty, value);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var children = InternalChildren.Cast<UIElement>().OrderBy(GetOrder).ToArray();
+        var itemWidth = TabHeaderWidthPolicy.MeasureConstraint(LimitMaximumWidth);
         foreach (var child in children)
-            child.Measure(new Size(double.PositiveInfinity, availableSize.Height));
+            child.Measure(new Size(itemWidth, availableSize.Height));
 
         return TabHeaderLayout.Calculate(children.Select(child => child.DesiredSize).ToArray(),
             availableSize.Width, Multiline).DesiredSize;

@@ -55,6 +55,8 @@
 
 > **多行标签栏（2026-10-27）：**“视图 → 多行标签栏”现可让标签标题按可用宽度换行，隐藏单行滚动箭头并启用纵向滚动；默认关闭，保存在独立便携 `MultilineTabHeaders.ini`。Release SettingsSmoke 覆盖单行滚动范围、多行行列坐标及配置往返，App Release build 通过。尚未运行可见 GUI；极窄窗格、拖动重排、标签标题动态变化和键盘焦点需人工验收。
 
+> **标签标题最大宽度（2026-10-28）：**“视图 → 限制标签标题最大宽度”默认开启，保持原有 180 DIP 上限；关闭后标题可按文件夹全名自然扩展，遵循 Q-Dir 提供的最大宽度开关。偏好单独保存在便携 `TabHeaderMaximumWidth.ini`，发布隔离 profile 白名单已纳入该文件。Release SettingsSmoke 覆盖 INI 往返及 WPF 面板测量上限，完整发布 smoke、App Release build 通过；可见菜单/长标题布局仍待集中 UI 验收。
+
 > **拖动悬停标签自动切换（2026-10-27）：**“标签页 → 拖动悬停自动切换”提供关闭和 0.2–3 秒六个延时档位，默认 1 秒，保存在独立便携 `TabHoverActivation.ini`。每窗格仅为 Shell 文件/文件夹拖动启动可取消的 dispatcher timer；应用内标签重排保持原行为。偏好、拖放目标 gate 与接线 SettingsSmoke 和 App Release build 通过。鼠标悬停是否持续收到 WPF DragOver、切换后的 Shell drop target 和实体文件拖放仍待 GUI 验收。
 
 > **空白标签栏双击新建标签（2026-10-27）：**在标签标题滚动区域的空白处左键双击，复用 `NewTab()` 创建 Home/默认视图标签；标签标题双击仍走原关闭逻辑。接线 smoke 与 Release build 通过。真实鼠标命中和视觉仍待 GUI 验收。

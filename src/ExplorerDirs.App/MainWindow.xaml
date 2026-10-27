@@ -66,6 +66,9 @@
                 <MenuItem x:Name="MultilineTabHeadersMenu" Header="多行标签栏" IsCheckable="True"
                           ToolTip="标签较多时自动换行显示；关闭时使用单行滚动标签栏。"
                           Click="MultilineTabHeaders_Click"/>
+                <MenuItem x:Name="TabHeaderMaximumWidthMenu" Header="限制标签标题最大宽度" IsCheckable="True"
+                          ToolTip="取消限制后，标签会按文件夹名称展开；名称较长时可能占用更多标签栏空间。"
+                          Click="TabHeaderMaximumWidth_Click"/>
                 <MenuItem x:Name="FullScreenMenu" Header="全屏" InputGestureText="F11"
                           IsCheckable="True" Click="FullScreenMenu_Click"/>
                 <MenuItem x:Name="HiddenItemsMenu" Header="隐藏项目" SubmenuOpened="HiddenItemsMenu_SubmenuOpened">

@@ -12,6 +12,8 @@ public partial class PaneControl : UserControl
 {
     public static readonly DependencyProperty MultilineTabHeadersProperty = DependencyProperty.Register(
         nameof(MultilineTabHeaders), typeof(bool), typeof(PaneControl), new PropertyMetadata(false));
+    public static readonly DependencyProperty LimitTabHeaderWidthProperty = DependencyProperty.Register(
+        nameof(LimitTabHeaderWidth), typeof(bool), typeof(PaneControl), new PropertyMetadata(true));
 
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
@@ -120,7 +122,14 @@ public partial class PaneControl : UserControl
         set => SetValue(MultilineTabHeadersProperty, value);
     }
 
+    public bool LimitTabHeaderWidth
+    {
+        get => (bool)GetValue(LimitTabHeaderWidthProperty);
+        set => SetValue(LimitTabHeaderWidthProperty, value);
+    }
+
     internal void SetMultilineTabHeaders(bool enabled) => MultilineTabHeaders = enabled;
+    internal void SetLimitTabHeaderWidth(bool enabled) => LimitTabHeaderWidth = enabled;
 
     internal void SetStatusBarVisible(bool visible) =>
         StatusBarRow.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
@@ -1718,7 +1727,6 @@ public partial class PaneControl : UserControl
         header.Children.Add(new TextBlock
         {
             Text = string.IsNullOrEmpty(name) ? state.Path : name,
-            MaxWidth = 180,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
         header.MouseDown += (_, e) =>

@@ -142,7 +142,8 @@
                             PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
                     <TabControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <local:TabHeaderPanel Multiline="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"/>
+                            <local:TabHeaderPanel Multiline="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"
+                                                   LimitMaximumWidth="{Binding LimitTabHeaderWidth, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"/>
                         </ItemsPanelTemplate>
                     </TabControl.ItemsPanel>
                     <TabControl.ItemContainerStyle>

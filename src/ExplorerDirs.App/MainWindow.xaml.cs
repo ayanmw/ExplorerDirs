@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
+    private readonly TabHeaderMaximumWidthStore _tabHeaderMaximumWidthStore;
     private readonly TabHoverActivationPreference _tabHoverActivationPreference;
     private readonly PortableBooleanPreference _newTabLocationPreference;
     private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
@@ -56,6 +57,7 @@ public partial class MainWindow : Window
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
+    private bool _limitTabHeaderWidth = true;
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private bool _newTabUsesCurrentFolder;
     private bool _showStatusBar = true;
@@ -202,6 +204,9 @@ public partial class MainWindow : Window
         _multilineTabHeadersStore = new MultilineTabHeadersStore(Path.Combine(
             _profileDirectory, "MultilineTabHeaders.ini"));
         _multilineTabHeaders = _multilineTabHeadersStore.Load();
+        _tabHeaderMaximumWidthStore = new TabHeaderMaximumWidthStore(Path.Combine(
+            _profileDirectory, "TabHeaderMaximumWidth.ini"));
+        _limitTabHeaderWidth = _tabHeaderMaximumWidthStore.Load();
         _tabHoverActivationPreference = new TabHoverActivationPreference(Path.Combine(
             _profileDirectory, "TabHoverActivation.ini"));
         _tabHoverActivationDelayMilliseconds = _tabHoverActivationPreference.Load();
@@ -374,6 +379,7 @@ public partial class MainWindow : Window
         ApplyTabHoverActivationDelay();
         ApplyNewTabLocationPreference();
         ApplyMultilineTabHeaders();
+        ApplyTabHeaderMaximumWidth();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
         UpdatePreviewPaneToggle();
@@ -530,6 +536,7 @@ public partial class MainWindow : Window
     {
         UpdateShellPaneToggles();
         UpdateTabStripVisibilityMenu();
+        TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
     }
 
     private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)
@@ -1046,6 +1053,25 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TabHeaderMaximumWidth_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TabHeaderMaximumWidthMenu.IsChecked;
+        try
+        {
+            _tabHeaderMaximumWidthStore.Save(next);
+            _limitTabHeaderWidth = next;
+            ApplyTabHeaderMaximumWidth();
+            EnvironmentStatus.Text = next
+                ? "标签标题最大宽度限制已启用。"
+                : "标签标题不再限制最大宽度。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabHeaderMaximumWidth();
+            EnvironmentStatus.Text = $"标签标题宽度设置保存失败：{ex.Message}";
+        }
+    }
+
     private void TabHoverActivationMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
         UpdateTabHoverActivationMenu();
 
@@ -1194,6 +1220,12 @@ public partial class MainWindow : Window
     {
         MultilineTabHeadersMenu.IsChecked = _multilineTabHeaders;
         foreach (var pane in _panes) pane.SetMultilineTabHeaders(_multilineTabHeaders);
+    }
+
+    private void ApplyTabHeaderMaximumWidth()
+    {
+        TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
+        foreach (var pane in _panes) pane.SetLimitTabHeaderWidth(_limitTabHeaderWidth);
     }
 
     private void ApplyTabHoverActivationDelay()

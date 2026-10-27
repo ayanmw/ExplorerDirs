@@ -4,6 +4,14 @@ namespace ExplorerDirs.App;
 
 internal readonly record struct TabHeaderLayoutResult(Size DesiredSize, IReadOnlyList<Rect> Items);
 
+internal static class TabHeaderWidthPolicy
+{
+    internal const double MaximumWidth = 180;
+
+    internal static double MeasureConstraint(bool limitMaximumWidth) =>
+        limitMaximumWidth ? MaximumWidth : double.PositiveInfinity;
+}
+
 internal static class TabHeaderLayout
 {
     internal static TabHeaderLayoutResult Calculate(IReadOnlyList<Size> sizes, double availableWidth,

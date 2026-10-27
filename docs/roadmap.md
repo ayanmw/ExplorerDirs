@@ -4254,6 +4254,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 为隔离 NativeProbe 的 STA 在 Shell 窗口创建前显式执行 `OleInitialize` 增加 opt-in 对照，输入法保持启用；连续两次菜单激活/停用后的同步销毁都在顶层 parent `DestroyWindow` 挂起，50 秒 watchdog 后终止。WCT 均重复看到 COM activation → `ChsIME` 等待链，`cycle=False`，主桌面前台未变。
 - 因而“仅缺少 OLE 初始化”不是充分解释。该等待链不是线程栈，且只发生在 Private Desktop 的隔离 `IShellView` 探针，不据此推断当前 ExplorerBrowser 产品故障。下一步单独评估 WPF Dispatcher/消息泵差异；`ImmDisableIME` 仍仅为诊断对照，不能用作产品修复。详细记录见[隔离原型诊断](ishellview-color-spike.md#2026-10-28显式-ole-初始化未改变菜单后销毁挂起)。
 
+## 2026-10-28：标签标题最大宽度开关
+
+- 对照 Q-Dir [FAQ 65](https://www.softwareok.com/?faq=65&seite=faq-Q-DIR)，将原本固定的 180 DIP 标签标题测量上限改为“视图 → 限制标签标题最大宽度”选项；默认开启以保留现有布局，关闭后允许标题按完整目录名自然测量。状态保存到独立便携 `TabHeaderMaximumWidth.ini`，隔离预览配置白名单也已加入该文件。
+- 专项 smoke 覆盖偏好往返和 WPF 面板的实际 Measure 上限；完整 Release SettingsSmoke、App Release 构建与发布脚本隔离配置 smoke 均通过，构建 0 警告/错误，差异检查通过。未打开产品窗口；菜单可见状态、超长标题截断/自然扩展以及多行组合效果仍待集中 UI 验收。
+
 ## 2026-10-28：减少 `.qdr` 导入的行拆分分配
 
 - 源码审查发现，8 MB 输入上限之外，`string.Split('\n')` 还会同时保留行数组和逐行字符串。换行密集的 1,000,000 字符输入在修复前单次解析分配 16,385,488 字节。现在改用 `ReadOnlySpan<char>` 顺序扫描并只为实际字段分配字符串；同一 SettingsSmoke 复测分配 680 字节。完整 Release SettingsSmoke 通过，App Release 构建 0 警告/错误，`git diff --check` 通过。
