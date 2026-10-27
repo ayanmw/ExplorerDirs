@@ -9,6 +9,7 @@ internal static class NativeShellTheme
 {
     private static bool _dark;
     private static readonly Subclass HeaderParentProcedure = HeaderParentMessage;
+    private static readonly Subclass BackgroundProcedure = BackgroundMessage;
     private static readonly Subclass MenuFrameProcedure = MenuFrameMessage;
     internal static void SetProcessTheme(bool dark)
     {
@@ -33,6 +34,7 @@ internal static class NativeShellTheme
 
     private static void ApplyOne(nint window)
     {
+        _ = SetWindowSubclass(window, BackgroundProcedure, 0xED7603, 0);
         AllowDarkModeForWindow(window, _dark);
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
@@ -40,6 +42,23 @@ internal static class NativeShellTheme
         if (name.ToString() == "SysHeader32")
             _ = SetWindowSubclass(GetParent(window), HeaderParentProcedure, 0xED7601, 0);
     }
+
+    // Newly created hosts can erase before OnViewCreated supplies IVisualProperties.
+    // Fill only the native erase pass; leave Shell content, input and painting intact.
+    private static nint BackgroundMessage(nint window, uint message, nuint wParam, nint lParam, nuint id, nint data)
+    {
+        if (_dark && message == 0x0014 && wParam != 0 && GetClientRect(window, out var rect))
+        {
+            var previous = SetDCBrushColor((nint)wParam, 0x202020);
+            try { FillRect((nint)wParam, ref rect, GetStockObject(18)); }
+            finally { SetDCBrushColor((nint)wParam, previous); }
+            return 1;
+        }
+        if (message == 0x0082) RemoveWindowSubclass(window, BackgroundProcedure, id);
+        return DefSubclassProc(window, message, wParam, lParam);
+    }
+    [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out NativeRect rect);
+    [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref NativeRect rect, nint brush);
 
     internal static int ApplyView(nint view)
     {

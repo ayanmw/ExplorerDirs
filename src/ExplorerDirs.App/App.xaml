@@ -110,7 +110,20 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style TargetType="{x:Type Separator}">
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type Separator}">
+                <Border Height="1" Margin="5,3" Background="{DynamicResource ExplorerDirs.BorderBrush}"/>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
         <Style TargetType="{x:Type ContextMenu}">
+            <!-- The default Aero context-menu template paints a light gutter and border. -->
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type ContextMenu}">
+                <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="2">
+                    <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto" MaxHeight="700">
+                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                    </ScrollViewer>
+                </Border>
+            </ControlTemplate></Setter.Value></Setter>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>

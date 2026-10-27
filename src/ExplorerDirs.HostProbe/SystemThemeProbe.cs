@@ -90,6 +90,11 @@ internal static class SystemThemeProbe
                   control.Foreground is SolidColorBrush foreground && foreground.Color == ColorFor("ControlText"),
                 $"{control.GetType().Name} uses paired palette colors in secondary windows");
         }
+        var context = new ContextMenu { Width = 260, Height = 28, Style = (Style)app.FindResource(typeof(ContextMenu)) };
+        context.Measure(new Size(260, 28));
+        context.Arrange(new Rect(0, 0, 260, 28));
+        Check(ReadPixel(context, 200, 6) == ColorFor("ControlBackground"),
+            "tab context menu template paints the themed surface without an Aero gutter");
         var toolbar = new ToolBar { Width = 260, Style = (Style)app.FindResource(typeof(ToolBar)) };
         toolbar.Items.Add(new Button { Content = "导航" });
         toolbar.Measure(new Size(260, 28));
