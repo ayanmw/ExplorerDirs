@@ -145,3 +145,10 @@ dnx dotnet-counters@10.0.750501 --source https://api.nuget.org/v3/index.json -- 
 
 - `runtime.csv` SHA-256：`A48C94CBAE4523D9F221DCF8AF38A3151148D52445ED36C751897D6BE12213E5`。
 - `process.json` SHA-256：`61ECB0947FF2EC2BB24C2A9D76EC163A586F7F9C258CB39A85D2A72B440AD447`。
+
+## 2026-10-29 UTC：temp.76 同一进程只读复采
+
+- 对象仍为 `preview-0.6.0-temp.76` PID `58888`，启动时间 `2026-10-27T13:43:03Z`。EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`；应用 DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+- UTC `2026-10-28T16:50:16Z` 至 `16:51:16Z`，13 个样本、约每 5 秒一次，覆盖 60.296 秒。Working Set 全程 `244,547,584` B（233.31 MiB），Private Bytes `123,265,024` B（117.55 MiB），虚拟内存 `2,342,109,573,120` B，句柄 `1121`，线程 `34`；五项计数在本窗口的首末值及最小/最大值相同。
+- 这是无交互的只读进程采样；没有记录窗格/标签数量或用户操作，也没有采集 CPU、GC 或原生分配栈。它表明该窗口内这些计数稳定，不构成长时间无泄漏证明，也不能用于组件归因或优化前后 A/B。
+- CSV 保留在忽略目录 `src/.state/memory-samples/ExplorerDirs-memory-20261028-background.csv`，SHA-256 `E7D809DD7A290B673C788AEA79B86A9C39414966DE822D34A3D777DECF8A03BB`。后续仍需在记录固定操作序列的情况下观察同一 PID 的曲线，再按 Private Bytes/GDI/USER/句柄变化选择 profiler 路径。
