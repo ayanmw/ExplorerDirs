@@ -366,9 +366,26 @@ namespace
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {
             if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToObjectRequests);
+            if (!value) return E_POINTER;
+            *value = nullptr;
             PCUIDLIST_RELATIVE original = nullptr;
             auto result = UnwrapChildPidlView(item, &original);
-            return FAILED(result) ? result : _inner->BindToObject(original, bind, iid, value);
+            if (FAILED(result)) return result;
+            if (!_wrappedPidls || (iid != IID_IShellFolder && iid != IID_IShellFolder2))
+                return _inner->BindToObject(original, bind, iid, value);
+
+            // Keep the diagnostic namespace adapter in the hierarchy so child
+            // folders expose the same wrapped-PIDL behavior as their parent.
+            IShellFolder2* childFolder = nullptr;
+            result = _inner->BindToObject(original, bind, IID_IShellFolder2, reinterpret_cast<void**>(&childFolder));
+            if (FAILED(result)) return result;
+            if (!childFolder) return E_UNEXPECTED;
+            auto* childAdapter = new (std::nothrow) StaticShellFolderAdapter(childFolder, false, false, true);
+            childFolder->Release();
+            if (!childAdapter) return E_OUTOFMEMORY;
+            result = childAdapter->QueryInterface(iid, value);
+            childAdapter->Release();
+            return result;
         }
         HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {

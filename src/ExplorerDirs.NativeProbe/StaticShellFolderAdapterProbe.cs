@@ -43,6 +43,45 @@ internal static class StaticShellFolderAdapterProbe
             if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
             if (wrappedPidls)
             {
+                stage = "wrapped-nested-folder-adapter";
+                var nestedFolderPath = Path.Combine(fixture, "nested-folder");
+                Directory.CreateDirectory(nestedFolderPath);
+                File.WriteAllBytes(Path.Combine(nestedFolderPath, "two.bin"), new byte[2]);
+                var nestedPidl = ParseChild(adapter, "nested-folder");
+                nint nestedFolder = 0;
+                try
+                {
+                    var bindHr = At<BindToObject>(adapter, 5)(adapter, nestedPidl, 0, in ShellFolder2Id, out nestedFolder);
+                    if (bindHr < 0 || nestedFolder == 0)
+                        throw new Exception($"Wrapped folder BindToObject failed: hr=0x{bindHr:X8}, folder=0x{nestedFolder:X}.");
+                    var nestedHeader = Marshal.AllocCoTaskMem(shellDetailsSize);
+                    try
+                    {
+                        var nestedAdapterColumnFound = false;
+                        for (uint nestedColumn = 0; nestedColumn < 64; nestedColumn++)
+                        {
+                            Marshal.Copy(new byte[shellDetailsSize], 0, nestedHeader, shellDetailsSize);
+                            if (At<GetDetailsOf>(nestedFolder, 18)(nestedFolder, 0, nestedColumn, nestedHeader) < 0) continue;
+                            if (ReadDetailsText(nestedHeader) == "Registered schema control")
+                            {
+                                nestedAdapterColumnFound = true;
+                                break;
+                            }
+                        }
+                        if (!nestedAdapterColumnFound)
+                            throw new Exception("A folder opened through the wrapped adapter did not retain its adapter column metadata.");
+                    }
+                    finally { Marshal.FreeCoTaskMem(nestedHeader); }
+                    var nestedChild = ParseChild(nestedFolder, "two.bin");
+                    try { VerifyWrappedShellItemObjects(nestedFolder, nestedChild); }
+                    finally { ILFree(nestedChild); }
+                }
+                finally
+                {
+                    if (nestedFolder != 0) Marshal.Release(nestedFolder);
+                    ILFree(nestedPidl);
+                }
+
                 stage = "wrapped-enumeration";
                 var rawEnumHr = At<EnumObjects>(folder, 4)(folder, 0, 0x60, out var rawEnumerator);
                 if (rawEnumHr < 0) throw new Exception($"Filesystem IEnumIDList creation failed: 0x{rawEnumHr:X8}.");
@@ -962,6 +1001,7 @@ internal static class StaticShellFolderAdapterProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindToObject(nint self, nint item, nint bind, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);

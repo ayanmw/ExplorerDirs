@@ -181,3 +181,9 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 随后对同一包装项执行绝对 PIDL 路径解析：原始文件的绝对 PIDL 由 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 正确解析；`ILCombine(原始父目录 PIDL, 包装子 PIDL)` 则返回 `E_INVALIDARG`。这说明当前包装 child 身份不能直接用于普通 Shell API 解析绝对路径。适配器内部的列/重命名/DataObject 合同通过，不能据此推断该包装项可在 Shell 组件之间自由传递。
 
 这只证明私有 PIDL 包装的编码/解码及被测 `IShellFolder2` 委托入口；绝对 PIDL 路径解析失败说明还缺少能解释自定义根/项目身份的 Shell namespace 路由。DefView 自定义列消费仍未验证，也未覆盖打开、菜单、属性对话框、剪贴板传输、OLE 拖放、导航和通知。下一步先解决绝对身份/namespace 路由问题，再在集中批次评估 DefView 列消费；当前包装方案不能直接进入产品。
+
+### 2026-10-28：包装文件夹的嵌套绑定合同
+
+无窗口复核发现包装 adapter 的 `BindToObject` 还会把子文件夹直接返回为普通 filesystem folder；因此即使根级 DefView 将来能使用包装身份，浏览进子目录也会离开实验 adapter。新增回归合同后，旧实现先因子目录缺少 adapter 专属 `Registered schema control` 列而失败。修复后，包装模式下对子文件夹的 `BindToObject(IShellFolder/IShellFolder2)` 会建立另一个包装 adapter；探针确认子 folder 保留该列元数据，且继续可解析其文件并取得正常 Shell 数据对象。未包装模式和其他非文件夹接口仍沿用原委托路径。
+
+NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 folder smoke 和 `git diff --check` 全部通过；未创建窗口、未触碰产品代码。该结果只证明 adapter 树中一层子目录可继续委托，不修复包装 PIDL 的普通绝对路径解析失败，也没有证明 DefView 可消费该树；Explorer 导航、上下文菜单、拖放、通知与自定义列仍待后续隔离宿主/集中 UI 验收。
