@@ -36,7 +36,8 @@
                         <ColumnDefinition x:Name="AddressHistoryColumn" Width="24"/>
                     </Grid.ColumnDefinitions>
                     <ScrollViewer x:Name="BreadcrumbScroll" Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
-                                  VerticalScrollBarVisibility="Disabled" Focusable="False"
+                                  VerticalScrollBarVisibility="Disabled" Focusable="False" Background="Transparent"
+                                  MouseLeftButtonDown="BreadcrumbScroll_MouseLeftButtonDown"
                                   PreviewMouseWheel="BreadcrumbScroll_PreviewMouseWheel">
                         <StackPanel x:Name="BreadcrumbButtons" Orientation="Horizontal"/>
                     </ScrollViewer>

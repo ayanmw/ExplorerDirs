@@ -2298,6 +2298,14 @@ public partial class PaneControl : UserControl
         }));
     }
 
+    private void BreadcrumbScroll_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Use the bubbling event: breadcrumb buttons consume their own clicks,
+        // while blank space and separators provide Explorer-style path editing.
+        FocusAddress();
+        e.Handled = true;
+    }
+
     private void BreadcrumbScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (BreadcrumbScroll.ExtentWidth <= BreadcrumbScroll.ViewportWidth) return;
