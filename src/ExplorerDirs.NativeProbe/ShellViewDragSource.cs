@@ -42,6 +42,9 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
     internal static int RunOleLoop(ComDataObject dataObject, uint allowedEffects, uint initiatingButton, out uint performedEffect)
     {
         ArgumentNullException.ThrowIfNull(dataObject);
+        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            throw new InvalidOperationException("OLE drag-and-drop must run on an STA thread.");
+
         var source = new ShellViewDragSource(initiatingButton);
         // DoDragDrop owns target discovery and input tracking; callers must run this on an OLE-initialized STA.
         // This probe entry point deliberately does not move the cursor or synthesize input.
