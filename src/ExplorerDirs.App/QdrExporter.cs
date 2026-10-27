@@ -18,7 +18,8 @@ internal static class QdrExporter
 
     internal static string Render(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
         IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
-        NavigationTreeWidths? treeWidths = null)
+        NavigationTreeWidths? treeWidths = null,
+        IReadOnlyDictionary<string, string>? encodedLocations = null)
     {
         Validate(state, pins);
         if (proportions is not null) ValidateProportions(state.Layout, proportions);
@@ -52,7 +53,14 @@ internal static class QdrExporter
             for (var tab = 0; tab < state.Panes[pane].Count; tab++)
             {
                 var suffix = (layoutMap.AppToNative[pane] + 1).ToString() + (tab == selected ? "" : "_" + tab);
-                values["Dir" + suffix] = ToQdrTextPath(state.Panes[pane][tab].Path);
+                var location = state.Panes[pane][tab].Path;
+                if (encodedLocations is not null && encodedLocations.TryGetValue(location, out var encoded))
+                {
+                    // Resolve outside this pure renderer; never block UI rendering on Shell/network binding.
+                    QdrImporter.DecodePidl(encoded);
+                    values["Folder" + suffix] = encoded;
+                }
+                else values["Dir" + suffix] = ToQdrTextPath(location);
                 values["CurPos" + suffix] = tab.ToString();
                 var mode = state.Panes[pane][tab].View.Mode;
                 // Q-Dir's published view list omits Content; map it to Details in the interoperable base fields.

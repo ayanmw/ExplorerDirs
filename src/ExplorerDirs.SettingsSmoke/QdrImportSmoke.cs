@@ -265,6 +265,25 @@ internal static class QdrImportSmoke
                     QdrImporter.ResolveLocation);
                 Require(literalResult.Panes[0][0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase),
                     "QDR PIDLs preserve percent-named folder identity despite a matching environment variable");
+                var literalState = new SessionState(4, 4,
+                    Enumerable.Range(0, 4).Select(_ => new List<TabSettings>
+                        { new(literalFolder, ViewState.Default()) }).ToList(), 0, [0, 0, 0, 0]);
+                var encodedExport = QdrExporter.Render(literalState, [], encodedLocations:
+                    new Dictionary<string, string> { [literalFolder] = literalEncoded });
+                var baseExport = string.Join("\n", encodedExport.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                var baseRoundTrip = QdrImporter.Parse(baseExport, QdrImporter.ResolveLocation);
+                Require(baseRoundTrip.TabCount == 4 && baseRoundTrip.Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "encoded export preserves literal paths in all four base panes without the app extension");
+                var exactRoundTrip = QdrImporter.Parse(encodedExport, QdrImporter.ResolveLocation);
+                Require(exactRoundTrip.ExtendedState is not null,
+                    "encoded base paths participate in the extension hash and retain exact app state");
+                var malformedRejected = false;
+                try { QdrExporter.Render(literalState, [], encodedLocations:
+                    new Dictionary<string, string> { [literalFolder] = "%01" }); }
+                catch (FormatException) { malformedRejected = true; }
+                Require(malformedRejected, "invalid pre-resolved PIDLs cannot be emitted as valid export fields");
             }
             finally { if (literalPidl != 0) Marshal.FreeCoTaskMem(literalPidl); }
         }
