@@ -976,6 +976,18 @@ public static class ShellViewColorBrowserHostSmoke
                   _coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
                 "WM_MENUCOMMAND from the Object group is consumed without dispatching to the pane");
 
+            SendMessageW(frameWindow, 0x0211, 0, 0);
+            SendMessageW(frameWindow, 0x011F, 0x00100000, compositeMenu);
+            SendMessageW(frameWindow, 0x011F, 0x7123, fileChild);
+            SendMessageW(frameWindow, 0x0111, 0x7123, 0);
+            _coordinatorObservedCommandId = 0;
+            Check(host.RemoveMenusSB(compositeMenu) == 0 && GetMenu(frameWindow) == baseMenu,
+                "deactivating the pane retires its merged menu before a queued command is dispatched");
+            traceCount = host.MenuTrace.Count;
+            DispatchOnePostedCoordinatorMessage(frameWindow);
+            Check(_coordinatorObservedCommandId == 0 && host.MenuTrace.Count == traceCount,
+                "a queued command from a retired pane is consumed without reaching its old view HWND");
+
             SendMessageW(frameWindow, 0x0212, 0, 0); // WM_EXITMENULOOP.
             Console.WriteLine("PASS coordinator WM_MENUSELECT/WM_COMMAND and WM_MENUCOMMAND posted dispatch on hidden Win32 windows");
         }
