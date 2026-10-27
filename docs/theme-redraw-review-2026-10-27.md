@@ -48,3 +48,5 @@
 树布局候选已做反证：隐藏原生 STATIC 父子窗口下，相同尺寸 MoveWindow 连续 20 次没有产生冗余 WM_WINDOWPOSCHANGED，真实尺寸改变仍正常。因此不保留尺寸缓存或新 helper，不把它作为已证实的闪烁来源；该临时夹具测量日志为 src/.state/theme-hang/opt-tree-red.log。隐藏窗口测量不能证明可见树绝无擦除，仍以实际场景为准。
 
 用户授权同一批次优化经重复验证后覆盖同一预览版本；本次继续更新 temp.76，完整保留配置及旧包。
+
+发布完成：temp.76 构建来源 2b9bcc6；系统主题及原生主题专项各连续两轮通过，完整 SettingsSmoke 通过。旧包完整备份至 releases/.history/preview-0.6.0-temp.76-before-redraw-opt-20261027-111749；替换前校验 active INI，保持原 profile 原位，发布文件与 staging 哈希一致。通过 Computer Use 启动确切 release EXE，截图观察四窗格、深色原生主/子菜单及贴合边界，随后归还桌面；未做完整浅色/所有交互的本轮 GUI 复测，不宣称全部闪烁消失。
