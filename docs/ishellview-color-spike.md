@@ -1107,3 +1107,10 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 为区分全套恢复探针中偶发超时的具体边界，增加菜单选择、四 pane 菜单激活/命令、文件操作和各 pane 计数等待日志；计数等待可选记录 WinForms message filter 看到的消息号、HWND 和窗口类。NativeProbe Release 构建通过（0 警告、0 错误），Private Desktop watchdog 多轮退出码 124。停滞点并不固定：样本曾停在菜单激活前后、pane 菜单命令、复制/重命名/删除，以及删除后的消息泵/其它窗格计数等待。`20261027-083314-807898ed` 的删除主视图到第 5 次轮询后匹配，Pane 1 收敛后转到 Pane 2 等待；`20261027-083437-2c3cd84f` 使用 120 秒预算，推进至 `file-delete-start` 后仍超时，尚无 `file-delete-performed`。Private Desktop 前台窗口保持不变。
 
 这些分布式停滞日志不能确定共同根因，也不能证明是固定 Shell 命令、文件操作或 `Pump` 消息派发失败；目前没有加入规避逻辑或延长产品超时。后续需用可取得原生线程栈的手段捕获一次真实停滞，之后才能定位 COM 调用、DefView 消息处理或测试夹具生命周期。完整四窗格 Shell 宿主迁移仍未过可靠性门槛，产品 ExplorerBrowser 未改。
+### 2026-10-27 watchdog 超时递归清理回归
+
+此前 `scripts/native-probe-watchdog.ps1` 超时只调用 `Process.Kill()`，而会话恢复 probe 会启动独立 consumer 子进程。该实现只保证直接子进程退出，不保证 consumer 的后代进程退出。新增 `-TestTimeoutPath` 回归夹具：由 watchdog 测试父进程启动 30 秒 pwsh 孙进程，记录孙进程 PID，再令父进程在 5 秒时限超时。
+
+修复前测试以失败退出，并观察到存活孙进程 PID `32872`；测试清理随后回收该进程。改用 `Process.Kill($true)` 后，回归输出 `selftest=timeout-tree-passed; seconds=5; parent-exited=True; grandchild-exited=True`。这确认了 watchdog 会递归结束被测进程树。
+
+之后用新 watchdog 复跑 `session-restore-private-desktop`，该探针仍超时，最后阶段记录到 pane 4 的 sort/group 菜单命令检查；日志为 `src/.state/native-probe-watchdog/20261027-083750-52d4c612.stdout.log`。watchdog 返回超时后，进程快照中没有 NativeProbe 或会话恢复 consumer 遗留。由此只确认超时清理有效；IShellView 四窗格恢复停滞仍未定位，也不能推断为本次遗留子进程问题所致。

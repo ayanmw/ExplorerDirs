@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：修复 NativeProbe watchdog 超时后的子进程清理
+
+- 超时 watchdog 过去只终止直接子进程；IShellView 会话恢复探针内部会再启动 consumer 子进程，因此超时可能留下后台 Shell 测试进程。现在通过 `Process.Kill($true)` 递归终止进程树，并扩展 watchdog 自测：构造带孙进程的超时进程，断言父进程和孙进程均退出。修复前回归失败并发现存活孙进程，修复后通过。
+- 使用修复后的 watchdog 复跑四窗格 Private Desktop 会话恢复探针，仍在 pane 4 菜单命令阶段后于 60 秒超时；确认本轮没有遗留 NativeProbe/consumer 子进程。该修复解决探针进程泄漏，不解决也不解释 IShellView 恢复停滞。完整证据见[隔离原型记录](ishellview-color-spike.md#2026-10-27-watchdog-超时递归清理回归)。
+
 ## 2026-10-27：四窗格 IShellView 恢复探针出现阶段不定的超时
 
 - NativeProbe 的完整四窗格 Private Desktop 恢复回归在 60 秒多轮及一次 120 秒样本中均出现超时，停滞阶段分散于菜单激活/命令、文件操作及消息泵/窗格收敛等待。最新 120 秒样本推进至删除调用前；另一轮删除主 view 已收敛而后续 Pane 2 等待未完成。前台窗口未变。

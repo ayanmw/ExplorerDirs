@@ -12,9 +12,19 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runTimeoutSeconds = $TimeoutSeconds
+$timeoutTreeScriptPath = $null
+$timeoutTreePidPath = $null
 if ($TestTimeoutPath) {
     $executable = (Get-Command pwsh -ErrorAction Stop).Source
-    $arguments = '-NoProfile -Command "Start-Sleep -Seconds 30"'
+    $timeoutTreeScriptPath = Join-Path $env:TEMP "ExplorerDirs-watchdog-tree-$([Guid]::NewGuid().ToString('N')).ps1"
+    $timeoutTreePidPath = "$timeoutTreeScriptPath.child-pid"
+    @'
+$child = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source `
+    -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+[IO.File]::WriteAllText($args[0], [string]$child.Id)
+$child.WaitForExit()
+'@ | Set-Content -LiteralPath $timeoutTreeScriptPath -Encoding utf8NoBOM
+    $arguments = '-NoProfile -File "{0}" "{1}"' -f $timeoutTreeScriptPath, $timeoutTreePidPath
     $runTimeoutSeconds = 5
 }
 else {
@@ -60,14 +70,25 @@ $process = Start-Process -FilePath $executable -ArgumentList $arguments -Working
 
 if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     try {
-        if (-not $process.HasExited) { $process.Kill() }
+        if (-not $process.HasExited) { $process.Kill($true) }
     }
     catch {
         if (-not $process.HasExited) { throw }
     }
     $process.WaitForExit()
     if ($TestTimeoutPath) {
-        Write-Output "selftest=timeout-path-passed; seconds=$runTimeoutSeconds; child-exited=$($process.HasExited); stdout=$stdoutPath; stderr=$stderrPath"
+        $grandchildId = if (Test-Path -LiteralPath $timeoutTreePidPath) {
+            [int](Get-Content -LiteralPath $timeoutTreePidPath -Raw)
+        }
+        else { 0 }
+        $grandchildStillRunning = $grandchildId -gt 0 -and $null -ne (Get-Process -Id $grandchildId -ErrorAction SilentlyContinue)
+        if ($grandchildStillRunning) { Stop-Process -Id $grandchildId -Force }
+        Remove-Item -LiteralPath $timeoutTreeScriptPath, $timeoutTreePidPath -Force -ErrorAction SilentlyContinue
+        if ($grandchildId -eq 0 -or $grandchildStillRunning) {
+            Write-Error "Watchdog timeout did not terminate its process tree (grandchildId=$grandchildId; stillRunning=$grandchildStillRunning)."
+            exit 1
+        }
+        Write-Output "selftest=timeout-tree-passed; seconds=$runTimeoutSeconds; parent-exited=$($process.HasExited); grandchild-exited=True; stdout=$stdoutPath; stderr=$stderrPath"
     }
     else {
         Write-Output "status=timeout; seconds=$runTimeoutSeconds; exitCode=124; stdout=$stdoutPath; stderr=$stderrPath"
