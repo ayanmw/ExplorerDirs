@@ -32,7 +32,8 @@ internal static class PrivateDesktopShellProbe
         Run(synchronousCleanupProbe ? "session-restore-consumer-sync-cleanup" : "session-restore-consumer",
             () => ShellViewColorSpike.RunSessionRestoreConsumer(fixture, stateDirectory, sessionId,
                 terminateProcessAfterProbe: !synchronousCleanupProbe,
-                synchronousCleanupProbe: synchronousCleanupProbe), TimeSpan.FromSeconds(100));
+                synchronousCleanupProbe: synchronousCleanupProbe),
+            TimeSpan.FromSeconds(synchronousCleanupProbe ? 55 : 100));
 
     internal static int RunReadOnlyColorRule() => Run("color-readonly-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, readOnlyRuleProbe: true));

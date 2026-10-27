@@ -28,6 +28,7 @@ internal static class ShellViewColorSpike
     private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly SubclassProc DrawObserver = ObserveCustomDraw;
+    private static readonly SubclassProc CleanupWindowObserver = ObserveCleanupWindowMessages;
     private static readonly Dictionary<nuint, Rect> CustomDrawBounds = [];
     private static readonly Dictionary<nuint, nint> CustomDrawDeviceContexts = [];
     private static readonly Dictionary<nuint, uint> CustomDrawDeviceContextTypes = [];
@@ -194,8 +195,28 @@ internal static class ShellViewColorSpike
                 _ = DestroyWindow(pane);
                 Console.WriteLine("session-restore-consumer-cleanup: destroy-primary-pane-complete");
             }
+            if (synchronousCleanupProbe && parent != 0 && IsWindow(parent))
+            {
+                var childCount = 0;
+                EnumChildWindows(parent, (window, _) =>
+                {
+                    childCount++;
+                    Console.WriteLine($"session-restore-consumer-cleanup: remaining-child hwnd=0x{window:X} class={WindowClassName(window)}");
+                    return true;
+                }, 0);
+                Console.WriteLine($"session-restore-consumer-cleanup: remaining-child-count={childCount}");
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not attach the parent destroy-message observer.");
+                Console.WriteLine("session-restore-consumer-cleanup: parent-destroy-observer-installed");
+            }
             if (parent != 0 && IsWindow(parent)) Console.WriteLine("session-restore-consumer-cleanup: destroy-parent-window");
-            if (parent != 0 && IsWindow(parent)) _ = DestroyWindow(parent);
+            if (parent != 0 && IsWindow(parent))
+            {
+                var destroyed = DestroyWindow(parent);
+                Console.WriteLine($"session-restore-consumer-cleanup: destroy-parent-returned={destroyed}; still-valid={IsWindow(parent)}");
+                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
             Console.WriteLine("session-restore-consumer-cleanup: complete");
             Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
         }
@@ -2373,6 +2394,18 @@ internal static class ShellViewColorSpike
         if (window == 0) return "<none>";
         var name = new System.Text.StringBuilder(128);
         return GetClassNameW(window, name, name.Capacity) > 0 ? name.ToString() : "<unknown>";
+    }
+
+    private static nint ObserveCleanupWindowMessages(nint window, uint message, nuint wParam,
+        nint lParam, nuint id, nuint data)
+    {
+        var observed = message is 0x0002 or 0x0082;
+        if (observed)
+            Console.WriteLine($"session-restore-consumer-cleanup: parent-message-enter=0x{message:X4}; hwnd=0x{window:X}");
+        var result = DefSubclassProc(window, message, wParam, lParam);
+        if (observed)
+            Console.WriteLine($"session-restore-consumer-cleanup: parent-message-return=0x{message:X4}; hwnd=0x{window:X}");
+        return result;
     }
 
     private static bool VerifyCustomDrawContract(nint notifyTarget, nint listView)
