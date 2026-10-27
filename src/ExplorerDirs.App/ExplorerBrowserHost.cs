@@ -844,11 +844,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         ((_hostWindow != 0 && (hwnd == _hostWindow || IsChild(_hostWindow, hwnd))) ||
          (_viewWindow != 0 && (hwnd == _viewWindow || IsChild(_viewWindow, hwnd))));
 
-    public bool HasColumnHeader() => FindColumnHeader() is not null;
+    public bool HasColumnHeader() => FindNativeColumnHeader() != 0 || FindColumnHeader() is not null;
 
     public bool IsColumnHeaderFocused()
     {
         if (!HasNativeFocus()) return false;
+        var nativeHeader = FindNativeColumnHeader();
+        if (nativeHeader != 0 && GetFocus() == nativeHeader) return true;
         try
         {
             var element = AutomationElement.FocusedElement;
@@ -863,6 +865,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool FocusColumnHeader()
     {
         if (!IsVisible) return false;
+        var nativeHeader = FindNativeColumnHeader();
+        if (nativeHeader != 0) return FocusNativeColumnHeader(nativeHeader);
         var header = FindColumnHeader();
         if (header is null) return false;
         try
@@ -873,6 +877,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (ElementNotAvailableException) { return false; }
         catch (COMException) { return false; }
         catch (InvalidOperationException) { return false; }
+    }
+
+    private nint FindNativeColumnHeader()
+    {
+        var content = FindContentFocusWindow();
+        if (content == 0 || WindowClass(content) != "SysListView32") return 0;
+        var header = SendMessage(content, 0x101F, 0, 0); // LVM_GETHEADER
+        return header != 0 && IsWindowVisible(header) ? header : 0;
+    }
+
+    private static bool FocusNativeColumnHeader(nint header)
+    {
+        if (header == 0 || !IsWindow(header)) return false;
+        // Visible Shell headers can report IsKeyboardFocusable=false through UIA.
+        // Use the native Header contract instead of silently skipping this Tab stop.
+        var item = SendMessage(header, 0x121B, 0, 0); // HDM_GETFOCUSEDITEM
+        if (item.ToInt64() < 0) item = 0;
+        SetFocus(header);
+        return SendMessage(header, 0x121C, 0, item) != 0 && GetFocus() == header; // HDM_SETFOCUSEDITEM
     }
 
     private AutomationElement? FindColumnHeader()
@@ -5375,6 +5398,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         [MarshalAs(UnmanagedType.Interface)] out IShellItem item);
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam,
         ref NativeListViewHitTestInfo lParam);

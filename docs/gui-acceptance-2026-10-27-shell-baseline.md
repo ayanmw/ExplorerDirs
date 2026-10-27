@@ -56,3 +56,13 @@ header-error System.InvalidOperationException: 目标元素无法接收焦点。
 下一步验证原生 Header HWND 的焦点与 `HDM_SETFOCUSEDITEM`，保留 DirectUI 路径及原文件选择。官方接口依据：[HDM_SETFOCUSEDITEM](https://learn.microsoft.com/en-us/windows/win32/controls/hdm-setfocuseditem)、[HDM_GETFOCUSEDITEM](https://learn.microsoft.com/en-us/windows/win32/controls/hdm-getfocuseditem)。这些文档只证明接口契约，不证明当前 Shell 控件已接受修复。
 
 日志构建的源码明确为临时诊断脏构建；取证后全部诊断代码撤回，App 源码与提交基线一致，未更新发布包。两份窗口均已关闭，后续窗口枚举确认均已退出。
+
+## 原生 Header 聚焦修复与局部验收
+
+产品为可见的 `SysListView32` Header 新增原生聚焦路径：通过 `LVM_GETHEADER` 取得 `SysHeader32`，保留 `HDM_GETFOCUSEDITEM` 索引，SetFocus 后用 `HDM_SETFOCUSEDITEM` 进入该列，并检查原生焦点。HasColumnHeader / IsColumnHeaderFocused 同时识别这个原生停靠点；其他 Shell 控件继续用原 UIA 路径。没有改变文件选择、排序或保存格式。
+
+新增 HostProbe `--column-header-focus`：缺少原生路径时先失败，接入后验证原生 Header 聚焦、Right 移动列焦点、再次进入保留列索引、空句柄拒绝及返回原 ListView。测试显式激活版本 6 common-controls；未激活时系统创建旧版 Header，SetFocus 可到 HWND，但不支持该项消息，不应作为 Shell 接口可用性结论。增加 Right 检查后曾发现隐藏父窗被 Header 激活，前台不变断言正确失败；父窗加 WS_EX_NOACTIVATE 后最终通过，断言保留。此探针没有 Shell view 或桌面输入。
+
+隔离产品候选 `20261027-131931-834-a5f9ac`（源码基线 0d6a741 加本批未提交修复）中，第一窗格选中 sample-1.txt 后 Shift+Tab 成功高亮“名称”标题，Right 成功将高亮移到“修改日期”，原 sample-1.txt 保持选择。随后 Tab 操作被工具报告并发输入，重新观察时窗格/选择已变；这段不记通过。续测前枚举确认候选已退出，不对日常 release 注入输入。因此产品中列标题进入与 Right 有可见证据，返回原文件及完整跨窗格正反顺序仍待后续验收。
+
+App publish、完整 Release SettingsSmoke 和最终原生 Header probe 通过。日常 temp.76 未覆盖；本批修复与主题发布分开。

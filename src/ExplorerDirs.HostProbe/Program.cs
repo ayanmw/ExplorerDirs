@@ -25,6 +25,7 @@ internal static class Program
 
     private static int Run(string[] args)
     {
+        if (args is ["--column-header-focus"]) return ColumnHeaderFocusProbe.Run();
         if (args is ["--system-theme"]) return SystemThemeProbe.Run();
         if (args is ["--native-theme-colors"]) return NativeThemeColorProbe.Run();
         if (args is ["--folder-navigation-callbacks"]) return FolderNavigationCallbacksProbe.Run();
