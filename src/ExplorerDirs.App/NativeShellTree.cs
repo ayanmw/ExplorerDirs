@@ -362,27 +362,13 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
     {
         normal = open = -1;
         if (!useExplicitShellIcons) return unchecked((int)0x80004001);
-        if (item == 0 || GetDisplayName(item, out var parsingName) < 0 || parsingName == 0)
-            return unchecked((int)0x80004001);
-        try
-        {
-            var path = Marshal.PtrToStringUni(parsingName);
-            if (!ShellTreeIconIndexResolver.TryResolve(path ?? string.Empty, out normal, out open))
-                return unchecked((int)0x80004001);
-            return 0;
-        }
-        catch { return unchecked((int)0x80004001); }
-        finally { Marshal.FreeCoTaskMem(parsingName); }
+        return ShellTreeIconIndexResolver.TryResolveShellItem(item, out normal, out open)
+            ? 0 : unchecked((int)0x80004001);
     }
-
-    private static int GetDisplayName(nint item, out nint value) =>
-        Marshal.GetDelegateForFunctionPointer<GetDisplayNameNative>(
-            Marshal.ReadIntPtr(Marshal.ReadIntPtr(item), 5 * nint.Size))(item, 0x80028000, out value);
 
     private static T At<T>(nint value, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * nint.Size));
 
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDisplayNameNative(nint self, uint kind, out nint value);
 }
 
 [ComVisible(true), Guid("93D77985-B3D8-4484-8318-672CDDA002CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
