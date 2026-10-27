@@ -10,6 +10,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
+    private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
 
@@ -23,8 +24,7 @@ internal static class StaticShellFolderAdapterProbe
         try
         {
             Directory.CreateDirectory(fixture);
-            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
-                File.WriteAllText(Path.Combine(fixture, name), "static-column fixture");
+            WriteSortableFixtures(fixture, "ten-copy.bin");
             Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
@@ -203,8 +203,7 @@ internal static class StaticShellFolderAdapterProbe
         try
         {
             Directory.CreateDirectory(fixture);
-            foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "a-ten-copy.bin" })
-                File.WriteAllText(Path.Combine(fixture, name), "static-column fixture");
+            WriteSortableFixtures(fixture, "a-ten-copy.bin");
 
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs static Shell-column probe",
                 0x80000000, 0, 0, 900, 600, 0, 0, 0, 0);
@@ -298,6 +297,7 @@ internal static class StaticShellFolderAdapterProbe
             foreach (var column in displayedColumns)
                 Console.WriteLine($"native-static-shell-column: list-view-subitem-{column.SubItem}-text=[{string.Join(',', column.Values)}]");
             Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
+            VerifyLegacyColumnRearrange(view, columnIndexForView);
             var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
             // A failed custom-schema check must not suppress the standard-schema control evidence.
             VerifySortMatrix((standard, direction) => ReadSortedValues(view, folderView, adapter,
@@ -444,6 +444,14 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(details); }
     }
 
+    private static void WriteSortableFixtures(string fixture, string tenByteAlias)
+    {
+        File.WriteAllBytes(Path.Combine(fixture, "two.bin"), new byte[2]);
+        File.WriteAllBytes(Path.Combine(fixture, "ten.bin"), new byte[10]);
+        File.WriteAllBytes(Path.Combine(fixture, "hundred.bin"), new byte[100]);
+        File.WriteAllBytes(Path.Combine(fixture, tenByteAlias), new byte[10]);
+    }
+
     private static int GetShellDetailsSize(nint module)
     {
         // SHELLDETAILS embeds STRRET, whose x64 alignment makes the full structure larger than 272 bytes.
@@ -499,6 +507,27 @@ internal static class StaticShellFolderAdapterProbe
         if (names.Length != valuesByName.Count || names.Any(name => !valuesByName.ContainsKey(name)))
             throw new Exception($"Unexpected visible fixture rows: [{string.Join(',', names)}].");
         return names.Select(name => valuesByName[name]).ToArray();
+    }
+
+    private static void VerifyLegacyColumnRearrange(nint view, int customColumnIndex)
+    {
+        Check(Marshal.QueryInterface(view, in ShellFolderViewId, out var shellFolderView));
+        try
+        {
+            foreach (var candidateIndex in new[] { customColumnIndex, 2 })
+            {
+                var before = ReadNativeComparisonStats();
+                var hr = At<Rearrange>(shellFolderView, 3)(shellFolderView, candidateIndex);
+                Check(hr);
+                Pump(300);
+                var names = ReadDisplayedColumnValues(view, 0);
+                var after = ReadNativeComparisonStats();
+                Console.WriteLine($"native-static-shell-column: legacy-Rearrange hr=0x{hr:X8}; " +
+                    $"candidate-index={candidateIndex}; visible-name-order=[{string.Join(',', names)}]; " +
+                    $"callbacks-before=[{before}]; callbacks-after=[{after}]");
+            }
+        }
+        finally { Marshal.Release(shellFolderView); }
     }
 
     private static string[] ReadDisplayedColumnValues(nint view, int subItem)
@@ -658,6 +687,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Rearrange(nint self, nint sortColumn);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);

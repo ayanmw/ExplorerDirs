@@ -4114,3 +4114,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 查明 `--view-data-capability` 误报多一个夹具项目：它把绝对 PIDL 与 `0x4000`（SDK 定义为 `SBSP_NAVIGATEBACK`）传给 `BrowseObject`，该标志忽略 PIDL，测试仍停留在父目录。改为 flags=0，并在读取视图前等待 `IPersistFolder2::GetCurFolder` 与目标 PIDL 一致。
 - 分组后应用筛选会替换当前 `IFolderView2`。等待器不再沿用旧 COM 指针；它重取当前视图并连续三次验证预期 PIDL 行序。NativeProbe Release 构建 0 警告/错误；完整 `--view-data-capability` 三个独立进程均 exitCode 0，分组/筛选/导出组合通过。`--view-property-refresh-capability` 也 exitCode 0：普通 Shell 的 `PKEY_Size` 降序为 `five.txt|three.txt|child`，设置视图缓存不改变排序，刷新清空缓存。隐藏父窗口未显示，前台未改变。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-27类身份对照与探针缓冲区修正)。
+
+## 2026-10-28：校准原生列排序实验
+
+- 隔离 adapter 夹具现使用 2、10、10、100 字节文件。严格 adapter 的真实 `PKEY_Size` 升降序均按物理大小正确重排；旧式 `IShellFolderView::Rearrange` 传入自定义列索引 37 或显示位置 2 均返回 `S_OK`，但行序不变且没有调用 adapter 的 `CompareIDs`。现代自定义 PKEY 升降序仍未重排；标准大小属性升降序正常。Private Desktop 前台未变；探针以 exitCode 1 明确保留自定义排序失败，不把测试缺陷记成通过。
+- 这把问题范围进一步收窄到 adapter 的自定义列属性消费/比较路由。未注册机器级 schema，未接入产品，也未改变 ExplorerBrowser。详细证据和下一步边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-28区分实际-size-排序与旧式列索引排序入口)。

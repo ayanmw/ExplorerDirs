@@ -135,3 +135,11 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 分组/筛选组合期间 Shell 会替换当前 `IFolderView2`；持有旧指针读取时得到空项或 `E_FAIL`，单次 `ItemCount` 命中也可能只是过渡值。探针现每次从 `IExplorerBrowser::GetCurrentView` 取新接口，并要求三次连续读取都得到预期 PIDL 行序，才继续检查导出。`--view-data-capability` 随后在 3 个独立隐藏 ExplorerBrowser 进程中全部以 exitCode=0 完成，含普通名称排序、筛选、分组、分组后启用筛选及导出行序；父 HWND 未显示，前台未变。
 
 单独的 `--view-property-refresh-capability` 以 exitCode=0 完成，系统 `PKEY_Size` 以实际 5/3 字节文件得到 `five.txt|three.txt|child` 的降序；注入 `IFolderView2::SetViewProperty` 后仍为相同顺序，刷新后缓存清空。修正后普通 Shell 的标准排序控制已通过；与之对照，自定义 adapter 的 DefView 可见行序仍保持原名序，排序失败不能归因于初始夹具导航错位。
+
+## 2026-10-28：区分实际 Size 排序与旧式列索引排序入口
+
+此前 adapter 的物理夹具四个文件长度完全相同，不能作为实际 `PKEY_Size` 重排对照。本轮将隔离文件固定为 2、10、10、100 字节，并以字母序 `a-ten-copy.bin|hundred.bin|ten.bin|two.bin` 作为初始顺序。严格 adapter 的 Private Desktop 记录 `src/.state/native-probe-watchdog/20261028-002005-80159188.stdout.log`（SHA-256 `A6CB26626009DD5F4E4A3BF38183CC7D98FB94D1317606138CCD5B8A90F506DD`）：`PKEY_Size` 升序得到 `two|a-ten-copy|ten|hundred`，降序得到 `hundred|a-ten-copy|ten|two`；两项均通过。由此确认此前 Size 对照失效是夹具问题，不是 Shell 标准排序失效。
+
+同一实验用 `IShellFolderView::Rearrange` 分别传入自定义列索引 37 和其当前显示位置 2，两次均返回 `S_OK`，但可见顺序不变；`CompareIDs` 计数也均无增加。随后 `IFolderView2::SetSortColumns` 对自定义 PKEY 升降序同样保持名称顺序，读回的排序键/方向正确但未重排；标准 `PKEY_Size` 升降序仍通过。自定义列的 `GetDetailsOf` 子项为空，排序调用未触发 `GetDetailsEx`、`IPropertyStore` 或 `CompareIDs`。探针 exitCode=1 是自定义排序门槛失败，Private Desktop 前台句柄未变。
+
+微软文档将 `Rearrange` 标为弃用接口，并说明系统文件视图会以其低 16 位指定排序列；本轮实际试验表明调用成功本身不代表 adapter 获得了比较回调。[`IShellFolderView::Rearrange`](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-rearrange)。因此当前可确认：普通文件夹的标准大小排序可用；此 adapter 的自定义属性显示/排序尚未打通；两条排序入口都未调用 adapter 比较函数。自定义属性 schema 是否是原因仍只是推测，本轮没有注册 schema，也没有证明所有自定义 namespace 都不可行。产品仍使用 ExplorerBrowser，未接入原型。
