@@ -178,4 +178,6 @@ DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图�
 
 无窗口合同验证通过：真实文件 PIDL 往返后 `ILIsEqual` 保持身份；错误 marker 被拒绝；包装枚举项通过 `GetAttributesOf` 和 `GetUIObjectOf(IDataObject)`；包装解析得到的项目维持既有列文本、`VT_UI8`、数值排序合同；`SetNameOf` 将夹具文件重命名并返回可还原的新 PIDL。底层文件系统枚举器的 `Clone` 返回 `E_NOTIMPL`，包装器原样保留，不伪造成功。原始 PIDL adapter 合同也继续通过，NativeProbe C++ `/W4 /WX` 与 Release 构建为 0 警告/错误，`git diff --check` 通过。
 
-这只证明私有 PIDL 包装的编码/解码及被测 `IShellFolder2` 委托入口，不证明 DefView 会消费新身份下的自定义列，也未覆盖打开、菜单、属性对话框、剪贴板传输、OLE 拖放、导航和通知。下一个判别点是集中批次在隔离 DefView 中复测实际自定义列读取与数值排序；窗口级证据产生前，不把该 adapter 接入产品。
+随后对同一包装项执行绝对 PIDL 路径解析：原始文件的绝对 PIDL 由 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 正确解析；`ILCombine(原始父目录 PIDL, 包装子 PIDL)` 则返回 `E_INVALIDARG`。这说明当前包装 child 身份不能直接用于普通 Shell API 解析绝对路径。适配器内部的列/重命名/DataObject 合同通过，不能据此推断该包装项可在 Shell 组件之间自由传递。
+
+这只证明私有 PIDL 包装的编码/解码及被测 `IShellFolder2` 委托入口；绝对 PIDL 路径解析失败说明还缺少能解释自定义根/项目身份的 Shell namespace 路由。DefView 自定义列消费仍未验证，也未覆盖打开、菜单、属性对话框、剪贴板传输、OLE 拖放、导航和通知。下一步先解决绝对身份/namespace 路由问题，再在集中批次评估 DefView 列消费；当前包装方案不能直接进入产品。

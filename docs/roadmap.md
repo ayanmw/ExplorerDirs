@@ -17,6 +17,7 @@
 
 - 在 NativeProbe 原生 `IShellFolder2` adapter 增加 opt-in 子 PIDL 包装实验；包装真实 filesystem PIDL，并在 `ParseDisplayName`、`EnumObjects` 及比较、属性、绑定、显示名、UI 对象、重命名入口解包后委托。普通 adapter 路径保持原行为，产品 `ExplorerBrowser` 未改。
 - 无窗口包装合同验证通过：PIDL 身份往返、损坏 marker 拒绝、枚举项属性与 `IDataObject` 获取、既有逐行静态列合同及夹具文件重命名；原始 PIDL 合同仍通过。底层文件系统枚举器的 `Clone` 返回 `E_NOTIMPL`，adapter 保留相同结果。C++ `/W4 /WX`、NativeProbe Release 构建及 `git diff --check` 通过。
+- 绝对 PIDL 对照发现当前包装身份不能直接跨普通 Shell API 解析：原始文件路径可由 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 解析，而 `ILCombine(原始父目录 PIDL, 包装 child)` 返回 `E_INVALIDARG`。因此先需要解决自定义根/项目 PIDL 的 namespace 路由，再进入 DefView 窗口验收；当前包装方案不接入产品。
 - 这尚未验证 DefView 是否会因子 PIDL 身份改变而请求自定义列值或排序，也未覆盖 Shell 菜单、剪贴板传输、OLE 拖放和导航通知。按用户当前要求，DefView 窗口验证暂存入集中 UI/隔离视图验收批次。
 
 ## 2026-10-28：目录树系统图像列表后台集成复核

@@ -23,6 +23,7 @@ internal static class StaticShellFolderAdapterProbe
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
         var stage = "sort-matrix-isolation";
         var cloneBehavior = "not-tested";
+        var absolutePidlBehavior = "not-tested";
         nint folderPidl = 0, folder = 0, adapter = 0, nativeLibrary = 0;
         var items = new Dictionary<string, nint>(StringComparer.OrdinalIgnoreCase);
         try
@@ -94,6 +95,24 @@ internal static class StaticShellFolderAdapterProbe
             {
                 File.WriteAllText(Path.Combine(fixture, name), "value pending");
                 items.Add(name, ParseChild(adapter, name));
+            }
+            if (wrappedPidls)
+            {
+                stage = "wrapped-absolute-pidl-resolution";
+                var rawAbsoluteHr = SHParseDisplayName(Path.Combine(fixture, "two.bin"), 0, out var rawAbsolute, 0, out _);
+                if (rawAbsoluteHr < 0) throw new Exception($"Raw filesystem absolute PIDL setup failed: 0x{rawAbsoluteHr:X8}.");
+                var combined = ILCombine(folderPidl, items["two.bin"]);
+                if (combined == 0) throw new Exception("Could not combine the folder PIDL and wrapped child PIDL.");
+                try
+                {
+                    var rawName = DescribeFileSystemPath(rawAbsolute);
+                    absolutePidlBehavior = $"raw={rawName}; wrapped={DescribeFileSystemPath(combined)}";
+                }
+                finally
+                {
+                    ILFree(combined);
+                    ILFree(rawAbsolute);
+                }
             }
             stage = "validate-adapter-columns";
             var columnIndex = GetColumnCount(folder, shellDetailsSize);
@@ -297,7 +316,7 @@ internal static class StaticShellFolderAdapterProbe
             var documentByteCount = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
                 { FormatId = DocumentSummaryFormat, PropertyId = 4 });
 
-            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; enum-clone={cloneBehavior}; " +
+            Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; enum-clone={cloneBehavior}; absolute-path={absolutePidlBehavior}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
@@ -741,6 +760,14 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(text); }
     }
 
+    private static string DescribeFileSystemPath(nint pidl)
+    {
+        var hr = SHGetNameFromIDList(pidl, 0x80058000, out var text); // SIGDN_FILESYSPATH
+        if (hr < 0) return $"unresolved-0x{hr:X8}";
+        try { return Marshal.PtrToStringUni(text) ?? "empty"; }
+        finally { Marshal.FreeCoTaskMem(text); }
+    }
+
     private static void VerifyWrappedShellItemObjects(nint adapter, nint child)
     {
         var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
@@ -897,6 +924,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
+    [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
