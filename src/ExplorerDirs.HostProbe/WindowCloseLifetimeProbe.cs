@@ -85,6 +85,7 @@ internal static class WindowCloseLifetimeProbe
                 Ensure(new WindowInteropHelper(window).Handle == 0, "product window has never acquired an HWND");
             }
             Ensure(allHosts.All(host => host.Handle == 0), "product hosts remained unattached");
+            CheckMinimizedRestoration(windows[0]);
             var firstPane = ((PaneControl[])Field(windows[0], "_panes")!)[0];
             var secondPane = ((PaneControl[])Field(windows[1], "_panes")!)[0];
             var movedTab = (TabItem)((TabControl)Field(firstPane, "Tabs")!).Items[0];
@@ -121,6 +122,37 @@ internal static class WindowCloseLifetimeProbe
                 throw new InvalidOperationException("Fixture cleanup escaped its test directory.");
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static void CheckMinimizedRestoration(MainWindow window)
+    {
+        // Source review found both single-instance activation routes forced Normal,
+        // losing the user's maximized state. Exercise their shared restore entry
+        // without activating or showing the window or creating a Shell view.
+        var restore = typeof(MainWindow).GetMethod("RestoreFromMinimized", Members)
+            ?? throw new InvalidOperationException("minimized activation has no shared state-preserving restore entry");
+        var lastMaximized = typeof(MainWindow).GetField("_lastNonMinimizedMaximized", Members)!;
+        lastMaximized.SetValue(window, true);
+        window.WindowState = WindowState.Minimized;
+        restore.Invoke(window, null);
+        Ensure(window.WindowState == WindowState.Maximized, "minimized maximized window restores maximized");
+        lastMaximized.SetValue(window, false);
+        window.WindowState = WindowState.Minimized;
+        restore.Invoke(window, null);
+        Ensure(window.WindowState == WindowState.Normal, "minimized ordinary window restores normally");
+        lastMaximized.SetValue(window, true);
+        restore.Invoke(window, null);
+        Ensure(window.WindowState == WindowState.Normal, "activation does not change a nonminimized window");
+
+        var fullScreen = typeof(MainWindow).GetField("_fullScreenRestoreState", Members)!;
+        fullScreen.SetValue(window, Activator.CreateInstance(Nullable.GetUnderlyingType(fullScreen.FieldType)!));
+        window.WindowState = WindowState.Minimized;
+        restore.Invoke(window, null);
+        Ensure(window.WindowState == WindowState.Normal && fullScreen.GetValue(window) is not null,
+            "minimized immersive window restores without maximizing or clearing its F11 return state");
+        fullScreen.SetValue(window, null);
+        Ensure(new WindowInteropHelper(window).Handle == 0 && !window.IsVisible,
+            "restoration checks never showed or attached the product window");
     }
 
     private static bool IsDisposed(HwndHost host) => (bool)typeof(HwndHost).GetField("_isDisposed", Members)!.GetValue(host)!;

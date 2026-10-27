@@ -181,7 +181,7 @@ public partial class App : Application
         {
             var window = _folderTargetWindow ?? _openWindows.FirstOrDefault();
             if (window is null) return false;
-            if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+            window.RestoreFromMinimized();
             window.Activate();
             return true;
         }).Task.ConfigureAwait(false);

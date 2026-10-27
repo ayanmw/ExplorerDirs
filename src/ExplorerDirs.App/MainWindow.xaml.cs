@@ -470,9 +470,19 @@ public partial class MainWindow : Window
         if (!Path.IsPathFullyQualified(path)) return false;
         _panes[0].OpenPathInNewTab(path);
         SetActivePane(_panes[0]);
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        RestoreFromMinimized();
         Activate();
         return true;
+    }
+
+    internal void RestoreFromMinimized()
+    {
+        if (WindowState != WindowState.Minimized) return;
+        // Both single-instance activation routes used Normal and discarded the
+        // pre-minimize maximized state. Immersive F11 uses a normal borderless
+        // window and keeps its separate return state until the user exits F11.
+        WindowState = _fullScreenRestoreState is null && _lastNonMinimizedMaximized
+            ? WindowState.Maximized : WindowState.Normal;
     }
 
     private void SetActivePane(PaneControl pane)
