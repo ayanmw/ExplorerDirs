@@ -85,9 +85,18 @@ $dllHash = (Get-FileHash -LiteralPath (Join-Path $payload 'ExplorerDirs.App.dll'
 if ($IsolatedProfile) {
     $profileCopy = Join-Path $payload 'profile'
     New-Item -ItemType Directory -Path $profileCopy -Force | Out-Null
-    # Match the separate preference stores: omitting the tree setting made an
-    # isolated preview silently revert the user's navigation preference.
-    foreach ($name in @('ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
+    # Keep the explicit list aligned with runtime preference stores. The former
+    # list omitted newer tab/status/filter options, resetting them in previews.
+    # Do not copy all INIs: unrelated files and unregistered sessions stay out.
+    foreach ($name in @(
+        'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
+        'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
+        'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',
+        'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini',
+        'MouseWheelFocus.ini', 'TabStripVisibility.ini', 'MultilineTabHeaders.ini', 'TabHoverActivation.ini',
+        'NewTabLocation.ini', 'StatusBar.ini', 'StatusBarSelectionSize.ini', 'StatusBarFolderSize.ini',
+        'SelectionCheckBoxes.ini', 'FullRowSelection.ini'
+    )) {
         $source = Join-Path $profileSourceRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)

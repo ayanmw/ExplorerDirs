@@ -22,7 +22,15 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
-$settings = @('ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
+$settings = @(
+    'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
+    'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
+    'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',
+    'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini',
+    'MouseWheelFocus.ini', 'TabStripVisibility.ini', 'MultilineTabHeaders.ini', 'TabHoverActivation.ini',
+    'NewTabLocation.ini', 'StatusBar.ini', 'StatusBarSelectionSize.ini', 'StatusBarFolderSize.ini',
+    'SelectionCheckBoxes.ini', 'FullRowSelection.ini', 'WindowSessions.ini'
+)
 foreach ($name in $settings) {
     [IO.File]::WriteAllText((Join-Path $fixtureProfile $name), ('fixture-' + $name))
 }
@@ -43,6 +51,7 @@ New-Item -ItemType Directory -Path $quickLinks, (Join-Path $quickLinks 'nested')
 [IO.File]::WriteAllText((Join-Path $quickLinks 'notes.txt'), 'not a quick link')
 [IO.File]::WriteAllText((Join-Path $quickLinks 'nested/ignored.lnk'), 'not listed by QuickLinkStore')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'unrelated.txt'), 'not app settings')
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'unrelated.ini'), 'not an Explorer Dirs setting')
 $before = @{}
 Get-ChildItem -LiteralPath $fixtureProfile -Recurse -File | ForEach-Object {
     $before[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
@@ -76,6 +85,7 @@ if (-not (Test-Path -LiteralPath $quickLinkCopy -PathType Leaf) -or
 if ((Get-ChildItem -LiteralPath (Join-Path $copied 'Workspaces') -Recurse -File).Count -ne 1 -or
     (Get-ChildItem -LiteralPath (Join-Path $copied 'QuickLinks') -Recurse -File).Count -ne 1 -or
     (Test-Path -LiteralPath (Join-Path $copied 'unrelated.txt')) -or
+    (Test-Path -LiteralPath (Join-Path $copied 'unrelated.ini')) -or
     (Test-Path -LiteralPath (Join-Path $copied 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'))) {
     throw 'Unrelated profile content was copied.'
 }
