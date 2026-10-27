@@ -31,6 +31,11 @@
 - 现在每个 ExplorerBrowserHost 持有唯一、按视图代际隔离的累加器；原生 HWND 与 WPF 窗格表面都写入它，原生路径完成整刻度后直接应用视图切换。SettingsSmoke 覆盖两路半刻度合并为整刻度，源码接线检查确认 WPF/原生共用入口且原生完成刻度不二次累计。Release SettingsSmoke、App Release build 通过，0 警告/错误；日志 `src/.state/view-style-wheel-shared-settings.log`、`view-style-wheel-shared-app.log`，`git diff --check` 通过。
 - 未启动窗口或模拟物理滚轮；真实跨控件滚动、焦点目标、可见绘制仍留待集中 UI 验收。普通滚轮和标签配置未改变。
 
+## 2026-10-28：区分产品崩溃与原生探针故障
+
+- 只读检查最近 7 天 Windows Application 日志：没有 `ExplorerDirs.App.exe` 的 1000/1001/1026 事件；发现一条 `ExplorerDirs.NativeProbe.exe` 在 2026-10-27 23:45:15 的 `0xC0000374` 堆损坏记录。时间对应逐行大小隔离探针，和[调查记录](folder-size-column-investigation.md)中已识别的旧 `SHELLDETAILS` 缓冲区大小/复用错误一致；修正后已有独立进程记录未再出现该崩溃。此轮只读核对，没有重新运行探针或分析转储栈。
+- 该有限日志范围不能证明程序从未崩溃，也不构成用户遇到的无响应问题已解决的证据；当前没有新的产品进程崩溃栈可支持“死循环”判断。后续若再次出现无响应，应保留当时版本、进程转储和操作时间线后再归因。
+
 ## 2026-10-27：多窗口清单的超大未来版本保护
 
 - 复核重启链路时发现 WindowSessions.ini 的 FormatVersion 用 Int32 解析，2147483648 等未知未来版本溢出后被视为损坏格式，备份后仍允许 Create 覆盖清单。改为与其他便携配置一致的 BigInteger 版本解析，保留未知版本的只读保护，不改变窗口数或会话格式。
