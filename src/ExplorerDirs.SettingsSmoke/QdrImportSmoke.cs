@@ -279,7 +279,21 @@ internal static class QdrImportSmoke
                 var exactRoundTrip = QdrImporter.Parse(encodedExport, QdrImporter.ResolveLocation);
                 Require(exactRoundTrip.ExtendedState is not null,
                     "encoded base paths participate in the extension hash and retain exact app state");
-                var malformedRejected = false;
+                var prepared = Task.Run(() => QdrExporter.Prepare(literalState, [])).GetAwaiter().GetResult();
+                var preparedBase = string.Join("\n", prepared.Text.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                Require(prepared.UnencodedLocationCount == 0 &&
+                    QdrImporter.Parse(preparedBase, QdrImporter.ResolveLocation).Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "background export preparation captures literal PIDLs without environment expansion");
+                var offlinePath = Path.Combine(root, "%MissingQdrLocation_" + Guid.NewGuid().ToString("N") + "%");
+                var offlineState = literalState with { Panes = Enumerable.Range(0, 4)
+                    .Select(_ => new List<TabSettings> { new(offlinePath, ViewState.Default()) }).ToList() };
+                var offlinePrepared = Task.Run(() => QdrExporter.Prepare(offlineState, [])).GetAwaiter().GetResult();
+                var offlineRoundTrip = QdrImporter.Parse(offlinePrepared.Text, (value, _) => value);
+                Require(offlinePrepared.UnencodedLocationCount == 1 && offlineRoundTrip.ExtendedState is not null &&
+                    offlineRoundTrip.TabCount == 4 && offlineRoundTrip.Panes.All(pane => pane[0].Path == offlinePath),
+                    "unavailable percent paths retain every tab and report one distinct unresolved identity");                var malformedRejected = false;
                 try { QdrExporter.Render(literalState, [], encodedLocations:
                     new Dictionary<string, string> { [literalFolder] = "%01" }); }
                 catch (FormatException) { malformedRejected = true; }

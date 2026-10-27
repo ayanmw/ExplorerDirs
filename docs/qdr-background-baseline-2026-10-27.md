@@ -38,3 +38,12 @@ QdrExporter.Render 增加可选的已解析路径→编码 PIDL 映射；有映�
 新增真实后台回归将同一百分号目录编码写入四窗格；删除全部 ExplorerDirs 扩展字段后，再通过实际 Shell 解析导入，四个标签仍指向原目录。带扩展时校验通过并恢复完整状态；非法编码拒绝输出。完整 SettingsSmoke 与 App Release build 通过，构建零警告错误，日志 src/.state/qdr-encoded-export-{green,build}.log。无窗口、无 Q-Dir UI；不是独立 Q-Dir 读取验收。
 
 当前产品导出调用尚未传入映射，故上一节记录的日常导出限制仍存在。源码确认普通导出、工作区快捷方式和导入前备份的 Render 均发生在 UI 线程，只有部分写入在后台；下一阶段必须在状态快照之后通过静态 state-only 后台任务取得编码身份，处理离线/解析失败的可见提示，再接入三个入口。不能直接在纯 Render 内加入 Shell 调用，也不能让某个离线标签静默丢失或阻断原会话备份。固定 UI 候选及发布包不变。
+### 普通导出入口：后台准备已接入
+
+QdrExporter.Prepare 对快照中含 `%` 的不同路径逐一取得真实 folder PIDL（不展开环境变量），用 Folder 字段输出；不含百分号的路径不解析 Shell，普通离线/网络路径保持原导出。所有 PIDL 在 finally 释放。同一路径多标签只解析一次；无法取得 PIDL 时保留 Dir 字段及完整扩展，返回不同路径的失败数量，不丢标签。
+
+ExportQdrAsync 已通过 WindowBackgroundOperation 的静态 state-only 委托调用 Prepare，UI 捕获 Session/Pins/Proportions/Widths 后不把窗口传给工作线程。关闭窗口取消 UI 等待；Shell 解析本身不保证立即停止，沿用现有迟到异常观察规则。存在回退路径时，在写入前给出兼容性确认；非活动窗口不弹出该确认、不继续写入。解析成功则使用既有确认后的冲突保护写入。
+
+实际 ThreadPool 后台准备回归：真实百分号目录在四窗格基础字段中保持身份，无扩展也能正确导入；不存在的百分号目录报告一个不同失败路径，四个标签和扩展全部保留。普通离线/网络假路径无 `%` 的输出与原 Render 逐字相同。完整 Release SettingsSmoke 与 App Release build 通过，零警告错误；日志 src/.state/qdr-prepare-{green,final,build}.log。
+
+范围限制：普通“导出 .qdr”及其保存工作区入口已接入；“保存到桌面”的快捷方式生成及导入前自动备份仍使用原纯 Render。后两处需要各自的后台/失败语义，不将普通导出完成当作三个入口全部完成。UI 进度、失败确认、关闭时行为和 Q-Dir 独立读取仍待集中验收。本修复不包含在固定 141624 候选或 temp.76 中。

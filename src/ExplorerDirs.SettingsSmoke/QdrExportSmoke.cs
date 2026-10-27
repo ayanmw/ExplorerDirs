@@ -68,6 +68,9 @@ internal static class QdrExportSmoke
             "missing v4 tree widths reject the whole custom snapshot and preserve base import");
 
         var text = QdrExporter.Render(state, pins);
+        var ordinaryPrepared = QdrExporter.Prepare(state, pins);
+        Check(ordinaryPrepared.Text == text && ordinaryPrepared.UnencodedLocationCount == 0,
+            "ordinary and offline paths without percent signs retain the original export without Shell binding");
         var contentModePanes = state.Panes.Select(pane => pane.ToList()).ToList();
         contentModePanes[0][0] = contentModePanes[0][0] with { View = view with { Mode = 8 } };
         var contentModeState = state with { Panes = contentModePanes };

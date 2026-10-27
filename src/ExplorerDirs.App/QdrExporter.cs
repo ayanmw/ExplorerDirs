@@ -1,10 +1,13 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ExplorerDirs.App;
+
+internal sealed record QdrExportDocument(string Text, int UnencodedLocationCount);
 
 internal static class QdrExporter
 {
@@ -15,6 +18,37 @@ internal static class QdrExporter
     private static readonly Regex BaseKey = new(
         @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4]|SP[0-2]|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    // Call only on a state-only background worker: Shell binding may wait for remote providers.
+    internal static QdrExportDocument Prepare(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
+        IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
+        NavigationTreeWidths? treeWidths = null)
+    {
+        Validate(state, pins);
+        var encoded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var unresolved = 0;
+        foreach (var path in state.Panes.SelectMany(pane => pane).Select(tab => tab.Path)
+            .Where(path => path.Contains('%')).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // Unlike text QDR import, parsing this captured identity must not expand variables.
+            if (!ShellLocationIdentity.TryGetFolderPidl(path, out var pidl))
+            {
+                unresolved++;
+                continue;
+            }
+            try
+            {
+                var bytes = new byte[checked((int)ILGetSize(pidl))];
+                Marshal.Copy(pidl, bytes, 0, bytes.Length);
+                encoded[path] = string.Concat(bytes.Select(value => "%" + value.ToString("X2")));
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        return new(Render(state, pins, proportions, treeWidths, encoded), unresolved);
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern uint ILGetSize(nint pidl);
 
     internal static string Render(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
         IReadOnlyDictionary<int, LayoutProportions>? proportions = null,

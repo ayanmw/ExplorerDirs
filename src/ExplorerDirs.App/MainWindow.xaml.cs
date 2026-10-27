@@ -2663,9 +2663,22 @@ public partial class MainWindow : Window
             if (MessageBox.Show(this, note, "导出 Q-Dir 状态", MessageBoxButton.OKCancel,
                     MessageBoxImage.Information, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
             var snapshot = SnapshotSession();
-            var text = QdrExporter.Render(snapshot,
-                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(), SnapshotLayoutProportions(),
-                _treeWidths);
+            var document = await WindowBackgroundOperation.RunAsync((Session: snapshot,
+                Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                _windowOperationStop.Token);
+            if (_closed) return;
+            if (document.UnencodedLocationCount > 0)
+            {
+                var warning = $"{document.UnencodedLocationCount} 个含百分号的目录未能取得 Shell 编码身份（可能已离线）。\n\n" +
+                    "全部标签仍会保留，但 Q-Dir 读取文本路径时可能展开同名环境变量。本程序扩展保留原路径。\n\n继续导出？";
+                EnvironmentStatus.Text = warning;
+                if (!IsActive || MessageBox.Show(this, warning, "QDR 路径兼容性提示",
+                        MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK)
+                    return;
+            }
+            var text = document.Text;
             await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Expected: expected, Text: text),
                 static state => { QdrExporter.Save(state.Path, state.Expected, state.Text); return true; },
                 _windowOperationStop.Token);
