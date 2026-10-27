@@ -16,6 +16,7 @@ internal static class StaticShellFolderAdapterProbe
 
     internal static int RunFolderContract()
     {
+        VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
         nint folderPidl = 0, folder = 0, adapter = 0, nativeLibrary = 0;
@@ -150,7 +151,9 @@ internal static class StaticShellFolderAdapterProbe
             var canonical = compare(adapter, 0x10000000, items["ten.bin"], items["ten-copy.bin"]);
             Check(canonical);
             if (unchecked((short)(canonical & 0xffff)) == 0)
-                throw new Exception("Distinct items with equal custom numbers must retain native canonical identity.");            var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
+                throw new Exception("Distinct items with equal custom numbers must retain native canonical identity.");
+
+            var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = property.FormatId, PropertyId = property.PropertyId });
             var sizeSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
                 { FormatId = SizeKeyFormat, PropertyId = 12 });
@@ -288,19 +291,12 @@ internal static class StaticShellFolderAdapterProbe
             foreach (var column in displayedColumns)
                 Console.WriteLine($"native-static-shell-column: list-view-subitem-{column.SubItem}-text=[{string.Join(',', column.Values)}]");
             Console.WriteLine($"native-static-shell-column: callbacks-after-display-read={ReadNativeComparisonStats()}");
-            var values = ReadSortedValues(folderView, adapter, nativeKey, 1);
-            if (!values.SequenceEqual(new ulong[] { 2, 10, 10, 100 })) throw new Exception("Ascending sort was not numeric: " + string.Join(',', values));
-            values = ReadSortedValues(folderView, adapter, nativeKey, -1);
-            if (!values.SequenceEqual(new ulong[] { 100, 10, 10, 2 })) throw new Exception("Descending sort was not numeric: " + string.Join(',', values));
-
             var sizeKey = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
-            values = ReadSortedValues(folderView, adapter, sizeKey, 1);
-            if (!values.SequenceEqual(new ulong[] { 2, 10, 10, 100 })) throw new Exception("Ascending PKEY_Size sort was not numeric: " + string.Join(',', values));
-            values = ReadSortedValues(folderView, adapter, sizeKey, -1);
-            if (!values.SequenceEqual(new ulong[] { 100, 10, 10, 2 })) throw new Exception("Descending PKEY_Size sort was not numeric: " + string.Join(',', values));
-
+            // A failed custom-schema check must not suppress the standard-schema control evidence.
+            VerifySortMatrix((standard, direction) => ReadSortedValues(folderView, adapter,
+                standard ? sizeKey : nativeKey, direction), Console.WriteLine);
             Console.WriteLine($"native-static-shell-column: base-columns={columnIndexForView}; custom-column-visible=True; " +
-                "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=False; foreground-unchanged=True");
+                "custom-and-PKEY_Size-typed-value=UInt64; ascending=[2,10,10,100]; descending=[100,10,10,2]; parent-visible=True; foreground-unchanged=True");
             CheckBoundary(parent, foreground, "static column sorting");
         }
         catch (Exception ex)
@@ -336,6 +332,52 @@ internal static class StaticShellFolderAdapterProbe
         return result;
     }
 
+    private static void VerifySortMatrix(Func<bool, int, IReadOnlyList<ulong>> read, Action<string> report)
+    {
+        var failures = new List<Exception>();
+        foreach (var standard in new[] { false, true })
+        foreach (var direction in new[] { 1, -1 })
+        {
+            var label = $"{(standard ? "PKEY_Size" : "custom")}/{(direction == 1 ? "ascending" : "descending")}";
+            try
+            {
+                var values = read(standard, direction);
+                var expected = direction == 1 ? new ulong[] { 2, 10, 10, 100 } : [100, 10, 10, 2];
+                if (!values.SequenceEqual(expected))
+                    throw new Exception("Unexpected numeric order: " + string.Join(',', values));
+                report($"native-static-shell-column: sort-check={label}; passed=True");
+            }
+            catch (Exception ex)
+            {
+                report($"native-static-shell-column: sort-check={label}; passed=False; {ex.GetType().Name}: {ex.Message}");
+                failures.Add(new InvalidOperationException(label, ex));
+            }
+        }
+        if (failures.Count > 0) throw new AggregateException("Static column sort matrix did not pass.", failures);
+    }
+
+    private static void VerifySortMatrixIsolation()
+    {
+        var calls = new List<(bool Standard, int Direction)>();
+        var reported = new List<string>();
+        try
+        {
+            VerifySortMatrix((standard, direction) =>
+            {
+                calls.Add((standard, direction));
+                if (calls.Count == 1) throw new InvalidOperationException("synthetic initial failure");
+                return [];
+            }, reported.Add);
+            throw new Exception("A failing matrix was accepted.");
+        }
+        catch (AggregateException ex)
+        {
+            if (ex.InnerExceptions.Count != 4 || reported.Count != 4 ||
+                !calls.SequenceEqual(new[] { (false, 1), (false, -1), (true, 1), (true, -1) }))
+                throw new Exception("Sort failure skipped a later direction or standard-schema control.");
+        }
+        VerifySortMatrix((_, direction) => direction == 1 ? [2, 10, 10, 100] : [100, 10, 10, 2], _ => { });
+    }
     private static int GetColumnCount(nint adapter)
     {
         var details = Marshal.AllocCoTaskMem(272);

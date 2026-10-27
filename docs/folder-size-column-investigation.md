@@ -73,3 +73,11 @@ Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将 Size 列�
 运行 `ExplorerDirs.NativeProbe.exe --static-shell-column-folder-smoke`，在不创建窗口的条件下直接查询隔离 `IShellFolder2` 适配器。`PKEY_Size` 可读为 `UInt64`，标准大小列的格式化文本和 `CompareIDs` 均按 2、10、100 的数值顺序处理，并将相等值比较为 0；退出码为 0，探针输出 `window-created=False`。样本值是适配器合同夹具，不是真实递归目录计算结果。
 
 这提高了 `IShellFolder2` + Windows DefView 路线的可行性证据，但没有创建 DefView、没有验证文件系统文件夹视图的列显示/排序，也没有覆盖拖放、右键菜单、Shell 操作和刷新。下一步仍需独立宿主兼容门槛验证；在本项目当前不进行 GUI/桌面操作的约束下，不运行该宿主探针，也不接入 ExplorerBrowser 产品代码。
+
+## 2026-10-27：排序对照实验不再遇首个失败就退出
+
+源码复核发现 StaticShellFolderAdapterProbe.Run 顺序执行 custom 升/降序，再执行标准 PKEY_Size 升/降序；首个数值顺序断言失败会直接抛出，后面标准属性对照没有执行。因此既有首个 custom 排序失败不能推出标准 Size 的排序实验也失败。之前显示读取后的回调计数仍是该阶段证据，但不能代替后续被跳过的四组排序请求。
+
+探针现分别执行四组检查并逐项报告，每个错误保留在 AggregateException 中，任意一组失败仍令整个实验失败；没有降低升/降序预期。无窗口自检注入首次异常、随后三个错误结果，确认四组都执行并最终报告四个失败；全正确的矩阵也通过。该自检随真实无窗口 folder-contract smoke 通过，日志 src/.state/static-sort-matrix.log，原生属性/空值合同亦通过。修正最终成功日志的 parent-visible 标志，与该实验实际 ShowWindow/边界检查一致。
+
+尚未运行创建视图的矩阵，未加入动态值缓存、递归扫描、IPropertyStore 装饰器或产品迁移。当前关键缺口仍是 DefView 是否在安全隔离环境中实际读取和排序适配列；应在后续集中实验分别取得 custom 与标准 Size 的四组结果，而不是继续扩展未被消费的数据通道。
