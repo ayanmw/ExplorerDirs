@@ -514,6 +514,7 @@ try
     QuickFilterHistoryStoreSmoke.Run(root);
     TabHoverActivationSmoke.Run(root);
     ExplorerDirs.SettingsSmoke.NewTabLocationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
     QDirBlankTabDoubleClickSmoke.Run();
     if (args.Length == 2 && args[0] == "--inspect-qdr")
     {

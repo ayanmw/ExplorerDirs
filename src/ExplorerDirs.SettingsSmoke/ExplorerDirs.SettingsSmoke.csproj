@@ -120,6 +120,7 @@
     <Compile Include="../ExplorerDirs.App/QuickFilterHistoryStore.cs" Link="QuickFilterHistoryStore.cs" />
     <Compile Include="../ExplorerDirs.App/TabHoverActivationPreference.cs" Link="TabHoverActivationPreference.cs" />
     <Compile Include="../ExplorerDirs.App/TabHoverActivationGate.cs" Link="TabHoverActivationGate.cs" />
+    <Compile Include="../ExplorerDirs.App/TabTransferPolicy.cs" Link="TabTransferPolicy.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRecoverySuppression.cs" Link="ShellSelectionRecoverySuppression.cs" />

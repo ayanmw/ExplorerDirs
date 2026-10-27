@@ -161,6 +161,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
+    private bool _retainBrowserOnDetach;
     private bool _hasNavigated;
     private readonly ShellViewReadiness _viewReadiness = new();
     private string? _completedDiskDirectory;
@@ -529,6 +530,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
+        if (_retainBrowserOnDetach && _hostWindow != IntPtr.Zero && _browser is not null)
+        {
+            if (GetParent(_hostWindow) != hwndParent.Handle)
+            {
+                Marshal.SetLastPInvokeError(0);
+                var previousParent = SetParent(_hostWindow, hwndParent.Handle);
+                if (previousParent == IntPtr.Zero && Marshal.GetLastPInvokeError() != 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError());
+            }
+            _retainBrowserOnDetach = false;
+            return new HandleRef(this, _hostWindow);
+        }
+
         _hostWindow = CreateWindowEx(0, "STATIC", "", 0x50000000,
             0, 0, Math.Max(1, (int)ActualWidth), Math.Max(1, (int)ActualHeight),
             hwndParent.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
@@ -575,12 +589,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
+        if (_retainBrowserOnDetach) return;
         CancelCreatedFileSelection();
         CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: false);
         DisposeBrowser();
         DestroyWindow(hwnd.Handle);
         _hostWindow = IntPtr.Zero;
     }
+
+    internal void PrepareForRehost() => _retainBrowserOnDetach = true;
 
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
@@ -5080,6 +5097,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr DefSubclassProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern IntPtr GetParent(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetParent(IntPtr hwnd, IntPtr newParent);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumChildWindows(IntPtr parent, EnumWindowProc callback, IntPtr data);

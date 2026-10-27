@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：跨窗格移动和复制标签并保留 Shell 历史
+
+- 普通拖动标签到其他窗格会移动原 `TabState` 与 ExplorerBrowser host，保留 Shell Travel Log；Ctrl+拖动会复制当前视图为独立 host。仅允许在相同固定状态的标签分区中放置；移动不能清空源窗格最后一个标签。点击标签标题按左右半区插入，标签栏空白处追加。
+- Release SettingsSmoke 覆盖策略及接线；隐藏 HostProbe 使用真实 PaneControl/ExplorerBrowser 验证同一 TabState 和原生 host HWND 被保留、目标宿主尺寸更新、Back 可以穿过移动前历史；Ctrl 复制为新 host。前台未变，未操作可见 GUI。真实鼠标拖动、跨 DPI/显示器和拖动视觉仍待可见验收。
+
 ## 2026-10-27：新建标签可使用当前文件夹
 
 - “标签页 → 新建标签时使用当前文件夹”补齐 Q-Dir 的同名可选行为。默认关闭时仍从用户文件夹开始；开启后，工具栏、Ctrl+T 和标签栏空白双击等普通新建标签从当前窗格路径开始。便携配置保存在 `NewTabLocation.ini`。

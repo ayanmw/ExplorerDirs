@@ -13,6 +13,8 @@
 
 > **新建标签使用当前文件夹（2026-10-27）：**“标签页”菜单可选择普通新建标签从当前窗格目录开始，默认关闭；便携设置保存在 profile 的 `NewTabLocation.ini`。指定目录新建和复制标签不受影响。Release SettingsSmoke 与 App Release build 通过，菜单与跨重启行为仍待可见验收。来源：[Q-Dir 官方英文功能表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)。
 
+> **跨窗格移动和复制标签（2026-10-27）：**普通标签拖动可移入另一窗格并复用原 ExplorerBrowser/HWND，保留 Shell Travel Log；Ctrl+拖动复制当前视图为独立 host。Release 策略 smoke 与隐藏 HostProbe 已验证移动前后的原生句柄、视图路径、Back 历史和复制隔离。鼠标手势、菜单/图标指示、焦点与不同 DPI 仍待可见 GUI 验收。Q-Dir 官方功能字符串列出“Move to new Tab Group”“Copy to new Tab Group”“Use Tab Groups”，但公开资料未说明其组语义或手势；本实现只对齐跨视图移动/复制需求，不宣称标签组语义相同。[Q-Dir 官方英文功能表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)。
+
 > **隔离 Shell 菜单命令队列（2026-10-27）：**共享 frame coordinator 现在按 FIFO 保存每条延迟 `WM_COMMAND` 的 pane owner 与命令 ID，防止 STA 处理前新命令覆盖旧槽。隐藏 frame smoke 验证两个 owner/ID 的顺序与身份，NativeProbe Release build 和完整 `--shell-view-color-policy-smoke` 通过；未创建 `IShellView`，真实菜单回调时序仍待验证。产品未改。
 
 > **IShellView 延迟 View 命令拒绝过期 pane（2026-10-27）：**隔离 NativeProbe 的共享菜单 frame 会把 `WM_COMMAND` 延迟到自定义消息执行；切换 pane 后，旧 View 菜单命令之前可能沿旧 owner 发给已不活动的 view。现有执行前再次核对 coordinator owner，过期命令被消费但不派发。新增隐藏 frame 两 pane 回归；NativeProbe Release build 与无 Shell-view 的 `--shell-view-color-policy-smoke` 通过。仅是迁移原型门控，不代表产品 ExplorerBrowser 或真实菜单交互验收。详见[原型记录](ishellview-color-spike.md#2026-10-27拒绝已过期-owner-的延迟-shell-view-命令)。

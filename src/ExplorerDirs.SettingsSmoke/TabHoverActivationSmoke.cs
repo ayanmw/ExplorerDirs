@@ -66,8 +66,8 @@ internal static class TabHoverActivationSmoke
                 windowMarkup.Contains("Tag=\"3000\"", StringComparison.Ordinal) &&
                 windowMarkup.Contains("TabHoverActivation_Click", StringComparison.Ordinal),
             "Tab menu exposes the delay choices and connects the preference command");
-        Require(paneCode.Contains("tab.DragOver += Tab_DragOver", StringComparison.Ordinal) &&
-                paneCode.Contains("tab.DragLeave += Tab_DragLeave", StringComparison.Ordinal) &&
+        Require(paneCode.Contains("state.Owner.Tab_DragOver(sender, e)", StringComparison.Ordinal) &&
+                paneCode.Contains("state.Owner.Tab_DragLeave(sender, e)", StringComparison.Ordinal) &&
                 paneCode.Contains("_tabHoverActivationTimer.Start()", StringComparison.Ordinal) &&
                 paneCode.Contains("Tabs.SelectedItem = target", StringComparison.Ordinal),
             "pane tab drag-over starts a cancellable timer and selects its current target");

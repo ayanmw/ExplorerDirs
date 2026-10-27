@@ -25,6 +25,7 @@ internal static class Program
 
     private static int Run(string[] args)
     {
+        if (args is ["--pane-tab-transfer"]) return PaneTabTransferProbe.Run();
         if (args is ["--shell-update-notification-smoke"])
             return ShellUpdateNotificationProbe.Run();
         if (args is ["--shell-change-registration-stress"])
