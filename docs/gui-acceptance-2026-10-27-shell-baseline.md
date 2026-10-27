@@ -38,3 +38,21 @@
 - **列标题停靠未通过**：从 sample-2.txt 再按 Shift+Tab，实际到达 pane-1 标签标题，跳过列标题；Tab 返回 sample-2.txt。源码已有 `FindColumnHeader` / `FocusColumnHeader` UIA 路径，但本轮未区分查询未找到、SetFocus 失败或后续焦点转移，不能据此归因。此项保持 P0 开放，下一步需定位原生 Header 可聚焦性与宿主焦点判定。
 
 UIA focused_element 有缺失或与截图焦点框不同步，以上结论以逐步可见焦点框、选择状态和 Down 行为为依据。本轮未操作剪贴板、删除或提交重命名。Alt+F4 关闭隔离窗口后再次枚举确认该窗口已退出，日常 release 未改。
+
+## 列标题跳过：原生控件诊断
+
+使用两份仅含临时日志的隔离构建重复 Shift+Tab，仍从 sample-1.txt 跳到标签标题。第二份 `src/.state/gui-smoke/20261027-131400-261-853c3d/app/column-header-diagnostic.log` 给出明确失败边界：
+
+```text
+header-find ... class=SysListView32 root=ControlType.DataGrid group=ControlType.Header
+header-setfocus before=SysListView32 target=ControlType.SplitButton name=名称 focusable=False
+header-error System.InvalidOperationException: 目标元素无法接收焦点。
+   at System.Windows.Automation.AutomationElement.SetFocus()
+   at ExplorerDirs.App.ExplorerBrowserHost.FocusColumnHeader()
+```
+
+因此本次不是未找到 Header，也不是 SetFocus 成功后被抢走：现有 UIA SetFocus 直接失败，FocusStop 返回 false 后遍历跳到标签标题。外部 UIA 快照同样能列出 Header 和“名称”等 SplitButton，但“存在”不表示“可通过 UIA 聚焦”。
+
+下一步验证原生 Header HWND 的焦点与 `HDM_SETFOCUSEDITEM`，保留 DirectUI 路径及原文件选择。官方接口依据：[HDM_SETFOCUSEDITEM](https://learn.microsoft.com/en-us/windows/win32/controls/hdm-setfocuseditem)、[HDM_GETFOCUSEDITEM](https://learn.microsoft.com/en-us/windows/win32/controls/hdm-getfocuseditem)。这些文档只证明接口契约，不证明当前 Shell 控件已接受修复。
+
+日志构建的源码明确为临时诊断脏构建；取证后全部诊断代码撤回，App 源码与提交基线一致，未更新发布包。两份窗口均已关闭，后续窗口枚举确认均已退出。
