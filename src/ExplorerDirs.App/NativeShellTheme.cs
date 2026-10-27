@@ -36,7 +36,7 @@ internal static class NativeShellTheme
         AllowDarkModeForWindow(window, _dark);
         var name = new StringBuilder(64);
         GetClassName(window, name, name.Capacity);
-        SetWindowTheme(window, _dark && name.ToString() == "SysHeader32" ? "DarkMode_ItemsView" : "Explorer", null);
+        SetWindowTheme(window, _dark ? (name.ToString() == "SysHeader32" ? "DarkMode_ItemsView" : "DarkMode_Explorer") : "Explorer", null);
         if (name.ToString() == "SysHeader32")
             _ = SetWindowSubclass(GetParent(window), HeaderParentProcedure, 0xED7601, 0);
     }
@@ -70,6 +70,8 @@ internal static class NativeShellTheme
             var name = new StringBuilder(32);
             GetClassName(window, name, name.Capacity);
             if (name.ToString() != "#32768") return true;
+            AllowDarkModeForWindow(window, true);
+            SetWindowTheme(window, "DarkMode_Explorer", null);
             var color = _dark ? 0x404040u : GetSysColor(16);
             _ = DwmSetWindowAttribute(window, 34, ref color, sizeof(uint));
             _ = SetWindowSubclass(window, MenuFrameProcedure, 0xED7602, 0);
