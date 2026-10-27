@@ -1,5 +1,22 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-27：同一日常进程的后续资源观察
+
+北京时间 22:41:47–22:42:48，以现有 perf-sample 对仍在运行的 PID 58888 补采 13 点、约 60.25 秒。与前段 JSON 比较，ProcessStartUtc 和磁盘 DLL SHA-256 相同（temp.76/4dcafc2）；未重启、强制 GC、裁剪工作集或操作窗口。
+
+| 指标 | 前段末尾（22:10） | 本段开始及结束（22:41–22:42） |
+| --- | ---: | ---: |
+| Private Bytes / MiB | 132.66 | 133.23 |
+| Working Set / MiB | 235.86 | 228.30 |
+| 句柄 | 1262 | 1117 |
+| GDI 对象 | 191 | 191 |
+| USER 对象 | 135 | 115 |
+
+本段全部 13 点的上述五项均相同，线程也均为 34。进程 CPU 累计仅增加约 0.078 秒；不将机器 CPU 百分比四舍五入后的 0 当作完全没有工作。跨段 Private Bytes 增加约 0.57 MiB，Working Set 减少约 7.56 MiB，句柄和 USER 回落。这进一步表明前段对象数上升不是本样本中不可逆的单调积累，当前没有支持立即改架构或强制回收的增长证据。
+
+中间约 31 分钟没有连续采样，操作负载也没有固定记录，不能声称整段内存稳定、已排除泄漏，或把变化归功于后续修复（当前进程没有加载这些新提交）。下一步仍需捕获实际增长操作前后并关联 GC/原生分配证据；本轮不新增常驻诊断代码。
+
+原始产物 `src/.state/memory-samples/resource-live-58888-followup-20261027.json` 保留本地、不入 Git，SHA-256：`74E75431CC2DD644D7F2901D22B6F236981BBE90C046E5C1FFCBF67ECFEE50AB`。采样完成且身份对比通过；不是优化 A/B 或 UI 验收。
 ## 2026-10-27：托管版本与 GUI 对象计数
 
 `scripts/perf-sample.ps1` JSON schema 升至 4：保留 PID/启动时间、发布目录归属、内存/CPU/句柄/线程指标，补充同目录 `ExplorerDirs.App.dll` 路径、SHA-256、ProductVersion，以及每个样本的 `GdiObjectCount` / `UserObjectCount`。DLL 身份只对 Explorer Dirs 进程记录；其他进程仍需 `-AllowOtherProcess`，不会推断其托管程序集。
