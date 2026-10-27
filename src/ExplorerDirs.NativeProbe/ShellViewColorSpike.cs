@@ -154,7 +154,8 @@ internal static class ShellViewColorSpike
         bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
         bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false,
         bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false,
-        bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false)
+        bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false,
+        bool useWpfHwndHostPane = false, bool restoreParentFocusBeforeDestroy = true)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
         var previousPumpMode = _useWpfDispatcherPump;
@@ -170,6 +171,8 @@ internal static class ShellViewColorSpike
         var panes = new List<(nint Pane, nint Pidl, nint Folder, nint View, nint HostPointer, nint ViewWindow, nint FolderView, ShellViewColorBrowserHost Host)>();
         nint parent = 0;
         System.Windows.Interop.HwndSource? wpfParentSource = null;
+        System.Windows.Controls.Grid? wpfRootGrid = null;
+        var wpfPaneHosts = new List<CleanupPaneHwndHost>();
         ShellMenuFrameCoordinator? menuCoordinator = null;
         var result = 1;
         try
@@ -185,8 +188,37 @@ internal static class ShellViewColorSpike
                     WindowStyle = unchecked((int)0x10CF0000u)
                 };
                 wpfParentSource = new System.Windows.Interop.HwndSource(parameters);
-                wpfParentSource.RootVisual = new System.Windows.Controls.Grid();
+                wpfRootGrid = new System.Windows.Controls.Grid();
+                wpfParentSource.RootVisual = wpfRootGrid;
                 parent = wpfParentSource.Handle;
+                if (useWpfHwndHostPane)
+                {
+                    if (paneCount is not (1 or 4))
+                        throw new InvalidOperationException("The WPF HwndHost teardown differential supports one or four panes.");
+                    if (paneCount == 4)
+                    {
+                        wpfRootGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+                        wpfRootGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+                        wpfRootGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+                        wpfRootGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+                    }
+                    for (var index = 0; index < paneCount; index++)
+                    {
+                        var paneHost = new CleanupPaneHwndHost();
+                        if (paneCount == 4)
+                        {
+                            System.Windows.Controls.Grid.SetRow(paneHost, index / 2);
+                            System.Windows.Controls.Grid.SetColumn(paneHost, index % 2);
+                        }
+                        wpfPaneHosts.Add(paneHost);
+                        wpfRootGrid.Children.Add(paneHost);
+                    }
+                    wpfRootGrid.Measure(new System.Windows.Size(800, 560));
+                    wpfRootGrid.Arrange(new System.Windows.Rect(0, 0, 800, 560));
+                    wpfRootGrid.UpdateLayout();
+                    if (wpfPaneHosts.Any(host => host.NativeHandle == 0))
+                        throw new InvalidOperationException("WPF layout did not create every native HwndHost pane.");
+                }
             }
             else
             {
@@ -204,8 +236,9 @@ internal static class ShellViewColorSpike
                 {
                     var x = index % 2 * 400;
                     var y = index / 2 * 275;
-                    pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs cleanup pane {index + 1}",
-                        0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, parent, 0, 0, 0);
+                    pane = index < wpfPaneHosts.Count ? wpfPaneHosts[index].NativeHandle :
+                        CreateWindowExW(0, "STATIC", $"ExplorerDirs cleanup pane {index + 1}",
+                            0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, parent, 0, 0, 0);
                     if (pane == 0) throw new InvalidOperationException($"Could not create pane {index + 1}.");
                     Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
                     Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
@@ -269,12 +302,21 @@ internal static class ShellViewColorSpike
                     if (activated != expectedActivation || (deactivateMenus && !restored))
                         throw new InvalidOperationException($"Pane {index + 1} menu activation did not match state {menuActivationState}.");
                 }
-                var restoredFocus = SetFocus(parent);
                 var currentFocus = GetFocus();
-                Console.WriteLine($"multi-pane-cleanup: focus-on-root-hwnd={currentFocus == parent}; " +
-                    $"focus-on-root-descendant={(currentFocus != 0 && IsChild(parent, currentFocus))}; " +
-                    $"focused-class={WindowClassName(currentFocus)}; current-focus=0x{currentFocus:X}; " +
-                    $"previous-focus=0x{restoredFocus:X}");
+                if (restoreParentFocusBeforeDestroy)
+                {
+                    var restoredFocus = SetFocus(parent);
+                    currentFocus = GetFocus();
+                    Console.WriteLine($"multi-pane-cleanup: focus-on-root-hwnd={currentFocus == parent}; " +
+                        $"focus-on-root-descendant={(currentFocus != 0 && IsChild(parent, currentFocus))}; " +
+                        $"focused-class={WindowClassName(currentFocus)}; current-focus=0x{currentFocus:X}; " +
+                        $"previous-focus=0x{restoredFocus:X}");
+                }
+                else
+                {
+                    Console.WriteLine($"multi-pane-cleanup: focus-after-menu-deactivation=0x{currentFocus:X}; " +
+                        $"focused-class={WindowClassName(currentFocus)}; focus-is-root-child={(currentFocus != 0 && IsChild(parent, currentFocus))}");
+                }
             }
             result = 0;
         }
@@ -299,7 +341,9 @@ internal static class ShellViewColorSpike
                 Marshal.Release(item.Folder);
                 Marshal.Release(item.HostPointer);
                 item.Host.Dispose();
-                var paneDestroyed = DestroyWindow(item.Pane);
+                var wpfPaneHost = wpfPaneHosts.FirstOrDefault(host => host.NativeHandle == item.Pane || host.LastHandle == item.Pane);
+                if (wpfPaneHost is not null) wpfPaneHost.Dispose();
+                var paneDestroyed = wpfPaneHost is not null ? !IsWindow(item.Pane) : DestroyWindow(item.Pane);
                 Console.WriteLine($"multi-pane-cleanup: pane-destroy-returned={paneDestroyed}; still-valid={IsWindow(item.Pane)}");
                 if (!paneDestroyed || IsWindow(item.Pane)) result = 1;
                 Marshal.FreeCoTaskMem(item.Pidl);
@@ -325,6 +369,7 @@ internal static class ShellViewColorSpike
             if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
             }
             if (!disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            foreach (var paneHost in wpfPaneHosts) paneHost.Dispose();
             if (wpfParentSource is not null) DestroyCleanupParent(parent, ref wpfParentSource);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
             if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
@@ -339,6 +384,30 @@ internal static class ShellViewColorSpike
         wpfParentSource.Dispose();
         wpfParentSource = null;
         return !IsWindow(parent);
+    }
+
+    private sealed class CleanupPaneHwndHost : System.Windows.Interop.HwndHost
+    {
+        internal nint NativeHandle { get; private set; }
+        internal nint LastHandle { get; private set; }
+
+        protected override HandleRef BuildWindowCore(HandleRef hwndParent)
+        {
+            NativeHandle = CreateWindowExW(0, "STATIC", "ExplorerDirs WPF-hosted Shell pane",
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265,
+                hwndParent.Handle, 0, 0, 0);
+            if (NativeHandle == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "Could not create the WPF-hosted native pane.");
+            LastHandle = NativeHandle;
+            return new HandleRef(this, NativeHandle);
+        }
+
+        protected override void DestroyWindowCore(HandleRef hwnd)
+        {
+            _ = DestroyWindow(hwnd.Handle);
+            NativeHandle = 0;
+        }
     }
 
     private static void DumpTeardownWindowState(nint parent, ShellMenuFrameCoordinator? coordinator,
