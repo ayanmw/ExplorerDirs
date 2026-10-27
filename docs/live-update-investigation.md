@@ -1869,3 +1869,9 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 另一次 `NativeProbe --live-updates-wpf` 最小四窗格对照曾观察到未收敛计数（无站点控制通过，生产站点创建 `1,2,2,2`、删除 `0,1,1,1`）；后续连续多轮同一路径及本轮新加的 `--live-updates-view-flags-wpf` 矩阵均通过。最新矩阵中，无站点、生产 `NOINCLUDEITEM` 站点、零视图标志站点的四窗格创建计数均为 `2,2,2,2`，删除均回到 `1,1,1,1`，进程退出码 0。当前结论是该最小探针路径存在过间歇观测，尚无证据将它稳定归因于某组视图标志；它与产品 HostProbe 的 watcher/recovery 路径不同，不据此改产品刷新逻辑。详细日志位于 `%TEMP%\explorer-dirs-live-updates-view-flags-wpf.log`。
 
 本轮只增加 NativeProbe 的 WPF 消息泵矩阵命令并做隐藏后台验证；没有显示 MainWindow、操作用户桌面或发布。隐藏 Shell 计数不代表可见 UI 刷新体验验收。
+
+### 2026-10-28：补验当前真实 ExplorerBrowserHost 四窗格序列
+
+在同一源码状态下连续运行两次 HostProbe `--live-updates`。两轮均从 `1,1,1,1` 开始，创建探针文件后四 pane 到 `2,2,2,2`，删除初始文件后回到 `1,1,1,1`；创建分别用时 1,024/1,028 ms，删除 582/623 ms，均退出码 0。产品 watcher 两轮均收到四个创建和四个删除通知，最终每窗格只剩 `created.txt`。第二轮完整日志保存在忽略目录 `src/.state/background-live-updates-hostprobe-20261028.log`，SHA-256 `ACFA0E01074F96F01907EF501B1760DEBFC8BEEBC04B7C9B31F11D3A87658DF3`。
+
+这两轮是本机隐藏真实 `ExplorerBrowserHost` 和本地临时目录的重复证据；没有显示产品窗口或输入用户桌面。结果不覆盖网络/第三方 Shell provider、长时运行或可见焦点与重绘，也不代表完整自动刷新 P0 已关闭。
