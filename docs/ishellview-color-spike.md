@@ -1114,3 +1114,11 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 修复前测试以失败退出，并观察到存活孙进程 PID `32872`；测试清理随后回收该进程。改用 `Process.Kill($true)` 后，回归输出 `selftest=timeout-tree-passed; seconds=5; parent-exited=True; grandchild-exited=True`。这确认了 watchdog 会递归结束被测进程树。
 
 之后用新 watchdog 复跑 `session-restore-private-desktop`，该探针仍超时，最后阶段记录到 pane 4 的 sort/group 菜单命令检查；日志为 `src/.state/native-probe-watchdog/20261027-083750-52d4c612.stdout.log`。watchdog 返回超时后，进程快照中没有 NativeProbe 或会话恢复 consumer 遗留。由此只确认超时清理有效；IShellView 四窗格恢复停滞仍未定位，也不能推断为本次遗留子进程问题所致。
+
+### 2026-10-27 定位四窗格 session-restore 的变化停点
+
+为区分 Shell 调用挂起与测试预算不足，在菜单读取、Select All 路由、Shell 动词调用、状态断言和文件操作边界增加阶段日志。多轮的最后阶段会变化：有的停在菜单检查，有的已完成四 pane 菜单路由并进入复制/重命名。检查 Private Desktop runner 后发现，真正的内层执行线程有固定 25 秒 deadline；整个 session-restore 仍在执行时，该 runner 就向 watchdog 报告 timeout。此前“阶段不定的 Shell 停滞”结论应由此修正为测试宿主提前超时；没有证据表明存在某个固定 pane/动词死锁。
+
+现只为 `session-restore` 和它派生的 consumer 将 Private Desktop runner deadline 调为 110 秒与 100 秒，并把父进程等待 consumer 的时间调为 100 秒；其余 probe 保持 25 秒。NativeProbe Release build 0 warning/error。`scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120` 退出码 0，Private Desktop foreground HWND 前后相同。成功日志 `20261027-084330-8968e6b6.stdout.log` 的 consumer 总结确认：状态流恢复、四 pane 菜单项逐窗格路由、方向键/Ctrl+A/F2 路由、copy/rename/delete 四 pane 收敛、目录通知及 sibling pane 隔离均通过。
+
+本次通过只覆盖隔离 NativeProbe 中的 IShellView 宿主，不表示已接入 Explorer Dirs 产品；未运行可见 UI，也没有验证 OLE `DoDragDrop` 的鼠标源端、WPF 焦点链或用户实际拖放。

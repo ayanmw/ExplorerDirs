@@ -21,13 +21,13 @@ internal static class PrivateDesktopShellProbe
         visible: true, deferParentCleanup: true, probeMenuActivation: true));
 
     internal static int RunSessionRestore() => Run("session-restore", () => ShellViewColorSpike.Run(
-        visible: true, deferParentCleanup: true, probeSessionRestore: true));
+        visible: true, deferParentCleanup: true, probeSessionRestore: true), TimeSpan.FromSeconds(110));
 
     internal static int RunDropTarget() => Run("drop-target", ShellViewDropTargetProbe.Run);
 
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId) =>
         Run("session-restore-consumer", () => ShellViewColorSpike.RunSessionRestoreConsumer(
-            fixture, stateDirectory, sessionId, terminateProcessAfterProbe: true));
+            fixture, stateDirectory, sessionId, terminateProcessAfterProbe: true), TimeSpan.FromSeconds(100));
 
     internal static int RunReadOnlyColorRule() => Run("color-readonly-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, readOnlyRuleProbe: true));
@@ -55,7 +55,7 @@ internal static class PrivateDesktopShellProbe
         return passed ? 0 : 1;
     }
 
-    private static int Run(string kind, Func<int> probe)
+    private static int Run(string kind, Func<int> probe, TimeSpan? timeout = null)
     {
         var foregroundBefore = GetForegroundWindow();
         var desktopName = "ExplorerDirs-Probe-" + Guid.NewGuid().ToString("N");
@@ -95,7 +95,7 @@ internal static class PrivateDesktopShellProbe
         worker.SetApartmentState(ApartmentState.STA);
         worker.Start();
 
-        if (!probeReturned.Wait(TimeSpan.FromSeconds(25)))
+        if (!probeReturned.Wait(timeout ?? TimeSpan.FromSeconds(25)))
         {
             var foregroundAtTimeout = GetForegroundWindow();
             Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");

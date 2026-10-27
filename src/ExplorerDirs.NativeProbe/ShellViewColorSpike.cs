@@ -476,7 +476,10 @@ internal static class ShellViewColorSpike
             Pump(150);
             AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Group Ascending");
             Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-group-ascending-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-menu-read-start");
             var selectAllCommandId = FindShellViewCommandId(GetSubMenu(GetMenu(menuFrameWindow), 1), "全选", "Select All");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-menu-read-verified; id=0x{selectAllCommandId:X4}");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-routing-start");
             var editSelectAll = VerifyEditSelectAllOnFrame(menuFrameWindow, folderViews, index, selectAllCommandId);
             Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-verified");
             shellMenuCommands.Add($"pane{index + 1}:details=0x{detailsCommandId:X4}/context=0x{backgroundVerbDetailsId:X4}/same={detailsCommandId == backgroundVerbDetailsId},sort={sortDescendingId:X4}/{sortAscendingId:X4},group={groupDescendingId:X4}/{groupAscendingId:X4}");
@@ -560,14 +563,19 @@ internal static class ShellViewColorSpike
     {
         foreach (var folderView in folderViews)
         {
+            Console.WriteLine("session-restore-consumer-stage: edit-select-all-clear-start");
             Check(At<ItemCount>(folderView, 7)(folderView, 2, out var itemCount)); // SVGIO_ALLVIEW.
             for (var item = 0; item < itemCount; item++)
                 Check(At<SelectFolderItem>(folderView, 15)(folderView, item, 0)); // SVSI_DESELECT.
+            Console.WriteLine($"session-restore-consumer-stage: edit-select-all-clear-verified; items={itemCount}");
         }
 
+        Console.WriteLine($"session-restore-consumer-stage: edit-select-all-command-send-start; id=0x{commandId:X4}");
         _ = SendMessageW(menuFrameWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        Console.WriteLine("session-restore-consumer-stage: edit-select-all-command-send-returned");
         Pump(150);
 
+        Console.WriteLine("session-restore-consumer-stage: edit-select-all-active-count-start");
         Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 2, out var allItems));
         Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 1, out var selectedItems)); // SVGIO_SELECTION.
         if (allItems == 0 || selectedItems != allItems)
@@ -637,7 +645,9 @@ internal static class ShellViewColorSpike
             AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "before");
 
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-start");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-invoke-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "viewlogicaldetails");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-invoke-returned");
             Pump(250);
             Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var commandMode, out _));
             if (commandMode != 4)
@@ -647,18 +657,25 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-verified");
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortdescending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-invoke-returned");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, -1, 1, $"pane {targetIndex + 1} Sort Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-verified");
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-invoke-returned");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Sort Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-verified");
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupdescending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-invoke-returned");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 0, $"pane {targetIndex + 1} Group Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-verified");
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-ascending-start");
             InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-ascending-invoke-returned");
             Pump(100);
             AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Group Ascending");
             Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-group-verified");
@@ -667,13 +684,19 @@ internal static class ShellViewColorSpike
             Pump(150);
             results.Add($"pane{targetIndex + 1}:details/sort/group");
         }
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-restore-sort-start");
         Check(At<SetSortColumns>(folderViews[0], 27)(folderViews[0], [expectedOriginalSort], 1));
         var restoreGroupKey = typeKey;
         Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
         Pump(150);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-restore-sort-verified");
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-arrow-start");
         var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-arrow-verified");
         var selectAllRouting = VerifyFourPaneCtrlARouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-ctrl-a-verified");
         var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-rename-verified");
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
         return $"{string.Join(',', results)}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
@@ -2227,8 +2250,8 @@ internal static class ShellViewColorSpike
             ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");
         var stdout = DrainChildOutput(process.StandardOutput, "stdout");
         var stderr = DrainChildOutput(process.StandardError, "stderr");
-        // The four-pane frame probe now dispatches Details, sorting and grouping through each merged Shell menu.
-        if (!process.WaitForExit(60_000))
+        // The four-pane session probe also runs keyboard and file-operation checks; allow the private desktop worker its full diagnostic budget.
+        if (!process.WaitForExit(100_000))
         {
             try { process.Kill(entireProcessTree: true); }
             catch (InvalidOperationException) { }

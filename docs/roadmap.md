@@ -1,5 +1,11 @@
 # 路线图
 
+## 2026-10-27：延长隔离四窗格恢复探针的专用执行预算
+
+- 追踪此前停点漂移后确认共同原因是 `PrivateDesktopShellProbe.Run()` 固定 25 秒等待：完整 session-restore 由四窗格创建、原生菜单命令、键盘/重命名路由和多轮文件操作组成，测试尚未完成便被内部 deadline 中止。不是某个 pane 固定的 Shell 调用死锁。
+- 只将 session-restore 宿主/consumer 的私有桌面等待延长为 110/100 秒，并把 consumer 进程等待设为 100 秒；其他探针仍使用原 25 秒预算。Release NativeProbe build 通过（0 警告、0 错误）；完整 `session-restore-private-desktop` 在 120 秒外层 watchdog 下退出码 0，确认四 pane 的 Details/排序/分组/全选菜单路由、方向键与 Ctrl+A 路由、多 pane F2 编辑焦点隔离、复制/重命名/删除四窗格收敛、目录通知及 foreground 不变。过程日志：`src/.state/native-probe-watchdog/20261027-084330-8968e6b6.stdout.log`。
+- 这是隔离 IShellView 原型的测试门槛通过，不是产品迁移或可见 GUI 验收；真实拖放与 WPF 接线仍未验证。watchdog 超时递归清理另见上一条路线图记录。
+
 ## 2026-10-27：修复 NativeProbe watchdog 超时后的子进程清理
 
 - 超时 watchdog 过去只终止直接子进程；IShellView 会话恢复探针内部会再启动 consumer 子进程，因此超时可能留下后台 Shell 测试进程。现在通过 `Process.Kill($true)` 递归终止进程树，并扩展 watchdog 自测：构造带孙进程的超时进程，断言父进程和孙进程均退出。修复前回归失败并发现存活孙进程，修复后通过。
