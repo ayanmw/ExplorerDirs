@@ -2260,10 +2260,10 @@
 - Microsoft `IFolderView2::SetViewProperty` 可为当前视图项目缓存显示属性，但微软标记其从 Windows 7 起弃用，未来可能移除，且搜索结果/库视图不支持。`System.Size` 是可见 `UInt64` 列，`System.FileCount` 则明确不是列；`IColumnManager` 管理现有 Shell 列，不能注册任意派生列。
 - 因此 F9 当前目录汇总继续作为已实现能力；逐行大小列只列为可见原生视图隔离验证候选，子项计数列仍需另行评估自定义列/视图宿主，不能用 F9 汇总宣称完成。调查与验证门槛见[逐行文件夹大小调查](folder-size-column-investigation.md)。本轮未启动 GUI 或隐藏 Shell 宿主。
 
-## 2026-10-25：Q-Dir 预览格式过滤实现边界复核
+## 2026-10-28：Q-Dir 预览格式过滤实现边界复核
 
-- Q-Dir FAQ 34 将通配符列在预览设置并说明 `*.*` 查看所有可预览格式；FAQ 17 说明 PDF 预览依赖 Windows 预览支持。FAQ 34 同页通用段落又描述减少列表显示并提及日期、大小和关键词，尚不足以确认实际控件语义。Microsoft 文档确认 ExplorerBrowser 的 `IExplorerPaneVisibility` 只控制整个 Preview Pane 显示状态；复用 `IFolderFilterSite` 则会把文件从列表中隐藏。
-- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；差异保留为待评估，先待 Q-Dir 可见交互确认过滤作用于预览、列表或两者，再决定是否引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-25)。
+- Q-Dir FAQ 34 将通配符列在预览设置并说明 `*.*` 查看所有可预览格式；FAQ 38 单独说明每个 Explorer view 的文件过滤（通配符、多条件、是否包含文件夹）。FAQ 34 的通用段落混有列表过滤描述，预览设置是否同时过滤列表仍待可见交互确认。项目已实现每标签快速过滤，不能拿它代替逐项预览资格过滤。官方依据：[FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR)、[FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。Microsoft 文档确认 ExplorerBrowser 的 `IExplorerPaneVisibility` 只控制整个 Preview Pane 显示状态；复用 `IFolderFilterSite` 则会把文件从列表中隐藏。
+- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；差异保留为待评估，先待 Q-Dir 可见交互确认过滤作用于预览、列表或两者，再决定是否引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-28-复核)。
 
 ## 2026-10-25：F9 当前目录递归大小与子项计数
 
