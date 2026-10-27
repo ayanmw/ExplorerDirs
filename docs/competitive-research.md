@@ -14,6 +14,10 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 2026-10-25 复核 Program Starter 时，本机 `C:\SoftwareOK\Q-Dir\Q-Dir.ini` 的 `[Program]` 节只有 `portable_install=1`，当前没有可验证的实际启动项行。Q-Dir FAQ 46 公开说明 Ctrl+S、`Name=Path=Arguments[=Work directory]` 与目录/所选文件/多窗格占位符；Program Starter 专页说明保存于 Q-Dir.ini 并允许相对路径。Explorer Dirs 已接入独立 `ProgramStarter.ini`、Q-Dir `[Program]` 导入预览和显式导入；当前已用公开格式 fixture 验证解析，仍待真实桌面交互验收及带有效启动项的 Q-Dir.ini 正向样本核验。[FAQ 46](https://softwareok.com/?faq=46&seite=faq-Q-DIR) · [Program Starter 专页](https://www.softwareok.com/?seite=Freeware/Q-Dir/Programmstarter_in-Q-Dir)
 
+## 2026-10-27 官方版本基线复核
+
+再次核对 [Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)：当前仍为 12.82，更新日期 2026-10-24；版本说明只具体提到改进地址栏目录树使用，其余为一般 Quad-Explorer 优化和语言文件更新，没有给出可据此实现的新交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑、祖先导航及“此电脑”驱动器子项。本轮不据笼统的“优化”文字推测新行为；当前实际差距应通过之后的可见 Q-Dir/Explorer Dirs 对照记录，而不是再扩写未经证实的版本功能。
+
 ## 功能对照
 
 | 产品 | 官方可确认能力 | 本项目可借鉴之处 |
