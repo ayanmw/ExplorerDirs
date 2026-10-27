@@ -4119,3 +4119,4 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 隔离 adapter 夹具现使用 2、10、10、100 字节文件。严格 adapter 的真实 `PKEY_Size` 升降序均按物理大小正确重排；旧式 `IShellFolderView::Rearrange` 传入自定义列索引 37 或显示位置 2 均返回 `S_OK`，但行序不变且没有调用 adapter 的 `CompareIDs`。现代自定义 PKEY 升降序仍未重排；标准大小属性升降序正常。Private Desktop 前台未变；探针以 exitCode 1 明确保留自定义排序失败，不把测试缺陷记成通过。
 - 这把问题范围进一步收窄到 adapter 的自定义列属性消费/比较路由。未注册机器级 schema，未接入产品，也未改变 ExplorerBrowser。详细证据和下一步边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-28区分实际-size-排序与旧式列索引排序入口)。
+- 微软 `PSRegisterPropertySchema` 文档要求安装阶段进行机器级注册并写入 HKLM，不能按用户注册；因此它与当前便携运行边界冲突，不能作为应用启动时的补救。若要继续验证，需要先解决属性 schema 是否必要、以及是否接受显式安装组件这两个问题；期间优先继续不依赖机器注册的 Q-Dir 差距项。[官方注册说明](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema)

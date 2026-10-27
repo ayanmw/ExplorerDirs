@@ -143,3 +143,5 @@ C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与�
 同一实验用 `IShellFolderView::Rearrange` 分别传入自定义列索引 37 和其当前显示位置 2，两次均返回 `S_OK`，但可见顺序不变；`CompareIDs` 计数也均无增加。随后 `IFolderView2::SetSortColumns` 对自定义 PKEY 升降序同样保持名称顺序，读回的排序键/方向正确但未重排；标准 `PKEY_Size` 升降序仍通过。自定义列的 `GetDetailsOf` 子项为空，排序调用未触发 `GetDetailsEx`、`IPropertyStore` 或 `CompareIDs`。探针 exitCode=1 是自定义排序门槛失败，Private Desktop 前台句柄未变。
 
 微软文档将 `Rearrange` 标为弃用接口，并说明系统文件视图会以其低 16 位指定排序列；本轮实际试验表明调用成功本身不代表 adapter 获得了比较回调。[`IShellFolderView::Rearrange`](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-rearrange)。因此当前可确认：普通文件夹的标准大小排序可用；此 adapter 的自定义属性显示/排序尚未打通；两条排序入口都未调用 adapter 比较函数。自定义属性 schema 是否是原因仍只是推测，本轮没有注册 schema，也没有证明所有自定义 namespace 都不可行。产品仍使用 ExplorerBrowser，未接入原型。
+
+后续评估 schema 方案时还要考虑部署边界：微软 [`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 文档要求安装时注册机器本地 `.propdesc`，schema 为机器级、不能按用户注册，且 API 需要包含 `HKLM` 写权限的权限上下文。这与项目当前便携配置、不改系统注册表的原则冲突；不能把 schema 注册作为普通启动行为。若未来证明确实是唯一技术路线，需先单独审视安装/卸载和系统影响策略，再决定是否做可选安装能力。
