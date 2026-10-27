@@ -1173,7 +1173,11 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 
 为给 `single-pane-menu-sync-cleanup` 的稳定挂起补充线程级证据，NativeProbe 在其 Private Desktop watchdog 超时点调用 Windows Wait Chain Traversal，并注册 OLE32 的 COM 状态回调。SDK `wct.h` 校正了节点枚举：`WctThreadType=8`；查询显示 `cycle=False`，探针线程 58152 处于线程等待，目标为同进程线程 58168；目标线程也在等待，后续节点为 COM → `svchost` PID 1832、COM activation → `ChsIME` PID 49244。当前快照不能证明循环死锁；WCT 只报告调用时的等待链，也不能单凭进程名确定具体 COM 类或组件责任。[Microsoft WCT sample](https://learn.microsoft.com/en-us/windows/win32/debug/using-wct)、[GetThreadWaitChain](https://learn.microsoft.com/en-us/windows/win32/api/wct/nf-wct-getthreadwaitchain)
 
-本次仍复现：Shell view 销毁和 pane 销毁均返回成功，菜单协调器已释放 owner/active object 且 RemoveMenus 回调成功；父窗口收到并返回 `WM_DESTROY` 后，`DestroyWindow` 未返回，最终被 watchdog 终止。该最小复现包含 `ActivateView(SVUIA_ACTIVATE_FOCUS)` / `ActivateView(SVUIA_DEACTIVATE)`；不能据此宣称 Explorer Dirs 产品发生死循环，也尚不能证明真实输入法或 RPCSS 是根因。NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产品 GUI，Private Desktop 前台 HWND 保持不变。产品 ExplorerBrowser、release 和主题代码未改。下一步应在同一隔离宿主中逐项对照菜单激活、父窗口销毁及输入法 COM 激活条件；在拿到可归属的原生调用栈或差分结果前，不做产品规避改动。
+本次差分结果：未激活菜单的单窗格 Shell view 清理正常完成，父窗口收到 `WM_DESTROY` 和 `WM_NCDESTROY`；单独的菜单激活探针也完成，但它把父窗口清理由进程退出负责，因此没有验证同步 DestroyWindow。相反，焦点激活后显式停用、跳过显式停用，以及 no-focus 激活后停用，这三种随后同步销毁父窗口的变体都可复现卡在 `WM_DESTROY` 返回之后；no-focus 变体重复时也有一次正常完成，说明有间歇性。各挂起样本的 WCT 链一致落到同进程等待线程、COM、`svchost` 和 `ChsIME`，且 `cycle=False`。这排除了“必须显式调用 DEACTIVATE”及“必须获得焦点”这两个单一条件，但尚未区分菜单激活留下的 Shell/OLE 状态与 Private Desktop 上的系统输入法 COM 行为。
+
+NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产品 GUI，Private Desktop 前台 HWND 保持不变。产品 ExplorerBrowser、release 和主题代码未改。当前只能说同步顶层窗口销毁在部分菜单激活历史之后不稳定，不能宣称 Explorer Dirs 产品发生死循环，也不能把根因归给输入法/RPCSS。下一步是检查窗口的 IME context、子窗口和 OLE menu coordinator 在 DestroyWindow 前后的状态，并设计不切换用户桌面的差分条件；在有可归属原生栈或稳定差分前，不做产品规避改动。
+
+追加差分：跳过显式 `SVUIA_DEACTIVATE`，让菜单仍处于 active 状态并由 coordinator 在 pane/view 释放后清理，父窗口仍在 `WM_DESTROY` 返回后挂起，WCT 链同样到 `ChsIME`。`SVUIA_ACTIVATE_NOFOCUS` 加显式停用的三轮结果为两次挂起、一次完成；完成轮的断言已修正为“未安装共享菜单是预期”，不把它误报成菜单安装失败。因此焦点激活、显式停用都不是必要单一条件；仍未验证的是菜单激活历史与 Private Desktop COM/IME 环境的组合效应。新加入的参数化隔离 probe 保留作后续对照入口。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。

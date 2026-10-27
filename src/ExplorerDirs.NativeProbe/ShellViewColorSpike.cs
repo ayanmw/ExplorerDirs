@@ -146,7 +146,8 @@ internal static class ShellViewColorSpike
     }
 
     internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
-        bool disposeMenuCoordinatorBeforeParent = true)
+        bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
+        bool deactivateMenus = true)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
         var foreground = GetForegroundWindow();
@@ -223,16 +224,21 @@ internal static class ShellViewColorSpike
                 for (var index = 0; index < panes.Count; index++)
                 {
                     var beforeInsert = panes[index].Host.InsertMenusCallCount;
-                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 2)); // SVUIA_ACTIVATE_FOCUS.
+                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, menuActivationState)); // SVUIA_ACTIVATE_FOCUS or SVUIA_ACTIVATE_NOFOCUS.
                     Pump(200);
                     var installed = GetMenu(parent);
                     var activated = panes[index].Host.InsertMenusCallCount > beforeInsert && installed != 0;
-                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 0)); // SVUIA_DEACTIVATE.
-                    Pump(200);
-                    var restored = GetMenu(parent) == menuCoordinator.BaseMenu;
-                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activated={activated}; deactivated={restored}; coordinator-owner={menuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
-                    if (!activated || !restored)
-                        throw new InvalidOperationException($"Pane {index + 1} did not install and remove its native composite menu.");
+                    var restored = false;
+                    if (deactivateMenus)
+                    {
+                        Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 0)); // SVUIA_DEACTIVATE.
+                        Pump(200);
+                        restored = GetMenu(parent) == menuCoordinator.BaseMenu;
+                    }
+                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activation-state={menuActivationState}; activated={activated}; deactivate-requested={deactivateMenus}; deactivated={restored}; coordinator-owner={menuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
+                    var expectedActivation = menuActivationState == 2;
+                    if (activated != expectedActivation || (deactivateMenus && !restored))
+                        throw new InvalidOperationException($"Pane {index + 1} menu activation did not match state {menuActivationState}.");
                 }
                 var restoredFocus = SetFocus(parent);
                 Console.WriteLine($"multi-pane-cleanup: focus-restored-to-parent={GetFocus() == parent}; previous-focus=0x{restoredFocus:X}");
