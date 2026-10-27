@@ -14,7 +14,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const uint SvgioAllView = 2;
 
-    internal static int RunFolderContract()
+    internal static int RunFolderContract(bool requireIdentity = false)
     {
         VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -32,6 +32,7 @@ internal static class StaticShellFolderAdapterProbe
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
                 NativeLibrary.GetExport(nativeLibrary, "CreateStaticShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
+            if (requireIdentity) VerifyForwardedIdentity(adapter);
             foreach (var name in new[] { "two.bin", "ten.bin", "hundred.bin", "ten-copy.bin" })
                 items.Add(name, ParseChild(adapter, name));
 
@@ -332,6 +333,27 @@ internal static class StaticShellFolderAdapterProbe
         return result;
     }
 
+    private static void VerifyForwardedIdentity(nint adapter)
+    {
+        var parentId = new Guid("b3a4b685-b685-4805-99d9-5dead2873236");
+        var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
+        nint parent = 0, owner = 0, parentOwner = 0;
+        try
+        {
+            Check(Marshal.QueryInterface(adapter, in parentId, out parent));
+            Check(Marshal.QueryInterface(adapter, in unknownId, out owner));
+            Check(Marshal.QueryInterface(parent, in unknownId, out parentOwner));
+            Console.WriteLine($"native-static-shell-folder-identity: forwarded=IParentAndItem; same-IUnknown={owner == parentOwner}; window-created=False");
+            if (owner != parentOwner)
+                throw new InvalidOperationException("The forwarded interface exposes a different COM identity from the adapter.");
+        }
+        finally
+        {
+            if (parentOwner != 0) Marshal.Release(parentOwner);
+            if (owner != 0) Marshal.Release(owner);
+            if (parent != 0) Marshal.Release(parent);
+        }
+    }
     private static void VerifySortMatrix(Func<bool, int, IReadOnlyList<ulong>> read, Action<string> report)
     {
         var failures = new List<Exception>();

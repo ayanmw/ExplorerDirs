@@ -101,3 +101,12 @@ Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将 Size 列�
 结论：静态 folder contract 仍通过，但 DefView 消费/排序门槛未通过。标准 PKEY_Size 对照也失败，使“仅缺自定义 schema”不足以解释结果；不能因此直接注册 schema、添加 IPropertyStore 装饰器或投入动态扫描缓存。仍需不同且有依据的视图身份/属性读取路径假设；当前证据不证明所有自定义 namespace 都不可行。产品架构、发布版与固定候选均未改变。
 
 C++ /W4 /WX、NativeProbe Release build 零警告错误，最终无窗口 folder-contract smoke 继续通过。独立 Desktop 实验是后台原生组件负向证据，不是用户可见文件管理体验验收。
+## 2026-10-27：接口转发与 COM 身份缺陷
+
+新增最多 64 个不同 IID 的原生 QueryInterface 转发诊断（无持有额外 COM 引用、无动态增长；只在隔离 DLL 中），保留原转发语义。独立 Desktop 记录 `src/.state/native-probe-watchdog/20261027-233209-eff81f30.stdout.log`：DefView 请求并成功取得转发的 IParentAndItem（B3A4B685...）和 IPersistFolder2（1AC3D9F0...），另有若干内部 IID；四组排序仍失败，正常退出 1，前台前后不变。未注册任何属性 schema。
+
+IID 名称经本机 Windows SDK 10.0.26100.0 ShObjIdl_core.h 核对；[IParentAndItem 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)说明该接口能直接提供父 ShellFolder 与子 PIDL。由此形成“转发的身份/父项接口可能让视图重新回到底层文件系统”的待验证假设，而不是已证明的读取调用链。
+
+新增独立无窗口入口 `--static-shell-column-identity-smoke`，从同一个 adapter 及其成功返回的 IParentAndItem 分别 QueryInterface(IUnknown)，比较真实指针并逐个 Release。结果 `same-IUnknown=False`，以失败退出；日志 src/.state/static-identity-red.log。根据[微软 QueryInterface 实现规则](https://learn.microsoft.com/en-us/windows/win32/com/rules-for-implementing-queryinterface)，同一对象的各接口必须有相同 IUnknown 身份。因此当前“任意未知接口直接返回 inner 指针”的包装方式至少存在 COM 身份合同缺陷；原数值 folder-contract 通过不能覆盖该门槛。
+
+本批只加诊断和独立失败门槛，未伪造修复、未降低要求。下一步应在隔离策略中只暴露正确包装的接口或对不支持接口返回 E_NOINTERFACE，再验证视图创建、原生操作与列消费是否仍可保留。若必须实现自己的 namespace 身份，应按架构门槛评审，不能把简单隐藏接口造成的功能丢失当作迁移成功。未证明该缺陷是所有排序失败的唯一原因；产品 ExplorerBrowser 不使用此 shim。

@@ -7,6 +7,7 @@
 #include <strsafe.h>
 #include <new>
 #include <string>
+#include <cstdio>
 
 namespace
 {
@@ -32,6 +33,31 @@ namespace
     volatile LONG g_propertyStoreBindToStorageRequests = 0;
     volatile LONG g_propertyStoreUiObjectRequests = 0;
 
+    SRWLOCK g_queryTraceLock = SRWLOCK_INIT;
+    GUID g_forwardedQueryIds[64]{};
+    UINT g_forwardedQueryCount = 0;
+
+    void TraceForwardedQuery(REFIID iid, HRESULT result)
+    {
+        // Prototype diagnostics only: bounded distinct interfaces, no retained COM references.
+        AcquireSRWLockExclusive(&g_queryTraceLock);
+        for (UINT index = 0; index < g_forwardedQueryCount; ++index)
+            if (g_forwardedQueryIds[index] == iid)
+            {
+                ReleaseSRWLockExclusive(&g_queryTraceLock);
+                return;
+            }
+        if (g_forwardedQueryCount < ARRAYSIZE(g_forwardedQueryIds))
+        {
+            g_forwardedQueryIds[g_forwardedQueryCount++] = iid;
+            wchar_t name[40]{};
+            StringFromGUID2(iid, name, ARRAYSIZE(name));
+            std::printf("native-static-shell-column: forwarded-QI=%ls; hr=0x%08lX\n",
+                name, static_cast<unsigned long>(result));
+            std::fflush(stdout);
+        }
+        ReleaseSRWLockExclusive(&g_queryTraceLock);
+    }
     bool NameFromPidl(IShellFolder2* folder, PCUITEMID_CHILD pidl, std::wstring& name)
     {
         if (!pidl) return false;
@@ -108,7 +134,9 @@ namespace
                 AddRef();
                 return S_OK;
             }
-            return _inner ? _inner->QueryInterface(iid, object) : E_NOINTERFACE;
+            const auto result = _inner ? _inner->QueryInterface(iid, object) : E_NOINTERFACE;
+            TraceForwardedQuery(iid, result);
+            return result;
         }
         ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_refs); }
         ULONG STDMETHODCALLTYPE Release() override

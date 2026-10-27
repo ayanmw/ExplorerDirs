@@ -35,6 +35,8 @@ internal static class Program
             return ShellViewStateStreamSmoke.RunChildCommand(args);
         if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
             return StaticShellColumnContractSmoke.Run();
+        if (args.Length == 1 && args[0] == "--static-shell-column-identity-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
             return StaticShellFolderAdapterProbe.RunFolderContract();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
