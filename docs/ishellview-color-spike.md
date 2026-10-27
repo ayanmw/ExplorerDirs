@@ -1178,6 +1178,8 @@ frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再
 NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产品 GUI，Private Desktop 前台 HWND 保持不变。产品 ExplorerBrowser、release 和主题代码未改。当前只能说同步顶层窗口销毁在部分菜单激活历史之后不稳定，不能宣称 Explorer Dirs 产品发生死循环，也不能把根因归给输入法/RPCSS。下一步是检查窗口的 IME context、子窗口和 OLE menu coordinator 在 DestroyWindow 前后的状态，并设计不切换用户桌面的差分条件；在有可归属原生栈或稳定差分前，不做产品规避改动。
 
 追加差分：跳过显式 `SVUIA_DEACTIVATE`，让菜单仍处于 active 状态并由 coordinator 在 pane/view 释放后清理，父窗口仍在 `WM_DESTROY` 返回后挂起，WCT 链同样到 `ChsIME`。`SVUIA_ACTIVATE_NOFOCUS` 加显式停用的三轮结果为两次挂起、一次完成；完成轮的断言已修正为“未安装共享菜单是预期”，不把它误报成菜单安装失败。因此焦点激活、显式停用都不是必要单一条件；仍未验证的是菜单激活历史与 Private Desktop COM/IME 环境的组合效应。新加入的参数化隔离 probe 保留作后续对照入口。
+
+窗口状态检查补充：普通清理基线与菜单挂起样本在父窗口销毁前都为 `Static` 顶层窗、零子窗、IME context 存在；菜单样本的 Shell view/pane 已销毁、coordinator 无 owner、active object 为 0、窗口菜单句柄为 0。为检验窗口 IME context 是否是直接触发条件，另一个隔离变体在父窗口销毁前调用 `ImmAssociateContext(hwnd, NULL)` 并确认当前 context 为空；挂起与同一 COM→`svchost`/`ChsIME` 链仍复现。此差分削弱了“父窗口当前关联 HIMC 直接导致挂起”的解释，但不能排除线程级输入法/COM 服务交互或 Private Desktop 环境因素。日志：`20261028-054952-9aed3674.stdout.log`、`20261028-054958-29b528b9.stdout.log`、`20261028-055117-d1b709b7.stdout.log`。
 ### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
 
 `ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。

@@ -130,6 +130,7 @@ internal static class ShellViewColorSpike
             }
             if (parent != 0 && IsWindow(parent))
             {
+                DumpTeardownWindowState(parent, menuCoordinator, host);
                 if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
                     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                         "Could not install the parent teardown observer.");
@@ -147,7 +148,7 @@ internal static class ShellViewColorSpike
 
     internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
         bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
-        bool deactivateMenus = true)
+        bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
         var foreground = GetForegroundWindow();
@@ -272,6 +273,14 @@ internal static class ShellViewColorSpike
             if (disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
             if (parent != 0 && IsWindow(parent))
             {
+                if (detachImeContextBeforeParentDestroy)
+                {
+                    var detachedContext = ImmAssociateContext(parent, 0);
+                    var currentContext = ImmGetContext(parent);
+                    if (currentContext != 0) _ = ImmReleaseContext(parent, currentContext);
+                    Console.WriteLine($"multi-pane-cleanup: ime-context-detached=0x{detachedContext:X}; current-ime-context=0x{currentContext:X}");
+                }
+                DumpTeardownWindowState(parent, menuCoordinator, panes.LastOrDefault().Host);
                 if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
                     throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                         "Could not install the parent teardown observer.");
@@ -286,6 +295,34 @@ internal static class ShellViewColorSpike
             if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
         }
         return result;
+    }
+
+    private static void DumpTeardownWindowState(nint parent, ShellMenuFrameCoordinator? coordinator,
+        ShellViewColorBrowserHost? lastHost)
+    {
+        var menu = GetMenu(parent);
+        var baseMenu = coordinator?.BaseMenu ?? 0;
+        var imeContext = ImmGetContext(parent);
+        if (imeContext != 0) _ = ImmReleaseContext(parent, imeContext);
+        var ownerThreadId = GetWindowThreadProcessId(parent, out var ownerPid);
+        var className = new System.Text.StringBuilder(128);
+        _ = GetClassNameW(parent, className, className.Capacity);
+        Console.WriteLine($"teardown-window-state: hwnd=0x{parent:X}; class={className}; pid={ownerPid}; tid={ownerThreadId}; menu=0x{menu:X}; base-menu=0x{baseMenu:X}; menu-valid={menu != 0 && IsMenu(menu)}; ime-context={imeContext != 0}; coordinator-owner={lastHost is not null && coordinator?.IsCurrentOwner(lastHost) == true}; active-object=0x{lastHost?.ActiveObjectPointer ?? 0:X}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var childClass = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(child, childClass, childClass.Capacity);
+            _ = GetWindowThreadProcessId(child, out var childPid);
+            var style = GetWindowLongPtrW(child, -16);
+            var exStyle = GetWindowLongPtrW(child, -20);
+            var childImeContext = ImmGetContext(child);
+            if (childImeContext != 0) _ = ImmReleaseContext(child, childImeContext);
+            Console.WriteLine($"teardown-window-child: index={++childIndex}; hwnd=0x{child:X}; class={childClass}; pid={childPid}; visible={IsWindowVisible(child)}; style=0x{style:X}; ex-style=0x{exStyle:X}; ime-context={childImeContext != 0}");
+            return true;
+        };
+        _ = EnumChildWindows(parent, callback, 0);
+        Console.WriteLine($"teardown-window-state: child-count={childIndex}");
     }
 
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
@@ -4138,5 +4175,9 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
+    [DllImport("imm32.dll")] private static extern nint ImmGetContext(nint window);
+    [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(nint window, nint context);
+    [DllImport("imm32.dll")] private static extern nint ImmAssociateContext(nint window, nint context);
 }

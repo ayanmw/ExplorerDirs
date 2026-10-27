@@ -52,6 +52,10 @@ internal static class PrivateDesktopShellProbe
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             deactivateMenus: false), TimeSpan.FromSeconds(45));
 
+    internal static int RunSinglePaneMenuDetachedImeSynchronousCleanup() => Run("single-pane-menu-detached-ime-sync-cleanup",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
+            detachImeContextBeforeParentDestroy: true), TimeSpan.FromSeconds(45));
+
     internal static int RunSinglePaneLateCoordinatorDispose() => Run("single-pane-menu-late-coordinator-dispose",
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             disposeMenuCoordinatorBeforeParent: false), TimeSpan.FromSeconds(45));

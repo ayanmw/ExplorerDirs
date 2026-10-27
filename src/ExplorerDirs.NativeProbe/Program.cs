@@ -102,6 +102,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSinglePaneMenuNoFocusSynchronousCleanup();
         if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-active-sync-cleanup")
             return PrivateDesktopShellProbe.RunSinglePaneMenuActiveSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-detached-ime-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuDetachedImeSynchronousCleanup();
         if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-late-coordinator-dispose")
             return PrivateDesktopShellProbe.RunSinglePaneLateCoordinatorDispose();
         if (args.Length == 1 && args[0] == "--window-destroy-current-desktop-child")
