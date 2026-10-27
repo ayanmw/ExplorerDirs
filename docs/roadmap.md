@@ -1,5 +1,10 @@
 # 路线图
 
+## 2026-10-27：退休的递归扫描失败不清除新结果
+
+- `ScanRecursiveDirectoryAsync` 失败分支原在后台线程先清空最近结果，再进入 dispatcher 检查当前扫描；旧 worker 的迟到失败可覆盖新结果。清理现在与错误显示一起在 UI 线程进行，先确认 token/owner/path/当前标签及可见性，再修改字段。
+- 未挂接实际 PaneControl 回归设置一份现有结果，对已不存在的临时子目录执行无当前所有权的真实扫描并等待其失败；旧实现清空结果而失败，修正后保留结果/路径/owner，`--pane-tab-copy-order` 通过。App/HostProbe Release build 零警告错误；不创建 Shell view，不模拟实际大目录时序。用户 F9、选择变化与晚到网络错误的可见体验仍待验收，本批未发布。
+
 ## 2026-10-27：隐藏窗格不执行迟到悬停切换
 
 - 标签拖动悬停 timer 原只检查目标仍在集合中；布局隐藏不保证触发 Unloaded，迟到回调可切换隐藏标签并通知活动窗格。现在 IsVisibleChanged 隐藏时取消，并在 timer 消费目标后复核 IsLoaded/IsVisible，避免保留过期目标。

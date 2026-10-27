@@ -66,6 +66,7 @@ internal static class PaneTabTransferProbe
                 CheckUnhostedFilterFailures(sourcePane);
                 CheckUnhostedFilterGroupSnapshot(sourcePane);
                 CheckUnhostedHiddenHover(sourcePane);
+                CheckUnhostedRetiredScanFailure(sourcePane, root);
                 EnsureForegroundUnchanged(foregroundBefore, "checking unattached pane tab order");
                 Console.WriteLine("Unhosted tab copy order: PASS (production pane state; no HWND or Shell view created)");
                 return 0;
@@ -178,6 +179,38 @@ internal static class PaneTabTransferProbe
             try { (sourcePane as IDisposable)?.Dispose(); } catch { }
             try { (targetPane as IDisposable)?.Dispose(); } catch { }
             try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    private static void CheckUnhostedRetiredScanFailure(UIElement pane, string root)
+    {
+        var type = pane.GetType();
+        var tabs = (TabControl)type.GetField("Tabs", InstanceMembers)!.GetValue(pane)!;
+        var owner = ((TabItem)tabs.SelectedItem).Tag;
+        var resultField = type.GetField("_lastRecursiveSizeResult", InstanceMembers)!;
+        var pathField = type.GetField("_lastRecursiveSizePath", InstanceMembers)!;
+        var ownerField = type.GetField("_lastRecursiveSizeOwner", InstanceMembers)!;
+        var previous = (resultField.GetValue(pane), pathField.GetValue(pane), ownerField.GetValue(pane));
+        var result = Activator.CreateInstance(resultField.FieldType, [123UL, 1L, 0L, 0L])!;
+        resultField.SetValue(pane, result);
+        pathField.SetValue(pane, root);
+        ownerField.SetValue(pane, owner);
+        using var retired = new CancellationTokenSource();
+        try
+        {
+            var task = (Task)type.GetMethod("ScanRecursiveDirectoryAsync", InstanceMembers)!.Invoke(pane,
+                [owner, Path.Combine(root, "missing-scan-" + Guid.NewGuid().ToString("N")), retired, null])!;
+            PumpUntil(() => task.IsCompleted, TimeSpan.FromSeconds(5), "retired local scan failure completed");
+            task.GetAwaiter().GetResult();
+            Ensure(ReferenceEquals(resultField.GetValue(pane), result) &&
+                Equals(pathField.GetValue(pane), root) && ReferenceEquals(ownerField.GetValue(pane), owner),
+                "a retired scan failure preserves a newer recursive-size result");
+        }
+        finally
+        {
+            resultField.SetValue(pane, previous.Item1);
+            pathField.SetValue(pane, previous.Item2);
+            ownerField.SetValue(pane, previous.Item3);
         }
     }
 

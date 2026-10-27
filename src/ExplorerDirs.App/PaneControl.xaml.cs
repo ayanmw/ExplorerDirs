@@ -410,12 +410,14 @@ public partial class PaneControl : UserControl
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _lastRecursiveSizeResult = null;
-            _lastRecursiveSizePath = null;
-            _lastRecursiveSizeOwner = null;
             await Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
+                // A retired worker may fail after another scan has completed.
+                // Check ownership on the UI thread before clearing its result.
+                _lastRecursiveSizeResult = null;
+                _lastRecursiveSizePath = null;
+                _lastRecursiveSizeOwner = null;
                 RecursiveSizeStatus.Text = $"无法计算{(selectedPaths is null ? "目录" : "所选项目")}大小：{ex.Message}";
                 RecursiveSizeStatus.ToolTip = path;
             });
