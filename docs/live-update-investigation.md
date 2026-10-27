@@ -1875,3 +1875,9 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 在同一源码状态下连续运行两次 HostProbe `--live-updates`。两轮均从 `1,1,1,1` 开始，创建探针文件后四 pane 到 `2,2,2,2`，删除初始文件后回到 `1,1,1,1`；创建分别用时 1,024/1,028 ms，删除 582/623 ms，均退出码 0。产品 watcher 两轮均收到四个创建和四个删除通知，最终每窗格只剩 `created.txt`。第二轮完整日志保存在忽略目录 `src/.state/background-live-updates-hostprobe-20261028.log`，SHA-256 `ACFA0E01074F96F01907EF501B1760DEBFC8BEEBC04B7C9B31F11D3A87658DF3`。
 
 这两轮是本机隐藏真实 `ExplorerBrowserHost` 和本地临时目录的重复证据；没有显示产品窗口或输入用户桌面。结果不覆盖网络/第三方 Shell provider、长时运行或可见焦点与重绘，也不代表完整自动刷新 P0 已关闭。
+
+### 2026-10-28：复核 3,000 项删除后的回退刷新
+
+交替运行四轮隐藏 HostProbe `--live-shell-directory-stress`（Shell callback trace 关闭/开启各两轮）。四轮创建均无回退刷新，产品 watcher 与独立 observer 各收到完整 `3000/3000` 创建/删除事件；四轮文件可见、删除后收敛、选区和焦点恢复均通过。删除阶段四轮各有一次回退刷新：三轮记录 `expected=3002 / actual=3003 / forced=False`，表示已删除文件仍暂时出现在 ExplorerBrowser 的计数中；另一轮为 `expected=3002 / actual=3002 / forced=True`，说明增删通知合并后净数量相等，不能仅靠计数发现内容变化。刷新后各轮均收敛到磁盘的 3 项。
+
+这不是无条件减少刷新就能安全解决的单纯重绘开销：前期精确文件删除对照的 6 轮中，发送或不发送精确 `SHCNE_DELETE` 后，Shell 均未在 700ms 内自然移除条目，之后由计数回退刷新修复。当前证据支持保留回退；关闭或再延迟这类回退可能让已删除条目继续留在列表中。本轮没有改产品代码，也没有打开可见窗口；记录属于本机隐藏 ExplorerBrowser 压力验证，不覆盖其它 Shell provider、可见刷新观感或长时间运行。
