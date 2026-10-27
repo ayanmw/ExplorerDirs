@@ -383,6 +383,8 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 2026-10-27 列标题菜单契约复核：Microsoft `IShellView::GetItemObject` 使用 `_SVGIO` 范围，官方枚举只有背景、选中、全部和已勾选项目；没有列标题范围。因此列标题菜单不是缺少一个 `GetItemObject` 参数，而是独立表头 `WM_CONTEXTMENU` 的创建、命令来源和执行路由问题。现有 Private Desktop 探针只捕获 popup、初始化查看/排序/分组子菜单并比较其命令 ID 偏移，随后取消菜单；尚未验证实际命令分发、排序列身份或用户可见行为。[Microsoft GetItemObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-getitemobject) · [Microsoft _SVGIO](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-_svgio)
 
+2026-10-28 列标题菜单命令隔离复核：在 Private Desktop 的临时 `IShellView` Details 视图中，实际捕获并初始化查看/排序/分组子菜单；各子项与背景 `IContextMenu` 项一一映射，命令 ID 基差为 `30976`。将列标题“类型”项映射为背景菜单命令偏移并调用 `IContextMenu::InvokeCommand` 后，`IFolderView2` 读回的主排序键变为 `PKEY_ItemTypeText`（属性 ID 4）。直接把捕获到的 ID 发给 `SHELLDLL_DefView` 的 `WM_COMMAND` 没有改变排序，故不能把裸窗口消息当作有效分发路径。前台窗口保持不变。该结果验证的是隔离宿主的菜单 ID→Shell 命令映射与排序状态，不模拟用户实际选择菜单项，也不验证 ExplorerBrowser 产品 UI 的物理输入、排序列命中或焦点；后者仍待集中可见验收。
+
 2026-10-27 OLE 宿主边框合同复核：隔离 `StreamViewHost` 的 `GetBorder` 返回父客户区；`RequestBorderSpace` / `SetBorderSpace` 接受零边框占用，并对非零工具栏空间返回 `INPLACE_E_NOTOOLSPACE`。`--shell-view-color-policy-smoke` 经真实 COM vtable 覆盖了有效/空参数及返回码，没有创建 `IShellView`。这只验证宿主合同，不证明 Shell 实际激活流程会按该顺序调用，也不代表完整宿主迁移门槛通过。
 
 ### 2026-10-27 鼠标空白取消选择（候选，待实机验收）

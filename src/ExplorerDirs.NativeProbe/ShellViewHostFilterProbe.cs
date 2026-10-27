@@ -970,7 +970,6 @@ internal static class ShellViewHostFilterProbe
             if (modeAfterMenu != 4 || iconSizeAfterMenu != 16)
                 throw new Exception($"The Shell background menu did not switch the isolated view to Details: mode={modeAfterMenu}, size={iconSizeAfterMenu}.");
             VerifyColumnHeaderControl(view, owner);
-            VerifyColumnHeaderContextMenu(view, owner);
             if (GetFocus() != listView || !FocusedItemMatches(folderView, expectedFocusedPidl))
                 throw new Exception("Switching view mode through the Shell menu lost the fixture list or focused item.");
 
@@ -1048,6 +1047,10 @@ internal static class ShellViewHostFilterProbe
             groupResult = At<GetGroupBy>(view2, 18)(view2, out groupKey, out groupAscending);
             if (groupResult != 0 || groupKey.FormatId != typeKey.FormatId || groupKey.PropertyId != typeKey.PropertyId || groupAscending != 1)
                 throw new Exception($"The Shell Group Ascending command did not restore ascending order: hr=0x{groupResult:X8}, ascending={groupAscending}.");
+
+            // This intentionally changes sort state only after the menu-command focus matrix;
+            // the Shell view uses a disposable fixture and is torn down immediately afterward.
+            VerifyColumnHeaderContextMenu(view, owner);
         }
         finally
         {
@@ -1224,7 +1227,57 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception($"The '{expectedCaption}' submenu items did not map one-for-one to the background command ID base: mapped={mappedOffsets.Length}, header={actualSubmenu.Items.Count}, background={backgroundSubmenu.Items.Count}, offsets=[{string.Join(',', offsets)}], expected={strongestOffset.Key}.");
             mappedSubmenuRows.Add($"{expectedCaption}:{actualSubmenu.Items.Count(item => item.Id != -1)} items");
         }
+        VerifyHeaderMenuSortByType(capturedSubmenus, capturedPopupOwner, view, strongestOffset.Key);
         Console.WriteLine($"ishellview-column-header-menu: owner=0x{capturedPopupOwner:X}; owner-chain=[{capturedPopupOwnerChain}]; items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
+    }
+
+    private static void VerifyHeaderMenuSortByType(
+        IReadOnlyList<(string Caption, List<(int Id, string Text)> Items)> capturedSubmenus,
+        nint popupOwner, nint view, int popupCommandIdBaseOffset)
+    {
+        var sortMenu = capturedSubmenus.FirstOrDefault(submenu => submenu.Caption.StartsWith("排序方式", StringComparison.Ordinal));
+        var typeItem = sortMenu.Items?.FirstOrDefault(item => item.Text.Contains("类型", StringComparison.Ordinal));
+        if (typeItem is null || typeItem.Value.Id < 0)
+            throw new Exception("The isolated column-header Sort menu did not expose a callable Type item.");
+
+        var folderView2Id = FolderView2Id;
+        Check(Marshal.QueryInterface(view, in folderView2Id, out var folderView2));
+        try
+        {
+            var contextMenuId = ContextMenuId;
+            Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND
+            try
+            {
+                var menu = CreatePopupMenu();
+                if (menu == 0) throw new Exception("Could not create the Shell context menu for header-command dispatch.");
+                try
+                {
+                    Check(At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800));
+                    // Recreate the host-side mapping from the captured header ID to this view's
+                    // IContextMenu range. A bare WM_COMMAND to DefView did not update the sort;
+                    // the header and background submenu mapping is checked above.
+                    var commandOffset = checked(typeItem.Value.Id - popupCommandIdBaseOffset - 1);
+                    var invoke = new NativeInvokeInfo
+                    {
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        Window = popupOwner,
+                        Verb = (nint)commandOffset,
+                        Show = 0
+                    };
+                    Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                }
+                finally { DestroyMenu(menu); }
+            }
+            finally { Marshal.Release(contextMenu); }
+
+            Check(At<GetSortColumnCount>(folderView2, 26)(folderView2, out var count));
+            var actual = new NativeSortColumn[count];
+            if (count > 0) Check(At<GetSortColumns>(folderView2, 28)(folderView2, actual, count));
+            if (count < 1 || actual[0].Key.FormatId != PropertyFormatId || actual[0].Key.PropertyId != 4)
+                throw new Exception($"The column-header Type command did not set the Shell sort key: count={count}, key={(count == 0 ? "none" : $"{actual[0].Key.FormatId:B}/{actual[0].Key.PropertyId}")}.");
+            Console.WriteLine($"ishellview-column-header-command: sort-by-type=True; command-id={typeItem.Value.Id}; primary-property-id={actual[0].Key.PropertyId}; sort-columns={count}");
+        }
+        finally { Marshal.Release(folderView2); }
     }
 
     private static IReadOnlyList<string> ReadBackgroundMenuCaptions(nint view) =>
