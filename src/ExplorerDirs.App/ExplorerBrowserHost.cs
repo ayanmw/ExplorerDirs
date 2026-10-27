@@ -4555,7 +4555,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void DetachViewWindow()
     {
         foreach (var hwnd in _subclassedWindows)
+        {
             RemoveWindowSubclass(hwnd, _subclassProc, 1);
+            // Right-click diagnostics cache class names by HWND; retired view handles must not accumulate across navigation.
+            _nativeViewWindowClasses.Remove(hwnd);
+        }
         _subclassedWindows.Clear();
         _viewWindow = IntPtr.Zero;
         _lastContentFocusWindow = IntPtr.Zero;
@@ -4682,6 +4686,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     break;
                 case 0x0082: // WM_NCDESTROY
                     if (hwnd == _viewWindow) _viewWindow = IntPtr.Zero;
+                    _nativeViewWindowClasses.Remove(hwnd);
                     break;
             }
         }
