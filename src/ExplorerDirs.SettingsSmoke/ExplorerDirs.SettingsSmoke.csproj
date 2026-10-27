@@ -117,6 +117,7 @@
     <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterEnumerationGate.cs" Link="QuickFilterEnumerationGate.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterFavoritesStore.cs" Link="QuickFilterFavoritesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickFilterHistoryStore.cs" Link="QuickFilterHistoryStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRecoverySuppression.cs" Link="ShellSelectionRecoverySuppression.cs" />

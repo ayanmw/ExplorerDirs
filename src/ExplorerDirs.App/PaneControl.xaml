@@ -103,9 +103,12 @@
                     <ComboBoxItem Content="包含匹配项"/>
                     <ComboBoxItem Content="排除匹配项"/>
                 </ComboBox>
-                <TextBox x:Name="QuickFilterBox" ToolTip="通配符筛选；多个模式用分号分隔，例如 *.txt;*.md"
-                         AutomationProperties.Name="快速筛选文件名" KeyDown="QuickFilterBox_KeyDown"
-                         VerticalContentAlignment="Center"/>
+                <ComboBox x:Name="QuickFilterBox" ToolTip="通配符筛选；多个模式用分号分隔，例如 *.txt;*.md；按向下键查看历史"
+                          AutomationProperties.Name="快速筛选文件名" IsEditable="True"
+                          IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                          DropDownOpened="QuickFilterHistory_DropDownOpened"
+                          PreviewKeyDown="QuickFilterBox_PreviewKeyDown"
+                          VerticalContentAlignment="Center"/>
             </DockPanel>
             <DockPanel x:Name="StatusBarRow" DockPanel.Dock="Bottom" LastChildFill="True">
                 <Button x:Name="ViewStyleButton" DockPanel.Dock="Right"

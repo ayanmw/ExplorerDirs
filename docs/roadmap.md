@@ -3743,3 +3743,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - Q-Dir 公布的标签栏能力包含多行标签显示。本程序新增“视图 → 多行标签栏”，按可用宽度排列标签行，关闭横向箭头并提供纵向滚动；默认仍为原先单行滚动，开关保存于独立便携 `MultilineTabHeaders.ini`。标签头仍由现有 `TabHeaderPanel` 排序，不重建浏览器或导航历史。
 - Release SettingsSmoke 覆盖默认关闭及开关往返、单行滚动范围与多行标签坐标；App Release build 通过。未运行可见 GUI；窄窗格、动态标签、拖放重排、标签数量增加后的滚动和焦点行为待验收。此项代码已实现，交互验收未完成。
+
+## 2026-10-27：补齐快速筛选历史自动完成
+
+- 对齐 Q-Dir FAQ 84：向下键展开已使用的筛选模式，Delete 移除下拉列表中选中的历史项。Explorer Dirs 以独立便携 INI 保存最近 50 个已应用模式，不与每标签筛选状态或命名筛选收藏混合；历史不可读、格式较新或被其他实例更改时保护原文件。
+- Store 与按键策略由 Release SettingsSmoke 覆盖通过，App Release 构建 0 警告、0 错误；实际 WPF 下拉、实体键盘和多窗格交互待可见 GUI 验收。[Q-Dir FAQ 84](https://www.softwareok.com/?faq=84&seite=faq-Q-DIR)。

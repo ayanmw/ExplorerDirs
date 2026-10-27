@@ -19,6 +19,7 @@ public partial class PaneControl : UserControl
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
+    private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
     private HiddenItemsPreference _hiddenItemsPreference;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
@@ -128,6 +129,7 @@ public partial class PaneControl : UserControl
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
         QuickFilterFavoritesStore quickFilterFavoritesStore,
+        QuickFilterHistoryStore quickFilterHistoryStore,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
         bool selectionCheckBoxes = false, bool? fullRowSelection = null)
     {
@@ -166,6 +168,8 @@ public partial class PaneControl : UserControl
         ToolbarViewStyleButton.ContextMenu = viewMenu;
         _newTabView = newTabView;
         _quickFilterFavoritesStore = quickFilterFavoritesStore;
+        _quickFilterHistoryStore = quickFilterHistoryStore;
+        QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
         _fullRowSelection = fullRowSelection;
@@ -897,8 +901,7 @@ public partial class PaneControl : UserControl
         QuickFilterBar.Visibility = Visibility.Visible;
         RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         ShowQuickFilterEditor(state.Browser.QuickFilter);
-        QuickFilterBox.Focus();
-        QuickFilterBox.SelectAll();
+        FocusQuickFilterEditor(selectAll: true);
     }
 
     private void ShowQuickFilterEditor(QuickFilterSettings settings)
@@ -911,14 +914,34 @@ public partial class PaneControl : UserControl
     internal void ApplyQuickFilter()
     {
         if (Current is not { } state) return;
-        state.Browser.SetQuickFilter(new QuickFilterSettings(QuickFilterBox.Text,
-            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true));
+        var settings = new QuickFilterSettings(QuickFilterBox.Text,
+            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true);
+        state.Browser.SetQuickFilter(settings);
+        try
+        {
+            _quickFilterHistoryStore.Record(settings.Pattern);
+            RefreshQuickFilterHistory(settings.Pattern);
+        }
+        catch (Exception ex) { Status.Text = $"筛选已应用，但保存筛选历史失败：{ex.Message}"; }
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void QuickFilterBox_KeyDown(object sender, KeyEventArgs e)
+    private void QuickFilterBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter)
+        if (QuickFilterHistoryKeyRouting.ShouldRemoveSelectedEntry((int)e.Key,
+                QuickFilterBox.IsDropDownOpen, QuickFilterBox.SelectedItem is string) &&
+            QuickFilterBox.SelectedItem is string selectedPattern)
+        {
+            var textToKeep = QuickFilterBox.Text;
+            try
+            {
+                _quickFilterHistoryStore.Remove(selectedPattern);
+                RefreshQuickFilterHistory(textToKeep, keepDropDownOpen: true);
+            }
+            catch (Exception ex) { Status.Text = $"删除筛选历史失败：{ex.Message}"; }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
         {
             ApplyQuickFilter();
             e.Handled = true;
@@ -928,6 +951,32 @@ public partial class PaneControl : UserControl
             ClearQuickFilter();
             e.Handled = true;
         }
+    }
+
+    private void QuickFilterHistory_DropDownOpened(object sender, EventArgs e)
+    {
+        var textToKeep = QuickFilterBox.Text;
+        RefreshQuickFilterHistory(textToKeep, keepDropDownOpen: true);
+    }
+
+    private void RefreshQuickFilterHistory(string textToKeep, bool keepDropDownOpen = false)
+    {
+        QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
+        QuickFilterBox.SelectedIndex = -1;
+        QuickFilterBox.Text = textToKeep;
+        QuickFilterBox.IsDropDownOpen = keepDropDownOpen;
+    }
+
+    private void FocusQuickFilterEditor(bool selectAll)
+    {
+        QuickFilterBox.ApplyTemplate();
+        if (QuickFilterBox.Template.FindName("PART_EditableTextBox", QuickFilterBox) is TextBox editor)
+        {
+            editor.Focus();
+            if (selectAll) editor.SelectAll();
+            return;
+        }
+        QuickFilterBox.Focus();
     }
 
     private void ApplyQuickFilter_Click(object sender, RoutedEventArgs e) => ApplyQuickFilter();
@@ -994,6 +1043,7 @@ public partial class PaneControl : UserControl
 
     private void ClearQuickFilter()
     {
+        QuickFilterBox.IsDropDownOpen = false;
         if (Current is not { } state) return;
         ShowQuickFilterEditor(QuickFilterSettings.Empty);
         state.Browser.SetQuickFilter(QuickFilterSettings.Empty);

@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<ProgramStarterEntry> _programStarterEntries = [];
     private ProgramStarterWindow? _programStarterWindow;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
+    private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
@@ -166,6 +167,12 @@ public partial class MainWindow : Window
         if (_quickFilterFavoritesStore.LoadWarning is { } filterFavoritesWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? filterFavoritesWarning : $"{EnvironmentStatus.Text} {filterFavoritesWarning}";
+        _quickFilterHistoryStore = new QuickFilterHistoryStore(Path.Combine(
+            _profileDirectory, "QuickFilterHistory.ini"));
+        _ = _quickFilterHistoryStore.Load();
+        if (_quickFilterHistoryStore.LoadWarning is { } filterHistoryWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? filterHistoryWarning : $"{EnvironmentStatus.Text} {filterHistoryWarning}";
         _uiPreferencesStore = new UiPreferencesStore(Path.Combine(
             _profileDirectory, "UiPreferences.ini"));
         _compactMode = _uiPreferencesStore.Load();
@@ -286,7 +293,8 @@ public partial class MainWindow : Window
                 () => ViewState.Default(_defaultViewMode, _defaultIconSize),
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
-                _quickFilterFavoritesStore, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection);
+                _quickFilterFavoritesStore, _quickFilterHistoryStore, _hiddenItemsPreference,
+                _selectionCheckBoxes, _fullRowSelection);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
