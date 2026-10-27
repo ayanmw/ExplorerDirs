@@ -181,3 +181,11 @@ ListView 的直接通知父级为 `SHELLDLL_DefView`，而列表子窗口创建�
 若绕开 ExplorerBrowser 自行承载 `IShellView`，项目需提供完整的 `IShellBrowser` 协作宿主。当前 NativeProbe 的 `StreamViewHost` 仅用于隐藏探针：菜单插入/设置/移除、状态栏、modeless、激活和工具栏回调是空实现；控件窗口查询与控制消息未实现；默认 `BrowseObject` 返回 `E_NOTIMPL`；视图状态流只读隔离内存。独立筛选探针虽覆写导航并实现有限历史，也不是生产级宿主。需补齐的 parity 面至少包括导航/历史、命令菜单合并、工具栏/状态栏、Shell 快捷键转发、视图持久化、通知/刷新、焦点、拖放和文件操作，并在产品 UI 中逐项验收。相关官方契约见 [`IShellBrowser`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellbrowser) 与 [`IShellView::CreateViewWindow`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-createviewwindow)。
 
 因此当前决策是：生产继续使用 ExplorerBrowser，颜色规则保持未实现/未决；独立 `IShellView` 仅作为隔离可行性研究，不把已验证的默认 `DefView` ListView 着色原型迁入产品。若后续需评估切换宿主，先完成 parity 清单和独立可运行原型，再比较用户可见行为及维护成本。导入后暂黑问题仍按前述隔离对照方案定位，不能与逐项颜色规则混为同一缺陷。
+
+## 2026-10-28 ExplorerBrowser 现有子类链的逐项绘制候选点
+
+源码复核发现，生产 `ExplorerBrowserHost.AttachViewWindow` 会对子视图窗口、沿父链直到宿主窗口的窗口，以及该视图的所有后代安装同一 `SetWindowSubclass` 回调。`ViewWindowProc` 已处理 `WM_NOTIFY`，当前仅把通知交给原生 tooltip 主题刷新；尚未处理 `NM_CUSTOMDRAW`。
+
+这提供了一个比替换整个 ExplorerBrowser 更窄的待验证接点：若当前 Windows/ExplorerBrowser 的 `SysListView32` 将逐项绘制通知发给已被子类化的父窗口，宿主理论上可以在调用 `DefSubclassProc` 前识别来自该 ListView 的 `NM_CUSTOMDRAW`，应用已解析的 Q-Dir 规则，并让其余通知继续由 Shell 默认处理。当前证据仅是源码中的窗口覆盖范围与消息分支；它**不证明**生产 DefView 会发送 `CDDS_ITEMPREPAINT`，也不证明 DirectUI/图标/平铺/内容视图会采用相同路径。
+
+按当前无可见窗口约束，本轮没有创建 ExplorerBrowser 宿主或合成/注入通知，没有修改产品代码。下一步应在获准的隔离宿主中只观察 `WM_NOTIFY` 的 `hwndFrom`、控件类和通知码，再确认是否出现逐项绘制阶段及回调 DC。若不存在稳定逐项通知，继续沿用隔离 `IShellView` 迁移门槛；若存在，也必须先覆盖八种视图、选择态、排序/分组、导航替换和无规则默认绘制，才评估产品接入。
