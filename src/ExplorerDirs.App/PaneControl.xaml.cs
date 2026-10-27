@@ -635,6 +635,11 @@ public partial class PaneControl : UserControl
         return failures;
     }
 
+    internal void RefreshTheme()
+    {
+        foreach (var tab in _tabOrder.ToArray()) ((TabState)tab.Tag).Browser.RefreshTheme();
+    }
+
     internal IReadOnlyList<string> RefreshForWindowsHiddenItemsChange()
     {
         List<string> failures = [];

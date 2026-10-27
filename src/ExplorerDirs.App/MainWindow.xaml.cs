@@ -1286,6 +1286,7 @@ public partial class MainWindow : Window
     {
         ApplyThemePreferenceMenuState();
         ApplyWindowFrameTheme();
+        foreach (var pane in _panes) pane.RefreshTheme();
     }
 
     private void ApplyWindowFrameTheme() =>

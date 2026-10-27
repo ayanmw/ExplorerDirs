@@ -509,6 +509,23 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
+    internal void RefreshTheme()
+    {
+        NativeShellTheme.Apply(_hostWindow);
+        var browser = _browser;
+        if (browser is null) return;
+        var id = ShellViewId;
+        if (browser.GetCurrentView(ref id, out var viewObject) < 0 || viewObject is null) return;
+        try
+        {
+            if (!ReferenceEquals(browser, _browser)) return;
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { NativeShellTheme.ApplyView(view); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
     internal int SetFullRowSelection(bool? enabled)
     {
         _fullRowSelection = enabled;
@@ -574,6 +591,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             ShellBrowserSite.SetSite(_browser, _browserSite);
             var rect = ClientRect();
             var settings = new FolderSettings { ViewMode = _viewState.Mode, Flags = 0 };
+            NativeShellTheme.Apply(_hostWindow);
             Check(_browser.Initialize(_hostWindow, ref rect, ref settings));
             Check(_browser.SetOptions(0x40 | 0x80 | (_visibleShellPane != ExplorerShellPane.None ? 0x2u : 0u))); // EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_SHOWFRAMES
             Check(_browser.Advise(this, out _cookie));
@@ -4221,6 +4239,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         try
         {
+            NativeShellTheme.ApplyView(view);
             var shellView = (IShellView)Marshal.GetObjectForIUnknown(view);
             try
             {
@@ -4235,7 +4254,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         MenuError?.Invoke(this, $"Shell 未能应用整行选择设置（0x{fullRowResult:X8}）。");
                 }
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
+                {
                     AttachViewWindow(hwnd);
+                    NativeShellTheme.Apply(hwnd);
+                }
             }
             finally { Marshal.ReleaseComObject(shellView); }
         }
@@ -4616,6 +4638,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         _menuPrepared = true;
                         InjectCommands(wParam);
                     }
+                    break;
+                case 0x011F: // WM_MENUSELECT: style only this thread's native popup frames.
+                    NativeShellTheme.ApplyMenuFrames();
+                    break;
+                case 0x0121: // WM_ENTERIDLE after the native popup HWND has been created.
+                    if (wParam == 2) NativeShellTheme.ApplyMenuFrames(); // MSGF_MENU
+                    break;
+                case 0x004E: // WM_NOTIFY: native file-information tips are created lazily.
+                    NativeShellTheme.ApplyTooltip(lParam);
                     break;
                 case 0x0111: // WM_COMMAND
                     if (ShellMenuCommand.TryGetMenuId(wParam, lParam, out var commandId))

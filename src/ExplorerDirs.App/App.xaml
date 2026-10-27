@@ -3,6 +3,83 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:ExplorerDirs.App">
     <Application.Resources>
+        <!-- Default Aero templates contain fixed light hover/disabled surfaces. -->
+        <ControlTemplate x:Key="ExplorerDirs.ButtonTemplate" TargetType="{x:Type Control}">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                <ContentPresenter Content="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
+                                  ContentTemplate="{Binding ContentTemplate, RelativeSource={RelativeSource TemplatedParent}}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="Chrome" Property="Opacity" Value="0.45"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+        <ControlTemplate x:Key="ExplorerDirs.MenuItemTemplate" TargetType="{x:Type MenuItem}">
+            <Grid>
+                <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1">
+                    <Grid Margin="3,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="IconColumn" Width="22"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition x:Name="ArrowColumn" Width="16"/>
+                        </Grid.ColumnDefinitions>
+                        <ContentPresenter x:Name="Icon" ContentSource="Icon" VerticalAlignment="Center" Width="16" Height="16"/>
+                        <Path x:Name="Check" Visibility="Collapsed" Data="M 1,5 L 4,8 L 11,1" StrokeThickness="2"
+                              Stroke="{TemplateBinding Foreground}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" Margin="3,0"/>
+                        <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}" Margin="22,0,4,0" VerticalAlignment="Center"/>
+                        <Path x:Name="Arrow" Grid.Column="3" Visibility="Collapsed" Data="M 0,0 L 4,4 L 0,8"
+                              Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Grid>
+                </Border>
+                <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}" Placement="Right" Focusable="False"
+                       AllowsTransparency="True" PopupAnimation="None">
+                    <Border Background="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"
+                            BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" Padding="2">
+                        <ScrollViewer CanContentScroll="True" MaxHeight="700" VerticalScrollBarVisibility="Auto">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="{x:Type Separator}">
+                                    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type Separator}">
+                                        <Border Height="1" Margin="5,3" Background="{DynamicResource ExplorerDirs.BorderBrush}"/>
+                                    </ControlTemplate></Setter.Value></Setter>
+                                </Style>
+                            </ScrollViewer.Resources>
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </ScrollViewer>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="HasItems" Value="True"><Setter TargetName="Arrow" Property="Visibility" Value="Visible"/></Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                    <Setter TargetName="Icon" Property="Visibility" Value="Collapsed"/>
+                </Trigger>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ExplorerDirs.SelectionBackgroundBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.MutedTextBrush}"/></Trigger>
+                <Trigger Property="Role" Value="TopLevelHeader">
+                    <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom"/>
+                    <Setter TargetName="IconColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="ArrowColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="Gesture" Property="Visibility" Value="Collapsed"/>
+                </Trigger>
+                <Trigger Property="Role" Value="TopLevelItem">
+                    <Setter TargetName="IconColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="ArrowColumn" Property="Width" Value="0"/>
+                    <Setter TargetName="Gesture" Property="Visibility" Value="Collapsed"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
         <!-- Keep app-owned navigation surfaces on the same live palette as the window chrome. -->
         <Style x:Key="ExplorerDirs.FocusVisualStyle" TargetType="{x:Type Control}">
             <Setter Property="Template">
@@ -22,6 +99,7 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
         </Style>
         <Style TargetType="{x:Type MenuItem}">
+            <Setter Property="Template" Value="{StaticResource ExplorerDirs.MenuItemTemplate}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
         </Style>
@@ -41,6 +119,24 @@
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"/>
         </Style>
         <Style TargetType="{x:Type ToolBar}">
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolBar}">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <Thumb x:Name="ToolBarThumb" Width="5"><Thumb.Template><ControlTemplate TargetType="{x:Type Thumb}"><Border Background="Transparent"/></ControlTemplate></Thumb.Template></Thumb>
+                        <ToolBarPanel x:Name="PART_ToolBarPanel" Grid.Column="1" IsItemsHost="True"/>
+                        <ToggleButton x:Name="OverflowButton" Grid.Column="2" Content="⋮" Width="18" Focusable="False" Visibility="Collapsed"
+                                      IsChecked="{Binding IsOverflowOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
+                        <Popup Placement="Bottom" PlacementTarget="{Binding ElementName=OverflowButton}" StaysOpen="False"
+                               IsOpen="{Binding IsOverflowOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" AllowsTransparency="True">
+                            <Border Background="{DynamicResource ExplorerDirs.ControlBackgroundBrush}" BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" Padding="3">
+                                <ToolBarOverflowPanel x:Name="PART_ToolBarOverflowPanel"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers><Trigger Property="HasOverflowItems" Value="True"><Setter TargetName="OverflowButton" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
@@ -54,6 +150,17 @@
             <Setter Property="SelectionBrush" Value="{DynamicResource ExplorerDirs.SelectionBackgroundBrush}"/>
             <Setter Property="SelectionTextBrush" Value="{DynamicResource ExplorerDirs.SelectionTextBrush}"/>
         </Style>
+        <Style TargetType="{x:Type ToolTip}">
+            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolTip}">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="7,4">
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
         <Style TargetType="{x:Type ComboBox}">
             <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
@@ -65,12 +172,14 @@
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
         </Style>
         <Style TargetType="{x:Type Button}">
+            <Setter Property="Template" Value="{StaticResource ExplorerDirs.ButtonTemplate}"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.BorderBrush}"/>
         </Style>
         <Style TargetType="{x:Type ToggleButton}">
+            <Setter Property="Template" Value="{StaticResource ExplorerDirs.ButtonTemplate}"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource ExplorerDirs.FocusVisualStyle}"/>
             <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>

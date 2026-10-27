@@ -1,5 +1,8 @@
 # Explorer Dirs project rules
 
+- On 2026-10-27 the user authorized shared Computer Use for this repair, superseding the earlier no-Computer-Use period. Announce short action bursts, return control promptly, refresh after incidental input conflicts, and continue background work when front-end tooling is blocked. Honor tool-enforced stops; do not treat an incidental ESC report as cancellation of the whole development task. Explicit user text stopping desktop use takes immediate effect.
+- Deep theme acceptance includes app menu normal/highlight/check/disabled states, native file content and column-header text, native popup borders and both Shell/WPF tooltips. Palette/INI tests or a dark frame alone are insufficient. The user explicitly authorized updating the same temp.76 release directory for this repair; preserve its profile and retain a recoverable old payload before replacement.
+
 - Windows UISettings light Foreground means dark theme. Test the actual SystemThemeMonitor/controller chain, not only the palette brightness helper; System/Light/Dark preferences stay portable in Theme.ini. Do not claim ExplorerBrowser/third-party menus are fully dark from WPF resource checks alone.
 
 ## Product boundary

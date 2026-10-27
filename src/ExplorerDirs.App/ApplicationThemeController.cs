@@ -96,6 +96,7 @@ internal sealed class ApplicationThemeController : IDisposable
     private void Apply()
     {
         Resolved = ThemePalette.Resolve(Preference, _systemIsDark);
+        NativeShellTheme.SetProcessTheme(Resolved == ResolvedTheme.Dark && !SystemParameters.HighContrast);
         if (SystemParameters.HighContrast)
         {
             CurrentColors = null;
