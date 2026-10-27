@@ -107,15 +107,46 @@ internal static class AddressEditingProbe
         Ensure(address.Text == nextPath && address.IsReadOnly && pane.CurrentPath == nextPath,
             "an unchanged address submission still leaves editing after completion");
 
+        pane.FocusAddress();
+        address.Text = firstPath;
+        Call(pane, "Go_Click", Field(pane, "GoButton")!, new RoutedEventArgs());
+        var oldRequest = (long)Field(browser, "_navigationRequestVersion")!;
+        address.Text = nextPath;
+        Call(pane, "Go_Click", Field(pane, "GoButton")!, new RoutedEventArgs());
+        Notify(browser, "Navigated", firstPath, oldRequest);
+        Ensure(address.Text == nextPath && !address.IsReadOnly && pane.CurrentPath == firstPath &&
+            (bool)Field(pane, "_addressNavigationPending")!,
+            "an older completion records the actual folder without finishing the newer address submission");
+        Notify(browser, "NavigationFailed", "old failure", oldRequest);
+        Ensure((bool)Field(pane, "_addressNavigationPending")!, "an older failure cannot clear the newer address request");
+        Notify(browser, "Navigated", nextPath);
+        Ensure(address.Text == nextPath && address.IsReadOnly && !(bool)Field(pane, "_addressNavigationPending")!,
+            "the matching completion finishes the newer address submission");
+
         var search = (TextBox)Field(pane, "SearchBox")!;
         var location = Field(browser, "_location")!;
-        void CompleteSearch(string query)
+        void CompleteSearch(string query, long? request = null)
         {
             Call(location, "TryCompleteSearch", "search-ms:query=" + Uri.EscapeDataString(query) +
                 "&crumb=location:" + Uri.EscapeDataString(nextPath));
-            Notify(browser, "SearchNavigated", query);
+            Notify(browser, "SearchNavigated", query, request);
         }
         CompleteSearch("earlier");
+        var earlierSearch = (long)Field(browser, "_navigationRequestVersion")!;
+        // This unhosted browser cannot accept a real search. Model the accepted
+        // newer request explicitly and exercise the actual pane notification handlers.
+        browser.GetType().GetField("_navigationRequestVersion", Members)!.SetValue(browser, earlierSearch + 1);
+        state.GetType().GetProperty("SearchRequestPending", Members)!.SetValue(state, true);
+        search.Text = "next query";
+        CompleteSearch("earlier", earlierSearch);
+        Notify(browser, "Navigated", nextPath, earlierSearch);
+        Notify(browser, "NavigationFailed", "old search failure", earlierSearch);
+        Ensure((bool)state.GetType().GetProperty("SearchRequestPending", Members)!.GetValue(state)! &&
+            ((FrameworkElement)Field(pane, "SearchBar")!).Visibility == Visibility.Visible && search.Text == "next query",
+            "older search, directory and failure notices leave the newer search pending and its editor visible");
+        CompleteSearch("next query");
+        Ensure(!(bool)state.GetType().GetProperty("SearchRequestPending", Members)!.GetValue(state)! &&
+            !(bool)Field(pane, "_searchTextDirty")!, "the newer search result settles its own submission");
         search.Text = "new draft";
         CompleteSearch("earlier");
         Ensure(search.Text == "new draft", "late search success preserves newer text even after input loses focus");
@@ -128,6 +159,10 @@ internal static class AddressEditingProbe
         Ensure(search.Text == "new draft", "explicit submit normalizes query whitespace without reverting to the old query");
         CompleteSearch("earlier");
         Ensure(search.Text == "new draft", "an older search result cannot replace the newer submitted query");
+        CompleteSearch("new draft");
+        Ensure((bool)Field(pane, "_searchTextDirty")!, "a failed search cannot be acknowledged by a later success with the same request number");
+        browser.GetType().GetField("_navigationRequestVersion", Members)!.SetValue(browser,
+            (long)Field(browser, "_navigationRequestVersion")! + 1);
         CompleteSearch("new draft");
         Ensure(!(bool)Field(pane, "_searchTextDirty")!, "the matching result acknowledges submitted search text");
         search.Text = string.Empty;
@@ -147,8 +182,9 @@ internal static class AddressEditingProbe
         Ensure(address.Text == "unsubmitted current-tab text", "a background tab cannot replace the active tab's draft");
     }
 
-    private static void Notify(object browser, string eventName, string value) =>
-        ((EventHandler<string>?)Field(browser, eventName))?.Invoke(browser, value);
+    private static void Notify(object browser, string eventName, string value, long? requestVersion = null) =>
+        ((EventHandler<ShellNavigationNotice>?)Field(browser, eventName))?.Invoke(browser,
+            new(value, requestVersion ?? (long)Field(browser, "_navigationRequestVersion")!));
 
     private static void RaiseMouseDown(UIElement element, MouseButton button) => element.RaiseEvent(
         new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button) { RoutedEvent = Mouse.MouseDownEvent });

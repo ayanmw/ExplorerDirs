@@ -1502,29 +1502,41 @@ public partial class PaneControl : UserControl
                 () => Clipboard.SetText(selectedItem?.Path ?? state.Path)));
             return actions;
         };
-        browser.Navigated += (_, navigatedPath) =>
+        browser.Navigated += (_, notice) =>
         {
             var owner = state.Owner;
-            state.SearchRequestPending = false;
-            owner.SetSearchScope(state, null);
-            var restoreSearchCloseFocus = ReferenceEquals(owner._searchCloseFocusPending, state);
+            var navigatedPath = notice.Value;
+            var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (completesInput)
+            {
+                state.SearchRequestPending = false;
+                owner.SetSearchScope(state, null);
+            }
+            var restoreSearchCloseFocus = completesInput && ReferenceEquals(owner._searchCloseFocusPending, state);
             if (restoreSearchCloseFocus) owner._searchCloseFocusPending = null;
             state.Path = navigatedPath;
             state.AddressHistory.Record(navigatedPath);
             owner.UpdateTabHeader(state);
             if (owner.Current == state)
             {
-                var restoreFocus = owner._addressNavigationPending &&
-                    (owner.Address.IsKeyboardFocusWithin || owner.GoButton.IsKeyboardFocused);
                 owner.RenderBreadcrumb(navigatedPath);
-                if (!owner._addressEditing || owner._addressNavigationPending)
+                // Shell display-name work can reenter; a later request still
+                // owns editing even if it began while this notification ran.
+                completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+                restoreSearchCloseFocus &= completesInput;
+                var restoreFocus = completesInput && owner._addressNavigationPending &&
+                    (owner.Address.IsKeyboardFocusWithin || owner.GoButton.IsKeyboardFocused);
+                if (!owner._addressEditing || completesInput && owner._addressNavigationPending)
                 {
                     owner.Address.Text = navigatedPath;
                     owner.ShowBreadcrumb();
                 }
-                owner._addressNavigationPending = false;
-                owner.SearchBar.Visibility = Visibility.Collapsed;
-                owner.Status.Text = "Shell 视图";
+                if (completesInput)
+                {
+                    owner._addressNavigationPending = false;
+                    owner.SearchBar.Visibility = Visibility.Collapsed;
+                    owner.Status.Text = "Shell 视图";
+                }
                 if (browser.IsFileSystemLocation) owner._treeHost?.SetDirectory(navigatedPath);
                 else owner._treeHost?.SetVirtualLocation();
                 owner.QueueSelectionCountsRefresh(state);
@@ -1536,29 +1548,36 @@ public partial class PaneControl : UserControl
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
             if (owner.Current == state) owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
         };
-        browser.SearchNavigated += (_, query) =>
+        browser.SearchNavigated += (_, notice) =>
         {
             var owner = state.Owner;
-            state.SearchRequestPending = false;
+            var query = notice.Value;
+            var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (completesInput) state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state)) return;
             state.Path = browser.CurrentPath;
             owner.UpdateTabHeader(state);
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
             if (owner.Current != state) return;
             owner.RenderBreadcrumb(state.Path);
+            completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
             if (!owner._addressEditing)
             {
                 owner.Address.Text = state.Path;
                 owner.ShowBreadcrumb();
             }
-            owner.SearchBar.Visibility = Visibility.Visible;
-            owner.SyncSearchText(query);
-            owner.Status.Text = $"搜索结果：{query}";
+            if (completesInput)
+            {
+                owner.SearchBar.Visibility = Visibility.Visible;
+                owner.SyncSearchText(query);
+                owner.Status.Text = $"搜索结果：{query}";
+            }
             owner.QueueSelectionCountsRefresh(state);
             owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
         };
-        browser.NavigationFailed += (_, message) =>
+        browser.NavigationFailed += (_, notice) =>
         {
+            if (!browser.IsCurrentNavigationRequest(notice.RequestVersion)) return;
             var owner = state.Owner;
             state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state))
@@ -1571,7 +1590,7 @@ public partial class PaneControl : UserControl
                     owner.SearchBar.Visibility = Visibility.Visible;
                     owner.SyncSearchText(query);
                 }
-                owner.Status.Text = message;
+                owner.Status.Text = notice.Value;
                 owner.SyncTreeToCurrent(state);
                 owner.QueueSelectionCountsRefresh(state);
             }

@@ -79,11 +79,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     // Shell parsing can pump STA messages. Invalidate preparation before any
     // newer request, including one still waiting for a directory probe.
     private long _navigationRequestVersion;
+    private long _nativeNavigationRequestVersion;
+    private long? _failedNavigationRequestVersion;
     private readonly ShellNavigationState _location;
     private readonly ShellBrowserSite _browserSite = new();
     private readonly ShellSearchHistory _searchHistory = new();
-    private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _issuedSearches = new(StringComparer.Ordinal);
+    private readonly record struct IssuedNavigationRequest(int Count, long RequestVersion);
+    private readonly Dictionary<string, IssuedNavigationRequest> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IssuedNavigationRequest> _issuedSearches = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
     {
         Interval = TimeSpan.FromMilliseconds(250)
@@ -400,7 +403,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal int DirectoryChangeFolderDeleteLookupCount => Volatile.Read(ref _directoryChangeFolderDeleteLookupCount);
     internal string DirectoryChangeLastFolderDeleteNotificationResult => _directoryChangeLastFolderDeleteNotificationResult;
     internal int DirectoryChangeDeletedEventCount => Volatile.Read(ref _directoryChangeDeletedEvents);
-    public event EventHandler<string>? Navigated;
+    public event EventHandler<ShellNavigationNotice>? Navigated;
     public event EventHandler? NavigationStarting;
     public event EventHandler? NavigationAvailabilityChanged;
     public event EventHandler<string?>? ShellStatusTextChanged;
@@ -409,8 +412,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal event Action<ShellMenuPoint>? HeaderPresetMenuRequested;
     internal bool CanGoBack => CanNavigateHistory(true);
     internal bool CanGoForward => CanNavigateHistory(false);
-    public event EventHandler<string>? SearchNavigated;
-    public event EventHandler<string>? NavigationFailed;
+    public event EventHandler<ShellNavigationNotice>? SearchNavigated;
+    public event EventHandler<ShellNavigationNotice>? NavigationFailed;
+    internal bool IsCurrentNavigationRequest(long? version) => version == _navigationRequestVersion;
+    internal bool CanCompleteNavigationRequest(long? version) =>
+        IsCurrentNavigationRequest(version) && version != _failedNavigationRequestVersion;
+
+    private void ReportNavigationFailure(string message, long? requestVersion)
+    {
+        if (IsCurrentNavigationRequest(requestVersion))
+        {
+            // A late success from an ambiguous same-target batch must not
+            // turn an already failed submission into an input completion.
+            _failedNavigationRequestVersion = requestVersion;
+            _focusWhenReady = false;
+            _restoreFocusAfterNavigation = false;
+        }
+        NavigationFailed?.Invoke(this, new(message, requestVersion));
+    }
     public event EventHandler<string>? MenuError;
     internal event EventHandler<string>? FolderMiddleClicked;
     public event EventHandler? Activated;
@@ -559,7 +578,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (_browser is null) return;
                 try { Navigate(CurrentPath); }
-                catch (Exception ex) { NavigationFailed?.Invoke(this, ex.Message); }
+                catch (Exception ex) { ReportNavigationFailure(ex.Message, _navigationRequestVersion); }
             }));
         }
         catch
@@ -1556,7 +1575,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _navigationRequestVersion++;
         var hr = _browser.BrowseToIDList(IntPtr.Zero, flag);
         if (hr < 0 && hr != unchecked((int)0x80004005))
-            NavigationFailed?.Invoke(this, $"目录导航失败：0x{hr:X8}");
+            ReportNavigationFailure($"目录导航失败：0x{hr:X8}", _navigationRequestVersion);
         return hr >= 0;
     }
 
@@ -1592,6 +1611,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public void Navigate(string path)
     {
+        _navigationRequestVersion++;
+        _navigationGate.Cancel();
         path = AddressInputResolver.Resolve(path,
             _location.IsFileSystemLocation ? _location.DirectoryPath : null);
         if (string.IsNullOrWhiteSpace(path))
@@ -1601,11 +1622,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         if (!ShellLocationIdentity.TryNormalize(path, out path, out var isFileSystemPath))
         {
-            NavigationFailed?.Invoke(this, "路径不是可识别的文件系统位置或受支持的 Shell 文件夹。");
+            ReportNavigationFailure("路径不是可识别的文件系统位置或受支持的 Shell 文件夹。", _navigationRequestVersion);
             return;
         }
-        _navigationRequestVersion++;
-        _navigationGate.Cancel();
         if (_browser is null)
         {
             _location.CompleteDirectory(path, isFileSystemPath);
@@ -1621,19 +1640,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private async Task SearchWhenAvailableAsync(string query, string? scopePath)
     {
+        var request = ++_navigationRequestVersion;
+        _navigationGate.Cancel();
         if (!_location.CanSearchCurrentLocation)
         {
-            NavigationFailed?.Invoke(this, "当前 Shell 位置暂不支持按目录搜索。");
+            ReportNavigationFailure("当前 Shell 位置暂不支持按目录搜索。", request);
             return;
         }
-        var request = ++_navigationRequestVersion;
         var browser = _browser;
         if (_browser is null)
         {
-            NavigationFailed?.Invoke(this, "搜索视图尚未就绪。");
+            ReportNavigationFailure("搜索视图尚未就绪。", request);
             return;
         }
-        _navigationGate.Cancel();
         bool IsCurrentRequest() => request == _navigationRequestVersion && ReferenceEquals(browser, _browser);
         try
         {
@@ -1646,7 +1665,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!IsCurrentRequest()) return;
                 _retryPath = null;
                 _focusWhenReady = true;
-                _issuedSearches[uri] = _issuedSearches.GetValueOrDefault(uri) + 1;
+                TrackIssuedSearch(uri);
                 try
                 {
                     var result = await BrowseWhenAvailableAsync(browser!, pidl, IsCurrentRequest);
@@ -1669,12 +1688,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             if (!IsCurrentRequest()) return;
             _focusWhenReady = false;
-            NavigationFailed?.Invoke(this, $"无法搜索指定范围：{ex.Message}");
+            ReportNavigationFailure($"无法搜索指定范围：{ex.Message}", request);
         }
     }
 
     private async Task NavigateWhenAvailableAsync(string path, bool isFileSystemPath)
     {
+        var request = _navigationRequestVersion;
         var probe = await _navigationGate.ProbeAsync(path,
             _ => isFileSystemPath ? DirectoryProbe.Check(path) : DirectoryProbeStatus.Unavailable);
         if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
@@ -1685,7 +1705,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Check(SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out _));
             else if (!ShellLocationIdentity.TryGetFolderPidl(path, out pidl))
             {
-                NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
+                if (_navigationGate.IsCurrent(probe) && _browser is not null)
+                    ReportNavigationFailure("目录不存在、不可访问或设备离线；可点击刷新重试。", request);
                 return;
             }
 
@@ -1716,7 +1737,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (Exception ex)
         {
             if (_navigationGate.IsCurrent(probe) && _browser is not null)
-                NavigationFailed?.Invoke(this, $"无法打开目录：{ex.Message}");
+                ReportNavigationFailure($"无法打开目录：{ex.Message}", request);
         }
         finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }
     }
@@ -4053,8 +4074,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try { UpdateQuickFilterAttachment(searchActive: false); }
             catch (Exception ex) { MenuError?.Invoke(this, $"为目标目录启用快速筛选失败：{ex.Message}"); }
         }
-        var issuedByApp = identity is not null &&
-            (_issuedBrowserPaths.ContainsKey(NormalizePathKey(identity)) || _issuedSearches.ContainsKey(identity));
+        var issuedVersion = IssuedRequestVersion(identity);
+        var issuedByApp = issuedVersion.HasValue;
         // An app-issued folder/search can start after a later directory probe.
         // Its delayed callback must not cancel that newer request as user input.
         if (!issuedByApp)
@@ -4062,6 +4083,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _navigationRequestVersion++;
             _navigationGate.Cancel();
         }
+        _nativeNavigationRequestVersion = issuedVersion ?? _navigationRequestVersion;
         _viewReadiness.Begin(identity);
         QueueNavigationAvailability();
         NavigationStarting?.Invoke(this, EventArgs.Empty);
@@ -4111,28 +4133,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
         var identity = NavigationIdentity(pidl);
-        CompleteIssuedSearch(identity);
+        var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Complete(identity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
-        var path = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var location, out _)
-            ? location : null;
-        var issuedByApp = path is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
-        if (path is not null) CompleteIssuedPath(path);
         // Retire bookkeeping for every callback, but publish only the current
         // settled visit. An older completion must not overwrite address/capacity.
         if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (_viewReadiness.RequiresLocationRead)
         {
-            if (!ReconcileCurrentLocation(navigationVersion, clearRetry: true) &&
-                _viewReadiness.IsCurrent(navigationVersion))
-                NavigationFailed?.Invoke(this, "当前 Shell 目录位置暂时无法确认，请刷新重试。");
+            if (!ReconcileCurrentLocation(navigationVersion, requestVersion, clearRetry: true) &&
+                _viewReadiness.IsCurrent(navigationVersion) && IsCurrentNavigationRequest(requestVersion))
+                ReportNavigationFailure("当前 Shell 目录位置暂时无法确认，请刷新重试。", requestVersion);
             return 0;
         }
-        return PublishNavigationLocation(pidl, navigationVersion, issuedByApp, clearRetry: true);
+        return PublishNavigationLocation(pidl, navigationVersion, requestVersion, clearRetry: true);
     }
 
-    private int PublishNavigationLocation(IntPtr pidl, long navigationVersion, bool issuedByApp, bool clearRetry)
+    private int PublishNavigationLocation(IntPtr pidl, long navigationVersion, long? requestVersion, bool clearRetry)
     {
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out var isFileSystemLocation))
@@ -4148,8 +4166,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch (Exception ex) { MenuError?.Invoke(this, $"应用快速筛选失败：{ex.Message}"); }
             _hasNavigated = true;
-            if (clearRetry && (!issuedByApp || (_retryPath is not null &&
-                string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))))
+            if (clearRetry && CanCompleteNavigationRequest(requestVersion))
                 _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
@@ -4161,12 +4178,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!_viewReadiness.IsCurrent(navigationVersion)) return;
                 if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
                 else StopDirectoryChangeMonitor();
-                RestoreNavigationFocus(navigationVersion);
+                if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
                 if (_viewReadiness.IsCurrent(navigationVersion) && CurrentPath == path && !_location.IsSearchActive)
-                    Navigated?.Invoke(this, path);
+                    Navigated?.Invoke(this, new(path, requestVersion));
             }));
             return 0;
         }
@@ -4179,18 +4196,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             catch (Exception ex) { MenuError?.Invoke(this, $"切换搜索视图筛选状态失败：{ex.Message}"); }
             _locationUnconfirmed = false;
             _hasNavigated = true;
-            if (clearRetry) _retryPath = null;
+            if (clearRetry && CanCompleteNavigationRequest(requestVersion)) _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!_viewReadiness.IsCurrent(navigationVersion) || _location.SearchUri != searchUri) return;
-                RestoreNavigationFocus(navigationVersion);
+                if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
                 if (_viewReadiness.IsCurrent(navigationVersion) && _location.SearchUri == searchUri)
-                    SearchNavigated?.Invoke(this, _location.SearchQuery!);
+                    SearchNavigated?.Invoke(this, new(_location.SearchQuery!, requestVersion));
             }));
             return 0;
         }
@@ -4199,7 +4216,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return 0;
     }
 
-    private bool ReconcileCurrentLocation(long navigationVersion, bool clearRetry)
+    private bool ReconcileCurrentLocation(long navigationVersion, long? requestVersion, bool clearRetry)
     {
         nint unknown = 0, actual = 0;
         try
@@ -4209,7 +4226,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             actual = ShellCurrentLocation.ReadPidl(unknown);
             if (actual == 0 || !_viewReadiness.IsCurrent(navigationVersion)) return false;
             _locationUnconfirmed = true;
-            PublishNavigationLocation(actual, navigationVersion, issuedByApp: true, clearRetry: clearRetry);
+            PublishNavigationLocation(actual, navigationVersion, requestVersion, clearRetry: clearRetry);
             return !_locationUnconfirmed && _viewReadiness.IsCurrent(navigationVersion);
         }
         catch (COMException) { return false; }
@@ -4240,7 +4257,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         // navigation stops retrying and an older failure cannot replace it.
         _retryPath = path;
         var key = NormalizePathKey(path);
-        _issuedBrowserPaths[key] = _issuedBrowserPaths.GetValueOrDefault(key) + 1;
+        _issuedBrowserPaths[key] = new(_issuedBrowserPaths.GetValueOrDefault(key).Count + 1, _navigationRequestVersion);
         if (_issuedBrowserPaths.Count > 32)
             _issuedBrowserPaths.Remove(_issuedBrowserPaths.Keys.First());
     }
@@ -4248,16 +4265,48 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void CompleteIssuedPath(string path)
     {
         var key = NormalizePathKey(path);
-        if (!_issuedBrowserPaths.TryGetValue(key, out var count)) return;
-        if (count <= 1) _issuedBrowserPaths.Remove(key);
-        else _issuedBrowserPaths[key] = count - 1;
+        if (!_issuedBrowserPaths.TryGetValue(key, out var request)) return;
+        if (request.Count <= 1) _issuedBrowserPaths.Remove(key);
+        else _issuedBrowserPaths[key] = request with { Count = request.Count - 1 };
     }
 
     private void CompleteIssuedSearch(string? identity)
     {
-        if (identity is null || !_issuedSearches.TryGetValue(identity, out var count)) return;
-        if (count <= 1) _issuedSearches.Remove(identity);
-        else _issuedSearches[identity] = count - 1;
+        if (identity is null || !_issuedSearches.TryGetValue(identity, out var request)) return;
+        if (request.Count <= 1) _issuedSearches.Remove(identity);
+        else _issuedSearches[identity] = request with { Count = request.Count - 1 };
+    }
+
+    private void TrackIssuedSearch(string uri) =>
+        _issuedSearches[uri] = new(_issuedSearches.GetValueOrDefault(uri).Count + 1, _navigationRequestVersion);
+
+    private long? IssuedRequestVersion(string? identity)
+    {
+        if (identity is null) return null;
+        if (_issuedBrowserPaths.TryGetValue(NormalizePathKey(identity), out var directory)) return directory.RequestVersion;
+        return _issuedSearches.TryGetValue(identity, out var search) ? search.RequestVersion : null;
+    }
+
+    private long? RetireNavigationRequest(string? identity)
+    {
+        // Native callbacks identify a target, not an individual submission.
+        // Preserve the latest registered input number for the counted batch;
+        // no partial batch may acknowledge input. Readiness still reconciles
+        // the actual Shell location after repeated native targets settle.
+        if (identity is not null)
+        {
+            if (_issuedBrowserPaths.TryGetValue(NormalizePathKey(identity), out var directory))
+            {
+                CompleteIssuedPath(identity);
+                return directory.Count == 1 ? directory.RequestVersion : null;
+            }
+            if (_issuedSearches.TryGetValue(identity, out var search))
+            {
+                CompleteIssuedSearch(identity);
+                return search.Count == 1 ? search.RequestVersion : null;
+            }
+        }
+        return _nativeNavigationRequestVersion;
     }
 
     private static string? FileSystemPath(IntPtr pidl)
@@ -4837,36 +4886,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
         var identity = NavigationIdentity(pidl);
-        CompleteIssuedSearch(identity);
+        var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Fail(identity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
-        if (identity is { } path)
-        {
-            var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
-            CompleteIssuedPath(path);
-            if (issuedByApp && _retryPath is not null &&
-                !string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))
-                return 0;
-        }
         if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
         var reconcile = _viewReadiness.RequiresLocationRead;
         if (reconcile)
         {
             // A mixed success/failure batch has no per-request token. Its last
             // callback cannot establish which folder the native view retained.
-            ReconcileCurrentLocation(navigationVersion, clearRetry: false);
+            ReconcileCurrentLocation(navigationVersion, requestVersion, clearRetry: false);
             if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         }
         var isSearch = _searchHistory.TryResolve(pidl, out _);
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
-        if (isSearch) _focusWhenReady = false;
+        if (isSearch && IsCurrentNavigationRequest(requestVersion)) _focusWhenReady = false;
         void ReportFailure()
         {
-            if (_viewReadiness.IsCurrent(navigationVersion))
-                NavigationFailed?.Invoke(this, _locationUnconfirmed
+            if (_viewReadiness.IsCurrent(navigationVersion) && IsCurrentNavigationRequest(requestVersion))
+                ReportNavigationFailure(_locationUnconfirmed
                     ? "当前 Shell 目录位置暂时无法确认，请刷新重试。"
-                    : isSearch ? "无法打开搜索结果。" : "无法打开目录。");
+                    : isSearch ? "无法打开搜索结果。" : "无法打开目录。", requestVersion);
         }
         // Reconciliation queues a location update which also resets status text.
         // Queue the error after it so the older status cannot erase the failure.

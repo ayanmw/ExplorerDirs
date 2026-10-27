@@ -3,6 +3,8 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.Windows.Threading;
+using ExplorerDirs.App;
 
 // Real Shell folder PIDLs and actual host callbacks, without attaching the host
 // to a window or creating ExplorerBrowser. Callback ordering is synthetic.
@@ -24,13 +26,16 @@ internal static class FolderNavigationCallbacksProbe
             {
                 CheckCompletion(path, pidl);
                 CheckLatePending(path, pidl);
+                CheckSupersededCompletion(path, pidl);
                 CheckRepeatedRegistration(path, pidl);
                 CheckNativeNavigation(pidl);
+                if (path == "shell:MyComputerFolder") CheckQueuedCompletion(path, pidl);
             }
             finally { Marshal.FreeCoTaskMem(pidl); }
         }
+        CheckSearchHandoff();
         Ensure(GetForegroundWindow() == foreground, "foreground remained unchanged");
-        Console.WriteLine("Folder navigation callbacks: PASS (five real Shell identities; unhosted callbacks, no native view or desktop input)");
+        Console.WriteLine("Folder navigation callbacks: PASS (five folder identities and search handoff; actual queued unhosted callbacks, no native view or desktop input)");
         return 0;
     }
 
@@ -64,7 +69,7 @@ internal static class FolderNavigationCallbacksProbe
         var version = (long)Field(host, "_navigationRequestVersion")!;
         var failures = 0;
         HostType.GetEvent("NavigationFailed", Members)!.AddEventHandler(host,
-            (EventHandler<string>)((_, _) => failures++));
+            (EventHandler<ExplorerDirs.App.ShellNavigationNotice>)((_, _) => failures++));
         Event(host, "OnNavigationPending", pidl);
         Ensure((long)Field(host, "_navigationRequestVersion")! == version &&
             (bool)Call(gate, "IsCurrent", probe)!,
@@ -92,6 +97,24 @@ internal static class FolderNavigationCallbacksProbe
         EnsureUnhosted(host);
     }
 
+    private static void CheckSupersededCompletion(string path, nint pidl)
+    {
+        using var host = NewHost();
+        Call(host, "Navigate", path);
+        RegisterFolder(host, pidl);
+        Event(host, "OnNavigationPending", pidl);
+        // The second same-path submission has not reached native Pending yet.
+        Call(host, "Navigate", path);
+        Event(host, "OnNavigationComplete", pidl);
+        Ensure(Field(host, "_retryPath") is not null,
+            "an older same-path completion must not retire the newer unissued request");
+        RegisterFolder(host, pidl);
+        Event(host, "OnNavigationPending", pidl);
+        Event(host, "OnNavigationComplete", pidl);
+        Ensure(Field(host, "_retryPath") is null, "the newer request clears its own retry target on completion");
+        EnsureUnhosted(host);
+    }
+
     private static void CheckRepeatedRegistration(string path, nint pidl)
     {
         using var host = NewHost();
@@ -101,11 +124,11 @@ internal static class FolderNavigationCallbacksProbe
         RegisterFolder(host, pidl);
         Event(host, "OnNavigationPending", pidl);
         var issued = (IDictionary)Field(host, "_issuedBrowserPaths")!;
-        Ensure(issued.Count == 1 && (int)issued.Values.Cast<object>().Single() == 2,
+        Ensure(issued.Count == 1 && Count(issued) == 2,
             "repeated canonical folders share a counted registration");
         Event(host, "OnNavigationFailed", pidl);
         var readiness = Field(host, "_viewReadiness")!;
-        Ensure(issued.Count == 1 && (int)issued.Values.Cast<object>().Single() == 1 &&
+        Ensure(issued.Count == 1 && Count(issued) == 1 &&
             (bool)readiness.GetType().GetProperty("Pending", Members)!.GetValue(readiness)!,
             "the first repeated callback does not settle or discard the remaining visit");
         Event(host, "OnNavigationFailed", pidl);
@@ -116,11 +139,104 @@ internal static class FolderNavigationCallbacksProbe
         EnsureUnhosted(host);
     }
 
+    private static void CheckQueuedCompletion(string path, nint pidl)
+    {
+        using var host = NewHost();
+        var notices = new List<ShellNavigationNotice>();
+        HostType.GetEvent("Navigated", Members)!.AddEventHandler(host,
+            (EventHandler<ShellNavigationNotice>)((_, notice) => notices.Add(notice)));
+        Call(host, "Navigate", path);
+        RegisterFolder(host, pidl);
+        Event(host, "OnNavigationPending", pidl);
+        var earlier = (long)Field(host, "_navigationRequestVersion")!;
+        Event(host, "OnNavigationComplete", pidl); // Notification is queued, not delivered yet.
+        Call(host, "Navigate", path);
+        // The unshown host deliberately cannot take focus; seed only its
+        // pending intent, then let the real queued callback attempt to retire it.
+        HostType.GetField("_focusWhenReady", Members)!.SetValue(host, true);
+        Drain(host.Dispatcher);
+        Ensure(notices.Count == 1 && notices[0].RequestVersion == earlier &&
+            !(bool)Call(host, "CanCompleteNavigationRequest", notices[0].RequestVersion)!,
+            "queued actual location publication retains its original request number");
+        Ensure((bool)Field(host, "_focusWhenReady")!, "old queued completion does not consume newer focus intent");
+
+        RegisterFolder(host, pidl);
+        Event(host, "OnNavigationPending", pidl);
+        Event(host, "OnNavigationComplete", pidl);
+        Drain(host.Dispatcher);
+        Ensure(notices.Count == 2 && (bool)Call(host, "CanCompleteNavigationRequest", notices[1].RequestVersion)! &&
+            !(bool)Field(host, "_focusWhenReady")!, "the matching queued completion consumes its own focus request");
+
+        // A second same-target request can fail before reaching native Pending.
+        Call(host, "Navigate", path);
+        RegisterFolder(host, pidl);
+        Event(host, "OnNavigationPending", pidl);
+        Call(host, "Navigate", path);
+        RegisterFolder(host, pidl);
+        Call(host, "CompleteIssuedPath", Call(host, "NavigationIdentity", pidl));
+        var failed = (long)Field(host, "_navigationRequestVersion")!;
+        Call(host, "ReportNavigationFailure", "probe browse rejection", failed);
+        Event(host, "OnNavigationComplete", pidl);
+        Drain(host.Dispatcher);
+        Ensure(Field(host, "_retryPath") is not null && !(bool)Call(host, "CanCompleteNavigationRequest", failed)!,
+            "a late same-target success preserves an already reported failure and retry target");
+        EnsureUnhosted(host);
+    }
+
+    private static void Drain(Dispatcher dispatcher)
+    {
+        var frame = new DispatcherFrame();
+        dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+
+    private static void CheckSearchHandoff()
+    {
+        var type = HostType.Assembly.GetType("ExplorerDirs.App.ShellSearchLocation", true)!;
+        var uri = (string)type.GetMethod("BuildUri")!.Invoke(null, [Path.GetTempPath(), "ExplorerDirs request handoff probe"])!;
+        var pidl = (nint)type.GetMethod("ParsePidl")!.Invoke(null, [uri])!;
+        try
+        {
+            foreach (var fail in new[] { false, true })
+            {
+                using var host = NewHost();
+                var history = Field(host, "_searchHistory")!;
+                Call(history, "Remember", pidl, uri);
+                Call(host, "TrackIssuedSearch", uri);
+                var earlier = (long)Field(host, "_navigationRequestVersion")!;
+                var notices = new List<ShellNavigationNotice>();
+                var failures = 0;
+                HostType.GetEvent("SearchNavigated", Members)!.AddEventHandler(host,
+                    (EventHandler<ShellNavigationNotice>)((_, notice) => notices.Add(notice)));
+                HostType.GetEvent("NavigationFailed", Members)!.AddEventHandler(host,
+                    (EventHandler<ShellNavigationNotice>)((_, _) => failures++));
+                Call(host, "Navigate", Path.GetTempPath());
+                Event(host, "OnNavigationPending", pidl);
+                Event(host, fail ? "OnNavigationFailed" : "OnNavigationComplete", pidl);
+                Drain(host.Dispatcher);
+                Ensure(failures == 0 && Field(host, "_retryPath") is not null &&
+                    ((IDictionary)Field(host, "_issuedSearches")!).Count == 0,
+                    "an older search retires without clearing the newer directory retry or publishing an error");
+                Ensure(fail ? notices.Count == 0 : notices.Count == 1 && notices[0].RequestVersion == earlier &&
+                    !(bool)Call(host, "CanCompleteNavigationRequest", earlier)!,
+                    "search publication carries the search's original input identity");
+                EnsureUnhosted(host);
+            }
+        }
+        finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+
     private static object BeginProbe(object gate)
     {
         var task = (Task)Call(gate, "ProbeAsync", Path.GetTempPath(), null)!;
         task.GetAwaiter().GetResult();
         return task.GetType().GetProperty("Result")!.GetValue(task)!;
+    }
+
+    private static int Count(IDictionary issued)
+    {
+        var request = issued.Values.Cast<object>().Single();
+        return (int)request.GetType().GetProperty("Count", Members)!.GetValue(request)!;
     }
 
     private static void RegisterFolder(object host, nint pidl)
