@@ -56,3 +56,13 @@
 - 后台解析期间关闭窗口，不弹迟到错误或更新关闭窗口；已确认写入的文件生命周期由后台负责，检查实际落盘，不仅看 UI 是否退出。
 - 导入备份等待期间改变标签/排序/布局比例或切到其他窗口：保留旧快照备份，停止追加；稳定会话下仍正常导入。备份 I/O 失败必须不追加，精确恢复文件可能已保留。
 - 独立 Q-Dir 打开基础 Folder 字段，检查活动标签、排序/分组和四窗格路径。后台本程序消费成功不代替这项互操作验收。
+## 新 QDR 批次候选：150314/822ae1（仅准备，未启动）
+
+- 路径：`D:\projects\explorer-dirs-worktrees\windows-accent-theme\src\.state\gui-smoke\20261027-150314-676-822ae1`，程序位于 `app\ExplorerDirs.App.exe`。
+- 干净源码：`2ea51a180a10093a332c9e8f22bbe1fc70fa16cd`；BuildIdentity/DLL ProductVersion：`gui-acceptance.20261027-150314-676-822ae1+2ea51a180a10093a332c9e8f22bbe1fc70fa16cd`。
+- EXE SHA-256：`5E7E5BAC0EED880D071A3BBE30992425F61546D34920AD821BD4FC2E91719C30`。
+- DLL SHA-256：`902204284D8E0F66E3D86F1FC7192650B2ADA78A08702BB899F55930C69960D0`。
+- `preparation.json` 为 prepared-not-run、SourceWorkingTreeDirty=false，27 项 PendingAcceptance；新增 QDR 三入口、追加前状态复核、后台关闭生命周期和多窗口恢复回归。原有 141624 候选保留，不将其旧 manifest 改成新批次结果。
+- 百分号夹具：`acceptance-files\percent-paths\%ExplorerDirsQdrAcceptance%` 与同级 `expanded-target`。后续仅向被启动的测试进程传入 `ExplorerDirsQdrAcceptance=expanded-target`，通过文件列表/树进入字面量文件夹；不要写用户/系统环境，也不要将地址栏主动展开变量误判为目录选择错误。
+
+执行 PrepareOnly 成功；独立核对源码、ProductVersion、两个哈希与夹具目录通过。该 EXE 对应进程数为 0，focus-trace.log、performance.json 不存在。本次不做可见验收、不更新日常 temp.76。新候选包含最新 QDR 后台导出/桌面项/备份及多窗口版本保护，但不因打包完成宣称 UI 或 Q-Dir 独立互操作通过。
