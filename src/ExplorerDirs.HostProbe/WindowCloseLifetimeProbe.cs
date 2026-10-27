@@ -129,6 +129,10 @@ internal static class WindowCloseLifetimeProbe
             var secondHosts = allHosts.Skip(allHosts.Count / 2).Append(movedHost).ToArray();
             windows[0].Close();
             Ensure(firstHosts.All(IsDisposed), "closing a window disposes every file and tree host, including inactive tabs");
+            Ensure(((CancellationTokenSource)Field(windows[0], "_windowOperationStop")!).IsCancellationRequested,
+                "closing cancels the owning window's background waits");
+            Ensure(!((CancellationTokenSource)Field(windows[1], "_windowOperationStop")!).IsCancellationRequested,
+                "closing leaves sibling background waits active");
             Ensure(secondHosts.All(host => !IsDisposed(host)),
                 "closing one window preserves the sibling window and the transferred tab");
             foreach (var name in new[] { "_saveTimer", "_viewPollTimer", "_fileCommandRefreshTimer" })

@@ -27,6 +27,12 @@ if (args is ["--filter-attachment-smoke"])
     return;
 }
 
+if (args is ["--window-background-operation-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult();
+    return;
+}
+
 if (args is ["--window-placement-smoke"])
 {
     var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
@@ -604,6 +610,7 @@ try
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
     ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult();
     ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
     ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
     var shellView = new FakeShellViewStateSource

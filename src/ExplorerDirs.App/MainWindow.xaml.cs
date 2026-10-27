@@ -106,7 +106,7 @@ public partial class MainWindow : Window
     private bool _importingQdr;
     private bool _exportingQdr;
     private Task<WorkspaceListing>? _workspaceListingTask;
-    private readonly CancellationTokenSource _terminalLaunchStop = new();
+    private readonly CancellationTokenSource _windowOperationStop = new();
 
     public string SessionPath => _sessionStore.Path;
     internal bool HasSavedWindowPlacement => _savedWindowPlacement is not null;
@@ -450,7 +450,7 @@ public partial class MainWindow : Window
             MouseWheelFocusMessageHook.Unregister(this);
             if (_themeController is not null)
                 _themeController.ThemeChanged -= ThemeController_ThemeChanged;
-            _terminalLaunchStop.Cancel();
+            _windowOperationStop.Cancel();
             _systemSettingChangeHook?.Dispose();
         };
         if (startupDirectory is not null)
@@ -2174,15 +2174,17 @@ public partial class MainWindow : Window
 
     private async Task BuildWorkspaceMenuAsync(MenuItem menu)
     {
+        if (_closed) return;
         try
         {
             // Share an outstanding enumeration across reopenings. A slow volume
             // must not accumulate a new blocked worker for every menu opening.
             if (_workspaceListingTask is null || _workspaceListingTask.IsCompleted)
-                _workspaceListingTask = Task.Run(() => WorkspaceCatalog.Read(
-                    WorkspaceCatalog.DirectoryFor(_sessionStore.Path)));
+                _workspaceListingTask = WindowBackgroundOperation.RunAsync(
+                    WorkspaceCatalog.DirectoryFor(_sessionStore.Path), static path => WorkspaceCatalog.Read(path),
+                    _windowOperationStop.Token);
             var listing = await _workspaceListingTask;
-            if (!IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
+            if (_closed || !IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
             menu.Items.Clear();
             foreach (var entry in listing.Entries)
             {
@@ -2202,7 +2204,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            if (!IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
+            if (_closed || !IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
             menu.Items.Clear();
             menu.Items.Add(new MenuItem { Header = "工作区列表读取失败，请重新展开", IsEnabled = false });
             EnvironmentStatus.Text = $"工作区列表读取失败：{ex.Message}";
@@ -2303,9 +2305,9 @@ public partial class MainWindow : Window
         var path = ActivePane.CurrentPath;
         try
         {
-            await TerminalLauncher.OpenAsync(path, _terminalLaunchStop.Token);
+            await TerminalLauncher.OpenAsync(path, _windowOperationStop.Token);
         }
-        catch (OperationCanceledException) when (_terminalLaunchStop.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_windowOperationStop.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (IsLoaded)
@@ -2338,7 +2340,7 @@ public partial class MainWindow : Window
 
     private async Task ImportQdrAsync(string path)
     {
-        if (_importingQdr || _exportingQdr) return;
+        if (_closed || _importingQdr || _exportingQdr) return;
         _importingQdr = true;
         ImportQdrMenu.IsEnabled = false;
         ExportQdrMenu.IsEnabled = false;
@@ -2346,8 +2348,9 @@ public partial class MainWindow : Window
         var appending = false;
         try
         {
-            var import = await Task.Run(() => QdrImporter.Load(path));
-            if (!IsVisible) return;
+            var import = await WindowBackgroundOperation.RunAsync(path, static value => QdrImporter.Load(value),
+                _windowOperationStop.Token);
+            if (_closed || !IsVisible) return;
             if (!IsActive)
             {
                 // Parsing can finish after the user switches to another app.
@@ -2430,13 +2433,18 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             var message = appending
                 ? $"导入未完整完成，可能已追加部分标签。原会话备份：{backupPath}\n{ex.Message}"
                 : $"导入失败，未追加标签：{ex.Message}";
             EnvironmentStatus.Text = message;
             if (IsActive) MessageBox.Show(this, message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { _importingQdr = false; ImportQdrMenu.IsEnabled = true; ExportQdrMenu.IsEnabled = true; }
+        finally
+        {
+            _importingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
     }
 
     private void SaveWorkspaceToDesktop_Click(object sender, RoutedEventArgs e)
@@ -2591,7 +2599,7 @@ public partial class MainWindow : Window
 
     private async Task ExportQdrAsync(bool saveWorkspace)
     {
-        if (_exportingQdr || _importingQdr) return;
+        if (_closed || _exportingQdr || _importingQdr) return;
         _exportingQdr = true;
         ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = false;
         try
@@ -2599,8 +2607,9 @@ public partial class MainWindow : Window
             var workspaceDirectory = WorkspaceCatalog.DirectoryFor(_sessionStore.Path);
             if (saveWorkspace)
             {
-                await Task.Run(() => Directory.CreateDirectory(workspaceDirectory));
-                if (!IsVisible || !IsActive) return;
+                await WindowBackgroundOperation.RunAsync(workspaceDirectory,
+                    static path => Directory.CreateDirectory(path), _windowOperationStop.Token);
+                if (_closed || !IsVisible || !IsActive) return;
             }
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
@@ -2611,8 +2620,9 @@ public partial class MainWindow : Window
             };
             if (saveWorkspace) dialog.InitialDirectory = workspaceDirectory;
             if (dialog.ShowDialog(this) != true) return;
-            var expected = await Task.Run(() => File.Exists(dialog.FileName) ? QdrImporter.ReadText(dialog.FileName) : null);
-            if (!IsVisible || !IsActive) return;
+            var expected = await WindowBackgroundOperation.RunAsync(dialog.FileName,
+                static path => File.Exists(path) ? QdrImporter.ReadText(path) : null, _windowOperationStop.Token);
+            if (_closed || !IsVisible || !IsActive) return;
             var note = "导出全部窗格与标签（包括隐藏窗格），以及查看设置、预览/详情窗格、固定标签和新标签默认查看方式。\n\n" +
                 "导出当前十二种布局及各窗格标签。已取得完整列设置的标签同时写入 Q-Dir 格式的查看、排序、分组与列设置；其余标签通过本程序扩展保留视图状态。\n\n" +
                 "当前布局分隔比例写入 Q-Dir 字段（精度为万分之一）；全部已记忆的布局比例通过本程序扩展完整保存。不同程序的边框尺寸可能影响实际像素位置。\n\n" +
@@ -2625,17 +2635,25 @@ public partial class MainWindow : Window
             var text = QdrExporter.Render(snapshot,
                 _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(), SnapshotLayoutProportions(),
                 _treeWidths);
-            await Task.Run(() => QdrExporter.Save(dialog.FileName, expected, text));
+            await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Expected: expected, Text: text),
+                static state => { QdrExporter.Save(state.Path, state.Expected, state.Text); return true; },
+                _windowOperationStop.Token);
+            if (_closed) return;
             EnvironmentStatus.Text = WorkspaceCatalog.IsInDirectory(dialog.FileName, workspaceDirectory)
                 ? "已保存工作区；可从“收藏夹 → 追加已保存工作区”打开。"
                 : "已导出 .qdr 工作区状态到所选位置；该位置不在工作区收藏目录中。";
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"导出失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { _exportingQdr = false; ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true; }
+        finally
+        {
+            _exportingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
     }
 
     private Dictionary<int, LayoutProportions> SnapshotLayoutProportions()
