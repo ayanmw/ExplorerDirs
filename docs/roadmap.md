@@ -13,6 +13,12 @@
 
 本轮基于 2ac23d5 源码重跑完整 Release SettingsSmoke、无 HWND 的 pane-tab-copy-order 和 App Release build，全部通过，构建零警告错误。日志分别为 `src/.state/background-current-settings.log`、`background-current-pane.log`、`background-current-app.log`。未启动窗口、未改变发布版本。上批拖放退休修复属于隔离原型，设备地址字面量修复属于后续产品批次，均不改动已经固定的 UI 候选。
 
+## 2026-10-28：隔离验证环境变量设置变更刷新
+
+- 首次后台探针构造 `MainWindow` 以获得消息 HWND，触发了窗口可见性假设失败；该失败属于探针设计，不是产品刷新失败证据。现改为独立不可见的 1×1 `HwndSource`，直接挂载生产 `SystemSettingChangeHook` 和 `EnvironmentRefresh.Reload`；不创建主窗口/Shell 文件视图、不触碰 profile，也不向其他应用广播消息。
+- 通过真实 `WM_SETTINGCHANGE` HWND 消息验证当前用户环境变量新增后刷新到本进程、由 `TerminalLauncher` 启动的 `cmd.exe` 可继承；删除注册表值并再次刷新后，本进程和新 `cmd.exe` 均不再包含该变量。探针结束后 HKCU 与进程中对应临时变量数量均为 0。
+- HostProbe Release 构建（0 警告/错误）、该隔离探针及完整 Release `SettingsSmoke` 通过。证据覆盖生产消息 hook/service 的进程内刷新与子进程继承；不代表可见窗口提示、系统广播接收或跨进程刷新已做 UI 验收。
+
 ## 2026-10-28：Ctrl+滚轮余量不跨导航复用
 
 - 源码追踪发现每个 ExplorerBrowser 宿主持有高精度 Ctrl+滚轮累加余量，但导航开始、完成和宿主重置都会递增 `ShellViewReadiness.Generation`，累加器此前未绑定此代际。用户在同一窗格导航前后的两次半刻度输入，可能被合并为新视图的一次切换。
