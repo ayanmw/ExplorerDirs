@@ -17,6 +17,7 @@
 
 - 复核重启链路时发现 WindowSessions.ini 的 FormatVersion 用 Int32 解析，2147483648 等未知未来版本溢出后被视为损坏格式，备份后仍允许 Create 覆盖清单。改为与其他便携配置一致的 BigInteger 版本解析，保留未知版本的只读保护，不改变窗口数或会话格式。
 - 扩展现有未来版本回归，覆盖 2、Int32 上界之外及 42 位数字；旧实现先在写入保护断言失败，修复后完整 Release SettingsSmoke 通过，App Release build 零警告错误。测试仅使用独立临时配置，未启动窗口或修改用户 profile。日志：src/.state/window-registry-version-{red,green,build}.log。
+- 后续重复字段复核：原来的短路条件在读到首个版本后跳过后续解析，FormatVersion=1 后追加 2 或超大版本仍可能进入损坏备份/重写路径。现在重复声明仍判为不完整，但保留所有有效声明的最高版本来决定未来格式保护，与 PinnedTabsStore 一致。新增低→高、高→低及超大重复声明回归先失败后通过；完整 SettingsSmoke 与 App Release build 通过。日志 src/.state/window-registry-duplicate-{red,green,build}.log。
 - 这是配置读写保护证据，不替代真实多窗口重启/多屏位置恢复验收；固定 141624 UI 候选和 temp.76 不变，本修复进入后续产品批次。
 ## 2026-10-27：设备地址保留百分号字面量
 

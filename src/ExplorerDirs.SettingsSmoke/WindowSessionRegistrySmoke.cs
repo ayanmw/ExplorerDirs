@@ -46,7 +46,8 @@ internal static class WindowSessionRegistrySmoke
                 .Count(path => !path.EndsWith(".PinnedTabs.ini", StringComparison.OrdinalIgnoreCase)) == 1,
             "failed registry writes clean up the unpublished session file");
 
-        foreach (var futureVersion in new[] { "2", "2147483648", "999999999999999999999999999999999999999999" })
+        foreach (var futureVersion in new[] { "2", "2147483648", "999999999999999999999999999999999999999999",
+            "1\nFormatVersion=2", "1\nFormatVersion=2147483648", "2\nFormatVersion=1" })
         {
             var futureFolder = Path.Combine(root, "window-sessions-future-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(futureFolder);

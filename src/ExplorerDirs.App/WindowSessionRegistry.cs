@@ -179,8 +179,13 @@ internal sealed class WindowSessionRegistry
             var value = line[(equals + 1)..].Trim();
             if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
             {
-                if (version >= 0 || !BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
-                else version = version < 0 ? parsed : BigInteger.Max(version, parsed);
+                if (!BigInteger.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)) complete = false;
+                else
+                {
+                    // Duplicates are malformed, but must not hide a future format from write protection.
+                    if (version >= 0) complete = false;
+                    version = BigInteger.Max(version, parsed);
+                }
             }
             else if (key.Equals("Count", StringComparison.OrdinalIgnoreCase))
             {
