@@ -210,6 +210,10 @@ Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date �
 
 结果通过：`display-path` 正确指向夹具 `two.bin`，`same-parent-IUnknown=True`，`same-child-PIDL=True`，窗口未创建。既有包装文件夹无窗口合同、嵌套绑定、Shell 数据对象及列/排序合同同次运行通过；绝对 PIDL 对照仍明确显示 `ILCombine(folderPidl, wrappedChild)` 得到的 PIDL 无法按文件系统路径解析。NativeProbe Release 构建 0 警告、0 错误。
 
-这证明 Shell item 路径可在对象级保留自定义父文件夹和相对 child PIDL，值得作为后续 Shell 选择项/数据对象桥接的实验入口；它没有恢复包装 PIDL 的 Desktop namespace 绝对身份，也没有证明 DefView 列消费、标准上下文菜单、拖放、剪贴板、导航、通知或完整 `IShellView` 宿主可用。故不改变“不能接入产品”的结论。下一步应先验证由此 `IShellItem` 构造的 Shell item array 与其原生 `IDataObject` 是否保留适配器身份和现存文件操作语义，再决定是否继续走此桥接路径。
+这证明 Shell item 路径可在对象级保留自定义父文件夹和相对 child PIDL；它没有恢复包装 PIDL 的 Desktop namespace 绝对身份，也没有证明 DefView 列消费、标准上下文菜单、拖放、剪贴板、导航、通知或完整 `IShellView` 宿主可用。故不改变“不能接入产品”的结论。
+
+继续验证 Shell 选择项桥接：由上述 `IShellItem` 调用 `SHCreateShellItemArrayFromShellItem`，`IShellItemArray::GetItemAt` 返回的 item 仍具有相同父 `IUnknown` 和 child PIDL；数组通过 `BHID_DataObject` 绑定出的 `IDataObject` 能提供有效 `CF_HDROP` 与 CIDA，均解析到存在的夹具文件。整条包装 folder/column 合同仍以 exit code 0 完成，窗口未创建。运行输出保存在忽略目录 `src/.state/native-probe-watchdog/20261029-shell-item-parent-probe.log`。
+
+这一结果把桥接范围推进到“Shell item array + 可用于文件路径的标准数据对象”，但该 CIDA 仍是普通文件系统身份，不能让 Shell 绝对 PIDL 解析自定义包装节点；也没有实际调用 shell context menu、执行复制/移动拖放、让真实 IShellView 浏览或验证通知和刷新。继续前应优先检查 item array 提供的 Shell 视图/菜单绑定 handler 是否能回到包装 `IShellFolder`，若 handler 回到 filesystem parent，则这条桥接只适合作为兼容现有文件操作的边界层，不能解决 DefView 迁移核心问题。
 
 参考：[SHCreateItemWithParent](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateitemwithparent)、[IParentAndItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)。

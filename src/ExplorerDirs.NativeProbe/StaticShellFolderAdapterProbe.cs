@@ -13,7 +13,9 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ParentAndItemId = new("B3A4B685-B685-4805-99D9-5DEAD2873236");
+    private static readonly Guid DataObjectHandlerId = new("B8C0BD9F-ED24-455C-83E6-D5390C4FE8C4");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -672,6 +674,8 @@ internal static class StaticShellFolderAdapterProbe
             Console.WriteLine($"native-shell-item-parent-probe: create=SHCreateItemWithParent; display-path={fileSystemPath ?? $"hr-0x{displayNameHr:X8}"}; same-parent-IUnknown={sameParentIdentity}; same-child-PIDL={sameChildIdentity}; window-created=False");
             if (!sameParentIdentity || !sameChildIdentity)
                 throw new Exception("The Shell item did not preserve both the wrapped parent adapter identity and child PIDL.");
+
+            VerifyShellItemArrayDataObject(item, adapter, childPidl);
         }
         finally
         {
@@ -683,6 +687,47 @@ internal static class StaticShellFolderAdapterProbe
             if (parentAndItem != 0) Marshal.Release(parentAndItem);
             if (displayName != 0) Marshal.FreeCoTaskMem(displayName);
             if (item != 0) Marshal.Release(item);
+        }
+    }
+
+    private static void VerifyShellItemArrayDataObject(nint item, nint adapter, nint childPidl)
+    {
+        nint array = 0, selectedItem = 0, selectedParentAndItem = 0, selectedParent = 0;
+        nint selectedParentUnknown = 0, adapterUnknown = 0, selectedParentPidl = 0, selectedChild = 0;
+        nint dataObject = 0;
+        var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
+        try
+        {
+            var arrayId = ShellItemArrayId;
+            Check(SHCreateShellItemArrayFromShellItem(item, in arrayId, out array));
+            if (At<GetShellItemArrayCount>(array, 7)(array, out var count) < 0 || count != 1)
+                throw new Exception($"Shell item array did not contain exactly one item: {count}.");
+            Check(At<GetShellItemArrayItemAt>(array, 8)(array, 0, out selectedItem));
+            Check(Marshal.QueryInterface(selectedItem, in ParentAndItemId, out selectedParentAndItem));
+            Check(At<GetParentAndItem>(selectedParentAndItem, 4)(selectedParentAndItem, out selectedParentPidl, out selectedParent, out selectedChild));
+            Check(Marshal.QueryInterface(selectedParent, in unknownId, out selectedParentUnknown));
+            Check(Marshal.QueryInterface(adapter, in unknownId, out adapterUnknown));
+            if (selectedParentUnknown != adapterUnknown || !ILIsEqual(childPidl, selectedChild))
+                throw new Exception("Shell item array enumeration changed the wrapped parent or child identity.");
+
+            var handlerId = DataObjectHandlerId;
+            var dataObjectId = DataObjectId;
+            Check(At<BindShellItemArrayHandler>(array, 3)(array, 0, in handlerId, in dataObjectId, out dataObject));
+            if (dataObject == 0) throw new Exception("IShellItemArray BindToHandler returned a null IDataObject.");
+            VerifyWrappedShellItemDataObject(dataObject);
+            Console.WriteLine("native-shell-item-array-probe: count=1; same-parent-IUnknown=True; same-child-PIDL=True; data-object=CF_HDROP+CIDA-filesystem-paths-valid; window-created=False");
+        }
+        finally
+        {
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (adapterUnknown != 0) Marshal.Release(adapterUnknown);
+            if (selectedParentUnknown != 0) Marshal.Release(selectedParentUnknown);
+            if (selectedParentPidl != 0) ILFree(selectedParentPidl);
+            if (selectedChild != 0) ILFree(selectedChild);
+            if (selectedParent != 0) Marshal.Release(selectedParent);
+            if (selectedParentAndItem != 0) Marshal.Release(selectedParentAndItem);
+            if (selectedItem != 0) Marshal.Release(selectedItem);
+            if (array != 0) Marshal.Release(array);
         }
     }
 
@@ -920,62 +965,67 @@ internal static class StaticShellFolderAdapterProbe
             if (dataObject == 0) throw new Exception("Wrapped GetUIObjectOf(IDataObject) returned a null interface.");
             try
             {
-                var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
-                var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
-                if (getDataHr < 0) throw new Exception($"Wrapped IDataObject.GetData(CF_HDROP) failed: 0x{getDataHr:X8}.");
-                try
-                {
-                    if (medium.Tymed != 1 || medium.Value == 0) throw new Exception("Wrapped CF_HDROP did not use a valid TYMED_HGLOBAL.");
-                    var dropFiles = GlobalLock(medium.Value);
-                    if (dropFiles == 0) throw new Exception("Could not lock the wrapped CF_HDROP memory.");
-                    try
-                    {
-                        var pathOffset = Marshal.ReadInt32(dropFiles);
-                        var isWide = Marshal.ReadInt32(dropFiles, 16);
-                        if (pathOffset < 20 || isWide != 1) throw new Exception("Wrapped CF_HDROP did not contain a valid Unicode DROPFILES block.");
-                        var path = Marshal.PtrToStringUni(dropFiles + pathOffset);
-                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                            throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path.");
-                    }
-                    finally { GlobalUnlock(medium.Value); }
-                }
-                finally { ReleaseStgMedium(ref medium); }
-
-                var shellIdListFormat = checked((ushort)RegisterClipboardFormatW("Shell IDList Array"));
-                var shellIdListEtc = new NativeFormatEtc { Format = shellIdListFormat, Aspect = 1, Index = -1, Tymed = 1 };
-                var shellIdListHr = At<GetData>(dataObject, 3)(dataObject, ref shellIdListEtc, out var shellIdListMedium);
-                if (shellIdListHr < 0) throw new Exception($"Wrapped IDataObject.GetData(Shell IDList Array) failed: 0x{shellIdListHr:X8}.");
-                try
-                {
-                    if (shellIdListMedium.Tymed != 1 || shellIdListMedium.Value == 0) throw new Exception("Shell IDList Array did not use a valid TYMED_HGLOBAL.");
-                    var cida = GlobalLock(shellIdListMedium.Value);
-                    if (cida == 0) throw new Exception("Could not lock the Shell IDList Array memory.");
-                    try
-                    {
-                        var cidaBytes = GlobalSize(shellIdListMedium.Value).ToUInt64();
-                        var childCount = unchecked((uint)Marshal.ReadInt32(cida));
-                        if (childCount != 1 || cidaBytes < 12) throw new Exception($"Expected one CIDA child, got {childCount} in {cidaBytes} bytes.");
-                        var parentOffset = unchecked((uint)Marshal.ReadInt32(cida, 4));
-                        var childOffset = unchecked((uint)Marshal.ReadInt32(cida, 8));
-                        if (parentOffset >= cidaBytes || childOffset >= cidaBytes)
-                            throw new Exception("CIDA item offsets were outside the storage medium.");
-                        var absolute = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
-                        if (absolute == 0) throw new Exception("Could not combine CIDA parent and child PIDLs.");
-                        try
-                        {
-                            var path = DescribeFileSystemPath(absolute);
-                            if (path.StartsWith("unresolved-", StringComparison.Ordinal) || !File.Exists(path))
-                                throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
-                        }
-                        finally { ILFree(absolute); }
-                    }
-                    finally { GlobalUnlock(shellIdListMedium.Value); }
-                }
-                finally { ReleaseStgMedium(ref shellIdListMedium); }
+                VerifyWrappedShellItemDataObject(dataObject);
             }
             finally { Marshal.Release(dataObject); }
         }
         finally { Marshal.FreeCoTaskMem(childArray); }
+    }
+
+    private static void VerifyWrappedShellItemDataObject(nint dataObject)
+    {
+        var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0) throw new Exception($"Wrapped IDataObject.GetData(CF_HDROP) failed: 0x{getDataHr:X8}.");
+        try
+        {
+            if (medium.Tymed != 1 || medium.Value == 0) throw new Exception("Wrapped CF_HDROP did not use a valid TYMED_HGLOBAL.");
+            var dropFiles = GlobalLock(medium.Value);
+            if (dropFiles == 0) throw new Exception("Could not lock the wrapped CF_HDROP memory.");
+            try
+            {
+                var pathOffset = Marshal.ReadInt32(dropFiles);
+                var isWide = Marshal.ReadInt32(dropFiles, 16);
+                if (pathOffset < 20 || isWide != 1) throw new Exception("Wrapped CF_HDROP did not contain a valid Unicode DROPFILES block.");
+                var path = Marshal.PtrToStringUni(dropFiles + pathOffset);
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path.");
+            }
+            finally { GlobalUnlock(medium.Value); }
+        }
+        finally { ReleaseStgMedium(ref medium); }
+
+        var shellIdListFormat = checked((ushort)RegisterClipboardFormatW("Shell IDList Array"));
+        var shellIdListEtc = new NativeFormatEtc { Format = shellIdListFormat, Aspect = 1, Index = -1, Tymed = 1 };
+        var shellIdListHr = At<GetData>(dataObject, 3)(dataObject, ref shellIdListEtc, out var shellIdListMedium);
+        if (shellIdListHr < 0) throw new Exception($"Wrapped IDataObject.GetData(Shell IDList Array) failed: 0x{shellIdListHr:X8}.");
+        try
+        {
+            if (shellIdListMedium.Tymed != 1 || shellIdListMedium.Value == 0) throw new Exception("Shell IDList Array did not use a valid TYMED_HGLOBAL.");
+            var cida = GlobalLock(shellIdListMedium.Value);
+            if (cida == 0) throw new Exception("Could not lock the Shell IDList Array memory.");
+            try
+            {
+                var cidaBytes = GlobalSize(shellIdListMedium.Value).ToUInt64();
+                var childCount = unchecked((uint)Marshal.ReadInt32(cida));
+                if (childCount != 1 || cidaBytes < 12) throw new Exception($"Expected one CIDA child, got {childCount} in {cidaBytes} bytes.");
+                var parentOffset = unchecked((uint)Marshal.ReadInt32(cida, 4));
+                var childOffset = unchecked((uint)Marshal.ReadInt32(cida, 8));
+                if (parentOffset >= cidaBytes || childOffset >= cidaBytes)
+                    throw new Exception("CIDA item offsets were outside the storage medium.");
+                var absolute = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
+                if (absolute == 0) throw new Exception("Could not combine CIDA parent and child PIDLs.");
+                try
+                {
+                    var path = DescribeFileSystemPath(absolute);
+                    if (path.StartsWith("unresolved-", StringComparison.Ordinal) || !File.Exists(path))
+                        throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
+                }
+                finally { ILFree(absolute); }
+            }
+            finally { GlobalUnlock(shellIdListMedium.Value); }
+        }
+        finally { ReleaseStgMedium(ref shellIdListMedium); }
     }
 
     private static string ReadDetailsText(nint details)
@@ -1134,6 +1184,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemDisplayName(nint self, uint nameType, out nint name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetParentAndItem(nint self, out nint parentPidl, out nint parentFolder, out nint childPidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemArrayCount(nint self, out uint count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemArrayItemAt(nint self, uint index, out nint item);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemArrayHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
@@ -1141,6 +1194,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint left, nint right);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateItemWithParent(nint parentPidl, nint parentFolder, nint childPidl, in Guid iid, out nint item);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateShellItemArrayFromShellItem(nint item, in Guid iid, out nint array);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
