@@ -2,11 +2,13 @@
 
 ## 2026-10-28：Private Desktop 拖放探针前台阶段复验
 
-使用 `scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 35` 运行当时的 Release NativeProbe。源与目标 `IShellView` 均创建；选中视图项提供的 `IDataObject` 可被目标目录及另一个注册 HWND 的 `IDropTarget` 直接 Copy，目标文件内容正确、Copy effect 为 `0x1`、源文件保留；但 `IShellView.GetItemObject` 作为 drop target 的查询返回 `E_NOINTERFACE`。结果仍是直接 COM 回调，不包含真实 `DoDragDrop`。
+首轮使用 `scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 35` 运行当时的 Release NativeProbe。源与目标 `IShellView` 均创建；选中视图项提供的 `IDataObject` 可被目标目录及另一个注册 HWND 的 `IDropTarget` 直接 Copy，目标文件内容正确、Copy effect 为 `0x1`、源文件保留；但 `IShellView.GetItemObject` 作为 drop target 的查询返回 `E_NOINTERFACE`。结果仍是直接 COM 回调，不包含真实 `DoDragDrop`。
 
 外层前台守卫首次记录到 HWND 从 `0x2632026` 变为 `0x10C1456`，阶段为 `drop-target: query-and-copy-start`，距探针开始约 687 ms；watchdog 退出码 1。该阶段覆盖多个数据对象查询与拖放回调，不能定位单个 COM 调用，也不能排除外部桌面活动。运行后夹具目录不存在、无残留 `ExplorerDirs.NativeProbe.exe`。日志：`src/.state/native-probe-watchdog/20261028-140641-227d80f2.stdout.log` 与 `.stderr.log`。
 
-随后在源码中为 `DragEnter`、`DragOver`、`Drop` 分别加入调用前后阶段标记，供未来在前台隔离可确认时定位边界；当前已生成的日志不含这些新增标记。这些标记只提供时间相关性，不会自行阻止或归因前台切换。该失败轮次不作为迁移门槛通过，也不代表真实用户拖放失败。
+随后在源码中为 `DragEnter`、`DragOver`、`Drop` 分别加入调用前后阶段标记，再运行一次相同探针。第二轮前台首次变化记录在 `drop-target: IShellFolder.CreateViewObject (registered HWND target): drop-start`，约 1094 ms；这将变化关联到该注册目标的 `Drop` 调用边界。由于监视器每 25 ms 采样且无法排除外部活动，这不是因果证明。两个 Copy 路径仍返回成功，数据及文件检查通过，但前台守卫失败，watchdog 退出码 1；日志 `src/.state/native-probe-watchdog/20261028-140920-574c5db6.stdout.log`、`.stderr.log`。没有遗留 NativeProbe 进程，本轮临时夹具已由 watchdog 清理。
+
+细粒度标记只提供阶段相关性，不会自行阻止或归因前台切换。两轮失败都不作为迁移门槛通过，也不代表真实用户拖放失败；在找到不影响外层前台的验证环境前，不再重跑同类 Shell-view 探针。
 
 ## 2026-10-28：四窗格 WPF Shell 反向选择矩阵
 
