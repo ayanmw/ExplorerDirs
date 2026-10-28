@@ -4376,3 +4376,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 源码复核发现重启等待阶段把“桌面 Shell PID 变化”当作 Windows Explorer 已恢复；另一个进程短暂接管 Shell 窗口时可能误报成功。现在等待阶段还会读取新 PID 的映像并要求匹配 `%WINDIR%\explorer.exe`；进程在读取 HWND 与打开进程句柄之间退出时继续等待。
 - 身份策略回归先因缺少替代进程判定失败，再通过“新 PID 且映像匹配”“旧 PID”“非 Explorer 映像”“原 PID 缺失”四种情况。完整 Release SettingsSmoke 与 App Release build（0 警告/错误）通过；未结束或启动任何系统进程。Windows 实际 Shell 自动恢复与 fallback 启动仍需集中可见验收。
+
+## 2026-10-28：验证 Explorer 重启的 fallback 恢复
+
+- 补齐手动启动路径：Windows 自动恢复等待超时后启动 `explorer.exe`，还会继续等待最多 10 秒，只有检测到不同于旧 PID、且映像确认为 `%WINDIR%\explorer.exe` 的桌面 Shell 才报告成功；仅仅启动进程不再算恢复完成。
+- Release SettingsSmoke 覆盖旧 Shell 持续存在时不得误报、有效新 Shell 出现后立即成功及有界轮询耗尽；完整 Release SettingsSmoke、App Release build（0 警告/错误）和 `git diff --check` 通过。没有操作实际 Explorer 进程或打开 UI；自动恢复与 fallback 的桌面、开始菜单和任务栏体验仍待集中可见验收。

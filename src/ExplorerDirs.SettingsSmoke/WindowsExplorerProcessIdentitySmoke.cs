@@ -37,6 +37,30 @@ internal static class WindowsExplorerProcessIdentitySmoke
         Check(!WindowsExplorerRestarter.IsExpectedReplacementShell(
                 0, 101, @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
             "a missing original Shell PID cannot establish a replacement");
+
+        var reads = 0;
+        Check(WindowsExplorerRestarter.WaitForExpectedReplacementShell(
+                100, @"C:\Windows\explorer.exe",
+                () => ++reads == 1
+                    ? (100u, @"C:\Windows\explorer.exe")
+                    : (101u, @"C:\Windows\explorer.exe"),
+                maxAttempts: 3, _ => { }),
+            "a Shell that appears after fallback launch is observed before reporting success");
+        Check(reads == 2,
+            "Shell recovery polling stops as soon as the replacement process is verified");
+
+        reads = 0;
+        Check(!WindowsExplorerRestarter.WaitForExpectedReplacementShell(
+                100, @"C:\Windows\explorer.exe",
+                () =>
+                {
+                    reads++;
+                    return (100u, @"C:\Windows\explorer.exe");
+                },
+                maxAttempts: 3, _ => { }),
+            "starting explorer.exe alone is not evidence that the desktop Shell recovered");
+        Check(reads == 3,
+            "the Shell is checked for the entire bounded recovery window");
     }
 
     private static void Check(bool value, string label)
