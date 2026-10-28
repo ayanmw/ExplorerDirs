@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-28：temp.76 两分钟被动复采
+
+- 北京时间 08:00:03–08:01:58（UTC 2026-10-28 00:00:03–00:01:58），对仍运行的 PID `58888` 每 5 秒采样，共 24 点；进程启动时间保持 UTC `2026-10-27T13:43:03.531Z`。未启动、重启、聚焦或操作应用。
+- 实例为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`。EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`，DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+- Working Set 全程 `244,584,448` 字节（233.25 MiB）；Private Bytes 范围 `121,765,888–121,806,848` 字节，首末均为 `121,806,848`。句柄 `1122`、线程 `34`、GDI `191`、USER `113` 均未变化；累计 CPU 增加 `0.079` 秒。
+- 原始 JSON 位于忽略目录 `src/.state/memory-samples/temp76-20261028-passive-58888.json`，SHA-256 `9CD2434B92A0CA459A1792DEEAD1C699FCADC51AFAC31CF908D4334CD6C74A4D`。此被动窗口没有固定或记录用户操作、窗格和标签负载；只能说明该区间未观察到明显进程级增长，不能代表文件浏览负载、排除短时峰值/增长后回落或定位分配来源。
+
 ## 2026-10-28：temp.76 新一轮被动采样
 
 - 北京时间 07:13:45–07:14:45（UTC 2026-10-27 23:13:45–23:14:45），对 PID `58888` 按 5 秒间隔采样 13 点。进程启动时间 `2026-10-27T13:43:03.531Z`，仍是 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.76+4dcafc22202a380de6954f288b9f62eb78e138fb`。未启动、重启、聚焦或操作应用。
