@@ -66,24 +66,62 @@ internal static class QdrImporter
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var warnings = new HashSet<string>();
         var duplicate = false;
-        foreach (var raw in text.Split('\n'))
+        var inFilter2 = false;
+        var filter2RuleCount = 0;
+        var filter2Patterns = new List<string>(6);
+        var remaining = text.AsSpan();
+        while (!remaining.IsEmpty)
         {
-            var line = raw.Trim().TrimStart('\uFEFF');
-            if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#')) continue;
+            var newline = remaining.IndexOf('\n');
+            var rawLine = newline < 0 ? remaining : remaining[..newline];
+            remaining = newline < 0 ? ReadOnlySpan<char>.Empty : remaining[(newline + 1)..];
+            var line = rawLine.Trim().TrimStart('\uFEFF');
+            if (line.IsEmpty || line.StartsWith(";".AsSpan(), StringComparison.Ordinal) ||
+                line.StartsWith("#".AsSpan(), StringComparison.Ordinal)) continue;
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                inFilter2 = line.Equals("[Filter2]".AsSpan(), StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            if (inFilter2)
+            {
+                var equals = line.IndexOf('=');
+                if (equals > 0 && int.TryParse(line[..equals].Trim(), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out _))
+                {
+                    filter2RuleCount++;
+                    var patternStart = equals + 1;
+                    var patternEnd = line[patternStart..].IndexOf('=');
+                    if (patternEnd >= 0) patternEnd += patternStart;
+                    if (patternEnd > patternStart && filter2Patterns.Count < 6)
+                    {
+                        var pattern = line[patternStart..patternEnd].Trim();
+                        filter2Patterns.Add(pattern.Length <= 64 ? pattern.ToString() : pattern[..61].ToString() + "…");
+                    }
+                }
+                continue;
+            }
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
             // Plain Dir paths may legitimately contain &, so never split those.
-            var fields = line.StartsWith("Folder", StringComparison.OrdinalIgnoreCase) ? line.Split('&') : [line];
-            foreach (var field in fields)
+            var splitMetadata = line.StartsWith("Folder".AsSpan(), StringComparison.OrdinalIgnoreCase);
+            while (true)
             {
+                var separator = splitMetadata ? line.IndexOf('&') : -1;
+                var field = separator < 0 ? line : line[..separator];
+                if (separator >= 0) line = line[(separator + 1)..];
+                else splitMetadata = false;
                 var equals = field.IndexOf('=');
-                if (equals < 1) continue;
-                var key = field[..equals].Trim();
-                if (values.ContainsKey(key) && !key.Equals("UNICODE", StringComparison.OrdinalIgnoreCase))
+                if (equals > 0)
                 {
-                    duplicate = true;
-                    warnings.Add("重复字段使用最后一个值。");
+                    var key = field[..equals].Trim().ToString();
+                    if (values.ContainsKey(key) && !key.Equals("UNICODE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        duplicate = true;
+                        warnings.Add("重复字段使用最后一个值。");
+                    }
+                    values[key] = field[(equals + 1)..].Trim().ToString();
                 }
-                values[key] = field[(equals + 1)..].Trim();
+                if (!splitMetadata) break;
             }
         }
         if (!values.ContainsKey("Q-Dir Version")) throw new InvalidDataException("缺少 Q-Dir 配置标识，未导入。");
@@ -103,13 +141,26 @@ internal static class QdrImporter
         for (var pane = 1; pane <= 4; pane++)
         {
             var entries = new Dictionary<int, (string Suffix, string Raw, bool Encoded)>();
+            var ambiguousLocations = new HashSet<int>();
             foreach (var pair in values)
             {
                 var match = LocationKey.Match(pair.Key);
                 if (!match.Success || int.Parse(match.Groups[2].Value) != pane) continue;
                 var index = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : -1;
+                if (ambiguousLocations.Contains(index)) continue;
                 var encoded = match.Groups[1].Value.Equals("Folder", StringComparison.OrdinalIgnoreCase);
-                if (entries.TryGetValue(index, out var previous) && !previous.Encoded) continue;
+                if (entries.TryGetValue(index, out var previous))
+                {
+                    if (previous.Encoded != encoded)
+                    {
+                        // DirN and FolderN are alternate encodings of one location, not separate tabs.
+                        // Their conflict has no documented precedence, so never silently redirect the import.
+                        entries.Remove(index);
+                        ambiguousLocations.Add(index);
+                        warnings.Add("同一标签同时包含明文路径与编码 Shell 路径，已跳过该标签。");
+                    }
+                    continue;
+                }
                 entries[index] = (pane + (index < 0 ? "" : "_" + index), pair.Value, encoded);
             }
             var resolved = new SortedDictionary<int, TabSettings>();
@@ -161,7 +212,8 @@ internal static class QdrImporter
             if (current is not null)
             {
                 // Q-Dir omits the active tab's numbered Folder entry in saved files.
-                currentIndex = Enumerable.Range(0, 100).FirstOrDefault(index => !entries.ContainsKey(index), -1);
+                currentIndex = Enumerable.Range(0, 100).FirstOrDefault(index =>
+                    !entries.ContainsKey(index) && !ambiguousLocations.Contains(index), -1);
                 if (currentIndex >= 0) resolved[currentIndex] = current;
                 else warnings.Add("单窗格标签超过 100 个，已跳过超出部分。");
             }
@@ -236,6 +288,13 @@ internal static class QdrImporter
         }
         var proportions = QdrProportions.Read(values, layout, warnings);
         warnings.Add("不导入颜色规则、背景值、窗口位置及程序启动命令。");
+        if (filter2RuleCount > 0)
+        {
+            var patternSummary = filter2Patterns.Count == 0 ? "" : "规则模式：" +
+                string.Join("、", filter2Patterns) +
+                (filter2RuleCount > filter2Patterns.Count ? "等" : "");
+            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；当前版本未导入。{patternSummary}");
+        }
         AddUnsupportedColorSwitchWarning(values, "useColor", warnings);
         AddUnsupportedColorSwitchWarning(values, "useTreeColor", warnings);
         var result = QdrExporter.ApplyExtension(values, duplicate,

@@ -11,6 +11,7 @@ namespace ExplorerDirs.App;
 internal sealed class ProgramStarterWindow : Window
 {
     private readonly ProgramStarterStore _store;
+    private readonly ApplicationThemeController? _themeController;
     private readonly Func<ProgramStarterContext> _contextProvider;
     private readonly Action<string> _report;
     private readonly ObservableCollection<ProgramStarterEntry> _entries;
@@ -25,12 +26,14 @@ internal sealed class ProgramStarterWindow : Window
     private bool _importPreviewOpen;
 
     public ProgramStarterWindow(ProgramStarterStore store, IEnumerable<ProgramStarterEntry> entries,
-        Func<ProgramStarterContext> contextProvider, Action<string> report)
+        ApplicationThemeController? themeController, Func<ProgramStarterContext> contextProvider, Action<string> report)
     {
         _store = store;
+        _themeController = themeController;
         _entries = new ObservableCollection<ProgramStarterEntry>(entries);
         _contextProvider = contextProvider;
         _report = report;
+        ApplicationThemeWindowBinding.Attach(this, themeController);
         Title = "程序启动器";
         Width = 760;
         Height = 430;
@@ -69,7 +72,7 @@ internal sealed class ProgramStarterWindow : Window
 
     private void EditEntry(ProgramStarterEntry? existing)
     {
-        var editor = new ProgramStarterEntryEditor(existing) { Owner = this };
+        var editor = new ProgramStarterEntryEditor(existing, _themeController) { Owner = this };
         if (editor.ShowDialog() != true || editor.Result is not { } value) return;
         var index = existing is null ? -1 : _entries.IndexOf(existing);
         var proposed = _entries.ToList();
@@ -101,7 +104,7 @@ internal sealed class ProgramStarterWindow : Window
         try
         {
             var remainingCapacity = ProgramStarterStore.MaximumEntries - _entries.Count;
-            var dialog = new ProgramStarterImportPreviewWindow(picker.FileName, preview, remainingCapacity) { Owner = this };
+            var dialog = new ProgramStarterImportPreviewWindow(picker.FileName, preview, remainingCapacity, _themeController) { Owner = this };
             if (dialog.ShowDialog() != true) return;
             if (preview.Entries.Count > ProgramStarterStore.MaximumEntries - _entries.Count)
             {
@@ -191,7 +194,7 @@ internal sealed class ProgramStarterEntryEditor : Window
     private readonly Guid _existingId;
     public ProgramStarterEntry? Result { get; private set; }
 
-    public ProgramStarterEntryEditor(ProgramStarterEntry? entry)
+    public ProgramStarterEntryEditor(ProgramStarterEntry? entry, ApplicationThemeController? themeController)
     {
         Title = entry is null ? "添加启动项" : "编辑启动项";
         Width = 680;
@@ -199,6 +202,7 @@ internal sealed class ProgramStarterEntryEditor : Window
         MinWidth = 560;
         ResizeMode = ResizeMode.CanResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ApplicationThemeWindowBinding.Attach(this, themeController);
         _name.Text = entry?.Name ?? string.Empty;
         _existingId = entry?.Id ?? Guid.NewGuid();
         _path.Text = entry?.ExecutablePath ?? string.Empty;
@@ -251,11 +255,13 @@ internal sealed class ProgramStarterEntryEditor : Window
 
 internal sealed class ProgramStarterImportPreviewWindow : Window
 {
-    public ProgramStarterImportPreviewWindow(string path, QdrProgramImportPreview preview, int remainingCapacity)
+    public ProgramStarterImportPreviewWindow(string path, QdrProgramImportPreview preview, int remainingCapacity,
+        ApplicationThemeController? themeController)
     {
         Title = "Q-Dir 程序项导入预览";
         Width = 740; Height = 430; MinWidth = 540; MinHeight = 300;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ApplicationThemeWindowBinding.Attach(this, themeController);
         var root = new DockPanel { Margin = new Thickness(10) };
         var commandState = ProgramStarterCommandState.From(
             ProgramStarterStore.MaximumEntries - remainingCapacity, false, false, true,

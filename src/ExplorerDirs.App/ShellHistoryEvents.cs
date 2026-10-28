@@ -6,6 +6,7 @@ internal sealed class ShellHistoryEvents : IDisposable
 {
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly Action _changed;
+    private readonly Action<string?> _statusTextChanged;
     private readonly ShellBrowserCommandSink _sink;
     private nint _point;
     private uint _cookie;
@@ -14,16 +15,18 @@ internal sealed class ShellHistoryEvents : IDisposable
     internal bool? Back { get; private set; }
     internal bool? Forward { get; private set; }
     internal int LastResult { get; private set; }
+    internal string? StatusText { get; private set; }
 
-    private ShellHistoryEvents(Action changed)
+    private ShellHistoryEvents(Action changed, Action<string?> statusTextChanged)
     {
         _changed = changed;
-        _sink = new ShellBrowserCommandSink(OnCommand);
+        _statusTextChanged = statusTextChanged;
+        _sink = new ShellBrowserCommandSink(OnCommand, OnStatusTextChange);
     }
 
-    internal static ShellHistoryEvents Subscribe(nint browser, Action changed)
+    internal static ShellHistoryEvents Subscribe(nint browser, Action changed, Action<string?>? statusTextChanged = null)
     {
-        var result = new ShellHistoryEvents(changed);
+        var result = new ShellHistoryEvents(changed, statusTextChanged ?? (_ => { }));
         var containerId = new Guid("B196B284-BAB4-101A-B69C-00AA00341D07");
         var eventsId = typeof(IShellBrowserCommandEvents).GUID;
         nint container = 0, sink = 0;
@@ -67,6 +70,14 @@ internal sealed class ShellHistoryEvents : IDisposable
         // Never unwind a managed UI callback through native event delivery.
         try { _changed(); }
         catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"History state notification: {ex.GetType().Name}"); }
+    }
+
+    private void OnStatusTextChange(string? text)
+    {
+        if (_disposed || Environment.CurrentManagedThreadId != _thread) return;
+        StatusText = text;
+        try { _statusTextChanged(text); }
+        catch (Exception ex) { System.Diagnostics.Trace.WriteLine($"Shell status notification: {ex.GetType().Name}"); }
     }
 
     public void Dispose()

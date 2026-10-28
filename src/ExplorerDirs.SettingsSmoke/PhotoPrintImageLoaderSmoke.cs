@@ -46,12 +46,38 @@ internal static class PhotoPrintImageLoaderSmoke
                     "the fixed document paginator contains the expected pages for the captured image order");
             });
             using (new FileStream(firstPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+            using var cancelled = new CancellationTokenSource();
+            var interruptedPaths = new CancelBetweenImages(firstPath, lastPath, cancelled);
+            try
+            {
+                PhotoPrintImageLoader.DecodeAsync(interruptedPaths, cancelled.Token).GetAwaiter().GetResult();
+                throw new Exception("cancelled decoding returned a partial successful image batch");
+            }
+            catch (OperationCanceledException) when (cancelled.IsCancellationRequested) { }
+            using (new FileStream(firstPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
             Console.WriteLine("Photo print image loader smoke: PASS");
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private sealed class CancelBetweenImages(string first, string second, CancellationTokenSource stop)
+        : IReadOnlyList<string>
+    {
+        public int Count => 2;
+        public string this[int index] => index switch
+        {
+            0 => first, 1 => second, _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+        public IEnumerator<string> GetEnumerator()
+        {
+            yield return first;
+            stop.Cancel();
+            yield return second;
+        }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private static void SavePng(string path, int width, int height)

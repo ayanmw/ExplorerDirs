@@ -7,24 +7,54 @@ namespace ExplorerDirs.App;
 internal sealed class UiPreferencesStore(string path)
     : PortableBooleanPreference(path, "Appearance", "Compact", "外观");
 
+internal sealed class TabStripVisibilityStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "AlwaysShow", "标签栏", defaultValue: true);
+
+internal sealed class MultilineTabHeadersStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "Multiline", "多行标签栏");
+
+internal sealed class TabHeaderMaximumWidthStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "LimitMaximumWidth", "标签最大宽度", defaultValue: true);
+
+internal sealed class TabCloseButtonStore(string path)
+    : PortableBooleanPreference(path, "Tabs", "ShowCloseButton", "标签关闭按钮");
+
+internal sealed class StatusBarVisibilityStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "Show", "状态栏", defaultValue: true);
+
+internal sealed class StatusBarSelectionSizeStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "ShowSelectionSize", "状态栏选中大小", defaultValue: true);
+
+internal sealed class StatusBarFolderSizeWhenEmptyStore(string path)
+    : PortableBooleanPreference(path, "StatusBar", "ShowFolderSizeWhenEmpty", "状态栏当前目录大小");
+
+internal sealed class SelectionCheckBoxesStore(string path)
+    : PortableBooleanPreference(path, "Selection", "CheckBoxes", "复选框选择");
+
+internal sealed class FullRowSelectionStore(string path)
+    : PortableBooleanPreference(path, "FullRowSelection", "FullRowSelect", "整行选择");
+
 internal sealed class AddressBarStyleStore(string path)
     : PortableBooleanPreference(path, "AddressBar", "Classic", "地址栏样式");
 
 // Separate files let older releases preserve settings they do not understand.
-internal class PortableBooleanPreference(string path, string section, string keyName, string label)
+internal class PortableBooleanPreference(string path, string section, string keyName, string label,
+    bool defaultValue = false)
 {
     private readonly string _path = path;
     private string? _lastSeenContent;
     private bool _canOverwrite = true;
 
     public string? LoadWarning { get; private set; }
+    public bool HasExplicitValue { get; private set; }
 
     public bool Load()
     {
         LoadWarning = null;
+        HasExplicitValue = false;
         _canOverwrite = true;
         _lastSeenContent = null;
-        if (!File.Exists(_path)) return false;
+        if (!File.Exists(_path)) return defaultValue;
 
         var complete = true;
         var inAppearance = false;
@@ -70,12 +100,16 @@ internal class PortableBooleanPreference(string path, string section, string key
             {
                 _canOverwrite = false;
                 LoadWarning = $"{label}配置格式高于当前版本；已停止写入原文件。";
-                return false;
+                return defaultValue;
             }
             if (version != 1 || !compact.HasValue || !seenAppearance) complete = false;
         }
         catch (Exception) { complete = false; }
-        if (complete) return compact!.Value;
+        if (complete)
+        {
+            HasExplicitValue = true;
+            return compact!.Value;
+        }
 
         try
         {
@@ -87,7 +121,7 @@ internal class PortableBooleanPreference(string path, string section, string key
             _canOverwrite = false;
             LoadWarning = $"{label}配置不完整且备份失败；本次不会覆盖原文件。";
         }
-        return compact ?? false;
+        return compact ?? defaultValue;
     }
 
     public void Save(bool compact)

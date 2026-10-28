@@ -59,9 +59,9 @@ internal static class SearchHostProbe
         }
         var errors = new List<string>();
         var published = hosts.ToDictionary(host => host, _ => (string?)null);
-        EventHandler<string> onError = (_, error) => errors.Add(error);
-        EventHandler<string> onDirectory = (sender, _) => published[(HwndHost)sender!] = "directory";
-        EventHandler<string> onSearch = (sender, query) => published[(HwndHost)sender!] = query;
+        EventHandler<ExplorerDirs.App.ShellNavigationNotice> onError = (_, error) => errors.Add(error.Value);
+        EventHandler<ExplorerDirs.App.ShellNavigationNotice> onDirectory = (sender, _) => published[(HwndHost)sender!] = "directory";
+        EventHandler<ExplorerDirs.App.ShellNavigationNotice> onSearch = (sender, query) => published[(HwndHost)sender!] = query.Value;
         foreach (var host in hosts)
         {
             if (host.IsVisible) throw new Exception("Search host must be hidden to prevent focus restoration.");

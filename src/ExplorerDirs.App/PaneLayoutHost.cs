@@ -110,7 +110,7 @@ internal static class PaneLayoutHost
                     IsTabStop = false,
                     ShowsPreview = false
                 };
-                splitter.SetResourceReference(Control.BackgroundProperty, SystemColors.ControlDarkBrushKey);
+                splitter.SetResourceReference(Control.BackgroundProperty, "ExplorerDirs.BorderBrush");
                 AutomationProperties.SetName(splitter, columns ? "调整左右窗格宽度" : "调整上下窗格高度");
                 Grid.SetColumn(splitter, columns ? boundary * 2 - 1 : first * 2);
                 Grid.SetRow(splitter, columns ? first * 2 : boundary * 2 - 1);

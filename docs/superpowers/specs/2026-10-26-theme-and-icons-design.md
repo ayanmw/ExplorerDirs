@@ -2,7 +2,18 @@
 
 ## 状态
 
-规划稿。此文件记录用户要求自主规划的主题和图标方向，不代表已经实现或通过可见验收。初始 `System/Light/Dark` 偏好设计见[基础主题设计](2026-10-25-theme-preference.md)。
+规划与阶段状态。初始 `System/Light/Dark` 偏好设计见[基础主题设计](2026-10-25-theme-preference.md)。
+
+### 2026-10-26 实施记录
+
+- 每窗格当前选中的标签现通过两 DIP 底边框消费动态 `ExplorerDirs.AccentBrush`；没有替换 TabItem 默认模板，也未改变标签拖动、关闭和原生 Shell 视图行为。静态 XAML smoke 与 Release 构建通过，实际颜色、四窗格观感和高对比度仍待可见验收。
+- 第一阶段基础接线已实现：`SystemThemeMonitor` 读取 Windows Accent 并接收颜色变化；应用在 System/Light/Dark 三种模式下都使用最新成功的系统强调色，读取失败继续沿用上次有效值，首次失败回退到默认蓝色。主题 INI 格式未改变。
+- 语义色板增加 Accent/AccentText，选中背景会基于浅/深中性表面和系统强调色派生，前景通过相对对比度选择。资源已提供应用级 Accent 画刷，当前活动窗格根边框使用该画刷，非活动窗格仍使用系统边框色；活动标签、焦点环、按钮图标尚未逐个接入。
+- 布局工具栏按钮的选中态现使用对比度检查过的选择背景和动态系统强调色边框；未选中布局继续使用中性边框。主题资源切换由 WPF 动态资源处理。
+- 每窗格的新建/关闭标签按钮复用应用本地矢量图标；主工具栏的预览/详情窗格开关添加带文字标签的对应图标。图标沿用动态语义画刷，Automation 名称、命令处理器和焦点顺序保持不变。
+- 目录树、预览窗格和详情窗格三个 ToggleButton 的启用态现使用选择色底、可读前景和动态 Accent 边框；关闭态继续使用中性控件色，主题状态变化不修改其可见性/导航行为。
+- WPF TextBox、ComboBox、Button 和 ToggleButton 现在共享 Accent 色键盘焦点虚线框；颜色通过动态资源跟随系统/自定义强调色及高对比度回退。原生 Shell 文件列表焦点视觉仍由 Windows Shell 控制。
+- 派生色纯逻辑冒烟、完整设置冒烟及 App Release 构建通过；尚未观察实际 Windows 强调色变化事件、多窗口同步、WPF 控件可见效果或高对比度切换。本阶段仍需桌面验收。
 
 ## 意图
 
@@ -10,7 +21,7 @@
 
 ## 已核实现状
 
-- `Theme.ini` 已保存全局 `System/Light/Dark`；默认跟随 Windows。`SystemThemeMonitor` 当前通过 `UISettings` 颜色变化事件推断明暗，但未读取 `UIColorType.Accent`；`ThemePalette` 对强调色使用固定值。
+- `Theme.ini` 已保存全局 `System/Light/Dark`；默认跟随 Windows。`SystemThemeMonitor` 现通过 `UISettings` 颜色变化事件读取系统明暗与 `UIColorType.Accent`；`ThemePalette` 可由系统强调色派生选中色与语义 Accent 资源。
 - WPF 窗口、菜单、工具栏、导航和状态栏可通过动态系统颜色资源更新。ExplorerBrowser 文件区由 Windows Shell 绘制，不会因替换 WPF 资源而自动变色。
 - 文件/文件夹图标由 Shell 提供。应用布局及命令按钮中还有字符或独立绘制图标，需要统一视觉资源。
 - Q-Dir 公开资料将整体“Color - Theme”与文件颜色过滤分开列出；文件规则可针对扩展名、目录、只读、隐藏状态设置文字/背景/字体样式，`#BG` 与 `#BG-A` 分别表示普通视图和活动视图背景。FAQ 47 说明启用保存选项后可把颜色设置写入收藏 `.qdr`，但当前本机样本没有规则正向样本，`colorthema=0` 的含义也未确认。

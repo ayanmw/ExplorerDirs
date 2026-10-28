@@ -14,6 +14,30 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 2026-10-25 复核 Program Starter 时，本机 `C:\SoftwareOK\Q-Dir\Q-Dir.ini` 的 `[Program]` 节只有 `portable_install=1`，当前没有可验证的实际启动项行。Q-Dir FAQ 46 公开说明 Ctrl+S、`Name=Path=Arguments[=Work directory]` 与目录/所选文件/多窗格占位符；Program Starter 专页说明保存于 Q-Dir.ini 并允许相对路径。Explorer Dirs 已接入独立 `ProgramStarter.ini`、Q-Dir `[Program]` 导入预览和显式导入；当前已用公开格式 fixture 验证解析，仍待真实桌面交互验收及带有效启动项的 Q-Dir.ini 正向样本核验。[FAQ 46](https://softwareok.com/?faq=46&seite=faq-Q-DIR) · [Program Starter 专页](https://www.softwareok.com/?seite=Freeware/Q-Dir/Programmstarter_in-Q-Dir)
 
+## 2026-10-27 官方版本基线复核
+
+再次核对 [Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)：当前仍为 12.82，更新日期 2026-10-24；版本说明只具体提到改进地址栏目录树使用，其余为一般 Quad-Explorer 优化和语言文件更新，没有给出可据此实现的新交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑、祖先导航及“此电脑”驱动器子项。本轮不据笼统的“优化”文字推测新行为；当前实际差距应通过之后的可见 Q-Dir/Explorer Dirs 对照记录，而不是再扩写未经证实的版本功能。
+
+## 2026-10-28 官方大小信息行为复核
+
+Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字可带同一目录中文件与文件夹大小的相对百分比。官方说明没有定义百分比的精确分母、隐藏项/失败扫描的处理及舍入策略，因此这些规则仍需可见行为确认。
+
+Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树到状态栏，和 Q-Dir 的“切换逐行大小信息”不是同一行为；继续保留用户选定的 F9 语义。逐行列仍受 [Shell 视图架构门槛](folder-size-column-investigation.md)限制，本轮没有引入猜测公式或代码实现。
+
+## 2026-10-27 Win+E 入口对照
+
+Q-Dir 帮助页概述支持把 Win+E 设为启动 Q-Dir；更具体的 [FAQ 81](https://www.softwareok.com/?faq=81&seite=faq-Q-DIR) 给出的做法是使用 QuickTextPaste，把 `E+L-Win` 绑定到 `run:%PATH%/q-dir.exe`。因此，公开证据确认的是可通过外部快捷键工具转发 Win+E，并未说明 Q-Dir 自身注册全局热键、替换 Explorer 或改写文件夹关联。此处是基于官方操作步骤的判断，不推断 Q-Dir 的内部实现。
+
+Explorer Dirs 已具备单目录命令行启动和可选、可逆的每用户文件夹/磁盘菜单脚本；这与 Win+E 热键路由是不同入口。鉴于 Win+E 是系统级组合键且可能与其他快捷键工具冲突，后续设计须先明确应用自身的可逆启停与冲突恢复流程，不使用未经验证的全局键盘钩子或注册表键。当前仍未接管 Win+E；系统入口验收继续列在 [路线图 M3](roadmap.md#系统入口接管) 中。
+
+## 2026-10-27 Q-Dir 文件筛选行为对照
+
+复核 Q-Dir 官方 [FAQ 37](https://www.softwareok.com/?faq=37&seite=faq-Q-DIR) 与 [FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)：Q-Dir 说明每个文件视图分别保存筛选设置；筛选支持多个 `*`/`?` 通配模式、正向或反向匹配、可选择是否筛选文件夹、保存筛选收藏，并可通过列表列标题筛选。FAQ 37 还把其筛选称作 “effective tagging filter”，但没有解释这个术语是否意味着仅高亮、选择标记或额外筛选行为，因此不据此增加新的“标记”模式。
+
+Explorer Dirs 已按标签保存独立过滤规则和筛选收藏，支持分号分隔模式、包含/排除以及可选筛文件夹；这覆盖了 FAQ 38 明确描述的主要规则，并比每视图保存扩展到每标签保存。ExplorerBrowser 使用原生 Shell 视图，故列标题筛选预期沿用系统能力；与快速筛选同时启用时是否只影响当前视图，仍需四窗格可见验收。筛选策略源码见[核心操作对照](shell-parity.md)；本轮没有新增筛选实现或改变路线图优先级。
+
+Q-Dir [FAQ 84](https://www.softwareok.com/?faq=84&seite=faq-Q-DIR) 另说明筛选输入框支持历史自动完成：按向下键展开，选中某条后按 Delete 删除该记录。Explorer Dirs 现将已应用的非空模式记录到独立便携历史 INI，保留最近 50 项，并按此键盘约定接入历史下拉；它与每标签筛选状态和命名筛选收藏分开保存。下拉的实际键盘操作仍待可见 GUI 验收。
+
 ## 功能对照
 
 | 产品 | 官方可确认能力 | 本项目可借鉴之处 |

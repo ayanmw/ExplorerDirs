@@ -4,6 +4,32 @@ internal static class ShellViewColorPolicySmoke
 {
     internal static int Run()
     {
+        ShellViewDragSource.VerifyContract(Check);
+        var qdrFilter2 = "[Filter2]\r\n0=#Hidden=1=-1=1=1=-1=0\r\n1=*.zip;*.rar;=1=00AA00=-1=1=-1=0\r\n10=#BG=1=-1=-1=1=-1=0\r\n[Other]\r\n0=not-a-filter";
+        Check(QdrFilter2RawReader.TryParse(qdrFilter2, out var rawRules) && rawRules.Count == 3 &&
+              rawRules[0].Index == 0 && rawRules[0].Pattern == "#Hidden" &&
+              rawRules[0].Fields.SequenceEqual(new[] { "1", "-1", "1", "1", "-1", "0" }) &&
+              rawRules[1].Index == 1 && rawRules[1].Pattern == "*.zip;*.rar;" &&
+              rawRules[1].Fields[1] == "00AA00" &&
+              rawRules[2].Index == 10 && rawRules[2].Pattern == "#BG",
+            "numbered Q-Dir Filter2 rows preserve patterns, ordering, and undocumented raw fields");
+        Check(!QdrFilter2RawReader.TryParse("[Filter2]\r\n0=#DIR=1=00FF00", out var invalidRules) &&
+              invalidRules.Count == 0,
+            "an incomplete numbered Q-Dir Filter2 row is rejected without partial output");
+
+        var appliedColors = new List<uint>();
+        Check(ShellViewColorBackgroundPolicy.TryApply(1, 0x00112233,
+                (_, color) => { appliedColors.Add(color); return true; }) &&
+              appliedColors.SequenceEqual(new uint[] { 0x00112233 }),
+            "a resolved view background is sent to the native list view unchanged");
+        Check(ShellViewColorBackgroundPolicy.TryApply(1, null,
+                (_, color) => { appliedColors.Add(color); return true; }) &&
+              appliedColors.Last() == ShellViewColorBackgroundPolicy.NoColor,
+            "an unresolved view background restores the parent-painted Shell default");
+        Check(!ShellViewColorBackgroundPolicy.TryApply(0, 0x00112233,
+                (_, _) => throw new InvalidOperationException("A missing view window must not be called.")),
+            "a missing native list view is rejected without sending a message");
+
         ShellViewReferenceRetirementSmoke.Run();
         ShellViewNavigationHistorySmoke.Run();
         ShellViewColorBrowserHostSmoke.Run();
@@ -158,7 +184,7 @@ internal static class ShellViewColorPolicySmoke
         if (ShellViewColorPolicy.TryGetColors(9, selection, ruleTextColors, ruleColors, out _))
             throw new InvalidOperationException("An unmatched row should retain native Shell colors.");
 
-        Console.WriteLine("shell-view-color-policy-smoke: q-dir-name-folder-hidden-patterns=True; q-dir-rule-priority=True; independent-properties=True; view-background-active-rules=True; selected=1,3; defview-only-selected-bit=ignored; configured-properties-only=True; native-unmatched-preserved=True; font-style-policy=True");
+        Console.WriteLine("shell-view-color-policy-smoke: qdr-filter2-raw=True; q-dir-name-folder-hidden-patterns=True; q-dir-rule-priority=True; independent-properties=True; view-background-active-rules=True; selected=1,3; defview-only-selected-bit=ignored; configured-properties-only=True; native-unmatched-preserved=True; font-style-policy=True");
         return 0;
     }
 

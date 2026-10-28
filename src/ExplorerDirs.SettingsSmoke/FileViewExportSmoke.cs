@@ -7,6 +7,12 @@ internal static class FileViewExportSmoke
 {
     internal static void Run()
     {
+        var repoRoot = FindRepoRoot();
+        var mainWindowCode = File.ReadAllText(Path.Combine(repoRoot,
+            "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+        Require(mainWindowCode.Contains("FileViewExportFile.WriteAtomically", StringComparison.Ordinal),
+            "the export command writes a complete temporary file before replacing its destination");
+
         var snapshot = new FileViewExportSnapshot(
             ["Name", "Details"],
             [
@@ -75,6 +81,73 @@ internal static class FileViewExportSmoke
             "XLS rejects more than 256 columns");
         Require(WriteText(FileViewExportFormat.Csv, wideSnapshot).Split(',').Length == 257,
             "CSV has no XLS-specific column limit");
+
+        var root = Path.Combine(Path.GetTempPath(), $"explorer-dirs-atomic-export-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var destination = Path.Combine(root, "current-view.csv");
+            File.WriteAllText(destination, "previous complete export");
+            Throws<InvalidOperationException>(() => FileViewExportFile.WriteAtomically(destination, output =>
+            {
+                output.Write("partial"u8);
+                throw new InvalidOperationException("simulated writer failure");
+            }), "a failed export propagates its writer failure");
+            Require(File.ReadAllText(destination) == "previous complete export" &&
+                    Directory.GetFiles(root).Length == 1,
+                "a failed export preserves the previous destination and removes its temporary file");
+
+            FileViewExportFile.WriteAtomically(destination, output => output.Write("complete"u8));
+            Require(File.ReadAllText(destination) == "complete" && Directory.GetFiles(root).Length == 1,
+                "a successful export replaces the destination only after the new file is complete");
+            CheckClosedWindowWriteAsync(destination).GetAwaiter().GetResult();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+
+    }
+
+    private static async Task CheckClosedWindowWriteAsync(string destination)
+    {
+        using var closed = new CancellationTokenSource();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var proceed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = WindowBackgroundOperation.RunAsync((destination, started, proceed, finished), static state =>
+        {
+            try
+            {
+                FileViewExportFile.WriteAtomically(state.destination, output =>
+                {
+                    output.Write("confirmed "u8);
+                    state.started.SetResult(true);
+                    state.proceed.Task.GetAwaiter().GetResult();
+                    output.Write("export"u8);
+                });
+                state.finished.TrySetResult(true);
+                return true;
+            }
+            catch (Exception ex) { state.finished.TrySetException(ex); throw; }
+        }, closed.Token);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            closed.Cancel();
+            try { await waiting.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) when (closed.IsCancellationRequested) { }
+            Require(waiting.IsCanceled && !finished.Task.IsCompleted,
+                "closing ends the UI wait without cancelling a confirmed export writer");
+            Require(File.ReadAllText(destination) == "complete",
+                "a partially written export never replaces the previous destination");
+            proceed.TrySetResult(true);
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Require(File.ReadAllText(destination) == "confirmed export",
+                "the confirmed atomic write completes after its UI wait was cancelled");
+        }
+        finally
+        {
+            proceed.TrySetResult(true);
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     private static string WriteText(FileViewExportFormat format, FileViewExportSnapshot snapshot) =>
@@ -89,6 +162,18 @@ internal static class FileViewExportSmoke
 
     private static bool HasUtf8Bom(byte[] bytes) => bytes.Length >= 3 &&
         bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+
+    private static string FindRepoRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md")) &&
+                File.Exists(Path.Combine(directory.FullName, "src", "ExplorerDirs.App", "MainWindow.xaml.cs")))
+                return directory.FullName;
+        }
+        throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
+    }
 
     private static void Require(bool condition, string description)
     {

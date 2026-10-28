@@ -33,7 +33,7 @@ public sealed class PaneLayoutGrid : Grid
                 Cursor = axis == 2 ? Cursors.SizeNS : Cursors.SizeWE,
                 Focusable = false, IsTabStop = false
             };
-            divider.SetResourceReference(Control.BackgroundProperty, SystemColors.ControlDarkBrushKey);
+            divider.SetResourceReference(Control.BackgroundProperty, "ExplorerDirs.BorderBrush");
             var border = new FrameworkElementFactory(typeof(Border));
             border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
             divider.Template = new ControlTemplate(typeof(Thumb)) { VisualTree = border };

@@ -11,6 +11,11 @@ internal static class PhotoPrintWindowMarkupSmoke
         var xamlPath = Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PhotoPrintWindow.xaml");
         var document = XDocument.Load(xamlPath);
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var window = document.Root ?? throw new InvalidOperationException("Photo print window XAML has no root element.");
+        Check((string?)window.Attribute("Background") == "{DynamicResource ExplorerDirs.WindowBackgroundBrush}" &&
+              (string?)window.Attribute("Foreground") == "{DynamicResource ExplorerDirs.WindowTextBrush}",
+            "photo print window follows semantic surface and text colors");
         var rootGrid = document.Root?.Element(presentation + "Grid")
             ?? throw new InvalidOperationException("Photo print window has no root Grid.");
         var rows = rootGrid.Element(presentation + "Grid.RowDefinitions")?
@@ -25,6 +30,14 @@ internal static class PhotoPrintWindowMarkupSmoke
         Check(preview is not null && (string?)preview.Attribute("Grid.Row") == "0" &&
               actions is not null && (string?)actions.Attribute("Grid.Row") == "1",
             "photo preview and print/cancel actions do not overlap");
+        Check(preview is not null &&
+              (string?)preview.Attribute("BorderBrush") == "{DynamicResource ExplorerDirs.BorderBrush}" &&
+              (string?)preview.Attribute("Background") == "{DynamicResource ExplorerDirs.WindowBackgroundBrush}",
+            "photo preview frame uses semantic border and surface colors");
+        Check(rootGrid.Descendants(presentation + "TextBlock").Any(element =>
+                (string?)element.Attribute(xaml + "Name") == "SettingsError" &&
+                (string?)element.Attribute("Foreground") == "{DynamicResource ExplorerDirs.WindowTextBrush}"),
+            "photo print errors remain readable through the semantic text role");
 
         var controls = rootGrid.Descendants().Where(element =>
             element.Name == presentation + "ComboBox" ||

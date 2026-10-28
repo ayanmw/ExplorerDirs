@@ -22,7 +22,15 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
-$settings = @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini', 'WindowSessions.ini')
+$settings = @(
+    'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
+    'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
+    'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',
+    'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini',
+    'MouseWheelFocus.ini', 'TabStripVisibility.ini', 'MultilineTabHeaders.ini', 'TabHeaderMaximumWidth.ini', 'TabCloseButton.ini', 'TabHoverActivation.ini',
+    'NewTabLocation.ini', 'StatusBar.ini', 'StatusBarSelectionSize.ini', 'StatusBarFolderSize.ini',
+    'SelectionCheckBoxes.ini', 'FullRowSelection.ini', 'WindowSessions.ini'
+)
 foreach ($name in $settings) {
     [IO.File]::WriteAllText((Join-Path $fixtureProfile $name), ('fixture-' + $name))
 }
@@ -30,6 +38,7 @@ $extraWindowName = 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.ini'
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'WindowSessions.ini'), "[WindowSessions]`nFormatVersion=1`nCount=2`nSession0=ExplorerDirs.ini`nSession1=$extraWindowName`n")
 [IO.File]::WriteAllText((Join-Path $fixtureProfile $extraWindowName), 'fixture extra window session')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini'), 'fixture extra window pins')
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.WindowPlacement.ini'), 'fixture extra window placement')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'), 'unregistered window session')
 $workspaces = Join-Path $fixtureProfile 'Workspaces'
 New-Item -ItemType Directory -Path $workspaces, (Join-Path $workspaces 'nested') | Out-Null
@@ -42,6 +51,7 @@ New-Item -ItemType Directory -Path $quickLinks, (Join-Path $quickLinks 'nested')
 [IO.File]::WriteAllText((Join-Path $quickLinks 'notes.txt'), 'not a quick link')
 [IO.File]::WriteAllText((Join-Path $quickLinks 'nested/ignored.lnk'), 'not listed by QuickLinkStore')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'unrelated.txt'), 'not app settings')
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'unrelated.ini'), 'not an Explorer Dirs setting')
 $before = @{}
 Get-ChildItem -LiteralPath $fixtureProfile -Recurse -File | ForEach-Object {
     $before[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
@@ -57,7 +67,7 @@ foreach ($name in $settings) {
         throw "Isolated preview did not preserve $name."
     }
 }
-foreach ($name in @($extraWindowName, 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini')) {
+foreach ($name in @($extraWindowName, 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini', 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.WindowPlacement.ini')) {
     if (-not (Test-Path -LiteralPath (Join-Path $copied $name) -PathType Leaf)) {
         throw "Isolated preview did not carry registered window state $name."
     }
@@ -75,11 +85,43 @@ if (-not (Test-Path -LiteralPath $quickLinkCopy -PathType Leaf) -or
 if ((Get-ChildItem -LiteralPath (Join-Path $copied 'Workspaces') -Recurse -File).Count -ne 1 -or
     (Get-ChildItem -LiteralPath (Join-Path $copied 'QuickLinks') -Recurse -File).Count -ne 1 -or
     (Test-Path -LiteralPath (Join-Path $copied 'unrelated.txt')) -or
+    (Test-Path -LiteralPath (Join-Path $copied 'unrelated.ini')) -or
     (Test-Path -LiteralPath (Join-Path $copied 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'))) {
     throw 'Unrelated profile content was copied.'
 }
 foreach ($path in $before.Keys) {
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $before[$path]) { throw 'Source profile was modified.' }
+}
+
+$externalProfile = Join-Path $fixture 'external-profile'
+New-Item -ItemType Directory -Path $externalProfile | Out-Null
+[IO.File]::WriteAllText((Join-Path $externalProfile 'ExplorerDirs.ini'), 'external-profile-session')
+[IO.File]::WriteAllText((Join-Path $externalProfile 'PinnedTabs.ini'), 'external-profile-pins')
+$externalSessionHash = (Get-FileHash -LiteralPath (Join-Path $externalProfile 'ExplorerDirs.ini') -Algorithm SHA256).Hash
+$externalPinsHash = (Get-FileHash -LiteralPath (Join-Path $externalProfile 'PinnedTabs.ini') -Algorithm SHA256).Hash
+$externalRelease = & $script -Version 'fixture-external-profile' -IsolatedProfile -ProfileRoot $externalProfile
+$externalCopy = Join-Path $externalRelease 'app/profile'
+foreach ($entry in @(@('ExplorerDirs.ini', $externalSessionHash), @('PinnedTabs.ini', $externalPinsHash))) {
+    $copiedPath = Join-Path $externalCopy $entry[0]
+    if (-not (Test-Path -LiteralPath $copiedPath -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $copiedPath -Algorithm SHA256).Hash -ne $entry[1]) {
+        throw "Isolated preview did not copy $($entry[0]) from the explicitly selected profile root."
+    }
+}
+foreach ($file in Get-ChildItem -LiteralPath $externalProfile -File) {
+    if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath (Join-Path $externalCopy $file.Name) -Algorithm SHA256).Hash) {
+        throw "Explicit profile source was modified during publishing: $($file.Name)"
+    }
+}
+$missingProfileRejected = $false
+try { & $script -Version 'fixture-missing-profile' -IsolatedProfile -ProfileRoot (Join-Path $fixture 'missing-profile') | Out-Null }
+catch {
+    if ($_.Exception.Message -notlike 'Profile source directory does not exist:*') { throw }
+    $missingProfileRejected = $true
+}
+if (-not $missingProfileRejected -or (Test-Path -LiteralPath (Join-Path $fixture 'releases/fixture-missing-profile'))) {
+    throw 'Publishing with an explicitly missing profile root was not rejected before creating a release.'
 }
 
 $rejectedExisting = $false
@@ -94,6 +136,11 @@ if (Test-Path -LiteralPath (Join-Path $normal 'profile')) { throw 'Normal releas
 $preview = & $script -Version 'preview-0.6.0-temp.4'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.6.0-preview.temp.4') {
     throw 'A temporary preview directory version was not applied to the published product version.'
+}
+$redirectedReleaseRoot = Join-Path $fixture 'redirected-releases'
+$redirected = & $script -Version 'fixture-redirected' -ReleaseRoot $redirectedReleaseRoot
+if ([IO.Path]::GetFullPath($redirected) -ne [IO.Path]::GetFullPath((Join-Path $redirectedReleaseRoot 'fixture-redirected'))) {
+    throw 'The requested release root was not used.'
 }
 $versioned = & $script -Version 'preview-0.7.0'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.7.0-preview') {

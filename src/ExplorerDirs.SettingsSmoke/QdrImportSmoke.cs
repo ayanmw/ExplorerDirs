@@ -7,6 +7,22 @@ internal static class QdrImportSmoke
 {
     public static void Run(string root)
     {
+        // The 8 MB input bound must also keep line parsing from allocating a second object per newline.
+        var blankLines = new string('\n', 1_000_000);
+        var allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        try
+        {
+            QdrImporter.Parse(blankLines, (value, _) => value);
+            throw new Exception("QDR without a version marker was accepted");
+        }
+        catch (InvalidDataException)
+        {
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+            Require(allocated < 2_000_000,
+                $"QDR line scanning avoids allocating a split array for newline-heavy input (allocated {allocated} bytes)");
+            Console.WriteLine($"Q-Dir parser newline scan allocation: {allocated} bytes for 1,000,000 LF characters");
+        }
+
         var plain = "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\current\nDir1_0=C:\\first\nDir1_2=C:\\third\n" +
             "ViewMode1=3\nCurPos1_2=0\nCurPos1_0=2\nDir2=D:\\名字 & 目录\nColsAndSort1=unknown";
         var imported = QdrImporter.Parse(plain, (value, _) => value);
@@ -15,6 +31,40 @@ internal static class QdrImportSmoke
             imported.Panes[0][1].View.Mode == 3 && imported.Panes[1][0].Path == @"D:\名字 & 目录",
             "QDR preserves pane mapping, active tab gap, reordered tabs, Unicode and ampersand paths");
         Require(imported.Warnings.Any(warning => warning.Contains("排序")), "private view blobs are reported as unsupported");
+        foreach (var locations in new[]
+        {
+            "Dir1=C:\\text-path\nFolder1=%0600FF00\n",
+            "Folder1=%0600FF00\nDir1=C:\\text-path\n"
+        })
+        {
+            var resolverCalls = 0;
+            var conflictingLocations = QdrImporter.Parse(
+                "Q-Dir Version=12.79\nViewMode=0\n" + locations + "Dir2=D:\\keep\n",
+                (value, encoded) =>
+                {
+                    resolverCalls++;
+                    return encoded ? @"C:\encoded-pidl" : value;
+                });
+            Require(conflictingLocations.TabCount == 1 &&
+                conflictingLocations.Panes[1][0].Path == @"D:\keep" && resolverCalls == 1 &&
+                conflictingLocations.Warnings.Any(warning => warning.Contains("同时包含") && warning.Contains("已跳过")),
+                "ambiguous Dir/Folder aliases skip only the conflicting QDR location regardless of field order");
+        }
+        var numberedAliasConflict = QdrImporter.Parse(
+            "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\current\nDir1_0=C:\\ambiguous\n" +
+            "Folder1_0=%0600FF00\nDir1_1=C:\\keep\nCurPos1=0\nCurPos1_1=1\n",
+            (value, encoded) => encoded ? @"C:\encoded-pidl" : value);
+        Require(numberedAliasConflict.Panes[0].Count == 2 &&
+            numberedAliasConflict.Panes[0][0].Path == @"C:\current" &&
+            numberedAliasConflict.Panes[0][1].Path == @"C:\keep" &&
+            numberedAliasConflict.SelectedTabs[0] == 0,
+            "a numbered Dir/Folder collision is skipped without reusing its index for the current tab");
+        var launchState = QdrLaunchSession.Create(imported, @"C:\Users\marvin");
+        Require(launchState.Layout == 4 && launchState.Panes[0].Count == 3 &&
+                launchState.Panes[1][0].Path == imported.Panes[1][0].Path &&
+                launchState.Panes.Skip(2).All(pane => pane.Count == 1 && pane[0].Path == @"C:\Users\marvin") &&
+                launchState.ActiveTabIndices![0] == imported.SelectedTabs[0],
+            "a launchable Q-Dir session restores imported panes and fills empty panes with the normal home tab");
         var unknownFields = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\safe\nViewModeFlags1=7\nVendorPolicy=private-path\n",
             (value, _) => value);
@@ -78,6 +128,26 @@ internal static class QdrImportSmoke
         Require(qdrColorInvalid.Warnings.Any(warning => warning.Contains("useColor") && warning.Contains("无法识别")) &&
                 qdrColorInvalid.Warnings.All(warning => !warning.Contains("maybe")),
             "invalid Q-Dir color switch values are reported without echoing the raw value");
+        var qdrColorRules = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nuseColor=1\nDir1=C:\\left\n" +
+            "[Filter2]\n0=*.jpg=1=FF0000=-1=1=-1=0\n1=#BG-A=1=-1=-1=1=-1=0\n",
+            (value, _) => value);
+        Require(qdrColorRules.Warnings.Any(warning => warning.Contains("Filter2") && warning.Contains("2") &&
+                    warning.Contains("颜色规则") && warning.Contains("未导入") &&
+                    warning.Contains("*.jpg") && warning.Contains("#BG-A")) &&
+                qdrColorRules.Warnings.All(warning => !warning.Contains("FF0000")) &&
+                !qdrColorRules.Warnings.Any(warning => warning.Contains("未识别且未应用的字段名")),
+            "Q-Dir import preview lists Filter2 rule patterns without interpreting or exposing color values");
+        var longFilterPattern = new string('x', 70);
+        var manyFilterRules = string.Join("\n", Enumerable.Range(0, 8).Select(index =>
+            $"{index}={(index == 0 ? longFilterPattern : $"pattern-{index}")}=1=00AA00=-1=1=-1=0"));
+        var boundedColorWarning = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nDir1=C:\\left\n[Filter2]\n" + manyFilterRules,
+            (value, _) => value).Warnings.Single(warning => warning.Contains("Filter2"));
+        Require(boundedColorWarning.Length < 400 && boundedColorWarning.Contains(new string('x', 61) + "…") &&
+                boundedColorWarning.Contains("pattern-5") && !boundedColorWarning.Contains("pattern-6") &&
+                boundedColorWarning.EndsWith("等", StringComparison.Ordinal),
+            "Q-Dir Filter2 preview bounds long patterns and the number of listed rules");
         var previewDisabled = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\left\nVorschau=0\n", (value, _) => value);
         Require(!previewDisabled.Panes[0][0].PreviewPaneVisible &&
@@ -215,6 +285,77 @@ internal static class QdrImportSmoke
         Require(QdrImporter.Load(qdrPath).TabCount == 1, "UTF16 QDR import of an existing directory");
         File.WriteAllText(qdrPath, loadable, new UTF8Encoding(true));
         Require(QdrImporter.Load(qdrPath).TabCount == 1, "UTF8 BOM QDR import of an existing directory");
+        var literalVariable = "ExplorerDirsQdrLiteral_" + Guid.NewGuid().ToString("N");
+        var literalFolder = Path.Combine(root, "%" + literalVariable + "%");
+        var replacementFolder = Path.Combine(root, "expanded-target");
+        Directory.CreateDirectory(literalFolder);
+        Directory.CreateDirectory(replacementFolder);
+        Environment.SetEnvironmentVariable(literalVariable, "expanded-target");
+        try
+        {
+            var expandedResult = QdrImporter.Parse($"Q-Dir Version=12.79\nDir1={literalFolder}\n",
+                QdrImporter.ResolveLocation);
+            Require(expandedResult.Panes[0][0].Path.Equals(replacementFolder, StringComparison.OrdinalIgnoreCase),
+                "plain QDR text paths intentionally expand environment variables");
+            nint literalPidl = 0;
+            try
+            {
+                // Encoded PIDLs carry a filesystem identity; percent signs here are not variable syntax.
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(literalFolder, 0, out literalPidl, 0, out _));
+                var literalBytes = new byte[ILGetSize(literalPidl)];
+                Marshal.Copy(literalPidl, literalBytes, 0, literalBytes.Length);
+                var literalEncoded = string.Concat(literalBytes.Select(value => "%" + value.ToString("X2")));
+                var literalResult = QdrImporter.Parse($"Q-Dir Version=12.79\nFolder1={literalEncoded}\n",
+                    QdrImporter.ResolveLocation);
+                Require(literalResult.Panes[0][0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase),
+                    "QDR PIDLs preserve percent-named folder identity despite a matching environment variable");
+                var literalState = new SessionState(4, 4,
+                    Enumerable.Range(0, 4).Select(_ => new List<TabSettings>
+                        { new(literalFolder, ViewState.Default()) }).ToList(), 0, [0, 0, 0, 0]);
+                var encodedExport = QdrExporter.Render(literalState, [], encodedLocations:
+                    new Dictionary<string, string> { [literalFolder] = literalEncoded });
+                var baseExport = string.Join("\n", encodedExport.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                var baseRoundTrip = QdrImporter.Parse(baseExport, QdrImporter.ResolveLocation);
+                Require(baseRoundTrip.TabCount == 4 && baseRoundTrip.Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "encoded export preserves literal paths in all four base panes without the app extension");
+                var exactRoundTrip = QdrImporter.Parse(encodedExport, QdrImporter.ResolveLocation);
+                Require(exactRoundTrip.ExtendedState is not null,
+                    "encoded base paths participate in the extension hash and retain exact app state");
+                var prepared = Task.Run(() => QdrExporter.Prepare(literalState, [])).GetAwaiter().GetResult();
+                var preparedBase = string.Join("\n", prepared.Text.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                Require(prepared.UnencodedLocationCount == 0 &&
+                    QdrImporter.Parse(preparedBase, QdrImporter.ResolveLocation).Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "background export preparation captures literal PIDLs without environment expansion");
+                var offlinePath = Path.Combine(root, "%MissingQdrLocation_" + Guid.NewGuid().ToString("N") + "%");
+                var offlineState = literalState with { Panes = Enumerable.Range(0, 4)
+                    .Select(_ => new List<TabSettings> { new(offlinePath, ViewState.Default()) }).ToList() };
+                var offlinePrepared = Task.Run(() => QdrExporter.Prepare(offlineState, [])).GetAwaiter().GetResult();
+                var offlineRoundTrip = QdrImporter.Parse(offlinePrepared.Text, (value, _) => value);
+                Require(offlinePrepared.UnencodedLocationCount == 1 && offlineRoundTrip.ExtendedState is not null &&
+                    offlineRoundTrip.TabCount == 4 && offlineRoundTrip.Panes.All(pane => pane[0].Path == offlinePath),
+                    "unavailable percent paths retain every tab and report one distinct unresolved identity");                var literalBackup = Path.Combine(root, "literal-backup.bak");
+                var literalBackupWarnings = Task.Run(() => QdrExporter.SaveBackup(literalBackup,
+                    literalState, [], new Dictionary<int, LayoutProportions> { [4] = new(0.5, 0.5) },
+                    NavigationTreeWidths.Defaults)).GetAwaiter().GetResult();
+                var literalBackupText = QdrImporter.ReadText(literalBackup + ".qdr");
+                var literalBackupBase = string.Join("\n", literalBackupText.Split('\n').Where(line =>
+                    !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+                Require(literalBackupWarnings == 0 && File.ReadAllText(literalBackup) == SessionStore.Render(literalState) &&
+                    QdrImporter.Parse(literalBackupBase, QdrImporter.ResolveLocation).Panes.All(pane =>
+                        pane[0].Path.Equals(literalFolder, StringComparison.OrdinalIgnoreCase)),
+                    "background backup retains literal percent identities in its interoperable base fields");                var malformedRejected = false;
+                try { QdrExporter.Render(literalState, [], encodedLocations:
+                    new Dictionary<string, string> { [literalFolder] = "%01" }); }
+                catch (FormatException) { malformedRejected = true; }
+                Require(malformedRejected, "invalid pre-resolved PIDLs cannot be emitted as valid export fields");
+            }
+            finally { if (literalPidl != 0) Marshal.FreeCoTaskMem(literalPidl); }
+        }
+        finally { Environment.SetEnvironmentVariable(literalVariable, null); }
         var pidl = IntPtr.Zero;
         try
         {

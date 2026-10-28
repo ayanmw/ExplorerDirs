@@ -156,6 +156,17 @@ internal static class ShellViewColorRuleEvaluator
     }
 }
 
+internal static class ShellViewColorBackgroundPolicy
+{
+    internal const uint NoColor = 0xFFFFFFFF; // CLR_NONE asks the ListView parent to paint the Shell default.
+
+    internal static bool TryApply(nint listView, uint? color, Func<nint, uint, bool> setBackground)
+    {
+        ArgumentNullException.ThrowIfNull(setBackground);
+        return listView != 0 && setBackground(listView, color ?? NoColor);
+    }
+}
+
 internal static class ShellViewColorPolicy
 {
     internal static bool TryGetColors(nuint itemIndex, ShellListSelectionSnapshot selection,

@@ -1,6 +1,56 @@
 # 可使用版本
 
-## 最新临时预览包（2026-10-26）
+最新主题修正版为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.76\app\ExplorerDirs.App.exe`，独立 profile 来自 temp.75。修正 Windows Foreground 深浅检测取反，选项明确三态，详见[temp.76](../docs/releases/preview-0.6.0-temp.76.md)。未启动 GUI；应用主题与原生 Shell 文件区适配分开验收。下列 temp.75 保留为上一版累计功能说明。
+
+## 最新临时预览包（2026-10-27）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.75\app\ExplorerDirs.App.exe`，独立 profile 从 temp.74 复制，三份 INI 哈希核对一致，源配置未改变。累计包含窗口位置记忆、工具栏精简、跨窗格/多行/悬停标签、地址编辑、状态栏/扫描和原生交互/配置保护修复。产品版本 `0.6.0-preview.temp.75+652d35e50b6bddf0cb2f60f78ee8ee9b393c4a07`；完整 SettingsSmoke、发布隔离检查、实际 publish 和 EXE/DLL 哈希核对通过。未启动 GUI，IShellView 原型未接入。详情见[temp.75 说明](../docs/releases/preview-0.6.0-temp.75.md)和[整体进度](../docs/progress-2026-10-27.md)。
+
+## 此前临时预览包（2026-10-27）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.74\app\ExplorerDirs.App.exe`，使用独立 profile。新增地址历史入口和 Q-Dir 路径输入规则、标签栏显示模式及对应 Tab 顺序、每窗格 Shell 状态提示，以及 `.qdr` 颜色规则模式导入预览。产品版本 `0.6.0-preview.temp.74+e74ad26a950edaf291730abb30dc3a00978dc769`，EXE SHA-256 `37BC65EE5234C5F1754A56BBE85FB3D104AB8C9E4AF6C4033B04274208A98701`，DLL SHA-256 `8E696F29B81547A1DE98AC21101B6CB1767A477FACB1F39369AAAFA1433837D0`，与包内清单一致。完整 Release `SettingsSmoke` 和 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；实际菜单、焦点、Shell 状态提示、文件区颜色及 Q-Dir 互操作仍待可见验收。详见[temp.74 说明](../docs/releases/preview-0.6.0-temp.74.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.73\app\ExplorerDirs.App.exe`，使用独立 profile。移除实测收益有限的“优化内存”，并新增“文件 > 重启应用”，确认后保存并恢复当前进程管理的全部窗口会话；其它独立 Explorer Dirs 进程不受影响。产品版本 `0.6.0-preview.temp.73+0d874d442d0f6efb0535cb920729fa89fd691da7`，EXE SHA-256 `1230251D4E33F5E932669E4A20C7C55FB5C42D7B254C9ED2B9C2549533EC60F3`，DLL SHA-256 `7BFA7311A8AC5976CAABB2177862279A219D35756BE256622142CAABD6EDDB31`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；独立 profile 包含 2 个文件。没有启动 GUI；重启后的真实窗口恢复、菜单交互、Shell 文件区主题与 Q-Dir 互操作仍待验收。内存视图释放 A/B 只观察到约 2 MB 变化；后续将按同一进程和固定工作负载观察运行期增长。详见[temp.73 说明](../docs/releases/preview-0.6.0-temp.73.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.70\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.69，文件操作后的焦点恢复请求会在窗口短暂失焦时保留；后台暂停焦点查询和 `SetFocus`，切回后在目标仍有效时继续有界恢复。产品版本 `0.6.0-preview.temp.70+9b0e91c596a134c10979b270a4aa91edd53aff03`，EXE SHA-256 `1225C43B0989E52D749FD13AB16E91B097CC6A4ECC2DAB431EC1F8332C94EC23`，DLL SHA-256 `7F39DCFF6D1A2658C8E023B84D8E7872D343789D6459136AB8A79C9E27323431`，与包内清单一致。完整 Release `SettingsSmoke` 与 App Release 构建通过；profile 文件与空闲 temp.69 隔离 profile 逐项哈希一致。没有启动 GUI；真实文件操作焦点、Alt+Tab 时序和目录树图标可见绘制仍待验收。详见[包说明](../docs/releases/preview-0.6.0-temp.70.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.69\app\ExplorerDirs.App.exe`，使用独立 profile。相较 temp.68，补入窗格“查看方式”按钮的 Tab 停靠点、禁用态矢量图标变淡，以及文件视图导出的同目录临时写入后替换。产品版本 `0.6.0-preview.temp.69+0f9af33c06fc43397bc01188069821a2f0bdef2e`，EXE SHA-256 `FA6787460F5AE294957214C4A1AEC2573B8A2266B56E3DF3F4450787C671F64F`，DLL SHA-256 `7520E7C1C4BB937C587EAEF6EEF270ECDCEBD7556AC2BD65D49967F3892A5A96`，与包内清单一致。完整 Release `SettingsSmoke`、App Release 构建、文件导出故障注入 smoke 和发布隔离 smoke 通过；独立 profile 来自 temp.68 并逐文件校验。没有启动 GUI；目录树图标可见绘制、焦点顺序、禁用态图标和导出对话框仍待验收。详见[temp.69 说明](../docs/releases/preview-0.6.0-temp.69.md)。
+
+## 此前临时预览包（2026-10-26）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.67\app\ExplorerDirs.App.exe`，使用隔离 profile。针对 temp.66 左侧目录树图标空白，现由 Shell 回调显式提供系统关闭/展开图标索引。产品版本 `0.6.0-preview.temp.67+8dd46e8564f47fd1a82d25e9cfc9986b0ac5ecc2`，EXE SHA-256 `BA32C9F7BDF1E98718A5E83518B35499E438BEFFD51E02FD6E94AB5F3BFA600D`，DLL SHA-256 `987C1236F9B36C13D4A30CB6876E39B95DF2F99E34E0E4D5F98FA358B34365D3`，与包内清单一致。Release `SettingsSmoke`、App Release build 和发布隔离 smoke 通过。没有启动 GUI；请重点检查普通文件夹、驱动器和虚拟 Shell 节点的图标。详见[temp.67 说明](../docs/releases/preview-0.6.0-temp.67.md)。
+
+## 此前临时预览包（2026-10-26）
+
+`D:\projects\explorer-dirs\releases\preview-0.6.0-temp.66\app\ExplorerDirs.App.exe`，使用隔离 profile。修复原生左侧目录树未提供自定义图标索引时的默认 Shell 图标回退。产品版本 `0.6.0-preview.temp.66+aaa7b6a3f6e4234532313dad077b284119b18ffd`，EXE SHA-256 `EACFCAD4AD68F39D082DEF92D8C453D5BF782C70D39D19C83CC157CE35A70CDE`，DLL SHA-256 `FD1193CBD1C56AD3936AE5A3C30C9853339966ADE8DB61FC34EEB85D776E1D62`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 和发布隔离 smoke 通过。未启动 GUI；目录树图标可见效果、虚拟 Shell 节点及多窗格体验仍待预览验收。详见[temp.66 说明](../docs/releases/preview-0.6.0-temp.66.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.64/app/ExplorerDirs.App.exe`，使用独立 profile。新增 System/Light/Dark 之外独立的自定义强调色输入，以及 Windows 11 DWM 标题栏、标题文字和边框主题同步；高对比度恢复系统默认色。产品版本 `0.6.0-preview.temp.64+b16b394881d3146c826b5ca1272cf188aa0a41bb`，EXE SHA-256 `AB14A78944F6762CCC087E6DE845A3E5CDC06907429AB350B419C64C1A279110`，DLL SHA-256 `7B1D7BC4543A76ACF95FA7D1A4DAB1742EEBB337A6D098EAA71CEDD49C80B61B`，与包内清单一致。完整 Release `SettingsSmoke`、App Release publish 与发布隔离 smoke 通过；profile 文件哈希与来源一致。没有启动 GUI；主题对话框、系统切色、标题栏外观、高对比度及 Shell 文件区深色仍待桌面验收。详见[temp.64 说明](../docs/releases/preview-0.6.0-temp.64.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.63/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.61，照片打印窗口改用 Windows 动态系统颜色，当前标签增加系统强调色底边；同时修复隔离 worktree 发布时未从主项目 profile 复制现有设置的问题。产品版本 `0.6.0-preview.temp.63+fb48e6c4cf819c8d79ce20ac09f44243edd01172`，EXE SHA-256 `D579B06A362D9E89E721EA4DD13B3EDBE9C5E2244471665330F88C5927105A5E`，DLL SHA-256 `04C833116CD902ACCAFD9D5316C5185624703986601ADA1DA29A636CBAB2C6C2`，与包内清单一致。全量 Release `SettingsSmoke`、App Release 构建与发布隔离 smoke 通过。未启动 GUI；多窗格视觉、系统主题变化、高对比度、Shell 文件区深色和 Q-Dir 颜色互操作仍待验收。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.62/app/ExplorerDirs.App.exe`，保留作较早的临时包。该包包含照片打印窗口系统色和当前标签强调色，但由隔离 worktree 发布时其 `app/profile/` 没有从主项目复制现存配置；请使用 temp.64。没有启动 GUI。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.61/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.60，在“此电脑”地址菜单中动态列出逻辑驱动器，并为就绪的本地固定盘显示卷标；网络盘不会触发远程卷标读取。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`，EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过。没有启动 GUI；真实菜单交互、驱动器导航和 Q-Dir 互操作仍待桌面验收。详见[第六十一版说明](../docs/releases/preview-0.6.0-temp.61.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
+
+`preview-0.6.0-temp.60/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.59，地址栏上级菜单改为可展开祖先目录树；增加 Windows 强调色基础接线和活动窗格强调色边框。产品版本 `0.6.0-preview.temp.60+80d2bbd147ac4d248e5554e509692c0f9c432f3b`，EXE SHA-256 `58BED64B44B2F66A8930A265B9200EC2DB78EE7EB41B5A33322974B2220DE258`，DLL SHA-256 `346D9CF4187750E28416F99E82338FB760D089D9D79DC843C253A867926A4F75`，与包内清单一致。Release SettingsSmoke、App Release 构建与发布隔离 smoke 通过。没有启动 GUI；菜单实际交互、系统切色和 Q-Dir 实际互操作仍待验收。详见[第六十版说明](../docs/releases/preview-0.6.0-temp.60.md)及包内 `RELEASE-NOTES.md`。
+
+## 此前临时预览包（2026-10-26）
 
 `preview-0.6.0-temp.61/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.60，在“此电脑”地址菜单中动态列出逻辑驱动器，并为就绪的本地固定盘显示卷标；网络盘不读取远程卷标。产品版本 `0.6.0-preview.temp.61+1fcc8a4d3db9549ee108d719e6634287559ede48`，EXE SHA-256 `A18429AFB3E89595B7D1823E3DF21CB0C4EDF23744CBC072AAC15E9B24DFD84B`，DLL SHA-256 `5F0BD2AC09FA059B85DCBCE3F0153E62C3BD90B4799E7CC9B9F190849190F3EB`，与包内清单一致。地址菜单定向 smoke、完整 Release `SettingsSmoke`、App Release 构建和发布隔离 smoke 通过。没有启动 GUI；真实菜单交互、驱动器导航和 Q-Dir 互操作仍待桌面验收。详见[包内说明](preview-0.6.0-temp.61/RELEASE-NOTES.md)。
 
@@ -8,11 +58,11 @@
 
 `preview-0.6.0-temp.59/app/ExplorerDirs.App.exe`，使用独立 profile。新增每窗格查看方式工具栏入口，以及列出当前路径上级和常用 Shell 位置的地址下拉；编辑与地址历史入口保持独立。产品版本 `0.6.0-preview.temp.59+77495f5d72a4739c2bb33a21d021328294f728c0`，EXE SHA-256 `C561B3B50F509760F823B0C71789570905CEB0E91414310DD8D9EC459770A7A7`，DLL SHA-256 `BFA91F50B668D370C9D62786EA6350F62989941FC25ECC450F450B9432EF0486`，与包内清单一致。路径菜单/焦点 smoke、App Release 构建、发布隔离 smoke 和重跑后的完整 Release SettingsSmoke 均通过；首次环境消息前台窗口断言失败未能复现。未启动 GUI；菜单和真实 Shell 导航仍待可见验收，路线图尚未全部完成。详见[第五十九版说明](../docs/releases/preview-0.6.0-temp.59.md)及包内 `RELEASE-NOTES.md`。
 
-## 最新临时预览包（2026-10-26）
+## 此前临时预览包（2026-10-26）
 
 `preview-0.6.0-temp.58/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.57，成功映射/断开网络驱动器后会通知 Shell 更新“此电脑”视图；取消/失败不发送通知。Release SettingsSmoke、App Release 构建及 `publish-smoke.ps1` 通过；产品版本 `0.6.0-preview.temp.58+77495f5d72a4739c2bb33a21d021328294f728c0`，EXE SHA-256 `66661E45FC3F981E4858EB016447F7C937E1321E0292DD75C82778E06B677A15`，DLL SHA-256 `FE0ECEEAF2F4CB12687D43AFC851333D2F2E757ACFBDE525955C95EFA79D5541`，与包内清单一致。没有启动发布程序或真实 GUI，Shell 可见刷新和其它交互仍待桌面验收。详见[第五十八版说明](../docs/releases/preview-0.6.0-temp.58.md)。
 
-## 最新临时预览包（2026-10-26）
+## 此前临时预览包（2026-10-26）
 
 `preview-0.6.0-temp.57/app/ExplorerDirs.App.exe`，使用独立 profile。相较 temp.56，汇总 10 月 26 日的多窗格焦点/快捷键、标签与会话、Q-Dir `.qdr` 和 Program Starter 导入、目录监视器恢复等源码更新；颜色能力仍只在隔离 `IShellView` 原型中，不接入本版产品视图。Release SettingsSmoke、App Release 构建和 `publish-smoke.ps1` 均通过；程序集产品版本 `0.6.0-preview.temp.57+77495f5d72a4739c2bb33a21d021328294f728c0`，EXE SHA-256 `FF678780BE08FF6F2025B74E2B69984ED402ABD8CD50965F78C8B0F1266D4DF6`，DLL SHA-256 `561C146AC31EE995590801DF282EFEBD529F8CD6B07BA2A4DD1CFC921BE9BE07`，与包内清单一致。没有启动发布 EXE；文件操作、真实右键目标、焦点、布局和 Q-Dir 可见互操作仍待桌面验收。详见[第五十七版说明](../docs/releases/preview-0.6.0-temp.57.md)。
 
@@ -217,6 +267,8 @@
 用户要求提前预览的 `preview-0.6.0-temp.1/app/ExplorerDirs.App.exe` 已打包，**完整 GUI 验收未完成**，日常版仍保留 0.5.2。临时包使用自己的 `app/profile/`，打包时复制现有 INI，此后的修改不会写回日常版配置。启动入口比旧版多一层 `app`；完整变化及待测项见 [临时版说明](../docs/releases/preview-0.6.0-temp.1.md)，包内也附 `RELEASE-NOTES.md`。
 
 临时隔离包使用 `scripts/publish.ps1 -Version preview-0.6.0-temp.1 -IsolatedProfile -ReleaseNotes docs/releases/preview-0.6.0-temp.1.md`。正常版本的发布路径和共享配置规则不变。校验清单同时覆盖 EXE 和 DLL；系统入口仍须另行验收和显式启用。
+
+从隔离 worktree 发布临时预览时，可通过 `-ProfileRoot D:\projects\explorer-dirs\profile` 指向主项目现有 profile；脚本只复制其允许列表内的配置文件、已登记窗口会话侧车及顶层工作区/快速链接，不修改来源。省略参数时仍默认从当前源码仓库的 `profile/` 复制。
 
 2026-10-23 发布脚本补齐隔离配置复制：会话、目录收藏、固定标签、紧凑选项、目录树和布局比例的独立 INI，以及 `Workspaces` 顶层 `.qdr` 收藏。仅复制原文，不解析或执行，不回写源 profile；不递归复制其他目录。此修正只影响之后打包的版本，现有包未改动。`pwsh -NoProfile -File scripts/publish-smoke.ps1` 用独立 fixture 仓库和占位构建文件检查复制、源文件不变、同名版本拒绝及普通发布行为；它不启动应用，也不代替实际发布构建或 GUI 验收。
 

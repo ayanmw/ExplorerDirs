@@ -1,0 +1,116 @@
+# 2026-10-27 深色模式白块修复
+
+用户截图判定 temp.76 深色失败：WPF 菜单高亮、按钮和标签仍有 Aero 浅色模板，Shell 文件主体/列头未统一；随后追加原生右键白边及文件信息提示白底。不能以此前系统检测/INI 检查作为完整深色验收。
+
+## 当前修改
+
+- WPF 菜单/按钮/标签/工具栏溢出/ToolTip 使用语义色模板，明确正常、高亮、禁用、勾选及文本状态；不采用已试验但改变尺寸的 Fluent 全局主题。
+- 原生文件视图以 SDK IVisualProperties.SetColor 的五种角色设置文字/背景/排序列/次要文字/文字背景，仍保留 ExplorerBrowser。新视图创建时应用，三态切换向现有标签刷新。
+- Windows 10 19041+ 使用隔离的 uxtheme 兼容入口设置进程与窗口主题，Win11 为本线程原生菜单边框着色。此部分包含非公开 ordinal，非所有 Windows 版本的公开兼容承诺；缺失入口可降级，不代表第三方提供程序均支持深色。
+- 列头保留原生交互，以 NM_CUSTOMDRAW 设定文字色。Shell tooltip 在 TTN_SHOW/GETDISPINFO 后应用主题及原生提示颜色，WPF ToolTip 独立模板。
+
+## 已取得的证据
+
+- 隔离真实四窗格截图确认文件主体深色、列标题文字可读，用户展开的三级主题菜单背景、高亮、勾选正常。前期仅背景变深但列头文字黑色的候选不算通过。
+- 实际 App.xaml 资源的无窗口 RenderTargetBitmap 检查：System/Light/Dark 的菜单正常、高亮、禁用表面像素与文字角色匹配；主题与 INI 重建恢复通过。
+- 原生 COM fixture 检查 IVisualProperties slot/五角色、失败 HRESULT 和不支持接口；不是实际 Shell 绘制证明。App/HostProbe 构建通过，完整 SettingsSmoke 曾通过，最新全量结果以随后记录为准。
+
+## 仍待最终验证
+
+原生右键白边新外框绘制、最新 WPF/Shell 提示框、三态运行中切换、工具栏溢出与文件区滚动条端点仍需可见核对。工具多次报告 ESC 停止；用户明确表示并非取消开发，并授权共用电脑，前台硬性拦截时转做后台，不改写未完成结果。
+
+本记录不是完整深色通过声明。用户要求继续并可协助观察；工具在再次明确授权后仍直接报告 ESC，无法启动最新 GUI。为供用户直接验证，按授权同目录更新 temp.76 为明确标注的修复候选，保留 profile 与旧包备份，未确认项不写为通过。
+
+补充后台证据：实际 App.xaml 资源的 WPF ToolTip 像素与文字角色通过，ToolBar 两个必须的布局部件成功创建；均未打开 Popup。`--native-theme-colors` 验证接口槽位、角色、失败传播与不支持接口；`--system-theme` 验证三态及重建，完整 SettingsSmoke 通过。
+
+## 用户补充验收：二级窗口与原生菜单
+
+- 用户确认最新隔离候选的原生右键仍有白边，之前 DWM/边框重绘方案不记为通过，需继续定位实际弹出窗口及绘制时机。
+- 程序启动器使用 DataGrid，原主题缺少行、单元格和列标题样式。新增配对的背景/前景与选中色；表头移除固定浅色 Aero 外观，保留列宽拖动部件。
+- SystemThemeProbe 新增真实控件配色检查，修改前 DataGridRow 检查失败；修改后 System/Light/Dark/重建配置全部通过。App Release 构建 0 warning/error。
+- 本轮短暂连接隔离窗口，观察到新复制标签区域仍有浅色面板；未取得原生右键复测画面。随后 Computer Use 又返回 ESC 停止，本轮停止前台调用。二级窗口真实显示、菜单白边与复制标签加载过程仍待验收，未刷新已发布 temp.76。
+
+
+## 标签菜单与新隔离副本
+
+- 标签栏 WPF ContextMenu 的 Aero 外层模板及分隔线未被之前 MenuItem 模板覆盖，改为显式主题模板。实际控件离屏像素检查在 System/Light/Dark 均通过。
+- 原生擦除背景试验候选 20261027-080814-761-8577f3 在一次点击超时后画面显示未响应；因果尚未确定，已撤回该试验，不将其作为解决白底闪烁的方案。仅终止该隔离测试进程。
+- 新候选 20261027-080935-263-8ce66b（源码 269982e）已经通过 Computer Use 启动，实际画面确认四窗格加载。标签菜单展开输入检测到用户操作，未完成真实菜单验收。新版本保留表格/标签菜单修复，未更新正式 temp.76。
+- 复制标签加载白底、原生右键白边、横向滚动条端部白块仍未解决；禁止称深色模式完全通过。
+
+## 无响应现场：2026-10-27 16:14–16:21
+
+- 用户再次确认 B 候选未响应；保留现场并抓取 PID 31148 两份 Mini dump，保存在 src/.state/theme-hang/，不纳入 Git，不上传。Windows Application 事件 1001/1002 报 AppHangB1，并非已证明的异常崩溃；进程 Responding=false 且 CPU 时间继续增加。
+- 第一份托管 UI 栈：ViewWindowProc(WM_NOTIFY) → NativeShellTheme.ApplyTooltip → SetWindowTheme。第二份仍位于同一原生消息分发链/DefSubclassProc。证据支持优先修复同步提示框通知内重复设置主题；不足以把所有未响应归因于 BackgroundMessage，也不能仅凭托管栈断言具体原生死锁位置。
+- ApplyTooltip 改为标记 HWND 后延后应用，同主题重复通知不排队。原生子窗口/菜单也加主题标记，避免 SetWindowTheme → WM_THEMECHANGED/子控件创建 → 再次设置主题的重复失效。
+- 恢复深色擦除背景候选，不再以一次超时单独判定其错误。新建子控件主题补刷采用合并的 ContextIdle 回调，已有窗口相同主题跳过。
+- 隐藏 native tooltip fixture 验证重复通知仅排队一次、完成后不重排、切浅色可重新应用；子窗口标记检查通过。App Release 构建 0 warning/error。
+- 93103b4 候选 20261027-081821-317-ef9e53 已启动，真实操作完成标签菜单展开与复制当前标签，文件 tooltip 深色，操作后仍 Responding=true。抓图不是完整过渡录像，不证明完全无闪白；原生文件右键及子菜单仍有白边，部分滚动条端部仍白色。
+- 最后去重候选 a153511 / 20261027-082129-202-23d7f1 已准备，尚未启动：Computer Use 再次返回 ESC 强制停止；不将其记录成用户撤销整体任务。原 temp.76 尚未覆盖。
+
+
+## 鼠标选择恢复问题
+
+- 用户报告鼠标选择后点空白不能清空，随后框选两个文件仍留原选择。现场复现未完成：目标窗口在恢复绑定时消失；后续启动修复候选被 Computer Use 的 ESC 停止状态拦截。不要将代码候选记为 GUI 已通过。
+- 399cbe6：鼠标左键抬起计入输入代次，左键仍按住时跳过快照/恢复观察；抬起后按 Shell 最终选择重建缓存。避免鼠标手势中间状态作为刷新恢复目标。
+- Release 构建 0 warning/error；--shell-selection-restore-gate-smoke 通过。新候选 20261027-082934-375-2acade 已准备但未启动。等待真实验证空白取消、随后连续两项框选、Ctrl/Shift 选择及外部刷新保持选择。
+- 原生右键白框仍未定位到实际绘制入口，既有 DWM/窗口边框处理经实测未生效；不作修复完成声明。
+
+## 切换后原生菜单混色：76beb4c
+
+- 源码确认 ApplyMenuFrames 在浅色下直接返回，菜单标记固定为深色，AllowDarkModeForWindow 与 DarkMode_Explorer 也只启用不恢复。用户报告不同窗格深浅混用，与缺少对称恢复路径一致，但完整原生菜单缓存仍需 GUI 复核。
+- 改为每个窗口按当前深浅标记去重；浅色恢复 Explorer 主题与 AllowDarkModeForWindow(false)，撤销自定义菜单边框子类并使用 DWM 默认边框值。SetProcessTheme 同时处理现存的菜单 HWND。
+- 新回归检查修改前失败于同一 HWND 深色→浅色；修改后深色→浅色→深色、重复应用去重均通过。此测试使用隐藏 native HWND 运行真实 API，只验证状态与路径，不证明 Shell 菜单最终像素。
+- 新隔离候选 20261027-083224-316-549d5b 已启动，实际画面确认四窗格及深色文件 tooltip；仍能见到滚动条白色端块。尝试打开主题菜单时检测到用户输入，因此未完成四窗格往返切换验收。源包含 399cbe6 鼠标选择修复候选。正式 temp.76 未更新。
+
+
+## 最新用户反馈：仍不能恢复浅色
+
+用户确认 76beb4c 后仍有原生菜单白边、切浅色恢复失败。隐藏 HWND 标记测试不是实际 #32768 菜单的端到端验证，撤销对此类测试的产品修复推断。现场核查还发现 SetWindowTheme/DWM/SetWindowSubclass 返回状态均未纳入标记成功条件。下一步先确认实际弹出 HWND、所属线程、菜单入口命中、客户区与窗口矩形以及 native 调用结果，区分 MENU 主题内部边缘、非客户区与 DWM 外框；不可假定额外父窗口必定存在。
+
+## 原生菜单外围诊断与 cf9070a 候选
+
+- 诊断副本 084156 / 084330：真实 #32768 HWND 被命中，SetWindowTheme 返回 S_OK，SetWindowSubclass 返回 true，但未观察到预期的子类 WM_PAINT/WM_NCPAINT 回调。窗口/客户区测量示例 473×865 对 467×859，即每侧 3 px 非客户区；此前 SM_CXEDGE 覆盖宽度不足，不能将 DWM 颜色设置当作已影响该外围区域。
+- 实际截图仍确认浅色应用下原生菜单残留深色，外围白框在深浅两种模式均存在；之前两项都未通过。
+- 新候选只在本进程当前 STA 的原生菜单循环中安装 WH_CALLWNDPROCRET，菜单关闭卸载，支持嵌套并防重入；观察原生调用完成后的绘制/布局和菜单 idle/select，再按测量的外围宽度绘制。高对比跳过；idle 路径限制到约 16 ms 一次。不改变全局输入或其他进程，不接管菜单项和文件命令。
+- 每次原生菜单循环开始，刷新 immersive policy、重设进程偏好、清菜单主题缓存，并对本菜单所属 Shell HWND 发 WM_THEMECHANGED；主题调用失败撤销成功标记。移除未奏效的 DWM 边框和普通菜单子类路径；临时诊断日志代码已移除，现场日志保留 src/.state/gui-smoke 对应目录。
+- Release 构建通过；native-theme-colors 包括真实线程 hook 安装/嵌套/卸载与重复清理检查通过，无可见窗口。此结果仍不证明真实菜单外围绘制及切换配色通过。
+- 尝试启动绘制原型时 Computer Use 再报 ESC 强制停止，本轮停止前台调用。最终候选已准备但未启动，不能报告白边或颜色刷新已经修好。正式 temp.76 未覆盖。
+
+
+## 17:03 后候选：裁剪外圈与无注入基线
+
+- 用户确认 cf9070a 的主题往返整体颜色已正常，当前只剩白边；记录为该测试范围通过。
+- 去除 WS_BORDER/WINDOWEDGE/DLGMODALFRAME 的试验产生刷新缺口；MIM_BACKGROUND 试验也未消除白边。两项均撤回，未进入提交。
+- ed4ca57 按实际客户区裁剪原生窗口显示区域，不修改样式、客户区大小或 Shell 项目坐标。隐藏 HWND 测试确认区域等于客户区，几何和样式不变，重复应用稳定。真实菜单边缘及子菜单仍待验收。
+- 隔离裁剪候选 090330 已启动；读取其菜单画面时 Computer Use 又返回 ESC 停止。之后继续后台工作，并按新指令取消文件区自定义项注入。正式 temp.76 尚未更新。
+
+## 17:58 验收与子菜单衔接修复
+
+- 用户确认：目录树的共享/窗格模式背景与文字已随深浅切换；094726 候选主/子菜单外层双线也消失，用户截图显示原生菜单项正常。此前已确认主题往返整体颜色正常与空白点击取消选择正常。文件区保持不追加自定义项。
+- 最终白边处理 e7fd476：裁剪范围包括测得非客户区与一个系统内边缘宽度，并以 DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE (0xFFFFFFFE) 禁用合成外框。真实菜单调用 S_OK 并由用户验收；临时诊断文件写入代码已移除。一次试图用 DwmGetWindowAttribute 读回该 Set 属性得到 E_INVALIDARG，不能用这个无效读回断言当作产品测试；删除该错误测试，保留真实设置结果/截图/用户证据。
+- 用户指出透明边缘仍参与 Shell 子菜单定位，产生间隙，并明确要求顺便修复。6209e88 以 MN_GETHMENU 和 GetSubMenu 匹配真实父子菜单，仅补偿两侧被裁边缘，保留原生展开方向与重叠量，限制当前监视器工作区，不缩放/激活窗口；缓存已经移动的位置，防止重复位移。
+- 隐藏原生 HWND 检查通过：左右展开恢复可见边缘的原始重叠、尺寸与 Y 不变、重复处理不累加。该检查不是真实 Shell 的父子识别或屏幕边缘验收。
+- 最新 20261027-095843-240-b37cb4 已准备，尚未启动：启动调用再遇 Computer Use ESC 强制停止，本轮不继续前台调用。已通过的白边/目录树验收不因此作废，新增子菜单衔接仍待可见复测。原 temp.76 尚未覆盖。
+
+## 18:06 后要求修正：保留单层边界
+
+- 用户指出完全无边框不符合 Explorer，深色也需要浅灰单线边界。75414b9 改为按 ThemePalette.Border 设置 DWM 边界（深色 #565656，浅色 #A0A0A0），不再用 COLOR_NONE；裁剪仍只针对原先异常 surround。区域未变化时也会更新边框主题；native hidden fixture 验证该缓存路径及区域不变。
+- 20261027-100639-959-25878e 已启动，包含 6209e88 子菜单位置补偿和上述单层灰边。用户截图显示父子窗口已有重叠，但用户明确回答仍有空隙，需要继续修；不能将这张图或隐藏位置测试登记为贴合验收通过。
+- 已进一步询问用户目标是边框与底色之间的透明间隔，还是父子菜单之间横向间距，两者需要不同修复。等待准确定位，保持已确认正常的主题/目录树/选择行为。
+- 读取当前菜单时 Computer Use 再报告 ESC 强制停止，本轮停止前台调用；未覆盖 temp.76，也不声称最终菜单间隙已修好。
+
+
+### 2026-10-27 子菜单横向位置回归原生
+
+用户明确要求父子菜单横向位置遵循资源管理器原生规则。当前不提供独立间距模式，因此删除 6209e88 的应用层位置补偿及其专用测试，不再枚举 HMENU 父子关系或调用 SetWindowPos 移动子菜单；展开方向、重叠量和屏幕边缘避让交回 Windows Shell。保留单层灰边、主题往返和目录树刷新。未来若明确提供独立间距选项，必须包含默认跟随原生和 0 间隔；本批不新增配置入口。NativeThemeColorProbe 和 Release 构建通过；裁剪后的视觉贴合仍需在新隔离候选中对照验收，不宣称已与 Explorer 像素一致。
+
+
+- 202de0b 的干净源候选 20261027-103339-131-b02116 已通过 Computer Use 启动；真实截图确认原生文件菜单内容、深色主体和单层灰边显示，子菜单也已展开。未取得用户对这一候选横向视觉间距的最终确认；原生坐标已不受应用移动，但裁剪区域与系统外框的视觉差别仍需验收。原 temp.76 尚未覆盖。
+
+### Border-to-fill gutter clarification
+The user clarified that the unwanted transparent gap is inside each menu boundary, not the parent/submenu placement. The candidate suppresses the DWM outline at the original HWND bounds and draws a one-pixel FrameRect inside the existing visible region after native paint. No window size, position, item geometry or submenu offset changes. Hidden native fixtures pass; real popup visual acceptance remains pending.
+Candidate 20261027-103936-700-af19fe (code 4fcfd7e) was launched through Computer Use. Captured dark main and child native menus show a thin boundary touching the menu fill. User acceptance and light-mode visual verification remain pending; no parent/submenu position override is installed.
+
+### 2026-10-27 用户授权恢复裁剪补偿
+用户明确授权：父子菜单按实际相邻裁剪宽度之和靠近，抵消本程序引入的透明距离，保留系统原始重叠量。不增加独立间距配置。保留当前贴合底色的单像素灰边。隐藏 HWND 用例验证向左/右展开的可见重叠量、尺寸/纵坐标不变及重复调用不累积位移；真实 Shell 父子识别、多级展开、边缘避让与不同 DPI 仍待用户验收。本批只准备隔离候选，不启动 GUI。

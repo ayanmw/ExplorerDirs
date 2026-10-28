@@ -1,12 +1,23 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
 // Isolated architecture spike: test whether the stock DefView used by IShellView
 // exposes a supported item-color hook while retaining native Shell operations.
 // The default host and fixture are hidden and temporary; no ExplorerBrowser or input is used.
+internal enum MergedEditMenuCommandRoute
+{
+    NotFound,
+    ShellView,
+    SelectAll
+}
+
 internal static class ShellViewColorSpike
 {
+    [ThreadStatic]
+    private static bool _useWpfDispatcherPump;
+
     private const uint ShellRenameItem = 0x00000001;
     private const uint ShellCreate = 0x00000002;
     private const uint ShellDelete = 0x00000004;
@@ -20,6 +31,7 @@ internal static class ShellViewColorSpike
     private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly SubclassProc DrawObserver = ObserveCustomDraw;
+    private static readonly SubclassProc CleanupWindowObserver = ObserveCleanupWindowMessages;
     private static readonly Dictionary<nuint, Rect> CustomDrawBounds = [];
     private static readonly Dictionary<nuint, nint> CustomDrawDeviceContexts = [];
     private static readonly Dictionary<nuint, uint> CustomDrawDeviceContextTypes = [];
@@ -38,13 +50,2394 @@ internal static class ShellViewColorSpike
     private static int _customDrawPrepaint;
     private static int _customDrawItems;
 
+    internal static int RunSinglePaneSynchronousCleanup()
+    {
+        var foreground = GetForegroundWindow();
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, "single-pane-cleanup-" + Guid.NewGuid().ToString("N"));
+        var stateDirectory = Path.Combine(fixturesRoot, "single-pane-cleanup-state-" + Guid.NewGuid().ToString("N"));
+        var sessionId = Guid.NewGuid();
+        nint parent = 0, pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        var createAttempted = false;
+        ShellViewColorBrowserHost? host = null;
+        ShellMenuFrameCoordinator? menuCoordinator = null;
+        var result = 1;
+        try
+        {
+            Directory.CreateDirectory(fixture);
+            File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
+            var stateStore = new ShellViewStateStore(stateDirectory);
+            parent = CreateWindowExW(0x08000080u, "STATIC", "ExplorerDirs single-pane synchronous cleanup",
+                0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated cleanup parent.");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
+            pane = CreateWindowExW(0, "STATIC", "ExplorerDirs single-pane host",
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 780, 520, parent, 0, 0, 0);
+            if (pane == 0) throw new InvalidOperationException("Could not create the isolated pane host.");
+            Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+            Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+            var shellViewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+            host = new ShellViewColorBrowserHost(pane, [],
+                new ShellFolderFilter(new QuickFilterSettings("*", false, false)),
+                stateStore: stateStore, stateId: sessionId, menuFrameWindow: parent,
+                menuFrameCoordinator: menuCoordinator);
+            host.View = view;
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 760, Bottom = 500 };
+            createAttempted = true;
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+            if (viewWindow == 0) throw new InvalidOperationException("CreateViewWindow returned no window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
+            ShowWindow(parent, 4);
+            Check(At<ActivateView>(view, 7)(view, 1));
+            Pump(500);
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            _ = WaitForShellViewItemCount(folderView, expectedCount: 1);
+            Console.WriteLine($"single-pane-cleanup: ready; parent=0x{parent:X}; pane=0x{pane:X}; view=0x{viewWindow:X}; foreground-unchanged={GetForegroundWindow() == foreground}");
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("single-pane-cleanup failure: " + ex.Message);
+        }
+        finally
+        {
+            Console.WriteLine("single-pane-cleanup: teardown-start");
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0)
+            {
+                if (host is not null) host.RevokeDropTarget();
+                if (createAttempted)
+                {
+                    Console.WriteLine("single-pane-cleanup: destroy-view-start");
+                    DumpChildWindowTree("single-pane-before-view-destroy", pane);
+                    var destroyHr = At<DestroyViewWindow>(view, 10)(view);
+                    Console.WriteLine($"single-pane-cleanup: destroy-view-hr=0x{destroyHr:X8}; view-window-valid={IsWindow(viewWindow)}");
+                    if (destroyHr < 0 || IsWindow(viewWindow)) result = 1;
+                }
+                if (host is not null) host.View = 0;
+                Marshal.Release(view);
+            }
+            if (folder != 0) Marshal.Release(folder);
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            host?.Dispose();
+            menuCoordinator?.Dispose();
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (pane != 0 && IsWindow(pane))
+            {
+                Console.WriteLine("single-pane-cleanup: destroy-pane-start");
+                var paneDestroyed = DestroyWindow(pane);
+                Console.WriteLine($"single-pane-cleanup: destroy-pane-returned={paneDestroyed}; still-valid={IsWindow(pane)}");
+                if (!paneDestroyed || IsWindow(pane)) result = 1;
+            }
+            if (parent != 0 && IsWindow(parent))
+            {
+                DumpTeardownWindowState(parent, menuCoordinator, host);
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not install the parent teardown observer.");
+                Console.WriteLine("single-pane-cleanup: destroy-parent-start");
+                var parentDestroyed = DestroyWindow(parent);
+                Console.WriteLine($"single-pane-cleanup: destroy-parent-returned={parentDestroyed}; still-valid={IsWindow(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (!parentDestroyed || IsWindow(parent) || GetForegroundWindow() != foreground) result = 1;
+                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
+        }
+        return result;
+    }
+
+    internal static int RunMultiPaneSynchronousCleanup(int paneCount, bool activateMenus = false,
+        bool disposeMenuCoordinatorBeforeParent = true, uint menuActivationState = 2,
+        bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false,
+        bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false,
+        bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false,
+        bool useWpfHwndHostPane = false, bool restoreParentFocusBeforeDestroy = true,
+        bool probeWpfKeyboard = false, bool probeWpfDirectoryIsolation = false)
+    {
+        if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
+        if (probeWpfKeyboard && (paneCount != 4 || !useWpfDispatcherPump || !useWpfHwndSourceParent || !useWpfHwndHostPane))
+            throw new ArgumentException("The WPF keyboard consumer probe requires four WPF-hosted Shell panes.", nameof(probeWpfKeyboard));
+        if (probeWpfDirectoryIsolation && !probeWpfKeyboard)
+            throw new ArgumentException("The WPF directory isolation probe requires the four-pane keyboard consumer host.", nameof(probeWpfDirectoryIsolation));
+        var previousPumpMode = _useWpfDispatcherPump;
+        _useWpfDispatcherPump = useWpfDispatcherPump;
+        Console.WriteLine($"multi-pane-cleanup: pump-mode={(useWpfDispatcherPump ? "wpf-dispatcher" : "winforms-doevents")}");
+        if (disableImeForProbeThread)
+            Console.WriteLine($"multi-pane-cleanup: ime-disabled={ImmDisableIME(GetCurrentThreadId())}; thread={GetCurrentThreadId()}");
+        var foreground = GetForegroundWindow();
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-{Guid.NewGuid():N}");
+        string? isolatedFixture = null;
+        var stateDirectory = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-state-{Guid.NewGuid():N}");
+        var stateStore = new ShellViewStateStore(stateDirectory);
+        var panes = new List<(nint Pane, nint Pidl, nint Folder, nint View, nint HostPointer, nint ViewWindow, nint FolderView, ShellViewColorBrowserHost Host)>();
+        nint parent = 0;
+        System.Windows.Interop.HwndSource? wpfParentSource = null;
+        System.Windows.Controls.Grid? wpfRootGrid = null;
+        var wpfPaneHosts = new List<CleanupPaneHwndHost>();
+        ShellMenuFrameCoordinator? menuCoordinator = null;
+        var result = 1;
+        try
+        {
+            Directory.CreateDirectory(fixture);
+            File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
+            if (probeWpfKeyboard)
+                File.WriteAllText(Path.Combine(fixture, "cleanup-sample-2.txt"), "cleanup-2");
+            if (probeWpfDirectoryIsolation)
+            {
+                var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+                if (string.Equals(Path.GetPathRoot(fixturesRoot), Path.GetPathRoot(temporaryRoot), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("The WPF cross-volume probe requires the workspace and temporary directory to be on different volumes.");
+                isolatedFixture = Path.Combine(temporaryRoot, $"ExplorerDirs-WPF-Isolated-{Guid.NewGuid():N}");
+                if (!isolatedFixture.StartsWith(temporaryRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("The isolated WPF fixture escaped the temporary directory.");
+                Directory.CreateDirectory(isolatedFixture);
+                File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample.txt"), "isolated-cleanup");
+                File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample-2.txt"), "isolated-cleanup-2");
+            }
+            if (useWpfHwndSourceParent)
+            {
+                var parameters = new System.Windows.Interop.HwndSourceParameters("ExplorerDirs WPF cleanup root")
+                {
+                    Width = 800,
+                    Height = 560,
+                    WindowStyle = unchecked((int)0x10CF0000u)
+                };
+                wpfParentSource = new System.Windows.Interop.HwndSource(parameters);
+                wpfRootGrid = new System.Windows.Controls.Grid();
+                wpfParentSource.RootVisual = wpfRootGrid;
+                parent = wpfParentSource.Handle;
+                if (useWpfHwndHostPane)
+                {
+                    if (paneCount is not (1 or 4))
+                        throw new InvalidOperationException("The WPF HwndHost teardown differential supports one or four panes.");
+                    if (paneCount == 4)
+                    {
+                        wpfRootGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+                        wpfRootGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition());
+                        wpfRootGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+                        wpfRootGrid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+                    }
+                    for (var index = 0; index < paneCount; index++)
+                    {
+                        var paneHost = new CleanupPaneHwndHost();
+                        if (paneCount == 4)
+                        {
+                            System.Windows.Controls.Grid.SetRow(paneHost, index / 2);
+                            System.Windows.Controls.Grid.SetColumn(paneHost, index % 2);
+                        }
+                        wpfPaneHosts.Add(paneHost);
+                        wpfRootGrid.Children.Add(paneHost);
+                    }
+                    wpfRootGrid.Measure(new System.Windows.Size(800, 560));
+                    wpfRootGrid.Arrange(new System.Windows.Rect(0, 0, 800, 560));
+                    wpfRootGrid.UpdateLayout();
+                    if (wpfPaneHosts.Any(host => host.NativeHandle == 0))
+                        throw new InvalidOperationException("WPF layout did not create every native HwndHost pane.");
+                }
+            }
+            else
+            {
+                parent = CreateWindowExW(0x08000080u, "STATIC", $"ExplorerDirs {paneCount}-pane cleanup",
+                    0x10CF0000u | 0x10000000u, 100, 100, 800, 560, 0, 0, 0, 0);
+            }
+            Console.WriteLine($"multi-pane-cleanup: parent-kind={(useWpfHwndSourceParent ? "wpf-hwndsource" : "native-static")}; hwnd=0x{parent:X}");
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated cleanup parent.");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
+            for (var index = 0; index < paneCount; index++)
+            {
+                nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+                ShellViewColorBrowserHost? host = null;
+                try
+                {
+                    var x = index % 2 * 400;
+                    var y = index / 2 * 275;
+                    pane = index < wpfPaneHosts.Count ? wpfPaneHosts[index].NativeHandle :
+                        CreateWindowExW(0, "STATIC", $"ExplorerDirs cleanup pane {index + 1}",
+                            0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, parent, 0, 0, 0);
+                    if (pane == 0) throw new InvalidOperationException($"Could not create pane {index + 1}.");
+                    var paneFixture = probeWpfDirectoryIsolation && index == 3 ? isolatedFixture! : fixture;
+                    Check(SHParseDisplayName(paneFixture, 0, out pidl, 0, out _));
+                    Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+                    var shellViewId = ShellViewId;
+                    Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+                    host = new ShellViewColorBrowserHost(pane, [],
+                        new ShellFolderFilter(new QuickFilterSettings("*", false, false)),
+                        stateStore: stateStore, stateId: Guid.NewGuid(), menuFrameWindow: parent,
+                        menuFrameCoordinator: menuCoordinator);
+                    host.View = view;
+                    hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+                    var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+                    var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+                    Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+                    if (viewWindow == 0) throw new InvalidOperationException($"Pane {index + 1} returned no Shell view window.");
+                    RegisterFolderDropTarget(folder, viewWindow, host);
+                    Check(At<ActivateView>(view, 7)(view, 1));
+                    Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+                    _ = WaitForShellViewItemCount(folderView, expectedCount: probeWpfKeyboard ? 2 : 1);
+                    panes.Add((pane, pidl, folder, view, hostPointer, viewWindow, folderView, host));
+                    pane = pidl = folder = view = hostPointer = viewWindow = folderView = 0;
+                    host = null;
+                    Console.WriteLine($"multi-pane-cleanup: pane-created={index + 1}");
+                }
+                finally
+                {
+                    if (folderView != 0) Marshal.Release(folderView);
+                    if (view != 0)
+                    {
+                        if (host is not null) host.RevokeDropTarget();
+                        if (viewWindow != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+                        if (host is not null) host.View = 0;
+                        Marshal.Release(view);
+                    }
+                    if (folder != 0) Marshal.Release(folder);
+                    if (hostPointer != 0) Marshal.Release(hostPointer);
+                    host?.Dispose();
+                    if (pane != 0 && IsWindow(pane)) _ = DestroyWindow(pane);
+                    if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+                }
+                Pump(250);
+            }
+            if (probeWpfKeyboard)
+            {
+                var frameMenuCoordinator = menuCoordinator
+                    ?? throw new InvalidOperationException("The WPF keyboard consumer requires its shared Shell menu coordinator.");
+                var views = panes.Select(item => item.View).ToArray();
+                var folderViews = panes.Select(item => item.FolderView).ToArray();
+                var selectAll = VerifyFourPaneCtrlARouting(views, folderViews,
+                    includeFourthPane: true, deactivateAfterPane: true);
+                var invertSelection = VerifyFourPaneInvertSelectionRouting(views, folderViews);
+                var renameArrows = VerifyFourPaneRenameArrowRouting(views, folderViews, deactivateAfterPane: true);
+                Pump(100);
+                var baseMenuRestored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
+                Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; invert-selection={invertSelection}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (activateMenus && !baseMenuRestored)
+                    throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
+                var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture,
+                    probeWpfDirectoryIsolation ? isolatedFixture : null, parent);
+                Console.WriteLine($"multi-pane-cleanup: wpf-file-operations={fileOperations}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                var selectedCounts = new int[folderViews.Length];
+                for (var index = 0; index < folderViews.Length; index++)
+                    Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out selectedCounts[index])); // SVGIO_SELECTION.
+                Console.WriteLine($"multi-pane-cleanup: selected-counts-before-context-menus={string.Join(',', selectedCounts)}");
+                var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
+                var expectedModes = new uint[folderViews.Length];
+                for (var index = 0; index < folderViews.Length; index++)
+                {
+                    Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out expectedModes[index], out _));
+                }
+                var nameKey = new PropertyKey
+                {
+                    FormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC"),
+                    PropertyId = 10
+                };
+                var nativeMenuCommands = VerifyFourPaneMenuCommandRouting(views, folderViews,
+                    expectedModes, parent, new SortColumn { Key = nameKey, Direction = 1 });
+                foreach (var view in views)
+                    Check(At<ActivateView>(view, 7)(view, 0)); // SVUIA_DEACTIVATE before the next menu-owner transition.
+                Pump(100);
+                var commandMenuRestored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
+                Console.WriteLine($"multi-pane-cleanup: wpf-selection-menus={selectionMenus}; native-menu-commands={nativeMenuCommands}; base-menu-restored-after-commands={commandMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (activateMenus && !commandMenuRestored)
+                    throw new InvalidOperationException("The WPF native Shell menu command probe did not restore the frame menu after deactivating all views.");
+            }
+            if (activateMenus)
+            {
+                var frameMenuCoordinator = menuCoordinator
+                    ?? throw new InvalidOperationException("The WPF menu consumer requires its shared Shell menu coordinator.");
+                for (var index = 0; index < panes.Count; index++)
+                {
+                    var beforeInsert = panes[index].Host.InsertMenusCallCount;
+                    Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, menuActivationState)); // SVUIA_ACTIVATE_FOCUS or SVUIA_ACTIVATE_NOFOCUS.
+                    Pump(200);
+                    var installed = GetMenu(parent);
+                    var activated = panes[index].Host.InsertMenusCallCount > beforeInsert && installed != 0;
+                    var restored = false;
+                    if (deactivateMenus)
+                    {
+                        Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 0)); // SVUIA_DEACTIVATE.
+                        Pump(200);
+                        restored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
+                    }
+                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activation-state={menuActivationState}; activated={activated}; deactivate-requested={deactivateMenus}; deactivated={restored}; coordinator-owner={frameMenuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
+                    var expectedActivation = menuActivationState == 2;
+                    if (activated != expectedActivation || (deactivateMenus && !restored))
+                        throw new InvalidOperationException($"Pane {index + 1} menu activation did not match state {menuActivationState}.");
+                }
+                var currentFocus = GetFocus();
+                if (restoreParentFocusBeforeDestroy)
+                {
+                    var restoredFocus = SetFocus(parent);
+                    currentFocus = GetFocus();
+                    Console.WriteLine($"multi-pane-cleanup: focus-on-root-hwnd={currentFocus == parent}; " +
+                        $"focus-on-root-descendant={(currentFocus != 0 && IsChild(parent, currentFocus))}; " +
+                        $"focused-class={WindowClassName(currentFocus)}; current-focus=0x{currentFocus:X}; " +
+                        $"previous-focus=0x{restoredFocus:X}");
+                }
+                else
+                {
+                    Console.WriteLine($"multi-pane-cleanup: focus-after-menu-deactivation=0x{currentFocus:X}; " +
+                        $"focused-class={WindowClassName(currentFocus)}; focus-is-root-child={(currentFocus != 0 && IsChild(parent, currentFocus))}");
+                }
+            }
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("multi-pane-cleanup failure: " + ex.Message);
+        }
+        finally
+        {
+            Console.WriteLine($"multi-pane-cleanup: teardown-start; created={panes.Count}; requested={paneCount}");
+            foreach (var item in panes.AsEnumerable().Reverse())
+            {
+                Marshal.Release(item.FolderView);
+                item.Host.RevokeDropTarget();
+                item.Host.View = 0;
+                DumpChildWindowTree($"before-view-destroy pane={item.Pane:X}", item.Pane);
+                if (detachShellViewImeContexts) DetachImeContextTree(item.Pane);
+                var destroyHr = At<DestroyViewWindow>(item.View, 10)(item.View);
+                Console.WriteLine($"multi-pane-cleanup: view-destroy-hr=0x{destroyHr:X8}; view-valid={IsWindow(item.ViewWindow)}");
+                if (destroyHr < 0 || IsWindow(item.ViewWindow)) result = 1;
+                Marshal.Release(item.View);
+                Marshal.Release(item.Folder);
+                Marshal.Release(item.HostPointer);
+                item.Host.Dispose();
+                var wpfPaneHost = wpfPaneHosts.FirstOrDefault(host => host.NativeHandle == item.Pane || host.LastHandle == item.Pane);
+                if (wpfPaneHost is not null) wpfPaneHost.Dispose();
+                var paneDestroyed = wpfPaneHost is not null ? !IsWindow(item.Pane) : DestroyWindow(item.Pane);
+                Console.WriteLine($"multi-pane-cleanup: pane-destroy-returned={paneDestroyed}; still-valid={IsWindow(item.Pane)}");
+                if (!paneDestroyed || IsWindow(item.Pane)) result = 1;
+                Marshal.FreeCoTaskMem(item.Pidl);
+            }
+            if (disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            if (parent != 0 && IsWindow(parent))
+            {
+                if (detachImeContextBeforeParentDestroy)
+                {
+                    var detachedContext = ImmAssociateContext(parent, 0);
+                    var currentContext = ImmGetContext(parent);
+                    if (currentContext != 0) _ = ImmReleaseContext(parent, currentContext);
+                    Console.WriteLine($"multi-pane-cleanup: ime-context-detached=0x{detachedContext:X}; current-ime-context=0x{currentContext:X}");
+                }
+                DumpTeardownWindowState(parent, menuCoordinator, panes.LastOrDefault().Host);
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not install the parent teardown observer.");
+                Console.WriteLine("multi-pane-cleanup: destroy-parent-start");
+                var parentDestroyed = DestroyCleanupParent(parent, ref wpfParentSource);
+                Console.WriteLine($"multi-pane-cleanup: parent-destroy-returned={parentDestroyed}; still-valid={IsWindow(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (!parentDestroyed || IsWindow(parent) || GetForegroundWindow() != foreground) result = 1;
+            if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
+            if (!disposeMenuCoordinatorBeforeParent) menuCoordinator?.Dispose();
+            foreach (var paneHost in wpfPaneHosts) paneHost.Dispose();
+            if (wpfParentSource is not null) DestroyCleanupParent(parent, ref wpfParentSource);
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (isolatedFixture is not null &&
+                isolatedFixture.StartsWith(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase) && Directory.Exists(isolatedFixture))
+                Directory.Delete(isolatedFixture, recursive: true);
+            if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
+            _useWpfDispatcherPump = previousPumpMode;
+        }
+        return result;
+    }
+
+    private static bool DestroyCleanupParent(nint parent, ref System.Windows.Interop.HwndSource? wpfParentSource)
+    {
+        if (wpfParentSource is null) return DestroyWindow(parent);
+        wpfParentSource.Dispose();
+        wpfParentSource = null;
+        return !IsWindow(parent);
+    }
+
+    private sealed class CleanupPaneHwndHost : System.Windows.Interop.HwndHost
+    {
+        internal nint NativeHandle { get; private set; }
+        internal nint LastHandle { get; private set; }
+
+        protected override HandleRef BuildWindowCore(HandleRef hwndParent)
+        {
+            NativeHandle = CreateWindowExW(0, "STATIC", "ExplorerDirs WPF-hosted Shell pane",
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265,
+                hwndParent.Handle, 0, 0, 0);
+            if (NativeHandle == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "Could not create the WPF-hosted native pane.");
+            LastHandle = NativeHandle;
+            return new HandleRef(this, NativeHandle);
+        }
+
+        protected override void DestroyWindowCore(HandleRef hwnd)
+        {
+            _ = DestroyWindow(hwnd.Handle);
+            NativeHandle = 0;
+        }
+    }
+
+    private static void DumpTeardownWindowState(nint parent, ShellMenuFrameCoordinator? coordinator,
+        ShellViewColorBrowserHost? lastHost)
+    {
+        var menu = GetMenu(parent);
+        var baseMenu = coordinator?.BaseMenu ?? 0;
+        var imeContext = ImmGetContext(parent);
+        if (imeContext != 0) _ = ImmReleaseContext(parent, imeContext);
+        var ownerThreadId = GetWindowThreadProcessId(parent, out var ownerPid);
+        var className = new System.Text.StringBuilder(128);
+        _ = GetClassNameW(parent, className, className.Capacity);
+        Console.WriteLine($"teardown-window-state: hwnd=0x{parent:X}; class={className}; pid={ownerPid}; tid={ownerThreadId}; menu=0x{menu:X}; base-menu=0x{baseMenu:X}; menu-valid={menu != 0 && IsMenu(menu)}; ime-context={imeContext != 0}; coordinator-owner={lastHost is not null && coordinator?.IsCurrentOwner(lastHost) == true}; active-object=0x{lastHost?.ActiveObjectPointer ?? 0:X}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var childClass = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(child, childClass, childClass.Capacity);
+            _ = GetWindowThreadProcessId(child, out var childPid);
+            var style = GetWindowLongPtrW(child, -16);
+            var exStyle = GetWindowLongPtrW(child, -20);
+            var childImeContext = ImmGetContext(child);
+            if (childImeContext != 0) _ = ImmReleaseContext(child, childImeContext);
+            Console.WriteLine($"teardown-window-child: index={++childIndex}; hwnd=0x{child:X}; class={childClass}; pid={childPid}; visible={IsWindowVisible(child)}; style=0x{style:X}; ex-style=0x{exStyle:X}; ime-context={childImeContext != 0}");
+            return true;
+        };
+        _ = EnumChildWindows(parent, callback, 0);
+        Console.WriteLine($"teardown-window-state: child-count={childIndex}");
+    }
+
+    private static void DumpChildWindowTree(string label, nint root)
+    {
+        var rootClass = new System.Text.StringBuilder(128);
+        _ = GetClassNameW(root, rootClass, rootClass.Capacity);
+        var rootContext = ImmGetContext(root);
+        if (rootContext != 0) _ = ImmReleaseContext(root, rootContext);
+        Console.WriteLine($"shell-window-tree: stage={label}; hwnd=0x{root:X}; class={rootClass}; ime-context={rootContext != 0}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var childClass = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(child, childClass, childClass.Capacity);
+            var childContext = ImmGetContext(child);
+            if (childContext != 0) _ = ImmReleaseContext(child, childContext);
+            Console.WriteLine($"shell-window-tree: stage={label}; index={++childIndex}; hwnd=0x{child:X}; class={childClass}; visible={IsWindowVisible(child)}; ime-context={childContext != 0}");
+            return true;
+        };
+        _ = EnumChildWindows(root, callback, 0);
+        Console.WriteLine($"shell-window-tree: stage={label}; child-count={childIndex}");
+    }
+
+    private static void DetachImeContextTree(nint root)
+    {
+        var detachedRootContext = ImmAssociateContext(root, 0);
+        Console.WriteLine($"shell-window-tree: ime-detach root=0x{root:X}; previous-context=0x{detachedRootContext:X}");
+        var childIndex = 0;
+        EnumChildProc callback = (child, parameter) =>
+        {
+            var detachedContext = ImmAssociateContext(child, 0);
+            Console.WriteLine($"shell-window-tree: ime-detach child={++childIndex}; hwnd=0x{child:X}; previous-context=0x{detachedContext:X}");
+            return true;
+        };
+        _ = EnumChildWindows(root, callback, 0);
+    }
+
+    internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
+        bool terminateProcessAfterProbe = false, bool synchronousCleanupProbe = false)
+    {
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullFixture = Path.GetFullPath(fixture);
+        var fullStateDirectory = Path.GetFullPath(stateDirectory);
+        if (!fullFixture.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine("session-restore-consumer: fixture and state store must remain under NativeProbe fixtures.");
+            return 1;
+        }
+
+        var store = new ShellViewStateStore(fullStateDirectory);
+        if (!store.TryLoad(sessionId, out var persistedState))
+        {
+            Console.Error.WriteLine("session-restore-consumer: session state was not present before this process started.");
+            return 1;
+        }
+
+        nint parent = 0, pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        var createAttempted = false;
+        ShellViewColorBrowserHost? host = null;
+        ShellMenuFrameCoordinator? menuCoordinator = null;
+        var result = 1;
+        try
+        {
+            var windowStyle = 0x10CF0000u | 0x10000000u;
+            var extendedStyle = 0x08000000u | 0x00000080u;
+            parent = CreateWindowExW(extendedStyle, "STATIC", "ExplorerDirs session restore consumer",
+                windowStyle, 100, 100, 800, 560, 0, 0, 0, 0);
+            if (parent == 0) throw new InvalidOperationException("Could not create the isolated consumer parent window.");
+            Console.WriteLine("session-restore-consumer-stage: parent-created");
+            menuCoordinator = new ShellMenuFrameCoordinator(parent);
+            pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 1",
+                0x50000000u | 0x02000000u | 0x04000000u, 0, 0, 390, 265, parent, 0, 0, 0);
+            if (pane == 0) throw new InvalidOperationException("Could not create the first child pane.");
+            Check(SHParseDisplayName(fullFixture, 0, out pidl, 0, out _));
+            Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+            var shellViewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+            host = new ShellViewColorBrowserHost(pane, [],
+                new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                stateStore: store, stateId: sessionId, menuFrameWindow: parent,
+                menuFrameCoordinator: menuCoordinator);
+            host.View = view;
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+            createAttempted = true;
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+            if (viewWindow == 0) throw new InvalidOperationException("The consumer view was created without a window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
+            Console.WriteLine("session-restore-consumer-stage: view-created");
+            if (GetParent(pane) != parent || GetParent(viewWindow) != pane)
+                throw new InvalidOperationException("The restored Shell view is not hosted inside its first child pane.");
+            ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated desktop.
+            Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
+            Console.WriteLine("session-restore-consumer-stage: view-activated");
+            Pump(1000);
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+            Console.WriteLine("session-restore-consumer-stage: items-enumerated");
+            Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out _));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            if (sortCount != 1) throw new Exception($"Restored sort count was {sortCount}, expected one.");
+            var sorts = new SortColumn[sortCount];
+            Check(At<GetSortColumns>(folderView, 28)(folderView, sorts, sortCount));
+            var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+            var expectedSort = new SortColumn
+            {
+                Key = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 },
+                Direction = -1
+            };
+            var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var group, out var groupAscending);
+            Check(groupResult);
+            Check(ShellColumnManager.Capture(folderView, out var columns));
+            var columnsExpected = new DisplayColumnState[]
+            {
+                new(new PropertyKeyState(propertyFormatId, 10), 280),
+                new(new PropertyKeyState(propertyFormatId, 12), 120),
+                new(new PropertyKeyState(propertyFormatId, 4), 160)
+            };
+            var restored = mode == 4 && sorts[0].Key.FormatId == expectedSort.Key.FormatId &&
+                sorts[0].Key.PropertyId == expectedSort.Key.PropertyId && sorts[0].Direction == expectedSort.Direction &&
+                group.FormatId == propertyFormatId && group.PropertyId == 4 && groupAscending == 1 &&
+                columns is not null && columnsExpected.SequenceEqual(columns) && host.Reads > 0;
+            if (!restored) throw new Exception("A new process did not restore the persisted Shell view settings.");
+            Console.WriteLine("session-restore-consumer-stage: state-restored");
+            var shellAcceleratorRoute = ProbeShellBrowserAcceleratorForwarding(host, view, viewWindow);
+            Console.WriteLine("session-restore-consumer-stage: shell-accelerator-route=" + shellAcceleratorRoute);
+            var concurrentViews = VerifyConcurrentViewIsolation(fullFixture, store, sessionId, parent, view, pane, host,
+                folderView, propertyFormatId, expectedSort, columnsExpected, menuCoordinator,
+                synchronousCleanupProbe);
+            Console.WriteLine("session-restore-consumer-stage: four-pane-finished");
+            Console.WriteLine($"session-restore-consumer: pid={Environment.ProcessId}; session={sessionId:D}; " +
+                $"prior-state-bytes={persistedState.Length}; shell-reads={host.Reads}; mode={mode}; sort={sorts.Length}; " +
+                $"group={groupResult:X8}/{groupAscending}; columns={columns?.Count ?? 0}; restored={restored}; " +
+                $"four-pane-probe={concurrentViews}");
+            result = 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("session-restore-consumer failure: " + ex.Message);
+        }
+        finally
+        {
+            if (terminateProcessAfterProbe)
+            {
+                // This helper process owns its isolated Shell Desktop; releasing the STA view can stall.
+                // Its parent removes the temporary fixture and state directory after this process exits.
+                Console.Out.Flush();
+                Console.Error.Flush();
+                Environment.Exit(result);
+            }
+            Console.WriteLine("session-restore-consumer-cleanup: start");
+            if (folderView != 0) Console.WriteLine("session-restore-consumer-cleanup: release-folder-view");
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0)
+            {
+                if (host is not null) host.RevokeDropTarget();
+                if (createAttempted)
+                {
+                    Console.WriteLine("session-restore-consumer-cleanup: destroy-view-window-start");
+                    try { _ = At<DestroyViewWindow>(view, 10)(view); }
+                    catch (Exception ex) { Console.Error.WriteLine("session-restore-consumer destroy: " + ex.Message); }
+                    Console.WriteLine("session-restore-consumer-cleanup: destroy-view-window-complete");
+                }
+                if (host is not null) host.View = 0;
+                Console.WriteLine("session-restore-consumer-cleanup: release-view");
+                Marshal.Release(view);
+            }
+            if (folder != 0) Console.WriteLine("session-restore-consumer-cleanup: release-folder");
+            if (folder != 0) Marshal.Release(folder);
+            if (hostPointer != 0) Console.WriteLine("session-restore-consumer-cleanup: release-browser-site");
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (host is not null) Console.WriteLine("session-restore-consumer-cleanup: dispose-browser-site");
+            if (host is not null) host.Dispose();
+            if (menuCoordinator is not null) Console.WriteLine("session-restore-consumer-cleanup: dispose-menu-coordinator");
+            menuCoordinator?.Dispose();
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (pane != 0 && IsWindow(pane))
+            {
+                Console.WriteLine("session-restore-consumer-cleanup: destroy-primary-pane");
+                _ = DestroyWindow(pane);
+                Console.WriteLine("session-restore-consumer-cleanup: destroy-primary-pane-complete");
+            }
+            if (synchronousCleanupProbe && parent != 0 && IsWindow(parent))
+            {
+                var childCount = 0;
+                EnumChildWindows(parent, (window, _) =>
+                {
+                    childCount++;
+                    Console.WriteLine($"session-restore-consumer-cleanup: remaining-child hwnd=0x{window:X} class={WindowClassName(window)}");
+                    return true;
+                }, 0);
+                Console.WriteLine($"session-restore-consumer-cleanup: remaining-child-count={childCount}");
+                if (!SetWindowSubclass(parent, CleanupWindowObserver, 0xC1EA, 0))
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not attach the parent destroy-message observer.");
+                Console.WriteLine("session-restore-consumer-cleanup: parent-destroy-observer-installed");
+            }
+            if (parent != 0 && IsWindow(parent)) Console.WriteLine("session-restore-consumer-cleanup: destroy-parent-window");
+            if (parent != 0 && IsWindow(parent))
+            {
+                var destroyed = DestroyWindow(parent);
+                Console.WriteLine($"session-restore-consumer-cleanup: destroy-parent-returned={destroyed}; still-valid={IsWindow(parent)}");
+                if (IsWindow(parent)) RemoveWindowSubclass(parent, CleanupWindowObserver, 0xC1EA);
+            }
+            Console.WriteLine("session-restore-consumer-cleanup: complete");
+            Console.WriteLine($"session-restore-consumer: result={result}; parent-visible={parent != 0 && IsWindowVisible(parent)}");
+        }
+        return result;
+    }
+
+    private static string VerifyConcurrentViewIsolation(string fixture, ShellViewStateStore store,
+        Guid restoredSessionId, nint containerParent, nint restoredView, nint firstPane,
+        ShellViewColorBrowserHost restoredHost,
+        nint restoredFolderView, Guid propertyFormatId, SortColumn expectedSort,
+        IReadOnlyList<DisplayColumnState> columnsExpected, ShellMenuFrameCoordinator menuCoordinator,
+        bool synchronousCleanupProbe)
+    {
+        Console.WriteLine("session-restore-consumer-stage: concurrent-views-start");
+        // The calling consumer exits immediately after this check; process exit owns the isolated Shell STA teardown.
+        nint pane = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
+        ShellViewColorBrowserHost? host = null;
+        pane = CreateWindowExW(0, "STATIC", "ExplorerDirs session restore pane 2",
+            0x50000000u | 0x02000000u | 0x04000000u, 400, 0, 390, 265, containerParent, 0, 0, 0);
+        if (pane == 0) throw new InvalidOperationException("Could not create the second child pane.");
+        if (GetParent(firstPane) != containerParent || GetParent(pane) != containerParent || firstPane == pane)
+            throw new InvalidOperationException("The two Shell pane hosts are not distinct children of one container.");
+        if (!store.TryLoad(restoredSessionId, out var restoredState))
+            throw new InvalidOperationException("The restored view session disappeared before its sibling was created.");
+        Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+        var shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+        var siblingSessionId = Guid.NewGuid();
+        host = new ShellViewColorBrowserHost(pane, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: siblingSessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
+        if (store.TryLoad(siblingSessionId, out _))
+            throw new InvalidOperationException("The new sibling unexpectedly inherited another session's stream.");
+        host.View = view;
+        hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+        if (viewWindow == 0) throw new InvalidOperationException("The second Shell view was created without a window.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
+        if (GetParent(viewWindow) != pane)
+            throw new InvalidOperationException("The sibling Shell view is not hosted inside its child pane.");
+        Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS.
+        Pump(700);
+        Console.WriteLine("session-restore-consumer-stage: sibling-view-activated");
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        if (host.Reads == 0)
+            throw new InvalidOperationException("The concurrent Shell view did not request its own session stream.");
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 3, 16)); // FVM_LIST
+        Pump(300);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var siblingMode, out _));
+        Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out var restoredMode, out _));
+        if (siblingMode != 3 || restoredMode != 4)
+            throw new InvalidOperationException($"Concurrent Shell views shared view mode state: sibling={siblingMode}; restored={restoredMode}.");
+        var siblingInitialReads = host.Reads;
+        Check(At<SaveViewState>(view, 13)(view));
+        Pump(350);
+        var retirement = new ShellViewReferenceRetirement(
+            shellView => At<DestroyViewWindow>(shellView, 10)(shellView),
+            shellView => Marshal.Release(shellView),
+            message => Console.WriteLine("concurrent-view retirement: " + message));
+        host.RevokeDropTarget();
+        host.View = 0;
+        retirement.Retire(view, folder);
+        view = folder = viewWindow = 0;
+        var siblingWrites = host.Writes;
+        Marshal.Release(hostPointer);
+        hostPointer = 0;
+        host.Dispose();
+        host = null;
+        if (siblingWrites == 0 || !store.TryLoad(siblingSessionId, out var siblingState) ||
+            restoredState.SequenceEqual(siblingState))
+            throw new InvalidOperationException("The sibling Shell view did not persist an independent view-state stream.");
+
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+        shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
+        host = new ShellViewColorBrowserHost(pane, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: siblingSessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
+        host.View = view;
+        hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+        if (viewWindow == 0) throw new InvalidOperationException("The sibling Shell view could not be recreated.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
+        if (GetParent(viewWindow) != pane)
+            throw new InvalidOperationException("The recreated Shell view left its child pane host.");
+        Check(At<ActivateView>(view, 7)(view, 1));
+        Pump(700);
+        Marshal.Release(folderView);
+        folderView = 0;
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var recreatedMode, out _));
+        Check(At<GetViewModeAndIconSize>(restoredFolderView, 36)(restoredFolderView, out restoredMode, out _));
+        if (host.Reads == 0 || recreatedMode != 3 || restoredMode != 4)
+            throw new InvalidOperationException($"Recreated sibling did not restore its own List state: sibling={recreatedMode}; original={restoredMode}; reads={host.Reads}.");
+        Console.WriteLine("session-restore-consumer-stage: sibling-state-restored");
+        var otherFixture = GetNotificationIsolationFixture(fixture);
+        Console.WriteLine("session-restore-consumer-stage: creating-pane3");
+        var pane3 = CreateSiblingPaneView(fixture, store, containerParent, 0, 275, 1, 48,
+            menuCoordinator: menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: pane3-created");
+        var pane4 = CreateSiblingPaneView(fixture, store, containerParent, 400, 275, 6, -1,
+            otherFixture, expectedItemCount: 1, menuCoordinator: menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: pane4-created");
+        var allViews = new[] { restoredFolderView, folderView, pane3.FolderView, pane4.FolderView };
+        var allHosts = new[] { restoredHost, host, pane3.Host, pane4.Host };
+        var expectedModes = new uint[] { 4, 3, 1, 6 };
+        AssertPaneModes(allViews, expectedModes, "four-pane setup");
+        Console.WriteLine("session-restore-consumer-stage: four-panes-ready");
+        Console.WriteLine("session-restore-consumer-stage: selection-menu-check-start");
+        var selectionMenus = VerifyFourPaneSelectionMenus(
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews);
+        Console.WriteLine("session-restore-consumer-stage: selection-menu-check-complete");
+        var menuRouting = VerifyFourPaneMenuActivation(
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews, allHosts, expectedModes, containerParent,
+            menuCoordinator);
+        Console.WriteLine("session-restore-consumer-stage: menu-activation-complete");
+        var menuCommands = VerifyFourPaneMenuCommandRouting(
+            new[] { restoredView, view, pane3.View, pane4.View }, allViews, expectedModes, containerParent, expectedSort);
+        Console.WriteLine("session-restore-consumer-stage: menu-commands-complete");
+        var rootFolderViews = allViews.Take(3).ToArray();
+        var allPaneCounts = VerifySessionRestoreFileOperations(restoredView, restoredFolderView, fixture, propertyFormatId,
+            expectedSort, columnsExpected, rootFolderViews);
+        Console.WriteLine("session-restore-consumer-stage: file-operations-complete");
+        var directoryIsolation = VerifyDirectoryNotificationIsolation(rootFolderViews, pane4.FolderView,
+            fixture, otherFixture);
+        Console.WriteLine("session-restore-consumer-stage: directory-notifications-complete");
+        AssertPaneModes(allViews, expectedModes, "file operations");
+        var result = $"restored-stream-bytes={restoredState.Length}; sibling-reads={siblingInitialReads}; " +
+            $"sibling-writes={siblingWrites}; sibling-stream-bytes={siblingState.Length}; " +
+            $"recreated-reads={host.Reads}; recreated-mode={recreatedMode}; original-mode={restoredMode}; " +
+            $"pane3-reads={pane3.Host.Reads}; pane4-reads={pane4.Host.Reads}; " +
+            $"pane-modes={string.Join(',', expectedModes)}; same-container=True; panes=4; " +
+            $"menu-routing={menuRouting}; menu-commands={menuCommands}; file-updates={allPaneCounts}; " +
+            $"selection-menus={selectionMenus}; directory-notifications={directoryIsolation}; independent=True";
+        if (synchronousCleanupProbe)
+        {
+            RetirePaneForSynchronousCleanup("pane-2", pane, view, viewWindow, folder, pidl,
+                hostPointer, host, folderView);
+            view = viewWindow = folder = pidl = hostPointer = folderView = 0;
+            RetirePaneForSynchronousCleanup("pane-3", pane3.Pane, pane3.View, pane3.ViewWindow,
+                pane3.Folder, pane3.Pidl, pane3.HostPointer, pane3.Host, pane3.FolderView);
+            RetirePaneForSynchronousCleanup("pane-4", pane4.Pane, pane4.View, pane4.ViewWindow,
+                pane4.Folder, pane4.Pidl, pane4.HostPointer, pane4.Host, pane4.FolderView);
+        }
+        return result;
+    }
+
+    private static void RetirePaneForSynchronousCleanup(string name, nint pane, nint view,
+        nint viewWindow, nint folder, nint pidl, nint hostPointer,
+        ShellViewColorBrowserHost host, nint folderView)
+    {
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-start");
+        host.RevokeDropTarget();
+        host.View = 0;
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-destroy-view-start");
+        var destroyHr = At<DestroyViewWindow>(view, 10)(view);
+        if (destroyHr < 0)
+            throw new InvalidOperationException($"{name} DestroyViewWindow failed: {destroyHr:X8}.");
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-destroy-view-complete/valid={IsWindow(viewWindow)}");
+        Marshal.Release(folderView);
+        Marshal.Release(view);
+        Marshal.Release(folder);
+        Marshal.Release(hostPointer);
+        host.Dispose();
+        if (pane != 0 && IsWindow(pane)) _ = DestroyWindow(pane);
+        if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+        Console.WriteLine($"session-restore-consumer-cleanup: {name}-complete");
+    }
+
+    private static string ProbeShellBrowserAcceleratorForwarding(ShellViewColorBrowserHost host,
+        nint view, nint viewWindow)
+    {
+        var foreground = GetForegroundWindow();
+        var priorFocus = GetFocus();
+        var listView = FindChildByClass(viewWindow, "SysListView32");
+        if (listView == 0) throw new InvalidOperationException("The Shell accelerator probe has no native file list.");
+        _ = SetFocus(listView);
+        if (GetFocus() != listView)
+            throw new InvalidOperationException("Could not focus the isolated Shell file list for accelerator routing.");
+
+        var priorHandler = host.AcceleratorHandler;
+        var calls = new List<string>();
+        host.AcceleratorHandler = (messagePointer, commandId) =>
+        {
+            var forwarded = Marshal.PtrToStructure<NativeMessage>(messagePointer);
+            calls.Add($"id=0x{commandId:X4}/msg=0x{forwarded.Id:X}/key=0x{forwarded.WParam:X}");
+            return true;
+        };
+        try
+        {
+            var results = new List<string>(3);
+            foreach (var (name, key) in new[] { ("F4", 0x73u), ("F6", 0x75u), ("F24", 0x87u) })
+            {
+                _ = SetFocus(listView);
+                if (GetFocus() != listView)
+                    throw new InvalidOperationException($"Could not restore the isolated file-list focus before {name}.");
+                var before = calls.Count;
+                var message = new NativeMessage
+                {
+                    Window = listView,
+                    Id = 0x0100, // WM_KEYDOWN
+                    WParam = key,
+                    LParam = 1
+                };
+                var result = At<TranslateAccelerator>(view, 5)(view, ref message);
+                results.Add($"{name}:hr=0x{result:X8}/browser-delegated={calls.Count != before}");
+            }
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Probing Shell accelerator forwarding changed the foreground window.");
+            return string.Join(',', results) + $";browser-calls=[{string.Join(';', calls)}]";
+        }
+        finally
+        {
+            host.AcceleratorHandler = priorHandler;
+            if (priorFocus != 0 && IsWindow(priorFocus)) _ = SetFocus(priorFocus);
+        }
+    }
+
+    private static string VerifyFourPaneMenuActivation(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, IReadOnlyList<ShellViewColorBrowserHost> hosts,
+        IReadOnlyList<uint> expectedModes, nint menuFrameWindow,
+        ShellMenuFrameCoordinator menuCoordinator)
+    {
+        Console.WriteLine("session-restore-consumer-stage: menu-activation-check-start");
+        if (views.Count != 4 || folderViews.Count != 4 || hosts.Count != 4 || expectedModes.Count != 4)
+            throw new ArgumentException("Menu routing probe requires exactly four Shell pane hosts.");
+        var foreground = GetForegroundWindow();
+        foreach (var host in hosts) host.MenuTrace.Clear();
+        var before = hosts.Select(host => (host.InsertMenusCallCount, host.SetMenuCallCount,
+            host.RemoveMenusCallCount)).ToArray();
+        var activations = new List<string>(views.Count);
+        var shellMenuCommands = new List<string>(views.Count);
+        var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
+        var typeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 4 };
+        foreach (var folderView in folderViews)
+        {
+            Check(At<SetSortColumns>(folderView, 27)(folderView,
+                [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+            var groupKey = typeKey;
+            Check(At<SetGroupBy>(folderView, 17)(folderView, ref groupKey, 1));
+        }
+        Pump(250);
+        for (var index = 0; index < views.Count; index++)
+        {
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-activate-start");
+            var menuBeingReplaced = GetMenu(menuFrameWindow);
+            Check(At<ActivateView>(views[index], 7)(views[index], 2)); // SVUIA_ACTIVATE_FOCUS.
+            Pump(250);
+            var current = hosts[index];
+            var insertDelta = current.InsertMenusCallCount - before[index].InsertMenusCallCount;
+            var setDelta = current.SetMenuCallCount - before[index].SetMenuCallCount;
+            if (insertDelta <= 0 || setDelta <= 0)
+                throw new InvalidOperationException($"Activating pane {index + 1} did not route Shell menu callbacks to its own host: insert={insertDelta}; set={setDelta}.");
+            var shellBrowser = (IStreamProbeBrowser)current;
+            var oleFrame = (IStreamProbeOleInPlaceFrame)current;
+            var browserHresult = shellBrowser.GetWindow(out var browserWindow);
+            var frameHresult = oleFrame.GetWindow(out var frameWindow);
+            var installedMenu = GetMenu(menuFrameWindow);
+            var customMenuPresent = HasMenuGroup(installedMenu, "Explorer Dirs");
+            var successfulSetMenu = current.MenuTrace.Any(trace =>
+                trace.Contains("hr=0x00000000", StringComparison.Ordinal) &&
+                trace.Contains($"frame=0x{menuFrameWindow:X}", StringComparison.Ordinal));
+            if (browserHresult < 0 || browserWindow != current.BrowserParentWindow ||
+                frameHresult < 0 || frameWindow != menuFrameWindow || browserWindow == frameWindow ||
+                installedMenu == 0 || !successfulSetMenu || !customMenuPresent)
+                throw new InvalidOperationException($"Pane {index + 1} did not install the merged Shell and app menu on the shared top-level frame: browser=0x{browserWindow:X}/0x{browserHresult:X8}; oleFrame=0x{frameWindow:X}/0x{frameHresult:X8}; expectedPane=0x{current.BrowserParentWindow:X}; expectedFrame=0x{menuFrameWindow:X}; installedMenu=0x{installedMenu:X}; custom-menu={customMenuPresent}; trace=[{string.Join(';', current.MenuTrace)}].");
+            if (index > 0 && hosts[index - 1].OwnsAttachedCustomMenuGroup)
+                throw new InvalidOperationException($"The previous pane retained its app-owned custom menu group after pane {index + 1} became active; previous-menu=0x{menuBeingReplaced:X}; previous-host=[{string.Join(';', hosts[index - 1].MenuTrace)}].");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-activated");
+            var commandCountsBefore = hosts.Select(host => host.ApplicationMenuCommandCount).ToArray();
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)StreamViewHost.ProbeApplicationCommandId, 0);
+            if (hosts.Select((host, hostIndex) => (host, hostIndex))
+                    .Any(entry => entry.hostIndex != index && entry.host.ApplicationMenuCommandCount != commandCountsBefore[entry.hostIndex]) ||
+                current.ApplicationMenuCommandCount != commandCountsBefore[index] + 1)
+                throw new InvalidOperationException($"The merged app menu command did not dispatch only to active pane {index + 1}: before={string.Join(',', commandCountsBefore)}; after={string.Join(',', hosts.Select(host => host.ApplicationMenuCommandCount))}.");
+
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-details-start");
+            var detailsCommandId = FindShellViewCommandId(GetSubMenu(installedMenu, 2), "详细信息", "Details");
+            var backgroundVerbDetailsId = FindBackgroundVerbCommandId(views[index], "viewlogicaldetails", 0x7000);
+            Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], 2, 16)); // FVM_SMALLICON.
+            Pump(100);
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)detailsCommandId, 0); // WM_COMMAND.
+            Pump(250);
+            Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out var shellMenuMode, out _));
+            if (shellMenuMode != 4)
+                throw new InvalidOperationException($"The host did not execute the merged Shell Details command for pane {index + 1}: id=0x{detailsCommandId:X4}; mode={shellMenuMode}; trace=[{string.Join(';', current.MenuTrace)}].");
+            for (var siblingIndex = 0; siblingIndex < folderViews.Count; siblingIndex++)
+            {
+                if (siblingIndex == index) continue;
+                Check(At<GetViewModeAndIconSize>(folderViews[siblingIndex], 36)(folderViews[siblingIndex], out var siblingMode, out _));
+                if (siblingMode != expectedModes[siblingIndex])
+                    throw new InvalidOperationException($"The merged Shell Details command for pane {index + 1} changed sibling pane {siblingIndex + 1}: mode={siblingMode}; expected={expectedModes[siblingIndex]}.");
+            }
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-details-verified");
+            Check(At<SetViewModeAndIconSize>(folderViews[index], 35)(folderViews[index], expectedModes[index],
+                expectedModes[index] == 1 ? 48 : expectedModes[index] == 3 ? 16 : -1));
+            Pump(150);
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-descending-start");
+            var viewMenu = GetSubMenu(installedMenu, 2);
+            var sortDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递减");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortDescendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, -1, 1, nameKey, typeKey, "Sort Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-descending-verified");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var sortAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "排序方式", "递增");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)sortAscendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Sort Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-sort-ascending-verified");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var groupDescendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递减");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupDescendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 0, nameKey, typeKey, "Group Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-group-descending-verified");
+            viewMenu = GetSubMenu(GetMenu(menuFrameWindow), 2);
+            var groupAscendingId = FindMenuCommandIdByPathSuffix(viewMenu, "分组依据", "递增");
+            _ = SendMessageW(menuFrameWindow, 0x0111, (nint)groupAscendingId, 0);
+            Pump(150);
+            AssertFourPaneSortGroupDirections(folderViews, index, 1, 1, nameKey, typeKey, "Group Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-group-ascending-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-menu-read-start");
+            var selectAllCommandId = FindShellViewCommandId(GetSubMenu(GetMenu(menuFrameWindow), 1), "全选", "Select All");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-menu-read-verified; id=0x{selectAllCommandId:X4}");
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-routing-start");
+            var editSelectAll = VerifyEditSelectAllOnFrame(menuFrameWindow, folderViews, index, selectAllCommandId);
+            Console.WriteLine($"session-restore-consumer-stage: menu-activation-pane{index + 1}-select-all-verified");
+            shellMenuCommands.Add($"pane{index + 1}:details=0x{detailsCommandId:X4}/context=0x{backgroundVerbDetailsId:X4}/same={detailsCommandId == backgroundVerbDetailsId},sort={sortDescendingId:X4}/{sortAscendingId:X4},group={groupDescendingId:X4}/{groupAscendingId:X4}");
+            shellMenuCommands[^1] += $",edit-select-all={editSelectAll}";
+            activations.Add($"{index + 1}:{insertDelta}/{setDelta}/{current.RemoveMenusCallCount - before[index].RemoveMenusCallCount}");
+            before[index] = (current.InsertMenusCallCount, current.SetMenuCallCount, current.RemoveMenusCallCount);
+        }
+        var finalHost = hosts[^1];
+        var finalCompositeMenu = GetMenu(menuFrameWindow);
+        var finalRemoveCount = finalHost.RemoveMenusCallCount;
+        Check(At<ActivateView>(views[^1], 7)(views[^1], 0)); // SVUIA_DEACTIVATE.
+        Pump(250);
+        var countsBeforeInactiveCommand = hosts.Select(host => host.ApplicationMenuCommandCount).ToArray();
+        _ = SendMessageW(menuFrameWindow, 0x0111, (nint)StreamViewHost.ProbeApplicationCommandId, 0);
+        if (finalHost.RemoveMenusCallCount <= finalRemoveCount || GetMenu(menuFrameWindow) != menuCoordinator.BaseMenu ||
+            finalHost.OwnsAttachedCustomMenuGroup ||
+            hosts.Where((host, index) => host.ApplicationMenuCommandCount != countsBeforeInactiveCommand[index]).Any())
+            throw new InvalidOperationException($"Deactivating the last Shell pane did not remove the active shared menu and restore the frame menu: remove={finalHost.RemoveMenusCallCount - finalRemoveCount}; expected=0x{menuCoordinator.BaseMenu:X}; actual=0x{GetMenu(menuFrameWindow):X}; trace=[{string.Join(';', finalHost.MenuTrace)}].");
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Activating Shell pane views changed the foreground window outside the Private Desktop probe.");
+        return $"per-pane-insert-set={string.Join(',', activations)}; custom-menu=present-in-each-active-composite; " +
+            $"shell-menu-command={string.Join(',', shellMenuCommands)}; " +
+            $"app-command-routing={string.Join(',', hosts.Select((host, index) => $"pane{index + 1}:{host.ApplicationMenuCommandCount}"))}; inactive-command=ignored; " +
+            $"callbacks=[{string.Join(" || ", hosts.Select((host, index) => $"pane{index + 1}:{string.Join(';', host.MenuTrace)}"))}]; " +
+            "frame-menu-restored-after-deactivate=True; foreground-unchanged=True";
+    }
+
+    private static uint FindMenuCommandIdByPathSuffix(nint menu, params string[] suffix)
+    {
+        var match = FindMenuCommandIdByPathSuffix(menu, [], suffix);
+        return match ?? throw new InvalidOperationException($"The Shell view menu did not contain command path suffix [{string.Join(" > ", suffix)}].");
+
+        static uint? FindMenuCommandIdByPathSuffix(nint currentMenu, IReadOnlyList<string> parents,
+            IReadOnlyList<string> expectedSuffix)
+        {
+            for (var index = 0; currentMenu != 0 && index < GetMenuItemCount(currentMenu); index++)
+            {
+                var text = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(currentMenu, (uint)index, text, text.Capacity, 0x400);
+                var itemLabel = NormalizeMenuLabel(text.ToString());
+                var id = GetMenuItemID(currentMenu, index);
+                if (id >= 0)
+                {
+                    var path = parents.Append(itemLabel).ToArray();
+                    if (path.Length >= expectedSuffix.Count && expectedSuffix.Select((part, partIndex) =>
+                            string.Equals(path[^(expectedSuffix.Count - partIndex)], part, StringComparison.OrdinalIgnoreCase)).All(equal => equal))
+                        return unchecked((uint)id);
+                }
+                var nested = GetSubMenu(currentMenu, index);
+                if (nested == 0) continue;
+                var nestedParents = string.IsNullOrEmpty(itemLabel) ? parents : parents.Append(itemLabel).ToArray();
+                var nestedMatch = FindMenuCommandIdByPathSuffix(nested, nestedParents, expectedSuffix);
+                if (nestedMatch is not null) return nestedMatch;
+            }
+            return null;
+        }
+    }
+
+    private static void AssertFourPaneSortGroupDirections(IReadOnlyList<nint> folderViews,
+        int activeIndex, int sortDirection, int groupAscending,
+        PropertyKey nameKey, PropertyKey typeKey, string phase)
+    {
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<GetSortColumnCount>(folderViews[index], 26)(folderViews[index], out var count));
+            if (count != 1) throw new InvalidOperationException($"Pane {index + 1} sort count changed during merged-menu {phase}: {count}.");
+            var sorts = new SortColumn[count];
+            Check(At<GetSortColumns>(folderViews[index], 28)(folderViews[index], sorts, count));
+            Check(At<GetGroupBy>(folderViews[index], 18)(folderViews[index], out var group, out var ascending));
+            var expectedSort = index == activeIndex ? sortDirection : 1;
+            var expectedGroup = index == activeIndex ? groupAscending : 1;
+            if (sorts[0].Key.FormatId != nameKey.FormatId || sorts[0].Key.PropertyId != nameKey.PropertyId ||
+                sorts[0].Direction != expectedSort || group.FormatId != typeKey.FormatId ||
+                group.PropertyId != typeKey.PropertyId || ascending != expectedGroup)
+                throw new InvalidOperationException($"Merged Shell menu {phase} changed an unexpected pane state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSort}/{expectedGroup}.");
+        }
+    }
+
+    private static string VerifyEditSelectAllOnFrame(nint menuFrameWindow,
+        IReadOnlyList<nint> folderViews, int activeIndex, uint commandId)
+    {
+        foreach (var folderView in folderViews)
+        {
+            Console.WriteLine("session-restore-consumer-stage: edit-select-all-clear-start");
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var itemCount)); // SVGIO_ALLVIEW.
+            for (var item = 0; item < itemCount; item++)
+                Check(At<SelectFolderItem>(folderView, 15)(folderView, item, 0)); // SVSI_DESELECT.
+            Console.WriteLine($"session-restore-consumer-stage: edit-select-all-clear-verified; items={itemCount}");
+        }
+
+        Console.WriteLine($"session-restore-consumer-stage: edit-select-all-command-send-start; id=0x{commandId:X4}");
+        _ = SendMessageW(menuFrameWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        Console.WriteLine("session-restore-consumer-stage: edit-select-all-command-send-returned");
+        Pump(150);
+
+        Console.WriteLine("session-restore-consumer-stage: edit-select-all-active-count-start");
+        Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 2, out var allItems));
+        Check(At<ItemCount>(folderViews[activeIndex], 7)(folderViews[activeIndex], 1, out var selectedItems)); // SVGIO_SELECTION.
+        if (allItems == 0 || selectedItems != allItems)
+            throw new InvalidOperationException($"Edit > Select All did not select every item in pane {activeIndex + 1}: command=0x{commandId:X4}; selected={selectedItems}; total={allItems}.");
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            if (index == activeIndex) continue;
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out var siblingSelection));
+            if (siblingSelection != 0)
+                throw new InvalidOperationException($"Edit > Select All in pane {activeIndex + 1} selected items in sibling pane {index + 1}: {siblingSelection}.");
+        }
+        for (var item = 0; item < allItems; item++)
+            Check(At<SelectFolderItem>(folderViews[activeIndex], 15)(folderViews[activeIndex], item, 0)); // SVSI_DESELECT.
+        Pump(150);
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out var remaining));
+            if (remaining != 0)
+                throw new InvalidOperationException($"Edit > Select All cleanup left pane {index + 1} selected: {remaining} items.");
+        }
+        return $"id=0x{commandId:X4};selected={selectedItems}/{allItems};target=pane{activeIndex + 1}";
+    }
+
+    private static bool HasMenuGroup(nint menu, string caption)
+    {
+        if (menu == 0 || !IsMenu(menu)) return false;
+        for (var index = 0; index < GetMenuItemCount(menu); index++)
+        {
+            var text = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(menu, (uint)index, text, text.Capacity, 0x400);
+            if (string.Equals(text.ToString(), caption, StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
+    private static string VerifyFourPaneMenuCommandRouting(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, nint menuOwner,
+        SortColumn expectedOriginalSort)
+    {
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-start");
+        if (views.Count != 4 || folderViews.Count != 4 || expectedModes.Count != 4)
+            throw new ArgumentException("Menu command routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var results = new List<string>(views.Count);
+        var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
+        var typeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 4 };
+        foreach (var folderView in folderViews)
+        {
+            Check(At<SetSortColumns>(folderView, 27)(folderView,
+                [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+            var groupKey = typeKey;
+            Check(At<SetGroupBy>(folderView, 17)(folderView, ref groupKey, 1));
+        }
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-baseline-set");
+        Pump(300);
+        AssertSortAndGroupDirections(-1, 1, 1, "menu test baseline");
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-baseline-verified");
+        for (var targetIndex = 0; targetIndex < views.Count; targetIndex++)
+        {
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-start");
+            Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex], 3, 16)); // FVM_LIST.
+            Pump(150);
+            Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var listMode, out _));
+            if (listMode != 3)
+                throw new InvalidOperationException($"Pane {targetIndex + 1} could not enter List before its Shell menu command.");
+            AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "before");
+
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-start");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-invoke-start");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "viewlogicaldetails");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-invoke-returned");
+            Pump(250);
+            Check(At<GetViewModeAndIconSize>(folderViews[targetIndex], 36)(folderViews[targetIndex], out var commandMode, out _));
+            if (commandMode != 4)
+                throw new InvalidOperationException($"The Shell Details menu command did not affect pane {targetIndex + 1}: mode={commandMode}.");
+            AssertUnchangedSiblingModes(folderViews, expectedModes, targetIndex, "after");
+            AssertSortAndGroupDirections(-1, 1, 1, $"pane {targetIndex + 1} Details");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-details-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-start");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortdescending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-invoke-returned");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, -1, 1, $"pane {targetIndex + 1} Sort Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-descending-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-start");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "sortascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-invoke-returned");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Sort Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-ascending-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-start");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupdescending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-invoke-returned");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 0, $"pane {targetIndex + 1} Group Descending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-descending-verified");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-ascending-start");
+            InvokeBackgroundVerb(views[targetIndex], menuOwner, "groupascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-group-ascending-invoke-returned");
+            Pump(100);
+            AssertSortAndGroupDirections(targetIndex, 1, 1, $"pane {targetIndex + 1} Group Ascending");
+            Console.WriteLine($"session-restore-consumer-stage: menu-command-pane{targetIndex + 1}-sort-group-verified");
+            Check(At<SetViewModeAndIconSize>(folderViews[targetIndex], 35)(folderViews[targetIndex],
+                expectedModes[targetIndex], expectedModes[targetIndex] == 1 ? 48 : expectedModes[targetIndex] == 3 ? 16 : -1));
+            Pump(150);
+            results.Add($"pane{targetIndex + 1}:details/sort/group");
+        }
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-restore-sort-start");
+        Check(At<SetSortColumns>(folderViews[0], 27)(folderViews[0], [expectedOriginalSort], 1));
+        var restoreGroupKey = typeKey;
+        Check(At<SetGroupBy>(folderViews[0], 17)(folderViews[0], ref restoreGroupKey, 1));
+        Pump(150);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-restore-sort-verified");
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-arrow-start");
+        var keyboardRouting = VerifyFourPaneArrowRouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-arrow-verified");
+        var selectAllRouting = VerifyFourPaneCtrlARouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-ctrl-a-verified");
+        var renameRouting = VerifyFourPaneRenameArrowRouting(views, folderViews);
+        Console.WriteLine("session-restore-consumer-stage: menu-command-routing-rename-verified");
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Shell menu command routing changed the foreground window outside the Private Desktop probe.");
+        return $"{string.Join(',', results)}; keyboard={keyboardRouting}; ctrl-a={selectAllRouting}; rename={renameRouting}; foreground-unchanged=True";
+
+        void AssertUnchangedSiblingModes(IReadOnlyList<nint> actualViews,
+            IReadOnlyList<uint> expected, int activeIndex, string phase)
+        {
+            for (var index = 0; index < actualViews.Count; index++)
+            {
+                if (index == activeIndex) continue;
+                Check(At<GetViewModeAndIconSize>(actualViews[index], 36)(actualViews[index], out var mode, out _));
+                if (mode != expected[index])
+                    throw new InvalidOperationException($"The Shell menu command {phase} pane {activeIndex + 1} changed sibling pane {index + 1}: mode={mode}; expected={expected[index]}.");
+            }
+        }
+
+        void AssertSortAndGroupDirections(int activePaneIndex, int activeSortDirection,
+            int activeGroupDirection, string phase)
+        {
+            for (var index = 0; index < folderViews.Count; index++)
+            {
+                Check(At<GetSortColumnCount>(folderViews[index], 26)(folderViews[index], out var count));
+                if (count != 1) throw new InvalidOperationException($"Pane {index + 1} sort count changed during {phase}: {count}.");
+                var sorts = new SortColumn[count];
+                Check(At<GetSortColumns>(folderViews[index], 28)(folderViews[index], sorts, count));
+                Check(At<GetGroupBy>(folderViews[index], 18)(folderViews[index], out var group, out var ascending));
+                var expectedSortDirection = index == activePaneIndex || activePaneIndex < 0 ? activeSortDirection : 1;
+                var expectedGroupDirection = index == activePaneIndex || activePaneIndex < 0 ? activeGroupDirection : 1;
+                if (sorts[0].Key.FormatId != nameKey.FormatId || sorts[0].Key.PropertyId != nameKey.PropertyId ||
+                    sorts[0].Direction != expectedSortDirection || group.FormatId != typeKey.FormatId ||
+                    group.PropertyId != typeKey.PropertyId || ascending != expectedGroupDirection)
+                    throw new InvalidOperationException($"Shell menu command {phase} changed the wrong view state: pane={index + 1}; sort={sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.PropertyId}/{ascending}; expected={expectedSortDirection}/{expectedGroupDirection}.");
+            }
+        }
+    }
+
+    private static uint FindShellMenuCommandId(nint menuOwner, params string[] labels)
+    {
+        var composite = GetMenu(menuOwner);
+        var viewMenu = composite == 0 ? 0 : GetSubMenu(composite, 2);
+        return FindShellViewCommandId(viewMenu, labels);
+    }
+
+    private static uint FindShellViewCommandId(nint viewMenu, params string[] labels)
+    {
+        for (var index = 0; viewMenu != 0 && index < GetMenuItemCount(viewMenu); index++)
+        {
+            var text = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(viewMenu, (uint)index, text, text.Capacity, 0x400);
+            if (labels.Any(label => text.ToString().Contains(label, StringComparison.OrdinalIgnoreCase)))
+                return GetMenuItemID(viewMenu, index);
+        }
+        throw new InvalidOperationException($"The merged Shell View menu did not contain a command matching [{string.Join(',', labels)}].");
+    }
+
+    private static uint FindBackgroundVerbCommandId(nint view, string expectedVerb, uint firstCommandId)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create an in-memory Shell context menu for command-ID comparison.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0,
+                    firstCommandId, 0x7FFF, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xFFFF, 0x7FFF - firstCommandId);
+                var buffer = Marshal.AllocHGlobal(512);
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                            return firstCommandId + offset;
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+        throw new InvalidOperationException($"The Shell background context menu did not expose canonical verb '{expectedVerb}' in the requested command-ID range.");
+    }
+
+    internal static bool TryInvokeMergedViewMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 2, execute, isStillActive);
+    }
+
+    internal static bool TryInvokeMergedFileMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 0, execute, isStillActive);
+    }
+
+    internal static bool TryInvokeMergedMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null, nint selectedMenu = 0)
+    {
+        return ResolveMergedShellMenuCommandGroup(GetMenu(owner.MenuFrameWindow), commandId, selectedMenu) switch
+        {
+            0 => TryInvokeMergedFileMenuCommand(owner, commandId, execute, isStillActive),
+            1 => TryInvokeMergedEditMenuCommand(owner, commandId, execute, isStillActive),
+            2 => TryInvokeMergedViewMenuCommand(owner, commandId, execute, isStillActive),
+            _ => false
+        };
+    }
+
+    private static bool TryInvokeMergedShellViewMenuCommand(StreamViewHost owner, uint commandId, int groupIndex,
+        bool execute, Func<bool>? isStillActive)
+    {
+        var shellView = owner.View;
+        if (shellView == 0 || owner.MenuFrameWindow == 0) return false;
+        var composite = GetMenu(owner.MenuFrameWindow);
+        var mergedPath = FindMergedMenuCommandPath(composite, groupIndex, commandId);
+        if (mergedPath is null) return false;
+        if (!execute) return true;
+        // A queued WM_COMMAND can outlive the pane that owned the merged menu.
+        // Consume recognized commands from retired owners without invoking their view.
+        bool IsCurrent() => IsCurrentShellMenuOwner(owner, shellView, isStillActive);
+        if (!IsCurrent()) return true;
+
+        // FCIDM_SHVIEWFIRST..LAST commands belong to the active folder view's
+        // window procedure. Forward the original Shell command ID instead of
+        // translating localized labels into a separate context-menu verb.
+        var windowResult = At<GetWindow>(shellView, 3)(shellView, out var viewWindow);
+        if (windowResult < 0 || viewWindow == 0 || !IsWindow(viewWindow))
+            throw new InvalidOperationException($"The active Shell view returned an invalid command target HWND: hr=0x{windowResult:X8}; hwnd=0x{viewWindow:X}.");
+        // GetWindow is a synchronous COM call and can reenter the frame; revalidate
+        // the pane/view before sending a command to the HWND it returned.
+        if (!IsCurrent()) return true;
+        _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        owner.MenuTrace.Add($"shell-command group={groupIndex} id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
+        return true;
+    }
+
+    internal static bool IsCurrentShellMenuOwner(StreamViewHost owner, nint expectedView, Func<bool>? isStillActive)
+    {
+        if (isStillActive is not null && !isStillActive()) return false;
+        return expectedView != 0 && owner.View == expectedView;
+    }
+
+    internal static bool TryInvokeMergedEditMenuCommand(StreamViewHost owner, uint commandId, bool execute = true,
+        Func<bool>? isStillActive = null)
+    {
+        if (owner.View == 0 || owner.MenuFrameWindow == 0) return false;
+        var composite = GetMenu(owner.MenuFrameWindow);
+        var route = ResolveMergedEditMenuCommandRoute(composite, commandId);
+        if (route == MergedEditMenuCommandRoute.NotFound) return false;
+        if (route == MergedEditMenuCommandRoute.ShellView)
+            return TryInvokeMergedShellViewMenuCommand(owner, commandId, groupIndex: 1, execute, isStillActive);
+        if (!execute) return true;
+
+        var editMenu = composite == 0 ? 0 : GetSubMenu(composite, 1);
+        var caption = FindMenuItemCaption(editMenu, commandId);
+        var normalizedCaption = NormalizeMenuLabel(caption);
+
+        var folderViewId = FolderView2Id;
+        Check(Marshal.QueryInterface(owner.View, in folderViewId, out var folderView));
+        try
+        {
+            var originalView = owner.View;
+            bool IsCurrent() => owner.View == originalView && originalView != 0 && (isStillActive?.Invoke() ?? true);
+            if (!IsCurrent()) return true;
+            if (!ShellSelectionCommands.Apply(folderView, ShellSelectionCommand.All,
+                    IsCurrent, IsCurrent))
+                throw new InvalidOperationException("The active Shell view changed while applying Edit > Select All.");
+            if (IsCurrent()) _ = ShellSelectionCommands.RestoreFocusedItem(folderView, takeFocus: false);
+        }
+        finally { Marshal.Release(folderView); }
+        owner.MenuTrace.Add($"edit-command id=0x{commandId:X4} path='Edit > {normalizedCaption}' target=active-view");
+        return true;
+    }
+
+    internal static MergedEditMenuCommandRoute ResolveMergedEditMenuCommandRoute(nint compositeMenu, uint commandId)
+    {
+        var path = FindMergedMenuCommandPath(compositeMenu, 1, commandId);
+        if (path is null) return MergedEditMenuCommandRoute.NotFound;
+        return NormalizeMenuLabel(path[^1]) is "全选" or "Select All"
+            ? MergedEditMenuCommandRoute.SelectAll
+            : MergedEditMenuCommandRoute.ShellView;
+    }
+
+    private static string? FindMenuItemCaption(nint menu, uint commandId)
+    {
+        for (var index = 0; menu != 0 && index < GetMenuItemCount(menu); index++)
+        {
+            if (unchecked((uint)GetMenuItemID(menu, index)) == commandId)
+            {
+                var caption = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400);
+                return caption.ToString();
+            }
+            var nested = GetSubMenu(menu, index);
+            var nestedCaption = FindMenuItemCaption(nested, commandId);
+            if (nestedCaption is not null) return nestedCaption;
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<string>? FindMenuCommandPath(nint menu, uint commandId,
+        IReadOnlyList<string>? parents = null)
+    {
+        parents ??= [];
+        for (var index = 0; menu != 0 && index < GetMenuItemCount(menu); index++)
+        {
+            var text = new System.Text.StringBuilder(256);
+            _ = GetMenuStringW(menu, (uint)index, text, text.Capacity, 0x400);
+            var itemLabel = NormalizeMenuLabel(text.ToString());
+            if (unchecked((uint)GetMenuItemID(menu, index)) == commandId)
+                return parents.Append(itemLabel).ToArray();
+            var nested = GetSubMenu(menu, index);
+            if (nested == 0) continue;
+            var nestedParents = string.IsNullOrEmpty(itemLabel) ? parents : parents.Append(itemLabel).ToArray();
+            var nestedPath = FindMenuCommandPath(nested, commandId, nestedParents);
+            if (nestedPath is not null) return nestedPath;
+        }
+        return null;
+    }
+
+    internal static IReadOnlyList<string>? FindMergedMenuCommandPath(nint compositeMenu, int groupIndex, uint commandId)
+    {
+        if (compositeMenu == 0 || !IsMenu(compositeMenu) || groupIndex is < 0 or > 5) return null;
+        return FindMenuCommandPath(GetSubMenu(compositeMenu, groupIndex), commandId);
+    }
+
+    internal static int? ResolveMergedShellMenuCommandGroup(nint compositeMenu, uint commandId, nint selectedMenu = 0)
+    {
+        if (compositeMenu == 0 || !IsMenu(compositeMenu)) return null;
+        if (selectedMenu != 0)
+        {
+            for (var groupIndex = 0; groupIndex < 6; groupIndex++)
+            {
+                var groupMenu = GetSubMenu(compositeMenu, groupIndex);
+                if (groupMenu != 0 && ContainsMenu(groupMenu, selectedMenu))
+                    return FindMergedMenuCommandPath(compositeMenu, groupIndex, commandId) is null ? null : groupIndex;
+            }
+            return null;
+        }
+
+        int? matchedGroup = null;
+        for (var groupIndex = 0; groupIndex < 6; groupIndex++)
+        {
+            if (FindMergedMenuCommandPath(compositeMenu, groupIndex, commandId) is null) continue;
+            if (matchedGroup is not null) return null;
+            matchedGroup = groupIndex;
+        }
+        return matchedGroup;
+    }
+
+    private static bool ContainsMenu(nint rootMenu, nint candidate)
+    {
+        if (rootMenu == candidate) return true;
+        for (var index = 0; index < GetMenuItemCount(rootMenu); index++)
+        {
+            var submenu = GetSubMenu(rootMenu, index);
+            if (submenu != 0 && ContainsMenu(submenu, candidate)) return true;
+        }
+        return false;
+    }
+
+    private static string NormalizeMenuLabel(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return string.Empty;
+        var accelerator = label.IndexOf('\t');
+        if (accelerator >= 0) label = label[..accelerator];
+        var normalized = label.Replace("&", string.Empty, StringComparison.Ordinal)
+            .Trim().TrimEnd('.', '…').Trim();
+        if (normalized.Length >= 3 && normalized[^3] == '(' && normalized[^1] == ')' &&
+            char.IsLetterOrDigit(normalized[^2]))
+            normalized = normalized[..^3].TrimEnd();
+        return normalized;
+    }
+
+    private static string VerifyFourPaneSelectionMenus(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Selection menu probe requires exactly four Shell panes.");
+        var verified = new List<string>(views.Count);
+        for (var index = 0; index < views.Count; index++)
+        {
+            Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-start");
+            // File operations can leave selected results in each native Shell view. Reset every
+            // pane so this check measures selection isolation rather than prior operation state.
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var paneItemCount)); // SVGIO_ALLVIEW.
+                for (var item = 0; item < paneItemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+            }
+            const uint svgIoAllView = 2;
+            Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], svgIoAllView, out var itemCount));
+            if (itemCount == 0) throw new InvalidOperationException($"Pane {index + 1} has no item for its selection menu probe.");
+            nint contextMenu = 0, popup = 0;
+            try
+            {
+                Check(At<SelectFolderItem>(folderViews[index], 15)(folderViews[index], 0,
+                    0x1u | 0x4u | 0x10u | 0x40000000u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectedCount)); // SVGIO_SELECTION.
+                    var expectedSelection = pane == index ? 1 : 0;
+                    if (selectedCount != expectedSelection)
+                        throw new InvalidOperationException($"Selecting pane {index + 1} leaked selection into pane {pane + 1}: expected={expectedSelection}, observed={selectedCount}.");
+                }
+                var contextMenuId = ContextMenuId;
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-get-context-start");
+                Check(At<GetItemObject>(views[index], 15)(views[index], 1, ref contextMenuId, out contextMenu)); // SVGIO_SELECTION.
+                if (contextMenu == 0)
+                    throw new InvalidOperationException($"Pane {index + 1} did not provide a selected-item IContextMenu.");
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-query-start");
+                var commands = QueryMenuCommands(contextMenu, out popup, out _);
+                if (!commands.Any(command => command.Verb.Equals("copy", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Pane {index + 1} selected-item menu did not expose the standard copy command.");
+                verified.Add($"pane{index + 1}:copy");
+                Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-verified");
+            }
+            finally
+            {
+                if (popup != 0) DestroyMenu(popup);
+                if (contextMenu != 0) Marshal.Release(contextMenu);
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var paneItemCount)); // SVGIO_ALLVIEW.
+                    for (var item = 0; item < paneItemCount; item++)
+                        Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectedCount));
+                    if (selectedCount != 0)
+                        throw new InvalidOperationException($"Selection menu probe left pane {pane + 1} selected: {selectedCount} items.");
+                }
+            }
+        }
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Arrow routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var verified = new List<string>(3);
+        for (var target = 0; target < 3; target++)
+        {
+            var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+            Check(windowHr);
+            var listView = FindChildByClass(viewWindow, "SysListView32");
+            if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for its arrow test.");
+            Check(At<GetViewModeAndIconSize>(folderViews[target], 36)(folderViews[target], out var mode, out _));
+            _ = SetFocus(listView);
+            if (GetFocus() != listView)
+                throw new InvalidOperationException($"Pane {target + 1} file list did not receive isolated keyboard focus.");
+
+            Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], 0,
+                0x1u | 0x4u | 0x10u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED.
+            Check(At<GetFocusedItem>(folderViews[target], 10)(folderViews[target], out var before));
+            if (before != 0) throw new InvalidOperationException($"Pane {target + 1} arrow fixture expected first-item focus, got {before}.");
+            var siblingFocus = new int[folderViews.Count];
+            for (var pane = 0; pane < folderViews.Count; pane++)
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out siblingFocus[pane]));
+
+            var message = new NativeMessage
+            {
+                Window = listView,
+                Id = 0x0100, // WM_KEYDOWN
+                WParam = mode == 1 ? 0x27u : 0x28u, // Icon grid uses Right; Details/List use Down.
+                LParam = mode == 1 ? 0x014D0001 : 0x00500001
+            };
+            Check(At<TranslateAccelerator>(views[target], 5)(views[target], ref message));
+            Pump(100);
+            Check(At<GetFocusedItem>(folderViews[target], 10)(folderViews[target], out var after));
+            if (after != 1)
+                throw new InvalidOperationException($"Pane {target + 1} Down accelerator did not move its focused item: {before}->{after}.");
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                if (pane == target) continue;
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out var siblingAfter));
+                if (siblingAfter != siblingFocus[pane])
+                    throw new InvalidOperationException($"Pane {target + 1} Down accelerator changed pane {pane + 1} focus: {siblingFocus[pane]}->{siblingAfter}.");
+            }
+            verified.Add($"pane{target + 1}/mode{mode}:{before}->{after}");
+        }
+        for (var pane = 0; pane < folderViews.Count; pane++)
+        {
+            Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var itemCount)); // SVGIO_ALLVIEW.
+            for (var item = 0; item < itemCount; item++)
+                Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Pane arrow routing changed the foreground window outside the Private Desktop probe.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneCtrlARouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,
+        bool includeFourthPane = false, bool deactivateAfterPane = false)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Ctrl+A routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var targetCount = includeFourthPane ? 4 : 3;
+        var verified = new List<string>(targetCount);
+        var originalKeyboardState = new byte[256];
+        if (!GetKeyboardState(originalKeyboardState))
+            throw new InvalidOperationException("Could not snapshot the isolated probe thread keyboard state.");
+        var controlDownState = (byte[])originalKeyboardState.Clone();
+        controlDownState[0x11] |= 0x80; // VK_CONTROL down only on this isolated probe thread.
+        try
+        {
+            // The session-restore fixture's fourth pane points at a one-item sibling directory;
+            // the WPF consumer fixture shares the two-item folder and can exercise all four panes.
+            for (var target = 0; target < targetCount; target++)
+            {
+                var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+                Check(windowHr);
+                var listView = FindChildByClass(viewWindow, "SysListView32");
+                if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for Ctrl+A.");
+                Check(At<ActivateView>(views[target], 7)(views[target], 2)); // SVUIA_ACTIVATE_FOCUS.
+                _ = SetFocus(listView);
+                if (GetFocus() != listView)
+                    throw new InvalidOperationException($"Pane {target + 1} list did not receive isolated keyboard focus for Ctrl+A.");
+                if (GetForegroundWindow() != foreground)
+                    throw new InvalidOperationException("Activating a pane for Ctrl+A changed the foreground window.");
+
+                var message = new NativeMessage
+                {
+                    Window = listView,
+                    Id = 0x0100, // WM_KEYDOWN
+                    WParam = (nuint)'A',
+                    LParam = 0x001E0001
+                };
+                int result;
+                if (!SetKeyboardState(controlDownState))
+                    throw new InvalidOperationException("Could not set the isolated probe thread Ctrl modifier state.");
+                try { result = At<TranslateAccelerator>(views[target], 5)(views[target], ref message); }
+                finally
+                {
+                    if (!SetKeyboardState(originalKeyboardState))
+                        throw new InvalidOperationException("Could not restore the isolated probe thread keyboard state.");
+                }
+                Check(result);
+
+                Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 1, out var selectedCount)); // SVGIO_SELECTION.
+                Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 2, out var totalCount)); // SVGIO_ALLVIEW.
+                if (totalCount < 2 || selectedCount != totalCount)
+                    throw new InvalidOperationException($"Pane {target + 1} Ctrl+A selected {selectedCount}/{totalCount} items.");
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    if (pane == target) continue;
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var siblingSelection));
+                    if (siblingSelection != 0)
+                        throw new InvalidOperationException($"Ctrl+A in pane {target + 1} selected {siblingSelection} items in sibling pane {pane + 1}.");
+                }
+                verified.Add($"pane{target + 1}:{selectedCount}");
+
+                for (var item = 0; item < totalCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], item, 0));
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var remainingSelection));
+                    if (remainingSelection != 0)
+                        throw new InvalidOperationException($"Ctrl+A probe left {remainingSelection} selected items in pane {pane + 1}.");
+                }
+                if (deactivateAfterPane) Check(At<ActivateView>(views[target], 7)(views[target], 0));
+            }
+        }
+        finally
+        {
+            if (!SetKeyboardState(originalKeyboardState))
+                throw new InvalidOperationException("Could not restore the isolated probe thread keyboard state after Ctrl+A routing.");
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Ctrl+A pane routing changed the foreground window.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneInvertSelectionRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Invert-selection probe requires exactly four Shell panes.");
+
+        var foreground = GetForegroundWindow();
+        var originalModes = new (uint Mode, int IconSize)[folderViews.Count];
+        for (var pane = 0; pane < folderViews.Count; pane++)
+            Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane], out originalModes[pane].Mode, out originalModes[pane].IconSize));
+
+        var verified = new List<string>(folderViews.Count * ViewStyle.All.Count);
+        try
+        {
+            for (var target = 0; target < folderViews.Count; target++)
+            foreach (var style in ViewStyle.All)
+            {
+                var view = folderViews[target];
+                Check(At<SetViewModeAndIconSize>(view, 35)(view, style.Mode, style.IconSize));
+                Pump(100);
+                Check(At<GetViewModeAndIconSize>(view, 36)(view, out var actualMode, out var actualSize));
+                if (actualMode != style.Mode ||
+                    style.IconSize >= 0 && actualSize != ViewStyle.NativeIconSize(style.Mode, style.IconSize))
+                    throw new InvalidOperationException($"Pane {target + 1} did not enter {style.Name}: expected={style.Mode}/{style.IconSize}, observed={actualMode}/{actualSize}.");
+
+                // These four panes share one filesystem folder, so the Shell may propagate
+                // folder view-mode changes to every view. Snapshot after mode setup to test
+                // whether inversion itself changes a sibling's mode.
+                var modesBeforeInvert = new (uint Mode, int IconSize)[folderViews.Count];
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                    Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane],
+                        out modesBeforeInvert[pane].Mode, out modesBeforeInvert[pane].IconSize));
+
+                Check(At<ItemCount>(view, 7)(view, 2, out var itemCount)); // SVGIO_ALLVIEW.
+                if (itemCount != 2)
+                    throw new InvalidOperationException($"Pane {target + 1} must have exactly two fixture items for identity-complement verification; observed {itemCount}.");
+
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(view, 15)(view, item, 0));
+                Check(At<SelectFolderItem>(view, 15)(view, 0, 0x40000015u)); // SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+                var original = ViewStyleProbe.ReadSelection(view);
+                if (original.Count != 1)
+                    throw new InvalidOperationException($"Pane {target + 1} could not establish one identity in {style.Name}.");
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusBefore));
+                if (focusBefore < 0) throw new InvalidOperationException($"Pane {target + 1} has no focused item before inversion in {style.Name}.");
+
+                if (!ShellSelectionCommands.Apply(view, ShellSelectionCommand.Invert, () => true, () => true))
+                    throw new InvalidOperationException($"Pane {target + 1} rejected inversion in {style.Name}.");
+                _ = ShellSelectionCommands.RestoreFocusedItem(view, takeFocus: false);
+                var inverse = ViewStyleProbe.ReadSelection(view);
+                Check(At<ItemCount>(view, 7)(view, 1, out var inverseCount)); // SVGIO_SELECTION.
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusAfterInvert));
+                if (inverseCount != 1 || inverse.Count != 1 || inverse.Overlaps(original) || focusAfterInvert != focusBefore)
+                    throw new InvalidOperationException($"Pane {target + 1} did not invert the two-item identity complement while preserving focus in {style.Name}: selected={inverseCount}; focus={focusBefore}->{focusAfterInvert}.");
+
+                if (!ShellSelectionCommands.Apply(view, ShellSelectionCommand.Invert, () => true, () => true))
+                    throw new InvalidOperationException($"Pane {target + 1} rejected the second inversion in {style.Name}.");
+                _ = ShellSelectionCommands.RestoreFocusedItem(view, takeFocus: false);
+                var restored = ViewStyleProbe.ReadSelection(view);
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusAfterRestore));
+                if (!restored.SetEquals(original) || focusAfterRestore != focusBefore)
+                    throw new InvalidOperationException($"Two inversions did not restore the same selected identity and focus in pane {target + 1} {style.Name}.");
+
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var siblingSelection));
+                    if (pane != target && siblingSelection != 0)
+                        throw new InvalidOperationException($"Inverting pane {target + 1} {style.Name} selected {siblingSelection} item(s) in sibling pane {pane + 1}.");
+                    if (pane != target)
+                    {
+                        Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane], out var siblingMode, out var siblingSize));
+                        if (siblingMode != modesBeforeInvert[pane].Mode || siblingSize != modesBeforeInvert[pane].IconSize)
+                            throw new InvalidOperationException($"Inverting pane {target + 1} {style.Name} changed sibling pane {pane + 1} view mode after setup: expected={modesBeforeInvert[pane].Mode}/{modesBeforeInvert[pane].IconSize}; observed={siblingMode}/{siblingSize}.");
+                    }
+                }
+
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(view, 15)(view, item, 0));
+                verified.Add($"pane{target + 1}:{style.Name}");
+            }
+        }
+        finally
+        {
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<SetViewModeAndIconSize>(folderViews[pane], 35)(folderViews[pane],
+                    originalModes[pane].Mode, originalModes[pane].IconSize));
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var itemCount));
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+            }
+        }
+
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Four-pane invert-selection routing changed the foreground window.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyWpfHostFileOperationConvergence(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture, nint menuOwner)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("The WPF file-operation probe requires exactly four Shell panes.");
+
+        var initialCount = GetShellViewItemCount(folderViews[0]);
+        var isolatedInitialCount = isolatedFixture is null ? 0 : GetShellViewItemCount(folderViews[3]);
+        if (isolatedFixture is not null &&
+            (!ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample.txt")) ||
+             !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample-2.txt"))))
+            throw new IOException("The fourth WPF pane did not open its isolated fixture directory.");
+        var sourcePath = Path.Combine(fixture, "cleanup-sample.txt");
+        var copiedPath = Path.Combine(fixture, "wpf-copy-result.txt");
+        var renamedPath = Path.Combine(fixture, "wpf-renamed-result.txt");
+        var source = CreateShellItem(sourcePath);
+        var destination = CreateShellItem(fixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
+            if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
+                throw new IOException("The WPF-hosted Shell copy did not produce the expected fixture content.");
+            WaitForOperationViews(initialCount + 1, copiedPath, null, "copy");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(copiedPath);
+                try { Check(At<RenameItem>(operation, 12)(operation, item, Path.GetFileName(renamedPath), 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(copiedPath) || !File.Exists(renamedPath))
+                throw new IOException("The WPF-hosted Shell rename did not replace the copied path.");
+            WaitForOperationViews(initialCount + 1, renamedPath, copiedPath, "rename");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(renamedPath);
+                try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(renamedPath))
+                throw new IOException("The WPF-hosted Shell delete left the fixture path present.");
+            WaitForOperationViews(initialCount, null, renamedPath, "delete");
+            if (isolatedFixture is not null)
+                VerifyWpfHostCrossVolumeMove(initialCount, isolatedInitialCount, sourcePath, fixture,
+                    isolatedFixture, folderViews);
+            var newFolder = VerifyWpfHostNewFolderVerb(views, folderViews, fixture, isolatedFixture,
+                initialCount, isolatedInitialCount, menuOwner);
+            return isolatedFixture is null
+                ? $"copy/rename/delete=all-four-panes-notified; {newFolder}"
+                : $"copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged; cross-volume-move=source-deleted-destination-created-both-views-converged; {newFolder}";
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+
+        void WaitForOperationViews(int expectedCount, string? presentPath, string? absentPath, string operation)
+        {
+            var notifiedPaneCount = isolatedFixture is null ? folderViews.Count : folderViews.Count - 1;
+            for (var index = 0; index < notifiedPaneCount; index++)
+            {
+                if (!WaitForShellView(folderViews[index], expectedCount, presentPath, absentPath,
+                        $"wpf-file-{operation}-pane{index + 1}"))
+                    throw new IOException($"WPF-hosted pane {index + 1} did not converge after {operation}.");
+            }
+            if (isolatedFixture is not null &&
+                (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount ||
+                 !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample.txt")) ||
+                 !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample-2.txt")) ||
+                 ShellViewContainsPath(folderViews[3], copiedPath) ||
+                 ShellViewContainsPath(folderViews[3], renamedPath)))
+                throw new IOException($"The isolated fourth WPF pane changed or displayed a root-directory item after {operation}.");
+        }
+    }
+
+    private static string VerifyWpfHostNewFolderVerb(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture,
+        int rootInitialCount, int isolatedInitialCount, nint menuOwner)
+    {
+        var existingFolders = Directory.GetDirectories(fixture, "*", SearchOption.TopDirectoryOnly)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Check(At<ActivateView>(views[0], 7)(views[0], 2)); // SVUIA_ACTIVATE_FOCUS for native folder creation.
+        var invokeResult = ShellFileCommands.Invoke(ShellFileCommand.NewFolder, background =>
+        {
+            if (!background) return null;
+            var contextMenuId = ContextMenuId;
+            Check(At<GetItemObject>(views[0], 15)(views[0], 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+            try { return new NativeShellCommandMenu(Marshal.GetObjectForIUnknown(contextMenu), menuOwner); }
+            finally { Marshal.Release(contextMenu); }
+        });
+        Console.WriteLine($"wpf-new-folder: production-command-result={(invokeResult is { } result ? $"0x{result:X8}" : "unavailable")}");
+        if (invokeResult is null)
+            throw new IOException("The production Shell command adapter did not consider New Folder available in the isolated writable fixture.");
+        Check(invokeResult.Value);
+
+        var deadline = Environment.TickCount64 + 5000;
+        string[] createdFolders;
+        do
+        {
+            Pump(50);
+            createdFolders = Directory.GetDirectories(fixture, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => !existingFolders.Contains(path)).ToArray();
+            if (createdFolders.Length > 1)
+                throw new IOException($"The native New Folder verb created {createdFolders.Length} folders instead of one.");
+        } while (createdFolders.Length == 0 && Environment.TickCount64 < deadline);
+        if (createdFolders.Length != 1)
+            throw new IOException("The native Shell New Folder verb returned without creating a folder in the isolated fixture.");
+
+        var createdPath = createdFolders[0];
+        var shellWindowResult = At<GetWindow>(views[0], 3)(views[0], out var shellViewWindow);
+        Check(shellWindowResult);
+        var edit = FindChildByClass(shellViewWindow, "Edit");
+        if (edit != 0)
+        {
+            var escape = new NativeMessage { Window = edit, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+            _ = At<TranslateAccelerator>(views[0], 5)(views[0], ref escape);
+            Pump(50);
+        }
+        Check(At<ActivateView>(views[0], 7)(views[0], 0)); // SVUIA_DEACTIVATE after dismissing optional inline rename.
+        Pump(50);
+
+        var notifiedPaneCount = isolatedFixture is null ? folderViews.Count : folderViews.Count - 1;
+        for (var index = 0; index < notifiedPaneCount; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount + 1, createdPath, null,
+                    $"wpf-new-folder-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge after the native New Folder verb.");
+        if (isolatedFixture is not null &&
+            (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount + 1 ||
+             !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "wpf-cross-volume-moved-result.txt")) ||
+             ShellViewContainsPath(folderViews[3], createdPath)))
+            throw new IOException("The isolated WPF pane changed or displayed the root New Folder result.");
+
+        return isolatedFixture is null
+            ? "new-folder=background-IContextMenu; all-panes-notified"
+            : "new-folder=background-IContextMenu; three-root-panes-notified; isolated-pane-unchanged";
+    }
+
+    private static void VerifyWpfHostCrossVolumeMove(int rootInitialCount, int isolatedInitialCount,
+        string copySourcePath, string sourceFixture, string destinationFixture, IReadOnlyList<nint> folderViews)
+    {
+        var moveSourcePath = Path.Combine(sourceFixture, "wpf-cross-volume-move-source.txt");
+        var movedPath = Path.Combine(destinationFixture, "wpf-cross-volume-moved-result.txt");
+        var sourceItem = CreateShellItem(copySourcePath);
+        var sourceFolder = CreateShellItem(sourceFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, sourceItem, sourceFolder,
+                    Path.GetFileName(moveSourcePath), 0)));
+        }
+        finally
+        {
+            Marshal.Release(sourceFolder);
+            Marshal.Release(sourceItem);
+        }
+        if (!File.Exists(moveSourcePath) || File.ReadAllText(moveSourcePath) != File.ReadAllText(copySourcePath))
+            throw new IOException("The WPF cross-volume move source fixture was not created with the expected content.");
+        for (var index = 0; index < 3; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount + 1, moveSourcePath, null,
+                    $"wpf-cross-volume-source-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge before the cross-volume move.");
+        if (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount ||
+            ShellViewContainsPath(folderViews[3], moveSourcePath))
+            throw new IOException("The isolated WPF destination pane changed before the cross-volume move.");
+
+        var moveItem = CreateShellItem(moveSourcePath);
+        var destinationFolder = CreateShellItem(destinationFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<MoveItem>(operation, 14)(operation, moveItem, destinationFolder,
+                    Path.GetFileName(movedPath), 0)));
+        }
+        finally
+        {
+            Marshal.Release(destinationFolder);
+            Marshal.Release(moveItem);
+        }
+
+        if (File.Exists(moveSourcePath) || !File.Exists(movedPath) ||
+            File.ReadAllText(movedPath) != File.ReadAllText(copySourcePath))
+            throw new IOException("The WPF cross-volume Shell move did not delete the source and create the expected destination content.");
+        for (var index = 0; index < 3; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount, null, moveSourcePath,
+                    $"wpf-cross-volume-source-deleted-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge after the cross-volume move.");
+        if (!WaitForShellView(folderViews[3], isolatedInitialCount + 1, movedPath, null,
+                "wpf-cross-volume-destination-created-pane4") ||
+            !ShellViewContainsPath(folderViews[3], Path.Combine(destinationFixture, "cleanup-sample.txt")) ||
+            !ShellViewContainsPath(folderViews[3], Path.Combine(destinationFixture, "cleanup-sample-2.txt")))
+            throw new IOException("The WPF destination pane did not converge while preserving its original items after the cross-volume move.");
+
+        Console.WriteLine("multi-pane-cleanup: wpf-cross-volume-move=source-deleted; destination-created; source-panes=3; destination-pane=4; content-matched=True");
+    }
+
+    private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,
+        bool deactivateAfterPane = false)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Rename routing probe requires exactly four Shell panes.");
+        var foreground = GetForegroundWindow();
+        var verified = new List<string>(views.Count);
+        for (var target = 0; target < views.Count; target++)
+        {
+            var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
+            Check(windowHr);
+            var listView = FindChildByClass(viewWindow, "SysListView32");
+            if (listView == 0) throw new InvalidOperationException($"Pane {target + 1} has no native list window for its rename test.");
+            Check(At<ActivateView>(views[target], 7)(views[target], 2)); // SVUIA_ACTIVATE_FOCUS.
+            Pump(100);
+            _ = SetFocus(listView);
+            if (GetFocus() != listView)
+                throw new InvalidOperationException($"Pane {target + 1} list did not receive isolated keyboard focus for F2.");
+            Check(At<ItemCount>(folderViews[target], 7)(folderViews[target], 2, out var itemCount));
+            if (itemCount == 0) throw new InvalidOperationException($"Pane {target + 1} has no item for its rename test.");
+            Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], 0,
+                0x1u | 0x4u | 0x10u | 0x40000000u)); // SVSI_SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+
+            var siblingFocus = new int[folderViews.Count];
+            var siblingSelection = new int[folderViews.Count];
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out siblingFocus[pane]));
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out siblingSelection[pane]));
+                var expectedSelection = pane == target ? 1 : 0;
+                if (siblingSelection[pane] != expectedSelection)
+                    throw new InvalidOperationException($"F2 setup for pane {target + 1} leaked selection into pane {pane + 1}: {siblingSelection[pane]}.");
+            }
+
+            var f2 = new NativeMessage { Window = listView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+            var f2Hr = At<TranslateAccelerator>(views[target], 5)(views[target], ref f2);
+            var edit = FindChildByClass(viewWindow, "Edit");
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+            while (DateTime.UtcNow < deadline && (edit == 0 || GetFocus() != edit))
+            {
+                Pump(10);
+                edit = FindChildByClass(viewWindow, "Edit");
+            }
+            if (f2Hr < 0 || edit == 0 || GetFocus() != edit)
+                throw new InvalidOperationException($"Pane {target + 1} did not focus its inline rename editor (hr=0x{f2Hr:X8}; edit=0x{edit:X}; focus=0x{GetFocus():X}).");
+
+            if (target == 0)
+            {
+                var foreignPaneMessage = new NativeMessage
+                {
+                    Window = edit,
+                    Id = 0x0100,
+                    WParam = 0x28,
+                    LParam = 0x00500001
+                };
+                var foreignPaneHr = At<TranslateAccelerator>(views[1], 5)(views[1], ref foreignPaneMessage);
+                Pump(10);
+                if (foreignPaneHr < 0 || !IsWindow(edit) || GetFocus() != edit)
+                    throw new InvalidOperationException($"A sibling pane's accelerator disrupted Pane 1 rename focus (hr=0x{foreignPaneHr:X8}; edit-alive={IsWindow(edit)}; focus=0x{GetFocus():X}).");
+                verified.Add($"foreign-route=pane2:{foreignPaneHr:X8}/pane1-edit-retained=True");
+            }
+
+            var arrows = new[]
+            {
+                (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+                (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+                (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+                (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+            };
+            try
+            {
+                foreach (var arrow in arrows)
+                {
+                    var message = new NativeMessage { Window = edit, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                    var hr = At<TranslateAccelerator>(views[target], 5)(views[target], ref message);
+                    Pump(10);
+                    if (hr < 0 || !IsWindow(edit) || GetFocus() != edit)
+                        throw new InvalidOperationException($"Pane {target + 1} lost rename focus on {arrow.Name} (hr=0x{hr:X8}; edit-alive={IsWindow(edit)}; focus=0x{GetFocus():X}).");
+                    for (var pane = 0; pane < folderViews.Count; pane++)
+                    {
+                        Check(At<GetFocusedItem>(folderViews[pane], 10)(folderViews[pane], out var focusAfter));
+                        Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectionAfter));
+                        if (focusAfter != siblingFocus[pane] || selectionAfter != siblingSelection[pane])
+                            throw new InvalidOperationException($"Pane {target + 1} {arrow.Name} changed pane {pane + 1} item focus/selection: {siblingFocus[pane]}/{siblingSelection[pane]}->{focusAfter}/{selectionAfter}.");
+                    }
+                }
+            }
+            finally
+            {
+                if (IsWindow(edit))
+                {
+                    var escape = new NativeMessage { Window = edit, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+                    _ = At<TranslateAccelerator>(views[target], 5)(views[target], ref escape);
+                    Pump(20);
+                }
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], item, 0));
+            }
+            if (IsWindow(edit)) throw new InvalidOperationException($"Pane {target + 1} did not dismiss the cancelled rename editor.");
+            if (deactivateAfterPane) Check(At<ActivateView>(views[target], 7)(views[target], 0));
+            verified.Add($"pane{target + 1}/arrows=4/focus-isolated=True");
+        }
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Four-pane rename routing changed the foreground window outside the Private Desktop probe.");
+        return string.Join(',', verified);
+    }
+
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create an in-memory Shell context menu.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xffff, 0x7fff);
+                var buffer = Marshal.AllocHGlobal(512);
+                uint? commandOffset = null;
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 256) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                        {
+                            commandOffset = offset;
+                            break;
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+                if (commandOffset is null)
+                    throw new InvalidOperationException($"The Shell background menu did not expose canonical verb '{expectedVerb}'.");
+                var invoke = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Window = owner,
+                    Verb = (nint)commandOffset.Value,
+                    Show = 1
+                };
+                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+    }
+
+    private static LivePaneView CreateSiblingPaneView(string fixture, ShellViewStateStore store,
+        nint containerParent, int x, int y, uint expectedMode, int iconSize,
+        string? location = null, int expectedItemCount = 2,
+        ShellMenuFrameCoordinator? menuCoordinator = null)
+    {
+        var pane = CreateWindowExW(0, "STATIC", $"ExplorerDirs session restore pane {expectedMode}",
+            0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, containerParent, 0, 0, 0);
+        if (pane == 0 || GetParent(pane) != containerParent)
+            throw new InvalidOperationException("Could not create another child pane under the shared container.");
+        var sessionId = Guid.NewGuid();
+        if (store.TryLoad(sessionId, out _))
+            throw new InvalidOperationException("A new pane unexpectedly reused a saved Shell session.");
+        Check(SHParseDisplayName(location ?? fixture, 0, out var pidl, 0, out _));
+        Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out var folder));
+        var shellViewId = ShellViewId;
+        Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out var view));
+        var host = new ShellViewColorBrowserHost(pane, [],
+            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+            stateStore: store, stateId: sessionId, menuFrameWindow: containerParent,
+            menuFrameCoordinator: menuCoordinator);
+        host.View = view;
+        var hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+        var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+        var bounds = new StreamProbeRect { Right = 380, Bottom = 235 };
+        Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out var viewWindow));
+        if (viewWindow == 0 || GetParent(viewWindow) != pane)
+            throw new InvalidOperationException("The additional Shell view is not parented to its pane host.");
+        RegisterFolderDropTarget(folder, viewWindow, host);
+        Check(At<ActivateView>(view, 7)(view, 1));
+        Pump(500);
+        Check(Marshal.QueryInterface(view, in FolderView2Id, out var folderView));
+        _ = WaitForShellViewItemCount(folderView, expectedItemCount);
+        if (host.Reads == 0)
+            throw new InvalidOperationException("The additional pane did not request a Shell stream for its session GUID.");
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, iconSize));
+        Pump(250);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var actualMode, out _));
+        if (actualMode != expectedMode)
+            throw new InvalidOperationException($"Pane session {sessionId:D} expected mode {expectedMode}, observed {actualMode}.");
+        return new LivePaneView(pane, view, viewWindow, folder, pidl, hostPointer, host, folderView, sessionId);
+    }
+
+    private static void AssertPaneModes(IReadOnlyList<nint> folderViews, IReadOnlyList<uint> expectedModes, string phase)
+    {
+        for (var index = 0; index < folderViews.Count; index++)
+        {
+            Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out var mode, out _));
+            if (mode != expectedModes[index])
+                throw new InvalidOperationException($"Pane {index + 1} changed mode during {phase}: expected={expectedModes[index]}, observed={mode}.");
+        }
+    }
+
+    private static string VerifySessionRestoreFileOperations(nint view, nint folderView, string fixture,
+        Guid propertyFormatId, SortColumn expectedSort, IReadOnlyList<DisplayColumnState> expectedColumns,
+        IReadOnlyList<nint> allFolderViews)
+    {
+        const uint svgIoAllView = 2;
+        var sourcePath = Path.Combine(fixture, "blue-rule-target.txt");
+        var copiedPath = Path.Combine(fixture, "session-copy.txt");
+        var renamedPath = Path.Combine(fixture, "session-renamed.txt");
+        var source = CreateShellItem(sourcePath);
+        var destination = CreateShellItem(fixture);
+        try
+        {
+            Check(At<ItemCount>(folderView, 7)(folderView, svgIoAllView, out var initialCount));
+            Console.WriteLine("session-restore-consumer-stage: file-copy-start");
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
+            Console.WriteLine("session-restore-consumer-stage: file-copy-performed");
+            if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
+                throw new IOException("The restored Shell view session could not copy its fixture file through IFileOperation.");
+            if (!WaitForShellView(folderView, initialCount + 1, copiedPath, null) &&
+                !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, copiedPath, null))
+                throw new IOException("The restored Shell view did not show the copied fixture after refresh.");
+            WaitForAllPaneCounts(allFolderViews, initialCount + 1, "copy");
+            AssertViewSettings("copy");
+            Console.WriteLine("session-restore-consumer-stage: file-copy-verified");
+
+            Console.WriteLine("session-restore-consumer-stage: file-rename-start");
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(copiedPath);
+                try { Check(At<RenameItem>(operation, 12)(operation, item, Path.GetFileName(renamedPath), 0)); }
+                finally { Marshal.Release(item); }
+            });
+            Console.WriteLine("session-restore-consumer-stage: file-rename-performed");
+            if (File.Exists(copiedPath) || !File.Exists(renamedPath))
+                throw new IOException("The restored Shell view session could not rename its fixture through IFileOperation.");
+            if (!WaitForShellView(folderView, initialCount + 1, renamedPath, copiedPath) &&
+                !RefreshUntilShellViewMatches(view, folderView, initialCount + 1, renamedPath, copiedPath))
+                throw new IOException("The restored Shell view did not show the renamed fixture after refresh.");
+            WaitForAllPaneCounts(allFolderViews, initialCount + 1, "rename");
+            AssertViewSettings("rename");
+            Console.WriteLine("session-restore-consumer-stage: file-rename-verified");
+
+            Console.WriteLine("session-restore-consumer-stage: file-delete-start");
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(renamedPath);
+                try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
+                finally { Marshal.Release(item); }
+            });
+            Console.WriteLine("session-restore-consumer-stage: file-delete-performed");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-path-check-start");
+            if (File.Exists(renamedPath))
+                throw new IOException("The restored Shell view session could not delete its fixture through IFileOperation.");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-primary-view-wait-start");
+            var deleteViewMatched = WaitForShellView(folderView, initialCount, null, renamedPath,
+                "session-delete-primary");
+            Console.WriteLine($"session-restore-consumer-stage: file-delete-primary-view-wait-result={deleteViewMatched}");
+            var deleteRefreshMatched = false;
+            if (!deleteViewMatched)
+            {
+                Console.WriteLine("session-restore-consumer-stage: file-delete-refresh-start");
+                deleteRefreshMatched = RefreshUntilShellViewMatches(view, folderView, initialCount, null,
+                    renamedPath, "session-delete-refresh");
+                Console.WriteLine($"session-restore-consumer-stage: file-delete-refresh-result={deleteRefreshMatched}");
+            }
+            if (!deleteViewMatched && !deleteRefreshMatched)
+                throw new IOException("The restored Shell view did not remove the deleted fixture after refresh.");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-all-pane-counts-start");
+            WaitForAllPaneCounts(allFolderViews, initialCount, "delete");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-settings-check-start");
+            AssertViewSettings("delete");
+            Console.WriteLine("session-restore-consumer-stage: file-delete-verified");
+            return "copy/rename/delete=all-4-panes-converged";
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+
+        static void WaitForAllPaneCounts(IReadOnlyList<nint> folderViews, int expectedCount, string operation)
+        {
+            for (var index = 0; index < folderViews.Count; index++)
+            {
+                Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-start");
+                var count = WaitForShellViewItemCount(folderViews[index], expectedCount,
+                    diagnosticLabel: $"file-{operation}-pane{index + 1}");
+                Console.WriteLine($"session-restore-consumer-stage: file-{operation}-pane{index + 1}-count-result={count}");
+                if (count != expectedCount)
+                    throw new IOException($"Pane {index + 1} did not converge after {operation}: expected={expectedCount}, observed={count}.");
+            }
+        }
+
+        void AssertViewSettings(string operation)
+        {
+            Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out _));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            if (sortCount != 1) throw new IOException($"View settings changed after {operation}: sort count={sortCount}.");
+            var sorts = new SortColumn[sortCount];
+            Check(At<GetSortColumns>(folderView, 28)(folderView, sorts, sortCount));
+            var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var group, out var ascending);
+            Check(groupResult);
+            Check(ShellColumnManager.Capture(folderView, out var columns));
+            // Opening Details through the Shell menu fits columns to the current viewport width.
+            // Preserve the persisted widths at initial restore, but after that transition compare column identity and order.
+            var expectedColumnKeys = expectedColumns.Select(column => column.Key);
+            var actualColumnKeys = columns?.Select(column => column.Key);
+            if (mode != 4 || sorts[0].Key.FormatId != expectedSort.Key.FormatId ||
+                sorts[0].Key.PropertyId != expectedSort.Key.PropertyId || sorts[0].Direction != expectedSort.Direction ||
+                group.FormatId != propertyFormatId || group.PropertyId != 4 || ascending != 1 ||
+                actualColumnKeys is null || !expectedColumnKeys.SequenceEqual(actualColumnKeys))
+                throw new IOException($"The Shell {operation} changed the restored view settings: mode={mode}; sort={sorts[0].Key.FormatId}/{sorts[0].Key.PropertyId}/{sorts[0].Direction}; group={group.FormatId}/{group.PropertyId}/{ascending}; columns={(columns is null ? "<null>" : string.Join(';', columns.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}")))}.");
+        }
+    }
+
+    private static string VerifyDirectoryNotificationIsolation(IReadOnlyList<nint> rootFolderViews,
+        nint otherFolderView, string fixture, string otherFixture)
+    {
+        var originalCount = rootFolderViews.Count == 0
+            ? throw new ArgumentException("At least one root-directory view is required.", nameof(rootFolderViews))
+            : GetShellViewItemCount(rootFolderViews[0]);
+        var otherOriginal = Path.Combine(otherFixture, "isolated-target.txt");
+        var unrelatedCopy = Path.Combine(otherFixture, "isolated-copy.txt");
+        if (!ShellViewContainsPath(otherFolderView, otherOriginal) || ShellViewContainsPath(otherFolderView,
+                Path.Combine(fixture, "blue-rule-target.txt")))
+            throw new IOException("The fourth pane did not stay scoped to its separate fixture directory.");
+        foreach (var rootView in rootFolderViews)
+            if (GetShellViewItemCount(rootView) != originalCount)
+                throw new IOException("The three root-directory panes did not converge after their file operations.");
+
+        var source = CreateShellItem(otherOriginal);
+        var destination = CreateShellItem(otherFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination,
+                    Path.GetFileName(unrelatedCopy), 0)));
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+        if (!File.Exists(unrelatedCopy) ||
+            !WaitForShellView(otherFolderView, 2, unrelatedCopy, null))
+            throw new IOException("The Shell notification did not update the pane showing the destination directory.");
+        foreach (var rootView in rootFolderViews)
+        {
+            if (GetShellViewItemCount(rootView) != originalCount || ShellViewContainsPath(rootView, unrelatedCopy))
+                throw new IOException("A file notification from another directory leaked into a root-directory pane.");
+        }
+        if (ShellViewContainsPath(otherFolderView, Path.Combine(fixture, "session-copy.txt")) ||
+            ShellViewContainsPath(otherFolderView, Path.Combine(fixture, "session-renamed.txt")))
+            throw new IOException("The separate-directory pane displayed a root-directory file operation.");
+        return "root-copy-rename-delete=3-panes; other-copy=other-pane-only";
+    }
+
+    private static string GetNotificationIsolationFixture(string fixture)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var path = Path.GetFullPath(Path.Combine(root,
+            Path.GetFileName(fixture) + "-notification-isolation"));
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || Directory.Exists(path) || File.Exists(path))
+            throw new IOException("The isolated notification fixture path is not a fresh child of NativeProbe fixtures.");
+        Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "isolated-target.txt"), "separate-directory");
+        return path;
+    }
+
+    private static int GetShellViewItemCount(nint folderView)
+    {
+        Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count)); // SVGIO_ALLVIEW.
+        return count;
+    }
+
+    private readonly record struct LivePaneView(nint Pane, nint View, nint ViewWindow, nint Folder, nint Pidl,
+        nint HostPointer, ShellViewColorBrowserHost Host, nint FolderView, Guid SessionId);
+
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
-        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false)
+        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
+        bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
+        bool probeWindowDestroyWithShellView = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
+        var stateDirectory = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N") + "-view-state");
+        var sessionId = Guid.NewGuid();
+        var stateStore = new ShellViewStateStore(stateDirectory);
         nint parent = 0, pidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0;
         nint folderView = 0, contextMenu = 0, selectionMenu = 0, dropTarget = 0, listView = 0;
         nint drawNotifyTarget = 0, backgroundMenuHandle = 0, selectionMenuHandle = 0;
@@ -66,6 +2459,7 @@ internal static class ShellViewColorSpike
             var createViewWindowAttempted = false;
             var previousView = view;
             var previousFolder = folder;
+            var previousWindow = viewWindow;
             try
             {
                 Check(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out nextFolder));
@@ -81,6 +2475,12 @@ internal static class ShellViewColorSpike
                 if (createHr < 0) Marshal.ThrowExceptionForHR(createHr);
                 if (nextWindow == 0)
                     throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
+                RegisterFolderDropTarget(nextFolder, nextWindow, host!);
+                var nextListView = FindChildByClass(nextWindow, "SysListView32");
+                if (nextListView != 0) _ = ApplyFixtureViewBackground(nextListView, isActiveView: true);
+
+                if (previousWindow != 0)
+                    host.RevokeDropTarget(previousWindow);
 
                 view = nextView;
                 folder = nextFolder;
@@ -106,6 +2506,14 @@ internal static class ShellViewColorSpike
             catch (Exception ex)
             {
                 host!.View = previousView;
+                if (nextWindow != 0)
+                {
+                    try { host.RevokeDropTarget(nextWindow); }
+                    catch (Exception revokeException)
+                    {
+                        Console.WriteLine("ishellview-color-spike navigation: failed-view drop target cleanup threw: " + revokeException.Message);
+                    }
+                }
                 if (nextView != 0)
                     viewRetirement.RetireAfterCreateAttempt(nextView, nextFolder, createViewWindowAttempted);
                 else if (nextFolder != 0) Marshal.Release(nextFolder);
@@ -156,7 +2564,8 @@ internal static class ShellViewColorSpike
             var itemFilter = new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false));
             var navigation = new ShellViewNavigationHistory(pidl, ILClone, Marshal.FreeCoTaskMem,
                 ILIsEqual, GetParentPidl, ILCombine, Navigate);
-            host = new ShellViewColorBrowserHost(parent, [], itemFilter, navigation);
+            host = new ShellViewColorBrowserHost(parent, [], itemFilter, navigation,
+                stateStore, sessionId);
             host.View = view;
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -165,6 +2574,7 @@ internal static class ShellViewColorSpike
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0)
                 throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
+            RegisterFolderDropTarget(folder, viewWindow, host);
             var filterSiteHr = Marshal.QueryInterface(view, in FolderFilterSiteId, out var filterSite);
             if (filterSite != 0) Marshal.Release(filterSite);
             Console.WriteLine($"ishellview-color-spike: direct-view-ifolderfiltersite={filterSiteHr:X8}");
@@ -172,6 +2582,73 @@ internal static class ShellViewColorSpike
             {
                 ShowWindow(parent, 4); // SW_SHOWNOACTIVATE
                 Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_NOFOCUS
+            }
+            if (probeWindowDestroyWithShellView)
+            {
+                var plainWindow = CreateWindowExW(0x00000080u, "STATIC",
+                    "ExplorerDirs plain window beside Shell view", 0x10CF0000u,
+                    20, 20, 160, 80, 0, 0, 0, 0);
+                if (plainWindow == 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not create the plain-window comparison beside the Shell view.");
+                Console.WriteLine($"shell-view-window-destroy-control: shell-view=0x{viewWindow:X}; plain-window=0x{plainWindow:X}; destroy-start");
+                var destroyReturned = DestroyWindow(plainWindow);
+                var stillValid = IsWindow(plainWindow);
+                Console.WriteLine($"shell-view-window-destroy-control: destroy-returned={destroyReturned}; still-valid={stillValid}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                return destroyReturned && !stillValid && GetForegroundWindow() == foreground ? 0 : 1;
+            }
+            if (probeMenuActivation)
+            {
+                Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_FOCUS
+                Pump();
+                var sharedMenu = GetMenu(parent);
+                var sharedMenuItems = Enumerable.Range(0, 6)
+                    .Select(index => GetSubMenu(sharedMenu, index))
+                    .ToArray();
+                if (sharedMenu == 0 || GetMenuItemCount(sharedMenu) < 6 ||
+                    sharedMenuItems.Where((_, index) => index is 0 or 1 or 2 or 5)
+                        .Any(submenu => submenu == 0 || GetMenuItemCount(submenu) == 0))
+                    throw new Exception("Shell UI activation did not populate the shared File/Edit/View/Help menu groups.");
+                var menuView = Marshal.QueryInterface(view, in FolderView2Id, out var menuFolderView);
+                Check(menuView);
+                try
+                {
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 1, 16)); // FVM_ICON
+                    var detailsIndex = Enumerable.Range(0, GetMenuItemCount(sharedMenuItems[2]))
+                        .FirstOrDefault(index =>
+                        {
+                            var text = new System.Text.StringBuilder(128);
+                            _ = GetMenuStringW(sharedMenuItems[2], (uint)index, text, text.Capacity, 0x400);
+                            return text.ToString().Contains("详细信息", StringComparison.OrdinalIgnoreCase) ||
+                                text.ToString().Contains("Details", StringComparison.OrdinalIgnoreCase);
+                        }, -1);
+                    if (detailsIndex < 0) throw new Exception("The native Shell View menu has no Details command.");
+                    var detailsCommandId = GetMenuItemID(sharedMenuItems[2], detailsIndex);
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 2, 16)); // FVM_SMALLICON baseline.
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var parentStart, out _));
+                    var parentDispatch = SendMessageW(parent, 0x0111, (nint)detailsCommandId, 0); // WM_COMMAND
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var modeAfterParent, out _));
+                    if (modeAfterParent != parentStart)
+                        throw new Exception($"The parent window unexpectedly changed Shell view mode while routing a menu command: {parentStart}->{modeAfterParent}.");
+                    Check(At<SetViewModeAndIconSize>(menuFolderView, 35)(menuFolderView, 2, 16)); // Reset before view routing.
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var viewStart, out _));
+                    var viewDispatch = SendMessageW(viewWindow, 0x0111, (nint)detailsCommandId, 0);
+                    Pump();
+                    Check(At<GetViewModeAndIconSize>(menuFolderView, 36)(menuFolderView, out var modeAfterView, out _));
+                    if (viewStart != 2 || modeAfterView != 4)
+                        throw new Exception($"The Shell View menu command did not change only the target IShellView to Details: {viewStart}->{modeAfterView}.");
+                    Console.WriteLine($"ishellview-menu-command-routing: id=0x{detailsCommandId:X}; parent-start={parentStart}; parent-result=0x{parentDispatch.ToInt64():X}; parent-mode={modeAfterParent}; view-start={viewStart}; view-result=0x{viewDispatch.ToInt64():X}; view-mode={modeAfterView}");
+                }
+                finally { Marshal.Release(menuFolderView); }
+                Console.WriteLine($"ishellview-menu-activation: insert={host.InsertMenusCallCount}; " +
+                    $"set={host.SetMenuCallCount}; remove={host.RemoveMenusCallCount}; " +
+                    $"shared-menu-present={sharedMenu != 0}; active-view={view != 0}; " +
+                    $"menu-groups=[{DescribeSharedMenu(sharedMenu)}]; " +
+                    $"foreground-unchanged={GetForegroundWindow() == foreground}");
+                return 0;
             }
             Pump();
 
@@ -184,6 +2661,86 @@ internal static class ShellViewColorSpike
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
+            if (probeSessionRestore)
+            {
+                Console.WriteLine("ishellview-session-restore-stage: configure-view");
+                const uint expectedMode = 4; // FVM_DETAILS
+                var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+                var nameKey = new PropertyKeyState(propertyFormatId, 10);
+                var sizeKey = new PropertyKeyState(propertyFormatId, 12);
+                var typeKey = new PropertyKeyState(propertyFormatId, 4);
+                var expectedSort = new SortColumn
+                {
+                    Key = new PropertyKey { FormatId = propertyFormatId, PropertyId = nameKey.PropertyId },
+                    Direction = -1
+                };
+                var expectedColumns = new DisplayColumnState[]
+                {
+                    new(nameKey, 280), new(sizeKey, 120), new(typeKey, 160)
+                };
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, expectedMode, 16));
+                Check(At<SetSortColumns>(folderView, 27)(folderView, [expectedSort], 1));
+                var expectedGroup = new PropertyKey { FormatId = propertyFormatId, PropertyId = typeKey.PropertyId };
+                Check(At<SetGroupBy>(folderView, 17)(folderView, ref expectedGroup, 1));
+                Check(ShellColumnManager.Apply(folderView, expectedColumns));
+                Console.WriteLine("ishellview-session-restore-stage: view-configured");
+                Pump(500);
+                Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var modeBeforeSave, out _));
+                Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCountBeforeSave));
+                if (sortCountBeforeSave != 1)
+                    throw new Exception($"The real Shell view did not retain the requested sort before saving: {sortCountBeforeSave}.");
+                var sortBeforeSave = new SortColumn[sortCountBeforeSave];
+                Check(At<GetSortColumns>(folderView, 28)(folderView, sortBeforeSave, sortCountBeforeSave));
+                var groupBeforeSaveHr = At<GetGroupBy>(folderView, 18)(folderView, out var groupBeforeSave, out var groupAscendingBeforeSave);
+                Check(groupBeforeSaveHr);
+                Check(ShellColumnManager.Capture(folderView, out var columnsBeforeSave));
+                var sortBeforeSaveMatches = sortBeforeSave[0].Key.FormatId == expectedSort.Key.FormatId &&
+                    sortBeforeSave[0].Key.PropertyId == expectedSort.Key.PropertyId && sortBeforeSave[0].Direction == expectedSort.Direction;
+                var groupBeforeSaveMatches = groupBeforeSave.FormatId == expectedGroup.FormatId &&
+                    groupBeforeSave.PropertyId == expectedGroup.PropertyId && groupAscendingBeforeSave == 1;
+                var columnsBeforeSaveMatch = columnsBeforeSave is not null && expectedColumns.SequenceEqual(columnsBeforeSave);
+                if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
+                    throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
+                Check(At<SaveViewState>(view, 13)(view));
+                Console.WriteLine("ishellview-session-restore-stage: shell-save-returned");
+                Pump(350);
+
+                var oldView = view;
+                var oldFolder = folder;
+                host.RevokeDropTarget(viewWindow);
+                if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
+                if (contextMenu != 0) { Marshal.Release(contextMenu); contextMenu = 0; }
+                view = folder = viewWindow = 0;
+                viewWindowCreateAttempted = false;
+                host.View = 0;
+                viewRetirement.Retire(oldView, oldFolder);
+                Console.WriteLine("ishellview-session-restore-stage: old-view-retired");
+                var shellWrites = host.Writes;
+                Marshal.Release(hostPointer);
+                hostPointer = 0;
+                host.Dispose();
+                host = null;
+                Console.WriteLine("ishellview-session-restore-stage: host-disposed");
+                var persisted = stateStore.TryLoad(sessionId, out var savedState);
+                if (!persisted || shellWrites == 0)
+                    throw new Exception($"Saving the real Shell view produced no persisted stream: writes={shellWrites}; saved={persisted}.");
+
+                if (modeBeforeSave != expectedMode || !sortBeforeSaveMatches || !groupBeforeSaveMatches || !columnsBeforeSaveMatch)
+                    throw new Exception("The real Shell view did not retain the requested mode, sort, group, and columns before saving.");
+                Console.WriteLine("ishellview-session-restore-stage: starting-consumer");
+                var consumer = RunSessionRestoreConsumerProcess(fixture, stateDirectory, sessionId,
+                    synchronousCleanupProbe);
+                Console.WriteLine($"ishellview-session-restore: producer-pid={Environment.ProcessId}; " +
+                    $"shell-write-callbacks={shellWrites}; persisted-bytes={savedState.Length}; " +
+                    $"mode-before-save={modeBeforeSave}; sort={sortCountBeforeSave}; " +
+                    $"group={groupBeforeSaveHr:X8}; columns={columnsBeforeSave?.Count ?? 0}; " +
+                    $"consumer-exit={consumer.ExitCode}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                foreach (var line in consumer.Output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+                    Console.WriteLine("ishellview-session-restore-child: " + line);
+                if (consumer.ExitCode != 0 || GetForegroundWindow() != foreground)
+                    throw new Exception("A separate NativeProbe process did not restore the real Shell view from the persisted session stream.");
+                return 0;
+            }
             var selectHr = At<SelectFolderItem>(folderView, 15)(folderView, 0, 0x1); // IFolderView::SelectItem; SVSI_SELECT only.
             Pump();
             var headerFlagProbe = VerifyColumnHeaderFlag(folderView);
@@ -262,6 +2819,10 @@ internal static class ShellViewColorSpike
             var itemCount = listView == 0 ? 0 : unchecked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT
             if (listView != 0)
             {
+                var viewBackground = ApplyFixtureViewBackground(listView, isActiveView: true);
+                var actualViewBackground = unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)); // LVM_GETBKCOLOR
+                if (viewBackground is { } expectedViewBackground && actualViewBackground != expectedViewBackground)
+                    throw new Exception($"ListView background did not retain the active Q-Dir color rule: expected=0x{expectedViewBackground:X6}; actual=0x{actualViewBackground:X6}.");
                 originalListStyle = GetWindowLongPtrW(listView, -16); // GWL_STYLE
                 if (((long)originalListStyle & 0x10000000) == 0) // WS_VISIBLE
                 {
@@ -277,6 +2838,7 @@ internal static class ShellViewColorSpike
                 subclassed = true;
             }
             if (listView != 0) RefreshFixtureColorMap(folderView, fixturePaths);
+            Console.WriteLine($"ishellview-color-spike: view-background-color={(listView == 0 ? "unsupported" : $"0x{unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)):X6}")}");
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
@@ -447,6 +3009,11 @@ internal static class ShellViewColorSpike
                 SetWindowLongPtrW(listView, -16, originalListStyle);
             if (view != 0)
             {
+                if (host is not null && viewWindow != 0)
+                {
+                    try { host.RevokeDropTarget(viewWindow); }
+                    catch (Exception ex) { Console.WriteLine("ishellview-color-spike cleanup: drop-target revoke threw: " + ex.Message); }
+                }
                 try
                 {
                     viewRetirement.RetireAfterCreateAttempt(view, folder, viewWindowCreateAttempted);
@@ -475,7 +3042,30 @@ internal static class ShellViewColorSpike
             if (parentDestroyed || viewRetirement.DeferredCount == 0)
             {
                 if (hostPointer != 0) Marshal.Release(hostPointer);
-                if (host is not null) { host.View = 0; host.Dispose(); GC.KeepAlive(host); }
+                if (host is not null)
+                {
+                    var shellWrites = host.Writes;
+                    host.View = 0;
+                    host.Dispose();
+                    var persisted = stateStore.TryLoad(sessionId, out var savedState);
+                    var restored = false;
+                    if (persisted)
+                    {
+                        using var restoredHost = new ShellViewColorBrowserHost(0, [],
+                            new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)),
+                            stateStore: new ShellViewStateStore(stateDirectory), stateId: sessionId);
+                        if (restoredHost.GetViewStateStream(0, out var readPointer) == 0 && readPointer != 0)
+                        {
+                            try { restored = ReadViewStateBytes(readPointer).SequenceEqual(savedState); }
+                            finally { Marshal.Release(readPointer); }
+                        }
+                    }
+                    Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
+                    if (!probeMenuActivation && !probeSessionRestore && !probeWindowDestroyWithShellView &&
+                        (shellWrites == 0 || !persisted || !restored))
+                        throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
+                    GC.KeepAlive(host);
+                }
             }
             else if (host is not null) GC.KeepAlive(host);
             var fullFixture = Path.GetFullPath(fixture);
@@ -486,16 +3076,151 @@ internal static class ShellViewColorSpike
                     File.SetAttributes(readOnlyFixturePath, File.GetAttributes(readOnlyFixturePath) & ~FileAttributes.ReadOnly);
                 Directory.Delete(fullFixture, recursive: true);
             }
+            if (probeSessionRestore)
+            {
+                var notificationFixture = Path.GetFullPath(Path.Combine(fixturesRoot,
+                    Path.GetFileName(fixture) + "-notification-isolation"));
+                if (notificationFixture.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    Directory.Exists(notificationFixture))
+                    Directory.Delete(notificationFixture, recursive: true);
+            }
+            var fullStateDirectory = Path.GetFullPath(stateDirectory);
+            if (fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullStateDirectory))
+                Directory.Delete(fullStateDirectory, recursive: true);
             _readOnlyRuleProbe = false;
             if (GetForegroundWindow() != foreground)
                 Console.WriteLine("ishellview-color-spike cleanup: foreground changed.");
         }
     }
 
-    private static void Pump(int milliseconds = 350)
+    private static void Pump(int milliseconds = 350, string? diagnosticLabel = null)
     {
+        if (_useWpfDispatcherPump)
+        {
+            PumpWithWpfDispatcher(milliseconds);
+            return;
+        }
+        var messageFilter = diagnosticLabel is null ? null : new PumpMessageTraceFilter(diagnosticLabel);
+        if (messageFilter is not null) System.Windows.Forms.Application.AddMessageFilter(messageFilter);
         var until = Environment.TickCount64 + milliseconds;
-        while (Environment.TickCount64 < until) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(10); }
+        try
+        {
+            while (Environment.TickCount64 < until)
+            {
+                System.Windows.Forms.Application.DoEvents();
+                Thread.Sleep(10);
+            }
+        }
+        finally
+        {
+            if (messageFilter is not null) System.Windows.Forms.Application.RemoveMessageFilter(messageFilter);
+        }
+    }
+
+    private static void PumpWithWpfDispatcher(int milliseconds)
+    {
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background,
+            dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(Math.Max(1, milliseconds))
+        };
+        EventHandler? onTick = null;
+        onTick = (_, _) =>
+        {
+            timer.Stop();
+            timer.Tick -= onTick;
+            frame.Continue = false;
+        };
+        timer.Tick += onTick;
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
+    private sealed class PumpMessageTraceFilter(string label) : System.Windows.Forms.IMessageFilter
+    {
+        private int _messages;
+
+        public bool PreFilterMessage(ref System.Windows.Forms.Message message)
+        {
+            if (_messages++ < 128)
+                Console.WriteLine($"session-restore-consumer-stage: {label}; pump-message=0x{message.Msg:X4}; hwnd=0x{message.HWnd:X}; class={WindowClassName(message.HWnd)}");
+            return false;
+        }
+    }
+
+    private static (int ExitCode, string Output) RunSessionRestoreConsumerProcess(
+        string fixture, string stateDirectory, Guid sessionId, bool synchronousCleanupProbe)
+    {
+        var executable = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Could not determine the NativeProbe process executable.");
+        var assembly = typeof(ShellViewColorSpike).Assembly.Location;
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(assembly);
+        start.ArgumentList.Add("--ishellview-session-restore-consumer-private-desktop");
+        start.ArgumentList.Add(fixture);
+        start.ArgumentList.Add(stateDirectory);
+        start.ArgumentList.Add(sessionId.ToString("D"));
+        if (synchronousCleanupProbe) start.ArgumentList.Add("--sync-cleanup");
+
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the isolated session restore consumer process.");
+        var stdout = DrainChildOutput(process.StandardOutput, "stdout");
+        var stderr = DrainChildOutput(process.StandardError, "stderr");
+        // The four-pane session probe also runs keyboard and file-operation checks; allow the private desktop worker its full diagnostic budget.
+        if (!process.WaitForExit(100_000))
+        {
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            process.WaitForExit();
+            var timeoutOutput = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+            return (124, $"consumer process timed out; {timeoutOutput[0]}{timeoutOutput[1]}");
+        }
+
+        var output = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+        return (process.ExitCode, output[0] + output[1]);
+
+        static async Task<string> DrainChildOutput(StreamReader reader, string stream)
+        {
+            var output = new System.Text.StringBuilder();
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                Console.WriteLine($"session-restore-consumer-live-{stream}: {line}");
+                output.AppendLine(line);
+            }
+            return output.ToString();
+        }
+    }
+
+    private static byte[] ReadViewStateBytes(nint pointer)
+    {
+        var stream = (System.Runtime.InteropServices.ComTypes.IStream)Marshal.GetObjectForIUnknown(pointer);
+        try
+        {
+            stream.Stat(out var stat, 1);
+            if (stat.cbSize is < 0 or > 65_536)
+                throw new InvalidDataException("The saved Shell view-state stream exceeds the probe limit.");
+            var bytes = new byte[(int)stat.cbSize];
+            var read = Marshal.AllocCoTaskMem(sizeof(int));
+            try
+            {
+                stream.Seek(0, 0, 0);
+                stream.Read(bytes, bytes.Length, read);
+                if (Marshal.ReadInt32(read) != bytes.Length)
+                    throw new InvalidDataException("The recreated host returned an incomplete Shell view-state stream.");
+                return bytes;
+            }
+            finally { Marshal.FreeCoTaskMem(read); }
+        }
+        finally { Marshal.ReleaseComObject(stream); }
     }
 
     private static nint FindChildByClass(nint parent, string className)
@@ -519,6 +3244,18 @@ internal static class ShellViewColorSpike
         if (window == 0) return "<none>";
         var name = new System.Text.StringBuilder(128);
         return GetClassNameW(window, name, name.Capacity) > 0 ? name.ToString() : "<unknown>";
+    }
+
+    private static nint ObserveCleanupWindowMessages(nint window, uint message, nuint wParam,
+        nint lParam, nuint id, nuint data)
+    {
+        var observed = message is 0x0002 or 0x0082;
+        if (observed)
+            Console.WriteLine($"session-restore-consumer-cleanup: parent-message-enter=0x{message:X4}; hwnd=0x{window:X}");
+        var result = DefSubclassProc(window, message, wParam, lParam);
+        if (observed)
+            Console.WriteLine($"session-restore-consumer-cleanup: parent-message-return=0x{message:X4}; hwnd=0x{window:X}");
+        return result;
     }
 
     private static bool VerifyCustomDrawContract(nint notifyTarget, nint listView)
@@ -850,6 +3587,20 @@ internal static class ShellViewColorSpike
         }
     }
 
+    private static uint? ApplyFixtureViewBackground(nint listView, bool isActiveView)
+    {
+        var rules = new[]
+        {
+            ShellViewColorRule.BackgroundOnly("#BG-A", ShellColorRuleDecision.Set, 0x00F0E0D0u),
+            ShellViewColorRule.BackgroundOnly("#BG", ShellColorRuleDecision.Set, 0x00D0E0F0u)
+        };
+        var color = ShellViewColorRuleEvaluator.ResolveViewBackground(rules, isActiveView);
+        if (!ShellViewColorBackgroundPolicy.TryApply(listView, color,
+                (window, value) => SendMessageW(window, 0x1001, 0, unchecked((nint)(long)value)) != 0))
+            throw new InvalidOperationException("The isolated Shell ListView rejected its resolved background color.");
+        return color;
+    }
+
     private static ShellViewColorRule WithTextColor(ShellViewColorRule rule, uint textColor) =>
         rule with { TextColor = ShellColorRuleProperty<uint>.Set(textColor) };
 
@@ -1034,6 +3785,46 @@ internal static class ShellViewColorSpike
             Check(setGroup(folderView, ref noGroup, 0));
         }
         Check(setSorts(folderView, originalSorts, originalSortCount));
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 8, -1)); // FVM_CONTENT.
+        Pump(200);
+        Check(getViewState(folderView, out var contentMode, out var contentSize));
+        var contentListMode = SendMessageW(listView, 0x108F, 0, 0).ToInt32(); // LVM_GETVIEW.
+        var contentItemCount = SendMessageW(listView, 0x1004, 0, 0).ToInt64(); // LVM_GETITEMCOUNT.
+        if (contentMode != 8 || contentItemCount != fixturePaths.Length)
+            throw new Exception($"Content view did not expose the fixture rows: shell={contentMode}/{contentSize}; " +
+                $"list-view={contentListMode}; items={contentItemCount}.");
+        RefreshFixtureColorMap(folderView, fixturePaths);
+        ClearColorProbeSelection();
+        var contentCapture = default((int[] RowHits, int[] BitmapHits, string ItemRects, string CustomDrawDetails,
+            int Prepaint, int CustomDrawItems, nuint[] DrawItems, bool PrintWindowRendered));
+        var contentPaintAttempts = 0;
+        for (; contentPaintAttempts < 10; contentPaintAttempts++)
+        {
+            contentCapture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            if (contentCapture.CustomDrawItems >= fixturePaths.Length &&
+                Enumerable.Range(0, fixturePaths.Length).All(index =>
+                    CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue) ==
+                    CustomDrawBackgrounds[(nuint)index]))
+                break;
+            Pump(100);
+        }
+        var contentPixelResults = Enumerable.Range(0, fixturePaths.Length).Select(index =>
+        {
+            var actual = CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue);
+            var expected = CustomDrawBackgrounds[(nuint)index];
+            return $"{index}:0x{actual:X6}/0x{expected:X6}";
+        }).ToArray();
+        var contentAttempts = Math.Min(contentPaintAttempts + 1, 10);
+        Console.WriteLine("content-view-item-pixels=" + string.Join(',', contentPixelResults) +
+            $";callbacks={contentCapture.CustomDrawItems};attempts={contentAttempts};" +
+            $"shell={contentMode}/{contentSize};list-view={contentListMode};items={contentItemCount};label-bounds=" +
+            string.Join(',', CustomDrawLabelBounds.OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key}:{FormatRect(pair.Value)}")));
+        if (contentCapture.CustomDrawItems < fixturePaths.Length ||
+            Enumerable.Range(0, fixturePaths.Length).Any(index =>
+                CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index, uint.MaxValue) !=
+                CustomDrawBackgrounds[(nuint)index]))
+            throw new Exception("Content view did not paint both per-item rule colors at their label pixels.");
         Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, originalMode, originalIconSize));
         Pump(250);
         Check(getViewState(folderView, out var restoredMode, out var restoredSize));
@@ -1560,30 +4351,58 @@ internal static class ShellViewColorSpike
         return item;
     }
 
-    private static bool WaitForShellView(nint folderView, int expectedCount, string? presentPath, string? absentPath)
+    private static void RegisterFolderDropTarget(nint folder, nint viewWindow, ShellViewColorBrowserHost host)
+    {
+        var dropTargetId = DropTargetId;
+        Check(At<CreateViewObject>(folder, 8)(folder, viewWindow, ref dropTargetId, out var dropTarget));
+        try { host.RegisterDropTarget(viewWindow, dropTarget); }
+        finally { Marshal.Release(dropTarget); }
+    }
+
+    private static bool WaitForShellView(nint folderView, int expectedCount, string? presentPath, string? absentPath,
+        string? diagnosticLabel = null)
     {
         const uint SvgIoAllView = 2;
         var deadline = Environment.TickCount64 + 5000;
         var observedCount = -1;
+        var attempt = 0;
         while (Environment.TickCount64 < deadline)
         {
-            Pump(100);
+            attempt++;
+            TraceWaitPhase("pump-start");
+            Pump(100, diagnosticLabel);
+            TraceWaitPhase($"item-count-start; attempt={attempt}");
             Check(At<ItemCount>(folderView, 7)(folderView, SvgIoAllView, out observedCount));
             if (observedCount != expectedCount) continue;
 
+            TraceWaitPhase($"path-check-start; attempt={attempt}");
             var hasExpectedItem = presentPath is null || ShellViewContainsPath(folderView, presentPath);
             var oldItemRemoved = absentPath is null || !ShellViewContainsPath(folderView, absentPath);
             if (hasExpectedItem && oldItemRemoved)
+            {
+                TraceWaitPhase($"matched; attempt={attempt}");
                 return true;
+            }
         }
+        TraceWaitPhase($"deadline; attempts={attempt}; observed-count={observedCount}");
         return false;
+
+        void TraceWaitPhase(string phase)
+        {
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; {phase}");
+        }
     }
 
     private static bool RefreshUntilShellViewMatches(nint view, nint folderView, int expectedCount,
-        string? presentPath, string? absentPath)
+        string? presentPath, string? absentPath, string? diagnosticLabel = null)
     {
+        if (diagnosticLabel is not null)
+            Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; refresh-call-start");
         Check(At<RefreshView>(view, 8)(view));
-        return WaitForShellView(folderView, expectedCount, presentPath, absentPath);
+        if (diagnosticLabel is not null)
+            Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; refresh-call-returned");
+        return WaitForShellView(folderView, expectedCount, presentPath, absentPath, diagnosticLabel);
     }
 
     private static bool NotifyThenWaitForShellView(uint eventId, string path, string? secondPath,
@@ -1632,15 +4451,24 @@ internal static class ShellViewColorSpike
         return result < 0 ? null : count;
     }
 
-    private static int WaitForShellViewItemCount(nint folderView, int expectedCount, int timeoutMilliseconds = 5000)
+    private static int WaitForShellViewItemCount(nint folderView, int expectedCount,
+        int timeoutMilliseconds = 5000, string? diagnosticLabel = null)
     {
         // DefView enumeration can finish after CreateViewWindow and the first message pump.
         var deadline = Environment.TickCount64 + timeoutMilliseconds;
         var observedCount = -1;
+        var attempt = 0;
         while (Environment.TickCount64 < deadline)
         {
-            Pump(50);
+            attempt++;
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; pump-start; attempt={attempt}");
+            Pump(50, diagnosticLabel);
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; item-count-start; attempt={attempt}");
             Check(At<ItemCount>(folderView, 7)(folderView, 2, out observedCount));
+            if (diagnosticLabel is not null)
+                Console.WriteLine($"session-restore-consumer-stage: {diagnosticLabel}; item-count={observedCount}; attempt={attempt}");
             if (observedCount == expectedCount) return observedCount;
         }
         throw new Exception($"The isolated Shell fixture did not finish initial enumeration: expected={expectedCount}, observed={observedCount}.");
@@ -1724,13 +4552,17 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous,
         ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SaveViewState(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderUiObject(nint self, nint owner, uint itemCount,
         nint childPidls, ref Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, nuint commandId, uint flags, nint reserved, nint name, uint length);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TranslateAccelerator(nint self, ref NativeMessage message);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderItem(nint self, int index, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderItem(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItemByPidl(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewModeAndIconSize(nint self, out uint mode, out int size);
@@ -1754,14 +4586,44 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int MoveItem(nint self, nint item, nint destination,
+        [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
+    [StructLayout(LayoutKind.Sequential)] private struct NativeMessage
+    {
+        public nint Window;
+        public uint Id;
+        public nuint WParam;
+        public nint LParam;
+        public uint Time;
+        public int X, Y;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct PropertyKey { public Guid FormatId; public uint PropertyId; }
     [StructLayout(LayoutKind.Sequential)] private struct SortColumn { public PropertyKey Key; public int Direction; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
+    {
+        public int Size;
+        public uint Mask;
+        public nint Window;
+        public nint Verb;
+        public nint Parameters;
+        public nint Directory;
+        public int Show;
+        public uint HotKey;
+        public nint Icon;
+        public nint Title;
+        public nint VerbW;
+        public nint ParametersW;
+        public nint DirectoryW;
+        public nint TitleW;
+        public System.Drawing.Point InvokePoint;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct CustomDraw
     {
         public NotifyHeader Header;
@@ -1774,6 +4636,27 @@ internal static class ShellViewColorSpike
         public uint TextColor;
         public uint TextBackground;
     }
+    private static string DescribeSharedMenu(nint menu)
+    {
+        if (menu == 0) return "";
+        var groups = new List<string>();
+        for (var index = 0; index < GetMenuItemCount(menu); index++)
+        {
+            var caption = new System.Text.StringBuilder(128);
+            _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400);
+            var submenu = GetSubMenu(menu, index);
+            var items = new List<string>();
+            for (var child = 0; submenu != 0 && child < GetMenuItemCount(submenu); child++)
+            {
+                var item = new System.Text.StringBuilder(128);
+                if (GetMenuStringW(submenu, (uint)child, item, item.Capacity, 0x400) > 0 && item.Length > 0)
+                    items.Add(item.ToString());
+            }
+            groups.Add($"{caption}({items.Count})={string.Join("|", items)}");
+        }
+        return string.Join(";", groups);
+    }
+
     [StructLayout(LayoutKind.Sequential)] private struct BitmapInfoHeader
     {
         public uint Size;
@@ -1808,6 +4691,11 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
+    [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
+    [DllImport("user32.dll")] private static extern bool GetKeyboardState([Out] byte[] state);
+    [DllImport("user32.dll")] private static extern bool SetKeyboardState([In] byte[] state);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProc callback, nuint id);
@@ -1838,8 +4726,20 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetMenu(nint window);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern bool IsMenu(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
+    [DllImport("user32.dll")] private static extern uint GetMenuItemID(nint menu, int position);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int maxLength, uint flags);
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
+    [DllImport("imm32.dll")] private static extern nint ImmGetContext(nint window);
+    [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(nint window, nint context);
+    [DllImport("imm32.dll")] private static extern nint ImmAssociateContext(nint window, nint context);
+    [DllImport("imm32.dll")] private static extern bool ImmDisableIME(uint threadId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 }

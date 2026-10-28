@@ -2,6 +2,94 @@
 
 日期：2026-10-15
 
+## 2026-10-27 accelerator 的文件命令授权范围
+
+ShellFileKeyboardActions.ResolveFallback 只把 WM_KEYDOWN 且 HRESULT 为 S_FALSE 的已知组合映射到 Shell 文件命令；正常 Resolve 继续用于识别已处理操作所需的焦点恢复，二者不混用。S_OK 在当前 visit 内按原逻辑安排恢复，允许文件操作导致短暂失焦；错误/未知状态不发补充 WM_COMMAND 或新恢复请求。
+
+键进入 Shell 前固定 browser/view/NavigationVersion/焦点 HWND，GetCurrentView、TranslateAccelerator 与 ReleaseComObject 后再核对。未处理键一旦访问或目标改变即消费，不转发新目标；已处理键只复核访问，因为正常操作会改变焦点。策略基于 [IShellView accelerator 契约](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator)，单元状态矩阵不代替原生消息、物理焦点及文件操作验收。
+
+## 2026-10-27 应用图标的引用上限
+
+ShellIconProvider 使用 UI 线程内的 ShellIconCache，固定保留最多 256 个大小写不敏感的键；字典定位节点，双向链表维护 LRU，命中/替换移至最近端，新增超限移除最旧项。缓存不持有 HWND/PIDL/HICON，不主动 Dispose ImageSource；冻结图像被控件继续引用时保持有效，缺失仍由既有 Shell 加载流程重建。原 HICON 的 finally DestroyIcon 保持不变，不增加配置、手动回收入口或原生浏览历史上限。压力检查验证引用数量与重载，实际 WPF 渲染/原生内存收益另行验收。
+
+## 2026-10-27 过滤枚举期间的分组意图
+
+`_quickFilterGroupToRestore` 与枚举计时分开：清组前用已确认 key/ascending 直接更新缓存，捕获成功后仅合并该意图，不冻结模式/图标/排序/列。取消旧 timer 不等于用户选择“无分组”，因此导航交接仍保留缓存和意图，供下一视图恢复；当前分组恢复或整份视图恢复成功后解除，失败时继续保留，DisposeBrowser 清理。
+
+完整捕获若已读到不同的非空分组键或方向，以此新观测为准，取消旧恢复 timer、清除意图并递增筛选请求，使尚未到达的刷新回调不能重新排队。None 仍视为可能的枚举临时状态；仅凭 getter 无法区分用户显式选择 None，此场景需原生菜单/消息验收，不声称已解决。记住新意图不经过观测合并逻辑，避免用旧缓存值错误退休刚建立的新请求。
+
+队列入口先拒绝过期 filter request，再替换 timer；计数查询后重新核对 request/navigation/path 与 timer 对象。分组写入在 GetCurrentView 前后及 SetGroupBy 后检查访问，旧错误不交给新访问。完整视图恢复也绑定筛选请求，避免与新的临时清组交错后错误清除意图。回归使用未挂接实际宿主、真实计时对象和模拟完整捕获，不证明真实 Shell 分组恢复、用户在枚举时主动改组或原生消息顺序。
+
+## 2026-10-27 快速筛选的失败边界
+
+ShellFilterAttachment 管理 IFolderFilterSite/IFolderFilter 查询与 SetFilter 槽位调用，失败必须交回宿主，不以缺少接口当成功。SetQuickFilter 返回是否完成当前请求，固定 filter request/browser/read generation，原设置与筛选对象只作为本次回滚快照；准备、附加、通知或刷新异常时尝试恢复，保留原始与回滚错误。回滚包含分组和界面通知，选区抑制直到 finally 才释放；新的访问/筛选优先，旧回滚与旧错误不再继续。没有原生浏览器时仅记录配置供创建时应用，不调用 Refresh。
+
+窗格应用与清除捕获错误，按宿主的当前设置回填编辑器，仅成功后记录历史或隐藏筛选条。失败清除保留可用的编辑区；恢复不完整如实显示，不伪装原生视图已经恢复。验证分为无 Shell 的真实托管 COM 槽位测试和未挂接 Pane 的通知故障注入；实际 Shell 拒绝、原生分组与选区恢复、慢刷新和物理焦点仍需可见验收。
+
+## 2026-10-27 整份视图恢复的保存保护
+
+`_viewRestoreFailed` 取代仅针对列的标记，进入自动恢复前即置位；视图不可用、任一 setter 失败或 COM 异常均保留缓存保护。`ShellViewStateRestore` 按模式、可选显示列、可选排序、分组顺序调用原生目标，任一步 HRESULT 失败可继续尝试其他字段，但整份恢复不会标记成功；默认空列/排序仍沿用 Shell，不增设覆盖。
+
+恢复前固定 view state/browser/read generation，每次调用前后复核，过期则停止后续写入与报错，不覆盖新访问的恢复结果。宿主只在当前恢复全部成功时解除标记；后续导航重试。ViewCaptureFailed 同时反映捕获与恢复失败，使未再次捕获的后台标签也立即阻止会话覆盖。预设应用在第一次写入前保护缓存，完整模式/列成功后再允许捕获。回归分别覆盖真实未挂接宿主的保存门控和模拟原生目标的 HRESULT/重入逻辑，真实 Shell setters 的拒绝与恢复外观仍需可见验收。
+
+## 2026-10-27 原生导航键边界
+
+ShellNavigationKeyRouting 统一识别 PageUp/PageDown/End/Home/四方向（VK 0x21～0x28）。原生命名编辑框在宿主快捷键和 IShellView accelerator 前直接接收这些 WM_KEYDOWN，沿用原消息及系统 Ctrl/Shift 状态；普通文件区先交 Shell，只有 S_FALSE 且当前为文件内容、非列标题/编辑框时才补发。S_OK、错误、WM_KEYUP 和 WM_SYSKEYDOWN 不进入补发。保持 Tab、确认、取消及其它编辑键原有分派；策略 smoke 不等同真实键盘、原生选区或多窗格物理焦点验收。
+
+## 2026-10-27 数据快照与排队标签呈现分离
+
+Browser 的 ShellNavigationState 是已确认目录来源。Pane.TabState.Path 曾是 Navigated 后更新的独立缓存，与浏览器在 Dispatcher Background 通知前可能不同；现在该属性直接派生自 Browser.CurrentPath，删除构造与通知中的重复赋值。当前目录命令、扫描、地址栏、新标签和搜索关闭从同一来源读取；界面元素仍可以保留旧呈现直到通知到达，不把界面文字作为操作目标。
+
+SnapshotTabs、SnapshotPins、DuplicateTab、CopyTabFrom、CloseTab 的持久化/新标签路径也明确使用 Browser.CurrentPath；前两者使用同一来源，使固定元数据不因路径滞后而在恢复时失配。查看状态仍走既有捕获和失败拒绝逻辑，搜索位置仍使用真实范围目录，不保存 search URI。不为消除这个时差而同步执行界面通知或改变焦点时序。合成目录通知夹具先更新浏览器位置再通知 Pane，遵循生产的 commit-before-notify 顺序。
+
+## 2026-10-27 原子视图快照的访问范围
+
+ExplorerBrowserHost 在取得 IFolderView2 之前记录 browser 实例及 `_viewReadiness.Generation`，通过有效性回调交给既有 ShellViewStateCapture。捕获入口及各原生 getter 返回后检查，访问代际变化或 browser 替换即返回不完整结果；宿主只在 complete 时替换 `_viewState`，失败时沿用缓存并通过既有 ViewCaptureFailed 阻止不可靠保存/复制。保持 OnNavigationPending 对离开视图的捕获时机，不把 Pending 本身当作所有捕获失败；要求的是一次捕获内访问不变。无窗口回归仅模拟 getter 重入与代际变化，不证明真实原生回调顺序。
+
+## 2026-10-27 关闭标签的轻量地址快照
+
+窗格关闭栈由 TabSettings 扩为设置与 AddressPathHistory 的组合快照，关闭前复制地址 MRU，恢复时传入 AddTab，与复制标签的行为一致。快照不引用 TabState/ExplorerBrowserHost，关闭时仍立即 Dispose 原生宿主；不为恢复历史而驻留 Shell 视图。关闭栈最多 20 项，单份地址记录最多 20 项，仅在进程内存在；Shell Travel Log 的前进/后退历史不在这份快照中。未挂接真实 PaneControl 检查快照和副本的可变状态隔离，可见交互另行验收。
+
+## 2026-10-27 新窗口的显示器归属
+
+三类新窗口入口复用 `CascadeFrom`，在目标 SourceInitialized 后一次执行并撤销订阅；有已存窗口位置时不登记错位操作。`WindowCascade.Place` 以 MonitorFromWindow/GetMonitorInfo 取得来源屏幕工作区，GetWindowRect 与 SetWindowPos 保持屏幕像素坐标。32 DIP 错位量按来源 DPI 换算，约束左上和右下边界；窗口大于工作区时优先保留标题栏入口，不缩小窗口。定位后根据实际尺寸再约束一次，使用 NOACTIVATE/NOSIZE/NOZORDER；来源最小化时改从同屏工作区起点错位，避免使用 iconic 伪坐标，不还原来源。
+
+此路径与持久化的 WINDOWPLACEMENT 工作区坐标互不转换。依据：[Microsoft WINDOWPLACEMENT 坐标约定](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-windowplacement)。普通不可见 HWND 验证原生定位，纯坐标用例覆盖模拟多屏；真实 WPF 跨 DPI 初始化、窗口显示后的坐标和显示器拔插仍需可见验收。
+
+## 2026-10-27 已有窗口的最小化恢复
+
+无参数单实例激活与目录转发统一调用 `MainWindow.RestoreFromMinimized`，再由各入口保留原有激活行为。仅最小化时修改 WindowState；普通/最大化按已记录的 `_lastNonMinimizedMaximized` 恢复。F11 使用普通无边框窗口，存在 `_fullScreenRestoreState` 时恢复 Normal，并保留退出时的原呈现记录。不新增配置。未显示实际窗口回归覆盖状态决策；实际激活、双屏坐标与 F11 呈现另行可见验收。
+
+## 2026-10-27 原生位置与输入完成分离
+
+`ShellNavigationNotice` 同时传递位置/查询/错误文本与应用提交编号。原生视图可能先完成旧目录，而新输入还在后台检查；仍发布已经稳定的实际位置以保持标签会话正确，但只有当前且未报告失败的提交可以结束编辑、重置搜索 UI、清理重试目标和恢复焦点。编号在通知排队时保留，接收和延迟聚焦时再核对；请求失败也只消费自己的意图。
+
+Shell 回调没有单次请求令牌。相同目标仍以计数批次处理，只有最后一个登记退役时给出本批次最新输入编号，部分批次保持无可确认编号；原有 readiness 对重复目标读取实际位置的机制保留。这不推断回调先后关系，也不把合成回调检查视为原生异步导航验收。
+
+## 2026-10-27 Shell 目录请求身份
+
+目录可用性探测和 PIDL 解析完成后，以 PIDL 对应的持久化身份登记应用发出的导航，并使重试目标使用相同身份；原输入别名可能与 Shell 回调路径不同，虚拟目录也可能没有文件系统路径。身份读取可能重入，登记前重新检查探测代际和浏览器可用性。Pending/失败沿统一身份查找并消费计数，成功与异常也清理同一键；仅未登记的原生导航可以取代正在准备的应用请求。无窗口回调回归不覆盖 Shell 的真实投递次序或 UI 完成通知的请求归属。
+
+## 2026-10-27 地址与搜索输入保护
+
+地址提交后继续输入即撤销旧提交结束编辑的权限，完成通知仍更新实际标签路径。搜索框独立记录是否存在新输入，避免仅按键盘焦点决定是否覆盖；成功/失败通知只有在没有新输入或结果与当前文本相同时才能同步，重新聚焦保留草稿。显式提交先去除首尾空白，关闭搜索和切换标签重置编辑状态。不新增持久化或导航请求协议；未显示控件的合成通知回归不代表原生回调次序已验收。
+
+## 2026-10-27 导航完成的焦点所有权
+
+目录与搜索完成共享一次性的导航焦点恢复入口。仅当前且已完成的导航可以消费待聚焦标记；消费发生在原生恢复前，避免旧意图跨导航保留。恢复复用现有窗格、窗口活动与前台所有权检查，并尊重当前原生重命名/列标题焦点。启动先建立文件区焦点意图，后续编辑焦点可取消；搜索提交在仍拥有交互时先进入文件区，结果回调不得独立夺回输入。未挂接对象回归只证明请求消费和接线；真实异步导航及键盘操作仍需可见验收。
+
+## 2026-10-27 现代地址栏直接编辑
+
+点击现代面包屑的空白区域或分隔符进入完整路径编辑并全选；路径节点继续导航。使用透明背景参与命中，监听冒泡左键事件而非预览事件，避免抢走子按钮的操作。复用现有地址编辑入口、提交/取消及 Tab 停靠点，不新增设置。未显示实际控件的路由回归覆盖四窗格与经典样式；真实鼠标命中和键盘焦点另行验收。
+
+## 2026-10-27 默认窗口位置持久化
+
+每个窗口在自己的会话旁保存 `<session-stem>.WindowPlacement.ini`，默认启用，不增加设置开关。记录普通窗口四边坐标和最大化状态；使用原生 `WINDOWPLACEMENT` 工作区坐标成对读取/恢复，保留负坐标，不混用 WPF DIP 或 `SetWindowPos` 的屏幕坐标。位置恢复在 `SourceInitialized` 时执行；多窗口启动只对缺少有效位置记录的窗口使用旧的错位排列。
+
+周期保存、关闭和重启写入位置。最小化时保留最后非最小化状态；进入 F11 前捕获原生位置，全屏期间仍保存该快照。新旧会话格式不变，位置为独立版本化 INI，并沿用外部编辑冲突保护、未知高版本拒写和损坏文件备份。隔离预览复制已注册窗口的位置文件。
+
+使用 [GetWindowPlacement](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowplacement) 与 [SetWindowPlacement](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowplacement)；后者由系统调整完全离屏位置。无窗口 smoke 验证配置、负坐标、状态归一化和 ABI，不能替代真实双屏、DPI、拔屏和 F11/最大化重启验收。
+
 ## 2026-10-21 内嵌搜索位置修正
 
 search-ms 作为请求元数据，使用文件夹优先绑定上下文解析并验证 Shell 文件夹属性，避免导航协议启动项。每浏览器保留已发出的查询/目录位置映射，跨原生 PIDL 规范化恢复查询；精确原生名称碰撞拒绝。搜索 URI 不写入目录会话。源码与原生组件结果已验证，真实窗口未验收，详见 [搜索记录](../../search-folder-investigation.md)。

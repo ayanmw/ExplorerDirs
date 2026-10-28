@@ -152,3 +152,30 @@ internal static class FileViewExportWriter
         workbook.Save(output, ExcelFileFormat.Xls, null);
     }
 }
+
+internal static class FileViewExportFile
+{
+    internal static void WriteAtomically(string destinationPath, Action<Stream> write)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        ArgumentNullException.ThrowIfNull(write);
+
+        var destination = Path.GetFullPath(destinationPath);
+        var directory = Path.GetDirectoryName(destination)!;
+        var temporary = Path.Combine(directory,
+            $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                write(output);
+                output.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+}

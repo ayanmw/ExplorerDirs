@@ -1,5 +1,291 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格 WPF Shell 反向选择矩阵
+
+扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView`、两项临时文件，在 4 个窗格 × 8 种 Shell 查看方式（大/中/小图标、超大图标、列表、详细信息、平铺、内容）逐项运行生产 `ShellSelectionCommands` 的反向选择。每项检查原选中项身份的补集、再次反选恢复、焦点索引保持及兄弟窗格无选区副作用。32 组全部通过；Ctrl+A、F2 四方向键编辑保持、跨窗格输入隔离、复制/重命名/删除通知和菜单生命周期也随组合探针通过。连续 3 次 Private Desktop 运行退出码 0，前台 HWND 不变、隔离窗口及 Shell 视图均完成清理；NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-092506-b2dc8aaf.stdout.log`、`20261028-092546-d9e05ad9.stdout.log`、`20261028-092605-1a282d6e.stdout.log`。
+
+测试窗格共用同一临时目录，Shell 会把视图模式变更传播给同目录的其他 Shell view；因此探针在每次模式设置完成后才记录模式基线，并检查反选本身不改变兄弟窗格模式。初版断言错误地把这种 Shell 模式同步归因于反选，已修正测试基线。该结果仅证明隔离 `IShellView` 原型和生产共享选择命令在这些模式下的命令行为；没有验证产品 `ExplorerBrowser`、物理键盘/可见选择体验、系统交互桌面或颜色列兼容，产品宿主仍未迁移。
+
+## 2026-10-28：四窗格 WPF Shell 跨卷移动
+
+扩展 `--private-desktop-four-pane-wpf-host-directory-isolation`：源目录位于工作区卷，第四 pane 的隔离目标目录位于系统临时目录卷；通过 `IFileOperation::MoveItem` 将一个测试文件跨卷移动并改名。断言源文件已消失、目标文件存在且内容一致；源卷三个视图都从 `3` 项收敛回 `2` 项，目标视图从 `2` 项增至 `3` 项并保留原有两项。连续 3 次通过，包含此前的通知隔离、键盘路由、菜单生命周期及同步清理；前台 HWND 不变，NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-082615-e4dce83b.stdout.log`、`20261028-082630-b832f1d2.stdout.log`、`20261028-082638-13f79c29.stdout.log`。三轮结束后临时目录残留数为 0。
+
+这是 Private Desktop 中真实 Shell 文件操作与视图收敛证据，不是鼠标拖放：没有调用 `DoDragDrop`，也没有验证产品视图、可见确认 UI 或其他 Shell provider。
+
+## 2026-10-28：四窗格 WPF 宿主跨目录通知隔离
+
+新增 `--private-desktop-four-pane-wpf-host-directory-isolation`，在前三个 WPF `HwndHost` pane 打开同一临时目录、第四个 pane 打开独立目录的条件下运行 Ctrl+A、F2 方向键和真实 `IFileOperation` 复制/重命名/删除。前三个 pane 都收敛到操作后的正确条目数/路径；第四 pane 始终保留自己的两项内容，且不显示根目录新建的副本或重命名项。连续 3 次通过，四 pane 菜单激活/停用、同步 view/pane/根窗销毁也通过，foreground HWND 未变。最终断言版日志：`src/.state/native-probe-watchdog/20261028-082221-bbdb77f2.stdout.log`、`20261028-082228-08e490d7.stdout.log`、`20261028-082234-e487a32f.stdout.log`。Release NativeProbe 构建 0 警告/错误。
+
+这补上了先前 WPF 宿主同目录通知探针没有覆盖的隔离边界；旧的静态 pane 会话恢复探针已有独立目录检查，但两类结果不能彼此替代。当前仍未验证真实鼠标 `DoDragDrop`、用户可见产品菜单/选择交互、第三方 Shell 扩展或颜色列兼容，产品仍未迁移到 `IShellView`。
+
+## 2026-10-28：四窗格 WPF Shell 文件操作与通知收敛
+
+扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView` 指向同一临时目录，通过真实 `IFileOperation` 依次复制、重命名、删除，并核对文件内容/路径以及四个 pane 的条目数和目标路径。三次连续运行均通过；复制后四 pane 首轮轮询即收敛，重命名与删除的操作 pane 最迟在第 5 次消息泵轮询收敛，其余 pane 首轮收敛。每轮随后逐 pane 激活/撤销 Shell 菜单，销毁四个 view、pane 和 WPF 根窗口；前台 HWND 始终不变。日志：`src/.state/native-probe-watchdog/20261028-081712-d0542690.stdout.log`、`20261028-081718-1d22d0a4.stdout.log`、`20261028-081725-74be3e96.stdout.log`。Release NativeProbe 构建 0 警告/错误。
+
+同时将该组合入口接入 watchdog，后续可以保留独立 stdout/stderr 证据并设置超时。该探针验证的是同一目录的真实 Shell 文件操作和四个独立视图对 Shell 通知的收敛；它不能证明不同目录之间的通知隔离、可见鼠标/OLE 拖放、产品窗格接线、Shell 扩展上下文菜单或颜色列兼容。当前仍是迁移门槛原型，不等于产品集成，也没有打开产品窗口。
+
+## 2026-10-28：四窗格 WPF 宿主键盘与菜单组合矩阵
+
+新增 `--private-desktop-four-pane-wpf-host-keyboard-consumer`，在 Private Desktop 中通过 `HwndSource → WPF Grid → 四个 HwndHost → STATIC pane → IShellView` 运行组合验收。四个 view 都指向同一临时两文件目录：逐窗格合成 Ctrl+A 均选中 `2/2` 项、兄弟 pane 选区保持为空并清理选区；逐窗格 F2 均进入原生编辑框，四方向键期间编辑框和焦点保持，Escape 取消重命名；另验证从 pane 1 编辑时向 pane 2 投递方向键不打断 pane 1 编辑。测试每个 pane 后显式 `SVUIA_DEACTIVATE`，随后确认 frame 菜单恢复并逐个激活/停用四个 Shell 菜单，最终同步销毁 Shell view、pane 和 WPF 根窗。
+
+菜单与键盘合并运行时，第一版探针在键盘矩阵后菜单激活失败。复查发现键盘辅助例程逐 pane 调用 `SVUIA_ACTIVATE_FOCUS`，却未在每个 pane 测试结束时执行 `SVUIA_DEACTIVATE`，让测试把多个视图留在活动态。加入与单活动 pane 生命周期相符的停用步骤后，键盘、基菜单恢复、四 pane 菜单及同步关闭连续 `3/3` 通过；每轮 foreground HWND 未变、无遗留 NativeProbe 进程。NativeProbe Release 构建零警告/错误。日志位于忽略目录 `src/.state/native-probe-watchdog/20261028-wpf-keyboard-menu-{1,2,3}.log`。
+
+这是隔离 WPF/Shell 宿主组合证据，不是产品 ExplorerBrowser 或可见用户输入验收；真实鼠标 OLE 拖放、产品窗格切换/菜单接线及颜色集成仍未完成。产品源文件与预览 release 未改。
+
+## 2026-10-28：四窗格同步清理停滞位置诊断
+
+新增 `session-restore-sync-cleanup-private-desktop` 诊断入口，让四窗格 consumer 在真实 Shell 操作完成后显式清理，并逐阶段输出进度。三轮中，`DestroyViewWindow`、view/folder/browser-site COM 引用释放、菜单协调器释放及 pane 子窗口销毁均返回；随后卡在 consumer 的顶层 parent `DestroyWindow`。第二、三轮还逐一销毁 pane 2–4 的 Shell view 与 pane 1 子窗口，结果相同。consumer 被其 100 秒期限终止，诊断轮次退出码 1；主桌面 foreground HWND 未变，无遗留 NativeProbe 子进程。日志：`20261028-045213-6af1c87c.stdout.log`、`20261028-045600-3606f1d1.stdout.log`、`20261028-045802-31f0f211.stdout.log`。
+
+因此当前证据把停滞点缩小到顶层 parent 窗口销毁调用期间，尚未确定它是 Shell/窗口消息重入、线程等待还是其他根因；不能把它归结为 `Marshal.Release` 卡住。随后原有 process-exit 清理路径完整复验通过，日志 `20261028-050007-1af1a06f.stdout.log`，退出码 0、前台不变。该诊断仅作用于隔离 NativeProbe；产品宿主未改，同步清理门槛仍未通过。
+
+追加消息追踪后，销毁前 `EnumChildWindows` 读到 0 个子窗口；parent 子类观察到 `WM_DESTROY` 进入并在 `DefSubclassProc` 后返回，但在 70 秒内没有收到 `WM_NCDESTROY`，`DestroyWindow` 也未返回。日志：`20261028-050243-9d16f024.stdout.log`。一个无子窗口、未创建 Shell view、未安装 subclass 的 `STATIC` 对照窗在 consumer 前置阶段也未从 `DestroyWindow` 返回；该轮 55 秒超时，与 producer 共用隔离 Desktop，不能据此排除同 Desktop 的 Shell 状态影响，日志：`20261028-050633-effcf141.stdout.log`。该对照代码已撤回，以免遮住正式 consumer 的 parent teardown 观测。根因仍未确定。
+
+为拆分 Private Desktop 本身及多进程共用因素，新增两个无 Shell 对照：独立新 Desktop 中单进程创建/销毁 childless `STATIC`，以及同一新 Desktop 中父、子两个进程分别创建/销毁普通 `STATIC`。两者均退出码 0、`DestroyWindow=True`、HWND 随后无效，主桌面前台 HWND 不变；日志分别为 `20261028-051206-525873e7.stdout.log` 与 `20261028-051211-6f0dc803.stdout.log`。因此普通窗口销毁和跨进程共用隔离 Desktop 本身可通过；早先对照卡住时 producer 正持有另一个 Shell view，当前差异更集中在共享该 Shell 状态的 Desktop，但仍不足以判定是 Shell view、隐藏消息/窗口还是其间接影响。同步清理根因和产品接入门槛仍未通过。
+
+后续最小化对照中，真实 `IShellView` 活动时销毁另一个无关普通 `STATIC` 也通过（`20261028-051446-befd5744.stdout.log`）；一至四个普通 Shell pane 依次执行 `DestroyViewWindow`、释放接口、销毁 pane 和 parent 同样通过（单 pane `20261028-051544-bd6f51c4.stdout.log`，2/3/4 pane 分别 `20261028-051702-7327ae7a.stdout.log`、`20261028-051708-328c2391.stdout.log`、`20261028-051715-b43f629f.stdout.log`）。但仅对单个 pane 调用 `ActivateView(SVUIA_ACTIVATE_FOCUS)` 安装共享 Shell 菜单、再 `ActivateView(SVUIA_DEACTIVATE)` 卸载菜单，完整释放 Shell view 与 pane 后销毁 parent 即可重现：`WM_DESTROY` 进入并从子类返回，随后 watchdog 超时，未见 `WM_NCDESTROY`。该卡顿在协调器于 parent 销毁前释放、延后到 parent 销毁后释放，以及销毁前将焦点显式移回 parent 时都仍存在（`20261028-052155-03d19fa3.stdout.log`、`20261028-052337-04a4fa62.stdout.log`、`20261028-052441-64abb555.stdout.log`）。日志确认基础菜单已恢复、协调器 owner 已清空、active object 为空、RemoveMenus 回调成功。因此菜单激活/卸载后的 OLE/Shell 生命周期是当前最小可复现触发序列，尚无线程栈证据确认卡住的具体系统调用；原四窗格完整 consumer 仍不接入产品。
+
+## 2026-10-28：隔离原型真实 F2 方向键确认
+
+用户在隔离候选窗口 `125449 / 179260` 中选取 sample 文件，手动按 F2 后确认进入重命名，使用方向键时编辑状态保持。该次只覆盖一个样本及当前查看方式；未覆盖四方向键逐项、Shift/Ctrl 组合、跨窗格竞争焦点、ExplorerBrowser 产品宿主或不同视图模式，因此仅记为隔离原型的可见交互证据，不关闭产品焦点验收。
+
+## 2026-10-28：Private Desktop drop-target 数据对象复验
+
+当前 Release NativeProbe 的 `drop-target-private-desktop` 通过真实 Shell `IDataObject` 直接调用目标 `IDropTarget::DragEnter/DragOver/Drop`。选中视图项的数据对象成功复制到另一 `IShellView` 的目标目录及由目标 `IShellFolder::CreateViewObject` 创建并注册的 HWND；目标文件内容正确、源文件保留，Copy effect 被接受。把源 `IShellView.GetItemObject` 当作 drop target 查询返回 `E_NOINTERFACE`，因此源数据对象与目录 drop target 的角色已分别确认。
+
+watchdog 退出码 0、stderr 为空、前台 HWND 不变，探针退出后无残留。日志 `src/.state/native-probe-watchdog/20261028-015722-7a54f99f.stdout.log` 的 SHA-256 为 `EBBC62316BE8F80FB84B85C9C1633ABC090AE699011CDDAD4B7C386824EF9EA6`。这直接调用 COM drop callbacks，没有执行 `DoDragDrop`、鼠标命中测试或物理拖动；不视作真实 OLE 拖放或产品接线通过。
+
+对直接调用序列尝试追加 Shift/Move 断言时，Drop 创建了目标副本但返回 `DROPEFFECT_NONE`，源文件仍存在。微软文档说明 `DragEnter`/`DragOver`/`Drop` 由 `DoDragDrop` 驱动，不能直接调用来代表完整 OLE 操作；因此该结果只说明当前 direct-callback 探针无法验证 Move，不表示真实 Shell 拖动不能移动文件。临时失败断言已撤回，原 Copy 探针重建后复验通过：日志 `src/.state/native-probe-watchdog/20261028-020200-80fea4fb.stdout.log` SHA-256 `9C4DF26603542BE3B674039139F13C03B2F4ED53E6C372ACA2988E1B0F06A0D8`。失败样本日志 `src/.state/native-probe-watchdog/20261028-020120-da410929.stdout.log` SHA-256 `3725D5070D986A5DD3FC1DE2A02499D2FCDF8A5E06F72BED9056F9B1E8D3BE90`。[IDropTarget::DragEnter](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idroptarget-dragenter)
+
+## 2026-10-28：直接 Drop 探针核验最终 effect
+
+复核发现 direct-callback Copy 探针此前只核对目标文件内容，尽管记录了 `IDropTarget::Drop` 输出的 `pdwEffect`，却未把最终 effect 纳入成功条件。现在每个 Copy 转移必须同时满足目标内容一致和 Drop 返回的 effect 为 `DROPEFFECT_COPY`。Release NativeProbe 构建 0 警告/错误；Private Desktop 探针退出码 0，选中项数据对象与已注册目录目标均返回 effect `0x1`、内容一致且源文件保留，主桌面前台未变。日志 `src/.state/native-probe-watchdog/20261028-062221-3b07c034.stdout.log`。其他未支持的 `IShellView.GetItemObject` drop-target 查询仍为预期失败。
+
+该修正只防止隔离探针把“文件出现但 Drop 未接受 Copy”误报为成功；仍直接调用 Drop 回调，不覆盖 `DoDragDrop`、鼠标命中、Move 源清理或产品宿主拖放。
+
+## 2026-10-28：四窗格会话恢复探针复验
+
+使用当前 Release 构建运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，退出码 0，stderr 为空。隔离 consumer 确认状态流恢复到四个 pane；四个 pane 的 Shell 菜单路由通过，键盘命令与 Ctrl+A 覆盖 pane 1–3，F2 编辑及方向键焦点隔离覆盖四个 pane；Copy、Rename、Delete 后四窗格计数收敛，目录通知与 sibling-pane 隔离通过。前台 HWND 前后相同，NativeProbe/consumer 子进程退出后无残留。
+
+原始日志 `src/.state/native-probe-watchdog/20261028-015505-730c1f9b.stdout.log` 的 SHA-256 为 `CF58E5A5628C3413F1A6CDF4B24F1DA76E1A521E43D8A93A6610EB6670F68D8F`。这是 Private Desktop 上的 IShellView 原型证据；不代表已接入 Explorer Dirs 产品或可见 UI 已验收。鼠标 OLE 拖放、实际 WPF 焦点链、系统主题/DPI 与第三方扩展兼容仍未通过。
+
+## 2026-10-27：交互 OLE 探针顶层窗口清理
+
+源码复核发现，可见交互 OLE Copy 探针退出时未销毁它创建的顶层 STATIC 窗口；Private Desktop watchdog 清理约定不能用于用户桌面入口。现在交互路径销毁顶层窗口及 pane 子窗格，Private Desktop 路径保留由 watchdog 回收的行为。`--shell-view-drop-target-cleanup-smoke` 使用隐藏普通 HWND 验证两种清理策略，前台不变；NativeProbe Release build 通过。本轮未运行可见 OLE 探针或 Shell 拖放，闭环仍未验收。
+
+## 2026-10-27 IDropSource 等待启动鼠标键
+
+`QueryContinueDrag` 现在区分“启动 OLE 循环时尚未按下启动键”和“启动键已按下后释放”：前者继续等待，后者完成拖放；Escape 仍返回取消。`--shell-view-color-policy-smoke` 通过 COM vtable 覆盖左键与右键顺序。没有启动 `DoDragDrop`、创建 `IShellView` 或进行物理输入。真实 source/target 交接、效果协商和视图更新尚未验证。
+
+## 2026-10-27 显式交互 OLE Copy 探针入口
+
+NativeProbe 的 `--shell-view-ole-drop-copy --AllowInteractiveDesktopControl` 会创建新临时 fixture 和可见双 `IShellView`，从源 view 获取所选项目 `IDataObject`，再调用 `RunOleLoop`，最后验证目标内容和源文件保留。命令还要求附着的控制台输入，并在等待开始确认后才进入 OLE 循环；默认仍只允许 Copy。Release build 通过，但没有运行命令、创建 Shell view 或进行输入。该命令使用当前交互桌面，须由用户在明确授权且有隔离条件的测试会话中启动；拖出目标窗格可能由其它系统 drop target 接受，所以不可在普通桌面上做无人看护的自动化。它尚未证明真实产品宿主拖放或多窗格 UI 行为。
+
+## 2026-10-27 OLE `DoDragDrop` 调用入口接线
+
+`ShellViewDragSource.RunOleLoop` 现将传入的 Shell COM `IDataObject` 与 `IDropSource` 交给 `ole32!DoDragDrop`，并原样返回 HRESULT 与最终 effect。调用方必须在已初始化的 STA 运行。该方法不设置光标、不注入输入，也没有在本轮执行；构建只验证了 P/Invoke 和 COM 接口编组的类型正确性。真实 OLE source/target 交接、Copy/Move/Link 效果、视图通知及物理输入仍未验证。
+
+## 2026-10-27：OLE 拖放源端对象合同
+
+NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠标按钮判断继续或完成，Escape 返回取消，`GiveFeedback` 请求 OLE 使用系统默认光标。COM vtable smoke 覆盖左键/右键启动、按钮仍按下/已释放、Escape，以及 None/Copy/Move 效果。
+
+依据 Microsoft [`IDropSource`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-idropsource)、[`QueryContinueDrag`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-querycontinuedrag) 与 [`GiveFeedback`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-idropsource-givefeedback) 合同。当前尚未连接 `DoDragDrop` 源数据对象，也未运行拖放消息循环；这不证明跨窗格拖放已完成或有效。
+
+## 2026-10-27：隔离四窗格文件夹 drop target 注册生命周期
+
+`StreamViewHost` 现按 view HWND 管理多份 STA 目标注册，通过 `OleInitialize` 和 `RegisterDragDrop` 将 Shell drop target 绑定到对应窗口，并在 view 销毁前由同一 STA 调用 `RevokeDragDrop` 与平衡 `OleUninitialize`。四窗格 session-restore consumer 的初始 view、同级 pane 创建/重建以及 `BrowseObject` 新建目标 view 时，均从对应 `IShellFolder::CreateViewObject(IID_IDropTarget)` 获取目录级目标；导航先注册新窗口，再撤销旧窗口的注册并退休旧 view。新 view 创建/注册失败时会尝试只清理新 HWND，保留原 view 的目标注册。独立 color spike 的初始 view 和其 BrowseObject 替换路径也已接线。宿主仅在注册期间依赖 OLE 对目标 COM 指针的引用。
+
+`--shell-view-drop-target-registration-smoke` 在同一个 host/STA 的四个隐藏普通 HWND 上验证多份 owner、选择性撤销、Dispose 撤销其余目标、重复 HWND 注册被 OLE 拒绝且不破坏原 owner，以及撤销后重新注册。源码审查确认本 spike 所有 `CreateViewWindow` 创建点均有目标注册入口。NativeProbe Release build 0 警告/错误，原有 `--shell-view-color-policy-smoke` 通过。此 smoke 不创建 Shell view；新目录导航的真实目标注册仅完成源码接线/编译，真实 `IShellFolder::CreateViewObject` 返回值、Windows 是否已为该 view HWND 注册目标、跨 pane/项目命中、完整 `DoDragDrop` 源/目标交接、物理输入及文件内容/通知都未验证。不得把它报告为拖放完成。
+
+依据 Microsoft [`IShellFolder::CreateViewObject`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[`OleInitialize`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleinitialize)、[`RegisterDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-registerdragdrop)、[`RevokeDragDrop`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-revokedragdrop) 合同。
+
+## 2026-10-27：四窗格 OLE drop target owner 生命周期 smoke
+
+扩展 `--shell-view-drop-target-registration-smoke`，同一 `StreamViewHost`/STA 同时拥有四个隐藏普通 HWND 的 drop-target 注册；另一个 host 对首个 HWND 重复注册，验证收到 `DRAGDROP_E_ALREADYREGISTERED` 后原 owner 仍可撤销，失败路径也平衡自己的 OLE 初始化。host 对其中一个窗口定向撤销后，该窗口可再次注册；Dispose 再撤销其余目标。Release build 0 警告/错误，smoke 通过且前台 HWND 不变。
+
+这验证单一宿主可在同一 STA 并存管理四个 HWND 注册、选择性撤销及集中释放，重复注册失败不会取代既有 owner；仍使用普通 STATIC HWND 与假 `IDropTarget`，不证明 Shell 文件夹目标是否能注册在真实 view HWND，也未调用 `DoDragDrop`。
+
+## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
+
+`StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。
+
+COM vtable smoke 先复现该反例并按预期失败；修正后增加父句柄已销毁的回归。`dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore`（0 警告、0 错误）及 `--shell-view-color-policy-smoke` 通过。该 smoke 只创建隐藏普通 HWND，没有创建 `IShellView`，不证明真实 Shell 激活行为。依据：[IOleWindow::GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-iolewindow-getwindow)。
+
+## 当前授权与迁移阶段门槛
+
+用户已授权继续推进隔离 `IShellView` 宿主迁移原型，验证范围包括原生菜单、Shell 文件操作、拖放、目录通知、键盘焦点和每会话 view-state。授权范围仅限 NativeProbe/隔离宿主，不等于批准替换产品 ExplorerBrowser 或发布迁移版本；产品文件视图保持现状，直到原型门槛有完整证据并单独评审。
+
+已有隐藏 COM smoke、局部文件操作/通知样本和会话状态测试来自不同验证层，不能合并宣称完整迁移通过。完整 Private Desktop session-restore 探针现已覆盖真实 `IShellView` 的写入、销毁、重建和恢复；颜色像素已有五种 ListView 样式及排序/分组后的隔离证据，但仍缺真实用户桌面的可见验收、真实 OLE 拖放闭环、物理键盘焦点，以及 WPF 产品宿主集成。当前继续不使用 Computer Use；不将隔离宿主证据当作产品 UI 验收。
+
+### 2026-10-27：保留连续到达的延迟 Shell 菜单命令
+
+静态复核共享 frame subclass 时发现，菜单 `WM_COMMAND` 被延迟到自定义消息执行，但 coordinator 原先只保存一个待处理命令。若在 STA 消费第一个自定义消息前又收到同类命令，第二条会覆盖第一条；已投递的两个自定义消息随后都可能读取第二条命令，造成首命令丢失或命令执行次数不匹配。NativeProbe 现为每条成功投递的自定义消息按 FIFO 入队对应的 pane owner 与 command ID，逐条出队，并在 coordinator dispose 时清空队列；owner 仍在执行前复核。新增隐藏 frame smoke 以两种 pane owner 和不同 command ID 验证 FIFO 身份保留及队列排空；NativeProbe Release build 与 `--shell-view-color-policy-smoke` 均通过（0 警告、0 错误）。该 smoke 不创建 `IShellView`，没有验证真实 Shell 菜单回调在 STA 中连续到达的时序。
+
+完整 `DoDragDrop` 仍不能在当前 Private Desktop 条件下安全验证：微软文档说明 OLE 循环按当前光标下窗口寻找目标并跟踪鼠标/键状态；`GetCursorPos` 和 `SetCursorPos` 要求调用时 input desktop 为当前桌面。为了避免向用户桌面注入鼠标输入，本轮没有尝试驱动真实拖动；直接调用 `IDropTarget` 的通过结果仍不等同于 OLE 源/目标闭环。参见 [DoDragDrop](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-dodragdrop)、[GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) 与 [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos)。
+
+### 2026-10-27：五种 ListView 样式的逐项颜色像素隔离复核
+
+`color-private-desktop` watchdog 本轮退出码 0，NativeProbe Release build 为 0 警告/错误，日志为 `src/.state/native-probe-watchdog/20261027-043915-cea60716.stdout.log`。原型为两条文件身份配置不同前景/背景颜色，在 Icon、Details、SmallIcon、List、Tile 五种原生 ListView 样式中读取目标行像素；排序与 Size 分组后再按当前 Shell item 身份映射颜色，并对两行分别断言非零像素。该路径报告五种样式 `matched-color-unsorted` 与 `matched-shell-and-listview-sorted-grouped` 均通过。
+
+日志前面的 `visible-row-pixels` 检查没有收到逐项通知，结果是 0；不能把它算作成功证据。通过的像素证据来自后续专用 `direct-listview-mode-capture`，对实际 `SysListView32` 的 `NM_CUSTOMDRAW` 采样。整个窗口属于独立 Private Desktop，主桌面 foreground HWND 未变；本结果验证隔离宿主的绘制技术可行性，不代表产品已接入，也不替代用户桌面的可见验收、主题/缩放检查或真实 Shell 扩展兼容检查。
+
+## 2026-10-27：四窗格 Shell View 菜单命令映射与执行
+
+隔离宿主的顶层 frame subclass 现在将 Shell composite View 菜单的 `WM_COMMAND` 映射到当前 pane 背景 `IContextMenu` 的 canonical verb。Shell 菜单项 ID 与 context-menu ID 并不一致，因此实现读取活动 View 菜单项的层级标题路径，再与 `IContextMenu::QueryContextMenu` 生成的命令路径匹配；按层级后缀消歧排序和分组菜单中重复的升序/降序项。执行通过 `IContextMenu::InvokeCommand`，并在原始 `WM_COMMAND` 返回后 `PostMessage` 到 frame，避免在 Shell 菜单回调中同步重入。
+
+完整回归有过两次 120 秒 watchdog 超时（`20261027-042623-ddebc4b7.stdout.log`、`20261027-042802-29e50ff5.stdout.log`），前台窗口均未变化。第二次增加阶段标记后确认生产 view 已保存并销毁，停在独立恢复 consumer 调用附近；当时 consumer 输出只在退出后回传，无法定位其内部阶段。随后保留了生产/consumer 阶段标记，并改为实时转发 consumer stdout/stderr。两次连续完整运行通过（`20261027-042900-e2e86451.stdout.log`、`20261027-042934-db8d1d60.stdout.log`）：四个真实 filesystem `IShellView` pane 均验证 Details、排序升序/降序和分组升序/降序；每项只改变活动 pane，兄弟 pane 的模式、排序和分组保持不变。文件复制/重命名/删除、目录通知、F2 焦点隔离、view-state 重建恢复和 foreground HWND 不变等既有检查也通过。consumer 早期停滞的原因仍未复现或确认；阶段输出保留，以便下次超时时定位。
+
+此验证通过 frame 收到的合成 `WM_COMMAND` 调用分派器，未实际显示或点击 Shell 菜单，也未覆盖真实鼠标菜单跟踪、快捷键/OLE accelerator、物理键盘或 WPF `HwndHost` 集成。路径匹配依赖本机 Shell 菜单文本；跨 Windows 版本、本地化语言、扩展菜单项仍需验证。该变化只在 NativeProbe 隔离宿主中，不是产品迁移完成的证据。
+
+### 2026-10-27：隔离 Edit → Select All pane 路由
+
+此前一次临时探针把 `IFolderView::SelectItem` 的标志 `0x1` 当成取消选择使用；实际 `SVSI_SELECT=0x1`，而 `SVSI_DESELECT=0`。因此旧记录中“pane 2 被误选”的结论被错误清选步骤污染，不能作为路由证据。恢复正确标志后，当前系统合成菜单实际将 Edit → 全选分配为 `0x7023`；原型 frame coordinator 收到命令后以当前 Edit 菜单项文字确认该命令，再调用项目现有 `ShellSelectionCommands.Apply(All)` 作用于当前 `IShellView` 的 `IFolderView2`，最后通过 `RestoreFocusedItem(..., takeFocus:false)` 保持原生项目焦点。
+
+NativeProbe Release 构建 0 警告、0 错误；无失效 owner 防护前，完整四 pane `session-restore-private-desktop` watchdog 连续两轮退出码 0：`20261027-051232-3a389403.stdout.log`、`20261027-051309-69db2ee8.stdout.log`。日志读回 pane1/2/3 各自 `2/2` 项被选中、pane4 `1/1`，每次只目标 pane 有选区，清理后所有 pane 均为空选区；原有 view-state、菜单、文件操作/目录通知、Ctrl+A、F2 焦点检查也通过，foreground HWND 未变。随后加入 pending command owner 仍为当前 pane 的检查；四次完整回归均走过 `menu-activation-complete`（Edit 全选断言在此前执行），因此新保护下的四 pane Edit 全选也通过：`20261027-051440-1b4c16df.stdout.log`、`20261027-051510-5c90b97d.stdout.log`、`20261027-051539-7154f511.stdout.log`、`20261027-051631-ff469050.stdout.log`。但这些回归之后分别在复制/重命名/删除阶段超时，不能算整套 session-restore 回归通过；卡点位置会变化，尚未找到原因。
+
+该实现只在 NativeProbe 隔离宿主，不接入产品 ExplorerBrowser。它通过合成 frame `WM_COMMAND` 与当前中文/英文菜单项目名识别全选，尚未覆盖其他本地化 Shell 菜单、真实菜单跟踪/鼠标点击、物理键盘或 WPF 产品焦点链；不能据此宣称产品迁移已完成。活跃 pane 的 owner 校验有四 pane 合成命令覆盖；切换 pane/视图后旧 pending 命令被丢弃的竞争分支、完整操作回归稳定性仍未验证。
+
+### 2026-10-27：为恢复 consumer 增加逐阶段诊断
+
+在第二个完整超时后，恢复 consumer 停滞位置不稳定：一轮在四 pane 菜单命令后未进入文件操作完成标记；加入复制、重命名、删除的开始/完成/读回标记后，两轮完整 Private Desktop session-restore watchdog 退出码 0（`20261027-050416-d29a6157.stdout.log`、`20261027-050448-d6f3baa5.stdout.log`）。更早的 `20261027-050301-4d766a58.stdout.log` 也完整通过。三轮成功均覆盖四 pane 菜单、Shell 复制/重命名/删除、视图状态、焦点与目录通知，主桌面 foreground HWND 未变；间隔仍有一轮在文件操作阶段超时（`20261027-050333-52f9c29c.stdout.log`），故不能视为已修复的稳定性问题。
+
+诊断输出现在分别标记 view 创建/恢复、pane 创建、菜单路由和每项文件操作，帮助定位偶发 consumer 停滞。全选菜单的隔离 pane 路由已按上一节验证；超时原因仍未确认。隐藏原型通过也不代表产品 ExplorerBrowser 或可见用户桌面验收。
+
+当前可见停滞点集中在 `file-delete-performed` 之后、`file-delete-verified` 之前，但旧阶段日志无法区分主视图计数/路径匹配、Refresh、四 pane 计数或恢复列/排序/分组检查。NativeProbe 现会分别记录这些边界，并在删除主视图等待中记录 `Pump`、`ItemCount`、PIDL 路径检查和每窗格计数等待入口，供下次获准的隔离运行定位具体阻塞调用。本轮仅构建验证，没有启动 ExplorerBrowser/IShellView 宿主探针；当前无根因结论。
+
+## 2026-10-27：Content 视图逐项颜色绘制像素验证
+
+在同一 NativeProbe 文件夹中切换到 `FVM_CONTENT`（Shell mode 8），确认原生 `SysListView32` 为 Content 样式且包含两个夹具项目；随后对每个项目读取其标签区域像素，并与按 Shell 项目身份匹配的规则背景色比较。首次采样可能发生在逐项绘制回调前，因此最多重试 10 次、每次间隔 100 ms。`color-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-044600-26c2494a.stdout.log` 报告 `shell=8/32;list-view=4;items=2;callbacks=2;attempts=2`，两项实际与预期颜色分别为 `0xF0E0D0`、`0xD0F0E0`。完整 NativeProbe Release 构建 0 警告/错误；该轮 session state 写回 772 字节，重建 host 恢复成功，Private Desktop 前台 HWND 不变。
+
+前两轮未通过的采样分别暴露了颜色值通道顺序解释错误，以及 Content 初次绘制尚未收到逐项回调；修正比较为原始 COLORREF 后，带有限重试的第三轮稳定命中。此前五种标准 ListView 样式的逐项颜色采样也已通过。该证据证明隔离 `IShellView`/DefView 在六种已测视图模式中能按项目绘制规则颜色，但不代表颜色功能已接入 Explorer Dirs 产品、Q-Dir `.qdr` 颜色已导入，也没有覆盖主题变化、DPI、多语言 Shell 扩展或可见 UI 验收。
+
+## 2026-10-27：四窗格原生 View 菜单命令 ID 直接分派
+
+将合并 View 菜单中已匹配到的 `FCIDM_SHVIEWFIRST..LAST` 命令原样发送给当前活动 `IShellView::GetWindow` 返回的 view HWND。此前 NativeProbe 用菜单文字路径匹配背景 `IContextMenu` canonical verb；微软 [`Implementing a Folder View`](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 说明 folder-specific 菜单命令在该 ID 区间内，并由 Explorer 宿主传给 folder view 窗口过程处理。单 pane 的 Details 命令实验也确认父 frame 收到同一 `WM_COMMAND` 不改变视图，而 view HWND 收到后切至 Details。
+
+Release NativeProbe 构建 0 警告/错误；`session-restore-private-desktop` watchdog 连续两次退出码 0：`20261027-044947-295ada75.stdout.log` 与 `20261027-045014-d7a36a44.stdout.log`。每次都在四 pane 分别将合成菜单里的 Details、排序升/降序、分组升/降序命令送达各自 view HWND；读回结果表明只有当前 pane 状态变化。四窗格菜单安装/停用恢复、视图状态恢复、复制/重命名/删除与 watcher 检查、F2 四方向键焦点隔离继续通过，前台 HWND 未变。
+
+该结果补齐隔离 NativeProbe 中的标准 View 菜单命令目标路由，并避免用本地化菜单文字推断 context-menu verb。命令清单仍通过当前 composite 菜单 ID 查找；实际菜单显示/点击、键盘菜单导航、标准 File/Edit 菜单命令、WPF `HwndHost` 和 ExplorerBrowser 产品均未验证。产品宿主不变更、不发布。
+
+## 2026-10-27：区分 OLE frame 与 Shell view accelerator 路径
+
+验证 `OleTranslateAccelerator` 时，探针创建的 accelerator 表可被 Win32 `TranslateAccelerator` 匹配，但调用 OLE API 返回 `S_FALSE` 且没有到达 `IOleInPlaceFrame::TranslateAccelerator` handler。该单次实验未满足完整 OLE in-place activation / `GetWindowContext` 生命周期，不能作为 frame accelerator 实现失败的结论；临时测试代码已撤回，不影响完整会话恢复探针。
+
+微软文档分别说明 [`IShellView::TranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-translateaccelerator) 是 Explorer 调用以分发文件视图快捷键，[`IShellBrowser::TranslateAcceleratorSB`](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-translateacceleratorsb) 处理浏览器 frame accelerator，而 [`OleTranslateAccelerator`](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oletranslateaccelerator) 属于对象服务器请求容器翻译的 OLE 路由。`OleTranslateAccelerator` 使用由 `IOleInPlaceSite::GetWindowContext` 提供的 frame 信息和 accelerator table；它用于 OLE in-place object activation。本文原型直接通过 `IShellFolder::CreateViewObject` 创建 `IShellView`，没有把文件视图作为 OLE in-place object 激活，因此人为补上 `GetWindowContext` 再测 `OleTranslateAccelerator` 不会验证当前 Shell view 宿主的按键路径。文件视图按键应继续沿 `IShellView::TranslateAccelerator` 验证，并区分 view 自己消费的按键与容器按键。
+
+### 2026-10-27：探测 filesystem view 到 browser accelerator 的委托
+
+在完整 Private Desktop session-restore consumer 内，对有焦点的真实 filesystem `IShellView` 直接提交独立的 F4、F6、F24 `WM_KEYDOWN`，每次前都重新聚焦同一原生文件列表。`IShellView::TranslateAccelerator` 分别返回 F4=`S_FALSE`、F6=`S_OK`、F24=`S_FALSE`；三次均未调用 `IShellBrowser::TranslateAcceleratorSB` 回调。探针结束后恢复原焦点，前台 HWND 未变；完整四窗格 session-restore watchdog 退出码 0，日志：`src/.state/native-probe-watchdog/20261027-043550-7cf2b1d4.stdout.log`。
+
+这说明 Windows 当前 filesystem view 对这几个合成按键没有委托 browser accelerator handler，其中 F6 由 view 自己消费。它不证明自定义 namespace extension 对 frame accelerator 的一般委托规则，也不覆盖真实物理按键、消息循环 accelerator table 或 WPF `HwndHost`。后续重点应放在产品 `ExplorerBrowserHost.TranslateAcceleratorCore` 到实际 focused Shell view 的消息、焦点与 pane 路由；`OleTranslateAccelerator` 不作为 filesystem `IShellView` 迁移门槛。参考微软 [`IOleInPlaceSite::GetWindowContext`](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplacesite-getwindowcontext) 对 OLE object activation 的契约。
+
+## 2026-10-26：读取 Q-Dir Filter2 原始规则行
+
+NativeProbe 增加 `QdrFilter2RawReader`，只处理 `[Filter2]` 中的数字键，按键序号排序，并保留模式字符串及其后六个原始字段。这个结构依据本机可读 `Q-Dir.ini` 的 12 行样本；字段含义未确认的值不映射到颜色或样式开关。编号规则若字段数不符或序号重复，解析整体失败且不返回部分规则。
+
+颜色策略 smoke 覆盖样本中的 `#Hidden`、通配规则和 `#BG` 原始行，以及缺字段拒绝。该读取器仅供隔离原型使用，未接入产品 `.qdr` 导入器；不会导入 Q-Dir 颜色、也不证明 `IShellView` 可见绘制或迁移兼容性。产品当前仍对 `[Filter2]` 显示“未导入”警告。
+
+复核 [Q-Dir FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR) 与 [FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR)：公开说明确认 `#BG`/`#BG-A` 背景规则、`#` 隐藏项、`#DIR` 文件夹、`#RO` 只读项，以及属性值 `-1` 允许后续匹配规则设置，`0` 表示不设置且锁定后续规则，`1` 表示设置并锁定后续规则。公开页面未说明 `[Filter2]` 行中这六个值各自对应的属性列；本机 INI 样本只能证明行形状。因此映射前仍须获得可公开验证的字段顺序证据，不能按样本猜列含义。
+
+## 2026-10-26：为隔离 Shell 宿主插入标准 OLE 菜单组
+
+`StreamViewHost.InsertMenusSB` 的默认宿主路径现创建 File、Edit、View、Favorites、Tools、Help 六个原生弹出菜单，并使用 Shell 标准菜单 ID；`OLEMENUGROUPWIDTHS` 的宿主数量为 `[2,0,3,0,1,0]`。`RemoveMenusSB` 与 `Dispose` 只移除宿主创建的菜单组和子菜单；外层显式回调仍优先接管。菜单标题暂为固定英文原型标签，未连接 WPF 产品菜单或本地化资源。
+
+`--shell-view-color-policy-smoke` 先在隐藏 HWND 上经实际 COM vtable 验证菜单项、ID、分组宽度、移除/释放及重复合并；另在同一 HMENU 保留一个外部 popup，确认宿主卸载不会删除非自身菜单。OLE composite 安装也已用真正的 `IOleInPlaceActiveObject` COM 接口夹具，不再使用空活动对象。没有创建 `IShellView`，Shell 尚未向这些组添加自己的命令项；因此不证明 Shell 菜单项合并、OLE 命令消息触发、活动对象消息循环或可见交互。依据：[Microsoft Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 与 [OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)。
+
+进一步尝试在隐藏 HWND 上直接合成 `WM_INITMENU`、`WM_INITMENUPOPUP`、`WM_MENUSELECT` 与 `WM_COMMAND`。消息到达 frame，但没有转发到 active-object 窗口；这类直接 `SendMessage` 没有经过系统实际菜单跟踪流程，不能据此判定真实 OLE 菜单路由失败，也不能当作成功证据。移除此无效断言；真实用户菜单选择仍须在不共享桌面的隔离会话验证。
+
+## 2026-10-26：为隔离 Shell 宿主提供 IOleInPlaceFrame
+
+`StreamViewHost` 现在也暴露 `IOleInPlaceFrame` IID。其菜单插入/安装/移除、状态文字、模态状态与 accelerator 方法复用 `IShellBrowser` 已验证的父级路由；`SetActiveObject` 走独立回调，父级接受后 host 保留一个 COM 引用并在替换/Dispose 时释放。`GetBorder` 报告父 HWND 客户区；`RequestBorderSpace` 与 `SetBorderSpace` 仍为 `E_NOTIMPL`，异常回调转成 `E_FAIL`。
+
+NativeProbe 的真实 CCW vtable smoke 覆盖该接口的继承槽布局、回调参数与 HRESULT、异常边界、边框拒绝及 Dispose 后断开。根据[微软 IOleInPlaceFrame 契约](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nn-oleidl-ioleinplaceframe)，这个接口提供容器框架菜单/状态/快捷键入口；当前还没有 Shell `UIActivate` 实际调用、共享 HMENU 生命周期或 `OleSetMenuDescriptor` 证据，因此这不代表主菜单已合并、安装或能正确分派命令。
+
+## 2026-10-27：实现隔离宿主 GetBorder
+
+`StreamViewHost.GetBorder` 现在验证输出指针和父 HWND，再通过 `GetClientRect` 返回容器可用客户区；空指针返回 `E_INVALIDARG`，无效父窗口返回 `E_FAIL`，Win32 读取失败转换为对应 HRESULT。`RequestBorderSpace` / `SetBorderSpace` 仍返回 `E_NOTIMPL`，因为原型尚未提供可分配的独立 Shell 工具栏边框空间。
+
+`--shell-view-color-policy-smoke` 先以隐藏普通 HWND 的 COM 回调断言复现 `GetBorder` 不写结果的失败，再核对返回矩形与独立 `GetClientRect` 结果一致、空指针被拒绝、其余 OLE frame 路由和异常/Dispose 回归通过。该验证没有创建或激活 `IShellView`，不证明真实 Shell 对边框协商的调用时序或产品菜单/工具栏布局。
+
+## 2026-10-27：补齐隔离宿主的 OLE 边框空间拒绝合同
+
+复核 `IOleInPlaceUIWindow` 合同后，`RequestBorderSpace` 对空指针返回 `E_INVALIDARG`；对四边均为零的请求返回 `S_OK`，对需要工具栏空间的请求返回 `INPLACE_E_NOTOOLSPACE`。`SetBorderSpace` 接受空指针或零宽度，不声称分配原型不支持的非零工具栏空间，并返回同一明确的无工具空间 HRESULT。
+
+COM vtable smoke 覆盖上述空指针、零值和非零请求；NativeProbe Release 定向 `--shell-view-color-policy-smoke` 通过。依据：[RequestBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-requestborderspace)、[SetBorderSpace](https://learn.microsoft.com/en-us/windows/win32/api/oleidl/nf-oleidl-ioleinplaceuiwindow-setborderspace)。没有创建 `IShellView`，因此真实 Shell 是否请求边框空间及其菜单/工具栏表现仍未验证。
+
+## 2026-10-27：保留隔离 Shell view-state 流的读写模式
+
+`IShellBrowser::GetViewStateStream` 现在按 `grfMode & STGM_ACCESS` 区分 READ、WRITE 和 READWRITE。READWRITE 使用已有 Shell 快照/初始导入状态作为流内容，同时保留可写流供后续保存；不合法访问值 `3` 返回 `E_INVALIDARG` 且不返回流。微软文档指出三种访问模式均有效，虽然 Shell 通常在创建视图时用 READ、保存时用 WRITE。
+
+`--shell-view-state-stream-smoke` 先因 READWRITE 返回空流而失败；修正后验证读取原状态、覆写并 Dispose 持久化到独立 session，再由新 host 读回；无效访问模式也有拒绝断言。定向 smoke 通过。没有创建真实 `IShellView`，因此尚未确认 Windows Shell 是否会在该原型路径请求 READWRITE；依据：[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)。
+
+## 2026-10-27：修正部分 OLE 菜单组插入失败的回滚
+
+源码审查发现 `InsertNativeMenuGroups` 的失败清理按正序移除菜单位置。每次删除会让后续项左移，可能遗留自有 popup 并错删紧邻的菜单项。现在通过共同的回滚函数按逆序撤销已插入组，释放相应 popup 句柄。
+
+新增原生 HMENU 回归夹具，对 0 到 6 个已插入组的全部失败前缀逐一验证；每种情况下都只移除已插入的自有 popup，保留外部菜单项，且未插入的 popup 仍有效。夹具先按旧正序行为失败，逆序修正后通过。`--shell-view-color-policy-smoke` 全部通过。此测试不创建 `IShellView`、不显示菜单，也不验证 Shell 可见菜单合并或产品菜单接线。
+
+## 2026-10-26：补齐 IOleWindow 帮助回调路由
+
+`StreamViewHost.ContextSensitiveHelp` 可选转给外层宿主，传递进入/退出帮助状态并保留其 HRESULT；没有处理器时继续返回 `E_NOTIMPL`。异常会转为 `E_FAIL`，释放时清除回调。COM vtable smoke 验证槽 4 的默认/转发/异常/释放行为；未启动实际帮助 UI 或 Shell view。
+
+## 2026-10-26：转发活动 Shell 视图通知
+
+`StreamViewHost.OnViewWindowActive` 现在可选委托给外层宿主，原样传递活动 view 指针并返回父级 HRESULT。无回调时仍返回原先的 `S_OK`；异常转换为 `E_FAIL`，释放 host 时解除委托。
+
+`--shell-view-color-policy-smoke` 经实际 `IShellBrowser` CCW vtable 槽 16 验证参数、HRESULT、异常隔离和释放后的默认行为。没有创建 Shell view 或窗口，因此焦点、激活时序以及多窗格/标签激活尚未验证。
+
+## 2026-10-26：接入 Shell 模态与工具栏状态回调
+
+`StreamViewHost.EnableModelessSB` 和 `SetToolbarItems` 现在可选调用外层宿主回调：前者传递 Shell 请求的启用/禁用状态，后者传递原生按钮结构指针、数量和标志；回调 HRESULT 原样返回。未配置回调仍返回原有的 `S_OK`，异常转换成 `E_FAIL`，释放时清除委托。
+
+`--shell-view-color-policy-smoke` 通过实际 `IShellBrowser` CCW vtable 验证参数、返回值、异常边界和释放后的默认行为。没有创建窗口或可见工具栏，也没有接入产品框架控件；这不证明工具栏合并、按钮绘制或模态交互已经实现。
+
+## 2026-10-26：为 IShellBrowser 接入外层菜单生命周期路由
+
+`StreamViewHost.InsertMenusSB`、`SetMenuSB` 和 `RemoveMenusSB` 可选调用外层宿主处理器；处理器收到原始 HMENU、`HOLEMENU`、活动窗口 HWND 和菜单组宽度指针，返回 HRESULT 原样保留，异常转成 `E_FAIL`。没有外层 SetMenu/RemoveMenus 处理器且 parent HWND 有效时，host 自己调用 Win32 `SetMenu` 并以 `OleSetMenuDescriptor` 接入 OLE 菜单分派；卸载时解除分派，并仅在该共享菜单仍挂在 parent 时恢复之前的菜单。parent 为零时维持空宿主 `S_OK` 行为。
+
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser` CCW vtable 和未显示的顶层 HWND 验证原生菜单安装/卸载，以及 `OleCreateMenuDescriptor` 创建、`OleSetMenuDescriptor` 安装/解除和调用方销毁顺序。没有创建 `IShellView`，也没有 Shell 菜单项进入 composite 或转换 WPF 菜单；因此不证明 Shell 实际合并、命令派发或可见交互。HMENU 与 HOLEMENU 仍由调用方拥有。产品右键菜单实现不受影响。
+
+## 2026-10-26：为 Shell 控制窗提供外层宿主路由
+
+`StreamViewHost.GetControlWindow` 和 `SendControlMsg` 现在可选委托给外层宿主：控件映射只返回显式提供的 HWND；未提供的窗口返回 `E_FAIL`，没有消息处理器时返回 `E_NOTIMPL`。成功的消息处理保留原始 HRESULT 和返回值；委托异常转换为 `E_FAIL`，不跨越 COM 边界。释放时清理两个委托。
+
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser` CCW vtable 覆盖未支持控件、有效/缺失 HWND、消息参数/结果、失败 HRESULT、异常和释放后的断开。没有创建 `IShellView`，也没有映射产品 WPF/ExplorerBrowser 控件；这不证明 Shell 实际查询控件的种类或调用时序，也不代表菜单合并已实现。
+
+## 2026-10-26：为 IShellBrowser 提供父级快捷键路由
+
+`StreamViewHost.TranslateAcceleratorSB` 不再无条件返回 `S_FALSE`。隔离宿主可选提供 `AcceleratorHandler`：返回已处理时向 Shell 返回 `S_OK`；无处理器、未消费或处理器异常时返回 `S_FALSE`，保持 Shell 原生处理。宿主释放时清除处理器引用。
+
+`--shell-view-color-policy-smoke` 通过实际 `IShellBrowser` CCW vtable 验证消息指针和命令 ID 到达处理器、消费/回退 HRESULT、处理器异常不越过 COM 边界以及释放后不再调用处理器。没有创建 `IShellView` 或完整消息循环，也没有接入产品的 WPF 快捷键路由；物理键盘、多选、文本编辑排除和焦点行为仍未验证。
+
+## 2026-10-26：接收 IShellBrowser 状态文本
+
+`StreamViewHost.SetStatusTextSB` 原先返回 `S_OK` 但丢弃传入文本。现将 LPCWSTR 复制到 host 的 `StatusText` 状态；空指针表示清除，并通过 `StatusTextChanged` 通知隔离宿主订阅者。通知异常会被限制在 native callback 边界内，不涉及原生传入缓冲区的所有权。
+
+`--shell-view-color-policy-smoke` 通过真实 `IShellBrowser::SetStatusTextSB` CCW vtable 槽写入文本再传空指针清除，验证 host 状态和订阅事件中的两次更新。没有创建 `IShellView` 或 WPF 状态栏；尚未验证 DefView/provider 实际调用内容、调用时序或文本显示布局。
+
+## 2026-10-26：通过 SID_SShellBrowser 暴露 CDB2/CDB3 服务
+
+颜色宿主先前只在直接 `QueryInterface` 时能取得自身的 `ICommDlgBrowser2/3`，而 `StreamViewHost.QueryService` 在未配置独立 `BrowserSite` 时对 `SID_SShellBrowser` 返回 `E_NOINTERFACE`。现为该独立原型增加服务查询回退：若没有外部 site，则按请求 IID 对 host 自身执行 `QueryInterface`；已有 `BrowserSite` 时仍优先委托给它。
+
+Smoke 先通过实际 `IServiceProvider` CCW vtable 槽调用 `QueryService`，并按 `SID_SShellBrowser` 请求 CDB2/CDB3；修复前两次查询均未取得接口，修复后均成功。完整 `--shell-view-color-policy-smoke` 通过，包括既有 CDB2/CDB3 全槽回调、筛选及 provider 失败开放用例。该验证没有创建 `IShellView`，仅证明托管服务路由/COM 身份可用，不证明 DefView 实际通过此路径查询或调用的时序，也不证明产品 ExplorerBrowser 已可迁移。
+
+## 2026-10-26：将 BrowseObject 导航路由下沉到通用隔离宿主
+
+`StreamViewHost.BrowseObject` 原先始终返回 `E_NOTIMPL`，颜色宿主和筛选宿主各自转发到 `ShellViewNavigationHistory`。现将可选的导航历史和其 PIDL 生命周期归到通用 host；没有配置历史时仍返回 `E_NOTIMPL`，配置后由基类统一处理绝对/相对目标、父级、前进/后退及 `SBSP_*` 策略。颜色宿主通过构造参数接入，筛选宿主将已有历史状态交给基类，并保留其目标计数与 fixture 专属回调。
+
+新增回归先因缺少 `StreamViewHost` 的 `navigation` 参数而构建失败；接线后通过真实 `IShellBrowser::BrowseObject` CCW vtable 槽验证成功导航、失败 HRESULT 保留当前位置/历史，以及宿主释放历史 PIDL。完整 `--shell-view-color-policy-smoke` 通过。该 smoke 用模拟 PIDL 和委托，不创建 `IShellView`；颜色探针实际重建 view 的导航回调仍是另一层，真实 provider 导航、旧/新 HWND 交接、焦点与选择恢复没有因此验收。
+
+## 2026-10-26：让同一探针宿主读回 Shell 写入的视图流
+
+`StreamViewHost.GetViewStateStream` 之前每次读取都返回固定的初始字节；即使 Shell 已写入新视图状态，后续在同一宿主生命周期内创建 view 仍读不到它。现在首次读取使用传入的初始流，之后若存在 Shell 写入则从保存的内存 `IStream` 读取最近字节。构造时复制输入字节，避免两个标签/调用方共用同一数组后，外部修改污染每个 host 的初始回退状态。
+
+新增 `--shell-view-state-stream-smoke`，不创建 `IShellView`，直接通过真实 Windows `SHCreateMemStream`/COM `IStream` 接口写入字节，再请求读取流并逐字节比较；还以两个 host 共用一个初始数组后修改调用方数组的方式，验证每个 host 保留独立初始快照，且其中一个 host 的 stream 更新不会覆盖另一个 host。两项回归分别先因读回旧初始值、初始数组被外部修改而失败，修复后通过。NativeProbe/App Release build 与完整 SettingsSmoke 通过，0 警告/错误。此结果只证明同一个 `StreamViewHost` 实例内存往返及实例隔离；没有进程重启持久化或 Q-Dir 互操作证据。
+
+同一探针随后加入 `ShellViewStateStore`：以稳定 GUID 会话键将 opaque native stream 写入独立二进制文件，先写唯一临时文件并 flush，再原子替换目标；`StreamViewHost.Dispose` 在释放最后的写入流前提交保存。重新创建 store 和 host 后可读取原 stream，未保存的 GUID 仍使用构造时的初始字节。NativeProbe smoke 覆盖双会话隔离与恢复；尽管后续已增加独立进程读写复验，真实 `IShellView` 的保存/销毁时序及产品标签会话持久化仍未验证。
+
+跨进程复验由三个 NativeProbe 子进程组成：两个先后运行的写入进程针对同一 GUID 各写一代状态并退出，最后一个新进程重新创建 store/host，逐字节读回第二代最新内容。该 smoke 证明独立进程可恢复并更新原型文件状态，仍未启动 `IShellView`，因此不验证 Shell 真实销毁时的写流提交时序或应用会话恢复。
+
 ## 2026-10-26：内存 DC 字体资源生命周期
 
 字体策略 smoke 现在额外创建内存 GDI DC，调用真实 `TrySelect` 将逐项样式字体选入，再执行与项目绘制后相同的 `Restore`，确认原字体重新成为当前对象后才销毁 DC。定向 `--shell-view-color-policy-smoke` 通过。该结果覆盖 GDI 句柄选择/恢复，不创建 Shell view，也不证明真实 DefView 通知或可见像素绘制。
@@ -90,13 +376,19 @@
 
 Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 将 `#BG` 定义为视图背景，将 `#BG-A` 定义为活动视图背景。NativeProbe 现把它们交给独立的视图背景匹配/求值入口，不当作文件名通配规则；`#BG-A` 只命中活动视图，`#BG` 可为活动或非活动视图供色，并沿用同一逐属性优先级逻辑。无窗口策略 smoke 覆盖两个标记、活动状态、全局回退和高优先级锁定。
 
-这只是值解析，没有连接到视图 HWND 或实际背景绘制，也没有导入 `.qdr`。官方 [FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 示例公开 `useColor` / `useTreeColor` 开关；FAQ 47 说明需在保存收藏前启用颜色保存。现有本机样本无可验证的颜色规则序列化内容，所以规则编码/导入仍未确定。未启动 GUI、Private Desktop 探针或产品 ExplorerBrowser。
+此记录后来已由下方“接入隔离 Shell 视图背景色”推进：解析出的颜色会应用到原生 `SysListView32`，未命中时传 `CLR_NONE` 让父窗口绘制系统默认背景。该实现仍仅在隔离 `IShellView` 原型中，真实背景像素、主题变化、`.qdr` 规则导入以及产品 ExplorerBrowser 均未验证。官方 [FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 示例公开 `useColor` / `useTreeColor` 开关；FAQ 47 说明需在保存收藏前启用颜色保存。官方页面仍未给出规则序列化字段，因此不推断 `.qdr` 导入格式。
 
 ## 2026-10-26：建模 Q-Dir 颜色规则的逐属性优先级
 
-Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 和[官方旧版帮助页](https://www.softwareok.com/?seite=q-dir-hilfe)说明颜色表按顺序执行、最上方优先；文字色、背景色、粗体、斜体、下划线、删除线各自具有 `-1/0/+1` 状态。`-1` 将该属性交给较低优先级规则，`0` 锁定未设置，`+1` 锁定已设置。NativeProbe 现为六类属性保存独立三态值，并用同一个纯 evaluator 按规则顺序解析；隔离自绘现消费文字色和背景色，字体样式未接入绘制。官方资料没有给出可核实的 Q-Dir 颜色规则 INI 行格式，因此不推断解析/导入行为。
+Q-Dir 官方 [FAQ 47](https://www.softwareok.com/?faq=47&seite=faq-Q-DIR) 和[官方旧版帮助页](https://www.softwareok.com/?seite=q-dir-hilfe)说明颜色表按顺序执行、最上方优先；文字色、背景色、粗体、斜体、下划线、删除线各自具有 `-1/0/+1` 状态。`-1` 将该属性交给较低优先级规则，`0` 锁定未设置，`+1` 锁定已设置。NativeProbe 现为六类属性保存独立三态值，并用同一个纯 evaluator 按规则顺序解析；隔离自绘消费文字色、逐项背景色和字体样式，`#BG`/`#BG-A` 视图背景也已连接到原生 ListView 背景消息。官方资料没有给出可核实的 Q-Dir 颜色规则 INI 行格式，因此不推断解析/导入行为。
 
 无窗口策略 smoke 覆盖 continuation、两种锁定、不匹配/最终 continuation，以及同一项目上背景与文字颜色、字体样式的独立优先级。隔离像素夹具仍通过该 evaluator 为两条背景色规则解析颜色身份。策略 smoke、完整 Release SettingsSmoke、NativeProbe Release build、App Release build 均通过，0 警告/错误。本轮未运行 GUI/Private Desktop 像素探针；未接入产品 ExplorerBrowser、用户设置或 `.qdr` 导入。Q-Dir 配置存储格式、规则导入及用户可见效果仍未验证。
+
+## 2026-10-26：接入隔离 Shell 视图背景色
+
+`#BG-A` / `#BG` 解析结果现通过 `LVM_SETBKCOLOR` 发送到隔离视图的 `SysListView32`；创建导航后的新视图时重新应用。无规则时发送 `CLR_NONE`，让 ListView 将背景擦除交给父窗口，保留 Shell 默认系统色。颜色仍只存在于 NativeProbe 夹具，不进入产品设置或 ExplorerBrowser。
+
+新增纯逻辑 smoke 覆盖已解析 COLORREF 原样转发、无规则默认回退及无效 HWND 拒绝。NativeProbe Release build 0 警告/错误，`--shell-view-color-policy-smoke` 通过。未创建 Shell view，因此真实 `LVM_SETBKCOLOR` 返回值、活动/非活动 pane 像素、各查看模式与 OS 主题变化尚未验证；`.qdr` 颜色规则序列化仍未知。
 
 ## 2026-10-26 复验普通颜色路径与控件基线
 
@@ -206,7 +498,7 @@ dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.cspro
 
 ### 源码接口差异复核（2026-10-25）
 
-逐项核对后，隔离 `StreamViewHost` 实现了 `IShellBrowser` 的方法布局，但 `BrowseObject` 返回 `E_NOTIMPL`，`GetControlWindow` 失败，`SendControlMsg` 不支持，菜单/状态栏/工具栏回调不接管产品 UI；`GetViewStateStream` 只连接传入的临时字节或内存流。它同时提供 `IShellServiceProvider`，仅为视图状态流查询返回探针接口。
+逐项核对后，隔离 `StreamViewHost` 实现了 `IShellBrowser` 的方法布局；`BrowseObject` 在没有导航委托时返回 `E_NOTIMPL`，`GetControlWindow`/`SendControlMsg` 与 `TranslateAcceleratorSB` 可委托给外层，但尚无产品控制窗映射或完整消息循环。`SetStatusTextSB` 复制/清除状态并通知订阅者。菜单合并、工具栏回调仍未接管产品 UI；`GetViewStateStream` 使用隔离内存/状态文件而非产品会话编排。它同时提供 `IShellServiceProvider`，仅为视图状态流查询探针接口或按 IID 暴露自己的 CDB 回调。
 
 本轮在直接创建的默认 `IShellView` 上只读查询 `IFolderFilterSite`，结果为 `E_NOINTERFACE`（`0x80004002`）。这与 ExplorerBrowser 对象上的筛选挂接点不同，说明现有 `IFolderFilterSite.SetFilter` 不能直接用于此独立视图；此结果不排除通过宿主 `ICommDlgBrowser3.IncludeObject` 实现普通项目过滤，也没有测试普通隐藏项枚举标志能否由独立宿主控制。
 
@@ -446,14 +738,14 @@ Release 构建 0 警告/错误，纯策略 smoke 退出码 0；组件抽取后�
 
 | 能力 | 隔离原型 | 当前产品实现 | 迁移缺口 |
 |---|---|---|---|
-| Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、简单服务查询；菜单栏/工具栏框架回调多为 no-op | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 要实现菜单/状态/控制窗、快捷键转发和活动 view 生命周期，而非只创建 `IShellView` |
-| 导航和历史 | 基类 `BrowseObject` 返回 `E_NOTIMPL`；筛选探针子类仅为两个临时文件夹实现导航、父级及内存历史 | ExplorerBrowser navigation events、取消/过期门控、虚拟位置/搜索路由及每标签 Shell TravelLog | 完整目录/虚拟位置导航、失败恢复、Back/Forward/Parent 语义及并发状态门控 |
-| 筛选 | 基础颜色宿主未提供 `ICommDlgBrowser3`；单独 FilteredHost 实现了测试过滤器和窄场景导航 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | 合并过滤、原生回调线程语义和大目录枚举时序，并验证全目录/搜索行为 |
+| Shell 浏览器框架 | `GetWindow`、`QueryActiveShellView`、view-state stream、服务查询；状态文本事件、控制窗/消息与加速器现有可选宿主委托；菜单合并/工具栏仍未实现 | ExplorerBrowser 创建/管理 ShellBrowser 与活动 view；`OnViewCreated` 抓取实际 view HWND | 状态文本产品提示已接入；隔离宿主仍需映射真实控制窗、合并菜单、验证宿主消息循环与活动 view 生命周期 |
+| 导航和历史 | `StreamViewHost` 可注入共享 `ShellViewNavigationHistory` 并统一路由绝对/相对 PIDL、父级及历史标志；颜色探针回调会按目标绑定文件夹并创建/替换 Shell view，筛选探针仍限临时 fixture | ExplorerBrowser navigation events、取消/过期门控、虚拟位置/搜索路由及每标签 Shell TravelLog | 基类 COM 路由与纯状态历史已有 smoke；实际 Shell 导航的 provider 失败、view/HWND 交接、焦点/选区恢复和并发门控仍须独立验证 |
+| 筛选 | 颜色宿主现实现并以 smoke 验证 CDB/CDB2/CDB3 全部回调槽及 `SID_SShellBrowser` 的 QueryService 路由；CDB3 的 `IncludeObject` 覆盖匹配、排除及 provider 元数据失败开放。FilteredHost 仍仅覆盖临时目录导航/历史 | `ShellBrowserSite` 实现 CDB/CDB2/CDB3；产品按标签接入 `IFolderFilterSite`，处理隐藏项偏好和搜索状态 | CDB 托管接口与服务查询合同已有 smoke；仍需确认 DefView 实际查询/回调顺序，并将过滤规则、原生回调线程语义和大目录枚举时序整合进通用宿主，验证全目录/搜索行为 |
 | 选择与状态 | 颜色探针手工创建选择；多选恢复使用生产快照类，但没有产品窗口/标签协调器 | `ExplorerBrowserHost` 维护用户选择快照、焦点、命令可用状态、视图模式/排序/分组/列配置及延迟恢复 | 连接真实用户输入代际、标签持久化、焦点遍历、刷新恢复与错误路径 |
 | 文件更新 | 当前颜色探针临时接入产品 watcher/batch coordinator 做隔离操作验证 | 每个产品文件系统标签拥有目录 watcher、合并队列、Shell STA Refresh 与 fallback | 从临时 fixture 移植到每个新宿主实例，验证 burst、异常、溢出和跨路径切换 |
 | Pane/界面集成 | 独立 parent hwnd，无 WPF PaneControl、标签、四窗格或应用主题 | WPF 每窗格/每标签持有 ExplorerBrowser，负责视图附着/隐藏、原生 Pane、地址/搜索/标签和布局状态 | 完整容器、创建/销毁、重排、隐藏保留、每标签配置、状态栏和系统主题集成 |
 
-`ShellViewHostFilterProbe.FilteredHost` 证明 `BrowseObject` 与 CDB3 过滤可在窄隔离用例内实现；它不是通用导航框架，也未补足产品窗格生命周期。当前证据支持“颜色绘制技术在默认 IShellView 中可行”，不支持把产品视图直接替换为该原型。颜色继续留在隔离研究阶段，后续若要进入产品方案，必须先针对上述导航/筛选/状态/刷新/容器缺口完成独立设计和分阶段等价验证。
+`ShellViewColorBrowserHost` 现已把 CDB/CDB2/CDB3 回调接入颜色宿主，并通过真实托管 CCW vtable smoke；`ShellViewHostFilterProbe.FilteredHost` 另证明 `BrowseObject` 与 CDB3 过滤可在窄隔离用例内实现。两者都不是通用导航框架，也未补足产品窗格生命周期。当前证据支持“颜色绘制技术在默认 IShellView 中部分模式可行”，不支持把产品视图直接替换为该原型。颜色继续留在隔离研究阶段，后续若要进入产品方案，必须先针对上述导航/状态/刷新/容器缺口完成独立设计和分阶段等价验证；CDB3 的接口槽本身已有 smoke，DefView 实际调用顺序、全目录/搜索过滤及大目录时序仍未验证。
 
 ## 2026-10-25 Shift 范围选择的合成加速器边界
 
@@ -622,3 +914,391 @@ Microsoft 的 `BrowseObject` 文档说明 `SBSP_EXPLOREMODE` 表示新浏览窗�
 本轮屏幕内像素检查中，八种 Shell 查看方式的项目行目标颜色像素均未命中（`0/0`）；Icon、Details、SmallIcon、List 没有收到可用的 `CDDS_ITEMPREPAINT`，Tile/Content 收到项目绘制通知，但也没有项目级回调，因而没有逐项着色。对照用的普通 ListView 在同一探针会话中各模式均产生项目回调并命中像素，证明采样链路可工作；不能把该对照结果外推为默认 Shell `IShellView` 支持着色。背景/选中项 Shell 菜单、视图模式读回和临时文件复制/重命名/删除刷新也在本轮通过，但均属于隔离默认 filesystem view，不是产品 ExplorerBrowser 或可见用户操作验收。
 
 这次屏幕内负结果结束了对相同 DefView `NM_CUSTOMDRAW` 项目回调路径的重复采样；逐项颜色仍是未决能力，不据此迁移产品宿主。后续优先推进可复用的原生 Shell 菜单和文件操作行为；若要继续颜色，应先提出新的、不同于该 DefView 回调路径的技术假设并单独验证。
+
+### 2026-10-27 真实 Shell view-state stream 按会话键写回
+
+`ShellViewColorBrowserHost` 现在可把 `ShellViewStateStore` 与稳定 session GUID 传给通用 `StreamViewHost`。策略 smoke 新增真实派生宿主的 store/read/write/dispose/recreate 往返，先因构造器不暴露 store 而失败，接线后通过。
+
+`color-private-desktop` 在临时 fixture 中创建真实默认 filesystem `IShellView`。`DestroyViewWindow` 期间宿主收到 4 次 stream 写回；`Dispose` 后同 GUID 状态文件存在，大小 772 字节。随后新建隔离宿主使用相同 GUID 调用 `GetViewStateStream(READ)`，逐字节匹配实际 Shell 写出的流。该次 NativeProbe Release build 0 警告/错误，Private Desktop watchdog 退出码 0；主桌面 foreground HWND 从 `0x81852` 保持不变。复验日志：`src/.state/native-probe-watchdog/20261027-000036-81c04f29.stdout.log`。
+
+证据仅覆盖 Shell 销毁回调到临时 session store、再由新 host 提供相同字节。单独切换模式、停用/销毁 view 或同路径重导航均未触发写回；写入只在完整探针后段出现，目前尚未隔离出最小触发条件。让第二个真实 `IShellView` 消费恢复流并读回模式/列的尝试因此没有通过，失败记录：`src/.state/native-probe-watchdog/20261026-235844-733e4d24.stdout.log`。没有跨应用进程重启或连接产品标签会话 ID。状态目录和 fixture 都由探针创建并清理，产品 INI、ExplorerBrowser 与 release 未修改。
+
+### 2026-10-27 真实 IShellView 激活菜单合并回调
+
+NativeProbe 新增 `--ishellview-menu-activation-private-desktop`，在唯一临时 filesystem fixture 上创建实际默认 `IShellView`，随后调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`。`StreamViewHost` 记录 `IShellBrowser::InsertMenusSB`、`SetMenuSB` 与 `RemoveMenusSB` 实际入口次数；探针并检查顶层宿主 `GetMenu` 是否返回共享菜单句柄。Release 构建 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过。Private Desktop watchdog 连续三轮退出码 0，每轮稳定读到 `insert=7 / set=13 / remove=6`、`shared-menu-present=True`、`active-view=True`；主桌面 foreground HWND 始终为 `0x81852`。原 `color-private-desktop` 另行复跑退出码 0，状态流仍写入 772 字节并由重建 host 读回。
+
+首次探针运行在菜单结果后被颜色主探针的状态流断言判为失败，因为专用菜单模式没有执行颜色主探针后续刷新/绘制阶段。现把这条模式与状态流验收条件分开；状态流门槛由独立的颜色探针复验，不降低原门槛。
+
+这证明真实默认 Shell 视图激活会进入当前隔离 `IShellBrowser` 的菜单生命周期并安装共享菜单。它没有显示/点击菜单，也没有验证 Shell 菜单项与应用自定义命令合并后的排序、绘制、快捷键、启用状态或命令分派；未覆盖 ExplorerBrowser 产品宿主、Pane/WPF 容器或标签切换。实际可见菜单验收仍需之后获准的隔离输入会话，产品宿主、INI 和 release 未修改。日志：`src/.state/native-probe-watchdog/20261027-000439-ec670e37.stdout.log`、`20261027-000445-8a085849.stdout.log`、`20261027-000446-98774ea8.stdout.log`；独立状态流复验：`20261027-000447-38b83a8d.stdout.log`。
+
+### 2026-10-27 真实 IShellView 四窗格模式隔离、状态往返与文件操作
+
+`--ishellview-session-restore-private-desktop` 生产者在临时文件夹 view 中设置 Details、Name 降序、Type 升序分组及 Name/Size/Type 三列顺序与宽度，调用 `IShellView::SaveViewState` 并将 session GUID 对应的流落盘。之后启动一个全新的 NativeProbe 消费进程，传入 fixture 路径、状态目录和相同 GUID；消费进程确认状态文件在启动前已存在，Shell 对新 host 请求 4 次读取 748 字节流，并从新建真实 view 读回 mode `4`、Name 降序、Type 升序分组及三列的相同顺序和宽度。消费者创建 2×2 原生子窗格布局，四个 pane HWND 都是同一 top-level 的不同子窗口，四个真实 `IShellView` window 分别是所属 pane 的子窗口。第一 pane 为 Details/mode `4`；第二 pane 用独立 session GUID 切换到 List/mode `3`，单独 `SaveViewState` 并写入 772 字节，按现有 `ShellViewReferenceRetirement` 路径销毁后以同 GUID 重建，Shell 对新 host 请求 4 次读流并恢复 List，第一 pane 仍是 Details。第三、第四 pane 分别切到 Icon/mode `1` 与 Tile/mode `6`；四个 view 同时存活时读回 `4,3,1,6`。第一 pane 对四个 view 共享的目录执行 Shell 复制、重命名、删除后，四个 view 的项目数都逐项收敛到预期值，四种模式以及第一 pane 的排序、分组和列布局仍保持。
+
+NativeProbe Release build 0 警告、0 错误，定向 `--shell-view-color-policy-smoke` 通过；四窗格版本 Private Desktop watchdog 连续三轮退出码 0，每轮生产者和消费者 PID 不同，四个 view 读回 Details/List/Icon/Tile (`4/3/1/6`)，第二 session 重建 read=4/write=1；Shell 复制、重命名、删除后四个 pane 项目数都收敛，主桌面 foreground HWND 均保持 `0x81852`。日志：`20261027-003105-fc14fff6.stdout.log`、`20261027-003119-043d18b7.stdout.log`、`20261027-003129-2cc68611.stdout.log`。
+
+早期失败并非 Shell 忽略会话流：旧刺激调用 `IFolderView::SetCurrentViewMode` 虽返回成功，但保存前模式仍是 `1`；改用已验证的 `IFolderView2::SetViewModeAndIconSize` 后，保存前和新进程新 view 都正确读回。消费者在四 pane 状态与文件操作检查后通过自身进程退出回收隔离 Shell STA，生产者再删除临时 fixture 和状态目录；同步释放该 STA 内的 Shell view 曾使消费者卡在清理阶段，所以不把未完成的同步清理当作恢复失败。该证据证明四个真实 Shell view 可在同一原生容器中以不同模式并存，第二 pane 能按 session GUID 独立保存/销毁/恢复，同目录 Shell 文件通知会使四个 view 的项目数都收敛。四个 pane 浏览同一路径，因此没有验证不同目录之间的通知隔离；它也不是 WPF `PaneControl` 或 ExplorerDirs.App 正式会话接线，不证明可见拖放、物理焦点/键盘或菜单体验。产品 ExplorerBrowser、INI 与 release 均未接入或修改。
+
+### 2026-10-27 四窗格菜单激活回调路由
+
+四窗格 session-restore consumer 在四个模式和各自 host 已建立后，依序对每个真实 `IShellView` 调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)`。每轮在目标 pane 的 `ShellViewColorBrowserHost` 上分别观察到 `InsertMenusSB +1`、`SetMenuSB +2`；Shell 离开该 pane 时 `RemoveMenusSB +1`。Private Desktop watchdog 连续三轮通过，三轮都维持主桌面 foreground HWND `0x81852`。日志：`20261027-003403-1ceb1c1b.stdout.log`、`20261027-003416-58e4ebf2.stdout.log`、`20261027-003426-f3a24d83.stdout.log`。
+
+该结果只验证 `UIActivate` 的 Shell 回调进入对应原生 pane host；没有打开或点击菜单，不能证明菜单视觉合并、WPF 命令分派、键盘焦点或真实输入体验。四个 view 仍位于同一隔离进程且浏览相同 fixture，未验证生产宿主、不同路径通知、拖放，也未修改产品 ExplorerBrowser、INI 或 release。
+
+### 2026-10-27 四窗格跨目录 Shell 通知隔离
+
+四窗格 session-restore consumer 将前三个 `IShellView` 留在主 fixture，第四个 view 放到兄弟隔离 fixture；两组都保持自己的视图模式和 session host。主目录的 Shell 复制、重命名、删除只要求前三个 pane 收敛；随后在另一目录执行 Shell 复制，第四个 pane 收到新项目且计数 `1→2`，前三个 pane 保持原计数并且没有出现该跨目录文件。Private Desktop watchdog 连续三轮退出码 0，主桌面 foreground HWND 每轮未变：`20261027-003657-e9c78ab7.stdout.log`、`20261027-003711-0d8fef2c.stdout.log`、`20261027-003721-a191bc98.stdout.log`。夹具位于 NativeProbe `fixtures` 根目录并由外层探针按根路径边界清理。
+
+本结果证明同一隔离原生容器里的 Shell 文件通知按不同目录更新各自 view，未依赖 F5 刷新。它仍是 `IFileOperation` 触发的合成操作，不覆盖真实外部进程 watcher、产品 PaneControl/WPF、可见菜单/物理输入、拖放或 ExplorerBrowser 产品接线；产品配置与 release 未改。
+
+### 2026-10-27 隔离 Shell 拖放探针未通过产品行为门槛
+
+从真实源 view 选中 child PIDL 后取得 `IDataObject`，并从目标文件夹的 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得 Shell drop target。手动调用 `DragEnter`、`DragOver`、`Drop` 虽均返回成功且保留 COPY effect，目标夹具始终未生成文件；这条直接回调路径不构成真实拖放验收。进一步改为 OLE `DoDragDrop` 后，Private Desktop 中 `GetCursorPos` 返回失败，无法在不移动/注入用户桌面输入的情况下把隔离目标放到当前光标下，因而没有开始 OLE 拖放循环。相关失败日志：`20261027-003901-65e574d6.stdout.log`、`20261027-003958-08c0f48b.stdout.log`、`20261027-004029-d5c2fb1a.stdout.log`、`20261027-004054-b9fd9a72.stdout.log`、`20261027-004126-daa97a66.stdout.log`、`20261027-004146-fd004e7e.stdout.log`、`20261027-004213-3866e1a3.stdout.log`、`20261027-004239-60802bf2.stdout.log`、`20261027-004305-030e6607.stdout.log`、`20261027-004459-b33c6755.stdout.log`。
+
+失败的临时拖放代码已撤回；四窗格跨目录通知隔离的已提交探针不受影响。本记录不判定 Windows Shell 拖放本身失败，也不代表产品拖放已验证。后续需要让真实 OLE 拖放循环在可定位指针的独立测试桌面内运行，或在用户明确授权的隔离 GUI 会话中进行；不调用 `SetCursorPos` 修改当前用户指针。官方合同说明：文件夹级 drop target 通过 `IShellFolder::CreateViewObject` 请求，而条目级 `GetUIObjectOf(IID_IDropTarget)` 的 `cidl` 需为 1。
+### 2026-10-27 双 pane IShellBrowser 导航历史隔离 smoke
+
+`ShellViewColorBrowserHostSmoke` 现通过两个独立 host 暴露出的 `IShellBrowser::BrowseObject` COM vtable 交错执行导航：各自进入不同 PIDL、第一 pane 后退、第二 pane 建立新历史分支，以及第一 pane 的失败目标。每一步都同时断言两个 history 的当前位置和索引；跨 pane 操作没有改变另一方历史，失败导航保留双方状态。NativeProbe Release 构建 0 警告/错误，`--shell-view-color-policy-smoke` 全部通过。
+
+此项使用 `ShellViewNavigationHistorySmoke.PidlPool` 的合成 PIDL 与成功/失败回调，不创建真实 Shell view，也不证明后退/前进按钮状态、travel log 或可见 Pane 导航。实际 `IShellView` 宿主历史接线仍需窗口级验证；产品 ExplorerBrowser 代码、配置和 release 未修改。
+
+### 2026-10-27 四窗格标准 Shell 查看命令定向到目标 pane
+
+四窗格 consumer 为每个 Shell view 取得原生背景 `IContextMenu`，按 canonical verb `viewlogicaldetails` 调用 `IContextMenu::InvokeCommand`，验证 pane 2、3、4 各自从 List/Icon/Tile 切到 Details、其它 pane 仍保持既定模式，再恢复原模式。连续三轮 Private Desktop watchdog 退出码 0；四窗格状态、复制/重命名/删除、跨目录通知仍通过，foreground HWND 未变。日志：`20261027-004952-5e89970c.stdout.log`、`20261027-005008-7067c712.stdout.log`、`20261027-005020-58682019.stdout.log`。NativeProbe Release build 0 警告/错误，策略 smoke 与 diff check 通过。
+
+首 pane 也参加往返时，诊断采样确认：切到 List 后三列宽仍为 `280/120/160`；调用 Shell 的 Details 菜单 verb 后，Shell 按当前约 380 px 的 view 宽度把列宽调整为 `158/110/110`。排序、分组、模式和列身份/顺序均未改变。原失败是后续文件操作断言错误地要求宽度仍与初次恢复完全相同，不是复制改变了排序/分组或列结构。
+
+探针现在对四个 pane 都运行 List→Shell Details 菜单命令→恢复原模式；文件操作阶段继续检查 Details、排序、分组和列身份/顺序。精确列宽仍在独立进程首次恢复状态时严格检查。Release build 0 警告/错误；2026-10-27 00:53:05 Private Desktop watchdog 退出码 0，四 pane 命令路由、复制/重命名/删除和跨目录通知全部通过，主桌面 foreground HWND `0x81852` 未变。日志：`src/.state/native-probe-watchdog/20261027-005305-a64c57ff.stdout.log`。
+
+测试仍不显示菜单，也不证明真实菜单外观、物理键盘或 WPF 活动 pane 集成；产品 ExplorerBrowser、配置与 release 未改。
+
+### 2026-10-27 四窗格 Shell 排序与分组菜单命令隔离
+
+在同一四窗格 consumer 中，先为每个真实 view 建立 Name 升序、Type 升序分组的可读回基线。然后逐个 pane 通过其自身背景 `IContextMenu` 调用 `viewlogicaldetails`、`sortdescending`、`sortascending`、`groupdescending`、`groupascending`；每次调用后读取四个 `IFolderView2` 状态，验证只有目标 pane 的排序/分组方向改变，其他三个 pane 保持升序。恢复四种查看模式和 pane 1 原有 Name 降序状态后，再执行已有 Shell 复制/重命名/删除及跨目录通知检查。
+
+NativeProbe Release 构建 0 警告、0 错误；加入 Details 菜单后排序/分组状态不变断言后，Private Desktop watchdog 连续三轮退出码 0；三轮均通过四个 pane 的菜单命令路由、文件操作和通知检查，主桌面 foreground HWND 保持 `0x81852`。日志：`20261027-005805-3fc08177.stdout.log`、`20261027-005826-4d2e0fc6.stdout.log`、`20261027-005843-098f9488.stdout.log`。
+
+该证据证明隔离默认 filesystem `IShellView` 的标准背景菜单命令可按各 pane 的原生 `IContextMenu` 定向，并读回独立排序/分组状态；菜单未实际显示或点击，因此不证明 UI 合并、列标题右键、物理输入、扩展菜单或 WPF 活动 pane 接线。产品 ExplorerBrowser、配置与 release 未修改。
+
+### 2026-10-27 四窗格文件项菜单目标隔离
+
+在四窗格 session-restore consumer 中逐个 `IFolderView2::SelectItem` 选中一项，并经对应 `IShellView::GetItemObject(SVGIO_SELECTION, IID_IContextMenu)` 查询文件项菜单。每一步都读取四个 view 的 `SVGIO_SELECTION` 数量，断言只有目标窗格有一项选中；原生菜单必须枚举出 canonical `copy` 动词。随后清空四个 view 的选区。探针不调用菜单命令、不访问系统剪贴板，也不显示菜单。
+
+Release NativeProbe 构建 0 警告/错误；Private Desktop watchdog 连续三轮退出码 0，四个 pane 都读到自己的 `copy` 菜单且兄弟 pane 选区为零，四窗格文件操作/通知及前台 HWND `0x81852` 检查通过。日志：`20261027-010130-21d014fe.stdout.log`、`20261027-010152-b16fbd87.stdout.log`、`20261027-010209-b0ee888b.stdout.log`。
+
+这验证了隔离原生 view 能从各自选择项提供 Shell 文件菜单对象并保持选区隔离；未验证可见右键菜单、命令点击、第三方扩展菜单、产品 ExplorerBrowser 或 WPF 目标命中。
+
+### 2026-10-27 四窗格 IShellView 方向键焦点路由
+
+四窗格 consumer 分别在 Details、List、Icon 模式中，将焦点设到第一项并通过对应 `IShellView::TranslateAccelerator` 派发导航键：Details/List 使用 Down，Icon 网格使用 Right。三种模式的目标 pane 焦点均从索引 0 移至 1；每次操作前后读取四个 `IFolderView2::GetFocusedItem`，兄弟 pane 的焦点索引保持不变。第四窗格只有一个项目，未纳入移动断言。结束前清空测试选择。
+
+NativeProbe Release 构建 0 警告/错误；完整四窗格 Private Desktop watchdog 连续三轮退出码 0，前台 HWND 保持 `0x81852`。日志：`20261027-010520-482e0ca0.stdout.log`、`20261027-010542-f36a9d5b.stdout.log`、`20261027-010559-e5ef25fc.stdout.log`。
+
+这证明默认 filesystem `IShellView` 在三个标准模式下能经各自 accelerator 入口移动 pane 内 Shell 焦点，并保持兄弟 view 状态。消息由隔离探针合成并直接交给 Shell，不是物理键盘/完整应用消息循环；不证明 WPF `HwndHost` 焦点、Tab/Shift+Tab、重命名编辑器、剪贴板操作或用户可见行为。产品 ExplorerBrowser、配置与 release 未修改。
+
+### 2026-10-27 四窗格 Ctrl+A 选择路由
+
+在同一四窗格 consumer 中逐 pane 激活各自 `IShellView` 与列表焦点，以隔离探针线程的键盘状态设置 Ctrl 按下，然后经对应 `IShellView::TranslateAccelerator` 派发 Ctrl+A。pane 1–3 分别读回自身全部两项被选中，另外三个 pane 的选中项数量保持为零；每步清除选择，并在 finally 路径恢复原线程键盘状态。没有读取或写入系统剪贴板。
+
+NativeProbe Release 构建 0 警告/错误；完整 Private Desktop 四窗格 watchdog 连续三轮退出码 0，记录 `ctrl-a=pane1:2,pane2:2,pane3:2`，前台 HWND 保持 `0x81852`。日志：`20261027-010720-60883814.stdout.log`、`20261027-010744-e5a5e1ee.stdout.log`、`20261027-010803-f770a4fc.stdout.log`。
+
+该证据是直接合成 Ctrl+A 消息与线程 modifier 状态的 Shell accelerator 路径，不是物理键盘或完整产品消息循环验收；第四 pane 只有一个 fixture 项且未纳入全选断言。产品 ExplorerBrowser、WPF、剪贴板与 release 未修改。
+
+### 2026-10-27 背景菜单“新建文件夹” canonical verb 原型通过
+
+`--ishellview-menu-command-private-desktop` 已能从背景 `IContextMenu` 读到 `newfolder` canonical verb。单命令探针在 Private Desktop 中显示并以 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 激活默认 `IShellView`，再将原生列表设为焦点后比较调用形式：不同的 `QueryContextMenu` 样本中，`GetCommandString` 找到的命令偏移先后为 `113` 和 `115`；以各自 `MAKEINTRESOURCE(offset)` 调用 `IContextMenu::InvokeCommand` 均返回 `E_FAIL (0x80004005)`。以无 `CMIC_MASK_FLAG_NO_UI` 的 ANSI canonical verb `newfolder` 调用返回 `S_OK`，实际创建“新建文件夹”，Shell 项目数由 2 增至 3。创建后选中数仍为 0，focused index 仍指向原 `child` 项，没有 `Edit` 重命名窗口，焦点仍在 `SysListView32`。没有调用 `GetControlWindow` 或状态文本回调；Private Desktop 外前台 HWND 未变，夹具随后清理。NativeProbe Release build 0 警告、0 错误，定向 watchdog 退出码 0。
+
+后续扩展同一 Private Desktop 探针：创建后明确通过 `IFolderView::SelectItem` 选中新目录，设置列表焦点，并将合成 F2 交给 `IShellView::TranslateAccelerator`。F2 返回 `S_OK`，原生内联 `Edit` 出现且取得焦点；随后将合成 Left/Right 交回 `IShellView::TranslateAccelerator`，两者均返回 `S_OK`，编辑窗口保持存在并持续持有焦点。这提供了一个可行的原生路径，可供后续解决多窗格重命名时方向键被邻窗格截获的问题。它只验证了编辑中的左右方向键，尚未覆盖上下键、真实物理键、完整 WPF/HwndHost 消息循环或产品多窗格路由，因此不能据此宣称用户报告的产品缺陷已修复。
+
+该结果证明默认文件系统 `IShellView` 可通过 canonical verb 完成新建文件夹并由视图枚举新项；程序化创建自身没有自动选中/重命名，但显式选中后原生 F2 和编辑器左右键路由有效。偏移在重新构造菜单时发生变化，因此不能跨菜单缓存；即使逐次重新查询后，offset 调用仍失败，具体原因未明。仍未验证真实弹出菜单点击、ExplorerBrowser 产品或完整四窗格，也不把一次具体命令推广为所有 Shell 命令都应使用字符串。隔离探针新增 `--ishellview-newfolder-private-desktop` 与 watchdog 入口，并要求列表预先持有焦点、创建结果同时出现在磁盘和 Shell 列表才算通过；产品 ExplorerBrowser、用户目录和 release 均未改动。
+
+### 2026-10-27 激活后的 Shell 原生菜单组内容读取
+
+扩展 `--ishellview-menu-activation-private-desktop`：在真实默认 filesystem `IShellView` 完成 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 后读取宿主共享 `HMENU` 的根级菜单组及其子项。Private Desktop watchdog 退出码 0，NativeProbe Release build 0 警告/错误，主桌面 foreground HWND 保持 `0x81852`。探针确认 File/Edit/View/Help 四个子菜单已包含 Shell 项目；当前中文 Windows 样本分别读到 4/10/18/1 项，Edit 含剪切、复制、粘贴、全选及快捷键，View 含八种查看方式及排列/排序/分组/列选择命令。探针以菜单组非空作为通过条件，不依赖本地化标题与具体子项数量。
+
+这补足了此前只有 `InsertMenusSB`/`SetMenuSB` 回调次数及共享句柄的证据：激活后的共享菜单对象中确实有 Shell 填充的标准命令。仍未追踪显示菜单、真实点击、应用自定义菜单插入位置、命令分派、键盘快捷键优先级或 WPF 活动 pane；因此不能证明应用当前菜单体验已合并，也不验证 ExplorerBrowser 产品菜单。产品代码、配置、release 与用户桌面未改动。
+
+继续验证 View→Details 菜单命令分派：探针从激活后的 View 子菜单按本地化标题定位 Details 项并读取其运行时命令 ID（本机样本 `0x704B`），将 view 设为 Small Icons 作为基线。对宿主父 HWND 发送 `WM_COMMAND` 后模式仍为 `2`；重置基线后，将相同消息发送到目标 `IShellView` window，模式变为 Details `4`。断言覆盖父窗口无变化及目标 view 的模式变化，Release build 0 警告/错误，Private Desktop `menu-activation-private-desktop` watchdog 退出码 0，前台句柄保持 `0x81852`。
+
+这说明原型中 Shell 菜单项自身的命令 ID 可由目标 view window 处理，也提示应用宿主需要把活动 view 的 Shell 命令送到正确窗口。实验使用合成 `WM_COMMAND`，没有真实跟踪菜单或鼠标选项；父窗口是探针的 `STATIC` host，不代表 WPF window 的默认/自定义窗口过程。仍需在真实 OLE 菜单循环和多 pane 活动目标下验证，不能直接当作产品路由实现已经确定。
+
+### 2026-10-27 四窗格共享菜单宿主尝试未通过
+
+为测试上节推导的多 pane 命令目标，在隔离 consumer 中尝试把 pane 的 Shell view parent（子窗格）与菜单 frame（顶层容器）分开，并按 pane 依序激活、向目标 view window 发送 Details 命令。NativeProbe Release build 通过，但 session-restore consumer 在 Pane 2 菜单读取处失败：Pane 1 可读到顶层共享菜单；切换到 Pane 2 后 `GetMenu` 返回的非零句柄没有可读菜单项（`GetMenuItemCount=-1`），当时 Pane 2 host 回调计数为 insert/set/remove `5/9/4`。失败日志：`src/.state/native-probe-watchdog/20261027-032413-14966fbe.stdout.log`。
+
+这不是 Windows 菜单系统或 `IShellView` 的负面结论，因为失败发生在 NativeProbe 自建的多 host 菜单 frame 管理。该 frame split 实验代码已撤回，原先四窗格 session restore consumer 和产品 ExplorerBrowser 未改。当前证据表明每个 view 的菜单不能只靠各自 host 独立 Set/Remove 同一个顶层菜单；下一步需隔离真实回调顺序、句柄有效期及跨 host 所有权，再设计协调器并复跑四窗格激活/卸载和命令目标验证。未验证真实菜单点击或 WPF 产品窗口。
+
+### 2026-10-27 四窗格菜单 SetMenu 子窗格错误根因确认
+
+给每个 `StreamViewHost` 增加只读回调轨迹后，既有四窗格 Private Desktop session-restore probe 仍完整通过（退出码 0；文件状态恢复、菜单命令、copy 选择菜单、方向键、Ctrl+A、复制/重命名/删除及目录通知均通过）。但 `VerifyFourPaneMenuActivation` 的日志显示，四个 pane 的 `SetMenuSB` 虽都被调用，返回值全部为 `0x8007059C`，调用中传入的 frame HWND 是各自 pane 子窗口，随后 `GetMenu(frame)` 为 0。日志：`src/.state/native-probe-watchdog/20261027-032609-83148717.stdout.log`。
+
+`0x8007059C` 是 `HRESULT_FROM_WIN32(ERROR_CHILD_WINDOW_MENU)`；`SetMenu` 文档规定菜单不能分配给 child window，因此原型当前把 menu 设在 pane 上必然失败。`OleSetMenuDescriptor` 也要求将 dispatch 安装到 container frame window；`IShellBrowser::SetMenuSB` 的用途是安装合成菜单，Shell 文档还要求 view deactivation 时通过 `RemoveMenusSB` 恢复菜单。依据：[SetMenu](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setmenu)、[系统错误码 1300–1699](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1300-1699-)、[OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)、[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
+
+因此之前只检查 `InsertMenusSB`/`SetMenuSB` 回调次数的四窗格“菜单激活”结论只能证明回调到达各个 host，不能证明任何 pane 的合成菜单被安装。下一步必须将每 view 的 `IShellBrowser::GetWindow`（pane parent）与 top-level `IOleInPlaceFrame::GetWindow`/菜单 frame 分开，并由一个共享 frame owner 串行管理当前 menu、OLE descriptor、活动 view 和移除恢复。尚未验证该协调器、真实菜单跟踪或 WPF 产品接线；产品代码和 release 未改。
+
+### 2026-10-27 OLE 菜单 frame 与 Shell pane HWND 分离（源码候选）
+
+上一轮真实 `UIActivate` 菜单跟踪发现四个 pane 都回调 `SetMenuSB`，但 HRESULT 是 `0x8007059C`（`ERROR_CHILD_WINDOW_MENU`）。根因是 `IShellBrowser.GetWindow` 和 `IOleInPlaceFrame.GetWindow` 共用 child pane HWND；Win32 `SetMenu` 不允许把窗口菜单挂到 child window。微软文档也要求 OLE 菜单分派安装在容器 frame HWND 上：[SetMenu](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setmenu)、[OleSetMenuDescriptor](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-olesetmenudescriptor)。
+
+NativeProbe 现在分开保留浏览器 pane parent 与 OLE top-level menu frame，四个 `IShellView` 共用 `ShellMenuFrameCoordinator`。协调器负责当前 owner 的 OLE descriptor 和菜单切换；迟到的非 owner `RemoveMenusSB` 不应卸载活动 pane 的菜单，切换安装失败会尝试恢复上一 owner。四窗格探针现会断言 Browser `GetWindow` 仍返回 pane，OLE frame `GetWindow` 返回共同顶层 HWND，并要求 `SetMenuSB` 成功且 frame 上确实有菜单。
+
+当前仅 `dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 通过（0 警告、0 错误）；没有启动 Shell view 或隔离桌面，因此 menu coordinator 的真实 COM/OLE 生命周期、连续 pane 激活、旧 owner 延迟移除和 frame 菜单恢复尚未验证。产品 ExplorerBrowser、INI 与 release 未改；本候选代码未接入产品。
+
+随后为协调器增加非 Shell hidden-window 回归：两个 child pane 的菜单依次接管同一 top-level frame；无效 HMENU 被拒绝且不影响当前 owner；旧 pane 对旧菜单的迟到 `RemoveMenusSB` 及释放旧 pane 都不会拆除新菜单；当前 owner 移除后恢复 frame 原菜单；同一 host 的 Browser `GetWindow` 与 OLE frame `GetWindow` 分别返回 child 与 top-level HWND。`dotnet build src/ExplorerDirs.NativeProbe -c Release --no-restore` 0 警告、0 错误，`dotnet run --project src/ExplorerDirs.NativeProbe -c Release --no-build -- --shell-view-color-policy-smoke` 退出码 0。它只验证 Win32/OLE coordinator 状态机和 COM vtable，不创建 `IShellView`、不显示菜单、不运行 Shell 激活，所以仍需前述真实四窗格隔离验证。
+
+### 2026-10-27 四窗格菜单共享 frame 真实回调验证
+
+第一次运行新菜单断言时 Pane 2 失败：诊断轨迹显示它仍将子窗格 HWND 当作 frame，并再次收到 `0x8007059C`。追查到原因是 session-restore consumer 在销毁并重建 Pane 2 host 时漏传 `menuFrameWindow` 和共享 coordinator；不是协调器的菜单交接失败。修正重建路径后，Release 构建 0 警告/错误，`session-restore-private-desktop` watchdog 连续三轮退出码 0，日志：`20261027-033501-8d0242bc.stdout.log`、`20261027-033524-cf73daba.stdout.log`、`20261027-033542-fdd57431.stdout.log`；另一次首次失败诊断为 `20261027-033410-53e04d8b.stdout.log`。
+
+三轮中四个 Pane 的 `SetMenuSB` 均返回 `S_OK`，共享 top-level frame 均安装对应 pane 的合成菜单；pane 逐个激活时的旧菜单移除不会清掉新 owner 的菜单。四窗格 Details、排序、分组命令各自作用于目标 pane，view-state 多进程恢复、复制/重命名/删除与同/异目录 Shell 通知检查均通过。probe 明确报告 `foreground-unchanged=True`。这是真实默认 filesystem `IShellView` 在 Private Desktop 的原生激活/菜单合并证据；仍未显示或点击菜单，也未验证 WPF/产品宿主、物理键盘输入、扩展菜单和 OLE 拖放，因此不能据此迁移或发布产品宿主。
+
+### 2026-10-27 四窗格最后一个 view 停用后恢复 frame 菜单
+
+在四窗格菜单循环末尾对最后一个 view 调用 `UIActivate(SVUIA_DEACTIVATE)`，新增断言要求 Shell 增加 `RemoveMenusSB` 回调、顶层 frame 菜单恢复到 coordinator 创建时的原始菜单。NativeProbe Release 构建 0 警告/错误；`session-restore-private-desktop` watchdog 连续三轮退出码 0，日志 `20261027-033747-45b38d47.stdout.log`、`20261027-033826-666e2fb3.stdout.log`、`20261027-033846-ea5e22c8.stdout.log`。每轮轨迹显示最后 pane 的 `SetMenuSB(menu=0)` 与 `RemoveMenusSB` 均返回 `S_OK`，`GetMenu(frame)` 从活动菜单变回 0；前台 HWND 未变化。完整四窗格会话、命令、文件操作及目录通知样本也通过。
+
+该检查补齐了原型的活动菜单卸载路径，但仍不显示或点击菜单，也不验证 WPF/ExplorerBrowser 产品宿主。Shell 拖放仍未通过 `DoDragDrop`：微软 [GetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getcursorpos) 与 [SetCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setcursorpos) 文档要求调用线程位于 input desktop；Private Desktop 不是活动 input desktop，不能用它来定位拖动光标。没有切换用户桌面或注入输入；真实拖放仍需独占且获授权的可接收输入会话。
+
+### 2026-10-27 F2 编辑状态下四方向键隔离验证
+
+将原有的 Left/Right 检查扩展为 Left/Up/Right/Down。Private Desktop `host-newfolder-private-desktop` watchdog 通过：先用 Shell canonical `newfolder` 在临时目录创建项目，选中并聚焦它，向 `IShellView::TranslateAccelerator` 发送 F2，再把四个方向键分别发给原生 `Edit` 编辑框。四次返回 `S_OK`，编辑框持续存在且持续持有焦点；日志 `src/.state/native-probe-watchdog/20261027-034108-b117b401.stdout.log` 显示 `foreground-unchanged=True`。NativeProbe Release build 为 0 警告、0 错误。
+
+这只证明单个原生 filesystem `IShellView` 的合成消息路径；没有覆盖 List/Icon 等视图方式、真实物理键盘、多窗格邻窗焦点、WPF `HwndHost` 或产品 ExplorerBrowser。该证据可用于后续宿主迁移比较，不能宣称用户报告的多窗格 F2 缺陷已修复。
+
+### 2026-10-27 五种视图模式下 F2 编辑焦点隔离验证
+
+将重命名焦点检查放入 Shell 与 `SysListView32` 同步模式循环，覆盖 Icon、Details、SmallIcon、List、Tile。初次尝试在 Icon 模式未进入编辑态；诊断显示 F2 返回 `S_OK`、选中项仍为 1，但焦点落在 `SHELLDLL_DefView`。根因是该通用筛选探针此前没有激活 Shell view。按原生宿主使用条件，在 Private Desktop 上以 `SW_SHOWNOACTIVATE` 显示父窗并调用 `UIActivate(SVUIA_ACTIVATE_FOCUS)` 后复测；结束时恢复隐藏父窗。
+
+完整 `host-filter-private-desktop` watchdog 连续两轮退出码 0：`20261027-034456-3eb61774.stdout.log`、`20261027-034526-eca8b327.stdout.log`。五种模式各自的 F2 都进入 `Edit` 并获得焦点，Left/Up/Right/Down 均为 `S_OK` 且编辑框/焦点保持；Ctrl+A、Down 导航、多层 history 和本轮其它 Shell view 检查也通过。前台 HWND 保持不变。
+
+该结果只验证 Private Desktop 内合成 accelerator 消息；没有验证物理键盘、相邻多窗格焦点争用、用户可见多窗格操作或 ExplorerBrowser 产品宿主。本次没有改产品视图或 release。
+
+### 2026-10-27 四窗格 F2 编辑方向键焦点隔离
+
+在四窗格 session-restore consumer 的完整流程中，对每个真实 filesystem `IShellView` 分别激活 view、聚焦其列表、选中一个项目并通过 `TranslateAccelerator` 启动 F2。向当前编辑框连续发送 Left/Up/Right/Down 后，编辑 HWND 与键盘焦点保持；逐键读取四个 view 的 focused item 和 selection，兄弟 pane 均未变化。结束时用 Escape 取消重命名并清除测试选择。
+
+`session-restore-private-desktop` watchdog 连续两轮退出码 0：`20261027-034716-d5121c08.stdout.log` 与 `20261027-034738-631c462c.stdout.log`。日志报告 `pane1` 到 `pane4` 均 `arrows=4/focus-isolated=True`，四窗格菜单激活/卸载恢复、视图状态恢复、Shell 文件操作、同/异目录通知仍通过，前台 HWND 未变化。
+
+这是 Private Desktop 内显式定向至目标 view 的合成 accelerator 检查。它验证四个 view 的原生焦点/选区互不串扰，但不模拟 WPF `HwndHost` 的 Tab/Shift+Tab 或错误 pane 路由，也未覆盖真实键盘、鼠标、可见窗口或 ExplorerBrowser 正式产品。因此不能视为用户报告的多窗格重命名问题已修复，产品代码和 release 未改。
+
+### 2026-10-27 错误 pane 的 accelerator 不夺取活动 F2 编辑焦点
+
+四窗格 consumer 新增反向路由试验：Pane 1 的原生 `Edit` 正持有 F2 重命名焦点时，将 `WM_KEYDOWN Down`（`hwnd` 指向 Pane 1 的编辑框）故意交给 Pane 2 的 `IShellView::TranslateAccelerator`。目标错误 pane 返回 `S_FALSE`；Pane 1 编辑框保持有效并继续持有焦点，随后对四个 pane 分别执行正确路由的 Left/Up/Right/Down，兄弟 view 的 focused item/selection 均保持不变。
+
+`session-restore-private-desktop` 完整 watchdog 连续两轮退出码 0：`20261027-035210-efee867c.stdout.log`、`20261027-035232-37d2a85f.stdout.log`。两轮都报告 `foreign-route=pane2:00000001/pane1-edit-retained=True` 和四 pane `arrows=4/focus-isolated=True`，前台 HWND 未变化。
+
+这是直接合成调用 Shell accelerator 的错误目标实验，不模拟 WPF `HwndHost` 事件链，也不能证明真实物理消息一定到达正确 host。它说明原生 DefView 在该样本中对错误 view 返回未处理并保留原编辑焦点；产品多窗格焦点问题仍需产品消息循环与真实输入验收。产品 ExplorerBrowser、配置和 release 未改。
+
+### 2026-10-27 四窗格 Shell 菜单合并应用菜单组
+
+根据微软 `Implementing a Folder View` 的宿主顺序，在 `SetMenuSB` 收到 Shell 已构造的 composite HMENU 后，给隔离 host 添加一个应用自有的 `Explorer Dirs` 顶层菜单组，含启用的 `Probe active-pane command` 项。菜单协调器切换活动 pane 或停用最后一个 view 时先解除 OLE 菜单 descriptor，再清理前一 owner 自己创建的 popup；Shell 回调传来的 HMENU 与宿主先前持有的 root 不完全一致时，按自有 popup 句柄清理，避免误删 Shell 菜单项。顶层 frame 用同线程 `SetWindowSubclass` 接收 `WM_COMMAND`，并将该 probe 命令交给当前 coordinator owner。
+
+NativeProbe Release build 0 警告/错误；无 Shell view 的 `--shell-view-color-policy-smoke` 通过；完整 `session-restore-private-desktop` watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-040514-e132943a.stdout.log`。四个真实 filesystem `IShellView` 逐一激活后，frame 上当前 composite 均包含应用菜单组；向 frame 发送该命令的 `WM_COMMAND` 后，只有当前 pane 的计数递增，四个 pane 各为 1；最后停用所有 pane 后再发送则被忽略。每次切换会清理前一 host 自有 popup，并在最终停用后恢复原 frame 菜单。四 pane view-state 恢复、Shell Details/排序/分组命令、选中项 copy 菜单、Ctrl+A、F2 四方向键与选区隔离、文件复制/重命名/删除、目录通知检查均继续通过；foreground HWND 未变化。
+
+这证明 Private Desktop 隐藏原生宿主内应用菜单组与 Shell 菜单共存，且合成 `WM_COMMAND` 只分派给当前活动 pane；不等于真实点击菜单项，因为探针直接向 frame 发送消息。probe 命令没有产品功能语义；没有显示菜单、运行真实 OLE 菜单消息循环、验证快捷键、扩展菜单或 WPF 产品接线。ExplorerBrowser 产品、配置与 release 未改。依据：[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)、[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[SetWindowSubclass](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-setwindowsubclass)。
+
+### 2026-10-27 Shell 原生菜单命令 frame 转发尚未通过
+
+在共享 frame subclass 中尝试把 Shell 菜单 ID `0x704B`（Details）转发给 coordinator 当前记录的 `hwndActiveObject`。Private Desktop 四 pane 探针能收到 `WM_COMMAND`，但目标 pane 2 仍为 Small Icons；回调轨迹显示菜单 coordinator 的 owner 和 active HWND 仍是 pane 1。随后尝试按焦点 HWND 映射 pane，目标模式仍未改变（日志 `20261027-041155-4116eada.stdout.log`）。因此不能把“菜单项 ID 可读”当作“Shell 命令已正确执行”。
+
+微软的 [Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview) 明确说明，Shell view 菜单的相关 `WM_COMMAND` 由 Explorer 宿主处理，不会传给 folder view 对象；因此把 frame 消息直接发给 `IShellView` 是错误的架构假设。`IShellBrowser::OnViewWindowActive` 用于通知宿主 view 获取焦点，`SetMenuSB` 安装 composite menu，但这两项文档本身没有定义我们这个自建宿主怎样执行 Details 命令。参考：[IShellBrowser::SetMenuSB](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-setmenusb)、[IShellBrowser::OnViewWindowActive](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-onviewwindowactive)。
+
+失败的 Shell 命令转发分支已撤回；上一节已通过的应用自定义 probe 命令 active-pane 路由保持。下一步先从 Windows Explorer/Shell 实现和公开接口确定宿主必须承担的标准命令执行路径，再设计最小 pane dispatch probe；在此之前不将 Shell 菜单分派能力列为已完成，也不迁移产品宿主。
+
+### 2026-10-27 撤回 frame 转发实验后的四窗格原生命令基线复核
+
+在恢复到已提交的应用菜单 probe 后，重新运行 Release build 与完整 `session-restore-private-desktop` watchdog。构建 0 警告/错误，watchdog 退出码 0，日志 `20261027-041344-088dec96.stdout.log`。四个 filesystem `IShellView` 通过 Shell 背景 `IContextMenu::InvokeCommand` 的 canonical verbs 分别执行 Details、排序和分组；会话恢复、菜单 merge 生命周期、自定义 app command active-pane 路由、复制/重命名/删除、目录通知及四 pane F2 方向键焦点隔离也全部通过，foreground HWND 未变。
+
+这轮确认撤回未损坏已通过的原生能力。但 `menu-commands=pane1:details/sort/group,...` 走的是逐 pane 背景 context menu canonical verb，不是 frame 上合成 View 菜单的 `WM_COMMAND`；两者必须分开记录。后续需查明 Explorer 宿主如何处理 standard `FCIDM_SHVIEWFIRST..LAST` 命令，并据此为自建 frame 建立受支持的执行路径。
+
+随后把两种 Details 命令 ID 做只读对比：真实 composite View 菜单项 ID 为 `0x704B`；查询同一 pane 的背景 `IContextMenu` 时以 `0x7000` 为 `idCmdFirst`，canonical verb `viewlogicaldetails` 对应 `0x701B`。二者不相同，因此不能把 View 菜单 ID 直接当作 context-menu verb ID。包含对比的四窗格 watchdog 再次退出码 0，日志 `20261027-041457-17b0712f.stdout.log`，所有既有 pane 操作/会话检查仍通过。该差异不证明 Explorer 具体如何执行 `0x704B`；仍需找到宿主命令表或标准分发实现。
+
+### 2026-10-27 四窗格原生 Shell view 的 drop target 生命周期复核
+
+NativeProbe Release 构建通过（0 警告、0 错误）。运行 `scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120`，watchdog 退出码 0，日志 `src/.state/native-probe-watchdog/20261027-053426-3ca5dac1.stdout.log`。四个真实 filesystem `IShellView` 的创建、激活、视图状态恢复、菜单切换、复制/重命名/删除、同/跨目录更新通知和方向键焦点隔离均通过，结束时 `foreground-unchanged=True`。本轮产品外的宿主原型在每个 `CreateViewWindow` 后取得该 view 文件夹的 `IID_IDropTarget` 并注册新 HWND；导航时先注册新窗口，再撤销旧窗口；view 销毁前撤销注册。四窗格完整探针顺利完成，证明该注册/替换/撤销路径没有破坏当前 host 生命周期。
+
+另运行 `ExplorerDirs.NativeProbe.dll --shell-view-drop-target-registration-smoke`，通过单 host 四 HWND 注册、重复注册冲突不改变原 owner、选择性撤销与重新注册、Dispose 撤销其余注册，且前台窗口保持不变。
+
+边界：以上没有调用 `DoDragDrop`，也没有让用户文件经鼠标跨 pane 拖动。它确认目标接口已绑定到真实 view HWND，不证明 Drop effect、移动/复制语义、外部拖放源/目标、可见交互或 ExplorerBrowser/WPF 产品接线。真实拖放验收仍需要可接收 OLE 输入的隔离桌面，并保持与用户日常桌面分离。
+
+### 2026-10-27 IShellView 文件夹 drop target 的 Shell 数据对象接收
+
+新增 Private Desktop 临时夹具探针，对比 `IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 与从目标文件夹 `IShellFolder::CreateViewObject(IID_IDropTarget)` 取得并注册到该 view HWND 的目标。当前 filesystem `IShellView::GetItemObject` 返回 `E_NOINTERFACE (0x80004002)`；文件夹目标的 `DragEnter`、`DragOver`、`Drop` 均返回 `S_OK`，Copy effect 为 1，使用 `SHCreateDataObject` 构造的 Shell 文件数据对象将临时文件复制到目标目录，源文件内容与存续状态都保持。NativeProbe Release build 0 警告/错误，`drop-target-private-desktop` watchdog 退出码 0，`--shell-view-color-policy-smoke` 通过，foreground 未变化。
+
+前两次探针运行在文件操作完成后卡于 Private Desktop 顶层 parent 的 `DestroyWindow`，watchdog 以超时结束；诊断确认 drop 与 Shell view 的撤销/销毁均已完成。按现有 Private Desktop 约束改为由一次性进程退出回收 top-level parent 后，探针退出码 0。两次被 watchdog 结束的探针各遗留一个仅含测试文件的临时 fixture，路径为 `%TEMP%\ExplorerDirs-NativeProbe\81c4ff72648f49fba34e19442d1aa5d4` 与 `%TEMP%\ExplorerDirs-NativeProbe\a9ef35a4f4244e62bb1150f2ad1cbdf9`；当前工具拒绝删除这些用户 temp 目录，故未声称已清理。
+
+这项结果比单纯注册 smoke 多验证了文件夹目标确实能消费 Shell `IDataObject` 并执行复制；但数据对象由 `SHCreateDataObject` 构造，不是从真实源 view 当前选择取得。它不证明真实 OLE `DoDragDrop`、鼠标命中/修饰键源端交接、移动语义、第三方目标或可见多窗格行为；`DoDragDrop` 仍待可接收输入的独立桌面验收。
+
+### 2026-10-27 对比 IShellView 选中项数据对象
+
+> **更正（2026-10-27）：**早期探针把选择数据对象的目标文件名错设为 `selected-view.txt`，但当时实际选中的是 `sourceItemPidl` 对应的 `view-target.txt`。Drop 创建原文件名后，探针只检查错误的目标路径，因而把成功复制误报为失败。此前本节及路线图中的“真实选中项对象不复制”结论无效，以下更新结果为准。
+
+扩展 Private Desktop 探针创建源 `IShellView`，等待临时目录条目完成枚举，选择一个文件并调用 `IShellView::GetItemObject(SVGIO_SELECTION, IID_IDataObject)`。该调用成功；同一目标文件夹的 `IDropTarget` 对此数据对象的 `DragEnter`、`DragOver`、`Drop` 均返回 `S_OK` 且 Copy effect=1，但目标目录没有新增文件。作为对照，单独用 `SHCreateDataObject` 从同一源目录构造的数据对象仍能复制并保留源文件。`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 仍返回 `E_NOINTERFACE`。
+
+两个对象的 `IDataObject::EnumFormatEtc(DATADIR_GET)` 结果相同，均含 7 种公开格式：`Shell IDList Array`、`CF_HDROP`、`FileName`、`FileContents`、`FileNameW`、`FileGroupDescriptorW`、`ZoneIdentifier`，且 aspect、index 和 tymed 属性一致。当前证据排除了“格式列表缺少常用 Shell 文件格式”这一简单解释，但没有比较延迟渲染的数据内容、`IDataObjectAsyncCapability` 或源端 `IDropSource`/OLE drag-loop 生命周期。
+
+继续读取 `CF_HDROP`：两个对象都返回同一个 `source\view-target.txt` 完整路径。两者均可查询到 `IDataObjectAsyncCapability`，`GetAsyncMode=False` 且 `InOperation=False`。因此当前比较过的公开格式列表、文件路径和异步接口初始状态一致；尚未比较 Shell IDList Array 的 PIDL 内容。直接 `IDropTarget.Drop` 成功码却没有复制文件，仍不能说明完整 `DoDragDrop` 会失败，因为探针没有 OLE drag source/loop。
+
+随后解码两个对象的 `Shell IDList Array` CIDA：两者的父 PIDL 都解析为同一临时 `source` 目录，唯一子 PIDL 都解析为同一 `view-target.txt`。因此当前系统上可读的格式列表、CF_HDROP 路径、CIDA 路径及 async capability 初始状态都相同；剩余差异可能在 COM 对象身份/内部状态或完整调用协议，现有证据不能再缩窄。微软 OLE 文档将 `DoDragDrop` 描述为调用 `IDropSource` 与 `IDropTarget` 的完整循环；直接分别调用目标的 `DragEnter/DragOver/Drop` 只验证目标方法响应，不等价于该循环。依据：[OLE drag-and-drop](https://learn.microsoft.com/en-us/windows/win32/com/drag-and-drop)、[Shell data object](https://learn.microsoft.com/en-us/windows/win32/shell/dataobject)。
+
+首次运行发现源 `sourceChildPidl` 是 `ILFindChild` 指向绝对 PIDL 内部的借用指针，不应释放；错误释放导致 heap corruption。移除释放并加入最多 3 秒的 Shell 枚举等待后，探针稳定运行。当前日志还会列出目标目录最终文件名，防止仅依赖 Drop 的成功码误判操作已完成。
+
+NativeProbe Release build 0 警告/错误；Private Desktop `drop-target-private-desktop` watchdog 退出码 0，`foreground-unchanged=True`。仍未调用真实 `DoDragDrop`，也没有验证鼠标源端、移动语义、第三方目标、可见交互或产品宿主接线。下一步在禁止合成用户输入的边界内评估 OLE drag-loop 验证方式，并继续迁移所需的其余宿主能力；本探针不会被视为拖放迁移完成。
+
+#### 2026-10-27 更正后的当前会话复跑
+
+现将 view 选择明确改为 `selectedSourcePidl`，目标断言同时核对原文件名和精确 fixture 内容。`scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 45` 退出码 0：目标文件夹 `IDropTarget` 直接消费真实 `IShellView::GetItemObject(SVGIO_SELECTION)` 数据对象后，`selected-view.txt` 已创建且内容匹配，源文件保留；`SHCreateDataObject` 路径也通过。前台 HWND 未变。新日志：`src/.state/native-probe-watchdog/20261027-064205-255387b2.stdout.log`。
+
+这次把异步状态读取扩展到 `DragEnter`、`DragOver` 和 `Drop` 前后；两个对象在所有阶段均保持 `async-mode=False`、`in-operation=False`，状态没有变化，也无需用异步操作状态解释前述假失败。此前针对 `FileContents`、HGLOBAL 格式、Drop 键状态及协商格式的观测仍是数据，只是不能再支撑“选中项对象不复制”这一结论。
+
+本证据只验证直接调用目标接口的复制和目标内容，不等于完整 OLE `DoDragDrop` 源端/目标交接；鼠标命中、Ctrl/Shift/右键拖动、移动语义、可见交互和产品宿主仍待独占且获授权的桌面验收。依据：[OLE drag-and-drop](https://learn.microsoft.com/en-us/windows/win32/com/drag-and-drop)。
+
+### 2026-10-27 拒绝已过期 owner 的延迟 Shell View 命令
+
+frame subclass 收到合成菜单 `WM_COMMAND` 后会投递自定义消息，再由当前 coordinator owner 执行；View 菜单分支之前没有复核 owner，Edit → Select All 已有该检查。两条消息之间切换 pane 时，旧命令可能以新 frame 菜单匹配出命令 ID，却向旧 owner 的 view HWND 发送。本轮在 View 命令执行前加入 owner 检查，并把 coordinator 活动状态传入 dispatcher。NativeProbe Release 构建 0 警告/错误；无 Shell-view 的 `--shell-view-color-policy-smoke` 通过，新增隐藏 frame 两 pane 回归确认 stale owner 的已识别命令被消费但不派发。没有创建 `IShellView`、显示菜单或启动产品 ExplorerBrowser；实际 Shell 菜单时序及可见行为仍待隔离桌面验收。
+
+### 2026-10-27 无窗口原型基线复核
+
+重新执行 `dotnet build src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-restore`，0 警告、0 错误；随后运行 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --shell-view-color-policy-smoke`，退出码 0。该 smoke 覆盖颜色策略、隔离宿主 COM 契约、导航历史、共享菜单 owner 变更及 `IDropSource` 回调约定；不创建 `IShellView`，不执行 `DoDragDrop`，也不验证物理输入、实际菜单点击或 WPF 产品集成。此结果只确认纯逻辑/宿主契约基线当前可编译且通过，拖放迁移门槛仍未关闭。
+
+### 2026-10-27 合并菜单命令 ID 必须唯一归属
+
+源码审查发现，frame 收到延迟 `WM_COMMAND` 后原先按 View、File、Edit 的固定优先级查找相同命令 ID。`WM_COMMAND` 本身只携带低 16 位命令 ID，不携带来源菜单组；若 composite HMENU 在多个组复用同一 ID，固定优先级可能把命令解释成另一组的命令。旧合成菜单 smoke 已构造跨组重复 ID，但没有验证最终 frame 路由。
+
+现在 NativeProbe 先在全部六个 OLE 菜单组中解析命令归属；只有命令仅出现在 File、Edit、View 中的一个组时才执行对应分支，Object、Window、Help 组的 ID 不交给 Shell view。多组重复或找不到的 ID 都不作 Shell 命令派发。Smoke 覆盖 File/Edit/View 的唯一命令、与其它组冲突的 ID 拒绝、原始 ID 到达隐藏假 Shell HWND，以及旧 view 重入切换保护。先补回归并观察到缺失 resolver 的编译失败，再实现；`dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --shell-menu-group-routing-smoke` 退出码 0。
+
+本轮不创建 `IShellView`，不启动 ExplorerBrowser，不显示菜单。它验证的是应用自有 frame 的 synthetic HMENU 路由策略；真实 Shell composite menu 的 ID 分配是否出现重复仍未知，所以不能声称已观察到用户可见误派发，也不能替代真实 Shell 菜单验证。
+
+### 2026-10-27 为列头 popup 记录消息 owner 窗口链
+
+微软的 `WM_INITMENUPOPUP` 契约说明消息会发给下拉菜单的 owner window；现有列头探针读取到该 HWND，但只把它用于初始化子菜单，没有保存或输出。现为探针记录首次 popup 的 owner HWND 与最多八层父窗口的 HWND/窗口类名，便于后续辨认实际收件者属于 header、view 还是宿主 frame。
+
+本轮只改 NativeProbe 诊断输出并进行 Release 编译；没有运行需要创建 `IShellView` 的列头菜单探针，因此 owner 链仍无运行时结论。该日志用于确定真实 popup 的菜单 owner，不等同于用户选中菜单项后 `WM_COMMAND` 的最终接收 HWND；命令分派仍待单独证据。[WM_INITMENUPOPUP](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-initmenupopup)
+
+### 2026-10-27 使用 WM_MENUSELECT 来源区分同 ID 菜单项
+
+前一批为避免误派发，缺少来源信息且跨组 ID 重复时会拒绝命令；这保证了安全，却会让合法的重复 ID 项不可用。微软 `WM_MENUSELECT` 消息提供当前选中项 ID/弹出菜单索引及菜单句柄；现在 NativeProbe 保存该选择路径对应的子菜单来源，并在延迟命令队列中保留来源句柄。路由器先依来源菜单确定 OLE 组：File/Edit/View 按各自组执行，Object/Window/Help 不传给 Shell view；没有有效来源时仍只接受唯一归属的 ID。对设置 `MNS_NOTIFYBYPOS` 的路径也加入 `WM_MENUCOMMAND` 的 menu+index 识别。
+
+合成菜单 smoke 覆盖嵌套 `WM_MENUSELECT` 参数序列、File 与 View 同 ID 分派、Object 同 ID 拒绝、显式 Reset 清除来源状态、来源句柄随 FIFO 队列保存，以及真实隐藏假 HWND 收到原始命令 ID；NativeProbe Release build 与专用 smoke 通过。测试没有进入真实菜单模态循环，也没有创建 `IShellView`，所以实际 Shell/OLE 是否把菜单消息送到当前 frame、菜单退出与 `WM_COMMAND` 的时序仍待隔离宿主验证。依据：[WM_MENUSELECT](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menuselect)、[WM_COMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command)、[WM_MENUCOMMAND](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-menucommand)。
+
+### 2026-10-27 隐藏 frame coordinator 消息链 smoke
+
+扩展专用 smoke：用普通隐藏 Win32 frame 与 pane、六组 synthetic HMENU、真实 OLE menu descriptor 和 `ShellMenuFrameCoordinator` subclass；发送合成 `WM_ENTERMENULOOP`、嵌套 `WM_MENUSELECT`、`WM_COMMAND`，再从消息队列分派 coordinator 实际投递的延迟消息。File 与 View 复用合法范围命令 ID `0x7123`，分别由来源菜单路由到隐藏假 pane HWND，并分别记录 group 0/group 2。此验证覆盖 subclass 收件、来源状态、排队、PostMessage 及最终 HWND 送达，未模拟系统菜单跟踪，也未创建 Shell view。
+
+随后把同一 coordinator smoke 扩展到按位置通知的 `WM_MENUCOMMAND`：File 与 View 的重复 ID `0x7123` 分别按各自 `HMENU` 派发，Object 组的同 ID 则不投递命令。再连续提交 File 与 View 两个 `WM_COMMAND`，在消息泵派发前改变当前选中来源；FIFO 两次延迟派发仍分别保留 File、View 的来源组。追加“命令排队后停用 pane，再处理延迟消息”场景；已退休菜单的命令不会到达旧 view HWND。NativeProbe Release build 0 警告/错误，`--shell-menu-group-routing-smoke` 通过。它补足 synthetic 消息链的集成证据；真实 OLE/DefView 模态菜单实际消息次序、命令 ID、接收 HWND 与用户可见行为仍未验证，迁移门槛不关闭。
+
+### 2026-10-27 四窗格恢复探针停滞阶段追踪
+
+为区分全套恢复探针中偶发超时的具体边界，增加菜单选择、四 pane 菜单激活/命令、文件操作和各 pane 计数等待日志；计数等待可选记录 WinForms message filter 看到的消息号、HWND 和窗口类。NativeProbe Release 构建通过（0 警告、0 错误），Private Desktop watchdog 多轮退出码 124。停滞点并不固定：样本曾停在菜单激活前后、pane 菜单命令、复制/重命名/删除，以及删除后的消息泵/其它窗格计数等待。`20261027-083314-807898ed` 的删除主视图到第 5 次轮询后匹配，Pane 1 收敛后转到 Pane 2 等待；`20261027-083437-2c3cd84f` 使用 120 秒预算，推进至 `file-delete-start` 后仍超时，尚无 `file-delete-performed`。Private Desktop 前台窗口保持不变。
+
+这些分布式停滞日志不能确定共同根因，也不能证明是固定 Shell 命令、文件操作或 `Pump` 消息派发失败；目前没有加入规避逻辑或延长产品超时。后续需用可取得原生线程栈的手段捕获一次真实停滞，之后才能定位 COM 调用、DefView 消息处理或测试夹具生命周期。完整四窗格 Shell 宿主迁移仍未过可靠性门槛，产品 ExplorerBrowser 未改。
+### 2026-10-27 watchdog 超时递归清理回归
+
+此前 `scripts/native-probe-watchdog.ps1` 超时只调用 `Process.Kill()`，而会话恢复 probe 会启动独立 consumer 子进程。该实现只保证直接子进程退出，不保证 consumer 的后代进程退出。新增 `-TestTimeoutPath` 回归夹具：由 watchdog 测试父进程启动 30 秒 pwsh 孙进程，记录孙进程 PID，再令父进程在 5 秒时限超时。
+
+修复前测试以失败退出，并观察到存活孙进程 PID `32872`；测试清理随后回收该进程。改用 `Process.Kill($true)` 后，回归输出 `selftest=timeout-tree-passed; seconds=5; parent-exited=True; grandchild-exited=True`。这确认了 watchdog 会递归结束被测进程树。
+
+之后用新 watchdog 复跑 `session-restore-private-desktop`，该探针仍超时，最后阶段记录到 pane 4 的 sort/group 菜单命令检查；日志为 `src/.state/native-probe-watchdog/20261027-083750-52d4c612.stdout.log`。watchdog 返回超时后，进程快照中没有 NativeProbe 或会话恢复 consumer 遗留。由此只确认超时清理有效；IShellView 四窗格恢复停滞仍未定位，也不能推断为本次遗留子进程问题所致。
+
+### 2026-10-27 定位四窗格 session-restore 的变化停点
+
+为区分 Shell 调用挂起与测试预算不足，在菜单读取、Select All 路由、Shell 动词调用、状态断言和文件操作边界增加阶段日志。多轮的最后阶段会变化：有的停在菜单检查，有的已完成四 pane 菜单路由并进入复制/重命名。检查 Private Desktop runner 后发现，真正的内层执行线程有固定 25 秒 deadline；整个 session-restore 仍在执行时，该 runner 就向 watchdog 报告 timeout。此前“阶段不定的 Shell 停滞”结论应由此修正为测试宿主提前超时；没有证据表明存在某个固定 pane/动词死锁。
+
+现只为 `session-restore` 和它派生的 consumer 将 Private Desktop runner deadline 调为 110 秒与 100 秒，并把父进程等待 consumer 的时间调为 100 秒；其余 probe 保持 25 秒。NativeProbe Release build 0 warning/error。`scripts/native-probe-watchdog.ps1 -Probe session-restore-private-desktop -TimeoutSeconds 120` 退出码 0，Private Desktop foreground HWND 前后相同。成功日志 `20261027-084330-8968e6b6.stdout.log` 的 consumer 总结确认：状态流恢复、四 pane 菜单项逐窗格路由、方向键/Ctrl+A/F2 路由、copy/rename/delete 四 pane 收敛、目录通知及 sibling pane 隔离均通过。
+
+本次通过只覆盖隔离 NativeProbe 中的 IShellView 宿主，不表示已接入 Explorer Dirs 产品；未运行可见 UI，也没有验证 OLE `DoDragDrop` 的鼠标源端、WPF 焦点链或用户实际拖放。
+
+### 2026-10-28 捕获菜单清理挂起的 WCT 等待链
+
+为给 `single-pane-menu-sync-cleanup` 的稳定挂起补充线程级证据，NativeProbe 在其 Private Desktop watchdog 超时点调用 Windows Wait Chain Traversal，并注册 OLE32 的 COM 状态回调。SDK `wct.h` 校正了节点枚举：`WctThreadType=8`；查询显示 `cycle=False`，探针线程 58152 处于线程等待，目标为同进程线程 58168；目标线程也在等待，后续节点为 COM → `svchost` PID 1832、COM activation → `ChsIME` PID 49244。当前快照不能证明循环死锁；WCT 只报告调用时的等待链，也不能单凭进程名确定具体 COM 类或组件责任。[Microsoft WCT sample](https://learn.microsoft.com/en-us/windows/win32/debug/using-wct)、[GetThreadWaitChain](https://learn.microsoft.com/en-us/windows/win32/api/wct/nf-wct-getthreadwaitchain)
+
+本次差分结果：未激活菜单的单窗格 Shell view 清理正常完成，父窗口收到 `WM_DESTROY` 和 `WM_NCDESTROY`；单独的菜单激活探针也完成，但它把父窗口清理由进程退出负责，因此没有验证同步 DestroyWindow。相反，焦点激活后显式停用、跳过显式停用，以及 no-focus 激活后停用，这三种随后同步销毁父窗口的变体都可复现卡在 `WM_DESTROY` 返回之后；no-focus 变体重复时也有一次正常完成，说明有间歇性。各挂起样本的 WCT 链一致落到同进程等待线程、COM、`svchost` 和 `ChsIME`，且 `cycle=False`。这排除了“必须显式调用 DEACTIVATE”及“必须获得焦点”这两个单一条件，但尚未区分菜单激活留下的 Shell/OLE 状态与 Private Desktop 上的系统输入法 COM 行为。
+
+NativeProbe Release 构建通过（0 警告、0 错误）；全程不打开产品 GUI，Private Desktop 前台 HWND 保持不变。产品 ExplorerBrowser、release 和主题代码未改。当前只能说同步顶层窗口销毁在部分菜单激活历史之后不稳定，不能宣称 Explorer Dirs 产品发生死循环，也不能把根因归给输入法/RPCSS。下一步是检查窗口的 IME context、子窗口和 OLE menu coordinator 在 DestroyWindow 前后的状态，并设计不切换用户桌面的差分条件；在有可归属原生栈或稳定差分前，不做产品规避改动。
+
+追加差分：跳过显式 `SVUIA_DEACTIVATE`，让菜单仍处于 active 状态并由 coordinator 在 pane/view 释放后清理，父窗口仍在 `WM_DESTROY` 返回后挂起，WCT 链同样到 `ChsIME`。`SVUIA_ACTIVATE_NOFOCUS` 加显式停用的三轮结果为两次挂起、一次完成；完成轮的断言已修正为“未安装共享菜单是预期”，不把它误报成菜单安装失败。因此焦点激活、显式停用都不是必要单一条件；仍未验证的是菜单激活历史与 Private Desktop COM/IME 环境的组合效应。新加入的参数化隔离 probe 保留作后续对照入口。
+
+窗口状态检查补充：普通清理基线与菜单挂起样本在父窗口销毁前都为 `Static` 顶层窗、零子窗、IME context 存在；菜单样本的 Shell view/pane 已销毁、coordinator 无 owner、active object 为 0、窗口菜单句柄为 0。为检验窗口 IME context 是否是直接触发条件，另一个隔离变体在父窗口销毁前调用 `ImmAssociateContext(hwnd, NULL)` 并确认当前 context 为空；挂起与同一 COM→`svchost`/`ChsIME` 链仍复现。此差分削弱了“父窗口当前关联 HIMC 直接导致挂起”的解释，但不能排除线程级输入法/COM 服务交互或 Private Desktop 环境因素。日志：`20261028-054952-9aed3674.stdout.log`、`20261028-054958-29b528b9.stdout.log`、`20261028-055117-d1b709b7.stdout.log`。
+
+随后在 `DestroyViewWindow` 前枚举 pane 子窗：`SHELLDLL_DefView`、`SysListView32`、`SysHeader32` 均有 IME context；挂起样本与不挂起的 no-menu 基线结构一致。测试隔离地从 pane 与这些 Shell 子窗逐一解除 HIMC 后，父窗口销毁仍挂起，WCT 仍指向同一 COM activation 链。另一变体在探针 STA 线程创建任何 Shell 窗口前调用 `ImmDisableIME(threadId)`，连续 3 次菜单激活与完整窗口清理全部通过；窗口 HIMC 仍存在。当时的结果一度提示线程级 IME/COM 交互，但后续 WPF HwndSource 根窗对照在 IME 启用时 3/3 正常销毁，削弱了该解释；现阶段不能把 ChsIME 或线程级 IME/COM 认定为根因。尝试用系统 WPR CPU profile 采集原生切换栈时，因缺少 `SeSystemProfilePrivilege` 失败（`0xc5585011`）；确认 WPR 未开始记录。日志：`20261028-055513-466f35ab.stdout.log`、`20261028-055539-4215b539.stdout.log`、`20261028-055433-e74b8cc7.stdout.log`、`20261028-055443-56672aa0.stdout.log`、`20261028-055450-a748daf7.stdout.log`、`20261028-055650-24a14d94.stdout.log`。
+
+`ImmDisableIME` 只用于私有探针 STA，不作为产品修复：在应用共用 UI STA 上禁用输入法会破坏中文输入，且逐窗 detach HIMC 已证明不足。当前 IShellView 迁移仍需解决/规避这一线程级生命周期交互；由于缺少系统采样权限，下一步优先检查 WPF/UI STA 与私有 STA 的 COM/IME 初始化差异，并评估是否能让 Shell host 在自身可回收的 STA 上运行，而不是降低 Shell 功能或把全局禁用输入法带入产品。
+
+### 2026-10-28：显式 OLE 初始化未改变菜单后销毁挂起
+
+为区分“隔离 STA 没有 OLE 初始化”与“WPF STA/消息环境差异”，新增仅供 NativeProbe 使用的 opt-in `private-desktop-single-pane-menu-ole-init-sync-cleanup`。它在隔离 worker STA、创建 Shell 窗口之前调用 `OleInitialize`，保持输入法启用，并在探针正常返回时配对 `OleUninitialize`；没有修改产品 ExplorerBrowser 或共享 WPF UI 线程。
+
+Release NativeProbe 构建 0 警告/错误。该用例连续两次在父窗口 `WM_DESTROY` 回调正常返回后卡于 `DestroyWindow`，均由 50 秒 watchdog 结束；两次 WCT 快照都显示同进程线程等待 → COM → `svchost` COM activation → `ChsIME`，`cycle=False`，前台 HWND 未变化。日志为 `20261028-060248-029d195c.stdout.log` 和 `20261028-060400-db16b703.stdout.log`。因此“仅缺少 OleInitialize”不能解释这组复现；这仍是等待链快照，不是调用栈，也不能证明产品 ExplorerBrowser 有同一问题。下一步应单独检查 WPF Dispatcher/消息泵差异，再决定是否值得继续专用 STA 架构验证；不得把 `ImmDisableIME` 带入产品。
+
+### 2026-10-28：WPF HwndSource 根窗下同步清理通过
+
+在前一轮“显式 OLE + WPF DispatcherFrame”仍挂起的基础上，只将顶层窗口从原生 `STATIC` 改为 WPF `HwndSource`；其下仍创建同样的 pane `STATIC`、真实 `IShellView` 和共享菜单 coordinator，输入法保持启用。新路线连续 3/3 完成 `DestroyViewWindow`、pane `DestroyWindow` 与根 `HwndSource.Dispose`；根窗均经过 `WM_DESTROY` 和 `WM_NCDESTROY`，`IsWindow` 变为 false，前台 HWND 不变。日志：`20261028-061036-7b7cb8f2.stdout.log`、`20261028-061047-2181c798.stdout.log`、`20261028-061049-8c00b176.stdout.log`。
+
+这是一项强差分：显式 OLE 与 WPF DispatcherFrame 单独及组合用于原生 `STATIC` 根窗时仍挂起，而 WPF 根窗组合 3/3 成功；此前将现象归因为线程级 IME/COM 交互过强，现已修正为尚无根因结论。给根 `HwndSource` 加上 WPF `Grid` 根视觉后，直接 `SetFocus(root)` 会把焦点置于 pane `STATIC`，但这属于探针额外注入的焦点变化，不能代表 Shell 菜单停用后的自然焦点状态。
+
+### 2026-10-28：四 pane WPF HwndHost 菜单与同步清理
+
+为匹配产品的 `HwndSource → WPF Grid → HwndHost → STATIC pane → Shell view` 层级，隔离探针现通过 WPF `Grid` 托管四个真实 `HwndHost`，每个 host 创建自己的 `STATIC` pane 并承载一个原生 `IShellView`。在输入法启用、显式 `OleInitialize` 和 WPF DispatcherFrame 泵下，依次对四 pane 激活/停用 Shell 菜单，再按序销毁 view、pane HwndHost 与根 HwndSource；连续 3/3 完整通过。每轮菜单插入/移除与 coordinator owner 释放均通过；菜单停用后 `GetFocus` 均落在当前 `SysListView32`，根窗销毁收到 `WM_DESTROY`/`WM_NCDESTROY`，`IsWindow=False` 且主桌面前台不变。日志：`20261028-061743-bc406769.stdout.log`、`20261028-061800-5928a72b.stdout.log`、`20261028-061804-3bb96028.stdout.log`。
+
+这同时解释了前一轮 `focus-restored-to-parent=False`：显式 `SetFocus(root)` 把已恢复到 Shell 列表的焦点改到 pane host；取消该人为干预后，WPF HwndHost 路径保留了 Shell 列表焦点。此证据验证的是隔离 WPF/Shell 组合，不是产品 ExplorerBrowser 的可见输入体验；没有验证真实鼠标 OLE 拖放、四 pane 用户输入、复制/移动文件、Shell 扩展异常或生产宿主替换。原型以外的产品代码未改。
+### 2026-10-27 导航历史拒绝嵌套请求并延迟关闭释放
+
+`ShellViewNavigationHistory` 的 callback 是可重入边界；原组件没有 busy/disposed 状态，合成回调中的第二次 BrowseObject 会提交另一目标，外层仍按旧请求更新历史。本批用 ERROR_BUSY HRESULT 拒绝尚未完成的同实例嵌套请求，finally 解除 gate，不建立无界延迟队列。回调中关闭会返回 E_ABORT 并阻止提交；历史 PIDL 直到 callback 退出后才释放，避免 Back/Forward 借用目标被提前释放。重复 Dispose 不重建历史，关闭后新导航拒绝。
+
+合成 PIDL 池回归先失败后通过，并检查下一次普通请求能继续、关闭期间 Back 目标可读及返回后清空。NativeProbe Release build 0 warning/error，完整 `--shell-view-color-policy-smoke` 通过。本次没有创建 Shell view 或运行 Private Desktop；真实 Shell 扩展重入、宿主关闭与历史/视图一致性仍需隔离原生验收，产品 ExplorerBrowser 不变。
+### 2026-10-27 延迟菜单命令绑定安装代次
+
+隐藏 frame coordinator 的新增合成消息回归先复现：命令排队后 RemoveMenusSB、再 SetMenuSB 同一个 host/HMENU，owner 再次相等，旧命令被送到假 pane HWND。现在 queue 保存 menu generation，SetMenu 的有效替换尝试及当前 owner Deactivate 递增代次，解析和最终执行均检查 owner+generation。重新安装失败而恢复旧菜单也不恢复旧队列执行资格；无效输入菜单在替换开始前拒绝，保持既有有效 owner。
+
+回归验证重激活拒绝旧命令、新命令正常，以及没有独立 RemoveMenusSB 的同菜单重装拒绝旧命令。NativeProbe Release 构建零警告错误，专用菜单消息链与完整颜色策略 smoke 通过。仅使用普通隐藏 HWND、合成 HMENU/OLE descriptor、假 pane 接收命令；没有真实 IShellView、系统菜单跟踪或产品迁移验收。
+### 2026-10-27 读取状态快照不改变原生写流位置
+
+`ReadSavedBytes` 原直接移动保存的 SHCreateMemStream 游标到 0 并读取，留下末尾位置。新增真实 IStream 回归：写入 1/2/3，将游标移到 1，读取快照，再写 9；旧行为得到追加内容，修正后为 1/9/3。现在以 64 位位置记录游标，并在 finally 恢复，避免读取快照干扰 Shell 后续写入。
+
+NativeProbe Release build 零警告错误，完整状态流 smoke（包括 session 隔离、读写更新、跨进程重开）及颜色策略 smoke 通过；没有创建 Shell view。当前状态存储是按 session GUID 保存的单流，保存与加载限制 64 KiB；没有在此处新增缓存或改变产品内存策略。真实 Shell SaveViewState/导航交接与 WPF 产品集成仍需单独验收。
+### 2026-10-27 宿主关闭后拒绝新状态流
+
+StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟到 GetViewStateStream 仍可创建 native stream，write 模式还会重新持有 `_savedStream`。现清理前标记关闭，重复 Dispose 短路，新的 read/write/readwrite 请求均返回 E_ABORT 与空输出指针，计数不增加。
+
+真实 CCW 的 IShellBrowser slot 12 回归先观察关闭后 read 请求仍成功，修正后覆盖三种模式；完整状态流（含跨进程）与颜色策略 smoke、NativeProbe Release build 通过，构建零警告错误。本次无 Shell view，不据此确认原生 SaveViewState/DestroyViewWindow 的清理顺序；调用方已持有的 IStream 仍按原有 COM 引用计数有效，不被强制撤销。产品 ExplorerBrowser 与 release 未改。
+### 2026-10-27 关闭后的活动视图和对象接口
+
+状态流关闭保护之后，继续核对 IShellBrowser QueryActiveShellView 与 IOleInPlaceFrame SetActiveObject：前者原在 Dispose 后仍 AddRef 借用 View，后者可重新持有 COM 对象，甚至 handler 已关闭宿主后外层仍继续持有。现退休时清空借用 View，关闭查询返回 E_ABORT/空输出，设置活动对象在 handler 前后检查退休。
+
+有效假 COM 对象配合 CCW slot 15/slot 8 回归先复现旧查询仍成功，修正后验证关闭拒绝及 handler 关闭后不持有。借用 View 清空不代表释放调用者自己的引用。NativeProbe Release build 零警告错误，完整颜色策略、菜单消息链、状态流 smoke 通过；无真实 Shell view，原生生命周期顺序及 WPF 产品迁移仍需单独验收。
+### 2026-10-27 视图状态按打开快照检查保存冲突
+
+新增两宿主同 stateId 回归先复现：二者均打开旧状态，先关闭者保存后，后关闭者会覆盖它。现在宿主创建时只读取一次持久化状态，读流使用这份初始快照，保存则比较同一份基线（缺失以 null 区分空数组）。已有 `_bytes` 与 expected baseline 共享引用，不额外复制已保存的 64 KiB 状态。未读到持久化状态时仍克隆调用方 fallback。
+
+存储沿用应用 PortableIniWriter 的 mutex 路径命名，500 ms 有界等待，持锁核对当前存在性/内容后保留原有临时文件写入/flush/原子替换。回归覆盖旧宿主保存拒绝、活动快照不被另一宿主保存替换、重新打开后可保存、外部创建及删除保持。NativeProbe Release build 零警告错误，完整状态流与颜色策略 smoke 通过；跨进程证据仍是顺序读写，未证明同时竞争锁的行为。非协作外部写入者不受该 mutex 控制；真实 Shell view/冲突 UI/产品接线未验证，产品和 release 不变。
+### 2026-10-27 多进程争用状态保存的实测
+
+此前状态冲突检查仅验证同进程宿主与跨进程顺序读写。本批增加独立 race-writer 子命令，创建宿主后通过 ready/go 文件屏障确保两个进程都持有同一初始快照，再并发保存。三轮均一成功、一明确内容冲突；磁盘字节属于成功者。另由父进程持有实际同名路径 mutex，确认子进程已读基线后放行，子进程在 500 ms 写锁等待后失败，原文件不变；释放锁后新子进程正常保存。
+
+完整状态流 smoke 和 NativeProbe Release build 通过，构建零警告错误。进程不创建窗口，runner 15 秒上限且超时递归 Kill，父进程清理前 join 两个 runner。此证据补足协作进程争锁及超时，不覆盖非协作写入者的检查后竞争、异常退出或磁盘故障；无真实 Shell view/产品宿主/GUI 验收，已固定产品候选不变。
+
+### 2026-10-27：关闭后拒绝迟到的拖放注册（后台验证）
+
+- `StreamViewHost.RegisterDropTarget` 现在先检查宿主退休状态。此前 Dispose 已完成撤销且重复 Dispose 短路，但注册入口仍能继续构造 OLE 注册，存在迟到调用新增资源后无人撤销的生命周期缺口。
+- 无窗口回归用已 Dispose 的宿主和零句柄验证：修复前进入 HWND 参数检查并抛 ArgumentException；修复后先抛 ObjectDisposedException。未创建 HWND、Shell view 或执行 RegisterDragDrop，不声称已复现真实 OLE 泄漏。
+- 完整 `--shell-view-state-stream-smoke` 通过，包含原有 COM stream、跨进程持久化、并发写保护与锁超时检查。日志：`src/.state/drop-retirement-red.log`、`src/.state/drop-retirement-green.log`。
+- 仅隔离原型改变；真实导航/关闭重入与拖放交互仍待集中 UI 验收，不归因为产品内存增长或无响应的根因。固定 UI 候选和 temp.76 发布目录未更新。
+
+### 2026-10-27：自定义列尚无数值时的原生契约
+
+无窗口 RunFolderContract 扩展两个真实临时文件，二者不在静态数值表。旧适配层 GetDetailsEx 返回 E_FAIL，红测明确记录 Pending custom GetDetailsEx failed: 0x80004005。修复仅针对自定义列：未知值返回 S_OK/VT_EMPTY，显示文本为空；排序时空值排在已知值前，两个空值沿用底层名称比较，不用零字节伪装未完成结果。用于诊断的标准 PKEY_Size 替换控制保持原行为。
+
+真实 native IShellFolder2 COM 调用验证空值类型、空白文本、空↔已知比较反对称、空值自比较、两个空值与原生名称排序一致，以及原有 2/10/100 和同值比较。另用 SHCIDS_CANONICALONLY 确认 ten.bin 与 ten-copy.bin 虽有相同自定义数值仍是不同原生身份；[微软 CompareIDs 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)区分列排序规则与 canonical identity 比较，修复未改写后一条委托路径。
+
+C++ /W4 /WX 构建及 --static-shell-column-folder-smoke、--static-shell-column-contract-smoke 通过。原生结果 window-created=False；本次未运行创建视图的 Run/Private Desktop 分支，未接入产品。日志 src/.state/static-missing-{red,green,native-build}.log。静态空值基础不能代替异步目录扫描/完成后重新排序、通知、可见焦点与迁移验收；递归目录大小与颜色 P0 仍未完成。
+
+### 2026-10-28：四窗格 WPF 原生选中项菜单隔离复验
+
+新增背景验证覆盖四个 WPF 托管 `IShellView` 的已选文件 `IContextMenu`：每个 pane 均取得原生菜单并确认包含标准 `copy` verb；同一批也通过每窗格的 Details、排序、分组命令映射与键盘路由。第一次失败时，在选中项菜单阶段前读到四个视图各自已有 2 项选中；这是前序真实 Shell 文件操作留下的状态，不能当成 pane 间选择泄漏。探针现于每个菜单用例前清空所有 pane 的选择，并在退出时清空、核对所有 pane；重新构建后连续 3 轮完整 Private Desktop 流程通过，前台 HWND 未变。
+
+Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌面上的原生 COM 菜单对象和命令查询，不显示菜单、不运行真实菜单跟踪，也不验证产品 UI 或真实鼠标拖放；这些仍留待集中可见验收。
+
+### 2026-10-28：WPF 隔离四窗格的原生新建文件夹命令
+
+在四 pane `IShellView` 的隐藏 Private Desktop 流程末尾，改为调用产品 `ShellFileCommands.Invoke(NewFolder)` 与 `NativeShellCommandMenu`。生产适配器先经 `IContextMenu2::HandleMenuMsg(WM_INITMENUPOPUP)` 初始化延迟的“新建”子菜单，再用当前菜单对象内的命令偏移调用；返回 `S_OK`。此前未初始化子菜单的独立调用偏移返回 `E_FAIL`，直接使用 canonical verb 字符串虽可执行，但不代表产品入口的实际调用路径。
+
+创建出的临时目录在同目录三个 pane 中均可见且计数增加，独立目录 Pane 4 的计数与内容保持不变；若 Shell 打开内联重命名，则由隔离 view 接收 Escape 后结束。当前产品适配器路径连续 3 次通过，前台 HWND 未变，fixture 清理完成。该验证覆盖隐藏原生适配器与通知传播，不等于产品 ExplorerBrowser 的可见菜单/焦点/自动重命名验收，也不覆盖用户真实输入。日志：`20261028-084306-df033e88.stdout.log`、`20261028-084356-2bf5a2ad.stdout.log`、`20261028-084412-57d9c5b7.stdout.log`、`20261028-084429-303fb9d9.stdout.log`。

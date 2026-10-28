@@ -19,8 +19,13 @@ if (-not $PrepareOnly -and -not $AllowInteractiveDesktopControl) {
 if (-not $IsWindows) { throw 'This GUI smoke test requires Windows.' }
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$sourceCommit = & git -C $projectRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot record the acceptance source revision.' }
+$sourceChanges = & git -C $projectRoot status --porcelain
+if ($LASTEXITCODE -ne 0) { throw 'Cannot record acceptance source cleanliness.' }
 $stateRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src\.state\gui-smoke'))
 $runName = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6)
+$buildIdentity = "gui-acceptance.$runName+$($sourceCommit.Trim())"
 $runRoot = [IO.Path]::GetFullPath((Join-Path $stateRoot $runName))
 if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
     [StringComparison]::OrdinalIgnoreCase)) {
@@ -29,9 +34,17 @@ if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
 $appDirectory = Join-Path $runRoot 'app'
 $acceptanceDirectory = Join-Path $runRoot 'acceptance-files'
 $testDirectory = Join-Path $acceptanceDirectory 'pane-1'
+$parentDirectoryItem = [IO.Path]::GetFileName($testDirectory)
 $recursiveSizeDirectory = Join-Path $acceptanceDirectory 'recursive-size-progress'
 $focusTracePath = Join-Path $runRoot 'focus-trace.log'
 New-Item -ItemType Directory -Path $appDirectory, $testDirectory, $recursiveSizeDirectory -Force | Out-Null
+# Choose the literal folder through the Shell tree/list during later acceptance.
+# Set this variable only in the launched test process, never in the user's global environment.
+$percentVariable = 'ExplorerDirsQdrAcceptance'
+$percentFixtureParent = Join-Path $acceptanceDirectory 'percent-paths'
+$percentLiteralFixture = Join-Path $percentFixtureParent ('%' + $percentVariable + '%')
+$percentExpandedFixture = Join-Path $percentFixtureParent 'expanded-target'
+New-Item -ItemType Directory -Path $percentLiteralFixture, $percentExpandedFixture -Force | Out-Null
 $searchToken = 'ExplorerDirsSmoke' + [Guid]::NewGuid().ToString('N')
 $searchName = "$searchToken.txt"
 [IO.File]::WriteAllText((Join-Path $testDirectory $searchName), 'isolated search proof')
@@ -74,11 +87,31 @@ $qdrColorBaseline = Join-Path $runRoot 'qdr-color-baseline.qdr'
     "Dir1=$testDirectory"
 ), [Text.UTF8Encoding]::new($false))
 
+# Import into the initially single-tab pane to reach the supported 100-tab
+# boundary without creating 99 tabs by hand. All paths are disposable fixtures.
+$tabCapacityFixture = Join-Path $runRoot 'qdr-tab-capacity-99.qdr'
+$tabCapacityLines = [Collections.Generic.List[string]]::new()
+$tabCapacityLines.Add('Q-Dir Version=12.79')
+$tabCapacityLines.Add("Dir1=$testDirectory")
+$tabCapacityLines.Add('CurPos1=0')
+$tabCapacityLines.Add('ViewMode1=4')
+foreach ($tabIndex in 1..98) {
+    $tabCapacityLines.Add("Dir1_$tabIndex=$testDirectory")
+    $tabCapacityLines.Add("CurPos1_$tabIndex=$tabIndex")
+    $tabCapacityLines.Add("ViewMode1_$tabIndex=4")
+}
+[IO.File]::WriteAllLines($tabCapacityFixture, $tabCapacityLines, [Text.UTF8Encoding]::new($false))
+
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
-    --configuration Release --self-contained false --output $appDirectory
+    --configuration Release --self-contained false --output $appDirectory `
+    "-p:InformationalVersion=$buildIdentity" -p:IncludeSourceRevisionInInformationalVersion=false
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 $exe = Join-Path $appDirectory 'ExplorerDirs.App.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" }
+$assemblyPath = Join-Path $appDirectory 'ExplorerDirs.App.dll'
+if ((Get-Item -LiteralPath $assemblyPath).VersionInfo.ProductVersion -ne $buildIdentity) {
+    throw 'Acceptance assembly does not contain its unique build identity.'
+}
 
 # A Release app copied outside releases/ uses the profile beside its executable.
 $profileDirectory = Join-Path $appDirectory 'profile'
@@ -122,34 +155,55 @@ $manifest = [ordered]@{
     SchemaVersion = 1
     Status = 'prepared-not-run'
     PreparedAtUtc = [DateTime]::UtcNow.ToString('o')
+    SourceCommit = $sourceCommit.Trim()
+    SourceWorkingTreeDirty = [bool]$sourceChanges
+    BuildIdentity = $buildIdentity
     Executable = 'app/ExplorerDirs.App.exe'
     Profile = 'app/profile/ExplorerDirs.ini'
     ManualFixtures = 'acceptance-files'
+    ParentDirectoryItem = $parentDirectoryItem
     RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
     QdrColorBaseline = 'qdr-color-baseline.qdr'
+    TabCapacityFixture = 'qdr-tab-capacity-99.qdr'
+    PercentPathFixture = 'acceptance-files/percent-paths'
+    PercentPathProcessVariable = $percentVariable
+    PercentPathProcessValue = 'expanded-target'
+    TabCapacityFixtureSha256 = (Get-FileHash -LiteralPath $tabCapacityFixture -Algorithm SHA256).Hash
     QdrProgramFixture = 'qdir-program-items.ini'
     QdrProgramFixtureSha256 = (Get-FileHash -LiteralPath $programStarterFixturePath -Algorithm SHA256).Hash
     InitialLayout = 4
     VisiblePaneCount = 4
     ExecutableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-    AssemblySha256 = (Get-FileHash -LiteralPath (Join-Path $appDirectory 'ExplorerDirs.App.dll') -Algorithm SHA256).Hash
+    AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     FocusTrace = if ($CaptureFocusTrace) { 'focus-trace.log' } else { $null }
     PendingAcceptance = @(
+        'For percent-paths, set PercentPathProcessVariable=PercentPathProcessValue only in the isolated launched process. Navigate through the file list/tree into the literal percent-named folder; export ordinary QDR and a desktop workspace shortcut. Open their base Folder fields in Q-Dir and verify the literal directory rather than expanded-target. Cancel an unresolved-path compatibility prompt and verify no target was written',
+        'During import backup preparation, change a tab/view/layout or switch to a sibling window: keep the backup but do not append. Repeat with a stable session and verify the exact session plus QDR backup, then append normally. Force a disposable backup output failure and verify no imported tabs appear',
+        'Close one isolated window during QDR preparation or desktop workspace publication; no late UI changes appear. While a sibling window keeps the process alive, inspect confirmed output and ensure shortcut/QDR match or failed publication cleans its new QDR',
+        'For the updated window registry, restart multiple isolated windows and verify per-window placement/session restoration; the background unknown-version protection checks do not replace normal restart acceptance',
         'In each pane, paste a file and immediately press Up/Down without clicking first; then use Shift+Delete, confirm, and immediately press Up/Down. The same pane must move its file focus/selection after both operations. If either fails, Alt+Tab away and back, then repeat the arrow key and record whether window activation restores keyboard navigation. When FocusTrace is set, retain focus-trace.log and compare the key, IShellView accelerator result, HWND focus, Shell item focus, and focus-restore-poll content-focused/attempt values around the operation',
-        'In every pane, F2 then Left/Up/Right/Down keeps the native rename editor focused; Shift/Ctrl+Left/Right edits text; Escape cancels and Enter commits without changing another pane selection',
+        'In every pane and view style, F2 then Left/Up/Right/Down/Home/End/PageUp/PageDown keeps the native rename editor focused; Shift/Ctrl+Left/Right/Home/End edits text; Escape cancels and Enter commits without changing another pane selection. In file content verify Home/End/PageUp/PageDown and their Ctrl/Shift variants keep selection and physical focus in that pane',
         'With the file view focused, F10 opens the File menu; Escape closes it without running a command; F10 can open it again',
-        'Select one item, right-click unused viewport below the last row, then separately right-click empty trailing space inside a visible row. Compare the Shell native menu and custom command target for both positions; do not assume row-tail whitespace is background. Retain focus-trace.log coordinates/control types and record which Shell menu appears at each point',
+        'Select one item, right-click unused viewport below the last row, then separately right-click empty trailing space inside a visible row. Verify the file-area menu remains native-only and targets the confirmed item or background; do not assume row-tail whitespace is background. Retain focus-trace.log coordinates/control types and record which Shell menu appears at each point',
         'Ctrl-drag cross-pane-copy-source.txt from pane-1 to pane-2; confirm source and destination remain and destination content matches',
         'Drag cross-pane-move-source.txt from pane-1 to pane-2; confirm the source disappears and destination content matches',
-        'Tab and Shift+Tab traverse all visible panes in reverse order',
-        'Address-history button and F4 show the same current-tab paths; selecting one navigates only that tab, Tab/Shift+Tab include the button, and address-edit right-click retains its text context menu',
+        'Tab and Shift+Tab traverse every enabled stop of each visible pane in reversible order, including the Details column header. From a file use Shift+Tab to enter Name, Right to move to the next column, then Tab to return to the same selected file; Up/Down must work. F6 and Shift+F6 traverse major regions, including the last-pane to first-pane wrap',
+        'The address-history button shows current-tab recent paths and selecting one navigates only that tab; Tab/Shift+Tab include the button and address-edit right-click retains its text context menu. In Modern style F4 opens the directory tree and a second F4 edits the full path; clicking breadcrumb blank space also edits, while clicking an ancestor navigates. Classic style keeps directly editable paths',
+        'Visit two fixture folders, close and reopen the tab, and verify its address dropdown keeps those entries. Duplicate it, visit another folder in the copy, and verify the original dropdown is unchanged; this does not assert restoration of the disposed Shell Travel Log',
+        'Immediately after directory navigation, duplicate the tab, create a current-folder tab, close/reopen it, open its address editor and close a pending search; verify every operation uses the confirmed directory. Save/restart and check both the path and pinned metadata, without replacing a newer address/search draft',
+        'Move and resize each window on a secondary monitor, including a negative-coordinate monitor where available, restart the isolated app, and verify normal bounds and maximized state. Minimize a maximized window and relaunch the same isolated executable; verify it restores maximized. Ctrl+N and a new QDR workspace must appear on the source monitor; also cover F11 and mixed DPI without altering the daily-use profile',
         'Per-tab history survives tab and layout switches',
-        'Ctrl+wheel view changes and independent per-tab view persistence',
+        'Ctrl+wheel, toolbar and menu view changes preserve per-tab sorting/grouping and save independently. While switching styles or applying a column preset, navigate or switch tabs; no retired operation may change the replacement tab, publish an old error or forward old wheel input. Retain evidence separately from the controlled backend callback tests',
+        'Close address editing or search, or clear a filter, then switch tabs before delayed focus restoration executes. The old request must not move focus in the replacement tab; the same-tab normal path must still return to files. This timing-sensitive case is pending if it cannot be observed reliably',
+        'Set a group and direction, apply and clear a quick filter, then duplicate and restart; temporary ungrouping must not become saved no-group. While enumeration/restoration is pending, explicitly choose a different native group and direction; the new choice must persist. Test explicit native no-group separately and record it as unresolved if old grouping returns',
+        'With several tabs in a pane, start file-drag hover activation over an inactive tab, then hide that pane by changing layout; a delayed callback must not switch the hidden tab or make its pane active. Repeat normal visible hover to confirm switching still works, and cancel the drag without moving fixture files',
+        'In one isolated window start QDR/workspace or current-view CSV/TXT/HTML/XLS IO on a deliberately slow disposable target, then close only that window; no late status/dialog may appear and a sibling window stays usable. A confirmed export may finish while the process remains alive; inspect its target contents before cleanup. Do not assume the last process exit waits for pending writes',
         'Open Tools > Options > Size display format; switch between Auto and fixed units, change decimal places and thousands separator, and verify selected-size, F9 total, and disk-capacity text refresh consistently. Toggle F9 file/subdirectory counts off and on; verify the summary changes while unreadable-item warnings remain. Restart the isolated app and confirm the saved unit/precision/count preferences load from SizeDisplay.ini',
         'Navigate one pane to RecursiveSizeFixture, press F9 and verify the status counter advances before the final 10,000-file summary; start a second scan, press F9 to cancel, then navigate away and confirm stale progress does not return',
         'Open Tools > Program Starter; add and save one inert test entry, then restart and verify it returns from the isolated profile ProgramStarter.ini. Import qdir-program-items.ini and verify both rows and all fields in preview; cancel and confirm ProgramStarter.ini is unchanged, then import again and explicitly apply. Verify the fixture SHA-256 is unchanged, the Q-Dir source was not modified, and imported programs were not launched',
         'QDR import/export, cancellation, and native Q-Dir compatibility',
-        'Color diagnosis: on the same directory and Details view, compare the initial fresh view, an ordinary new tab created in the running window, import-dialog cancel, minimal qdr-color-baseline.qdr import, and restart; capture the DirectUI file-area pixels at the same screen region after each step, and note exactly which transition changes the color'
+        'Theme regression: in both Light and Dark, verify cold start, duplicated tabs, pane switching, scrollbar endpoints, directory trees and native context menus retain the accepted temp.76 appearance without white flashes, delayed/double borders or transparent gutters; compare after import cancel, minimal qdr-color-baseline.qdr import and restart',
+        'Run capacity checks last on a fresh isolated profile with one tab in pane-1: import TabCapacityFixture (99 incoming tabs) to reach 100, verify New/Duplicate/Middle-click/drag-copy or drag-move into that pane cannot add a tab and keep the source/selection. Reimport is rejected before partial append. At capacity Reopen Closed must preserve its history; freeing a slot permits recovery. Do not use the resulting 100-tab workload as the normal memory baseline'
     )
 }
 [IO.File]::WriteAllText((Join-Path $runRoot 'preparation.json'),
@@ -321,7 +375,7 @@ try {
     Invoke-TestButton $app $mainWindow 'PaneGoParent'
     Wait-Until {
         Assert-TestForeground $app $mainWindow
-        $null -ne (Find-ShellItem $mainWindow 'files')
+        $null -ne (Find-ShellItem $mainWindow $parentDirectoryItem)
     } 'parent directory item' 20000
     $measurements.DirectoryUpToItemMs = [Math]::Round($directoryWatch.Elapsed.TotalMilliseconds, 1)
     $directoryWatch.Restart()

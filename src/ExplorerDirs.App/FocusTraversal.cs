@@ -9,6 +9,7 @@ internal readonly record struct PaneFocusStopMap(
     int FilterCount,
     int NavigationStopCount,
     int TreeButton,
+    int PaneViewStyle,
     int Address,
     int AddressMenu,
     int AddressHistory,
@@ -29,12 +30,16 @@ internal readonly record struct PaneFocusStopMap(
     // one index map so Tab and F6 cannot drift when a view's stops change.
     internal static PaneFocusStopMap Create(bool searchVisible, bool quickFilterVisible,
         bool treeVisible, bool hasColumnHeader, bool paneTreeButtonVisible = false,
-        bool addressHistoryButtonVisible = false, bool addressPathButtonVisible = false)
+        bool paneViewStyleButtonVisible = true, bool addressHistoryButtonVisible = false,
+        bool addressPathButtonVisible = false, bool tabHeaderVisible = true,
+        bool statusBarVisible = true)
     {
         var navigationStopCount = BaseNavigationStopCount + (paneTreeButtonVisible ? 1 : 0) +
+            (paneViewStyleButtonVisible ? 1 : 0) +
             (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
         var treeButton = paneTreeButtonVisible ? 4 : -1;
-        var address = 4 + (paneTreeButtonVisible ? 1 : 0);
+        var paneViewStyle = paneViewStyleButtonVisible ? 4 + (paneTreeButtonVisible ? 1 : 0) : -1;
+        var address = 4 + (paneTreeButtonVisible ? 1 : 0) + (paneViewStyleButtonVisible ? 1 : 0);
         var addressMenu = addressPathButtonVisible ? address + 1 : -1;
         var addressHistory = addressHistoryButtonVisible ? address + 1 + (addressPathButtonVisible ? 1 : 0) : -1;
         var go = address + 1 + (addressHistoryButtonVisible ? 1 : 0) + (addressPathButtonVisible ? 1 : 0);
@@ -44,22 +49,24 @@ internal readonly record struct PaneFocusStopMap(
         var filterCount = quickFilterVisible ? 8 : 0;
         var searchStart = navigationStopCount;
         var filterStart = searchStart + searchCount;
-        var tabHeader = filterStart + filterCount;
-        var tree = treeVisible ? tabHeader + 1 : -1;
-        var columnHeader = tabHeader + (treeVisible ? 2 : 1);
+        var nextStop = filterStart + filterCount;
+        var tabHeader = tabHeaderVisible ? nextStop : -1;
+        var tree = treeVisible ? nextStop + (tabHeaderVisible ? 1 : 0) : -1;
+        var columnHeader = nextStop + (tabHeaderVisible ? 1 : 0) + (treeVisible ? 1 : 0);
         var fileView = columnHeader + (hasColumnHeader ? 1 : 0);
-        var statusTools = fileView + 1;
+        var statusTools = statusBarVisible ? fileView + 1 : -1;
         var majorStops = new List<int> { address };
         if (searchVisible) majorStops.Add(searchStart);
         if (quickFilterVisible) majorStops.Add(filterStart);
-        majorStops.Add(tabHeader);
+        if (tabHeaderVisible) majorStops.Add(tabHeader);
         if (treeVisible) majorStops.Add(tree);
         if (hasColumnHeader) majorStops.Add(columnHeader);
         majorStops.Add(fileView);
-        majorStops.Add(statusTools);
+        if (statusBarVisible) majorStops.Add(statusTools);
         return new PaneFocusStopMap(searchStart, searchCount, filterStart, filterCount,
-            navigationStopCount, treeButton, address, addressMenu, addressHistory, go, newTab, closeTab,
-            tabHeader, tree, columnHeader, fileView, statusTools, statusTools + 1, majorStops);
+            navigationStopCount, treeButton, paneViewStyle, address, addressMenu, addressHistory, go, newTab, closeTab,
+            tabHeader, tree, columnHeader, fileView, statusTools,
+            fileView + (statusBarVisible ? 2 : 1), majorStops);
     }
 }
 

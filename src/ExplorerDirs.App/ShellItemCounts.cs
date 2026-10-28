@@ -1,6 +1,7 @@
 namespace ExplorerDirs.App;
 
-internal sealed record ShellItemCounts(int Total, int Selected, ulong? KnownSelectionBytes = null)
+internal sealed record ShellItemCounts(int Total, int Selected, ulong? KnownSelectionBytes = null,
+    ulong? KnownFolderBytes = null)
 {
     internal static int? ReadAllViewTotal(Func<uint, (int Result, int Count)> read)
     {
@@ -20,7 +21,14 @@ internal sealed record ShellItemCounts(int Total, int Selected, ulong? KnownSele
         return new(total.Value, selected.Count);
     }
     internal string DisplayText => $"{Total:N0} 项 · 已选 {Selected:N0} 项" +
-        (KnownSelectionBytes is { } size ? $" · 可取得大小 {ByteSizeFormatter.Format(size)}" : "");
+        (Selected > 0 && KnownSelectionBytes is { } selectionSize
+            ? $" · 可取得大小 {ByteSizeFormatter.Format(selectionSize)}"
+            : Selected == 0 && KnownFolderBytes is { } folderSize
+                ? $" · 当前目录可取得大小 {ByteSizeFormatter.Format(folderSize)}"
+                : "");
     internal string Description => DisplayText + (Selected > 0
-        ? "\n仅汇总可取得的大小，未提供大小的项目不计入；未递归统计文件夹。" : "");
+        ? "\n仅汇总可取得的选中项目大小，未提供大小的项目不计入；未递归统计选中的文件夹。"
+        : KnownFolderBytes is not null
+            ? "\n仅汇总 Windows Shell 可快速取得的当前目录直接子项大小；未提供大小的项目不计入，不递归统计文件夹。"
+            : "");
 }

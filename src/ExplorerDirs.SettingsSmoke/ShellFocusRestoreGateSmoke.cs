@@ -69,10 +69,41 @@ internal static class ShellFocusRestoreGateSmoke
         Check(ShellFocusRestoreGate.ShouldFocusContentWindow(focusWithinContentWindow: true,
             columnHeaderFocused: false), expected: false,
             "FocusView retains a focused file item inside the content window");
-        Check(ShellFocusRestoreGate.ShouldAttemptRestore(true, fileContentAlreadyFocused: false), expected: true,
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: false,
+                fileContentAlreadyFocused: false), expected: false,
+            "focus retry stays pending without taking focus while the app window is inactive");
+        var startedAtBeforeInactivePeriod = 10L;
+        var startedAtWhileInactive = ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+            startedAtBeforeInactivePeriod, now: 5000, windowActive: false);
+        Check(startedAtWhileInactive == 5000, expected: true,
+            "time spent away from the application does not consume the active focus-recovery window");
+        Check(ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+                startedAtWhileInactive, now: 5010, windowActive: false) == 5010, expected: true,
+            "an inactive retry keeps the pending request alive without accumulating inactive time");
+        Check(ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+                startedAtWhileInactive, now: 5100, windowActive: true) == 5000, expected: true,
+            "reactivation resumes the bounded focus-recovery window from its latest inactive checkpoint");
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
+                fileContentAlreadyFocused: false), expected: true,
             "focus retry restores the file-content target when a sibling Shell control has focus");
-        Check(ShellFocusRestoreGate.ShouldAttemptRestore(true, fileContentAlreadyFocused: true), expected: false,
+        Check(ShellFocusRestoreGate.ShouldAttemptRestore(canContinue: true, windowActive: true,
+                fileContentAlreadyFocused: true), expected: false,
             "focus monitor skips redundant SetFocus when file content already owns focus");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: false), expected: true,
+            "file-operation recovery reactivates a Shell view once even when its content HWND already reports focus");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: true, renameEditorFocused: false), expected: false,
+            "a pending file-operation recovery does not repeatedly activate the Shell view");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: false, activationAlreadyAttempted: false, renameEditorFocused: false), expected: false,
+            "Shell view activation waits while the application window is inactive");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: true,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: true), expected: false,
+            "file-operation recovery never interrupts an active rename editor");
+        Check(ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue: false,
+                windowActive: true, activationAlreadyAttempted: false, renameEditorFocused: false), expected: false,
+            "a stale file-operation request cannot reactivate a Shell view");
         Check(ShellFocusRestoreGate.CanRestoreForeground(foregroundIsEmpty: true, foregroundOwnedByThisWindow: false), expected: true,
             "file-operation focus may recover when Windows has no foreground window");
         Check(ShellFocusRestoreGate.CanRestoreForeground(foregroundIsEmpty: false, foregroundOwnedByThisWindow: true), expected: true,

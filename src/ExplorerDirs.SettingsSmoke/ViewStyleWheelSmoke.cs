@@ -12,6 +12,9 @@ internal static class ViewStyleWheelSmoke
             "a failed multi-notch switch forwards the accumulated wheel distance to Shell");
         Check(ViewStyleWheelDispatch.GetFallbackDelta(-1, false) == -120,
             "a failed reverse switch preserves the reverse wheel direction for Shell");
+        Check(ViewStyleWheelDispatch.GetFallbackDelta(2, false, targetCurrent: false) == 0 &&
+            ViewStyleWheelDispatch.GetFallbackDelta(-1, false, targetCurrent: false) == 0,
+            "a retired wheel target never receives accumulated fallback input");
 
         Check(ViewStyleWheelCycle.Next(4, 16, 120) == ViewStyle.All[4], "wheel up from Details cycles to List");
         Check(ViewStyleWheelCycle.Next(4, 16, -120) == ViewStyle.All[6], "wheel down from Details cycles to Tiles");
@@ -37,6 +40,19 @@ internal static class ViewStyleWheelSmoke
         Check(separateTab.Add(60) == 0 && new ViewStyleWheelAccumulator().Add(60) == 0 &&
             separateTab.Add(60) == 1,
             "partial wheel motion remains isolated to its owning tab");
+
+        var navigated = new ViewStyleWheelAccumulator();
+        var readiness = new ShellViewReadiness();
+        Check(navigated.Add(60, readiness.Generation) == 0,
+            "partial wheel motion waits for another delta in the same view generation");
+        readiness.Begin("next-directory");
+        Check(navigated.Add(60, readiness.Generation) == 0 &&
+            navigated.Add(60, readiness.Generation) == 1,
+            "partial wheel motion from a retired view is discarded after navigation");
+
+        var sharedWheel = new ViewStyleWheelAccumulator();
+        Check(sharedWheel.Add(60, 1) == 0 && sharedWheel.Add(60, 1) == 1,
+            "partial deltas from native and WPF surfaces complete one shared notch");
     }
 
     private static void Check(bool condition, string message)

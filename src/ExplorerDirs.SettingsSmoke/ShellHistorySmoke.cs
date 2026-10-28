@@ -9,14 +9,19 @@ internal static class ShellHistorySmoke
         var server = new HistoryTestServer { NotifyOnUnadvise = true };
         var unknown = Marshal.GetIUnknownForObject(server);
         var notifications = 0;
+        var statusChanges = new List<string?>();
         try
         {
-            using var history = ShellHistoryEvents.Subscribe(unknown, () => notifications++);
+            using var history = ShellHistoryEvents.Subscribe(unknown, () => notifications++, statusChanges.Add);
             Check(history.Connected && server.Advised == 1, "subscribes to the documented connection point");
             Check(history.CanNavigate(true, false, false) && history.CanNavigate(false, false, false),
                 "unknown direction states preserve navigation attempts");
             var sink = server.Sink!;
-            VerifyNativeDispatch(sink);
+            VerifyNativeDispatch(sink, statusChanges);
+            sink.StatusTextChange("Ready");
+            sink.StatusTextChange(null);
+            Check(history.StatusText is null && statusChanges.SequenceEqual(new string?[] { "Native status", "Ready", null }),
+                "status text and clear notifications are kept by the browser subscription");
             Check(history.Back == true, "IDispatch marshals native command and VARIANT_BOOL");
             sink.CommandStateChange(2, false);
             sink.CommandStateChange(1, true);
@@ -40,8 +45,9 @@ internal static class ShellHistorySmoke
             history.Dispose();
             var afterDispose = notifications;
             sink.CommandStateChange(2, false);
+            sink.StatusTextChange("late");
             Check(server.Unadvised == 1 && afterDispose == beforeDispose && notifications == afterDispose &&
-                !history.CanNavigate(true, false, false),
+                !history.CanNavigate(true, false, false) && statusChanges.Count == 3,
                 "failed unadvise still disconnects callbacks and disables disposed state");
             history.Dispose();
             Check(server.Unadvised == 1, "dispose is idempotent");
@@ -112,12 +118,13 @@ internal static class ShellHistorySmoke
         if (!value) throw new InvalidOperationException("Shell history: " + message);
     }
 
-    private static void VerifyNativeDispatch(ShellBrowserCommandSink sink)
+    private static void VerifyNativeDispatch(ShellBrowserCommandSink sink, List<string?> statusChanges)
     {
         var dispatch = Marshal.GetIDispatchForObject(sink);
         var size = IntPtr.Size == 8 ? 24 : 16; // VARIANT includes the two-pointer BRECORD union.
         var args = Marshal.AllocCoTaskMem(size * 2);
         var cancel = Marshal.AllocCoTaskMem(2);
+        var statusText = Marshal.StringToBSTR("Native status");
         try
         {
             Marshal.Copy(new byte[size * 2], 0, args, size * 2);
@@ -138,8 +145,21 @@ internal static class ShellHistorySmoke
             Marshal.WriteInt16(args, size, 11); // IsChildWindow VT_BOOL false
             Check(invoke(dispatch, 263, ref empty, 0, 1, ref parameters, 0, 0, out _) == 0 &&
                 Marshal.ReadInt16(cancel) == -1, "unused native event succeeds without changing cancellation");
+            Marshal.Copy(new byte[size], 0, args, size);
+            Marshal.WriteInt16(args, 8); // VT_BSTR
+            Marshal.WriteIntPtr(args, 8, statusText);
+            parameters.cArgs = 1;
+            Check(invoke(dispatch, 102, ref empty, 0, 1, ref parameters, 0, 0, out _) == 0 &&
+                statusChanges.SequenceEqual(["Native status"]),
+                "native StatusTextChange IDispatch delivers its BSTR to the browser subscription");
         }
-        finally { Marshal.FreeCoTaskMem(cancel); Marshal.FreeCoTaskMem(args); Marshal.Release(dispatch); }
+        finally
+        {
+            Marshal.FreeBSTR(statusText);
+            Marshal.FreeCoTaskMem(cancel);
+            Marshal.FreeCoTaskMem(args);
+            Marshal.Release(dispatch);
+        }
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int DispatchInvoke(nint self, int dispid, ref Guid iid, uint lcid, ushort flags,

@@ -1,10 +1,18 @@
 # Explorer Dirs
 
-### 2026-10-25 当前可预览版本：`preview-0.6.0-temp.55`
+最新主题修正版：[temp.76](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.76/app/ExplorerDirs.App.exe)。本批已验收并发布：右键文件区不闪白、原生菜单同步且单框贴合、窗格切换不闪、滚动条端部无白块、复制标签与冷启动无整片白底。文件区保留原生右键菜单。见[temp.76 说明](docs/releases/preview-0.6.0-temp.76.md)。
 
-[打开 temp.55 程序](releases/preview-0.6.0-temp.55/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。相较 temp.54，本版补上全局大小显示格式设置、F9 递归汇总数量开关，并修正独立预览 profile 漏带 `SizeDisplay.ini` 的打包问题。详情见[temp.55 说明](docs/releases/preview-0.6.0-temp.55.md)及[发布清单](releases/README.md)。
+2026-10-27 已发布 `preview-0.6.0-temp.75`：[启动预览程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.75/app/ExplorerDirs.App.exe)。使用本版独立 profile，从 temp.74 复制会话、固定标签和紧凑布局配置。完整进度及近期/远期安排见[整体报告](docs/progress-2026-10-27.md)，版本差异见[temp.75 说明](docs/releases/preview-0.6.0-temp.75.md)。本包构建、配置/打包检查及哈希核对通过，未启动 GUI。
 
-temp.55 的 Release SettingsSmoke、App Release 构建和发布隔离 smoke 通过，包内版本与 EXE/DLL SHA-256 已核对。没有启动 GUI、ExplorerBrowser 或 Q-Dir；选项菜单、F9 状态栏更新及其他可见 Shell 行为仍待桌面验收。
+temp.75 包含现代地址栏点击编辑、Shell 下载目录定位、窗口位置/大小/最大化状态记忆、新窗口跟随来源屏幕、主工具栏精简、跨窗格标签转移、多行标签与悬停切换、状态栏/递归统计，以及焦点、导航、配置保护和资源关闭修复。真实多屏/DPI、F2、文件操作后焦点和 Q-Dir 互操作仍待可见验收。
+
+产品仍使用 ExplorerBrowser；隔离 IShellView 迁移/逐项颜色原型没有替换本包宿主。内存长期增长的主要来源尚未确认，不把缓存限额或宿主释放修复解释为已取得显著内存收益。
+
+### 2026-10-27 此前预览版本：`preview-0.6.0-temp.74`
+
+[打开 temp.74 程序](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.74/app/ExplorerDirs.App.exe)，程序和独立 profile 均在该版本目录；请从包内 `app/ExplorerDirs.App.exe` 启动，不要运行 `src` 下的调试构建。本版对齐地址历史与路径输入、标签栏显示模式和 Tab 顺序，增加每窗格 Shell 状态提示，并让 `.qdr` 导入预览列出识别到的颜色规则。详情见[temp.74 说明](docs/releases/preview-0.6.0-temp.74.md)及[发布清单](releases/README.md)。
+
+temp.74 的完整 Release `SettingsSmoke`、App Release 构建通过，包内版本与 EXE/DLL SHA-256 已核对；profile 独立于日常使用配置，包含 2 个会话文件。预览程序未启动；真实菜单、焦点、Shell 状态提示、Shell 文件区主题及 Q-Dir 互操作仍待可见验收。内存采样中，一次性视图释放 44 个视图只带来约 2 MB 的有限变化；后续以同一进程、固定工作负载监测运行期增长，仓库已有 `scripts/perf-sample.ps1` 可按 PID 采集工作集、Private Bytes、CPU、线程和句柄，不把视图数直接折算为内存收益。
 
 源码还提供 Shell 原生文件视图和右键菜单、标签/多布局/独立窗口会话、`.qdr` 导入与状态导出、文件视图 CSV/TXT/HTML/XLS 导出、打印、搜索/筛选、目录树/预览/详情窗格、状态栏及大小显示格式设置，以及通过 Windows 系统对话框映射/断开网络驱动器的菜单入口。文件视图导出始终包含整份当前视图，即使已有选中项；该范围与用户确认一致。网络驱动器入口的分发 smoke 已通过，真实对话框、连接/断开后的驱动器刷新及凭据交互尚未验收。
 
@@ -72,8 +80,9 @@ temp.55 的 Release SettingsSmoke、App Release 构建和发布隔离 smoke 通�
 - 每窗格多标签；标签右键菜单支持新建、复制、关闭其他和恢复关闭标签。中键或双击标签标题可关闭标签；每个窗格至少保留一个标签。标签栏单行显示，溢出时可用左右箭头或鼠标滚轮横向滚动。源码已支持同窗格拖动标题排序；Ctrl+Tab、Ctrl+1～9、标题方向键和重启快照按显示顺序工作，真实窗口效果待验收，新排序已包含在 temp16。
 - 源码已接入 Ctrl+N 新建窗口；每个窗口保存独立会话 INI，`WindowSessions.ini` 在下次启动恢复窗口集合，固定标签随窗口保存，收藏夹与应用偏好共享。无参数重复启动会激活现有窗口；路由无法确认时停止第二个进程，避免会话冲突。隔离配置和命名管道回归通过，可见快捷键、多窗并行和真实重启仍待 GUI 验收；该功能已包含在 temp16。
 - 源码已让切换标签和布局时保留已访问的 Shell 视图与窗格对象，减少因 WPF 卸载视图造成的后退历史丢失风险。无窗口可视树回归通过；真实 ExplorerBrowser 句柄与历史保持仍待 GUI 验收，已包含在 temp16。
-- 源码已加入固定标签：右键标签或文件视图中的项目前置菜单可固定/取消固定，固定标签排在窗格左侧；复制标签继承固定状态，快捷关闭与“关闭其他标签”会保留固定标签。固定元数据独立保存在配置目录的 `PinnedTabs.ini`，旧预览版保存会话不会直接删除该文件；若旧版改变标签位置或路径，新版会跳过不匹配的固定记录。真实窗口与重启恢复待验收，已包含在 temp16。
-- 每个标签内嵌 Windows Shell ExplorerBrowser 文件视图，初始为详细信息。文件和目录空白处按系统视图命中，支持原生查看、排序、分组、新建、属性、文件关联、图标及第三方 Shell 扩展菜单；本程序的标签、路径命令排在同一个右键菜单前面。布局只在顶部菜单和快捷图标中切换。
+- 源码已加入固定标签：右键标签可固定/取消固定，固定标签排在窗格左侧；复制标签继承固定状态，快捷关闭与“关闭其他标签”会保留固定标签。固定元数据独立保存在配置目录的 `PinnedTabs.ini`，旧预览版保存会话不会直接删除该文件；若旧版改变标签位置或路径，新版会跳过不匹配的固定记录。真实窗口与重启恢复待验收，已包含在 temp16。
+- 每个标签内嵌 Windows Shell ExplorerBrowser 文件视图，初始为详细信息。文件和目录空白处按系统视图命中，支持原生查看、排序、分组、新建、属性、文件关联、图标及第三方 Shell 扩展菜单；按 2026-10-27 用户要求，文件区暂停追加本程序的标签、路径命令，仅显示 Shell 原生菜单内容；标签栏右键功能保留。布局只在顶部菜单和快捷图标中切换。
+- 当前源码的“视图 → 整行选择”使用原生 `FWF_FULLROWSELECT`，并通过独立 `FullRowSelection.ini` 记录显式偏好；配置缺失或无效时遵循 Shell 默认值。该功能尚未进入预览包 temp.74，实际行高亮、选择和右键行为仍待可见 GUI 验收。
 - 源码已改为根据 Shell 选中项属性显示文件夹的“在新标签页中打开”命令，构建菜单时不再额外同步检查目录是否存在；真实右键菜单和网络目录的响应仍待 GUI 验收，已包含在 temp16。
 - 源码已接入文件列表中键点击文件夹后在新标签打开：通过 UI Automation 命中列表行，再由 Shell 复核候选路径确为当前目录下的普通文件系统文件夹；空白处和虚拟/搜索位置不会借用旧选区。Release 构建与路径 smoke 通过，实际 UI Automation 命中和物理中键行为待 GUI 验收，已包含在 temp16。
 - 源码已限制右键菜单前置命令只接收 Windows 标记为菜单来源的 `WM_COMMAND`，控件通知和加速键消息不会误触发；插入失败的命令也不会注册回调。控制台消息分类回归通过，实际 Shell 菜单执行仍待 GUI 验收，已包含在 temp16。
@@ -98,7 +107,7 @@ temp.55 的 Release SettingsSmoke、App Release 构建和发布隔离 smoke 通�
 
 ## 预览发布版
 
-[当前可预览版本 temp.47](releases/preview-0.6.0-temp.47/app/ExplorerDirs.App.exe) 使用独立 `app/profile/`，说明及哈希见[发布清单](releases/README.md)。该版本没有启动 GUI、ExplorerBrowser 或 Q-Dir，不能视为真实桌面验收通过；文件区可见刷新、焦点/选区保持、右键目标、目录树、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
+最新已有预览包为 [temp.73](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.73/app/ExplorerDirs.App.exe)，使用独立 profile。它包含菜单、文件操作、查看方式、导航、`.qdr` 导入/导出和目录树图标绑定等近期源码；预览包未启动，图标可见绘制、文件操作焦点恢复、右键目标、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
 
 ## 开发调试
 

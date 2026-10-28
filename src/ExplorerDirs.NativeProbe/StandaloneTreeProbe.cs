@@ -3,6 +3,220 @@ using System.Runtime.InteropServices;
 // Capability experiment only. No ExplorerBrowser, visible parent, input, or user files.
 internal static class StandaloneTreeProbe
 {
+    internal static int RunIconContract()
+    {
+        var folder = Path.GetTempPath();
+        var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+        var hr = SHCreateItemFromParsingName(folder, 0, ref itemId, out var item);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        if (item == 0) throw new InvalidOperationException("Shell returned no item for the temporary folder.");
+        try
+        {
+            var events = new ExplorerDirs.App.NativeTreeEvents(() => { }, () => { }, (_, _, _) => false);
+            var iconHr = events.OnGetDefaultIconIndex(item, out var normal, out var open);
+            var imageList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            var imageCount = imageList == 0 ? 0 : ImageList_GetImageCount(imageList);
+            Console.WriteLine($"tree-icon-callback: hr=0x{iconHr:X8}; normal={normal}; open={open}; image-count={imageCount}");
+            if (iconHr != 0 || normal < 0 || open < 0 || normal >= imageCount || open >= imageCount)
+                throw new Exception("The production namespace-tree icon callback did not return valid system image indices.");
+            return 0;
+        }
+        finally { Marshal.Release(item); }
+    }
+
+    internal static int RunIconRenderAb()
+    {
+        var foreground = GetForegroundWindow();
+        var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden tree icon A/B",
+            0x80000000, 0, 0, 320, 480, 0, 0, 0, 0);
+        if (parent == 0) throw new Exception("Hidden icon A/B parent creation failed.");
+        var fixture = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "ExplorerDirsTreeIcon-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var shellDefault = CaptureIconMode(parent, fixture, useExplicitIcons: false);
+            var explicitSystemList = CaptureIconMode(parent, fixture, useExplicitIcons: true);
+            Console.WriteLine($"tree-icon-render-ab: foreground-unchanged={GetForegroundWindow() == foreground}; default-icon-match={shellDefault.IconMatchPixels}/{shellDefault.IconTemplatePixels}@{shellDefault.IconAtX},{shellDefault.IconAtY}; explicit-icon-match={explicitSystemList.IconMatchPixels}/{explicitSystemList.IconTemplatePixels}@{explicitSystemList.IconAtX},{explicitSystemList.IconAtY}; default={shellDefault}; explicit={explicitSystemList}");
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon A/B changed the foreground window.");
+            return shellDefault.ClientPixels != 0 || explicitSystemList.ClientPixels != 0 ? 0 : 2;
+        }
+        finally
+        {
+            DestroyWindow(parent);
+            Directory.Delete(fixture, recursive: true);
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon A/B teardown changed the foreground window.");
+        }
+    }
+
+    internal static int RunIconInitializationSizeAb()
+    {
+        var foreground = GetForegroundWindow();
+        var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden tree initialization-size A/B",
+            0x80000000, 0, 0, 320, 480, 0, 0, 0, 0);
+        if (parent == 0) throw new Exception("Hidden initialization-size A/B parent creation failed.");
+        var fixture = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "ExplorerDirsTreeSize-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var initializedAtOnePixel = CaptureIconMode(parent, fixture, useExplicitIcons: true,
+                initializationWidth: 1, initializationHeight: 1);
+            var initializedAtFinalSize = CaptureIconMode(parent, fixture, useExplicitIcons: true,
+                initializationWidth: 320, initializationHeight: 480);
+            var samePixels = initializedAtOnePixel.PixelHash == initializedAtFinalSize.PixelHash &&
+                initializedAtOnePixel.IconBandHash == initializedAtFinalSize.IconBandHash;
+            var sameIcon = initializedAtOnePixel.IconMatchPixels == initializedAtFinalSize.IconMatchPixels &&
+                initializedAtOnePixel.IconTemplatePixels == initializedAtFinalSize.IconTemplatePixels &&
+                initializedAtOnePixel.IconAtX == initializedAtFinalSize.IconAtX &&
+                initializedAtOnePixel.IconAtY == initializedAtFinalSize.IconAtY;
+            Console.WriteLine($"tree-icon-initial-size-ab: foreground-unchanged={GetForegroundWindow() == foreground}; " +
+                $"same-pixels={samePixels}; same-icon-match={sameIcon}; " +
+                $"initialized-1x1={initializedAtOnePixel}; initialized-final={initializedAtFinalSize}");
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon initialization-size A/B changed the foreground window.");
+            return 0;
+        }
+        finally
+        {
+            DestroyWindow(parent);
+            Directory.Delete(fixture, recursive: true);
+            if (GetForegroundWindow() != foreground)
+                throw new Exception("Tree icon initialization-size A/B teardown changed the foreground window.");
+        }
+    }
+
+    private static (int Normal, int Selected, int ClientPixels, int IconBandPixels, string PixelHash,
+        string IconBandHash, string IconBandColors, int IconMatchPixels, int IconTemplatePixels,
+        int IconAtX, int IconAtY, string Row) CaptureIconMode(
+        nint parent, string fixture, bool useExplicitIcons, int initializationWidth = 320,
+        int initializationHeight = 480)
+    {
+        using var tree = new ExplorerDirs.App.NativeShellTree(parent, initializationWidth, initializationHeight, useExplicitIcons);
+        if ((initializationWidth != 320 || initializationHeight != 480) &&
+            !MoveWindow(tree.WindowHandle, 0, 0, 320, 480, true))
+            throw new Exception("Could not resize the initially small hidden tree host.");
+        tree.SetRoot(fixture);
+        Pump();
+        var nativeTree = FindWindowExW(tree.WindowHandle, 0, "SysTreeView32", null);
+        if (nativeTree == 0) throw new Exception("Tree icon A/B could not find the native tree view.");
+        var root = SendMessageW(nativeTree, 0x110a, 0, 0); // TVM_GETNEXTITEM / TVGN_ROOT
+        var images = ReadTreeItemImages(nativeTree, root);
+        var client = new Rect();
+        if (!GetClientRect(nativeTree, out client)) throw new Exception("Could not read tree icon A/B client bounds.");
+        var width = Math.Max(1, client.Right - client.Left);
+        var height = Math.Max(1, client.Bottom - client.Top);
+        var screenDc = GetDC(nativeTree);
+        if (screenDc == 0) throw new Exception("Could not acquire the hidden tree client DC.");
+        var memoryDc = CreateCompatibleDC(screenDc);
+        var bitmap = CreateCompatibleBitmap(screenDc, width, height);
+        if (memoryDc == 0 || bitmap == 0)
+        {
+            if (bitmap != 0) DeleteObject(bitmap);
+            if (memoryDc != 0) DeleteDC(memoryDc);
+            ReleaseDC(nativeTree, screenDc);
+            throw new Exception("Could not create the hidden tree pixel target.");
+        }
+
+        var oldBitmap = SelectObject(memoryDc, bitmap);
+        var background = GetSysColor(5); // COLOR_WINDOW
+        var brush = CreateSolidBrush(background);
+        try
+        {
+            var bounds = new Rect { Right = width, Bottom = height };
+            _ = FillRect(memoryDc, ref bounds, brush);
+            _ = SendMessageW(nativeTree, 0x0318, memoryDc, 0x0000000C); // WM_PRINTCLIENT / PRF_CLIENT | PRF_ERASEBKGND
+            // Hidden tree views do not report item bounds reliably; the first root row is at the client origin.
+            var iconRight = Math.Min(80, width);
+            var iconBottom = Math.Min(32, height);
+            var pixels = new List<uint>();
+            var iconBandPixels = new List<uint>();
+            var pixelBands = new int[5];
+            var clientPixels = new uint[iconRight, iconBottom];
+            for (var y = 0; y < iconBottom; y++)
+            for (var x = 0; x < iconRight; x++)
+            {
+                var pixel = GetPixel(memoryDc, x, y);
+                clientPixels[x, y] = pixel;
+                if (pixel != 0xFFFFFFFF && pixel != (uint)background)
+                {
+                    pixels.Add(pixel);
+                    pixelBands[Math.Min(x / 16, pixelBands.Length - 1)]++;
+                    // The tree's expando is near x=16 and the root text starts
+                    // beyond this band; isolate the expected Shell icon column.
+                    if (x is >= 32 and < 56 && y < 32) iconBandPixels.Add(pixel);
+                }
+            }
+            var bytes = new byte[pixels.Count * sizeof(uint)];
+            Buffer.BlockCopy(pixels.ToArray(), 0, bytes, 0, bytes.Length);
+            var iconBandBytes = new byte[iconBandPixels.Count * sizeof(uint)];
+            Buffer.BlockCopy(iconBandPixels.ToArray(), 0, iconBandBytes, 0, iconBandBytes.Length);
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16];
+            var iconBandHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(iconBandBytes))[..16];
+            var iconBandColors = string.Join(',', iconBandPixels.GroupBy(pixel => pixel)
+                .OrderByDescending(group => group.Count()).Take(8)
+                .Select(group => $"{group.Key:X6}:{group.Count()}"));
+            var iconList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            if (iconList == 0 || !ImageList_GetIconSize(iconList, out var iconWidth, out var iconHeight) ||
+                iconWidth <= 0 || iconHeight <= 0 || iconWidth > iconRight || iconHeight > iconBottom)
+                throw new Exception("The Shell icon template dimensions are unavailable for tree pixel comparison.");
+            var expectedDc = CreateCompatibleDC(screenDc);
+            var expectedBitmap = CreateCompatibleBitmap(screenDc, iconWidth, iconHeight);
+            if (expectedDc == 0 || expectedBitmap == 0)
+            {
+                if (expectedBitmap != 0) DeleteObject(expectedBitmap);
+                if (expectedDc != 0) DeleteDC(expectedDc);
+                throw new Exception("Could not create the Shell icon template bitmap.");
+            }
+            var priorExpectedBitmap = SelectObject(expectedDc, expectedBitmap);
+            try
+            {
+                var iconBounds = new Rect { Right = iconWidth, Bottom = iconHeight };
+                _ = FillRect(expectedDc, ref iconBounds, brush);
+                if (!ImageList_Draw(iconList, images.Normal, expectedDc, 0, 0, 0))
+                    throw new Exception("The Shell image list could not render the selected tree item icon template.");
+                var foreground = new List<(int X, int Y, uint Color)>();
+                for (var y = 0; y < iconHeight; y++)
+                for (var x = 0; x < iconWidth; x++)
+                {
+                    var pixel = GetPixel(expectedDc, x, y);
+                    if (pixel != background) foreground.Add((x, y, pixel));
+                }
+                // A/B equality alone cannot prove the candidate pixels are an icon; match the captured row against the actual Shell image-list entry.
+                var bestMatches = 0;
+                var bestX = -1;
+                var bestY = -1;
+                for (var y = 0; y <= Math.Min(iconBottom - iconHeight, 16); y++)
+                // The native tree's indentation differs from the earlier assumed offset; search the full leading row.
+                for (var x = 0; x <= Math.Min(iconRight - iconWidth, 56); x++)
+                {
+                    var matches = 0;
+                    foreach (var pixel in foreground)
+                        if (clientPixels[x + pixel.X, y + pixel.Y] == pixel.Color) matches++;
+                    if (matches <= bestMatches) continue;
+                    bestMatches = matches;
+                    bestX = x;
+                    bestY = y;
+                }
+                return (images.Normal, images.Selected, pixels.Count, iconBandPixels.Count, hash, iconBandHash,
+                    iconBandColors, bestMatches, foreground.Count, bestX, bestY,
+                    $"0,0,{iconRight},{iconBottom}; bands16={string.Join(',', pixelBands)}");
+            }
+            finally
+            {
+                _ = SelectObject(expectedDc, priorExpectedBitmap);
+                DeleteObject(expectedBitmap);
+                DeleteDC(expectedDc);
+            }
+        }
+        finally
+        {
+            DeleteObject(brush);
+            _ = SelectObject(memoryDc, oldBitmap);
+            DeleteObject(bitmap);
+            DeleteDC(memoryDc);
+            ReleaseDC(nativeTree, screenDc);
+        }
+    }
+
     internal static int RunCore()
     {
         var foreground = GetForegroundWindow();
@@ -45,6 +259,13 @@ internal static class StandaloneTreeProbe
             File.WriteAllText(file, "isolated fixture");
             tree = new(parent, 320, 480);
             treeWindow = tree.WindowHandle;
+            var nativeTree = FindWindowExW(treeWindow, 0, "SysTreeView32", null);
+            if (nativeTree == 0) throw new Exception("Expected native tree view child is missing.");
+            var treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0); // TVM_GETIMAGELIST / TVSIL_NORMAL
+            var systemImageList = ExplorerDirs.App.ShellTreeIconIndexResolver.GetSystemImageList();
+            Console.WriteLine($"tree-icons: system-image-list-bound={treeImageList != 0 && treeImageList == systemImageList}");
+            if (treeImageList == 0 || treeImageList != systemImageList)
+                throw new Exception("Native tree view is not using the system image list that supplies its Shell icon indices.");
             if (!SetWindowSubclass(treeWindow, observer, 42, 0))
                 throw new Exception("Tree notification observation failed.");
             if (FindWindowExW(treeWindow, 0, "SysTreeView32", null) == 0)
@@ -54,11 +275,24 @@ internal static class StandaloneTreeProbe
             using var synchronization = tree.BeginSynchronization();
             tree.SetRoot(fixture);
             Pump();
+            treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0);
+            if (treeImageList != systemImageList)
+                throw new Exception("Populating the Shell tree replaced the system image list used by Shell icon indices.");
             var selected = tree.SelectDirectory(child);
             Pump(); // Native expansion may materialize descendants asynchronously.
             if (!selected) selected = tree.SelectDirectory(child);
             if (!selected) throw new Exception("Production tree did not select child.");
             Pump();
+            var caretItem = SendMessageW(nativeTree, 0x110a, 9, 0); // TVGN_CARET
+            var childImages = ReadTreeItemImages(nativeTree, caretItem);
+            Console.WriteLine($"tree-item-icons: normal={childImages.Normal}; selected={childImages.Selected}; image-count={ImageList_GetImageCount(systemImageList)}");
+            if (childImages.Normal < 0 || childImages.Selected < 0 ||
+                childImages.Normal >= ImageList_GetImageCount(systemImageList) ||
+                childImages.Selected >= ImageList_GetImageCount(systemImageList))
+                throw new Exception("The populated Shell tree item has no usable normal/selected image indices.");
+            treeImageList = SendMessageW(nativeTree, 0x1108, 0, 0);
+            if (treeImageList != systemImageList)
+                throw new Exception("Expanding Shell tree nodes replaced the system image list used by Shell icon indices.");
             if (!string.Equals(tree.SelectedDirectory, child, StringComparison.OrdinalIgnoreCase))
                 throw new Exception("Production tree selected path mismatch.");
             if (requests != 0 || tree.SelectionRevision == 0)
@@ -279,6 +513,14 @@ internal static class StandaloneTreeProbe
         if (SendMessageW(control, 0x110c, 0, ref value) == 0) throw new Exception("Could not read native tree item state.");
         return value.State;
     }
+    private static (int Normal, int Selected) ReadTreeItemImages(nint control, nint item)
+    {
+        if (item == 0) throw new Exception("The populated Shell tree has no caret item for icon inspection.");
+        var value = new TreeItem { Mask = 0x22, Item = item }; // TVIF_IMAGE | TVIF_SELECTEDIMAGE
+        if (SendMessageW(control, 0x110c, 0, ref value) == 0)
+            throw new Exception("Could not read native Shell tree item image indices.");
+        return (value.Image, value.SelectedImage);
+    }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct TreeItem
     {
@@ -309,14 +551,30 @@ internal static class StandaloneTreeProbe
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string path, nint bind, ref Guid iid, out nint item);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] private static extern nint GetDC(nint window);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
+    [DllImport("user32.dll")] private static extern uint GetSysColor(int index);
+    [DllImport("user32.dll")] private static extern int FillRect(nint dc, ref Rect rect, nint brush);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleBitmap(nint dc, int width, int height);
+    [DllImport("gdi32.dll")] private static extern nint SelectObject(nint dc, nint value);
+    [DllImport("gdi32.dll")] private static extern nint CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint value);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool MoveWindow(nint window, int x, int y, int width, int height, bool repaint);
     [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
     private delegate bool EnumChildCallback(nint window, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildCallback callback, nint parameter);
+    [DllImport("comctl32.dll")] private static extern int ImageList_GetImageCount(nint imageList);
+    [DllImport("comctl32.dll")] private static extern bool ImageList_GetIconSize(nint imageList, out int width, out int height);
+    [DllImport("comctl32.dll")] private static extern bool ImageList_Draw(nint imageList, int imageIndex, nint dc, int x, int y, uint style);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
@@ -340,7 +598,11 @@ public sealed class TreeProbeEvents : ITreeProbeEvents
     public int OnBeforeContextMenu(nint item, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnAfterContextMenu(nint item, nint input, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnBeforeStateImageChange(nint item) => 0;
-    public int OnGetDefaultIconIndex(nint item, out int normal, out int open) { normal = open = -1; return 1; }
+    public int OnGetDefaultIconIndex(nint item, out int normal, out int open)
+    {
+        normal = open = -1;
+        return unchecked((int)0x80004001); // E_NOTIMPL lets NamespaceTreeControl resolve the Shell icon.
+    }
 }
 
 [ComVisible(true), Guid("93D77985-B3D8-4484-8318-672CDDA002CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

@@ -24,9 +24,16 @@ public partial class MainWindow : Window
     private readonly ShellCommandRefreshGate _fileCommandRefreshGate = new();
     private PaneControl? _fileCommandRefreshPane;
     private readonly SessionStore _sessionStore;
+    private readonly WindowPlacementStore _windowPlacementStore;
+    private readonly WindowPlacementState? _savedWindowPlacement;
+    private WindowPlacementState? _fullScreenWindowPlacement;
+    private bool _windowPlacementReady;
+    private bool _lastNonMinimizedMaximized;
     private readonly ApplicationThemeController? _themeController;
     private readonly string _profileDirectory;
     private readonly Action<MainWindow>? _createWindow;
+    private readonly Action? _restartApplication;
+    private FullScreenPresentation? _fullScreenRestoreState;
     private readonly FavoritesStore _favoritesStore;
     private readonly ViewPresetStore _viewPresetStore;
     private readonly List<string> _favorites;
@@ -35,14 +42,42 @@ public partial class MainWindow : Window
     private IReadOnlyList<ProgramStarterEntry> _programStarterEntries = [];
     private ProgramStarterWindow? _programStarterWindow;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
+    private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
     private readonly UiPreferencesStore _uiPreferencesStore;
+    private readonly TabStripVisibilityStore _tabStripVisibilityStore;
+    private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
+    private readonly TabHeaderMaximumWidthStore _tabHeaderMaximumWidthStore;
+    private readonly TabCloseButtonStore _tabCloseButtonStore;
+    private readonly TabHoverActivationPreference _tabHoverActivationPreference;
+    private readonly PortableBooleanPreference _newTabLocationPreference;
+    private readonly StatusBarVisibilityStore _statusBarVisibilityStore;
+    private readonly StatusBarSelectionSizeStore _statusBarSelectionSizeStore;
+    private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
+    private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
+    private readonly FullRowSelectionStore _fullRowSelectionStore;
+    private readonly PortableBooleanPreference _disableGroupingStore;
+    private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
+    private bool _alwaysShowTabStrip;
+    private bool _multilineTabHeaders;
+    private bool _limitTabHeaderWidth = true;
+    private bool _showTabCloseButtons;
+    private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
+    private bool _newTabUsesCurrentFolder;
+    private bool _showStatusBar = true;
+    private bool _showSelectionSizeInStatusBar = true;
+    private bool _showFolderSizeWhenEmpty;
+    private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
+    private bool _disableGrouping;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
+    private readonly PortableBooleanPreference _treeSelectionAutoExpandPreferenceStore;
     private readonly NavigationTreeWidthsStore _treeWidthsStore;
     private NavigationTreeWidths _treeWidths;
     private readonly bool[] _paneTreeVisibility = new bool[4];
     private TreeDisplayMode _treeDisplayMode = TreeDisplayMode.PerPane;
+    private bool _treeSelectionAutoExpand = true;
     private ShellTreeHost? _sharedTreeHost;
     private readonly PinnedTabsStore _pinnedTabsStore;
     private readonly LayoutProportionsStore _layoutProportionsStore;
@@ -69,24 +104,41 @@ public partial class MainWindow : Window
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
     private bool _windowsShowsHiddenItems;
     private bool _classicAddressBar;
+    private bool _mouseWheelFocusEnabled;
     private bool _initializing = true;
-    private bool _fileViewFocusDesired;
+    private bool _closed;
+    private bool _fileViewFocusDesired = true;
     private bool _openingTerminal;
     private bool _importingQdr;
     private bool _exportingQdr;
+    private bool _loadingPrintPhotos;
     private Task<WorkspaceListing>? _workspaceListingTask;
-    private readonly CancellationTokenSource _terminalLaunchStop = new();
+    private readonly CancellationTokenSource _windowOperationStop = new();
 
     public string SessionPath => _sessionStore.Path;
+    internal bool HasSavedWindowPlacement => _savedWindowPlacement is not null;
 
     public MainWindow(string? startupDirectory = null, string? startupWarning = null)
         : this(null, startupDirectory, startupWarning) { }
 
     internal MainWindow(ApplicationThemeController? themeController, string? startupDirectory = null, string? startupWarning = null,
-        string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null)
+        string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null,
+        Action? restartApplication = null, string? startupSelectPath = null)
     {
         _themeController = themeController;
         InitializeComponent();
+        NewTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab));
+        NewWindowToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewWindow));
+        DuplicateTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.DuplicateTab));
+        CloseTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close));
+        RefreshCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh));
+        SearchCurrentDirectoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Search));
+        PrintFileViewToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Print));
+        FolderSizeToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.FolderSize));
+        PreviewPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent(ExplorerChromeIcon.Preview, "预览");
+        DetailsPaneToggle.Content = ExplorerChromeIcons.CreateLabeledButtonContent(ExplorerChromeIcon.Details, "详情");
+        RefreshEnvironmentToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Environment));
+        OpenTerminalToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Terminal));
         if (_themeController is not null)
             _themeController.ThemeChanged += ThemeController_ThemeChanged;
         ByteSizeFormatter.OptionsChanged += ByteSizeFormatter_OptionsChanged;
@@ -98,6 +150,10 @@ public partial class MainWindow : Window
         _fileCommandRefreshTimer.Tick += FileCommandRefreshTimer_Tick;
         var primarySessionPath = new SessionStore().Path;
         _sessionStore = new SessionStore(sessionPath ?? primarySessionPath);
+        _windowPlacementStore = new WindowPlacementStore(WindowPlacementStore.PathForSession(_sessionStore.Path));
+        _savedWindowPlacement = _windowPlacementStore.Load();
+        _lastNonMinimizedMaximized = _savedWindowPlacement?.Maximized == true;
+        if (HasSavedWindowPlacement) WindowStartupLocation = WindowStartupLocation.Manual;
         _profileDirectory = Path.GetFullPath(profileDirectory ?? Path.GetDirectoryName(primarySessionPath)!);
         _sizeDisplayPreferenceStore = new SizeDisplayPreferenceStore(Path.Combine(_profileDirectory, "SizeDisplay.ini"));
         ByteSizeFormatter.SetOptions(_sizeDisplayPreferenceStore.Load());
@@ -108,6 +164,7 @@ public partial class MainWindow : Window
         if (_viewPresetStore.LoadWarning is { } viewPresetsWarning)
             EnvironmentStatus.Text = viewPresetsWarning;
         _createWindow = createWindow;
+        _restartApplication = restartApplication;
 #if DEBUG
         Title = "Explorer Dirs · 开发调试";
 #else
@@ -132,9 +189,74 @@ public partial class MainWindow : Window
         if (_quickFilterFavoritesStore.LoadWarning is { } filterFavoritesWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? filterFavoritesWarning : $"{EnvironmentStatus.Text} {filterFavoritesWarning}";
+        _quickFilterHistoryStore = new QuickFilterHistoryStore(Path.Combine(
+            _profileDirectory, "QuickFilterHistory.ini"));
+        _ = _quickFilterHistoryStore.Load();
+        if (_quickFilterHistoryStore.LoadWarning is { } filterHistoryWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? filterHistoryWarning : $"{EnvironmentStatus.Text} {filterHistoryWarning}";
         _uiPreferencesStore = new UiPreferencesStore(Path.Combine(
             _profileDirectory, "UiPreferences.ini"));
         _compactMode = _uiPreferencesStore.Load();
+        _mouseWheelFocusPreferenceStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "MouseWheelFocus.ini"), "Mouse", "FocusOnWheel", "鼠标滚轮焦点");
+        _mouseWheelFocusEnabled = _mouseWheelFocusPreferenceStore.Load();
+        MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
+        _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
+            _profileDirectory, "TabStripVisibility.ini"));
+        _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
+        _multilineTabHeadersStore = new MultilineTabHeadersStore(Path.Combine(
+            _profileDirectory, "MultilineTabHeaders.ini"));
+        _multilineTabHeaders = _multilineTabHeadersStore.Load();
+        _tabHeaderMaximumWidthStore = new TabHeaderMaximumWidthStore(Path.Combine(
+            _profileDirectory, "TabHeaderMaximumWidth.ini"));
+        _limitTabHeaderWidth = _tabHeaderMaximumWidthStore.Load();
+        _tabCloseButtonStore = new TabCloseButtonStore(Path.Combine(
+            _profileDirectory, "TabCloseButton.ini"));
+        _showTabCloseButtons = _tabCloseButtonStore.Load();
+        _tabHoverActivationPreference = new TabHoverActivationPreference(Path.Combine(
+            _profileDirectory, "TabHoverActivation.ini"));
+        _tabHoverActivationDelayMilliseconds = _tabHoverActivationPreference.Load();
+        if (_tabHoverActivationPreference.LoadWarning is { } tabHoverWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? tabHoverWarning : $"{EnvironmentStatus.Text} {tabHoverWarning}";
+        _newTabLocationPreference = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "NewTabLocation.ini"), "Tabs", "UseCurrentFolder", "新标签目录");
+        _newTabUsesCurrentFolder = _newTabLocationPreference.Load();
+        NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+        if (_newTabLocationPreference.LoadWarning is { } newTabLocationWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? newTabLocationWarning : $"{EnvironmentStatus.Text} {newTabLocationWarning}";
+        _statusBarVisibilityStore = new StatusBarVisibilityStore(Path.Combine(
+            _profileDirectory, "StatusBar.ini"));
+        _showStatusBar = _statusBarVisibilityStore.Load();
+        _statusBarSelectionSizeStore = new StatusBarSelectionSizeStore(Path.Combine(
+            _profileDirectory, "StatusBarSelectionSize.ini"));
+        _showSelectionSizeInStatusBar = _statusBarSelectionSizeStore.Load();
+        StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
+        _statusBarFolderSizeWhenEmptyStore = new StatusBarFolderSizeWhenEmptyStore(Path.Combine(
+            _profileDirectory, "StatusBarFolderSize.ini"));
+        _showFolderSizeWhenEmpty = _statusBarFolderSizeWhenEmptyStore.Load();
+        StatusBarFolderSizeWhenEmptyMenu.IsChecked = _showFolderSizeWhenEmpty;
+        _selectionCheckBoxesStore = new SelectionCheckBoxesStore(Path.Combine(
+            _profileDirectory, "SelectionCheckBoxes.ini"));
+        _selectionCheckBoxes = _selectionCheckBoxesStore.Load();
+        SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
+        _fullRowSelectionStore = new FullRowSelectionStore(Path.Combine(
+            _profileDirectory, "FullRowSelection.ini"));
+        var fullRowSelectionValue = _fullRowSelectionStore.Load();
+        _fullRowSelection = _fullRowSelectionStore.HasExplicitValue ? fullRowSelectionValue : null;
+        FullRowSelectionMenu.IsChecked = _fullRowSelection == true;
+        if (_fullRowSelectionStore.LoadWarning is { } fullRowSelectionWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? fullRowSelectionWarning : $"{EnvironmentStatus.Text} {fullRowSelectionWarning}";
+        _disableGroupingStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "DisableGrouping.ini"), "View", "DisableGrouping", "全局分组");
+        _disableGrouping = _disableGroupingStore.Load();
+        DisableGroupingMenu.IsChecked = _disableGrouping;
+        if (_disableGroupingStore.LoadWarning is { } disableGroupingWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? disableGroupingWarning : $"{EnvironmentStatus.Text} {disableGroupingWarning}";
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -150,6 +272,10 @@ public partial class MainWindow : Window
                 ? addressBarWarning : $"{EnvironmentStatus.Text} {addressBarWarning}";
         _treePreferences = new PortableBooleanPreference(Path.Combine(
             _profileDirectory, "NavigationTree.ini"), "NavigationTree", "Visible", "目录树");
+        _treeSelectionAutoExpandPreferenceStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "NavigationTreeSelection.ini"), "NavigationTree", "SelectFromListAndExpand",
+            "目录树自动展开", defaultValue: true);
+        _treeSelectionAutoExpand = _treeSelectionAutoExpandPreferenceStore.Load();
         _treeWidthsStore = new NavigationTreeWidthsStore(Path.Combine(
             _profileDirectory, "NavigationTreeWidths.ini"));
         _treeWidths = _treeWidthsStore.Load();
@@ -161,12 +287,33 @@ public partial class MainWindow : Window
         if (_treePreferences.LoadWarning is { } treeWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeWarning : $"{EnvironmentStatus.Text} {treeWarning}";
+        if (_treeSelectionAutoExpandPreferenceStore.LoadWarning is { } treeSelectionWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? treeSelectionWarning : $"{EnvironmentStatus.Text} {treeSelectionWarning}";
         if (_treeWidthsStore.LoadWarning is { } treeWidthsWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeWidthsWarning : $"{EnvironmentStatus.Text} {treeWidthsWarning}";
         if (_uiPreferencesStore.LoadWarning is { } appearanceWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? appearanceWarning : $"{EnvironmentStatus.Text} {appearanceWarning}";
+        if (_mouseWheelFocusPreferenceStore.LoadWarning is { } wheelFocusWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? wheelFocusWarning : $"{EnvironmentStatus.Text} {wheelFocusWarning}";
+        if (_tabStripVisibilityStore.LoadWarning is { } tabStripWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? tabStripWarning : $"{EnvironmentStatus.Text} {tabStripWarning}";
+        if (_statusBarVisibilityStore.LoadWarning is { } statusBarWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarWarning : $"{EnvironmentStatus.Text} {statusBarWarning}";
+        if (_statusBarSelectionSizeStore.LoadWarning is { } statusBarSelectionSizeWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarSelectionSizeWarning : $"{EnvironmentStatus.Text} {statusBarSelectionSizeWarning}";
+        if (_statusBarFolderSizeWhenEmptyStore.LoadWarning is { } statusBarFolderSizeWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? statusBarFolderSizeWarning : $"{EnvironmentStatus.Text} {statusBarFolderSizeWarning}";
+        if (_selectionCheckBoxesStore.LoadWarning is { } checkBoxesWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? checkBoxesWarning : $"{EnvironmentStatus.Text} {checkBoxesWarning}";
         var isPrimarySession = string.Equals(Path.GetFullPath(_sessionStore.Path),
             Path.GetFullPath(primarySessionPath), StringComparison.OrdinalIgnoreCase);
         var pinnedTabsPath = isPrimarySession ? Path.Combine(_profileDirectory, "PinnedTabs.ini") :
@@ -194,10 +341,15 @@ public partial class MainWindow : Window
                 () => ViewState.Default(_defaultViewMode, _defaultIconSize),
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
-                _quickFilterFavoritesStore, _hiddenItemsPreference);
+                _quickFilterFavoritesStore, _quickFilterHistoryStore, _hiddenItemsPreference,
+                _selectionCheckBoxes, _fullRowSelection, _disableGrouping);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
+            pane.SetStatusBarVisible(_showStatusBar);
+            pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
+            pane.SetStatusBarFolderSizeWhenEmpty(_showFolderSizeWhenEmpty);
             pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
+            pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
             pane.TreeWidth = _treeWidths.GetPaneWidth(index);
             pane.TreeWidthChanged += (_, _) =>
@@ -223,10 +375,12 @@ public partial class MainWindow : Window
             pane.HeaderPresetMenuRequested += ShowViewPresetContextMenu;
             pane.ShortcutRequested += ExecuteShortcut;
             pane.MayRestoreFileFocus = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired && IsActive;
+            pane.MayKeepFileFocusRestorePending = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired;
         }
 
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
         ActivePane = _panes[Math.Clamp(state?.ActivePane ?? 0, 0, _panes.Length - 1)];
+        UpdateActivePaneVisuals();
         BuildLayoutControls();
         BuildFileCommandControls();
         BuildDefaultViewOptions();
@@ -234,11 +388,19 @@ public partial class MainWindow : Window
         ApplyThemePreferenceMenuState();
         ApplySizeDisplayMenuState();
         ApplyCompactMode();
+        ApplyStatusBarVisibility();
+        ApplyTabStripVisibility();
+        ApplyTabHoverActivationDelay();
+        ApplyNewTabLocationPreference();
+        ApplyMultilineTabHeaders();
+        ApplyTabHeaderMaximumWidth();
+        ApplyTabCloseButtons();
         ApplyAddressBarStyle();
         UpdateTreeModeMenu();
         UpdatePreviewPaneToggle();
         for (var index = 0; index < _panes.Length; index++)
         {
+            _panes[index].SetAutoExpandTreeSelection(_treeSelectionAutoExpand);
             _panes[index].SetTreeVisible(_treeDisplayMode == TreeDisplayMode.PerPane && _paneTreeVisibility[index]);
             _panes[index].SetPaneTreeButtonVisible(_treeDisplayMode == TreeDisplayMode.PerPane);
             var paneIndex = index;
@@ -249,7 +411,10 @@ public partial class MainWindow : Window
         }
         ApplyTreeDisplayMode();
         Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => ActivePane.FocusCurrentView()));
+            new Action(() =>
+            {
+                if (_fileViewFocusDesired && IsActive) ActivePane.FocusCurrentView();
+            }));
         _initializing = false;
         _saveTimer.Tick += (_, _) =>
         {
@@ -270,9 +435,25 @@ public partial class MainWindow : Window
         }));
         SourceInitialized += (_, _) =>
         {
+            RestoreSavedWindowPlacement();
+            try { MouseWheelFocusMessageHook.Register(this, _mouseWheelFocusEnabled); }
+            catch (Exception ex)
+            {
+                SetMouseWheelFocusEnabled(false);
+                try { _mouseWheelFocusPreferenceStore.Save(false); }
+                catch (Exception saveError) { ex = new AggregateException(ex, saveError); }
+                MouseWheelFocusMessageHook.Register(this, false);
+                EnvironmentStatus.Text = ex.Message;
+            }
             if (HwndSource.FromHwnd(new WindowInteropHelper(this).Handle) is { } source)
                 _systemSettingChangeHook = new SystemSettingChangeHook(source, RefreshEnvironment,
                     RefreshFollowedWindowsHiddenItems);
+            ApplyWindowFrameTheme();
+        };
+        StateChanged += (_, _) =>
+        {
+            if (_windowPlacementReady && _fullScreenRestoreState is null && WindowState != WindowState.Minimized)
+                _lastNonMinimizedMaximized = WindowState == WindowState.Maximized;
         };
         Closing += (_, _) =>
         {
@@ -283,15 +464,22 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _closed = true;
+            _saveTimer.Stop();
+            foreach (var pane in _panes) pane.DisposeViews();
+            try { _sharedTreeHost?.Dispose(); }
+            catch (Exception ex) { Trace.WriteLine($"Shared tree cleanup: {ex.GetType().Name} (0x{ex.HResult:X8})"); }
+            MouseWheelFocusMessageHook.Unregister(this);
             if (_themeController is not null)
                 _themeController.ThemeChanged -= ThemeController_ThemeChanged;
-            _terminalLaunchStop.Cancel();
+            _windowOperationStop.Cancel();
             _systemSettingChangeHook?.Dispose();
         };
         if (startupDirectory is not null)
         {
             SetActivePane(_panes[0]);
-            _panes[0].OpenPathInNewTab(startupDirectory);
+            if (startupSelectPath is null) _panes[0].OpenPathInNewTab(startupDirectory);
+            else _panes[0].OpenPathAndSelectInNewTab(startupDirectory, startupSelectPath);
         }
         if (startupWarning is not null)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
@@ -305,15 +493,58 @@ public partial class MainWindow : Window
         if (!Path.IsPathFullyQualified(path)) return false;
         _panes[0].OpenPathInNewTab(path);
         SetActivePane(_panes[0]);
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        RestoreFromMinimized();
         Activate();
         return true;
+    }
+
+    internal bool OpenExternalSelection(string directory, string selectedPath)
+    {
+        if (!Path.IsPathFullyQualified(directory) || !Path.IsPathFullyQualified(selectedPath) ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(selectedPath) ?? string.Empty),
+                Path.TrimEndingDirectorySeparator(directory), StringComparison.OrdinalIgnoreCase)) return false;
+        if (!_panes[0].OpenPathAndSelectInNewTab(directory, selectedPath)) return false;
+        SetActivePane(_panes[0]);
+        RestoreFromMinimized();
+        Activate();
+        return true;
+    }
+
+    internal void RestoreFromMinimized()
+    {
+        if (WindowState != WindowState.Minimized) return;
+        // Both single-instance activation routes used Normal and discarded the
+        // pre-minimize maximized state. Immersive F11 uses a normal borderless
+        // window and keeps its separate return state until the user exits F11.
+        WindowState = _fullScreenRestoreState is null && _lastNonMinimizedMaximized
+            ? WindowState.Maximized : WindowState.Normal;
+    }
+
+    internal void CascadeFrom(MainWindow source)
+    {
+        if (HasSavedWindowPlacement) return;
+        // All new-window routes previously clamped WPF coordinates to the
+        // primary work area, pulling windows away from a secondary monitor.
+        // Wait for a native target handle, and keep this operation in pixels.
+        SourceInitialized += Position;
+        void Position(object? sender, EventArgs args)
+        {
+            SourceInitialized -= Position;
+            try
+            {
+                var sourceHandle = new WindowInteropHelper(source).Handle;
+                if (sourceHandle != 0)
+                    WindowCascade.Place(new WindowInteropHelper(this).Handle, sourceHandle);
+            }
+            catch (Exception ex) { EnvironmentStatus.Text = $"新窗口定位失败：{ex.Message}"; }
+        }
     }
 
     private void SetActivePane(PaneControl pane)
     {
         var changed = !ReferenceEquals(ActivePane, pane);
         ActivePane = pane;
+        UpdateActivePaneVisuals();
         var index = Array.IndexOf(_panes, pane);
         if (index >= 0 && index < LayoutPreset.Find(_layout).Slots.Length)
             _lastFocusedPaneByLayout[_layout] = index;
@@ -323,7 +554,56 @@ public partial class MainWindow : Window
         if (changed) ScheduleSave();
     }
 
-    private void ViewMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateShellPaneToggles();
+    private void UpdateActivePaneVisuals()
+    {
+        foreach (var pane in _panes)
+            pane.SetActivePaneVisual(ReferenceEquals(pane, ActivePane));
+    }
+
+    private void ViewMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        UpdateShellPaneToggles();
+        UpdateTabStripVisibilityMenu();
+        TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
+    }
+
+    private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)
+    {
+        var next = MouseWheelFocusMenu.IsChecked;
+        try
+        {
+            _mouseWheelFocusPreferenceStore.Save(next);
+            MouseWheelFocusMessageHook.SetEnabled(next);
+        }
+        catch (Exception ex)
+        {
+            MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
+            try { _mouseWheelFocusPreferenceStore.Save(_mouseWheelFocusEnabled); }
+            catch (Exception saveError) { ex = new AggregateException(ex, saveError); }
+            EnvironmentStatus.Text = ex.Message;
+        }
+    }
+
+    internal bool TryRetargetMouseWheel(ref MSG message, nint hovered)
+    {
+        var pane = _panes.FirstOrDefault(candidate => candidate.ContainsMouseWheelShellTarget(hovered));
+        var sharedTreeTarget = _treeDisplayMode == TreeDisplayMode.Shared &&
+            _sharedTreeHost?.ContainsNativeWindow(hovered) == true;
+        if (!MouseWheelFocusRouter.TryRetarget(unchecked((uint)message.message),
+                unchecked((nuint)message.wParam.ToInt64()), _mouseWheelFocusEnabled,
+                message.hwnd, hovered, pane is not null || sharedTreeTarget, out var target))
+            return false;
+
+        message.hwnd = target;
+        if (pane is not null) SetActivePane(pane);
+        return true;
+    }
+
+    internal void SetMouseWheelFocusEnabled(bool enabled)
+    {
+        _mouseWheelFocusEnabled = enabled;
+        MouseWheelFocusMenu.IsChecked = enabled;
+    }
 
     private void HiddenItemsMenu_SubmenuOpened(object sender, RoutedEventArgs e) => UpdateHiddenItemsPreferenceMenu();
 
@@ -484,6 +764,7 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false
         };
+        ApplicationThemeWindowBinding.Attach(dialog, _themeController);
         var content = new StackPanel { Margin = new Thickness(16) };
         content.Children.Add(new TextBlock { Text = "预设名称（最多 64 个字符）：" });
         var input = new TextBox { Margin = new Thickness(0, 8, 0, 12), MinWidth = 350 };
@@ -648,6 +929,37 @@ public partial class MainWindow : Window
         TreeModeSharedMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.Shared;
         TreeModePerPaneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.PerPane;
         TreeModeNoneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.None;
+        TreeSelectionAutoExpandMenu.IsChecked = _treeSelectionAutoExpand;
+    }
+
+    private void TreeSelectionAutoExpand_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TreeSelectionAutoExpandMenu.IsChecked;
+        try
+        {
+            _treeSelectionAutoExpandPreferenceStore.Save(next);
+            _treeSelectionAutoExpand = next;
+            foreach (var pane in _panes) pane.SetAutoExpandTreeSelection(next);
+            EnvironmentStatus.Text = next ? "已启用从文件列表自动展开目录树。" : "已关闭从文件列表自动展开目录树。";
+        }
+        catch (Exception ex)
+        {
+            TreeSelectionAutoExpandMenu.IsChecked = _treeSelectionAutoExpand;
+            EnvironmentStatus.Text = $"目录树偏好保存失败：{ex.Message}";
+        }
+    }
+
+    private void Pane_SelectedFolderForTree(PaneControl pane, string identity)
+    {
+        var sharedTreeTarget = _treeDisplayMode == TreeDisplayMode.Shared && ReferenceEquals(pane, ActivePane);
+        var paneTreeTarget = _treeDisplayMode == TreeDisplayMode.PerPane && pane.TreeIsVisible;
+        if (!TreeSelectionAutoExpand.ShouldSync(_treeSelectionAutoExpand,
+                currentPane: pane.IsVisible && (_treeDisplayMode != TreeDisplayMode.Shared || sharedTreeTarget),
+                treeVisible: sharedTreeTarget || paneTreeTarget,
+                selectedCount: 1, selectedFolder: true)) return;
+
+        if (sharedTreeTarget) _sharedTreeHost?.SetSelectedFolderLocation(identity);
+        else if (paneTreeTarget) pane.ExpandTreeToSelectedFolder(identity);
     }
 
     private void ApplyTreeDisplayMode()
@@ -734,6 +1046,288 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TabStripVisibility_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value }) return;
+        var next = value.Equals("Always", StringComparison.Ordinal);
+        try
+        {
+            _tabStripVisibilityStore.Save(next);
+            _alwaysShowTabStrip = next;
+            ApplyTabStripVisibility();
+            EnvironmentStatus.Text = next ? "标签栏始终显示。" : "标签栏仅在多个标签时显示。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabStripVisibility();
+            EnvironmentStatus.Text = $"标签栏显示设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void MultilineTabHeaders_Click(object sender, RoutedEventArgs e)
+    {
+        var next = MultilineTabHeadersMenu.IsChecked;
+        try
+        {
+            _multilineTabHeadersStore.Save(next);
+            _multilineTabHeaders = next;
+            ApplyMultilineTabHeaders();
+            EnvironmentStatus.Text = next ? "标签栏已改为多行显示。" : "标签栏已恢复单行滚动显示。";
+        }
+        catch (Exception ex)
+        {
+            ApplyMultilineTabHeaders();
+            EnvironmentStatus.Text = $"多行标签栏设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void TabHeaderMaximumWidth_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TabHeaderMaximumWidthMenu.IsChecked;
+        try
+        {
+            _tabHeaderMaximumWidthStore.Save(next);
+            _limitTabHeaderWidth = next;
+            ApplyTabHeaderMaximumWidth();
+            EnvironmentStatus.Text = next
+                ? "标签标题最大宽度限制已启用。"
+                : "标签标题不再限制最大宽度。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabHeaderMaximumWidth();
+            EnvironmentStatus.Text = $"标签标题宽度设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void TabsMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
+        TabCloseButtonMenu.IsChecked = _showTabCloseButtons;
+
+    private void TabCloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var next = TabCloseButtonMenu.IsChecked;
+        try
+        {
+            _tabCloseButtonStore.Save(next);
+            _showTabCloseButtons = next;
+            ApplyTabCloseButtons();
+            EnvironmentStatus.Text = next ? "标签关闭按钮已显示。" : "标签关闭按钮已隐藏。";
+        }
+        catch (Exception ex)
+        {
+            ApplyTabCloseButtons();
+            EnvironmentStatus.Text = $"标签关闭按钮设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void TabHoverActivationMenu_SubmenuOpened(object sender, RoutedEventArgs e) =>
+        UpdateTabHoverActivationMenu();
+
+    private void TabHoverActivation_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: int delayMilliseconds }) return;
+        try
+        {
+            _tabHoverActivationPreference.Save(delayMilliseconds);
+            _tabHoverActivationDelayMilliseconds = delayMilliseconds;
+            ApplyTabHoverActivationDelay();
+            EnvironmentStatus.Text = delayMilliseconds == 0
+                ? "已关闭拖动悬停标签自动切换。"
+                : $"拖动悬停 {delayMilliseconds / 1000d:0.##} 秒后切换标签。";
+        }
+        catch (Exception ex)
+        {
+            UpdateTabHoverActivationMenu();
+            EnvironmentStatus.Text = $"标签悬停设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void NewTabUsesCurrentFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var next = NewTabUsesCurrentFolderMenu.IsChecked;
+        try
+        {
+            _newTabLocationPreference.Save(next);
+            _newTabUsesCurrentFolder = next;
+            ApplyNewTabLocationPreference();
+            EnvironmentStatus.Text = next
+                ? "新建标签将使用当前窗格的文件夹。"
+                : "新建标签将从用户文件夹开始。";
+        }
+        catch (Exception ex)
+        {
+            NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+            EnvironmentStatus.Text = $"新标签目录设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void StatusBar_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarMenu.IsChecked;
+        try
+        {
+            _statusBarVisibilityStore.Save(next);
+            _showStatusBar = next;
+            ApplyStatusBarVisibility();
+            EnvironmentStatus.Text = next ? "已显示状态栏。" : "已隐藏状态栏。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarMenu.IsChecked = _showStatusBar;
+            EnvironmentStatus.Text = $"状态栏显示设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ApplyStatusBarVisibility()
+    {
+        StatusBarMenu.IsChecked = _showStatusBar;
+        foreach (var pane in _panes) pane.SetStatusBarVisible(_showStatusBar);
+    }
+
+    private void StatusBarSelectionSize_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarSelectionSizeMenu.IsChecked;
+        try
+        {
+            _statusBarSelectionSizeStore.Save(next);
+            _showSelectionSizeInStatusBar = next;
+            foreach (var pane in _panes) pane.SetStatusBarSelectionSizeVisible(next);
+            EnvironmentStatus.Text = next ? "状态栏将显示可取得的选中项目大小。" : "状态栏将只显示项目数量。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarSelectionSizeMenu.IsChecked = _showSelectionSizeInStatusBar;
+            EnvironmentStatus.Text = $"状态栏选中大小设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void StatusBarFolderSizeWhenEmpty_Click(object sender, RoutedEventArgs e)
+    {
+        var next = StatusBarFolderSizeWhenEmptyMenu.IsChecked;
+        try
+        {
+            _statusBarFolderSizeWhenEmptyStore.Save(next);
+            _showFolderSizeWhenEmpty = next;
+            foreach (var pane in _panes) pane.SetStatusBarFolderSizeWhenEmpty(next);
+            EnvironmentStatus.Text = next
+                ? "状态栏将在没有选中项目时显示可取得的当前目录直接子项大小。"
+                : "已关闭状态栏的当前目录大小读取。";
+        }
+        catch (Exception ex)
+        {
+            StatusBarFolderSizeWhenEmptyMenu.IsChecked = _showFolderSizeWhenEmpty;
+            EnvironmentStatus.Text = $"状态栏当前目录大小设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void SelectionCheckBoxes_Click(object sender, RoutedEventArgs e)
+    {
+        var next = SelectionCheckBoxesMenu.IsChecked;
+        try
+        {
+            _selectionCheckBoxesStore.Save(next);
+            _selectionCheckBoxes = next;
+            var failures = _panes.SelectMany(pane => pane.SetSelectionCheckBoxes(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已为文件视图启用复选框选择。" : "已关闭文件视图复选框选择。"
+                : $"设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            SelectionCheckBoxesMenu.IsChecked = _selectionCheckBoxes;
+            EnvironmentStatus.Text = $"复选框选择设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void FullRowSelection_Click(object sender, RoutedEventArgs e)
+    {
+        var next = FullRowSelectionMenu.IsChecked == true;
+        try
+        {
+            _fullRowSelectionStore.Save(next);
+            _fullRowSelection = next;
+            var failures = _panes.SelectMany(pane => pane.SetFullRowSelection(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已为文件视图启用整行选择。" : "已关闭文件视图整行选择。"
+                : $"整行选择设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            FullRowSelectionMenu.IsChecked = _fullRowSelection == true;
+            EnvironmentStatus.Text = $"整行选择设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void DisableGrouping_Click(object sender, RoutedEventArgs e)
+    {
+        var next = DisableGroupingMenu.IsChecked == true;
+        try
+        {
+            _disableGroupingStore.Save(next);
+            _disableGrouping = next;
+            var failures = _panes.SelectMany(pane => pane.SetGroupingDisabled(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已停用所有文件视图的分组；原分组设置已保留。" : "已恢复各标签保存的分组设置。"
+                : $"全局分组设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            DisableGroupingMenu.IsChecked = _disableGrouping;
+            EnvironmentStatus.Text = $"全局分组设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ApplyTabStripVisibility()
+    {
+        foreach (var pane in _panes) pane.SetAlwaysShowTabStrip(_alwaysShowTabStrip);
+        UpdateTabStripVisibilityMenu();
+    }
+
+    private void ApplyMultilineTabHeaders()
+    {
+        MultilineTabHeadersMenu.IsChecked = _multilineTabHeaders;
+        foreach (var pane in _panes) pane.SetMultilineTabHeaders(_multilineTabHeaders);
+    }
+
+    private void ApplyTabHeaderMaximumWidth()
+    {
+        TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
+        foreach (var pane in _panes) pane.SetLimitTabHeaderWidth(_limitTabHeaderWidth);
+    }
+
+    private void ApplyTabCloseButtons()
+    {
+        TabCloseButtonMenu.IsChecked = _showTabCloseButtons;
+        foreach (var pane in _panes) pane.SetShowTabCloseButtons(_showTabCloseButtons);
+    }
+
+    private void ApplyTabHoverActivationDelay()
+    {
+        foreach (var pane in _panes)
+            pane.SetTabHoverActivationDelay(_tabHoverActivationDelayMilliseconds);
+        UpdateTabHoverActivationMenu();
+    }
+
+    private void ApplyNewTabLocationPreference()
+    {
+        NewTabUsesCurrentFolderMenu.IsChecked = _newTabUsesCurrentFolder;
+        foreach (var pane in _panes)
+            pane.SetNewTabUsesCurrentFolder(_newTabUsesCurrentFolder);
+    }
+
+    private void UpdateTabHoverActivationMenu()
+    {
+        foreach (var item in TabHoverActivationMenu.Items.OfType<MenuItem>())
+            item.IsChecked = int.TryParse(item.Tag?.ToString(), out var delay) &&
+                delay == _tabHoverActivationDelayMilliseconds;
+    }
+
+    private void UpdateTabStripVisibilityMenu()
+    {
+        AlwaysShowTabsMenu.IsChecked = _alwaysShowTabStrip;
+        ShowTabsWhenMultipleMenu.IsChecked = !_alwaysShowTabStrip;
+    }
+
     private void ThemePreference_Click(object sender, RoutedEventArgs e)
     {
         if (_themeController is null || sender is not MenuItem { Tag: string value } ||
@@ -756,8 +1350,53 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ThemeController_ThemeChanged(object? sender, EventArgs e) =>
+    private void WindowsAccent_Click(object sender, RoutedEventArgs e)
+    {
+        if (_themeController is null) return;
+        try
+        {
+            _themeController.SetCustomAccentColor(null);
+            EnvironmentStatus.Text = "强调色已设置为跟随 Windows。";
+        }
+        catch (Exception ex)
+        {
+            ApplyThemePreferenceMenuState();
+            EnvironmentStatus.Text = $"强调色配置保存失败：{ex.Message}";
+        }
+    }
+
+    private void CustomAccent_Click(object sender, RoutedEventArgs e)
+    {
+        if (_themeController is null) return;
+        var current = _themeController.CurrentColors?.Accent ?? ThemePalette.DefaultAccent;
+        var dialog = new AccentColorDialog(current) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedColor is not { } selected)
+        {
+            ApplyThemePreferenceMenuState();
+            return;
+        }
+        try
+        {
+            _themeController.SetCustomAccentColor(selected);
+            EnvironmentStatus.Text = $"自定义强调色已应用：#{selected.R:X2}{selected.G:X2}{selected.B:X2}";
+        }
+        catch (Exception ex)
+        {
+            ApplyThemePreferenceMenuState();
+            EnvironmentStatus.Text = $"强调色配置保存失败：{ex.Message}";
+        }
+    }
+
+    private void ThemeController_ThemeChanged(object? sender, EventArgs e)
+    {
         ApplyThemePreferenceMenuState();
+        ApplyWindowFrameTheme();
+        _sharedTreeHost?.RefreshTheme();
+        foreach (var pane in _panes) pane.RefreshTheme();
+    }
+
+    private void ApplyWindowFrameTheme() =>
+        NativeWindowFrameTheme.Apply(new WindowInteropHelper(this).Handle, _themeController?.CurrentColors);
 
     private void ByteSizeFormatter_OptionsChanged(object? sender, EventArgs e)
     {
@@ -828,6 +1467,9 @@ public partial class MainWindow : Window
         SystemThemeMenu.IsChecked = preference == ThemePreference.System;
         LightThemeMenu.IsChecked = preference == ThemePreference.Light;
         DarkThemeMenu.IsChecked = preference == ThemePreference.Dark;
+        var usesCustomAccent = _themeController?.CustomAccentColor.HasValue == true;
+        WindowsAccentMenu.IsChecked = !usesCustomAccent;
+        CustomAccentMenu.IsChecked = usesCustomAccent;
     }
 
     private void AddressBarStyle_Click(object sender, RoutedEventArgs e)
@@ -879,13 +1521,11 @@ public partial class MainWindow : Window
         {
             var panel = new Border
             {
-                BorderBrush = SystemColors.ControlDarkBrush,
                 BorderThickness = new Thickness(1),
-                Background = SystemColors.ControlLightBrush,
                 Margin = new Thickness(1)
             };
-            panel.SetResourceReference(Border.BorderBrushProperty, SystemColors.ControlDarkBrushKey);
-            panel.SetResourceReference(Border.BackgroundProperty, SystemColors.ControlLightBrushKey);
+            panel.SetResourceReference(Border.BorderBrushProperty, "ExplorerDirs.BorderBrush");
+            panel.SetResourceReference(Border.BackgroundProperty, "ExplorerDirs.ControlBackgroundBrush");
             Grid.SetRow(panel, slot.Row);
             Grid.SetColumn(panel, slot.Column);
             Grid.SetRowSpan(panel, slot.RowSpan);
@@ -903,8 +1543,12 @@ public partial class MainWindow : Window
         _lastFocusedPaneByLayout[_layout] = Array.IndexOf(_panes, ActivePane);
         _layout = LayoutPreset.Find(id).Id;
         BuildLayout();
+        _fileViewFocusDesired = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-            new Action(() => ActivePane.FocusCurrentView()));
+            new Action(() =>
+            {
+                if (_fileViewFocusDesired && IsActive) ActivePane.FocusCurrentView();
+            }));
         ScheduleSave();
     }
 
@@ -923,9 +1567,12 @@ public partial class MainWindow : Window
         SynchronizeSharedTree();
         foreach (var preset in LayoutPreset.All)
         {
-            _layoutMenuItems[preset.Id].IsChecked = preset.Id == _layout;
+            var isSelected = preset.Id == _layout;
+            _layoutMenuItems[preset.Id].IsChecked = isSelected;
             _layoutButtons[preset.Id].SetResourceReference(Control.BackgroundProperty,
-                preset.Id == _layout ? SystemColors.HighlightBrushKey : SystemColors.ControlBrushKey);
+                isSelected ? "ExplorerDirs.SelectionBackgroundBrush" : "ExplorerDirs.ControlBackgroundBrush");
+            _layoutButtons[preset.Id].SetResourceReference(Control.BorderBrushProperty,
+                isSelected ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
         }
     }
 
@@ -941,8 +1588,8 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.FocusedElement is MenuItem) return;
-        if (ActivePane.IsShellRenameEditorFocused) return;
+        if (Keyboard.FocusedElement is MenuItem && _fullScreenRestoreState is null) return;
+        if (IsAnyShellRenameEditorFocused()) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var virtualKey = KeyInterop.VirtualKeyFromKey(key);
         var modifiers = (int)Keyboard.Modifiers;
@@ -962,6 +1609,9 @@ public partial class MainWindow : Window
             return;
         e.Handled = ExecuteShortcut(ActivePane, shortcut);
     }
+
+    private bool IsAnyShellRenameEditorFocused() =>
+        _panes.Any(pane => pane.IsShellRenameEditorFocused);
 
     private bool ExecuteShortcut(PaneControl source, ExplorerShortcut shortcut)
     {
@@ -1003,6 +1653,9 @@ public partial class MainWindow : Window
                 break;
             case ExplorerShortcut.ProgramStarter:
                 OpenProgramStarterWindow();
+                break;
+            case ExplorerShortcut.RestartApplication:
+                RequestRestartApplication();
                 break;
             case ExplorerShortcut.ActivateMenu:
                 if (MainMenu.Items.Count == 0 || MainMenu.Items[0] is not MenuItem firstMenu) return false;
@@ -1047,12 +1700,116 @@ public partial class MainWindow : Window
             case ExplorerShortcut.ToggleDetailsPane:
                 SetDetailsPaneVisible(!source.DetailsPaneVisible);
                 break;
-            case ExplorerShortcut.ToggleMaximize:
-                WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            case ExplorerShortcut.ToggleFullScreen:
+                ToggleFullScreen();
                 break;
         }
         return true;
     }
+
+    private void ToggleFullScreen()
+    {
+        if (_fullScreenRestoreState is { } saved)
+        {
+            RestoreWindowPresentation(saved);
+            _fullScreenRestoreState = null;
+            _fullScreenWindowPlacement = null;
+            return;
+        }
+
+        var restoreBounds = WindowState == WindowState.Maximized ? RestoreBounds :
+            new Rect(Left, Top, ActualWidth, ActualHeight);
+        var original = new FullScreenPresentation(WindowState, WindowStyle, ResizeMode, Topmost,
+            restoreBounds.Left, restoreBounds.Top, restoreBounds.Width, restoreBounds.Height,
+            MainMenu.Visibility, MainToolBar.Visibility, EnvironmentStatus.Visibility);
+        var fullScreen = original.EnterFullScreen();
+
+        try
+        {
+            _fullScreenWindowPlacement = NativeWindowPlacement.Capture(new WindowInteropHelper(this).Handle,
+                _lastNonMinimizedMaximized);
+            _fullScreenRestoreState = original;
+            WindowState = fullScreen.WindowState;
+            WindowStyle = fullScreen.WindowStyle;
+            ResizeMode = fullScreen.ResizeMode;
+            MainMenu.Visibility = fullScreen.MenuVisibility;
+            MainToolBar.Visibility = fullScreen.ToolBarVisibility;
+            EnvironmentStatus.Visibility = fullScreen.StatusBarVisibility;
+            FullScreenMenu.IsChecked = true;
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            if (monitor == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(monitor, ref monitorInfo))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var bounds = monitorInfo.Monitor;
+            if (!SetWindowPos(hwnd, 0, bounds.Left, bounds.Top, bounds.Right - bounds.Left,
+                    bounds.Bottom - bounds.Top, SwpNoZOrder | SwpNoActivate | SwpFrameChanged))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+        catch (Exception ex)
+        {
+            RestoreWindowPresentation(original);
+            _fullScreenRestoreState = null;
+            _fullScreenWindowPlacement = null;
+            FullScreenMenu.IsChecked = false;
+            EnvironmentStatus.Text = $"无法切换全屏：{ex.Message}";
+        }
+    }
+
+    private void RestoreWindowPresentation(FullScreenPresentation saved)
+    {
+        WindowState = WindowState.Normal;
+        WindowStyle = saved.WindowStyle;
+        ResizeMode = saved.ResizeMode;
+        Topmost = saved.Topmost;
+        Left = saved.Left;
+        Top = saved.Top;
+        Width = saved.Width;
+        Height = saved.Height;
+        MainMenu.Visibility = saved.MenuVisibility;
+        MainToolBar.Visibility = saved.ToolBarVisibility;
+        EnvironmentStatus.Visibility = saved.StatusBarVisibility;
+        FullScreenMenu.IsChecked = false;
+        WindowState = saved.WindowState;
+    }
+
+    private void FullScreenMenu_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
+
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
 
     private void ProgramStarter_Click(object sender, RoutedEventArgs e) => OpenProgramStarterWindow();
 
@@ -1063,7 +1820,7 @@ public partial class MainWindow : Window
             _programStarterWindow.Activate();
             return;
         }
-        _programStarterWindow = new ProgramStarterWindow(_programStarterStore, _programStarterEntries,
+        _programStarterWindow = new ProgramStarterWindow(_programStarterStore, _programStarterEntries, _themeController,
             CaptureProgramStarterContext, message => EnvironmentStatus.Text = message) { Owner = this };
         _programStarterWindow.Closed += (_, _) =>
         {
@@ -1124,13 +1881,19 @@ public partial class MainWindow : Window
     {
         foreach (var info in ShellFileCommands.All)
         {
-            var item = new MenuItem { Header = info.Label, InputGestureText = info.Shortcut, IsEnabled = false };
+            var item = new MenuItem
+            {
+                Header = info.Label, Icon = ExplorerChromeIcons.CreateMenuIcon(info.Command),
+                InputGestureText = info.Shortcut, IsEnabled = false
+            };
             item.Click += (_, _) => InvokeFileCommand(info.Command);
             FileCommandsMenu.Items.Add(item);
             _fileCommandMenus[info.Command] = item;
+            if (info.Command is not (ShellFileCommand.Properties or ShellFileCommand.NewFolder)) continue;
             var button = new Button
             {
-                Content = info.Label, ToolTip = $"{info.Label} ({info.Shortcut})",
+                Content = ExplorerChromeIcons.CreateLabeledButtonContent(info.Command, info.Label),
+                ToolTip = $"{info.Label} ({info.Shortcut})",
                 IsEnabled = false, Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(1, 0, 1, 0)
             };
             AutomationProperties.SetName(button, info.Label);
@@ -1276,19 +2039,20 @@ public partial class MainWindow : Window
         _fileCommandRefreshGate.Cancel();
         _queryingFileCommands = true;
         var pane = ActivePane;
+        var renameEditorFocused = IsAnyShellRenameEditorFocused();
         try
         {
-            var states = pane.IsShellRenameEditorFocused
+            var states = renameEditorFocused
                 ? ShellFileCommands.All.ToDictionary(info => info.Command, _ => false)
                 : pane.QueryFileCommands();
             if (!ReferenceEquals(pane, ActivePane)) return;
             foreach (var (command, enabled) in states)
             {
                 _fileCommandMenus[command].IsEnabled = enabled;
-                _fileCommandButtons[command].IsEnabled = enabled;
+                if (_fileCommandButtons.TryGetValue(command, out var button)) button.IsEnabled = enabled;
             }
             NewFolderMenu.IsEnabled = states.GetValueOrDefault(ShellFileCommand.NewFolder);
-            var counts = pane.IsShellRenameEditorFocused ? null : pane.ReadSelectionCounts();
+            var counts = renameEditorFocused ? null : pane.ReadSelectionCounts();
             if (!ReferenceEquals(pane, ActivePane)) counts = null;
             foreach (var (command, item) in _selectionMenus)
                 item.IsEnabled = counts is not null &&
@@ -1326,6 +2090,19 @@ public partial class MainWindow : Window
     private void RefreshCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.RefreshCurrent();
     private void SearchCurrent_Click(object sender, RoutedEventArgs e) => ActivePane.FocusSearch();
     private void CalculateDirectorySize_Click(object sender, RoutedEventArgs e) => ActivePane.ToggleRecursiveDirectorySize();
+    private void CalculateSelectedItemsRecursiveSize_Click(object sender, RoutedEventArgs e)
+        => ActivePane.CalculateSelectedItemsRecursiveSize();
+    private void RestartApplication_Click(object sender, RoutedEventArgs e)
+        => RequestRestartApplication();
+
+    private void RequestRestartApplication()
+    {
+        if (_restartApplication is null) return;
+        if (MessageBox.Show(this,
+                "将关闭当前 Explorer Dirs 进程中的所有窗口，保存窗口会话后重新启动。继续吗？",
+                "重启 Explorer Dirs", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            _restartApplication();
+    }
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
     private void FavoritesMenu_SubmenuOpened(object sender, RoutedEventArgs e)
@@ -1505,15 +2282,17 @@ public partial class MainWindow : Window
 
     private async Task BuildWorkspaceMenuAsync(MenuItem menu)
     {
+        if (_closed) return;
         try
         {
             // Share an outstanding enumeration across reopenings. A slow volume
             // must not accumulate a new blocked worker for every menu opening.
             if (_workspaceListingTask is null || _workspaceListingTask.IsCompleted)
-                _workspaceListingTask = Task.Run(() => WorkspaceCatalog.Read(
-                    WorkspaceCatalog.DirectoryFor(_sessionStore.Path)));
+                _workspaceListingTask = WindowBackgroundOperation.RunAsync(
+                    WorkspaceCatalog.DirectoryFor(_sessionStore.Path), static path => WorkspaceCatalog.Read(path),
+                    _windowOperationStop.Token);
             var listing = await _workspaceListingTask;
-            if (!IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
+            if (_closed || !IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
             menu.Items.Clear();
             foreach (var entry in listing.Entries)
             {
@@ -1533,7 +2312,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            if (!IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
+            if (_closed || !IsVisible || !menu.IsSubmenuOpen || !FavoritesMenu.Items.Contains(menu)) return;
             menu.Items.Clear();
             menu.Items.Add(new MenuItem { Header = "工作区列表读取失败，请重新展开", IsEnabled = false });
             EnvironmentStatus.Text = $"工作区列表读取失败：{ex.Message}";
@@ -1634,9 +2413,9 @@ public partial class MainWindow : Window
         var path = ActivePane.CurrentPath;
         try
         {
-            await TerminalLauncher.OpenAsync(path, _terminalLaunchStop.Token);
+            await TerminalLauncher.OpenAsync(path, _windowOperationStop.Token);
         }
-        catch (OperationCanceledException) when (_terminalLaunchStop.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_windowOperationStop.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (IsLoaded)
@@ -1649,7 +2428,7 @@ public partial class MainWindow : Window
 
     private void ScheduleSave()
     {
-        if (!_initializing)
+        if (!_initializing && !_closed)
         {
             _saveTimer.Stop();
             _saveTimer.Start();
@@ -1669,7 +2448,7 @@ public partial class MainWindow : Window
 
     private async Task ImportQdrAsync(string path)
     {
-        if (_importingQdr || _exportingQdr) return;
+        if (_closed || _importingQdr || _exportingQdr) return;
         _importingQdr = true;
         ImportQdrMenu.IsEnabled = false;
         ExportQdrMenu.IsEnabled = false;
@@ -1677,8 +2456,9 @@ public partial class MainWindow : Window
         var appending = false;
         try
         {
-            var import = await Task.Run(() => QdrImporter.Load(path));
-            if (!IsVisible) return;
+            var import = await WindowBackgroundOperation.RunAsync(path, static value => QdrImporter.Load(value),
+                _windowOperationStop.Token);
+            if (_closed || !IsVisible) return;
             if (!IsActive)
             {
                 // Parsing can finish after the user switches to another app.
@@ -1704,15 +2484,31 @@ public partial class MainWindow : Window
                 _panes.Select(pane => pane.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
                 _panes.Select(pane => pane.SelectedTabIndex).ToArray(), _defaultIconSize,
                 _paneTreeVisibility.ToArray(), _treeDisplayMode);
-            if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > 100))
-                throw new InvalidOperationException("导入后单窗格将超过 100 个标签，请先关闭一些标签再导入。");
+            if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > SessionStore.MaximumTabsPerPane))
+                throw new InvalidOperationException($"导入后单窗格将超过 {SessionStore.MaximumTabsPerPane} 个标签，请先关闭一些标签再导入。");
             var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
-            Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-            File.WriteAllText(backup, SessionStore.Render(snapshot));
-            File.WriteAllText(backup + ".qdr", QdrExporter.Render(snapshot,
-                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(), SnapshotLayoutProportions(),
-                _treeWidths), System.Text.Encoding.Unicode);
+            var backupPins = _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
+            var backupProportions = SnapshotLayoutProportions();
+            var backupWidths = _treeWidths;
+            var baseline = QdrExporter.Render(snapshot, backupPins, backupProportions, backupWidths);
+            var unresolvedBackupPaths = await WindowBackgroundOperation.RunAsync((Path: backup, Session: snapshot,
+                Pins: backupPins, Proportions: backupProportions, Widths: backupWidths),
+                static state => QdrExporter.SaveBackup(state.Path, state.Session, state.Pins,
+                    state.Proportions, state.Widths), _windowOperationStop.Token);
+            if (_closed) return;
             backupPath = backup;
+            if (!IsVisible || !IsActive)
+            {
+                EnvironmentStatus.Text = "导入前备份已完成；窗口未激活，未追加标签。返回后可重新导入。";
+                return;
+            }
+            // Shell navigation and user input can change the session while the backup worker runs.
+            // Append only if the completed backup still describes the state we are about to modify.
+            var current = QdrExporter.Render(SnapshotSession(),
+                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                SnapshotLayoutProportions(), _treeWidths);
+            if (!string.Equals(baseline, current, StringComparison.Ordinal))
+                throw new InvalidOperationException("备份期间工作区状态已变化，未追加标签；请重新导入。旧快照备份已保留。");
             appending = true;
             for (var pane = 0; pane < 4; pane++)
                 _panes[pane].ImportTabs(import.Panes[pane], import.SelectedTabs[pane],
@@ -1757,23 +2553,103 @@ public partial class MainWindow : Window
             }
             if (import.ActivePane is { } activePane) SetActivePane(_panes[activePane]);
             ScheduleSave();
-            EnvironmentStatus.Text = $"已导入 {import.TabCount} 个标签；原会话已备份。未支持的配置未导入。";
+            EnvironmentStatus.Text = $"已导入 {import.TabCount} 个标签；原会话已备份。未支持的配置未导入。" +
+                (unresolvedBackupPaths == 0 ? "" : $" 备份中 {unresolvedBackupPaths} 个目录使用文本路径；本程序扩展保留原路径。");
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             var message = appending
                 ? $"导入未完整完成，可能已追加部分标签。原会话备份：{backupPath}\n{ex.Message}"
                 : $"导入失败，未追加标签：{ex.Message}";
             EnvironmentStatus.Text = message;
             if (IsActive) MessageBox.Show(this, message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { _importingQdr = false; ImportQdrMenu.IsEnabled = true; ExportQdrMenu.IsEnabled = true; }
+        finally
+        {
+            _importingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
     }
 
+    private async void SaveWorkspaceToDesktop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_closed || _importingQdr || _exportingQdr) return;
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存当前工作区到桌面",
+            Filter = "Explorer Dirs 桌面项 (*.lnk)|*.lnk",
+            DefaultExt = ".lnk",
+            AddExtension = true,
+            OverwritePrompt = false,
+            InitialDirectory = desktop,
+            FileName = "ExplorerDirs 工作区.lnk"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        _exportingQdr = true;
+        ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = false;
+        try
+        {
+            var expectedShortcut = await WindowBackgroundOperation.RunAsync(dialog.FileName,
+                static path => File.Exists(path) ? File.ReadAllBytes(path) : null, _windowOperationStop.Token);
+            if (_closed) return;
+            if (expectedShortcut is not null && (!IsActive || MessageBox.Show(this,
+                    "目标快捷方式已存在，确认替换？其原有工作区状态文件将保留。",
+                    "替换桌面工作区项", MessageBoxButton.OKCancel, MessageBoxImage.Question,
+                    MessageBoxResult.Cancel) != MessageBoxResult.OK)) return;
+            var document = await WindowBackgroundOperation.RunAsync((Session: SnapshotSession(),
+                Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                _windowOperationStop.Token);
+            if (!ConfirmQdrCompatibility(document)) return;
+            var qdrPath = Path.Combine(WorkspaceCatalog.DirectoryFor(_sessionStore.Path), $"Desktop-{Guid.NewGuid():N}.qdr");
+            var executable = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+            var isDotnetHost = Path.GetFileNameWithoutExtension(executable)
+                .Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+            await WindowBackgroundOperation.RunAsync((Shortcut: dialog.FileName, Executable: executable,
+                Assembly: isDotnetHost ? Environment.GetCommandLineArgs()[0] : null, Qdr: qdrPath,
+                WorkingDirectory: AppContext.BaseDirectory, Text: document.Text, Expected: expectedShortcut),
+                static state =>
+                {
+                    DesktopWorkspaceShortcut.CreateWithWorkspace(state.Shortcut, state.Executable,
+                        state.Assembly, state.Qdr, state.WorkingDirectory, state.Text, state.Expected);
+                    return true;
+                }, _windowOperationStop.Token);
+            if (_closed) return;
+            EnvironmentStatus.Text = $"已创建桌面工作区项；状态文件保存在 {Path.GetFileName(qdrPath)}。";
+        }
+        catch (Exception ex)
+        {
+            if (_closed) return;
+            EnvironmentStatus.Text = $"创建桌面工作区项失败：{ex.Message}";
+            if (IsActive)
+                MessageBox.Show(this, EnvironmentStatus.Text, "创建桌面工作区项失败",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _exportingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
+    }
+
+    private bool ConfirmQdrCompatibility(QdrExportDocument document)
+    {
+        if (_closed) return false;
+        if (document.UnencodedLocationCount == 0) return true;
+        var warning = $"{document.UnencodedLocationCount} 个含百分号的目录未能取得 Shell 编码身份（可能已离线）。\n\n" +
+            "全部标签仍会保留，但 Q-Dir 读取文本路径时可能展开同名环境变量。本程序扩展保留原路径。\n\n继续导出？";
+        EnvironmentStatus.Text = warning;
+        return IsActive && MessageBox.Show(this, warning, "QDR 路径兼容性提示",
+            MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
+    }
     private async void ExportQdr_Click(object sender, RoutedEventArgs e) => await ExportQdrAsync(false);
 
     private async void ExportFileView_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed) return;
         try
         {
             // Capture before opening the dialog so the export reflects the active Shell view at invocation time.
@@ -1796,15 +2672,21 @@ public partial class MainWindow : Window
                 4 => FileViewExportFormat.Xls,
                 _ => throw new InvalidOperationException("未知的导出格式。")
             };
-            await Task.Run(() =>
-            {
-                using var output = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None);
-                FileViewExportWriter.Write(output, format, snapshot);
-            });
+            // Like QDR export, a confirmed file write may outlive its window;
+            // keep the worker independent of both the window and save dialog.
+            await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Format: format, Snapshot: snapshot),
+                static state =>
+                {
+                    FileViewExportFile.WriteAtomically(state.Path,
+                        output => FileViewExportWriter.Write(output, state.Format, state.Snapshot));
+                    return true;
+                }, _windowOperationStop.Token);
+            if (_closed) return;
             EnvironmentStatus.Text = $"已导出 {snapshot.Rows.Count:N0} 项，{snapshot.Columns.Count} 列到 {Path.GetFileName(dialog.FileName)}。导出整个活动视图，当前选区不缩小导出范围。";
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"文件视图导出失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
@@ -1831,12 +2713,19 @@ public partial class MainWindow : Window
 
     private void RefreshPhotoPrintCommandState()
     {
+        if (_closed || _loadingPrintPhotos)
+        {
+            PrintSelectedPhotosMenu.IsEnabled = false;
+            return;
+        }
         try { PrintSelectedPhotosMenu.IsEnabled = ActivePane.CapturePhotoPrintSelection().CandidatePaths.Count > 0; }
         catch (Exception) { PrintSelectedPhotosMenu.IsEnabled = false; }
     }
 
     private async void PrintSelectedPhotos_Click(object sender, RoutedEventArgs e)
     {
+        if (_closed || _loadingPrintPhotos) return;
+        _loadingPrintPhotos = true;
         try
         {
             var selection = ActivePane.CapturePhotoPrintSelection();
@@ -1850,7 +2739,14 @@ public partial class MainWindow : Window
 
             PrintSelectedPhotosMenu.IsEnabled = false;
             EnvironmentStatus.Text = $"正在读取 {selection.CandidatePaths.Count:N0} 个所选文件…";
-            var decoded = await PhotoPrintImageLoader.DecodeAsync(selection.CandidatePaths);
+            var decoded = await PhotoPrintImageLoader.DecodeAsync(selection.CandidatePaths, _windowOperationStop.Token)
+                .WaitAsync(_windowOperationStop.Token);
+            if (_closed || !IsVisible) return;
+            if (!IsActive)
+            {
+                EnvironmentStatus.Text = "图片读取已结束；窗口未激活，未打开打印预览。返回后可重新选择打印。";
+                return;
+            }
             var rejected = selection.RejectedItems.Concat(decoded.RejectedItems).ToArray();
             if (decoded.Images.Count == 0)
             {
@@ -1859,7 +2755,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var window = new PhotoPrintWindow(decoded.Images, rejected) { Owner = this };
+            var window = new PhotoPrintWindow(decoded.Images, rejected, _themeController) { Owner = this };
             if (window.ShowDialog() == true)
                 EnvironmentStatus.Text = $"已提交照片打印任务：{window.SubmittedPhotoCount:N0} 张，{window.SubmittedPageCount:N0} 页。";
             else
@@ -1867,15 +2763,20 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"打印所选照片失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "打印所选照片失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { RefreshPhotoPrintCommandState(); }
+        finally
+        {
+            _loadingPrintPhotos = false;
+            if (!_closed) RefreshPhotoPrintCommandState();
+        }
     }
 
     private async Task ExportQdrAsync(bool saveWorkspace)
     {
-        if (_exportingQdr || _importingQdr) return;
+        if (_closed || _exportingQdr || _importingQdr) return;
         _exportingQdr = true;
         ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = false;
         try
@@ -1883,8 +2784,9 @@ public partial class MainWindow : Window
             var workspaceDirectory = WorkspaceCatalog.DirectoryFor(_sessionStore.Path);
             if (saveWorkspace)
             {
-                await Task.Run(() => Directory.CreateDirectory(workspaceDirectory));
-                if (!IsVisible || !IsActive) return;
+                await WindowBackgroundOperation.RunAsync(workspaceDirectory,
+                    static path => Directory.CreateDirectory(path), _windowOperationStop.Token);
+                if (_closed || !IsVisible || !IsActive) return;
             }
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
@@ -1895,8 +2797,9 @@ public partial class MainWindow : Window
             };
             if (saveWorkspace) dialog.InitialDirectory = workspaceDirectory;
             if (dialog.ShowDialog(this) != true) return;
-            var expected = await Task.Run(() => File.Exists(dialog.FileName) ? QdrImporter.ReadText(dialog.FileName) : null);
-            if (!IsVisible || !IsActive) return;
+            var expected = await WindowBackgroundOperation.RunAsync(dialog.FileName,
+                static path => File.Exists(path) ? QdrImporter.ReadText(path) : null, _windowOperationStop.Token);
+            if (_closed || !IsVisible || !IsActive) return;
             var note = "导出全部窗格与标签（包括隐藏窗格），以及查看设置、预览/详情窗格、固定标签和新标签默认查看方式。\n\n" +
                 "导出当前十二种布局及各窗格标签。已取得完整列设置的标签同时写入 Q-Dir 格式的查看、排序、分组与列设置；其余标签通过本程序扩展保留视图状态。\n\n" +
                 "当前布局分隔比例写入 Q-Dir 字段（精度为万分之一）；全部已记忆的布局比例通过本程序扩展完整保存。不同程序的边框尺寸可能影响实际像素位置。\n\n" +
@@ -1906,20 +2809,33 @@ public partial class MainWindow : Window
             if (MessageBox.Show(this, note, "导出 Q-Dir 状态", MessageBoxButton.OKCancel,
                     MessageBoxImage.Information, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
             var snapshot = SnapshotSession();
-            var text = QdrExporter.Render(snapshot,
-                _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(), SnapshotLayoutProportions(),
-                _treeWidths);
-            await Task.Run(() => QdrExporter.Save(dialog.FileName, expected, text));
+            var document = await WindowBackgroundOperation.RunAsync((Session: snapshot,
+                Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                _windowOperationStop.Token);
+            if (_closed) return;
+            if (!ConfirmQdrCompatibility(document)) return;
+            var text = document.Text;
+            await WindowBackgroundOperation.RunAsync((Path: dialog.FileName, Expected: expected, Text: text),
+                static state => { QdrExporter.Save(state.Path, state.Expected, state.Text); return true; },
+                _windowOperationStop.Token);
+            if (_closed) return;
             EnvironmentStatus.Text = WorkspaceCatalog.IsInDirectory(dialog.FileName, workspaceDirectory)
                 ? "已保存工作区；可从“收藏夹 → 追加已保存工作区”打开。"
                 : "已导出 .qdr 工作区状态到所选位置；该位置不在工作区收藏目录中。";
         }
         catch (Exception ex)
         {
+            if (_closed) return;
             EnvironmentStatus.Text = $"导出失败：{ex.Message}";
             if (IsActive) MessageBox.Show(this, EnvironmentStatus.Text, "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        finally { _exportingQdr = false; ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true; }
+        finally
+        {
+            _exportingQdr = false;
+            if (!_closed) ImportQdrMenu.IsEnabled = ExportQdrMenu.IsEnabled = true;
+        }
     }
 
     private Dictionary<int, LayoutProportions> SnapshotLayoutProportions()
@@ -1929,8 +2845,41 @@ public partial class MainWindow : Window
         return snapshot;
     }
 
-    private void SaveSession()
+    private void RestoreSavedWindowPlacement()
     {
+        try
+        {
+            if (_savedWindowPlacement is { } placement)
+            {
+                NativeWindowPlacement.Restore(new WindowInteropHelper(this).Handle, placement);
+                WindowState = placement.Maximized ? WindowState.Maximized : WindowState.Normal;
+            }
+            if (_windowPlacementStore.LoadWarning is { } warning) EnvironmentStatus.Text = warning;
+        }
+        catch (Exception ex)
+        {
+            EnvironmentStatus.Text = $"恢复窗口位置失败：{ex.Message}";
+        }
+        finally { _windowPlacementReady = true; }
+    }
+
+    private void SaveWindowPlacement()
+    {
+        if (!_windowPlacementReady) return;
+        // F11 has its own transient geometry; restarting from full screen must
+        // retain the window placement captured before entering immersive mode.
+        var placement = _fullScreenWindowPlacement ?? NativeWindowPlacement.Capture(
+            new WindowInteropHelper(this).Handle, _lastNonMinimizedMaximized);
+        _windowPlacementStore.Save(placement);
+    }
+
+    private bool SaveSession()
+    {
+        // The placement sidecar has an independent external-edit guard. A
+        // placement conflict must not prevent the existing tab session saving.
+        string? placementFailure = null;
+        try { SaveWindowPlacement(); }
+        catch (Exception ex) { placementFailure = $"窗口位置保存失败：{ex.Message}"; }
         try
         {
             _sessionStore.Save(new SessionState(_layout, _defaultViewMode,
@@ -1939,11 +2888,27 @@ public partial class MainWindow : Window
                 _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
                 _paneTreeVisibility.ToArray(), _treeDisplayMode));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
+            if (placementFailure is not null)
+            {
+                EnvironmentStatus.Text = placementFailure;
+                return false;
+            }
+            return true;
         }
         catch (Exception ex)
         {
-            EnvironmentStatus.Text = $"配置保存失败：{ex.Message}";
+            EnvironmentStatus.Text = $"配置保存失败：{ex.Message}" +
+                (placementFailure is null ? "" : $"；{placementFailure}");
+            return false;
         }
+    }
+
+    internal bool SaveSessionForRestart()
+    {
+        if (SaveSession()) return true;
+        MessageBox.Show(this, EnvironmentStatus.Text, "无法重启 Explorer Dirs",
+            MessageBoxButton.OK, MessageBoxImage.Warning);
+        return false;
     }
 
     internal SessionState SnapshotSession() => new(_layout, _defaultViewMode,
@@ -1955,4 +2920,5 @@ public partial class MainWindow : Window
         _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
 
     internal void ReportSessionIssue(string message) => EnvironmentStatus.Text = message;
+
 }

@@ -1853,3 +1853,53 @@ product 轮启用了 `DispatcherQueueLatencyProbe`、message-pump trace 和 Shel
 另一个隐藏 HostProbe 在四个生产 ExplorerBrowser 视图就绪后，先对包含四个窗格目录的根路径注册/注销，再对根目录下新建的空目录注册/注销。立即连续注册的初测中 3/4 轮完全成功；一轮第一笔成功、第二笔失败。两笔之间增加 150 ms WPF STA 消息泵等待后，8 轮中 4 轮两次都成功、2 轮两次都失败；另外 2 轮在宿主就绪阶段发现前台窗口被外部改变，按保护逻辑停止，未进入注册测试。等待不能稳定修复问题，路径内容也没有表现出稳定关联。原始日志：`src/.state/registration-once-low-frequency-20261026.log`、`src/.state/registration-after-hosts-paired-targets-20261026.log`、`src/.state/registration-after-hosts-pumped-pairs-20261026.log`、`src/.state/registration-after-hosts-low-frequency-20261026.log`、`src/.state/registration-after-hosts-empty-root-20261026.log`、`src/.state/registration-after-hosts-repeat-20261026.log`、`src/.state/shell-change-registration-stress-20261026.log`。
 
 测试只在隐藏窗口上观察注册/注销，没有执行文件操作。由于后续轮次检测到外部前台窗口切换，停止了更多 ExplorerBrowser 宿主探测。HostProbe Release 构建通过，0 警告、0 错误；没有改产品注册参数、重试、延时或 watcher 策略。`last-error=0/8` 都不足以定位无效参数或资源条件；根因仍开放。
+
+### 2026-10-26 再验 128 项批量删除与大视图身份扫描门控
+
+在上节状态机修正及身份扫描门控之后，当前 Release HostProbe 连续两次运行 `--live-shell-directory-stress-large 10000`。两轮均退出码 0；独立 observer 对 burst 文件创建/删除均为 `10,000/10,000`，产品 watcher 含额外测试子文件夹事件为 `10,001/10,001`。128 项批量删除目标 `burst-0127.txt` 在 Shell 视图仍有 10,002 项时被确认是文件，单次查询分别耗时 4 ms；两轮 `batch-visible=True`。大视图目录删除扫描计数均为 0、结果 `SkippedLargeView`，由计数协调器完成收敛。
+
+两轮最终目标窗格计数均为 3，四窗格计数为 `10003/3`；`second.txt`、`third.txt` 选区和未选中的 `initial.txt` 焦点在创建、单项删除及批量删除后保持。批量删除收敛分别使用 2 次与 1 次 fallback；Dispatcher 最大间隔也有波动（ContextIdle 108/128 ms，Input 83/85 ms，Normal 77/85 ms）。这加强了 128 项删除状态机修复在本机隐藏生产宿主上的重复证据，但不证明可见交互、慢速/网络位置、其它 Shell provider 或跨机器稳定性；自动刷新 P0 仍开放，无 release。
+
+### 2026-10-28 HostProbe 刷新序列误报修正
+
+本轮 `HostProbe --live-updates` 第一次运行中，真实产品 `ExplorerBrowserHost` 的四窗格创建已读到 `2,2,2,2`，随后探针在取项目名时抛出“2 items exceeds the probe limit 0”。根因是 `hosts.Select(Names)` 绑定到了 LINQ 的带索引 `Select` 重载，pane 序号被当作 `Names` 的 `maximumItems` 参数；不是 Shell 列表项目上限或产品刷新失败。创建/删除两处均改为显式单参数 lambda。
+
+修正后同一隐藏生产宿主序列连续 4 次退出码 0，每轮四窗格均从 `1,1,1,1` 收敛至创建后的 `2,2,2,2`，删除夹具文件后回到 `1,1,1,1`；创建收敛约 0.87–1.03 秒，删除约 0.45–0.59 秒。完整 Release SettingsSmoke 也通过。没有显示 MainWindow 或发送用户输入；这是隐藏 HwndSource 中的真实 ExplorerBrowserHost 与本地临时目录证据，不是可见刷新体验验收。
+
+另一次 `NativeProbe --live-updates-wpf` 最小四窗格对照曾观察到未收敛计数（无站点控制通过，生产站点创建 `1,2,2,2`、删除 `0,1,1,1`）；后续连续多轮同一路径及本轮新加的 `--live-updates-view-flags-wpf` 矩阵均通过。最新矩阵中，无站点、生产 `NOINCLUDEITEM` 站点、零视图标志站点的四窗格创建计数均为 `2,2,2,2`，删除均回到 `1,1,1,1`，进程退出码 0。当前结论是该最小探针路径存在过间歇观测，尚无证据将它稳定归因于某组视图标志；它与产品 HostProbe 的 watcher/recovery 路径不同，不据此改产品刷新逻辑。详细日志位于 `%TEMP%\explorer-dirs-live-updates-view-flags-wpf.log`。
+
+本轮只增加 NativeProbe 的 WPF 消息泵矩阵命令并做隐藏后台验证；没有显示 MainWindow、操作用户桌面或发布。隐藏 Shell 计数不代表可见 UI 刷新体验验收。
+
+### 2026-10-28：补验当前真实 ExplorerBrowserHost 四窗格序列
+
+在同一源码状态下连续运行两次 HostProbe `--live-updates`。两轮均从 `1,1,1,1` 开始，创建探针文件后四 pane 到 `2,2,2,2`，删除初始文件后回到 `1,1,1,1`；创建分别用时 1,024/1,028 ms，删除 582/623 ms，均退出码 0。产品 watcher 两轮均收到四个创建和四个删除通知，最终每窗格只剩 `created.txt`。第二轮完整日志保存在忽略目录 `src/.state/background-live-updates-hostprobe-20261028.log`，SHA-256 `ACFA0E01074F96F01907EF501B1760DEBFC8BEEBC04B7C9B31F11D3A87658DF3`。
+
+这两轮是本机隐藏真实 `ExplorerBrowserHost` 和本地临时目录的重复证据；没有显示产品窗口或输入用户桌面。结果不覆盖网络/第三方 Shell provider、长时运行或可见焦点与重绘，也不代表完整自动刷新 P0 已关闭。
+
+### 2026-10-28：复核 3,000 项删除后的回退刷新
+
+交替运行四轮隐藏 HostProbe `--live-shell-directory-stress`（Shell callback trace 关闭/开启各两轮）。四轮创建均无回退刷新，产品 watcher 与独立 observer 各收到完整 `3000/3000` 创建/删除事件；四轮文件可见、删除后收敛、选区和焦点恢复均通过。删除阶段四轮各有一次回退刷新：三轮记录 `expected=3002 / actual=3003 / forced=False`，表示已删除文件仍暂时出现在 ExplorerBrowser 的计数中；另一轮为 `expected=3002 / actual=3002 / forced=True`，说明增删通知合并后净数量相等，不能仅靠计数发现内容变化。刷新后各轮均收敛到磁盘的 3 项。
+
+这不是无条件减少刷新就能安全解决的单纯重绘开销：前期精确文件删除对照的 6 轮中，发送或不发送精确 `SHCNE_DELETE` 后，Shell 均未在 700ms 内自然移除条目，之后由计数回退刷新修复。当前证据支持保留回退；关闭或再延迟这类回退可能让已删除条目继续留在列表中。本轮没有改产品代码，也没有打开可见窗口；记录属于本机隐藏 ExplorerBrowser 压力验证，不覆盖其它 Shell provider、可见刷新观感或长时间运行。
+
+### 2026-10-28：复验不注入显式 Flush 的 Changed 元数据排序
+
+Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `ShellColumnManager.Apply` 新增的可选上下文参数而在夹具设置阶段退出；修复只影响 HostProbe，改为显式传入 `null`，不改产品代码。Release HostProbe 构建 0 警告/错误后，在 `EXPLORER_DIRS_HOSTPROBE_SKIP_FLUSH=1` 下运行 `--live-shell-changed-metadata`，退出码 0。
+
+生产 watcher 改写并观察到 `initial.txt`（7 B → 128 KiB）和 `second.txt`（6 B → 64 KiB）；没有额外注入通知。真实生产 `ExplorerBrowserHost` 当前行快照读到两个新大小，大小升序从 `second.txt|initial.txt` 自然变为 `initial.txt|second.txt`，约 1,122 ms 收敛。选区、焦点保持，整视图 Refresh fallback 增量为 0；父 HWND 隐藏且前台句柄未变。此次 observer 收到两条 `SHCNE_UPDATEITEM` 和一条目录更新。
+
+这补强了本机普通目录 Changed → 按项更新及元数据排序的后台链路，不覆盖 DirectUI 可见绘制、其他 Shell provider、网络/云目录或长时间稳定性。完整输出在 `src/.state/changed-metadata-no-flush-20261028.log`；失败的首轮未记录日志，且只证明了探针入口问题。
+
+### 2026-10-28：重验刷新时未选中焦点项的恢复
+
+重验 `--live-shell-refresh-unselected-focus` 时发现旧探针直接通过 Shell COM 设置选择与焦点，却没有更新产品的 native-input 快照。补上输入代际结算和“选区/焦点快照与夹具一致”的前置条件后，Release 隐藏生产宿主退出码 0：文件创建通知后，Shell 临时把焦点行 `initial.txt` 加入选区（刷新前观测为 3 项），调用产品 `ExplorerBrowserHost.Refresh()` 后恢复为用户原选区 `second.txt`、`third.txt`，未选中的 `initial.txt` 焦点也保留。原探针曾把 Shell 临时扩大的选区当作期望值，并出现焦点丢失；该结果属于基线不完整，不是有效产品回归证据。
+
+另行运行 `--live-shell-selection-delete-watcher` 退出码 0：生产 watcher 观察到删除，目标文件从视图和磁盘移除，选区与焦点均保持；批次约 805 ms 收敛。`--live-shell-selection-delete` 与 `--live-shell-selection-delete-after-input` 则关闭 watcher 并直接发送合成 `SHCNE_UPDATEDIR`，两者都观察到 Shell 将未选中的焦点行加入选区。后一模式已等待输入代际和快照结算，因此这个差异不是删除前快照尚未完成造成的；但它是 watcher 被人为关闭后的 Shell 原生通知对照，没有调用产品 `Refresh()`，不能据此归因生产 watcher 路径。该对照仍显示 Shell 自行重建视图时的选择行为差异，暂不改产品代码。
+
+本轮仅修正 HostProbe 的输入快照基线和期望值，未改产品逻辑；以上结果来自本机隐藏 `ExplorerBrowserHost` 与生成的临时文件，不涉及可见 UI、Explorer 桌面对照、网络目录或其它 Shell provider。自动刷新 P0 仍开放。
+
+### 2026-10-28：无 watcher 时的自然 Shell 删除通知对照
+
+继续运行 `--live-shell-selection-delete-native`：探针通过真实 `IFileOperation` 创建并删除副本，不注入 `SHCNE_UPDATEDIR`，但会关闭产品 watcher，以隔离 Shell 自身通知路径。夹具重建并核对删除前选区为 `second.txt`、`third.txt`、焦点为未选中 `initial.txt` 后，副本删除完成、计数收敛；最终 Shell 选区多出 `initial.txt` 与未操作的 `selection-delete-target.txt`，焦点仍为 `initial.txt`，因此该对照退出码为 1。它表明无 watcher 时原生 Shell 通知后的选区与用户输入快照不同；仍不等同于应用的正常 watcher/Refresh 路径。
+
+在相同源码下重跑 `--live-shell-selection-delete-watcher`，退出码 0：生产 watcher 收到删除事件，约 804 ms 后视图和磁盘均移除目标，`second.txt`/`third.txt` 选区及 `initial.txt` 焦点保持。结合上一节的强制 UPDATEDIR 对照，当前需要保留生产 watcher 负责的快照恢复；没有证据支持关闭 watcher 或仅依赖 Shell 自然通知。本轮只调整隔离测试的夹具选区建立方式，没有改产品 watcher、刷新或 Shell 通知逻辑。

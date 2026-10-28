@@ -14,15 +14,26 @@
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowPlacement.cs" Link="WindowPlacement.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowCascade.cs" Link="WindowCascade.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowPlacementStore.cs" Link="WindowPlacementStore.cs" />
     <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
+    <Compile Include="../ExplorerDirs.App/FullScreenPresentation.cs" Link="FullScreenPresentation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellAutoColumnWidthRouting.cs" Link="ShellAutoColumnWidthRouting.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewShortcutDispatch.cs" Link="FileViewShortcutDispatch.cs" />
     <Compile Include="../ExplorerDirs.App/AddressTreeShortcutState.cs" Link="AddressTreeShortcutState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeFolderLocation.cs" Link="ShellTreeFolderLocation.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTreeIconIndexResolver.cs" Link="ShellTreeIconIndexResolver.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeShellTree.cs" Link="NativeShellTree.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellIconProvider.cs" Link="ShellIconProvider.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellIconCache.cs" Link="ShellIconCache.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowBackgroundOperation.cs" Link="WindowBackgroundOperation.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathHistory.cs" Link="AddressPathHistory.cs" />
     <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewStyleIconSet.cs" Link="ViewStyleIconSet.cs" />
+    <Compile Include="../ExplorerDirs.App/ExplorerChromeIcons.cs" Link="ExplorerChromeIcons.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleWheelCycle.cs" Link="ViewStyleWheelCycle.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleWheelAccumulator.cs" Link="ViewStyleWheelAccumulator.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemCounts.cs" Link="ShellItemCounts.cs" />
@@ -51,6 +62,7 @@
     <Compile Include="../ExplorerDirs.App/NativeShellCommandMenu.cs" Link="NativeShellCommandMenu.cs" />
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/QdrImporter.cs" Link="QdrImporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrLaunchSession.cs" Link="QdrLaunchSession.cs" />
     <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
     <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
     <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
@@ -78,24 +90,32 @@
     <Compile Include="../ExplorerDirs.App/ProgramStarterCommandState.cs" Link="ProgramStarterCommandState.cs" />
     <Compile Include="../ExplorerDirs.App/TabReorder.cs" Link="TabReorder.cs" />
     <Compile Include="../ExplorerDirs.App/TabHeaderPanel.cs" Link="TabHeaderPanel.cs" />
+    <Compile Include="../ExplorerDirs.App/TabHeaderLayout.cs" Link="TabHeaderLayout.cs" />
     <Compile Include="../ExplorerDirs.App/BreadcrumbPath.cs" Link="BreadcrumbPath.cs" />
+    <Compile Include="../ExplorerDirs.App/AddressInputResolver.cs" Link="AddressInputResolver.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/UiPreferencesStore.cs" Link="UiPreferencesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/MouseWheelFocusRouter.cs" Link="MouseWheelFocusRouter.cs" />
+    <Compile Include="../ExplorerDirs.App/TabStripVisibilityPolicy.cs" Link="TabStripVisibilityPolicy.cs" />
+    <Compile Include="../ExplorerDirs.App/TreeSelectionAutoExpand.cs" Link="TreeSelectionAutoExpand.cs" />
     <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePreferenceStore.cs" Link="ThemePreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/SizeDisplayPreferenceStore.cs" Link="SizeDisplayPreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePalette.cs" Link="ThemePalette.cs" />
+    <Compile Include="../ExplorerDirs.App/NativeWindowFrameTheme.cs" Link="NativeWindowFrameTheme.cs" />
     <Compile Include="../ExplorerDirs.App/ViewPresetStore.cs" Link="ViewPresetStore.cs" />
     <Compile Include="../ExplorerDirs.App/PinnedTabsStore.cs" Link="PinnedTabsStore.cs" />
     <Compile Include="../ExplorerDirs.App/StartupDirectory.cs" Link="StartupDirectory.cs" />
     <Compile Include="../ExplorerDirs.App/FolderOpenRouter.cs" Link="FolderOpenRouter.cs" />
+    <Compile Include="../ExplorerDirs.App/DesktopWorkspaceShortcut.cs" Link="DesktopWorkspaceShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/ShellItemKind.cs" Link="ShellItemKind.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeMiddleClick.cs" Link="ShellTreeMiddleClick.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeLocationTarget.cs" Link="ShellTreeLocationTarget.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMiddleClickTarget.cs" Link="ShellMiddleClickTarget.cs" />
-    <Compile Include="../ExplorerDirs.App/ShellMenuCommand.cs" Link="ShellMenuCommand.cs" />
     <Compile Include="../ExplorerDirs.App/ShellMenuTargetTracker.cs" Link="ShellMenuTargetTracker.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewStateCapture.cs" Link="ShellViewStateCapture.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellFilterAttachment.cs" Link="ShellFilterAttachment.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNavigationState.cs" Link="ShellNavigationState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
@@ -103,6 +123,10 @@
     <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterEnumerationGate.cs" Link="QuickFilterEnumerationGate.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterFavoritesStore.cs" Link="QuickFilterFavoritesStore.cs" />
+    <Compile Include="../ExplorerDirs.App/QuickFilterHistoryStore.cs" Link="QuickFilterHistoryStore.cs" />
+    <Compile Include="../ExplorerDirs.App/TabHoverActivationPreference.cs" Link="TabHoverActivationPreference.cs" />
+    <Compile Include="../ExplorerDirs.App/TabHoverActivationGate.cs" Link="TabHoverActivationGate.cs" />
+    <Compile Include="../ExplorerDirs.App/TabTransferPolicy.cs" Link="TabTransferPolicy.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserSite.cs" Link="ShellBrowserSite.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRecoverySuppression.cs" Link="ShellSelectionRecoverySuppression.cs" />
@@ -135,5 +159,6 @@
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetShortcut.cs" Link="ShellHeaderPresetShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetMenuGate.cs" Link="ShellHeaderPresetMenuGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellStatusCountRefreshGate.cs" Link="ShellStatusCountRefreshGate.cs" />
+    <Compile Include="../ExplorerDirs.App/SystemExplorerLauncher.cs" Link="SystemExplorerLauncher.cs" />
   </ItemGroup>
 </Project>

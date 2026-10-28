@@ -2,8 +2,8 @@ using System.Runtime.InteropServices;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
-// Opt-in capability probe. Never shows its parent window or sends input.
-// Results concern the native component, not the application's GUI/focus behavior.
+// Opt-in capability probes; individual commands define their window and input boundaries.
+// Results concern native components, not the application's GUI/focus behavior.
 internal static class Program
 {
     static Guid BrowserClass = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
@@ -26,12 +26,55 @@ internal static class Program
             return LiveUpdateProbe.Run(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--live-updates-view-flags")
             return LiveUpdateProbe.RunViewFlagMatrix();
+        if (args.Length == 1 && args[0] == "--live-updates-view-flags-wpf")
+            return LiveUpdateProbe.RunViewFlagMatrix(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--qdr-native-stream")
             return QdrNativeViewProbe.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
+            return ShellViewStateStreamSmoke.Run();
+        if (args.Length == 4 && args[0] is "--shell-view-state-store-child-write" or "--shell-view-state-store-child-read" or
+                "--shell-view-state-store-child-race-write")
+            return ShellViewStateStreamSmoke.RunChildCommand(args);
+        if (args.Length == 1 && args[0] == "--static-shell-column-contract-smoke")
+            return StaticShellColumnContractSmoke.Run();
+        if (args.Length == 1 && args[0] == "--wrapped-pidl-contract-smoke")
+            return WrappedPidlContractSmoke.Run();
+        if (args.Length == 1 && args[0] == "--static-shell-column-classid-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true, strictInterfaces: true, prototypeClass: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-classid-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true, prototypeClass: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-identity-strict-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true, strictInterfaces: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-adapter-strict-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-identity-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract();
+        if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-folder-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(wrappedPidls: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
+        if (args.Length == 1 && args[0] == "--static-shell-column-legacy-details-callback-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(legacyDetailsCallbackProbe: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-adapter-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(wrappedPidls: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true, activateView: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")
             return ShellViewColorSpike.Run();
         if (args.Length == 1 && args[0] == "--shell-view-color-policy-smoke")
             return ShellViewColorPolicySmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-menu-group-routing-smoke")
+            return ShellMenuGroupRoutingSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-registration-smoke")
+            return ShellViewDropTargetRegistrationSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-cleanup-smoke")
+            return ShellViewDropTargetCleanupSmoke.Run();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-private-desktop")
+            return PrivateDesktopShellProbe.RunDropTarget();
+        if (args.Length == 2 && args[0] == "--shell-view-ole-drop-copy" && args[1] == "--AllowInteractiveDesktopControl")
+            return ShellViewDropTargetProbe.RunInteractiveOleCopy();
         if (args.Length == 1 && args[0] == "--ishellview-command-state-readonly")
             return ShellViewColorSpike.Run(queryCommandStatesOnly: true);
         if (args.Length == 1 && args[0] == "--ishellview-command-state-readonly-private-desktop")
@@ -40,12 +83,74 @@ internal static class Program
             return ShellViewHostFilterProbe.Run();
         if (args.Length == 1 && args[0] == "--ishellview-host-filter-private-desktop")
             return PrivateDesktopShellProbe.RunHostFilter();
+        if (args.Length == 1 && args[0] == "--private-desktop-owner-smoke")
+            return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
+        if (args.Length == 1 && args[0] == "--private-desktop-window-destroy-control")
+            return PrivateDesktopShellProbe.RunWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-shared-window-destroy-control")
+            return PrivateDesktopShellProbe.RunSharedDesktopWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-shell-view-window-destroy-control")
+            return PrivateDesktopShellProbe.RunShellViewWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneSynchronousCleanup();
+        if (args.Length == 2 && args[0] == "--private-desktop-multi-pane-sync-cleanup" &&
+            int.TryParse(args[1], out var cleanupPaneCount))
+            return PrivateDesktopShellProbe.RunMultiPaneSynchronousCleanup(cleanupPaneCount);
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-menu-sync-cleanup")
+            return PrivateDesktopShellProbe.RunFourPaneMenuSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-nofocus-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuNoFocusSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-active-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuActiveSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-detached-ime-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuDetachedImeSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-disabled-ime-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuDisabledImeSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-ole-init-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuOleInitializedSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuWpfDispatcherSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-wpf-ole-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuWpfDispatcherSynchronousCleanup(initializeOle: true);
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-wpf-host-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuWpfHostSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-menu-wpf-host-sync-cleanup")
+            return PrivateDesktopShellProbe.RunFourPaneMenuWpfHostSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-wpf-host-keyboard-consumer")
+            return PrivateDesktopShellProbe.RunFourPaneWpfHostKeyboardConsumer();
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-wpf-host-directory-isolation")
+            return PrivateDesktopShellProbe.RunFourPaneWpfHostDirectoryIsolation();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-detached-view-ime-sync-cleanup")
+            return PrivateDesktopShellProbe.RunSinglePaneMenuDetachedViewImeSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-late-coordinator-dispose")
+            return PrivateDesktopShellProbe.RunSinglePaneLateCoordinatorDispose();
+        if (args.Length == 1 && args[0] == "--window-destroy-current-desktop-child")
+            return PrivateDesktopShellProbe.RunWindowDestroyControlOnCurrentDesktop();
         if (args.Length == 1 && args[0] == "--ishellview-menu-command-private-desktop")
             return PrivateDesktopShellProbe.RunHostMenuCommands();
+        if (args.Length == 1 && args[0] == "--ishellview-newfolder-private-desktop")
+            return PrivateDesktopShellProbe.RunHostNewFolder();
         if (args.Length == 2 && args[0] == "--ishellview-host-filter-virtual-private-desktop")
             return PrivateDesktopShellProbe.RunHostFilterVirtualScope(args[1]);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike-private-desktop")
             return PrivateDesktopShellProbe.RunColor();
+        if (args.Length == 1 && args[0] == "--explorerbrowser-color-notifications-private-desktop")
+            return PrivateDesktopShellProbe.RunExplorerBrowserColorNotifications();
+        if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")
+            return PrivateDesktopShellProbe.RunMenuActivation();
+        if (args.Length == 1 && args[0] == "--ishellview-session-restore-private-desktop")
+            return PrivateDesktopShellProbe.RunSessionRestore();
+        if (args.Length == 1 && args[0] == "--ishellview-session-restore-sync-cleanup-private-desktop")
+            return PrivateDesktopShellProbe.RunSessionRestore(synchronousCleanupProbe: true);
+        if (args.Length == 4 && args[0] == "--ishellview-session-restore-consumer-private-desktop" &&
+            Guid.TryParse(args[3], out var restoreSessionId))
+            return PrivateDesktopShellProbe.RunSessionRestoreConsumer(args[1], args[2], restoreSessionId);
+        if (args.Length == 5 && args[0] == "--ishellview-session-restore-consumer-private-desktop" &&
+            args[4] == "--sync-cleanup" && Guid.TryParse(args[3], out restoreSessionId))
+            return PrivateDesktopShellProbe.RunSessionRestoreConsumer(args[1], args[2], restoreSessionId,
+                synchronousCleanupProbe: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-readonly-private-desktop")
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")
@@ -80,19 +185,49 @@ internal static class Program
             return StandaloneTreeProbe.Run();
         if (args.Length == 1 && args[0] == "--tree-host-core")
             return StandaloneTreeProbe.RunCore();
+        if (args.Length == 1 && args[0] == "--tree-icon-render-ab")
+            return StandaloneTreeProbe.RunIconRenderAb();
+        if (args.Length == 1 && args[0] == "--tree-icon-initial-size-ab")
+            return StandaloneTreeProbe.RunIconInitializationSizeAb();
+        if (args.Length == 1 && args[0] == "--tree-icon-callback-smoke")
+            return StandaloneTreeProbe.RunIconContract();
         if (args.Length != 1 || args[0] is not ("--selection-commands" or "--search-folder-navigation" or "--navigation-capability" or "--navigation-cancel" or "--menu-capability" or "--color-capability" or "--pane-capability" or "--pane-capability-selected" or "--pane-capability-off" or "--pane-same-location" or "--view-style-capability" or "--view-style-synchronized-hosted" or "--view-data-capability" or "--view-property-refresh-capability" or "--folder-filter-capability" or "--folder-header-options-hosted"))
         {
             Console.WriteLine("Usage: --navigation-capability (hidden native Shell; creates isolated fixture folders)");
             Console.WriteLine("       --live-updates / --live-updates-wpf (four hidden views, native file changes, optional WPF pump)");
             Console.WriteLine("       --live-updates-view-flags (same matrix plus production site with CDB2GVF_NOINCLUDEITEM disabled)");
+            Console.WriteLine("       --live-updates-view-flags-wpf (same view-flag matrix with a WPF Dispatcher pump)");
             Console.WriteLine("       --qdr-native-stream (native Shell directly restores the exported view stream; no input)");
+            Console.WriteLine("       --shell-view-state-stream-smoke (IShellBrowser view-state stream save/restore without a Shell view)");
+            Console.WriteLine("       --static-shell-column-contract-smoke (numeric static IShellFolder2 column policy only; no Shell window)");
+            Console.WriteLine("       --wrapped-pidl-contract-smoke (child-PIDL envelope round-trip; no Shell view or window)");
+            Console.WriteLine("       --static-shell-column-folder-smoke (native IShellFolder2 adapter CompareIDs; no window)");
+            Console.WriteLine("       --static-shell-column-wrapped-folder-smoke (wrapped child PIDLs through native adapter contracts; no window)");
+            Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
+            Console.WriteLine("       --static-shell-column-wrapped-adapter-private-desktop (wrapped PIDL IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");
             Console.WriteLine("       --shell-view-color-policy-smoke (selection snapshot and rule-color policy only; no Shell window or files)");
+            Console.WriteLine("       --shell-view-drop-target-cleanup-smoke (hidden HWND cleanup contract for interactive and Private Desktop probes)");
+            Console.WriteLine("       --shell-view-ole-drop-copy --AllowInteractiveDesktopControl (visible temporary Shell source/target; waits for a physical copy drag)");
             Console.WriteLine("       --ishellview-command-state-readonly (query background Undo/Redo twice; no file operations)");
             Console.WriteLine("       --ishellview-command-state-readonly-private-desktop (same read-only query on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-host-filter (hidden direct IShellView ICommDlgBrowser3 filtering fixture)");
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
+            Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
+            Console.WriteLine("       --private-desktop-window-destroy-control (create and destroy one isolated STATIC window without Shell view creation or foreground change)");
+            Console.WriteLine("       --private-desktop-shared-window-destroy-control (two processes create/destroy STATIC windows on one isolated Desktop, without Shell views)");
+            Console.WriteLine("       --private-desktop-shell-view-window-destroy-control (destroy a plain STATIC window while one real IShellView is active on the same isolated Desktop)");
+            Console.WriteLine("       --private-desktop-single-pane-sync-cleanup (synchronously destroy one IShellView, its pane, and its parent on an isolated Desktop)");
+            Console.WriteLine("       --private-desktop-multi-pane-sync-cleanup <2|3|4> (synchronously destroy multiple IShellViews and their parent on an isolated Desktop)");
+            Console.WriteLine("       --private-desktop-four-pane-menu-sync-cleanup (activate and route native Shell menus in four panes, then synchronously clean them up)");
+            Console.WriteLine("       --private-desktop-single-pane-menu-ole-init-sync-cleanup (repeat single-pane menu teardown with OLE initialized on the probe STA)");
+            Console.WriteLine("       --private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup (repeat single-pane menu teardown with a WPF DispatcherFrame pump)");
+            Console.WriteLine("       --private-desktop-single-pane-menu-wpf-ole-sync-cleanup (same probe with OLE initialized and WPF DispatcherFrame pumping)");
+            Console.WriteLine("       --private-desktop-single-pane-menu-wpf-host-sync-cleanup (same probe hosted under a WPF HwndSource root)");
+            Console.WriteLine("       --private-desktop-four-pane-menu-wpf-host-sync-cleanup (four Shell panes hosted by WPF HwndHost children; activates/deactivates each menu before teardown)");
+            Console.WriteLine("       --private-desktop-four-pane-wpf-host-keyboard-consumer (Ctrl+A, F2 arrow routing, menu activation, and synchronous cleanup through four WPF-hosted Shell panes)");
+            Console.WriteLine("       --private-desktop-four-pane-wpf-host-directory-isolation (Shell file updates reach three WPF panes while an isolated fourth pane remains unchanged)");
             Console.WriteLine("       --ishellview-host-filter-virtual-private-desktop <scope> (one virtual Shell scope on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
@@ -111,6 +246,7 @@ internal static class Program
             Console.WriteLine("       --menu-capability (read-only native menu states; never invokes commands)");
             Console.WriteLine("       --selection-commands (selection changes in a hidden fixture view; no file operations)");
             Console.WriteLine("       --color-capability (hidden child classes and available ListView colors)");
+            Console.WriteLine("       --explorerbrowser-color-notifications-private-desktop (observe Shell view WM_NOTIFY without switching the user desktop)");
             Console.WriteLine("       --pane-capability (experimental hidden native navigation/preview frames)");
             Console.WriteLine("       --pane-capability-selected (same experiment after selecting an isolated text fixture)");
             Console.WriteLine("       --pane-capability-off (same experiment with initial pane state off)");
@@ -118,6 +254,8 @@ internal static class Program
             Console.WriteLine("       --pane-same-location (tree preference refresh without changing location)");
             Console.WriteLine("       --standalone-tree (independent hidden native tree, isolated roots only)");
             Console.WriteLine("       --tree-host-core (production tree wrapper in an isolated hidden parent)");
+            Console.WriteLine("       --tree-icon-render-ab (hidden NamespaceTreeControl default-vs-explicit icon rendering comparison)");
+            Console.WriteLine("       --tree-icon-callback-smoke (production Shell icon callback contract; no window or input)");
             Console.WriteLine("       --view-style-capability (native view modes and selection/sort/group preservation; no wheel input)");
             Console.WriteLine("       --view-style-synchronized-hosted (opt-in hidden ExplorerBrowser plus product ShellBrowserSite; syncs standard ListView modes)");
             Console.WriteLine("       --view-data-capability (hidden current-view order, visible columns and cached item properties)");
@@ -548,6 +686,11 @@ internal static class Program
             Marshal.ThrowExceptionForHR(Method<GetInterface>(browser, 17)(browser, ref viewId, out view));
             Marshal.ThrowExceptionForHR(Method<ItemCount>(view, 7)(view, 2, out var count));
             if (count != 3) throw new Exception("Unexpected hidden-view fixture count.");
+            Marshal.ThrowExceptionForHR(Method<GetItems>(view, 8)(view, 2, ref arrayId, out items));
+            var folderSize = ShellSelectionSize.Read(items, count);
+            Marshal.Release(items);
+            items = 0;
+            if (folderSize != 8) throw new Exception("Hidden view current-folder size mismatch.");
             for (var i = 0; i < count; i++)
                 // SVSI_SELECT only. No focus, activation, keyboard, or mouse.
                 Marshal.ThrowExceptionForHR(Method<SelectItem>(view, 15)(view, i, 1));
@@ -555,7 +698,7 @@ internal static class Program
             Marshal.ThrowExceptionForHR(Method<GetItems>(view, 8)(view, 1, ref arrayId, out items));
             var size = ShellSelectionSize.Read(items, selected);
             if (selected != 3 || size != 8) throw new Exception("Hidden view selection size mismatch.");
-            Console.WriteLine("hidden-view: selected=3; known-size=8; folder-content-excluded=True");
+            Console.WriteLine("hidden-view: current-folder-known-size=8; selected=3; selected-known-size=8; folder-content-excluded=True");
         }
         finally
         {

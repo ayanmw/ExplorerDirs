@@ -1,10 +1,13 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ExplorerDirs.App;
+
+internal sealed record QdrExportDocument(string Text, int UnencodedLocationCount);
 
 internal static class QdrExporter
 {
@@ -16,9 +19,41 @@ internal static class QdrExporter
         @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4]|SP[0-2]|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    internal static string Render(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
+    // Call only on a state-only background worker: Shell binding may wait for remote providers.
+    internal static QdrExportDocument Prepare(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
         IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
         NavigationTreeWidths? treeWidths = null)
+    {
+        Validate(state, pins);
+        var encoded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var unresolved = 0;
+        foreach (var path in state.Panes.SelectMany(pane => pane).Select(tab => tab.Path)
+            .Where(path => path.Contains('%')).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // Unlike text QDR import, parsing this captured identity must not expand variables.
+            if (!ShellLocationIdentity.TryGetFolderPidl(path, out var pidl))
+            {
+                unresolved++;
+                continue;
+            }
+            try
+            {
+                var bytes = new byte[checked((int)ILGetSize(pidl))];
+                Marshal.Copy(pidl, bytes, 0, bytes.Length);
+                encoded[path] = string.Concat(bytes.Select(value => "%" + value.ToString("X2")));
+            }
+            finally { Marshal.FreeCoTaskMem(pidl); }
+        }
+        return new(Render(state, pins, proportions, treeWidths, encoded), unresolved);
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern uint ILGetSize(nint pidl);
+
+    internal static string Render(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
+        IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
+        NavigationTreeWidths? treeWidths = null,
+        IReadOnlyDictionary<string, string>? encodedLocations = null)
     {
         Validate(state, pins);
         if (proportions is not null) ValidateProportions(state.Layout, proportions);
@@ -52,7 +87,14 @@ internal static class QdrExporter
             for (var tab = 0; tab < state.Panes[pane].Count; tab++)
             {
                 var suffix = (layoutMap.AppToNative[pane] + 1).ToString() + (tab == selected ? "" : "_" + tab);
-                values["Dir" + suffix] = ToQdrTextPath(state.Panes[pane][tab].Path);
+                var location = state.Panes[pane][tab].Path;
+                if (encodedLocations is not null && encodedLocations.TryGetValue(location, out var encoded))
+                {
+                    // Resolve outside this pure renderer; never block UI rendering on Shell/network binding.
+                    QdrImporter.DecodePidl(encoded);
+                    values["Folder" + suffix] = encoded;
+                }
+                else values["Dir" + suffix] = ToQdrTextPath(location);
                 values["CurPos" + suffix] = tab.ToString();
                 var mode = state.Panes[pane][tab].View.Mode;
                 // Q-Dir's published view list omits Content; map it to Details in the interoperable base fields.
@@ -77,6 +119,16 @@ internal static class QdrExporter
         return text;
     }
 
+    internal static int SaveBackup(string backupPath, SessionState state, IReadOnlyList<PinnedTabEntry> pins,
+        IReadOnlyDictionary<int, LayoutProportions> proportions, NavigationTreeWidths treeWidths)
+    {
+        // Keep the exact portable session even if later Shell binding or QDR output fails.
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(backupPath))!);
+        File.WriteAllText(backupPath, SessionStore.Render(state));
+        var document = Prepare(state, pins, proportions, treeWidths);
+        File.WriteAllText(backupPath + ".qdr", document.Text, Encoding.Unicode);
+        return document.UnencodedLocationCount;
+    }
     internal static void Save(string path, string? expected, string text)
     {
         if (!Path.GetExtension(path).Equals(".qdr", StringComparison.OrdinalIgnoreCase))

@@ -7,6 +7,14 @@ namespace ExplorerDirs.App;
 // removes the selected HwndHost and its Shell travel log from the visual tree.
 public sealed class TabHeaderPanel : Panel
 {
+    public static readonly DependencyProperty MultilineProperty = DependencyProperty.Register(
+        nameof(Multiline), typeof(bool), typeof(TabHeaderPanel),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsMeasure));
+
+    public static readonly DependencyProperty LimitMaximumWidthProperty = DependencyProperty.Register(
+        nameof(LimitMaximumWidth), typeof(bool), typeof(TabHeaderPanel),
+        new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsMeasure));
+
     public static readonly DependencyProperty OrderProperty = DependencyProperty.RegisterAttached(
         "Order", typeof(int), typeof(TabHeaderPanel),
         new FrameworkPropertyMetadata(int.MaxValue, FrameworkPropertyMetadataOptions.AffectsParentArrange));
@@ -14,26 +22,37 @@ public sealed class TabHeaderPanel : Panel
     public static int GetOrder(DependencyObject element) => (int)element.GetValue(OrderProperty);
     public static void SetOrder(DependencyObject element, int value) => element.SetValue(OrderProperty, value);
 
+    public bool Multiline
+    {
+        get => (bool)GetValue(MultilineProperty);
+        set => SetValue(MultilineProperty, value);
+    }
+
+    public bool LimitMaximumWidth
+    {
+        get => (bool)GetValue(LimitMaximumWidthProperty);
+        set => SetValue(LimitMaximumWidthProperty, value);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
-        var width = 0.0;
-        var height = 0.0;
-        foreach (UIElement child in InternalChildren)
-        {
-            child.Measure(new Size(double.PositiveInfinity, availableSize.Height));
-            width += child.DesiredSize.Width;
-            height = Math.Max(height, child.DesiredSize.Height);
-        }
-        return new Size(width, height);
+        var children = InternalChildren.Cast<UIElement>().OrderBy(GetOrder).ToArray();
+        var itemWidth = TabHeaderWidthPolicy.MeasureConstraint(LimitMaximumWidth);
+        foreach (var child in children)
+            child.Measure(new Size(itemWidth, availableSize.Height));
+
+        return TabHeaderLayout.Calculate(children.Select(child => child.DesiredSize).ToArray(),
+            availableSize.Width, Multiline).DesiredSize;
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var left = 0.0;
-        foreach (var child in InternalChildren.Cast<UIElement>().OrderBy(GetOrder))
+        var children = InternalChildren.Cast<UIElement>().OrderBy(GetOrder).ToArray();
+        var layout = TabHeaderLayout.Calculate(children.Select(child => child.DesiredSize).ToArray(),
+            finalSize.Width, Multiline);
+        for (var index = 0; index < children.Length; index++)
         {
-            child.Arrange(new Rect(left, 0, child.DesiredSize.Width, finalSize.Height));
-            left += child.DesiredSize.Width;
+            children[index].Arrange(layout.Items[index]);
         }
         return finalSize;
     }

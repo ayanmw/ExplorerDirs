@@ -3,8 +3,9 @@ using System.Windows.Controls;
 
 namespace ExplorerDirs.App;
 
-// Keep visited HwndHost views attached while another tab is selected. Removing
-// one from the visual tree can destroy its HWND and the Shell travel log.
+// Keep visited views attached during tab switches to avoid reparenting and focus
+// churn. An explicit cross-pane transfer relies on WPF parking/reparenting the
+// same native child; the lifetime probe confirms it is not rebuilt on that path.
 public sealed class PersistentTabHost : Grid
 {
     public void Show(UIElement element)

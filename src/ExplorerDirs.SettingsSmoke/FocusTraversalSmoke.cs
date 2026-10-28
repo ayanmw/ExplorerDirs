@@ -39,7 +39,7 @@ internal static class FocusTraversalSmoke
                 "F6 reverses every Shift+F6 transition across major pane regions");
         }
 
-        for (var options = 0; options < 128; options++)
+        for (var options = 0; options < 1024; options++)
         {
             var hasSearch = (options & 1) != 0;
             var hasFilter = (options & 2) != 0;
@@ -48,47 +48,61 @@ internal static class FocusTraversalSmoke
             var hasTreeButton = (options & 16) != 0;
             var hasAddressHistoryButton = (options & 32) != 0;
             var hasAddressMenuButton = (options & 64) != 0;
+            var hasPaneViewStyleButton = (options & 128) != 0;
+            var hasTabHeader = (options & 256) != 0;
+            var hasStatusBar = (options & 512) != 0;
             var map = PaneFocusStopMap.Create(hasSearch, hasFilter, hasTree, hasColumnHeader,
                 paneTreeButtonVisible: hasTreeButton,
+                paneViewStyleButtonVisible: hasPaneViewStyleButton,
                 addressHistoryButtonVisible: hasAddressHistoryButton,
-                addressPathButtonVisible: hasAddressMenuButton);
+                addressPathButtonVisible: hasAddressMenuButton,
+                tabHeaderVisible: hasTabHeader,
+                statusBarVisible: hasStatusBar);
             var expectedSearchCount = hasSearch ? 3 : 0;
             var expectedFilterCount = hasFilter ? 8 : 0;
-            var expectedNavigationStops = 8 + (hasTreeButton ? 1 : 0) + (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
-            var expectedAddress = hasTreeButton ? 5 : 4;
+            // The per-pane view-style button is keyboard-focusable in the actual toolbar;
+            // it must remain in the custom Tab cycle instead of being skipped.
+            var expectedNavigationStops = 8 + (hasTreeButton ? 1 : 0) + (hasPaneViewStyleButton ? 1 : 0) +
+                (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
+            var expectedPaneViewStyle = hasPaneViewStyleButton ? 4 + (hasTreeButton ? 1 : 0) : -1;
+            var expectedAddress = 4 + (hasTreeButton ? 1 : 0) + (hasPaneViewStyleButton ? 1 : 0);
             var expectedAddressMenu = hasAddressMenuButton ? expectedAddress + 1 : -1;
             var expectedAddressHistory = hasAddressHistoryButton ? expectedAddress + 1 + (hasAddressMenuButton ? 1 : 0) : -1;
             var expectedGo = expectedAddress + 1 + (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
-            var expectedTabHeader = expectedNavigationStops + expectedSearchCount + expectedFilterCount;
-            var expectedTree = expectedTabHeader + 1;
-            var expectedColumnHeader = expectedTree + (hasTree ? 1 : 0);
+            var nextAfterFilter = expectedNavigationStops + expectedSearchCount + expectedFilterCount;
+            var expectedTabHeader = hasTabHeader ? nextAfterFilter : -1;
+            var expectedTree = nextAfterFilter + (hasTabHeader ? 1 : 0);
+            var expectedColumnHeader = nextAfterFilter + (hasTabHeader ? 1 : 0) + (hasTree ? 1 : 0);
             var expectedFileView = expectedColumnHeader + (hasColumnHeader ? 1 : 0);
             Check(map.NavigationStopCount == expectedNavigationStops && map.TreeButton == (hasTreeButton ? 4 : -1) &&
+                  map.PaneViewStyle == expectedPaneViewStyle &&
                   map.AddressMenu == expectedAddressMenu && map.AddressHistory == expectedAddressHistory && map.Address == expectedAddress && map.Go == expectedGo &&
                   map.NewTab == expectedGo + 1 && map.CloseTab == expectedGo + 2 &&
                   map.SearchStart == expectedNavigationStops && map.SearchCount == expectedSearchCount &&
                   map.FilterStart == expectedNavigationStops + expectedSearchCount && map.FilterCount == expectedFilterCount &&
                   map.TabHeader == expectedTabHeader && map.Tree == (hasTree ? expectedTree : -1) &&
                   map.ColumnHeader == expectedColumnHeader && map.FileView == expectedFileView &&
-                  map.StatusTools == expectedFileView + 1,
-                "visible pane tree button and optional controls occupy their specified Tab stops in order");
+                  map.StatusTools == (hasStatusBar ? expectedFileView + 1 : -1),
+                "visible pane controls and the optional status bar occupy only their declared Tab stops");
             var expectedStops = new List<int>(Enumerable.Range(0, expectedNavigationStops));
             if (hasSearch) expectedStops.AddRange([map.SearchStart, map.SearchStart + 1, map.SearchStart + 2]);
             if (hasFilter) expectedStops.AddRange(Enumerable.Range(map.FilterStart, 8));
-            expectedStops.Add(map.TabHeader);
+            if (hasTabHeader) expectedStops.Add(map.TabHeader);
             if (hasTree) expectedStops.Add(map.Tree);
             if (hasColumnHeader) expectedStops.Add(map.ColumnHeader);
-            expectedStops.AddRange([map.FileView, map.StatusTools]);
+            expectedStops.Add(map.FileView);
+            if (hasStatusBar) expectedStops.Add(map.StatusTools);
             Check(map.Count == expectedStops.Count && expectedStops.Distinct().Count() == expectedStops.Count &&
                   expectedStops.Order().SequenceEqual(Enumerable.Range(0, map.Count)),
                 "every dynamic pane focus layout assigns each Tab stop exactly once");
             var expectedMajorStops = new List<int> { expectedAddress };
             if (hasSearch) expectedMajorStops.Add(expectedNavigationStops);
             if (hasFilter) expectedMajorStops.Add(expectedNavigationStops + expectedSearchCount);
-            expectedMajorStops.Add(expectedTabHeader);
+            if (hasTabHeader) expectedMajorStops.Add(expectedTabHeader);
             if (hasTree) expectedMajorStops.Add(expectedTree);
             if (hasColumnHeader) expectedMajorStops.Add(expectedColumnHeader);
-            expectedMajorStops.AddRange([expectedFileView, expectedFileView + 1]);
+            expectedMajorStops.Add(expectedFileView);
+            if (hasStatusBar) expectedMajorStops.Add(expectedFileView + 1);
             Check(map.MajorStops.SequenceEqual(expectedMajorStops),
                 "F6 maps only to visible navigation, bars, tab, tree, headers, file view, and status tools");
 

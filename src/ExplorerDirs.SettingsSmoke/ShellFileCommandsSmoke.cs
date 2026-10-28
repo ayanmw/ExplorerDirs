@@ -4,27 +4,41 @@ internal static class ShellFileCommandsSmoke
 {
     internal static void Run()
     {
-        foreach (var key in new[] { 0x25, 0x26, 0x27, 0x28 })
-            Check(ShellArrowKeyRouting.ShouldForward(0x0100, key, shellResult: 1,
+        foreach (var key in new[] { 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28 })
+        {
+            Check(ShellNavigationKeyRouting.ShouldForward(0x0100, key, shellResult: 1,
                     fileContentFocused: true, columnHeaderFocused: false, editFocused: false),
-                $"an untranslated arrow key 0x{key:X2} stays in native file content");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, shellResult: 0,
-                fileContentFocused: true, columnHeaderFocused: false, editFocused: false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, shellResult: unchecked((int)0x80004005),
-                fileContentFocused: true, columnHeaderFocused: false, editFocused: false),
-            "only S_FALSE, never success or a Shell error, enables arrow fallback");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0101, 0x25, 1, true, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0104, 0x25, 1, true, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x41, 1, true, false, false),
-            "key-up, system-key and non-arrow messages stay on their existing routes");
-        Check(!ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, false, false, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, true, true, false) &&
-              !ShellArrowKeyRouting.ShouldForward(0x0100, 0x25, 1, true, false, true),
-            "arrows do not bypass WPF navigation outside file content, in headers or in editors");
+                $"an untranslated navigation key 0x{key:X2} stays in native file content");
+            Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, key, 0, true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, unchecked((int)0x80004005), true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0101, key, 1, true, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0104, key, 1, true, false, false),
+                $"navigation key 0x{key:X2} never duplicates success, errors, keyup or system-key input");
+            Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, false, false, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, true, true, false) &&
+                !ShellNavigationKeyRouting.ShouldForward(0x0100, key, 1, true, false, true),
+                $"navigation key 0x{key:X2} fallback is exclusive to file content");
+        }
+        Check(!ShellNavigationKeyRouting.ShouldForward(0x0100, 0x41, 1, true, false, false),
+            "non-navigation messages stay on their existing routes");
 
         Check(ShellFileKeyboardActions.Resolve(0x41, 2) == ShellFileKeyboardAction.SelectAll &&
             ShellFileKeyboardActions.Resolve(0x58, 2) == ShellFileKeyboardAction.Cut,
             "Ctrl+A and Ctrl+X stay on the native Shell file-view command path");
+        foreach (var (key, modifiers) in new[] { (0x41, 2), (0x43, 2), (0x56, 2), (0x58, 2),
+                     (0x5A, 2), (0x59, 2), (0x2D, 2), (0x2D, 4) })
+        {
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, unchecked((int)0x80004005)) ==
+                ShellFileKeyboardAction.None, "a Shell error never authorizes a fallback file command");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 0) == ShellFileKeyboardAction.None &&
+                ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 2) == ShellFileKeyboardAction.None,
+                "success and unknown status never duplicate a handled file command");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0100, key, modifiers, 1) ==
+                ShellFileKeyboardActions.Resolve(key, modifiers), "S_FALSE retains the normal native command fallback");
+            Check(ShellFileKeyboardActions.ResolveFallback(0x0101, key, modifiers, 1) == ShellFileKeyboardAction.None &&
+                ShellFileKeyboardActions.ResolveFallback(0x0104, key, modifiers, 1) == ShellFileKeyboardAction.None,
+                "keyup and system messages cannot issue fallback file commands");
+        }
         Check(KeyboardShortcuts.Resolve(0x2E, 4) == ExplorerShortcut.None,
             "Shift+Delete is not consumed by the application shortcut table");
         Check(ShellFileKeyboardActions.Resolve(0x43, 2) == ShellFileKeyboardAction.Copy &&
@@ -65,11 +79,16 @@ internal static class ShellFileCommandsSmoke
         Check(ShellFileCommands.Invoke(ShellFileCommand.Redo, _ => disabledRedo) is null &&
             disabledRedo.Invocations == 0 && disabledRedo.Disposed,
             "redo is not invoked when the current Shell background menu reports it disabled");
+        var staleRedoContext = true;
         var staleRedo = new FakeMenu(["redo"]);
         Check(ShellFileCommands.Invoke(ShellFileCommand.Redo,
-                background => background ? staleRedo : throw new Exception("Redo queried the selected-item menu."),
-                () => false) is null && staleRedo.Invocations == 0 && staleRedo.Disposed,
-            "a stale pane or navigation context cancels Redo before native invocation");
+                background =>
+                {
+                    if (!background) throw new Exception("Redo queried the selected-item menu.");
+                    staleRedoContext = false; // Native menu construction can reenter the host.
+                    return staleRedo;
+                }, () => staleRedoContext) is null && staleRedo.Invocations == 0 && staleRedo.Disposed,
+            "a pane or navigation change during Redo menu construction cancels invocation");
         Check(ShellFileCommands.Query(_ => null).Values.All(enabled => !enabled), "unavailable view disables commands");
         var contextCurrent = true;
         var queryMenus = new List<FakeMenu>();
@@ -112,12 +131,36 @@ internal static class ShellFileCommandsSmoke
         Check(stoppedDuringStateQuery.Values.All(enabled => !enabled) && !backgroundOpenedAfterStateQuery &&
             reentrantSelectionMenu.Disposed,
             "a stale context during native command-state lookup prevents later menus");
+        var invalidatedContextCurrent = true;
         var invalidated = new FakeMenu(["delete"]);
-        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => invalidated, () => false) is null &&
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ =>
+            {
+                invalidatedContextCurrent = false;
+                return invalidated;
+            }, () => invalidatedContextCurrent) is null &&
             invalidated.Invocations == 0 && invalidated.Disposed, "changed pane or selection cancels before invocation");
+        var staleRequestOpenedMenu = false;
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ =>
+            {
+                staleRequestOpenedMenu = true;
+                return new FakeMenu(["delete"]);
+            }, () => false) is null && !staleRequestOpenedMenu,
+            "a request already stale before invocation does not construct a native menu");
+        var staleDuringInvokeStateQuery = true;
+        var staleDuringInvokeStateMenu = new FakeMenu(["delete"])
+            { OnIsEnabled = () => staleDuringInvokeStateQuery = false };
+        Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => staleDuringInvokeStateMenu,
+                () => staleDuringInvokeStateQuery) is null && staleDuringInvokeStateMenu.Invocations == 0 &&
+            staleDuringInvokeStateMenu.Disposed,
+            "a request invalidated during native command-state lookup is not invoked");
+        var newFolderContextCurrent = true;
         var newFolder = new FakeMenu(["NewFolder"]);
         Check(ShellFileCommands.Invoke(ShellFileCommand.NewFolder, background =>
-            background ? newFolder : throw new Exception("NewFolder queried the selection."), () => false) is null &&
+            {
+                if (!background) throw new Exception("NewFolder queried the selection.");
+                newFolderContextCurrent = false;
+                return newFolder;
+            }, () => newFolderContextCurrent) is null &&
             newFolder.Invocations == 0 && newFolder.Disposed, "new folder cancels after reentrant background menu preparation");
         var rejected = new FakeMenu(["delete"]) { Result = unchecked((int)0x80004005) };
         Check(ShellFileCommands.Invoke(ShellFileCommand.Delete, _ => rejected) < 0 && rejected.Disposed,

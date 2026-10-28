@@ -42,11 +42,12 @@ internal sealed class NativeShellTree : IDisposable
         }
     }
 
-    internal NativeShellTree(nint parent, int width, int height)
+    internal NativeShellTree(nint parent, int width, int height, bool useExplicitShellIcons = true)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("目录树必须在 STA 线程创建。");
-        _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick);
+        _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick,
+            useExplicitShellIcons);
         var clsid = new Guid("AE054212-3535-4430-83ED-D501AA6680E6");
         var iid = new Guid("028212A3-B627-47E9-8856-C14265554E4F");
         try
@@ -63,6 +64,13 @@ internal sealed class NativeShellTree : IDisposable
                 Check(At<GetObject>(window, 3)(window, out var hwnd));
                 if (hwnd == 0 || !IsChild(parent, hwnd)) throw new InvalidOperationException("目录树窗口不属于当前宿主。");
                 WindowHandle = hwnd;
+                var treeView = FindWindowEx(hwnd, 0, "SysTreeView32", null);
+                if (useExplicitShellIcons)
+                {
+                    var systemImageList = ShellTreeIconIndexResolver.GetSystemImageList();
+                    if (treeView != 0 && systemImageList != 0)
+                        _ = SendMessage(treeView, 0x1109, 0, systemImageList); // TVM_SETIMAGELIST / TVSIL_NORMAL
+                }
             }
             finally { Marshal.Release(window); }
             Check(Method<Advise>(4)(_tree, _events, out _cookie));
@@ -304,11 +312,15 @@ internal sealed class NativeShellTree : IDisposable
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid clsid, nint outer, uint context, ref Guid iid, out nint value);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string path, nint bind, ref Guid iid, out nint item);
     [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowExW")]
+    private static extern nint FindWindowEx(nint parent, nint after, string className, string? windowName);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
 internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput,
-    Func<nint, uint, uint, bool> itemClick) : INativeTreeEvents
+    Func<nint, uint, uint, bool> itemClick, bool useExplicitShellIcons = true) : INativeTreeEvents
 {
     public int OnItemClick(nint item, uint hit, uint click)
     {
@@ -346,7 +358,17 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
     public int OnBeforeContextMenu(nint item, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnAfterContextMenu(nint item, nint input, ref Guid iid, out nint menu) { menu = 0; return unchecked((int)0x80004001); }
     public int OnBeforeStateImageChange(nint item) => 0;
-    public int OnGetDefaultIconIndex(nint item, out int normal, out int open) { normal = open = -1; return 1; }
+    public int OnGetDefaultIconIndex(nint item, out int normal, out int open)
+    {
+        normal = open = -1;
+        if (!useExplicitShellIcons) return unchecked((int)0x80004001);
+        return ShellTreeIconIndexResolver.TryResolveShellItem(item, out normal, out open)
+            ? 0 : unchecked((int)0x80004001);
+    }
+
+    private static T At<T>(nint value, int slot) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * nint.Size));
+
 }
 
 [ComVisible(true), Guid("93D77985-B3D8-4484-8318-672CDDA002CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

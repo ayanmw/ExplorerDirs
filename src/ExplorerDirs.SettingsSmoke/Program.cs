@@ -9,12 +9,58 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--tab-transfer-policy-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
+    return;
+}
+
+if (args is ["--view-state-restore-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
+    return;
+}
+
+if (args is ["--filter-attachment-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
+    return;
+}
+
+if (args is ["--window-background-operation-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult();
+    return;
+}
+
+if (args is ["--window-placement-smoke"])
+{
+    var placementRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.WindowPlacementSmoke.{Guid.NewGuid():N}");
+    Directory.CreateDirectory(placementRoot);
+    try { ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(placementRoot); }
+    finally { Directory.Delete(placementRoot, recursive: true); }
+    return;
+}
+
+if (args is ["--folder-open-router-protocol-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.FolderOpenRouterProtocolSmoke.Run();
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
 {
     var resultPath = args[1];
     var temporaryPath = resultPath + ".tmp";
     File.WriteAllText(temporaryPath, JsonSerializer.Serialize(args.Skip(2)));
     File.Move(temporaryPath, resultPath, overwrite: true);
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
+{
+    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.Run();
+    Console.WriteLine("Recursive directory scanner smoke: PASS");
     return;
 }
 
@@ -32,11 +78,85 @@ if (args.Length == 1 && args[0] == "--shell-selection-restore-gate-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--shell-rename-window-gate-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
+    Console.WriteLine("Shell rename window gate smoke: PASS");
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--full-row-selection-smoke")
+{
+    var smokeRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.FullRowSelectionSmoke.{Guid.NewGuid():N}");
+    Directory.CreateDirectory(smokeRoot);
+    try
+    {
+        ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
+        ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(smokeRoot);
+        ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
+    }
+    finally { Directory.Delete(smokeRoot, recursive: true); }
+    Console.WriteLine("Full-row selection smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--pure-state-smoke")
 {
     DirectoryMonitorStartupSmoke.Run();
     ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.RunShellNameSyntaxOnly();
     Console.WriteLine("Pure state smoke: PASS");
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--theme-palette-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckResolution();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--tab-strip-visibility-smoke")
+{
+    var smokeRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.TabStripSmoke.{Guid.NewGuid():N}");
+    Directory.CreateDirectory(smokeRoot);
+    try { ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(smokeRoot); }
+    finally { Directory.Delete(smokeRoot, recursive: true); }
+    Console.WriteLine("Tab strip visibility smoke: PASS");
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--active-pane-theme-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckActivePaneAccentWiring();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--semantic-theme-brush-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--view-style-icon-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--explorer-chrome-icon-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--native-shell-tree-icon-fallback-smoke")
+{
+    ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--shell-icon-provider-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();
     return;
 }
 
@@ -47,10 +167,30 @@ if (args.Length == 1 && args[0] == "--address-path-menu-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--address-path-history-smoke")
+{
+    AddressPathHistorySmoke.Run();
+    Console.WriteLine("Address path history smoke: PASS");
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--file-view-export-smoke")
+{
+    FileViewExportSmoke.Run();
+    Console.WriteLine("File view export smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--focus-traversal-smoke")
 {
     FocusTraversalSmoke.Run();
     Console.WriteLine("Focus traversal smoke: PASS");
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--mouse-wheel-focus-smoke")
+{
+    ExplorerDirs.SettingsSmoke.MouseWheelFocusSmoke.Run();
     return;
 }
 
@@ -106,6 +246,18 @@ if (args.Length == 1 && args[0] == "--program-starter-entry-commit-smoke")
 if (args.Length == 1 && args[0] == "--photo-print-window-markup-smoke")
 {
     ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--pane-theme-markup-smoke")
+{
+    PaneThemeMarkupSmoke.Run();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--window-frame-theme-smoke")
+{
+    WindowFrameThemeSmoke.Run();
     return;
 }
 
@@ -199,6 +351,13 @@ if (args.Length == 1 && args[0] == "--tree-width-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--tree-selection-auto-expand-smoke")
+{
+    ExplorerDirs.SettingsSmoke.TreeSelectionAutoExpandSmoke.Run();
+    Console.WriteLine("Tree selection auto-expand smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--address-tree-shortcut-smoke")
 {
     ExplorerDirs.SettingsSmoke.AddressTreeShortcutSmoke.Run();
@@ -256,6 +415,9 @@ if (args.Length == 1 && args[0] == "--environment-change-message-smoke")
 ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
+ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
+ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
+ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
 HiddenItemsPreferenceSmoke.Run();
 ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
 ExplorerDirs.SettingsSmoke.QuickLinkStoreSmoke.Run();
@@ -268,8 +430,10 @@ ExplorerDirs.SettingsSmoke.ProgramStarterLauncherSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterShortcutSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterCommandStateSmoke.Run();
 ExplorerDirs.SettingsSmoke.ProgramStarterEntryCommitSmoke.Run();
-var root = Path.Combine(AppContext.BaseDirectory, "profile-smoke");
+var root = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.SettingsSmoke.{Guid.NewGuid():N}");
 Directory.CreateDirectory(root);
+ExplorerDirs.SettingsSmoke.TabStripVisibilitySmoke.Run(root);
+ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(root);
 ExplorerDirs.SettingsSmoke.ViewPresetStoreSmoke.Run(root);
 if (args.Length == 1 && args[0] == "--view-preset-store-smoke")
 {
@@ -288,12 +452,6 @@ if (args.Length == 1 && args[0] == "--qdr-location-roundtrip-only")
 {
     QdrExportSmoke.Run(root);
     Console.WriteLine("Q-Dir Shell location export/import smoke: PASS");
-    return;
-}
-if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
-{
-    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.Run();
-    Console.WriteLine("Recursive directory scanner smoke: PASS");
     return;
 }
 ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run();
@@ -372,6 +530,7 @@ try
         DefaultViewSmoke.VerifyOlderReader(args[1], root, proportionsOnly: true);
     WorkspaceCatalogSmoke.Run(root);
     ExplorerDirs.SettingsSmoke.WindowSessionRegistrySmoke.Run(root);
+    ExplorerDirs.SettingsSmoke.DesktopWorkspaceShortcutSmoke.Run(root);
     QdrViewSmoke.Run();
     ViewStyleWheelSmoke.Run();
     ShellQuickFilterSmoke.Run();
@@ -383,8 +542,20 @@ try
     ExplorerDirs.SettingsSmoke.PhotoPrintImageLoaderSmoke.Run();
     ExplorerDirs.SettingsSmoke.PhotoPrintPreviewGateSmoke.Run();
     ExplorerDirs.SettingsSmoke.PhotoPrintWindowMarkupSmoke.Run();
+    PaneThemeMarkupSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ThemePreferenceSmoke.CheckSemanticBrushRoles();
+    ExplorerDirs.SettingsSmoke.ViewStyleIconSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ExplorerChromeIconSmoke.Run();
+    ExplorerDirs.SettingsSmoke.NativeShellTreeIconFallbackSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();
     QuickFilterSessionSmoke.Run(root);
     QuickFilterFavoritesSmoke.Run(root);
+    QuickFilterHistoryStoreSmoke.Run(root);
+    TabHoverActivationSmoke.Run(root);
+    ExplorerDirs.SettingsSmoke.NewTabLocationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.WindowPlacementSmoke.Run(root);
+    ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
+    QDirBlankTabDoubleClickSmoke.Run();
     if (args.Length == 2 && args[0] == "--inspect-qdr")
     {
         var inspectedQdr = QdrImporter.Load(args[1]);
@@ -444,6 +615,10 @@ try
         "column COM structures match Windows SDK layout");
     Check(cachedView.SortColumns.Count == 1 && cachedView.SortColumns[0].Key == sortKey,
           "cached view state keeps independent sort columns after its source changes");
+    ExplorerDirs.SettingsSmoke.ViewCaptureGenerationSmoke.Run();
+    ExplorerDirs.SettingsSmoke.WindowBackgroundOperationSmoke.RunAsync().GetAwaiter().GetResult();
+    ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
+    ExplorerDirs.SettingsSmoke.FilterAttachmentSmoke.Run();
     var shellView = new FakeShellViewStateSource
     {
         Mode = 3,
@@ -511,13 +686,31 @@ try
     mutableShellSorts.Clear();
     Check(captureComplete && captured.SortColumns.Count == 1,
           "captured sort columns do not alias the Shell reader's list");
-    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null),
+    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null, null, null),
           "startup without a directory restores the normal session");
     Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
           StartupDirectory.Parse([@"\\server\share\docs"]).Directory == @"\\server\share\docs",
           "local and UNC directory arguments keep their normalized paths");
     Check(StartupDirectory.Parse(["."]).Directory == Path.GetFullPath("."),
           "relative startup directory resolves against the caller's current directory");
+    Check(StartupDirectory.Parse([@"C:\work\saved.qdr"]).QdrFile == Path.GetFullPath(@"C:\work\saved.qdr") &&
+          StartupDirectory.Parse([@"C:\work\folder"]).Directory == Path.GetFullPath(@"C:\work\folder") &&
+          StartupDirectory.Parse([@"C:\work\saved.QDR"]).QdrFile == Path.GetFullPath(@"C:\work\saved.QDR"),
+          "Q-Dir status arguments are distinguished from directory arguments by extension");
+    var selectComma = StartupDirectory.Parse([@"/select,C:\work\folder\sample.txt"]);
+    var selectCommaSeparated = StartupDirectory.Parse(["/select,", @"C:\work\folder\sample.txt"]);
+    var selectSpace = StartupDirectory.Parse(["/select", @"C:\work\folder with spaces\sample.txt"]);
+    Check(selectComma.Directory == Path.GetFullPath(@"C:\work\folder") &&
+          selectComma.SelectPath == Path.GetFullPath(@"C:\work\folder\sample.txt") &&
+          selectCommaSeparated.Directory == Path.GetFullPath(@"C:\work\folder") &&
+          selectCommaSeparated.SelectPath == Path.GetFullPath(@"C:\work\folder\sample.txt") &&
+          selectSpace.Directory == Path.GetFullPath(@"C:\work\folder with spaces") &&
+          selectSpace.SelectPath == Path.GetFullPath(@"C:\work\folder with spaces\sample.txt"),
+          "Explorer select startup forms open the parent directory and retain the selected item");
+    Check(StartupDirectory.Parse(["/root", @"C:\work\folder"]).Warning is not null &&
+          StartupDirectory.Parse(["/select,"]).Warning is not null &&
+          StartupDirectory.Parse(["/select", "\0"]).Warning is not null,
+          "unsupported and incomplete Explorer switches are rejected without changing startup state");
     Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
           StartupDirectory.Parse(["\0"]).Warning is not null,
           "unsupported or invalid arguments do not become a navigation target");
@@ -532,6 +725,11 @@ try
     Check(FolderOpenRouter.TryActivateAsync(routerProfile, TimeSpan.FromMilliseconds(150))
               .GetAwaiter().GetResult() == FolderForwardResult.Unavailable,
           "no running process leaves the activation request with the launcher");
+    Check(FolderOpenRouter.TryForwardQdrAsync(routerProfile, Path.Combine(root, "saved.qdr"),
+              TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Unavailable &&
+          FolderOpenRouter.TryForwardQdrAsync(routerProfile, Path.Combine(root, "not-qdr.txt"),
+              TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+          "Q-Dir state requests use the route when available and reject non-qdr files");
     var routedPaths = new List<string>();
     using (var router = FolderOpenRouter.TryStart(routerProfile, path =>
            {
@@ -563,6 +761,51 @@ try
     }
     Check(routedPaths.Count == 6 && routedPaths[0] == routedPath,
           "only valid absolute folder requests reach the window callback");
+    var retryProfile = Path.Combine(root, "router-retry", "ExplorerDirs.ini");
+    var retryPath = Path.Combine(root, "retry-folder");
+    var retryId = Guid.NewGuid();
+    var retryCallbackCount = 0;
+    var allowFirstRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using (var retryRouter = FolderOpenRouter.TryStart(retryProfile, async _ =>
+           {
+               Interlocked.Increment(ref retryCallbackCount);
+               await allowFirstRetry.Task;
+               return true;
+           }) ?? throw new Exception("retry folder router did not start"))
+    {
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromMilliseconds(500), retryId)
+                  .GetAwaiter().GetResult() == FolderForwardResult.Uncertain,
+              "a sender timeout preserves an uncertain result while the first callback is pending");
+        allowFirstRetry.SetResult(true);
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromSeconds(2), retryId)
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && retryCallbackCount == 1,
+              "retrying the same logical request returns its result without dispatching twice");
+        Check(FolderOpenRouter.TryForwardAsync(retryProfile, retryPath, TimeSpan.FromSeconds(2), Guid.NewGuid())
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && retryCallbackCount == 2,
+              "a separate launch of the same path remains a separate request");
+    }
+    var legacyProfile = Path.Combine(root, "router-legacy-sender", "ExplorerDirs.ini");
+    var legacyCallbackCount = 0;
+    using (var legacyRouter = FolderOpenRouter.TryStart(legacyProfile, _ =>
+           {
+               Interlocked.Increment(ref legacyCallbackCount);
+               return Task.FromResult(true);
+           }) ?? throw new Exception("legacy compatibility router did not start"))
+    using (var legacyClient = new NamedPipeClientStream(".", FolderOpenRouter.PipeName(legacyProfile),
+               PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+    {
+        legacyClient.Connect(2000);
+        var legacyBytes = System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(retryPath));
+        var legacyHeader = new byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(legacyHeader, legacyBytes.Length);
+        legacyClient.Write(legacyHeader);
+        legacyClient.Write(legacyBytes);
+        legacyClient.Flush();
+        var legacyResponse = new byte[1];
+        legacyClient.ReadExactly(legacyResponse);
+        Check(legacyResponse[0] == 1 && legacyCallbackCount == 1,
+              "legacy directory clients continue to route to the request-id receiver");
+    }
     var activationProfile = Path.Combine(root, "router-activate", "ExplorerDirs.ini");
     var activationCount = 0;
     using (var activationRouter = FolderOpenRouter.TryStart(activationProfile,
@@ -579,6 +822,87 @@ try
                   .GetAwaiter().GetResult() == FolderForwardResult.Rejected && activationCount == 1,
               "directory routing remains distinct from window activation");
     }
+    var qdrProfile = Path.Combine(root, "router-qdr", "ExplorerDirs.ini");
+    string? routedQdrPath = null;
+    using (var qdrRouter = FolderOpenRouter.TryStart(qdrProfile, _ => Task.FromResult(false),
+               openQdr: path =>
+               {
+                   routedQdrPath = path;
+                   return Task.FromResult(true);
+               }) ?? throw new Exception("Q-Dir route did not start"))
+    {
+        var qdrPath = Path.GetFullPath(Path.Combine(root, "Saved Workspace.qdr"));
+        Check(FolderOpenRouter.TryForwardQdrAsync(qdrProfile, qdrPath, TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Accepted && routedQdrPath == qdrPath,
+              "a Q-Dir startup request reaches its dedicated existing-process callback");
+        Check(FolderOpenRouter.TryForwardAsync(qdrProfile, Path.Combine(root, "folder"), TimeSpan.FromSeconds(2))
+                  .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
+              "Q-Dir startup routing remains distinct from directory navigation");
+    }
+    var selectionProfile = Path.Combine(root, "router-select", "ExplorerDirs.ini");
+    string? selectedDirectory = null;
+    string? selectedPath = null;
+    var selectionCount = 0;
+    using (var selectionRouter = FolderOpenRouter.TryStart(selectionProfile, _ => Task.FromResult(false),
+               openSelection: (directory, item) =>
+               {
+                   selectedDirectory = directory;
+                   selectedPath = item;
+                   Interlocked.Increment(ref selectionCount);
+                   return Task.FromResult(true);
+               }) ?? throw new Exception("selection router did not start"))
+    {
+        var directory = Path.GetFullPath(Path.Combine(root, "select-folder"));
+        var item = Path.Combine(directory, "sample with spaces.txt");
+        var requestId = Guid.NewGuid();
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, directory, item,
+                  TimeSpan.FromSeconds(2), requestId).GetAwaiter().GetResult() == FolderForwardResult.Accepted &&
+              selectedDirectory == directory && selectedPath == item && selectionCount == 1,
+              "Explorer select requests route the containing folder and selected item to the existing process");
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, directory, item,
+                  TimeSpan.FromSeconds(2), requestId).GetAwaiter().GetResult() == FolderForwardResult.Accepted &&
+              selectionCount == 1,
+              "an ambiguous retry of the same select request does not select or open the item twice");
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, Path.Combine(root, "other"), item,
+                  TimeSpan.FromSeconds(2)).GetAwaiter().GetResult() == FolderForwardResult.Rejected && selectionCount == 1,
+              "select routing rejects a parent directory that does not contain the requested item");
+    }
+    var legacySelectProfile = Path.Combine(root, "router-select-legacy", "ExplorerDirs.ini");
+    using (var legacySelectServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(legacySelectProfile),
+           PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+           PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance))
+    {
+        string? legacySelectedDirectory = null;
+        var legacySelectTask = Task.Run(async () =>
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await legacySelectServer.WaitForConnectionAsync(deadline.Token);
+            var header = new byte[sizeof(int)];
+            await legacySelectServer.ReadExactlyAsync(header, deadline.Token);
+            Check(BinaryPrimitives.ReadInt32LittleEndian(header) == -3,
+                  "new select senders negotiate protocol support first");
+            await legacySelectServer.WriteAsync(new byte[] { 0 }, deadline.Token);
+            await legacySelectServer.FlushAsync(deadline.Token);
+            legacySelectServer.Disconnect();
+            await legacySelectServer.WaitForConnectionAsync(deadline.Token);
+            await legacySelectServer.ReadExactlyAsync(header, deadline.Token);
+            var length = BinaryPrimitives.ReadInt32LittleEndian(header);
+            Check(length > 0 && length <= 128 * 1024,
+                  "an older receiver gets a compatible parent-directory request");
+            var payload = new byte[length];
+            await legacySelectServer.ReadExactlyAsync(payload, deadline.Token);
+            legacySelectedDirectory = System.Text.Encoding.UTF8.GetString(payload);
+            await legacySelectServer.WriteAsync(new byte[] { 1 }, deadline.Token);
+            await legacySelectServer.FlushAsync(deadline.Token);
+        });
+        var legacyDirectory = Path.GetFullPath(Path.Combine(root, "legacy-select-parent"));
+        var legacyItem = Path.Combine(legacyDirectory, "legacy sample.txt");
+        var legacyResult = FolderOpenRouter.TryForwardSelectionAsync(legacySelectProfile, legacyDirectory,
+            legacyItem, TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        legacySelectTask.GetAwaiter().GetResult();
+        Check(legacyResult == FolderForwardResult.Accepted && legacySelectedDirectory == legacyDirectory,
+              "an older single-instance process opens the target parent when selection routing is unavailable");
+    }
     var unexpectedProfile = Path.Combine(root, "router-unexpected", "ExplorerDirs.ini");
     using (var unexpectedServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(unexpectedProfile),
            PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
@@ -589,6 +913,13 @@ try
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await unexpectedServer.WaitForConnectionAsync(deadline.Token);
             var header = new byte[4];
+            await unexpectedServer.ReadExactlyAsync(header, deadline.Token);
+            Check(BinaryPrimitives.ReadInt32LittleEndian(header) == -3,
+                  "new senders negotiate request IDs before sending a request");
+            await unexpectedServer.WriteAsync(new byte[] { 0 }, deadline.Token);
+            await unexpectedServer.FlushAsync(deadline.Token);
+            unexpectedServer.Disconnect();
+            await unexpectedServer.WaitForConnectionAsync(deadline.Token);
             await unexpectedServer.ReadExactlyAsync(header, deadline.Token);
             var payload = new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
             await unexpectedServer.ReadExactlyAsync(payload, deadline.Token);
@@ -663,18 +994,17 @@ try
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&
           !ShellItemKind.IsFileSystemFolder(0x20000000),
           "only ordinary filesystem folders get the new-tab directory command");
-    Check(ShellMenuCommand.TryGetMenuId((nint)0xE000, IntPtr.Zero, out var menuId) &&
-          menuId == 0xE000 &&
-          !ShellMenuCommand.TryGetMenuId((nint)0x1E000, IntPtr.Zero, out _) &&
-          !ShellMenuCommand.TryGetMenuId((nint)0xE000, (nint)123, out _) &&
-          !ShellMenuCommand.TryGetMenuId(IntPtr.Zero, IntPtr.Zero, out _),
-          "custom menu commands ignore accelerators, control notifications, and separator IDs");
     ShellMenuTargetTrackerSmoke.Run();
+    ExplorerDirs.SettingsSmoke.RestartShortcutSmoke.Run();
     ShellStatusCountRefreshGateSmoke.Run();
+    ExplorerDirs.SettingsSmoke.FullScreenPresentationSmoke.Run();
     Check(KeyboardShortcuts.Resolve(0x08, 0) == ExplorerShortcut.Parent, "Backspace goes to parent");
     Check(KeyboardShortcuts.Resolve(0x26, 1) == ExplorerShortcut.Parent, "Alt+Up goes to parent");
     Check(KeyboardShortcuts.Resolve(0x25, 1) == ExplorerShortcut.Back, "Alt+Left goes back");
     Check(KeyboardShortcuts.Resolve(0x27, 1) == ExplorerShortcut.Forward, "Alt+Right goes forward");
+    Check(KeyboardShortcuts.Resolve(0x7a, 1) == ExplorerShortcut.RestartApplication &&
+          KeyboardShortcuts.Resolve(0x7a, 0) == ExplorerShortcut.ToggleFullScreen,
+          "Alt+F11 restarts the app while F11 toggles full-screen mode");
     Check(KeyboardShortcuts.ResolveTabHeaderArrow(0x25, 2, tabHeaderFocused: true) == ExplorerShortcut.PreviousTab &&
           KeyboardShortcuts.ResolveTabHeaderArrow(0x27, 2, tabHeaderFocused: true) == ExplorerShortcut.NextTab,
           "Ctrl+Left/Right switches tabs while a tab header has focus");
@@ -725,22 +1055,25 @@ try
           KeyboardShortcuts.NextPane(0, 4, true) == 3 &&
           KeyboardShortcuts.NextPane(0, 1, false) == 0,
           "visible pane focus wraps");
-    var focusStops = new[] { 12, 11, 12, 11 };
+    var focusStops = new[] { 13, 12, 13, 12 };
     Check(FocusTraversal.Move(0, 9, focusStops, false) == (0, 10) &&
           FocusTraversal.Move(0, 10, focusStops, false) == (0, 11) &&
-          FocusTraversal.Move(0, 11, focusStops, false) == (1, 0) &&
-          FocusTraversal.Move(1, 0, focusStops, true) == (0, 11) &&
-          FocusTraversal.Move(0, 11, focusStops, true) == (0, 10) &&
-          FocusTraversal.Move(0, 0, focusStops, true) == (3, 10) &&
-          FocusTraversal.Move(2, -1, focusStops, true) == (2, 11),
+          FocusTraversal.Move(0, 11, focusStops, false) == (0, 12) &&
+          FocusTraversal.Move(0, 12, focusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, focusStops, true) == (0, 12) &&
+          FocusTraversal.Move(0, 12, focusStops, true) == (0, 11) &&
+          FocusTraversal.Move(0, 0, focusStops, true) == (3, 11) &&
+          FocusTraversal.Move(2, -1, focusStops, true) == (2, 12),
           "forward and reverse tab order includes Details header, status tools and wraps panes");
     var detailedPaneStops = PaneFocusStopMap.Create(false, false, false, hasColumnHeader: true,
         addressHistoryButtonVisible: true);
     var iconPaneStops = PaneFocusStopMap.Create(false, false, false, hasColumnHeader: false,
         addressHistoryButtonVisible: true);
-    Check(detailedPaneStops.FileView == 11 && detailedPaneStops.StatusTools == 12 && detailedPaneStops.Count == 13 &&
-          iconPaneStops.FileView == 10 && iconPaneStops.StatusTools == 11 && iconPaneStops.Count == 12,
-          "the address history button precedes file-view stops in every view mode");
+    Check(detailedPaneStops.PaneViewStyle == 4 && detailedPaneStops.Address == 5 &&
+          detailedPaneStops.FileView == 12 && detailedPaneStops.StatusTools == 13 && detailedPaneStops.Count == 14 &&
+          iconPaneStops.PaneViewStyle == 4 && iconPaneStops.Address == 5 &&
+          iconPaneStops.FileView == 11 && iconPaneStops.StatusTools == 12 && iconPaneStops.Count == 13,
+          "the pane view-style button and address controls precede file-view stops in every view mode");
     Check(FocusTraversal.Move(0, detailedPaneStops.FileView, [detailedPaneStops.Count, iconPaneStops.Count], false) == (0, detailedPaneStops.StatusTools) &&
           FocusTraversal.Move(0, detailedPaneStops.StatusTools, [detailedPaneStops.Count, iconPaneStops.Count], false) == (1, 0) &&
           FocusTraversal.Move(1, 0, [detailedPaneStops.Count, iconPaneStops.Count], true) == (0, detailedPaneStops.StatusTools),
@@ -826,7 +1159,7 @@ try
           KeyboardShortcuts.Resolve(0x64, 2) != ExplorerShortcut.AutoFitColumns,
           "auto-fit columns requires Ctrl+VK_ADD and does not claim other numpad keys");
     ExplorerDirs.SettingsSmoke.ShellAutoColumnWidthRoutingSmoke.Run();
-    var searchFocusStops = new[] { 15, 14, 12, 11 };
+    var searchFocusStops = new[] { 16, 15, 13, 12 };
     Check(FocusTraversal.Move(0, 7, searchFocusStops, false) == (0, 8) &&
           FocusTraversal.Move(0, 8, searchFocusStops, false) == (0, 9) &&
           FocusTraversal.Move(0, 9, searchFocusStops, false) == (0, 10) &&
@@ -834,8 +1167,9 @@ try
           FocusTraversal.Move(0, 11, searchFocusStops, true) == (0, 10) &&
           FocusTraversal.Move(0, 10, searchFocusStops, true) == (0, 9) &&
           FocusTraversal.Move(0, 13, searchFocusStops, false) == (0, 14) &&
-          FocusTraversal.Move(0, 14, searchFocusStops, false) == (1, 0) &&
-          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 14),
+          FocusTraversal.Move(0, 14, searchFocusStops, false) == (0, 15) &&
+          FocusTraversal.Move(0, 15, searchFocusStops, false) == (1, 0) &&
+          FocusTraversal.Move(1, 0, searchFocusStops, true) == (0, 15),
           "visible search controls extend each pane's reversible Tab order");
     var searchScope = Path.Combine(root, "search scope & 中文");
     Directory.CreateDirectory(searchScope);
@@ -874,6 +1208,29 @@ try
                   searchHistory.TryResolve(otherPidl, out var secondSearchUri) && secondSearchUri == otherUri &&
                   !new ShellSearchHistory().TryResolve(searchPidl, out _),
                 "search query history remains distinct and browser-local");
+            searchHistory.Forget(otherPidl, otherUri);
+            Check(!searchHistory.TryResolve(otherPidl, out _) &&
+                  searchHistory.TryResolve(searchPidl, out var retainedSearchUri) && retainedSearchUri == searchUri,
+                "retiring an uncommitted search removes only its matching native aliases");
+            var aliasUri = ShellSearchLocation.BuildUri(searchScope, "alias-query");
+            aliasUri = aliasUri[..aliasUri.IndexOf("&displayname=", StringComparison.Ordinal)] +
+                       otherUri[otherUri.IndexOf("&displayname=", StringComparison.Ordinal)..];
+            var aliasPidl = ShellSearchLocation.ParsePidl(aliasUri);
+            try
+            {
+                searchHistory.Remember(aliasPidl, aliasUri);
+                Check(searchHistory.TryResolve(aliasPidl, out var aliasSearchUri) && aliasSearchUri == aliasUri,
+                    "retiring a cancelled search also releases its named Shell alias for a later query");
+                searchHistory.Forget(aliasPidl, aliasUri);
+            }
+            finally { Marshal.FreeCoTaskMem(aliasPidl); }
+            searchHistory.Remember(otherPidl, otherUri);
+            searchHistory.Clear();
+            Check(!searchHistory.TryResolve(searchPidl, out _) && !searchHistory.TryResolve(otherPidl, out _),
+                "disposing a Shell browser releases its search identity mappings");
+            searchHistory.Remember(searchPidl, searchUri);
+            Check(searchHistory.TryResolve(searchPidl, out var reopenedSearchUri) && reopenedSearchUri == searchUri,
+                "a recreated Shell browser can record fresh search identities");
         }
         finally { Marshal.FreeCoTaskMem(otherPidl); }
         var collisionHistory = new ShellSearchHistory();
@@ -1064,6 +1421,27 @@ try
           "UNC path skips the extra directory watcher");
     store.Save(state);
     var loaded = store.Load() ?? throw new Exception("INI did not load");
+    var limitIni = Path.Combine(root, "session-tab-limit.ini");
+    var limitStore = new SessionStore(limitIni, Path.Combine(root, "missing-limit-legacy.json"));
+    limitStore.Save(state);
+    var beforeLimit = File.ReadAllBytes(limitIni);
+    var overLimitPanes = state.Panes.Select(pane => pane.ToList()).ToList();
+    overLimitPanes[0] = Enumerable.Range(0, 101).Select(_ => first).ToList();
+    var overLimit = state with { Panes = overLimitPanes };
+    Check(SessionStore.ParseComplete(SessionStore.Render(overLimit)) is null,
+        "101 tabs exceed the existing session reader's per-pane format limit");
+    var overLimitRejected = false;
+    try { limitStore.Save(overLimit); }
+    catch (InvalidDataException) { overLimitRejected = true; }
+    Check(overLimitRejected && File.ReadAllBytes(limitIni).SequenceEqual(beforeLimit),
+        "saving an unreadable 101-tab session is rejected without overwriting the complete profile");
+    limitStore.Save(state with { DefaultViewMode = 4 });
+    Check(limitStore.Load()?.DefaultViewMode == 4,
+        "rejected oversized session leaves the save baseline usable for a corrected state");
+    overLimitPanes[0] = overLimitPanes[0].Take(100).ToList();
+    limitStore.Save(state with { Panes = overLimitPanes });
+    Check(limitStore.Load()?.Panes[0].Count == 100 && limitStore.LoadWarning is null,
+        "the supported 100-tab boundary still saves and reloads without recovery");
     Check(store.LoadWarning is null, "complete INI needs no recovery");
     Check(loaded.Layout == 2 && loaded.DefaultViewMode == 3, "global settings");
     Check(loaded.Panes[0].Count == 2, "two tabs with same path");
@@ -1905,9 +2283,11 @@ internal delegate int NativeGetViewFlags(IntPtr self, out uint flags);
 
 internal sealed class FakeShellViewStateSource : IShellViewStateSource
 {
+    public Action<string>? ReadStep { get; set; }
     public IReadOnlyList<DisplayColumnState>? DisplayColumns { get; set; }
     public int GetDisplayColumns(out IReadOnlyList<DisplayColumnState>? columns)
     {
+        ReadStep?.Invoke("display");
         columns = DisplayColumns;
         return FailedStep == "display-columns" ? -1 : columns is null ? 1 : 0;
     }
@@ -1920,6 +2300,7 @@ internal sealed class FakeShellViewStateSource : IShellViewStateSource
 
     public int GetMode(out uint mode, out int iconSize)
     {
+        ReadStep?.Invoke("mode");
         mode = Mode;
         iconSize = IconSize;
         return FailedStep == "mode" ? -1 : 0;
@@ -1927,18 +2308,21 @@ internal sealed class FakeShellViewStateSource : IShellViewStateSource
 
     public int GetSortColumnCount(out int count)
     {
+        ReadStep?.Invoke("count");
         count = FailedStep == "invalid-count" ? 17 : Sorts.Count;
         return FailedStep == "count" ? -1 : 0;
     }
 
     public int GetSortColumns(int count, out IReadOnlyList<SortColumnState> columns)
     {
+        ReadStep?.Invoke("sorts");
         columns = FailedStep == "short-columns" ? [] : Sorts;
         return FailedStep == "columns" ? -1 : 0;
     }
 
     public int GetGroupBy(out PropertyKeyState? key, out bool ascending)
     {
+        ReadStep?.Invoke("group");
         key = Group;
         ascending = GroupAscending;
         return FailedStep == "group" ? -1 : 0;

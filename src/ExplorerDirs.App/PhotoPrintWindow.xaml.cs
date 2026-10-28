@@ -9,6 +9,7 @@ public partial class PhotoPrintWindow : Window
 {
     private readonly IReadOnlyList<PhotoPrintImageAsset> _images;
     private readonly IReadOnlyList<PhotoPrintRejectedItem> _rejectedItems;
+    private readonly ApplicationThemeController? _themeController;
     private readonly List<PrintQueue> _queues = [];
     private readonly PhotoPrintPreviewGate _previewGate = new();
     private bool _loading;
@@ -17,14 +18,29 @@ public partial class PhotoPrintWindow : Window
     private FixedDocument? _printDocument;
 
     internal PhotoPrintWindow(IReadOnlyList<PhotoPrintImageAsset> images,
-        IReadOnlyList<PhotoPrintRejectedItem> rejectedItems)
+        IReadOnlyList<PhotoPrintRejectedItem> rejectedItems, ApplicationThemeController? themeController = null)
     {
+        _themeController = themeController;
         InitializeComponent();
         _images = images;
         _rejectedItems = rejectedItems;
         RejectedItemsList.ItemsSource = rejectedItems.Select(item => new RejectedItemDisplay(item)).ToArray();
-        Closed += (_, _) => DisposeQueues();
+        SourceInitialized += (_, _) => ApplyWindowFrameTheme();
+        if (_themeController is not null)
+            _themeController.ThemeChanged += ThemeController_ThemeChanged;
+        Closed += (_, _) =>
+        {
+            DisposeQueues();
+            if (_themeController is not null)
+                _themeController.ThemeChanged -= ThemeController_ThemeChanged;
+        };
     }
+
+    private void ThemeController_ThemeChanged(object? sender, EventArgs e) => ApplyWindowFrameTheme();
+
+    private void ApplyWindowFrameTheme() =>
+        NativeWindowFrameTheme.Apply(new System.Windows.Interop.WindowInteropHelper(this).Handle,
+            _themeController?.CurrentColors);
 
     internal int SubmittedPhotoCount { get; private set; }
     internal int SubmittedPageCount { get; private set; }

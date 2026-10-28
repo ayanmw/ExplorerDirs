@@ -3,14 +3,15 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ExplorerDirs.App"
         Title="Explorer Dirs" Height="800" Width="1280" MinHeight="420" MinWidth="650"
-        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        Background="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"
+        Foreground="{DynamicResource ExplorerDirs.WindowTextBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <DockPanel>
         <Menu x:Name="MainMenu" DockPanel.Dock="Top">
             <MenuItem x:Name="FileMenu" Header="文件(_F)" SubmenuOpened="FileCommandsMenu_SubmenuOpened">
                 <MenuItem x:Name="ImportQdrMenu" Header="导入 Q-Dir 配置 (.qdr)…" Click="ImportQdr_Click"/>
                 <MenuItem x:Name="ExportQdrMenu" Header="导出 Q-Dir 状态 (.qdr)…" Click="ExportQdr_Click"/>
+                <MenuItem Header="保存当前工作区到桌面…" Click="SaveWorkspaceToDesktop_Click"/>
                 <MenuItem x:Name="ExportFileViewMenu" Header="导出当前文件视图…" Click="ExportFileView_Click"/>
                 <MenuItem x:Name="PrintFileViewMenu" Header="打印当前文件视图…" Click="PrintFileView_Click"/>
                 <MenuItem x:Name="PrintSelectedPhotosMenu" Header="打印所选照片…" IsEnabled="False" Click="PrintSelectedPhotos_Click"/>
@@ -18,26 +19,61 @@
                 <MenuItem x:Name="NewFolderMenu" Header="新建文件夹" InputGestureText="Ctrl+Shift+N" IsEnabled="False" Click="NewFolder_Click"/>
                 <Separator/>
                 <MenuItem Header="新建标签页" InputGestureText="Ctrl+T" Click="NewTab_Click"/>
-                <MenuItem Header="新建窗口" InputGestureText="Ctrl+N" Click="NewWindow_Click"/>
+                <MenuItem Header="复制当前窗口" InputGestureText="Ctrl+N" Click="NewWindow_Click"/>
                 <MenuItem Header="关闭标签页" InputGestureText="Ctrl+W" Click="CloseTab_Click"/>
                 <Separator/>
+                <MenuItem Header="重启应用" InputGestureText="Alt+F11" Click="RestartApplication_Click"/>
                 <MenuItem Header="退出" Click="Exit_Click"/>
             </MenuItem>
             <MenuItem x:Name="FileCommandsMenu" Header="编辑(_E)" SubmenuOpened="FileCommandsMenu_SubmenuOpened">
                 <MenuItem x:Name="PasteSpecialMenu" Header="粘贴特殊…" InputGestureText="Ctrl+Shift+V"
                           SubmenuOpened="PasteSpecialMenu_SubmenuOpened"/>
             </MenuItem>
-            <MenuItem Header="标签页(_T)">
+            <MenuItem Header="标签页(_T)" SubmenuOpened="TabsMenu_SubmenuOpened">
                 <MenuItem Header="复制当前标签" InputGestureText="Ctrl+K" Click="DuplicateTab_Click"/>
+                <MenuItem x:Name="NewTabUsesCurrentFolderMenu" Header="新建标签时使用当前文件夹" IsCheckable="True"
+                          ToolTip="启用后，普通新建标签从当前窗格的活动目录开始。"
+                          Click="NewTabUsesCurrentFolder_Click"/>
+                <MenuItem x:Name="TabCloseButtonMenu" Header="显示标签关闭按钮" IsCheckable="True"
+                          ToolTip="在可关闭的标签标题上显示关闭按钮。"
+                          Click="TabCloseButton_Click"/>
                 <MenuItem Header="关闭其他标签" Click="CloseOtherTabs_Click"/>
                 <MenuItem Header="恢复关闭的标签" InputGestureText="Ctrl+Shift+T"
                           ToolTip="文件视图聚焦且单选文件夹时，Ctrl+Shift+T 在新标签打开该文件夹；其他情况下恢复关闭的标签。"
                           Click="ReopenTab_Click"/>
+                <MenuItem x:Name="TabHoverActivationMenu" Header="拖动悬停自动切换"
+                          ToolTip="拖动文件到其他标签上时，停留指定时间后切换到该标签。"
+                          SubmenuOpened="TabHoverActivationMenu_SubmenuOpened">
+                    <MenuItem Header="关闭" Tag="0" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="0.2 秒" Tag="200" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="0.5 秒" Tag="500" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="1 秒" Tag="1000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="1.5 秒" Tag="1500" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="2 秒" Tag="2000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                    <MenuItem Header="3 秒" Tag="3000" IsCheckable="True" Click="TabHoverActivation_Click"/>
+                </MenuItem>
             </MenuItem>
             <MenuItem x:Name="QuickLinksMenu" Header="快速链接(_Q)" InputGestureText="Ctrl+Q" SubmenuOpened="QuickLinksMenu_SubmenuOpened"/>
             <MenuItem x:Name="FavoritesMenu" Header="收藏夹(_B)" SubmenuOpened="FavoritesMenu_SubmenuOpened"/>
             <MenuItem Header="视图(_V)" SubmenuOpened="ViewMenu_SubmenuOpened">
                 <MenuItem x:Name="CurrentViewMenu" Header="当前标签查看方式"/>
+                <MenuItem x:Name="MouseWheelFocusMenu" Header="鼠标悬停滚轮" IsCheckable="True"
+                          ToolTip="启用后，普通滚轮由鼠标所在的 Shell 文件视图或目录树处理。Ctrl+滚轮仍切换查看方式。"
+                          Click="MouseWheelFocus_Click"/>
+                <MenuItem x:Name="TabStripVisibilityMenu" Header="标签栏显示">
+                    <MenuItem x:Name="AlwaysShowTabsMenu" Header="始终显示" IsCheckable="True"
+                              Tag="Always" Click="TabStripVisibility_Click"/>
+                    <MenuItem x:Name="ShowTabsWhenMultipleMenu" Header="仅在多个标签时显示" IsCheckable="True"
+                              Tag="Multiple" Click="TabStripVisibility_Click"/>
+                </MenuItem>
+                <MenuItem x:Name="MultilineTabHeadersMenu" Header="多行标签栏" IsCheckable="True"
+                          ToolTip="标签较多时自动换行显示；关闭时使用单行滚动标签栏。"
+                          Click="MultilineTabHeaders_Click"/>
+                <MenuItem x:Name="TabHeaderMaximumWidthMenu" Header="限制标签标题最大宽度" IsCheckable="True"
+                          ToolTip="取消限制后，标签会按文件夹名称展开；名称较长时可能占用更多标签栏空间。"
+                          Click="TabHeaderMaximumWidth_Click"/>
+                <MenuItem x:Name="FullScreenMenu" Header="全屏" InputGestureText="F11"
+                          IsCheckable="True" Click="FullScreenMenu_Click"/>
                 <MenuItem x:Name="HiddenItemsMenu" Header="隐藏项目" SubmenuOpened="HiddenItemsMenu_SubmenuOpened">
                     <MenuItem x:Name="HiddenItemsFollowWindowsMenu" Header="跟随 Windows" IsCheckable="True"
                               Tag="FollowWindows" Click="HiddenItemsPreference_Click"/>
@@ -53,10 +89,25 @@
                 </MenuItem>
                 <MenuItem x:Name="LayoutMenu" Header="布局"/>
                 <MenuItem x:Name="CompactModeMenu" Header="紧凑布局" IsCheckable="True" Click="CompactMode_Click"/>
+                <MenuItem x:Name="StatusBarMenu" Header="状态栏" IsCheckable="True" Click="StatusBar_Click"/>
+                <MenuItem x:Name="StatusBarSelectionSizeMenu" Header="状态栏显示选中项目大小" IsCheckable="True"
+                          Click="StatusBarSelectionSize_Click"/>
+                <MenuItem x:Name="StatusBarFolderSizeWhenEmptyMenu" Header="未选中时显示当前目录可取得大小" IsCheckable="True"
+                          Click="StatusBarFolderSizeWhenEmpty_Click"/>
+                <MenuItem x:Name="SelectionCheckBoxesMenu" Header="使用复选框选择项目" IsCheckable="True"
+                          Click="SelectionCheckBoxes_Click"/>
+                <MenuItem x:Name="FullRowSelectionMenu" Header="整行选择" IsCheckable="True"
+                          Click="FullRowSelection_Click"/>
+                <MenuItem x:Name="DisableGroupingMenu" Header="停用所有视图分组" IsCheckable="True"
+                          ToolTip="暂时关闭所有文件视图的分组；每个标签原有的分组设置会在重新启用时恢复。"
+                          Click="DisableGrouping_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModePerPaneMenu" Header="每窗格各一棵树" IsCheckable="True" Tag="PerPane" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModeNoneMenu" Header="关闭目录树" IsCheckable="True" Tag="None" Click="TreeMode_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="TreeSelectionAutoExpandMenu" Header="从文件列表选择并展开" IsCheckable="True"
+                              Click="TreeSelectionAutoExpand_Click"/>
                 </MenuItem>
                 <MenuItem x:Name="PreviewPaneMenu" Header="预览窗格" InputGestureText="Alt+P" IsCheckable="True" Click="PreviewPaneMenu_Click"/>
                 <MenuItem x:Name="DetailsPaneMenu" Header="详情窗格" InputGestureText="Alt+Shift+P" IsCheckable="True" Click="DetailsPaneMenu_Click"/>
@@ -69,9 +120,16 @@
                 <Separator/>
                 <MenuItem Header="选项">
                     <MenuItem Header="主题">
-                        <MenuItem x:Name="SystemThemeMenu" Header="跟随系统" IsCheckable="True" Tag="System" Click="ThemePreference_Click"/>
-                        <MenuItem x:Name="LightThemeMenu" Header="浅色" IsCheckable="True" Tag="Light" Click="ThemePreference_Click"/>
-                        <MenuItem x:Name="DarkThemeMenu" Header="深色" IsCheckable="True" Tag="Dark" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="SystemThemeMenu" Header="跟随 Windows" IsCheckable="True" Tag="System" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="LightThemeMenu" Header="固定浅色" IsCheckable="True" Tag="Light" Click="ThemePreference_Click"/>
+                        <MenuItem x:Name="DarkThemeMenu" Header="固定深色" IsCheckable="True" Tag="Dark" Click="ThemePreference_Click"/>
+                        <Separator/>
+                        <MenuItem Header="强调色">
+                            <MenuItem x:Name="WindowsAccentMenu" Header="跟随 Windows 强调色"
+                                      IsCheckable="True" Click="WindowsAccent_Click"/>
+                            <MenuItem x:Name="CustomAccentMenu" Header="自定义强调色…"
+                                      IsCheckable="True" Click="CustomAccent_Click"/>
+                        </MenuItem>
                     </MenuItem>
                     <MenuItem x:Name="DefaultViewMenu" Header="新建标签默认查看"/>
                     <MenuItem Header="地址栏样式">
@@ -108,6 +166,7 @@
                     <MenuItem Header="断开网络驱动器…" Click="DisconnectNetworkDrive_Click"/>
                 </MenuItem>
                 <MenuItem Header="计算当前目录递归大小" InputGestureText="F9" Click="CalculateDirectorySize_Click"/>
+                <MenuItem Header="计算所选项目递归大小" Click="CalculateSelectedItemsRecursiveSize_Click"/>
                 <MenuItem Header="刷新环境变量" Click="RefreshEnvironment_Click"/>
                 <MenuItem Header="在当前目录打开命令行" Click="OpenTerminal_Click"/>
             </MenuItem>
@@ -120,31 +179,38 @@
                 <StackPanel x:Name="FileCommandButtons" Orientation="Horizontal"
                             MouseEnter="FileCommandButtons_Refresh" GotKeyboardFocus="FileCommandButtons_Refresh"/>
                 <Separator/>
-                <Button Content="＋" ToolTip="新建标签页 (Ctrl+T)" Click="NewTab_Click" Width="32"/>
-                <Button Content="▣↗" ToolTip="新建窗口 (Ctrl+N)" Click="NewWindow_Click" Width="38"/>
-                <Button Content="▣＋" ToolTip="复制当前标签 (Ctrl+K)" Click="DuplicateTab_Click" Width="42"/>
-                <Button Content="×" ToolTip="关闭标签页 (Ctrl+W)" Click="CloseTab_Click" Width="32"/>
+                <Button x:Name="NewTabToolbarButton" ToolTip="新建标签页 (Ctrl+T)"
+                        AutomationProperties.Name="新建标签页" Click="NewTab_Click" Width="32"/>
+                <Button x:Name="NewWindowToolbarButton" ToolTip="复制当前窗口及其标签和布局 (Ctrl+N)"
+                        AutomationProperties.Name="复制当前窗口" Click="NewWindow_Click" Width="38"/>
+                <Button x:Name="DuplicateTabToolbarButton" ToolTip="复制当前标签 (Ctrl+K)"
+                        AutomationProperties.Name="复制当前标签" Click="DuplicateTab_Click" Width="42"/>
+                <Button x:Name="CloseTabToolbarButton" ToolTip="关闭标签页 (Ctrl+W)"
+                        AutomationProperties.Name="关闭标签页" Click="CloseTab_Click" Width="32"/>
                 <ToggleButton x:Name="PreviewPaneToggle" Content="预览" ToolTip="切换当前标签的预览窗格 (Alt+P)"
                               AutomationProperties.Name="切换预览窗格" Click="PreviewPaneToggle_Click"/>
                 <ToggleButton x:Name="DetailsPaneToggle" Content="详情" ToolTip="切换当前标签的详情窗格 (Alt+Shift+P)"
                               AutomationProperties.Name="切换详情窗格" Click="DetailsPaneToggle_Click"/>
-                <Button Content="↻" ToolTip="刷新当前目录 (F5)" AutomationProperties.Name="刷新当前目录"
+                <Button x:Name="RefreshCurrentDirectoryButton" ToolTip="刷新当前目录 (F5)" AutomationProperties.Name="刷新当前目录"
                         AutomationProperties.AutomationId="RefreshCurrentDirectory"
                         Click="RefreshCurrent_Click" Width="32"/>
-                <Button Content="⌕" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
+                <Button x:Name="SearchCurrentDirectoryButton" ToolTip="搜索当前目录 (F3)" AutomationProperties.Name="搜索当前目录"
                         AutomationProperties.AutomationId="OpenCurrentDirectorySearch"
                         Click="SearchCurrent_Click" Width="32"/>
-                <Button Content="🖨" ToolTip="打印当前文件视图" AutomationProperties.Name="打印当前文件视图"
+                <Button x:Name="PrintFileViewToolbarButton" ToolTip="打印当前文件视图"
+                        AutomationProperties.Name="打印当前文件视图"
                         Click="PrintFileView_Click" Width="36"/>
-                <Button Content="大小" ToolTip="计算或取消当前目录递归大小 (F9)"
+                <Button x:Name="FolderSizeToolbarButton" ToolTip="计算或取消当前目录递归大小 (F9)"
                         AutomationProperties.Name="计算当前目录递归大小" Click="CalculateDirectorySize_Click"/>
                 <Separator/>
-                <Button Content="↻ 环境" ToolTip="刷新本程序环境变量" Click="RefreshEnvironment_Click"/>
-                <Button Content="⌘ 命令行" ToolTip="在当前目录打开命令行" Click="OpenTerminal_Click"/>
+                <Button x:Name="RefreshEnvironmentToolbarButton" ToolTip="刷新本程序环境变量"
+                        AutomationProperties.Name="刷新本程序环境变量" Click="RefreshEnvironment_Click" Width="32"/>
+                <Button x:Name="OpenTerminalToolbarButton" ToolTip="在当前目录打开命令行"
+                        AutomationProperties.Name="在当前目录打开命令行" Click="OpenTerminal_Click" Width="32"/>
             </ToolBar>
         </ToolBarTray>
         <TextBlock x:Name="EnvironmentStatus" DockPanel.Dock="Bottom" Margin="8,2"
-                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                   Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"/>
         <Grid x:Name="TreeLayoutGrid" Margin="5,2,5,5">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="SharedTreeColumn" Width="0"/>
@@ -152,11 +218,11 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Border x:Name="SharedTreeContainer" Grid.Column="0" Visibility="Collapsed"
-                    BorderBrush="{DynamicResource {x:Static SystemColors.ControlLightBrushKey}}"
+                    BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}"
                     BorderThickness="1" Margin="0,0,4,0"/>
             <GridSplitter x:Name="SharedTreeSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Center"
                           ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                          ShowsPreview="True" Background="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" Cursor="SizeWE"
+                          ShowsPreview="True" Background="{DynamicResource ExplorerDirs.ControlBackgroundBrush}" Cursor="SizeWE"
                           Focusable="False" IsTabStop="False" Visibility="Collapsed"
                           AutomationProperties.Name="调整共享目录树宽度"
                           DragCompleted="SharedTreeSplitter_DragCompleted"/>

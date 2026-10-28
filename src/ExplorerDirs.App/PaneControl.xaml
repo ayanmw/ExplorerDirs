@@ -2,26 +2,32 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:ExplorerDirs.App">
-    <Border x:Name="RootBorder" BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" BorderThickness="1" Margin="3">
+    <Border x:Name="RootBorder" BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" Padding="1" Margin="3"
+            PreviewMouseWheel="RootBorder_PreviewMouseWheel">
         <DockPanel>
             <DockPanel x:Name="NavigationRow" DockPanel.Dock="Top" LastChildFill="True" Margin="4">
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                    <Button x:Name="BackButton" Content="←" ToolTip="后退 (Alt+左箭头)"
-                            AutomationProperties.AutomationId="PaneGoBack" Click="Back_Click" Width="28"/>
-                    <Button x:Name="ForwardButton" Content="→" ToolTip="前进 (Alt+右箭头)" Click="Forward_Click" Width="28" Margin="2,0,0,0"/>
-                    <Button x:Name="UpButton" Content="↑" ToolTip="上级目录 (Backspace / Alt+上箭头)"
-                            AutomationProperties.AutomationId="PaneGoParent" Click="Up_Click" Width="28" Margin="2,0,0,0"/>
-                    <Button x:Name="RefreshButton" Content="↻" ToolTip="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
-                    <ToggleButton x:Name="TreeButton" Content="树" ToolTip="切换当前窗格目录树" Click="Tree_Click" Width="32" Margin="4,0,0,0"
+                    <Button x:Name="BackButton" ToolTip="后退 (Alt+左箭头)"
+                            AutomationProperties.Name="后退" AutomationProperties.AutomationId="PaneGoBack" Click="Back_Click"
+                            PreviewMouseRightButtonUp="NavigationHistoryRightClick" Width="28"/>
+                    <Button x:Name="ForwardButton" ToolTip="前进 (Alt+右箭头)"
+                            AutomationProperties.Name="前进" Click="Forward_Click"
+                            PreviewMouseRightButtonUp="NavigationHistoryRightClick" Width="28" Margin="2,0,0,0"/>
+                    <Button x:Name="UpButton" ToolTip="上级目录 (Backspace / Alt+上箭头)"
+                            AutomationProperties.Name="上级目录" AutomationProperties.AutomationId="PaneGoParent" Click="Up_Click" Width="28" Margin="2,0,0,0"/>
+                    <Button x:Name="RefreshButton" ToolTip="刷新目录" AutomationProperties.Name="刷新目录" Click="Refresh_Click" Width="28" Margin="4,0,0,0"/>
+                    <ToggleButton x:Name="TreeButton" ToolTip="切换当前窗格目录树" Click="Tree_Click" Width="32" Margin="4,0,0,0"
                                   AutomationProperties.Name="当前窗格目录树"/>
-                    <Button x:Name="ToolbarViewStyleButton" Content="▦ ▾" ToolTip="切换当前标签的文件视图方式"
+                    <Button x:Name="ToolbarViewStyleButton" ToolTip="切换当前标签的文件视图方式"
                             AutomationProperties.Name="查看方式" Click="ViewStyle_Click" Width="46" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button x:Name="GoButton" Content="编辑" ToolTip="编辑地址或转到" Click="Go_Click"
                             LostKeyboardFocus="GoButton_LostKeyboardFocus" Margin="4,0,0,0" Padding="8,2"/>
-                    <Button x:Name="NewTabButton" Content="+" ToolTip="新建标签页" Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
-                    <Button x:Name="CloseTabButton" Content="×" ToolTip="关闭标签页" Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
+                    <Button x:Name="NewTabButton" ToolTip="新建标签页" AutomationProperties.Name="新建标签页"
+                            Click="NewTab_Click" Margin="8,0,0,0" Width="28"/>
+                    <Button x:Name="CloseTabButton" ToolTip="关闭标签页" AutomationProperties.Name="关闭标签页"
+                            Click="CloseTab_Click" Margin="4,0,0,0" Width="28"/>
                 </StackPanel>
                 <Grid x:Name="AddressHost" MinWidth="80" Margin="6,0,0,0">
                     <Grid.ColumnDefinitions>
@@ -30,25 +36,27 @@
                         <ColumnDefinition x:Name="AddressHistoryColumn" Width="24"/>
                     </Grid.ColumnDefinitions>
                     <ScrollViewer x:Name="BreadcrumbScroll" Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
-                                  VerticalScrollBarVisibility="Disabled" Focusable="False"
+                                  VerticalScrollBarVisibility="Disabled" Focusable="False" Background="Transparent"
+                                  MouseLeftButtonDown="BreadcrumbScroll_MouseLeftButtonDown"
                                   PreviewMouseWheel="BreadcrumbScroll_PreviewMouseWheel">
                         <StackPanel x:Name="BreadcrumbButtons" Orientation="Horizontal"/>
                     </ScrollViewer>
                     <TextBox x:Name="Address" Grid.Column="0" KeyDown="Address_KeyDown"
+                             TextChanged="Address_TextChanged"
                              PreviewMouseLeftButtonDown="Address_PreviewMouseLeftButtonDown"
                              LostKeyboardFocus="Address_LostKeyboardFocus"
                              Visibility="Collapsed" VerticalContentAlignment="Center"/>
-                    <Button x:Name="AddressMenuButton" Grid.Column="1" Content="▾" Width="24" Padding="0"
+                    <Button x:Name="AddressMenuButton" Grid.Column="1" Width="24" Padding="0"
                             ToolTip="上级目录和常用系统位置" AutomationProperties.Name="路径位置"
                             Click="AddressMenu_Click"/>
-                    <Button x:Name="AddressHistoryButton" Grid.Column="2" Content="◷" Width="24" Padding="0"
+                    <Button x:Name="AddressHistoryButton" Grid.Column="2" Width="24" Padding="0"
                             ToolTip="地址历史" AutomationProperties.Name="地址历史"
                             Click="AddressHistory_Click"/>
                 </Grid>
             </DockPanel>
             <Popup x:Name="AddressTreePopup" PlacementTarget="{Binding ElementName=AddressHost}"
                    Placement="Bottom" StaysOpen="False" Closed="AddressTreePopup_Closed">
-                <Border BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" BorderThickness="1" Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                <Border BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" Background="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"
                         Width="300" Height="340">
                     <local:ShellTreeHost x:Name="AddressTreeHost"/>
                 </Border>
@@ -69,6 +77,7 @@
                 <TextBox x:Name="SearchBox" ToolTip="输入关键词后按 Enter 搜索；Esc 返回目录"
                          AutomationProperties.Name="搜索当前目录" AutomationProperties.AutomationId="PaneSearchQuery"
                          KeyDown="SearchBox_KeyDown"
+                         TextChanged="SearchBox_TextChanged"
                          VerticalContentAlignment="Center"/>
             </DockPanel>
             <DockPanel x:Name="QuickFilterBar" DockPanel.Dock="Top" Margin="4,2,4,0"
@@ -97,12 +106,15 @@
                     <ComboBoxItem Content="包含匹配项"/>
                     <ComboBoxItem Content="排除匹配项"/>
                 </ComboBox>
-                <TextBox x:Name="QuickFilterBox" ToolTip="通配符筛选；多个模式用分号分隔，例如 *.txt;*.md"
-                         AutomationProperties.Name="快速筛选文件名" KeyDown="QuickFilterBox_KeyDown"
-                         VerticalContentAlignment="Center"/>
+                <ComboBox x:Name="QuickFilterBox" ToolTip="通配符筛选；多个模式用分号分隔，例如 *.txt;*.md；按向下键查看历史"
+                          AutomationProperties.Name="快速筛选文件名" IsEditable="True"
+                          IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                          DropDownOpened="QuickFilterHistory_DropDownOpened"
+                          PreviewKeyDown="QuickFilterBox_PreviewKeyDown"
+                          VerticalContentAlignment="Center"/>
             </DockPanel>
-            <DockPanel DockPanel.Dock="Bottom" LastChildFill="True">
-                <Button x:Name="ViewStyleButton" DockPanel.Dock="Right" Content="查看 ▾"
+            <DockPanel x:Name="StatusBarRow" DockPanel.Dock="Bottom" LastChildFill="True">
+                <Button x:Name="ViewStyleButton" DockPanel.Dock="Right"
                         Margin="2,1" Padding="5,0"
                         ToolTip="切换当前窗格标签的查看方式"
                         AutomationProperties.Name="当前窗格查看方式"
@@ -117,7 +129,10 @@
                 <TextBlock x:Name="RecursiveSizeStatus" DockPanel.Dock="Left" Margin="6,3"
                            MaxWidth="420" TextTrimming="CharacterEllipsis" Visibility="Collapsed"
                            AutomationProperties.AutomationId="PaneRecursiveSize"/>
-                <TextBlock x:Name="Status" Margin="6,3" Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                <TextBlock x:Name="ShellStatusHint" DockPanel.Dock="Left" Margin="6,3" MaxWidth="280"
+                           Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"
+                           TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneShellStatusHint"/>
+                <TextBlock x:Name="Status" Margin="6,3" Foreground="{DynamicResource ExplorerDirs.MutedTextBrush}"
                            TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="PaneStatus"/>
             </DockPanel>
             <DockPanel>
@@ -127,16 +142,38 @@
                             PreviewMouseLeftButtonUp="Tabs_PreviewMouseLeftButtonUp">
                     <TabControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <local:TabHeaderPanel/>
+                            <local:TabHeaderPanel Multiline="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"
+                                                   LimitMaximumWidth="{Binding LimitTabHeaderWidth, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}"/>
                         </ItemsPanelTemplate>
                     </TabControl.ItemsPanel>
+                    <TabControl.ItemContainerStyle>
+                        <Style TargetType="{x:Type TabItem}">
+                            <Setter Property="Background" Value="{DynamicResource ExplorerDirs.ControlBackgroundBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ExplorerDirs.ControlTextBrush}"/>
+                            <Setter Property="Template"><Setter.Value>
+                                <ControlTemplate TargetType="{x:Type TabItem}">
+                                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}" Padding="4,2">
+                                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value></Setter>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource ExplorerDirs.AccentBrush}"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TabControl.ItemContainerStyle>
                     <TabControl.Template>
                         <ControlTemplate TargetType="{x:Type TabControl}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <Button x:Name="ScrollTabsLeft" Grid.Column="0" Content="‹"
                                         ToolTip="向左滚动标签" AutomationProperties.Name="向左滚动标签"
@@ -145,6 +182,8 @@
                                               HorizontalScrollBarVisibility="Hidden"
                                               VerticalScrollBarVisibility="Disabled"
                                               CanContentScroll="False" Focusable="False" AllowDrop="True"
+                                              PreviewMouseLeftButtonDown="TabHeaderScroll_PreviewMouseLeftButtonDown"
+                                              PreviewMouseRightButtonUp="TabHeaderScroll_PreviewMouseRightButtonUp"
                                               Background="Transparent"
                                               DragOver="TabStrip_DragOver" Drop="TabStrip_Drop"
                                               ScrollChanged="TabHeaderScroll_ScrollChanged"
@@ -155,10 +194,18 @@
                                         ToolTip="向右滚动标签" AutomationProperties.Name="向右滚动标签"
                                         Focusable="False" IsTabStop="False" Click="ScrollTabsRight_Click"/>
                             </Grid>
+                            <ControlTemplate.Triggers>
+                                <DataTrigger Binding="{Binding MultilineTabHeaders, RelativeSource={RelativeSource AncestorType={x:Type local:PaneControl}}}" Value="True">
+                                    <Setter TargetName="ScrollTabsLeft" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="ScrollTabsRight" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="TabHeaderScroll" Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+                                    <Setter TargetName="TabHeaderScroll" Property="VerticalScrollBarVisibility" Value="Auto"/>
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </TabControl.Template>
                 </TabControl>
-                <Border BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" BorderThickness="1">
+                <Border BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition x:Name="TreeColumn" Width="0"/>
@@ -166,10 +213,10 @@
                         <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Border x:Name="TreeContainer" Grid.Column="0" Visibility="Collapsed"
-                                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" BorderThickness="0,0,1,0"/>
+                                BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="0,0,1,0"/>
                     <GridSplitter x:Name="TreeSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Center"
                                   ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
-                                  ShowsPreview="True" Background="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}" Cursor="SizeWE"
+                                  ShowsPreview="True" Background="{DynamicResource ExplorerDirs.ControlBackgroundBrush}" Cursor="SizeWE"
                                   Focusable="False" IsTabStop="False" Visibility="Collapsed"
                                   AutomationProperties.Name="调整目录树宽度"
                                   DragCompleted="TreeSplitter_DragCompleted"/>

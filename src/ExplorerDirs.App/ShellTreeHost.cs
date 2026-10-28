@@ -43,14 +43,36 @@ internal sealed class ShellTreeHost : HwndHost
         };
     }
 
+    internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 && _tree is { WindowHandle: not 0 } tree &&
+        (hwnd == tree.WindowHandle || IsChild(tree.WindowHandle, hwnd));
+
+    internal void RefreshTheme()
+    {
+        if (_parent != 0) NativeShellTheme.Apply(_parent);
+    }
+
     public void SetDirectory(string directory)
     {
+        _addressTreeMode = false;
         _directory = directory;
+        StartSynchronization();
+    }
+
+    internal void SetSelectedFolderLocation(string identity)
+    {
+        _addressTreeMode = !Path.IsPathFullyQualified(identity);
+        _directory = identity;
+        if (_addressTreeMode && _tree is not null)
+        {
+            _root = "shell:Desktop";
+            _tree.SetRoot(_root);
+        }
         StartSynchronization();
     }
 
     internal void SetVirtualLocation()
     {
+        _addressTreeMode = false;
         _directory = null;
         _root = null;
         CancelSynchronization();
@@ -138,7 +160,9 @@ internal sealed class ShellTreeHost : HwndHost
         if (_parent == 0) throw new InvalidOperationException("无法创建目录树宿主窗口。");
         try
         {
+            NativeShellTheme.Apply(_parent);
             _tree = new NativeShellTree(_parent, 1, 1);
+            RefreshTheme();
             if (_addressTreeMode)
             {
                 _root = "shell:Desktop";

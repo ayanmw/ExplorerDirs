@@ -3,12 +3,11 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
-using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using ExplorerDirs.App;
 
-// Drives the real MainWindow WM_SETTINGCHANGE hook with an isolated hidden HWND.
+// Drives the production WM_SETTINGCHANGE hook with an isolated hidden HWND.
 // The temporary user variable is unique, is never broadcast to other windows,
 // and is removed from both the registry and this process before the probe exits.
 internal static class EnvironmentRefreshProbe
@@ -30,20 +29,33 @@ internal static class EnvironmentRefreshProbe
             registryBefore = key.GetValue(variable, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
         }
 
-        App? application = null;
-        MainWindow? window = null;
+        HwndSource? source = null;
+        IDisposable? settingChangeHook = null;
         try
         {
-            application = new App();
-            window = new MainWindow();
-            var sourceInitialized = false;
-            window.SourceInitialized += (_, _) => sourceInitialized = true;
-            var hwnd = new WindowInteropHelper(window).EnsureHandle();
+            // Avoid MainWindow here: its HWND initialization restores user window placement.
+            var parameters = new HwndSourceParameters("ExplorerDirsEnvironmentRefreshProbe")
+            {
+                Width = 1,
+                Height = 1,
+                PositionX = -32000,
+                PositionY = -32000,
+                WindowStyle = 0
+            };
+            source = new HwndSource(parameters);
+            var hwnd = source.Handle;
             if (IsWindowVisible(hwnd)) throw new InvalidOperationException("Test window unexpectedly became visible.");
-            var hwndSource = HwndSource.FromHwnd(hwnd)
-                ?? throw new InvalidOperationException("The hidden WPF window has no HwndSource.");
+            var appAssembly = typeof(MainWindow).Assembly;
+            var environmentRefreshType = appAssembly.GetType("ExplorerDirs.App.EnvironmentRefresh", true)!;
+            var environmentRefresh = Activator.CreateInstance(environmentRefreshType)!;
+            var reload = environmentRefreshType.GetMethod("Reload", BindingFlags.Instance | BindingFlags.Public)!;
+            Action refresh = () => reload.Invoke(environmentRefresh, null);
+            var hookType = appAssembly.GetType("ExplorerDirs.App.SystemSettingChangeHook", true)!;
+            var hookConstructor = hookType.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, [typeof(HwndSource), typeof(Action), typeof(Action)], null)!;
+            settingChangeHook = (IDisposable)hookConstructor.Invoke([source, refresh, null]);
             var nativeMessageObserved = false;
-            hwndSource.AddHook((IntPtr _, int message, IntPtr _, IntPtr _, ref bool _) =>
+            source.AddHook((IntPtr _, int message, IntPtr _, IntPtr _, ref bool _) =>
             {
                 if (message == WmSettingChange) nativeMessageObserved = true;
                 return IntPtr.Zero;
@@ -56,19 +68,12 @@ internal static class EnvironmentRefreshProbe
             {
                 SendMessage(hwnd, WmSettingChange, IntPtr.Zero, text);
                 nativeRefresh = PumpUntilValue(variable, value, TimeSpan.FromMilliseconds(500));
-                if (!nativeRefresh)
-                {
-                    // Some hidden Window/HwndSource configurations do not run the window hook
-                    // chain until WPF shows the Window. Exercise the same production callback
-                    // directly as a non-GUI fallback, and record that boundary explicitly.
-                    var hookMethod = typeof(MainWindow).GetMethod("WindowHook", BindingFlags.Instance | BindingFlags.NonPublic)!;
-                    hookMethod.Invoke(window, [hwnd, WmSettingChange, IntPtr.Zero, text, false]);
-                }
             }
             finally { Marshal.FreeHGlobal(text); }
+            if (!nativeRefresh)
+                throw new TimeoutException("The production WM_SETTINGCHANGE hook did not refresh the process environment.");
             PumpUntil(() => Environment.GetEnvironmentVariable(variable, EnvironmentVariableTarget.Process) == value,
-                TimeSpan.FromSeconds(5),
-                $"MainWindow did not refresh WM_SETTINGCHANGE: status='{StatusText(window)}', process='{Environment.GetEnvironmentVariable(variable, EnvironmentVariableTarget.Process)}', registry='{key.GetValue(variable, null, RegistryValueOptions.DoNotExpandEnvironmentNames)}', visible={IsWindowVisible(hwnd)}.");
+                TimeSpan.FromSeconds(5), "The environment refresh hook did not apply the new persisted variable.");
 
             string? childOutput = null;
             var launcher = typeof(MainWindow).Assembly.GetType("ExplorerDirs.App.TerminalLauncher", true)!
@@ -84,17 +89,21 @@ internal static class EnvironmentRefreshProbe
             {
                 SendMessage(hwnd, WmSettingChange, IntPtr.Zero, removalText);
                 nativeRemoval = PumpUntilMissing(variable, TimeSpan.FromMilliseconds(500));
-                if (!nativeRemoval)
-                    InvokeProductionHook(window, hwnd, removalText);
             }
             finally { Marshal.FreeHGlobal(removalText); }
+            if (!nativeRemoval)
+                throw new TimeoutException("The production WM_SETTINGCHANGE hook did not remove the deleted process variable.");
             PumpUntil(() => Environment.GetEnvironmentVariable(variable, EnvironmentVariableTarget.Process) is null,
-                TimeSpan.FromSeconds(5), "MainWindow did not remove the deleted environment variable.");
+                TimeSpan.FromSeconds(5), "The environment refresh hook did not remove the deleted variable.");
             childOutput = RunCommand(launcher, variable, $"/d /c if defined {variable} (echo defined) else (echo missing)");
             if (childOutput != "missing")
                 throw new InvalidOperationException($"New cmd.exe still inherited a deleted variable: '{childOutput}'.");
+            if (!nativeMessageObserved)
+                throw new InvalidOperationException("The hidden native HWND did not receive WM_SETTINGCHANGE.");
+            if (IsWindowVisible(hwnd))
+                throw new InvalidOperationException("The environment refresh HWND became visible.");
 
-            Console.WriteLine($"environment-refresh-hook message=WM_SETTINGCHANGE source-initialized={sourceInitialized} native-message-observed={nativeMessageObserved} production-hook={(nativeRefresh && nativeRemoval ? "native-window-message" : "direct-hidden-test-callback")} add-value-refreshed=True child-cmd-inherited=True delete-value-removed=True child-cmd-no-longer-inherits=True hwnd-visible=False other-windows-broadcast=False");
+            Console.WriteLine($"environment-refresh-hook message=WM_SETTINGCHANGE native-message-observed={nativeMessageObserved} production-hook=native-window-message add-value-refreshed=True child-cmd-inherited=True delete-value-removed=True child-cmd-no-longer-inherits=True hwnd-visible=False other-windows-broadcast=False");
             return 0;
         }
         finally
@@ -118,12 +127,8 @@ internal static class EnvironmentRefreshProbe
                 }
                 finally
                 {
-                    if (window is not null)
-                    {
-                        if (window.IsVisible) window.Hide();
-                        window.Close();
-                    }
-                    application?.Shutdown();
+                    settingChangeHook?.Dispose();
+                    source?.Dispose();
                 }
             }
         }
@@ -194,12 +199,6 @@ internal static class EnvironmentRefreshProbe
         return output ?? throw new InvalidOperationException($"cmd.exe produced no output for {variable}.");
     }
 
-    private static void InvokeProductionHook(MainWindow window, nint hwnd, nint text)
-    {
-        var hookMethod = typeof(MainWindow).GetMethod("WindowHook", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        hookMethod.Invoke(window, [hwnd, WmSettingChange, IntPtr.Zero, text, false]);
-    }
-
     private static bool PumpUntilValue(string variable, string value, TimeSpan timeout)
     {
         var frame = new DispatcherFrame();
@@ -222,10 +221,6 @@ internal static class EnvironmentRefreshProbe
         Dispatcher.PushFrame(frame);
         return complete;
     }
-
-    private static string? StatusText(MainWindow window) => typeof(MainWindow)
-        .GetField("EnvironmentStatus", BindingFlags.Instance | BindingFlags.NonPublic)?
-        .GetValue(window) is System.Windows.Controls.TextBlock status ? status.Text : null;
 
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
 

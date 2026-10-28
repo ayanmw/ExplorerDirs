@@ -2,12 +2,28 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$Version = 'preview-0.5.2',
     [switch]$IsolatedProfile,
-    [string]$ReleaseNotes
+    [string]$ReleaseNotes,
+    [string]$ReleaseRoot,
+    [string]$ProfileRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'releases'))
+$releaseRoot = [System.IO.Path]::GetFullPath(
+    $(if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) { Join-Path $projectRoot 'releases' } else { $ReleaseRoot }))
+$profileSourceRoot = if ([string]::IsNullOrWhiteSpace($ProfileRoot)) {
+    Join-Path $projectRoot 'profile'
+} else {
+    [System.IO.Path]::GetFullPath($ProfileRoot)
+}
+if ($IsolatedProfile -and -not (Test-Path -LiteralPath $profileSourceRoot -PathType Container)) {
+    throw "Profile source directory does not exist: $profileSourceRoot"
+}
+$releasePrefix = if ($releaseRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $releaseRoot
+} else {
+    $releaseRoot + [System.IO.Path]::DirectorySeparatorChar
+}
 $project = Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj'
 $productVersion = $null
 if ($Version -match '^preview-(\d+\.\d+\.\d+)-temp\.(\d+)$') {
@@ -25,7 +41,7 @@ $destination = [System.IO.Path]::GetFullPath((Join-Path $releaseRoot $Version))
 $buildOutput = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ('src\ExplorerDirs.App\bin\publish-build\' + $Version)))
 
 foreach ($path in @($staging, $destination)) {
-    if (-not $path.StartsWith($releaseRoot + [System.IO.Path]::DirectorySeparatorChar,
+    if (-not $path.StartsWith($releasePrefix,
         [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Release path escapes releases directory: $path"
     }
@@ -69,23 +85,32 @@ $dllHash = (Get-FileHash -LiteralPath (Join-Path $payload 'ExplorerDirs.App.dll'
 if ($IsolatedProfile) {
     $profileCopy = Join-Path $payload 'profile'
     New-Item -ItemType Directory -Path $profileCopy -Force | Out-Null
-    # Match the separate preference stores: omitting the tree setting made an
-    # isolated preview silently revert the user's navigation preference.
-    foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', 'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini')) {
-        $source = Join-Path (Join-Path $projectRoot 'profile') $name
+    # Keep the explicit list aligned with runtime preference stores. The former
+    # list omitted newer tab/status/filter options, resetting them in previews.
+    # Do not copy all INIs: unrelated files and unregistered sessions stay out.
+    foreach ($name in @(
+        'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
+        'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
+        'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',
+        'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini',
+        'MouseWheelFocus.ini', 'TabStripVisibility.ini', 'MultilineTabHeaders.ini', 'TabHeaderMaximumWidth.ini', 'TabCloseButton.ini', 'TabHoverActivation.ini',
+        'NewTabLocation.ini', 'StatusBar.ini', 'StatusBarSelectionSize.ini', 'StatusBarFolderSize.ini',
+        'SelectionCheckBoxes.ini', 'FullRowSelection.ini'
+    )) {
+        $source = Join-Path $profileSourceRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
         }
     }
-    $windowRegistry = Join-Path (Join-Path $projectRoot 'profile') 'WindowSessions.ini'
+    $windowRegistry = Join-Path $profileSourceRoot 'WindowSessions.ini'
     if (Test-Path -LiteralPath $windowRegistry -PathType Leaf) {
         Copy-Item -LiteralPath $windowRegistry -Destination (Join-Path $profileCopy 'WindowSessions.ini')
         foreach ($line in [IO.File]::ReadAllLines($windowRegistry)) {
             $match = [regex]::Match($line, '^Session\d+=(ExplorerDirs\.window-[0-9a-fA-F]{32}\.ini)$')
             if (-not $match.Success) { continue }
             $sessionName = $match.Groups[1].Value
-            foreach ($name in @($sessionName, ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.PinnedTabs.ini'))) {
-                $source = Join-Path (Join-Path $projectRoot 'profile') $name
+            foreach ($name in @($sessionName, ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.PinnedTabs.ini'), ([IO.Path]::GetFileNameWithoutExtension($sessionName) + '.WindowPlacement.ini'))) {
+                $source = Join-Path $profileSourceRoot $name
                 if (Test-Path -LiteralPath $source -PathType Leaf) {
                     Copy-Item -LiteralPath $source -Destination (Join-Path $profileCopy $name)
                 }
@@ -94,7 +119,7 @@ if ($IsolatedProfile) {
     }
     # WorkspaceCatalog lists only top-level .qdr snapshots. Carry those into the
     # independent profile as well, without copying nested directories or unrelated files.
-    $workspaceSource = Join-Path (Join-Path $projectRoot 'profile') 'Workspaces'
+    $workspaceSource = Join-Path $profileSourceRoot 'Workspaces'
     if (Test-Path -LiteralPath $workspaceSource -PathType Container) {
         $workspaceFiles = @(Get-ChildItem -LiteralPath $workspaceSource -File -Force |
             Where-Object { $_.Extension -ieq '.qdr' })
@@ -108,7 +133,7 @@ if ($IsolatedProfile) {
     }
     # Quick Links are user-managed Shell shortcuts. Copy only the top-level
     # .lnk files the runtime menu reads; do not carry unrelated profile files.
-    $quickLinksSource = Join-Path (Join-Path $projectRoot 'profile') 'QuickLinks'
+    $quickLinksSource = Join-Path $profileSourceRoot 'QuickLinks'
     if (Test-Path -LiteralPath $quickLinksSource -PathType Container) {
         $quickLinks = @(Get-ChildItem -LiteralPath $quickLinksSource -File -Force |
             Where-Object { $_.Extension -ieq '.lnk' })

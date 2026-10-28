@@ -33,6 +33,45 @@ internal static class FolderHeaderFlagsSmoke
                 throw new InvalidOperationException($"Custom-position option expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8}.");
         }
 
+        var checkSelectCases = new (uint Input, bool Enabled, uint Expected)[]
+        {
+            (0x40200008, true, 0x40240008),
+            (0x40240008, false, 0x40200008),
+            (0xFFFFFFFF, true, 0xFFFFFFFF)
+        };
+        foreach (var (input, enabled, expected) in checkSelectCases)
+        {
+            var actual = ShellFolderViewOptions.SetCheckSelect(input, enabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"Check-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
+        }
+
+        var fullRowSelectCases = new (uint Input, bool Enabled, uint Expected)[]
+        {
+            (0x40040008, true, 0x40240008),
+            (0x40240008, false, 0x40040008),
+            (0xFFFFFFFF, false, 0xFFDFFFFF)
+        };
+        foreach (var (input, enabled, expected) in fullRowSelectCases)
+        {
+            var actual = ShellFolderViewOptions.SetFullRowSelect(input, enabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"Full-row-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
+        }
+
+        var groupingCases = new (uint Input, bool Disabled, uint Expected)[]
+        {
+            (0x40240008, true, 0x40340008),
+            (0x40340008, false, 0x40240008),
+            (0xFFFFFFFF, false, 0xFFEFFFFF)
+        };
+        foreach (var (input, disabled, expected) in groupingCases)
+        {
+            var actual = ShellFolderViewOptions.SetNoGrouping(input, disabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"No-grouping flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (disabled={disabled}).");
+        }
+
         Console.WriteLine("Folder header flags smoke: PASS");
     }
 }

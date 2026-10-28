@@ -52,6 +52,154 @@
 
 ## Q-Dir 已公开的列行为补充（2026-10-25）
 
-复查 Q-Dir 官方 [FAQ 63](https://www.softwareok.com/?faq=63&seite=faq-Q-DIR) 后确认，逐行信息不止一个递归大小字段：Q-Dir 可把文件夹总大小显示在 Size 列，并把文件/目录数量（包括子目录中的项目）显示在 Type 列。官方说明通过 F9 的 Data Size Information 配置这类信息，也提供是否忽略文件夹大小参与排序的选项。后续若实现，需覆盖用户可选择的排序语义，不能把“文件夹大小永不参与排序”当作完整验收条件。
+复查 Q-Dir 官方 [FAQ 63](https://www.softwareok.com/?faq=63&seite=faq-Q-DIR) 和[功能说明](https://www.softwareok.com/?seite=Freeware/Q-Dir/File_and_folder_size_Column_with_percentage) 后确认，逐行信息不止一个递归大小字段：文件大小继续显示在 Size 列，文件夹总大小复用 Size 列；文件/目录数量（包括子目录中的项目）复用 Type 列。官方选项还包括单位/小数位/千位分隔、百分比、目录/文件数量、无焦点时暂停计算，以及是否忽略文件夹大小参与排序。Q-Dir 明确指出，可选择忽略文件夹大小排序以避免导航性能问题；因此排序忽略是可选策略，不是所有模式下的固定行为。
+
+### 2026-10-28 FAQ 82 控制入口与百分比说明
+
+重新打开 Q-Dir 官方 [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 核对当前文字：逐行 Size 信息可以关闭/开启，入口写作 Extras → Size information 或 F9；文件及文件夹大小的下划线百分比被说明为同一目录内大小的相对百分比。该页未定义分母公式、文件/目录是否分开归一、隐藏项及扫描失败如何参与、舍入方式。故只确认“相对同目录项目”这一层语义，不据此实现百分比计算。
+
+Explorer Dirs 的 F9 已由用户选定为显式递归汇总命令，输出整棵目录子树的状态栏统计；保留该行为，不将其静默改为 Q-Dir 的逐行信息开关。该记录确认两者当前命令语义不同；逐行功能仍须先通过新的 Shell 视图架构与性能门槛，不改变 ExplorerBrowser 产品路径。
+
+本项目现有 F9 只汇总当前目录整棵子树的总字节数、文件数和子目录数到状态栏，**不等同于 Q-Dir 的逐行列和 F9 数据大小信息**，也不提供每个可见子目录的大小/数量、百分比或排序设置。Q-Dir 官方 [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 说明文件夹大小下划线百分比相对于同一目录中的文件/文件夹，而不是磁盘容量比例；但公开文字没有定义具体分母、是否包含普通文件及未完成/失败项目。下一次可见互操作仍需确认 Size/Type 两列显示、计算未完成标记、精确百分比公式、排序切换，以及“无焦点时暂停”如何作用于四窗格；默认排序设置也仍未知。
+
+因此，后续原型验收需要同时覆盖逐项值与交互策略：Size 列复用、Type 列复用、单位/精度、百分比、数量、未完成/失败状态、排序忽略开关、失焦暂停和多个窗格并发。目录扫描必须按需、可取消，不能在导航时对全部子目录递归扫描；任何缺值不能伪装成 0。当前隔离 adapter 尚未读取逐项属性，排序门槛未通过，不能开始产品接线。
 
 本项目目前的 F9/状态栏扫描只汇总当前目录的总字节数、文件数和子目录数，尚未提供逐行数据。此前 `SetViewProperty(System.Size)` spike 证明该视图缓存不会参与本机 Shell 大小排序且刷新会清除，不能满足可排序列。公开资料补充了 Q-Dir 的目标行为，但没有改变 ExplorerBrowser 对任意新列缺少受支持扩展接口的结论；也没有新增视图实现方案或启动 Shell 探针。
+
+### 2026-10-27 百分比语义补充
+
+Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将 Size 列中文件夹大小的下划线百分比说明为同一目录中项目之间的相对比例。因此它不是磁盘空间使用率，不能复用状态栏的“已用容量百分比”。FAQ 没有明确定义计算分母、文件与文件夹是否分别参与、递归未完成时如何处理；这些细节仍需对照 Q-Dir 可见行为，不能据此臆造公式。该资料只更新需求语义，不改变目前 ExplorerBrowser/DefView 的新列架构门槛。
+
+### 2026-10-26 原生 Shell 视图架构评审
+
+用户选择先做原生 `IShellView` 架构评审。评审推荐隔离验证 `IShellFolder2` folder adapter + Windows DefView，而不是自绘列表或重写完整 `IShellView`；这仍需独立 `IShellBrowser` 宿主，不可作为 ExplorerBrowser 的列插件。评审范围、比较、门槛及递归计算策略冲突见[架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。未修改产品代码、未运行 Shell 宿主或 GUI。
+
+### 2026-10-26 无窗口文件夹适配器合同复验
+
+运行 `ExplorerDirs.NativeProbe.exe --static-shell-column-folder-smoke`，在不创建窗口的条件下直接查询隔离 `IShellFolder2` 适配器。`PKEY_Size` 可读为 `UInt64`，标准大小列的格式化文本和 `CompareIDs` 均按 2、10、100 的数值顺序处理，并将相等值比较为 0；退出码为 0，探针输出 `window-created=False`。样本值是适配器合同夹具，不是真实递归目录计算结果。
+
+这提高了 `IShellFolder2` + Windows DefView 路线的可行性证据，但没有创建 DefView、没有验证文件系统文件夹视图的列显示/排序，也没有覆盖拖放、右键菜单、Shell 操作和刷新。下一步仍需独立宿主兼容门槛验证；在本项目当前不进行 GUI/桌面操作的约束下，不运行该宿主探针，也不接入 ExplorerBrowser 产品代码。
+
+## 2026-10-27：排序对照实验不再遇首个失败就退出
+
+源码复核发现 StaticShellFolderAdapterProbe.Run 顺序执行 custom 升/降序，再执行标准 PKEY_Size 升/降序；首个数值顺序断言失败会直接抛出，后面标准属性对照没有执行。因此既有首个 custom 排序失败不能推出标准 Size 的排序实验也失败。之前显示读取后的回调计数仍是该阶段证据，但不能代替后续被跳过的四组排序请求。
+
+探针现分别执行四组检查并逐项报告，每个错误保留在 AggregateException 中，任意一组失败仍令整个实验失败；没有降低升/降序预期。无窗口自检注入首次异常、随后三个错误结果，确认四组都执行并最终报告四个失败；全正确的矩阵也通过。该自检随真实无窗口 folder-contract smoke 通过，日志 src/.state/static-sort-matrix.log，原生属性/空值合同亦通过。修正最终成功日志的 parent-visible 标志，与该实验实际 ShowWindow/边界检查一致。
+
+尚未运行创建视图的矩阵，未加入动态值缓存、递归扫描、IPropertyStore 装饰器或产品迁移。当前关键缺口仍是 DefView 是否在安全隔离环境中实际读取和排序适配列；应在后续集中实验分别取得 custom 与标准 Size 的四组结果，而不是继续扩展未被消费的数据通道。
+## 2026-10-27：独立 Desktop 四组排序实测（门槛未通过）
+
+通过新增 watchdog 模式 `static-shell-column-adapter-private-desktop` 在独立 Windows Desktop 执行；未调用 SwitchDesktop、SetForegroundWindow 或键鼠输入。私有 Desktop 内允许窗口显示以满足 DefView 条件，不等于无 HWND。超时外层 35 秒/内部 25 秒；两次均正常返回失败 exitCode=1，非挂死或超时。前后前台均 0x14A111A。
+
+首轮 20261027-232708-9067d0e3 完整执行四组：custom/Size 升序失败，两个降序表面通过。但初始名称顺序 hundred/ten/ten-copy/two 恰好对应 100/10/10/2，降序通过不能证明发生重排。改用 a-ten-copy/hundred/ten/two，使初始数值为 10/100/10/2，与任何预期方向均不同；仅为此夹具增加等值文件名别名，不改数值断言。修正排序结束的 visible 边界检查，与既有 ShowWindow 保持一致。
+
+最终记录：`src/.state/native-probe-watchdog/20261027-232840-a9f01e28.stdout.log`，SHA-256 `52C42DB67877FD1CC2A95F45B197D3A0AEE6A865DE0B12D005A2C9424E5F7E50`。DLL SHA-256 `87BEC6A41112A6093E5B9AAA744F790E98877D5D056B9AE835A9A14F0A44272F`。
+
+| 检查 | 请求/读回 | 实际项目数值顺序 | 结果 |
+| --- | --- | --- | --- |
+| custom 升序 | S_OK，方向 +1 | 10,100,10,2 | 失败 |
+| custom 降序 | S_OK，方向 -1 | 10,100,10,2 | 失败 |
+| PKEY_Size 升序 | S_OK，方向 +1 | 10,100,10,2 | 失败 |
+| PKEY_Size 降序 | S_OK，方向 -1 | 10,100,10,2 | 失败 |
+
+列表实际读出的 Size 文本仍均为 1 KB，自定义子项文本为空，名称与日期列可读；view-uses-adapter=1。每组排序前、排序完成且探针尚未自行读取数值时，CompareIDs/GetDetailsEx/GetDetailsOf/IPropertyStore 各计数无增量。每组完成后四次直接 GetDetailsEx 读回由探针自身造成，现已用明确的阶段标签区分，不能误称 DefView 开始消费属性。
+
+结论：静态 folder contract 仍通过，但 DefView 消费/排序门槛未通过。标准 PKEY_Size 对照也失败，使“仅缺自定义 schema”不足以解释结果；不能因此直接注册 schema、添加 IPropertyStore 装饰器或投入动态扫描缓存。仍需不同且有依据的视图身份/属性读取路径假设；当前证据不证明所有自定义 namespace 都不可行。产品架构、发布版与固定候选均未改变。
+
+C++ /W4 /WX、NativeProbe Release build 零警告错误，最终无窗口 folder-contract smoke 继续通过。独立 Desktop 实验是后台原生组件负向证据，不是用户可见文件管理体验验收。
+## 2026-10-27：接口转发与 COM 身份缺陷
+
+新增最多 64 个不同 IID 的原生 QueryInterface 转发诊断（无持有额外 COM 引用、无动态增长；只在隔离 DLL 中），保留原转发语义。独立 Desktop 记录 `src/.state/native-probe-watchdog/20261027-233209-eff81f30.stdout.log`：DefView 请求并成功取得转发的 IParentAndItem（B3A4B685...）和 IPersistFolder2（1AC3D9F0...），另有若干内部 IID；四组排序仍失败，正常退出 1，前台前后不变。未注册任何属性 schema。
+
+IID 名称经本机 Windows SDK 10.0.26100.0 ShObjIdl_core.h 核对；[IParentAndItem 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)说明该接口能直接提供父 ShellFolder 与子 PIDL。由此形成“转发的身份/父项接口可能让视图重新回到底层文件系统”的待验证假设，而不是已证明的读取调用链。
+
+新增独立无窗口入口 `--static-shell-column-identity-smoke`，从同一个 adapter 及其成功返回的 IParentAndItem 分别 QueryInterface(IUnknown)，比较真实指针并逐个 Release。结果 `same-IUnknown=False`，以失败退出；日志 src/.state/static-identity-red.log。根据[微软 QueryInterface 实现规则](https://learn.microsoft.com/en-us/windows/win32/com/rules-for-implementing-queryinterface)，同一对象的各接口必须有相同 IUnknown 身份。因此当前“任意未知接口直接返回 inner 指针”的包装方式至少存在 COM 身份合同缺陷；原数值 folder-contract 通过不能覆盖该门槛。
+
+本批只加诊断和独立失败门槛，未伪造修复、未降低要求。下一步应在隔离策略中只暴露正确包装的接口或对不支持接口返回 E_NOINTERFACE，再验证视图创建、原生操作与列消费是否仍可保留。若必须实现自己的 namespace 身份，应按架构门槛评审，不能把简单隐藏接口造成的功能丢失当作迁移成功。未证明该缺陷是所有排序失败的唯一原因；产品 ExplorerBrowser 不使用此 shim。
+## 2026-10-27：严格接口策略与持久化包装对照
+
+新增独立 CreateStrictShellFolderAdapter 工厂；旧工厂保留为身份缺陷的负向对照，不改产品。严格对象只暴露自己实现的接口，不直接返回 inner 的任意 QI 指针。新增 --static-shell-column-identity-strict-smoke 与 watchdog 的 static-shell-column-adapter-strict-private-desktop 模式。
+
+第一阶段严格拒绝未知接口，直接数值合同/基础身份可通过，但独立 Desktop 的 SHCreateShellFolderView/CreateViewObject 返回 E_NOINTERFACE，无法进入文件视图（20261027-233706-08c1579f）。这不是迁移成功，也不能用“不支持接口”掩盖必需能力缺失。
+
+第二阶段在严格对象上实际实现 IPersistFolder2（包括 IPersist/IPersistFolder 的 QI），各接口的 IUnknown 都返回同一适配层身份；GetClassID/Initialize/GetCurFolder 的功能调用委托给底层并逐次释放引用。原生文件夹操作仍通过已有 IShellFolder2 方法委托。直接检查同时验证文件夹与 persistence 接口身份一致、不再暴露未实现的 IParentAndItem；完整数值合同继续通过，exitCode=0，日志 src/.state/static-strict-final-identity.log。
+
+最终独立 Desktop 实测（20261027-233824-e77f264e）恢复视图创建，view-uses-adapter=1，名称/原始 Size/日期可读，但自定义列仍空、四组排序仍为 10/100/10/2，最终失败退出 1，前台前后不变。证明 COM 身份缺陷确实可以隔离修正，但修正它并保留最小 persistence 路径仍不足以修复列消费。不能把该缺陷称为排序问题唯一原因，也不能把“严格接口直接测试通过”当作视图门槛通过。
+
+C++ /W4 /WX 和 NativeProbe 构建通过，原有无窗口 folder-contract 与新的严格身份检查均通过。严格模式仅为隔离 A/B，未证明快捷键、菜单、拖放和通知等整体功能保留；不能替换产品宿主。下一步仍需调查文件系统解析身份/属性缓存如何影响 DefView 消费，不继续无依据扩展动态扫描缓存。候选和发布版不变。
+
+## 2026-10-27：类身份对照与探针缓冲区修正
+
+前一轮新增的原生 folder-contract 探针在输出 PASS 后以 `0xC0000374`（heap corruption）退出，因此该次结果无效。复查发现探针将 `SHELLDETAILS` 固定按 272 字节分配；x64 SDK 下 `STRRET` 的对齐使完整结构大于该值。另外，标准 `PKEY_Size` 对照还复用了已经释放的 details 缓冲区。现在由同一 C++ 编译单元导出 `sizeof(SHELLDETAILS)`，托管探针按实际大小分配；标准 Size 检查使用单独分配、释放的缓冲区。
+
+修正后，`--static-shell-column-classid-smoke` 在 3 个独立进程中均以 exitCode=0 完成，严格身份基线也以 exitCode=0 完成，未再出现堆损坏。随后在独立 Desktop 上比较仅改变 `IPersist::GetClassID` 返回值的原型：DefView 确实使用 adapter，名称、系统 Size、日期及自定义列的属性回调均可读取；但四种自定义列/`PKEY_Size` 升降序仍不改变列表顺序。排序前后直接读取 DefView 内 `SysListView32` 的可见文件名，均为原始名称序；`CompareIDs` 计数为 0。显式调用 `IShellView::Refresh` 也未改变结果（返回 `S_FALSE`）。故类身份不是目前排序失败的修复点；隔离原型仍未达到逐行列的消费/排序门槛，不能接入产品。该私有 Desktop 探针退出码为 1，前台窗口句柄保持不变。
+
+此结果修正了此前被损坏探针污染的判断边界：无窗口合同现可重复通过，但实际 DefView 消费与排序仍失败。产品代码、发布候选及用户配置均未改动。
+
+为建立普通文件系统 ExplorerBrowser 对照，追查发现隐藏 `--view-data-capability` 的导航 helper 将绝对 PIDL 与 `0x4000` 一起传入；Windows 定义该值为 `SBSP_NAVIGATEBACK`（忽略 PIDL），所以 Shell 实际仍留在父夹具目录，误把新建的 `.view-data-*` 子目录计为第四项。改用绝对 PIDL 标志 0，并等待当前 `IPersistFolder2::GetCurFolder` 与目标 PIDL 相等后，夹具导航和详情排序名称升降序均恢复正确。
+
+分组/筛选组合期间 Shell 会替换当前 `IFolderView2`；持有旧指针读取时得到空项或 `E_FAIL`，单次 `ItemCount` 命中也可能只是过渡值。探针现每次从 `IExplorerBrowser::GetCurrentView` 取新接口，并要求三次连续读取都得到预期 PIDL 行序，才继续检查导出。`--view-data-capability` 随后在 3 个独立隐藏 ExplorerBrowser 进程中全部以 exitCode=0 完成，含普通名称排序、筛选、分组、分组后启用筛选及导出行序；父 HWND 未显示，前台未变。
+
+单独的 `--view-property-refresh-capability` 以 exitCode=0 完成，系统 `PKEY_Size` 以实际 5/3 字节文件得到 `five.txt|three.txt|child` 的降序；注入 `IFolderView2::SetViewProperty` 后仍为相同顺序，刷新后缓存清空。修正后普通 Shell 的标准排序控制已通过；与之对照，自定义 adapter 的 DefView 可见行序仍保持原名序，排序失败不能归因于初始夹具导航错位。
+
+## 2026-10-28：区分实际 Size 排序与旧式列索引排序入口
+
+此前 adapter 的物理夹具四个文件长度完全相同，不能作为实际 `PKEY_Size` 重排对照。本轮将隔离文件固定为 2、10、10、100 字节，并以字母序 `a-ten-copy.bin|hundred.bin|ten.bin|two.bin` 作为初始顺序。严格 adapter 的 Private Desktop 记录 `src/.state/native-probe-watchdog/20261028-002005-80159188.stdout.log`（SHA-256 `A6CB26626009DD5F4E4A3BF38183CC7D98FB94D1317606138CCD5B8A90F506DD`）：`PKEY_Size` 升序得到 `two|a-ten-copy|ten|hundred`，降序得到 `hundred|a-ten-copy|ten|two`；两项均通过。由此确认此前 Size 对照失效是夹具问题，不是 Shell 标准排序失效。
+
+同一实验用 `IShellFolderView::Rearrange` 分别传入自定义列索引 37 和其当前显示位置 2，两次均返回 `S_OK`，但可见顺序不变；`CompareIDs` 计数也均无增加。随后 `IFolderView2::SetSortColumns` 对自定义 PKEY 升降序同样保持名称顺序，读回的排序键/方向正确但未重排；标准 `PKEY_Size` 升降序仍通过。自定义列的 `GetDetailsOf` 子项为空，排序调用未触发 `GetDetailsEx`、`IPropertyStore` 或 `CompareIDs`。探针 exitCode=1 是自定义排序门槛失败，Private Desktop 前台句柄未变。
+
+微软文档将 `Rearrange` 标为弃用接口，并说明系统文件视图会以其低 16 位指定排序列；本轮实际试验表明调用成功本身不代表 adapter 获得了比较回调。[`IShellFolderView::Rearrange`](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderview-rearrange)。因此当前可确认：普通文件夹的标准大小排序可用；此 adapter 的自定义属性显示/排序尚未打通；两条排序入口都未调用 adapter 比较函数。自定义属性 schema 是否是原因仍只是推测，本轮没有注册 schema，也没有证明所有自定义 namespace 都不可行。产品仍使用 ExplorerBrowser，未接入原型。
+
+后续评估 schema 方案时还要考虑部署边界：微软 [`PSRegisterPropertySchema`](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema) 文档要求安装时注册机器本地 `.propdesc`，schema 为机器级、不能按用户注册，且 API 需要包含 `HKLM` 写权限的权限上下文。这与项目当前便携配置、不改系统注册表的原则冲突；不能把 schema 注册作为普通启动行为。若未来证明确实是唯一技术路线，需先单独审视安装/卸载和系统影响策略，再决定是否做可选安装能力。
+
+### 2026-10-28：系统已知属性 schema 无窗口核验
+
+为形成后续 DefView 对照，本轮只扩展无窗口文件夹合同探针：通过 `PSGetPropertyDescription` 查询 `System.Document.ByteCount`（`{D5CDD502-2E9C-101B-9397-08002B2CF9AE},4`）。Windows SDK 10.0.26100.0 的 `propkey.h` 将其声明为 `VT_I4`；当前机器解析结果为 `S_OK`，`IPropertyDescription::GetPropertyType` 返回 `VT_I4`，`GetColumnState` 返回 `SHCOLSTATE_TYPE_INT`。同一探针中的私有测试属性仍返回 `TYPE_E_ELEMENTNOTFOUND`，而 `System.Size`、`System.DateCreated` 与 `System.Document.ByteCount` 均能解析。
+
+隔离 adapter 现在另提供一个仅供实验的 `System.Document.ByteCount` 列，使用与 schema 一致的 `VT_I4` 值；无窗口合同已验证该列状态、键映射、显示文本、类型和数值比较。该结果证明适配器可以按系统 schema 契约提供一列，但仍不证明 DefView 会消费该值。`VT_I4` 也不适合真实文件夹总大小。没有注册 schema、创建窗口或改动产品；NativeProbe Release 构建、原生 adapter 构建及 `--static-shell-column-folder-smoke` 通过，输出 `window-created=False`。后续隔离 DefView 对照只能把它用作“已知 schema”诊断控制，并与产品 64 位大小语义严格区分。
+
+### 2026-10-28：已知 schema 列的 DefView 消费检查
+
+将 `System.Document.ByteCount` 以其系统描述的 `VT_I4` 类型加入严格 `IShellFolder2` adapter 的 Details 列后，在独立 Private Desktop 上激活 DefView 检查。运行记录为 `src/.state/native-probe-watchdog/20261028-014424-registered-schema-column.stdout.log`（SHA-256 `8E51A3CE311D5AED4BCDBEC5C3024FBC62D151D99DF8A28D72B3B6FD77C16A8B`）。`UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 成功，DefView 确认使用 adapter，用户桌面的前台窗口句柄前后不变。
+
+DefView 的 `System.Document.ByteCount` 子项文本仍为空；从创建视图前重置的计数器观察，显示列及排序前后，该属性对应的 `GetDetailsOf`、`GetDetailsEx` 和 `CompareIDs` 计数均为 0。未注册测试列只收到一次列标题 `GetDetailsOf`，没有逐项读取。标准 `PKEY_Size` 升降序都通过；`System.Document.ByteCount` 两个方向仍保持初始名称顺序，严格探针以 exit code 1 报告未达自定义列排序门槛。可确认：即使系统 schema 已知、属性类型和列状态匹配，当前严格 filesystem adapter 路径仍未让 DefView 消费该自定义列。不能据此排除其他 Shell namespace/宿主设计，也不构成产品迁移依据；产品仍使用 ExplorerBrowser。
+
+### 2026-10-28 激活视图仍不触发逐项属性回调
+
+为排除“DefView 尚未激活所以不读取列值”的解释，NativeProbe 增加 `--static-shell-column-adapter-activated-strict-private-desktop` 对照。它在独立、未切换的 Windows Desktop 上创建同一严格接口适配器和文件夹夹具，显示父窗口后调用 `IShellView::UIActivate(SVUIA_ACTIVATE_NOFOCUS)`，再执行同一列显示与四向排序矩阵；没有把输入焦点交给视图，也未操作用户桌面。
+
+最终运行记录为 `src/.state/native-probe-watchdog/20261028-013132-ca617853.stdout.log`（SHA-256 `F6EDBAF5663419115E6DB3E29756ADCED0AF75A7B2EC21D69926A4C4E3204952`），NativeProbe DLL SHA-256 `15D68CD4647CFC01BC6F79D650F22F805B39954D442BBE9520CD2FFAD914558E`。NativeProbe Release build 为 0 警告、0 错误。`UIActivate` 返回 `S_OK`，view 仍使用严格适配器，私有 Desktop 边界与主桌面前台句柄检查通过。标准 `PKEY_Size` 升/降序按真实 2/10/10/100 字节重排通过；自定义列升/降序仍保持名称顺序并使整个探针以预期的门槛失败退出。视图显示的自定义列各项文本为空；排序前后适配器 `GetDetailsEx(custom/size)`、子项 `GetDetailsOf`、`CompareIDs` 计数都没有由 DefView 增加，只有探针自身的少量显式检查调用。
+
+这排除了本探针采用的“激活后 DefView 会开始消费该适配器逐项列值”路径，但不证明任意自定义 Shell namespace 或自定义 PIDL/属性存储路线不可行。下一步需改变项目身份/属性提供路径来形成新的可证伪假设；不再仅重复激活同一 adapter，不注册系统级 property schema、不增加递归扫描缓存，也不接入产品 ExplorerBrowser。该隔离结果不是用户桌面 UI 验收。
+
+### 2026-10-28 包装子 PIDL 的后台合同原型
+
+按“改变项目身份”假设新增仅供 NativeProbe 的私有子 PIDL 包装层：枚举器和 `ParseDisplayName` 返回含原始 PIDL 副本的私有单项 PIDL；`IShellFolder2` 的比较、属性、显示名、绑定、UI 对象和重命名入口会先还原原始项目身份，再委托文件系统 Shell folder。包装格式只在进程内实验使用，不写入 profile 或 `.qdr`。
+
+无窗口合同验证通过：真实文件 PIDL 往返后 `ILIsEqual` 保持身份；错误 marker 被拒绝；包装枚举项通过 `GetAttributesOf`；`GetUIObjectOf(IDataObject)` 返回的数据对象可读取 `CF_HDROP` 与 `Shell IDList Array`（CIDA），两者都解析为现存夹具文件的真实 filesystem 路径；包装解析得到的项目维持既有列文本、`VT_UI8`、数值排序合同；`SetNameOf` 将夹具文件重命名并返回可还原的新 PIDL。底层文件系统枚举器的 `Clone` 返回 `E_NOTIMPL`，包装器原样保留，不伪造成功。原始 PIDL adapter 合同也继续通过，NativeProbe C++ `/W4 /WX` 与 Release 构建为 0 警告/错误，`git diff --check` 通过。
+
+随后对同一包装项执行绝对 PIDL 路径解析：原始文件的绝对 PIDL 由 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 正确解析；`ILCombine(原始父目录 PIDL, 包装子 PIDL)` 则返回 `E_INVALIDARG`。这说明当前包装 child 身份不能直接用于普通 Shell API 解析绝对路径。适配器内部的列/重命名/DataObject 合同通过，不能据此推断该包装项可在 Shell 组件之间自由传递。
+
+这只证明私有 PIDL 包装的编码/解码及被测 `IShellFolder2` 委托入口；绝对 PIDL 路径解析失败说明还缺少能解释自定义根/项目身份的 Shell namespace 路由。DefView 自定义列消费仍未验证，也未覆盖打开、菜单、属性对话框、剪贴板传输、OLE 拖放、导航和通知。下一步先解决绝对身份/namespace 路由问题，再在集中批次评估 DefView 列消费；当前包装方案不能直接进入产品。
+
+### 2026-10-28：包装文件夹的嵌套绑定合同
+
+无窗口复核发现包装 adapter 的 `BindToObject` 还会把子文件夹直接返回为普通 filesystem folder；因此即使根级 DefView 将来能使用包装身份，浏览进子目录也会离开实验 adapter。新增回归合同后，旧实现先因子目录缺少 adapter 专属 `Registered schema control` 列而失败。修复后，包装模式下对子文件夹的 `BindToObject(IShellFolder/IShellFolder2)` 会建立另一个包装 adapter；探针确认子 folder 保留该列元数据，且继续可解析其文件并取得正常 Shell 数据对象。未包装模式和其他非文件夹接口仍沿用原委托路径。
+
+NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 folder smoke 和 `git diff --check` 全部通过；未创建窗口、未触碰产品代码。进一步调用包装 folder 的 `CreateViewObject(IID_IShellView)` 后，不调用 `CreateViewWindow`，`IFolderView2::GetFolder` 仍报告该视图持有包装 adapter，且 `window-created=False`。这确认可在不建 HWND 的情况下构造 DefView COM 对象并核对根 folder 身份，但不测试列表读取或绘制。新增的第二层相对绑定也通过：根→子目录→孙目录每一级都取得包装 adapter，末端文件仍可经 Shell 数据对象返回。该结果只证明直接 folder 对象持有者可沿两层相对目录继续委托，不修复包装 PIDL 的普通绝对路径解析失败。
+
+微软文档将绝对 PIDL 定义为从 Desktop namespace root 开始的完整身份；自定义 namespace 扩展需要在 Shell namespace 中声明根位置，文档列出的入口包括 CLSID junction。当前实验没有注册扩展，也只把 adapter 直接交给调用者，因此尚无从 Desktop 解析私有包装 PIDL 的路径。参考[PIDL namespace 说明](https://learn.microsoft.com/en-us/windows/win32/shell/namespace-intro)、[IShellFolder 接口范围](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellfolder)及[namespace junction](https://learn.microsoft.com/en-us/windows/win32/shell/nse-junction)。DefView 的列表读取、导航、上下文菜单、拖放、通知与自定义列消费仍待后续隔离宿主/集中 UI 验收。
+
+### 2026-10-28：包装 PIDL 的 DefView 列消费对照
+
+为确认“DefView 是否因为项目 PIDL 身份不同而开始读取 adapter 属性”，新增独立 Private Desktop 包装 adapter 命令，并与原始 PIDL adapter 使用相同夹具各跑一轮。两轮 DefView 都报告 `view-uses-adapter=1`，但自定义列子项仍为空；读完列表后计数均为 `GetDetailsOf(custom header/item)=1/0`、`GetDetailsEx=0`、`CompareIDs=0`、`IPropertyStore=0`。自定义列升序和 `System.Document.ByteCount` 升序都因行序未改变而失败。包装项直连 adapter 的显示/比较合同仍通过，所以差异发生在 DefView 消费路径，而不是包装 PIDL 解码入口。
+
+完整日志位于 `src/.state/native-probe-watchdog/20261028-wrapped-pidl-defview.log`（SHA-256 `41BCDC57A2C424603529F180772CDF1CEE36A78D1F3A7F3CCA6617B9FED60C1D`）和原始基线 `20261028-static-adapter-defview.log`（SHA-256 `188246C3C72A486D8C13ECDBE7EFB4EE2874F0347304845EFF99B7D229B45C59`）。两次探针都按未通过列显示/排序门槛返回 exit code 1；前台 HWND 均保持不变，Private Desktop 在子进程结束时清理。结果说明仅改变 child PIDL 身份不足以让 DefView 逐项读取或排序这些列；包装 adapter 及列路继续仅作隔离研究，不接入产品。进一步推进需要新的、可证伪的属性提供架构假设，并评审完整 Shell 行为成本，不能把当前失败改成软性通过。
+
+### 2026-10-28：旧 `IShellFolderViewCB` 逐项列回退探针
+
+核对 Windows SDK 与 Microsoft Learn 后，增加一个只供 NativeProbe 的 Private Desktop A/B 命令：`SFV_CREATE.psfvcb` 安装 `IShellFolderViewCB`；仅在此模式下，让测试自定义列的 `IShellFolder2::GetDetailsOf` 返回 `E_NOTIMPL`，由 `MessageSFVCB` 为 `SFVM_GETDETAILSOF` 提供测试标题与文本。其他模式及产品代码不变。官方接口说明该回调只在 `IShellFolder2::GetDetailsOf` 失败且无 `IShellDetails::GetDetailsOf` 时作为后备；该消息另列于微软弃用 API 清单。
+
+Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date 列，但未调用 `SFVM_GETDETAILSOF`（请求/标题/项目均为 0），测试自定义列各项文本为空；前台 HWND 前后相同，探针退出并清理其 Private Desktop。完整日志 `src/.state/native-probe-watchdog/20261028-legacy-details-callback-private-desktop.log` 的 SHA-256 为 `4D5BFDFA9B061E9116CDE122DF87E0F9C6F492A448A1605A254861BB2466F640`。NativeProbe Release 构建 0 警告/错误，命令退出码 0 表示隔离观察完整完成，并不表示该列路线通过。结论：当前 `SHCreateShellFolderView` 视图没有采用此回调补读该自定义列；加上回调的弃用状态，不将其作为产品列实现路线。该结果不能推广为所有自定义 Shell namespace 架构都不可行。
+
+参考：[SFV_CREATE](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/ns-shlobj_core-sfv_create)、[LPFNVIEWCALLBACK 的 SFVM_GETDETAILSOF 说明](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nc-shlobj_core-lpfnviewcallback)、[弃用 Shell API](https://learn.microsoft.com/en-us/windows/win32/shell/deprecated-api)。

@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using System.Windows.Shapes;
 
 namespace ExplorerDirs.App;
 
@@ -12,6 +13,7 @@ internal static class ViewStyleMenu
             var item = new MenuItem
             {
                 Header = style.Name, Tag = style, IsCheckable = true,
+                Icon = CreateMenuIcon(style),
                 InputGestureText = $"Ctrl+Shift+{index + 1}"
             };
             item.Click += (_, _) => apply(style);
@@ -31,4 +33,21 @@ internal static class ViewStyleMenu
                 (style.IconSize < 0 || value.IconSize == style.IconSize);
         }
     }
+
+    internal static Path CreateMenuIcon(ViewStyle style)
+    {
+        var index = -1;
+        for (var candidate = 0; candidate < ViewStyle.All.Count; candidate++)
+        {
+            if (ViewStyle.All[candidate] != style) continue;
+            index = candidate;
+            break;
+        }
+        if (index < 0) throw new ArgumentOutOfRangeException(nameof(style));
+
+        return ExplorerChromeIcons.CreatePath(ViewStyleIconSet.All[index]);
+    }
+
+    internal static StackPanel CreateToolbarIcon() =>
+        ExplorerChromeIcons.CreateButtonContent(ViewStyleIconSet.All[5]);
 }

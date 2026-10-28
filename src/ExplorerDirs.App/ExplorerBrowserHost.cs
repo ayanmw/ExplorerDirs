@@ -21,7 +21,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-    private static readonly Guid FolderFilterSiteId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private const uint WmCommand = 0x0111;
     private const uint BrowseParent = 0x2000;
     private const uint BrowseBack = 0x4000;
@@ -40,15 +39,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private QuickFilterSettings _quickFilterSettings = QuickFilterSettings.Empty;
     private ShellFolderFilter? _quickFilter;
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
+    private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
+    private bool _disableGrouping;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
+    private (PropertyKeyState Group, bool Ascending)? _quickFilterGroupToRestore;
     private long _quickFilterRequestVersion;
     private const int QuickFilterGroupRestoreTimeoutMilliseconds = 5000;
     private ShellHistoryEvents? _historyEvents;
-    private bool _columnRestoreFailed;
+    private bool _viewRestoreFailed;
     private IntPtr _hostWindow;
     private IntPtr _viewWindow;
     private readonly List<IntPtr> _subclassedWindows = new();
+    private bool _nativeThemeRefreshQueued;
     private readonly ViewStyleWheelAccumulator _ctrlWheelAccumulator = new();
     private readonly Dictionary<uint, int> _nativeUserMessages = new();
     private readonly Dictionary<IntPtr, string> _nativeViewWindowClasses = new();
@@ -77,23 +81,27 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     // Shell parsing can pump STA messages. Invalidate preparation before any
     // newer request, including one still waiting for a directory probe.
     private long _navigationRequestVersion;
+    private long _nativeNavigationRequestVersion;
+    private long? _failedNavigationRequestVersion;
     private readonly ShellNavigationState _location;
     private readonly ShellBrowserSite _browserSite = new();
     private readonly ShellSearchHistory _searchHistory = new();
-    private readonly Dictionary<string, int> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, int> _issuedSearches = new(StringComparer.Ordinal);
+    private readonly record struct IssuedNavigationRequest(int Count, long RequestVersion);
+    private readonly Dictionary<string, IssuedNavigationRequest> _issuedBrowserPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IssuedNavigationRequest> _issuedSearches = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _focusRestoreTimer = new(DispatcherPriority.Background)
     {
         Interval = TimeSpan.FromMilliseconds(250)
     };
     private FocusRestoreRequest? _pendingFileOperationFocusRestore;
     private const double FileOperationFocusRestoreWindowMilliseconds = 1500;
-    private static readonly TimeSpan SelectionSizeRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ShellPropertySizeRefreshInterval = TimeSpan.FromSeconds(5);
     private ShellSelectionSizeCacheKey? _selectionSizeCacheKey;
     private ulong? _selectionSizeCacheBytes;
     private long _selectionSizeCacheReadAt;
-    private bool _menuPrepared;
-    private readonly ShellMenuTargetTracker _menuTarget = new();
+    private ShellFolderSizeCacheKey? _folderSizeCacheKey;
+    private ulong? _folderSizeCacheBytes;
+    private long _folderSizeCacheReadAt;
     private readonly ShellHeaderPresetMenuGate _headerPresetMenuGate = new();
     private DispatcherTimer? _newFolderRenameTimer;
     private DispatcherTimer? _createdFileSelectionTimer;
@@ -153,7 +161,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _directoryChangeNativeCreateNotificationStartedAt;
     private long _directoryChangeNativeCreateNotificationCompletedAt;
     private string _directoryChangeLastCreateNotificationResult = "not-attempted";
-    private readonly Dictionary<ushort, Action> _menuActions = new();
     private uint _cookie;
     private bool _advised;
     private bool _hasNavigated;
@@ -168,6 +175,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    internal long ViewGeneration => _viewReadiness.Generation;
+    internal int AccumulateCtrlWheel(int delta) => _ctrlWheelAccumulator.Add(delta, _viewReadiness.Generation);
     internal bool IsFileSystemLocation => _location.IsFileSystemLocation;
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot()
     {
@@ -183,6 +192,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             throw new InvalidOperationException("当前文件视图尚未准备完成。");
         return new ProgramStarterPaneContext(CurrentPath,
             CaptureProgramStarterItemPaths(1), CaptureProgramStarterItemPaths(2));
+    }
+
+    internal IReadOnlyList<string> CaptureSelectedFileSystemPaths()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        return CaptureProgramStarterItemPaths(1).Where(Path.IsPathFullyQualified).ToArray();
     }
 
     internal PhotoPrintSelectionResult CapturePhotoPrintSelection()
@@ -360,7 +376,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public string? SearchQuery => _location.SearchQuery;
     internal string? DiskSpaceDirectory => IsVisible && !_viewReadiness.Pending && _browser is not null
         ? _completedDiskDirectory : null;
-    public bool ViewCaptureFailed { get; private set; }
+    private bool _viewCaptureFailed;
+    public bool ViewCaptureFailed
+    {
+        get => _viewCaptureFailed || _viewRestoreFailed;
+        private set => _viewCaptureFailed = value;
+    }
     internal int DirectoryChangeFallbackRefreshCount { get; private set; }
     // Hidden stress diagnostics: distinguish Shell selection loss before Refresh
     // from a snapshot/restore failure inside our fallback path.
@@ -388,23 +409,40 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal int DirectoryChangeFolderDeleteLookupCount => Volatile.Read(ref _directoryChangeFolderDeleteLookupCount);
     internal string DirectoryChangeLastFolderDeleteNotificationResult => _directoryChangeLastFolderDeleteNotificationResult;
     internal int DirectoryChangeDeletedEventCount => Volatile.Read(ref _directoryChangeDeletedEvents);
-    public event EventHandler<string>? Navigated;
+    public event EventHandler<ShellNavigationNotice>? Navigated;
     public event EventHandler? NavigationStarting;
     public event EventHandler? NavigationAvailabilityChanged;
+    public event EventHandler<string?>? ShellStatusTextChanged;
     internal event EventHandler? SelectionContextChanged;
     internal event Action<QuickFilterSettings>? QuickFilterChanged;
     internal event Action<ShellMenuPoint>? HeaderPresetMenuRequested;
     internal bool CanGoBack => CanNavigateHistory(true);
     internal bool CanGoForward => CanNavigateHistory(false);
-    public event EventHandler<string>? SearchNavigated;
-    public event EventHandler<string>? NavigationFailed;
+    public event EventHandler<ShellNavigationNotice>? SearchNavigated;
+    public event EventHandler<ShellNavigationNotice>? NavigationFailed;
+    internal bool IsCurrentNavigationRequest(long? version) => version == _navigationRequestVersion;
+    internal bool CanCompleteNavigationRequest(long? version) =>
+        IsCurrentNavigationRequest(version) && version != _failedNavigationRequestVersion;
+
+    private void ReportNavigationFailure(string message, long? requestVersion)
+    {
+        if (IsCurrentNavigationRequest(requestVersion))
+        {
+            // A late success from an ambiguous same-target batch must not
+            // turn an already failed submission into an input completion.
+            _failedNavigationRequestVersion = requestVersion;
+            _focusWhenReady = false;
+            _restoreFocusAfterNavigation = false;
+        }
+        NavigationFailed?.Invoke(this, new(message, requestVersion));
+    }
     public event EventHandler<string>? MenuError;
     internal event EventHandler<string>? FolderMiddleClicked;
     public event EventHandler? Activated;
-    public Func<SelectedItem?, IReadOnlyList<MenuAction>>? CustomCommands { get; set; }
     public Func<ExplorerShortcut, bool>? ShortcutHandler { get; set; }
     public Func<int, bool>? CtrlWheelHandler { get; set; }
     public Func<bool>? MayRestoreFocus { get; set; }
+    public Func<bool>? MayContinueFileOperationFocusRestore { get; set; }
     internal QuickFilterSettings QuickFilter => _quickFilterSettings;
     internal HiddenItemsPreference HiddenItemsPreference => _hiddenItemsPreference;
     internal bool PreviewPaneVisible => _visibleShellPane == ExplorerShellPane.Preview;
@@ -421,7 +459,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
         bool showPreviewPane = false, bool showDetailsPane = false,
-        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false)
     {
         if (showPreviewPane && showDetailsPane)
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
@@ -429,10 +468,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _viewState = initialView.Copy();
         _quickFilterSettings = quickFilter;
         _hiddenItemsPreference = hiddenItemsPreference;
+        _selectionCheckBoxes = selectionCheckBoxes;
+        _fullRowSelection = fullRowSelection;
+        _disableGrouping = disableGrouping;
         _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
         _subclassProc = ViewWindowProc;
+        IsVisibleChanged += (_, _) => { if (IsVisible) QueueNativeThemeRefresh(); };
         _browserSite.SelectionChanged += OnShellSelectionChanged;
         _focusRestoreTimer.Tick += (_, _) =>
         {
@@ -447,6 +490,113 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         return SetVisibleShellPane(visible ? ExplorerShellPane.Preview :
             _visibleShellPane == ExplorerShellPane.Preview ? ExplorerShellPane.None : _visibleShellPane);
+    }
+
+    internal int SetSelectionCheckBoxes(bool enabled)
+    {
+        _selectionCheckBoxes = enabled;
+        if (_browser is null || _viewWindow == IntPtr.Zero) return 0;
+        var viewId = ShellViewId;
+        var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
+        if (viewResult < 0 || viewObject is null)
+        {
+            return viewResult < 0 ? viewResult : unchecked((int)0x80004005);
+        }
+        try
+        {
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { return ShellFolderViewOptions.SetCheckSelect(view, enabled); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    internal void RefreshTheme()
+    {
+        NativeShellTheme.Apply(_hostWindow);
+        var browser = _browser;
+        if (browser is null) return;
+        var id = ShellViewId;
+        if (browser.GetCurrentView(ref id, out var viewObject) < 0 || viewObject is null) return;
+        try
+        {
+            if (!ReferenceEquals(browser, _browser)) return;
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { NativeShellTheme.ApplyView(view); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    internal int SetFullRowSelection(bool? enabled)
+    {
+        _fullRowSelection = enabled;
+        if (enabled is not { } value || _browser is null || _viewWindow == IntPtr.Zero) return 0;
+        var viewId = ShellViewId;
+        var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
+        if (viewResult < 0 || viewObject is null)
+            return viewResult < 0 ? viewResult : unchecked((int)0x80004005);
+        try
+        {
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { return ShellFolderViewOptions.SetFullRowSelect(view, value); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    internal int SetGroupingDisabled(bool disabled)
+    {
+        if (_disableGrouping == disabled) return 0;
+        var browser = _browser;
+        if (browser is null || _viewWindow == IntPtr.Zero)
+        {
+            _disableGrouping = disabled;
+            return 0;
+        }
+
+        if (disabled)
+        {
+            try { CaptureViewState(); }
+            catch (Exception) { return unchecked((int)0x80004005); }
+            if (ViewCaptureFailed) return unchecked((int)0x80004005);
+            CancelPendingQuickFilterGroupRestore();
+        }
+
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return unchecked((int)0x80004005);
+        try
+        {
+            var target = new NativeViewStateTarget(view, Current);
+            if (disabled)
+            {
+                var result = target.SetGrouping(null, ascending: false);
+                if (result < 0 || !Current()) return result < 0 ? result : unchecked((int)0x80004005);
+                result = ShellFolderViewOptions.SetNoGrouping(view, disabled: true);
+                if (result < 0)
+                {
+                    if (Current()) _ = target.SetGrouping(_viewState.GroupKey, _viewState.GroupAscending);
+                    return result;
+                }
+            }
+            else
+            {
+                var result = ShellFolderViewOptions.SetNoGrouping(view, disabled: false);
+                if (result < 0 || !Current()) return result < 0 ? result : unchecked((int)0x80004005);
+                result = target.SetGrouping(_viewState.GroupKey, _viewState.GroupAscending);
+                if (result < 0)
+                {
+                    if (Current()) _ = ShellFolderViewOptions.SetNoGrouping(view, disabled: true);
+                    return result;
+                }
+            }
+            if (!Current()) return unchecked((int)0x80004005);
+            _disableGrouping = disabled;
+            return 0;
+        }
+        finally { Marshal.Release(view); }
     }
 
     internal bool SetDetailsPaneVisible(bool visible)
@@ -476,7 +626,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
-        _hostWindow = CreateWindowEx(0, "STATIC", "", 0x50000000,
+        // Child/visible plus child/sibling clipping: the blank backdrop must not paint over Shell HWNDs.
+        _hostWindow = CreateWindowEx(0, "STATIC", "", 0x56000000,
             0, 0, Math.Max(1, (int)ActualWidth), Math.Max(1, (int)ActualHeight),
             hwndParent.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         if (_hostWindow == IntPtr.Zero)
@@ -484,12 +635,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
         try
         {
+            // COM activation may pump messages before Initialize; theme the
+            // visible native container before entering that initialization.
+            NativeShellTheme.PrepareHost(_hostWindow);
             var browserType = Type.GetTypeFromCLSID(BrowserClassId, true)!;
             _browser = (IExplorerBrowser)Activator.CreateInstance(browserType)!;
             var browserUnknown = Marshal.GetIUnknownForObject(_browser);
             try
             {
-                _historyEvents = ShellHistoryEvents.Subscribe(browserUnknown, QueueNavigationAvailability);
+                _historyEvents = ShellHistoryEvents.Subscribe(browserUnknown, QueueNavigationAvailability,
+                    QueueShellStatusTextChanged);
                 ReportFolderHeaderFailure(ShellFolderViewOptions.EnableCustomPosition(browserUnknown));
             }
             finally { Marshal.Release(browserUnknown); }
@@ -505,7 +660,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (_browser is null) return;
                 try { Navigate(CurrentPath); }
-                catch (Exception ex) { NavigationFailed?.Invoke(this, ex.Message); }
+                catch (Exception ex) { ReportNavigationFailure(ex.Message, _navigationRequestVersion); }
             }));
         }
         catch
@@ -521,6 +676,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
+        // WPF parks/reparents an existing HWND when tabs move between panes;
+        // it does not rebuild it. Always clean up here when the host is disposed.
         CancelCreatedFileSelection();
         CancelDeferredRefreshSelectionRestore(restartDirectoryMonitor: false);
         DisposeBrowser();
@@ -554,24 +711,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase))
         {
             // F2 + arrows escaped the native editor: returning false lets WPF
-            // navigate to a neighbouring HwndHost and ends the rename. Dispatch
-            // once to the focused editor, retaining Ctrl/Shift text selection.
-            if (ShellRenameKeyRouting.ShouldForwardArrowKeyDown(
+            // navigate to a neighbouring HwndHost and ends the rename. Home/End
+            // and paging keys need the same protection. Dispatch once to the
+            // focused editor, retaining Ctrl/Shift text selection.
+            if (ShellRenameKeyRouting.ShouldForwardNavigationKeyDown(
                     msg.message, unchecked((int)msg.wParam.ToInt64())))
             {
                 SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
-                Trace($"rename-arrow-forward key={msg.wParam.ToInt64():X} mods={modifiers} " +
+                Trace($"rename-navigation-forward key={msg.wParam.ToInt64():X} mods={modifiers} " +
                     $"host={_hostWindow} view={_viewWindow} editor={focused}/{focusedClass} focusAfter={GetFocus()}");
                 return true;
             }
             return base.TranslateAcceleratorCore(ref msg, modifiers);
         }
 
-        if (msg.message == 0x0100 &&
-            ((msg.wParam.ToInt64() == 0x5D && modifiers == ModifierKeys.None) ||
-             (msg.wParam.ToInt64() == 0x79 && modifiers == ModifierKeys.Shift)))
-            _menuTarget.KeyboardMenuRequested(
-                allowCustomCommands: !IsNativeContextMenuExcludedWindow(focused)); // Menu key or Shift+F10.
+        var inputBrowser = _browser;
+        var inputView = _viewWindow;
+        var inputVersion = _viewReadiness.NavigationVersion;
+        bool SameVisit() => ReferenceEquals(inputBrowser, _browser) && inputView != 0 &&
+            inputView == _viewWindow && inputVersion == _viewReadiness.NavigationVersion;
+        bool SameInputTarget() => SameVisit() && GetFocus() == focused;
 
         if (msg.message == 0x0100 || msg.message == 0x0104)
         {
@@ -580,11 +739,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return true;
         }
 
+        if (inputBrowser is null || !SameInputTarget()) return true;
         var iid = ShellViewId;
-        if (_browser.GetCurrentView(ref iid, out var viewObject) < 0)
-            return base.TranslateAcceleratorCore(ref msg, modifiers);
+        if (inputBrowser.GetCurrentView(ref iid, out var viewObject) < 0)
+            return SameInputTarget() ? base.TranslateAcceleratorCore(ref msg, modifiers) : true;
+        int shellResult;
         try
         {
+            if (!SameInputTarget()) return true;
             var nativeMessage = new NativeMessage
             {
                 Hwnd = msg.hwnd,
@@ -599,23 +761,27 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 Marshal.StructureToPtr(nativeMessage, pointer, false);
-                var shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
+                shellResult = ((IShellView)viewObject).TranslateAccelerator(pointer);
                 if (FocusTracePath is not null && IsTraceKey(msg.wParam.ToInt64()))
                     Trace($"shell result={shellResult:X8} focus={FocusClass()} item={FolderFocusState()}");
-                if (ShellArrowKeyRouting.ShouldForward(msg.message,
+                if (shellResult == 0)
+                {
+                    // A handled operation may legitimately move native focus.
+                    // Keep its existing restore path, but never target a new visit.
+                    if (SameVisit()) QueueFocusRestoreAfterFileKey(msg, modifiers);
+                    return true;
+                }
+                if (!SameInputTarget()) return true;
+                if (ShellNavigationKeyRouting.ShouldForward(msg.message,
                         unchecked((int)msg.wParam.ToInt64()), shellResult,
                         IsFileContentInputWindow(focused), IsColumnHeaderInputWindow(focused),
                         focusedClass.ToString().Contains("Edit", StringComparison.OrdinalIgnoreCase)))
                 {
-                    // When Shell declines an arrow, HwndHost's base route can treat it as
-                    // WPF focus navigation. Keep it in the focused native file-content control.
+                    // When Shell declines an arrow, Home/End or paging key,
+                    // HwndHost's base route can treat it as WPF focus navigation.
+                    // Keep it in the focused native file-content control.
                     SendMessage(focused, (uint)msg.message, msg.wParam, msg.lParam);
-                    Trace($"untranslated-arrow-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
-                    return true;
-                }
-                if (shellResult == 0)
-                {
-                    QueueFocusRestoreAfterFileKey(msg, modifiers);
+                    Trace($"untranslated-navigation-forward key={msg.wParam.ToInt64():X} focus={FocusClass()} hwnd={focused}");
                     return true;
                 }
                 if (ShellAutoColumnWidthRouting.ShouldDispatchToListView(
@@ -641,9 +807,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.FreeHGlobal(pointer); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+        // COM translation/release can pump a navigation or focus change. An old
+        // key must not issue a file command against the newly focused directory.
+        if (!SameInputTarget()) return true;
         if (msg.message == 0x0100)
         {
-            var command = ShellFileKeyboardActions.Resolve(unchecked((int)msg.wParam.ToInt64()), (int)modifiers) switch
+            var command = ShellFileKeyboardActions.ResolveFallback(msg.message,
+                unchecked((int)msg.wParam.ToInt64()), (int)modifiers, shellResult) switch
             {
                 ShellFileKeyboardAction.SelectAll => ShellSelectAll,
                 ShellFileKeyboardAction.Copy => ShellCopy,
@@ -657,11 +827,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 SendMessage(_viewWindow, WmCommand, (IntPtr)command, IntPtr.Zero);
                 Trace($"fallback command={command:X} focus={FocusClass()}");
-                QueueFocusRestore();
+                if (SameVisit()) QueueFocusRestore();
                 return true;
             }
         }
-        QueueFocusRestoreAfterFileKey(msg, modifiers);
+        if (shellResult == 1) QueueFocusRestoreAfterFileKey(msg, modifiers);
         return base.TranslateAcceleratorCore(ref msg, modifiers);
     }
 
@@ -679,7 +849,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var target = FindContentFocusWindow();
         if (target == IntPtr.Zero) return false;
         Trace($"focus-view before={FocusClass()} target={target}");
-        _focusWhenReady = false;
+        // An explicit focus while navigation is pending can still target the old
+        // view. Keep that intent until the destination view has completed.
+        _focusWhenReady = _viewReadiness.Pending;
         var focused = GetFocus();
         if (focused != IntPtr.Zero && IsChild(_viewWindow, focused) &&
             WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase))
@@ -716,11 +888,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             WindowClass(focused).Contains("Edit", StringComparison.OrdinalIgnoreCase);
     }
 
-    public bool HasColumnHeader() => FindColumnHeader() is not null;
+    internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 &&
+        ((_hostWindow != 0 && (hwnd == _hostWindow || IsChild(_hostWindow, hwnd))) ||
+         (_viewWindow != 0 && (hwnd == _viewWindow || IsChild(_viewWindow, hwnd))));
+
+    public bool HasColumnHeader() => FindNativeColumnHeader() != 0 || FindColumnHeader() is not null;
 
     public bool IsColumnHeaderFocused()
     {
         if (!HasNativeFocus()) return false;
+        var nativeHeader = FindNativeColumnHeader();
+        if (nativeHeader != 0 && GetFocus() == nativeHeader) return true;
         try
         {
             var element = AutomationElement.FocusedElement;
@@ -735,6 +913,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool FocusColumnHeader()
     {
         if (!IsVisible) return false;
+        var nativeHeader = FindNativeColumnHeader();
+        if (nativeHeader != 0) return FocusNativeColumnHeader(nativeHeader);
         var header = FindColumnHeader();
         if (header is null) return false;
         try
@@ -745,6 +925,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (ElementNotAvailableException) { return false; }
         catch (COMException) { return false; }
         catch (InvalidOperationException) { return false; }
+    }
+
+    private nint FindNativeColumnHeader()
+    {
+        var content = FindContentFocusWindow();
+        if (content == 0 || WindowClass(content) != "SysListView32") return 0;
+        var header = SendMessage(content, 0x101F, 0, 0); // LVM_GETHEADER
+        return header != 0 && IsWindowVisible(header) ? header : 0;
+    }
+
+    private static bool FocusNativeColumnHeader(nint header)
+    {
+        if (header == 0 || !IsWindow(header)) return false;
+        // Visible Shell headers can report IsKeyboardFocusable=false through UIA.
+        // Use the native Header contract instead of silently skipping this Tab stop.
+        var item = SendMessage(header, 0x121B, 0, 0); // HDM_GETFOCUSEDITEM
+        if (item.ToInt64() < 0) item = 0;
+        SetFocus(header);
+        return SendMessage(header, 0x121C, 0, item) != 0 && GetFocus() == header; // HDM_SETFOCUSEDITEM
     }
 
     private AutomationElement? FindColumnHeader()
@@ -847,7 +1046,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (!ReferenceEquals(_pendingFileOperationFocusRestore, request)) return;
         var window = Window.GetWindow(this);
-        var focusStillDesired = MayRestoreFocus?.Invoke() == true && IsVisible && window?.IsActive == true;
+        var focusStillDesired =
+            (MayContinueFileOperationFocusRestore?.Invoke() ?? MayRestoreFocus?.Invoke() == true) && IsVisible;
+        var windowActive = window?.IsActive == true;
+        var retryWindowStart = ShellFocusRestoreGate.ResolveRetryWindowStartTimestamp(
+            request.StartedAt, Stopwatch.GetTimestamp(), windowActive);
+        if (retryWindowStart != request.StartedAt)
+        {
+            request = request with { StartedAt = retryWindowStart };
+            _pendingFileOperationFocusRestore = request;
+        }
         var sameView = ReferenceEquals(request.Browser, _browser) &&
             request.NavigationVersion == _viewReadiness.NavigationVersion &&
             string.Equals(request.Path, CurrentPath, StringComparison.OrdinalIgnoreCase);
@@ -862,13 +1070,27 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return;
         }
 
-        var fileContentFocused = IsFileContentFocused();
-        var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue, fileContentFocused);
+        var shellViewActivationAttempted = false;
+        if (ShellFocusRestoreGate.ShouldActivateShellViewForOperationRestore(canContinue, windowActive,
+                request.ShellActivationAttempted, IsRenameEditorFocused()))
+        {
+            // The content HWND and focused item can look correct while the Shell view is not UI-activated;
+            // a user's Alt+Tab round trip reactivates it, so do that once after file operations too.
+            request = request with { ShellActivationAttempted = true };
+            _pendingFileOperationFocusRestore = request;
+            shellViewActivationAttempted = true;
+            if (FocusTracePath is not null) Trace("focus-restore shell-view-activation-attempt");
+            RestoreContentFocusIfNeeded();
+        }
+
+        var fileContentFocused = windowActive && IsFileContentFocused();
+        var shouldAttemptRestore = ShellFocusRestoreGate.ShouldAttemptRestore(canContinue,
+            windowActive, fileContentFocused);
         if (FocusTracePath is not null)
-            Trace($"focus-restore-poll desired={focusStillDesired} same-view={sameView} input-unchanged={userInputUnchanged} " +
+            Trace($"focus-restore-poll desired={focusStillDesired} window-active={windowActive} same-view={sameView} input-unchanged={userInputUnchanged} " +
                 $"within-window={withinRetryWindow} content-focused={fileContentFocused} attempt={shouldAttemptRestore} " +
                 $"elapsed-ms={Stopwatch.GetElapsedTime(request.StartedAt).TotalMilliseconds:F0}");
-        if (shouldAttemptRestore)
+        if (shouldAttemptRestore && !shellViewActivationAttempted)
             RestoreContentFocusIfNeeded();
 
         if (ReferenceEquals(_pendingFileOperationFocusRestore, request))
@@ -931,7 +1153,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
 
     private sealed record FocusRestoreRequest(object Browser, string Path, long NavigationVersion,
-        long InputVersion, long StartedAt);
+        long InputVersion, long StartedAt, bool ShellActivationAttempted = false);
 
     private sealed record PendingQuickFilterGroupRestore(PropertyKeyState Group, bool Ascending,
         int InitialItemCount, ShellFolderFilter? Filter, string Path, long NavigationVersion, long RequestVersion, long StartedAt);
@@ -1172,8 +1394,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
 
         CancelCreatedFileSelection();
-        var request = new CreatedFileSelectionRequest(_browser, CurrentPath, _viewReadiness.NavigationVersion,
-            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+        var request = CaptureFileSystemSelectionRequest();
         if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
         {
             if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
@@ -1183,18 +1404,45 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             if (!ShellCreatedItemNotification.NotifyCreatedFile(path, absolutePidl)) return false;
-
-            // Shell calls can pump messages. Keep the request tied to its original tab state.
+            // Shell calls can pump messages. Do not replace a newer selection request created reentrantly.
             if (_createdFileSelectionRequest is not null || !IsCreatedFileSelectionRequestCurrent(request)) return true;
-            _createdFileSelectionPidl = absolutePidl;
-            absolutePidl = IntPtr.Zero;
-            _createdFileSelectionRequest = request;
+            return QueueFileSystemSelection(absolutePidl, request);
         }
         finally
         {
             if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
         }
+    }
 
+    internal bool QueueFileSystemSelection(string path)
+    {
+        if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(path) ?? string.Empty),
+                Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
+        if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
+        {
+            if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
+            return false;
+        }
+        try
+        {
+            CancelCreatedFileSelection();
+            return QueueFileSystemSelection(absolutePidl, CaptureFileSystemSelectionRequest());
+        }
+        finally { Marshal.FreeCoTaskMem(absolutePidl); }
+    }
+
+    private CreatedFileSelectionRequest CaptureFileSystemSelectionRequest() =>
+        new(_browser!, CurrentPath, _viewReadiness.NavigationVersion,
+            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+
+    private bool QueueFileSystemSelection(IntPtr absolutePidl, CreatedFileSelectionRequest request)
+    {
+        // Shell calls can pump messages. Keep the request tied to its original tab state.
+        if (!IsCreatedFileSelectionRequestCurrent(request)) return false;
+        _createdFileSelectionPidl = ILClone(absolutePidl);
+        if (_createdFileSelectionPidl == IntPtr.Zero) return false;
+        _createdFileSelectionRequest = request;
         _createdFileSelectionAttempts = 0;
         _createdFileSelectionTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -1471,7 +1719,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _navigationRequestVersion++;
         var hr = _browser.BrowseToIDList(IntPtr.Zero, flag);
         if (hr < 0 && hr != unchecked((int)0x80004005))
-            NavigationFailed?.Invoke(this, $"目录导航失败：0x{hr:X8}");
+            ReportNavigationFailure($"目录导航失败：0x{hr:X8}", _navigationRequestVersion);
         return hr >= 0;
     }
 
@@ -1492,16 +1740,35 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }));
     }
 
+    private void QueueShellStatusTextChanged(string? text)
+    {
+        var owner = _historyEvents;
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            if (_browser is not null && ReferenceEquals(_historyEvents, owner))
+                ShellStatusTextChanged?.Invoke(this, text);
+        }));
+    }
+
+    internal string? ShellStatusText => _historyEvents?.StatusText;
+
     public void Navigate(string path)
     {
-        path = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
-        if (!ShellLocationIdentity.TryNormalize(path, out path, out var isFileSystemPath))
-        {
-            NavigationFailed?.Invoke(this, "路径不是可识别的文件系统位置或受支持的 Shell 文件夹。");
-            return;
-        }
         _navigationRequestVersion++;
         _navigationGate.Cancel();
+        path = AddressInputResolver.Resolve(path,
+            _location.IsFileSystemLocation ? _location.DirectoryPath : null);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            Refresh();
+            return;
+        }
+        if (!ShellLocationIdentity.TryNormalize(path, out path, out var isFileSystemPath))
+        {
+            ReportNavigationFailure("路径不是可识别的文件系统位置或受支持的 Shell 文件夹。", _navigationRequestVersion);
+            return;
+        }
         if (_browser is null)
         {
             _location.CompleteDirectory(path, isFileSystemPath);
@@ -1517,19 +1784,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private async Task SearchWhenAvailableAsync(string query, string? scopePath)
     {
+        var request = ++_navigationRequestVersion;
+        _navigationGate.Cancel();
         if (!_location.CanSearchCurrentLocation)
         {
-            NavigationFailed?.Invoke(this, "当前 Shell 位置暂不支持按目录搜索。");
+            ReportNavigationFailure("当前 Shell 位置暂不支持按目录搜索。", request);
             return;
         }
-        var request = ++_navigationRequestVersion;
         var browser = _browser;
         if (_browser is null)
         {
-            NavigationFailed?.Invoke(this, "搜索视图尚未就绪。");
+            ReportNavigationFailure("搜索视图尚未就绪。", request);
             return;
         }
-        _navigationGate.Cancel();
         bool IsCurrentRequest() => request == _navigationRequestVersion && ReferenceEquals(browser, _browser);
         try
         {
@@ -1539,13 +1806,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (!IsCurrentRequest()) return;
                 _searchHistory.Remember(pidl, uri);
-                if (!IsCurrentRequest()) return;
+                if (!IsCurrentRequest())
+                {
+                    // Remember may pump Shell callbacks; a superseded request not yet submitted to BrowseToIDList is not TravelLog history.
+                    _searchHistory.Forget(pidl, uri);
+                    return;
+                }
                 _retryPath = null;
                 _focusWhenReady = true;
-                _issuedSearches[uri] = _issuedSearches.GetValueOrDefault(uri) + 1;
+                TrackIssuedSearch(uri);
                 try
                 {
                     var result = await BrowseWhenAvailableAsync(browser!, pidl, IsCurrentRequest);
+                    if (result is null || result.Value < 0)
+                        _searchHistory.Forget(pidl, uri);
                     if (result is null)
                     {
                         if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
@@ -1556,6 +1830,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 catch
                 {
                     if (ReferenceEquals(browser, _browser)) CompleteIssuedSearch(uri);
+                    _searchHistory.Forget(pidl, uri);
                     throw;
                 }
             }
@@ -1565,12 +1840,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             if (!IsCurrentRequest()) return;
             _focusWhenReady = false;
-            NavigationFailed?.Invoke(this, $"无法搜索指定范围：{ex.Message}");
+            ReportNavigationFailure($"无法搜索指定范围：{ex.Message}", request);
         }
     }
 
     private async Task NavigateWhenAvailableAsync(string path, bool isFileSystemPath)
     {
+        var request = _navigationRequestVersion;
         var probe = await _navigationGate.ProbeAsync(path,
             _ => isFileSystemPath ? DirectoryProbe.Check(path) : DirectoryProbeStatus.Unavailable);
         if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
@@ -1581,13 +1857,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Check(SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out _));
             else if (!ShellLocationIdentity.TryGetFolderPidl(path, out pidl))
             {
-                NavigationFailed?.Invoke(this, "目录不存在、不可访问或设备离线；可点击刷新重试。");
+                if (_navigationGate.IsCurrent(probe) && _browser is not null)
+                    ReportNavigationFailure("目录不存在、不可访问或设备离线；可点击刷新重试。", request);
                 return;
             }
 
-            // A newer search may cancel this probe while Shell parses.
+            // Inputs such as shell:Downloads can resolve to a filesystem path,
+            // while virtual folders have no filesystem path at all. Register
+            // the same confirmed identity used by navigation callbacks.
+            var issuedPath = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var canonicalPath, out _)
+                ? canonicalPath : path;
+            // A newer request may cancel this probe while Shell parses or
+            // reads the folder identity; do not register stale preparation.
             if (!_navigationGate.IsCurrent(probe) || _browser is null) return;
-            TrackIssuedPath(path);
+            TrackIssuedPath(issuedPath);
             int? result;
             var browser = _browser;
             try
@@ -1597,16 +1880,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch
             {
-                if (ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+                if (ReferenceEquals(browser, _browser)) CompleteIssuedPath(issuedPath);
                 throw;
             }
-            if ((result is null || result < 0) && ReferenceEquals(browser, _browser)) CompleteIssuedPath(path);
+            if ((result is null || result < 0) && ReferenceEquals(browser, _browser)) CompleteIssuedPath(issuedPath);
             if (result is not null) Check(result.Value);
         }
         catch (Exception ex)
         {
             if (_navigationGate.IsCurrent(probe) && _browser is not null)
-                NavigationFailed?.Invoke(this, $"无法打开目录：{ex.Message}");
+                ReportNavigationFailure($"无法打开目录：{ex.Message}", request);
         }
         finally { if (pidl != 0) Marshal.FreeCoTaskMem(pidl); }
     }
@@ -1639,13 +1922,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private ViewState CaptureViewStateCore()
     {
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool IsCurrentCapture() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         if (_locationUnconfirmed)
         {
             ViewCaptureFailed = true;
             return _viewState.Copy();
         }
         if (_location.IsSearchActive) return _viewState.Copy();
-        if (_columnRestoreFailed)
+        if (_viewRestoreFailed)
         {
             ViewCaptureFailed = true;
             return _viewState.Copy();
@@ -1653,15 +1939,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero)
         {
-            if (_hasNavigated) ViewCaptureFailed = true;
+            if (_hasNavigated || !IsCurrentCapture()) ViewCaptureFailed = true;
             return _viewState.Copy();
         }
         try
         {
             var captured = ShellViewStateCapture.Capture(_viewState,
-                new NativeViewStateSource(view), out var complete);
+                new NativeViewStateSource(view), out var complete, IsCurrentCapture);
             ViewCaptureFailed = !complete;
-            if (complete) _viewState = captured;
+            if (complete)
+            {
+                captured = PreserveQuickFilterGroup(captured);
+                captured = ShellGroupingPolicy.PreserveCachedGrouping(captured, _viewState, _disableGrouping);
+                _viewState = captured;
+            }
             return _viewState.Copy();
         }
         finally { Marshal.Release(view); }
@@ -1669,13 +1960,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public ViewState CachedViewState() => _viewState.Copy();
 
-    internal ShellItemCounts? ReadItemCounts(bool includeSelectionSize = true)
-        => ReadItemCountsCore(includeSelectionSize, requireVisible: true);
+    internal ShellItemCounts? ReadItemCounts(bool includeSelectionSize = true, bool includeFolderSize = false)
+        => ReadItemCountsCore(includeSelectionSize, includeFolderSize, requireVisible: true);
 
     private int? ReadDirectoryMonitorItemCount() =>
-        ReadItemCountsCore(includeSelectionSize: false, requireVisible: false)?.Total;
+        ReadItemCountsCore(includeSelectionSize: false, includeFolderSize: false, requireVisible: false)?.Total;
 
-    private ShellItemCounts? ReadItemCountsCore(bool includeSelectionSize, bool requireVisible)
+    private ShellItemCounts? ReadItemCountsCore(bool includeSelectionSize, bool includeFolderSize, bool requireVisible)
     {
         if ((requireVisible && !IsVisible) || _viewReadiness.Pending || _browser is null || _viewWindow == IntPtr.Zero)
             return null;
@@ -1702,10 +1993,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     ? Stopwatch.GetElapsedTime(_selectionSizeCacheReadAt)
                     : Timeout.InfiniteTimeSpan;
                 readSelectionSize = ShellSelectionSizeRefreshGate.ShouldRead(_selectionSizeCacheKey,
-                    sizeKey.Value, age, SelectionSizeRefreshInterval);
+                    sizeKey.Value, age, ShellPropertySizeRefreshInterval);
                 selectionBytes = readSelectionSize
                     ? ReadSelectionSize(view, selectedCounts.Selected)
                     : _selectionSizeCacheBytes;
+            }
+            ShellFolderSizeCacheKey? folderSizeKey = null;
+            ulong? folderBytes = null;
+            var readFolderSize = false;
+            if (includeFolderSize && counts is { Selected: 0, Total: > 0 } folderCounts)
+            {
+                folderSizeKey = new ShellFolderSizeCacheKey(generation, folderCounts.Total);
+                var age = _folderSizeCacheKey == folderSizeKey
+                    ? Stopwatch.GetElapsedTime(_folderSizeCacheReadAt)
+                    : Timeout.InfiniteTimeSpan;
+                readFolderSize = _folderSizeCacheKey != folderSizeKey || age >= ShellPropertySizeRefreshInterval;
+                folderBytes = readFolderSize
+                    ? ReadItemArraySize(view, 2, folderCounts.Total)
+                    : _folderSizeCacheBytes;
             }
             // A Shell COM call may pump messages and complete another navigation.
             if (generation != _viewReadiness.Generation || _viewReadiness.Pending ||
@@ -1729,6 +2034,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     _selectionSizeCacheReadAt = 0;
                 }
             }
+            if (folderSizeKey is { } folderKey && counts is not null)
+            {
+                if (readFolderSize)
+                {
+                    _folderSizeCacheKey = folderKey;
+                    _folderSizeCacheBytes = folderBytes;
+                    _folderSizeCacheReadAt = Stopwatch.GetTimestamp();
+                }
+                counts = counts with { KnownFolderBytes = folderBytes };
+            }
             return counts;
         }
         catch (COMException) { return null; }
@@ -1736,14 +2051,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { if (viewObject is not null) Marshal.ReleaseComObject(viewObject); }
     }
 
-    private static ulong? ReadSelectionSize(IFolderView view, int expectedCount)
+    private static ulong? ReadSelectionSize(IFolderView view, int expectedCount) =>
+        ReadItemArraySize(view, 1, expectedCount);
+
+    private static ulong? ReadItemArraySize(IFolderView view, uint scope, int expectedCount)
     {
         object? array = null;
         nint unknown = 0, items = 0;
         try
         {
             var id = ShellItemArrayId;
-            if (view.Items(1, ref id, out array) != 0 || array is null) return null;
+            if (view.Items(scope, ref id, out array) != 0 || array is null) return null;
             unknown = Marshal.GetIUnknownForObject(array);
             if (Marshal.QueryInterface(unknown, in id, out items) != 0) return null;
             return ShellSelectionSize.Read(items, expectedCount);
@@ -1758,19 +2076,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
+    private readonly record struct ShellFolderSizeCacheKey(long ViewGeneration, int ItemCount);
+
     internal (uint Mode, int IconSize)? ReadViewStyle()
     {
         if (!IsVisible || _viewReadiness.Pending || _browser is null || IsRenameEditorFocused())
             return null;
+        var browser = _browser;
         var generation = _viewReadiness.Generation;
         var view = IntPtr.Zero;
         try
         {
             view = GetFolderView2Pointer();
-            if (view == IntPtr.Zero) return null;
+            // Getting the COM view itself may pump a navigation callback.
+            if (view == IntPtr.Zero || !ReferenceEquals(browser, _browser) ||
+                generation != _viewReadiness.Generation) return null;
             var result = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view, out var mode, out var size);
             return result == 0 && mode is >= 1 and <= 8 && size > 0 &&
-                generation == _viewReadiness.Generation && !_viewReadiness.Pending && IsVisible
+                ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation && !_viewReadiness.Pending && IsVisible
                 ? (mode, size) : null;
         }
         catch (COMException) { return null; }
@@ -1781,130 +2104,140 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     public bool SetViewStyle(ViewStyle style)
     {
         if (!IsVisible || _viewReadiness.Pending) return false;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = IntPtr.Zero;
         try
         {
             view = GetFolderView2Pointer();
             if (view == IntPtr.Zero)
             {
-                MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
+                if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
             // Change only mode/size: do not reapply cached sorting or grouping.
-            var result = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, style.Mode,
-                ViewStyle.NativeIconSize(style.Mode, style.IconSize));
-            if (result < 0)
-            {
-                MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}");
-                return false;
-            }
+            if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
+                    result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
         }
         catch (COMException ex)
         {
-            MenuError?.Invoke(this, $"无法切换查看方式：0x{ex.HResult:X8}");
+            if (Current()) MenuError?.Invoke(this, $"无法切换查看方式：0x{ex.HResult:X8}");
             return false;
         }
         finally { if (view != IntPtr.Zero) Marshal.Release(view); }
 
         // Read back what Shell actually accepted. Search views remain runtime-only.
+        if (!Current()) return false;
         try { CaptureViewState(); }
         catch (Exception)
         {
-            MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
+            if (Current()) MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
         }
-        return true;
+        return Current();
     }
 
     public bool ApplyViewPreset(ViewPreset preset)
     {
         if (!IsVisible || _viewReadiness.Pending) return false;
         var validated = preset.NormalizeAndValidate();
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero)
         {
-            MenuError?.Invoke(this, "文件视图尚未就绪，未应用查看预设。");
+            if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未应用查看预设。");
             return false;
         }
 
         try
         {
-            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, validated.Mode,
-                ViewStyle.NativeIconSize(validated.Mode, validated.IconSize));
-            if (modeResult < 0)
+            if (!Current()) return false;
+            // Do not capture a partial preset over the previous complete state.
+            // Native setters can pump a navigation callback, just like getters.
+            _viewRestoreFailed = true;
+            var applied = ShellViewStateRestore.ApplyPreset(validated, new NativeViewStateTarget(view, Current), (step, result) =>
             {
-                MenuError?.Invoke(this, $"查看预设的查看方式未能应用：0x{modeResult:X8}");
-                return false;
-            }
-
-            // Mark the cached layout unsafe until every saved column has applied.
-            _columnRestoreFailed = true;
-            var columnResult = ShellColumnManager.Apply(view, validated.DisplayColumns);
-            if (columnResult < 0)
-            {
-                MenuError?.Invoke(this, $"查看预设的列设置未能完整应用；会话保存将等待重新读取。0x{columnResult:X8}");
-                return false;
-            }
-            _columnRestoreFailed = false;
+                var label = step == ShellViewRestoreStep.Mode ? "查看方式" : "列设置";
+                MenuError?.Invoke(this, $"查看预设的{label}未能完整应用；会话保存将等待重新读取。0x{result:X8}");
+            }, Current);
+            if (!Current()) return false;
+            _viewRestoreFailed = !applied;
+            if (!applied) return false;
         }
         catch (COMException ex)
         {
-            MenuError?.Invoke(this, $"无法应用查看预设：0x{ex.HResult:X8}");
+            if (Current()) MenuError?.Invoke(this, $"无法应用查看预设：0x{ex.HResult:X8}");
             return false;
         }
         finally { Marshal.Release(view); }
 
         try
         {
+            if (!Current()) return false;
             CaptureViewState();
-            return !ViewCaptureFailed;
+            return Current() && !ViewCaptureFailed;
         }
         catch (Exception)
         {
-            MenuError?.Invoke(this, "查看预设已发送给 Shell，但当前视图状态无法完整读取；会话保存将等待重试。");
+            if (Current()) MenuError?.Invoke(this, "查看预设已发送给 Shell，但当前视图状态无法完整读取；会话保存将等待重试。");
             return false;
         }
     }
 
     private void ApplyViewState()
     {
-        // Keep a saved layout protected if the view is unavailable or COM fails
-        // before restoration finishes. A subsequent navigation retries it.
-        _columnRestoreFailed = _viewState.DisplayColumns is { Count: > 0 };
+        // All saved fields need protection, not only custom columns. Otherwise
+        // a mode/sort/group failure can be captured over the user's settings.
+        _viewRestoreFailed = true;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        var saved = ShellGroupingPolicy.ForNativeRestore(_viewState.Copy(), _disableGrouping);
+        var filterRequest = _quickFilterRequestVersion;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
+            filterRequest == _quickFilterRequestVersion;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return;
         try
         {
-            var modeResult = GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, _viewState.Mode,
-                ViewStyle.NativeIconSize(_viewState.Mode, _viewState.IconSize));
-            if (modeResult < 0)
-                MenuError?.Invoke(this, $"查看方式未能恢复：0x{modeResult:X8}");
-            if (_viewState.DisplayColumns is { Count: > 0 } columnsToRestore)
+            var restored = ShellViewStateRestore.Restore(saved, new NativeViewStateTarget(view, Current), (step, result) =>
             {
-                // A failed/partial restore must not be captured over the saved layout.
-                var columnResult = ShellColumnManager.Apply(view, columnsToRestore);
-                _columnRestoreFailed = columnResult < 0;
-                if (columnResult < 0)
-                    MenuError?.Invoke(this, $"列设置恢复失败，暂未保存会话；请重新打开目录后重试。0x{columnResult:X8}");
-            }
-            if (_viewState.SortColumns.Count > 0)
-            {
-                var columns = _viewState.SortColumns.Select(sort => new NativeSortColumn
+                var label = step switch
                 {
-                    Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
-                    Direction = sort.Direction
-                }).ToArray();
-                var sortResult = GetMethod<SetSortColumnsDelegate>(view, 27)(view, columns, columns.Length);
-                if (sortResult < 0)
-                    MenuError?.Invoke(this, $"排序方式未能恢复：0x{sortResult:X8}");
+                    ShellViewRestoreStep.Mode => "查看方式", ShellViewRestoreStep.Columns => "列设置",
+                    ShellViewRestoreStep.Sorting => "排序方式", _ => "分组方式"
+                };
+                MenuError?.Invoke(this, $"{label}恢复失败，暂未保存会话；请重新打开目录后重试。0x{result:X8}");
+            }, Current);
+            if (Current())
+            {
+                _viewRestoreFailed = !restored;
+                if (restored) _quickFilterGroupToRestore = null;
             }
-            var group = _viewState.GroupKey is { } savedGroup
-                ? new NativePropertyKey { FormatId = savedGroup.FormatId, PropertyId = savedGroup.PropertyId }
-                : default;
-            var groupResult = GetMethod<SetGroupByDelegate>(view, 17)(view, ref group, _viewState.GroupAscending ? 1 : 0);
-            if (groupResult < 0)
-                MenuError?.Invoke(this, $"分组方式未能恢复：0x{groupResult:X8}");
         }
         finally { Marshal.Release(view); }
+    }
+
+    private sealed class NativeViewStateTarget(nint view, Func<bool> isCurrent) : IShellViewStateTarget
+    {
+        public int SetMode(uint mode, int iconSize) =>
+            GetMethod<SetViewModeAndIconSizeDelegate>(view, 35)(view, mode, iconSize);
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) => ShellColumnManager.Apply(view, columns, isCurrent);
+        public int SetSorting(IReadOnlyList<SortColumnState> columns)
+        {
+            var native = columns.Select(sort => new NativeSortColumn
+            {
+                Key = new NativePropertyKey { FormatId = sort.Key.FormatId, PropertyId = sort.Key.PropertyId },
+                Direction = sort.Direction
+            }).ToArray();
+            return GetMethod<SetSortColumnsDelegate>(view, 27)(view, native, native.Length);
+        }
+        public int SetGrouping(PropertyKeyState? key, bool ascending)
+        {
+            var native = key is null ? default : new NativePropertyKey { FormatId = key.FormatId, PropertyId = key.PropertyId };
+            return GetMethod<SetGroupByDelegate>(view, 17)(view, ref native, ascending ? 1 : 0);
+        }
     }
 
     private IntPtr GetFolderView2Pointer()
@@ -1963,44 +2296,100 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         });
     }
 
-    internal void SetQuickFilter(QuickFilterSettings settings)
+    internal bool SetQuickFilter(QuickFilterSettings settings)
     {
         var requestVersion = ++_quickFilterRequestVersion;
+        var browser = _browser;
+        var generation = _viewReadiness.Generation;
+        bool Current() => requestVersion == _quickFilterRequestVersion && ReferenceEquals(browser, _browser) &&
+            generation == _viewReadiness.Generation;
+        var previousSettings = _quickFilterSettings;
+        var previousFilter = _quickFilter;
+        var previousActive = _browserSite.QuickFilterActive;
+        var attachmentAttempted = false;
         LastQuickFilterStatus = $"start pattern={settings.Pattern},exclude={settings.ExcludeMatches},folders={settings.FilterFolders}";
         var pendingRestore = _pendingQuickFilterGroupRestore;
         CancelPendingQuickFilterGroupRestore();
         var searchActive = _location.IsSearchActive;
-        PropertyKeyState? group = pendingRestore?.Group;
-        var groupAscending = pendingRestore?.Ascending ?? false;
-        var hasGroup = !searchActive && (pendingRestore is not null ||
-            settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
-        var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
-        // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
-        // Keep the last confirmed user selection authoritative across that transition.
-        using var groupSelectionSuppression = hasGroup
-            ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
-            : null;
-        // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
-        var groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false);
-        LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={ReadCurrentGroupDiagnostic()}";
-        _quickFilterSettings = settings;
-        _quickFilter = null;
-        try { UpdateQuickFilterAttachment(searchActive); }
-        catch
+        PropertyKeyState? group = pendingRestore?.Group ?? _quickFilterGroupToRestore?.Group;
+        var groupAscending = pendingRestore?.Ascending ?? _quickFilterGroupToRestore?.Ascending ?? false;
+        var groupCleared = pendingRestore is not null;
+        IDisposable? groupSelectionSuppression = pendingRestore is not null
+            ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion) : null;
+        try
         {
-            if (groupCleared && group is not null) _ = TrySetGroup(group, groupAscending);
+            var hasGroup = !_disableGrouping && !searchActive && (pendingRestore is not null || _quickFilterGroupToRestore is not null ||
+                settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
+            var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
+            if (!Current()) return false;
+            // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
+            // Keep the last confirmed user selection authoritative across that transition.
+            groupSelectionSuppression ??= hasGroup
+                ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion)
+                : null;
+            if (hasGroup && group is not null) RememberQuickFilterGroup(group, groupAscending);
+            // Attach the filter while the Shell view is ungrouped; DefView can produce an empty item list otherwise.
+            groupCleared = pendingRestore is not null || hasGroup && TrySetGroup(null, ascending: false, Current);
+            if (!Current()) return false;
+            var groupDiagnostic = ReadCurrentGroupDiagnostic();
+            if (!Current()) return false;
+            LastQuickFilterStatus += $"; grouped={hasGroup},clear-result={groupCleared},current-group={groupDiagnostic}";
+            _quickFilterSettings = settings;
+            _quickFilter = null;
+            attachmentAttempted = true;
+            UpdateQuickFilterAttachment(searchActive);
+            if (!Current()) return false;
+            LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
+            QuickFilterChanged?.Invoke(_quickFilterSettings);
+            if (!Current()) return false;
+            // An uncreated tab keeps this preference for BuildWindowCore; there
+            // is no native view to refresh yet.
+            if (!searchActive && browser is not null)
+                Refresh(groupCleared && group is not null
+                    ? () =>
+                    {
+                        if (requestVersion == _quickFilterRequestVersion)
+                            QueueQuickFilterGroupRestore(group, groupAscending, initialItemCount, requestVersion);
+                    }
+                    : null);
+            return Current();
+        }
+        catch (Exception original)
+        {
+            if (!Current()) return false;
+            // A rejected attachment or refresh must not leave the new settings
+            // eligible for session/history saving. Reapply the previous filter;
+            // native failure does not guarantee that no state changed.
+            _quickFilterSettings = previousSettings;
+            _quickFilter = previousFilter;
+            _browserSite.QuickFilterActive = previousActive;
+            var failures = new List<Exception> { original };
+            try { if (attachmentAttempted) UpdateQuickFilterAttachment(searchActive); }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原筛选失败。", ex)); }
+            if (!Current()) return false;
+            try
+            {
+                if (groupCleared && group is not null)
+                {
+                    if (!TrySetGroup(group, groupAscending, Current))
+                        failures.Add(new InvalidOperationException("恢复原分组失败。"));
+                    else if (Current()) _quickFilterGroupToRestore = null;
+                }
+            }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原分组失败。", ex)); }
+            if (!Current()) return false;
+            CancelPendingQuickFilterGroupRestore();
+            var rollbackVersion = ++_quickFilterRequestVersion;
+            try { QuickFilterChanged?.Invoke(previousSettings); }
+            catch (Exception ex) { failures.Add(new InvalidOperationException("恢复筛选界面失败。", ex)); }
+            if (rollbackVersion != _quickFilterRequestVersion || !ReferenceEquals(browser, _browser) ||
+                generation != _viewReadiness.Generation) return false;
+            LastQuickFilterStatus += failures.Count == 1 ? "; previous-filter-restored" : "; rollback-incomplete";
+            if (failures.Count > 1)
+                throw new AggregateException("筛选失败，恢复原状态也未完整完成。", failures);
             throw;
         }
-        LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
-        QuickFilterChanged?.Invoke(_quickFilterSettings);
-        if (!searchActive)
-            Refresh(groupCleared && group is not null
-                ? () =>
-                {
-                    if (requestVersion == _quickFilterRequestVersion)
-                        QueueQuickFilterGroupRestore(group, groupAscending, initialItemCount, requestVersion);
-                }
-                : null);
+        finally { groupSelectionSuppression?.Dispose(); }
     }
 
     internal void SetHiddenItemsPreference(HiddenItemsPreference preference)
@@ -2022,7 +2411,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void QueueQuickFilterGroupRestore(PropertyKeyState group, bool ascending, int initialItemCount, long requestVersion)
     {
+        if (requestVersion != _quickFilterRequestVersion) return;
         CancelPendingQuickFilterGroupRestore();
+        RememberQuickFilterGroup(group, ascending);
+        if (_disableGrouping) return;
         var pending = new PendingQuickFilterGroupRestore(group, ascending, initialItemCount,
             _quickFilter, _location.DirectoryPath, _viewReadiness.NavigationVersion, requestVersion, Stopwatch.GetTimestamp());
         _pendingQuickFilterGroupRestore = pending;
@@ -2038,19 +2430,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void AdvanceQuickFilterGroupRestore(PendingQuickFilterGroupRestore pending, DispatcherTimer timer)
     {
+        bool VisitCurrent() => _quickFilterRequestVersion == pending.RequestVersion &&
+            _viewReadiness.NavigationVersion == pending.NavigationVersion &&
+            string.Equals(CurrentPath, pending.Path, StringComparison.OrdinalIgnoreCase);
         if (!ReferenceEquals(_pendingQuickFilterGroupRestore, pending) ||
             !ReferenceEquals(_quickFilterGroupRestoreTimer, timer)) return;
-        if (_quickFilterRequestVersion != pending.RequestVersion ||
-            _viewReadiness.NavigationVersion != pending.NavigationVersion ||
-            !string.Equals(CurrentPath, pending.Path, StringComparison.OrdinalIgnoreCase))
+        if (!VisitCurrent())
         {
             CancelPendingQuickFilterGroupRestore();
             LastQuickFilterStatus += "; stale group restore cancelled after navigation";
             return;
         }
+        if (_disableGrouping)
+        {
+            CancelPendingQuickFilterGroupRestore();
+            return;
+        }
 
         var callbacks = pending.Filter is null ? -1 : pending.Filter.ShouldShowCalls;
         var rows = ReadDirectoryMonitorItemCount() ?? 0;
+        // Count queries can pump COM callbacks and retire this timer/visit.
+        if (!VisitCurrent() || !ReferenceEquals(_pendingQuickFilterGroupRestore, pending) ||
+            !ReferenceEquals(_quickFilterGroupRestoreTimer, timer)) return;
         var decision = QuickFilterEnumerationGate.Decide(pending.InitialItemCount, callbacks, rows,
             Stopwatch.GetElapsedTime(pending.StartedAt), TimeSpan.FromMilliseconds(QuickFilterGroupRestoreTimeoutMilliseconds));
         if (decision == QuickFilterEnumerationDecision.WaitForEnumeration) return;
@@ -2064,9 +2465,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _quickFilterSettings = QuickFilterSettings.Empty;
             _quickFilter = null;
             try { UpdateQuickFilterAttachment(searchActive: false); }
-            catch (Exception ex) { MenuError?.Invoke(this, $"超时后恢复文件视图失败：{ex.Message}"); }
+            catch (Exception ex) { if (VisitCurrent()) MenuError?.Invoke(this, $"超时后恢复文件视图失败：{ex.Message}"); }
+            if (!VisitCurrent()) return;
             QuickFilterChanged?.Invoke(_quickFilterSettings);
+            if (!VisitCurrent()) return;
             MenuError?.Invoke(this, "Shell 文件视图未完成筛选刷新，已清除筛选并恢复显示全部项目。");
+            if (!VisitCurrent()) return;
             try
             {
                 Refresh(() =>
@@ -2076,12 +2480,42 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             pending.RequestVersion);
                 });
             }
-            catch (Exception ex) { MenuError?.Invoke(this, $"筛选恢复刷新失败：0x{ex.HResult:X8}"); }
+            catch (Exception ex) { if (VisitCurrent()) MenuError?.Invoke(this, $"筛选恢复刷新失败：0x{ex.HResult:X8}"); }
             return;
         }
 
-        var restored = TrySetGroup(pending.Group, pending.Ascending);
-        LastQuickFilterStatus += $"; restore-group={restored},rows={ReadDirectoryMonitorItemCount()},current-group={ReadCurrentGroupDiagnostic()}";
+        var restored = TrySetGroup(pending.Group, pending.Ascending, VisitCurrent);
+        if (!VisitCurrent()) return;
+        if (restored) _quickFilterGroupToRestore = null;
+        var currentRows = ReadDirectoryMonitorItemCount();
+        if (!VisitCurrent()) return;
+        var currentGroup = ReadCurrentGroupDiagnostic();
+        if (!VisitCurrent()) return;
+        LastQuickFilterStatus += $"; restore-group={restored},rows={currentRows},current-group={currentGroup}";
+    }
+
+    private void RememberQuickFilterGroup(PropertyKeyState group, bool ascending)
+    {
+        // Filtering temporarily clears native grouping. Keep the confirmed intent
+        // even when navigation cancels its timer, so save/copy never store "None".
+        _quickFilterGroupToRestore = (group, ascending);
+        _viewState = _viewState with { GroupKey = group, GroupAscending = ascending };
+    }
+
+    private ViewState PreserveQuickFilterGroup(ViewState captured)
+    {
+        if (_quickFilterGroupToRestore is not { } group) return captured;
+        if (captured.GroupKey is not null &&
+            (captured.GroupKey != group.Group || captured.GroupAscending != group.Ascending))
+        {
+            // Native state has moved beyond the temporary "None" phase. Honor
+            // the newly observed group/direction instead of restoring over it.
+            CancelPendingQuickFilterGroupRestore();
+            _quickFilterGroupToRestore = null;
+            _quickFilterRequestVersion++;
+            return captured;
+        }
+        return captured with { GroupKey = group.Group, GroupAscending = group.Ascending };
     }
 
     private void CancelPendingQuickFilterGroupRestore()
@@ -2111,15 +2545,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(view); }
     }
 
-    private bool TrySetGroup(PropertyKeyState? group, bool ascending)
+    private bool TrySetGroup(PropertyKeyState? group, bool ascending, Func<bool> isCurrent)
     {
+        if (!isCurrent()) return false;
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) return false;
         try
         {
+            if (!isCurrent()) return false;
             var key = group is null ? default : new NativePropertyKey
                 { FormatId = group.FormatId, PropertyId = group.PropertyId };
             var result = GetMethod<SetGroupByDelegate>(view, 17)(view, ref key, ascending ? 1 : 0);
+            if (!isCurrent()) return false;
             if (result < 0) MenuError?.Invoke(this, $"调整筛选分组顺序失败：0x{result:X8}");
             return result >= 0;
         }
@@ -2140,30 +2577,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var browserUnknown = Marshal.GetIUnknownForObject(_browser);
         try
         {
-            var iid = FolderFilterSiteId;
-            if (Marshal.QueryInterface(browserUnknown, in iid, out var site) < 0) return;
-            try
-            {
-                var filterUnknown = filter is null ? IntPtr.Zero : Marshal.GetIUnknownForObject(filter);
-                try
-                {
-                    if (filterUnknown != IntPtr.Zero)
-                    {
-                        var filterIid = new Guid("9CC22886-DC8E-11D2-B1D0-00C04F8EEB3E");
-                        Check(Marshal.QueryInterface(filterUnknown, in filterIid, out var filterInterface));
-                        Marshal.Release(filterInterface);
-                    }
-                    Check(GetMethod<SetFolderFilter>(site, 3)(site, filterUnknown));
-                }
-                finally { if (filterUnknown != IntPtr.Zero) Marshal.Release(filterUnknown); }
-            }
-            finally { Marshal.Release(site); }
+            var filterUnknown = filter is null ? IntPtr.Zero : Marshal.GetIUnknownForObject(filter);
+            try { ShellFilterAttachment.Apply(browserUnknown, filterUnknown); }
+            finally { if (filterUnknown != IntPtr.Zero) Marshal.Release(filterUnknown); }
         }
         finally { Marshal.Release(browserUnknown); }
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int SetFolderFilter(nint self, nint filter);
 
     private void Refresh(Action? afterRefresh)
     {
@@ -2595,7 +3014,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         TraceShellSelectionCallback(shellView);
         if (_browser is null || _selectionRecoverySuppression.IsSuppressed(_viewReadiness.NavigationVersion) || _viewReadiness.Pending ||
-            !ShellSelectionRestoreGate.ShouldObserveSelectionCallback(_directorySelectionRestorePending) ||
+            !ShellSelectionRestoreGate.ShouldObserveSelectionCallback(_directorySelectionRestorePending, GetKeyState(1) < 0) ||
             Interlocked.Read(ref _nativeUserInputVersion) != Interlocked.Read(ref _settledNativeUserInputVersion)) return;
         if (Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView) < 0 || folderView == IntPtr.Zero)
             return;
@@ -2784,6 +3203,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 navigationVersion != _viewReadiness.NavigationVersion ||
                 !string.Equals(path, CurrentPath, StringComparison.OrdinalIgnoreCase)) return;
 
+            if (GetKeyState(1) < 0) return; // Wait for WM_LBUTTONUP before caching the final mouse selection.
             var folderView = GetFolderView2Pointer();
             if (folderView == IntPtr.Zero) return;
             ShellViewSelectionSnapshot? snapshot;
@@ -2809,6 +3229,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _lastNativeSelectionPath = path;
         }));
     }
+
+    [DllImport("user32.dll")] private static extern short GetKeyState(int key);
 
     private bool IsFileContentInputWindow(IntPtr hwnd)
     {
@@ -3861,6 +4283,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         _quickFilterRequestVersion++;
         CancelPendingQuickFilterGroupRestore();
+        _quickFilterGroupToRestore = null;
         ClearLastNativeSelection();
         _nativeInputSelectionCapture?.Abort();
         _nativeInputSelectionCapture = null;
@@ -3875,6 +4298,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         CancelPendingNewFolderRename();
         _issuedBrowserPaths.Clear();
         _issuedSearches.Clear();
+        // Destroying the browser also destroys its Shell TravelLog; old search PIDL aliases cannot be used after recreation.
+        _searchHistory.Clear();
         _pendingFileOperationFocusRestore = null;
         _focusRestoreTimer.Stop();
         if (_browser is null) return;
@@ -3897,6 +4322,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _nativeInputSelectionCapture?.Abort();
         _nativeInputSelectionCapture = null;
         StopDirectoryChangeMonitor();
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
         var targetPath = FileSystemPath(pidl);
         var isSearchTarget = _searchHistory.TryResolve(pidl, out _);
@@ -3912,15 +4338,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try { UpdateQuickFilterAttachment(searchActive: false); }
             catch (Exception ex) { MenuError?.Invoke(this, $"为目标目录启用快速筛选失败：{ex.Message}"); }
         }
-        var issuedByApp = targetPath is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(targetPath)) ||
-            identity is not null && _issuedSearches.ContainsKey(identity);
-        // An app-issued search can start after a later directory probe. Its
-        // delayed callback must not cancel that newer request as user input.
+        var issuedVersion = IssuedRequestVersion(identity);
+        var issuedByApp = issuedVersion.HasValue;
+        // An app-issued folder/search can start after a later directory probe.
+        // Its delayed callback must not cancel that newer request as user input.
         if (!issuedByApp)
         {
             _navigationRequestVersion++;
             _navigationGate.Cancel();
         }
+        _nativeNavigationRequestVersion = issuedVersion ?? _navigationRequestVersion;
         _viewReadiness.Begin(identity);
         QueueNavigationAvailability();
         NavigationStarting?.Invoke(this, EventArgs.Empty);
@@ -3938,12 +4365,29 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         try
         {
+            NativeShellTheme.ApplyView(view);
             var shellView = (IShellView)Marshal.GetObjectForIUnknown(view);
             try
             {
                 ReportFolderHeaderFailure(ShellFolderViewOptions.EnableAllViewHeaders(view));
+                var checkSelectResult = ShellFolderViewOptions.SetCheckSelect(view, _selectionCheckBoxes);
+                if (checkSelectResult < 0)
+                    MenuError?.Invoke(this, $"Shell 未能应用复选框选择设置（0x{checkSelectResult:X8}）。");
+                if (_fullRowSelection is { } fullRowSelection)
+                {
+                    var fullRowResult = ShellFolderViewOptions.SetFullRowSelect(view, fullRowSelection);
+                    if (fullRowResult < 0)
+                        MenuError?.Invoke(this, $"Shell 未能应用整行选择设置（0x{fullRowResult:X8}）。");
+                }
+                var noGroupingResult = ShellFolderViewOptions.SetNoGrouping(view, _disableGrouping);
+                if (noGroupingResult < 0)
+                    MenuError?.Invoke(this, $"Shell 未能应用全局分组设置（0x{noGroupingResult:X8}）。");
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
+                {
                     AttachViewWindow(hwnd);
+                    NativeShellTheme.Apply(hwnd);
+                    QueueNativeThemeRefresh();
+                }
             }
             finally { Marshal.ReleaseComObject(shellView); }
         }
@@ -3960,29 +4404,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     int IExplorerBrowserEvents.OnNavigationComplete(IntPtr pidl)
     {
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
-        CompleteIssuedSearch(identity);
+        var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Complete(identity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
-        var path = ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var location, out _)
-            ? location : null;
-        var issuedByApp = path is not null && _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
-        if (path is not null) CompleteIssuedPath(path);
         // Retire bookkeeping for every callback, but publish only the current
         // settled visit. An older completion must not overwrite address/capacity.
         if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (_viewReadiness.RequiresLocationRead)
         {
-            if (!ReconcileCurrentLocation(navigationVersion, clearRetry: true) &&
-                _viewReadiness.IsCurrent(navigationVersion))
-                NavigationFailed?.Invoke(this, "当前 Shell 目录位置暂时无法确认，请刷新重试。");
+            if (!ReconcileCurrentLocation(navigationVersion, requestVersion, clearRetry: true) &&
+                _viewReadiness.IsCurrent(navigationVersion) && IsCurrentNavigationRequest(requestVersion))
+                ReportNavigationFailure("当前 Shell 目录位置暂时无法确认，请刷新重试。", requestVersion);
             return 0;
         }
-        return PublishNavigationLocation(pidl, navigationVersion, issuedByApp, clearRetry: true);
+        return PublishNavigationLocation(pidl, navigationVersion, requestVersion, clearRetry: true);
     }
 
-    private int PublishNavigationLocation(IntPtr pidl, long navigationVersion, bool issuedByApp, bool clearRetry)
+    private int PublishNavigationLocation(IntPtr pidl, long navigationVersion, long? requestVersion, bool clearRetry)
     {
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         if (ShellLocationIdentity.TryGetPersistedIdentity(pidl, out var path, out var isFileSystemLocation))
@@ -3998,8 +4439,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch (Exception ex) { MenuError?.Invoke(this, $"应用快速筛选失败：{ex.Message}"); }
             _hasNavigated = true;
-            if (clearRetry && (!issuedByApp || (_retryPath is not null &&
-                string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))))
+            if (clearRetry && CanCompleteNavigationRequest(requestVersion))
                 _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
@@ -4011,14 +4451,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (!_viewReadiness.IsCurrent(navigationVersion)) return;
                 if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
                 else StopDirectoryChangeMonitor();
-                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
-                    FocusView();
-                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
+                if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
                 if (_viewReadiness.IsCurrent(navigationVersion) && CurrentPath == path && !_location.IsSearchActive)
-                    Navigated?.Invoke(this, path);
+                    Navigated?.Invoke(this, new(path, requestVersion));
             }));
             return 0;
         }
@@ -4031,20 +4469,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             catch (Exception ex) { MenuError?.Invoke(this, $"切换搜索视图筛选状态失败：{ex.Message}"); }
             _locationUnconfirmed = false;
             _hasNavigated = true;
-            if (clearRetry) _retryPath = null;
+            if (clearRetry && CanCompleteNavigationRequest(requestVersion)) _retryPath = null;
             try { AttachCurrentViewWindow(); }
             catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!_viewReadiness.IsCurrent(navigationVersion) || _location.SearchUri != searchUri) return;
-                if ((_focusWhenReady || _restoreFocusAfterNavigation) && IsVisible)
-                    FocusView();
-                if (_viewReadiness.IsCurrent(navigationVersion)) _restoreFocusAfterNavigation = false;
+                if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
             }));
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
                 if (_viewReadiness.IsCurrent(navigationVersion) && _location.SearchUri == searchUri)
-                    SearchNavigated?.Invoke(this, _location.SearchQuery!);
+                    SearchNavigated?.Invoke(this, new(_location.SearchQuery!, requestVersion));
             }));
             return 0;
         }
@@ -4053,7 +4489,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return 0;
     }
 
-    private bool ReconcileCurrentLocation(long navigationVersion, bool clearRetry)
+    private bool ReconcileCurrentLocation(long navigationVersion, long? requestVersion, bool clearRetry)
     {
         nint unknown = 0, actual = 0;
         try
@@ -4063,7 +4499,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             actual = ShellCurrentLocation.ReadPidl(unknown);
             if (actual == 0 || !_viewReadiness.IsCurrent(navigationVersion)) return false;
             _locationUnconfirmed = true;
-            PublishNavigationLocation(actual, navigationVersion, issuedByApp: true, clearRetry: clearRetry);
+            PublishNavigationLocation(actual, navigationVersion, requestVersion, clearRetry: clearRetry);
             return !_locationUnconfirmed && _viewReadiness.IsCurrent(navigationVersion);
         }
         catch (COMException) { return false; }
@@ -4090,8 +4526,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void TrackIssuedPath(string path)
     {
+        // Keep retries in the callback identity too, so a successful alias
+        // navigation stops retrying and an older failure cannot replace it.
+        _retryPath = path;
         var key = NormalizePathKey(path);
-        _issuedBrowserPaths[key] = _issuedBrowserPaths.GetValueOrDefault(key) + 1;
+        _issuedBrowserPaths[key] = new(_issuedBrowserPaths.GetValueOrDefault(key).Count + 1, _navigationRequestVersion);
         if (_issuedBrowserPaths.Count > 32)
             _issuedBrowserPaths.Remove(_issuedBrowserPaths.Keys.First());
     }
@@ -4099,16 +4538,48 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void CompleteIssuedPath(string path)
     {
         var key = NormalizePathKey(path);
-        if (!_issuedBrowserPaths.TryGetValue(key, out var count)) return;
-        if (count <= 1) _issuedBrowserPaths.Remove(key);
-        else _issuedBrowserPaths[key] = count - 1;
+        if (!_issuedBrowserPaths.TryGetValue(key, out var request)) return;
+        if (request.Count <= 1) _issuedBrowserPaths.Remove(key);
+        else _issuedBrowserPaths[key] = request with { Count = request.Count - 1 };
     }
 
     private void CompleteIssuedSearch(string? identity)
     {
-        if (identity is null || !_issuedSearches.TryGetValue(identity, out var count)) return;
-        if (count <= 1) _issuedSearches.Remove(identity);
-        else _issuedSearches[identity] = count - 1;
+        if (identity is null || !_issuedSearches.TryGetValue(identity, out var request)) return;
+        if (request.Count <= 1) _issuedSearches.Remove(identity);
+        else _issuedSearches[identity] = request with { Count = request.Count - 1 };
+    }
+
+    private void TrackIssuedSearch(string uri) =>
+        _issuedSearches[uri] = new(_issuedSearches.GetValueOrDefault(uri).Count + 1, _navigationRequestVersion);
+
+    private long? IssuedRequestVersion(string? identity)
+    {
+        if (identity is null) return null;
+        if (_issuedBrowserPaths.TryGetValue(NormalizePathKey(identity), out var directory)) return directory.RequestVersion;
+        return _issuedSearches.TryGetValue(identity, out var search) ? search.RequestVersion : null;
+    }
+
+    private long? RetireNavigationRequest(string? identity)
+    {
+        // Native callbacks identify a target, not an individual submission.
+        // Preserve the latest registered input number for the counted batch;
+        // no partial batch may acknowledge input. Readiness still reconciles
+        // the actual Shell location after repeated native targets settle.
+        if (identity is not null)
+        {
+            if (_issuedBrowserPaths.TryGetValue(NormalizePathKey(identity), out var directory))
+            {
+                CompleteIssuedPath(identity);
+                return directory.Count == 1 ? directory.RequestVersion : null;
+            }
+            if (_issuedSearches.TryGetValue(identity, out var search))
+            {
+                CompleteIssuedSearch(identity);
+                return search.Count == 1 ? search.RequestVersion : null;
+            }
+        }
+        return _nativeNavigationRequestVersion;
     }
 
     private static string? FileSystemPath(IntPtr pidl)
@@ -4117,6 +4588,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return null;
         try { return Marshal.PtrToStringUni(pointer); }
         finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
+    private void RestoreNavigationFocus(long navigationVersion)
+    {
+        if (!_viewReadiness.IsCurrent(navigationVersion)) return;
+        var requested = _focusWhenReady || _restoreFocusAfterNavigation;
+        // Retire this visit's intent before native activation can reenter. A
+        // hidden tab or a user who moved to another input must not leave stale
+        // intent for a later visit. Explicit tab/window activation requests focus anew.
+        _focusWhenReady = false;
+        _restoreFocusAfterNavigation = false;
+        if (requested && !IsRenameEditorFocused() && !IsColumnHeaderFocused())
+            RestoreContentFocusIfNeeded();
     }
 
     private void AttachCurrentViewWindow()
@@ -4130,6 +4614,19 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 AttachViewWindow(hwnd);
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private void QueueNativeThemeRefresh()
+    {
+        if (_nativeThemeRefreshQueued) return;
+        _nativeThemeRefreshQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            _nativeThemeRefreshQueued = false;
+            // Scrollbar children may not exist yet during OnViewCreated.
+            if (_browser is not null && _hostWindow != IntPtr.Zero)
+                NativeShellTheme.Apply(_hostWindow);
+        }));
     }
 
     private void AttachViewWindow(IntPtr hwnd)
@@ -4162,12 +4659,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void DetachViewWindow()
     {
         foreach (var hwnd in _subclassedWindows)
+        {
             RemoveWindowSubclass(hwnd, _subclassProc, 1);
+            // Right-click diagnostics cache class names by HWND; retired view handles must not accumulate across navigation.
+            _nativeViewWindowClasses.Remove(hwnd);
+        }
         _subclassedWindows.Clear();
         _viewWindow = IntPtr.Zero;
         _lastContentFocusWindow = IntPtr.Zero;
-        _menuActions.Clear();
-        _menuTarget.Reset();
     }
 
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
@@ -4178,17 +4677,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var timingStartedAt = timingSample ? Stopwatch.GetTimestamp() : 0;
         try
         {
-            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0204 or 0x0207)
+            // Finish the mouse gesture before caching selection; a button-down snapshot can be an intermediate range.
+            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0204 or 0x0207)
                 NoteNativeUserInput(hwnd);
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {
                 var delta = unchecked((short)(wParam.ToInt64() >> 16));
                 if (delta != 0)
                 {
-                    var notches = _ctrlWheelAccumulator.Add(delta);
+                    var notches = _ctrlWheelAccumulator.Add(delta, _viewReadiness.Generation);
                     if (notches == 0) return IntPtr.Zero;
+                    var wheelBrowser = _browser;
+                    var wheelView = _viewWindow;
+                    var wheelGeneration = _viewReadiness.Generation;
                     var viewStyleApplied = wheelHandler(notches * 120);
-                    var fallbackDelta = ViewStyleWheelDispatch.GetFallbackDelta(notches, viewStyleApplied);
+                    // A setter may navigate or close this host while pumping COM.
+                    // Never forward the old accumulated wheel to its replacement.
+                    var targetCurrent = ReferenceEquals(wheelBrowser, _browser) && wheelView == _viewWindow &&
+                        wheelGeneration == _viewReadiness.Generation && IsVisible;
+                    var fallbackDelta = ViewStyleWheelDispatch.GetFallbackDelta(notches, viewStyleApplied, targetCurrent);
                     if (fallbackDelta == 0) return IntPtr.Zero;
 
                     // The app consumed earlier fractional messages, so forward the accumulated
@@ -4233,12 +4740,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
                     _headerPresetMenuGate.Reset();
-                    _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0207: // WM_MBUTTONDOWN
                     _headerPresetMenuGate.Reset();
-                    _menuTarget.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
                     BeginMiddleClickFolderProbe();
                     break;
@@ -4249,16 +4754,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     Activated?.Invoke(this, EventArgs.Empty);
                     if (_headerPresetMenuGate.BeginRightClick(
                         unchecked((nuint)wParam.ToInt64()), GetDiagnosticWindowClass(hwnd)))
-                    {
-                        _menuTarget.Reset();
                         break;
-                    }
-                    // Always replace the previous hit test. If cursor retrieval fails,
-                    // the later WM_CONTEXTMENU must probe its own point instead of inheriting stale state.
-                    ShellMenuPoint? menuPoint = GetCursorPos(out var cursorPoint)
-                        ? new ShellMenuPoint(cursorPoint.X, cursorPoint.Y) : null;
-                    _menuTarget.MouseDown(menuPoint, ProbeMenuTarget,
-                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
                     break;
                 case 0x007B: // WM_CONTEXTMENU; (-1,-1) means keyboard invocation.
                     if (_headerPresetMenuGate.TryConsume(
@@ -4268,53 +4764,46 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                             new Action(() => HeaderPresetMenuRequested?.Invoke(headerMenuPoint)));
                         return IntPtr.Zero;
                     }
-                    _menuTarget.ContextMenu(lParam, ProbeMenuTarget,
-                        allowCustomCommands: !IsNativeContextMenuExcludedWindow(hwnd));
                     break;
                 case 0x0100: // WM_KEYDOWN
                 case 0x0104: // WM_SYSKEYDOWN
                     _headerPresetMenuGate.Reset();
                     break;
                 case 0x0211: // WM_ENTERMENULOOP
-                    _menuPrepared = false;
-                    _menuActions.Clear();
+                    NativeShellTheme.BeginMenu(hwnd);
                     break;
-                case 0x0117: // WM_INITMENUPOPUP
-                    if (!_menuPrepared)
-                    {
-                        _menuPrepared = true;
-                        InjectCommands(wParam);
-                    }
+                case 0x0210: // WM_PARENTNOTIFY: apply theme to newly created native children.
+                    if ((wParam.ToInt64() & 0xFFFF) == 1) QueueNativeThemeRefresh();
                     break;
-                case 0x0111: // WM_COMMAND
-                    if (ShellMenuCommand.TryGetMenuId(wParam, lParam, out var commandId))
-                    {
-                        var customCommand = _menuActions.TryGetValue(commandId, out var action);
-                        _menuActions.Clear();
-                        if (customCommand)
-                        {
-                            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
-                            {
-                                try { action!(); }
-                                catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
-                            }));
-                            return IntPtr.Zero;
-                        }
-                    }
+                case 0x011F: // WM_MENUSELECT: style only this thread's native popup frames.
+                    NativeShellTheme.ApplyMenuFramesFromOwner();
+                    break;
+                case 0x0121: // WM_ENTERIDLE after the native popup HWND has been created.
+                    if (wParam == 2) NativeShellTheme.ApplyMenuFramesFromOwner(); // MSGF_MENU
+                    break;
+                case 0x004E: // WM_NOTIFY: native file-information tips are created lazily.
+                    NativeShellTheme.ApplyTooltip(lParam);
                     break;
                 case 0x0212: // WM_EXITMENULOOP
-                    _menuPrepared = false;
-                    _menuTarget.Reset();
+                    NativeShellTheme.EndMenu();
                     _headerPresetMenuGate.Reset();
                     break;
                 case 0x0082: // WM_NCDESTROY
                     if (hwnd == _viewWindow) _viewWindow = IntPtr.Zero;
+                    _nativeViewWindowClasses.Remove(hwnd);
                     break;
             }
         }
         catch (Exception ex) { MenuError?.Invoke(this, ex.Message); }
         var beforeShell = timingSample ? Stopwatch.GetTimestamp() : 0;
-        var result = DefSubclassProc(hwnd, message, wParam, lParam);
+        // Some Shell menus use an internal owner that does not forward
+        // WM_ENTERMENULOOP through our view subclass. Observe the dispatch before
+        // Shell can create/show its popup, and balance it even on failure.
+        var contextDispatch = message is 0x007B or 0x0205; // WM_CONTEXTMENU / WM_RBUTTONUP
+        if (contextDispatch) NativeShellTheme.BeginMenu(hwnd);
+        IntPtr result;
+        try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
+        finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
         if (timingSample)
         {
             var shellElapsed = Stopwatch.GetTimestamp() - beforeShell;
@@ -4401,65 +4890,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
-    private void InjectCommands(IntPtr menu)
-    {
-        if (menu == IntPtr.Zero || CustomCommands is null || !_menuTarget.CanInjectCustomCommands) return;
-        var target = _menuTarget.Resolve();
-        Trace($"context-menu target={target}");
-        // Unknown mouse hits still receive target-independent tab commands; only
-        // a confirmed item or keyboard target may expose the Shell selection.
-        var selectedItem = ShellMenuTargetTracker.CanUseSelectionForCommands(target)
-            ? GetSelectedItem() : null;
-        var commands = CustomCommands(selectedItem);
-        if (commands.Count == 0) return;
-
-        var inserted = 0;
-        for (var index = commands.Count - 1; index >= 0; index--)
-        {
-            var id = checked((ushort)(0xE000 + index));
-            if (!InsertMenu(menu, 0, 0x400, id, commands[index].Label))
-                continue;
-            _menuActions[id] = commands[index].Action;
-            inserted++;
-        }
-        if (inserted > 0)
-            InsertMenu(menu, (uint)inserted, 0x400 | 0x800, 0, null);
-        if (inserted != commands.Count)
-            MenuError?.Invoke(this, "部分自定义右键菜单命令未能插入。");
-    }
-
-    private static bool IsNativeContextMenuExcludedWindow(IntPtr hwnd)
-    {
-        var windowClass = WindowClass(hwnd);
-        return windowClass.Equals("SysHeader32", StringComparison.OrdinalIgnoreCase) ||
-            windowClass.Equals("ScrollBar", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private Task<ShellMenuTarget> ProbeMenuTarget(ShellMenuPoint point)
-    {
-        var viewWindow = _viewWindow;
-        if (viewWindow == IntPtr.Zero) return Task.FromResult(ShellMenuTarget.Unknown);
-        // Empty values disable the writer too; avoid collecting UIA ancestry when nothing can be logged.
-        var traceHit = ShellMenuHitTrace.IsEnabled(FocusTracePath);
-        // UI Automation queries against our own Shell view must not run inside
-        // the view's menu/window procedure. An unfinished probe fails closed.
-        return Task.Run(() =>
-        {
-            IReadOnlyList<ControlType> controls = [];
-            try
-            {
-                var target = HitTestMenuTarget(point, viewWindow, traceHit, out controls);
-                if (traceHit) Trace(ShellMenuHitTrace.Format(point, target, controls));
-                return target;
-            }
-            catch
-            {
-                if (traceHit) Trace(ShellMenuHitTrace.Format(point, ShellMenuTarget.Unknown, controls));
-                return ShellMenuTarget.Unknown;
-            }
-        });
-    }
-
     private Task<string?> ProbeFileSystemFolderAtPoint(ShellMenuPoint point, string parentPath, IntPtr viewWindow)
     {
         return Task.Run(() =>
@@ -4518,72 +4948,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (InvalidOperationException) { return null; }
     }
 
-    private static ShellMenuTarget HitTestMenuTarget(ShellMenuPoint point, IntPtr viewWindow,
-        bool collectTrace, out IReadOnlyList<ControlType> controls)
-    {
-        List<ControlType>? ancestry = collectTrace ? [] : null;
-        try
-        {
-            var element = AutomationElement.FromPoint(new Point(point.X, point.Y));
-            var list = false;
-            var owned = false;
-            var headerOrScrollBar = false;
-            for (var depth = 0; element is not null && depth < 32; depth++)
-            {
-                var type = element.Current.ControlType;
-                ancestry?.Add(type);
-                list |= type == ControlType.List;
-                headerOrScrollBar |= type == ControlType.Header || type == ControlType.ScrollBar;
-                var handle = new IntPtr(element.Current.NativeWindowHandle);
-                owned |= handle != IntPtr.Zero &&
-                    (handle == viewWindow || IsChild(viewWindow, handle));
-                element = TreeWalker.ControlViewWalker.GetParent(element);
-            }
-            controls = ancestry ?? [];
-            if (!owned || !list || headerOrScrollBar) return ShellMenuTarget.Unknown;
-            if (TryHitTestNativeListView(point, viewWindow, out var nativeTarget))
-                return nativeTarget;
-            // UIA ListItem bounds may span a whole Details row. If the native list-view
-            // hit test is unavailable, neither an item nor background target is confirmed.
-            return ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: false, itemIndex: -1, hitFlags: 0);
-        }
-        catch (ElementNotAvailableException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-        catch (COMException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-        catch (InvalidOperationException) { controls = ancestry ?? []; return ShellMenuTarget.Unknown; }
-    }
-
-    private static bool TryHitTestNativeListView(ShellMenuPoint point, IntPtr viewWindow,
-        out ShellMenuTarget target)
-    {
-        // UIA ListItem bounds can cover the full Details row; the native hit flags distinguish
-        // its icon/text from the blank row area that must receive the Shell background menu.
-        var listView = IntPtr.Zero;
-        EnumChildWindows(viewWindow, (child, _) =>
-        {
-            var name = new StringBuilder(32);
-            GetClassName(child, name, name.Capacity);
-            if (name.ToString() != "SysListView32") return true;
-            listView = child;
-            return false;
-        }, IntPtr.Zero);
-        if (listView == IntPtr.Zero)
-        {
-            target = ShellMenuTarget.Unknown;
-            return false;
-        }
-
-        var clientPoint = new NativePoint { X = point.X, Y = point.Y };
-        if (!ScreenToClient(listView, ref clientPoint))
-        {
-            target = ShellMenuTarget.Unknown;
-            return true;
-        }
-        var hit = new NativeListViewHitTestInfo { X = clientPoint.X, Y = clientPoint.Y };
-        var itemIndex = SendMessage(listView, 0x1039, IntPtr.Zero, ref hit).ToInt32(); // LVM_SUBITEMHITTEST
-        target = ShellMenuTargetTracker.ResolveNativeListViewHitTest(available: true, itemIndex, hit.Flags);
-        return true;
-    }
-
     internal SelectedItem? GetSelectedItem()
     {
         if (_browser is null) return null;
@@ -4618,6 +4982,49 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
+    internal string? GetSelectedFolderLocation()
+    {
+        if (_browser is null || _viewReadiness.Pending) return null;
+        var folderViewId = FolderViewId;
+        if (_browser.GetCurrentView(ref folderViewId, out var viewObject) < 0 || viewObject is not IFolderView folderView)
+        {
+            if (viewObject is not null && Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+            return null;
+        }
+
+        try
+        {
+            var arrayId = ShellItemArrayId;
+            if (folderView.Items(1, ref arrayId, out var arrayObject) < 0 || arrayObject is not IShellItemArray items)
+            {
+                if (arrayObject is not null && Marshal.IsComObject(arrayObject)) Marshal.ReleaseComObject(arrayObject);
+                return null;
+            }
+            try
+            {
+                if (items.GetCount(out var count) < 0 || count != 1 || items.GetItemAt(0, out var item) < 0)
+                    return null;
+                try
+                {
+                    if (item.GetAttributes(0x20000000, out var attributes) < 0 || (attributes & 0x20000000) == 0 ||
+                        item.GetDisplayName(0x80028000, out var name) < 0 || name == IntPtr.Zero) return null;
+                    try
+                    {
+                        var identity = Marshal.PtrToStringUni(name);
+                        if (identity is null || !ShellLocationIdentity.TryGetFolderPidl(identity, out var pidl)) return null;
+                        Marshal.FreeCoTaskMem(pidl);
+                        return identity;
+                    }
+                    finally { Marshal.FreeCoTaskMem(name); }
+                }
+                finally { if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item); }
+            }
+            finally { if (Marshal.IsComObject(arrayObject)) Marshal.ReleaseComObject(arrayObject); }
+        }
+        catch (COMException) { return null; }
+        finally { if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject); }
+    }
+
     internal bool OpenSelectedFolderInNewTab(Action<string> openPath)
     {
         var selected = GetSelectedItem();
@@ -4631,37 +5038,30 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         : null;
     int IExplorerBrowserEvents.OnNavigationFailed(IntPtr pidl)
     {
+        QueueNativeThemeRefresh();
         var identity = NavigationIdentity(pidl);
-        CompleteIssuedSearch(identity);
+        var requestVersion = RetireNavigationRequest(identity);
         var publish = _viewReadiness.Fail(identity);
         QueueNavigationAvailability();
         var navigationVersion = _viewReadiness.NavigationVersion;
-        if (FileSystemPath(pidl) is { } path)
-        {
-            var issuedByApp = _issuedBrowserPaths.ContainsKey(NormalizePathKey(path));
-            CompleteIssuedPath(path);
-            if (issuedByApp && _retryPath is not null &&
-                !string.Equals(NormalizePathKey(_retryPath), NormalizePathKey(path), StringComparison.OrdinalIgnoreCase))
-                return 0;
-        }
         if (!publish || !_viewReadiness.IsCurrent(navigationVersion)) return 0;
         var reconcile = _viewReadiness.RequiresLocationRead;
         if (reconcile)
         {
             // A mixed success/failure batch has no per-request token. Its last
             // callback cannot establish which folder the native view retained.
-            ReconcileCurrentLocation(navigationVersion, clearRetry: false);
+            ReconcileCurrentLocation(navigationVersion, requestVersion, clearRetry: false);
             if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
         }
         var isSearch = _searchHistory.TryResolve(pidl, out _);
         if (!_viewReadiness.IsCurrent(navigationVersion)) return 0;
-        if (isSearch) _focusWhenReady = false;
+        if (isSearch && IsCurrentNavigationRequest(requestVersion)) _focusWhenReady = false;
         void ReportFailure()
         {
-            if (_viewReadiness.IsCurrent(navigationVersion))
-                NavigationFailed?.Invoke(this, _locationUnconfirmed
+            if (_viewReadiness.IsCurrent(navigationVersion) && IsCurrentNavigationRequest(requestVersion))
+                ReportNavigationFailure(_locationUnconfirmed
                     ? "当前 Shell 目录位置暂时无法确认，请刷新重试。"
-                    : isSearch ? "无法打开搜索结果。" : "无法打开目录。");
+                    : isSearch ? "无法打开搜索结果。" : "无法打开目录。", requestVersion);
         }
         // Reconciliation queues a location update which also resets status text.
         // Queue the error after it so the older status cannot erase the failure.
@@ -4735,13 +5135,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeListViewHitTestInfo
-    {
-        public int X, Y;
-        public uint Flags;
-        public int Item, SubItem, Group;
-    }
     [StructLayout(LayoutKind.Sequential)]
     private struct FolderSettings { public uint ViewMode, Flags; }
     [StructLayout(LayoutKind.Sequential)]
@@ -4900,9 +5293,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumChildWindows(IntPtr parent, EnumWindowProc callback, IntPtr data);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool InsertMenu(IntPtr menu, uint position, uint flags, nuint id, string? text);
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
     [DllImport("user32.dll", SetLastError = true)]
@@ -4914,9 +5304,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ScreenToClient(IntPtr hwnd, ref NativePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
@@ -4940,8 +5327,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
-    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam,
-        ref NativeListViewHitTestInfo lParam);
+    private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")]

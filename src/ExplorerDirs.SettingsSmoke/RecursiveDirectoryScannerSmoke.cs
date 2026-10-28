@@ -19,6 +19,7 @@ internal static class RecursiveDirectoryScannerSmoke
         var child = Path.Combine(root, "child");
         var linkTarget = root + "-link-target";
         var directoryLink = Path.Combine(root, "linked-target");
+        var standalone = Path.Combine(root + "-standalone.bin");
         Directory.CreateDirectory(child);
         Directory.CreateDirectory(linkTarget);
         try
@@ -28,6 +29,13 @@ internal static class RecursiveDirectoryScannerSmoke
             var result = RecursiveDirectoryScanner.Scan(root, CancellationToken.None);
             Check(result.Bytes == 8 && result.Files == 2 && result.Directories == 1 && result.Unreadable == 0,
                 "recursive scan totals nested file sizes and counts");
+
+            File.WriteAllBytes(standalone, new byte[7]);
+            var selectionResult = RecursiveDirectoryScanner.ScanSelection(
+                [root, child, root, standalone], CancellationToken.None);
+            Check(selectionResult.Bytes == 15 && selectionResult.Files == 3 && selectionResult.Directories == 1 &&
+                  selectionResult.Unreadable == 0,
+                "recursive selection scan counts files and folders while deduplicating nested and repeated selections");
 
             var empty = Path.Combine(root, "empty");
             Directory.CreateDirectory(empty);
@@ -80,8 +88,17 @@ internal static class RecursiveDirectoryScannerSmoke
             }
             Check((File.GetAttributes(directoryLink) & FileAttributes.ReparsePoint) != 0,
                 "the isolated junction fixture is a real filesystem reparse point");
+            var selectedLinkResult = RecursiveDirectoryScanner.ScanSelection([directoryLink], CancellationToken.None);
+            Check(selectedLinkResult.Bytes == 0 && selectedLinkResult.Files == 0 &&
+                  selectedLinkResult.Directories == 0 && selectedLinkResult.Unreadable == 1,
+                "recursive selection scan skips a selected reparse point without counting its target");
+            var selectedLinkChildResult = RecursiveDirectoryScanner.ScanSelection(
+                [Path.Combine(directoryLink, "outside.bin")], CancellationToken.None);
+            Check(selectedLinkChildResult.Bytes == 0 && selectedLinkChildResult.Files == 0 &&
+                  selectedLinkChildResult.Directories == 0 && selectedLinkChildResult.Unreadable == 1,
+                "recursive selection scan does not follow a selected path through a reparse-point ancestor");
             var linkedResult = RecursiveDirectoryScanner.Scan(root, CancellationToken.None);
-            Check(linkedResult.Bytes == 8 && linkedResult.Files == 2 && linkedResult.Directories == 2 &&
+            Check(linkedResult.Bytes == 8 && linkedResult.Files == 602 && linkedResult.Directories == 3 &&
                   linkedResult.Unreadable == 1,
                 $"recursive scan skips a real directory reparse point without counting its target contents " +
                 $"(attributes={File.GetAttributes(directoryLink)}, result={linkedResult})");
@@ -89,6 +106,7 @@ internal static class RecursiveDirectoryScannerSmoke
         finally
         {
             if (Directory.Exists(directoryLink)) Directory.Delete(directoryLink);
+            if (File.Exists(standalone)) File.Delete(standalone);
             Directory.Delete(root, recursive: true);
             Directory.Delete(linkTarget, recursive: true);
         }

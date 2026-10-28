@@ -29,11 +29,14 @@ internal static class ShellViewHostFilterProbe
     internal static int RunMenuCommandsForPrivateDesktop() => Run(stopAfterGroupedExport: false,
         leaveParentForThreadExit: true, menuCommandsOnly: true);
 
+    internal static int RunNewFolderForPrivateDesktop() => Run(stopAfterGroupedExport: false,
+        leaveParentForThreadExit: true, newFolderOnly: true);
+
     internal static int RunVirtualScopeForPrivateDesktop(string scope) =>
         Run(stopAfterGroupedExport: false, leaveParentForThreadExit: true, virtualScopeOnly: scope);
 
     private static int Run(bool stopAfterGroupedExport, bool leaveParentForThreadExit, string? virtualScopeOnly = null,
-        bool menuCommandsOnly = false)
+        bool menuCommandsOnly = false, bool newFolderOnly = false)
     {
         var foreground = GetForegroundWindow();
         var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -97,6 +100,13 @@ internal static class ShellViewHostFilterProbe
             Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
 
             host = new FilteredHost(parent, new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)), folderPidl, childFolderPidl, Navigate);
+            List<uint> controlWindowRequests = [];
+            List<string?> statusTextChanges = [];
+            if (newFolderOnly)
+            {
+                host.ControlWindowProvider = id => { controlWindowRequests.Add(id); return 0; };
+                host.StatusTextChanged += text => statusTextChanges.Add(text);
+            }
             host.View = view;
             viewPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
@@ -144,6 +154,94 @@ internal static class ShellViewHostFilterProbe
                 VerifyNativeMenuCommands(view, folderView, parent, foreground);
                 return 0;
             }
+            if (newFolderOnly)
+            {
+                _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE, still confined to the Private Desktop.
+                Check(At<ActivateView>(view, 7)(view, 1)); // SVUIA_ACTIVATE_FOCUS.
+                var newFolderListView = FindChildByClass(viewWindow, "SysListView32");
+                if (newFolderListView == 0) throw new Exception("The activated Shell view has no native list control.");
+                _ = SetFocus(newFolderListView);
+                Application.DoEvents();
+                var listFocusBefore = GetFocus() == newFolderListView;
+                var before = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                var attempts = new List<string>();
+                var invocationModes = new[]
+                {
+                    (Name: "offset-no-ui", Mask: 0x400u, Canonical: false),
+                    (Name: "offset", Mask: 0u, Canonical: false),
+                    (Name: "ansi-verb", Mask: 0u, Canonical: true)
+                };
+                foreach (var mode in invocationModes)
+                {
+                    var invokeHr = InvokeBackgroundVerbRaw(view, parent, "newfolder",
+                        invokeMask: mode.Mask, canonicalString: mode.Canonical);
+                    var settleUntil = DateTime.UtcNow + TimeSpan.FromMilliseconds(500);
+                    while (DateTime.UtcNow < settleUntil)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(10);
+                    }
+                    var afterAttempt = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
+                        .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                    attempts.Add($"{mode.Name}=0x{invokeHr:X8},entries=[{string.Join('|', afterAttempt)}]");
+                    if (invokeHr >= 0 || !before.SequenceEqual(afterAttempt, StringComparer.OrdinalIgnoreCase)) break;
+                }
+                var after = Directory.GetFileSystemEntries(fixture).Select(entry => Path.GetFileName(entry)!)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out var afterViewCount));
+                var added = after.Except(before, StringComparer.OrdinalIgnoreCase).ToArray();
+                var canonicalVerbSucceeded = attempts.Any(attempt => attempt.StartsWith("ansi-verb=0x00000000", StringComparison.Ordinal));
+                Check(At<ItemCount>(folderView, 7)(folderView, 1, out var createdSelectionCount));
+                Check(At<GetFocusedItem>(folderView, 10)(folderView, out var focusedIndex));
+                var focusedName = focusedIndex >= 0 && focusedIndex < afterViewCount
+                    ? ReadVisibleItemNames(folderView, afterViewCount)[focusedIndex]
+                    : string.Empty;
+                var renameEditor = FindChildByClass(viewWindow, "Edit");
+                var renameEditorAfterCreate = renameEditor != 0;
+                var focusedWindowClass = new System.Text.StringBuilder(128);
+                if (GetFocus() != 0) _ = GetClassNameW(GetFocus(), focusedWindowClass, focusedWindowClass.Capacity);
+                if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
+                    throw new Exception("The isolated New Folder diagnostic changed the desktop boundary.");
+                if (!listFocusBefore || !canonicalVerbSucceeded || added.Length != 1 || afterViewCount != 3 ||
+                    !Directory.Exists(Path.Combine(fixture, added[0])))
+                    throw new Exception("The focused Shell view's newfolder canonical verb did not create exactly one visible fixture directory.");
+
+                var addedIndex = Array.FindIndex(ReadVisibleItemNames(folderView, afterViewCount),
+                    name => name.Equals(added[0], StringComparison.OrdinalIgnoreCase));
+                if (addedIndex < 0) throw new Exception("The created folder has no row in the Shell view.");
+                Check(At<SelectItem>(folderView, 15)(folderView, addedIndex, 0x1u | 0x4u | 0x10u | 0x40000000u));
+                _ = SetFocus(newFolderListView);
+                var f2 = new NativeMessage { Window = newFolderListView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+                var f2Hr = At<TranslateAccelerator>(view, 5)(view, ref f2);
+                var renameDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+                while (DateTime.UtcNow < renameDeadline && renameEditor == 0)
+                {
+                    Application.DoEvents();
+                    renameEditor = FindChildByClass(viewWindow, "Edit");
+                    if (renameEditor == 0) Thread.Sleep(10);
+                }
+                if (renameEditor == 0) throw new Exception($"Shell TranslateAccelerator F2 did not open an inline rename editor: hr=0x{f2Hr:X8}.");
+                var focusInRenameEditor = GetFocus() == renameEditor;
+                var arrowResults = new List<string>();
+                foreach (var arrow in new[]
+                {
+                    (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+                    (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+                    (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+                    (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+                })
+                {
+                    var message = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                    var arrowHr = At<TranslateAccelerator>(view, 5)(view, ref message);
+                    Application.DoEvents();
+                    arrowResults.Add($"{arrow.Name}=0x{arrowHr:X8},edit-alive={IsWindow(renameEditor)},edit-focus={GetFocus() == renameEditor}");
+                    if (!IsWindow(renameEditor) || GetFocus() != renameEditor)
+                        throw new Exception($"Shell {arrow.Name} accelerator left the inline rename editor.");
+                }
+                Console.WriteLine($"ishellview-newfolder-diagnostic: list-focus-before={listFocusBefore}; attempts=[{string.Join(';', attempts)}]; filesystem-before=[{string.Join('|', before)}]; filesystem-after=[{string.Join('|', after)}]; view-items-before=2; view-items-after={afterViewCount}; canonical-verb-succeeded={canonicalVerbSucceeded}; selected-count-after-create={createdSelectionCount}; focused-index-after-create={focusedIndex}; focused-name-after-create={focusedName}; rename-editor-after-create={renameEditorAfterCreate}; focused-window-class-after-create={focusedWindowClass}; f2-hr=0x{f2Hr:X8}; f2-focus-in-edit={focusInRenameEditor}; arrow-routing=[{string.Join(',', arrowResults)}]; get-control-window-ids=[{string.Join(',', controlWindowRequests)}]; status-callbacks=[{string.Join('|', statusTextChanges)}]; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                return 0;
+            }
             VerifyGroupedFilteredExport(folderView);
             if (stopAfterGroupedExport)
             {
@@ -179,7 +277,7 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception("The native context-menu scopes did not resolve file Copy and background Refresh commands independently.");
             var listView = FindChildByClass(viewWindow, "SysListView32");
             if (listView == 0) throw new Exception("The isolated Shell view has no native file list window.");
-            VerifySynchronizedViewModes(folderView, listView, host);
+            VerifySynchronizedViewModes(folderView, listView, host, viewWindow, parent);
             Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedCount)); // SVGIO_SELECTION
             if (selectedCount != 0) throw new Exception("The fixture view unexpectedly started with a selection.");
             var callbackSelectionVersionBefore = host.CallbackSelectionVersion;
@@ -387,17 +485,21 @@ internal static class ShellViewHostFilterProbe
 
             void BrowseVirtualScope(string parsingName, string label)
             {
+                TraceVirtualScope($"{label}-parse-before", foreground);
                 if (label == "SearchFolder")
                     virtualFolderPidl = ShellSearchLocation.ParsePidl(parsingName);
                 else
                     Check(SHParseDisplayName(parsingName, 0, out virtualFolderPidl, 0, out _));
                 try
                 {
+                    TraceVirtualScope($"{label}-browse-before", foreground);
                     Check(host.BrowseObject(virtualFolderPidl, 0));
+                    TraceVirtualScope($"{label}-browse-after", foreground);
                     var itemCount = AdoptPendingView(expectedItemCount: null);
                     if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"The isolated host did not retain the {label} PIDL.");
                     Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; enumerated-items={itemCount}; {InspectNativeContracts(readVerbs: label != "ZipContainer")}");
+                    TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
                 {
@@ -412,6 +514,7 @@ internal static class ShellViewHostFilterProbe
                 using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
                 using var entry = archive.CreateEntry("archive.txt").Open();
                 entry.WriteByte(0x41);
+                TraceVirtualScope("zip-fixture-created", foreground);
                 return zipPath;
             }
 
@@ -505,16 +608,16 @@ internal static class ShellViewHostFilterProbe
         }
         finally
         {
-            TraceCleanup("pending-view-before");
+            TraceCleanup("pending-view-before", foreground);
             host?.DisposePendingView();
-            TraceCleanup("pending-view-after");
+            TraceCleanup("pending-view-after", foreground);
             if (created && view != 0)
             {
-                TraceCleanup("destroy-view-before");
+                TraceCleanup("destroy-view-before", foreground);
                 _ = At<DestroyViewWindow>(view, 10)(view);
-                TraceCleanup("destroy-view-after");
+                TraceCleanup("destroy-view-after", foreground);
             }
-            TraceCleanup("release-interfaces-before");
+            TraceCleanup("release-interfaces-before", foreground);
             if (folderView != 0) Marshal.Release(folderView);
             if (view != 0) Marshal.Release(view);
             if (viewPointer != 0) Marshal.Release(viewPointer);
@@ -528,32 +631,40 @@ internal static class ShellViewHostFilterProbe
             if (childFolderPidl != 0) Marshal.FreeCoTaskMem(childFolderPidl);
             if (filePidl != 0) Marshal.FreeCoTaskMem(filePidl);
             if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
-            TraceCleanup("release-interfaces-after");
+            TraceCleanup("release-interfaces-after", foreground);
             if (!leaveParentForThreadExit && parent != 0 && IsWindow(parent))
             {
-                TraceCleanup("destroy-parent-before");
+                TraceCleanup("destroy-parent-before", foreground);
                 DestroyWindow(parent);
-                TraceCleanup("destroy-parent-after");
+                TraceCleanup("destroy-parent-after", foreground);
             }
             else if (leaveParentForThreadExit && parent != 0 && IsWindow(parent))
             {
                 // DestroyWindow on the owning window of a non-input Desktop stalls even after
                 // the Shell view and child controls are gone; thread exit owns final HWND cleanup.
-                TraceCleanup("parent-cleanup-deferred-to-thread-exit");
+                TraceCleanup("parent-cleanup-deferred-to-thread-exit", foreground);
             }
-            TraceCleanup("fixture-delete-before");
+            TraceCleanup("fixture-delete-before", foreground);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
             if (zipPath is not null && File.Exists(zipPath)) File.Delete(zipPath);
-            TraceCleanup("fixture-delete-after");
-            TraceCleanup("keepalive-before");
+            TraceCleanup("fixture-delete-after", foreground);
+            TraceCleanup("keepalive-before", foreground);
             GC.KeepAlive(host);
-            TraceCleanup("keepalive-after");
+            TraceCleanup("keepalive-after", foreground);
         }
     }
 
-    private static void TraceCleanup(string phase)
+    private static void TraceCleanup(string phase, nint expectedForeground)
     {
-        Console.WriteLine($"ishellview-host-filter: cleanup={phase}");
+        var foreground = GetForegroundWindow();
+        Console.WriteLine($"ishellview-host-filter: cleanup={phase}; foreground=0x{foreground:X}; expected=0x{expectedForeground:X}; foreground-unchanged={foreground == expectedForeground}");
+        Console.Out.Flush();
+    }
+
+    private static void TraceVirtualScope(string phase, nint expectedForeground)
+    {
+        var foreground = GetForegroundWindow();
+        Console.WriteLine($"ishellview-host-filter: virtual-phase={phase}; foreground=0x{foreground:X}; expected=0x{expectedForeground:X}; foreground-unchanged={foreground == expectedForeground}");
         Console.Out.Flush();
     }
 
@@ -662,7 +773,7 @@ internal static class ShellViewHostFilterProbe
         finally { Marshal.Release(folder); }
     }
 
-    private static void VerifySynchronizedViewModes(nint folderView, nint listView, FilteredHost host)
+    private static void VerifySynchronizedViewModes(nint folderView, nint listView, FilteredHost host, nint viewWindow, nint parent)
     {
         const int LvmSetView = 0x108E;
         const int LvmGetView = 0x108F;
@@ -675,6 +786,8 @@ internal static class ShellViewHostFilterProbe
             (Name: "Tile", ListView: 4, Shell: 6, IconSize: 48)
         };
         var results = new List<string>();
+        _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE; the parent remains on the Private Desktop.
+        Check(At<ActivateView>(host.View, 7)(host.View, 1)); // SVUIA_ACTIVATE_FOCUS.
         foreach (var mode in viewPairs)
         {
             var setHr = setMode(folderView, (uint)mode.Shell, mode.IconSize);
@@ -696,13 +809,78 @@ internal static class ShellViewHostFilterProbe
             if (actualShellMode != mode.Shell || iconSize != mode.IconSize || actualListViewMode != mode.ListView || visibleItems != 2 ||
                 !visibleNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).SequenceEqual(["child", "keep.txt"], StringComparer.OrdinalIgnoreCase))
                 throw new Exception($"Synchronized {mode.Name} mode changed the native list layout or filtered contents: set=0x{setHr:X8},shell-immediate={shellModeAfterSet}/{sizeAfterSet},lvm-set={listViewSetResult},shell-final={actualShellMode}/{iconSize},list={actualListViewMode},items={visibleItems},names={string.Join(',', visibleNames)}.");
-            results.Add($"{mode.Name}=shell:{actualShellMode}/{iconSize},list:{actualListViewMode},items:{visibleItems}");
+            var renameArrowResults = VerifyRenameArrowRouting(folderView, listView, viewWindow, host.View, visibleNames, mode.Name);
+            results.Add($"{mode.Name}=shell:{actualShellMode}/{iconSize},list:{actualListViewMode},items:{visibleItems},rename-arrows:[{string.Join(',', renameArrowResults)}]");
         }
         // Keep the following linear Down-key probe in Details, where its expected next-row behavior is defined.
         Check(setMode(folderView, 4, 16));
         _ = SendMessageW(listView, LvmSetView, 1, 0);
         Application.DoEvents();
+        _ = ShowWindow(parent, 0); // SW_HIDE; restore the probe's original hidden-parent boundary.
         Console.WriteLine("ishellview-host-filter: synchronized-view-modes=" + string.Join('|', results));
+    }
+
+    private static IReadOnlyList<string> VerifyRenameArrowRouting(nint folderView, nint listView, nint viewWindow, nint view,
+        IReadOnlyList<string> visibleNames, string modeName)
+    {
+        const uint selectFocusedVisible = 0x1u | 0x4u | 0x10u | 0x40000000u;
+        var itemIndex = Array.FindIndex(visibleNames.ToArray(), name => name.Equals("keep.txt", StringComparison.OrdinalIgnoreCase));
+        if (itemIndex < 0) throw new Exception($"The {modeName} view has no rename fixture item.");
+
+        Check(At<SelectItem>(folderView, 15)(folderView, itemIndex, selectFocusedVisible));
+        _ = SetFocus(listView);
+        var f2 = new NativeMessage { Window = listView, Id = 0x0100, WParam = 0x71, LParam = 0x003C0001 };
+        var f2Hr = At<TranslateAccelerator>(view, 5)(view, ref f2);
+        var renameEditor = FindChildByClass(viewWindow, "Edit");
+        var renameDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        while (DateTime.UtcNow < renameDeadline && (renameEditor == 0 || GetFocus() != renameEditor))
+        {
+            Application.DoEvents();
+            renameEditor = FindChildByClass(viewWindow, "Edit");
+            if (renameEditor == 0 || GetFocus() != renameEditor) Thread.Sleep(10);
+        }
+        if (renameEditor == 0 || GetFocus() != renameEditor)
+        {
+            var focusedWindow = GetFocus();
+            var focusedClass = new System.Text.StringBuilder(128);
+            if (focusedWindow != 0) _ = GetClassNameW(focusedWindow, focusedClass, focusedClass.Capacity);
+            Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedCount));
+            throw new Exception($"The {modeName} view did not focus its inline rename editor after F2 (hr=0x{f2Hr:X8},editor=0x{renameEditor:X},focus=0x{focusedWindow:X}/{focusedClass},selected={selectedCount},list=0x{listView:X},view=0x{viewWindow:X}).");
+        }
+
+        var arrows = new[]
+        {
+            (Name: "left", Key: 0x25u, LParam: 0x004B0001u),
+            (Name: "up", Key: 0x26u, LParam: 0x00480001u),
+            (Name: "right", Key: 0x27u, LParam: 0x004D0001u),
+            (Name: "down", Key: 0x28u, LParam: 0x00500001u)
+        };
+        var results = new List<string>(arrows.Length);
+        try
+        {
+            foreach (var arrow in arrows)
+            {
+                var message = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = arrow.Key, LParam = (nint)arrow.LParam };
+                var hr = At<TranslateAccelerator>(view, 5)(view, ref message);
+                Application.DoEvents();
+                var retained = IsWindow(renameEditor) && GetFocus() == renameEditor;
+                results.Add($"{arrow.Name}:{hr:X8}/{retained}");
+                if (hr < 0 || !retained)
+                    throw new Exception($"The {modeName} view lost its inline rename editor or focus on {arrow.Name} (hr=0x{hr:X8}).");
+            }
+        }
+        finally
+        {
+            if (IsWindow(renameEditor))
+            {
+                var escape = new NativeMessage { Window = renameEditor, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+                _ = At<TranslateAccelerator>(view, 5)(view, ref escape);
+                Application.DoEvents();
+            }
+            Check(At<SelectItem>(folderView, 15)(folderView, itemIndex, 0));
+        }
+        if (IsWindow(renameEditor)) throw new Exception($"The {modeName} view did not dismiss its cancelled inline rename editor.");
+        return results;
     }
 
     private static void VerifyNativeMenuCommands(nint view, nint folderView, nint owner, nint foreground)
@@ -792,7 +970,6 @@ internal static class ShellViewHostFilterProbe
             if (modeAfterMenu != 4 || iconSizeAfterMenu != 16)
                 throw new Exception($"The Shell background menu did not switch the isolated view to Details: mode={modeAfterMenu}, size={iconSizeAfterMenu}.");
             VerifyColumnHeaderControl(view, owner);
-            VerifyColumnHeaderContextMenu(view, owner);
             if (GetFocus() != listView || !FocusedItemMatches(folderView, expectedFocusedPidl))
                 throw new Exception("Switching view mode through the Shell menu lost the fixture list or focused item.");
 
@@ -870,6 +1047,10 @@ internal static class ShellViewHostFilterProbe
             groupResult = At<GetGroupBy>(view2, 18)(view2, out groupKey, out groupAscending);
             if (groupResult != 0 || groupKey.FormatId != typeKey.FormatId || groupKey.PropertyId != typeKey.PropertyId || groupAscending != 1)
                 throw new Exception($"The Shell Group Ascending command did not restore ascending order: hr=0x{groupResult:X8}, ascending={groupAscending}.");
+
+            // This intentionally changes sort state only after the menu-command focus matrix;
+            // the Shell view uses a disposable fixture and is torn down immediately afterward.
+            VerifyColumnHeaderContextMenu(view, owner);
         }
         finally
         {
@@ -922,6 +1103,8 @@ internal static class ShellViewHostFilterProbe
         var capturedSubmenus = new List<(string Caption, List<(int Id, string Text)> Items)>();
         var initializedSubmenus = new HashSet<nint>();
         nint capturedRootMenu = 0;
+        nint capturedPopupOwner = 0;
+        var capturedPopupOwnerChain = "(not captured)";
         HookProc? hookCallback = null;
         nint hook = 0;
         try
@@ -946,6 +1129,8 @@ internal static class ShellViewHostFilterProbe
                             var menu = unchecked((nint)message.WParam);
                             if (capturedRootMenu != 0) return CallNextHookEx(hook, code, wParam, lParam);
                             capturedRootMenu = menu;
+                            capturedPopupOwner = message.Window;
+                            capturedPopupOwnerChain = DescribeWindowChain(message.Window);
                             var count = GetMenuItemCount(menu);
                             for (var index = 0; index < count; index++)
                             {
@@ -1042,7 +1227,57 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception($"The '{expectedCaption}' submenu items did not map one-for-one to the background command ID base: mapped={mappedOffsets.Length}, header={actualSubmenu.Items.Count}, background={backgroundSubmenu.Items.Count}, offsets=[{string.Join(',', offsets)}], expected={strongestOffset.Key}.");
             mappedSubmenuRows.Add($"{expectedCaption}:{actualSubmenu.Items.Count(item => item.Id != -1)} items");
         }
-        Console.WriteLine($"ishellview-column-header-menu: items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
+        VerifyHeaderMenuSortByType(capturedSubmenus, capturedPopupOwner, view, strongestOffset.Key);
+        Console.WriteLine($"ishellview-column-header-menu: owner=0x{capturedPopupOwner:X}; owner-chain=[{capturedPopupOwnerChain}]; items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
+    }
+
+    private static void VerifyHeaderMenuSortByType(
+        IReadOnlyList<(string Caption, List<(int Id, string Text)> Items)> capturedSubmenus,
+        nint popupOwner, nint view, int popupCommandIdBaseOffset)
+    {
+        var sortMenu = capturedSubmenus.FirstOrDefault(submenu => submenu.Caption.StartsWith("排序方式", StringComparison.Ordinal));
+        var typeItem = sortMenu.Items?.FirstOrDefault(item => item.Text.Contains("类型", StringComparison.Ordinal));
+        if (typeItem is null || typeItem.Value.Id < 0)
+            throw new Exception("The isolated column-header Sort menu did not expose a callable Type item.");
+
+        var folderView2Id = FolderView2Id;
+        Check(Marshal.QueryInterface(view, in folderView2Id, out var folderView2));
+        try
+        {
+            var contextMenuId = ContextMenuId;
+            Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND
+            try
+            {
+                var menu = CreatePopupMenu();
+                if (menu == 0) throw new Exception("Could not create the Shell context menu for header-command dispatch.");
+                try
+                {
+                    Check(At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800));
+                    // Recreate the host-side mapping from the captured header ID to this view's
+                    // IContextMenu range. A bare WM_COMMAND to DefView did not update the sort;
+                    // the header and background submenu mapping is checked above.
+                    var commandOffset = checked(typeItem.Value.Id - popupCommandIdBaseOffset - 1);
+                    var invoke = new NativeInvokeInfo
+                    {
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        Window = popupOwner,
+                        Verb = (nint)commandOffset,
+                        Show = 0
+                    };
+                    Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                }
+                finally { DestroyMenu(menu); }
+            }
+            finally { Marshal.Release(contextMenu); }
+
+            Check(At<GetSortColumnCount>(folderView2, 26)(folderView2, out var count));
+            var actual = new NativeSortColumn[count];
+            if (count > 0) Check(At<GetSortColumns>(folderView2, 28)(folderView2, actual, count));
+            if (count < 1 || actual[0].Key.FormatId != PropertyFormatId || actual[0].Key.PropertyId != 4)
+                throw new Exception($"The column-header Type command did not set the Shell sort key: count={count}, key={(count == 0 ? "none" : $"{actual[0].Key.FormatId:B}/{actual[0].Key.PropertyId}")}.");
+            Console.WriteLine($"ishellview-column-header-command: sort-by-type=True; command-id={typeItem.Value.Id}; primary-property-id={actual[0].Key.PropertyId}; sort-columns={count}");
+        }
+        finally { Marshal.Release(folderView2); }
     }
 
     private static IReadOnlyList<string> ReadBackgroundMenuCaptions(nint view) =>
@@ -1148,7 +1383,11 @@ internal static class ShellViewHostFilterProbe
         return Array.FindIndex(names, name => name.Equals(expectedName, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb) =>
+        Check(InvokeBackgroundVerbRaw(view, owner, expectedVerb));
+
+    private static int InvokeBackgroundVerbRaw(nint view, nint owner, string expectedVerb, uint invokeMask = 0,
+        bool canonicalString = false)
     {
         var contextMenuId = ContextMenuId;
         Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
@@ -1177,17 +1416,33 @@ internal static class ShellViewHostFilterProbe
                         }
                     }
                     if (commandOffset is null) throw new Exception($"The Shell background menu did not expose the '{expectedVerb}' canonical verb.");
+                    if (string.Equals(expectedVerb, "newfolder", StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"ishellview-newfolder-map: command-offset={commandOffset.Value}; invocation={(canonicalString ? "ansi-verb" : "offset")}");
                 }
                 finally { Marshal.FreeHGlobal(buffer); }
 
-                var invoke = new NativeInvokeInfo
+                nint ansiVerb = 0;
+                try
                 {
-                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
-                    Window = owner,
-                    Verb = (nint)commandOffset.Value,
-                    Show = 1
-                };
-                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                    var invoke = new NativeInvokeInfo
+                    {
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        Mask = invokeMask,
+                        Window = owner,
+                        Verb = (nint)commandOffset.Value,
+                        Show = 1
+                    };
+                    if (canonicalString)
+                    {
+                        ansiVerb = Marshal.StringToCoTaskMemAnsi(expectedVerb);
+                        invoke.Verb = ansiVerb;
+                    }
+                    return At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                }
+                finally
+                {
+                    if (ansiVerb != 0) Marshal.FreeCoTaskMem(ansiVerb);
+                }
             }
             finally { DestroyMenu(menu); }
         }
@@ -1242,6 +1497,19 @@ internal static class ShellViewHostFilterProbe
             return true;
         }, 0);
         return match;
+    }
+
+    private static string DescribeWindowChain(nint window)
+    {
+        var chain = new List<string>();
+        for (var depth = 0; window != 0 && depth < 8 && IsWindow(window); depth++)
+        {
+            var className = new System.Text.StringBuilder(128);
+            _ = GetClassNameW(window, className, className.Capacity);
+            chain.Add($"0x{window:X}:{className}");
+            window = GetParent(window);
+        }
+        return string.Join(" <- ", chain);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1302,7 +1570,6 @@ internal static class ShellViewHostFilterProbe
         // Keep the isolated host's non-filter browser callbacks aligned with the
         // product site; only IncludeObject remains specialized for this fixture.
         private readonly ShellBrowserSite _browserCallbacks = new() { QuickFilterActive = true };
-        private readonly ShellViewNavigationHistory _navigation;
         internal ShellFolderFilter Filter { get; }
         private int _includeObjectCalls;
         private int _defaultCommandCalls;
@@ -1314,15 +1581,15 @@ internal static class ShellViewHostFilterProbe
         internal long CallbackSelectionVersion => _browserCallbacks.SelectionVersion;
         internal bool BrowseTargetIsChild { get; private set; }
         internal bool BrowseTargetIsRoot { get; private set; }
-        internal int HistoryIndex => _navigation.Index;
-        internal nint CurrentPidl => _navigation.CurrentPidl;
+        internal int HistoryIndex => NavigationHistory!.Index;
+        internal nint CurrentPidl => NavigationHistory!.CurrentPidl;
         internal nint PendingView => _pendingView;
 
         internal FilteredHost(nint parent, ShellFolderFilter filter, nint rootPidl, nint expectedChildPidl,
             Func<nint, uint, int> navigate) : base(parent, [])
         {
             Filter = filter;
-            _navigation = new ShellViewNavigationHistory(rootPidl, ClonePidl, Marshal.FreeCoTaskMem,
+            NavigationHistory = new ShellViewNavigationHistory(rootPidl, ClonePidl, Marshal.FreeCoTaskMem,
                 ILIsEqual, TryGetParentPidl, ILCombine, (target, flags) =>
                 {
                     BrowseTargetIsChild = ILIsEqual(target, expectedChildPidl);
@@ -1360,7 +1627,7 @@ internal static class ShellViewHostFilterProbe
         public override int BrowseObject(nint pidl, uint flags)
         {
             Interlocked.Increment(ref _browseObjectCalls);
-            return _navigation.BrowseObject(pidl, flags);
+            return base.BrowseObject(pidl, flags);
         }
 
         public int OnDefaultCommand(nint shellView)
@@ -1408,11 +1675,6 @@ internal static class ShellViewHostFilterProbe
         public int GetCurrentFilter(nint text, int capacity) => _browserCallbacks.GetCurrentFilter(text, capacity);
         public int OnPreViewCreated(nint shellView) => _browserCallbacks.OnPreViewCreated(shellView);
 
-        public new void Dispose()
-        {
-            base.Dispose();
-            _navigation.Dispose();
-        }
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, ref Guid iid, out nint value);
@@ -1465,11 +1727,13 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
         string cls, string name, uint style, int x, int y, int width, int height,
         nint parent, nint menu, nint instance, nint param);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, nint rect);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetParent(nint window);
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);

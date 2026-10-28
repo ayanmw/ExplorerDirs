@@ -8,9 +8,11 @@ namespace ExplorerDirs.App;
 public sealed class ShellBrowserCommandSink : IShellBrowserCommandEvents
 {
     private Action<int, bool>? _command;
-    internal ShellBrowserCommandSink(Action<int, bool> command) => _command = command;
-    internal void Disconnect() => _command = null;
-    public void StatusTextChange(string Text) {  }
+    private Action<string?>? _statusText;
+    internal ShellBrowserCommandSink(Action<int, bool> command, Action<string?> statusText)
+    { _command = command; _statusText = statusText; }
+    internal void Disconnect() { _command = null; _statusText = null; }
+    public void StatusTextChange(string? Text) => _statusText?.Invoke(Text);
     public void ProgressChange(int Progress, int ProgressMax) {  }
     public void CommandStateChange(int Command, bool Enable) { _command?.Invoke(Command, Enable); }
     public void DownloadBegin() {  }
@@ -57,7 +59,7 @@ public sealed class ShellBrowserCommandSink : IShellBrowserCommandEvents
  InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
 public interface IShellBrowserCommandEvents
 {
-    [DispId(102)] void StatusTextChange([MarshalAs(UnmanagedType.BStr)] string Text);
+    [DispId(102)] void StatusTextChange([MarshalAs(UnmanagedType.BStr)] string? Text);
     [DispId(108)] void ProgressChange(int Progress, int ProgressMax);
     [DispId(105)] void CommandStateChange(int Command, [MarshalAs(UnmanagedType.VariantBool)] bool Enable);
     [DispId(106)] void DownloadBegin();

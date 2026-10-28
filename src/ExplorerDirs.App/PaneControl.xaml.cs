@@ -10,13 +10,29 @@ namespace ExplorerDirs.App;
 
 public partial class PaneControl : UserControl
 {
+    public static readonly DependencyProperty MultilineTabHeadersProperty = DependencyProperty.Register(
+        nameof(MultilineTabHeaders), typeof(bool), typeof(PaneControl), new PropertyMetadata(false));
+    public static readonly DependencyProperty LimitTabHeaderWidthProperty = DependencyProperty.Register(
+        nameof(LimitTabHeaderWidth), typeof(bool), typeof(PaneControl), new PropertyMetadata(true));
+
     private const string TabDragFormat = "ExplorerDirs.TabReorder.v1";
     // The Details column header is one Shell focus stop; arrow keys move among columns.
-    private readonly Stack<TabSettings> _closedTabs = new();
+    private readonly Stack<(TabSettings Settings, AddressPathHistory AddressHistory)> _closedTabs = new();
     private readonly List<TabItem> _tabOrder = [];
     private readonly Func<ViewState> _newTabView;
     private readonly QuickFilterFavoritesStore _quickFilterFavoritesStore;
+    private readonly QuickFilterHistoryStore _quickFilterHistoryStore;
+    private readonly DispatcherTimer _tabHoverActivationTimer = new();
+    private readonly TabHoverActivationGate _tabHoverActivationGate = new();
+    private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
+    private bool _newTabUsesCurrentFolder;
+    private bool _showTabCloseButtons;
     private HiddenItemsPreference _hiddenItemsPreference;
+    private bool _selectionCheckBoxes;
+    private bool? _fullRowSelection;
+    private bool _disableGrouping;
+    private bool _showSelectionSizeInStatusBar = true;
+    private bool _showFolderSizeWhenEmpty;
     private bool _updatingFilterPresets;
     private TabItem? _dragCandidate;
     private Point _dragStart;
@@ -24,9 +40,15 @@ public partial class PaneControl : UserControl
     private string? _dragToken;
     private bool _addressEditing;
     private bool _classicAddressBar;
+    private bool _alwaysShowTabStrip = true;
     private bool _addressNavigationPending;
+    private bool _searchTextDirty;
+    private bool _updatingSearchText;
     private TabState? _searchCloseFocusPending;
     private bool _compactMode;
+    private bool? _activePaneVisual;
+    private bool _autoExpandTreeSelection = true;
+    private long _treeSelectionSyncRequestVersion;
     private ShellTreeHost? _treeHost;
     private double _treeWidth = 160;
     private Func<TreeFocusTarget>? _treeFocusTarget;
@@ -46,17 +68,24 @@ public partial class PaneControl : UserControl
     private CancellationTokenSource? _recursiveSizeCancellation;
     private TabState? _recursiveSizeOwner;
     private string? _recursiveSizePath;
+    private bool _recursiveSizeIsSelection;
     private RecursiveDirectoryScanResult? _lastRecursiveSizeResult;
     private string? _lastRecursiveSizePath;
     private TabState? _lastRecursiveSizeOwner;
+    private bool _lastRecursiveSizeIsSelection;
 
     private sealed class TabState
     {
+        public required PaneControl Owner { get; set; }
         public required TabItem Tab { get; init; }
         public required ExplorerBrowserHost Browser { get; init; }
-        public required string Path { get; set; }
+        // Shell confirms location before the queued pane notification updates
+        // the chrome. Commands must not use a second, lagging directory model.
+        public string Path => Browser.CurrentPath;
         public bool IsPinned { get; set; }
+        public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
+        public string? StartupSelectPath { get; set; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
     }
@@ -64,17 +93,111 @@ public partial class PaneControl : UserControl
     public event EventHandler? StateChanged;
     internal event EventHandler? CommandContextChanged;
     internal event EventHandler? TreeWidthChanged;
+    internal event Action<PaneControl, string>? SelectedFolderForTree;
     public event EventHandler? Activated;
+
+    internal void SetAutoExpandTreeSelection(bool enabled)
+    {
+        _autoExpandTreeSelection = enabled;
+        _treeSelectionSyncRequestVersion++;
+    }
+
+    internal void SetAlwaysShowTabStrip(bool alwaysShow)
+    {
+        _alwaysShowTabStrip = alwaysShow;
+        UpdateTabStripVisibility();
+    }
+
+    internal void SetTabHoverActivationDelay(int delayMilliseconds)
+    {
+        if (!TabHoverActivationPreference.AllowedDelayMilliseconds.Contains(delayMilliseconds))
+            throw new ArgumentOutOfRangeException(nameof(delayMilliseconds));
+        CancelTabHoverActivation();
+        _tabHoverActivationDelayMilliseconds = delayMilliseconds;
+        if (delayMilliseconds > 0)
+            _tabHoverActivationTimer.Interval = TimeSpan.FromMilliseconds(delayMilliseconds);
+    }
+
+    internal void SetNewTabUsesCurrentFolder(bool enabled) => _newTabUsesCurrentFolder = enabled;
+
+    internal void SetShowTabCloseButtons(bool enabled)
+    {
+        _showTabCloseButtons = enabled;
+        foreach (var tab in _tabOrder)
+        {
+            var state = (TabState)tab.Tag;
+            if (enabled) AddTabCloseButton(state);
+            else RemoveTabCloseButton(state);
+        }
+        UpdateTabCloseButtonStates();
+    }
+
+    public bool MultilineTabHeaders
+    {
+        get => (bool)GetValue(MultilineTabHeadersProperty);
+        set => SetValue(MultilineTabHeadersProperty, value);
+    }
+
+    public bool LimitTabHeaderWidth
+    {
+        get => (bool)GetValue(LimitTabHeaderWidthProperty);
+        set => SetValue(LimitTabHeaderWidthProperty, value);
+    }
+
+    internal void SetMultilineTabHeaders(bool enabled) => MultilineTabHeaders = enabled;
+    internal void SetLimitTabHeaderWidth(bool enabled) => LimitTabHeaderWidth = enabled;
+
+    internal void SetStatusBarVisible(bool visible) =>
+        StatusBarRow.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
+    internal void SetStatusBarSelectionSizeVisible(bool visible)
+    {
+        _showSelectionSizeInStatusBar = visible;
+        RefreshItemCounts();
+    }
+
+    internal void SetStatusBarFolderSizeWhenEmpty(bool enabled)
+    {
+        _showFolderSizeWhenEmpty = enabled;
+        RefreshItemCounts();
+    }
+
+    internal void SetActivePaneVisual(bool isActive)
+    {
+        if (_activePaneVisual == isActive) return;
+        _activePaneVisual = isActive;
+        // Active/inactive borders used to change the content inset by one pixel,
+        // resizing both Shell views on every focus transfer. Reserve two pixels
+        // in either state while keeping the existing one/two-pixel visual border.
+        RootBorder.Padding = isActive ? new Thickness(0) : new Thickness(1);
+        RootBorder.BorderThickness = isActive ? new Thickness(2) : new Thickness(1);
+        RootBorder.SetResourceReference(Border.BorderBrushProperty,
+            isActive ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
+    }
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
+    internal Func<bool>? MayKeepFileFocusRestorePending { get; set; }
 
     internal PaneControl(IEnumerable<TabSettings> tabs, Func<ViewState> newTabView,
         IReadOnlySet<int>? pinnedIndices, int selectedTabIndex,
         QuickFilterFavoritesStore quickFilterFavoritesStore,
-        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows)
+        QuickFilterHistoryStore quickFilterHistoryStore,
+        HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false)
     {
         InitializeComponent();
+        BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
+        ForwardButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Forward), 14);
+        UpButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Up), 14);
+        RefreshButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Refresh), 14);
+        TreeButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Tree));
+        NewTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab), 14);
+        CloseTabButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Close), 14);
+        ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
+        ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
+        AddressMenuButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.AddressDropDown), 12);
+        AddressHistoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.History), 14);
         AddressTreeHost.DirectorySelected += identity =>
         {
             var owner = Current;
@@ -98,7 +221,18 @@ public partial class PaneControl : UserControl
         ToolbarViewStyleButton.ContextMenu = viewMenu;
         _newTabView = newTabView;
         _quickFilterFavoritesStore = quickFilterFavoritesStore;
+        _quickFilterHistoryStore = quickFilterHistoryStore;
+        _tabHoverActivationTimer.Tick += TabHoverActivationTimer_Tick;
+        Unloaded += (_, _) => CancelTabHoverActivation();
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible) CancelTabHoverActivation();
+        };
+        QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
         _hiddenItemsPreference = hiddenItemsPreference;
+        _selectionCheckBoxes = selectionCheckBoxes;
+        _fullRowSelection = fullRowSelection;
+        _disableGrouping = disableGrouping;
         QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
@@ -129,13 +263,18 @@ public partial class PaneControl : UserControl
         };
         IsVisibleChanged += (_, _) =>
         {
-            if (IsVisible && IsLoaded) { RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start(); }
+            if (IsVisible && IsLoaded)
+            {
+                RefreshItemCounts(); RefreshDiskSpace(); _itemCountsTimer.Start();
+                UpdateShellStatusHint(Current?.Browser.ShellStatusText);
+            }
             else
             {
                 CloseAddressTree();
                 CancelRecursiveDirectorySize();
                 CancelSelectionCountsRefresh();
                 _itemCountsTimer.Stop(); ItemCounts.Text = ""; ItemCounts.ToolTip = null; _diskSpace.Reset();
+                UpdateShellStatusHint(null);
             }
         };
     }
@@ -171,7 +310,8 @@ public partial class PaneControl : UserControl
     {
         if (!IsLoaded || !IsVisible) return;
         var state = Current;
-        var counts = state?.Browser.ReadItemCounts();
+        var counts = state?.Browser.ReadItemCounts(includeSelectionSize: _showSelectionSizeInStatusBar,
+            includeFolderSize: _showFolderSizeWhenEmpty);
         if (Current == state && IsLoaded && IsVisible)
         {
             ItemCounts.Text = counts?.DisplayText ?? "项目统计暂不可用";
@@ -211,47 +351,107 @@ public partial class PaneControl : UserControl
         _recursiveSizeCancellation = cancellation;
         _recursiveSizeOwner = state;
         _recursiveSizePath = path;
+        _recursiveSizeIsSelection = false;
         _lastRecursiveSizeResult = null;
         _lastRecursiveSizePath = null;
+        _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
         RecursiveSizeStatus.Text = "正在计算目录总大小… 已检查 0 项 · 再按 F9 取消";
         RecursiveSizeStatus.ToolTip = path;
         RecursiveSizeStatus.Visibility = Visibility.Visible;
-        _ = ScanRecursiveDirectoryAsync(state, path, cancellation);
+        _ = ScanRecursiveDirectoryAsync(state, path, cancellation, null);
     }
 
-    private async Task ScanRecursiveDirectoryAsync(TabState owner, string path, CancellationTokenSource cancellation)
+    public void CalculateSelectedItemsRecursiveSize()
+    {
+        if (_recursiveSizeCancellation is not null)
+        {
+            CancelRecursiveDirectorySize();
+        }
+
+        if (Current is not { } state || !state.Browser.IsFileSystemLocation)
+        {
+            RecursiveSizeStatus.Text = "递归大小仅支持文件系统项目。";
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+
+        IReadOnlyList<string> paths;
+        try { paths = state.Browser.CaptureSelectedFileSystemPaths(); }
+        catch (Exception ex)
+        {
+            RecursiveSizeStatus.Text = $"无法读取所选项目：{ex.Message}";
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+        if (paths.Count == 0)
+        {
+            RecursiveSizeStatus.Text = "请先选择文件或文件夹。";
+            RecursiveSizeStatus.ToolTip = null;
+            RecursiveSizeStatus.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _recursiveSizeCancellation = cancellation;
+        _recursiveSizeOwner = state;
+        _recursiveSizePath = state.Path;
+        _recursiveSizeIsSelection = true;
+        _lastRecursiveSizeResult = null;
+        _lastRecursiveSizePath = null;
+        _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
+        RecursiveSizeStatus.Text = "正在计算所选项目递归大小… 已检查 0 项 · 再按 F9 取消";
+        RecursiveSizeStatus.ToolTip = $"选择项目数：{paths.Count:N0}";
+        RecursiveSizeStatus.Visibility = Visibility.Visible;
+        _ = ScanRecursiveDirectoryAsync(state, state.Path, cancellation, paths.ToArray());
+    }
+
+    private async Task ScanRecursiveDirectoryAsync(TabState owner, string path, CancellationTokenSource cancellation,
+        string[]? selectedPaths)
     {
         try
         {
             var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));
-            var result = await Task.Run(() => RecursiveDirectoryScanner.Scan(path, cancellation.Token, entriesChecked =>
+            var isSelection = selectedPaths is not null;
+            void ReportProgress(long entriesChecked)
             {
                 if (!progressThrottle.ShouldReport(Stopwatch.GetTimestamp())) return;
                 Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
                 {
                     if (IsCurrentRecursiveSizeScan(owner, path, cancellation))
-                        RecursiveSizeStatus.Text = $"正在计算目录总大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消";
+                        RecursiveSizeStatus.Text = isSelection
+                            ? $"正在计算所选项目递归大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消"
+                            : $"正在计算目录总大小… 已检查 {entriesChecked:N0} 项 · 再按 F9 取消";
                 }));
-            }), cancellation.Token).ConfigureAwait(false);
+            }
+
+            var result = await Task.Run(() => selectedPaths is null
+                ? RecursiveDirectoryScanner.Scan(path, cancellation.Token, ReportProgress)
+                : RecursiveDirectoryScanner.ScanSelection(selectedPaths, cancellation.Token, ReportProgress),
+                cancellation.Token).ConfigureAwait(false);
             await Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
                 _lastRecursiveSizeResult = result;
                 _lastRecursiveSizePath = path;
                 _lastRecursiveSizeOwner = owner;
-                RenderRecursiveSizeResult(path, result);
+                _lastRecursiveSizeIsSelection = isSelection;
+                RenderRecursiveSizeResult(path, result, isSelection);
             });
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _lastRecursiveSizeResult = null;
-            _lastRecursiveSizePath = null;
-            _lastRecursiveSizeOwner = null;
             await Dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentRecursiveSizeScan(owner, path, cancellation)) return;
-                RecursiveSizeStatus.Text = $"无法计算目录大小：{ex.Message}";
+                // A retired worker may fail after another scan has completed.
+                // Check ownership on the UI thread before clearing its result.
+                _lastRecursiveSizeResult = null;
+                _lastRecursiveSizePath = null;
+                _lastRecursiveSizeOwner = null;
+                RecursiveSizeStatus.Text = $"无法计算{(selectedPaths is null ? "目录" : "所选项目")}大小：{ex.Message}";
                 RecursiveSizeStatus.ToolTip = path;
             });
         }
@@ -264,6 +464,7 @@ public partial class PaneControl : UserControl
                     _recursiveSizeCancellation = null;
                     _recursiveSizeOwner = null;
                     _recursiveSizePath = null;
+                    _recursiveSizeIsSelection = false;
                 }
                 cancellation.Dispose();
             });
@@ -281,9 +482,11 @@ public partial class PaneControl : UserControl
         _recursiveSizeCancellation = null;
         _recursiveSizeOwner = null;
         _recursiveSizePath = null;
+        _recursiveSizeIsSelection = false;
         _lastRecursiveSizeResult = null;
         _lastRecursiveSizePath = null;
         _lastRecursiveSizeOwner = null;
+        _lastRecursiveSizeIsSelection = false;
         if (cancellation is not null) cancellation.Cancel();
         RecursiveSizeStatus.Text = "";
         RecursiveSizeStatus.ToolTip = null;
@@ -295,13 +498,14 @@ public partial class PaneControl : UserControl
         RefreshItemCounts();
         RefreshDiskSpace();
         if (_lastRecursiveSizeResult is { } result && _lastRecursiveSizePath is { } path)
-            RenderRecursiveSizeResult(path, result);
+            RenderRecursiveSizeResult(path, result, _lastRecursiveSizeIsSelection);
     }
 
-    private void RenderRecursiveSizeResult(string path, RecursiveDirectoryScanResult result)
+    private void RenderRecursiveSizeResult(string path, RecursiveDirectoryScanResult result, bool isSelection)
     {
-        RecursiveSizeStatus.Text = ByteSizeFormatter.FormatRecursiveDirectorySummary(result, ByteSizeFormatter.Options);
-        RecursiveSizeStatus.ToolTip = $"{path}\n不跟随重解析点；无法读取或已跳过位置：{result.Unreadable:N0}";
+        var summary = ByteSizeFormatter.FormatRecursiveDirectorySummary(result, ByteSizeFormatter.Options);
+        RecursiveSizeStatus.Text = isSelection ? $"所选项目：{summary}" : summary;
+        RecursiveSizeStatus.ToolTip = $"{(isSelection ? "所选项目" : path)}\n不跟随重解析点；无法读取或已跳过位置：{result.Unreadable:N0}";
     }
 
     private void RefreshNavigationAvailability()
@@ -337,7 +541,9 @@ public partial class PaneControl : UserControl
         return _tabOrder.Select(tab =>
         {
             var state = (TabState)tab.Tag;
-            return new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+            // Native completion updates the browser before its queued pane notice.
+            // Persist its confirmed directory, not the lagging presentation path.
+            return new TabSettings(state.Browser.CurrentPath, state.Browser.CachedViewState(), state.Browser.QuickFilter,
                 state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible);
         }).ToArray();
     }
@@ -362,6 +568,7 @@ public partial class PaneControl : UserControl
         if (IsVisible && Current is { } state && state.Browser.IsVisible)
             CaptureViewState(state);
     }
+
     private void CaptureViewState(TabState state)
     {
         try { state.Browser.CaptureViewState(); }
@@ -370,14 +577,33 @@ public partial class PaneControl : UserControl
     internal IReadOnlyList<PinnedTabEntry> SnapshotPins(int paneIndex) => _tabOrder
         .Select((tab, index) => (State: (TabState)tab.Tag, Index: index))
         .Where(item => item.State.IsPinned)
-        .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Path)).ToArray();
+        .Select(item => new PinnedTabEntry(paneIndex, item.Index, item.State.Browser.CurrentPath)).ToArray();
     private TabState? Current => (Tabs.SelectedItem as TabItem)?.Tag as TabState;
 
-    public void NewTab() => AddTab(Home, _newTabView());
-    public void OpenPathInNewTab(string path) => AddTab(path, _newTabView());
+    private sealed record TabDragPayload(PaneControl Source, TabItem Tab, string Token);
+
+    private bool CanAddTabs(int count)
+    {
+        if (count <= SessionStore.MaximumTabsPerPane - _tabOrder.Count) return true;
+        Status.Text = $"单窗格最多保留 {SessionStore.MaximumTabsPerPane} 个标签；请关闭一些标签后重试。";
+        return false;
+    }
+    public void NewTab() => OpenPathInNewTab(_newTabUsesCurrentFolder ? CurrentPath : Home);
+    public void OpenPathInNewTab(string path)
+    {
+        if (CanAddTabs(1)) AddTab(path, _newTabView());
+    }
+    internal bool OpenPathAndSelectInNewTab(string directory, string selectedPath)
+    {
+        if (!CanAddTabs(1)) return false;
+        AddTab(directory, _newTabView(), startupSelectPath: selectedPath);
+        return true;
+    }
     internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
         IReadOnlySet<int>? pinned = null)
     {
+        // Validate the whole incoming batch before the first AddTab event.
+        if (!CanAddTabs(tabs.Count)) throw new InvalidOperationException(Status.Text);
         var imported = tabs.Select((tab, index) =>
             AddTab(tab.Path, tab.View.Copy(), select: false, pinned: pinned?.Contains(index) == true,
                 quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
@@ -393,6 +619,7 @@ public partial class PaneControl : UserControl
     }
     private void DuplicateTab(TabState state)
     {
+        if (!CanAddTabs(1)) return;
         try
         {
             var view = state.Browser.CaptureViewState();
@@ -401,7 +628,7 @@ public partial class PaneControl : UserControl
                 Status.Text = "视图配置暂时不可读取，未复制标签。";
                 return;
             }
-            AddTab(state.Path, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+            AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
                 addressHistory: state.AddressHistory.Copy());
@@ -424,6 +651,62 @@ public partial class PaneControl : UserControl
             catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
         }
         return failures;
+    }
+
+    internal IReadOnlyList<string> SetSelectionCheckBoxes(bool enabled)
+    {
+        _selectionCheckBoxes = enabled;
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try
+            {
+                var result = state.Browser.SetSelectionCheckBoxes(enabled);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> SetFullRowSelection(bool? enabled)
+    {
+        _fullRowSelection = enabled;
+        if (enabled is not { } value) return [];
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try
+            {
+                var result = state.Browser.SetFullRowSelection(value);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> SetGroupingDisabled(bool disabled)
+    {
+        _disableGrouping = disabled;
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try
+            {
+                var result = state.Browser.SetGroupingDisabled(disabled);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal void RefreshTheme()
+    {
+        _treeHost?.RefreshTheme();
+        AddressTreeHost.RefreshTheme();
+        foreach (var tab in _tabOrder.ToArray()) ((TabState)tab.Tag).Browser.RefreshTheme();
     }
 
     internal IReadOnlyList<string> RefreshForWindowsHiddenItemsChange()
@@ -488,9 +771,26 @@ public partial class PaneControl : UserControl
     }
     private bool CycleViewStyle(int delta)
     {
-        var current = ReadViewStyle();
-        if (current is not { } style) return false;
+        var state = Current;
+        if (state is null) return false;
+        var notches = state.Browser.AccumulateCtrlWheel(delta);
+        return notches == 0 || ApplyCompletedViewStyleDelta(state, notches * 120);
+    }
+    private bool ApplyCompletedViewStyleDelta(TabState state, int delta)
+    {
+        if (Current != state) return false;
+        var current = state.Browser.ReadViewStyle();
+        if (Current != state || current is not { } style) return false;
         return TrySetViewStyle(ViewStyleWheelCycle.Next(style.Mode, style.IconSize, delta));
+    }
+    private void RootBorder_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || e.Delta == 0) return;
+
+        // Native Shell views handle Ctrl+wheel in their HWND message path. This
+        // routed handler extends the same gesture to the pane's WPF chrome.
+        Activated?.Invoke(this, EventArgs.Empty);
+        if (CycleViewStyle(e.Delta)) e.Handled = true;
     }
     public void NavigateTo(string path) => Navigate(path);
     public void CreateNewFolder() => Current?.Browser.CreateNewFolder();
@@ -534,6 +834,11 @@ public partial class PaneControl : UserControl
         return true;
     }
 
+    internal void ExpandTreeToSelectedFolder(string identity)
+    {
+        if (TreeVisible) _treeHost?.SetSelectedFolderLocation(identity);
+    }
+
     private void SyncTreeToCurrent() { if (Current is { } state) SyncTreeToCurrent(state); }
 
     private void SyncTreeToCurrent(TabState state)
@@ -550,8 +855,11 @@ public partial class PaneControl : UserControl
         CurrentTreeFocusTarget != TreeFocusTarget.None,
         Current?.Browser.HasColumnHeader() == true,
         TreeButton.Visibility == Visibility.Visible,
+        paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
         addressHistoryButtonVisible: true,
-        addressPathButtonVisible: true);
+        addressPathButtonVisible: true,
+        tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
+        statusBarVisible: StatusBarRow.Visibility == Visibility.Visible);
     internal int FocusStopCount => FocusMap.Count;
     internal IReadOnlyList<int> MajorFocusStops => FocusMap.MajorStops;
     private TreeFocusTarget CurrentTreeFocusTarget =>
@@ -569,9 +877,9 @@ public partial class PaneControl : UserControl
     {
         var focus = FocusMap;
         UIElement[] controls = focus.TreeButton >= 0
-            ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton,
+            ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton, ToolbarViewStyleButton,
                 Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
-            : [BackButton, ForwardButton, UpButton, RefreshButton,
+            : [BackButton, ForwardButton, UpButton, RefreshButton, ToolbarViewStyleButton,
                 Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
@@ -589,9 +897,9 @@ public partial class PaneControl : UserControl
             for (var index = 0; index < filterControls.Length; index++)
                 if (filterControls[index].IsKeyboardFocusWithin) return focus.FilterStart + index;
         }
-        if (Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
+        if (Tabs.Visibility == Visibility.Visible && Tabs.SelectedItem is TabItem tab && tab.IsKeyboardFocused)
             return focus.TabHeader;
-        if (ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
+        if (focus.StatusTools >= 0 && ViewStyleButton.IsKeyboardFocused) return focus.StatusTools;
         if (CurrentTreeFocusTarget switch
             {
                 TreeFocusTarget.Shared => _sharedTreeHasFocus?.Invoke() == true,
@@ -612,6 +920,7 @@ public partial class PaneControl : UserControl
             0 => BackButton, 1 => ForwardButton, 2 => UpButton, 3 => RefreshButton,
             _ => null
         };
+        if (stop == focus.PaneViewStyle) target = ToolbarViewStyleButton;
         if (stop == focus.Address) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (stop == focus.AddressMenu) target = AddressMenuButton;
         if (stop == focus.AddressHistory) target = AddressHistoryButton;
@@ -646,7 +955,7 @@ public partial class PaneControl : UserControl
         if (stop == focus.ColumnHeader && Current?.Browser.HasColumnHeader() == true)
             return Current?.Browser.FocusColumnHeader() == true;
         if (stop == focus.FileView) return FocusCurrentView();
-        if (stop == focus.StatusTools) return ViewStyleButton.Focus();
+        if (focus.StatusTools >= 0 && stop == focus.StatusTools) return ViewStyleButton.Focus();
         return false;
     }
     public void FocusSearch()
@@ -675,9 +984,33 @@ public partial class PaneControl : UserControl
     {
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         SearchBar.Visibility = Visibility.Visible;
-        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        if (!_searchTextDirty) SetSearchText(state.Browser.SearchQuery ?? string.Empty);
         SearchBox.Focus();
         SearchBox.SelectAll();
+    }
+
+    private void SetSearchText(string text)
+    {
+        _updatingSearchText = true;
+        try
+        {
+            SearchBox.Text = text;
+            _searchTextDirty = false;
+        }
+        finally { _updatingSearchText = false; }
+    }
+
+    private void SyncSearchText(string query)
+    {
+        // Focus can already be on the submit button or another pane. Only a
+        // matching result may acknowledge edited text; older results leave it alone.
+        if (!_searchTextDirty || string.Equals(SearchBox.Text, query, StringComparison.Ordinal))
+            SetSearchText(query);
+    }
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_updatingSearchText) _searchTextDirty = true;
     }
 
     private void SetSearchScope(TabState state, string? scopePath)
@@ -697,6 +1030,9 @@ public partial class PaneControl : UserControl
 
     internal bool IsQuickFilterInputFocused => QuickFilterBox.IsKeyboardFocusWithin;
     internal bool HasFileViewFocus => _treeHost?.HasNativeFocus() != true && Current?.Browser.HasNativeFocus() == true;
+    internal bool ContainsMouseWheelShellTarget(nint hwnd) => IsVisible &&
+        (Current?.Browser.ContainsNativeWindow(hwnd) == true ||
+         (TreeVisible && _treeHost?.ContainsNativeWindow(hwnd) == true));
 
     public void FocusQuickFilter()
     {
@@ -704,8 +1040,7 @@ public partial class PaneControl : UserControl
         QuickFilterBar.Visibility = Visibility.Visible;
         RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         ShowQuickFilterEditor(state.Browser.QuickFilter);
-        QuickFilterBox.Focus();
-        QuickFilterBox.SelectAll();
+        FocusQuickFilterEditor(selectAll: true);
     }
 
     private void ShowQuickFilterEditor(QuickFilterSettings settings)
@@ -718,14 +1053,43 @@ public partial class PaneControl : UserControl
     internal void ApplyQuickFilter()
     {
         if (Current is not { } state) return;
-        state.Browser.SetQuickFilter(new QuickFilterSettings(QuickFilterBox.Text,
-            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true));
+        var settings = new QuickFilterSettings(QuickFilterBox.Text,
+            QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true);
+        try { if (!state.Browser.SetQuickFilter(settings)) return; }
+        catch (Exception ex)
+        {
+            if (Current == state)
+            {
+                ShowQuickFilterEditor(state.Browser.QuickFilter);
+                Status.Text = $"应用筛选失败：{ex.Message}";
+            }
+            return;
+        }
+        try
+        {
+            _quickFilterHistoryStore.Record(settings.Pattern);
+            RefreshQuickFilterHistory(settings.Pattern);
+        }
+        catch (Exception ex) { Status.Text = $"筛选已应用，但保存筛选历史失败：{ex.Message}"; }
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void QuickFilterBox_KeyDown(object sender, KeyEventArgs e)
+    private void QuickFilterBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter)
+        if (QuickFilterHistoryKeyRouting.ShouldRemoveSelectedEntry((int)e.Key,
+                QuickFilterBox.IsDropDownOpen, QuickFilterBox.SelectedItem is string) &&
+            QuickFilterBox.SelectedItem is string selectedPattern)
+        {
+            var textToKeep = QuickFilterBox.Text;
+            try
+            {
+                _quickFilterHistoryStore.Remove(selectedPattern);
+                RefreshQuickFilterHistory(textToKeep, keepDropDownOpen: true);
+            }
+            catch (Exception ex) { Status.Text = $"删除筛选历史失败：{ex.Message}"; }
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
         {
             ApplyQuickFilter();
             e.Handled = true;
@@ -735,6 +1099,32 @@ public partial class PaneControl : UserControl
             ClearQuickFilter();
             e.Handled = true;
         }
+    }
+
+    private void QuickFilterHistory_DropDownOpened(object sender, EventArgs e)
+    {
+        var textToKeep = QuickFilterBox.Text;
+        RefreshQuickFilterHistory(textToKeep, keepDropDownOpen: true);
+    }
+
+    private void RefreshQuickFilterHistory(string textToKeep, bool keepDropDownOpen = false)
+    {
+        QuickFilterBox.ItemsSource = _quickFilterHistoryStore.Load();
+        QuickFilterBox.SelectedIndex = -1;
+        QuickFilterBox.Text = textToKeep;
+        QuickFilterBox.IsDropDownOpen = keepDropDownOpen;
+    }
+
+    private void FocusQuickFilterEditor(bool selectAll)
+    {
+        QuickFilterBox.ApplyTemplate();
+        if (QuickFilterBox.Template.FindName("PART_EditableTextBox", QuickFilterBox) is TextBox editor)
+        {
+            editor.Focus();
+            if (selectAll) editor.SelectAll();
+            return;
+        }
+        QuickFilterBox.Focus();
     }
 
     private void ApplyQuickFilter_Click(object sender, RoutedEventArgs e) => ApplyQuickFilter();
@@ -801,9 +1191,19 @@ public partial class PaneControl : UserControl
 
     private void ClearQuickFilter()
     {
+        QuickFilterBox.IsDropDownOpen = false;
         if (Current is not { } state) return;
+        try { if (!state.Browser.SetQuickFilter(QuickFilterSettings.Empty)) return; }
+        catch (Exception ex)
+        {
+            if (Current == state)
+            {
+                ShowQuickFilterEditor(state.Browser.QuickFilter);
+                Status.Text = $"清除筛选失败：{ex.Message}";
+            }
+            return;
+        }
         ShowQuickFilterEditor(QuickFilterSettings.Empty);
-        state.Browser.SetQuickFilter(QuickFilterSettings.Empty);
         QuickFilterBar.Visibility = Visibility.Collapsed;
         StateChanged?.Invoke(this, EventArgs.Empty);
         RestoreFileFocusWhenActive();
@@ -877,10 +1277,23 @@ public partial class PaneControl : UserControl
     private void SubmitSearch()
     {
         if (Current is not { } state || string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+        // Shell searches trim the submitted query. Normalize on explicit submit,
+        // then keep it protected until its matching result acknowledges the text.
+        SearchBox.Text = SearchBox.Text.Trim();
+        _searchTextDirty = true;
         state.SearchRequestPending = true;
         if (ReferenceEquals(_searchCloseFocusPending, state)) _searchCloseFocusPending = null;
         Status.Text = $"正在搜索：{SearchBox.Text.Trim()}";
         state.Browser.Search(SearchBox.Text, state.SearchScopePath);
+        if (state.SearchRequestPending && Current == state && IsVisible && Window.GetWindow(this)?.IsActive == true &&
+            (SearchBox.IsKeyboardFocusWithin || SearchSubmitButton.IsKeyboardFocusWithin))
+        {
+            // Transfer the explicit submit to the file view now. Returning to an
+            // editor afterwards cancels that intent through the normal focus route;
+            // late search results must not reactivate it independently.
+            Activated?.Invoke(this, EventArgs.Empty);
+            FocusCurrentView();
+        }
     }
 
     private void CloseSearch_Click(object sender, RoutedEventArgs e) => CloseSearch();
@@ -888,6 +1301,7 @@ public partial class PaneControl : UserControl
     private void CloseSearch()
     {
         if (Current is not { } state) return;
+        _searchTextDirty = false;
         _searchCloseFocusPending = state.SearchRequestPending || state.Browser.SearchQuery is not null
             ? state : null;
         state.SearchRequestPending = false;
@@ -961,11 +1375,14 @@ public partial class PaneControl : UserControl
     }
 
     public void ShowAddressHistory()
+        => ShowAddressHistory(AddressHost);
+
+    private void ShowAddressHistory(FrameworkElement placementTarget)
     {
         if (Current is not { } state) return;
         var menu = new ContextMenu
         {
-            PlacementTarget = AddressHost,
+            PlacementTarget = placementTarget,
             Placement = PlacementMode.Bottom,
             DataContext = state
         };
@@ -980,6 +1397,13 @@ public partial class PaneControl : UserControl
 
     private void AddressHistory_Click(object sender, RoutedEventArgs e) => ShowAddressHistory();
 
+    private void NavigationHistoryRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement target) return;
+        ShowAddressHistory(target);
+        e.Handled = true;
+    }
+
     private void AddressMenu_Click(object sender, RoutedEventArgs e)
     {
         if (Current is not { } state) return;
@@ -991,6 +1415,7 @@ public partial class PaneControl : UserControl
         };
         var entries = AddressPathMenu.Build(state.Path);
         var addedCommonSeparator = false;
+        var itemsByIdentity = new Dictionary<string, MenuItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
             if (!entry.IsAncestor && !addedCommonSeparator)
@@ -1002,6 +1427,8 @@ public partial class PaneControl : UserControl
             {
                 Header = entry.Header,
                 ToolTip = entry.Identity,
+                IsCheckable = entry.IsCurrent,
+                IsChecked = entry.IsCurrent,
                 Icon = new Image
                 {
                     Source = ShellIconProvider.GetIcon(entry.Identity, isDirectory: true),
@@ -1013,7 +1440,9 @@ public partial class PaneControl : UserControl
             {
                 if (ReferenceEquals(Current, state)) state.Browser.Navigate(entry.Identity);
             };
-            menu.Items.Add(item);
+            if (entry.ParentIdentity is null) menu.Items.Add(item);
+            else itemsByIdentity[entry.ParentIdentity].Items.Add(item);
+            itemsByIdentity[entry.Identity] = item;
         }
         menu.IsOpen = true;
     }
@@ -1067,13 +1496,18 @@ public partial class PaneControl : UserControl
     public void CloseCurrentTab() { if (Current is { } state) CloseTab(state); }
     public void ReopenClosedTab()
     {
-        if (_closedTabs.TryPop(out var tab))
+        // A full pane must not consume a snapshot that can be reopened later.
+        if (_closedTabs.Count == 0 || !CanAddTabs(1)) return;
+        if (_closedTabs.TryPop(out var closed))
+        {
+            var tab = closed.Settings;
             AddTab(tab.Path, tab.View, quickFilter: tab.QuickFilter, previewPaneVisible: tab.PreviewPaneVisible,
-                detailsPaneVisible: tab.DetailsPaneVisible);
+                detailsPaneVisible: tab.DetailsPaneVisible, addressHistory: closed.AddressHistory);
+        }
     }
 
     internal bool TryOpenSelectedFolderInNewTab() => Current?.Browser.OpenSelectedFolderInNewTab(
-        path => AddTab(path, _newTabView())) == true;
+        OpenPathInNewTab) == true;
 
     public void CloseOtherTabs()
     {
@@ -1087,174 +1521,243 @@ public partial class PaneControl : UserControl
 
     private TabItem AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false,
         QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
-        AddressPathHistory? addressHistory = null)
+        AddressPathHistory? addressHistory = null, string? startupSelectPath = null)
     {
+        if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
-            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference);
+            previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection,
+            _disableGrouping);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
-        var state = new TabState { Tab = tab, Browser = browser, Path = path, IsPinned = pinned,
-            AddressHistory = addressHistory ?? new AddressPathHistory() };
+        var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,
+            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectPath = startupSelectPath };
         state.AddressHistory.Record(path);
         tab.Tag = state;
         browser.QuickFilterChanged += settings =>
         {
-            if (Current != state) return;
-            if (!QuickFilterBox.IsKeyboardFocusWithin) ShowQuickFilterEditor(settings);
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            var owner = state.Owner;
+            if (owner.Current != state) return;
+            if (!owner.QuickFilterBox.IsKeyboardFocusWithin) owner.ShowQuickFilterEditor(settings);
+            owner.StateChanged?.Invoke(owner, EventArgs.Empty);
         };
         browser.NavigationAvailabilityChanged += (_, _) =>
         {
-            if (Current == state) RefreshNavigationAvailability();
+            var owner = state.Owner;
+            if (owner.Current == state) owner.RefreshNavigationAvailability();
+        };
+        browser.ShellStatusTextChanged += (_, text) =>
+        {
+            var owner = state.Owner;
+            if (owner.Current == state) owner.UpdateShellStatusHint(text);
         };
         browser.SelectionContextChanged += (_, _) =>
         {
-            if (Current == state)
+            var owner = state.Owner;
+            if (owner.Current == state)
             {
-                CommandContextChanged?.Invoke(this, EventArgs.Empty);
-                QueueSelectionCountsRefresh(state);
+                if (owner._recursiveSizeIsSelection && ReferenceEquals(owner._recursiveSizeOwner, state))
+                    owner.CancelRecursiveDirectorySize();
+                owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
+                owner.QueueSelectionCountsRefresh(state);
+                if (owner._autoExpandTreeSelection && owner.IsVisible)
+                {
+                    var requestVersion = ++owner._treeSelectionSyncRequestVersion;
+                    var selectionPath = state.Path;
+                    owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                    {
+                        var currentOwner = state.Owner;
+                        if (!currentOwner._autoExpandTreeSelection || requestVersion != currentOwner._treeSelectionSyncRequestVersion ||
+                            currentOwner.Current != state || !currentOwner.IsVisible ||
+                            !string.Equals(state.Path, selectionPath, StringComparison.OrdinalIgnoreCase)) return;
+                        var folder = state.Browser.GetSelectedFolderLocation();
+                        if (folder is not null && currentOwner._autoExpandTreeSelection &&
+                            requestVersion == currentOwner._treeSelectionSyncRequestVersion && currentOwner.Current == state && currentOwner.IsVisible &&
+                            string.Equals(state.Path, selectionPath, StringComparison.OrdinalIgnoreCase))
+                            currentOwner.SelectedFolderForTree?.Invoke(currentOwner, folder);
+                    }));
+                }
             }
         };
         browser.FolderMiddleClicked += (_, folderPath) =>
         {
-            if (Current == state && IsVisible) AddTab(folderPath, _newTabView());
+            var owner = state.Owner;
+            if (owner.Current == state && owner.IsVisible) owner.OpenPathInNewTab(folderPath);
         };
         browser.NavigationStarting += (_, _) =>
         {
+            var owner = state.Owner;
             if (!state.SearchRequestPending && state.Browser.SearchQuery is null)
-                SetSearchScope(state, null);
-            if (ReferenceEquals(_recursiveSizeOwner, state) || ReferenceEquals(_lastRecursiveSizeOwner, state))
-                CancelRecursiveDirectorySize();
-            if (Current != state) return;
-            CancelSelectionCountsRefresh();
-            RefreshNavigationAvailability();
-            _treeHost?.CancelSynchronization();
-            _diskSpace.Reset();
-            ItemCounts.Text = "";
-            ItemCounts.ToolTip = null;
+                owner.SetSearchScope(state, null);
+            if (ReferenceEquals(owner._recursiveSizeOwner, state) || ReferenceEquals(owner._lastRecursiveSizeOwner, state))
+                owner.CancelRecursiveDirectorySize();
+            if (owner.Current != state) return;
+            owner.UpdateShellStatusHint(null);
+            owner.CancelSelectionCountsRefresh();
+            owner.RefreshNavigationAvailability();
+            owner._treeHost?.CancelSynchronization();
+            owner._diskSpace.Reset();
+            owner.ItemCounts.Text = "";
+            owner.ItemCounts.ToolTip = null;
         };
-        browser.CustomCommands = selectedItem =>
+        // File-area menus remain native-only while menu theme behavior is verified.
+        browser.Navigated += (_, notice) =>
         {
-            var actions = new List<ExplorerBrowserHost.MenuAction>();
-            if (selectedItem is { IsFileSystemFolder: true })
-                actions.Add(new("在新标签页中打开", () => AddTab(selectedItem.Path, _newTabView())));
-            actions.Add(new("新建标签页", NewTab));
-            actions.Add(new("复制当前标签", () => DuplicateTab(state)));
-            actions.Add(new(state.IsPinned ? "取消固定当前标签" : "固定当前标签", () => TogglePinned(state)));
-            if (!state.IsPinned) actions.Add(new("关闭当前标签", () => CloseTab(state)));
-            actions.Add(new("关闭其他标签", () =>
+            var owner = state.Owner;
+            var navigatedPath = notice.Value;
+            var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (completesInput && state.StartupSelectPath is { } startupSelectPath)
             {
-                Tabs.SelectedItem = state.Tab;
-                CloseOtherTabs();
-            }));
-            actions.Add(new("恢复关闭的标签", ReopenClosedTab));
-            actions.Add(new(selectedItem is null ? "复制当前文件夹路径" : "复制完整路径",
-                () => Clipboard.SetText(selectedItem?.Path ?? state.Path)));
-            return actions;
-        };
-        browser.Navigated += (_, navigatedPath) =>
-        {
-            state.SearchRequestPending = false;
-            SetSearchScope(state, null);
-            var restoreSearchCloseFocus = ReferenceEquals(_searchCloseFocusPending, state);
-            if (restoreSearchCloseFocus) _searchCloseFocusPending = null;
-            state.Path = navigatedPath;
+                state.StartupSelectPath = null;
+                if (string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(startupSelectPath) ?? string.Empty),
+                        Path.TrimEndingDirectorySeparator(navigatedPath), StringComparison.OrdinalIgnoreCase))
+                    browser.QueueFileSystemSelection(startupSelectPath);
+            }
+            if (completesInput)
+            {
+                state.SearchRequestPending = false;
+                owner.SetSearchScope(state, null);
+            }
+            var restoreSearchCloseFocus = completesInput && ReferenceEquals(owner._searchCloseFocusPending, state);
+            if (restoreSearchCloseFocus) owner._searchCloseFocusPending = null;
             state.AddressHistory.Record(navigatedPath);
-            UpdateTabHeader(state);
-            if (Current == state)
+            owner.UpdateTabHeader(state);
+            if (owner.Current == state)
             {
-                var restoreFocus = _addressNavigationPending &&
-                    (Address.IsKeyboardFocusWithin || GoButton.IsKeyboardFocused);
-                RenderBreadcrumb(navigatedPath);
-                if (!_addressEditing || _addressNavigationPending)
+                owner.RenderBreadcrumb(navigatedPath);
+                // Shell display-name work can reenter; a later request still
+                // owns editing even if it began while this notification ran.
+                completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+                restoreSearchCloseFocus &= completesInput;
+                var restoreFocus = completesInput && owner._addressNavigationPending &&
+                    (owner.Address.IsKeyboardFocusWithin || owner.GoButton.IsKeyboardFocused);
+                if (!owner._addressEditing || completesInput && owner._addressNavigationPending)
                 {
-                    Address.Text = navigatedPath;
-                    ShowBreadcrumb();
+                    owner.Address.Text = navigatedPath;
+                    owner.ShowBreadcrumb();
                 }
-                _addressNavigationPending = false;
-                SearchBar.Visibility = Visibility.Collapsed;
-                Status.Text = "Shell 视图";
-                if (browser.IsFileSystemLocation) _treeHost?.SetDirectory(navigatedPath);
-                else _treeHost?.SetVirtualLocation();
-                QueueSelectionCountsRefresh(state);
+                if (completesInput)
+                {
+                    owner._addressNavigationPending = false;
+                    owner.SearchBar.Visibility = Visibility.Collapsed;
+                    owner.Status.Text = "Shell 视图";
+                }
+                if (browser.IsFileSystemLocation) owner._treeHost?.SetDirectory(navigatedPath);
+                else owner._treeHost?.SetVirtualLocation();
+                owner.QueueSelectionCountsRefresh(state);
                 if (restoreFocus)
-                    Activated?.Invoke(this, EventArgs.Empty);
+                    owner.Activated?.Invoke(owner, EventArgs.Empty);
                 if (restoreFocus || restoreSearchCloseFocus)
-                    RestoreFileFocusWhenActive();
+                    owner.RestoreFileFocusWhenActive();
             }
-            StateChanged?.Invoke(this, EventArgs.Empty);
-            if (Current == state) CommandContextChanged?.Invoke(this, EventArgs.Empty);
+            owner.StateChanged?.Invoke(owner, EventArgs.Empty);
+            if (owner.Current == state) owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
         };
-        browser.SearchNavigated += (_, query) =>
+        browser.SearchNavigated += (_, notice) =>
         {
-            state.SearchRequestPending = false;
-            if (ReferenceEquals(_searchCloseFocusPending, state)) return;
-            state.Path = browser.CurrentPath;
-            UpdateTabHeader(state);
-            StateChanged?.Invoke(this, EventArgs.Empty);
-            if (Current != state) return;
-            RenderBreadcrumb(state.Path);
-            if (!_addressEditing)
+            var owner = state.Owner;
+            var query = notice.Value;
+            var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (completesInput) state.SearchRequestPending = false;
+            if (ReferenceEquals(owner._searchCloseFocusPending, state)) return;
+            owner.UpdateTabHeader(state);
+            owner.StateChanged?.Invoke(owner, EventArgs.Empty);
+            if (owner.Current != state) return;
+            owner.RenderBreadcrumb(state.Path);
+            completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (!owner._addressEditing)
             {
-                Address.Text = state.Path;
-                ShowBreadcrumb();
+                owner.Address.Text = state.Path;
+                owner.ShowBreadcrumb();
             }
-            SearchBar.Visibility = Visibility.Visible;
-            if (!SearchBox.IsKeyboardFocusWithin || SearchBox.Text == query)
-                SearchBox.Text = query;
-            Status.Text = $"搜索结果：{query}";
-            QueueSelectionCountsRefresh(state);
-            CommandContextChanged?.Invoke(this, EventArgs.Empty);
-        };
-        browser.NavigationFailed += (_, message) =>
-        {
-            state.SearchRequestPending = false;
-            if (ReferenceEquals(_searchCloseFocusPending, state))
-                _searchCloseFocusPending = null;
-            if (Current == state)
+            if (completesInput)
             {
-                _addressNavigationPending = false;
+                owner.SearchBar.Visibility = Visibility.Visible;
+                owner.SyncSearchText(query);
+                owner.Status.Text = $"搜索结果：{query}";
+            }
+            owner.QueueSelectionCountsRefresh(state);
+            owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
+        };
+        browser.NavigationFailed += (_, notice) =>
+        {
+            if (!browser.IsCurrentNavigationRequest(notice.RequestVersion)) return;
+            var owner = state.Owner;
+            state.StartupSelectPath = null;
+            state.SearchRequestPending = false;
+            if (ReferenceEquals(owner._searchCloseFocusPending, state))
+                owner._searchCloseFocusPending = null;
+            if (owner.Current == state)
+            {
+                owner._addressNavigationPending = false;
                 if (state.Browser.SearchQuery is { } query)
                 {
-                    SearchBar.Visibility = Visibility.Visible;
-                    SearchBox.Text = query;
+                    owner.SearchBar.Visibility = Visibility.Visible;
+                    owner.SyncSearchText(query);
                 }
-                Status.Text = message;
-                SyncTreeToCurrent(state);
-                QueueSelectionCountsRefresh(state);
+                owner.Status.Text = notice.Value;
+                owner.SyncTreeToCurrent(state);
+                owner.QueueSelectionCountsRefresh(state);
             }
-            if (Current == state) CommandContextChanged?.Invoke(this, EventArgs.Empty);
+            if (owner.Current == state) owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
         };
         browser.MenuError += (_, message) =>
         {
-            if (Current == state) Status.Text = $"Shell 视图：{message}";
+            var owner = state.Owner;
+            if (owner.Current == state) owner.Status.Text = $"Shell 视图：{message}";
         };
-        browser.Activated += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
-        browser.HeaderPresetMenuRequested += point => HeaderPresetMenuRequested?.Invoke(this, point);
+        browser.Activated += (_, _) => state.Owner.Activated?.Invoke(state.Owner, EventArgs.Empty);
+        browser.HeaderPresetMenuRequested += point => state.Owner.HeaderPresetMenuRequested?.Invoke(state.Owner, point);
         browser.ShortcutHandler = shortcut => shortcut == ExplorerShortcut.OpenSelectionInNewTab
-            ? TryOpenSelectedFolderInNewTab()
-            : ShortcutRequested?.Invoke(this, shortcut) == true;
-        browser.CtrlWheelHandler = CycleViewStyle;
-        browser.MayRestoreFocus = () => Current == state && IsVisible &&
-            _treeHost?.HasNativeFocus() != true && MayRestoreFileFocus?.Invoke() == true;
+            ? state.Owner.TryOpenSelectedFolderInNewTab()
+            : state.Owner.ShortcutRequested?.Invoke(state.Owner, shortcut) == true;
+        browser.CtrlWheelHandler = style => state.Owner.Current == state && state.Owner.ApplyCompletedViewStyleDelta(state, style);
+        browser.MayRestoreFocus = () => state.Owner.Current == state && state.Owner.IsVisible &&
+            state.Owner._treeHost?.HasNativeFocus() != true && state.Owner.MayRestoreFileFocus?.Invoke() == true;
+        browser.MayContinueFileOperationFocusRestore = () => state.Owner.Current == state && state.Owner.IsVisible &&
+            state.Owner._treeHost?.HasNativeFocus() != true && state.Owner.MayKeepFileFocusRestorePending?.Invoke() == true;
         UpdateTabHeader(state);
-        tab.PreviewMouseLeftButtonDown += (_, e) =>
-        {
-            _dragCandidate = e.ClickCount == 1 ? tab : null;
-            _dragStart = e.GetPosition(Tabs);
-        };
-        tab.PreviewMouseRightButtonDown += (_, _) => Tabs.SelectedItem = tab;
+        tab.PreviewMouseLeftButtonDown += (_, e) => state.Owner.TabHeader_PreviewMouseLeftButtonDown(tab, e);
+        tab.PreviewMouseRightButtonDown += (_, _) => state.Owner.Tabs.SelectedItem = tab;
         tab.AllowDrop = true;
-        tab.DragOver += Tab_DragOver;
-        tab.Drop += Tab_Drop;
+        tab.DragOver += (sender, e) => state.Owner.Tab_DragOver(sender, e);
+        tab.DragLeave += (sender, e) => state.Owner.Tab_DragLeave(sender, e);
+        tab.Drop += (sender, e) => state.Owner.Tab_Drop(sender, e);
         tab.ContextMenu = CreateTabContextMenu(state);
         Tabs.Items.Add(tab);
         var insertion = pinned ? _tabOrder.TakeWhile(item => ((TabState)item.Tag).IsPinned).Count() : _tabOrder.Count;
         _tabOrder.Insert(insertion, tab);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         if (select) Tabs.SelectedItem = tab;
         StateChanged?.Invoke(this, EventArgs.Empty);
         return tab;
+    }
+
+    internal void DisposeViews()
+    {
+        CloseAddressTree();
+        CancelTabHoverActivation();
+        CancelRecursiveDirectorySize();
+        CancelSelectionCountsRefresh();
+        _itemCountsTimer.Stop();
+        _diskSpace.Reset();
+
+        // Window closure does not dispose HwndHost children: WPF can park them
+        // under its hidden window. Release every tab, including inactive ones.
+        foreach (var tab in Tabs.Items.Cast<TabItem>())
+            DisposeHost(((TabState)tab.Tag).Browser);
+        DisposeHost(_treeHost);
+        DisposeHost(AddressTreeHost);
+
+        static void DisposeHost(IDisposable? host)
+        {
+            try { host?.Dispose(); }
+            catch (Exception ex)
+            {
+                // One failing Shell extension must not prevent other hosts from closing.
+                Trace.WriteLine($"Pane host cleanup: {ex.GetType().Name} (0x{ex.HResult:X8})");
+            }
+        }
     }
 
     private void UpdateTabHeader(TabState state)
@@ -1273,11 +1776,14 @@ public partial class PaneControl : UserControl
         header.Children.Add(new TextBlock
         {
             Text = string.IsNullOrEmpty(name) ? state.Path : name,
-            MaxWidth = 180,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
+        state.CloseButton = null;
+        if (_showTabCloseButtons)
+            AddTabCloseButton(state, header);
         header.MouseDown += (_, e) =>
         {
+            if (state.CloseButton?.IsMouseOver == true) return;
             if (e.ChangedButton == MouseButton.Middle ||
                 (e.ChangedButton == MouseButton.Left && e.ClickCount == 2))
             {
@@ -1286,15 +1792,65 @@ public partial class PaneControl : UserControl
             }
         };
         state.Tab.Header = header;
-        state.Tab.ToolTip = state.IsPinned ? $"固定标签 · {state.Path}" : state.Path;
+        state.Tab.ToolTip = $"{(state.IsPinned ? "固定标签 · " : "")}{state.Path}\n拖动到其他窗格可移动；Ctrl+拖动可复制。";
         if (state.Tab.IsSelected)
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
                 new Action(() => { if (state.Tab.IsSelected) state.Tab.BringIntoView(); }));
     }
 
+    private void AddTabCloseButton(TabState state, StackPanel? header = null)
+    {
+        if (state.CloseButton is not null) return;
+        header ??= state.Tab.Header as StackPanel;
+        if (header is null) return;
+        var closeButton = new Button
+        {
+            Content = "×",
+            Width = 18,
+            Height = 18,
+            Padding = new Thickness(0),
+            Margin = new Thickness(4, 0, 0, 0),
+            BorderThickness = new Thickness(0),
+            Background = System.Windows.Media.Brushes.Transparent,
+            Focusable = false,
+            IsTabStop = false,
+            ToolTip = "关闭标签页"
+        };
+        closeButton.SetResourceReference(Control.ForegroundProperty, "ExplorerDirs.ControlTextBrush");
+        System.Windows.Automation.AutomationProperties.SetName(closeButton, "关闭标签页");
+        closeButton.Click += (_, e) =>
+        {
+            state.Owner.CloseTab(state);
+            e.Handled = true;
+        };
+        header.Children.Add(closeButton);
+        state.CloseButton = closeButton;
+    }
+
+    private static void RemoveTabCloseButton(TabState state)
+    {
+        if (state.CloseButton?.Parent is Panel parent)
+            parent.Children.Remove(state.CloseButton);
+        state.CloseButton = null;
+    }
+
+    private void UpdateTabCloseButtonStates()
+    {
+        foreach (var tab in _tabOrder)
+        {
+            var state = (TabState)tab.Tag;
+            if (state.CloseButton is null) continue;
+            state.CloseButton.Visibility = TabCloseButtonPolicy.IsVisible(
+                _showTabCloseButtons, state.IsPinned, _tabOrder.Count)
+                ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
     private ContextMenu CreateTabContextMenu(TabState state)
     {
         var menu = new ContextMenu();
+        AddMenuItem(menu, "使用 Explorer 浏览", () => OpenInSystemExplorer(state));
+        menu.Items.Add(new Separator());
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
         AddMenuItem(menu, "复制当前标签", () => DuplicateTab(state), "Ctrl+K");
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
@@ -1318,6 +1874,12 @@ public partial class PaneControl : UserControl
         return menu;
     }
 
+    private void OpenInSystemExplorer(TabState state)
+    {
+        try { SystemExplorerLauncher.Open(state.Browser.CurrentPath); }
+        catch (Exception ex) { Status.Text = $"启动 Windows Explorer 失败：{ex.Message}"; }
+    }
+
     private static void AddMenuItem(ContextMenu menu, string header, Action action, string? shortcut = null)
     {
         var item = new MenuItem { Header = header, InputGestureText = shortcut ?? "" };
@@ -1335,8 +1897,10 @@ public partial class PaneControl : UserControl
             ? _tabOrder[closingIndex + 1 < _tabOrder.Count ? closingIndex + 1 : closingIndex - 1]
             : null;
         CaptureViewState(state);
-        _closedTabs.Push(new TabSettings(state.Path, state.Browser.CachedViewState(), state.Browser.QuickFilter,
-            state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible));
+        // Reopening previously kept only the current address, unlike DuplicateTab.
+        // Retain an independent dropdown history without keeping the native host alive.
+        _closedTabs.Push((new TabSettings(state.Browser.CurrentPath, state.Browser.CachedViewState(), state.Browser.QuickFilter,
+            state.Browser.PreviewPaneVisible, state.Browser.DetailsPaneVisible), state.AddressHistory.Copy()));
         while (_closedTabs.Count > 20)
         {
             var recent = _closedTabs.Take(20).Reverse().ToArray();
@@ -1346,6 +1910,7 @@ public partial class PaneControl : UserControl
         Tabs.Items.Remove(state.Tab);
         _tabOrder.Remove(state.Tab);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         if (adjacent is not null) Tabs.SelectedItem = adjacent;
         BrowserLayer.Remove(state.Browser);
         state.Browser.Dispose();
@@ -1361,12 +1926,21 @@ public partial class PaneControl : UserControl
         _tabOrder.Insert(insertion, state.Tab);
         UpdateTabHeader(state);
         UpdateTabOrders();
+        UpdateTabCloseButtonStates();
         state.Tab.BringIntoView();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Navigate(string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _addressNavigationPending = false;
+            RefreshCurrent();
+            ShowBreadcrumb();
+            return;
+        }
+
         try
         {
             Status.Text = "正在检查目录…";
@@ -1395,8 +1969,8 @@ public partial class PaneControl : UserControl
         _draggedTab = candidate;
         _dragToken = Guid.NewGuid().ToString("N");
         var data = new DataObject();
-        data.SetData(TabDragFormat, _dragToken);
-        try { DragDrop.DoDragDrop(candidate, data, DragDropEffects.Move); }
+        data.SetData(TabDragFormat, new TabDragPayload(this, candidate, _dragToken));
+        try { DragDrop.DoDragDrop(candidate, data, DragDropEffects.Move | DragDropEffects.Copy); }
         finally
         {
             _draggedTab = null;
@@ -1404,7 +1978,36 @@ public partial class PaneControl : UserControl
         }
     }
 
+    private void TabHeader_PreviewMouseLeftButtonDown(TabItem tab, MouseButtonEventArgs e)
+    {
+        _dragCandidate = e.ClickCount == 1 ? tab : null;
+        _dragStart = e.GetPosition(Tabs);
+    }
+
     private void Tabs_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => _dragCandidate = null;
+
+    private void TabHeaderScroll_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2 || e.ChangedButton != MouseButton.Left ||
+            ItemsControl.ContainerFromElement(Tabs, e.OriginalSource as DependencyObject ?? Tabs) is TabItem)
+            return;
+
+        NewTab();
+        e.Handled = true;
+    }
+
+    private void TabHeaderScroll_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(Tabs, e.OriginalSource as DependencyObject ?? Tabs) is TabItem ||
+            Tabs.SelectedItem is not TabItem selected || selected.Tag is not TabState state)
+            return;
+
+        var menu = CreateTabContextMenu(state);
+        menu.PlacementTarget = TabHeaderScroll;
+        menu.Placement = PlacementMode.MousePoint;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
 
     private void Tabs_PreviewKeyDown(object sender, KeyEventArgs e)
     {
@@ -1430,22 +2033,85 @@ public partial class PaneControl : UserControl
         if (_draggedTab is null || _dragToken is null || !Tabs.Items.Contains(_draggedTab)) return false;
         try
         {
-            return data.GetDataPresent(TabDragFormat) &&
-                string.Equals(data.GetData(TabDragFormat) as string, _dragToken, StringComparison.Ordinal);
+            return TryGetTabDrag(data, out var payload) && ReferenceEquals(payload.Source, this) &&
+                ReferenceEquals(payload.Tab, _draggedTab) &&
+                string.Equals(payload.Token, _dragToken, StringComparison.Ordinal);
         }
         catch (Exception) { return false; }
     }
 
+    private static bool TryGetTabDrag(IDataObject data, out TabDragPayload payload)
+    {
+        payload = null!;
+        try
+        {
+            if (!data.GetDataPresent(TabDragFormat) || data.GetData(TabDragFormat) is not TabDragPayload value ||
+                value.Source._draggedTab != value.Tab || value.Source._dragToken != value.Token ||
+                !value.Source.Tabs.Items.Contains(value.Tab)) return false;
+            payload = value;
+            return true;
+        }
+        catch (Exception) { return false; }
+    }
+
+    private static TabTransferOperation GetTabTransferOperation(TabDragPayload payload, TabState target,
+        bool copyModifier) => TabTransferPolicy.Resolve(
+            samePane: ReferenceEquals(payload.Source, target.Owner),
+            sourceTabCount: payload.Source.Tabs.Items.Count,
+            sourcePinned: ((TabState)payload.Tab.Tag).IsPinned,
+            targetPinned: target.IsPinned,
+            copyModifier);
+
     private void Tab_DragOver(object sender, DragEventArgs e)
     {
-        if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source ||
-            ((TabState)source.Tag).IsPinned != ((TabState)target.Tag).IsPinned)
+        if (sender is not TabItem target)
         {
             e.Effects = DragDropEffects.None;
             e.Handled = true;
             return;
         }
-        e.Effects = DragDropEffects.Move;
+
+        if (TryGetTabDrag(e.Data, out var payload))
+        {
+            CancelTabHoverActivation();
+            var operation = GetTabTransferOperation(payload, (TabState)target.Tag,
+                (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+            if (operation == TabTransferOperation.Reject ||
+                (ReferenceEquals(payload.Source, this) && !IsOwnTabDrag(e.Data)))
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+            e.Effects = operation == TabTransferOperation.Copy ? DragDropEffects.Copy : DragDropEffects.Move;
+        }
+        else
+        {
+            if (ReferenceEquals(Tabs.SelectedItem, target))
+            {
+                CancelTabHoverActivation();
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+            var started = _tabHoverActivationGate.Begin(target, isOwnTabDrag: false,
+                hasShellLocationData: ShellTabDropTarget.HasShellLocationData(e.Data),
+                delayMilliseconds: _tabHoverActivationDelayMilliseconds);
+            if (started)
+            {
+                _tabHoverActivationTimer.Interval = TimeSpan.FromMilliseconds(_tabHoverActivationDelayMilliseconds);
+                _tabHoverActivationTimer.Start();
+            }
+            else if (!_tabHoverActivationGate.HasPendingTarget)
+            {
+                _tabHoverActivationTimer.Stop();
+            }
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        if (!TryGetTabDrag(e.Data, out _)) e.Effects = DragDropEffects.Move;
         e.Handled = true;
         if (TabHeaderScroll is not { } scroll) return;
         var point = e.GetPosition(scroll);
@@ -1457,28 +2123,119 @@ public partial class PaneControl : UserControl
 
     private void Tab_Drop(object sender, DragEventArgs e)
     {
-        if (sender is not TabItem target || !IsOwnTabDrag(e.Data) || _draggedTab is not { } source)
+        CancelTabHoverActivation();
+        if (sender is not TabItem target || target.Tag is not TabState targetState ||
+            !TryGetTabDrag(e.Data, out var payload))
         {
             e.Effects = DragDropEffects.None;
             e.Handled = true;
             return;
         }
-        ReorderTab(source, target, e.GetPosition(target).X >= target.ActualWidth / 2);
-        e.Effects = DragDropEffects.Move;
+        var after = e.GetPosition(target).X >= target.ActualWidth / 2;
+        var operation = GetTabTransferOperation(payload, targetState,
+            (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+        if (operation == TabTransferOperation.Reorder)
+        {
+            if (!IsOwnTabDrag(e.Data)) operation = TabTransferOperation.Reject;
+            else ReorderTab(payload.Tab, target, after);
+        }
+        else if (operation == TabTransferOperation.Move &&
+                 !payload.Source.TransferTabTo((TabState)payload.Tab.Tag, this, target, after))
+            operation = TabTransferOperation.Reject;
+        else if (operation == TabTransferOperation.Copy &&
+                 !CopyTabFrom((TabState)payload.Tab.Tag, target, after))
+            operation = TabTransferOperation.Reject;
+        if (operation == TabTransferOperation.Reject)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+        e.Effects = operation == TabTransferOperation.Copy ? DragDropEffects.Copy : DragDropEffects.Move;
         e.Handled = true;
+    }
+
+    private void Tab_DragLeave(object sender, DragEventArgs e)
+    {
+        if (sender is TabItem target && _tabHoverActivationGate.Leave(target))
+            _tabHoverActivationTimer.Stop();
+    }
+
+    private void TabHoverActivationTimer_Tick(object? sender, EventArgs e)
+    {
+        _tabHoverActivationTimer.Stop();
+        // Layout changes may hide a pane without unloading it. A queued drag
+        // timer must not select a hidden tab or activate that pane afterward.
+        if (_tabHoverActivationGate.TakeTarget() is TabItem target && IsLoaded && IsVisible &&
+            Tabs.Items.Contains(target))
+            Tabs.SelectedItem = target;
+    }
+
+    private void CancelTabHoverActivation()
+    {
+        _tabHoverActivationTimer.Stop();
+        _tabHoverActivationGate.Cancel();
     }
 
     private void TabStrip_DragOver(object sender, DragEventArgs e)
     {
-        // TabItem handles the app's private reorder payload; the strip only accepts Shell folders.
-        e.Effects = _draggedTab is null && ShellTabDropTarget.HasShellLocationData(e.Data)
-            ? GetTabStripDropEffect(e.AllowedEffects)
-            : DragDropEffects.None;
+        CancelTabHoverActivation();
+        if (TryGetTabDrag(e.Data, out var payload))
+        {
+            var isPinned = ((TabState)payload.Tab.Tag).IsPinned;
+            var operation = TabTransferPolicy.Resolve(
+                samePane: ReferenceEquals(payload.Source, this),
+                sourceTabCount: payload.Source.Tabs.Items.Count,
+                sourcePinned: isPinned,
+                targetPinned: isPinned,
+                copyModifier: (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+            e.Effects = operation switch
+            {
+                TabTransferOperation.Copy => DragDropEffects.Copy,
+                TabTransferOperation.Move or TabTransferOperation.Reorder => DragDropEffects.Move,
+                _ => DragDropEffects.None
+            };
+        }
+        else
+            e.Effects = _draggedTab is null && ShellTabDropTarget.HasShellLocationData(e.Data)
+                ? GetTabStripDropEffect(e.AllowedEffects)
+                : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void TabStrip_Drop(object sender, DragEventArgs e)
     {
+        CancelTabHoverActivation();
+        if (TryGetTabDrag(e.Data, out var payload))
+        {
+            var state = (TabState)payload.Tab.Tag;
+            var operation = TabTransferPolicy.Resolve(
+                samePane: ReferenceEquals(payload.Source, this),
+                sourceTabCount: payload.Source.Tabs.Items.Count,
+                sourcePinned: state.IsPinned,
+                targetPinned: state.IsPinned,
+                copyModifier: (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+            switch (operation)
+            {
+                case TabTransferOperation.Reorder when payload.Source == this && IsOwnTabDrag(e.Data):
+                    ReorderTabToEnd(payload.Tab);
+                    e.Effects = DragDropEffects.Move;
+                    break;
+                case TabTransferOperation.Move when payload.Source != this:
+                    e.Effects = payload.Source.TransferTabTo(state, this, target: null, after: true)
+                        ? DragDropEffects.Move : DragDropEffects.None;
+                    break;
+                case TabTransferOperation.Copy:
+                    e.Effects = CopyTabFrom(state, target: null, after: true)
+                        ? DragDropEffects.Copy : DragDropEffects.None;
+                    break;
+                default:
+                    e.Effects = DragDropEffects.None;
+                    break;
+            }
+            e.Handled = true;
+            return;
+        }
         var effect = GetTabStripDropEffect(e.AllowedEffects);
         if (_draggedTab is null && effect != DragDropEffects.None &&
             ShellTabDropTarget.TryGetDroppedFolder(e.Data, out var location))
@@ -1518,15 +2275,148 @@ public partial class PaneControl : UserControl
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private bool TransferTabTo(TabState state, PaneControl destination, TabItem? target, bool after)
+    {
+        if (ReferenceEquals(this, destination) || !Tabs.Items.Contains(state.Tab) ||
+            (target is not null && (!destination.Tabs.Items.Contains(target) || target.Tag is not TabState targetState ||
+                targetState.IsPinned != state.IsPinned)) || Tabs.Items.Count <= 1) return false;
+        if (!destination.CanAddTabs(1)) return false;
+        var originalIndex = _tabOrder.IndexOf(state.Tab);
+        var originalSelected = ReferenceEquals(Current, state);
+        try
+        {
+            CaptureViewState(state);
+            if (state.Browser.ViewCaptureFailed)
+                throw new InvalidOperationException("Shell 视图状态暂时不可读取；未移动标签。");
+
+            CancelTabHoverActivation();
+            if (ReferenceEquals(_recursiveSizeOwner, state) || ReferenceEquals(_lastRecursiveSizeOwner, state))
+                CancelRecursiveDirectorySize();
+            BrowserLayer.Remove(state.Browser);
+            Tabs.Items.Remove(state.Tab);
+            _tabOrder.Remove(state.Tab);
+            UpdateTabOrders();
+            UpdateTabCloseButtonStates();
+
+            state.Owner = destination;
+            destination.Tabs.Items.Add(state.Tab);
+            var insertIndex = destination.GetTabInsertionIndex(state.IsPinned, target, after);
+            destination._tabOrder.Insert(insertIndex, state.Tab);
+            destination.UpdateTabOrders();
+            state.Tab.ContextMenu = destination.CreateTabContextMenu(state);
+            destination.BrowserLayer.Show(state.Browser);
+            destination.Tabs.SelectedItem = state.Tab;
+            destination.UpdateTabHeader(state);
+            destination.UpdateTabCloseButtonStates();
+            UpdateTabCloseButtonStates();
+            destination.StateChanged?.Invoke(destination, EventArgs.Empty);
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (destination.Tabs.Items.Contains(state.Tab))
+            {
+                destination.BrowserLayer.Remove(state.Browser);
+                destination.Tabs.Items.Remove(state.Tab);
+                destination._tabOrder.Remove(state.Tab);
+                destination.UpdateTabOrders();
+                destination.UpdateTabCloseButtonStates();
+            }
+            state.Owner = this;
+            if (!Tabs.Items.Contains(state.Tab))
+            {
+                Tabs.Items.Insert(Math.Clamp(_tabOrder.Count == 0 ? 0 : originalIndex, 0, Tabs.Items.Count), state.Tab);
+                _tabOrder.Insert(Math.Clamp(originalIndex, 0, _tabOrder.Count), state.Tab);
+                UpdateTabOrders();
+                UpdateTabCloseButtonStates();
+                state.Tab.ContextMenu = CreateTabContextMenu(state);
+                BrowserLayer.Show(state.Browser);
+                if (originalSelected) Tabs.SelectedItem = state.Tab;
+            }
+            Status.Text = $"移动标签失败：{ex.Message}";
+            return false;
+        }
+    }
+
+    private bool CopyTabFrom(TabState source, TabItem? target, bool after)
+    {
+        if (target is not null && (target.Tag is not TabState targetState ||
+            targetState.IsPinned != source.IsPinned)) return false;
+        if (!CanAddTabs(1)) return false;
+        try
+        {
+            var view = source.Browser.CaptureViewState();
+            if (source.Browser.ViewCaptureFailed)
+                throw new InvalidOperationException("Shell 视图状态暂时不可读取；未复制标签。");
+            var copy = AddTab(source.Browser.CurrentPath, view, select: false, pinned: source.IsPinned,
+                quickFilter: source.Browser.QuickFilter,
+                previewPaneVisible: source.Browser.PreviewPaneVisible,
+                detailsPaneVisible: source.Browser.DetailsPaneVisible,
+                addressHistory: source.AddressHistory.Copy());
+            _tabOrder.Remove(copy);
+            // AddTab already inserted the copy. Exclude it before counting the
+            // pinned partition, or a blank-strip copy lands after an ordinary tab.
+            var destinationIndex = GetTabInsertionIndex(source.IsPinned, target, after);
+            _tabOrder.Insert(Math.Clamp(destinationIndex, 0, _tabOrder.Count), copy);
+            UpdateTabOrders();
+            Tabs.SelectedItem = copy;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Status.Text = $"复制标签失败：{ex.Message}";
+            return false;
+        }
+    }
+
+    private int GetTabInsertionIndex(bool pinned, TabItem? target, bool after)
+    {
+        if (target is not null)
+        {
+            var targetIndex = _tabOrder.IndexOf(target);
+            if (targetIndex >= 0) return Math.Clamp(targetIndex + (after ? 1 : 0), 0, _tabOrder.Count);
+        }
+        return pinned ? _tabOrder.TakeWhile(tab => ((TabState)tab.Tag).IsPinned).Count() : _tabOrder.Count;
+    }
+
+    private void ReorderTabToEnd(TabItem tab)
+    {
+        if (!_tabOrder.Contains(tab)) return;
+        var state = (TabState)tab.Tag;
+        var reordered = _tabOrder.Where(item => !ReferenceEquals(item, tab)).ToList();
+        var insertion = state.IsPinned
+            ? reordered.TakeWhile(item => ((TabState)item.Tag).IsPinned).Count()
+            : reordered.Count;
+        reordered.Insert(insertion, tab);
+        if (_tabOrder.SequenceEqual(reordered)) return;
+        _tabOrder.Clear();
+        _tabOrder.AddRange(reordered);
+        UpdateTabOrders();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private void UpdateTabOrders()
     {
         for (var index = 0; index < _tabOrder.Count; index++)
             TabHeaderPanel.SetOrder(_tabOrder[index], index);
+        UpdateTabStripVisibility();
+    }
+
+    private void UpdateTabStripVisibility() =>
+        Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_alwaysShowTabStrip, Tabs.Items.Count)
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    private void UpdateShellStatusHint(string? text)
+    {
+        ShellStatusHint.Text = text ?? string.Empty;
+        ShellStatusHint.ToolTip = string.IsNullOrEmpty(text) ? null : text;
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != Tabs || Current is not { } state) return;
+        CancelTabHoverActivation();
         if (e.RemovedItems.Count != 0) CloseAddressTree();
         foreach (var previous in e.RemovedItems.OfType<TabItem>())
         {
@@ -1540,6 +2430,7 @@ public partial class PaneControl : UserControl
         RefreshNavigationAvailability();
         SyncTreeToCurrent(state);
         _diskSpace.Reset();
+        UpdateShellStatusHint(state.Browser.ShellStatusText);
         ItemCounts.Text = ""; // Never carry a previous tab's selection counts across a switch.
         ItemCounts.ToolTip = null;
         CancelSelectionCountsRefresh();
@@ -1549,7 +2440,7 @@ public partial class PaneControl : UserControl
         RenderBreadcrumb(state.Path);
         ShowBreadcrumb();
         SearchBar.Visibility = state.Browser.SearchQuery is null ? Visibility.Collapsed : Visibility.Visible;
-        SearchBox.Text = state.Browser.SearchQuery ?? string.Empty;
+        SetSearchText(state.Browser.SearchQuery ?? string.Empty);
         if (QuickFilterBar.Visibility == Visibility.Visible) ShowQuickFilterEditor(state.Browser.QuickFilter);
         Status.Text = state.Browser.SearchQuery is { } query ? $"搜索结果：{query}" : "Shell 视图";
         Activated?.Invoke(this, EventArgs.Empty);
@@ -1560,7 +2451,9 @@ public partial class PaneControl : UserControl
             if (Current != state) return;
             state.Tab.BringIntoView();
             UpdateTabScrollButtons();
-            if (IsLoaded && IsVisible) FocusCurrentView();
+            // A later click or Tab/arrow move may have chosen another pane,
+            // address box or tab header while this callback was queued.
+            if (IsLoaded && IsVisible && MayRestoreFileFocus?.Invoke() == true) FocusCurrentView();
         }));
     }
 
@@ -1650,10 +2543,23 @@ public partial class PaneControl : UserControl
 
     private void RestoreFileFocusWhenActive()
     {
+        var state = Current;
+        if (state is null) return;
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
         {
-            if (MayRestoreFileFocus?.Invoke() == true) FocusCurrentView();
+            // Closing address/search UI can queue this before the user switches
+            // tabs. The old request must not focus its replacement tab.
+            if (Current == state && MayRestoreFileFocus?.Invoke() == true)
+                state.Browser.FocusView();
         }));
+    }
+
+    private void BreadcrumbScroll_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Use the bubbling event: breadcrumb buttons consume their own clicks,
+        // while blank space and separators provide Explorer-style path editing.
+        FocusAddress();
+        e.Handled = true;
     }
 
     private void BreadcrumbScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -1700,6 +2606,13 @@ public partial class PaneControl : UserControl
             RestoreFileFocusWhenActive();
             e.Handled = true;
         }
+    }
+
+    private void Address_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Continuing to edit after submission revokes the old completion's
+        // permission to replace the draft or leave address editing.
+        if (_addressEditing) _addressNavigationPending = false;
     }
 
     private void Address_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

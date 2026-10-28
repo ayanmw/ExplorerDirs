@@ -3,6 +3,17 @@ namespace ExplorerDirs.App;
 internal sealed class ViewStyleWheelAccumulator
 {
     private int _remainder;
+    private long? _targetGeneration;
+
+    internal int Add(int delta, long targetGeneration)
+    {
+        if (_targetGeneration != targetGeneration)
+        {
+            _remainder = 0;
+            _targetGeneration = targetGeneration;
+        }
+        return Add(delta);
+    }
 
     internal int Add(int delta)
     {
@@ -16,6 +27,6 @@ internal sealed class ViewStyleWheelAccumulator
 
 internal static class ViewStyleWheelDispatch
 {
-    internal static int GetFallbackDelta(int completedNotches, bool viewStyleApplied) =>
-        viewStyleApplied ? 0 : completedNotches * 120;
+    internal static int GetFallbackDelta(int completedNotches, bool viewStyleApplied, bool targetCurrent = true) =>
+        viewStyleApplied || !targetCurrent ? 0 : completedNotches * 120;
 }

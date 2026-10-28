@@ -16,7 +16,9 @@ internal static class QuickFilterTabStateProbe
         var fixtureParent = Path.Combine(AppContext.BaseDirectory, "fixtures");
         var fixtureRoot = Path.Combine(fixtureParent, "quick-filter-tabs-" + Guid.NewGuid().ToString("N"));
         var directory = Path.Combine(fixtureRoot, "pane-0");
+        var siblingDirectory = Path.Combine(fixtureRoot, "sibling");
         Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(siblingDirectory);
         File.WriteAllText(Path.Combine(directory, "initial.txt"), "initial");
         Directory.CreateDirectory(Path.Combine(directory, "child"));
         var favoritesPath = Path.Combine(fixtureRoot, "QuickFilterFavorites.ini");
@@ -31,6 +33,7 @@ internal static class QuickFilterTabStateProbe
             var quickFilterType = app.GetType("ExplorerDirs.App.QuickFilterSettings", throwOnError: true)!;
             var tabSettingsType = app.GetType("ExplorerDirs.App.TabSettings", throwOnError: true)!;
             var favoritesStoreType = app.GetType("ExplorerDirs.App.QuickFilterFavoritesStore", throwOnError: true)!;
+            var historyStoreType = app.GetType("ExplorerDirs.App.QuickFilterHistoryStore", throwOnError: true)!;
             var paneType = app.GetType("ExplorerDirs.App.PaneControl", throwOnError: true)!;
             var defaultView = viewStateType.GetMethod("Default", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!;
             var viewFactoryType = typeof(Func<>).MakeGenericType(viewStateType);
@@ -61,11 +64,13 @@ internal static class QuickFilterTabStateProbe
             tabArray.SetValue(initialTab, 0);
             var favoritesStore = Activator.CreateInstance(favoritesStoreType, InstanceMembers, null,
                 [favoritesPath], null)!;
+            var historyStore = Activator.CreateInstance(historyStoreType, InstanceMembers, null,
+                [Path.Combine(fixtureRoot, "QuickFilterHistory.ini")], null)!;
             var hiddenItemsPreferenceType = app.GetType("ExplorerDirs.App.HiddenItemsPreference", throwOnError: true)!;
             var followWindows = Enum.Parse(hiddenItemsPreferenceType, "FollowWindows");
             var foregroundBeforePane = GetForegroundWindow();
             pane = Activator.CreateInstance(paneType, InstanceMembers, null,
-                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, followWindows }, null)!;
+                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, historyStore, followWindows, false, null }, null)!;
             HostProbeForegroundGuard.EnsureUnchanged(foregroundBeforePane, GetForegroundWindow(),
                 "creating the quick-filter PaneControl ExplorerBrowserHost");
 
@@ -180,9 +185,12 @@ internal static class QuickFilterTabStateProbe
             if (!Equals(shortcutHandler.DynamicInvoke(openSelection), false) || GetStates(pane).Count != 4)
                 throw new Exception("Shift+Enter was consumed for a file selection instead of remaining with Shell.");
 
+            VerifyTabHistoryIsolation(pane, afterSelectionTab[1].Browser, afterSelectionTab[3].Browser,
+                directory, Path.Combine(directory, "child"), siblingDirectory);
+
             if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
             if (GetForegroundWindow() != foregroundBefore) throw new Exception("The probe changed the foreground window.");
-            Console.WriteLine($"quick-filter-tabs: restore/new/duplicate/selected-folder state PASS; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source isolation=True; parent-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"quick-filter-tabs: restore/new/duplicate/selected-folder/history-isolation state PASS; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source isolation=True; parent-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -220,6 +228,64 @@ internal static class QuickFilterTabStateProbe
             var view = browser.GetType().GetMethod("CachedViewState", InstanceMembers)!.Invoke(browser, null)!;
             return new TabSnapshot(browser, filter, path, view);
         }).ToArray();
+    }
+
+    private static void VerifyTabHistoryIsolation(object pane, object firstBrowser, object secondBrowser,
+        string root, string child, string sibling)
+    {
+        var paneType = pane.GetType();
+        var select = paneType.GetMethod("SelectTabByNumber")!;
+        var paneGoBack = paneType.GetMethod("GoBack")!;
+        var paneGoForward = paneType.GetMethod("GoForward")!;
+        var browserType = firstBrowser.GetType();
+        var navigate = browserType.GetMethod("Navigate", InstanceMembers)!;
+        var currentPath = browserType.GetProperty("CurrentPath", InstanceMembers)!;
+        var canGoBack = browserType.GetProperty("CanGoBack", InstanceMembers)!;
+        var canGoForward = browserType.GetProperty("CanGoForward", InstanceMembers)!;
+
+        // Hidden Shell hosts must retain independent Travel Logs while PaneControl switches selected tabs.
+        select.Invoke(pane, [2]);
+        navigate.Invoke(firstBrowser, [child]);
+        WaitFor(() => string.Equals((string)currentPath.GetValue(firstBrowser)!, child, StringComparison.OrdinalIgnoreCase) &&
+                      (bool)canGoBack.GetValue(firstBrowser)!, TimeSpan.FromSeconds(10),
+            "First tab did not create its independent back-history entry.");
+
+        select.Invoke(pane, [4]);
+        navigate.Invoke(secondBrowser, [sibling]);
+        WaitFor(() => string.Equals((string)currentPath.GetValue(secondBrowser)!, sibling, StringComparison.OrdinalIgnoreCase) &&
+                      (bool)canGoBack.GetValue(secondBrowser)!, TimeSpan.FromSeconds(10),
+            "Second tab did not create its independent back-history entry.");
+
+        select.Invoke(pane, [2]);
+        EnsureHistory(firstBrowser, child, back: true, forward: false, currentPath, canGoBack, canGoForward,
+            "first tab after switching away and back");
+        paneGoBack.Invoke(pane, null);
+        WaitFor(() => string.Equals((string)currentPath.GetValue(firstBrowser)!, root, StringComparison.OrdinalIgnoreCase) &&
+                      (bool)canGoForward.GetValue(firstBrowser)!, TimeSpan.FromSeconds(10),
+            "PaneControl Back did not restore the selected first tab's root location.");
+
+        select.Invoke(pane, [4]);
+        EnsureHistory(secondBrowser, sibling, back: true, forward: false, currentPath, canGoBack, canGoForward,
+            "second tab after navigating the first tab Back");
+        select.Invoke(pane, [2]);
+        EnsureHistory(firstBrowser, root, back: false, forward: true, currentPath, canGoBack, canGoForward,
+            "first tab before Forward");
+        paneGoForward.Invoke(pane, null);
+        WaitFor(() => string.Equals((string)currentPath.GetValue(firstBrowser)!, child, StringComparison.OrdinalIgnoreCase) &&
+                      !(bool)canGoForward.GetValue(firstBrowser)!, TimeSpan.FromSeconds(10),
+            "PaneControl Forward did not restore the selected first tab's child location.");
+        Console.WriteLine("tab-history-isolation: PaneControl Back/Forward targeted the selected production Shell tab; another tab retained its independent location and history state");
+    }
+
+    private static void EnsureHistory(object browser, string expectedPath, bool back, bool forward,
+        PropertyInfo currentPath, PropertyInfo canGoBack, PropertyInfo canGoForward, string phase)
+    {
+        var actualPath = (string)currentPath.GetValue(browser)!;
+        var actualBack = (bool)canGoBack.GetValue(browser)!;
+        var actualForward = (bool)canGoForward.GetValue(browser)!;
+        if (!string.Equals(actualPath, expectedPath, StringComparison.OrdinalIgnoreCase) ||
+            actualBack != back || actualForward != forward)
+            throw new Exception($"Tab Shell history was not isolated at {phase}: path={actualPath}; back={actualBack}; forward={actualForward}.");
     }
 
     private static bool IsBrowserReady(object browser)

@@ -3,7 +3,7 @@ param(
     [int]$TimeoutSeconds = 30,
     [ValidateSet('Desktop', 'ThisPC', 'RecycleBin', 'Libraries', 'NetworkPlaces', 'SearchFolder', 'ZipContainer')]
     [string]$VirtualScope,
-    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop')]
+    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'session-restore-sync-cleanup-private-desktop', 'private-desktop-window-destroy-control', 'private-desktop-shared-window-destroy-control', 'private-desktop-shell-view-window-destroy-control', 'private-desktop-single-pane-sync-cleanup', 'private-desktop-2pane-sync-cleanup', 'private-desktop-3pane-sync-cleanup', 'private-desktop-4pane-sync-cleanup', 'private-desktop-4pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-nofocus-sync-cleanup', 'private-desktop-single-pane-menu-active-sync-cleanup', 'private-desktop-single-pane-menu-detached-ime-sync-cleanup', 'private-desktop-single-pane-menu-disabled-ime-sync-cleanup', 'private-desktop-single-pane-menu-ole-init-sync-cleanup', 'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup', 'private-desktop-single-pane-menu-wpf-ole-sync-cleanup', 'private-desktop-single-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-wpf-host-keyboard-consumer', 'private-desktop-four-pane-wpf-host-directory-isolation', 'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup', 'private-desktop-single-pane-menu-late-coordinator-dispose', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop')]
     [string]$Probe = 'color',
     [switch]$TestTimeoutPath
 )
@@ -12,9 +12,19 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runTimeoutSeconds = $TimeoutSeconds
+$timeoutTreeScriptPath = $null
+$timeoutTreePidPath = $null
 if ($TestTimeoutPath) {
     $executable = (Get-Command pwsh -ErrorAction Stop).Source
-    $arguments = '-NoProfile -Command "Start-Sleep -Seconds 30"'
+    $timeoutTreeScriptPath = Join-Path $env:TEMP "ExplorerDirs-watchdog-tree-$([Guid]::NewGuid().ToString('N')).ps1"
+    $timeoutTreePidPath = "$timeoutTreeScriptPath.child-pid"
+    @'
+$child = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source `
+    -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+[IO.File]::WriteAllText($args[0], [string]$child.Id)
+$child.WaitForExit()
+'@ | Set-Content -LiteralPath $timeoutTreeScriptPath -Encoding utf8NoBOM
+    $arguments = '-NoProfile -File "{0}" "{1}"' -f $timeoutTreeScriptPath, $timeoutTreePidPath
     $runTimeoutSeconds = 5
 }
 else {
@@ -25,11 +35,42 @@ else {
 
     $executable = (Get-Command dotnet -ErrorAction Stop).Source
     $probeArgument = switch ($Probe) {
+        'static-shell-column-adapter-private-desktop' { '--static-shell-column-adapter-private-desktop' }
+        'static-shell-column-adapter-activated-strict-private-desktop' { '--static-shell-column-adapter-activated-strict-private-desktop' }
+        'static-shell-column-adapter-strict-private-desktop' { '--static-shell-column-adapter-strict-private-desktop' }
+        'static-shell-column-classid-private-desktop' { '--static-shell-column-classid-private-desktop' }
         'auto-column-width' { '--auto-column-width' }
         'photo-print-verb' { '--photo-print-verb' }
         'command-state-readonly-private-desktop' { '--ishellview-command-state-readonly-private-desktop' }
         'host-filter-private-desktop' { '--ishellview-host-filter-private-desktop' }
         'host-menu-commands-private-desktop' { '--ishellview-menu-command-private-desktop' }
+        'host-newfolder-private-desktop' { '--ishellview-newfolder-private-desktop' }
+        'menu-activation-private-desktop' { '--ishellview-menu-activation-private-desktop' }
+        'session-restore-private-desktop' { '--ishellview-session-restore-private-desktop' }
+        'session-restore-sync-cleanup-private-desktop' { '--ishellview-session-restore-sync-cleanup-private-desktop' }
+        'private-desktop-window-destroy-control' { '--private-desktop-window-destroy-control' }
+        'private-desktop-shared-window-destroy-control' { '--private-desktop-shared-window-destroy-control' }
+        'private-desktop-shell-view-window-destroy-control' { '--private-desktop-shell-view-window-destroy-control' }
+        'private-desktop-single-pane-sync-cleanup' { '--private-desktop-single-pane-sync-cleanup' }
+        'private-desktop-2pane-sync-cleanup' { '--private-desktop-multi-pane-sync-cleanup 2' }
+        'private-desktop-3pane-sync-cleanup' { '--private-desktop-multi-pane-sync-cleanup 3' }
+        'private-desktop-4pane-sync-cleanup' { '--private-desktop-multi-pane-sync-cleanup 4' }
+        'private-desktop-4pane-menu-sync-cleanup' { '--private-desktop-four-pane-menu-sync-cleanup' }
+        'private-desktop-single-pane-menu-sync-cleanup' { '--private-desktop-single-pane-menu-sync-cleanup' }
+        'private-desktop-single-pane-menu-nofocus-sync-cleanup' { '--private-desktop-single-pane-menu-nofocus-sync-cleanup' }
+        'private-desktop-single-pane-menu-active-sync-cleanup' { '--private-desktop-single-pane-menu-active-sync-cleanup' }
+        'private-desktop-single-pane-menu-detached-ime-sync-cleanup' { '--private-desktop-single-pane-menu-detached-ime-sync-cleanup' }
+        'private-desktop-single-pane-menu-disabled-ime-sync-cleanup' { '--private-desktop-single-pane-menu-disabled-ime-sync-cleanup' }
+        'private-desktop-single-pane-menu-ole-init-sync-cleanup' { '--private-desktop-single-pane-menu-ole-init-sync-cleanup' }
+        'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup' { '--private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup' }
+        'private-desktop-single-pane-menu-wpf-ole-sync-cleanup' { '--private-desktop-single-pane-menu-wpf-ole-sync-cleanup' }
+        'private-desktop-single-pane-menu-wpf-host-sync-cleanup' { '--private-desktop-single-pane-menu-wpf-host-sync-cleanup' }
+        'private-desktop-four-pane-menu-wpf-host-sync-cleanup' { '--private-desktop-four-pane-menu-wpf-host-sync-cleanup' }
+        'private-desktop-four-pane-wpf-host-keyboard-consumer' { '--private-desktop-four-pane-wpf-host-keyboard-consumer' }
+        'private-desktop-four-pane-wpf-host-directory-isolation' { '--private-desktop-four-pane-wpf-host-directory-isolation' }
+        'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup' { '--private-desktop-single-pane-menu-detached-view-ime-sync-cleanup' }
+        'private-desktop-single-pane-menu-late-coordinator-dispose' { '--private-desktop-single-pane-menu-late-coordinator-dispose' }
+        'drop-target-private-desktop' { '--shell-view-drop-target-private-desktop' }
         'host-filter-virtual-private-desktop' {
             if ([string]::IsNullOrWhiteSpace($VirtualScope)) { throw 'Set -VirtualScope for the selected probe.' }
             '--ishellview-host-filter-virtual-private-desktop "{0}"' -f $VirtualScope
@@ -56,14 +97,25 @@ $process = Start-Process -FilePath $executable -ArgumentList $arguments -Working
 
 if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     try {
-        if (-not $process.HasExited) { $process.Kill() }
+        if (-not $process.HasExited) { $process.Kill($true) }
     }
     catch {
         if (-not $process.HasExited) { throw }
     }
     $process.WaitForExit()
     if ($TestTimeoutPath) {
-        Write-Output "selftest=timeout-path-passed; seconds=$runTimeoutSeconds; child-exited=$($process.HasExited); stdout=$stdoutPath; stderr=$stderrPath"
+        $grandchildId = if (Test-Path -LiteralPath $timeoutTreePidPath) {
+            [int](Get-Content -LiteralPath $timeoutTreePidPath -Raw)
+        }
+        else { 0 }
+        $grandchildStillRunning = $grandchildId -gt 0 -and $null -ne (Get-Process -Id $grandchildId -ErrorAction SilentlyContinue)
+        if ($grandchildStillRunning) { Stop-Process -Id $grandchildId -Force }
+        Remove-Item -LiteralPath $timeoutTreeScriptPath, $timeoutTreePidPath -Force -ErrorAction SilentlyContinue
+        if ($grandchildId -eq 0 -or $grandchildStillRunning) {
+            Write-Error "Watchdog timeout did not terminate its process tree (grandchildId=$grandchildId; stillRunning=$grandchildStillRunning)."
+            exit 1
+        }
+        Write-Output "selftest=timeout-tree-passed; seconds=$runTimeoutSeconds; parent-exited=$($process.HasExited); grandchild-exited=True; stdout=$stdoutPath; stderr=$stderrPath"
     }
     else {
         Write-Output "status=timeout; seconds=$runTimeoutSeconds; exitCode=124; stdout=$stdoutPath; stderr=$stderrPath"
