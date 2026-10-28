@@ -4314,3 +4314,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - HostProbe 新增隐藏 `--shell-selection-invert-modes`，通过四个生产 `ExplorerBrowserHost` 和生产 `ShellSelectionCommands` 检查四窗格 × 八种查看方式：身份补集、再次反选恢复、原焦点保持、兄弟窗格选区与各窗格模式隔离。Release HostProbe build 0 警告/错误；连续 2 次完整矩阵通过，父窗口隐藏且前台 HWND 不变。
 - 首轮探针未同步产品输入代际，导致旧选区恢复回调覆盖探针准备的状态；补入 `NoteNativeUserInput` 后问题消失。该证据覆盖隐藏 ExplorerBrowser 的命令行为，不覆盖物理快捷键、可见菜单/焦点交互、网络或大目录。详见[选择命令验证](selection-commands.md#生产-explorerbrowser-反向选择矩阵2026-10-28)。
+
+## 2026-10-28：生产 ExplorerBrowser Ctrl+滚轮路由复验
+
+- 使用隐藏 HostProbe 对生产 `ExplorerBrowserHost` 的真实子视图 HWND 合成 Ctrl+滚轮消息，按八个查看方式循环完整一周。两轮均从 Details 出发并回到 Details，三项选中身份保持，另外三个窗格的视图方式不变；父窗口保持隐藏，探针不读取桌面光标、不发送物理输入。
+- 这是消息路由与 Shell 状态读回证据，不代表真实鼠标消息一定命中该 HWND，也不覆盖高精度实体滚轮、WPF 工具栏区域焦点、可见绘制或普通滚轮滚动；这些留待集中 UI 验收。没有修改产品逻辑。
