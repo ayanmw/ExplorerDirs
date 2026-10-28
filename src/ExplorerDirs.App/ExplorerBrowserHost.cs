@@ -3267,6 +3267,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void TraceShellSelectionRestore(string source, string step)
     {
+        // A source review found these diagnostic strings were captured even when tracing was disabled.
+        if (!_traceNativeUserMessages) return;
         if (_shellSelectionRestoreSamples.Count == 128) _shellSelectionRestoreSamples.RemoveAt(0);
         _shellSelectionRestoreSamples.Add($"t={Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms,ticks={Stopwatch.GetTimestamp()},source={source},{step}");
     }

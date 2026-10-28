@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：内存留存审查发现 `ExplorerBrowserHost` 在 Shell 选择恢复期间，即使 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE` 未启用，也会为每个视图最多保留 128 条诊断字符串。此集合有上限，不是无界泄漏，也没有证据说明它能解释用户观察到的整体内存差异；现已在 tracing 关闭时跳过记录，仅保留显式诊断所需数据。源码回归先按预期失败，再通过；定向 `--shell-selection-restore-gate-smoke` 与完整 Release `ExplorerDirs.SettingsSmoke` 均通过，App Release build 成功（0 错误，2 条 NU1900，因 NuGet 漏洞源不可达）。没有运行产品 UI；当前没有可归因的 ExplorerDirs.App 运行样本，因此不报告内存下降数值，也不将此项视为整体内存增长问题已解决。
+
 2026-10-29：提交 `ba4036f` 新增“最近打开的收藏夹”窗口标题模式后，完整 Release `ExplorerDirs.SettingsSmoke` 输出 `Settings smoke: PASS`；App Release build 为 0 错误、2 条 NU1900（NuGet 漏洞数据源不可达）。未启动产品窗口。当前没有 ExplorerDirs.App 进程，因此本轮无法采集实际运行内存。`folder-verb-smoke.ps1` 的首次本地权限内尝试被沙箱拒绝；随后按脚本作用域获批，在唯一 `HKCU\Software\ExplorerDirs.Tests\FolderVerb-*` 临时键下运行通过，完成幂等安装、冲突保护、外部编辑保护与清理检查，结束后无 FolderVerb 测试键残留，未触碰真实 Explorer 注册项。
 
 2026-10-29：隔离 `IShellView` 已验证 Shell item 入口、视图枚举/标准 Size 排序、菜单、部分文件操作与通知；新增列仍未被 DefView 请求逐项值。官方接口文档复核确认系统 DefView 没有受支持的 cell-value/render/sort 回调入口，而自定义 `IShellView` 会承担窗口、呈现、菜单、键盘、拖放等完整 view 职责。继续进行的有效实验应改为有效父级下的自有 namespace + 稳定虚拟 PIDL + `IShellFolder2::CompareIDs`，并验证 Shell 标准列读取与数值升降序；不能继续叠加 DefView 忽略的属性覆盖/legacy callback。该实验需要临时挂接 Desktop\NameSpace，尚未获用户明确授权，故本轮只收敛技术边界、不改产品、不重跑 Shell view；当前路线上下一步待用户允许这项隔离注册后执行。选中项重命名/删除、真实 OLE 拖放及完整产品接线仍待验证。细节见[逐行列调查](folder-size-column-investigation.md#2026-10-29-defview-与自定义文件视图的支持边界复核)。

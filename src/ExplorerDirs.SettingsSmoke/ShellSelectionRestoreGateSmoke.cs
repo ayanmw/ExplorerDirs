@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.IO;
 
 namespace ExplorerDirs.SettingsSmoke;
 
@@ -162,6 +163,26 @@ internal static class ShellSelectionRestoreGateSmoke
             "an already present selection is not needlessly rewritten");
         Check(!(bool)restoreNaturalSelection.Invoke(null, [0, 0])!, expected: true,
             "an intentionally empty saved selection is never recreated");
+
+        var repoRoot = FindRepoRoot();
+        var hostSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
+        var traceStart = hostSource.IndexOf("private void TraceShellSelectionRestore(", StringComparison.Ordinal);
+        var traceEnd = hostSource.IndexOf("private void ClearLastNativeSelection()", traceStart, StringComparison.Ordinal);
+        var traceMethod = traceStart >= 0 && traceEnd > traceStart ? hostSource[traceStart..traceEnd] : string.Empty;
+        Check(traceMethod.Contains("if (!_traceNativeUserMessages) return;", StringComparison.Ordinal), expected: true,
+            "selection-restore diagnostic strings are retained only when Shell callback tracing is enabled");
+    }
+
+    private static string FindRepoRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md")) &&
+                File.Exists(Path.Combine(directory.FullName, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs")))
+                return directory.FullName;
+        }
+        throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
     }
 
     private static void Check(bool actual, bool expected, string name)
