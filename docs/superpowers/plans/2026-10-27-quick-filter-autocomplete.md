@@ -42,4 +42,4 @@
 ### Task 3: Review and commit
 
 - [x] Review the focused diff and run `git diff --check`.
-- [ ] Commit the feature and its checks in one local commit.
+- [x] Commit the feature and its checks in one local commit (`2414d87`).

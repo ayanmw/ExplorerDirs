@@ -5,6 +5,6 @@
 - [x] 仅让普通 `NewTab()` 按该选项选择当前路径；显式路径新建保持原行为。
 - [x] 更新路线图和 Q-Dir 差距记录。
 - [x] 运行完整 Release SettingsSmoke、App Release build、`git diff --check`。
-- [ ] 检查 diff 并提交本地 Git。
+- [x] 检查 diff 并提交本地 Git（`d5b896f`）。
 
 本轮不操作 GUI；真实交互仍需后续可见验收。

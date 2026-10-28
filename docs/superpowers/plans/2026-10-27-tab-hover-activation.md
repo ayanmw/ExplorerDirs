@@ -48,4 +48,4 @@
 ### Task 3: Documentation and commit
 
 - [x] Update `docs/roadmap.md` and `docs/shell-parity.md` with behavior and GUI acceptance limits.
-- [ ] Run `git diff --check`, inspect the focused diff, and commit the batch locally.
+- [x] Run `git diff --check`, inspect the focused diff, and commit the batch locally (`f9d9a33`; follow-up hidden-pane cancellation fix `090dad3`).
