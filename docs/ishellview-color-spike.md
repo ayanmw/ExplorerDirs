@@ -2,11 +2,11 @@
 
 ## 2026-10-29：Shell item 绑定视图的原生上下文菜单
 
-在自定义 `IShellFolder` 适配器产生的嵌套文件夹 `IShellItem` 上，通过 `BHID_SFViewObject` 建立实际 Shell view，再分别查询 `GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 与 `GetItemObject(SVGIO_SELECTION, IID_IContextMenu)`。背景菜单的 `QueryContextMenu` 返回 194 条命令、31 个菜单项，并枚举到 `refresh`、`newfolder`、`viewlogicaldetails`；选中一项后，选中项菜单返回 135 条命令、27 个菜单项，并枚举到 `copy`、`delete`、`rename`、`properties`。菜单只查询和枚举，未显示、调用命令或执行文件操作。
+在自定义 `IShellFolder` 适配器产生的嵌套文件夹 `IShellItem` 上，通过 `BHID_SFViewObject` 建立实际 Shell view，再分别查询 `GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 与 `GetItemObject(SVGIO_SELECTION, IID_IContextMenu)`。背景菜单的 `QueryContextMenu` 返回 194 条命令、31 个菜单项，并枚举到 `refresh`、`newfolder`、`viewlogicaldetails`；选中一项后，选中项菜单返回 135 条命令、27 个菜单项，并枚举到 `copy`、`delete`、`rename`、`properties`。随后从该视图选择取出原生 `IDataObject`，交给 `IFileOperation::CopyItems` 分别复制到兄弟目录和当前视图目录；两个副本内容检查通过，源文件保留，当前视图通过 Shell 通知从 2 项更新为 3 项，同目录副本名由系统本地化为 `ten - 副本.bin`。菜单只查询和枚举，未显示或调用菜单命令；没有执行真实鼠标 OLE 拖放。
 
-Release NativeProbe 构建 0 警告/错误。隔离 Private Desktop 运行中，两类菜单检查均通过；Shell view 也枚举两项、标准 Size 排序和列布局读回通过，桌面前台 HWND 与最后输入时间未变化，夹具及私有桌面完成清理。探针最终仍以退出码 1 停在既有自定义列门槛：两条自定义列单元格为空，DefView 未请求逐项 `GetDetailsOf`（总计/标题/条目 `4/4/0`）、`GetDetailsEx`、`CompareIDs` 或 `IPropertyStore`。因此菜单接口证据成立，但逐项自定义列仍未通过；该结果不证明菜单可见呈现、命令执行状态、产品宿主接线或颜色绘制。未启动产品 GUI。
+Release NativeProbe 构建 0 警告/错误。隔离 Private Desktop 运行中，菜单及复制/通知检查均通过；Shell view 也枚举、排序并读回三项及列布局，桌面前台 HWND 与最后输入时间未变化，夹具及私有桌面完成清理。探针最终仍以退出码 1 停在既有自定义列门槛：三条自定义列单元格为空，DefView 未请求逐项 `GetDetailsOf`（总计/标题/条目 `4/4/0`）、`GetDetailsEx`、`CompareIDs` 或 `IPropertyStore`。因此操作对象与当前视图通知也获得正向证据，但逐项自定义列仍未通过；这些结果不证明菜单可见呈现、命令执行状态、产品宿主接线、鼠标 OLE 拖放或颜色绘制。未启动产品 GUI。
 
-下一步继续验证此 Shell item 绑定视图的操作与刷新通知，再验证原生查看/排序命令；自定义列仍是独立迁移门槛，不能因菜单查询成功而提前切换产品宿主。
+下一步验证此 Shell item 绑定视图的原生查看/排序菜单命令及刷新行为；自定义列仍是独立迁移门槛，不能因菜单和复制通知通过而提前切换产品宿主。
 
 ## 2026-10-28：Private Desktop 拖放探针前台阶段复验
 

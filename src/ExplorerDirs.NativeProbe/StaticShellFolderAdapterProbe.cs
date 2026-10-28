@@ -620,6 +620,7 @@ internal static class StaticShellFolderAdapterProbe
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
         var childPath = Path.Combine(fixture, "nested-folder");
+        var copyDestinationPath = Path.Combine(fixture, "copy-destination");
         nint parent = 0, folderPidl = 0, folder = 0, adapter = 0, childPidl = 0, childFolder = 0;
         nint item = 0, view = 0, folderView = 0, viewFolder = 0, hostPointer = 0, nativeLibrary = 0;
         var createdView = false;
@@ -629,6 +630,7 @@ internal static class StaticShellFolderAdapterProbe
         try
         {
             Directory.CreateDirectory(childPath);
+            Directory.CreateDirectory(copyDestinationPath);
             File.WriteAllBytes(Path.Combine(childPath, "two.bin"), new byte[2]);
             File.WriteAllBytes(Path.Combine(childPath, "ten.bin"), new byte[10]);
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs Shell item bound-view probe",
@@ -749,6 +751,48 @@ internal static class StaticShellFolderAdapterProbe
                 finally { DestroyMenu(menu); }
             }
             finally { Marshal.Release(selectionMenu); }
+
+            stage = "verify-selected-item-file-operation-copy";
+            var dataObjectId = DataObjectId;
+            Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectedDataObject)); // SVGIO_SELECTION, IDataObject.
+            try
+            {
+                var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+                var fileOperationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+                Check(CoCreateInstance(ref operationClassId, 0, 1, ref fileOperationId, out var fileOperation));
+                try
+                {
+                    Check(At<SetOperationFlags>(fileOperation, 5)(fileOperation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                    var destinationItemId = ShellItemId;
+                    Check(SHCreateItemFromParsingName(copyDestinationPath, 0, ref destinationItemId, out var destinationItem));
+                    try { Check(At<CopyItems>(fileOperation, 17)(fileOperation, selectedDataObject, destinationItem)); }
+                    finally { Marshal.Release(destinationItem); }
+                    destinationItemId = ShellItemId;
+                    Check(SHCreateItemFromParsingName(childPath, 0, ref destinationItemId, out var viewDestinationItem));
+                    try { Check(At<CopyItems>(fileOperation, 17)(fileOperation, selectedDataObject, viewDestinationItem)); }
+                    finally { Marshal.Release(viewDestinationItem); }
+                    Check(At<PerformOperations>(fileOperation, 21)(fileOperation));
+                    Check(At<GetAnyOperationsAborted>(fileOperation, 22)(fileOperation, out var aborted));
+                    var copiedPath = Path.Combine(copyDestinationPath, "ten.bin");
+                    if (aborted != 0 || !File.Exists(copiedPath) || File.ReadAllBytes(copiedPath).Length != 10 ||
+                        !File.Exists(Path.Combine(childPath, "ten.bin")))
+                        throw new IOException("The wrapped view selection did not copy the expected file while preserving its source.");
+                    var deadline = Environment.TickCount64 + 5000;
+                    var observedCount = -1;
+                    while (Environment.TickCount64 < deadline)
+                    {
+                        Pump(100);
+                        Check(At<ItemCount>(folderView, 7)(folderView, 2, out observedCount));
+                        if (observedCount == 3) break;
+                    }
+                    if (observedCount != 3 || Directory.EnumerateFiles(childPath).Count() != 3)
+                        throw new IOException($"The adapter-backed view did not receive the copy notification: view-count={observedCount}, directory-files={Directory.EnumerateFiles(childPath).Count()}.");
+                    itemCount = observedCount;
+                    Console.WriteLine("native-shell-item-bound-view: selection-IDataObject-IFileOperation.CopyItems=True; copied=ten.bin; source-preserved=True; view-copy-notification=2->3");
+                }
+                finally { Marshal.Release(fileOperation); }
+            }
+            finally { Marshal.Release(selectedDataObject); }
             Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x40000000u));
 
             stage = "verify-standard-size-sort";
@@ -763,8 +807,9 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
-            names = ReadDisplayedColumnValues(view, 0, expectedCount: 2);
-            if (!names.SequenceEqual(new[] { "two.bin", "ten.bin" }, StringComparer.OrdinalIgnoreCase))
+            names = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            if (names.Length != 3 || !names[0].Equals("two.bin", StringComparison.OrdinalIgnoreCase) ||
+                !names.Any(name => name.Equals("ten.bin", StringComparison.OrdinalIgnoreCase)))
                 throw new Exception("The Shell view did not sort by standard Size: " + string.Join('|', names));
 
             stage = "verify-custom-column-contract";
@@ -779,14 +824,14 @@ internal static class StaticShellFolderAdapterProbe
             Check(ShellColumnManager.Capture(folderView, out var appliedColumns));
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
-            var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 2);
+            var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; callbacks={ReadNativeComparisonStats()}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
             finally { ILFree(operationChild); }
             Console.WriteLine("native-shell-item-bound-view: Shell IDataObject CF_HDROP+CIDA formats=valid");
             if (!viewFolderHasCustomColumn ||
-                !customValues.SequenceEqual(new[] { "2", "10" }, StringComparer.Ordinal))
+                !customValues.SequenceEqual(new[] { "2", "10", "10" }, StringComparer.Ordinal))
                 throw new Exception("The Shell item-bound view did not display its custom column values: " + string.Join('|', customValues));
         }
         catch (Exception ex)
@@ -1532,6 +1577,10 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
@@ -1539,6 +1588,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint left, nint right);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateItemWithParent(nint parentPidl, nint parentFolder, nint childPidl, in Guid iid, out nint item);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string path, nint bindContext, ref Guid iid, out nint item);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateShellItemArrayFromShellItem(nint item, in Guid iid, out nint array);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateShellItemArrayFromDataObject(nint dataObject, in Guid iid, out nint array);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
@@ -1557,6 +1607,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
     [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref NativeStorageMedium medium);
+    [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string formatName);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     private delegate bool EnumChildProc(nint window, nint parameter);
