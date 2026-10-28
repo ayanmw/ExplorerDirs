@@ -38,6 +38,9 @@ namespace
     volatile LONG g_documentByteCountComparisons = 0;
     volatile LONG g_documentByteCountDetailsEx = 0;
     volatile LONG g_documentByteCountDetailsOf = 0;
+    volatile LONG g_mapColumnToScidRequests = 0;
+    volatile LONG g_defaultColumnRequests = 0;
+    volatile LONG g_defaultColumnSortProbeEnabled = 0;
     volatile LONG g_propertyStoreQueryInterfaceRequests = 0;
     volatile LONG g_persistClassIdRequests = 0;
     volatile LONG g_persistRootRequests = 0;
@@ -653,7 +656,18 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDefaultSearchGUID(GUID* value) override { return _inner->GetDefaultSearchGUID(value); }
         HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch** enumerator) override { return _inner->EnumSearches(enumerator); }
-        HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD reserved, ULONG* sort, ULONG* display) override { return _inner->GetDefaultColumn(reserved, sort, display); }
+        HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD reserved, ULONG* sort, ULONG* display) override
+        {
+            InterlockedIncrement(&g_defaultColumnRequests);
+            if (InterlockedCompareExchange(&g_defaultColumnSortProbeEnabled, 0, 0))
+            {
+                if (!sort || !display) return E_POINTER;
+                *sort = _columnCount + 2;
+                *display = 0;
+                return S_OK;
+            }
+            return _inner->GetDefaultColumn(reserved, sort, display);
+        }
         HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column, SHCOLSTATEF* state) override
         {
             if (column == _columnCount) { *state = SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT; return S_OK; }
@@ -781,6 +795,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* id) override
         {
+            InterlockedIncrement(&g_mapColumnToScidRequests);
             if (!id) return E_POINTER;
             if (column < _columnCount) return _inner->MapColumnToSCID(column, id);
             if (column == _columnCount) *id = kStaticSizeKey;
@@ -844,6 +859,8 @@ extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters
     InterlockedExchange(&g_documentByteCountComparisons, 0);
     InterlockedExchange(&g_documentByteCountDetailsEx, 0);
     InterlockedExchange(&g_documentByteCountDetailsOf, 0);
+    InterlockedExchange(&g_mapColumnToScidRequests, 0);
+    InterlockedExchange(&g_defaultColumnRequests, 0);
     InterlockedExchange(&g_propertyStoreQueryInterfaceRequests, 0);
     InterlockedExchange(&g_persistClassIdRequests, 0);
     InterlockedExchange(&g_persistRootRequests, 0);
@@ -955,6 +972,21 @@ extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsExC
 extern "C" __declspec(dllexport) LONG WINAPI GetDocumentByteCountShellDetailsOfCount()
 {
     return InterlockedCompareExchange(&g_documentByteCountDetailsOf, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetMapColumnToScidRequestCount()
+{
+    return InterlockedCompareExchange(&g_mapColumnToScidRequests, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetDefaultColumnRequestCount()
+{
+    return InterlockedCompareExchange(&g_defaultColumnRequests, 0, 0);
+}
+
+extern "C" __declspec(dllexport) void WINAPI SetDefaultColumnSortProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_defaultColumnSortProbeEnabled, enabled ? 1 : 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreQueryInterfaceRequestCount()

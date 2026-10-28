@@ -268,6 +268,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 参考：[IPropertyDescriptionAliasInfo](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertydescriptionaliasinfo)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)、[IShellFolder2::GetDefaultColumn](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumn)。
 
+### 2026-10-29：列映射与默认排序合同调用计数
+
+在 NativeProbe 适配器中增加 `MapColumnToSCID`、`GetDefaultColumn` 调用计数，并暂时启用一个只供实验的默认排序覆写（返回 ByteCount 列序号）。Private Desktop 创建绑定视图时，DefView 调用 `MapColumnToSCID` 40 次枚举列，但 `GetDefaultColumn` 为 0；初始读回排序仍为标准 Name 列，`CompareIDs` 为 0。仅在列枚举阶段看到 MapColumn 调用，随后标准 Size Header 排序以及 ByteCount `SetSortColumns`/Header 排序阶段两项计数均为 0。默认排序覆写因宿主完全不调用该方法而没有生效。
+
+静态 folder-contract 已单独直接调用适配器映射合同，注册属性列索引正确映射到 `System.Document.ByteCount`；因此并非适配器无法映射，而是当前绑定 DefView 在排序路径未请求该映射，也未回调列比较器。最新输出 `src/.state/native-probe-watchdog/20261029-024818-b1854f9d.stdout.log`；Private Desktop 前台未变化。探针仍以 exit code 1 报告私有测试列无值。此结果将问题收敛到该 Shell view 的排序宿主行为；继续确认是否有可支持的排序委托/通知接口可接入，不能直接将默认列覆写或更改 `CompareIDs` 参数当成修复。
+
 ### 2026-10-29：DefView 列点击通知对照
 
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。
