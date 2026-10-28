@@ -4294,3 +4294,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 为四 pane WPF 原型增加隐藏 `IContextMenu` 检查，每个视图都能为单项选择提供含 `copy` 的原生菜单；原生 Details/排序/分组映射、键盘路由和菜单 owner 清理同批回归通过。首轮发现菜单检查前四个 Shell view 均已有 2 项选择，系前序文件操作后的残留状态，旧断言把它误认为选择隔离失败；现于每项检查前后清空并核对所有 pane。
 - Release NativeProbe build 0 警告/错误，修正后完整 Private Desktop 流程连续 3 次退出码 0，前台 HWND 未改变。仅是隐藏 COM/命令查询证据；菜单可见呈现、真实 OLE `DoDragDrop` 及产品 GUI 留待集中验收，产品仍未切换到 `IShellView`。
+
+## 2026-10-28：WPF 隔离四窗格的新建文件夹菜单命令
+
+- 在四 pane 隐藏 WPF `IShellView` 测试中，从背景 `IContextMenu` 查询并执行 `newfolder` canonical verb。命令偏移形式返回 `E_FAIL`，canonical verb 字符串形式返回 `S_OK`；新文件夹在同目录三个 pane 中出现，独立 Pane 4 保持不变。连续 3 轮通过，前台 HWND 未变，测试 fixture 清理完成。
+- 这只验证 Private Desktop 原生宿主上的 `IContextMenu::InvokeCommand` 和通知传播；产品 ExplorerBrowser 的真实菜单输入、重命名体验仍待集中 UI 验收。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-28wpf-隔离四窗格的原生新建文件夹命令)。

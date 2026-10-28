@@ -318,7 +318,7 @@ internal static class ShellViewColorSpike
                 if (activateMenus && !baseMenuRestored)
                     throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
                 var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture,
-                    probeWpfDirectoryIsolation ? isolatedFixture : null);
+                    probeWpfDirectoryIsolation ? isolatedFixture : null, parent);
                 Console.WriteLine($"multi-pane-cleanup: wpf-file-operations={fileOperations}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var selectedCounts = new int[folderViews.Length];
                 for (var index = 0; index < folderViews.Length; index++)
@@ -1746,7 +1746,7 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyWpfHostFileOperationConvergence(IReadOnlyList<nint> views,
-        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture)
+        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture, nint menuOwner)
     {
         if (views.Count != 4 || folderViews.Count != 4)
             throw new ArgumentException("The WPF file-operation probe requires exactly four Shell panes.");
@@ -1792,9 +1792,11 @@ internal static class ShellViewColorSpike
             if (isolatedFixture is not null)
                 VerifyWpfHostCrossVolumeMove(initialCount, isolatedInitialCount, sourcePath, fixture,
                     isolatedFixture, folderViews);
+            var newFolder = VerifyWpfHostNewFolderVerb(views, folderViews, fixture, isolatedFixture,
+                initialCount, isolatedInitialCount, menuOwner);
             return isolatedFixture is null
-                ? "copy/rename/delete=all-four-panes-notified"
-                : "copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged; cross-volume-move=source-deleted-destination-created-both-views-converged";
+                ? $"copy/rename/delete=all-four-panes-notified; {newFolder}"
+                : $"copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged; cross-volume-move=source-deleted-destination-created-both-views-converged; {newFolder}";
         }
         finally
         {
@@ -1819,6 +1821,57 @@ internal static class ShellViewColorSpike
                  ShellViewContainsPath(folderViews[3], renamedPath)))
                 throw new IOException($"The isolated fourth WPF pane changed or displayed a root-directory item after {operation}.");
         }
+    }
+
+    private static string VerifyWpfHostNewFolderVerb(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture,
+        int rootInitialCount, int isolatedInitialCount, nint menuOwner)
+    {
+        var existingFolders = Directory.GetDirectories(fixture, "*", SearchOption.TopDirectoryOnly)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Check(At<ActivateView>(views[0], 7)(views[0], 2)); // SVUIA_ACTIVATE_FOCUS for native folder creation.
+        InvokeBackgroundVerb(views[0], menuOwner, "newfolder", "wpf-new-folder", useCanonicalVerbString: true);
+
+        var deadline = Environment.TickCount64 + 5000;
+        string[] createdFolders;
+        do
+        {
+            Pump(50);
+            createdFolders = Directory.GetDirectories(fixture, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => !existingFolders.Contains(path)).ToArray();
+            if (createdFolders.Length > 1)
+                throw new IOException($"The native New Folder verb created {createdFolders.Length} folders instead of one.");
+        } while (createdFolders.Length == 0 && Environment.TickCount64 < deadline);
+        if (createdFolders.Length != 1)
+            throw new IOException("The native Shell New Folder verb returned without creating a folder in the isolated fixture.");
+
+        var createdPath = createdFolders[0];
+        var shellWindowResult = At<GetWindow>(views[0], 3)(views[0], out var shellViewWindow);
+        Check(shellWindowResult);
+        var edit = FindChildByClass(shellViewWindow, "Edit");
+        if (edit != 0)
+        {
+            var escape = new NativeMessage { Window = edit, Id = 0x0100, WParam = 0x1B, LParam = 0x00010001 };
+            _ = At<TranslateAccelerator>(views[0], 5)(views[0], ref escape);
+            Pump(50);
+        }
+        Check(At<ActivateView>(views[0], 7)(views[0], 0)); // SVUIA_DEACTIVATE after dismissing optional inline rename.
+        Pump(50);
+
+        var notifiedPaneCount = isolatedFixture is null ? folderViews.Count : folderViews.Count - 1;
+        for (var index = 0; index < notifiedPaneCount; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount + 1, createdPath, null,
+                    $"wpf-new-folder-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge after the native New Folder verb.");
+        if (isolatedFixture is not null &&
+            (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount + 1 ||
+             !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "wpf-cross-volume-moved-result.txt")) ||
+             ShellViewContainsPath(folderViews[3], createdPath)))
+            throw new IOException("The isolated WPF pane changed or displayed the root New Folder result.");
+
+        return isolatedFixture is null
+            ? "new-folder=background-IContextMenu; all-panes-notified"
+            : "new-folder=background-IContextMenu; three-root-panes-notified; isolated-pane-unchanged";
     }
 
     private static void VerifyWpfHostCrossVolumeMove(int rootInitialCount, int isolatedInitialCount,
@@ -1986,10 +2039,13 @@ internal static class ShellViewColorSpike
         return string.Join(',', verified);
     }
 
-    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb,
+        string? diagnosticLabel = null, bool useCanonicalVerbString = false)
     {
         var contextMenuId = ContextMenuId;
-        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        var getMenuResult = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu); // SVGIO_BACKGROUND.
+        if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: get-background-menu=0x{getMenuResult:X8}");
+        Check(getMenuResult);
         try
         {
             var menu = CreatePopupMenu();
@@ -1997,6 +2053,7 @@ internal static class ShellViewColorSpike
             try
             {
                 var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: query-context-menu=0x{queryResult:X8}");
                 Check(queryResult);
                 var commandCount = Math.Min(queryResult & 0xffff, 0x7fff);
                 var buffer = Marshal.AllocHGlobal(512);
@@ -2016,16 +2073,24 @@ internal static class ShellViewColorSpike
                     }
                 }
                 finally { Marshal.FreeHGlobal(buffer); }
+                if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: canonical-verb={expectedVerb}; offset={commandOffset?.ToString() ?? "missing"}");
                 if (commandOffset is null)
                     throw new InvalidOperationException($"The Shell background menu did not expose canonical verb '{expectedVerb}'.");
+                var canonicalVerb = useCanonicalVerbString ? Marshal.StringToCoTaskMemAnsi(expectedVerb) : 0;
                 var invoke = new NativeInvokeInfo
                 {
                     Size = Marshal.SizeOf<NativeInvokeInfo>(),
                     Window = owner,
-                    Verb = (nint)commandOffset.Value,
+                    Verb = canonicalVerb != 0 ? canonicalVerb : (nint)commandOffset.Value,
                     Show = 1
                 };
-                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                try
+                {
+                    var invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                    if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: invoke-command=0x{invokeResult:X8}; selector={(useCanonicalVerbString ? "canonical-name" : "offset")}");
+                    Check(invokeResult);
+                }
+                finally { if (canonicalVerb != 0) Marshal.FreeCoTaskMem(canonicalVerb); }
             }
             finally { DestroyMenu(menu); }
         }

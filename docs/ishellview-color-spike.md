@@ -1290,3 +1290,9 @@ C++ /W4 /WX 构建及 --static-shell-column-folder-smoke、--static-shell-column
 新增背景验证覆盖四个 WPF 托管 `IShellView` 的已选文件 `IContextMenu`：每个 pane 均取得原生菜单并确认包含标准 `copy` verb；同一批也通过每窗格的 Details、排序、分组命令映射与键盘路由。第一次失败时，在选中项菜单阶段前读到四个视图各自已有 2 项选中；这是前序真实 Shell 文件操作留下的状态，不能当成 pane 间选择泄漏。探针现于每个菜单用例前清空所有 pane 的选择，并在退出时清空、核对所有 pane；重新构建后连续 3 轮完整 Private Desktop 流程通过，前台 HWND 未变。
 
 Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌面上的原生 COM 菜单对象和命令查询，不显示菜单、不运行真实菜单跟踪，也不验证产品 UI 或真实鼠标拖放；这些仍留待集中可见验收。
+
+### 2026-10-28：WPF 隔离四窗格的原生新建文件夹命令
+
+在四 pane `IShellView` 的隐藏 Private Desktop 流程末尾，从 Pane 1 获取标准背景 `IContextMenu` 并查询到 `newfolder` canonical verb。以命令偏移调用时 Shell 返回 `E_FAIL`；按 Microsoft `IContextMenu::InvokeCommand` 支持的 canonical verb 字符串调用后返回 `S_OK`。创建出的临时目录在同目录三个 pane 中均可见且计数增加，独立目录 Pane 4 的计数与内容保持不变；若 Shell 打开内联重命名，则由隔离 view 接收 Escape 后结束。临时 fixture 在宿主销毁时删除，目标卷临时目录无残留。
+
+同一流程连续 3 次通过，前台 HWND 未变。该验证表明原生背景菜单命令可在该隔离 WPF/IShellView 组合中执行并传播通知；不等于产品 ExplorerBrowser 的可见菜单/焦点/自动重命名验收，也不覆盖用户真实输入。详细日志位于 `src/.state/native-probe-watchdog/20261028-084019-bb6fb3d2.stdout.log`、`20261028-084035-bd3e3528.stdout.log` 和 `20261028-084052-9e72661b.stdout.log`。
