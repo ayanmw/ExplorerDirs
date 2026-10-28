@@ -405,6 +405,7 @@ namespace
     {
         found = true;
         if (_wcsicmp(name.c_str(), L"two.bin") == 0) return 2;
+        if (_wcsicmp(name.c_str(), L"a-ten.bin") == 0 || _wcsicmp(name.c_str(), L"z-ten.bin") == 0) return 10;
         // The a- prefix makes the view fixture name order differ from either numeric direction.
         if (_wcsicmp(name.c_str(), L"ten.bin") == 0 || _wcsicmp(name.c_str(), L"ten-copy.bin") == 0 ||
             _wcsicmp(name.c_str(), L"a-ten-copy.bin") == 0) return 10;

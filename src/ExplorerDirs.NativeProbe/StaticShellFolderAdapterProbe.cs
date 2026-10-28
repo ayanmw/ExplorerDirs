@@ -816,6 +816,20 @@ internal static class StaticShellFolderAdapterProbe
                         throw new IOException($"The adapter-backed view did not receive the copy notification: view-count={observedCount}, directory-files={Directory.EnumerateFiles(childPath).Count()}.");
                     itemCount = observedCount;
                     Console.WriteLine("native-shell-item-bound-view: selection-IDataObject-IFileOperation.CopyItems=True; copied=ten.bin; source-preserved=True; view-copy-notification=2->3");
+
+                    // The copy-notification check creates a localized duplicate name; rename both equal-size
+                    // rows into a non-monotonic name/value sequence before the independent sort comparison.
+                    var copiedInFolder = Directory.EnumerateFiles(childPath)
+                        .Single(path => !Path.GetFileName(path).Equals("two.bin", StringComparison.OrdinalIgnoreCase) &&
+                                        !Path.GetFileName(path).Equals("ten.bin", StringComparison.OrdinalIgnoreCase));
+                    File.Move(Path.Combine(childPath, "ten.bin"), Path.Combine(childPath, "a-ten.bin"));
+                    File.Move(copiedInFolder, Path.Combine(childPath, "z-ten.bin"));
+                    InvokeShellViewBackgroundVerb(view, parent, "refresh");
+                    Pump(400);
+                    var sortFixtureNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+                    if (!sortFixtureNames.SequenceEqual(new[] { "a-ten.bin", "two.bin", "z-ten.bin" }, StringComparer.OrdinalIgnoreCase))
+                        throw new IOException("The isolated non-monotonic sort fixture did not refresh as expected: " + string.Join('|', sortFixtureNames));
+                    Console.WriteLine("native-shell-item-bound-view: non-monotonic-sort-fixture=[a-ten.bin:10|two.bin:2|z-ten.bin:10]; source-files-reset-after-copy-notification=True");
                 }
                 finally { Marshal.Release(fileOperation); }
             }
@@ -847,7 +861,7 @@ internal static class StaticShellFolderAdapterProbe
             Pump(400);
             names = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             if (names.Length != 3 || !names[0].Equals("two.bin", StringComparison.OrdinalIgnoreCase) ||
-                !names.Any(name => name.Equals("ten.bin", StringComparison.OrdinalIgnoreCase)))
+                !names.Any(name => name.Equals("a-ten.bin", StringComparison.OrdinalIgnoreCase)))
                 throw new Exception("The Shell view did not sort by standard Size: " + string.Join('|', names));
             var resetStandardSortProbeCounters = Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
                 NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"));
@@ -942,6 +956,8 @@ internal static class StaticShellFolderAdapterProbe
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var knownSchemaSortNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var knownSchemaSortValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            var knownSchemaAscendingNumericOrder = knownSchemaSortValues.SequenceEqual(new[] { "2", "10", "10" }, StringComparer.Ordinal);
             Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var knownSchemaSortCount));
             var knownSchemaSortReadback = "none";
             if (knownSchemaSortCount > 0)
@@ -971,6 +987,8 @@ internal static class StaticShellFolderAdapterProbe
             Pump(400);
             var knownSchemaDescendingNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var knownSchemaDescendingValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            var knownSchemaDescendingNumericOrder = knownSchemaDescendingValues.SequenceEqual(new[] { "10", "10", "2" }, StringComparer.Ordinal);
+            var knownSchemaDirectionsReorderedRows = !knownSchemaSortNames.SequenceEqual(knownSchemaDescendingNames, StringComparer.OrdinalIgnoreCase);
             Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var knownSchemaDescendingSortCount));
             var knownSchemaDescendingSortReadback = "none";
             if (knownSchemaDescendingSortCount > 0)
@@ -999,12 +1017,12 @@ internal static class StaticShellFolderAdapterProbe
             var knownSchemaStats = ReadNativeComparisonStats();
             if (!knownSchemaValues.SequenceEqual(new[] { "2", "10", "10" }, StringComparer.Ordinal))
                 throw new Exception("The registered-schema property-store control column did not display file byte counts: " + string.Join('|', knownSchemaValues));
-            var knownSchemaDirectEvidence = VerifyViewFolderDocumentByteCount(viewFolder, childFolder, shellDetailsSize);
+            var knownSchemaDirectEvidence = VerifyViewFolderDocumentByteCount(viewFolder, childFolder, shellDetailsSize, "a-ten.bin");
             resetProbeCounters();
-            var shellItemStoreEvidence = ReadShellItemPropertyStoreValue(childFolder, "ten.bin", knownSchemaColumn);
+            var shellItemStoreEvidence = ReadShellItemPropertyStoreValue(childFolder, "a-ten.bin", knownSchemaColumn);
             var shellItemStoreStats = ReadNativeComparisonStats();
             resetProbeCounters();
-            var shellFolderStoreFactoryEvidence = ReadShellFolderPropertyStoreFactoryValue(childFolder, "ten.bin", knownSchemaColumn);
+            var shellFolderStoreFactoryEvidence = ReadShellFolderPropertyStoreFactoryValue(childFolder, "a-ten.bin", knownSchemaColumn);
             var shellFolderStoreFactoryStats = ReadNativeComparisonStats();
 
             resetProbeCounters();
@@ -1020,7 +1038,7 @@ internal static class StaticShellFolderAdapterProbe
             var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var customHeaders = ReadDisplayedColumnHeaders(view);
             var customStats = ReadNativeComparisonStats();
-            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; synthetic-column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; synthetic-column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; synthetic-column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; header-click-results={knownSchemaHeaderClickOneResult}/{knownSchemaHeaderClickTwoResult}; header-click-one=[{string.Join('|', knownSchemaHeaderClickOneNames)}] values=[{string.Join('|', knownSchemaHeaderClickOneValues)}] sort={knownSchemaHeaderClickOneSort}; header-click-two=[{string.Join('|', knownSchemaHeaderClickTwoNames)}] values=[{string.Join('|', knownSchemaHeaderClickTwoValues)}] sort={knownSchemaHeaderClickTwoSort}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}]; known-schema-descending-values=[{string.Join('|', knownSchemaDescendingValues)}]; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
+            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; synthetic-column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; synthetic-column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; synthetic-column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; header-click-results={knownSchemaHeaderClickOneResult}/{knownSchemaHeaderClickTwoResult}; header-click-one=[{string.Join('|', knownSchemaHeaderClickOneNames)}] values=[{string.Join('|', knownSchemaHeaderClickOneValues)}] sort={knownSchemaHeaderClickOneSort}; header-click-two=[{string.Join('|', knownSchemaHeaderClickTwoNames)}] values=[{string.Join('|', knownSchemaHeaderClickTwoValues)}] sort={knownSchemaHeaderClickTwoSort}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}] values=[{string.Join('|', knownSchemaSortValues)}] numeric-ascending={knownSchemaAscendingNumericOrder}; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}] values=[{string.Join('|', knownSchemaDescendingValues)}] numeric-descending={knownSchemaDescendingNumericOrder}; directions-reordered-rows={knownSchemaDirectionsReorderedRows}; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
             Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; headers=[{string.Join('|', customHeaders)}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; custom-column-callbacks={customStats}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
@@ -1697,9 +1715,9 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    private static string VerifyViewFolderDocumentByteCount(nint viewFolder, nint childFolder, int shellDetailsSize)
+    private static string VerifyViewFolderDocumentByteCount(nint viewFolder, nint childFolder, int shellDetailsSize, string fileName)
     {
-        var child = ParseChild(childFolder, "ten.bin");
+        var child = ParseChild(childFolder, fileName);
         var key = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
         var value = Marshal.AllocCoTaskMem(24);
         var details = Marshal.AllocCoTaskMem(shellDetailsSize);
@@ -1715,7 +1733,7 @@ internal static class StaticShellFolderAdapterProbe
             var detailsValue = ReadDetailsText(details);
             if (propertyValue is not int number || number != 10 || detailsValue != "10")
                 throw new Exception($"The view folder did not directly return its registered-schema values: property={propertyValue}, details={detailsValue}.");
-            return $"System.Document.ByteCount={number};GetDetailsOf={detailsValue}";
+            return $"System.Document.ByteCount({fileName})={number};GetDetailsOf={detailsValue}";
         }
         finally
         {

@@ -285,3 +285,11 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。
 
 完整输出：`src/.state/native-probe-watchdog/20261029-023639-86984b53.stdout.log`，SHA-256 `B91C5B93ED3AFE0F7654DDFBD0DA70C38AC617E8D9ADF8AA218B231878667D49`。下一步应检查 Header 通知与实际点击状态如何更新 `SORTCOLUMN`，并以有数值差异的排序确认排序类型；不把当前文本序迹象作为产品决策。
+
+### 2026-10-29：`System.Document.ByteCount` 升降序数值对照复核
+
+复核前述绑定视图中的 ByteCount 排序结论时发现，先前的叙述没有把“行名顺序”和“属性值顺序”作为独立成功条件。现在探针明确记录每行的 `System.Document.ByteCount` 文本，并分别对排序方向 `+1/-1` 检查数值序列以及两次排序之间的行序变化。探针先验证 2→3 项的真实 Shell 文件复制通知，再将三项夹具重命名为 `a-ten.bin=10`、`two.bin=2`、`z-ten.bin=10`，显式刷新后名称顺序为 `a-ten.bin|two.bin|z-ten.bin`、属性值为 `10|2|10`。这个排列既不是数值升序 `2|10|10`，也不是数值降序 `10|10|2`，可排除按名称顺序碰巧等于任一数值方向。
+
+标准 `PKEY_Size` 标题点击仍能按大小实际切换：升序 `two.bin|a-ten.bin|z-ten.bin`，降序 `a-ten.bin|z-ten.bin|two.bin`。ByteCount 设为升序后得到 `a-ten.bin|two.bin|z-ten.bin` / `10|2|10`，不满足预期 `2|10|10`；设为降序后行序与升序完全相同，仍为 `10|2|10`，不满足预期 `10|10|2`。方向状态分别读回 `+1/-1`，但方向变化没有重排行。故这条 DefView 路径对已注册 ByteCount 列的数值排序仍不工作；此前只看行名或使用 `2/10/10` 值序列的判断不够区分，应以本次非单调夹具复核为准。`CompareIDs` 及逐项属性读取回调仍为 0，显示值由 `IPropertyStoreFactory` 提供。日志：`src/.state/native-probe-watchdog/20261029-025919-177dca49.stdout.log`。Release 构建 0 警告/错误；探针以 exit code 1 结束，原因仍是未注册私有测试 PKEY 列为空值，不是夹具或 Shell 操作前置项失败；Private Desktop 前台句柄与输入时间戳未变。
+
+这把已注册系统属性列的限制确定到“方向状态可读回，但 DefView 保持了名称顺序，没有按属性值排序”，并排除了名称顺序与数字顺序偶然重合的解释。后续不继续堆叠列元数据或旧 callback 试探；下一步检查 DefView/SysListView 排序委托边界及其与 `IShellFolder2::CompareIDs` 的关系，评估是否需要自绘/自管列表及由此增加的 Shell 操作兼容成本。产品仍留在 ExplorerBrowser，未发布任何改动。
