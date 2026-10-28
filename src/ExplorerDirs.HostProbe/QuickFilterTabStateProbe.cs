@@ -31,6 +31,7 @@ internal static class QuickFilterTabStateProbe
             var app = Assembly.Load("ExplorerDirs.App");
             var viewStateType = app.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
             var quickFilterType = app.GetType("ExplorerDirs.App.QuickFilterSettings", throwOnError: true)!;
+            var columnFilterType = app.GetType("ExplorerDirs.App.ColumnValueFilter", throwOnError: true)!;
             var tabSettingsType = app.GetType("ExplorerDirs.App.TabSettings", throwOnError: true)!;
             var favoritesStoreType = app.GetType("ExplorerDirs.App.QuickFilterFavoritesStore", throwOnError: true)!;
             var historyStoreType = app.GetType("ExplorerDirs.App.QuickFilterHistoryStore", throwOnError: true)!;
@@ -55,7 +56,12 @@ internal static class QuickFilterTabStateProbe
             var initialView = Activator.CreateInstance(viewStateType, InstanceMembers, null,
                 new object?[] { 4u, 16, sortColumns, typeKey, true, displayColumns }, null)!;
             var expectedView = (object)initialView;
-            var filter = Activator.CreateInstance(quickFilterType, "*.txt", true, true)!;
+            var columnFilterConstructor = columnFilterType.GetConstructors(InstanceMembers)
+                .Single(constructor => constructor.GetParameters().Length == 2);
+            var columnFilterArray = Array.CreateInstance(columnFilterType, 1);
+            columnFilterArray.SetValue(columnFilterConstructor.Invoke([nameKey, new[] { "initial.txt" }]), 0);
+            var filter = Activator.CreateInstance(quickFilterType,
+                new object?[] { string.Empty, false, true, columnFilterArray })!;
             var emptyFilter = quickFilterType.GetProperty("Empty", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(null);
             // Reflection does not apply optional constructor defaults; pass pane visibility flags explicitly.
             var initialTab = Activator.CreateInstance(tabSettingsType,
@@ -70,7 +76,7 @@ internal static class QuickFilterTabStateProbe
             var followWindows = Enum.Parse(hiddenItemsPreferenceType, "FollowWindows");
             var foregroundBeforePane = GetForegroundWindow();
             pane = Activator.CreateInstance(paneType, InstanceMembers, null,
-                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, historyStore, followWindows, false, null }, null)!;
+                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, historyStore, followWindows, false, null, false }, null)!;
             HostProbeForegroundGuard.EnsureUnchanged(foregroundBeforePane, GetForegroundWindow(),
                 "creating the quick-filter PaneControl ExplorerBrowserHost");
 
@@ -96,6 +102,7 @@ internal static class QuickFilterTabStateProbe
             HostProbeForegroundGuard.EnsureUnchanged(foregroundBeforeInitialReady, GetForegroundWindow(),
                 "waiting for the initial quick-filter Shell tab");
             var countShellItems = typeof(Program).GetMethod("Count", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!;
+            int ShellItemCount(object browser) => (int)countShellItems.Invoke(null, [browser])!;
             var stableItemReads = 0;
             var lastItemCount = -1;
             try
@@ -103,7 +110,7 @@ internal static class QuickFilterTabStateProbe
                 WaitFor(() =>
                 {
                     var browser = GetStates(pane)[0].Browser;
-                    lastItemCount = (int)countShellItems.Invoke(null, [browser])!;
+                    lastItemCount = ShellItemCount(browser);
                     stableItemReads = lastItemCount == 1 ? stableItemReads + 1 : 0;
                     return stableItemReads >= 3;
                 }, TimeSpan.FromSeconds(10), "Filtered Shell enumeration did not stabilize at its one matching file.");
@@ -144,6 +151,10 @@ internal static class QuickFilterTabStateProbe
             AssertFilter(afterDuplicate[0].Filter, filter, "duplicating a tab leaves its source filter intact");
             AssertFilter(afterDuplicate[1].Filter, emptyFilter, "duplicating another tab leaves its filter intact");
             AssertFilter(afterDuplicate[2].Filter, filter, "duplicate copies the source filter");
+            WaitFor(() => ShellItemCount(afterDuplicate[0].Browser) == 1 &&
+                          ShellItemCount(afterDuplicate[1].Browser) == 2 &&
+                          ShellItemCount(afterDuplicate[2].Browser) == 1,
+                TimeSpan.FromSeconds(10), "New and duplicated tabs did not apply their independent column filter state.");
             var sourceViewStyle = GetViewStyle(afterDuplicate[0].View);
             var newTabViewStyle = GetViewStyle(afterDuplicate[1].View);
             var duplicateViewStyle = GetViewStyle(afterDuplicate[2].View);
