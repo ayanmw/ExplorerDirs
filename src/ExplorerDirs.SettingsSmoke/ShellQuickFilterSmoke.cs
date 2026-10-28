@@ -45,6 +45,13 @@ internal static class ShellQuickFilterSmoke
             "large column value lists provide case-insensitive membership lookup");
         Check(!manyValueFilter.Contains("value-256"),
             "large column value lists reject values that were not selected");
+
+        var mutableValues = Enumerable.Range(0, 8).Select(index => $"ORIGINAL-{index}").ToList();
+        var immutableFilter = new ColumnValueFilter(typeKey, mutableValues);
+        mutableValues[0] = "REPLACED";
+        Check(immutableFilter.Values[0] == "ORIGINAL-0" && immutableFilter.Contains("ORIGINAL-0") &&
+              !immutableFilter.Contains("REPLACED"),
+            "column filter values and lookup keep a stable snapshot when their input list changes");
     }
 
     private static void Check(bool condition, string message)

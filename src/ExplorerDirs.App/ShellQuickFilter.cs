@@ -63,11 +63,22 @@ internal sealed record QuickFilterSettings
     }
 }
 
-internal sealed record ColumnValueFilter(PropertyKeyState Key, IReadOnlyList<string> Values)
+internal sealed record ColumnValueFilter
 {
-    private readonly HashSet<string>? _valueLookup = Values.Count >= 8
-        ? new HashSet<string>(Values, StringComparer.OrdinalIgnoreCase)
-        : null;
+    private readonly HashSet<string>? _valueLookup;
+
+    internal PropertyKeyState Key { get; }
+    internal IReadOnlyList<string> Values { get; }
+
+    internal ColumnValueFilter(PropertyKeyState key, IReadOnlyList<string> values)
+    {
+        Key = key;
+        var snapshot = values.ToArray();
+        Values = Array.AsReadOnly(snapshot);
+        _valueLookup = snapshot.Length >= 8
+            ? new HashSet<string>(snapshot, StringComparer.OrdinalIgnoreCase)
+            : null;
+    }
 
     internal bool Contains(string value) => _valueLookup?.Contains(value) ??
         Values.Contains(value, StringComparer.OrdinalIgnoreCase);
