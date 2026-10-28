@@ -40,7 +40,7 @@ public partial class PaneControl : UserControl
     private string? _dragToken;
     private bool _addressEditing;
     private bool _classicAddressBar;
-    private bool _alwaysShowTabStrip = true;
+    private TabStripVisibilityMode _tabStripVisibilityMode = TabStripVisibilityMode.Always;
     private bool _addressNavigationPending;
     private bool _searchTextDirty;
     private bool _updatingSearchText;
@@ -102,9 +102,9 @@ public partial class PaneControl : UserControl
         _treeSelectionSyncRequestVersion++;
     }
 
-    internal void SetAlwaysShowTabStrip(bool alwaysShow)
+    internal void SetTabStripVisibilityMode(TabStripVisibilityMode mode)
     {
-        _alwaysShowTabStrip = alwaysShow;
+        _tabStripVisibilityMode = mode;
         UpdateTabStripVisibility();
     }
 
@@ -2443,7 +2443,7 @@ public partial class PaneControl : UserControl
     }
 
     private void UpdateTabStripVisibility() =>
-        Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_alwaysShowTabStrip, Tabs.Items.Count)
+        Tabs.Visibility = TabStripVisibilityPolicy.ShouldShow(_tabStripVisibilityMode, Tabs.Items.Count)
             ? Visibility.Visible : Visibility.Collapsed;
 
     private void UpdateShellStatusHint(string? text)

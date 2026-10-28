@@ -58,7 +58,7 @@ public partial class MainWindow : Window
     private readonly FullRowSelectionStore _fullRowSelectionStore;
     private readonly PortableBooleanPreference _disableGroupingStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
-    private bool _alwaysShowTabStrip;
+    private TabStripVisibilityMode _tabStripVisibilityMode = TabStripVisibilityMode.Always;
     private bool _multilineTabHeaders;
     private bool _limitTabHeaderWidth = true;
     private WindowTitleMode _windowTitleMode;
@@ -216,7 +216,7 @@ public partial class MainWindow : Window
         MouseWheelFocusMenu.IsChecked = _mouseWheelFocusEnabled;
         _tabStripVisibilityStore = new TabStripVisibilityStore(Path.Combine(
             _profileDirectory, "TabStripVisibility.ini"));
-        _alwaysShowTabStrip = _tabStripVisibilityStore.Load();
+        _tabStripVisibilityMode = _tabStripVisibilityStore.Load();
         _multilineTabHeadersStore = new MultilineTabHeadersStore(Path.Combine(
             _profileDirectory, "MultilineTabHeaders.ini"));
         _multilineTabHeaders = _multilineTabHeadersStore.Load();
@@ -1235,14 +1235,20 @@ public partial class MainWindow : Window
 
     private void TabStripVisibility_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string value }) return;
-        var next = value.Equals("Always", StringComparison.Ordinal);
+        if (sender is not MenuItem { Tag: string value } ||
+            !Enum.TryParse<TabStripVisibilityMode>(value, out var next)) return;
         try
         {
             _tabStripVisibilityStore.Save(next);
-            _alwaysShowTabStrip = next;
+            _tabStripVisibilityMode = next;
             ApplyTabStripVisibility();
-            EnvironmentStatus.Text = next ? "标签栏始终显示。" : "标签栏仅在多个标签时显示。";
+            EnvironmentStatus.Text = next switch
+            {
+                TabStripVisibilityMode.Always => "标签栏始终显示。",
+                TabStripVisibilityMode.Multiple => "标签栏仅在多个标签时显示。",
+                TabStripVisibilityMode.Hidden => "标签栏已隐藏；标签和快捷键仍可用。",
+                _ => "标签栏显示方式已更新。"
+            };
         }
         catch (Exception ex)
         {
@@ -1466,7 +1472,7 @@ public partial class MainWindow : Window
 
     private void ApplyTabStripVisibility()
     {
-        foreach (var pane in _panes) pane.SetAlwaysShowTabStrip(_alwaysShowTabStrip);
+        foreach (var pane in _panes) pane.SetTabStripVisibilityMode(_tabStripVisibilityMode);
         UpdateTabStripVisibilityMenu();
     }
 
@@ -1511,8 +1517,9 @@ public partial class MainWindow : Window
 
     private void UpdateTabStripVisibilityMenu()
     {
-        AlwaysShowTabsMenu.IsChecked = _alwaysShowTabStrip;
-        ShowTabsWhenMultipleMenu.IsChecked = !_alwaysShowTabStrip;
+        AlwaysShowTabsMenu.IsChecked = _tabStripVisibilityMode == TabStripVisibilityMode.Always;
+        ShowTabsWhenMultipleMenu.IsChecked = _tabStripVisibilityMode == TabStripVisibilityMode.Multiple;
+        HideTabsMenu.IsChecked = _tabStripVisibilityMode == TabStripVisibilityMode.Hidden;
     }
 
     private void ThemePreference_Click(object sender, RoutedEventArgs e)

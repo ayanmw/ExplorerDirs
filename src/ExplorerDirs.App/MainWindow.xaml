@@ -65,6 +65,8 @@
                               Tag="Always" Click="TabStripVisibility_Click"/>
                     <MenuItem x:Name="ShowTabsWhenMultipleMenu" Header="仅在多个标签时显示" IsCheckable="True"
                               Tag="Multiple" Click="TabStripVisibility_Click"/>
+                    <MenuItem x:Name="HideTabsMenu" Header="隐藏标签栏（保留标签）" IsCheckable="True"
+                              Tag="Hidden" Click="TabStripVisibility_Click"/>
                 </MenuItem>
                 <MenuItem x:Name="MultilineTabHeadersMenu" Header="多行标签栏" IsCheckable="True"
                           ToolTip="标签较多时自动换行显示；关闭时使用单行滚动标签栏。"

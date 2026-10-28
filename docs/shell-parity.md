@@ -121,7 +121,7 @@
 
 > **虚拟 Shell 标签和快捷链接图标（2026-10-27）：**标签标题与快捷链接现在按 Shell 位置 PIDL 读取虚拟文件夹图标；普通文件夹和文件扩展名图标维持原逻辑。定向 Windows Shell smoke 确认文件夹、“此电脑”和“回收站”图像不同。当前没有 GUI 验收，实际控件绘制仍待检查。详见[路线图](roadmap.md#2026-10-27虚拟-shell-标签和快捷链接使用位置图标)。
 
-> **标签栏显示模式（2026-10-26）：**对照 Q-Dir [FAQ 101](https://www.softwareok.com/?faq=101&seite=faq-Q-DIR) 的“始终显示 / 至少两个标签时显示”选项，视图菜单现在可切换两种模式，并保存到便携 `TabStripVisibility.ini`。默认保持始终显示；按每个窗格的标签数量显示/隐藏标题栏，Shell 视图、标签对象和会话不受影响。Tab/Shift+Tab 与 F6 停靠点同步移除隐藏的标签栏；策略/INI smoke、扩展焦点矩阵、完整 Release SettingsSmoke 和 App Release build 通过。真实菜单操作、切换后键盘焦点和跨重启可见效果尚未桌面验收。
+> **标签栏显示模式（2026-10-29）：**“视图 → 标签栏显示”增加“隐藏标签栏（保留标签）”，与“始终显示 / 仅在多个标签时显示”并列。隐藏只收起标签标题控件，不关闭标签、不丢弃会话；现有标签快捷键仍可用，Tab/Shift+Tab 与 F6 焦点顺序随隐藏栏同步跳过。便携 `TabStripVisibility.ini` 从版本 1 的 `AlwaysShow=true/false` 迁移到版本 2 的 `Mode=Always/Multiple/Hidden`；识别未知更高版本时拒绝覆盖。策略及 INI smoke、完整 Release SettingsSmoke 和 App Release build 通过。真实菜单操作、焦点与跨重启可见效果尚未桌面验收。
 
 > **窗口标题栏内容模式（2026-10-29）：**Q-Dir 官方语言资源列出隐藏附加信息、完整路径、文件夹名、最近打开的收藏夹、所选对象完整路径五种标题栏内容。Explorer Dirs 在“视图 → 标题栏显示”提供五种模式，并将模式偏好写入便携 `WindowTitle.ini`；当前路径/文件名模式跟随活动窗格，最近收藏模式只在用户显式点击“收藏夹”菜单中的目录时更新，显示该收藏路径且不被普通导航覆盖。应用名/版本标识始终保留。Q-Dir [FAQ 98](https://www.softwareok.com/?faq=98&seite=faq-Q-DIR) 及[官方功能说明](https://www.softwareok.com/?page=Windows%2FTip%2FQ-Dir%2F59)已明确：该模式显示用于启动/打开窗口的最近收藏名称，目的是区分同时运行的多个工作区窗口。本项目的普通目录收藏没有自定义标签，因此当前显示路径；最近收藏状态仅存活于当前窗口进程，不跨重启恢复。命名 `.qdr` 工作区导入是否更新最近收藏仍待确认，当前不更新。SettingsSmoke 覆盖模式序列化与标题文本；菜单切换、导航/选区联动和实际标题呈现仍待集中 UI 验收。 |
 

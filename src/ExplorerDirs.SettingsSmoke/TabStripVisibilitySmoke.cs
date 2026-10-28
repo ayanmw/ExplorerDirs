@@ -9,13 +9,17 @@ internal static class TabStripVisibilitySmoke
 {
     internal static void Run(string root)
     {
-        Check(TabStripVisibilityPolicy.ShouldShow(alwaysShow: true, tabCount: 1),
+        Check(!TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Hidden, 4) &&
+              !TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Hidden, 1),
+            "hidden mode hides every tab strip without depending on pane tab count");
+
+        Check(TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Always, 1),
             "always-show mode keeps a single tab visible");
-        Check(TabStripVisibilityPolicy.ShouldShow(alwaysShow: false, tabCount: 1) == false,
+        Check(!TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Multiple, 1),
             "multiple-tabs mode hides the strip for one tab");
-        Check(TabStripVisibilityPolicy.ShouldShow(alwaysShow: false, tabCount: 2),
+        Check(TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Multiple, 2),
             "multiple-tabs mode shows the strip at two tabs");
-        Check(TabStripVisibilityPolicy.ShouldShow(alwaysShow: false, tabCount: 0) == false,
+        Check(!TabStripVisibilityPolicy.ShouldShow(TabStripVisibilityMode.Always, 0),
             "an empty pane does not show a tab strip");
 
         var headerSizes = new[] { new Size(40, 10), new Size(35, 10), new Size(50, 10) };
@@ -31,9 +35,36 @@ internal static class TabStripVisibilitySmoke
 
         var path = Path.Combine(root, "TabStripVisibility.ini");
         var store = new TabStripVisibilityStore(path);
-        Check(store.Load(), "missing tab-strip preference preserves the existing always-visible default");
-        store.Save(false);
-        Check(!new TabStripVisibilityStore(path).Load(), "multiple-tabs preference round-trips through portable INI");
+        Check(store.Load() == TabStripVisibilityMode.Always,
+            "missing tab-strip preference preserves the existing always-visible default");
+        store.Save(TabStripVisibilityMode.Multiple);
+        Check(new TabStripVisibilityStore(path).Load() == TabStripVisibilityMode.Multiple,
+            "multiple-tabs preference round-trips through portable INI");
+        File.WriteAllText(path, "; legacy format\n[Tabs]\nFormatVersion=1\nAlwaysShow=false\n");
+        var migratedLegacy = new TabStripVisibilityStore(path);
+        Check(migratedLegacy.Load() == TabStripVisibilityMode.Multiple,
+            "legacy boolean tab-strip preference maps false to multiple-tabs mode");
+        migratedLegacy.Save(TabStripVisibilityMode.Hidden);
+        Check(new TabStripVisibilityStore(path).Load() == TabStripVisibilityMode.Hidden,
+            "hidden mode round-trips through portable INI");
+        migratedLegacy.Save(TabStripVisibilityMode.Always);
+        Check(new TabStripVisibilityStore(path).Load() == TabStripVisibilityMode.Always,
+            "hidden mode can be reversed without discarding tabs");
+        File.WriteAllText(path, "; legacy format\n[Tabs]\nFormatVersion=1\nAlwaysShow=true\n");
+        Check(new TabStripVisibilityStore(path).Load() == TabStripVisibilityMode.Always,
+            "legacy boolean tab-strip preference maps true to always-visible mode");
+
+        var futurePath = Path.Combine(root, "TabStripVisibilityFuture.ini");
+        const string futureContent = "[Tabs]\nFormatVersion=999999999999999999999999999999\nMode=Hidden\n";
+        File.WriteAllText(futurePath, futureContent);
+        var futureStore = new TabStripVisibilityStore(futurePath);
+        Check(futureStore.Load() == TabStripVisibilityMode.Always && futureStore.LoadWarning is not null,
+            "future tab-strip preference versions are reported without applying unknown values");
+        var futureSaveRejected = false;
+        try { futureStore.Save(TabStripVisibilityMode.Multiple); }
+        catch (IOException) { futureSaveRejected = true; }
+        Check(futureSaveRejected && File.ReadAllText(futurePath) == futureContent,
+            "future tab-strip preference files are preserved from older-version writes");
 
         var multilinePath = Path.Combine(root, "MultilineTabHeaders.ini");
         var multilineStore = new MultilineTabHeadersStore(multilinePath);

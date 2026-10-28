@@ -7,8 +7,116 @@ namespace ExplorerDirs.App;
 internal sealed class UiPreferencesStore(string path)
     : PortableBooleanPreference(path, "Appearance", "Compact", "外观");
 
+internal enum TabStripVisibilityMode
+{
+    Always,
+    Multiple,
+    Hidden
+}
+
 internal sealed class TabStripVisibilityStore(string path)
-    : PortableBooleanPreference(path, "Tabs", "AlwaysShow", "标签栏", defaultValue: true);
+{
+    private string? _lastSeenContent;
+    private bool _canOverwrite = true;
+
+    public string? LoadWarning { get; private set; }
+
+    public TabStripVisibilityMode Load()
+    {
+        LoadWarning = null;
+        _canOverwrite = true;
+        _lastSeenContent = null;
+        if (!File.Exists(path)) return TabStripVisibilityMode.Always;
+
+        TabStripVisibilityMode? mode = null;
+        var valid = true;
+        var inTabs = false;
+        var sawTabs = false;
+        var sawLegacyAlwaysShow = false;
+        var sawMode = false;
+        BigInteger version = -1;
+        try
+        {
+            _lastSeenContent = File.ReadAllText(path);
+            foreach (var raw in _lastSeenContent.Split('\n'))
+            {
+                var line = raw.Trim().TrimStart('\uFEFF');
+                if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#')) continue;
+                if (line.StartsWith('[') && line.EndsWith(']'))
+                {
+                    inTabs = line.Equals("[Tabs]", StringComparison.OrdinalIgnoreCase);
+                    if (!inTabs || sawTabs) valid = false;
+                    sawTabs |= inTabs;
+                    continue;
+                }
+
+                var equals = line.IndexOf('=');
+                if (!inTabs || equals < 1) { valid = false; continue; }
+                var key = line[..equals].Trim();
+                var value = line[(equals + 1)..].Trim();
+                if (key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (version >= 0 || !BigInteger.TryParse(value, NumberStyles.None,
+                            CultureInfo.InvariantCulture, out var parsed)) valid = false;
+                    else version = parsed;
+                }
+                else if (key.Equals("AlwaysShow", StringComparison.OrdinalIgnoreCase) &&
+                         bool.TryParse(value, out var alwaysShow) && !mode.HasValue)
+                {
+                    sawLegacyAlwaysShow = true;
+                    mode = alwaysShow ? TabStripVisibilityMode.Always : TabStripVisibilityMode.Multiple;
+                }
+                else if (key.Equals("Mode", StringComparison.OrdinalIgnoreCase) && !mode.HasValue &&
+                         Enum.TryParse<TabStripVisibilityMode>(value, ignoreCase: true, out var parsedMode) &&
+                         Enum.IsDefined(parsedMode))
+                {
+                    sawMode = true;
+                    mode = parsedMode;
+                }
+                else valid = false;
+            }
+
+            if (version > 2)
+            {
+                _canOverwrite = false;
+                LoadWarning = "标签栏配置格式高于当前版本；已停止写入原文件。";
+                return TabStripVisibilityMode.Always;
+            }
+            if ((version != BigInteger.One && version != new BigInteger(2)) || !mode.HasValue || !sawTabs ||
+                (version == BigInteger.One && sawMode) ||
+                (version == new BigInteger(2) && sawLegacyAlwaysShow))
+                valid = false;
+        }
+        catch (Exception) { valid = false; }
+
+        if (valid) return mode!.Value;
+
+        try
+        {
+            File.Copy(path, path + $".invalid-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.bak");
+            LoadWarning = "标签栏配置不完整；已备份原文件并恢复可读取的设置。";
+        }
+        catch (Exception)
+        {
+            _canOverwrite = false;
+            LoadWarning = "标签栏配置不完整且备份失败；本次不会覆盖原文件。";
+        }
+        return mode ?? TabStripVisibilityMode.Always;
+    }
+
+    public void Save(TabStripVisibilityMode mode)
+    {
+        if (!_canOverwrite) throw new IOException($"标签栏配置原文件受到保护，已停止覆盖：{path}");
+        if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        var content = "; Explorer Dirs portable preference. Close the app before editing." + Environment.NewLine +
+            "[Tabs]" + Environment.NewLine +
+            "FormatVersion=2" + Environment.NewLine +
+            $"Mode={mode}" + Environment.NewLine;
+        PortableIniWriter.WriteIfUnchanged(path, _lastSeenContent, content,
+            "标签栏配置已被其他实例修改；请重启程序后再保存。");
+        _lastSeenContent = content;
+    }
+}
 
 internal sealed class MultilineTabHeadersStore(string path)
     : PortableBooleanPreference(path, "Tabs", "Multiline", "多行标签栏");
