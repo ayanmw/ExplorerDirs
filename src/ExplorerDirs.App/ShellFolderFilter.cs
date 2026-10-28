@@ -28,6 +28,9 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
     public int ShouldShow(nint shellFolder, nint folderPidl, nint itemPidl)
     {
         Interlocked.Increment(ref _shouldShowCalls);
+        // Hidden-item preferences can attach this callback without an active quick filter.
+        // In that case visibility is controlled by GetEnumFlags, so avoid per-item Shell lookups.
+        if (!_settings.HasPattern) return 0;
         try
         {
             if (shellFolder == 0 || itemPidl == 0 || !TryGetFolderState(shellFolder, itemPidl, out var isFolder))
