@@ -795,6 +795,17 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.Release(selectedDataObject); }
             Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x40000000u));
 
+            stage = "verify-native-details-and-refresh-menu-verbs";
+            Check(At<SetMode>(folderView, 35)(folderView, 1, 16)); // FVM_ICON.
+            InvokeShellViewBackgroundVerb(view, parent, "viewlogicaldetails");
+            Check(At<GetCurrentViewMode>(folderView, 3)(folderView, out var viewMode));
+            if (viewMode != 4) throw new Exception($"The native Details menu command left view mode {viewMode}, expected FVM_DETAILS (4).");
+            InvokeShellViewBackgroundVerb(view, parent, "refresh");
+            Pump(500);
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var refreshedItemCount));
+            if (refreshedItemCount != 3) throw new Exception($"Native Refresh changed item count unexpectedly: {refreshedItemCount}.");
+            Console.WriteLine("native-shell-item-bound-view: native-menu-verbs=viewlogicaldetails,refresh; details-mode-readback=True; refresh-count=3");
+
             stage = "verify-standard-size-sort";
             var nameColumn = new ShellColumnManager.NativeKey { FormatId = NameKeyFormat, PropertyId = 10 };
             var sizeColumn = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
@@ -1355,6 +1366,51 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
+    private static void InvokeShellViewBackgroundVerb(nint view, nint owner, string expectedVerb)
+    {
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        try
+        {
+            var menu = CreatePopupMenu();
+            if (menu == 0) throw new Exception("Temporary Shell command menu creation failed.");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = Math.Min(queryResult & 0xffff, 0x7fff);
+                var buffer = Marshal.AllocHGlobal(1024);
+                uint? commandOffset = null;
+                try
+                {
+                    var getCommandString = At<GetCommandString>(contextMenu, 5);
+                    for (uint offset = 0; offset < commandCount; offset++)
+                    {
+                        Marshal.WriteInt16(buffer, 0);
+                        if (getCommandString(contextMenu, offset, 4, 0, buffer, 512) == 0 &&
+                            string.Equals(Marshal.PtrToStringUni(buffer), expectedVerb, StringComparison.OrdinalIgnoreCase))
+                        {
+                            commandOffset = offset;
+                            break;
+                        }
+                    }
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+                if (commandOffset is null) throw new Exception($"Native Shell background menu did not expose '{expectedVerb}'.");
+                var invoke = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Window = owner,
+                    Verb = (nint)commandOffset.Value,
+                    Show = 1
+                };
+                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+            }
+            finally { DestroyMenu(menu); }
+        }
+        finally { Marshal.Release(contextMenu); }
+    }
+
     private static void VerifyWrappedShellItemDataObject(nint dataObject)
     {
         var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
@@ -1530,6 +1586,25 @@ internal static class StaticShellFolderAdapterProbe
         public nint ColumnFormats;
         public int Group;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
+    {
+        public int Size;
+        public uint Mask;
+        public nint Window;
+        public nint Verb;
+        public nint Parameters;
+        public nint Directory;
+        public int Show;
+        public uint HotKey;
+        public nint Icon;
+        public nint Title;
+        public nint VerbW;
+        public nint ParametersW;
+        public nint DirectoryW;
+        public nint TitleW;
+        public Point Point;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateAdapter(nint folder, out nint adapter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindToObject(nint self, nint item, nint bind, in Guid iid, out nint value);
@@ -1577,6 +1652,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurrentViewMode(nint self, out uint mode);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
