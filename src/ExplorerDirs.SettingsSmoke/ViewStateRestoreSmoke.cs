@@ -8,6 +8,15 @@ internal static class ViewStateRestoreSmoke
     {
         var key = new PropertyKeyState(Guid.NewGuid(), 1);
         var saved = new ViewState(4, 16, [new(key, -1)], key, false, [new(key, 240)]);
+        var ungroupedNative = ShellGroupingPolicy.ForNativeRestore(saved, disabled: true);
+        Check(ungroupedNative.GroupKey is null && ungroupedNative.SortColumns.SequenceEqual(saved.SortColumns),
+            "global suppression clears grouping only for the native restore request");
+        var capturedUngrouped = saved with { GroupKey = null, GroupAscending = true };
+        var preserved = ShellGroupingPolicy.PreserveCachedGrouping(capturedUngrouped, saved, disabled: true);
+        Check(preserved.GroupKey == saved.GroupKey && preserved.GroupAscending == saved.GroupAscending,
+            "capture during global suppression retains the tab's saved grouping intent");
+        Check(ShellGroupingPolicy.PreserveCachedGrouping(capturedUngrouped, saved, disabled: false).GroupKey is null,
+            "normal capture still accepts an explicitly ungrouped view");
         foreach (var step in Enum.GetValues<ShellViewRestoreStep>())
         {
             var target = new Target { FailedStep = step };

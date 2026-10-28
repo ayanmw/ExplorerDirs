@@ -2,6 +2,15 @@ namespace ExplorerDirs.App;
 
 internal enum ShellViewRestoreStep { Mode, Columns, Sorting, Grouping }
 
+internal static class ShellGroupingPolicy
+{
+    internal static ViewState ForNativeRestore(ViewState saved, bool disabled) =>
+        disabled ? saved with { GroupKey = null } : saved;
+
+    internal static ViewState PreserveCachedGrouping(ViewState captured, ViewState cached, bool disabled) =>
+        disabled ? captured with { GroupKey = cached.GroupKey, GroupAscending = cached.GroupAscending } : captured;
+}
+
 internal interface IShellViewStateTarget
 {
     int SetMode(uint mode, int iconSize);

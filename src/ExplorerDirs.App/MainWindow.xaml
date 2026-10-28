@@ -98,6 +98,9 @@
                           Click="SelectionCheckBoxes_Click"/>
                 <MenuItem x:Name="FullRowSelectionMenu" Header="整行选择" IsCheckable="True"
                           Click="FullRowSelection_Click"/>
+                <MenuItem x:Name="DisableGroupingMenu" Header="停用所有视图分组" IsCheckable="True"
+                          ToolTip="暂时关闭所有文件视图的分组；每个标签原有的分组设置会在重新启用时恢复。"
+                          Click="DisableGrouping_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModePerPaneMenu" Header="每窗格各一棵树" IsCheckable="True" Tag="PerPane" Click="TreeMode_Click"/>

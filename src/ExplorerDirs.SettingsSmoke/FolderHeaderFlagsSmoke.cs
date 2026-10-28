@@ -59,6 +59,19 @@ internal static class FolderHeaderFlagsSmoke
                 throw new InvalidOperationException($"Full-row-select flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
         }
 
+        var groupingCases = new (uint Input, bool Disabled, uint Expected)[]
+        {
+            (0x40240008, true, 0x40340008),
+            (0x40340008, false, 0x40240008),
+            (0xFFFFFFFF, false, 0xFFEFFFFF)
+        };
+        foreach (var (input, disabled, expected) in groupingCases)
+        {
+            var actual = ShellFolderViewOptions.SetNoGrouping(input, disabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"No-grouping flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (disabled={disabled}).");
+        }
+
         Console.WriteLine("Folder header flags smoke: PASS");
     }
 }

@@ -6,6 +6,7 @@ internal static class ShellFolderViewOptions
     internal const uint HeaderSuppressionMask = 0x01800000;
     internal const uint CheckSelect = 0x00040000;
     internal const uint FullRowSelect = 0x00200000;
+    internal const uint NoGrouping = 0x00100000;
 
     private static readonly Guid FolderViewOptionsId = new("3CC974D2-B302-4D36-AD3E-06D93F695D3F");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
@@ -20,6 +21,9 @@ internal static class ShellFolderViewOptions
 
     internal static uint SetFullRowSelect(uint folderFlags, bool enabled) =>
         enabled ? folderFlags | FullRowSelect : folderFlags & ~FullRowSelect;
+
+    internal static uint SetNoGrouping(uint folderFlags, bool disabled) =>
+        disabled ? folderFlags | NoGrouping : folderFlags & ~NoGrouping;
 
     internal static int EnableCustomPosition(IntPtr browserUnknown) =>
         EnableCustomPosition(browserUnknown, out _, out _);
@@ -85,6 +89,9 @@ internal static class ShellFolderViewOptions
 
     internal static int SetFullRowSelect(IntPtr shellView, bool enabled)
         => SetFolderFlag(shellView, FullRowSelect, enabled);
+
+    internal static int SetNoGrouping(IntPtr shellView, bool disabled)
+        => SetFolderFlag(shellView, NoGrouping, disabled);
 
     private static int SetFolderFlag(IntPtr shellView, uint flag, bool enabled)
     {

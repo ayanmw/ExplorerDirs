@@ -41,6 +41,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
+    private bool _disableGrouping;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
     private (PropertyKeyState Group, bool Ascending)? _quickFilterGroupToRestore;
@@ -459,7 +460,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
         bool showPreviewPane = false, bool showDetailsPane = false,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
-        bool selectionCheckBoxes = false, bool? fullRowSelection = null)
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false)
     {
         if (showPreviewPane && showDetailsPane)
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
@@ -469,6 +470,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _hiddenItemsPreference = hiddenItemsPreference;
         _selectionCheckBoxes = selectionCheckBoxes;
         _fullRowSelection = fullRowSelection;
+        _disableGrouping = disableGrouping;
         _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
@@ -541,6 +543,60 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.Release(view); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    internal int SetGroupingDisabled(bool disabled)
+    {
+        if (_disableGrouping == disabled) return 0;
+        var browser = _browser;
+        if (browser is null || _viewWindow == IntPtr.Zero)
+        {
+            _disableGrouping = disabled;
+            return 0;
+        }
+
+        if (disabled)
+        {
+            try { CaptureViewState(); }
+            catch (Exception) { return unchecked((int)0x80004005); }
+            if (ViewCaptureFailed) return unchecked((int)0x80004005);
+            CancelPendingQuickFilterGroupRestore();
+        }
+
+        var generation = _viewReadiness.Generation;
+        bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return unchecked((int)0x80004005);
+        try
+        {
+            var target = new NativeViewStateTarget(view, Current);
+            if (disabled)
+            {
+                var result = target.SetGrouping(null, ascending: false);
+                if (result < 0 || !Current()) return result < 0 ? result : unchecked((int)0x80004005);
+                result = ShellFolderViewOptions.SetNoGrouping(view, disabled: true);
+                if (result < 0)
+                {
+                    if (Current()) _ = target.SetGrouping(_viewState.GroupKey, _viewState.GroupAscending);
+                    return result;
+                }
+            }
+            else
+            {
+                var result = ShellFolderViewOptions.SetNoGrouping(view, disabled: false);
+                if (result < 0 || !Current()) return result < 0 ? result : unchecked((int)0x80004005);
+                result = target.SetGrouping(_viewState.GroupKey, _viewState.GroupAscending);
+                if (result < 0)
+                {
+                    if (Current()) _ = ShellFolderViewOptions.SetNoGrouping(view, disabled: true);
+                    return result;
+                }
+            }
+            if (!Current()) return unchecked((int)0x80004005);
+            _disableGrouping = disabled;
+            return 0;
+        }
+        finally { Marshal.Release(view); }
     }
 
     internal bool SetDetailsPaneVisible(bool visible)
@@ -1891,7 +1947,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var captured = ShellViewStateCapture.Capture(_viewState,
                 new NativeViewStateSource(view), out var complete, IsCurrentCapture);
             ViewCaptureFailed = !complete;
-            if (complete) _viewState = PreserveQuickFilterGroup(captured);
+            if (complete)
+            {
+                captured = PreserveQuickFilterGroup(captured);
+                captured = ShellGroupingPolicy.PreserveCachedGrouping(captured, _viewState, _disableGrouping);
+                _viewState = captured;
+            }
             return _viewState.Copy();
         }
         finally { Marshal.Release(view); }
@@ -2132,7 +2193,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _viewRestoreFailed = true;
         var browser = _browser;
         var generation = _viewReadiness.Generation;
-        var saved = _viewState.Copy();
+        var saved = ShellGroupingPolicy.ForNativeRestore(_viewState.Copy(), _disableGrouping);
         var filterRequest = _quickFilterRequestVersion;
         bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation &&
             filterRequest == _quickFilterRequestVersion;
@@ -2257,7 +2318,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             ? _selectionRecoverySuppression.Acquire(_viewReadiness.NavigationVersion) : null;
         try
         {
-            var hasGroup = !searchActive && (pendingRestore is not null || _quickFilterGroupToRestore is not null ||
+            var hasGroup = !_disableGrouping && !searchActive && (pendingRestore is not null || _quickFilterGroupToRestore is not null ||
                 settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
             var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
             if (!Current()) return false;
@@ -2353,6 +2414,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (requestVersion != _quickFilterRequestVersion) return;
         CancelPendingQuickFilterGroupRestore();
         RememberQuickFilterGroup(group, ascending);
+        if (_disableGrouping) return;
         var pending = new PendingQuickFilterGroupRestore(group, ascending, initialItemCount,
             _quickFilter, _location.DirectoryPath, _viewReadiness.NavigationVersion, requestVersion, Stopwatch.GetTimestamp());
         _pendingQuickFilterGroupRestore = pending;
@@ -2377,6 +2439,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         {
             CancelPendingQuickFilterGroupRestore();
             LastQuickFilterStatus += "; stale group restore cancelled after navigation";
+            return;
+        }
+        if (_disableGrouping)
+        {
+            CancelPendingQuickFilterGroupRestore();
             return;
         }
 
@@ -4312,6 +4379,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     if (fullRowResult < 0)
                         MenuError?.Invoke(this, $"Shell 未能应用整行选择设置（0x{fullRowResult:X8}）。");
                 }
+                var noGroupingResult = ShellFolderViewOptions.SetNoGrouping(view, _disableGrouping);
+                if (noGroupingResult < 0)
+                    MenuError?.Invoke(this, $"Shell 未能应用全局分组设置（0x{noGroupingResult:X8}）。");
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
                 {
                     AttachViewWindow(hwnd);

@@ -4336,3 +4336,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 使用隐藏 HostProbe 对生产 `ExplorerBrowserHost` 的真实子视图 HWND 合成 Ctrl+滚轮消息，按八个查看方式循环完整一周。两轮均从 Details 出发并回到 Details，三项选中身份保持，另外三个窗格的视图方式不变；父窗口保持隐藏，探针不读取桌面光标、不发送物理输入。
 - 这是消息路由与 Shell 状态读回证据，不代表真实鼠标消息一定命中该 HWND，也不覆盖高精度实体滚轮、WPF 工具栏区域焦点、可见绘制或普通滚轮滚动；这些留待集中 UI 验收。没有修改产品逻辑。
+
+## 2026-10-28：全局停用文件视图分组
+
+- 对齐 Q-Dir 官方“完全停用所有文件列表分组”与当前 Shell 视图右键菜单的单视图分组操作；新增 View 菜单开关和独立便携 `DisableGrouping.ini`。启用后将 `FWF_NOGROUPING` 应用到现有及新建 Shell 视图，停用前缓存每标签分组键/方向，停用期间不把原生无分组状态覆盖进会话，关闭时恢复标签值。
+- 过滤器分组延迟恢复队列服从全局覆盖。`SettingsSmoke` 对 flag 保留、profile/窗格/新标签接线及缓存状态策略通过；完整 Release SettingsSmoke 通过，App Release build 0 警告、0 错误。没有打开 GUI 或真实 ExplorerBrowser 窗口；分组菜单可见禁用状态、各标签切换及重启恢复仍待集中验收。依据：[Q-Dir 完全停用分组说明](https://www.softwareok.com/?page=Windows%2FQ-Dir%2FTips%2F11)、[Windows FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags)。

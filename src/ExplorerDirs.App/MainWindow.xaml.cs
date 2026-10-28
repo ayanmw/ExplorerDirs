@@ -55,6 +55,7 @@ public partial class MainWindow : Window
     private readonly StatusBarFolderSizeWhenEmptyStore _statusBarFolderSizeWhenEmptyStore;
     private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
     private readonly FullRowSelectionStore _fullRowSelectionStore;
+    private readonly PortableBooleanPreference _disableGroupingStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
@@ -67,6 +68,7 @@ public partial class MainWindow : Window
     private bool _showFolderSizeWhenEmpty;
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
+    private bool _disableGrouping;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -248,6 +250,13 @@ public partial class MainWindow : Window
         if (_fullRowSelectionStore.LoadWarning is { } fullRowSelectionWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? fullRowSelectionWarning : $"{EnvironmentStatus.Text} {fullRowSelectionWarning}";
+        _disableGroupingStore = new PortableBooleanPreference(Path.Combine(
+            _profileDirectory, "DisableGrouping.ini"), "View", "DisableGrouping", "全局分组");
+        _disableGrouping = _disableGroupingStore.Load();
+        DisableGroupingMenu.IsChecked = _disableGrouping;
+        if (_disableGroupingStore.LoadWarning is { } disableGroupingWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? disableGroupingWarning : $"{EnvironmentStatus.Text} {disableGroupingWarning}";
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -333,7 +342,7 @@ public partial class MainWindow : Window
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
                 _quickFilterFavoritesStore, _quickFilterHistoryStore, _hiddenItemsPreference,
-                _selectionCheckBoxes, _fullRowSelection);
+                _selectionCheckBoxes, _fullRowSelection, _disableGrouping);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
@@ -1246,6 +1255,25 @@ public partial class MainWindow : Window
         {
             FullRowSelectionMenu.IsChecked = _fullRowSelection == true;
             EnvironmentStatus.Text = $"整行选择设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void DisableGrouping_Click(object sender, RoutedEventArgs e)
+    {
+        var next = DisableGroupingMenu.IsChecked == true;
+        try
+        {
+            _disableGroupingStore.Save(next);
+            _disableGrouping = next;
+            var failures = _panes.SelectMany(pane => pane.SetGroupingDisabled(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next ? "已停用所有文件视图的分组；原分组设置已保留。" : "已恢复各标签保存的分组设置。"
+                : $"全局分组设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            DisableGroupingMenu.IsChecked = _disableGrouping;
+            EnvironmentStatus.Text = $"全局分组设置保存失败：{ex.Message}";
         }
     }
 
