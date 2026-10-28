@@ -215,3 +215,10 @@ dnx dotnet-counters@10.0.750501 --source https://api.nuget.org/v3/index.json -- 
 - GC 最近一次报告的各代堆大小合计约 `17.94 MiB`，GC committed 为 `27.54 MiB`；托管分配增量合计约 `9.63 MiB/25 秒`，约 `0.38 MiB/s`。窗口中 Gen0/1/2 GC 次数与 GC pause 增量均为 0。`last_collection.heap.size` 不是实时存活堆，累计分配也不是保留量或泄漏量。
 - 这进一步表明观察到的进程 Private Bytes 明显高于 GC committed，但不能将差值归给 Shell、WPF、运行时或第三方扩展；采样窗口没有固定操作负载，也没有原生分配栈。它只提供一次短时闲置运行时快照，不构成长期增长结论或新旧版本 A/B。
 - 原始 CSV 留在忽略目录 `src/.state/memory-samples/runtime-followup-58888-20261028.csv`，SHA-256 `C657D480B88CD7735727EC1212814BCB8433CE238E1717A2E16D9A9ACE9EA76D`。指标解释见上文列出的微软 .NET runtime metrics 文档。
+
+## 2026-10-28 CST：temp.76 同一 PID 两分钟只读复采
+
+- 采样对象为已运行的 `preview-0.6.0-temp.76` PID `58888`，启动时间 `2026-10-27T13:43:03.5311184Z`。本次重新核对 EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`、应用 DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`，与既有样本相同。
+- UTC `2026-10-28T01:16:42.516Z` 至 `01:18:43.101Z`，25 个样本覆盖约 120.6 秒。Working Set 全程 `244,756,480` B（233.42 MiB），Private Bytes `120,848,384` B（115.25 MiB），虚拟内存 `2,342,109,573,120` B，句柄 `1121`，线程 `34`；首末值及最小/最大值均相同。
+- 使用既有只读 sampler；没有启动、聚焦或操作窗口，也没有 GC、重启或剪裁工作集。窗格/标签数量和用户操作未记录，因此只说明这两分钟计数稳定，不能说明操作期间的增长、长期泄漏或具体分配来源。
+- 原始 CSV 留在忽略目录 `src/.state/memory-samples/background-followup-20261028.csv`，SHA-256 `58CF6724080214584BCD4F69627A0AA040AB33115C9404C23B3DC3AB8A305F35`。下一步仍需在固定操作序列下复采，再依据同一 PID 的变化决定分配栈调查。
