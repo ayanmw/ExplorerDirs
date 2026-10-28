@@ -4371,3 +4371,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 源码复核发现重启工具此前仅凭 `GetShellWindow()` 的 PID 结束进程，未检查进程映像；自定义桌面 Shell 可能被误结束。现在先确认 Windows 目录下的 `explorer.exe` 存在，再要求 Shell 窗口所属进程映像规范化后与该文件路径大小写不敏感地完全相同，否则不结束任何进程并返回明确错误。
 - 路径身份 SettingsSmoke 先因缺少检查而按预期失败，接入后通过；完整 Release SettingsSmoke 通过，App Release build 0 警告/错误。未启动、结束任何 Explorer/Shell 进程，也未进行 UI 验收；取消确认与真实桌面恢复仍待集中验收。
+
+## 2026-10-28：确认 Explorer Shell 自动恢复的进程身份
+
+- 源码复核发现重启等待阶段把“桌面 Shell PID 变化”当作 Windows Explorer 已恢复；另一个进程短暂接管 Shell 窗口时可能误报成功。现在等待阶段还会读取新 PID 的映像并要求匹配 `%WINDIR%\explorer.exe`；进程在读取 HWND 与打开进程句柄之间退出时继续等待。
+- 身份策略回归先因缺少替代进程判定失败，再通过“新 PID 且映像匹配”“旧 PID”“非 Explorer 映像”“原 PID 缺失”四种情况。完整 Release SettingsSmoke 与 App Release build（0 警告/错误）通过；未结束或启动任何系统进程。Windows 实际 Shell 自动恢复与 fallback 启动仍需集中可见验收。

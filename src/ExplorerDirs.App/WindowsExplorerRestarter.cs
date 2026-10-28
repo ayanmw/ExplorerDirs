@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -32,7 +33,8 @@ internal static class WindowsExplorerRestarter
         var deadline = Environment.TickCount64 + (long)ShellRestartGracePeriod.TotalMilliseconds;
         while (Environment.TickCount64 < deadline)
         {
-            if (TryGetShellProcessId(out var currentProcessId) && currentProcessId != shellProcessId)
+            if (TryGetShellProcessId(out var currentProcessId) &&
+                IsExpectedRunningReplacementShell(shellProcessId, currentProcessId, explorerPath))
                 return;
 
             Thread.Sleep(100);
@@ -68,6 +70,27 @@ internal static class WindowsExplorerRestarter
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
+            return false;
+        }
+    }
+
+    internal static bool IsExpectedReplacementShell(uint previousProcessId, uint currentProcessId,
+        string? actualPath, string? expectedPath) =>
+        previousProcessId != 0 && currentProcessId != 0 && currentProcessId != previousProcessId &&
+        MatchesExpectedExecutable(actualPath, expectedPath);
+
+    private static bool IsExpectedRunningReplacementShell(uint previousProcessId,
+        uint currentProcessId, string expectedPath)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)currentProcessId);
+            return IsExpectedReplacementShell(previousProcessId, currentProcessId,
+                process.MainModule?.FileName, expectedPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            // A Shell process can exit between reading GetShellWindow and opening its process handle.
             return false;
         }
     }
