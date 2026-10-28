@@ -4429,6 +4429,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - FAQ 38 页面确认每个 Explorer view 有独立设置，并提供“通过列表列标题过滤”的独立示例；示例图显示列标题上的筛选入口会打开该列的复选值清单。上方旧记录中“未公开具体手势”的判断已过期。实现建议为每标签保存列属性值筛选，与现有名称筛选合并；多个列条件按 AND，属性无法读取时保留项目。先做隔离表头消息/入口与 `IShellFolder2` 属性读取验证，再决定产品接线，不替换 ExplorerBrowser。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。
 
+## 2026-10-29：IShellView 已注册属性列排序诊断
+
+- Private Desktop 原生 Header 点击现可读回正确的升序/降序切换，但行序仍不随属性值或方向变化；无窗口 `IPropertyDescription` 对照确认 ByteCount 与标准 Size 都声明规范排序。当前证据仍指向 DefView 没有对该属性列调用适配器的比较/逐项详情路径，列值可显示不代表排序可用。NativeProbe Release build 与无窗口合同 smoke 通过；真实视图探针保留未满足列门槛的 exit code 1。
+- 下一步只在 NativeProbe 中继续隔离 DefView 的排序消费路径；不得修改产品 ExplorerBrowser 或发布包。只有自定义属性列升序、降序都实际按数值重排，并完成 Shell 操作、焦点、拖放和通知等现有迁移门槛后，才评估产品架构迁移。
+
 2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。
 
 2026-10-28：列值筛选查表优化已提交（a73e467）。每列候选值达到 8 个时预建大小写不敏感 HashSet，避免 Shell 项目筛选对最多 256 个值逐项线性比较；较小列表继续线性查找以避免额外集合分配。新增边界 smoke 覆盖第 256 个匹配值和未选择值；完整 Release SettingsSmoke、App Release build（0 警告/错误）和 `git diff --check` 通过。真实 Shell 属性读取与可见筛选效果仍待集中验收。

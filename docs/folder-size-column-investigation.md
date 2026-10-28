@@ -248,6 +248,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 参考：[IFolderView2::SetSortColumns](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setsortcolumns)、[SORTCOLUMN](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ns-shobjidl_core-sortcolumn)。
 
+### 2026-10-29：标题点击方向与属性排序元数据
+
+补充通过 Private Desktop 原生 `SysHeader32` 鼠标消息点击已注册属性列标题的对照。两次点击后 `GetSortColumns` 分别读回方向 `+1`、`-1`，因此原先合成 `LVN_COLUMNCLICK` 不翻转方向的问题不能代表真实 Header 点击；但两次行序和值仍为 `ten - 副本.bin|ten.bin|two.bin` / `10|10|2`，没有随方向重排。`CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，属性工厂仍为三次绑定/创建/取值。记录见 `src/.state/native-probe-watchdog/20261029-023820-85f298c6.stdout.log`；该运行因未注册私有 PKEY 列仍无值而按预期 exit code 1，Private Desktop 前台未变化。
+
+再用无窗口 folder-contract smoke 查询 `IPropertyDescription`：`System.Document.ByteCount` 类型为 `VT_I4`，`GetSortDescription` 返回 `PDSD_SMALLEST_BIGGEST`（`0x3`），`GetTypeFlags` 为 `0x8000001A`，列状态为 `0x2`；标准 `PKEY_Size` 的类型为 `VT_UI8`，排序描述同为 `0x3`。该探针新构建 Release 成功（0 警告、0 错误），运行 exit code 0、未创建窗口。该排序描述只决定 UI 使用的排序文案（最小到最大），不是 DefView 已按属性值比较/重排的证据；不能把属性类型或 schema 描述视作排序已可用。下一步继续定位 DefView 的列排序比较接口/值消费路径；在升降序均实际按数值重排前，逐行大小列仍不满足迁移门槛。
+
 ### 2026-10-29：DefView 列点击通知对照
 
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。

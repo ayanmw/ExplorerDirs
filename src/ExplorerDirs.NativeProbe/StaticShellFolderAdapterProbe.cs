@@ -397,12 +397,16 @@ internal static class StaticShellFolderAdapterProbe
             // suitable production size property (folder sizes exceed Int32).
             var documentByteCount = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
                 { FormatId = DocumentSummaryFormat, PropertyId = 4 });
+            var sizePropertyDescription = GetPropertyDescriptionEvidence(new ShellColumnManager.NativeKey
+                { FormatId = SizeKeyFormat, PropertyId = 12 });
 
             Console.WriteLine($"native-static-shell-folder-contract: adapter-column={columnIndex}; wrapped-pidls={wrappedPidls}; enum-clone={cloneBehavior}; absolute-path={absolutePidlBehavior}; " +
                 "state=0x12; title-and-four-values=valid; standard-PKEY_Size=UInt64/text/sort-valid; variant=UInt64; " +
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
                 $"document-byte-count-type=0x{documentByteCount.VariantType:X4}(hr=0x{documentByteCount.TypeHResult:X8}); " +
+                $"document-byte-count-sort-description=0x{documentByteCount.SortDescription:X8}(hr=0x{documentByteCount.SortDescriptionHResult:X8}); type-flags=0x{documentByteCount.TypeFlags:X8}(hr=0x{documentByteCount.TypeFlagsHResult:X8}); " +
+                $"size-type=0x{sizePropertyDescription.VariantType:X4}; size-sort-description=0x{sizePropertyDescription.SortDescription:X8}; size-type-flags=0x{sizePropertyDescription.TypeFlags:X8}; " +
                 $"column-state=0x{documentByteCount.ColumnState:X8}(hr=0x{documentByteCount.ColumnStateHResult:X8}); window-created=False");
             return 0;
         }
@@ -863,6 +867,26 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(300);
+            var knownSchemaHeaderClickOneResult = SendHeaderItemClick(view, 2);
+            Pump(300);
+            var knownSchemaHeaderClickOneNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var knownSchemaHeaderClickOneValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            var knownSchemaHeaderClickOneSort = ReadCurrentSortColumn(folderView);
+            var knownSchemaHeaderClickTwoResult = SendHeaderItemClick(view, 2);
+            Pump(300);
+            var knownSchemaHeaderClickTwoNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var knownSchemaHeaderClickTwoValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            var knownSchemaHeaderClickTwoSort = ReadCurrentSortColumn(folderView);
+            resetProbeCounters();
+            sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn { Key = sizeColumn, Direction = 1 }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(300);
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -955,7 +979,7 @@ internal static class StaticShellFolderAdapterProbe
             var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var customHeaders = ReadDisplayedColumnHeaders(view);
             var customStats = ReadNativeComparisonStats();
-            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}]; known-schema-descending-values=[{string.Join('|', knownSchemaDescendingValues)}]; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
+            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; synthetic-column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; synthetic-column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; synthetic-column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; header-click-results={knownSchemaHeaderClickOneResult}/{knownSchemaHeaderClickTwoResult}; header-click-one=[{string.Join('|', knownSchemaHeaderClickOneNames)}] values=[{string.Join('|', knownSchemaHeaderClickOneValues)}] sort={knownSchemaHeaderClickOneSort}; header-click-two=[{string.Join('|', knownSchemaHeaderClickTwoNames)}] values=[{string.Join('|', knownSchemaHeaderClickTwoValues)}] sort={knownSchemaHeaderClickTwoSort}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}]; known-schema-descending-values=[{string.Join('|', knownSchemaDescendingValues)}]; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
             Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; headers=[{string.Join('|', customHeaders)}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; custom-column-callbacks={customStats}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
@@ -1517,6 +1541,55 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeHGlobal(pointer); }
     }
 
+    private static string SendHeaderItemClick(nint view, int itemIndex)
+    {
+        Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
+        nint listView = 0;
+        EnumChildWindows(viewWindow, (child, _) =>
+        {
+            var className = new System.Text.StringBuilder(32);
+            if (GetClassNameW(child, className, className.Capacity) > 0 && className.ToString() == "SysListView32")
+            {
+                listView = child;
+                return false;
+            }
+            return true;
+        }, 0);
+        if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child for a native header click.");
+        var header = SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER.
+        if (header == 0) throw new InvalidOperationException("DefView ListView has no native header control.");
+
+        var rectPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            if (SendMessageW(header, 0x1207, (nint)itemIndex, rectPointer) == 0) // HDM_GETITEMRECT.
+                throw new InvalidOperationException($"Could not get native header item rectangle {itemIndex}.");
+            var rect = Marshal.PtrToStructure<NativeRect>(rectPointer);
+            var x = (rect.Left + rect.Right) / 2;
+            var y = (rect.Top + rect.Bottom) / 2;
+            var coordinates = unchecked((nint)((y << 16) | (x & 0xffff)));
+            SendMessageW(header, 0x0200, 0, coordinates); // WM_MOUSEMOVE.
+            SendMessageW(header, 0x0201, 1, coordinates); // WM_LBUTTONDOWN.
+            var result = SendMessageW(header, 0x0202, 0, coordinates); // WM_LBUTTONUP.
+            return $"header=0x{header:X};item={itemIndex};xy={x},{y};up-result=0x{result:X}";
+        }
+        finally { Marshal.FreeHGlobal(rectPointer); }
+    }
+
+    private static string ReadCurrentSortColumn(nint folderView)
+    {
+        Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var count));
+        if (count <= 0) return "none";
+        var pointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>() * count);
+        try
+        {
+            Check(At<GetSortColumns>(folderView, 28)(folderView, pointer, count));
+            var first = Marshal.PtrToStructure<NativeSortColumn>(pointer);
+            return $"{first.Key.FormatId}/{first.Key.PropertyId}:{first.Direction}";
+        }
+        finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
     private static nint ParseChild(nint adapter, string name)
     {
         var text = Marshal.StringToCoTaskMemUni(name);
@@ -1791,12 +1864,14 @@ internal static class StaticShellFolderAdapterProbe
     {
         var interfaceId = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
         var result = PSGetPropertyDescription(in key, in interfaceId, out var description);
-        if (result < 0 || description == 0) return new(result, 0, result, 0, result);
+        if (result < 0 || description == 0) return new(result, 0, result, 0, result, 0, result, 0, result);
         try
         {
             var typeResult = At<GetPropertyType>(description, 5)(description, out var variantType);
+            var typeFlagsResult = At<GetPropertyTypeFlags>(description, 8)(description, 0x80001fff, out var typeFlags); // PDTF_MASK_ALL.
             var columnStateResult = At<GetPropertyColumnState>(description, 12)(description, out var columnState);
-            return new(result, variantType, typeResult, columnState, columnStateResult);
+            var sortDescriptionResult = At<GetPropertySortDescription>(description, 16)(description, out var sortDescription);
+            return new(result, variantType, typeResult, typeFlags, typeFlagsResult, columnState, columnStateResult, sortDescription, sortDescriptionResult);
         }
         finally { Marshal.Release(description); }
     }
@@ -1875,7 +1950,8 @@ internal static class StaticShellFolderAdapterProbe
         public nint Value;
         public nint ReleaseUnknown;
     }
-    private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint ColumnState, int ColumnStateHResult);
+    private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint TypeFlags, int TypeFlagsHResult,
+        uint ColumnState, int ColumnStateHResult, uint SortDescription, int SortDescriptionHResult);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask;
@@ -1925,6 +2001,13 @@ internal static class StaticShellFolderAdapterProbe
         public Point ActionPoint;
         public nint Parameter;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
     {
         public int Size;
@@ -1966,7 +2049,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIDs(nint self, nint sortColumn, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyType(nint self, out ushort variantType);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyTypeFlags(nint self, uint mask, out uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertySortDescription(nint self, out uint description);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProbeCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetLegacyDetailsCallbackProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
