@@ -302,6 +302,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 这把已注册系统属性列的限制确定到“方向状态可读回，但 DefView 保持了名称顺序，没有按属性值排序”，并排除了名称顺序与数字顺序偶然重合的解释。后续不继续堆叠列元数据或旧 callback 试探；下一步检查 DefView/SysListView 排序委托边界及其与 `IShellFolder2::CompareIDs` 的关系，评估是否需要自绘/自管列表及由此增加的 Shell 操作兼容成本。产品仍留在 ExplorerBrowser，未发布任何改动。
 
+### 2026-10-29：CLSID PIDL 直建视图超时
+
+为避开尚未授权的 `Desktop\NameSpace` 注册，NativeProbe 改为临时注册唯一 HKCU CLSID、手工构造 CLSID 绝对 PIDL，并直接从隔离 adapter 创建 `IShellView`。原生 adapter 和 NativeProbe Release 构建均成功；Private Desktop watchdog 在 45 秒后终止探针。日志只有 Private Desktop 启动与 `OleInitialize` 成功，没有到达 C# 视图创建后的下一阶段输出；watchdog 收尾确认临时 CLSID 键已清除，前台基线为 LockApp。日志：`src/.state/native-probe-watchdog/20261029-034154-4bedb92e.stdout.log`。
+
+因此目前只能把阻塞范围收敛到“合成根 PIDL 与 Shell 视图创建/绑定”路径，不能确认具体卡在 `SHCreateShellFolderView` 或其内部回调。单独 CLSID 注册不是完整 Shell namespace 挂载点，这种 PIDL 也没有经 Shell 正常解析验证；继续重复该形态不会提供可靠排序证据。保留此探针变更作为失败边界记录；恢复实验需要真实、隔离的 namespace 注册位置或更窄的带阶段追踪调用。该超时不是产品卡死证据，也没有接入产品或更新发布版。
+
 ### 2026-10-29：DefView 排序时的 ListView 消息观察
 
 为判断标准 Size 和 ByteCount 的差异是否来自 ListView 本身，探针在同一个 Private Desktop `SysListView32` 上安装短生命周期的只读 subclass：仅记录发往该 HWND 的 `LVM_FIRST..LVM_LAST` 范围消息，并立即交给原窗口过程。分别采集标准 Size `SetSortColumns`/两次合成 Header 鼠标消息路径，以及 ByteCount 两个方向；采样区间避开探针随后读取行文本的 LVM 查询。该观察只覆盖发给此 ListView HWND 的消息，不覆盖 DefView 父窗口、其他 HWND 或 Shell 内部 COM/模型调用。

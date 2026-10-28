@@ -8,7 +8,6 @@ internal static class SyntheticShellSortProbe
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
-    private static readonly Guid ShellViewId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
     private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const int LvmFirst = 0x1000;
@@ -35,9 +34,8 @@ internal static class SyntheticShellSortProbe
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
-            Check(SHParseDisplayName($"::{{{SyntheticFolderClassId:D}}}", 0, out rootPidl, 0, out _));
-            Check(SHBindToObject(0, rootPidl, 0, in ShellFolder2Id, out folder));
-            Check(At<CreateViewObject>(folder, 8)(folder, 0, in ShellViewId, out view));
+            rootPidl = CreateClsidPidl(SyntheticFolderClassId);
+            Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
 
             host = new StreamViewHost(parent, []) { View = view };
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
@@ -200,6 +198,15 @@ internal static class SyntheticShellSortProbe
         }
     }
 
+    private static nint CreateClsidPidl(Guid classId)
+    {
+        var pidl = Marshal.AllocCoTaskMem(sizeof(ushort) + 16 + sizeof(ushort));
+        Marshal.WriteInt16(pidl, 18);
+        Marshal.Copy(classId.ToByteArray(), 0, pidl + sizeof(ushort), 16);
+        Marshal.WriteInt16(pidl, 18, 0);
+        return pidl;
+    }
+
     private static int ReadCounter(nint module, string name) =>
         Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, name))();
 
@@ -221,12 +228,12 @@ internal static class SyntheticShellSortProbe
         public uint ColumnCount; public nint Columns; public nint ColumnFormats; public int Group;
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, in Guid iid, out nint folder);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
@@ -234,8 +241,6 @@ internal static class SyntheticShellSortProbe
     private delegate bool EnumChildProcedure(nint child, nint parameter);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bindContext, in Guid iid, out nint value);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
