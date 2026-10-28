@@ -4279,3 +4279,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - NativeProbe 在 Private Desktop 的四个 WPF 托管 `IShellView` 上，通过真实 `IFileOperation` 依次复制、重命名、删除；每一步都核对磁盘结果及四个视图的条目数和路径。连续 3 次通过；随后四 pane 菜单激活/停用和同步销毁也均通过，主桌面 foreground HWND 未变化。探针已加入 watchdog 入口，Release 构建 0 警告/错误。
 - 这证明原型在同一目录下的 Shell 更新可传播到四个独立 view，尚未覆盖不同目录的隔离、真实 OLE 拖动、产品菜单/视图集成或可见 UI。产品仍使用当前 ExplorerBrowser；IShellView 仍处于隔离迁移评审，不据此启动产品迁移。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-文件操作与通知收敛)。
+
+## 2026-10-28：四窗格 WPF 宿主跨目录通知隔离
+
+- NativeProbe 在 Private Desktop 中以三个同目录 pane 加一个独立目录 pane 运行四窗格 WPF `HwndHost → IShellView`；真实 Shell 复制、重命名、删除均使前三个视图更新，隔离 pane 内容/计数保持不变。连续 3 轮通过，并通过键盘路由、菜单激活/停用与同步销毁门槛；前台 HWND 不变，Release NativeProbe 构建 0 警告/错误。
+- 该结果补上 WPF 宿主与不同目录通知隔离的组合证据，但不覆盖真实 OLE 鼠标拖动、产品可见 UI、第三方扩展菜单和颜色列行为；IShellView 仍在隔离评审阶段，产品未切换宿主。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-宿主跨目录通知隔离)。

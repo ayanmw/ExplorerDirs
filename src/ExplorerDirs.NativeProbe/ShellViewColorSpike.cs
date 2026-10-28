@@ -156,11 +156,13 @@ internal static class ShellViewColorSpike
         bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false,
         bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false,
         bool useWpfHwndHostPane = false, bool restoreParentFocusBeforeDestroy = true,
-        bool probeWpfKeyboard = false)
+        bool probeWpfKeyboard = false, bool probeWpfDirectoryIsolation = false)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
         if (probeWpfKeyboard && (paneCount != 4 || !useWpfDispatcherPump || !useWpfHwndSourceParent || !useWpfHwndHostPane))
             throw new ArgumentException("The WPF keyboard consumer probe requires four WPF-hosted Shell panes.", nameof(probeWpfKeyboard));
+        if (probeWpfDirectoryIsolation && !probeWpfKeyboard)
+            throw new ArgumentException("The WPF directory isolation probe requires the four-pane keyboard consumer host.", nameof(probeWpfDirectoryIsolation));
         var previousPumpMode = _useWpfDispatcherPump;
         _useWpfDispatcherPump = useWpfDispatcherPump;
         Console.WriteLine($"multi-pane-cleanup: pump-mode={(useWpfDispatcherPump ? "wpf-dispatcher" : "winforms-doevents")}");
@@ -169,6 +171,7 @@ internal static class ShellViewColorSpike
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-{Guid.NewGuid():N}");
+        string? isolatedFixture = null;
         var stateDirectory = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-state-{Guid.NewGuid():N}");
         var stateStore = new ShellViewStateStore(stateDirectory);
         var panes = new List<(nint Pane, nint Pidl, nint Folder, nint View, nint HostPointer, nint ViewWindow, nint FolderView, ShellViewColorBrowserHost Host)>();
@@ -184,6 +187,13 @@ internal static class ShellViewColorSpike
             File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
             if (probeWpfKeyboard)
                 File.WriteAllText(Path.Combine(fixture, "cleanup-sample-2.txt"), "cleanup-2");
+            if (probeWpfDirectoryIsolation)
+            {
+                isolatedFixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-isolated-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(isolatedFixture);
+                File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample.txt"), "isolated-cleanup");
+                File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample-2.txt"), "isolated-cleanup-2");
+            }
             if (useWpfHwndSourceParent)
             {
                 var parameters = new System.Windows.Interop.HwndSourceParameters("ExplorerDirs WPF cleanup root")
@@ -245,7 +255,8 @@ internal static class ShellViewColorSpike
                         CreateWindowExW(0, "STATIC", $"ExplorerDirs cleanup pane {index + 1}",
                             0x50000000u | 0x02000000u | 0x04000000u, x, y, 390, 265, parent, 0, 0, 0);
                     if (pane == 0) throw new InvalidOperationException($"Could not create pane {index + 1}.");
-                    Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+                    var paneFixture = probeWpfDirectoryIsolation && index == 3 ? isolatedFixture! : fixture;
+                    Check(SHParseDisplayName(paneFixture, 0, out pidl, 0, out _));
                     Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
                     var shellViewId = ShellViewId;
                     Check(At<CreateViewObject>(folder, 8)(folder, pane, ref shellViewId, out view));
@@ -300,7 +311,8 @@ internal static class ShellViewColorSpike
                 Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (activateMenus && !baseMenuRestored)
                     throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
-                var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture);
+                var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture,
+                    probeWpfDirectoryIsolation ? isolatedFixture : null);
                 Console.WriteLine($"multi-pane-cleanup: wpf-file-operations={fileOperations}; foreground-unchanged={GetForegroundWindow() == foreground}");
             }
             if (activateMenus)
@@ -396,6 +408,8 @@ internal static class ShellViewColorSpike
             foreach (var paneHost in wpfPaneHosts) paneHost.Dispose();
             if (wpfParentSource is not null) DestroyCleanupParent(parent, ref wpfParentSource);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (isolatedFixture is not null && Directory.Exists(isolatedFixture))
+                Directory.Delete(isolatedFixture, recursive: true);
             if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
             _useWpfDispatcherPump = previousPumpMode;
         }
@@ -1691,12 +1705,17 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyWpfHostFileOperationConvergence(IReadOnlyList<nint> views,
-        IReadOnlyList<nint> folderViews, string fixture)
+        IReadOnlyList<nint> folderViews, string fixture, string? isolatedFixture)
     {
         if (views.Count != 4 || folderViews.Count != 4)
             throw new ArgumentException("The WPF file-operation probe requires exactly four Shell panes.");
 
         var initialCount = GetShellViewItemCount(folderViews[0]);
+        var isolatedInitialCount = isolatedFixture is null ? 0 : GetShellViewItemCount(folderViews[3]);
+        if (isolatedFixture is not null &&
+            (!ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample.txt")) ||
+             !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample-2.txt"))))
+            throw new IOException("The fourth WPF pane did not open its isolated fixture directory.");
         var sourcePath = Path.Combine(fixture, "cleanup-sample.txt");
         var copiedPath = Path.Combine(fixture, "wpf-copy-result.txt");
         var renamedPath = Path.Combine(fixture, "wpf-renamed-result.txt");
@@ -1708,7 +1727,7 @@ internal static class ShellViewColorSpike
                 Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
             if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
                 throw new IOException("The WPF-hosted Shell copy did not produce the expected fixture content.");
-            WaitForEveryPane(initialCount + 1, copiedPath, null, "copy");
+            WaitForOperationViews(initialCount + 1, copiedPath, null, "copy");
 
             PerformShellFileOperation(operation =>
             {
@@ -1718,7 +1737,7 @@ internal static class ShellViewColorSpike
             });
             if (File.Exists(copiedPath) || !File.Exists(renamedPath))
                 throw new IOException("The WPF-hosted Shell rename did not replace the copied path.");
-            WaitForEveryPane(initialCount + 1, renamedPath, copiedPath, "rename");
+            WaitForOperationViews(initialCount + 1, renamedPath, copiedPath, "rename");
 
             PerformShellFileOperation(operation =>
             {
@@ -1728,8 +1747,10 @@ internal static class ShellViewColorSpike
             });
             if (File.Exists(renamedPath))
                 throw new IOException("The WPF-hosted Shell delete left the fixture path present.");
-            WaitForEveryPane(initialCount, null, renamedPath, "delete");
-            return "copy/rename/delete=all-four-panes-notified";
+            WaitForOperationViews(initialCount, null, renamedPath, "delete");
+            return isolatedFixture is null
+                ? "copy/rename/delete=all-four-panes-notified"
+                : "copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged";
         }
         finally
         {
@@ -1737,14 +1758,22 @@ internal static class ShellViewColorSpike
             Marshal.Release(source);
         }
 
-        void WaitForEveryPane(int expectedCount, string? presentPath, string? absentPath, string operation)
+        void WaitForOperationViews(int expectedCount, string? presentPath, string? absentPath, string operation)
         {
-            for (var index = 0; index < folderViews.Count; index++)
+            var notifiedPaneCount = isolatedFixture is null ? folderViews.Count : folderViews.Count - 1;
+            for (var index = 0; index < notifiedPaneCount; index++)
             {
                 if (!WaitForShellView(folderViews[index], expectedCount, presentPath, absentPath,
                         $"wpf-file-{operation}-pane{index + 1}"))
                     throw new IOException($"WPF-hosted pane {index + 1} did not converge after {operation}.");
             }
+            if (isolatedFixture is not null &&
+                (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount ||
+                 !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample.txt")) ||
+                 !ShellViewContainsPath(folderViews[3], Path.Combine(isolatedFixture, "cleanup-sample-2.txt")) ||
+                 ShellViewContainsPath(folderViews[3], copiedPath) ||
+                 ShellViewContainsPath(folderViews[3], renamedPath)))
+                throw new IOException($"The isolated fourth WPF pane changed or displayed a root-directory item after {operation}.");
         }
     }
 
