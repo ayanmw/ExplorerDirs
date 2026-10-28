@@ -4351,3 +4351,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 按“跨窗格与 Explorer 互操作”P0 门槛，先重跑既有隐藏 Copy 基线，再扩展 Move 对照。NativeProbe Release 构建 0 警告/错误；隐藏目标文件夹收到来自真实 `SVGIO_SELECTION` 数据对象的 Copy 后，目标内容正确、源文件保留。该运行不是完整 OLE `DoDragDrop`，不证明鼠标拖放闭环。
 - 退出码为 1：Private Desktop 外层监督记录前台 HWND 从 `0x10EA8` 变为 `0x7514D4`，尽管内层文件夹目标探针报告其局部前台未变。该桌面隔离条件未通过，因此本轮停止后续 Shell/Private Desktop 探针，没有尝试恢复前台，也没有运行 Move。外层前台差异的来源待查；修复或明确归因前，不以这次运行支持桌面无干扰结论。
+
+## 2026-10-28：工具菜单加入 Windows Explorer Shell 重启入口
+
+- 工具菜单新增“重启 Windows 资源管理器”。用户确认后，通过桌面 Shell 窗口定位其所属 explorer.exe，后台结束该 Shell 进程并启动 Windows Explorer；先等待系统可能进行的自动 Shell 恢复，避免重复启动。未枚举并结束所有 Explorer 进程。
+- App Release 构建 0 警告/错误；没有实际重启 Explorer 或进行 UI 验收。Shell 自动恢复、桌面/开始菜单/任务栏恢复时间、Explorer 文件窗口与 Shell 是否共享进程仍需可见验收。
