@@ -451,3 +451,9 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列表列值过滤作为两种功
 `QuickFilterSettings` 现在保存以 `PROPERTYKEY` 标识的列值条件。一个属性所选值按不区分大小写的 OR 匹配，多属性条件按 AND 匹配；与文件名通配符同时存在时两者继续按 AND 组合。生产 `ShellFolderFilter` 仅在有列条件时调用 `IShellFolder2::GetDetailsEx`，再用 `InitPropVariantFromVariant` 和 `PSFormatForDisplayAlloc` 得到列显示文本；某属性无法读取时跳过该条件，避免误隐藏项目。会话 INI v11 把这些条件按标签写入 Base64/JSON，旧格式默认为无列条件，旧会话写回前备份；Q-Dir 扩展包含同一会话字符串，因此能往返本程序自定义条件。
 
 这一批没有 UI 来创建、选择或清除列值，也没有在 ExplorerBrowser 生产回调里实测 Shell 属性读取/格式化；不能视为列值筛选功能已可供用户使用。下一步实现可见筛选入口，并在集中 GUI 验收中覆盖重排列、空值、过滤组合、逐标签复制/恢复和属性不可读时的行为。此前列头 DirectUI 入口的前台隔离结果仍保持失败，故本批没有改变原生表头或重复执行该探针。
+
+#### 2026-10-28 列头箭头入口接线
+
+`ExplorerBrowserHost` 在导航完成、Shell view 创建及视图几何改变后，通过 Dispatcher 空闲任务缓存 UIA `SplitButton` 边界，并与当时 `IColumnManager` 可见 PROPERTYKEY 顺序对应。鼠标子类回调不执行 UIA；仅当点击落入列头矩形右侧 20 个屏幕坐标单位的区域并避开最右 3 个单位的列宽调整边缘时，应用才消费按下/抬起并排队打开该列筛选清单。标题文字区仍交给 Shell 执行排序；缓存与视图代次不匹配、列头数量不同或 UIA 不可用时也完全保留 Shell 原生点击行为。列值清单支持同列多值勾选、空白值显示和清除当前列条件；应用条件通过现有活动标签 Browser 设置，保留名称筛选与其它列条件。读取值仅请求目标列并去重排序。
+
+后台纯几何回归覆盖箭头区、标题区、列宽调整边缘、标题外区域及 PROPERTYKEY 关联；App Release build 和完整 Release SettingsSmoke 通过。没有启动 ExplorerBrowser 或 GUI，故当前 20/3 DIP 命中范围与真实 Windows 表头控件布局的重合仍未验证；列清单的深浅主题观感、空值读取、筛选后 Shell 刷新、跨 provider 可用性及多标签复制/重开也待可见验收。此前 Private Desktop 前台守卫失败的探针不重跑。

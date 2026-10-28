@@ -159,6 +159,7 @@
     <Compile Include="../ExplorerDirs.App/ShellFolderViewOptions.cs" Link="ShellFolderViewOptions.cs" />
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetShortcut.cs" Link="ShellHeaderPresetShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetMenuGate.cs" Link="ShellHeaderPresetMenuGate.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnHeaderArrowHitTest.cs" Link="ShellColumnHeaderArrowHitTest.cs" />
     <Compile Include="../ExplorerDirs.App/ShellStatusCountRefreshGate.cs" Link="ShellStatusCountRefreshGate.cs" />
     <Compile Include="../ExplorerDirs.App/SystemExplorerLauncher.cs" Link="SystemExplorerLauncher.cs" />
     <Compile Include="../ExplorerDirs.App/WindowsExplorerRestarter.cs" Link="WindowsExplorerRestarter.cs" />

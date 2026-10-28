@@ -103,6 +103,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ulong? _folderSizeCacheBytes;
     private long _folderSizeCacheReadAt;
     private readonly ShellHeaderPresetMenuGate _headerPresetMenuGate = new();
+    private IReadOnlyList<ShellColumnHeaderArrowTarget> _columnHeaderArrowTargets = [];
+    private long _columnHeaderArrowTargetsGeneration = -1;
+    private bool _columnHeaderGeometryRefreshQueued;
+    private bool _columnFilterArrowMouseDown;
     private DispatcherTimer? _newFolderRenameTimer;
     private DispatcherTimer? _createdFileSelectionTimer;
     private IntPtr _createdFileSelectionPidl;
@@ -183,6 +187,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
         try { return ShellFileViewExportCapture.Capture(view, quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter); }
+        finally { Marshal.Release(view); }
+    }
+
+    internal IReadOnlyList<string> CaptureColumnDisplayValues(PropertyKeyState key)
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        try
+        {
+            return ShellFileViewExportCapture.CaptureColumnDisplayValues(view, key,
+                quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter);
+        }
         finally { Marshal.Release(view); }
     }
 
@@ -416,6 +432,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal event EventHandler? SelectionContextChanged;
     internal event Action<QuickFilterSettings>? QuickFilterChanged;
     internal event Action<ShellMenuPoint>? HeaderPresetMenuRequested;
+    internal event Action<PropertyKeyState, string, ShellMenuPoint>? ColumnValueFilterMenuRequested;
     internal bool CanGoBack => CanNavigateHistory(true);
     internal bool CanGoForward => CanNavigateHistory(false);
     public event EventHandler<ShellNavigationNotice>? SearchNavigated;
@@ -961,6 +978,92 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (ElementNotAvailableException) { return null; }
         catch (COMException) { return null; }
         catch (InvalidOperationException) { return null; }
+    }
+
+    private IReadOnlyList<ShellColumnHeaderArrowTarget> CaptureColumnHeaderArrowTargets()
+    {
+        var content = FindContentFocusWindow();
+        if (content == 0) return [];
+        try
+        {
+            var root = AutomationElement.FromHandle(content);
+            var header = root.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Header));
+            var splitButtons = header?.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.SplitButton));
+            if (splitButtons is null || splitButtons.Count == 0) return [];
+
+            var view = GetFolderView2Pointer();
+            if (view == 0) return [];
+            try
+            {
+                var result = ShellColumnManager.CaptureForExport(view, out var columns);
+                if (result != 0 || columns is null || columns.Count != splitButtons.Count) return [];
+                var targets = new ShellColumnHeaderArrowTarget[splitButtons.Count];
+                for (var index = 0; index < splitButtons.Count; index++)
+                {
+                    var element = splitButtons[index];
+                    var bounds = element.Current.BoundingRectangle;
+                    if (element.Current.IsOffscreen || bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0)
+                        return [];
+                    targets[index] = new ShellColumnHeaderArrowTarget(bounds, columns[index].Key, columns[index].Name);
+                }
+                return targets;
+            }
+            finally { Marshal.Release(view); }
+        }
+        catch (ElementNotAvailableException) { return []; }
+        catch (COMException) { return []; }
+        catch (InvalidOperationException) { return []; }
+    }
+
+    private void QueueColumnHeaderGeometryRefresh()
+    {
+        _columnHeaderArrowTargets = [];
+        _columnHeaderArrowTargetsGeneration = -1;
+        if (_columnHeaderGeometryRefreshQueued || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            return;
+        _columnHeaderGeometryRefreshQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            _columnHeaderGeometryRefreshQueued = false;
+            if (_browser is null || !IsVisible || _viewReadiness.Pending) return;
+            _columnHeaderArrowTargets = CaptureColumnHeaderArrowTargets();
+            _columnHeaderArrowTargetsGeneration = _viewReadiness.Generation;
+        }));
+    }
+
+    private bool TryGetColumnFilterArrowHit(IntPtr hwnd, IntPtr lParam,
+        out ShellColumnHeaderArrowTarget target, out ShellMenuPoint screenPoint)
+    {
+        target = default;
+        screenPoint = default;
+        if (!IsVisible || _columnHeaderArrowTargetsGeneration != _viewReadiness.Generation ||
+            _columnHeaderArrowTargets.Count == 0)
+            return false;
+
+        var point = new NativePoint
+        {
+            X = unchecked((short)(lParam.ToInt64() & 0xFFFF)),
+            Y = unchecked((short)((lParam.ToInt64() >> 16) & 0xFFFF))
+        };
+        if (!ClientToScreen(hwnd, ref point) ||
+            !ShellColumnHeaderArrowHitTest.TryFind(_columnHeaderArrowTargets,
+                new System.Windows.Point(point.X, point.Y), out target))
+            return false;
+        screenPoint = new ShellMenuPoint(point.X, point.Y);
+        return true;
+    }
+
+    private bool IsColumnHeaderPoint(IntPtr hwnd, IntPtr lParam)
+    {
+        var point = new NativePoint
+        {
+            X = unchecked((short)(lParam.ToInt64() & 0xFFFF)),
+            Y = unchecked((short)((lParam.ToInt64() >> 16) & 0xFFFF))
+        };
+        return ClientToScreen(hwnd, ref point) &&
+            _columnHeaderArrowTargets.Any(target => target.Bounds.Contains(point.X, point.Y));
     }
 
     private void FocusFolderItem()
@@ -4387,6 +4490,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     AttachViewWindow(hwnd);
                     NativeShellTheme.Apply(hwnd);
                     QueueNativeThemeRefresh();
+                    QueueColumnHeaderGeometryRefresh();
                 }
             }
             finally { Marshal.ReleaseComObject(shellView); }
@@ -4449,6 +4553,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 try { ApplyViewState(); }
                 catch (Exception ex) { MenuError?.Invoke(this, $"恢复视图配置失败：{ex.Message}"); }
                 if (!_viewReadiness.IsCurrent(navigationVersion)) return;
+                QueueColumnHeaderGeometryRefresh();
                 if (isFileSystemLocation) StartDirectoryChangeMonitor(path, navigationVersion);
                 else StopDirectoryChangeMonitor();
                 if (CanCompleteNavigationRequest(requestVersion)) RestoreNavigationFocus(navigationVersion);
@@ -4667,6 +4772,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _subclassedWindows.Clear();
         _viewWindow = IntPtr.Zero;
         _lastContentFocusWindow = IntPtr.Zero;
+        _columnHeaderArrowTargets = [];
+        _columnHeaderArrowTargetsGeneration = -1;
+        _columnFilterArrowMouseDown = false;
     }
 
     private IntPtr ViewWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, nuint id, IntPtr data)
@@ -4678,7 +4786,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             // Finish the mouse gesture before caching selection; a button-down snapshot can be an intermediate range.
-            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0204 or 0x0207)
+            if (message is 0x0100 or 0x0104 or 0x0111 or 0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0207)
                 NoteNativeUserInput(hwnd);
             if (message == 0x020A && (wParam.ToInt64() & 0x0008) != 0 && CtrlWheelHandler is { } wheelHandler)
             {
@@ -4727,6 +4835,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             switch (message)
             {
+                case 0x0005: // WM_SIZE
+                case 0x0047: // WM_WINDOWPOSCHANGED
+                    QueueColumnHeaderGeometryRefresh();
+                    break;
                 case 0x0007: // WM_SETFOCUS
                     var focusedClass = new StringBuilder(64);
                     GetClassName(hwnd, focusedClass, focusedClass.Capacity);
@@ -4739,8 +4851,32 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         Activated?.Invoke(this, EventArgs.Empty);
                     break;
                 case 0x0201: // WM_LBUTTONDOWN
+                case 0x0203: // WM_LBUTTONDBLCLK
                     _headerPresetMenuGate.Reset();
                     Activated?.Invoke(this, EventArgs.Empty);
+                    if (TryGetColumnFilterArrowHit(hwnd, lParam, out var columnTarget, out var columnPoint))
+                    {
+                        _columnFilterArrowMouseDown = true;
+                        var browser = _browser;
+                        var viewWindow = _viewWindow;
+                        var generation = _viewReadiness.Generation;
+                        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+                        {
+                            if (ReferenceEquals(browser, _browser) && viewWindow == _viewWindow &&
+                                generation == _viewReadiness.Generation && IsVisible)
+                                ColumnValueFilterMenuRequested?.Invoke(columnTarget.Key,
+                                    columnTarget.DisplayName, columnPoint);
+                        }));
+                        return IntPtr.Zero;
+                    }
+                    break;
+                case 0x0202: // WM_LBUTTONUP
+                    if (_columnFilterArrowMouseDown)
+                    {
+                        _columnFilterArrowMouseDown = false;
+                        return IntPtr.Zero;
+                    }
+                    if (IsColumnHeaderPoint(hwnd, lParam)) QueueColumnHeaderGeometryRefresh();
                     break;
                 case 0x0207: // WM_MBUTTONDOWN
                     _headerPresetMenuGate.Reset();
@@ -4773,7 +4909,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     NativeShellTheme.BeginMenu(hwnd);
                     break;
                 case 0x0210: // WM_PARENTNOTIFY: apply theme to newly created native children.
-                    if ((wParam.ToInt64() & 0xFFFF) == 1) QueueNativeThemeRefresh();
+                    if ((wParam.ToInt64() & 0xFFFF) == 1)
+                    {
+                        QueueNativeThemeRefresh();
+                        QueueColumnHeaderGeometryRefresh();
+                    }
                     break;
                 case 0x011F: // WM_MENUSELECT: style only this thread's native popup frames.
                     NativeShellTheme.ApplyMenuFramesFromOwner();
@@ -5304,6 +5444,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr hwnd, ref NativePoint point);
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]

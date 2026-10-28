@@ -373,6 +373,7 @@ public partial class MainWindow : Window
                 _fileViewFocusDesired = true;
             };
             pane.HeaderPresetMenuRequested += ShowViewPresetContextMenu;
+            pane.ColumnValueFilterMenuRequested += ShowColumnValueFilterMenu;
             pane.ShortcutRequested += ExecuteShortcut;
             pane.MayRestoreFileFocus = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired && IsActive;
             pane.MayKeepFileFocusRestorePending = () => ReferenceEquals(ActivePane, pane) && _fileViewFocusDesired;
@@ -754,6 +755,87 @@ public partial class MainWindow : Window
             }
         }
         menu.IsOpen = true;
+    }
+
+    private void ShowColumnValueFilterMenu(PaneControl pane, PropertyKeyState key, string columnName,
+        ShellMenuPoint point)
+    {
+        SetActivePane(pane);
+        var localPoint = pane.PointFromScreen(new Point(point.X, point.Y));
+        var menu = new ContextMenu
+        {
+            PlacementTarget = pane,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.RelativePoint,
+            HorizontalOffset = localPoint.X,
+            VerticalOffset = localPoint.Y
+        };
+        menu.Items.Add(new MenuItem { Header = $"筛选：{columnName}", IsEnabled = false });
+        menu.Items.Add(new Separator());
+        var loading = new MenuItem { Header = "正在读取列值…", IsEnabled = false };
+        menu.Items.Add(loading);
+        menu.Opened += (_, _) => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() => PopulateColumnValueFilterMenu(menu, pane, key, columnName, loading)));
+        menu.IsOpen = true;
+    }
+
+    private void PopulateColumnValueFilterMenu(ContextMenu menu, PaneControl pane, PropertyKeyState key,
+        string columnName, MenuItem loading)
+    {
+        if (!menu.IsOpen) return;
+        IReadOnlyList<string> values;
+        try { values = pane.CaptureColumnDisplayValues(key); }
+        catch (Exception ex)
+        {
+            loading.Header = $"读取列值失败：{ex.Message}";
+            return;
+        }
+
+        var currentFilter = pane.CurrentQuickFilter.ColumnFilters.FirstOrDefault(filter => filter.Key == key);
+        var selectedValues = currentFilter?.Values.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var allValues = values.Concat(selectedValues)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+
+        menu.Items.Remove(loading);
+        var clear = new MenuItem
+        {
+            Header = "清除此列筛选",
+            IsEnabled = selectedValues.Count > 0
+        };
+        clear.Click += (_, _) => pane.ApplyColumnValueFilter(key, []);
+        menu.Items.Add(clear);
+        menu.Items.Add(new Separator());
+        if (allValues.Length == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = "当前目录没有可筛选值", IsEnabled = false });
+            return;
+        }
+
+        foreach (var value in allValues)
+        {
+            var item = new MenuItem
+            {
+                Header = string.IsNullOrEmpty(value) ? "（空白）" : value,
+                Tag = value,
+                IsCheckable = true,
+                IsChecked = selectedValues.Contains(value),
+                StaysOpenOnClick = true
+            };
+            item.Click += (_, _) =>
+            {
+                var selected = menu.Items.OfType<MenuItem>()
+                    .Where(entry => entry.IsCheckable && entry.IsChecked && entry.Tag is string)
+                    .Select(entry => (string)entry.Tag)
+                    .ToArray();
+                if (!pane.ApplyColumnValueFilter(key, selected)) item.IsChecked = !item.IsChecked;
+                clear.IsEnabled = menu.Items.OfType<MenuItem>().Any(entry =>
+                    entry.IsCheckable && entry.IsChecked && entry.Tag is string);
+            };
+            menu.Items.Add(item);
+        }
     }
 
     private string? PromptViewPresetName()

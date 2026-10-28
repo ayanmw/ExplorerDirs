@@ -542,6 +542,7 @@ try
     QdrViewSmoke.Run();
     ViewStyleWheelSmoke.Run();
     ShellQuickFilterSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ShellColumnHeaderArrowHitTestSmoke.Run();
     QuickFilterEnumerationGateSmoke.Run();
     FileViewExportSmoke.Run();
     FileViewPrintSmoke.Run();

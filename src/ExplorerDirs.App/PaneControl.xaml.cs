@@ -175,6 +175,7 @@ public partial class PaneControl : UserControl
             isActive ? "ExplorerDirs.AccentBrush" : "ExplorerDirs.BorderBrush");
     }
     internal event Action<PaneControl, ShellMenuPoint>? HeaderPresetMenuRequested;
+    internal event Action<PaneControl, PropertyKeyState, string, ShellMenuPoint>? ColumnValueFilterMenuRequested;
     internal event Func<PaneControl, ExplorerShortcut, bool>? ShortcutRequested;
     internal Func<bool>? MayRestoreFileFocus { get; set; }
     internal Func<bool>? MayKeepFileFocusRestorePending { get; set; }
@@ -724,6 +725,29 @@ public partial class PaneControl : UserControl
     internal ExplorerBrowserHost.SelectedItem? GetSelectedQuickLinkItem() => Current?.Browser.GetSelectedItem();
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot() => Current?.Browser.CaptureFileViewExportSnapshot()
         ?? throw new InvalidOperationException("当前窗格没有可导出的文件视图。");
+    internal IReadOnlyList<string> CaptureColumnDisplayValues(PropertyKeyState key) =>
+        Current?.Browser.CaptureColumnDisplayValues(key)
+        ?? throw new InvalidOperationException("当前窗格没有可读取的文件视图。");
+
+    internal bool ApplyColumnValueFilter(PropertyKeyState key, IReadOnlyList<string> selectedValues)
+    {
+        if (Current is not { } state) return false;
+        var settings = state.Browser.QuickFilter;
+        var filters = settings.ColumnFilters.Where(filter => filter.Key != key).ToList();
+        if (selectedValues.Count > 0)
+            filters.Add(new ColumnValueFilter(key, selectedValues));
+        try
+        {
+            if (!state.Browser.SetQuickFilter(settings.WithColumnFilters(filters))) return false;
+        }
+        catch (Exception ex)
+        {
+            if (Current == state) Status.Text = $"应用列值筛选失败：{ex.Message}";
+            return false;
+        }
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
     internal FileViewPrintSnapshot CaptureFileViewPrintSnapshot() => Current?.Browser.CaptureFileViewPrintSnapshot()
         ?? throw new InvalidOperationException("当前窗格没有可打印的文件视图。");
     internal PhotoPrintSelectionResult CapturePhotoPrintSelection() => Current?.Browser.CapturePhotoPrintSelection()
@@ -1029,6 +1053,7 @@ public partial class PaneControl : UserControl
     }
 
     internal bool IsQuickFilterInputFocused => QuickFilterBox.IsKeyboardFocusWithin;
+    internal QuickFilterSettings CurrentQuickFilter => Current?.Browser.QuickFilter ?? QuickFilterSettings.Empty;
     internal bool HasFileViewFocus => _treeHost?.HasNativeFocus() != true && Current?.Browser.HasNativeFocus() == true;
     internal bool ContainsMouseWheelShellTarget(nint hwnd) => IsVisible &&
         (Current?.Browser.ContainsNativeWindow(hwnd) == true ||
@@ -1707,6 +1732,11 @@ public partial class PaneControl : UserControl
         };
         browser.Activated += (_, _) => state.Owner.Activated?.Invoke(state.Owner, EventArgs.Empty);
         browser.HeaderPresetMenuRequested += point => state.Owner.HeaderPresetMenuRequested?.Invoke(state.Owner, point);
+        browser.ColumnValueFilterMenuRequested += (key, name, point) =>
+        {
+            if (state.Owner.Current == state)
+                state.Owner.ColumnValueFilterMenuRequested?.Invoke(state.Owner, key, name, point);
+        };
         browser.ShortcutHandler = shortcut => shortcut == ExplorerShortcut.OpenSelectionInNewTab
             ? state.Owner.TryOpenSelectedFolderInNewTab()
             : state.Owner.ShortcutRequested?.Invoke(state.Owner, shortcut) == true;
