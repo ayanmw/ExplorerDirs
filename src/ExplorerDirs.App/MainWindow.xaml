@@ -81,6 +81,8 @@
                               Tag="FolderName" Click="WindowTitleMode_Click"/>
                     <MenuItem x:Name="WindowTitleSelectedItemPathMenu" Header="所选项目完整路径" IsCheckable="True"
                               Tag="SelectedItemPath" Click="WindowTitleMode_Click"/>
+                    <MenuItem x:Name="WindowTitleRecentFavoriteMenu" Header="最近打开的收藏夹" IsCheckable="True"
+                              Tag="RecentFavorite" Click="WindowTitleMode_Click"/>
                 </MenuItem>
                 <MenuItem x:Name="FullScreenMenu" Header="全屏" InputGestureText="F11"
                           IsCheckable="True" Click="FullScreenMenu_Click"/>

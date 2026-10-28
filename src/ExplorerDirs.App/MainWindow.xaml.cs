@@ -62,6 +62,7 @@ public partial class MainWindow : Window
     private bool _multilineTabHeaders;
     private bool _limitTabHeaderWidth = true;
     private WindowTitleMode _windowTitleMode;
+    private string? _recentFavoritePath;
     private string _applicationTitle = "Explorer Dirs";
     private bool _windowTitleRefreshQueued;
     private bool _showTabCloseButtons;
@@ -611,6 +612,7 @@ public partial class MainWindow : Window
         WindowTitleFullPathMenu.IsChecked = _windowTitleMode == WindowTitleMode.FullPath;
         WindowTitleFolderNameMenu.IsChecked = _windowTitleMode == WindowTitleMode.FolderName;
         WindowTitleSelectedItemPathMenu.IsChecked = _windowTitleMode == WindowTitleMode.SelectedItemPath;
+        WindowTitleRecentFavoriteMenu.IsChecked = _windowTitleMode == WindowTitleMode.RecentFavorite;
     }
 
     private void QueueWindowTitleRefresh()
@@ -636,7 +638,8 @@ public partial class MainWindow : Window
         var selectedPath = _windowTitleMode == WindowTitleMode.SelectedItemPath
             ? pane.GetSelectedQuickLinkItem()?.Path
             : null;
-        Title = WindowTitlePresentation.Format(_applicationTitle, _windowTitleMode, currentPath, selectedPath);
+        Title = WindowTitlePresentation.Format(_applicationTitle, _windowTitleMode, currentPath, selectedPath,
+            _recentFavoritePath);
     }
 
     private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)
@@ -2542,6 +2545,9 @@ public partial class MainWindow : Window
     private void OpenFavorite(string path)
     {
         var pane = ActivePane;
+        // Only an explicit favorite-menu action changes this title source; ordinary navigation does not.
+        _recentFavoritePath = path;
+        QueueWindowTitleRefresh();
         _fileViewFocusDesired = true;
         pane.NavigateTo(path);
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>

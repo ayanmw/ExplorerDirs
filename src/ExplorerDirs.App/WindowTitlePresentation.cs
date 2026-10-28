@@ -9,19 +9,21 @@ internal enum WindowTitleMode
     None,
     FullPath,
     FolderName,
-    SelectedItemPath
+    SelectedItemPath,
+    RecentFavorite
 }
 
 internal static class WindowTitlePresentation
 {
     internal static string Format(string applicationTitle, WindowTitleMode mode, string currentFolder,
-        string? selectedItemPath)
+        string? selectedItemPath, string? recentFavoritePath = null)
     {
         var detail = mode switch
         {
             WindowTitleMode.FullPath => currentFolder,
             WindowTitleMode.FolderName => FolderName(currentFolder),
             WindowTitleMode.SelectedItemPath => selectedItemPath,
+            WindowTitleMode.RecentFavorite => recentFavoritePath,
             _ => null
         };
         return string.IsNullOrWhiteSpace(detail) ? applicationTitle : $"{applicationTitle} — {detail}";

@@ -22,6 +22,11 @@ internal static class WindowTitlePreferenceSmoke
             Check(WindowTitlePresentation.Format("Explorer Dirs", WindowTitleMode.SelectedItemPath,
                 @"C:\Users\marvin", @"C:\Users\marvin\file.txt") ==
                 @"Explorer Dirs — C:\Users\marvin\file.txt", "selected item path mode");
+            Check(WindowTitlePresentation.Format("Explorer Dirs", WindowTitleMode.RecentFavorite,
+                @"C:\Users\marvin", null) == "Explorer Dirs", "recent favorite mode has no suffix before a favorite is opened");
+            Check(WindowTitlePresentation.Format("Explorer Dirs", WindowTitleMode.RecentFavorite,
+                @"C:\Users\marvin", null, @"D:\Workspaces\server") ==
+                @"Explorer Dirs — D:\Workspaces\server", "recent favorite mode shows the explicitly opened favorite path");
 
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "WindowTitle.ini");
@@ -30,6 +35,9 @@ internal static class WindowTitlePreferenceSmoke
             preference.Save(WindowTitleMode.SelectedItemPath);
             Check(new WindowTitlePreferenceStore(path).Load() == WindowTitleMode.SelectedItemPath,
                 "portable preference roundtrip");
+            preference.Save(WindowTitleMode.RecentFavorite);
+            Check(new WindowTitlePreferenceStore(path).Load() == WindowTitleMode.RecentFavorite,
+                "recent favorite mode preference roundtrip");
             File.WriteAllText(path, "[WindowTitle]\nFormatVersion=99\nMode=FullPath\n");
             var future = new WindowTitlePreferenceStore(path);
             Check(future.Load() == WindowTitleMode.None && future.LoadWarning is not null,
