@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 当前采样器用法
+
+`scripts/sample-memory.ps1` 默认每 5 秒采样、持续 300 秒；默认收集所有正在运行的 Explorer Dirs 进程，并为每一行记录 PID 与进程启动时间。需要严格跟踪同一实例时传入 `-ProcessId <PID>`；采样器先确认 PID 属于 `ExplorerDirs.App`，之后持续核对进程启动时间，目标退出或 PID 被复用后停止，不会切换到另一个实例。输出现在还包含 GDI 与 USER 对象计数，帮助发现 GUI 资源数量随固定操作负载持续增长的情况。
+
+示例：`pwsh -NoProfile -File scripts/sample-memory.ps1 -ProcessId 1234 -DurationSeconds 300 -IntervalSeconds 5 -OutputPath src/.state/memory-samples/fixed-load.csv`。采样只读取进程计数，不启动、聚焦或操作应用；GDI/USER 计数和进程级内存变化只能指出值得继续追查的方向，不能单独证明泄漏或分配来源。若要比较负载阶段，应记录每阶段的起止时间并保持同一 PID、相同操作序列和窗格/标签数量。
+
 ## 2026-10-28：记录四窗格压力阶段及 Shell 宿主释放后的占用
 
 - HostProbe 增加被动阶段检查点，并提供仅供隔离探针显式启用的 `EXPLORER_DIRS_HOSTPROBE_FORCE_GC_AFTER_DISPOSE=1` 完整 GC 对照；正式 App 不读取此变量。四阶段为 4 个 Shell 视图就绪、3,000 项创建完成、删除并静置 5 秒后、释放全部 Shell 宿主后。默认检查点不强制 GC；托管字节字段可能包括尚未回收的垃圾。

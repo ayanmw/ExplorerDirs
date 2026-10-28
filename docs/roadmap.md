@@ -13,6 +13,8 @@
 
 2026-10-28：为集中验收准备最新隔离候选 `src/.state/gui-smoke/20261028-030259-694-16bd5d`。源码 `0621d2bdf0f5360e8da45b3e338dea0408c1b07b`，工作区干净；Release `dotnet publish` 成功，唯一构建标识写入程序集，EXE SHA-256 `D763E219D8899DD1FE9CAD40C1EFD3E467143075FE5A351A17BB40EC144E237B`。准备目录含四个独立窗格样本、QDR/Program Starter 配置和 10,000 项递归扫描夹具。`-PrepareOnly` 在加载 UI Automation 与窗口操作前返回；未启动候选窗口、未覆盖日常发布。该产物仅供后续集中桌面验收，不代表功能验收通过。
 
+2026-10-28：内存采样器现可用 `-ProcessId` 固定单个 ExplorerDirs 实例，并核对进程启动时间以拒绝 PID 复用；CSV 增加 GDI/USER 计数。指定 PID 与默认多实例模式各做了两点只读冒烟，错误进程身份以退出码 2 拒绝且不创建输出。没有记录固定浏览负载，因此内存归因仍待同一 PID 的受控操作采样；说明与命令见[内存采样](memory-sampling.md#当前采样器用法)。
+
 2026-10-28：以当前 `0f23ba1` 源码运行完整 Release `ExplorerDirs.SettingsSmoke`，退出码 0，汇总 `Settings smoke: PASS`。本次没有修改产品代码、启动可见窗口或覆盖发布包。它证明当前无窗口设置/路由/状态回归集通过，不替代 ExplorerBrowser 真实鼠标键盘、主题像素或独立 Q-Dir 互操作验收。
 
 2026-10-28：NativeProbe 的 Private Desktop 列标题菜单复验现已执行“类型”子项的 Shell 命令映射，并从 `IFolderView2` 读回主排序键为 `PKEY_ItemTypeText`；裸 `WM_COMMAND` 发给 `SHELLDLL_DefView` 未改排序，实际验证通过的是映射后的 `IContextMenu::InvokeCommand`。这一项补强了隔离宿主命令映射证据，不覆盖物理菜单选择或产品 ExplorerBrowser UI，仍留在集中验收门槛内。详见[核心操作对照](shell-parity.md#2026-10-28-列标题菜单命令隔离复核)。

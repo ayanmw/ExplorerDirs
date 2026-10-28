@@ -5,6 +5,9 @@ param(
     [ValidateRange(1, 3600)]
     [int]$IntervalSeconds = 5,
 
+    [ValidateRange(1, 2147483647)]
+    [int]$ProcessId,
+
     [string]$OutputPath
 )
 
@@ -25,12 +28,31 @@ else {
 }
 
 $processes = @(Get-Process -Name 'ExplorerDirs.App' -ErrorAction SilentlyContinue)
-if ($processes.Count -eq 0) {
+if ($PSBoundParameters.ContainsKey('ProcessId')) {
+    $target = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $target -or $target.ProcessName -ne 'ExplorerDirs.App') {
+        [Console]::Error.WriteLine("PID $ProcessId is not a running ExplorerDirs.App process.")
+        exit 2
+    }
+    $targetStartTicks = $target.StartTime.ToUniversalTime().Ticks
+    $target.Dispose()
+}
+elseif ($processes.Count -eq 0) {
     [Console]::Error.WriteLine('No running ExplorerDirs.App process was found. The sampler never launches the application.')
     exit 2
 }
 
-$header = 'timestamp_utc,elapsed_seconds,pid,process_start_utc,working_set_bytes,private_bytes,virtual_bytes,handle_count,thread_count'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ExplorerDirsGuiResourceCounter
+{
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetGuiResources(IntPtr process, uint flags);
+}
+'@
+
+$header = 'timestamp_utc,elapsed_seconds,pid,process_start_utc,working_set_bytes,private_bytes,virtual_bytes,handle_count,thread_count,gdi_object_count,user_object_count'
 $writer = [System.IO.StreamWriter]::new($OutputPath, $false, [System.Text.UTF8Encoding]::new($false))
 $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $rowCount = 0
@@ -39,7 +61,19 @@ try {
     $writer.WriteLine($header)
     do {
         $timestamp = [DateTimeOffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-        $processes = @(Get-Process -Name 'ExplorerDirs.App' -ErrorAction SilentlyContinue)
+        if ($PSBoundParameters.ContainsKey('ProcessId')) {
+            $target = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+            if ($null -eq $target) { break }
+            if ($target.ProcessName -ne 'ExplorerDirs.App' -or
+                $target.StartTime.ToUniversalTime().Ticks -ne $targetStartTicks) {
+                $target.Dispose()
+                break
+            }
+            $processes = @($target)
+        }
+        else {
+            $processes = @(Get-Process -Name 'ExplorerDirs.App' -ErrorAction SilentlyContinue)
+        }
         if ($processes.Count -eq 0 -and $rowCount -gt 0) { break }
         foreach ($process in $processes) {
             try {
@@ -55,13 +89,18 @@ try {
                     $process.PrivateMemorySize64,
                     $process.VirtualMemorySize64,
                     $process.HandleCount,
-                    $process.Threads.Count
+                    $process.Threads.Count,
+                    [ExplorerDirsGuiResourceCounter]::GetGuiResources($process.Handle, 0),
+                    [ExplorerDirsGuiResourceCounter]::GetGuiResources($process.Handle, 1)
                 ) -join ','
                 $writer.WriteLine($row)
                 $rowCount++
             }
             catch [System.InvalidOperationException] {
                 # The process exited between enumeration and sampling.
+            }
+            finally {
+                $process.Dispose()
             }
         }
 
