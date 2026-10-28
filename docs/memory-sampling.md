@@ -5,6 +5,7 @@
 - 当前工作树 `5808acc` 的只读源码检查，重点看每个 `ExplorerBrowserHost` 中随文件浏览变化而增长的集合。已确认选择回调、选择恢复和目录刷新时间线分别限制为 64、128、64 条；原生消息样本限制为 64 条且仅在诊断开关打开时采集；慢消息时间线最多 256 条。Shell 子窗口销毁时移除 HWND 类名和 subclass 记录，浏览器销毁时清空已发导航请求及搜索位置映射。图标 LRU 固定上限 256 项。
 - 发现一个有意保留但容量未设上限的状态：每个浏览器实例的 `ShellSearchHistory` 为成功搜索保留 PIDL 身份哈希、Shell 解析名和原始 `search-ms:` URI 映射，以便 TravelLog 后退/前进时恢复查询范围与关键词。浏览器销毁时清空；失败或尚未提交的请求会单独移除。源码没有显示随普通文件导航增长的诊断列表或通用文件图标缓存。
 - 这只是源码留存路径检查，不是运行期增长证据。搜索映射是否比 Windows TravelLog 实际保留时间更久、每次搜索的原生 PIDL/字符串成本，以及正式 App 固定浏览负载下的 Private Bytes/托管堆/GDI/USER 变化仍未知。暂不限制搜索映射，避免让仍可后退到的 Search Folder 失去恢复身份；下一步应在同一正式 App PID 下记录固定次数的搜索→浏览→后退操作，并在每个阶段同时采进程计数与活动标签/窗格数，再判断是否需要与 TravelLog 生命周期联动的清理。
+- 后续官方接口查证发现旧版 `ITravelLogStg` 合约提供 `EnumEntries`，可向前、向后或遍历整个 TravelLog；现有 NativeProbe 只读到 travel-log 服务和条目数量，未验证枚举器、条目身份与 `ShellSearchHistory` 的对应关系。若未来获准进行隔离 Shell 宿主验证，应先核对 ExplorerBrowser 的实际服务和可见历史条目，再评估按历史成员清理；固定容量裁剪仍不是已批准或已验证的方案。[ITravelLogStg](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa768470%28v%3Dvs.85%29) · [EnumEntries](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa768466%28v%3Dvs.85%29)
 
 ## 当前采样器用法
 
