@@ -198,7 +198,9 @@ internal sealed class FolderOpenRouter : IDisposable
         }
         try
         {
-            await WriteRequestAsync(client, payload, qdr, selectionPayload, deadline).ConfigureAwait(false);
+            // Older receivers know only directory requests, so preserve Explorer's parent-folder part.
+            await WriteRequestAsync(client, payload, qdr: selectionPayload is null && qdr,
+                selectionPayload: null, token: deadline).ConfigureAwait(false);
             return await ReadRequestResultAsync(client, deadline).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or OperationCanceledException)

@@ -25,8 +25,8 @@
 
 ## 2026-10-28：Explorer `/select` 启动请求
 
-- 启动解析器支持 `/select,<对象>`、`/select, <对象>` 和 `/select <对象>`；定位到对象所在目录后，通过现有 profile 单实例管道携带目录与目标项。接收端只在对应导航完成后向当前 Shell 视图请求选择，并复用已有带导航代际、选区版本和用户输入版本保护的重试机制。
-- Release SettingsSmoke 覆盖解析、路径空格、未知/缺失开关、同请求重试去重、父目录与目标项不匹配拒绝；App Release build 通过，0 警告/错误。没有启动 GUI 或 ExplorerBrowser，不证明 Windows 实际命令行拆分、Shell 文件/文件夹高亮和焦点行为；加入集中 UI 验收。
+- 启动解析器支持 `/select,<对象>`、`/select, <对象>` 和 `/select <对象>`；定位到对象所在目录后，通过现有 profile 单实例管道携带目录与目标项。接收端只在对应导航完成后向当前 Shell 视图请求选择，并复用已有带导航代际、选区版本和用户输入版本保护的重试机制。遇到不支持该协议的旧版接收端时，降级转发父目录，避免已有实例锁导致启动请求丢失；旧版无法执行高亮选择。
+- Release SettingsSmoke 覆盖解析、路径空格、未知/缺失开关、同请求重试去重、父目录与目标项不匹配拒绝，以及旧版接收端降级；App Release build 通过，0 警告/错误。没有启动 GUI 或 ExplorerBrowser，不证明 Windows 实际命令行拆分、Shell 文件/文件夹高亮和焦点行为；加入集中 UI 验收。
 - 仍不处理 `/root`、`/n` 等浏览器窗口开关，不接管 Win+E、不修改文件关联或注册表。启动参数只用于标准文件/文件夹路径；磁盘根目录自身没有可打开的父级，安全地回到原会话并提示。
 
 2026-10-28：同步清理追踪已排除普通 HWND teardown、单纯多进程共用 Private Desktop、Shell view 存在本身及 1–4 个 pane 的数量作为稳定触发条件。最小可复现序列缩到单 pane 真实 Shell view 经 `SVUIA_ACTIVATE_FOCUS` 安装、再经 `SVUIA_DEACTIVATE` 卸载共享菜单后，同步销毁 parent：`WM_DESTROY` 子类回调正常返回，但未收到 `WM_NCDESTROY`。协调器销毁时机和焦点还原均未改变结果；当前证据指向菜单激活/卸载后的 OLE/Shell 生命周期，仍缺挂起线程栈以确认具体系统调用。process-exit 方式继续只作为隔离探针回收，不接入产品。完整矩阵、日志与证据边界见[原型诊断记录](ishellview-color-spike.md)。

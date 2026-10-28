@@ -867,6 +867,42 @@ try
                   TimeSpan.FromSeconds(2)).GetAwaiter().GetResult() == FolderForwardResult.Rejected && selectionCount == 1,
               "select routing rejects a parent directory that does not contain the requested item");
     }
+    var legacySelectProfile = Path.Combine(root, "router-select-legacy", "ExplorerDirs.ini");
+    using (var legacySelectServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(legacySelectProfile),
+           PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+           PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance))
+    {
+        string? legacySelectedDirectory = null;
+        var legacySelectTask = Task.Run(async () =>
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await legacySelectServer.WaitForConnectionAsync(deadline.Token);
+            var header = new byte[sizeof(int)];
+            await legacySelectServer.ReadExactlyAsync(header, deadline.Token);
+            Check(BinaryPrimitives.ReadInt32LittleEndian(header) == -3,
+                  "new select senders negotiate protocol support first");
+            await legacySelectServer.WriteAsync(new byte[] { 0 }, deadline.Token);
+            await legacySelectServer.FlushAsync(deadline.Token);
+            legacySelectServer.Disconnect();
+            await legacySelectServer.WaitForConnectionAsync(deadline.Token);
+            await legacySelectServer.ReadExactlyAsync(header, deadline.Token);
+            var length = BinaryPrimitives.ReadInt32LittleEndian(header);
+            Check(length > 0 && length <= 128 * 1024,
+                  "an older receiver gets a compatible parent-directory request");
+            var payload = new byte[length];
+            await legacySelectServer.ReadExactlyAsync(payload, deadline.Token);
+            legacySelectedDirectory = System.Text.Encoding.UTF8.GetString(payload);
+            await legacySelectServer.WriteAsync(new byte[] { 1 }, deadline.Token);
+            await legacySelectServer.FlushAsync(deadline.Token);
+        });
+        var legacyDirectory = Path.GetFullPath(Path.Combine(root, "legacy-select-parent"));
+        var legacyItem = Path.Combine(legacyDirectory, "legacy sample.txt");
+        var legacyResult = FolderOpenRouter.TryForwardSelectionAsync(legacySelectProfile, legacyDirectory,
+            legacyItem, TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        legacySelectTask.GetAwaiter().GetResult();
+        Check(legacyResult == FolderForwardResult.Accepted && legacySelectedDirectory == legacyDirectory,
+              "an older single-instance process opens the target parent when selection routing is unavailable");
+    }
     var unexpectedProfile = Path.Combine(root, "router-unexpected", "ExplorerDirs.ini");
     using (var unexpectedServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(unexpectedProfile),
            PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
