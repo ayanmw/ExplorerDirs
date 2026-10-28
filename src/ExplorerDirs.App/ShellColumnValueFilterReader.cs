@@ -8,55 +8,67 @@ internal static class ShellColumnValueFilterReader
 {
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
 
-    internal static bool TryGetDisplayValue(nint shellFolder, nint itemPidl,
-        PropertyKeyState propertyKey, out string value)
+    internal static bool MatchesFilters(nint shellFolder, nint itemPidl,
+        IReadOnlyList<ColumnValueFilter> filters)
     {
-        value = string.Empty;
-        if (shellFolder == 0 || itemPidl == 0 || propertyKey.FormatId == Guid.Empty ||
-            Marshal.QueryInterface(shellFolder, in ShellFolder2Id, out var folder2) < 0 || folder2 == 0)
-            return false;
+        if (shellFolder == 0 || itemPidl == 0 || filters.Count == 0) return true;
+
+        var queryResult = Marshal.QueryInterface(shellFolder, in ShellFolder2Id, out var folder2);
+        if (queryResult < 0 || folder2 == 0)
+        {
+            if (folder2 != 0) Marshal.Release(folder2);
+            return true;
+        }
 
         nint key = 0;
         nint variant = 0;
         nint propVariant = 0;
-        nint display = 0;
         try
         {
             key = Marshal.AllocHGlobal(Marshal.SizeOf<NativePropertyKey>());
             variant = Marshal.AllocHGlobal(Marshal.SizeOf<NativeVariant>());
             propVariant = Marshal.AllocHGlobal(Marshal.SizeOf<NativePropVariant>());
-            Marshal.StructureToPtr(new NativePropertyKey
+            for (var index = 0; index < filters.Count; index++)
             {
-                FormatId = propertyKey.FormatId,
-                PropertyId = propertyKey.PropertyId
-            }, key, false);
-            Zero(variant, Marshal.SizeOf<NativeVariant>());
-            Zero(propVariant, Marshal.SizeOf<NativePropVariant>());
+                var propertyKey = filters[index].Key;
+                if (propertyKey.FormatId == Guid.Empty) continue;
 
-            if (At<GetDetailsEx>(folder2, 17)(folder2, itemPidl, key, variant) < 0 ||
-                InitPropVariantFromVariant(variant, propVariant) < 0 ||
-                PSFormatForDisplayAlloc(key, propVariant, 0, out display) < 0 || display == 0)
-                return false;
+                nint display = 0;
+                string? value = null;
+                Zero(variant, Marshal.SizeOf<NativeVariant>());
+                Zero(propVariant, Marshal.SizeOf<NativePropVariant>());
+                Marshal.StructureToPtr(new NativePropertyKey
+                {
+                    FormatId = propertyKey.FormatId,
+                    PropertyId = propertyKey.PropertyId
+                }, key, false);
+                try
+                {
+                    if (At<GetDetailsEx>(folder2, 17)(folder2, itemPidl, key, variant) < 0 ||
+                        VariantToPropVariant(variant, propVariant) < 0 ||
+                        PSFormatForDisplayAlloc(key, propVariant, 0, out display) < 0 || display == 0)
+                        continue;
 
-            value = Marshal.PtrToStringUni(display) ?? string.Empty;
-            return true;
+                    value = Marshal.PtrToStringUni(display) ?? string.Empty;
+                }
+                finally
+                {
+                    if (display != 0) Marshal.FreeCoTaskMem(display);
+                    PropVariantClear(propVariant);
+                    VariantClear(variant);
+                }
+
+                if (value is not null && !filters[index].Contains(value)) return false;
+            }
         }
         finally
         {
-            if (display != 0) Marshal.FreeCoTaskMem(display);
-            if (propVariant != 0)
-            {
-                PropVariantClear(propVariant);
-                Marshal.FreeHGlobal(propVariant);
-            }
-            if (variant != 0)
-            {
-                VariantClear(variant);
-                Marshal.FreeHGlobal(variant);
-            }
+            if (propVariant != 0) Marshal.FreeHGlobal(propVariant);
+            if (variant != 0) Marshal.FreeHGlobal(variant);
             if (key != 0) Marshal.FreeHGlobal(key);
             Marshal.Release(folder2);
         }
+        return true;
     }
 
     private static void Zero(nint buffer, int length)
@@ -98,16 +110,16 @@ internal static class ShellColumnValueFilterReader
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int GetDetailsEx(nint self, nint childPidl, nint propertyKey, nint variant);
+    internal delegate int GetDetailsEx(nint self, nint childPidl, nint propertyKey, nint variant);
 
     [DllImport("propsys.dll", ExactSpelling = true)]
-    private static extern int InitPropVariantFromVariant(nint variant, nint propVariant);
+    private static extern int VariantToPropVariant(nint variant, nint propVariant);
 
     [DllImport("propsys.dll", ExactSpelling = true)]
     private static extern int PSFormatForDisplayAlloc(nint propertyKey, nint propVariant,
         uint formatFlags, out nint display);
 
-    [DllImport("propsys.dll", ExactSpelling = true)]
+    [DllImport("ole32.dll", ExactSpelling = true)]
     private static extern int PropVariantClear(nint propVariant);
 
     [DllImport("oleaut32.dll", ExactSpelling = true)]

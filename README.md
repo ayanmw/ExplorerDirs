@@ -71,6 +71,7 @@ temp.74 的完整 Release `SettingsSmoke`、App Release 构建通过，包内版
 - 2026-10-21 源码已接入“视图 → 目录树”：每窗格独立原生侧栏，默认关闭；显示当前盘符/共享根，同步当前标签目录，开关保存在 `NavigationTree.ini`。Tab/F6 加入树停靠点，关闭树不重建文件视图。隐藏原生目录定位、取消及配置回归通过；真实点击/键盘、布局和重启恢复待 GUI 验收，已包含在 temp16；见[原生树进度](docs/native-panes-investigation.md)。
 
 - 源码已新增“文件 → 导出 Q-Dir 状态 (.qdr)…”：保存全部窗格、标签、查看设置及本程序扩展。2026-10-23 已扩展为十二种布局的原生编号及窗格排列，原生 Focus 按布局映射读写活动窗格。完整列快照的标签同时写出原生排序、分组、图标大小和列设置；未捕获列布局的标签及固定标签等继续通过扩展保存。Windows 属性直读和去扩展读回通过，GUI 导出/导入及 Q-Dir 实际读取待验收，比例交换已按已知字段接入，四宫格独立左右比例仍有限制，已包含在 temp16。见[兼容范围](docs/qdr-import.md)和[布局证据](docs/qdr-layout-mapping.md)。
+- 2026-10-29 源码修正列标题值筛选的 Shell 属性转换入口，并将多列筛选合并为每个项目一次 `IShellFolder2` 查询；计数型 COM smoke、完整 SettingsSmoke 和 App Release 构建通过。App 构建有 2 条无法访问 NuGet 漏洞源的 `NU1900` 警告、0 错误。该修改尚未进入最新预览包，实际 ExplorerBrowser 与第三方 Shell provider 行为待集中验收。
 - 2026-10-20 源码新增“编辑”菜单及工具栏的剪切、复制、粘贴、删除、重命名、属性、撤销入口，复用 Shell 命令和禁用状态；点击时重新校验选区。工具栏另有“刷新当前目录”按钮，F5 与 Ctrl+R 共用活动窗格刷新入口。无窗口命令分派与 COM 边界检查通过，真实操作/焦点待 GUI 验收，已包含在 temp16。
 - 2026-10-20 源码状态栏新增当前视图项目总数、选中数、“查看”菜单及当前目录所在卷的可用空间。容量后台查询并限制并发，切换目录/标签丢弃旧结果，搜索等虚拟视图隐藏容量；不扫描目录求大小。状态栏与顶部查看菜单共用八种 Shell 查看方式和实际状态勾选。无窗口容量回归和本地磁盘查询通过，选中项目的可取得大小已通过 Shell 快速属性接入，并验证真实属性存储与隐藏视图选区；不递归文件夹。真实多窗格显示、网络位置、大选区、菜单和焦点待 GUI 验收。
 
@@ -107,7 +108,7 @@ temp.74 的完整 Release `SettingsSmoke`、App Release 构建通过，包内版
 
 ## 预览发布版
 
-最新已有预览包为 [temp.73](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.73/app/ExplorerDirs.App.exe)，使用独立 profile。它包含菜单、文件操作、查看方式、导航、`.qdr` 导入/导出和目录树图标绑定等近期源码；预览包未启动，图标可见绘制、文件操作焦点恢复、右键目标、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作仍待验收。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
+最新已有预览包为 [temp.76](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.76/app/ExplorerDirs.App.exe)，使用独立 profile。它已验收主题边界与刷新体验；本次列值筛选属性读取修正尚未打入该包。产品仍待集中验收图标可见绘制、文件操作焦点恢复、列值筛选、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
 
 ## 开发调试
 

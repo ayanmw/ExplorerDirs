@@ -469,4 +469,6 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 
 2026-10-28 列值筛选匹配性能：每列不超过 7 个选项仍用列表比较；达到 8 个时构建大小写不敏感查找集，减少大筛选条件下每个 Shell 项目的同步比较成本。候选值上限仍为 256，筛选、序列化和菜单顺序仍使用原值列表。完整 Release SettingsSmoke 与 App Release build 通过；实际 Shell provider 的耗时收益还未在真实大目录测量。
 
+2026-10-29 列值读取正确性与热路径修正：定向 COM 夹具先复现两处错误导入，`PropVariantClear` 被错误地从 `Propsys.dll` 查找，且 `InitPropVariantFromVariant` 不是系统导出入口；失败的属性读取因此抛出 `EntryPointNotFoundException`，被过滤器的 fail-open 保护吞掉，无法应用列条件。现改用 `Ole32.dll` 的 `PropVariantClear` 与 `Propsys.dll` 的 `VariantToPropVariant`。多列匹配按每个 Shell 项目只查询一次 `IShellFolder2`，并复用 PROPERTYKEY/VARIANT/PROPVARIANT 缓冲区，边读取边比较，不为每项创建结果数组。计数型 COM smoke 验证两列只做一次接口查询、不可读属性放行、可读匹配通过及首个不匹配短路；现有 SettingsSmoke 覆盖条件组合逻辑。Release 构建通过；真实 ExplorerBrowser/第三方 Shell 属性读取与列头交互仍待集中验收，未更新预览包。
+
 2026-10-28 文件夹入口发布包补齐：正常发布版与隔离预览包均携带 `tools/folder-verb.ps1` 和 `FolderVerb.psm1`。打包脚本在 package layout 下默认定位本包 EXE；源码树仍要求明确指定 `releases/` 下的目标。发布隔离 smoke 验证包内脚本与目录参数能力清单对应；未修改真实注册表，菜单可见与实际启动仍待集中验收。

@@ -6,6 +6,8 @@
 
 2026-10-29：当前沙箱拒绝同进程客户端连接 `PipeOptions.CurrentUserOnly` 命名管道（`UnauthorizedAccessException: Access to the path is denied`）。路由协议与“无激活目标” smoke 现在先做实际连接预检；不可用时明确输出 `SKIP`，完整 SettingsSmoke 其余检查通过。该结果不验证跨进程路由协议本身；真实 Windows 用户会话仍需运行这些 IPC 检查。
 
+2026-10-29：列值筛选定向 COM smoke 暴露 `PropVariantClear` DLL 错误和不存在的 `InitPropVariantFromVariant` 入口；二者曾令 Shell 属性筛选在 fail-open 保护下总是放行。现改为 `Ole32.PropVariantClear` / `Propsys.VariantToPropVariant`，并将多列属性读取合并为每个项目一次 `IShellFolder2` 查询、复用原生缓冲区。计数型 COM smoke 验证接口查询次数、属性失败放行、匹配与不匹配结果；完整 Release SettingsSmoke 通过。App Release build 成功，0 错误，NuGet 漏洞数据源不可达产生 2 条 NU1900 警告。未启动 ExplorerBrowser/GUI，也未更新预览包。
+
 2026-10-28：以干净主分支当前源码重跑三个定向 Release SettingsSmoke：`--shell-tab-drop-smoke`、`--tab-transfer-policy-smoke`、`--qdr-layout-smoke` 均通过。它们覆盖 Shell 文件夹拖到标签的数据解析、跨窗格移动/复制策略与 Q-Dir 布局映射；没有启动产品窗口，不证明真实鼠标拖放、标签焦点/历史或 Q-Dir 可见互操作。
 
 > **IShellView 拖放最新复验（2026-10-28）：**两轮探针的外层前台变化都发生在 Private Desktop worker 的 Shell 操作阶段，但源码确认监视器读取的是调用线程所在的原桌面前台，阶段名只提供时间相关性；探针 worker 内 Private Desktop 的前台保持不变。旧日志没有记录原桌面 HWND 的进程/窗口类或输入时间，无法区分外部用户活动与探针影响。本轮为下一次受控复验加入这些身份及输入时间戳诊断；仍保留原桌面前台变化即失败的保护，不重跑 Shell-view 探针。现有直接 `IDropTarget` Copy 路径返回成功、目标内容正确且源保留；将 `IShellView.GetItemObject` 作为目标仍返回 `E_NOINTERFACE`。未调用 `DoDragDrop`，真实 OLE 拖放仍未验证。详见[本轮拖放复验](ishellview-color-spike.md#2026-10-28-private-desktop-拖放探针前台阶段复验)及[前台监视器桌面区分](ishellview-color-spike.md#2026-10-28-区分-private-desktop-阶段与调用桌面前台变化)。

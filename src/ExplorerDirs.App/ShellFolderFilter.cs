@@ -46,8 +46,7 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
                 if (!_settings.ShouldShow(name, isFolder)) return 1;
             }
             if (_settings.HasColumnFilters &&
-                !_settings.MatchesColumnFilters(key => ShellColumnValueFilterReader.TryGetDisplayValue(
-                    shellFolder, itemPidl, key, out var value) ? value : null))
+                !ShellColumnValueFilterReader.MatchesFilters(shellFolder, itemPidl, _settings.ColumnFilters))
                 return 1;
             return 0; // S_OK shows; S_FALSE filters.
         }

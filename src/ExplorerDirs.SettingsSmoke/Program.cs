@@ -67,6 +67,12 @@ if (args is ["--folder-open-router-no-target-smoke"])
     return;
 }
 
+if (args is ["--column-value-batch-smoke"])
+{
+    ShellColumnValueFilterReaderSmoke.Run();
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
 {
     var resultPath = args[1];
@@ -563,6 +569,7 @@ try
     QdrViewSmoke.Run();
     ViewStyleWheelSmoke.Run();
     ShellQuickFilterSmoke.Run();
+    ShellColumnValueFilterReaderSmoke.Run();
     ExplorerDirs.SettingsSmoke.ShellColumnHeaderArrowHitTestSmoke.Run();
     QuickFilterEnumerationGateSmoke.Run();
     FileViewExportSmoke.Run();
