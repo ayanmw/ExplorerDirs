@@ -230,3 +230,10 @@ dnx dotnet-counters@10.0.750501 --source https://api.nuget.org/v3/index.json -- 
 - HostProbe 自身的被动阶段检查点：四视图就绪时 Private Bytes / Working Set / 托管堆估算 / 句柄为 `77.20 / 126.41 / 1.14 MiB / 989`；创建后 `83.29 / 135.32 / 6.37 MiB / 999`；删除静置后 `90.39 / 143.21 / 13.01 MiB / 1,001`；释放四个 Shell 宿主后 `80.27 / 133.01 / 13.10 MiB / 898`。全程没有 Gen0/1/2 GC；托管堆估算不是存活对象证明。宿主释放后 Private Bytes 较删除静置检查点低约 10.12 MiB，GDI/USER 的释放后值没有在阶段检查点中读取。
 - 外部采样器的目标是 `dotnet` 测试进程，不是正式 `ExplorerDirs.App.exe`；首次样本也早于视图就绪。该结果只说明当前隐藏 ExplorerBrowser 压力夹具下 GUI 对象计数在文件 burst 后稳定、Shell 宿主释放时部分进程占用回落，不能解释正式 App 内存来源或排除长期增长。原始文件保存在忽略目录 `src/.state/memory-samples/current-stress3000/`；`perf-sample.json` SHA-256 `5649575B85B8F0E4A46A68DFDE583FE57E252C9E4443BB9915D40BE04F095F54`，`hostprobe.stdout.txt` SHA-256 `98B5ED16C5E55E6E8BFEC90B39FE8A0BA89BDEF53BA6A5082C097666AF6EF05`。
 - 下一步仍需在正式 App 的固定用户操作负载下采同一 PID，并把窗格/标签/操作阶段与 Private Bytes、托管计数、GDI/USER 和句柄同时关联；本轮没有改产品内存行为。
+
+## 2026-10-28 CST：temp.76 后续 60 秒被动复采
+
+- 对象为已运行的 `preview-0.6.0-temp.76` PID `58888`，启动时间 `2026-10-27 21:43:03`（本地时间）。EXE SHA-256 `016E5C4FA3145051FEFD694D17F53E4C5BF320550C6236FD8E7639C93BD79F93`；应用 DLL SHA-256 `6015270C1A770FF8B8591709AB1E8BD53AA32A670BC6EAEC000468AADDBD8BF8`。
+- 本地时间 `10:24:52` 至 `10:25:57`，13 个样本、约每 5 秒一次。Working Set `229.14–229.16 MiB`，首末 `229.14→229.02 MiB`；Private Bytes `151.87–152.11 MiB`，首末 `152.07→151.87 MiB`。句柄数范围 `1144–1160`（首末 `1157→1144`），线程数范围 `40–45`（首末 `44→40`）。
+- 计数在前约 40 秒保持不变，随后小幅上升并回落；采样期间未启动/重启/聚焦或操作应用，也未记录用户窗格、标签及操作负载。不能据此归因变化来源、推断长期泄漏或作为优化前后对照；下一步仍需在固定浏览操作负载下采同一 PID，并关联托管与原生分配类别。
+- 原始 CSV 保留在忽略目录 `src/.state/temp76-passive-followup-20261028.csv`，SHA-256 `4FA1F4C51E216E5AAD305D0649F7E4AB6FEAB46024FA62F9670F0536F1273D98`。
