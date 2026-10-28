@@ -1897,3 +1897,9 @@ Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `She
 另行运行 `--live-shell-selection-delete-watcher` 退出码 0：生产 watcher 观察到删除，目标文件从视图和磁盘移除，选区与焦点均保持；批次约 805 ms 收敛。`--live-shell-selection-delete` 与 `--live-shell-selection-delete-after-input` 则关闭 watcher 并直接发送合成 `SHCNE_UPDATEDIR`，两者都观察到 Shell 将未选中的焦点行加入选区。后一模式已等待输入代际和快照结算，因此这个差异不是删除前快照尚未完成造成的；但它是 watcher 被人为关闭后的 Shell 原生通知对照，没有调用产品 `Refresh()`，不能据此归因生产 watcher 路径。该对照仍显示 Shell 自行重建视图时的选择行为差异，暂不改产品代码。
 
 本轮仅修正 HostProbe 的输入快照基线和期望值，未改产品逻辑；以上结果来自本机隐藏 `ExplorerBrowserHost` 与生成的临时文件，不涉及可见 UI、Explorer 桌面对照、网络目录或其它 Shell provider。自动刷新 P0 仍开放。
+
+### 2026-10-28：无 watcher 时的自然 Shell 删除通知对照
+
+继续运行 `--live-shell-selection-delete-native`：探针通过真实 `IFileOperation` 创建并删除副本，不注入 `SHCNE_UPDATEDIR`，但会关闭产品 watcher，以隔离 Shell 自身通知路径。夹具重建并核对删除前选区为 `second.txt`、`third.txt`、焦点为未选中 `initial.txt` 后，副本删除完成、计数收敛；最终 Shell 选区多出 `initial.txt` 与未操作的 `selection-delete-target.txt`，焦点仍为 `initial.txt`，因此该对照退出码为 1。它表明无 watcher 时原生 Shell 通知后的选区与用户输入快照不同；仍不等同于应用的正常 watcher/Refresh 路径。
+
+在相同源码下重跑 `--live-shell-selection-delete-watcher`，退出码 0：生产 watcher 收到删除事件，约 804 ms 后视图和磁盘均移除目标，`second.txt`/`third.txt` 选区及 `initial.txt` 焦点保持。结合上一节的强制 UPDATEDIR 对照，当前需要保留生产 watcher 负责的快照恢复；没有证据支持关闭 watcher 或仅依赖 Shell 自然通知。本轮只调整隔离测试的夹具选区建立方式，没有改产品 watcher、刷新或 Shell 通知逻辑。

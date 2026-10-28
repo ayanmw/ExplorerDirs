@@ -1313,6 +1313,9 @@ internal static class Program
                     ShellFixtureOperations.Run(root, new[] { folders[0] }, copy: true, copyName: deleteName);
                     if (!WaitForExpectedCounts(hosts, [5, 3, 3, 3], TimeSpan.FromSeconds(10)))
                         throw new Exception($"The native selection-delete probe copy did not become visible; counts={string.Join(',', hosts.Select(Count))}.");
+                    // The Shell can change row selection while inserting a copied item; rebuild the intended fixture selection after enumeration settles.
+                    SelectAll(hostType, hosts[0]);
+                    DeselectItem(hostType, hosts[0], folders[0], "selection-delete-target.txt");
                     DeselectItem(hostType, hosts[0], folders[0], deleteName);
                     SetUnselectedFocus(hostType, hosts[0], folders[0], "initial.txt");
                 }
