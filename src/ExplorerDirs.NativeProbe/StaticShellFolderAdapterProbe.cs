@@ -19,6 +19,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellFolderObjectHandlerId = new("3981E224-F559-11D3-8E3A-00C04F6837D5");
     private static readonly Guid ShellViewObjectHandlerId = new("3981E226-F559-11D3-8E3A-00C04F6837D5");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -699,6 +700,57 @@ internal static class StaticShellFolderAdapterProbe
             if (!names.SequenceEqual(new[] { "ten.bin", "two.bin" }, StringComparer.OrdinalIgnoreCase))
                 throw new Exception("Unexpected initial Shell view name order: " + string.Join('|', names));
 
+            stage = "verify-adapter-background-context-menu";
+            var contextMenuId = ContextMenuId;
+            Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var backgroundMenu)); // SVGIO_BACKGROUND.
+            try
+            {
+                var menu = CreatePopupMenu();
+                if (menu == 0) throw new Exception("Temporary background context menu creation failed.");
+                try
+                {
+                    var queryResult = At<QueryContextMenu>(backgroundMenu, 3)(backgroundMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                    Check(queryResult);
+                    var commandCount = queryResult & 0xffff;
+                    var itemCountInMenu = GetMenuItemCount(menu);
+                    if (commandCount == 0 || itemCountInMenu == 0)
+                        throw new Exception($"Adapter-backed background menu was empty: commands={commandCount}, items={itemCountInMenu}.");
+                    var verbs = ReadContextMenuVerbs(backgroundMenu, (uint)commandCount);
+                    var expectedVerbs = new[] { "refresh", "newfolder", "viewlogicaldetails" };
+                    if (expectedVerbs.Any(expected => !verbs.Contains(expected, StringComparer.OrdinalIgnoreCase)))
+                        throw new Exception("Adapter-backed background menu is missing native verbs: " + string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
+                    Console.WriteLine($"native-shell-item-bound-view: background-context-menu=available; commands={commandCount}; menu-items={itemCountInMenu}; verbs=[{string.Join('|', expectedVerbs)}]");
+                }
+                finally { DestroyMenu(menu); }
+            }
+            finally { Marshal.Release(backgroundMenu); }
+
+            stage = "verify-adapter-selection-context-menu";
+            Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x1u | 0x4u | 0x40000000u));
+            Check(At<GetItemObject>(view, 15)(view, 1, ref contextMenuId, out var selectionMenu)); // SVGIO_SELECTION.
+            try
+            {
+                var menu = CreatePopupMenu();
+                if (menu == 0) throw new Exception("Temporary selection context menu creation failed.");
+                try
+                {
+                    var queryResult = At<QueryContextMenu>(selectionMenu, 3)(selectionMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                    Check(queryResult);
+                    var commandCount = queryResult & 0xffff;
+                    var itemCountInMenu = GetMenuItemCount(menu);
+                    if (commandCount == 0 || itemCountInMenu == 0)
+                        throw new Exception($"Adapter-backed selection menu was empty: commands={commandCount}, items={itemCountInMenu}.");
+                    var verbs = ReadContextMenuVerbs(selectionMenu, (uint)commandCount);
+                    var expectedVerbs = new[] { "copy", "delete", "rename", "properties" };
+                    if (expectedVerbs.Any(expected => !verbs.Contains(expected, StringComparer.OrdinalIgnoreCase)))
+                        throw new Exception("Adapter-backed selection menu is missing native verbs: " + string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
+                    Console.WriteLine($"native-shell-item-bound-view: selection-context-menu=available; commands={commandCount}; menu-items={itemCountInMenu}; verbs=[{string.Join('|', expectedVerbs)}]");
+                }
+                finally { DestroyMenu(menu); }
+            }
+            finally { Marshal.Release(selectionMenu); }
+            Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x40000000u));
+
             stage = "verify-standard-size-sort";
             var nameColumn = new ShellColumnManager.NativeKey { FormatId = NameKeyFormat, PropertyId = 10 };
             var sizeColumn = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
@@ -1239,6 +1291,25 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(childArray); }
     }
 
+    private static string[] ReadContextMenuVerbs(nint contextMenu, uint commandCount)
+    {
+        var buffer = Marshal.AllocHGlobal(1024);
+        try
+        {
+            var getCommandString = At<GetCommandString>(contextMenu, 5);
+            var verbs = new List<string>();
+            for (uint offset = 0; offset < commandCount; offset++)
+            {
+                Marshal.WriteInt16(buffer, 0);
+                if (getCommandString(contextMenu, offset, 4, 0, buffer, 512) != 0) continue; // GCS_VERBW.
+                var verb = Marshal.PtrToStringUni(buffer);
+                if (!string.IsNullOrWhiteSpace(verb)) verbs.Add(verb);
+            }
+            return verbs.ToArray();
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
     private static void VerifyWrappedShellItemDataObject(nint dataObject)
     {
         var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
@@ -1457,6 +1528,10 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
@@ -1473,6 +1548,9 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
