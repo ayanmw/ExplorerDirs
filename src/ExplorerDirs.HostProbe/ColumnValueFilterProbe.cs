@@ -19,6 +19,9 @@ internal static class ColumnValueFilterProbe
         var keyType = assembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
         var key = Activator.CreateInstance(keyType, ItemTypeTextFormatId, 4u)
             ?? throw new Exception("Could not create the System.ItemTypeText property key.");
+        var commentKey = Activator.CreateInstance(keyType,
+            Guid.Parse("F29F85E0-4FF9-1068-AB91-08002B27B3D9"), 6u)
+            ?? throw new Exception("Could not create the System.Comment property key.");
         var itemNameKey = Activator.CreateInstance(keyType, ItemTypeTextFormatId, 10u)
             ?? throw new Exception("Could not create the System.ItemNameDisplay property key.");
         var filterConstructor = filterType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -69,6 +72,14 @@ internal static class ColumnValueFilterProbe
         VerifyPane0(["initial.txt", "sample.bin"], "clearing column values restores the Shell view");
         VerifyOtherPanes();
 
+        Apply("", (commentKey, [""]));
+        VerifyPane0(["initial.txt", "sample.bin"], "blank System.Comment values remain selectable through the production Shell provider");
+        Apply("", (commentKey, ["ExplorerDirs filter probe sentinel"]));
+        VerifyPane0([], "a nonblank System.Comment value excludes files with no comment");
+        Apply("", []);
+        VerifyPane0(["initial.txt", "sample.bin"], "clearing an empty-property filter restores the Shell view");
+        VerifyOtherPanes();
+
         var zipPath = Path.Combine(folders[0], "column-filter-provider.zip");
         using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
@@ -115,7 +126,7 @@ internal static class ColumnValueFilterProbe
                 TimeSpan.FromSeconds(8)))
             throw new Exception("The source fixture did not converge after removing the temporary ZIP archive.");
         VerifyOtherPanes();
-        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True zip-provider-groups={zipNamesByType.Count} independent-panes=True");
+        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True System.Comment-empty-value=True zip-provider-groups={zipNamesByType.Count} independent-panes=True");
         return 0;
 
         void Apply(string pattern, params (object Key, string[] Values)[] filters)
