@@ -635,6 +635,7 @@ internal static class StaticShellFolderAdapterProbe
         var result = 0;
         var propertyStoreFactoryProbeEnabled = false;
         var defaultColumnSortProbeEnabled = false;
+        var sortCallbackProbeEnabled = false;
         try
         {
             Directory.CreateDirectory(childPath);
@@ -673,6 +674,9 @@ internal static class StaticShellFolderAdapterProbe
 
             stage = "bind-shell-view-object";
             var shellViewId = ShellViewId;
+            Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
+                NativeLibrary.GetExport(nativeLibrary, "SetStaticShellSortCallbackProbe"))(1);
+            sortCallbackProbeEnabled = true;
             Check(At<BindShellItemHandler>(item, 3)(item, 0, in ShellViewObjectHandlerId, in shellViewId, out view));
             host = new StreamViewHost(parent, []) { View = view };
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
@@ -683,6 +687,9 @@ internal static class StaticShellFolderAdapterProbe
             defaultColumnSortProbeEnabled = true;
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             createdView = true;
+            Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
+                NativeLibrary.GetExport(nativeLibrary, "SetStaticShellSortCallbackProbe"))(0);
+            sortCallbackProbeEnabled = false;
             Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
                 NativeLibrary.GetExport(nativeLibrary, "SetDefaultColumnSortProbe"))(0);
             defaultColumnSortProbeEnabled = false;
@@ -1030,6 +1037,11 @@ internal static class StaticShellFolderAdapterProbe
         }
         finally
         {
+            if (sortCallbackProbeEnabled && nativeLibrary != 0)
+            {
+                Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
+                    NativeLibrary.GetExport(nativeLibrary, "SetStaticShellSortCallbackProbe"))(0);
+            }
             if (defaultColumnSortProbeEnabled && nativeLibrary != 0)
             {
                 Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
@@ -1969,6 +1981,9 @@ internal static class StaticShellFolderAdapterProbe
             var documentCompare = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellComparisonCount"))();
             var mapColumnToScid = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetMapColumnToScidRequestCount"))();
             var defaultColumnRequests = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDefaultColumnRequestCount"))();
+            var sortCallbackClicks = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellSortCallbackColumnClickCount"))();
+            var sortCallbackLastColumn = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellSortCallbackLastColumn"))();
+            var sortCallbackDefaults = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellSortCallbackGetDefaultsCount"))();
             var documentDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsExCount"))();
             var documentDetailsOf = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetDocumentByteCountShellDetailsOfCount"))();
             var sizeDetailsEx = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStandardSizeShellDetailsExCount"))();
@@ -1984,7 +1999,7 @@ internal static class StaticShellFolderAdapterProbe
             var persistClass = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistClassRequestCount"))();
             var persistRoot = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistRootRequestCount"))();
             return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; " +
-                $"document-byte-count(CompareIDs/GetDetailsEx/GetDetailsOf)={documentCompare}/{documentDetailsEx}/{documentDetailsOf}; MapColumnToSCID={mapColumnToScid}; GetDefaultColumn={defaultColumnRequests}; " +
+                $"document-byte-count(CompareIDs/GetDetailsEx/GetDetailsOf)={documentCompare}/{documentDetailsEx}/{documentDetailsOf}; MapColumnToSCID={mapColumnToScid}; GetDefaultColumn={defaultColumnRequests}; SFVM_COLUMNCLICK={sortCallbackClicks}(last={sortCallbackLastColumn}); SFVM_GETSORTDEFAULTS={sortCallbackDefaults}; " +
                 $"GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom total/header/item, size-item)={detailsOf}/{customHeaderDetailsOf}/{customItemDetailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
                 $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}; IPropertyStoreFactory(Bind/Create/GetValue)=" +
                 $"{propertyStoreFactoryBind}/{propertyStoreFactoryCreate}/{propertyStoreGetValue}";

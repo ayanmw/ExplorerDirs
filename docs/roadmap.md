@@ -4435,6 +4435,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 下一步只在 NativeProbe 中继续隔离 DefView 的排序消费路径；不得修改产品 ExplorerBrowser 或发布包。只有自定义属性列升序、降序都实际按数值重排，并完成 Shell 操作、焦点、拖放和通知等现有迁移门槛后，才评估产品架构迁移。
 - ByteCount 和标准 Size 的属性描述均为 `PDDT_NUMBER`，`GetSortByAlias` 均返回 `S_FALSE` 且无主排序别名；已排除显示类型及主排序别名是本次差异的明显解释。继续检查 `IShellFolder2` 列索引到属性键的映射及 DefView 的比较调用路径。
 - 列映射计数对照已完成：DefView 初始化会调用 `MapColumnToSCID` 列举扩展列，但排序阶段不调用该映射或 adapter `CompareIDs`；`GetDefaultColumn` 在该绑定视图生命周期中也没有被调用。适配器的直接映射合同本身有效。后续聚焦可支持的 DefView 排序委托/通知接口，仍不把状态读回当作已重排。
+- `SFVM_GETSORTDEFAULTS` 回调收到一次，但按 SDK 参数写入 ByteCount 列并返回 `S_OK` 后，视图仍无排序状态、无重排、无 `CompareIDs`；其官方文档明确说系统文件夹视图对象不识别此消息。当前合成点击路径也未触发 `SFVM_COLUMNCLICK`。不再将这两个旧 callback 消息视作排序修复入口；后续验证要转向实际 ListView/Shell 排序委托边界及其完整操作兼容成本。
 
 2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。
 

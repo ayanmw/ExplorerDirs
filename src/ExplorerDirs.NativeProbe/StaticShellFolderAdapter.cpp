@@ -52,6 +52,10 @@ namespace
     volatile LONG g_legacyDetailsCallbackItemRequests = 0;
     volatile LONG g_legacyDetailsCallbackLastColumn = -1;
     volatile LONG g_legacyDetailsCallbackEnabled = 0;
+    volatile LONG g_sortCallbackProbeEnabled = 0;
+    volatile LONG g_sortCallbackColumnClickRequests = 0;
+    volatile LONG g_sortCallbackLastColumn = -1;
+    volatile LONG g_sortCallbackGetDefaultsRequests = 0;
     volatile LONG g_propertyStoreFactoryBindRequests = 0;
     volatile LONG g_propertyStoreFactoryCreateRequests = 0;
     volatile LONG g_propertyStoreValueRequests = 0;
@@ -158,6 +162,7 @@ namespace
     class LegacyDetailsCallback final : public IShellFolderViewCB
     {
     public:
+        explicit LegacyDetailsCallback(UINT sortColumn) : _sortColumn(sortColumn) {}
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -176,6 +181,23 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MessageSFVCB(UINT message, WPARAM column, LPARAM data) override
         {
+            if (message == SFVM_COLUMNCLICK)
+            {
+                InterlockedIncrement(&g_sortCallbackColumnClickRequests);
+                InterlockedExchange(&g_sortCallbackLastColumn, static_cast<LONG>(column));
+                return E_NOTIMPL;
+            }
+            if (message == SFVM_GETSORTDEFAULTS)
+            {
+                InterlockedIncrement(&g_sortCallbackGetDefaultsRequests);
+                if (InterlockedCompareExchange(&g_sortCallbackProbeEnabled, 0, 0) && column && data)
+                {
+                    *reinterpret_cast<int*>(column) = 1; // Ascending.
+                    *reinterpret_cast<int*>(data) = static_cast<int>(_sortColumn);
+                    return S_OK;
+                }
+                return E_NOTIMPL;
+            }
             if (message != SFVM_GETDETAILSOF || !data) return E_NOTIMPL;
             auto* details = reinterpret_cast<DETAILSINFO*>(data);
             InterlockedIncrement(&g_legacyDetailsCallbackRequests);
@@ -194,6 +216,7 @@ namespace
         }
     private:
         volatile LONG _references = 1;
+        const UINT _sortColumn;
     };
 
     SRWLOCK g_queryTraceLock = SRWLOCK_INIT;
@@ -600,9 +623,10 @@ namespace
             create.cbSize = sizeof(create);
             create.pshf = static_cast<IShellFolder*>(this);
             LegacyDetailsCallback* callback = nullptr;
-            if (InterlockedCompareExchange(&g_legacyDetailsCallbackEnabled, 0, 0))
+            if (InterlockedCompareExchange(&g_legacyDetailsCallbackEnabled, 0, 0) ||
+                InterlockedCompareExchange(&g_sortCallbackProbeEnabled, 0, 0))
             {
-                callback = new (std::nothrow) LegacyDetailsCallback();
+                callback = new (std::nothrow) LegacyDetailsCallback(_columnCount + 2);
                 if (!callback) return E_OUTOFMEMORY;
                 create.psfvcb = callback;
             }
@@ -871,6 +895,9 @@ extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters
     InterlockedExchange(&g_legacyDetailsCallbackHeaderRequests, 0);
     InterlockedExchange(&g_legacyDetailsCallbackItemRequests, 0);
     InterlockedExchange(&g_legacyDetailsCallbackLastColumn, -1);
+    InterlockedExchange(&g_sortCallbackColumnClickRequests, 0);
+    InterlockedExchange(&g_sortCallbackLastColumn, -1);
+    InterlockedExchange(&g_sortCallbackGetDefaultsRequests, 0);
     InterlockedExchange(&g_propertyStoreFactoryBindRequests, 0);
     InterlockedExchange(&g_propertyStoreFactoryCreateRequests, 0);
     InterlockedExchange(&g_propertyStoreValueRequests, 0);
@@ -896,6 +923,22 @@ extern "C" __declspec(dllexport) void WINAPI SetStaticShellPropertyStoreFactoryP
 extern "C" __declspec(dllexport) void WINAPI SetStaticShellLegacyDetailsCallbackProbe(BOOL enabled)
 {
     InterlockedExchange(&g_legacyDetailsCallbackEnabled, enabled ? 1 : 0);
+}
+extern "C" __declspec(dllexport) void WINAPI SetStaticShellSortCallbackProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_sortCallbackProbeEnabled, enabled ? 1 : 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackColumnClickCount()
+{
+    return InterlockedCompareExchange(&g_sortCallbackColumnClickRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackLastColumn()
+{
+    return InterlockedCompareExchange(&g_sortCallbackLastColumn, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellSortCallbackGetDefaultsCount()
+{
+    return InterlockedCompareExchange(&g_sortCallbackGetDefaultsRequests, 0, 0);
 }
 extern "C" __declspec(dllexport) LONG WINAPI GetStaticShellLegacyDetailsCallbackRequestCount()
 {

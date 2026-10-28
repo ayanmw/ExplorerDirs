@@ -274,6 +274,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 静态 folder-contract 已单独直接调用适配器映射合同，注册属性列索引正确映射到 `System.Document.ByteCount`；因此并非适配器无法映射，而是当前绑定 DefView 在排序路径未请求该映射，也未回调列比较器。最新输出 `src/.state/native-probe-watchdog/20261029-024818-b1854f9d.stdout.log`；Private Desktop 前台未变化。探针仍以 exit code 1 报告私有测试列无值。此结果将问题收敛到该 Shell view 的排序宿主行为；继续确认是否有可支持的排序委托/通知接口可接入，不能直接将默认列覆写或更改 `CompareIDs` 参数当成修复。
 
+### 2026-10-29：`IShellFolderViewCB` 排序回调能力检查
+
+本机 SDK 定义 `SFVM_GETSORTDEFAULTS`（53）和 `SFVM_COLUMNCLICK`（24）。隔离 view 创建时收到一次 `SFVM_GETSORTDEFAULTS`；仅用于诊断的回调按文档从 `wParam` 写入升序方向、向 `lParam` 写入 ByteCount 列索引并返回 `S_OK`。但创建后的 `IFolderView2::GetSortColumns` 返回无排序列，初始行序没有变，适配器 `CompareIDs` 计数仍为 0。文档明确说明系统文件夹视图对象不识别 `SFVM_GETSORTDEFAULTS`，因此排除它作为此 DefView 的排序控制入口。通过现有隔离 Header/`LVN_COLUMNCLICK` 消息路径时，`SFVM_COLUMNCLICK` 回调计数为 0；这只代表当前合成消息路径，不外推为真实物理鼠标路径。
+
+完整记录：`src/.state/native-probe-watchdog/20261029-025123-08a037e1.stdout.log`。NativeProbe Release 构建 0 警告、0 错误；Private Desktop 前台未变；探针仍因私有测试列无值以 exit code 1 结束。参考：[IShellFolderViewCB::MessageSFVCB](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ishellfolderviewcb-messagesfvcb)、[SFVM_GETSORTDEFAULTS](https://learn.microsoft.com/en-us/windows/win32/shell/sfvm-getsortdefaults)。
+
 ### 2026-10-29：DefView 列点击通知对照
 
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。
