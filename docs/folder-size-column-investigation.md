@@ -311,3 +311,11 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 ### 2026-10-29：文件系统身份属性屏蔽探针未触发
 
 为验证 DefView 是否因 `SFGAO_FILESYSTEM` / `SFGAO_FILESYSANCESTOR` 走了文件系统专用排序路径，曾在隔离 adapter 的 `GetAttributesOf` 临时加入按开关屏蔽这两个标记，并在绑定子文件夹及创建 view 前启用。该 Private Desktop 运行的屏蔽计数仍为 0：Shell 在该阶段没有通过此 adapter 的 `GetAttributesOf` 查询项目属性，因此实际视图并未进入“标记被屏蔽”的条件。原生属性工厂数值与上一轮一致，标准 Size 仍按磁盘大小排序。故这次不构成身份屏蔽 A/B 结果，不能推断移除标记后的 Shell 行为；无效开关接线已移除。输出：`src/.state/native-probe-watchdog/20261029-031308-c29b7d62.stdout.log`，前台 HWND 与输入时间戳未变化，探针仍以既有私有属性列空值门槛 exit code 1 结束。下一步应先定位 Shell view 取得文件夹/属性身份的实际接口边界，再决定是否值得做隔离的非文件系统命名空间样本。
+
+### 2026-10-29：自有 Shell namespace 是排序验证的下一条技术边界
+
+微软官方 Windows Classic Samples 的 Explorer Data Provider 以自有 PIDL 保存项目数据，并在 `IShellFolder2::CompareIDs` 按列比较其中的数值大小；这与当前把真实文件系统 PIDL 包装后继续委托给底层文件夹的 adapter 不同。该示例为“真正的虚拟 namespace 可以提供自己的比较合同”提供了实现先例，但没有证明本项目的 DefView 会消费标准 `PKEY_Size`，也不证明 Shell 文件操作、拖放、第三方扩展和会话体验可无损迁移。
+
+因此此前的 property-store 覆写、属性别名、列映射及文件系统属性屏蔽试验到此收束；若要继续验证递归目录大小排序，应使用独立的非文件系统 PIDL/`IShellFolder2` 样本，并直接计数 `CompareIDs` 调用与升降序行序。产品仍保持 ExplorerBrowser，不接入这个架构原型。
+
+本轮没有运行新的 Shell-view 探针。项目的 Private Desktop 前台守卫曾记录到用户桌面前台 HWND 变化，现行规则要求先确认隔离问题，再继续创建新的 Shell view；故自有 namespace 原型的 DefView 排序行为仍未实测。参考：[Microsoft Explorer Data Provider sample](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/winui/shell/shellextensibility/explorerdataprovider)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)。
