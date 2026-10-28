@@ -4284,3 +4284,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - NativeProbe 在 Private Desktop 中以三个同目录 pane 加一个独立目录 pane 运行四窗格 WPF `HwndHost → IShellView`；真实 Shell 复制、重命名、删除均使前三个视图更新，隔离 pane 内容/计数保持不变。连续 3 轮通过，并通过键盘路由、菜单激活/停用与同步销毁门槛；前台 HWND 不变，Release NativeProbe 构建 0 警告/错误。
 - 该结果补上 WPF 宿主与不同目录通知隔离的组合证据，但不覆盖真实 OLE 鼠标拖动、产品可见 UI、第三方扩展菜单和颜色列行为；IShellView 仍在隔离评审阶段，产品未切换宿主。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-宿主跨目录通知隔离)。
+
+## 2026-10-28：四窗格 WPF Shell 跨卷移动
+
+- 在四窗格 WPF `IShellView` Private Desktop 探针中，使用源卷和临时目标卷执行真实 `IFileOperation::MoveItem`。断言源文件删除、目标文件创建及内容一致；源卷三 pane 计数 `3→2`，目标 pane 计数 `2→3` 并保留原内容。连续 3 轮通过，前台未变，临时夹具清理为 0 残留；Release NativeProbe 构建 0 警告/错误。
+- 此项按路线图补齐跨卷 Shell 移动的双侧收敛证据，但不是 `DoDragDrop` 鼠标拖放，也不代表 ExplorerBrowser 产品集成或可见验收通过。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-跨卷移动)。

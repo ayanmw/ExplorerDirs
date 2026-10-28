@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格 WPF Shell 跨卷移动
+
+扩展 `--private-desktop-four-pane-wpf-host-directory-isolation`：源目录位于工作区卷，第四 pane 的隔离目标目录位于系统临时目录卷；通过 `IFileOperation::MoveItem` 将一个测试文件跨卷移动并改名。断言源文件已消失、目标文件存在且内容一致；源卷三个视图都从 `3` 项收敛回 `2` 项，目标视图从 `2` 项增至 `3` 项并保留原有两项。连续 3 次通过，包含此前的通知隔离、键盘路由、菜单生命周期及同步清理；前台 HWND 不变，NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-082615-e4dce83b.stdout.log`、`20261028-082630-b832f1d2.stdout.log`、`20261028-082638-13f79c29.stdout.log`。三轮结束后临时目录残留数为 0。
+
+这是 Private Desktop 中真实 Shell 文件操作与视图收敛证据，不是鼠标拖放：没有调用 `DoDragDrop`，也没有验证产品视图、可见确认 UI 或其他 Shell provider。
+
 ## 2026-10-28：四窗格 WPF 宿主跨目录通知隔离
 
 新增 `--private-desktop-four-pane-wpf-host-directory-isolation`，在前三个 WPF `HwndHost` pane 打开同一临时目录、第四个 pane 打开独立目录的条件下运行 Ctrl+A、F2 方向键和真实 `IFileOperation` 复制/重命名/删除。前三个 pane 都收敛到操作后的正确条目数/路径；第四 pane 始终保留自己的两项内容，且不显示根目录新建的副本或重命名项。连续 3 次通过，四 pane 菜单激活/停用、同步 view/pane/根窗销毁也通过，foreground HWND 未变。最终断言版日志：`src/.state/native-probe-watchdog/20261028-082221-bbdb77f2.stdout.log`、`20261028-082228-08e490d7.stdout.log`、`20261028-082234-e487a32f.stdout.log`。Release NativeProbe 构建 0 警告/错误。

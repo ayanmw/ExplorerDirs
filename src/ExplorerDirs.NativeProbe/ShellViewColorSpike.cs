@@ -189,7 +189,13 @@ internal static class ShellViewColorSpike
                 File.WriteAllText(Path.Combine(fixture, "cleanup-sample-2.txt"), "cleanup-2");
             if (probeWpfDirectoryIsolation)
             {
-                isolatedFixture = Path.Combine(fixturesRoot, $"{paneCount}-pane-cleanup-isolated-{Guid.NewGuid():N}");
+                var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+                if (string.Equals(Path.GetPathRoot(fixturesRoot), Path.GetPathRoot(temporaryRoot), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("The WPF cross-volume probe requires the workspace and temporary directory to be on different volumes.");
+                isolatedFixture = Path.Combine(temporaryRoot, $"ExplorerDirs-WPF-Isolated-{Guid.NewGuid():N}");
+                if (!isolatedFixture.StartsWith(temporaryRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("The isolated WPF fixture escaped the temporary directory.");
                 Directory.CreateDirectory(isolatedFixture);
                 File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample.txt"), "isolated-cleanup");
                 File.WriteAllText(Path.Combine(isolatedFixture, "cleanup-sample-2.txt"), "isolated-cleanup-2");
@@ -408,7 +414,9 @@ internal static class ShellViewColorSpike
             foreach (var paneHost in wpfPaneHosts) paneHost.Dispose();
             if (wpfParentSource is not null) DestroyCleanupParent(parent, ref wpfParentSource);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
-            if (isolatedFixture is not null && Directory.Exists(isolatedFixture))
+            if (isolatedFixture is not null &&
+                isolatedFixture.StartsWith(Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase) && Directory.Exists(isolatedFixture))
                 Directory.Delete(isolatedFixture, recursive: true);
             if (Directory.Exists(stateDirectory)) Directory.Delete(stateDirectory, recursive: true);
             _useWpfDispatcherPump = previousPumpMode;
@@ -1748,9 +1756,12 @@ internal static class ShellViewColorSpike
             if (File.Exists(renamedPath))
                 throw new IOException("The WPF-hosted Shell delete left the fixture path present.");
             WaitForOperationViews(initialCount, null, renamedPath, "delete");
+            if (isolatedFixture is not null)
+                VerifyWpfHostCrossVolumeMove(initialCount, isolatedInitialCount, sourcePath, fixture,
+                    isolatedFixture, folderViews);
             return isolatedFixture is null
                 ? "copy/rename/delete=all-four-panes-notified"
-                : "copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged";
+                : "copy/rename/delete=three-root-panes-notified; isolated-pane-unchanged; cross-volume-move=source-deleted-destination-created-both-views-converged";
         }
         finally
         {
@@ -1775,6 +1786,64 @@ internal static class ShellViewColorSpike
                  ShellViewContainsPath(folderViews[3], renamedPath)))
                 throw new IOException($"The isolated fourth WPF pane changed or displayed a root-directory item after {operation}.");
         }
+    }
+
+    private static void VerifyWpfHostCrossVolumeMove(int rootInitialCount, int isolatedInitialCount,
+        string copySourcePath, string sourceFixture, string destinationFixture, IReadOnlyList<nint> folderViews)
+    {
+        var moveSourcePath = Path.Combine(sourceFixture, "wpf-cross-volume-move-source.txt");
+        var movedPath = Path.Combine(destinationFixture, "wpf-cross-volume-moved-result.txt");
+        var sourceItem = CreateShellItem(copySourcePath);
+        var sourceFolder = CreateShellItem(sourceFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, sourceItem, sourceFolder,
+                    Path.GetFileName(moveSourcePath), 0)));
+        }
+        finally
+        {
+            Marshal.Release(sourceFolder);
+            Marshal.Release(sourceItem);
+        }
+        if (!File.Exists(moveSourcePath) || File.ReadAllText(moveSourcePath) != File.ReadAllText(copySourcePath))
+            throw new IOException("The WPF cross-volume move source fixture was not created with the expected content.");
+        for (var index = 0; index < 3; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount + 1, moveSourcePath, null,
+                    $"wpf-cross-volume-source-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge before the cross-volume move.");
+        if (GetShellViewItemCount(folderViews[3]) != isolatedInitialCount ||
+            ShellViewContainsPath(folderViews[3], moveSourcePath))
+            throw new IOException("The isolated WPF destination pane changed before the cross-volume move.");
+
+        var moveItem = CreateShellItem(moveSourcePath);
+        var destinationFolder = CreateShellItem(destinationFixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<MoveItem>(operation, 14)(operation, moveItem, destinationFolder,
+                    Path.GetFileName(movedPath), 0)));
+        }
+        finally
+        {
+            Marshal.Release(destinationFolder);
+            Marshal.Release(moveItem);
+        }
+
+        if (File.Exists(moveSourcePath) || !File.Exists(movedPath) ||
+            File.ReadAllText(movedPath) != File.ReadAllText(copySourcePath))
+            throw new IOException("The WPF cross-volume Shell move did not delete the source and create the expected destination content.");
+        for (var index = 0; index < 3; index++)
+            if (!WaitForShellView(folderViews[index], rootInitialCount, null, moveSourcePath,
+                    $"wpf-cross-volume-source-deleted-pane{index + 1}"))
+                throw new IOException($"WPF source pane {index + 1} did not converge after the cross-volume move.");
+        if (!WaitForShellView(folderViews[3], isolatedInitialCount + 1, movedPath, null,
+                "wpf-cross-volume-destination-created-pane4") ||
+            !ShellViewContainsPath(folderViews[3], Path.Combine(destinationFixture, "cleanup-sample.txt")) ||
+            !ShellViewContainsPath(folderViews[3], Path.Combine(destinationFixture, "cleanup-sample-2.txt")))
+            throw new IOException("The WPF destination pane did not converge while preserving its original items after the cross-volume move.");
+
+        Console.WriteLine("multi-pane-cleanup: wpf-cross-volume-move=source-deleted; destination-created; source-panes=3; destination-pane=4; content-matched=True");
     }
 
     private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,
@@ -4321,6 +4390,9 @@ internal static class ShellViewColorSpike
         [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    private delegate int MoveItem(nint self, nint item, nint destination,
+        [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
