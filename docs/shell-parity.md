@@ -473,6 +473,8 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 
 2026-10-29 隐藏标签状态回归：真实 `PaneControl` 新建标签默认没有列筛选；复制有 `System.ItemNameDisplay=initial.txt` 条件的标签会复制筛选状态，并在新 ExplorerBrowser 中实际只显示匹配项。源、新建、复制标签的视图过滤互不串扰。会话跨重启读回及列头菜单的可见交互仍未验收。
 
+2026-10-29 ZIP provider 回归：生产 ExplorerBrowser 导航进入测试 ZIP 压缩文件夹，按 Shell 导出的 `System.ItemTypeText` 为不同归档条目逐组应用筛选，Shell 文件列表分别只保留匹配文件；清除恢复完整归档视图，返回源目录后移除测试 ZIP。隐藏父窗口、四窗格隔离、前台 HWND 不变均通过。仍未覆盖网络位置、云盘或第三方虚拟 Shell provider，也未验收可见菜单和慢速目录响应。
+
 2026-10-29 列值读取正确性与热路径修正：定向 COM 夹具先复现两处错误导入，`PropVariantClear` 被错误地从 `Propsys.dll` 查找，且 `InitPropVariantFromVariant` 不是系统导出入口；失败的属性读取因此抛出 `EntryPointNotFoundException`，被过滤器的 fail-open 保护吞掉，无法应用列条件。现改用 `Ole32.dll` 的 `PropVariantClear` 与 `Propsys.dll` 的 `VariantToPropVariant`。多列匹配按每个 Shell 项目只查询一次 `IShellFolder2`，并复用 PROPERTYKEY/VARIANT/PROPVARIANT 缓冲区，边读取边比较，不为每项创建结果数组；真实隐藏 ExplorerBrowser HostProbe 还验证了当前 Windows 语言下 TXT/BIN 类型筛选、切换条件、名称与列条件 AND、清除恢复，以及其它窗格不受影响，父窗保持隐藏且前台 HWND 未变化。该探针只覆盖本机普通文件夹和属性 provider，不能替代列头菜单的可见命中、第三方/虚拟 provider 或慢速目录验收。计数型 COM smoke 与完整 Release SettingsSmoke 通过；App/HostProbe Release 构建成功，NuGet 漏洞源不可达产生 1 条 NU1900 警告。未更新预览包。
 
 2026-10-28 文件夹入口发布包补齐：正常发布版与隔离预览包均携带 `tools/folder-verb.ps1` 和 `FolderVerb.psm1`。打包脚本在 package layout 下默认定位本包 EXE；源码树仍要求明确指定 `releases/` 下的目标。发布隔离 smoke 验证包内脚本与目录参数能力清单对应；未修改真实注册表，菜单可见与实际启动仍待集中验收。

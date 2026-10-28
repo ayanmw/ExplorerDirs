@@ -1,4 +1,5 @@
 using System.Collections;
+using System.IO.Compression;
 using System.IO;
 using System.Reflection;
 using System.Windows.Interop;
@@ -67,7 +68,54 @@ internal static class ColumnValueFilterProbe
         Apply("", []);
         VerifyPane0(["initial.txt", "sample.bin"], "clearing column values restores the Shell view");
         VerifyOtherPanes();
-        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True independent-panes=True");
+
+        var zipPath = Path.Combine(folders[0], "column-filter-provider.zip");
+        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            using (var writer = new StreamWriter(archive.CreateEntry("archive.txt").Open())) writer.Write("zip text");
+            using (var writer = new StreamWriter(archive.CreateEntry("package.bin").Open())) writer.Write("zip binary");
+        }
+        var navigate = hostType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(method => method.Name == "Navigate" && method.GetParameters().Length == 1);
+        navigate.Invoke(hosts[0], [zipPath]);
+        var currentPath = hostType.GetProperty("CurrentPath", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        if (!WaitFor(() => string.Equals((string?)currentPath.GetValue(hosts[0]), zipPath, StringComparison.OrdinalIgnoreCase) &&
+                           count(hosts[0]) == 2,
+                TimeSpan.FromSeconds(10)))
+            throw new Exception($"The production ExplorerBrowser did not enumerate the ZIP Shell folder: path={currentPath.GetValue(hosts[0])}, count={count(hosts[0])}.");
+
+        var zipSnapshot = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .Invoke(hosts[0], null) ?? throw new Exception("Could not capture the ZIP Shell view fixture.");
+        var zipColumns = ((IEnumerable)zipSnapshot.GetType().GetProperty("Columns")!.GetValue(zipSnapshot)!).Cast<string>().ToArray();
+        var zipNameColumn = FindColumn(zipColumns, "Name", "名称");
+        var zipTypeColumn = FindColumn(zipColumns, "Type", "类型");
+        var zipRows = ((IEnumerable)zipSnapshot.GetType().GetProperty("Rows")!.GetValue(zipSnapshot)!).Cast<IEnumerable>()
+            .Select(row => row.Cast<object?>().Select(value => value?.ToString() ?? string.Empty).ToArray()).ToArray();
+        var zipAllNames = Names(zipRows.Select(row => Path.GetFileName(row[zipNameColumn])!));
+        if (!zipAllNames.SequenceEqual(Names(["archive.txt", "package.bin"]), StringComparer.OrdinalIgnoreCase))
+            throw new Exception($"ZIP Shell view exposed unexpected files: [{string.Join(',', zipAllNames)}].");
+        var zipNamesByType = zipRows.GroupBy(row => row[zipTypeColumn], StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key,
+                group => Names(group.Select(row => Path.GetFileName(row[zipNameColumn])!)), StringComparer.OrdinalIgnoreCase);
+        foreach (var (zipType, expectedNames) in zipNamesByType)
+        {
+            Apply("", (key, [zipType]));
+            VerifyZipPane(expectedNames, $"ZIP Shell provider applies System.ItemTypeText='{zipType}'");
+        }
+        Apply("", []);
+        VerifyZipPane(["archive.txt", "package.bin"], "clearing a ZIP Shell filter restores the archive contents");
+        navigate.Invoke(hosts[0], [folders[0]]);
+        if (!WaitFor(() => string.Equals((string?)currentPath.GetValue(hosts[0]), folders[0], StringComparison.OrdinalIgnoreCase) &&
+                           count(hosts[0]) == 3, TimeSpan.FromSeconds(10)))
+            throw new Exception("The production ExplorerBrowser did not return from the ZIP Shell folder to its source fixture.");
+        File.Delete(zipPath);
+        if (!WaitFor(() => count(hosts[0]) == 2 &&
+                           Names(viewItemPaths(hostType, hosts[0], folders[0], 2))
+                               .SequenceEqual(Names(["initial.txt", "sample.bin"]), StringComparer.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(8)))
+            throw new Exception("The source fixture did not converge after removing the temporary ZIP archive.");
+        VerifyOtherPanes();
+        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True zip-provider-groups={zipNamesByType.Count} independent-panes=True");
         return 0;
 
         void Apply(string pattern, params (object Key, string[] Values)[] filters)
@@ -81,13 +129,14 @@ internal static class ColumnValueFilterProbe
                 throw new Exception("Production SetQuickFilter rejected a column-value filter state.");
         }
 
-        void VerifyPane0(string[] expected, string stage)
+        void VerifyPane0(string[] expected, string stage, string? location = null)
         {
             var expectedNames = Names(expected);
+            location ??= folders[0];
             if (!WaitFor(() => count(hosts[0]) == expected.Length &&
-                    Names(viewItemPaths(hostType, hosts[0], folders[0], 2))
+                    Names(viewItemPaths(hostType, hosts[0], location, 2))
                         .SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase), TimeSpan.FromSeconds(8)))
-                throw new Exception($"{stage}: expected=[{string.Join(',', expectedNames)}], count={count(hosts[0])}, actual=[{string.Join(',', Names(viewItemPaths(hostType, hosts[0], folders[0], 2)))}], status={hostType.GetProperty("LastQuickFilterStatus", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(hosts[0])}.");
+                throw new Exception($"{stage}: expected=[{string.Join(',', expectedNames)}], count={count(hosts[0])}, actual=[{string.Join(',', Names(viewItemPaths(hostType, hosts[0], location, 2)))}], status={hostType.GetProperty("LastQuickFilterStatus", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(hosts[0])}.");
         }
 
         void VerifyOtherPanes()
@@ -98,6 +147,27 @@ internal static class ColumnValueFilterProbe
                 if (!otherPaneBaseline[index - 1].SequenceEqual(current, StringComparer.OrdinalIgnoreCase))
                     throw new Exception($"Column filter changed pane {index}: expected=[{string.Join(',', otherPaneBaseline[index - 1])}], actual=[{string.Join(',', current)}].");
             }
+        }
+
+        void VerifyZipPane(string[] expected, string stage)
+        {
+            var expectedNames = Names(expected);
+            if (!WaitFor(() => count(hosts[0]) == expected.Length && CurrentZipNames()
+                    .SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase), TimeSpan.FromSeconds(8)))
+                throw new Exception($"{stage}: expected=[{string.Join(',', expectedNames)}], count={count(hosts[0])}, actual=[{string.Join(',', CurrentZipNames())}], status={hostType.GetProperty("LastQuickFilterStatus", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(hosts[0])}.");
+        }
+
+        string[] CurrentZipNames()
+        {
+            var snapshot = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+                .Invoke(hosts[0], null);
+            if (snapshot is null) return [];
+            var rows = ((IEnumerable)snapshot.GetType().GetProperty("Rows")!.GetValue(snapshot)!).Cast<IEnumerable>();
+            return Names(rows.Select(row =>
+            {
+                var values = row.Cast<object?>().Select(value => value?.ToString() ?? string.Empty).ToArray();
+                return Path.GetFileName(values[zipNameColumn])!;
+            }));
         }
     }
 
