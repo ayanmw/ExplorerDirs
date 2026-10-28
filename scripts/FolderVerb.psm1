@@ -113,7 +113,8 @@ function Enable-ExplorerDirsFolderVerb {
         foreach ($path in $created) {
             $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path, $false)
             try {
-                if ($null -ne $key -and $key.GetValue('ExplorerDirsOwner') -eq $owner) {
+                # A concurrent editor may have changed our key after creation; only roll back an untouched complete verb.
+                if ($null -ne $key -and (Test-OwnedVerb $key)) {
                     $key.Dispose()
                     [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($path, $false)
                 }

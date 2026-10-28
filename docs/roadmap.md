@@ -6,6 +6,8 @@
 
 > **IShellView 拖放最新复验（2026-10-28）：**两轮探针的外层前台变化都发生在 Private Desktop worker 的 Shell 操作阶段，但源码确认监视器读取的是调用线程所在的原桌面前台，阶段名只提供时间相关性；探针 worker 内 Private Desktop 的前台保持不变。旧日志没有记录原桌面 HWND 的进程/窗口类或输入时间，无法区分外部用户活动与探针影响。本轮为下一次受控复验加入这些身份及输入时间戳诊断；仍保留原桌面前台变化即失败的保护，不重跑 Shell-view 探针。现有直接 `IDropTarget` Copy 路径返回成功、目标内容正确且源保留；将 `IShellView.GetItemObject` 作为目标仍返回 `E_NOINTERFACE`。未调用 `DoDragDrop`，真实 OLE 拖放仍未验证。详见[本轮拖放复验](ishellview-color-spike.md#2026-10-28-private-desktop-拖放探针前台阶段复验)及[前台监视器桌面区分](ishellview-color-spike.md#2026-10-28-区分-private-desktop-阶段与调用桌面前台变化)。
 
+2026-10-28：系统文件夹入口回滚复核发现，启用失败后的清理只检查本项目标记，可能删除启用期间被外部改动的注册表树。现在仅在注册表项仍完整匹配本项目生成内容时才回滚；外部新增或修改会保留为冲突供用户处理。PowerShell 语法解析通过；隔离注册表 smoke 因当前执行环境拒绝写入 HKCU（`Access is denied`）未能运行，未改真实 Explorer 注册表。
+
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |
 | 1 | 核心产品集中验收 | 当前候选 `20261028-153606-710-86fc93`（源码 `a6da8b6`，工作区干净，28 项待验收）只执行 PrepareOnly、未启动窗口；EXE/DLL SHA-256 与 `preparation.json` 一致。发布时 NuGet 漏洞数据源不可访问（NU1900），但还原与发布成功。用户在隔离样本确认过 Details 模式 F2；隐藏 HostProbe 对 pane 0–3 × 8 个查看预设共 32 组方向键/文本选区回归通过，但物理输入与可见焦点仍待集中验收。剪贴板后方向键、逐标签状态、QDR 独立互操作及主题回归继续按[清单](ui-acceptance-next-batch-2026-10-27.md)逐项验收；不因局部通过而整体打勾。后续后台优先。 |
