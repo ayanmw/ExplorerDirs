@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：用本机三个 Q-Dir `.qdr` 文件执行真实配置导入→`QdrLaunchSession` 启动投影→本程序导出→再导入：42 标签、44 标签和单标签启动配置均通过，基础字段恢复且扩展会话逐字匹配。首轮发现 `QdrRoundTripProbe` 绕过产品启动投影，直接把未使用的隐藏窗格留空，导致单窗格配置触发 exporter 完整性校验；探针已改用产品相同的 `QdrLaunchSession.Create`，并新增单窗格回归。完整 Release SettingsSmoke 通过。此结果只验证本机配置在本程序内往返，不证明 Q-Dir GUI 读取本程序导出结果。
+
 2026-10-29：只读检查本机 Q-Dir 安装目录 `.qdr` 发现 `start.qdr`/`start2.qdr` 为 `tree_mode=2`，但四个 `TreeN` 均为 0，`TreeNsplit` 仍记录默认 2500。导入器此前只按 `tree_mode=0` 抑制宽度警告，导致所有窗格树关闭时仍提示忽略宽度。新增回归先复现该多余警告，再将提示门控改为：只有存在有效启用的窗格树或树开关不完整时才提示；四个有效树开关全为 0 时不提示。完整 Release SettingsSmoke 通过，未启动 Q-Dir 或产品 GUI；宽度单位仍未知，不导入 `TreeNsplit`。
 
 2026-10-29：内存留存审查发现 `ExplorerBrowserHost` 在 Shell 选择恢复期间，即使 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE` 未启用，也会为每个视图最多保留 128 条诊断字符串。此集合有上限，不是无界泄漏，也没有证据说明它能解释用户观察到的整体内存差异；现已在 tracing 关闭时跳过记录，仅保留显式诊断所需数据。源码回归先按预期失败，再通过；定向 `--shell-selection-restore-gate-smoke` 与完整 Release `ExplorerDirs.SettingsSmoke` 均通过，App Release build 成功（0 错误，2 条 NU1900，因 NuGet 漏洞源不可达）。没有运行产品 UI；当前没有可归因的 ExplorerDirs.App 运行样本，因此不报告内存下降数值，也不将此项视为整体内存增长问题已解决。

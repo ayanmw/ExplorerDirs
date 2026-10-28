@@ -65,6 +65,10 @@ internal static class QdrImportSmoke
                 launchState.Panes.Skip(2).All(pane => pane.Count == 1 && pane[0].Path == @"C:\Users\marvin") &&
                 launchState.ActiveTabIndices![0] == imported.SelectedTabs[0],
             "a launchable Q-Dir session restores imported panes and fills empty panes with the normal home tab");
+        var singlePaneRoundTripPath = Path.Combine(root, "single-pane-roundtrip.qdr");
+        File.WriteAllText(singlePaneRoundTripPath,
+            $"Q-Dir Version=12.79\nViewMode=11\nDir1={root}\nFocus=0\n");
+        QdrRoundTripProbe.Run(singlePaneRoundTripPath);
         var unknownFields = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nDir1=C:\\safe\nViewModeFlags1=7\nVendorPolicy=private-path\n",
             (value, _) => value);

@@ -9,11 +9,8 @@ internal static class QdrRoundTripProbe
         if (imported.Layout is not { } layout)
             throw new InvalidDataException("Q-Dir 布局未映射，无法验证应用状态往返。");
 
-        var activePane = imported.ActivePane ??
-            Enumerable.Range(0, imported.Panes.Count).FirstOrDefault(index => imported.Panes[index].Count > 0);
-        var state = imported.ExtendedState ?? new SessionState(layout, 4, imported.Panes, activePane,
-            imported.SelectedTabs, PaneTreeVisibility: imported.PaneTreeVisibility,
-            TreeDisplayMode: imported.TreeDisplayMode);
+        var state = QdrLaunchSession.Create(imported,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         var sourceState = SessionStore.Render(state);
         var exported = QdrExporter.Render(state, imported.Pins ?? [], imported.Proportions,
             imported.NavigationTreeWidths);
