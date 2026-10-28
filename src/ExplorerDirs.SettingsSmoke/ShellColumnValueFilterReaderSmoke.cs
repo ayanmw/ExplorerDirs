@@ -11,6 +11,7 @@ internal static class ShellColumnValueFilterReaderSmoke
     {
         using var folder = new CountingShellFolder();
         using var valueFolder = new CountingShellFolder(returnValues: true);
+        using var emptyValueFolder = new CountingShellFolder(returnEmptyValues: true);
         var pidl = Marshal.AllocHGlobal(2);
         try
         {
@@ -40,6 +41,13 @@ internal static class ShellColumnValueFilterReaderSmoke
                 "a readable nonmatching Shell display value rejects the item");
             Require(valueFolder.QueryInterfaceCalls == 2 && valueFolder.GetDetailsExCalls == 3,
                 "each item uses one ShellFolder2 query and stops reading after a known mismatch");
+
+            Require(ShellColumnValueFilterReader.MatchesFilters(emptyValueFolder.Pointer, pidl,
+                    [new ColumnValueFilter(FirstKey, [""])]),
+                "a readable VT_EMPTY property matches the blank checklist value");
+            Require(!ShellColumnValueFilterReader.MatchesFilters(emptyValueFolder.Pointer, pidl,
+                    [new ColumnValueFilter(FirstKey, ["TXT 文件"])]),
+                "a readable VT_EMPTY property does not fail open against a nonblank selected value");
         }
         finally { Marshal.FreeHGlobal(pidl); }
         Console.WriteLine("Column value batch smoke: PASS");
@@ -65,6 +73,7 @@ internal static class ShellColumnValueFilterReaderSmoke
         private readonly ShellColumnValueFilterReader.GetDetailsEx _getDetailsEx;
         private readonly nint _vtable;
         private readonly bool _returnValues;
+        private readonly bool _returnEmptyValues;
         private int _references = 1;
 
         internal nint Pointer { get; }
@@ -74,9 +83,10 @@ internal static class ShellColumnValueFilterReaderSmoke
         internal CountingShellFolder()
             : this(returnValues: false) { }
 
-        internal CountingShellFolder(bool returnValues)
+        internal CountingShellFolder(bool returnValues = false, bool returnEmptyValues = false)
         {
             _returnValues = returnValues;
+            _returnEmptyValues = returnEmptyValues;
             _queryInterface = QueryInterfaceImpl;
             _addRef = _ => (uint)Interlocked.Increment(ref _references);
             _release = _ => (uint)Interlocked.Decrement(ref _references);
@@ -107,6 +117,11 @@ internal static class ShellColumnValueFilterReaderSmoke
         private int GetDetailsExImpl(nint self, nint childPidl, nint key, nint variant)
         {
             GetDetailsExCalls++;
+            if (_returnEmptyValues)
+            {
+                Marshal.WriteInt16(variant, 0, 0); // VT_EMPTY: a successful, readable blank property.
+                return 0;
+            }
             if (_returnValues)
             {
                 var propertyId = unchecked((uint)Marshal.ReadInt32(key, 16));
