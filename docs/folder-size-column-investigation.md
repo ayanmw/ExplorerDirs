@@ -247,3 +247,9 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 本轮探针仍因未登记私有 PKEY 列没有值而以 exit code 1 结束；系统 schema 列显示与排序状态读回均有证据，实际排序门槛仍失败。日志 `src/.state/native-probe-watchdog/20261029-023517-d275bf4b.stdout.log`，SHA-256 `3F75F29366BABD94D055135A958575C5EBDA0FC4939546843705BF419E99834B`。
 
 参考：[IFolderView2::SetSortColumns](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setsortcolumns)、[SORTCOLUMN](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ns-shobjidl_core-sortcolumn)。
+
+### 2026-10-29：DefView 列点击通知对照
+
+在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。
+
+完整输出：`src/.state/native-probe-watchdog/20261029-023639-86984b53.stdout.log`，SHA-256 `B91C5B93ED3AFE0F7654DDFBD0DA70C38AC617E8D9ADF8AA218B231878667D49`。下一步应检查 Header 通知与实际点击状态如何更新 `SORTCOLUMN`，并以有数值差异的排序确认排序类型；不把当前文本序迹象作为产品决策。
