@@ -128,7 +128,7 @@ internal static class Program
             try { return ProcessFixtureOperations.RunChild(args); }
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
         }
-        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--auto-column-width" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-mode" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
+        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--auto-column-width" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-mode" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--shell-selection-invert-modes" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
         var acceptsLargeSelectionArgument = args.Length == 2 && args[0] == "--live-shell-selection-large" &&
             int.TryParse(args[1], out var requestedSelectionCount) && requestedSelectionCount is >= 4 and <= 10001;
         var acceptsBurstArgument = args.Length == 2 &&
@@ -283,7 +283,7 @@ internal static class Program
                         File.WriteAllText(Path.Combine(folder, "drop-source-2.txt"), "native drop fixture two");
                     }
                 }
-                if (args[0].StartsWith("--live-shell-refresh", StringComparison.Ordinal) || args[0].StartsWith("--live-shell-delete-selected", StringComparison.Ordinal) || args[0] is "--ctrl-wheel-routing" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-large")
+                if (args[0].StartsWith("--live-shell-refresh", StringComparison.Ordinal) || args[0].StartsWith("--live-shell-delete-selected", StringComparison.Ordinal) || args[0] is "--ctrl-wheel-routing" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-large" or "--shell-selection-invert-modes")
                 {
                     File.WriteAllText(Path.Combine(folder, "second.txt"), "second");
                     File.WriteAllText(Path.Combine(folder, "third.txt"), "third");
@@ -374,6 +374,16 @@ internal static class Program
                 "waiting for ExplorerBrowserHost Shell views");
             if (IsWindowVisible(source.Handle))
                 throw new InvalidOperationException("Hidden HostProbe parent became visible while waiting for Shell views.");
+            if (args[0] == "--shell-selection-invert-modes")
+            {
+                var result = VerifyProductionInvertSelectionModes(hostType, hosts, folders);
+                HostProbeForegroundGuard.EnsureUnchanged(foregroundBeforeProbe, GetForegroundWindow(),
+                    "production ExplorerBrowser invert-selection mode matrix");
+                if (IsWindowVisible(source.Handle))
+                    throw new Exception("Invert-selection mode probe showed its hidden parent.");
+                Console.WriteLine($"shell-selection-invert-modes matrix={result}; foreground-unchanged=True; parent-visible=False");
+                return 0;
+            }
             if (args[0] == "--shell-change-registration-after-hosts")
             {
                 var foreground = GetForegroundWindow();
@@ -3596,6 +3606,118 @@ internal static class Program
                 !otherPanesPreserved)
                 throw new Exception($"Native Select All failed or changed view/other panes in {name} mode.");
         }
+    }
+
+    private static string VerifyProductionInvertSelectionModes(Type hostType,
+        IReadOnlyList<HwndHost> hosts, IReadOnlyList<string> folders)
+    {
+        if (hosts.Count != 4 || folders.Count != 4)
+            throw new ArgumentException("The production invert-selection probe requires four ExplorerBrowser panes.");
+        if (!WaitForExpectedCounts(hosts, [3, 3, 3, 3], TimeSpan.FromSeconds(10)))
+            throw new TimeoutException("The production invert-selection fixtures did not enumerate three items per pane.");
+
+        var assembly = hostType.Assembly;
+        var styleType = assembly.GetType("ExplorerDirs.App.ViewStyle", true)!;
+        var styles = ((System.Collections.IEnumerable)styleType.GetProperty("All")!.GetValue(null)!)
+            .Cast<object>().ToArray();
+        var setStyle = hostType.GetMethod("SetViewStyle", BindingFlags.Instance | BindingFlags.Public)!;
+        var readStyle = hostType.GetMethod("ReadViewStyle", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var noteInput = hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var focusedPath = hostType.GetMethod("GetFocusedItemPath", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var commandType = assembly.GetType("ExplorerDirs.App.ShellSelectionCommand", true)!;
+        var invert = Enum.Parse(commandType, "Invert");
+        var apply = assembly.GetType("ExplorerDirs.App.ShellSelectionCommands", true)!
+            .GetMethod("Apply", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var restoreFocused = assembly.GetType("ExplorerDirs.App.ShellSelectionCommands", true)!
+            .GetMethod("RestoreFocusedItem", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var verified = new List<string>(hosts.Count * styles.Length);
+
+        for (var target = 0; target < hosts.Count; target++)
+        foreach (var style in styles)
+        {
+            var name = (string)styleType.GetProperty("Name")!.GetValue(style)!;
+            var expectedMode = (uint)styleType.GetProperty("Mode")!.GetValue(style)!;
+            if (!Equals(setStyle.Invoke(hosts[target], [style]), true))
+                throw new Exception($"ExplorerBrowser rejected the {name} baseline for pane {target + 1}.");
+            if (!WaitForPredicate(() =>
+                {
+                    var current = readStyle.Invoke(hosts[target], null);
+                    return current is not null && (uint)current.GetType().GetField("Item1")!.GetValue(current)! == expectedMode;
+                }, TimeSpan.FromSeconds(5)))
+                throw new TimeoutException($"ExplorerBrowser pane {target + 1} did not settle into {name}.");
+
+            var siblingModes = hosts.Select(host => readStyle.Invoke(host, null)!).ToArray();
+            noteInput.Invoke(hosts[target], [IntPtr.Zero]);
+            SelectOnlyItem(hostType, hosts[target], folders[target], "initial.txt");
+            var originalSelection = SelectedPaths(hostType, hosts[target], folders[target])
+                .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            var originalFocus = (string?)focusedPath.Invoke(hosts[target], [folders[target]]);
+            var expectedOriginal = Path.Combine(folders[target], "initial.txt");
+            if (!originalSelection.SequenceEqual([expectedOriginal], StringComparer.OrdinalIgnoreCase) ||
+                !string.Equals(originalFocus, expectedOriginal, StringComparison.OrdinalIgnoreCase))
+                throw new Exception($"Pane {target + 1} could not establish a single selected, focused identity before inversion in {name}.");
+
+            var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(hosts[target], null)!;
+            if (view == 0) throw new Exception($"ExplorerBrowser pane {target + 1} lost its folder view in {name}.");
+            try
+            {
+                void InvertAndRestoreFocus()
+                {
+                    noteInput.Invoke(hosts[target], [IntPtr.Zero]);
+                    var applied = apply.Invoke(null, [view, invert, (Func<bool>)(() => true), (Func<bool>)(() => true)]);
+                    if (!Equals(applied, true)) throw new Exception($"The production selection command rejected inversion in pane {target + 1} {name}.");
+                    _ = restoreFocused.Invoke(null, [view, false]);
+                }
+
+                InvertAndRestoreFocus();
+                var complement = SelectedPaths(hostType, hosts[target], folders[target])
+                    .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                var expectedComplement = new[]
+                {
+                    Path.Combine(folders[target], "second.txt"),
+                    Path.Combine(folders[target], "third.txt")
+                }.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                var focusAfterInvert = (string?)focusedPath.Invoke(hosts[target], [folders[target]]);
+                if (!complement.SequenceEqual(expectedComplement, StringComparer.OrdinalIgnoreCase) ||
+                    !string.Equals(focusAfterInvert, originalFocus, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"ExplorerBrowser pane {target + 1} produced the wrong identity complement or focus in {name}: selected={string.Join('|', complement)} focus={focusAfterInvert}.");
+
+                InvertAndRestoreFocus();
+                var restoredSelection = SelectedPaths(hostType, hosts[target], folders[target])
+                    .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                var restoredFocus = (string?)focusedPath.Invoke(hosts[target], [folders[target]]);
+                if (!restoredSelection.SequenceEqual(originalSelection, StringComparer.OrdinalIgnoreCase) ||
+                    !string.Equals(restoredFocus, originalFocus, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"Two inversions did not restore pane {target + 1}'s selection and focus in {name}.");
+
+                for (var pane = 0; pane < hosts.Count; pane++)
+                {
+                    if (pane != target && SelectedPaths(hostType, hosts[pane], folders[pane]).Length != 0)
+                    {
+                        var siblingSelection = SelectedPaths(hostType, hosts[pane], folders[pane]);
+                        throw new Exception($"Inverting pane {target + 1} {name} changed sibling pane {pane + 1} selection: {string.Join('|', siblingSelection)}.");
+                    }
+                    var currentMode = readStyle.Invoke(hosts[pane], null);
+                    if (currentMode is null || !Equals(currentMode, siblingModes[pane]))
+                        throw new Exception($"Inverting pane {target + 1} {name} changed pane {pane + 1}'s view style.");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    noteInput.Invoke(hosts[target], [IntPtr.Zero]);
+                    SelectNone(hostType, hosts[target]);
+                    if (!WaitForPredicate(() => SelectedPaths(hostType, hosts[target], folders[target]).Length == 0,
+                        TimeSpan.FromSeconds(2)))
+                        throw new Exception($"Pane {target + 1} selection did not clear after the product invert-selection check in {name}.");
+                }
+                finally { Marshal.Release(view); }
+            }
+            verified.Add($"pane{target + 1}:{name}");
+        }
+        return string.Join(',', verified);
     }
 
     private static void VerifyRenameEditorAcrossViewStyles(Type hostType,

@@ -42,6 +42,16 @@ dotnet src/ExplorerDirs.HostProbe/bin/Release/net10.0-windows/ExplorerDirs.HostP
 - 全选性能对照：同一 1,000 项中自定义 `SelectAndPositionItems` 单批约 1,874 ms；拆成 10 个 100 项批次约 1,926 ms。原生 Ctrl+A 路径因此用于菜单“全选”，自定义批量 helper 保留为 Shell 不处理时的回退，以及取消选择/反向选择的实现。
 - 隐藏宿主没有运行 WPF 菜单点击或可见窗口；菜单关闭、菜单点击后的焦点、其他窗格以及真实键盘操作仍需 GUI 验收。
 
+## 生产 ExplorerBrowser 反向选择矩阵（2026-10-28）
+
+Release HostProbe 的 `--shell-selection-invert-modes` 在四个生产 `ExplorerBrowserHost` 上逐窗格切换八种查看方式，并直接调用产品 `ShellSelectionCommands`。每个用例先选择并聚焦 `initial.txt`，随后验证反向结果恰为 `second.txt` 与 `third.txt`，恢复焦点后再次反选恢复原身份和焦点；另外三个窗格选区为空，且所有窗格查看方式保持。32 组连续两次通过，前台 HWND 未变，HostProbe 父窗口始终隐藏。
+
+准备选区前、两次反选前以及清理前，探针都调用产品 `NoteNativeUserInput`，避免将合成 Shell 选择误当成旧状态并触发生产选择恢复。首轮缺少此步骤时，Shell 回调重新应用了旧选择；这属于探针前置状态错误，补齐输入代际后未再复现。该测试验证生产 ExplorerBrowser 的 Shell 选择命令与每窗格隔离，不验证物理 Ctrl+Shift+A、菜单焦点/关闭、WPF 可见交互、网络目录或大目录响应。
+
+```powershell
+dotnet src/ExplorerDirs.HostProbe/bin/Release/net10.0-windows10.0.19041.0/ExplorerDirs.HostProbe.dll --shell-selection-invert-modes
+```
+
 分组设置可异步重排索引，测试因此在设置后处理消息，并在重新建立部分选区时重新捕获项目身份，
 不假设两次 index 0 代表同一项目。实际调用使用 PIDL，结果验证使用独立 ShellItemArray 的项目身份。
 

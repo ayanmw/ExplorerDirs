@@ -4309,3 +4309,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 在 Private Desktop 扩展四 pane 键盘 consumer：4 个窗格 × 8 种 Shell 查看方式共 32 组，验证反向选择的项目身份补集、连续反选恢复原选择、焦点保持及兄弟窗格选区隔离。连续 3 次通过；同批 Ctrl+A、F2 方向键、跨窗格输入隔离、Shell 文件操作通知、菜单生命周期及销毁清理均通过，前台 HWND 未变。NativeProbe Release build 0 警告/错误。
 - 仅为隔离 `IShellView` 原型及生产选择命令的后台证据；未验证产品 `ExplorerBrowser`、物理键盘、可见 UI 或颜色兼容，产品仍未迁移。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-反向选择矩阵)。
+
+## 2026-10-28：生产 ExplorerBrowser 反向选择矩阵
+
+- HostProbe 新增隐藏 `--shell-selection-invert-modes`，通过四个生产 `ExplorerBrowserHost` 和生产 `ShellSelectionCommands` 检查四窗格 × 八种查看方式：身份补集、再次反选恢复、原焦点保持、兄弟窗格选区与各窗格模式隔离。Release HostProbe build 0 警告/错误；连续 2 次完整矩阵通过，父窗口隐藏且前台 HWND 不变。
+- 首轮探针未同步产品输入代际，导致旧选区恢复回调覆盖探针准备的状态；补入 `NoteNativeUserInput` 后问题消失。该证据覆盖隐藏 ExplorerBrowser 的命令行为，不覆盖物理快捷键、可见菜单/焦点交互、网络或大目录。详见[选择命令验证](selection-commands.md#生产-explorerbrowser-反向选择矩阵2026-10-28)。
