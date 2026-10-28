@@ -1284,3 +1284,9 @@ StreamViewHost 的 Dispose 原只释放当前资源而没有退休标记，迟�
 真实 native IShellFolder2 COM 调用验证空值类型、空白文本、空↔已知比较反对称、空值自比较、两个空值与原生名称排序一致，以及原有 2/10/100 和同值比较。另用 SHCIDS_CANONICALONLY 确认 ten.bin 与 ten-copy.bin 虽有相同自定义数值仍是不同原生身份；[微软 CompareIDs 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)区分列排序规则与 canonical identity 比较，修复未改写后一条委托路径。
 
 C++ /W4 /WX 构建及 --static-shell-column-folder-smoke、--static-shell-column-contract-smoke 通过。原生结果 window-created=False；本次未运行创建视图的 Run/Private Desktop 分支，未接入产品。日志 src/.state/static-missing-{red,green,native-build}.log。静态空值基础不能代替异步目录扫描/完成后重新排序、通知、可见焦点与迁移验收；递归目录大小与颜色 P0 仍未完成。
+
+### 2026-10-28：四窗格 WPF 原生选中项菜单隔离复验
+
+新增背景验证覆盖四个 WPF 托管 `IShellView` 的已选文件 `IContextMenu`：每个 pane 均取得原生菜单并确认包含标准 `copy` verb；同一批也通过每窗格的 Details、排序、分组命令映射与键盘路由。第一次失败时，在选中项菜单阶段前读到四个视图各自已有 2 项选中；这是前序真实 Shell 文件操作留下的状态，不能当成 pane 间选择泄漏。探针现于每个菜单用例前清空所有 pane 的选择，并在退出时清空、核对所有 pane；重新构建后连续 3 轮完整 Private Desktop 流程通过，前台 HWND 未变。
+
+Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌面上的原生 COM 菜单对象和命令查询，不显示菜单、不运行真实菜单跟踪，也不验证产品 UI 或真实鼠标拖放；这些仍留待集中可见验收。

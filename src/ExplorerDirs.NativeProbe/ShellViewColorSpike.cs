@@ -320,6 +320,30 @@ internal static class ShellViewColorSpike
                 var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture,
                     probeWpfDirectoryIsolation ? isolatedFixture : null);
                 Console.WriteLine($"multi-pane-cleanup: wpf-file-operations={fileOperations}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                var selectedCounts = new int[folderViews.Length];
+                for (var index = 0; index < folderViews.Length; index++)
+                    Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], 1, out selectedCounts[index])); // SVGIO_SELECTION.
+                Console.WriteLine($"multi-pane-cleanup: selected-counts-before-context-menus={string.Join(',', selectedCounts)}");
+                var selectionMenus = VerifyFourPaneSelectionMenus(views, folderViews);
+                var expectedModes = new uint[folderViews.Length];
+                for (var index = 0; index < folderViews.Length; index++)
+                {
+                    Check(At<GetViewModeAndIconSize>(folderViews[index], 36)(folderViews[index], out expectedModes[index], out _));
+                }
+                var nameKey = new PropertyKey
+                {
+                    FormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC"),
+                    PropertyId = 10
+                };
+                var nativeMenuCommands = VerifyFourPaneMenuCommandRouting(views, folderViews,
+                    expectedModes, parent, new SortColumn { Key = nameKey, Direction = 1 });
+                foreach (var view in views)
+                    Check(At<ActivateView>(view, 7)(view, 0)); // SVUIA_DEACTIVATE before the next menu-owner transition.
+                Pump(100);
+                var commandMenuRestored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
+                Console.WriteLine($"multi-pane-cleanup: wpf-selection-menus={selectionMenus}; native-menu-commands={nativeMenuCommands}; base-menu-restored-after-commands={commandMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (activateMenus && !commandMenuRestored)
+                    throw new InvalidOperationException("The WPF native Shell menu command probe did not restore the frame menu after deactivating all views.");
             }
             if (activateMenus)
             {
@@ -1529,6 +1553,14 @@ internal static class ShellViewColorSpike
         for (var index = 0; index < views.Count; index++)
         {
             Console.WriteLine($"session-restore-consumer-stage: selection-menu-pane{index + 1}-start");
+            // File operations can leave selected results in each native Shell view. Reset every
+            // pane so this check measures selection isolation rather than prior operation state.
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var paneItemCount)); // SVGIO_ALLVIEW.
+                for (var item = 0; item < paneItemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+            }
             const uint svgIoAllView = 2;
             Check(At<ItemCount>(folderViews[index], 7)(folderViews[index], svgIoAllView, out var itemCount));
             if (itemCount == 0) throw new InvalidOperationException($"Pane {index + 1} has no item for its selection menu probe.");
@@ -1560,10 +1592,11 @@ internal static class ShellViewColorSpike
             {
                 if (popup != 0) DestroyMenu(popup);
                 if (contextMenu != 0) Marshal.Release(contextMenu);
-                for (var item = 0; item < itemCount; item++)
-                    Check(At<SelectFolderItem>(folderViews[index], 15)(folderViews[index], item, 0));
                 for (var pane = 0; pane < folderViews.Count; pane++)
                 {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var paneItemCount)); // SVGIO_ALLVIEW.
+                    for (var item = 0; item < paneItemCount; item++)
+                        Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
                     Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var selectedCount));
                     if (selectedCount != 0)
                         throw new InvalidOperationException($"Selection menu probe left pane {pane + 1} selected: {selectedCount} items.");

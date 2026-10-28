@@ -4289,3 +4289,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 在四窗格 WPF `IShellView` Private Desktop 探针中，使用源卷和临时目标卷执行真实 `IFileOperation::MoveItem`。断言源文件删除、目标文件创建及内容一致；源卷三 pane 计数 `3→2`，目标 pane 计数 `2→3` 并保留原内容。连续 3 轮通过，前台未变，临时夹具清理为 0 残留；Release NativeProbe 构建 0 警告/错误。
 - 此项按路线图补齐跨卷 Shell 移动的双侧收敛证据，但不是 `DoDragDrop` 鼠标拖放，也不代表 ExplorerBrowser 产品集成或可见验收通过。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-跨卷移动)。
+
+## 2026-10-28：四窗格 WPF 选中项菜单隔离复验
+
+- 为四 pane WPF 原型增加隐藏 `IContextMenu` 检查，每个视图都能为单项选择提供含 `copy` 的原生菜单；原生 Details/排序/分组映射、键盘路由和菜单 owner 清理同批回归通过。首轮发现菜单检查前四个 Shell view 均已有 2 项选择，系前序文件操作后的残留状态，旧断言把它误认为选择隔离失败；现于每项检查前后清空并核对所有 pane。
+- Release NativeProbe build 0 警告/错误，修正后完整 Private Desktop 流程连续 3 次退出码 0，前台 HWND 未改变。仅是隐藏 COM/命令查询证据；菜单可见呈现、真实 OLE `DoDragDrop` 及产品 GUI 留待集中验收，产品仍未切换到 `IShellView`。
