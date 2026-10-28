@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格 WPF Shell 文件操作与通知收敛
+
+扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView` 指向同一临时目录，通过真实 `IFileOperation` 依次复制、重命名、删除，并核对文件内容/路径以及四个 pane 的条目数和目标路径。三次连续运行均通过；复制后四 pane 首轮轮询即收敛，重命名与删除的操作 pane 最迟在第 5 次消息泵轮询收敛，其余 pane 首轮收敛。每轮随后逐 pane 激活/撤销 Shell 菜单，销毁四个 view、pane 和 WPF 根窗口；前台 HWND 始终不变。日志：`src/.state/native-probe-watchdog/20261028-081712-d0542690.stdout.log`、`20261028-081718-1d22d0a4.stdout.log`、`20261028-081725-74be3e96.stdout.log`。Release NativeProbe 构建 0 警告/错误。
+
+同时将该组合入口接入 watchdog，后续可以保留独立 stdout/stderr 证据并设置超时。该探针验证的是同一目录的真实 Shell 文件操作和四个独立视图对 Shell 通知的收敛；它不能证明不同目录之间的通知隔离、可见鼠标/OLE 拖放、产品窗格接线、Shell 扩展上下文菜单或颜色列兼容。当前仍是迁移门槛原型，不等于产品集成，也没有打开产品窗口。
+
 ## 2026-10-28：四窗格 WPF 宿主键盘与菜单组合矩阵
 
 新增 `--private-desktop-four-pane-wpf-host-keyboard-consumer`，在 Private Desktop 中通过 `HwndSource → WPF Grid → 四个 HwndHost → STATIC pane → IShellView` 运行组合验收。四个 view 都指向同一临时两文件目录：逐窗格合成 Ctrl+A 均选中 `2/2` 项、兄弟 pane 选区保持为空并清理选区；逐窗格 F2 均进入原生编辑框，四方向键期间编辑框和焦点保持，Escape 取消重命名；另验证从 pane 1 编辑时向 pane 2 投递方向键不打断 pane 1 编辑。测试每个 pane 后显式 `SVUIA_DEACTIVATE`，随后确认 frame 菜单恢复并逐个激活/停用四个 Shell 菜单，最终同步销毁 Shell view、pane 和 WPF 根窗。

@@ -300,6 +300,8 @@ internal static class ShellViewColorSpike
                 Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (activateMenus && !baseMenuRestored)
                     throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
+                var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture);
+                Console.WriteLine($"multi-pane-cleanup: wpf-file-operations={fileOperations}; foreground-unchanged={GetForegroundWindow() == foreground}");
             }
             if (activateMenus)
             {
@@ -1686,6 +1688,64 @@ internal static class ShellViewColorSpike
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Ctrl+A pane routing changed the foreground window.");
         return string.Join(',', verified);
+    }
+
+    private static string VerifyWpfHostFileOperationConvergence(IReadOnlyList<nint> views,
+        IReadOnlyList<nint> folderViews, string fixture)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("The WPF file-operation probe requires exactly four Shell panes.");
+
+        var initialCount = GetShellViewItemCount(folderViews[0]);
+        var sourcePath = Path.Combine(fixture, "cleanup-sample.txt");
+        var copiedPath = Path.Combine(fixture, "wpf-copy-result.txt");
+        var renamedPath = Path.Combine(fixture, "wpf-renamed-result.txt");
+        var source = CreateShellItem(sourcePath);
+        var destination = CreateShellItem(fixture);
+        try
+        {
+            PerformShellFileOperation(operation =>
+                Check(At<CopyItem>(operation, 16)(operation, source, destination, Path.GetFileName(copiedPath), 0)));
+            if (!File.Exists(copiedPath) || File.ReadAllText(copiedPath) != File.ReadAllText(sourcePath))
+                throw new IOException("The WPF-hosted Shell copy did not produce the expected fixture content.");
+            WaitForEveryPane(initialCount + 1, copiedPath, null, "copy");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(copiedPath);
+                try { Check(At<RenameItem>(operation, 12)(operation, item, Path.GetFileName(renamedPath), 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(copiedPath) || !File.Exists(renamedPath))
+                throw new IOException("The WPF-hosted Shell rename did not replace the copied path.");
+            WaitForEveryPane(initialCount + 1, renamedPath, copiedPath, "rename");
+
+            PerformShellFileOperation(operation =>
+            {
+                var item = CreateShellItem(renamedPath);
+                try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
+                finally { Marshal.Release(item); }
+            });
+            if (File.Exists(renamedPath))
+                throw new IOException("The WPF-hosted Shell delete left the fixture path present.");
+            WaitForEveryPane(initialCount, null, renamedPath, "delete");
+            return "copy/rename/delete=all-four-panes-notified";
+        }
+        finally
+        {
+            Marshal.Release(destination);
+            Marshal.Release(source);
+        }
+
+        void WaitForEveryPane(int expectedCount, string? presentPath, string? absentPath, string operation)
+        {
+            for (var index = 0; index < folderViews.Count; index++)
+            {
+                if (!WaitForShellView(folderViews[index], expectedCount, presentPath, absentPath,
+                        $"wpf-file-{operation}-pane{index + 1}"))
+                    throw new IOException($"WPF-hosted pane {index + 1} did not converge after {operation}.");
+            }
+        }
     }
 
     private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,

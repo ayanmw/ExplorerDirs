@@ -4274,3 +4274,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 源码审查发现，8 MB 输入上限之外，`string.Split('\n')` 还会同时保留行数组和逐行字符串。换行密集的 1,000,000 字符输入在修复前单次解析分配 16,385,488 字节。现在改用 `ReadOnlySpan<char>` 顺序扫描并只为实际字段分配字符串；同一 SettingsSmoke 复测分配 680 字节。完整 Release SettingsSmoke 通过，App Release 构建 0 警告/错误，`git diff --check` 通过。
 - 本轮没有启动产品窗口、ExplorerBrowser 或 Q-Dir。此结果只量化合成输入上的托管临时分配，不代表峰值工作集或真实用户导入收益；字段语义和 8 MB 文件限制未变。详细记录见[Q-Dir 导入说明](qdr-import.md#2026-10-28-qdr-行扫描临时分配)。
+
+## 2026-10-28：四窗格 WPF Shell 文件操作与通知收敛
+
+- NativeProbe 在 Private Desktop 的四个 WPF 托管 `IShellView` 上，通过真实 `IFileOperation` 依次复制、重命名、删除；每一步都核对磁盘结果及四个视图的条目数和路径。连续 3 次通过；随后四 pane 菜单激活/停用和同步销毁也均通过，主桌面 foreground HWND 未变化。探针已加入 watchdog 入口，Release 构建 0 警告/错误。
+- 这证明原型在同一目录下的 Shell 更新可传播到四个独立 view，尚未覆盖不同目录的隔离、真实 OLE 拖动、产品菜单/视图集成或可见 UI。产品仍使用当前 ExplorerBrowser；IShellView 仍处于隔离迁移评审，不据此启动产品迁移。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-文件操作与通知收敛)。
