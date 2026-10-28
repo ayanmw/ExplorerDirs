@@ -12,11 +12,13 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid ParentAndItemId = new("B3A4B685-B685-4805-99D9-5DEAD2873236");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
 
-    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false, bool wrappedPidls = false)
+    internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false, bool wrappedPidls = false, bool shellItemParentProbe = false)
     {
         VerifySortMatrixIsolation();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -178,6 +180,11 @@ internal static class StaticShellFolderAdapterProbe
                 {
                     ILFree(combined);
                     ILFree(rawAbsolute);
+                }
+                if (shellItemParentProbe)
+                {
+                    stage = "shell-item-parent-identity";
+                    VerifyShellItemParentIdentity(adapter, items["two.bin"]);
                 }
             }
             stage = "validate-adapter-columns";
@@ -639,6 +646,46 @@ internal static class StaticShellFolderAdapterProbe
             if (parent != 0) Marshal.Release(parent);
         }
     }
+
+    private static void VerifyShellItemParentIdentity(nint adapter, nint childPidl)
+    {
+        nint item = 0, displayName = 0, parentAndItem = 0, returnedParent = 0;
+        nint parentPidl = 0, returnedChild = 0, adapterUnknown = 0, parentUnknown = 0;
+        var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
+        try
+        {
+            var itemId = ShellItemId;
+            Check(SHCreateItemWithParent(0, adapter, childPidl, in itemId, out item));
+            var displayNameHr = At<GetShellItemDisplayName>(item, 5)(item, 0x80058000, out displayName);
+            var fileSystemPath = displayNameHr >= 0 && displayName != 0 ? Marshal.PtrToStringUni(displayName) : null;
+            if (displayName != 0) { Marshal.FreeCoTaskMem(displayName); displayName = 0; }
+
+            Check(Marshal.QueryInterface(item, in ParentAndItemId, out parentAndItem));
+            Check(At<GetParentAndItem>(parentAndItem, 4)(parentAndItem, out parentPidl, out returnedParent, out returnedChild));
+            if (returnedParent == 0 || returnedChild == 0)
+                throw new Exception("IParentAndItem returned a null parent folder or child PIDL.");
+
+            Check(Marshal.QueryInterface(adapter, in unknownId, out adapterUnknown));
+            Check(Marshal.QueryInterface(returnedParent, in unknownId, out parentUnknown));
+            var sameParentIdentity = adapterUnknown == parentUnknown;
+            var sameChildIdentity = ILIsEqual(childPidl, returnedChild);
+            Console.WriteLine($"native-shell-item-parent-probe: create=SHCreateItemWithParent; display-path={fileSystemPath ?? $"hr-0x{displayNameHr:X8}"}; same-parent-IUnknown={sameParentIdentity}; same-child-PIDL={sameChildIdentity}; window-created=False");
+            if (!sameParentIdentity || !sameChildIdentity)
+                throw new Exception("The Shell item did not preserve both the wrapped parent adapter identity and child PIDL.");
+        }
+        finally
+        {
+            if (parentUnknown != 0) Marshal.Release(parentUnknown);
+            if (adapterUnknown != 0) Marshal.Release(adapterUnknown);
+            if (parentPidl != 0) ILFree(parentPidl);
+            if (returnedChild != 0) ILFree(returnedChild);
+            if (returnedParent != 0) Marshal.Release(returnedParent);
+            if (parentAndItem != 0) Marshal.Release(parentAndItem);
+            if (displayName != 0) Marshal.FreeCoTaskMem(displayName);
+            if (item != 0) Marshal.Release(item);
+        }
+    }
+
     private static void VerifySortMatrix(Func<string, int, IReadOnlyList<ulong>> read, Action<string> report)
     {
         var failures = new List<Exception>();
@@ -1085,11 +1132,15 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Rearrange(nint self, nint sortColumn);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewWindow(nint self, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemDisplayName(nint self, uint nameType, out nint name);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetParentAndItem(nint self, out nint parentPidl, out nint parentFolder, out nint childPidl);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
+    [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint left, nint right);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateItemWithParent(nint parentPidl, nint parentFolder, nint childPidl, in Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);

@@ -53,6 +53,8 @@ internal static class Program
             return StaticShellFolderAdapterProbe.RunFolderContract();
         if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-folder-smoke")
             return StaticShellFolderAdapterProbe.RunFolderContract(wrappedPidls: true);
+        if (args.Length == 1 && args[0] == "--static-shell-column-parent-item-smoke")
+            return StaticShellFolderAdapterProbe.RunFolderContract(wrappedPidls: true, shellItemParentProbe: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter();
         if (args.Length == 1 && args[0] == "--static-shell-column-legacy-details-callback-private-desktop")

@@ -203,3 +203,13 @@ NativeProbe 原生 `/W4 /WX` 与 Release 构建、包装 folder smoke、原始 f
 Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date 列，但未调用 `SFVM_GETDETAILSOF`（请求/标题/项目均为 0），测试自定义列各项文本为空；前台 HWND 前后相同，探针退出并清理其 Private Desktop。完整日志 `src/.state/native-probe-watchdog/20261028-legacy-details-callback-private-desktop.log` 的 SHA-256 为 `4D5BFDFA9B061E9116CDE122DF87E0F9C6F492A448A1605A254861BB2466F640`。NativeProbe Release 构建 0 警告/错误，命令退出码 0 表示隔离观察完整完成，并不表示该列路线通过。结论：当前 `SHCreateShellFolderView` 视图没有采用此回调补读该自定义列；加上回调的弃用状态，不将其作为产品列实现路线。该结果不能推广为所有自定义 Shell namespace 架构都不可行。
 
 参考：[SFV_CREATE](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/ns-shlobj_core-sfv_create)、[LPFNVIEWCALLBACK 的 SFVM_GETDETAILSOF 说明](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nc-shlobj_core-lpfnviewcallback)、[弃用 Shell API](https://learn.microsoft.com/en-us/windows/win32/shell/deprecated-api)。
+
+### 2026-10-29：`IShellItem` 父级身份适配探针
+
+针对包装 child PIDL 无法经 `ILCombine` 变成可解析的文件系统绝对 PIDL，新增无窗口命令 `--static-shell-column-parent-item-smoke`。探针使用 `SHCreateItemWithParent(parentFolder=adapter, childPidl=wrapped)` 创建 `IShellItem`，再从 `IParentAndItem::GetParentAndItem` 取回父 `IShellFolder` 与 child PIDL，直接比较父对象 `IUnknown` 身份和 `ILIsEqual` 结果；同时读取 Shell 文件系统显示路径。IID 与方法签名核对本机 Windows SDK 10.0.26100.0 `ShObjIdl_core.h`。
+
+结果通过：`display-path` 正确指向夹具 `two.bin`，`same-parent-IUnknown=True`，`same-child-PIDL=True`，窗口未创建。既有包装文件夹无窗口合同、嵌套绑定、Shell 数据对象及列/排序合同同次运行通过；绝对 PIDL 对照仍明确显示 `ILCombine(folderPidl, wrappedChild)` 得到的 PIDL 无法按文件系统路径解析。NativeProbe Release 构建 0 警告、0 错误。
+
+这证明 Shell item 路径可在对象级保留自定义父文件夹和相对 child PIDL，值得作为后续 Shell 选择项/数据对象桥接的实验入口；它没有恢复包装 PIDL 的 Desktop namespace 绝对身份，也没有证明 DefView 列消费、标准上下文菜单、拖放、剪贴板、导航、通知或完整 `IShellView` 宿主可用。故不改变“不能接入产品”的结论。下一步应先验证由此 `IShellItem` 构造的 Shell item array 与其原生 `IDataObject` 是否保留适配器身份和现存文件操作语义，再决定是否继续走此桥接路径。
+
+参考：[SHCreateItemWithParent](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateitemwithparent)、[IParentAndItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)。
