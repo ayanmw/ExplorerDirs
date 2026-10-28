@@ -311,10 +311,11 @@ internal static class ShellViewColorSpike
                 var folderViews = panes.Select(item => item.FolderView).ToArray();
                 var selectAll = VerifyFourPaneCtrlARouting(views, folderViews,
                     includeFourthPane: true, deactivateAfterPane: true);
+                var invertSelection = VerifyFourPaneInvertSelectionRouting(views, folderViews);
                 var renameArrows = VerifyFourPaneRenameArrowRouting(views, folderViews, deactivateAfterPane: true);
                 Pump(100);
                 var baseMenuRestored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
-                Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; invert-selection={invertSelection}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (activateMenus && !baseMenuRestored)
                     throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
                 var fileOperations = VerifyWpfHostFileOperationConvergence(views, folderViews, fixture,
@@ -1742,6 +1743,103 @@ internal static class ShellViewColorSpike
         }
         if (GetForegroundWindow() != foreground)
             throw new InvalidOperationException("Ctrl+A pane routing changed the foreground window.");
+        return string.Join(',', verified);
+    }
+
+    private static string VerifyFourPaneInvertSelectionRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    {
+        if (views.Count != 4 || folderViews.Count != 4)
+            throw new ArgumentException("Invert-selection probe requires exactly four Shell panes.");
+
+        var foreground = GetForegroundWindow();
+        var originalModes = new (uint Mode, int IconSize)[folderViews.Count];
+        for (var pane = 0; pane < folderViews.Count; pane++)
+            Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane], out originalModes[pane].Mode, out originalModes[pane].IconSize));
+
+        var verified = new List<string>(folderViews.Count * ViewStyle.All.Count);
+        try
+        {
+            for (var target = 0; target < folderViews.Count; target++)
+            foreach (var style in ViewStyle.All)
+            {
+                var view = folderViews[target];
+                Check(At<SetViewModeAndIconSize>(view, 35)(view, style.Mode, style.IconSize));
+                Pump(100);
+                Check(At<GetViewModeAndIconSize>(view, 36)(view, out var actualMode, out var actualSize));
+                if (actualMode != style.Mode ||
+                    style.IconSize >= 0 && actualSize != ViewStyle.NativeIconSize(style.Mode, style.IconSize))
+                    throw new InvalidOperationException($"Pane {target + 1} did not enter {style.Name}: expected={style.Mode}/{style.IconSize}, observed={actualMode}/{actualSize}.");
+
+                // These four panes share one filesystem folder, so the Shell may propagate
+                // folder view-mode changes to every view. Snapshot after mode setup to test
+                // whether inversion itself changes a sibling's mode.
+                var modesBeforeInvert = new (uint Mode, int IconSize)[folderViews.Count];
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                    Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane],
+                        out modesBeforeInvert[pane].Mode, out modesBeforeInvert[pane].IconSize));
+
+                Check(At<ItemCount>(view, 7)(view, 2, out var itemCount)); // SVGIO_ALLVIEW.
+                if (itemCount != 2)
+                    throw new InvalidOperationException($"Pane {target + 1} must have exactly two fixture items for identity-complement verification; observed {itemCount}.");
+
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(view, 15)(view, item, 0));
+                Check(At<SelectFolderItem>(view, 15)(view, 0, 0x40000015u)); // SELECT | DESELECTOTHERS | FOCUSED | NOTAKEFOCUS.
+                var original = ViewStyleProbe.ReadSelection(view);
+                if (original.Count != 1)
+                    throw new InvalidOperationException($"Pane {target + 1} could not establish one identity in {style.Name}.");
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusBefore));
+                if (focusBefore < 0) throw new InvalidOperationException($"Pane {target + 1} has no focused item before inversion in {style.Name}.");
+
+                if (!ShellSelectionCommands.Apply(view, ShellSelectionCommand.Invert, () => true, () => true))
+                    throw new InvalidOperationException($"Pane {target + 1} rejected inversion in {style.Name}.");
+                _ = ShellSelectionCommands.RestoreFocusedItem(view, takeFocus: false);
+                var inverse = ViewStyleProbe.ReadSelection(view);
+                Check(At<ItemCount>(view, 7)(view, 1, out var inverseCount)); // SVGIO_SELECTION.
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusAfterInvert));
+                if (inverseCount != 1 || inverse.Count != 1 || inverse.Overlaps(original) || focusAfterInvert != focusBefore)
+                    throw new InvalidOperationException($"Pane {target + 1} did not invert the two-item identity complement while preserving focus in {style.Name}: selected={inverseCount}; focus={focusBefore}->{focusAfterInvert}.");
+
+                if (!ShellSelectionCommands.Apply(view, ShellSelectionCommand.Invert, () => true, () => true))
+                    throw new InvalidOperationException($"Pane {target + 1} rejected the second inversion in {style.Name}.");
+                _ = ShellSelectionCommands.RestoreFocusedItem(view, takeFocus: false);
+                var restored = ViewStyleProbe.ReadSelection(view);
+                Check(At<GetFocusedItem>(view, 10)(view, out var focusAfterRestore));
+                if (!restored.SetEquals(original) || focusAfterRestore != focusBefore)
+                    throw new InvalidOperationException($"Two inversions did not restore the same selected identity and focus in pane {target + 1} {style.Name}.");
+
+                for (var pane = 0; pane < folderViews.Count; pane++)
+                {
+                    Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 1, out var siblingSelection));
+                    if (pane != target && siblingSelection != 0)
+                        throw new InvalidOperationException($"Inverting pane {target + 1} {style.Name} selected {siblingSelection} item(s) in sibling pane {pane + 1}.");
+                    if (pane != target)
+                    {
+                        Check(At<GetViewModeAndIconSize>(folderViews[pane], 36)(folderViews[pane], out var siblingMode, out var siblingSize));
+                        if (siblingMode != modesBeforeInvert[pane].Mode || siblingSize != modesBeforeInvert[pane].IconSize)
+                            throw new InvalidOperationException($"Inverting pane {target + 1} {style.Name} changed sibling pane {pane + 1} view mode after setup: expected={modesBeforeInvert[pane].Mode}/{modesBeforeInvert[pane].IconSize}; observed={siblingMode}/{siblingSize}.");
+                    }
+                }
+
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(view, 15)(view, item, 0));
+                verified.Add($"pane{target + 1}:{style.Name}");
+            }
+        }
+        finally
+        {
+            for (var pane = 0; pane < folderViews.Count; pane++)
+            {
+                Check(At<SetViewModeAndIconSize>(folderViews[pane], 35)(folderViews[pane],
+                    originalModes[pane].Mode, originalModes[pane].IconSize));
+                Check(At<ItemCount>(folderViews[pane], 7)(folderViews[pane], 2, out var itemCount));
+                for (var item = 0; item < itemCount; item++)
+                    Check(At<SelectFolderItem>(folderViews[pane], 15)(folderViews[pane], item, 0));
+            }
+        }
+
+        if (GetForegroundWindow() != foreground)
+            throw new InvalidOperationException("Four-pane invert-selection routing changed the foreground window.");
         return string.Join(',', verified);
     }
 

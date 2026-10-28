@@ -4304,3 +4304,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 新增 HostProbe 的隐藏验证入口，通过生产四窗格 `ExplorerBrowserHost.TranslateAcceleratorCore` 发送 Ctrl+VK_ADD，并用生产 `ShellColumnManager` 固定/读取列宽。Details 模式的 Name 列从 110 增至 419；另外三个窗格的列设置保持不变，焦点保留在当前原生文件列表。
 - HostProbe Release build 0 警告/错误，隔离运行退出码 0；父窗口始终隐藏、前台 HWND 未变化，探针线程键盘状态恢复。没有打开产品窗口或发送实体键盘输入；本机实际数字小键盘与可见 UI 留待集中验收。
+
+## 2026-10-28：四窗格 WPF `IShellView` 反向选择矩阵
+
+- 在 Private Desktop 扩展四 pane 键盘 consumer：4 个窗格 × 8 种 Shell 查看方式共 32 组，验证反向选择的项目身份补集、连续反选恢复原选择、焦点保持及兄弟窗格选区隔离。连续 3 次通过；同批 Ctrl+A、F2 方向键、跨窗格输入隔离、Shell 文件操作通知、菜单生命周期及销毁清理均通过，前台 HWND 未变。NativeProbe Release build 0 警告/错误。
+- 仅为隔离 `IShellView` 原型及生产选择命令的后台证据；未验证产品 `ExplorerBrowser`、物理键盘、可见 UI 或颜色兼容，产品仍未迁移。详见[隔离 IShellView 原型](ishellview-color-spike.md#2026-10-28四窗格-wpf-shell-反向选择矩阵)。

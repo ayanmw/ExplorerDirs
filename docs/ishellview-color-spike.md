@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格 WPF Shell 反向选择矩阵
+
+扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView`、两项临时文件，在 4 个窗格 × 8 种 Shell 查看方式（大/中/小图标、超大图标、列表、详细信息、平铺、内容）逐项运行生产 `ShellSelectionCommands` 的反向选择。每项检查原选中项身份的补集、再次反选恢复、焦点索引保持及兄弟窗格无选区副作用。32 组全部通过；Ctrl+A、F2 四方向键编辑保持、跨窗格输入隔离、复制/重命名/删除通知和菜单生命周期也随组合探针通过。连续 3 次 Private Desktop 运行退出码 0，前台 HWND 不变、隔离窗口及 Shell 视图均完成清理；NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-092506-b2dc8aaf.stdout.log`、`20261028-092546-d9e05ad9.stdout.log`、`20261028-092605-1a282d6e.stdout.log`。
+
+测试窗格共用同一临时目录，Shell 会把视图模式变更传播给同目录的其他 Shell view；因此探针在每次模式设置完成后才记录模式基线，并检查反选本身不改变兄弟窗格模式。初版断言错误地把这种 Shell 模式同步归因于反选，已修正测试基线。该结果仅证明隔离 `IShellView` 原型和生产共享选择命令在这些模式下的命令行为；没有验证产品 `ExplorerBrowser`、物理键盘/可见选择体验、系统交互桌面或颜色列兼容，产品宿主仍未迁移。
+
 ## 2026-10-28：四窗格 WPF Shell 跨卷移动
 
 扩展 `--private-desktop-four-pane-wpf-host-directory-isolation`：源目录位于工作区卷，第四 pane 的隔离目标目录位于系统临时目录卷；通过 `IFileOperation::MoveItem` 将一个测试文件跨卷移动并改名。断言源文件已消失、目标文件存在且内容一致；源卷三个视图都从 `3` 项收敛回 `2` 项，目标视图从 `2` 项增至 `3` 项并保留原有两项。连续 3 次通过，包含此前的通知隔离、键盘路由、菜单生命周期及同步清理；前台 HWND 不变，NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-082615-e4dce83b.stdout.log`、`20261028-082630-b832f1d2.stdout.log`、`20261028-082638-13f79c29.stdout.log`。三轮结束后临时目录残留数为 0。
