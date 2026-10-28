@@ -12,6 +12,9 @@ internal static class PrivateDesktopShellProbe
     private delegate int WctCoGetActivationState(Guid classId, uint processId, out uint activationState);
     private static WctCoGetCallState? CoGetCallStateCallback;
     private static WctCoGetActivationState? CoGetActivationStateCallback;
+    private static string _activeProbeStage = "idle";
+
+    internal static void ReportStage(string stage) => Volatile.Write(ref _activeProbeStage, stage);
 
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
 
@@ -281,6 +284,7 @@ internal static class PrivateDesktopShellProbe
     private static int Run(string kind, Func<int> probe, TimeSpan? timeout = null, bool initializeOle = false)
     {
         var foregroundBefore = GetForegroundWindow();
+        ReportStage($"{kind}: desktop-created");
         var desktopName = "ExplorerDirs-Probe-" + Guid.NewGuid().ToString("N");
         var desktop = CreateProbeDesktop(desktopName);
 
@@ -291,13 +295,16 @@ internal static class PrivateDesktopShellProbe
         var worker = new Thread(() =>
         {
             Interlocked.Exchange(ref workerThreadId, unchecked((int)GetCurrentThreadId()));
+            ReportStage($"{kind}: worker-started");
             if (!SetThreadDesktop(desktop))
             {
+                ReportStage($"{kind}: set-thread-desktop-failed");
                 failure = new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not assign the probe thread to its isolated desktop.");
                 probeReturned.Set();
                 return;
             }
 
+            ReportStage($"{kind}: thread-on-private-desktop");
             var oleInitialized = false;
             try
             {
@@ -308,10 +315,12 @@ internal static class PrivateDesktopShellProbe
                     if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
                     oleInitialized = true;
                 }
+                ReportStage($"{kind}: probe-entered");
                 result = probe();
             }
             catch (Exception exception)
             {
+                ReportStage($"{kind}: probe-threw-{exception.GetType().Name}");
                 failure = exception;
             }
             finally
@@ -319,6 +328,7 @@ internal static class PrivateDesktopShellProbe
                 if (oleInitialized) OleUninitialize();
                 // Returning from the Shell probe is enough to report assertions. The STA
                 // may stall while tearing down its private Desktop, so process exit owns cleanup.
+                ReportStage($"{kind}: probe-returned");
                 probeReturned.Set();
             }
         })
@@ -329,18 +339,36 @@ internal static class PrivateDesktopShellProbe
         worker.SetApartmentState(ApartmentState.STA);
         worker.Start();
 
-        if (!probeReturned.Wait(timeout ?? TimeSpan.FromSeconds(25)))
+        var timeoutLimit = timeout ?? TimeSpan.FromSeconds(25);
+        var waitTimer = Stopwatch.StartNew();
+        var foregroundChangeObserved = false;
+        while (!probeReturned.Wait(TimeSpan.FromMilliseconds(25)) && waitTimer.Elapsed < timeoutLimit)
+        {
+            var currentForeground = GetForegroundWindow();
+            if (!foregroundChangeObserved && currentForeground != foregroundBefore)
+            {
+                foregroundChangeObserved = true;
+                Console.Error.WriteLine($"private-desktop-probe: kind={kind}; first-foreground-change=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=0x{foregroundBefore:X}; foreground-now=0x{currentForeground:X}");
+            }
+        }
+
+        if (!probeReturned.IsSet)
         {
             var foregroundAtTimeout = GetForegroundWindow();
             var threadId = unchecked((uint)Volatile.Read(ref workerThreadId));
-            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; stage={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
             CaptureWaitChain(threadId);
             return 124;
         }
 
         var foregroundAfter = GetForegroundWindow();
+        if (!foregroundChangeObserved && foregroundAfter != foregroundBefore)
+        {
+            foregroundChangeObserved = true;
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; foreground-change-detected-at-completion=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}");
+        }
         var foregroundUnchanged = foregroundBefore == foregroundAfter;
-        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
+        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; stage-at-return={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
 
         if (failure is not null)
         {

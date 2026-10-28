@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-> **IShellView 拖放最新复验（2026-10-28）：**不创建 Shell view 的窗口对照显示：隐藏 `WS_POPUP` 可创建/销毁；`WS_VISIBLE` 窗口成为 Private Desktop 活动窗，销毁超过 10 秒未返回并由 watchdog 终止；改为 `SW_SHOWNOACTIVATE` 后窗口可见、非活动且可同步销毁，外层桌面前台不变。随后仅将该非激活显示用于 Private Desktop 拖放探针，两个直接 `IDropTarget` Copy 路径仍复制成功且源保留，但外层前台 HWND 再次变化（`0x2632026 → 0x4F1D0C`），整轮退出码 1，不采纳为通过；不能归因于窗口样式或排除同时发生的外部桌面活动。未调用 `DoDragDrop`，也不再创建 Shell-view 探针，直到前台隔离条件可确认。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
+> **IShellView 拖放最新复验（2026-10-28）：**不创建 Shell view 的窗口对照显示：隐藏 `WS_POPUP` 可创建/销毁；`WS_VISIBLE` 窗口成为 Private Desktop 活动窗，销毁超过 10 秒未返回并由 watchdog 终止；改为 `SW_SHOWNOACTIVATE` 后窗口可见、非活动且可同步销毁，外层桌面前台不变。随后仅将该非激活显示用于 Private Desktop 拖放探针，两个直接 `IDropTarget` Copy 路径仍复制成功且源保留，但外层前台 HWND 再次变化（`0x2632026 → 0x4F1D0C`），整轮退出码 1，不采纳为通过；不能归因于窗口样式或排除同时发生的外部桌面活动。未调用 `DoDragDrop`，本轮仅新增阶段监视并运行无 Shell-view 控制，未复跑 Shell-view；阶段监视尚无 Shell-view 实证，前台隔离仍未确认。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
 
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |
@@ -4394,3 +4394,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-28：补充列头筛选交互证据
 
 - FAQ 38 页面确认每个 Explorer view 有独立设置，并提供“通过列表列标题过滤”的独立示例；示例图显示列标题上的筛选入口会打开该列的复选值清单。上方旧记录中“未公开具体手势”的判断已过期。实现建议为每标签保存列属性值筛选，与现有名称筛选合并；多个列条件按 AND，属性无法读取时保留项目。先做隔离表头消息/入口与 `IShellFolder2` 属性读取验证，再决定产品接线，不替换 ExplorerBrowser。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。
+
+2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。

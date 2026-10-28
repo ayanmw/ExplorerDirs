@@ -49,6 +49,7 @@ internal static class ShellViewDropTargetProbe
         var targetCreateAttempted = false;
         try
         {
+            PrivateDesktopShellProbe.ReportStage("drop-target: fixture-start");
             Console.WriteLine("shell-view-drop-target-stage: fixture-start");
             Directory.CreateDirectory(sourceFolderPath);
             Directory.CreateDirectory(targetFolderPath);
@@ -81,6 +82,7 @@ internal static class ShellViewDropTargetProbe
                 if (!IsWindowVisible(parent))
                     throw new InvalidOperationException("The Private Desktop Shell drop target parent did not become visible.");
             }
+            PrivateDesktopShellProbe.ReportStage("drop-target: parent-shown");
             sourcePane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop source pane",
                 0x50000000 | 0x02000000 | 0x04000000, 10, 10, 315, 440, parent, 0, 0, 0);
             if (sourcePane == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -96,8 +98,10 @@ internal static class ShellViewDropTargetProbe
             var settings = new StreamProbeSettings { Mode = uint.MaxValue };
             var bounds = new StreamProbeRect { Right = 305, Bottom = 420 };
             sourceCreateAttempted = true;
+            PrivateDesktopShellProbe.ReportStage("drop-target: source-view-create-start");
             Marshal.ThrowExceptionForHR(At<CreateViewWindow>(sourceView, 9)(sourceView, 0, ref settings, sourceHostPointer, ref bounds, out sourceViewWindow));
             if (sourceViewWindow == 0) throw new InvalidOperationException("Source CreateViewWindow returned no HWND.");
+            PrivateDesktopShellProbe.ReportStage("drop-target: source-view-created");
             Console.WriteLine("shell-view-drop-target-stage: source-view-created");
             var folderViewId = FolderViewId;
             Marshal.ThrowExceptionForHR(Marshal.QueryInterface(sourceView, in folderViewId, out sourceFolderView));
@@ -171,8 +175,10 @@ internal static class ShellViewDropTargetProbe
             settings = new StreamProbeSettings { Mode = uint.MaxValue };
             bounds = new StreamProbeRect { Right = 305, Bottom = 420 };
             targetCreateAttempted = true;
+            PrivateDesktopShellProbe.ReportStage("drop-target: target-view-create-start");
             Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
             if (targetViewWindow == 0) throw new InvalidOperationException("Target CreateViewWindow returned no HWND.");
+            PrivateDesktopShellProbe.ReportStage("drop-target: target-view-created");
             var dropTargetId = DropTargetId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetViewWindow, ref dropTargetId, out folderDropTarget));
             targetHost.RegisterDropTarget(targetViewWindow, folderDropTarget);
@@ -188,6 +194,7 @@ internal static class ShellViewDropTargetProbe
             var point = new PointL { X = boundsOnScreen.Left + Math.Max(1, boundsOnScreen.Right - boundsOnScreen.Left) / 2,
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
+            PrivateDesktopShellProbe.ReportStage("drop-target: query-and-copy-start");
             if (interactiveOleCopy)
             {
                 System.Windows.Forms.Application.DoEvents();
@@ -253,10 +260,12 @@ internal static class ShellViewDropTargetProbe
             Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-copy={folderTargetResult}; sources-preserved={sourcePreserved}; foreground-unchanged=True; actual-DoDragDrop=False");
             if (!folderTargetResult || !selectedDataObjectResult || !sourcePreserved)
                 throw new InvalidOperationException("An isolated source or destination Shell IDataObject copy failed, or a source was not preserved.");
+            PrivateDesktopShellProbe.ReportStage("drop-target: copy-complete");
             return 0;
         }
         finally
         {
+            PrivateDesktopShellProbe.ReportStage("drop-target: cleanup-start");
             if (targetHost is not null && targetViewWindow != 0)
                 targetHost.RevokeDropTarget(targetViewWindow);
             if (targetView != 0 && targetCreateAttempted)

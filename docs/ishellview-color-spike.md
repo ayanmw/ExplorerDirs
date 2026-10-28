@@ -1320,3 +1320,9 @@ Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌�
 据此，Private Desktop drop probe 的顶层 parent 改为隐藏创建后非激活显示，交互式 OLE 模式仍保留可见创建路径。一次受守卫重跑中，选中项 IDataObject 和注册的文件夹 drop target 均通过直接 Copy，源文件保持；`IShellView.GetItemObject` 查询仍为 `E_NOINTERFACE`，对应 view target Copy 失败。外层前台 HWND 再次从 `0x2632026` 变化到 `0x4F1D0C`，故整轮退出码 1，不算通过。探针夹具已清理，进程退出；没有调用真实 `DoDragDrop` 或输入用户桌面。
 
 非激活显示控制能保持外层前台，但真实 Shell view 探针仍触发守卫失败。由于未能在前台变化发生时采集到精确阶段，不能断言是 Shell view 创建导致，也不能排除外部窗口活动。暂停继续创建 Shell view 的探针；不要恢复前台或移除守卫。日志：`20261028-135833-538ef870.stdout.log`（首次可见创建销毁阻塞）、`20261028-135906-d534142a.stdout.log`（带阶段标记的复验）、`20261028-135944-59c2aa2a.stdout.log`（非激活显示通过）、`20261028-140025-209e28ae.stdout.log`（drop probe 前台守卫失败）。
+
+### 2026-10-28 Private Desktop 前台变化阶段监视
+
+前台守卫现于主线程等待 Private Desktop worker 时每 25 ms 采样一次用户桌面的 `GetForegroundWindow()`。首次发现 HWND 不同，会记录 elapsed time 和当前最近阶段；当前拖放探针在源视图创建、目标视图创建、Copy 查询及清理前更新阶段标记。该监视只记录，不恢复前台、不取消调用，也不放宽最终前台守卫。
+
+NativeProbe Release build 0 警告/错误；随后仅重跑无 Shell-view 的 `SW_SHOWNOACTIVATE` STATIC 窗口控制，退出码 0，stage-at-return 已输出，`foreground-change-observed=False`，前后台 HWND 同为 `0x9901DE`。没有重跑 Shell-view 探针，因此尚无证据证明该监视能将先前前台变化定位到具体阶段。下一次 Shell-view 复验仍需先确认隔离桌面和前台守卫条件；若守卫变化，保留采样日志并判失败，不恢复前台。日志：`20261028-140547-3e07b6e4.stdout.log`。
