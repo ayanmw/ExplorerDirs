@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+> **IShellView 拖放最新复验（2026-10-28）：**目标 Shell 的两个直接 `IDropTarget` Copy 回调在诊断中复制成功，但 Private Desktop 外层守卫发现前台 HWND 改变，整轮退出码 1，因此不采纳为通过；不归因变化来源，也不继续创建 Shell view 的隔离探针，直到前台隔离条件可确认。该轮没有调用 `DoDragDrop`。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)。
+
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |
 | 1 | 核心产品集中验收 | 当前候选 `20261028-051842-945-c3b3a7`（源码 `f3a04e3`，干净构建，28 项待验收）已只执行 PrepareOnly、未启动窗口；EXE/DLL SHA-256 与 `preparation.json` 一致，候选进程数为 0。用户在隔离样本确认过 Details 模式 F2；隐藏 HostProbe 对 pane 0–3 × 8 个查看预设共 32 组方向键/文本选区回归通过，但物理输入与可见焦点仍待集中验收。剪贴板后方向键、逐标签状态、QDR 独立互操作及主题回归继续按[清单](ui-acceptance-next-batch-2026-10-27.md)逐项验收；不因局部通过而整体打勾。后续后台优先。 |

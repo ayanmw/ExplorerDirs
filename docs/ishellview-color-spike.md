@@ -1302,3 +1302,7 @@ Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌�
 在四 pane `IShellView` 的隐藏 Private Desktop 流程末尾，改为调用产品 `ShellFileCommands.Invoke(NewFolder)` 与 `NativeShellCommandMenu`。生产适配器先经 `IContextMenu2::HandleMenuMsg(WM_INITMENUPOPUP)` 初始化延迟的“新建”子菜单，再用当前菜单对象内的命令偏移调用；返回 `S_OK`。此前未初始化子菜单的独立调用偏移返回 `E_FAIL`，直接使用 canonical verb 字符串虽可执行，但不代表产品入口的实际调用路径。
 
 创建出的临时目录在同目录三个 pane 中均可见且计数增加，独立目录 Pane 4 的计数与内容保持不变；若 Shell 打开内联重命名，则由隔离 view 接收 Escape 后结束。当前产品适配器路径连续 3 次通过，前台 HWND 未变，fixture 清理完成。该验证覆盖隐藏原生适配器与通知传播，不等于产品 ExplorerBrowser 的可见菜单/焦点/自动重命名验收，也不覆盖用户真实输入。日志：`20261028-084306-df033e88.stdout.log`、`20261028-084356-2bf5a2ad.stdout.log`、`20261028-084412-57d9c5b7.stdout.log`、`20261028-084429-303fb9d9.stdout.log`。
+
+### 2026-10-28：复验 `IShellView` drop target 时 Private Desktop 前台守卫失败
+
+从当前 `main` 重新运行 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --shell-view-drop-target-private-desktop`。探针在隔离桌面创建真实文件系统 `IShellView`，并通过真实 Shell 选中项 `IDataObject` 直接调用目标 `IDropTarget`：选中项数据对象目标和 `IShellFolder::CreateViewObject` 注册目标均返回 Copy effect，目标临时文件内容正确、源文件保留；`IShellView::GetItemObject` 的 drop-target 查询返回 `E_NOINTERFACE`。这些回调结果仅作诊断，不视为本轮通过，因为外层 watchdog 检测到用户桌面前台 HWND 从 `0x1E71D78` 变为 `0x14712D4`，整轮退出码为 1，`foreground-unchanged=False`。无法归因前台变化来源，不恢复前台、不弱化守卫，也不继续运行会创建 Shell view 的 Private Desktop 探针。本轮没有调用 `DoDragDrop` 或注入鼠标；临时夹具目录已确认清理。真实 OLE 拖放与该隔离条件仍未通过。
