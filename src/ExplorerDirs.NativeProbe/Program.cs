@@ -61,6 +61,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(legacyDetailsCallbackProbe: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-adapter-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(wrappedPidls: true);
+        if (args.Length == 1 && args[0] == "--static-shell-item-bound-view-private-desktop")
+            return PrivateDesktopShellProbe.RunStaticShellItemBoundView();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true, activateView: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")

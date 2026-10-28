@@ -136,6 +136,10 @@ internal static class PrivateDesktopShellProbe
         Run(legacyDetailsCallbackProbe ? "static-shell-column-legacy-details-callback" : wrappedPidls ? "static-shell-column-wrapped-adapter" : activateView ? "static-shell-column-adapter-activated-strict" : prototypeClass ? "static-shell-column-adapter-classid" : strictInterfaces ? "static-shell-column-adapter-strict" : "static-shell-column-adapter",
             () => StaticShellFolderAdapterProbe.Run(strictInterfaces, prototypeClass, activateView, wrappedPidls, legacyDetailsCallbackProbe));
 
+    internal static int RunStaticShellItemBoundView() =>
+        Run("static-shell-item-bound-view", StaticShellFolderAdapterProbe.RunShellItemBoundView,
+            TimeSpan.FromSeconds(90), initializeOle: true);
+
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);
 

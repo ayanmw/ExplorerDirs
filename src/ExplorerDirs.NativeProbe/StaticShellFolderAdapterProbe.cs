@@ -613,6 +613,168 @@ internal static class StaticShellFolderAdapterProbe
         return result;
     }
 
+    internal static int RunShellItemBoundView()
+    {
+        var foreground = GetForegroundWindow();
+        var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
+        var childPath = Path.Combine(fixture, "nested-folder");
+        nint parent = 0, folderPidl = 0, folder = 0, adapter = 0, childPidl = 0, childFolder = 0;
+        nint item = 0, view = 0, folderView = 0, viewFolder = 0, hostPointer = 0, nativeLibrary = 0;
+        var createdView = false;
+        StreamViewHost? host = null;
+        var stage = "create-fixture";
+        var result = 0;
+        try
+        {
+            Directory.CreateDirectory(childPath);
+            File.WriteAllBytes(Path.Combine(childPath, "two.bin"), new byte[2]);
+            File.WriteAllBytes(Path.Combine(childPath, "ten.bin"), new byte[10]);
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs Shell item bound-view probe",
+                0x80000000, 0, 0, 900, 600, 0, 0, 0, 0);
+            if (parent == 0) throw new Exception("Private Desktop parent window creation failed.");
+            Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
+            Check(SHBindToObject(0, folderPidl, 0, in ShellFolder2Id, out folder));
+
+            nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
+            var shellDetailsSize = GetShellDetailsSize(nativeLibrary);
+            var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
+                NativeLibrary.GetExport(nativeLibrary, "CreateWrappedPidlShellFolderAdapter"));
+            Check(createAdapter(folder, out adapter));
+            Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
+                NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"))();
+
+            stage = "bind-child-folder-adapter";
+            childPidl = ParseChild(adapter, "nested-folder");
+            Check(At<BindToObject>(adapter, 5)(adapter, childPidl, 0, in ShellFolder2Id, out childFolder));
+            var itemId = ShellItemId;
+            Check(SHCreateItemWithParent(0, adapter, childPidl, in itemId, out item));
+            var shellFolderId = ShellFolder2Id;
+            Check(At<BindShellItemHandler>(item, 3)(item, 0, in ShellFolderObjectHandlerId, in shellFolderId, out var handlerFolder));
+            try
+            {
+                if (!HasRegisteredSchemaColumn(handlerFolder, shellDetailsSize))
+                    throw new Exception("BHID_SFObject did not return the wrapped child folder.");
+            }
+            finally { Marshal.Release(handlerFolder); }
+
+            stage = "bind-shell-view-object";
+            var shellViewId = ShellViewId;
+            Check(At<BindShellItemHandler>(item, 3)(item, 0, in ShellViewObjectHandlerId, in shellViewId, out view));
+            host = new StreamViewHost(parent, []) { View = view };
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
+            createdView = true;
+            _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE; the caller confines this to Private Desktop.
+            Pump(700);
+            CheckBoundary(parent, foreground, "Shell item-bound view creation", expectVisible: true);
+
+            stage = "verify-view-folder-identity";
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            Check(At<SetMode>(folderView, 35)(folderView, 4, 16)); // FVM_DETAILS.
+            Check(At<GetFolder>(folderView, 5)(folderView, ref shellFolderId, out viewFolder));
+            nint boundUnknown = 0, viewUnknown = 0;
+            var sameFolderIdentity = false;
+            var viewFolderHasCustomColumn = false;
+            try
+            {
+                Check(Marshal.QueryInterface(childFolder, in UnknownId, out boundUnknown));
+                Check(Marshal.QueryInterface(viewFolder, in UnknownId, out viewUnknown));
+                sameFolderIdentity = boundUnknown == viewUnknown;
+                viewFolderHasCustomColumn = HasRegisteredSchemaColumn(viewFolder, shellDetailsSize);
+                Console.WriteLine($"native-shell-item-bound-view: same-folder-IUnknown={sameFolderIdentity}; view-folder-custom-column={viewFolderHasCustomColumn}");
+            }
+            finally
+            {
+                if (viewUnknown != 0) Marshal.Release(viewUnknown);
+                if (boundUnknown != 0) Marshal.Release(boundUnknown);
+            }
+
+            stage = "enumerate-view-items";
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var itemCount)); // SVGIO_ALLVIEW
+            if (itemCount != 2) throw new Exception($"Shell view should enumerate two children, got {itemCount}.");
+            var names = ReadDisplayedColumnValues(view, 0, expectedCount: 2);
+            if (!names.SequenceEqual(new[] { "ten.bin", "two.bin" }, StringComparer.OrdinalIgnoreCase))
+                throw new Exception("Unexpected initial Shell view name order: " + string.Join('|', names));
+
+            stage = "verify-standard-size-sort";
+            var nameColumn = new ShellColumnManager.NativeKey { FormatId = NameKeyFormat, PropertyId = 10 };
+            var sizeColumn = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            var sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn { Key = sizeColumn, Direction = 1 }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            names = ReadDisplayedColumnValues(view, 0, expectedCount: 2);
+            if (!names.SequenceEqual(new[] { "two.bin", "ten.bin" }, StringComparer.OrdinalIgnoreCase))
+                throw new Exception("The Shell view did not sort by standard Size: " + string.Join('|', names));
+
+            stage = "verify-custom-column-contract";
+            var property = StaticShellColumnContract.PropertyKey;
+            var customColumn = new PropertyKeyState(property.FormatId, property.PropertyId);
+            Check(ShellColumnManager.Apply(folderView,
+            [
+                new(new(nameColumn.FormatId, nameColumn.PropertyId), 220),
+                new(new(sizeColumn.FormatId, sizeColumn.PropertyId), 100),
+                new(customColumn, 130)
+            ]));
+            Check(ShellColumnManager.Capture(folderView, out var appliedColumns));
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 2);
+            Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; callbacks={ReadNativeComparisonStats()}; window-created=True; private-desktop-only=True");
+            var operationChild = ParseChild(childFolder, "two.bin");
+            try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
+            finally { ILFree(operationChild); }
+            Console.WriteLine("native-shell-item-bound-view: Shell IDataObject CF_HDROP+CIDA formats=valid");
+            if (!viewFolderHasCustomColumn ||
+                !customValues.SequenceEqual(new[] { "2", "10" }, StringComparer.Ordinal))
+                throw new Exception("The Shell item-bound view did not display its custom column values: " + string.Join('|', customValues));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"native-shell-item-bound-view failure at {stage}: {ex}");
+            result = 1;
+        }
+        finally
+        {
+            if (createdView && view != 0)
+            {
+                try { Check(At<DestroyViewWindow>(view, 10)(view)); }
+                catch (Exception ex) { Console.WriteLine("native-shell-item-bound-view cleanup: DestroyViewWindow: " + ex.Message); result = 1; }
+            }
+            host?.Dispose();
+            if (folderView != 0) Marshal.Release(folderView);
+            if (viewFolder != 0) Marshal.Release(viewFolder);
+            if (view != 0) Marshal.Release(view);
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (item != 0) Marshal.Release(item);
+            if (childFolder != 0) Marshal.Release(childFolder);
+            if (childPidl != 0) ILFree(childPidl);
+            if (adapter != 0) Marshal.Release(adapter);
+            if (folder != 0) Marshal.Release(folder);
+            if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
+            if (nativeLibrary != 0) NativeLibrary.Free(nativeLibrary);
+            if (parent != 0 && (!DestroyWindow(parent) || IsWindow(parent))) result = 1;
+            var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (Path.GetFullPath(fixture).StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fixture))
+                Directory.Delete(fixture, recursive: true);
+            GC.KeepAlive(host);
+        }
+        if (GetForegroundWindow() != foreground)
+        {
+            Console.WriteLine("native-shell-item-bound-view failure: foreground changed.");
+            result = 1;
+        }
+        return result;
+    }
+
     private static void VerifyForwardedIdentity(nint adapter, bool strictInterfaces)
     {
         var parentId = new Guid("b3a4b685-b685-4805-99d9-5dead2873236");
@@ -992,7 +1154,7 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.Release(shellFolderView); }
     }
 
-    private static string[] ReadDisplayedColumnValues(nint view, int subItem)
+    private static string[] ReadDisplayedColumnValues(nint view, int subItem, int expectedCount = 4)
     {
         Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
         nint listView = 0;
@@ -1009,7 +1171,7 @@ internal static class StaticShellFolderAdapterProbe
         if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child to query.");
 
         var count = unchecked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT
-        if (count != 4) throw new InvalidOperationException($"Expected four displayed rows, got {count}.");
+        if (count != expectedCount) throw new InvalidOperationException($"Expected {expectedCount} displayed rows, got {count}.");
         var textBuffer = Marshal.AllocHGlobal(512 * sizeof(char));
         var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
         try
@@ -1294,6 +1456,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemArrayHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

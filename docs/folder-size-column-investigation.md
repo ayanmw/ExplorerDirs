@@ -220,4 +220,12 @@ Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date �
 
 结论：对象级 `IShellItem`、由它直接创建的数组和 `BHID_SFViewObject` 可保留包装身份；经受支持的标准数据对象往返则丢失身份。后一条可维持现存文件格式的剪贴板/拖放路径，但不能充当完整自定义 namespace 桥接，也不能让 Shell 绝对 PIDL 解析包装节点。当前的新正向证据使隔离 `IShellView` 窗口原型值得继续，但尚未实际创建 view window、浏览/枚举列表、验证列消费、Shell 菜单、复制/移动拖放、导航、通知和刷新；也不构成产品迁移许可。下一步应在隔离宿主中从 `BHID_SFViewObject` 获得的视图创建隐藏 view window，逐项验证枚举、详情、排序和标准文件操作，再决定完整迁移是否可行。
 
+### 2026-10-29：Shell item 绑定视图的 Private Desktop 窗口门槛
+
+新增 `--static-shell-item-bound-view-private-desktop`，通过 `IShellItem::BindToHandler(BHID_SFViewObject)` 取得子文件夹 `IShellView`，在独立 Private Desktop 中调用 `CreateViewWindow`。两轮均创建实际 DefView `SysListView32`、读到两个子项，并通过标准 `PKEY_Size` 升序排序（`two.bin|ten.bin`）；从 view folder 取得的适配器仍暴露实验列元数据，且基于它取得的 Shell 文件 `IDataObject` 通过 `CF_HDROP` 和 CIDA 现存路径合同。Private Desktop 监视器两轮均记录前台句柄与输入时间戳不变，并由测试进程负责桌面清理。
+
+自定义列仍未通过：列设置 Capture 读回成功，view folder 暴露 40 列，但自定义显示子项仍为空。两轮回调计数相同：`GetDetailsOf` 共 4 次且均为列头、逐项为 0；自定义 `GetDetailsEx`、`CompareIDs` 和 `IPropertyStore` 均为 0。两个文件的 `IDataObject` 格式合同（`CF_HDROP` 与 CIDA）也有效，但没有执行复制/移动操作。故该架构已证明可从 `IShellItem` 绑定到真实 Shell view、枚举和按标准大小排序，也能提供常规文件数据对象格式；仍未提供产品所需的逐项自定义列值，且没有验证原生菜单、真实复制/移动、OLE 拖放、导航历史与目录通知。由于自定义列是本轮硬门槛，两轮探针均在该项以 exit code 1 结束；这不是窗口创建失败。视图的 `GetFolder` 与单独 `BHID_SFObject` 返回对象虽 `IUnknown` 指针不同，但前者仍含实验列元数据，不能把指针不相等单独判为视图退回文件系统。
+
+Private Desktop 记录：`src/.state/native-probe-watchdog/20261029-shell-item-bound-view.log`（末轮）；探针源码与命令保留，后续可复跑。产品代码、ExplorerBrowser 和 release 未改变。
+
 参考：[IShellItem::BindToHandler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitem-bindtohandler)、[IShellItemArray::BindToHandler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitemarray-bindtohandler)、[SHCreateItemWithParent](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateitemwithparent)、[SHCreateShellItemArrayFromShellItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateshellitemarrayfromshellitem)、[IParentAndItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)。
