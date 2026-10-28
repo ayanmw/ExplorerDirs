@@ -4341,3 +4341,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 对齐 Q-Dir 官方“完全停用所有文件列表分组”与当前 Shell 视图右键菜单的单视图分组操作；新增 View 菜单开关和独立便携 `DisableGrouping.ini`。启用后将 `FWF_NOGROUPING` 应用到现有及新建 Shell 视图，停用前缓存每标签分组键/方向，停用期间不把原生无分组状态覆盖进会话，关闭时恢复标签值。
 - 过滤器分组延迟恢复队列服从全局覆盖。`SettingsSmoke` 对 flag 保留、profile/窗格/新标签接线及缓存状态策略通过；完整 Release SettingsSmoke 通过，App Release build 0 警告、0 错误。没有打开 GUI 或真实 ExplorerBrowser 窗口；分组菜单可见禁用状态、各标签切换及重启恢复仍待集中验收。依据：[Q-Dir 完全停用分组说明](https://www.softwareok.com/?page=Windows%2FQ-Dir%2FTips%2F11)、[Windows FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags)。
+
+## 2026-10-28：标签菜单外部 Explorer 浏览与空白处右键
+
+- 标签页右键菜单首项新增“使用 Explorer 浏览”，将该标签已确认的 Shell 当前路径作为单一参数交给 Windows `explorer.exe`，避免用 Explorer Dirs 打开第二个标签/窗格。标签栏空白处右键复用当前选中标签的上下文菜单；原有空白处左键双击新建标签及标签项双击关闭逻辑保持不变。
+- `SettingsSmoke` 验证磁盘路径（含空格）和 Shell 虚拟位置作为单个进程参数，菜单首项/右键空白区路由及原有双击规则；进程未实际启动。Release SettingsSmoke 与 App Release 构建结果见本批记录。未打开 GUI，真实 Explorer 窗口复用/路径显示和空白区命中位置仍待集中验收。

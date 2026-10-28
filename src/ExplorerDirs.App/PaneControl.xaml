@@ -183,6 +183,7 @@
                                               VerticalScrollBarVisibility="Disabled"
                                               CanContentScroll="False" Focusable="False" AllowDrop="True"
                                               PreviewMouseLeftButtonDown="TabHeaderScroll_PreviewMouseLeftButtonDown"
+                                              PreviewMouseRightButtonUp="TabHeaderScroll_PreviewMouseRightButtonUp"
                                               Background="Transparent"
                                               DragOver="TabStrip_DragOver" Drop="TabStrip_Drop"
                                               ScrollChanged="TabHeaderScroll_ScrollChanged"

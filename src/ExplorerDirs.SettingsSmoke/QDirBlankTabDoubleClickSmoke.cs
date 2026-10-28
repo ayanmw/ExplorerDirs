@@ -10,6 +10,10 @@ internal static class QDirBlankTabDoubleClickSmoke
         var paneCode = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
         var tabHeaderScroll = markup.Descendants().Single(element =>
             (string?)element.Attribute("{http://schemas.microsoft.com/winfx/2006/xaml}Name") == "TabHeaderScroll");
+        var blankHeaderRightClickStart = paneCode.IndexOf("private void TabHeaderScroll_PreviewMouseRightButtonUp", StringComparison.Ordinal);
+        var blankHeaderRightClickEnd = paneCode.IndexOf("private void Tabs_PreviewKeyDown", blankHeaderRightClickStart, StringComparison.Ordinal);
+        var blankHeaderRightClickHandler = blankHeaderRightClickStart >= 0 && blankHeaderRightClickEnd > blankHeaderRightClickStart
+            ? paneCode[blankHeaderRightClickStart..blankHeaderRightClickEnd] : string.Empty;
         var newTabHandlerStart = paneCode.IndexOf("private void TabHeaderScroll_PreviewMouseLeftButtonDown", StringComparison.Ordinal);
         var newTabHandlerEnd = paneCode.IndexOf("private void Tabs_PreviewKeyDown", newTabHandlerStart, StringComparison.Ordinal);
         var newTabHandler = newTabHandlerStart >= 0 && newTabHandlerEnd > newTabHandlerStart
@@ -32,6 +36,27 @@ internal static class QDirBlankTabDoubleClickSmoke
         Require(headerCloseHandler.Contains("e.ClickCount == 2", StringComparison.Ordinal) &&
                 headerCloseHandler.Contains("CloseTab(state);", StringComparison.Ordinal),
             "the existing double-click on a tab item still closes that tab");
+
+        Require((string?)tabHeaderScroll.Attribute("PreviewMouseRightButtonUp") ==
+                "TabHeaderScroll_PreviewMouseRightButtonUp" &&
+                blankHeaderRightClickHandler.Contains("ItemsControl.ContainerFromElement(Tabs", StringComparison.Ordinal) &&
+                blankHeaderRightClickHandler.Contains("is TabItem", StringComparison.Ordinal) &&
+                blankHeaderRightClickHandler.Contains("Tabs.SelectedItem", StringComparison.Ordinal) &&
+                blankHeaderRightClickHandler.Contains("CreateTabContextMenu(state)", StringComparison.Ordinal) &&
+                blankHeaderRightClickHandler.Contains("menu.PlacementTarget = TabHeaderScroll", StringComparison.Ordinal) &&
+                blankHeaderRightClickHandler.Contains("menu.IsOpen = true", StringComparison.Ordinal),
+            "right-clicking blank tab-strip space opens the selected tab's menu while tab-item menus remain native to their header");
+
+        var tabContextMenuStart = paneCode.IndexOf("private ContextMenu CreateTabContextMenu(TabState state)", StringComparison.Ordinal);
+        var tabContextMenuEnd = paneCode.IndexOf("private static void AddMenuItem", tabContextMenuStart, StringComparison.Ordinal);
+        var tabContextMenu = tabContextMenuStart >= 0 && tabContextMenuEnd > tabContextMenuStart
+            ? paneCode[tabContextMenuStart..tabContextMenuEnd] : string.Empty;
+        Require(tabContextMenu.IndexOf("AddMenuItem(menu, \"使用 Explorer 浏览\"", StringComparison.Ordinal) is var explorerIndex && explorerIndex >= 0 &&
+                explorerIndex < tabContextMenu.IndexOf("AddMenuItem(menu, \"新建标签页\"", StringComparison.Ordinal) &&
+                tabContextMenu.Contains("OpenInSystemExplorer(state)", StringComparison.Ordinal),
+            "system Explorer browsing is the first custom tab-context command and uses that tab's location");
+
+        ExplorerDirs.SettingsSmoke.SystemExplorerLauncherSmoke.Run();
         Console.WriteLine("Q-Dir blank-tab double-click smoke: PASS");
     }
 

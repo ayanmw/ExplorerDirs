@@ -1849,6 +1849,8 @@ public partial class PaneControl : UserControl
     private ContextMenu CreateTabContextMenu(TabState state)
     {
         var menu = new ContextMenu();
+        AddMenuItem(menu, "使用 Explorer 浏览", () => OpenInSystemExplorer(state));
+        menu.Items.Add(new Separator());
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
         AddMenuItem(menu, "复制当前标签", () => DuplicateTab(state), "Ctrl+K");
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
@@ -1870,6 +1872,12 @@ public partial class PaneControl : UserControl
             closeItem.IsEnabled = !state.IsPinned && Tabs.Items.Count > 1;
         };
         return menu;
+    }
+
+    private void OpenInSystemExplorer(TabState state)
+    {
+        try { SystemExplorerLauncher.Open(state.Browser.CurrentPath); }
+        catch (Exception ex) { Status.Text = $"启动 Windows Explorer 失败：{ex.Message}"; }
     }
 
     private static void AddMenuItem(ContextMenu menu, string header, Action action, string? shortcut = null)
@@ -1985,6 +1993,19 @@ public partial class PaneControl : UserControl
             return;
 
         NewTab();
+        e.Handled = true;
+    }
+
+    private void TabHeaderScroll_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(Tabs, e.OriginalSource as DependencyObject ?? Tabs) is TabItem ||
+            Tabs.SelectedItem is not TabItem selected || selected.Tag is not TabState state)
+            return;
+
+        var menu = CreateTabContextMenu(state);
+        menu.PlacementTarget = TabHeaderScroll;
+        menu.Placement = PlacementMode.MousePoint;
+        menu.IsOpen = true;
         e.Handled = true;
     }
 

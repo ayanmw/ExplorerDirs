@@ -425,3 +425,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 ### 全局关闭文件视图分组（2026-10-28）
 
 “视图 → 停用所有视图分组”是 profile 级开关，独立于 Shell 右键菜单的单视图分组。开启时对每个现有/新建视图设置 Windows `FWF_NOGROUPING`；标签原分组键和方向仍保留在会话缓存，关闭开关后恢复。偏好存于 `DisableGrouping.ini`。后台 `SettingsSmoke` 与 Release build 通过；尚未操作真实 ExplorerBrowser 菜单，也未验证不同标签分组恢复和跨重启结果。[Q-Dir 说明](https://www.softwareok.com/?page=Windows%2FQ-Dir%2FTips%2F11) · [Windows FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags)
+
+### 标签栏菜单与系统 Explorer（2026-10-28）
+
+标签页右键菜单现在以“使用 Explorer 浏览”开头，将该标签 `Browser.CurrentPath` 传给 `explorer.exe`；空白标签栏右键显示当前标签菜单。原空白双击新建标签及标签项双击关闭规则不变。后台参数/接线 smoke 不启动子进程；真实 Explorer 导航和可见菜单定位待集中 UI 验收。

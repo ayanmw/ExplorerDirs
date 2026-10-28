@@ -159,5 +159,6 @@
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetShortcut.cs" Link="ShellHeaderPresetShortcut.cs" />
     <Compile Include="../ExplorerDirs.App/ShellHeaderPresetMenuGate.cs" Link="ShellHeaderPresetMenuGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellStatusCountRefreshGate.cs" Link="ShellStatusCountRefreshGate.cs" />
+    <Compile Include="../ExplorerDirs.App/SystemExplorerLauncher.cs" Link="SystemExplorerLauncher.cs" />
   </ItemGroup>
 </Project>
