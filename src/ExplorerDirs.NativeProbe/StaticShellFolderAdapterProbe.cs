@@ -405,8 +405,9 @@ internal static class StaticShellFolderAdapterProbe
                 $"compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; registered-schema-column={documentColumn}; " +
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
                 $"document-byte-count-type=0x{documentByteCount.VariantType:X4}(hr=0x{documentByteCount.TypeHResult:X8}); " +
+                $"document-byte-count-display-type=0x{documentByteCount.DisplayType:X8}(hr=0x{documentByteCount.DisplayTypeHResult:X8}); " +
                 $"document-byte-count-sort-description=0x{documentByteCount.SortDescription:X8}(hr=0x{documentByteCount.SortDescriptionHResult:X8}); type-flags=0x{documentByteCount.TypeFlags:X8}(hr=0x{documentByteCount.TypeFlagsHResult:X8}); " +
-                $"document-byte-count-sort-alias=[{documentByteCount.SortAliasEvidence}]; size-type=0x{sizePropertyDescription.VariantType:X4}; size-sort-description=0x{sizePropertyDescription.SortDescription:X8}; size-type-flags=0x{sizePropertyDescription.TypeFlags:X8}; size-sort-alias=[{sizePropertyDescription.SortAliasEvidence}]; " +
+                $"document-byte-count-sort-alias=[{documentByteCount.SortAliasEvidence}]; size-type=0x{sizePropertyDescription.VariantType:X4}; size-display-type=0x{sizePropertyDescription.DisplayType:X8}; size-sort-description=0x{sizePropertyDescription.SortDescription:X8}; size-type-flags=0x{sizePropertyDescription.TypeFlags:X8}; size-sort-alias=[{sizePropertyDescription.SortAliasEvidence}]; " +
                 $"column-state=0x{documentByteCount.ColumnState:X8}(hr=0x{documentByteCount.ColumnStateHResult:X8}); window-created=False");
             return 0;
         }
@@ -1882,15 +1883,16 @@ internal static class StaticShellFolderAdapterProbe
     {
         var interfaceId = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
         var result = PSGetPropertyDescription(in key, in interfaceId, out var description);
-        if (result < 0 || description == 0) return new(result, 0, result, 0, result, 0, result, 0, result, "unavailable");
+        if (result < 0 || description == 0) return new(result, 0, result, 0, result, 0, result, 0, result, 0, result, "unavailable");
         try
         {
             var typeResult = At<GetPropertyType>(description, 5)(description, out var variantType);
             var typeFlagsResult = At<GetPropertyTypeFlags>(description, 8)(description, 0x80001fff, out var typeFlags); // PDTF_MASK_ALL.
+            var displayTypeResult = At<GetPropertyDisplayType>(description, 11)(description, out var displayType);
             var columnStateResult = At<GetPropertyColumnState>(description, 12)(description, out var columnState);
             var sortDescriptionResult = At<GetPropertySortDescription>(description, 16)(description, out var sortDescription);
             var sortAliasEvidence = GetPropertySortAliasEvidence(description);
-            return new(result, variantType, typeResult, typeFlags, typeFlagsResult, columnState, columnStateResult, sortDescription, sortDescriptionResult, sortAliasEvidence);
+            return new(result, variantType, typeResult, typeFlags, typeFlagsResult, displayType, displayTypeResult, columnState, columnStateResult, sortDescription, sortDescriptionResult, sortAliasEvidence);
         }
         finally { Marshal.Release(description); }
     }
@@ -1990,7 +1992,7 @@ internal static class StaticShellFolderAdapterProbe
         public nint Value;
         public nint ReleaseUnknown;
     }
-    private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint TypeFlags, int TypeFlagsHResult,
+    private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint TypeFlags, int TypeFlagsHResult, uint DisplayType, int DisplayTypeHResult,
         uint ColumnState, int ColumnStateHResult, uint SortDescription, int SortDescriptionHResult, string SortAliasEvidence);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
@@ -2090,6 +2092,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsEx(nint self, nint item, nint key, nint variant);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyType(nint self, out ushort variantType);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyTypeFlags(nint self, uint mask, out uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyDisplayType(nint self, out uint displayType);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertySortDescription(nint self, out uint description);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortByAlias(nint self, in Guid iid, out nint value);

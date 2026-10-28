@@ -264,6 +264,8 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 按 Windows `IPropertyDescriptionAliasInfo` 合同读取 ByteCount 与 `PKEY_Size` 的主排序别名。两者查询都返回 `S_FALSE` 且没有别名对象；因此该次 A/B 中 ByteCount 失败而 Size 成功，不能归因于 ByteCount 缺少 sort-by alias（两边都没有）。无窗口 NativeProbe Release build 0 警告、0 错误，folder-contract smoke exit code 0、未创建窗口。下一步应继续查 `IShellFolder2` 列索引和 `IFolderView2` 属性键排序之间的映射/调用路径，特别是 DefView 为什么能对 Size 进入行重排，却没有向 adapter 发出 ByteCount 列比较。
 
+同一无窗口探针读取 `GetDisplayType`，ByteCount 与 Size 都返回 `PDDT_NUMBER`（`1`）；连同已读出的升序文案描述 `PDSD_SMALLEST_BIGGEST`，当前属性描述的数字显示/排序文案元数据一致，尚不能解释两列排序行为差异。
+
 参考：[IPropertyDescriptionAliasInfo](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertydescriptionaliasinfo)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)、[IShellFolder2::GetDefaultColumn](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumn)。
 
 ### 2026-10-29：DefView 列点击通知对照
