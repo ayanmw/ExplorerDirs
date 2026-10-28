@@ -4,6 +4,9 @@ namespace ExplorerDirs.App;
 
 internal sealed record QuickFilterSettings
 {
+    // Keep the UI selection ceiling aligned with the bounded session value list.
+    internal const int MaximumColumnFilterValues = 256;
+
     private readonly string[] _patterns;
     private readonly ColumnValueFilter[] _columnFilters;
 

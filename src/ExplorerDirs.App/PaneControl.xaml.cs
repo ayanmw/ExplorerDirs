@@ -739,9 +739,15 @@ public partial class PaneControl : UserControl
         var filters = settings.ColumnFilters.Where(filter => filter.Key != key).ToList();
         if (selectedValues.Count > 0)
             filters.Add(new ColumnValueFilter(key, selectedValues));
+        var updated = settings.WithColumnFilters(filters);
+        if (SessionStore.ColumnFilterValidationError(updated) is { } validationError)
+        {
+            Status.Text = validationError;
+            return false;
+        }
         try
         {
-            if (!state.Browser.SetQuickFilter(settings.WithColumnFilters(filters))) return false;
+            if (!state.Browser.SetQuickFilter(updated)) return false;
         }
         catch (Exception ex)
         {

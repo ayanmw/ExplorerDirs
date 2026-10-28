@@ -55,3 +55,11 @@
 - [x] Read at most 64 current-view items per Dispatcher turn, retaining Shell's existing visible-item and filtered-view paths.
 - [x] Stop and release the retained Shell interfaces when the menu closes, the active tab changes, or the view generation changes.
 - [x] Build the App Release configuration with zero warnings and errors; defer real large-directory and slow-provider response measurements to visible acceptance.
+
+### Task 5: Keep active filters serializable
+
+**Files:** Modify `ShellQuickFilter.cs`, `SessionStore.cs`, `PaneControl.xaml.cs`, and `MainWindow.xaml.cs`.
+
+- [x] Use one shared 256-value-per-column limit for the checklist and session parser/writer.
+- [x] Validate the candidate filter against session value-count, value-length, column-count, and aggregate-payload limits before applying it; preserve the old filter on rejection.
+- [x] Build the App Release configuration with zero warnings and errors; defer visible limit-state acceptance.

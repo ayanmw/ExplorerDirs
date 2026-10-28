@@ -818,6 +818,12 @@ public partial class MainWindow : Window
         clear.Click += (_, _) => pane.ApplyColumnValueFilter(key, []);
         menu.Items.Add(clear);
         menu.Items.Add(new Separator());
+        var selectionCount = new MenuItem
+        {
+            Header = $"已选 {selectedValues.Count}/{QuickFilterSettings.MaximumColumnFilterValues} 个值",
+            IsEnabled = false
+        };
+        menu.Items.Add(selectionCount);
         if (allValues.Length == 0)
         {
             menu.Items.Add(new MenuItem { Header = "当前目录没有可筛选值", IsEnabled = false });
@@ -832,6 +838,7 @@ public partial class MainWindow : Window
                 Tag = value,
                 IsCheckable = true,
                 IsChecked = selectedValues.Contains(value),
+                IsEnabled = selectedValues.Contains(value) || selectedValues.Count < QuickFilterSettings.MaximumColumnFilterValues,
                 StaysOpenOnClick = true
             };
             item.Click += (_, _) =>
@@ -840,9 +847,18 @@ public partial class MainWindow : Window
                     .Where(entry => entry.IsCheckable && entry.IsChecked && entry.Tag is string)
                     .Select(entry => (string)entry.Tag)
                     .ToArray();
-                if (!pane.ApplyColumnValueFilter(key, selected)) item.IsChecked = !item.IsChecked;
-                clear.IsEnabled = menu.Items.OfType<MenuItem>().Any(entry =>
+                if (selected.Length > QuickFilterSettings.MaximumColumnFilterValues)
+                {
+                    item.IsChecked = false;
+                    EnvironmentStatus.Text = $"每列最多可筛选 {QuickFilterSettings.MaximumColumnFilterValues} 个值。";
+                }
+                else if (!pane.ApplyColumnValueFilter(key, selected)) item.IsChecked = !item.IsChecked;
+                var checkedCount = menu.Items.OfType<MenuItem>().Count(entry =>
                     entry.IsCheckable && entry.IsChecked && entry.Tag is string);
+                selectionCount.Header = $"已选 {checkedCount}/{QuickFilterSettings.MaximumColumnFilterValues} 个值";
+                clear.IsEnabled = checkedCount > 0;
+                foreach (var valueItem in menu.Items.OfType<MenuItem>().Where(entry => entry.IsCheckable))
+                    valueItem.IsEnabled = valueItem.IsChecked || checkedCount < QuickFilterSettings.MaximumColumnFilterValues;
             };
             menu.Items.Add(item);
         }

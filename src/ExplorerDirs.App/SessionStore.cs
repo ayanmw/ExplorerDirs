@@ -69,7 +69,6 @@ internal sealed class SessionStore
     internal const int MaximumTabsPerPane = 100;
     private const int CurrentFormatVersion = 11;
     private const int MaximumColumnFiltersPerTab = 16;
-    private const int MaximumColumnFilterValues = 256;
     private const int MaximumColumnFilterValueLength = 512;
     private const int MaximumColumnFilterPayloadLength = 128 * 1024;
     private readonly string _path;
@@ -77,6 +76,26 @@ internal sealed class SessionStore
     private bool _canOverwrite = true;
     private string? _lastSeenContent;
     private bool _olderVersionBackedUp;
+
+    internal static string? ColumnFilterValidationError(QuickFilterSettings settings)
+    {
+        if (settings.ColumnFilters.Count > MaximumColumnFiltersPerTab)
+            return $"每个标签最多保存 {MaximumColumnFiltersPerTab} 个列值筛选条件。";
+
+        var encodedValuesLength = 0;
+        foreach (var filter in settings.ColumnFilters)
+        {
+            var values = filter.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (filter.Key.FormatId == Guid.Empty || values.Length is 0 or > QuickFilterSettings.MaximumColumnFilterValues ||
+                values.Any(value => value.Length > MaximumColumnFilterValueLength || value.Contains('\r') || value.Contains('\n')))
+                return "列值筛选条件无效或超过可保存范围。";
+
+            encodedValuesLength += Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(values)).Length;
+            if (encodedValuesLength > MaximumColumnFilterPayloadLength)
+                return "单个标签的列值筛选配置过大，未覆盖会话文件。";
+        }
+        return null;
+    }
 
     public string Path => _path;
     public string? LoadWarning { get; private set; }
@@ -235,21 +254,14 @@ internal sealed class SessionStore
                 builder.AppendLine($"FilterExcludeMatches={tab.QuickFilter.ExcludeMatches.ToString().ToLowerInvariant()}");
                 builder.AppendLine($"FilterFolders={tab.QuickFilter.FilterFolders.ToString().ToLowerInvariant()}");
                 var columnFilters = tab.QuickFilter.ColumnFilters;
-                if (columnFilters.Count > MaximumColumnFiltersPerTab)
-                    throw new InvalidDataException($"每个标签最多保存 {MaximumColumnFiltersPerTab} 个列值筛选条件。");
-                var encodedValuesLength = 0;
+                if (ColumnFilterValidationError(tab.QuickFilter) is { } filterError)
+                    throw new InvalidDataException(filterError);
                 builder.AppendLine($"ColumnFilterCount={columnFilters.Count}");
                 for (var filterIndex = 0; filterIndex < columnFilters.Count; filterIndex++)
                 {
                     var filter = columnFilters[filterIndex];
                     var values = filter.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                    if (filter.Key.FormatId == Guid.Empty || values.Length is 0 or > MaximumColumnFilterValues ||
-                        values.Any(value => value.Length > MaximumColumnFilterValueLength || value.Contains('\r') || value.Contains('\n')))
-                        throw new InvalidDataException("列值筛选条件无效或超过可保存范围。");
                     var encodedValues = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(values));
-                    encodedValuesLength += encodedValues.Length;
-                    if (encodedValuesLength > MaximumColumnFilterPayloadLength)
-                        throw new InvalidDataException("单个标签的列值筛选配置过大，未覆盖会话文件。");
                     builder.AppendLine($"ColumnFilter{filterIndex}Key={filter.Key}");
                     builder.AppendLine($"ColumnFilter{filterIndex}Values={encodedValues}");
                 }
@@ -486,7 +498,7 @@ internal sealed class SessionStore
             {
                 var decoded = JsonSerializer.Deserialize<string[]>(Convert.FromBase64String(encodedValues));
                 if (key is null || key.FormatId == Guid.Empty || decoded is null ||
-                    decoded.Length is 0 or > MaximumColumnFilterValues ||
+                    decoded.Length is 0 or > QuickFilterSettings.MaximumColumnFilterValues ||
                     decoded.Any(value => value is null || value.Length > MaximumColumnFilterValueLength ||
                         value.Contains('\r') || value.Contains('\n')))
                 {
