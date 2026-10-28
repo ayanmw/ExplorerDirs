@@ -10,6 +10,12 @@
 
 细粒度标记只提供阶段相关性，不会自行阻止或归因前台切换。两轮失败都不作为迁移门槛通过，也不代表真实用户拖放失败；在找到不影响外层前台的验证环境前，不再重跑同类 Shell-view 探针。
 
+## 2026-10-28：区分 Private Desktop 阶段与调用桌面前台变化
+
+静态追踪确认外层 `Run` 在调用线程（即创建 Private Desktop 的原桌面）采集前台 HWND，轮询也始终由该线程执行；Shell 探针则在另一个已 `SetThreadDesktop` 的 STA 上运行。阶段字符串通过共享字段读取，只能标出探针当时走到哪里。拖放探针自身还在 Private Desktop worker 内比较其桌面前台，并报告 `foreground-unchanged=True`。因此旧日志中“外层前台首次变化恰逢 registered target 的 Drop 阶段”是时间相关性，不能证明该 Drop 改变了用户桌面的前台，也不能排除用户/其它程序在同一时刻切换窗口。
+
+为让下一次受控复验能区分这两种情况，外层守卫现在会同时记录它所监视的线程/桌面、前台 HWND 的 PID/进程名/窗口类，以及开始、变化和返回时的 `GetLastInputInfo` 时间戳；不记录窗口标题或输入内容。原前台变化仍令探针失败，保持保护用户桌面的 fail-closed 行为。本轮只做源码审查和 NativeProbe Release 构建，没有重跑 Shell-view 探针；新日志尚未产生，Drop 的因果关系仍未确定。
+
 ## 2026-10-28：四窗格 WPF Shell 反向选择矩阵
 
 扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView`、两项临时文件，在 4 个窗格 × 8 种 Shell 查看方式（大/中/小图标、超大图标、列表、详细信息、平铺、内容）逐项运行生产 `ShellSelectionCommands` 的反向选择。每项检查原选中项身份的补集、再次反选恢复、焦点索引保持及兄弟窗格无选区副作用。32 组全部通过；Ctrl+A、F2 四方向键编辑保持、跨窗格输入隔离、复制/重命名/删除通知和菜单生命周期也随组合探针通过。连续 3 次 Private Desktop 运行退出码 0，前台 HWND 不变、隔离窗口及 Shell 视图均完成清理；NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-092506-b2dc8aaf.stdout.log`、`20261028-092546-d9e05ad9.stdout.log`、`20261028-092605-1a282d6e.stdout.log`。

@@ -6,6 +6,11 @@ using System.Windows.Media.Imaging;
 
 namespace ExplorerDirs.App;
 
+internal interface IColumnValueCaptureSource
+{
+    bool IsCurrentColumnValueCapture(ShellFileViewExportCapture.ColumnValueCapture capture);
+}
+
 // Reads the current Shell view's displayed item order and visible columns.
 // This deliberately consumes the native view snapshot instead of re-enumerating the folder.
 internal static class ShellFileViewExportCapture
@@ -113,7 +118,7 @@ internal static class ShellFileViewExportCapture
             _column = column;
         }
 
-        internal ExplorerBrowserHost? Source { get; set; }
+        internal IColumnValueCaptureSource? Source { get; set; }
         internal long Generation { get; set; }
         // Keep the collected set unsorted here; the UI combines it with stale selected
         // values and sorts the final menu once after the capture releases its COM handles.

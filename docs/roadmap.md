@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-> **IShellView 拖放最新复验（2026-10-28）：**细粒度监视器在 `IShellFolder.CreateViewObject (registered HWND target): drop-start` 记录首次外层前台变化，约 1094 ms（前一轮在总阶段 `query-and-copy-start` 后 687 ms 记录到变化）。这与第二个已注册目录目标的 `Drop` 调用边界相关，但 25 ms 轮询不能证明因果或排除外部窗口活动；探针整轮退出码 1，不采纳为通过。两个直接 `IDropTarget` Copy 路径返回成功、目标内容正确且源保留；将 `IShellView.GetItemObject` 作为目标仍返回 `E_NOINTERFACE`。未调用 `DoDragDrop`，不证明真实 OLE 拖放。第二轮无残留进程且夹具清理；在找到不影响外层前台的验证环境前停止同类重跑。详见[本轮拖放复验](ishellview-color-spike.md#2026-10-28-private-desktop-拖放探针前台阶段复验)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
+> **IShellView 拖放最新复验（2026-10-28）：**两轮探针的外层前台变化都发生在 Private Desktop worker 的 Shell 操作阶段，但源码确认监视器读取的是调用线程所在的原桌面前台，阶段名只提供时间相关性；探针 worker 内 Private Desktop 的前台保持不变。旧日志没有记录原桌面 HWND 的进程/窗口类或输入时间，无法区分外部用户活动与探针影响。本轮为下一次受控复验加入这些身份及输入时间戳诊断；仍保留原桌面前台变化即失败的保护，不重跑 Shell-view 探针。现有直接 `IDropTarget` Copy 路径返回成功、目标内容正确且源保留；将 `IShellView.GetItemObject` 作为目标仍返回 `E_NOINTERFACE`。未调用 `DoDragDrop`，真实 OLE 拖放仍未验证。详见[本轮拖放复验](ishellview-color-spike.md#2026-10-28-private-desktop-拖放探针前台阶段复验)及[前台监视器桌面区分](ishellview-color-spike.md#2026-10-28-区分-private-desktop-阶段与调用桌面前台变化)。
 
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |

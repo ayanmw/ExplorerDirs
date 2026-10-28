@@ -42,6 +42,7 @@
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnValueFilterReader.cs" Link="ShellColumnValueFilterReader.cs" />
     <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
     <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />

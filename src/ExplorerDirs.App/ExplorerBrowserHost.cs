@@ -12,7 +12,8 @@ namespace ExplorerDirs.App;
 
 // Hosts the Windows Shell folder view. Its hit testing, view modes, sorting,
 // grouping, file operations and context menu all belong to the Shell view.
-internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplorerBrowserEvents
+internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplorerBrowserEvents,
+    IColumnValueCaptureSource
 {
     private static readonly Guid BrowserClassId = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
@@ -208,6 +209,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal bool IsCurrentColumnValueCapture(ShellFileViewExportCapture.ColumnValueCapture capture) =>
         ReferenceEquals(capture.Source, this) && capture.Generation == _viewReadiness.Generation &&
         _browser is not null && IsVisible && !_viewReadiness.Pending;
+
+    bool IColumnValueCaptureSource.IsCurrentColumnValueCapture(
+        ShellFileViewExportCapture.ColumnValueCapture capture) => IsCurrentColumnValueCapture(capture);
 
     internal ProgramStarterPaneContext CaptureProgramStarterPaneContext()
     {

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using ExplorerDirs.NativeProbe;
 
 // Runs focus-sensitive Shell probes on a separate, never-switched Windows Desktop.
@@ -284,6 +285,9 @@ internal static class PrivateDesktopShellProbe
     private static int Run(string kind, Func<int> probe, TimeSpan? timeout = null, bool initializeOle = false)
     {
         var foregroundBefore = GetForegroundWindow();
+        var foregroundBeforeDescription = DescribeWindow(foregroundBefore);
+        var lastInputBefore = GetLastInputTick();
+        Console.WriteLine($"private-desktop-probe: kind={kind}; monitor-thread={GetCurrentThreadId()}; monitor-desktop=0x{GetThreadDesktop(GetCurrentThreadId()):X}; foreground-baseline=[{foregroundBeforeDescription}]; last-input-tick={lastInputBefore}");
         ReportStage($"{kind}: desktop-created");
         var desktopName = "ExplorerDirs-Probe-" + Guid.NewGuid().ToString("N");
         var desktop = CreateProbeDesktop(desktopName);
@@ -348,7 +352,7 @@ internal static class PrivateDesktopShellProbe
             if (!foregroundChangeObserved && currentForeground != foregroundBefore)
             {
                 foregroundChangeObserved = true;
-                Console.Error.WriteLine($"private-desktop-probe: kind={kind}; first-foreground-change=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=0x{foregroundBefore:X}; foreground-now=0x{currentForeground:X}");
+                Console.Error.WriteLine($"private-desktop-probe: kind={kind}; first-foreground-change=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=[{foregroundBeforeDescription}]; foreground-now=[{DescribeWindow(currentForeground)}]; last-input-before={lastInputBefore}; last-input-at-change={GetLastInputTick()}");
             }
         }
 
@@ -356,7 +360,7 @@ internal static class PrivateDesktopShellProbe
         {
             var foregroundAtTimeout = GetForegroundWindow();
             var threadId = unchecked((uint)Volatile.Read(ref workerThreadId));
-            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; stage={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=0x{foregroundBefore:X}; foreground-at-timeout=0x{foregroundAtTimeout:X}; probe did not return before the deadline");
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; stage={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=[{foregroundBeforeDescription}]; foreground-at-timeout=[{DescribeWindow(foregroundAtTimeout)}]; last-input-before={lastInputBefore}; last-input-at-timeout={GetLastInputTick()}; probe did not return before the deadline");
             CaptureWaitChain(threadId);
             return 124;
         }
@@ -365,10 +369,10 @@ internal static class PrivateDesktopShellProbe
         if (!foregroundChangeObserved && foregroundAfter != foregroundBefore)
         {
             foregroundChangeObserved = true;
-            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; foreground-change-detected-at-completion=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}");
+            Console.Error.WriteLine($"private-desktop-probe: kind={kind}; foreground-change-detected-at-completion=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=[{foregroundBeforeDescription}]; foreground-after=[{DescribeWindow(foregroundAfter)}]; last-input-before={lastInputBefore}; last-input-at-completion={GetLastInputTick()}");
         }
         var foregroundUnchanged = foregroundBefore == foregroundAfter;
-        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; stage-at-return={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
+        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; stage-at-return={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=[{foregroundBeforeDescription}]; foreground-after=[{DescribeWindow(foregroundAfter)}]; last-input-before={lastInputBefore}; last-input-at-return={GetLastInputTick()}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
 
         if (failure is not null)
         {
@@ -380,6 +384,27 @@ internal static class PrivateDesktopShellProbe
             return 1;
 
         return result;
+    }
+
+    private static string DescribeWindow(nint window)
+    {
+        if (window == 0) return "hwnd=0";
+        var threadId = GetWindowThreadProcessId(window, out var processId);
+        var className = new StringBuilder(256);
+        var classLength = GetClassNameW(window, className, className.Capacity);
+        var processName = "unavailable";
+        if (processId != 0)
+        {
+            try { processName = Process.GetProcessById(unchecked((int)processId)).ProcessName; }
+            catch (Exception exception) { processName = "unavailable-" + exception.GetType().Name; }
+        }
+        return $"hwnd=0x{window:X};pid={processId};tid={threadId};process={processName};class={(classLength > 0 ? className.ToString() : "unavailable")}";
+    }
+
+    private static string GetLastInputTick()
+    {
+        var info = new LastInputInfo { Size = unchecked((uint)Marshal.SizeOf<LastInputInfo>()) };
+        return GetLastInputInfo(ref info) ? info.Time.ToString() : "unavailable";
     }
 
     private static void CaptureWaitChain(uint threadId)
@@ -529,6 +554,22 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassNameW(nint window, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LastInputInfo
+    {
+        internal uint Size;
+        internal uint Time;
+    }
 
     [DllImport("user32.dll")]
     private static extern nint GetThreadDesktop(uint threadId);
