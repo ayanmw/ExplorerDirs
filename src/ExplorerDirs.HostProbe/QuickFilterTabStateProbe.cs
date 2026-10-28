@@ -66,8 +66,7 @@ internal static class QuickFilterTabStateProbe
             // Reflection does not apply optional constructor defaults; pass pane visibility flags explicitly.
             var initialTab = Activator.CreateInstance(tabSettingsType,
                 new object?[] { directory, initialView, filter, false, false })!;
-            var tabArray = Array.CreateInstance(tabSettingsType, 1);
-            tabArray.SetValue(initialTab, 0);
+            var tabArray = SaveAndReloadTabSettings(app, tabSettingsType, initialTab, fixtureRoot);
             var favoritesStore = Activator.CreateInstance(favoritesStoreType, InstanceMembers, null,
                 [favoritesPath], null)!;
             var historyStore = Activator.CreateInstance(historyStoreType, InstanceMembers, null,
@@ -201,7 +200,7 @@ internal static class QuickFilterTabStateProbe
 
             if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
             if (GetForegroundWindow() != foregroundBefore) throw new Exception("The probe changed the foreground window.");
-            Console.WriteLine($"quick-filter-tabs: restore/new/duplicate/selected-folder/history-isolation state PASS; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source isolation=True; parent-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"quick-filter-tabs: disk-session-restore/new/duplicate/selected-folder/history-isolation state PASS; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source isolation=True; parent-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -224,6 +223,42 @@ internal static class QuickFilterTabStateProbe
             if (Directory.Exists(fixtureRoot) && Path.GetDirectoryName(fixtureRoot) == fixtureParent)
                 Directory.Delete(fixtureRoot, recursive: true);
         }
+    }
+
+    private static Array SaveAndReloadTabSettings(Assembly app, Type tabSettingsType, object tab, string fixtureRoot)
+    {
+        var paneTabsType = typeof(List<>).MakeGenericType(tabSettingsType);
+        var paneTabs = Activator.CreateInstance(paneTabsType)!;
+        paneTabsType.GetMethod("Add")!.Invoke(paneTabs, [tab]);
+
+        var panesType = typeof(List<>).MakeGenericType(paneTabsType);
+        var panes = Activator.CreateInstance(panesType)!;
+        panesType.GetMethod("Add")!.Invoke(panes, [paneTabs]);
+        var sessionStateType = app.GetType("ExplorerDirs.App.SessionState", throwOnError: true)!;
+        var sessionState = Activator.CreateInstance(sessionStateType, InstanceMembers, null,
+            [4, 4u, panes, 0, null, -1, null, null], null)!;
+
+        var sessionPath = Path.Combine(fixtureRoot, "session.ini");
+        var legacyPath = Path.Combine(fixtureRoot, "missing-legacy-session.json");
+        var sessionStoreType = app.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
+        var writer = Activator.CreateInstance(sessionStoreType, InstanceMembers, null,
+            [sessionPath, legacyPath], null)!;
+        sessionStoreType.GetMethod("Save")!.Invoke(writer, [sessionState]);
+
+        // Use a distinct store instance to model the next application launch reading the persisted snapshot.
+        var reader = Activator.CreateInstance(sessionStoreType, InstanceMembers, null,
+            [sessionPath, legacyPath], null)!;
+        var restoredState = sessionStoreType.GetMethod("Load")!.Invoke(reader, null)!;
+        var restoredPanes = (System.Collections.IEnumerable)sessionStateType
+            .GetProperty("Panes", InstanceMembers)!.GetValue(restoredState)!;
+        var restoredTabs = (System.Collections.IEnumerable)restoredPanes.Cast<object>().First();
+        var restoredTabItems = restoredTabs.Cast<object>().ToArray();
+        if (restoredTabItems.Length != 1)
+            throw new Exception($"Disk session restored {restoredTabItems.Length} tabs instead of one.");
+
+        var result = Array.CreateInstance(tabSettingsType, restoredTabItems.Length);
+        result.SetValue(restoredTabItems[0], 0);
+        return result;
     }
 
     private static IReadOnlyList<TabSnapshot> GetStates(object pane)
@@ -352,7 +387,43 @@ internal static class QuickFilterTabStateProbe
 
     private static void AssertFilter(object? actual, object? expected, string message)
     {
-        if (!Equals(actual, expected)) throw new Exception($"{message}: expected={expected}, actual={actual}.");
+        if (actual is null || expected is null)
+        {
+            if (!Equals(actual, expected)) throw new Exception($"{message}: expected={expected}, actual={actual}.");
+            return;
+        }
+
+        var actualType = actual.GetType();
+        var expectedType = expected.GetType();
+        foreach (var propertyName in new[] { "Pattern", "ExcludeMatches", "FilterFolders" })
+        {
+            if (!Equals(actualType.GetProperty(propertyName)!.GetValue(actual),
+                    expectedType.GetProperty(propertyName)!.GetValue(expected)))
+                throw new Exception($"{message}: quick-filter property {propertyName} differed.");
+        }
+
+        var actualColumns = ((System.Collections.IEnumerable)actualType.GetProperty("ColumnFilters")!
+            .GetValue(actual)!).Cast<object>().ToArray();
+        var expectedColumns = ((System.Collections.IEnumerable)expectedType.GetProperty("ColumnFilters")!
+            .GetValue(expected)!).Cast<object>().ToArray();
+        if (actualColumns.Length != expectedColumns.Length)
+            throw new Exception($"{message}: expected {expectedColumns.Length} column filters, actual {actualColumns.Length}.");
+
+        for (var index = 0; index < actualColumns.Length; index++)
+        {
+            if (actualColumns[index] is null || expectedColumns[index] is null)
+                throw new Exception($"{message}: null column-filter entry at {index}; expected=[{string.Join(";", expectedColumns.Select(column => column?.ToString() ?? "<null>"))}], actual=[{string.Join(";", actualColumns.Select(column => column?.ToString() ?? "<null>"))}].");
+            var actualColumnType = actualColumns[index].GetType();
+            var expectedColumnType = expectedColumns[index].GetType();
+            var actualKey = actualColumnType.GetProperty("Key", InstanceMembers)!.GetValue(actualColumns[index]);
+            var expectedKey = expectedColumnType.GetProperty("Key", InstanceMembers)!.GetValue(expectedColumns[index]);
+            var actualValues = ((System.Collections.IEnumerable)actualColumnType.GetProperty("Values", InstanceMembers)!
+                .GetValue(actualColumns[index])!).Cast<string>();
+            var expectedValues = ((System.Collections.IEnumerable)expectedColumnType.GetProperty("Values", InstanceMembers)!
+                .GetValue(expectedColumns[index])!).Cast<string>();
+            if (!Equals(actualKey, expectedKey) || !actualValues.SequenceEqual(expectedValues, StringComparer.Ordinal))
+                throw new Exception($"{message}: column filter {index} differed.");
+        }
     }
 
     private sealed record TabSnapshot(object Browser, object? Filter, string Path, object View);
