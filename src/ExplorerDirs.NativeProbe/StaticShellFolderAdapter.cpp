@@ -67,7 +67,7 @@ namespace
     class StaticByteCountPropertyStore final : public IPropertyStore
     {
     public:
-        explicit StaticByteCountPropertyStore(LONG value) : _value(value) {}
+        StaticByteCountPropertyStore(LONG byteCount, ULONGLONG size) : _byteCount(byteCount), _size(size) {}
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -87,14 +87,15 @@ namespace
         HRESULT STDMETHODCALLTYPE GetCount(DWORD* count) override
         {
             if (!count) return E_POINTER;
-            *count = 1;
+            *count = 2;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetAt(DWORD index, PROPERTYKEY* key) override
         {
             if (!key) return E_POINTER;
-            if (index != 0) return E_INVALIDARG;
-            *key = kDocumentByteCountKey;
+            if (index == 0) *key = kSizeKey;
+            else if (index == 1) *key = kDocumentByteCountKey;
+            else return E_INVALIDARG;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key, PROPVARIANT* value) override
@@ -102,22 +103,29 @@ namespace
             InterlockedIncrement(&g_propertyStoreValueRequests);
             if (!value) return E_POINTER;
             PropVariantInit(value);
+            if (key == kSizeKey)
+            {
+                value->vt = VT_UI8;
+                value->uhVal.QuadPart = _size;
+                return S_OK;
+            }
             if (key != kDocumentByteCountKey) return S_FALSE;
             value->vt = VT_I4;
-            value->lVal = _value;
+            value->lVal = _byteCount;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE SetValue(REFPROPERTYKEY, REFPROPVARIANT) override { return STG_E_ACCESSDENIED; }
         HRESULT STDMETHODCALLTYPE Commit() override { return S_OK; }
     private:
         volatile LONG _references = 1;
-        LONG _value;
+        LONG _byteCount;
+        ULONGLONG _size;
     };
 
     class StaticByteCountPropertyStoreFactory final : public IPropertyStoreFactory
     {
     public:
-        explicit StaticByteCountPropertyStoreFactory(LONG value) : _value(value) {}
+        StaticByteCountPropertyStoreFactory(LONG byteCount, ULONGLONG size) : _byteCount(byteCount), _size(size) {}
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -137,26 +145,27 @@ namespace
         HRESULT STDMETHODCALLTYPE GetPropertyStore(GETPROPERTYSTOREFLAGS, IUnknown*, REFIID iid, void** value) override
         {
             InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
-            return CreateStore(_value, iid, value);
+            return CreateStore(_byteCount, _size, iid, value);
         }
         HRESULT STDMETHODCALLTYPE GetPropertyStoreForKeys(const PROPERTYKEY*, UINT, GETPROPERTYSTOREFLAGS, REFIID iid, void** value) override
         {
             InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
-            return CreateStore(_value, iid, value);
+            return CreateStore(_byteCount, _size, iid, value);
         }
     private:
-        static HRESULT CreateStore(LONG propertyValue, REFIID iid, void** value)
+        static HRESULT CreateStore(LONG byteCount, ULONGLONG size, REFIID iid, void** value)
         {
             if (!value) return E_POINTER;
             *value = nullptr;
-            auto* store = new (std::nothrow) StaticByteCountPropertyStore(propertyValue);
+            auto* store = new (std::nothrow) StaticByteCountPropertyStore(byteCount, size);
             if (!store) return E_OUTOFMEMORY;
             const auto result = store->QueryInterface(iid, value);
             store->Release();
             return result;
         }
         volatile LONG _references = 1;
-        LONG _value;
+        LONG _byteCount;
+        ULONGLONG _size;
     };
 
     class LegacyDetailsCallback final : public IShellFolderViewCB
@@ -556,7 +565,15 @@ namespace
                 ULONGLONG byteCount = size.vt == VT_UI8 ? size.ullVal : size.vt == VT_I8 ? static_cast<ULONGLONG>(size.llVal) : 10;
                 VariantClear(&size);
                 const auto testValue = byteCount > LONG_MAX ? LONG_MAX : static_cast<LONG>(byteCount);
-                auto* factory = new (std::nothrow) StaticByteCountPropertyStoreFactory(testValue);
+                ULONGLONG testSize = byteCount;
+                std::wstring itemName;
+                if (NameFromPidl(_inner, reinterpret_cast<PCUITEMID_CHILD>(original), itemName))
+                {
+                    if (_wcsicmp(itemName.c_str(), L"a-ten.bin") == 0) testSize = 100;
+                    else if (_wcsicmp(itemName.c_str(), L"two.bin") == 0) testSize = 200;
+                    else if (_wcsicmp(itemName.c_str(), L"z-ten.bin") == 0) testSize = 10;
+                }
+                auto* factory = new (std::nothrow) StaticByteCountPropertyStoreFactory(testValue, testSize);
                 if (!factory) return E_OUTOFMEMORY;
                 *value = static_cast<IPropertyStoreFactory*>(factory);
                 return S_OK;

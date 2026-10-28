@@ -851,6 +851,14 @@ internal static class StaticShellFolderAdapterProbe
             using var listViewMessageObserver = new ListViewMessageObserver(FindListViewWindow(view));
             var nameColumn = new ShellColumnManager.NativeKey { FormatId = NameKeyFormat, PropertyId = 10 };
             var sizeColumn = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            var overriddenSizeKey = new PropertyKeyState(SizeKeyFormat, 12);
+            var sizeFactoryEvidence = string.Join(";", new[] { "a-ten.bin", "two.bin", "z-ten.bin" }
+                .Select(childName => $"{childName}:{ReadShellFolderPropertyStoreFactoryValue(childFolder, childName, overriddenSizeKey)}"));
+            if (!sizeFactoryEvidence.Contains("a-ten.bin:BindToObject=S_OK;GetPropertyStore=S_OK;GetValue=100", StringComparison.Ordinal) ||
+                !sizeFactoryEvidence.Contains("two.bin:BindToObject=S_OK;GetPropertyStore=S_OK;GetValue=200", StringComparison.Ordinal) ||
+                !sizeFactoryEvidence.Contains("z-ten.bin:BindToObject=S_OK;GetPropertyStore=S_OK;GetValue=10", StringComparison.Ordinal))
+                throw new Exception("The diagnostic property-store factory did not expose the expected PKEY_Size overrides: " + sizeFactoryEvidence);
+            Console.WriteLine("native-shell-item-bound-view: standard-size-property-store-overrides=[" + sizeFactoryEvidence + "]");
             listViewMessageObserver.Reset();
             var sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
@@ -863,9 +871,8 @@ internal static class StaticShellFolderAdapterProbe
             Pump(400);
             var standardSizeSetSortMessages = listViewMessageObserver.Snapshot();
             names = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
-            if (names.Length != 3 || !names[0].Equals("two.bin", StringComparison.OrdinalIgnoreCase) ||
-                !names.Any(name => name.Equals("a-ten.bin", StringComparison.OrdinalIgnoreCase)))
-                throw new Exception("The Shell view did not sort by standard Size: " + string.Join('|', names));
+            var standardSizeSortUsedOverride = names.SequenceEqual(new[] { "z-ten.bin", "a-ten.bin", "two.bin" }, StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"native-shell-item-bound-view: standard-size-sort-source={(standardSizeSortUsedOverride ? "property-store-override" : "not-property-store-override")}; ascending-order=[{string.Join('|', names)}]; override-values=[a-ten.bin:100|two.bin:200|z-ten.bin:10]; disk-sizes=[a-ten.bin:10|two.bin:2|z-ten.bin:10]");
             var resetStandardSortProbeCounters = Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
                 NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"));
             resetStandardSortProbeCounters();
@@ -881,6 +888,7 @@ internal static class StaticShellFolderAdapterProbe
             var standardSizeHeaderClickTwoMessages = listViewMessageObserver.Snapshot();
             var standardSizeHeaderClickTwoNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var standardSizeHeaderClickTwoSort = ReadCurrentSortColumn(folderView);
+            Console.WriteLine($"native-shell-item-bound-view: standard-size-header-sort-orders=[one:{string.Join('|', standardSizeHeaderClickOneNames)};two:{string.Join('|', standardSizeHeaderClickTwoNames)}]; overridden-size-order-would-be=[ascending:z-ten.bin|a-ten.bin|two.bin;descending:two.bin|a-ten.bin|z-ten.bin]");
             var standardSizeHeaderClickStats = ReadNativeComparisonStats();
             Console.WriteLine($"native-shell-item-bound-view: standard-size-header-clicks={standardSizeHeaderClickOne}/{standardSizeHeaderClickTwo}; one=[{string.Join('|', standardSizeHeaderClickOneNames)}] sort={standardSizeHeaderClickOneSort} listview-messages=[{standardSizeHeaderClickOneMessages}]; two=[{string.Join('|', standardSizeHeaderClickTwoNames)}] sort={standardSizeHeaderClickTwoSort} listview-messages=[{standardSizeHeaderClickTwoMessages}]; callbacks={standardSizeHeaderClickStats}; SetSortColumns-messages=[{standardSizeSetSortMessages}]");
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());

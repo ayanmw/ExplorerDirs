@@ -301,3 +301,9 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 标准 Size 升降序行序仍正确改变，适配器 `CompareIDs` 仍为 0；但其排序区间没有看到 `LVM_SORTITEMS`（`0x1030`）、`LVM_SORTITEMSEX`（`0x1032`）或 LVM 插入/删除/设置项目消息。ByteCount 两个方向也没有这些操作消息、没有新的属性工厂读取，行序继续为 `a-ten.bin|two.bin|z-ten.bin`，值为 `10|2|10`。观测到的其他 LVM 流量主要是 Header/项目查询，不能解释为排序命令。NativeProbe Release 构建 0 警告/错误；Private Desktop 运行退出码 1，仍停在末尾未注册私有测试列为空值的既有门槛；前台 HWND 和输入时间戳不变。日志：`src/.state/native-probe-watchdog/20261029-030358-8441a1db.stdout.log`。
 
 这说明在所测本机 DefView 路径中，排序并非由它向 `SysListView32` 发送通用 ListView 排序/重排消息完成；更可能由 DefView 自己先改变 Shell 项目顺序，再由列表读取该顺序。这是根据限定 HWND 消息范围作出的推断，不是对 Shell 内部实现的证明。后续应追踪 `IFolderView2::SetSortColumns`、Header 通知到 DefView 项目序列/属性读取的边界，并优先验证能否通过受支持的 Shell folder 比较合同让 ByteCount 进入同一排序路径。产品和发布包仍未改变。
+
+### 2026-10-29：标准 Size 的属性存储覆写对照
+
+NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回明确的 `PKEY_Size` 覆盖值：`a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`；逐项直接读取均确认返回 `S_OK` 和目标值。随后设置标准 `PKEY_Size` 升序并刷新，DefView 行序仍是 `two.bin|a-ten.bin|z-ten.bin`，对应真实文件字节大小 `2|10|10`，而非覆盖值所要求的 `z-ten.bin|a-ten.bin|two.bin`。真实 Header 输入产生的两种方向行序也与真实文件大小对应。由此确认该视图的标准 Size 排序没有消费此子项 `IPropertyStoreFactory` 返回的 `PKEY_Size` 值；光装饰标准属性存储无法让递归目录大小参与 Explorer 原生大小排序。
+
+本轮 `StaticShellFolderAdapter.cpp` 原生构建成功，NativeProbe Release 构建 0 警告/错误；Private Desktop 探针前台句柄与输入时间戳未变。完整探针继续走过排序对照，但最终仍以 exit code 1 停在原有“未注册私有测试 PKEY 列值为空”门槛；该状态不推翻此次 Size 对照。完整输出：`src/.state/native-probe-watchdog/20261029-030918-8e9002cc.stdout.log`。没有改产品 ExplorerBrowser 或 release。后续应停止重复尝试覆写 `PKEY_Size`，转向评估 DefView 排序身份/属性来源与自定义 namespace 的真实代价；只有存在受支持的数值排序合同才继续该路径。
