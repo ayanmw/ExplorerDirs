@@ -35,13 +35,20 @@ internal static class SyntheticShellSortProbe
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
             rootPidl = CreateClsidPidl(SyntheticFolderClassId);
+            Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
             Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
+            Console.WriteLine("synthetic-shell-size-sort: synthetic folder and view returned");
 
+            Console.WriteLine("synthetic-shell-size-sort: creating StreamViewHost");
             host = new StreamViewHost(parent, []) { View = view };
+            Console.WriteLine("synthetic-shell-size-sort: StreamViewHost created");
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            Console.WriteLine("synthetic-shell-size-sort: browser interface acquired");
             var settings = new StreamProbeSettings { Mode = 4 };
             var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
+            Console.WriteLine("synthetic-shell-size-sort: calling IShellView.CreateViewWindow");
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
+            Console.WriteLine("synthetic-shell-size-sort: IShellView.CreateViewWindow returned");
             viewWindowCreated = true;
             _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the Private Desktop only.
             Pump(700);

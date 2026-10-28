@@ -23,7 +23,7 @@ $child = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source `
     -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
 [IO.File]::WriteAllText($args[0], [string]$child.Id)
 $child.WaitForExit()
-'@ | Set-Content -LiteralPath $timeoutTreeScriptPath -Encoding utf8NoBOM
+'@ | ForEach-Object { [IO.File]::WriteAllText($timeoutTreeScriptPath, $_, [Text.UTF8Encoding]::new($false)) }
     $arguments = '-NoProfile -File "{0}" "{1}"' -f $timeoutTreeScriptPath, $timeoutTreePidPath
     $runTimeoutSeconds = 5
 }
@@ -107,7 +107,9 @@ $process = Start-Process -FilePath $executable -ArgumentList $arguments -Working
 
 if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     try {
-        if (-not $process.HasExited) { $process.Kill($true) }
+        # Process.Kill(bool) is unavailable in Windows PowerShell 5.1; this
+        # watchdog owns the direct probe process and kills any test grandchild below explicitly.
+        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
     }
     catch {
         if (-not $process.HasExited) { throw }
@@ -122,7 +124,15 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
         }
         else { 0 }
         $grandchildStillRunning = $grandchildId -gt 0 -and $null -ne (Get-Process -Id $grandchildId -ErrorAction SilentlyContinue)
-        if ($grandchildStillRunning) { Stop-Process -Id $grandchildId -Force }
+        if ($grandchildStillRunning) {
+            Stop-Process -Id $grandchildId -Force
+            $stopDeadline = (Get-Date).AddSeconds(5)
+            do {
+                Start-Sleep -Milliseconds 50
+                $grandchildStillRunning = $null -ne (Get-Process -Id $grandchildId -ErrorAction SilentlyContinue)
+            } while ($grandchildStillRunning -and (Get-Date) -lt $stopDeadline)
+        }
+        $grandchildStillRunning = $grandchildId -gt 0 -and $null -ne (Get-Process -Id $grandchildId -ErrorAction SilentlyContinue)
         Remove-Item -LiteralPath $timeoutTreeScriptPath, $timeoutTreePidPath -Force -ErrorAction SilentlyContinue
         if ($grandchildId -eq 0 -or $grandchildStillRunning) {
             Write-Error "Watchdog timeout did not terminate its process tree (grandchildId=$grandchildId; stillRunning=$grandchildStillRunning)."

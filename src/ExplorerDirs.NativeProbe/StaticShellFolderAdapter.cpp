@@ -12,6 +12,15 @@
 
 namespace
 {
+    void TraceSyntheticSortStage(const char* stage)
+    {
+        const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (!output || output == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        WriteFile(output, stage, static_cast<DWORD>(strlen(stage)), &written, nullptr);
+        WriteFile(output, "\r\n", 2, &written, nullptr);
+    }
+
     volatile LONG g_syntheticLiveObjects = 0;
     volatile LONG g_syntheticServerLocks = 0;
     const CLSID kSyntheticFolderClassId =
@@ -1328,13 +1337,17 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE CreateViewObject(HWND, REFIID iid, void** value) override
         {
+            TraceSyntheticSortStage("synthetic-sort: create-view-object-enter");
             if (!value) return E_POINTER;
             *value = nullptr;
             if (iid != IID_IShellView) return E_NOINTERFACE;
             SFV_CREATE create{};
             create.cbSize = sizeof(create);
             create.pshf = this;
-            return SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            TraceSyntheticSortStage("synthetic-sort: SHCreateShellFolderView-enter");
+            const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            TraceSyntheticSortStage("synthetic-sort: SHCreateShellFolderView-return");
+            return result;
         }
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY, SFGAOF* attributes) override
         {
@@ -1493,14 +1506,19 @@ STDAPI DllCanUnloadNow()
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)
 {
+    TraceSyntheticSortStage("synthetic-sort: export-enter");
     if (!rootPidl || !folder || !view) return E_POINTER;
     *folder = nullptr;
     *view = nullptr;
     auto* instance = new (std::nothrow) SyntheticSortFolder();
     if (!instance) return E_OUTOFMEMORY;
+    TraceSyntheticSortStage("synthetic-sort: initialize-enter");
     auto result = instance->Initialize(rootPidl);
+    TraceSyntheticSortStage("synthetic-sort: initialize-return");
     if (FAILED(result)) { instance->Release(); return result; }
+    TraceSyntheticSortStage("synthetic-sort: export-create-view-object-enter");
     result = instance->CreateViewObject(nullptr, IID_IShellView, reinterpret_cast<void**>(view));
+    TraceSyntheticSortStage("synthetic-sort: export-create-view-object-return");
     if (FAILED(result)) { instance->Release(); return result; }
     *folder = static_cast<IShellFolder2*>(instance);
     return result;
