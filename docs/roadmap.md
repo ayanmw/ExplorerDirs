@@ -4346,3 +4346,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 标签页右键菜单首项新增“使用 Explorer 浏览”，将该标签已确认的 Shell 当前路径作为单一参数交给 Windows `explorer.exe`，避免用 Explorer Dirs 打开第二个标签/窗格。标签栏空白处右键复用当前选中标签的上下文菜单；原有空白处左键双击新建标签及标签项双击关闭逻辑保持不变。
 - `SettingsSmoke` 验证磁盘路径（含空格）和 Shell 虚拟位置作为单个进程参数，菜单首项/右键空白区路由及原有双击规则；进程未实际启动。Release SettingsSmoke 与 App Release 构建结果见本批记录。未打开 GUI，真实 Explorer 窗口复用/路径显示和空白区命中位置仍待集中验收。
+
+## 2026-10-28：跨窗格 IShellView 拖放 Move 验证前置检查
+
+- 按“跨窗格与 Explorer 互操作”P0 门槛，先重跑既有隐藏 Copy 基线，再扩展 Move 对照。NativeProbe Release 构建 0 警告/错误；隐藏目标文件夹收到来自真实 `SVGIO_SELECTION` 数据对象的 Copy 后，目标内容正确、源文件保留。该运行不是完整 OLE `DoDragDrop`，不证明鼠标拖放闭环。
+- 退出码为 1：Private Desktop 外层监督记录前台 HWND 从 `0x10EA8` 变为 `0x7514D4`，尽管内层文件夹目标探针报告其局部前台未变。该桌面隔离条件未通过，因此本轮停止后续 Shell/Private Desktop 探针，没有尝试恢复前台，也没有运行 Move。外层前台差异的来源待查；修复或明确归因前，不以这次运行支持桌面无干扰结论。
