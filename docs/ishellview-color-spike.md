@@ -1,5 +1,13 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：四窗格 WPF 宿主键盘与菜单组合矩阵
+
+新增 `--private-desktop-four-pane-wpf-host-keyboard-consumer`，在 Private Desktop 中通过 `HwndSource → WPF Grid → 四个 HwndHost → STATIC pane → IShellView` 运行组合验收。四个 view 都指向同一临时两文件目录：逐窗格合成 Ctrl+A 均选中 `2/2` 项、兄弟 pane 选区保持为空并清理选区；逐窗格 F2 均进入原生编辑框，四方向键期间编辑框和焦点保持，Escape 取消重命名；另验证从 pane 1 编辑时向 pane 2 投递方向键不打断 pane 1 编辑。测试每个 pane 后显式 `SVUIA_DEACTIVATE`，随后确认 frame 菜单恢复并逐个激活/停用四个 Shell 菜单，最终同步销毁 Shell view、pane 和 WPF 根窗。
+
+菜单与键盘合并运行时，第一版探针在键盘矩阵后菜单激活失败。复查发现键盘辅助例程逐 pane 调用 `SVUIA_ACTIVATE_FOCUS`，却未在每个 pane 测试结束时执行 `SVUIA_DEACTIVATE`，让测试把多个视图留在活动态。加入与单活动 pane 生命周期相符的停用步骤后，键盘、基菜单恢复、四 pane 菜单及同步关闭连续 `3/3` 通过；每轮 foreground HWND 未变、无遗留 NativeProbe 进程。NativeProbe Release 构建零警告/错误。日志位于忽略目录 `src/.state/native-probe-watchdog/20261028-wpf-keyboard-menu-{1,2,3}.log`。
+
+这是隔离 WPF/Shell 宿主组合证据，不是产品 ExplorerBrowser 或可见用户输入验收；真实鼠标 OLE 拖放、产品窗格切换/菜单接线及颜色集成仍未完成。产品源文件与预览 release 未改。
+
 ## 2026-10-28：四窗格同步清理停滞位置诊断
 
 新增 `session-restore-sync-cleanup-private-desktop` 诊断入口，让四窗格 consumer 在真实 Shell 操作完成后显式清理，并逐阶段输出进度。三轮中，`DestroyViewWindow`、view/folder/browser-site COM 引用释放、菜单协调器释放及 pane 子窗口销毁均返回；随后卡在 consumer 的顶层 parent `DestroyWindow`。第二、三轮还逐一销毁 pane 2–4 的 Shell view 与 pane 1 子窗口，结果相同。consumer 被其 100 秒期限终止，诊断轮次退出码 1；主桌面 foreground HWND 未变，无遗留 NativeProbe 子进程。日志：`20261028-045213-6af1c87c.stdout.log`、`20261028-045600-3606f1d1.stdout.log`、`20261028-045802-31f0f211.stdout.log`。

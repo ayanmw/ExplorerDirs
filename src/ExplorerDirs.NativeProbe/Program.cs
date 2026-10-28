@@ -118,6 +118,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSinglePaneMenuWpfHostSynchronousCleanup();
         if (args.Length == 1 && args[0] == "--private-desktop-four-pane-menu-wpf-host-sync-cleanup")
             return PrivateDesktopShellProbe.RunFourPaneMenuWpfHostSynchronousCleanup();
+        if (args.Length == 1 && args[0] == "--private-desktop-four-pane-wpf-host-keyboard-consumer")
+            return PrivateDesktopShellProbe.RunFourPaneWpfHostKeyboardConsumer();
         if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-detached-view-ime-sync-cleanup")
             return PrivateDesktopShellProbe.RunSinglePaneMenuDetachedViewImeSynchronousCleanup();
         if (args.Length == 1 && args[0] == "--private-desktop-single-pane-menu-late-coordinator-dispose")
@@ -222,6 +224,7 @@ internal static class Program
             Console.WriteLine("       --private-desktop-single-pane-menu-wpf-ole-sync-cleanup (same probe with OLE initialized and WPF DispatcherFrame pumping)");
             Console.WriteLine("       --private-desktop-single-pane-menu-wpf-host-sync-cleanup (same probe hosted under a WPF HwndSource root)");
             Console.WriteLine("       --private-desktop-four-pane-menu-wpf-host-sync-cleanup (four Shell panes hosted by WPF HwndHost children; activates/deactivates each menu before teardown)");
+            Console.WriteLine("       --private-desktop-four-pane-wpf-host-keyboard-consumer (Ctrl+A, F2 arrow routing, menu activation, and synchronous cleanup through four WPF-hosted Shell panes)");
             Console.WriteLine("       --ishellview-host-filter-virtual-private-desktop <scope> (one virtual Shell scope on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");

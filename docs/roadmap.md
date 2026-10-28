@@ -13,6 +13,8 @@
 
 2026-10-28：NativeProbe 的 Private Desktop 列标题菜单复验现已执行“类型”子项的 Shell 命令映射，并从 `IFolderView2` 读回主排序键为 `PKEY_ItemTypeText`；裸 `WM_COMMAND` 发给 `SHELLDLL_DefView` 未改排序，实际验证通过的是映射后的 `IContextMenu::InvokeCommand`。这一项补强了隔离宿主命令映射证据，不覆盖物理菜单选择或产品 ExplorerBrowser UI，仍留在集中验收门槛内。详见[核心操作对照](shell-parity.md#2026-10-28-列标题菜单命令隔离复核)。
 
+2026-10-28：新增 WPF HwndHost 四窗格 `IShellView` 键盘/菜单组合探针，Ctrl+A、F2 四方向编辑焦点、兄弟 pane 焦点隔离、菜单逐窗格激活/停用和同步关闭连续 3/3 通过。此次补齐的是隔离宿主迁移门槛，不代表产品 ExplorerBrowser 可见体验；见[隔离原型记录](ishellview-color-spike.md#2026-10-28四窗格-wpf-宿主键盘与菜单组合矩阵)。
+
 2026-10-28：Private Desktop 对照已让包装 PIDL adapter 进入真实 DefView 消费路径，并确认它只请求列标题、不请求逐项属性或比较；原始 adapter 对照相同，列显示/排序门槛均未通过。此结果关闭“只改子 PIDL 身份即可打通 DefView 派生列”的假设，逐行派生列继续留在产品之外。后续先评审新的属性供应架构；其余 Q-Dir 差距按后台可验证性继续推进，用户可见验收仍集中安排。
 
 2026-10-28：补测 `SFV_CREATE.psfvcb` 的 `IShellFolderViewCB::MessageSFVCB(SFVM_GETDETAILSOF)` 回退：隔离自定义列让 `GetDetailsOf` 返回 `E_NOTIMPL` 后，Private Desktop DefView 的回调请求仍为 0，测试列内容为空；标准列和前台隔离不受影响。该回调只作为旧兼容后备，且微软将 `SFVM_GETDETAILSOF` 列为可能变更/不可用的弃用接口，因此否决其作为列实现路线。下一步暂停同一 `SHCreateShellFolderView` DefView 上的列消费变体，先评审需要完整 namespace 属性供应的新架构；不要把这一结论外推到所有 Shell namespace 方案。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-28-旧-ishellfolderviewcb-逐项列回退探针)。

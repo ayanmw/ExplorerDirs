@@ -155,9 +155,12 @@ internal static class ShellViewColorSpike
         bool deactivateMenus = true, bool detachImeContextBeforeParentDestroy = false,
         bool disableImeForProbeThread = false, bool detachShellViewImeContexts = false,
         bool useWpfDispatcherPump = false, bool useWpfHwndSourceParent = false,
-        bool useWpfHwndHostPane = false, bool restoreParentFocusBeforeDestroy = true)
+        bool useWpfHwndHostPane = false, bool restoreParentFocusBeforeDestroy = true,
+        bool probeWpfKeyboard = false)
     {
         if (paneCount is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(paneCount));
+        if (probeWpfKeyboard && (paneCount != 4 || !useWpfDispatcherPump || !useWpfHwndSourceParent || !useWpfHwndHostPane))
+            throw new ArgumentException("The WPF keyboard consumer probe requires four WPF-hosted Shell panes.", nameof(probeWpfKeyboard));
         var previousPumpMode = _useWpfDispatcherPump;
         _useWpfDispatcherPump = useWpfDispatcherPump;
         Console.WriteLine($"multi-pane-cleanup: pump-mode={(useWpfDispatcherPump ? "wpf-dispatcher" : "winforms-doevents")}");
@@ -179,6 +182,8 @@ internal static class ShellViewColorSpike
         {
             Directory.CreateDirectory(fixture);
             File.WriteAllText(Path.Combine(fixture, "cleanup-sample.txt"), "cleanup");
+            if (probeWpfKeyboard)
+                File.WriteAllText(Path.Combine(fixture, "cleanup-sample-2.txt"), "cleanup-2");
             if (useWpfHwndSourceParent)
             {
                 var parameters = new System.Windows.Interop.HwndSourceParameters("ExplorerDirs WPF cleanup root")
@@ -257,7 +262,7 @@ internal static class ShellViewColorSpike
                     RegisterFolderDropTarget(folder, viewWindow, host);
                     Check(At<ActivateView>(view, 7)(view, 1));
                     Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
-                    _ = WaitForShellViewItemCount(folderView, expectedCount: 1);
+                    _ = WaitForShellViewItemCount(folderView, expectedCount: probeWpfKeyboard ? 2 : 1);
                     panes.Add((pane, pidl, folder, view, hostPointer, viewWindow, folderView, host));
                     pane = pidl = folder = view = hostPointer = viewWindow = folderView = 0;
                     host = null;
@@ -281,8 +286,25 @@ internal static class ShellViewColorSpike
                 }
                 Pump(250);
             }
+            if (probeWpfKeyboard)
+            {
+                var frameMenuCoordinator = menuCoordinator
+                    ?? throw new InvalidOperationException("The WPF keyboard consumer requires its shared Shell menu coordinator.");
+                var views = panes.Select(item => item.View).ToArray();
+                var folderViews = panes.Select(item => item.FolderView).ToArray();
+                var selectAll = VerifyFourPaneCtrlARouting(views, folderViews,
+                    includeFourthPane: true, deactivateAfterPane: true);
+                var renameArrows = VerifyFourPaneRenameArrowRouting(views, folderViews, deactivateAfterPane: true);
+                Pump(100);
+                var baseMenuRestored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
+                Console.WriteLine($"multi-pane-cleanup: wpf-keyboard-select-all={selectAll}; rename-arrows={renameArrows}; panes-deactivated=True; base-menu-restored={baseMenuRestored}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (activateMenus && !baseMenuRestored)
+                    throw new InvalidOperationException("The WPF keyboard consumer did not restore the frame menu after deactivating the last Shell view.");
+            }
             if (activateMenus)
             {
+                var frameMenuCoordinator = menuCoordinator
+                    ?? throw new InvalidOperationException("The WPF menu consumer requires its shared Shell menu coordinator.");
                 for (var index = 0; index < panes.Count; index++)
                 {
                     var beforeInsert = panes[index].Host.InsertMenusCallCount;
@@ -295,9 +317,9 @@ internal static class ShellViewColorSpike
                     {
                         Check(At<ActivateView>(panes[index].View, 7)(panes[index].View, 0)); // SVUIA_DEACTIVATE.
                         Pump(200);
-                        restored = GetMenu(parent) == menuCoordinator.BaseMenu;
+                        restored = GetMenu(parent) == frameMenuCoordinator.BaseMenu;
                     }
-                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activation-state={menuActivationState}; activated={activated}; deactivate-requested={deactivateMenus}; deactivated={restored}; coordinator-owner={menuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
+                    Console.WriteLine($"multi-pane-cleanup: menu-pane={index + 1}; activation-state={menuActivationState}; activated={activated}; deactivate-requested={deactivateMenus}; deactivated={restored}; coordinator-owner={frameMenuCoordinator.IsCurrentOwner(panes[index].Host)}; active-object=0x{panes[index].Host.ActiveObjectPointer:X}; remove-callbacks={panes[index].Host.RemoveMenusCallCount}; last-menu-trace={panes[index].Host.MenuTrace.LastOrDefault()}");
                     var expectedActivation = menuActivationState == 2;
                     if (activated != expectedActivation || (deactivateMenus && !restored))
                         throw new InvalidOperationException($"Pane {index + 1} menu activation did not match state {menuActivationState}.");
@@ -1584,12 +1606,14 @@ internal static class ShellViewColorSpike
         return string.Join(',', verified);
     }
 
-    private static string VerifyFourPaneCtrlARouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    private static string VerifyFourPaneCtrlARouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,
+        bool includeFourthPane = false, bool deactivateAfterPane = false)
     {
         if (views.Count != 4 || folderViews.Count != 4)
             throw new ArgumentException("Ctrl+A routing probe requires exactly four Shell panes.");
         var foreground = GetForegroundWindow();
-        var verified = new List<string>(3);
+        var targetCount = includeFourthPane ? 4 : 3;
+        var verified = new List<string>(targetCount);
         var originalKeyboardState = new byte[256];
         if (!GetKeyboardState(originalKeyboardState))
             throw new InvalidOperationException("Could not snapshot the isolated probe thread keyboard state.");
@@ -1597,7 +1621,9 @@ internal static class ShellViewColorSpike
         controlDownState[0x11] |= 0x80; // VK_CONTROL down only on this isolated probe thread.
         try
         {
-            for (var target = 0; target < 3; target++)
+            // The session-restore fixture's fourth pane points at a one-item sibling directory;
+            // the WPF consumer fixture shares the two-item folder and can exercise all four panes.
+            for (var target = 0; target < targetCount; target++)
             {
                 var windowHr = At<GetWindow>(views[target], 3)(views[target], out var viewWindow);
                 Check(windowHr);
@@ -1649,6 +1675,7 @@ internal static class ShellViewColorSpike
                     if (remainingSelection != 0)
                         throw new InvalidOperationException($"Ctrl+A probe left {remainingSelection} selected items in pane {pane + 1}.");
                 }
+                if (deactivateAfterPane) Check(At<ActivateView>(views[target], 7)(views[target], 0));
             }
         }
         finally
@@ -1661,7 +1688,8 @@ internal static class ShellViewColorSpike
         return string.Join(',', verified);
     }
 
-    private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews)
+    private static string VerifyFourPaneRenameArrowRouting(IReadOnlyList<nint> views, IReadOnlyList<nint> folderViews,
+        bool deactivateAfterPane = false)
     {
         if (views.Count != 4 || folderViews.Count != 4)
             throw new ArgumentException("Rename routing probe requires exactly four Shell panes.");
@@ -1759,6 +1787,7 @@ internal static class ShellViewColorSpike
                     Check(At<SelectFolderItem>(folderViews[target], 15)(folderViews[target], item, 0));
             }
             if (IsWindow(edit)) throw new InvalidOperationException($"Pane {target + 1} did not dismiss the cancelled rename editor.");
+            if (deactivateAfterPane) Check(At<ActivateView>(views[target], 7)(views[target], 0));
             verified.Add($"pane{target + 1}/arrows=4/focus-isolated=True");
         }
         if (GetForegroundWindow() != foreground)

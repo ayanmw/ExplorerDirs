@@ -84,6 +84,12 @@ internal static class PrivateDesktopShellProbe
             restoreParentFocusBeforeDestroy: false),
         TimeSpan.FromSeconds(60), initializeOle: true);
 
+    internal static int RunFourPaneWpfHostKeyboardConsumer() => Run("four-pane-wpf-host-keyboard-consumer",
+        () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(4, activateMenus: true,
+            useWpfDispatcherPump: true, useWpfHwndSourceParent: true, useWpfHwndHostPane: true,
+            restoreParentFocusBeforeDestroy: false, probeWpfKeyboard: true),
+        TimeSpan.FromSeconds(75), initializeOle: true);
+
     internal static int RunSinglePaneMenuDetachedViewImeSynchronousCleanup() => Run("single-pane-menu-detached-view-ime-sync-cleanup",
         () => ShellViewColorSpike.RunMultiPaneSynchronousCleanup(1, activateMenus: true,
             detachShellViewImeContexts: true), TimeSpan.FromSeconds(45));
