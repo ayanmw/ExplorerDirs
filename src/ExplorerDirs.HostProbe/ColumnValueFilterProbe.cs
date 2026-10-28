@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.IO;
 using System.Reflection;
@@ -125,8 +126,44 @@ internal static class ColumnValueFilterProbe
                                .SequenceEqual(Names(["initial.txt", "sample.bin"]), StringComparer.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(8)))
             throw new Exception("The source fixture did not converge after removing the temporary ZIP archive.");
+
+        var bulkDirectory = Path.Combine(folders[0], "column-filter-load");
+        Directory.CreateDirectory(bulkDirectory);
+        for (var index = 0; index < 1000; index++)
+        {
+            var extension = index % 2 == 0 ? ".txt" : ".bin";
+            File.WriteAllBytes(Path.Combine(bulkDirectory, $"item-{index:D4}{extension}"), [0x41]);
+        }
+        navigate.Invoke(hosts[0], [bulkDirectory]);
+        if (!WaitFor(() => string.Equals((string?)currentPath.GetValue(hosts[0]), bulkDirectory,
+                               StringComparison.OrdinalIgnoreCase) && count(hosts[0]) == 1000,
+                TimeSpan.FromSeconds(20)))
+            throw new Exception($"The production ExplorerBrowser did not enumerate the 1,000-item filter fixture: count={count(hosts[0])}.");
+
+        var matchedReads = 0;
+        var filterTimer = Stopwatch.StartNew();
+        Apply("", (key, [textType]));
+        if (!WaitFor(() =>
+            {
+                matchedReads = count(hosts[0]) == 500 ? matchedReads + 1 : 0;
+                return matchedReads >= 3;
+            }, TimeSpan.FromSeconds(20)))
+            throw new Exception($"The 1,000-item TXT filter did not converge to 500 rows: count={count(hosts[0])}.");
+        filterTimer.Stop();
+
+        Apply("", []);
+        if (!WaitFor(() => count(hosts[0]) == 1000, TimeSpan.FromSeconds(20)))
+            throw new Exception($"Clearing the 1,000-item filter did not restore all rows: count={count(hosts[0])}.");
+        navigate.Invoke(hosts[0], [folders[0]]);
+        if (!WaitFor(() => string.Equals((string?)currentPath.GetValue(hosts[0]), folders[0],
+                               StringComparison.OrdinalIgnoreCase) && count(hosts[0]) == 3,
+                TimeSpan.FromSeconds(10)))
+            throw new Exception("The production ExplorerBrowser did not return to the source after the large-directory check.");
+        Directory.Delete(bulkDirectory, recursive: true);
+        if (!WaitFor(() => count(hosts[0]) == 2, TimeSpan.FromSeconds(10)))
+            throw new Exception("The source view did not converge after removing the large-directory fixture.");
         VerifyOtherPanes();
-        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True System.Comment-empty-value=True zip-provider-groups={zipNamesByType.Count} independent-panes=True");
+        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True System.Comment-empty-value=True zip-provider-groups={zipNamesByType.Count} large-directory=1000 filter-match=500 filter-elapsed-ms={filterTimer.ElapsedMilliseconds} independent-panes=True");
         return 0;
 
         void Apply(string pattern, params (object Key, string[] Values)[] filters)

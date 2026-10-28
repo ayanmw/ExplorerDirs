@@ -481,4 +481,6 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 
 2026-10-29 本机 Shell 空属性回归：在未写入注释元数据的 TXT/BIN 临时文件上，用生产 ExplorerBrowser 按 `System.Comment`（`F29F85E0-4FF9-1068-AB91-08002B27B3D9`, PID 6）筛选。空值条件保留两项，非空哨兵值排除两项，清除条件后完整列表恢复；这证明本机文件系统 Shell provider 的可读空属性可按空白选项过滤，而不走读取失败 fail-open。既有 TXT/BIN 类型、组合条件、ZIP provider 与窗格隔离也同轮继续通过。隐藏 HostProbe 连续两次通过，父窗不可见且前台 HWND 不变；未覆盖真实列头菜单、慢速 provider、网络/云盘/第三方 Shell provider，也未更新预览包。
 
+2026-10-29 本机 1,000 项筛选响应：在普通本地文件夹生成 500 个 TXT 和 500 个 BIN，由生产 ExplorerBrowser 完成 Shell 枚举后应用 TXT 类型值条件，确认稳定收敛到 500 行；清除后恢复 1,000 行，再离开并删除夹具。连续两轮从应用筛选到三次稳定读数分别为 61 ms 和 46 ms，包含 Dispatcher 轮询及 Shell 项目数读回，不代表列头菜单全量值枚举耗时。测试覆盖普通本地文件系统 provider，不外推到机械盘/网络/云 provider 或更大目录；父窗隐藏、前台 HWND 不变，未更新预览包。
+
 2026-10-28 文件夹入口发布包补齐：正常发布版与隔离预览包均携带 `tools/folder-verb.ps1` 和 `FolderVerb.psm1`。打包脚本在 package layout 下默认定位本包 EXE；源码树仍要求明确指定 `releases/` 下的目标。发布隔离 smoke 验证包内脚本与目录参数能力清单对应；未修改真实注册表，菜单可见与实际启动仍待集中验收。
