@@ -27,6 +27,10 @@ internal static class WindowsExplorerRestarter
         if (!MatchesExpectedExecutable(shellProcess.MainModule?.FileName, explorerPath))
             throw new InvalidOperationException("桌面 Shell 不是由 Windows 自带的 explorer.exe 承载；未结束任何进程。");
 
+        if (!IsCurrentShellProcess(shellProcessId, () =>
+                TryGetShellProcessId(out var currentProcessId) ? currentProcessId : 0))
+            throw new InvalidOperationException("桌面 Shell 已变化；未结束任何进程。");
+
         shellProcess.Kill();
         if (!shellProcess.WaitForExit((int)ShellRestartGracePeriod.TotalMilliseconds))
             throw new TimeoutException("Windows Shell 进程未能在 3 秒内退出。");
@@ -100,6 +104,9 @@ internal static class WindowsExplorerRestarter
             return false;
         }
     }
+
+    internal static bool IsCurrentShellProcess(uint expectedProcessId, Func<uint> readCurrentProcessId) =>
+        expectedProcessId != 0 && readCurrentProcessId() == expectedProcessId;
 
     internal static bool IsExpectedReplacementShell(uint previousProcessId, uint currentProcessId,
         string? actualPath, string? expectedPath) =>

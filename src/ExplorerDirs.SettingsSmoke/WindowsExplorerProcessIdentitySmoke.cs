@@ -25,6 +25,13 @@ internal static class WindowsExplorerProcessIdentitySmoke
                 @"C:\Windows\explorer.exe", ""),
             "an unavailable expected image path is rejected");
 
+        Check(WindowsExplorerRestarter.IsCurrentShellProcess(100, () => 100),
+            "the desktop Shell PID remains eligible when it is unchanged before termination");
+        Check(!WindowsExplorerRestarter.IsCurrentShellProcess(100, () => 101),
+            "a replacement desktop Shell prevents termination of a stale Explorer PID");
+        Check(!WindowsExplorerRestarter.IsCurrentShellProcess(100, () => 0),
+            "an unavailable desktop Shell PID prevents termination of the previously observed process");
+
         Check(WindowsExplorerRestarter.IsExpectedReplacementShell(
                 100, 101, @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
             "a different PID running the Windows Explorer image is a restored shell");

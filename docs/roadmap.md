@@ -14,6 +14,8 @@
 | 4 | Explorer 系统入口 | 可选文件夹右键入口、目录参数、`/select,<对象>` 与管道转发已有代码及后台证据。默认文件夹打开与 Win+E 接管仍是后续工作，可逆恢复和真实启动链路尚待验证；不自动修改系统入口。见本文件 M3。 |
 | 5 | Q-Dir 列值筛选 | 最近成功轮次的 Private Desktop ExplorerBrowser 探针确认 `IFolderFilter::ShouldShow` 可对本地文件夹的 3/3 项通过 `IShellFolder2::GetDetailsEx` 读取 `System.ItemTypeText`，移除筛选后 3 项恢复；`IColumnManager` 的列序重排为 Type/Name/Size 后，DirectUI UIA `Header → SplitButton` 顺序及矩形同步成为“类型/名称/大小”。但窗口树没有 `SysHeader32`，不能用 `HDF_SPLITBUTTON`/`HDN_DROPDOWN` 扩展原生 Header；UIA 的 `ExpandCollapse.Expand()` 仍报告 Collapsed，未出现原生 `#32768` 菜单。随后两次实验前台 HWND 守卫均失败，原因未知；暂停继续调用该 ExplorerBrowser 探针，不弱化守卫。产品 UI、标签独立保存及跨 provider 属性读取都未接入。详见[功能对照](shell-parity.md#q-dir-列头过滤差距2026-10-28)。 |
 
+2026-10-28：复核 Explorer 重启工具时补上结束进程前的 Shell PID 再确认。读取桌面 Shell PID、打开并验证映像期间若旧进程退出且 PID 被复用为另一 `explorer.exe`，现在会在结束前发现当前 `GetShellWindow()` 已指向不同进程并中止，避免误杀另一个 Explorer 实例。身份回归先按预期因缺少检查失败，再通过完整 Release SettingsSmoke 与 App Release build（0 警告/错误）；没有结束或启动系统 Explorer，真实桌面恢复仍待集中验收。
+
 2026-10-28：为集中验收准备最新隔离候选 `src/.state/gui-smoke/20261028-030259-694-16bd5d`。源码 `0621d2bdf0f5360e8da45b3e338dea0408c1b07b`，工作区干净；Release `dotnet publish` 成功，唯一构建标识写入程序集，EXE SHA-256 `D763E219D8899DD1FE9CAD40C1EFD3E467143075FE5A351A17BB40EC144E237B`。准备目录含四个独立窗格样本、QDR/Program Starter 配置和 10,000 项递归扫描夹具。`-PrepareOnly` 在加载 UI Automation 与窗口操作前返回；未启动候选窗口、未覆盖日常发布。该产物仅供后续集中桌面验收，不代表功能验收通过。
 
 2026-10-28：内存采样器现可用 `-ProcessId` 固定单个 ExplorerDirs 实例，并核对进程启动时间以拒绝 PID 复用；CSV 增加 GDI/USER 计数。指定 PID 与默认多实例模式各做了两点只读冒烟，错误进程身份以退出码 2 拒绝且不创建输出。没有记录固定浏览负载，因此内存归因仍待同一 PID 的受控操作采样；说明与命令见[内存采样](memory-sampling.md#当前采样器用法)。
