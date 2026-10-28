@@ -81,22 +81,19 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
     private static bool TryGetFolderState(nint shellFolder, nint itemPidl, out bool isFolder)
     {
         isFolder = false;
-        var pidlArray = Marshal.AllocHGlobal(nint.Size);
-        var attributes = Marshal.AllocHGlobal(sizeof(uint));
+        // GetAttributesOf needs a PIDL pointer and a UINT mask; keep their per-item buffers together.
+        var buffer = Marshal.AllocHGlobal(nint.Size + sizeof(uint));
+        var attributes = IntPtr.Add(buffer, nint.Size);
         try
         {
-            Marshal.WriteIntPtr(pidlArray, itemPidl);
+            Marshal.WriteIntPtr(buffer, itemPidl);
             Marshal.WriteInt32(attributes, unchecked((int)FolderAttribute));
-            var hr = GetMethod<GetAttributesOf>(shellFolder, 9)(shellFolder, 1, pidlArray, attributes);
+            var hr = GetMethod<GetAttributesOf>(shellFolder, 9)(shellFolder, 1, buffer, attributes);
             if (hr < 0) return false;
             isFolder = (unchecked((uint)Marshal.ReadInt32(attributes)) & FolderAttribute) != 0;
             return true;
         }
-        finally
-        {
-            Marshal.FreeHGlobal(attributes);
-            Marshal.FreeHGlobal(pidlArray);
-        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     private static bool TryGetName(nint shellFolder, nint itemPidl, out string name)
