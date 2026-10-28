@@ -1830,7 +1830,18 @@ internal static class ShellViewColorSpike
         var existingFolders = Directory.GetDirectories(fixture, "*", SearchOption.TopDirectoryOnly)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         Check(At<ActivateView>(views[0], 7)(views[0], 2)); // SVUIA_ACTIVATE_FOCUS for native folder creation.
-        InvokeBackgroundVerb(views[0], menuOwner, "newfolder", "wpf-new-folder", useCanonicalVerbString: true);
+        var invokeResult = ShellFileCommands.Invoke(ShellFileCommand.NewFolder, background =>
+        {
+            if (!background) return null;
+            var contextMenuId = ContextMenuId;
+            Check(At<GetItemObject>(views[0], 15)(views[0], 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+            try { return new NativeShellCommandMenu(Marshal.GetObjectForIUnknown(contextMenu), menuOwner); }
+            finally { Marshal.Release(contextMenu); }
+        });
+        Console.WriteLine($"wpf-new-folder: production-command-result={(invokeResult is { } result ? $"0x{result:X8}" : "unavailable")}");
+        if (invokeResult is null)
+            throw new IOException("The production Shell command adapter did not consider New Folder available in the isolated writable fixture.");
+        Check(invokeResult.Value);
 
         var deadline = Environment.TickCount64 + 5000;
         string[] createdFolders;
@@ -2039,13 +2050,10 @@ internal static class ShellViewColorSpike
         return string.Join(',', verified);
     }
 
-    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb,
-        string? diagnosticLabel = null, bool useCanonicalVerbString = false)
+    private static void InvokeBackgroundVerb(nint view, nint owner, string expectedVerb)
     {
         var contextMenuId = ContextMenuId;
-        var getMenuResult = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu); // SVGIO_BACKGROUND.
-        if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: get-background-menu=0x{getMenuResult:X8}");
-        Check(getMenuResult);
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
         try
         {
             var menu = CreatePopupMenu();
@@ -2053,7 +2061,6 @@ internal static class ShellViewColorSpike
             try
             {
                 var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
-                if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: query-context-menu=0x{queryResult:X8}");
                 Check(queryResult);
                 var commandCount = Math.Min(queryResult & 0xffff, 0x7fff);
                 var buffer = Marshal.AllocHGlobal(512);
@@ -2073,24 +2080,16 @@ internal static class ShellViewColorSpike
                     }
                 }
                 finally { Marshal.FreeHGlobal(buffer); }
-                if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: canonical-verb={expectedVerb}; offset={commandOffset?.ToString() ?? "missing"}");
                 if (commandOffset is null)
                     throw new InvalidOperationException($"The Shell background menu did not expose canonical verb '{expectedVerb}'.");
-                var canonicalVerb = useCanonicalVerbString ? Marshal.StringToCoTaskMemAnsi(expectedVerb) : 0;
                 var invoke = new NativeInvokeInfo
                 {
                     Size = Marshal.SizeOf<NativeInvokeInfo>(),
                     Window = owner,
-                    Verb = canonicalVerb != 0 ? canonicalVerb : (nint)commandOffset.Value,
+                    Verb = (nint)commandOffset.Value,
                     Show = 1
                 };
-                try
-                {
-                    var invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
-                    if (diagnosticLabel is not null) Console.WriteLine($"{diagnosticLabel}: invoke-command=0x{invokeResult:X8}; selector={(useCanonicalVerbString ? "canonical-name" : "offset")}");
-                    Check(invokeResult);
-                }
-                finally { if (canonicalVerb != 0) Marshal.FreeCoTaskMem(canonicalVerb); }
+                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
             }
             finally { DestroyMenu(menu); }
         }

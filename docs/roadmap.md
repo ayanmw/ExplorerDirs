@@ -4297,5 +4297,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 ## 2026-10-28：WPF 隔离四窗格的新建文件夹菜单命令
 
-- 在四 pane 隐藏 WPF `IShellView` 测试中，从背景 `IContextMenu` 查询并执行 `newfolder` canonical verb。命令偏移形式返回 `E_FAIL`，canonical verb 字符串形式返回 `S_OK`；新文件夹在同目录三个 pane 中出现，独立 Pane 4 保持不变。连续 3 轮通过，前台 HWND 未变，测试 fixture 清理完成。
-- 这只验证 Private Desktop 原生宿主上的 `IContextMenu::InvokeCommand` 和通知传播；产品 ExplorerBrowser 的真实菜单输入、重命名体验仍待集中 UI 验收。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-28wpf-隔离四窗格的原生新建文件夹命令)。
+- 在四 pane 隐藏 WPF `IShellView` 测试中，直接调用产品 `ShellFileCommands.Invoke(NewFolder)` / `NativeShellCommandMenu` 路径；该路径先初始化延迟“新建”子菜单，再通过当前菜单偏移调用 `IContextMenu::InvokeCommand`，返回 `S_OK`。此前未初始化子菜单的裸偏移调用返回 `E_FAIL`，canonical verb 字符串调用也能成功；本次改用产品适配器验证其真实路径。
+- 新目录在同目录三个 pane 中出现，独立 Pane 4 保持不变。Release NativeProbe build 0 警告/错误，完整流程连续 3 轮退出码 0，前台 HWND 未变且 fixture 清理完成。产品 ExplorerBrowser 的真实菜单输入、重命名体验仍待集中 UI 验收。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-28wpf-隔离四窗格的原生新建文件夹命令)。

@@ -1293,6 +1293,6 @@ Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌�
 
 ### 2026-10-28：WPF 隔离四窗格的原生新建文件夹命令
 
-在四 pane `IShellView` 的隐藏 Private Desktop 流程末尾，从 Pane 1 获取标准背景 `IContextMenu` 并查询到 `newfolder` canonical verb。以命令偏移调用时 Shell 返回 `E_FAIL`；按 Microsoft `IContextMenu::InvokeCommand` 支持的 canonical verb 字符串调用后返回 `S_OK`。创建出的临时目录在同目录三个 pane 中均可见且计数增加，独立目录 Pane 4 的计数与内容保持不变；若 Shell 打开内联重命名，则由隔离 view 接收 Escape 后结束。临时 fixture 在宿主销毁时删除，目标卷临时目录无残留。
+在四 pane `IShellView` 的隐藏 Private Desktop 流程末尾，改为调用产品 `ShellFileCommands.Invoke(NewFolder)` 与 `NativeShellCommandMenu`。生产适配器先经 `IContextMenu2::HandleMenuMsg(WM_INITMENUPOPUP)` 初始化延迟的“新建”子菜单，再用当前菜单对象内的命令偏移调用；返回 `S_OK`。此前未初始化子菜单的独立调用偏移返回 `E_FAIL`，直接使用 canonical verb 字符串虽可执行，但不代表产品入口的实际调用路径。
 
-同一流程连续 3 次通过，前台 HWND 未变。该验证表明原生背景菜单命令可在该隔离 WPF/IShellView 组合中执行并传播通知；不等于产品 ExplorerBrowser 的可见菜单/焦点/自动重命名验收，也不覆盖用户真实输入。详细日志位于 `src/.state/native-probe-watchdog/20261028-084019-bb6fb3d2.stdout.log`、`20261028-084035-bd3e3528.stdout.log` 和 `20261028-084052-9e72661b.stdout.log`。
+创建出的临时目录在同目录三个 pane 中均可见且计数增加，独立目录 Pane 4 的计数与内容保持不变；若 Shell 打开内联重命名，则由隔离 view 接收 Escape 后结束。当前产品适配器路径连续 3 次通过，前台 HWND 未变，fixture 清理完成。该验证覆盖隐藏原生适配器与通知传播，不等于产品 ExplorerBrowser 的可见菜单/焦点/自动重命名验收，也不覆盖用户真实输入。日志：`20261028-084306-df033e88.stdout.log`、`20261028-084356-2bf5a2ad.stdout.log`、`20261028-084412-57d9c5b7.stdout.log`、`20261028-084429-303fb9d9.stdout.log`。
