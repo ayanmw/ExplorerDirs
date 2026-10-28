@@ -445,3 +445,9 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列表列值过滤作为两种功
 #### 2026-10-28 UIA Invoke 与前台守卫失败
 
 额外尝试对 DirectUI 列头 SplitButton 调用 UIA `InvokePattern.Invoke()`，该轮读到排序状态不变且没有 `#32768` Popup，但 Private Desktop 守卫报告前台 HWND 从 `0x272314` 变为 `0x59024C`，因此整轮以失败处理，不采纳其菜单行为结论。移除 Invoke 后再运行原只读能力探针，守卫仍报告 `0xE0B5E` 变为 `0x405F0` 并失败。现有证据不能把变化归因于 UIA、探针或外部活动；不得降低前台不变门槛。暂停继续运行 ExplorerBrowser 视图探针，待能确认稳定前台状态后再继续；列头真实鼠标箭头命中仍未验证。
+
+#### 2026-10-28 列值筛选后端接线
+
+`QuickFilterSettings` 现在保存以 `PROPERTYKEY` 标识的列值条件。一个属性所选值按不区分大小写的 OR 匹配，多属性条件按 AND 匹配；与文件名通配符同时存在时两者继续按 AND 组合。生产 `ShellFolderFilter` 仅在有列条件时调用 `IShellFolder2::GetDetailsEx`，再用 `InitPropVariantFromVariant` 和 `PSFormatForDisplayAlloc` 得到列显示文本；某属性无法读取时跳过该条件，避免误隐藏项目。会话 INI v11 把这些条件按标签写入 Base64/JSON，旧格式默认为无列条件，旧会话写回前备份；Q-Dir 扩展包含同一会话字符串，因此能往返本程序自定义条件。
+
+这一批没有 UI 来创建、选择或清除列值，也没有在 ExplorerBrowser 生产回调里实测 Shell 属性读取/格式化；不能视为列值筛选功能已可供用户使用。下一步实现可见筛选入口，并在集中 GUI 验收中覆盖重排列、空值、过滤组合、逐标签复制/恢复和属性不可读时的行为。此前列头 DirectUI 入口的前台隔离结果仍保持失败，故本批没有改变原生表头或重复执行该探针。

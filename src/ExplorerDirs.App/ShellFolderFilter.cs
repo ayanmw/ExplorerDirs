@@ -29,7 +29,7 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
     {
         // Hidden-item preferences can attach this callback without an active quick filter.
         // In that case visibility is controlled by GetEnumFlags, so avoid per-item Shell lookups.
-        if (!_settings.HasPattern) return 0;
+        if (!_settings.HasAnyFilter) return 0;
         Interlocked.Increment(ref _shouldShowCalls);
         try
         {
@@ -40,8 +40,16 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
                 if (!TryGetFolderState(shellFolder, itemPidl, out isFolder)) return 0;
                 if (isFolder) return 0;
             }
-            if (!TryGetName(shellFolder, itemPidl, out var name)) return 0;
-            return _settings.ShouldShow(name, isFolder) ? 0 : 1; // S_OK shows; S_FALSE filters.
+            if (_settings.HasPattern)
+            {
+                if (!TryGetName(shellFolder, itemPidl, out var name)) return 0;
+                if (!_settings.ShouldShow(name, isFolder)) return 1;
+            }
+            if (_settings.HasColumnFilters &&
+                !_settings.MatchesColumnFilters(key => ShellColumnValueFilterReader.TryGetDisplayValue(
+                    shellFolder, itemPidl, key, out var value) ? value : null))
+                return 1;
+            return 0; // S_OK shows; S_FALSE filters.
         }
         catch
         {
@@ -68,12 +76,12 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
             _ => windowsShowsHiddenItems
         });
 
-    internal static bool ShouldAttachFilter(bool hasPattern, bool searchActive,
+    internal static bool ShouldAttachFilter(bool hasFilter, bool searchActive,
         HiddenItemsPreference hiddenItemsPreference) =>
-        !searchActive && hasPattern || hiddenItemsPreference != HiddenItemsPreference.FollowWindows;
+        (!searchActive && hasFilter) || hiddenItemsPreference != HiddenItemsPreference.FollowWindows;
 
-    internal static bool ShouldApplyQuickFilter(bool searchActive, bool hasPattern) =>
-        !searchActive && hasPattern;
+    internal static bool ShouldApplyQuickFilter(bool searchActive, bool hasFilter) =>
+        !searchActive && hasFilter;
 
     internal static bool ReadShowAllObjectsSetting()
     {

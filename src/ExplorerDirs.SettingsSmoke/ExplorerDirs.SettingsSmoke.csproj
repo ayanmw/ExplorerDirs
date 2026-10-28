@@ -121,6 +121,7 @@
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
     <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnValueFilterReader.cs" Link="ShellColumnValueFilterReader.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterEnumerationGate.cs" Link="QuickFilterEnumerationGate.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterFavoritesStore.cs" Link="QuickFilterFavoritesStore.cs" />
     <Compile Include="../ExplorerDirs.App/QuickFilterHistoryStore.cs" Link="QuickFilterHistoryStore.cs" />

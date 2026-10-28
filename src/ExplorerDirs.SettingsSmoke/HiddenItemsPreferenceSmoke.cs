@@ -29,8 +29,8 @@ internal static class HiddenItemsPreferenceSmoke
             Check(!ShellFolderFilter.ShouldAttachFilter(false, false, HiddenItemsPreference.FollowWindows) &&
                   ShellFolderFilter.ShouldAttachFilter(true, false, HiddenItemsPreference.FollowWindows) &&
                   ShellFolderFilter.ShouldAttachFilter(false, true, HiddenItemsPreference.Show) &&
-                  !ShellFolderFilter.ShouldApplyQuickFilter(true, hasPattern: true) &&
-                  ShellFolderFilter.ShouldApplyQuickFilter(false, hasPattern: true),
+                  !ShellFolderFilter.ShouldApplyQuickFilter(true, hasFilter: true) &&
+                  ShellFolderFilter.ShouldApplyQuickFilter(false, hasFilter: true),
                 "explicit visibility attaches the Shell filter while search ignores stale quick-filter patterns");
             Check(!HiddenItemsPreferencePolicy.ShouldRefreshExistingView(preferenceChanged: true, viewAvailable: false) &&
                   !HiddenItemsPreferencePolicy.ShouldRefreshExistingView(preferenceChanged: false, viewAvailable: true) &&

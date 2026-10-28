@@ -23,6 +23,20 @@ internal static class ShellQuickFilterSmoke
 
         Check(QuickFilterSettings.Empty.ShouldShow("anything.bin", isFolder: false), "empty filter keeps all files");
         Check(!QuickFilterSettings.Empty.Matches("anything.bin"), "empty filter has no matching patterns");
+
+        var typeKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 4);
+        var sizeKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 12);
+        var columns = new QuickFilterSettings(string.Empty, false, false,
+            [new ColumnValueFilter(typeKey, ["TXT 文件", "BIN 文件"]),
+             new ColumnValueFilter(sizeKey, ["1 KB"])]);
+        Check(!columns.HasPattern && columns.HasColumnFilters && columns.HasAnyFilter,
+            "column-only criteria activate the filter without a name pattern");
+        Check(columns.MatchesColumnFilters(key => key == typeKey ? "txt 文件" : "1 KB"),
+            "values within a column are case-insensitive alternatives and columns combine with AND");
+        Check(!columns.MatchesColumnFilters(key => key == typeKey ? "TXT 文件" : "2 KB"),
+            "a nonmatching value in any selected column rejects the item");
+        Check(columns.MatchesColumnFilters(_ => null),
+            "unavailable Shell properties fail open instead of hiding the item");
     }
 
     private static void Check(bool condition, string message)

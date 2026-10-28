@@ -5,19 +5,24 @@ internal static class QuickFilterSessionSmoke
 {
     internal static void Run(string root)
     {
-        var filter = new QuickFilterSettings("*.txt;*.md", true, true);
+        var typeKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 4);
+        var filter = new QuickFilterSettings("*.txt;*.md", true, true,
+            [new ColumnValueFilter(typeKey, ["TXT 文件", "BIN 文件"])]);
         var state = new SessionState(4, 4,
             [[new TabSettings(@"C:\filter-fixture", ViewState.Default(), filter)], [], [], []]);
         var rendered = SessionStore.Render(state);
-        Require(rendered.Contains("FormatVersion=10", StringComparison.Ordinal), "session format advances to v10 for tree display modes");
+        Require(rendered.Contains("FormatVersion=11", StringComparison.Ordinal), "session format advances to v11 for column-value filters");
         Require(rendered.Contains("FilterPattern=*.txt;*.md", StringComparison.Ordinal) &&
             rendered.Contains("FilterExcludeMatches=true", StringComparison.Ordinal) &&
             rendered.Contains("FilterFolders=true", StringComparison.Ordinal), "filter settings serialize per tab");
         var restored = SessionStore.ParseComplete(rendered)?.Panes[0][0].QuickFilter;
         Require(restored is { Pattern: "*.txt;*.md", ExcludeMatches: true, FilterFolders: true },
             "filter settings round-trip");
+        Require(restored?.ColumnFilters.Count == 1 && restored.ColumnFilters[0].Key == typeKey &&
+            restored.ColumnFilters[0].Values.SequenceEqual(["TXT 文件", "BIN 文件"]),
+            "column-value criteria round-trip per tab");
 
-        var legacy = rendered.Replace("FormatVersion=10", "FormatVersion=5", StringComparison.Ordinal)
+        var legacy = rendered.Replace("FormatVersion=11", "FormatVersion=5", StringComparison.Ordinal)
             .Replace("FilterPattern=*.txt;*.md" + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("FilterExcludeMatches=true" + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("FilterFolders=true" + Environment.NewLine, "", StringComparison.Ordinal)
@@ -33,16 +38,25 @@ internal static class QuickFilterSessionSmoke
         }
         var malformed = rendered.Replace("FilterExcludeMatches=true", "FilterExcludeMatches=maybe", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(malformed) is null, "malformed filter booleans reject incomplete profile snapshots");
+        var malformedColumnValues = rendered.Replace("ColumnFilter0Values=", "ColumnFilter0Values=bad!", StringComparison.Ordinal);
+        Require(SessionStore.ParseComplete(malformedColumnValues) is null,
+            "malformed column-value payload rejects an incomplete profile snapshot");
+        var v10 = rendered.Replace("FormatVersion=11", "FormatVersion=10", StringComparison.Ordinal)
+            .Replace("ColumnFilterCount=1" + Environment.NewLine, "", StringComparison.Ordinal)
+            .Replace("ColumnFilter0Key=" + typeKey + Environment.NewLine, "", StringComparison.Ordinal)
+            .Replace("ColumnFilter0Values=" + Convert.ToBase64String(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new[] { "TXT 文件", "BIN 文件" })) + Environment.NewLine, "", StringComparison.Ordinal);
+        Require(SessionStore.ParseComplete(v10)?.Panes[0][0].QuickFilter is { HasPattern: true, HasColumnFilters: false },
+            "v10 profile keeps the name filter and defaults column-value filters to empty");
 
         var migrationPath = Path.Combine(root, "quick-filter-v5.ini");
         File.WriteAllText(migrationPath, legacy);
         var store = new SessionStore(migrationPath, Path.Combine(root, "missing-filter-session.json"));
         var loaded = store.Load() ?? throw new Exception("v5 profile failed to load");
         store.Save(loaded);
-        var backups = Directory.GetFiles(root, "quick-filter-v5.ini.before-v10-*.bak");
+        var backups = Directory.GetFiles(root, "quick-filter-v5.ini.before-v11-*.bak");
         Require(backups.Length == 1 && File.ReadAllText(backups[0]) == legacy &&
-            File.ReadAllText(migrationPath).Contains("FormatVersion=10", StringComparison.Ordinal),
-            "v5 upgrade keeps the original snapshot before writing v9");
+            File.ReadAllText(migrationPath).Contains("FormatVersion=11", StringComparison.Ordinal),
+            "v5 upgrade keeps the original snapshot before writing v11");
         Console.WriteLine("Quick filter session smoke: PASS");
     }
 

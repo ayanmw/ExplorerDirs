@@ -182,7 +182,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
-        try { return ShellFileViewExportCapture.Capture(view, quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasPattern); }
+        try { return ShellFileViewExportCapture.Capture(view, quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter); }
         finally { Marshal.Release(view); }
     }
 
@@ -311,7 +311,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             return ShellFileViewExportCapture.CaptureForPrint(view,
-                quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasPattern,
+                quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter,
                 mode: style.Mode, iconSize: style.IconSize);
         }
         finally { Marshal.Release(view); }
@@ -2319,7 +2319,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             var hasGroup = !_disableGrouping && !searchActive && (pendingRestore is not null || _quickFilterGroupToRestore is not null ||
-                settings.HasPattern && TryReadGroup(out group, out groupAscending) && group is not null);
+                settings.HasAnyFilter && TryReadGroup(out group, out groupAscending) && group is not null);
             var initialItemCount = pendingRestore?.InitialItemCount ?? ReadDirectoryMonitorItemCount() ?? 0;
             if (!Current()) return false;
             // Clearing a Shell group can pump selection callbacks before Refresh takes its own suppression lease.
@@ -2566,8 +2566,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void UpdateQuickFilterAttachment(bool searchActive)
     {
         if (_browser is null) return;
-        var applyQuickFilter = ShellFolderFilter.ShouldApplyQuickFilter(searchActive, _quickFilterSettings.HasPattern);
-        var filter = ShellFolderFilter.ShouldAttachFilter(_quickFilterSettings.HasPattern, searchActive,
+        var applyQuickFilter = ShellFolderFilter.ShouldApplyQuickFilter(searchActive, _quickFilterSettings.HasAnyFilter);
+        var filter = ShellFolderFilter.ShouldAttachFilter(_quickFilterSettings.HasAnyFilter, searchActive,
             _hiddenItemsPreference)
             ? _quickFilter ??= new ShellFolderFilter(
                 applyQuickFilter ? _quickFilterSettings : QuickFilterSettings.Empty, _hiddenItemsPreference)
@@ -4331,7 +4331,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try { UpdateQuickFilterAttachment(searchActive: true); }
             catch (Exception ex) { MenuError?.Invoke(this, $"停用搜索视图筛选失败：{ex.Message}"); }
         }
-        else if (targetPath is not null && _quickFilterSettings.HasPattern)
+        else if (targetPath is not null && _quickFilterSettings.HasAnyFilter)
         {
             // GetViewFlags is queried while DefView creates the target view. Re-enable
             // filtering before that transition; doing so only after completion is too late.
@@ -4435,7 +4435,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             try
             {
                 UpdateQuickFilterAttachment(searchActive: false);
-                if (returningFromSearch && _quickFilterSettings.HasPattern) Refresh();
+                if (returningFromSearch && _quickFilterSettings.HasAnyFilter) Refresh();
             }
             catch (Exception ex) { MenuError?.Invoke(this, $"应用快速筛选失败：{ex.Message}"); }
             _hasNavigated = true;

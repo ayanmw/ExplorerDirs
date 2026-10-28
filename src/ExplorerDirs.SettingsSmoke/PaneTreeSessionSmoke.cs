@@ -20,11 +20,11 @@ internal static class PaneTreeSessionSmoke
         var state = new SessionState(4, 4, panes, PaneTreeVisibility: expected,
             TreeDisplayMode: TreeDisplayMode.Shared);
         var rendered = SessionStore.Render(state);
-        Require(rendered.Contains("FormatVersion=10", StringComparison.Ordinal) &&
+        Require(rendered.Contains("FormatVersion=11", StringComparison.Ordinal) &&
             rendered.Contains("TreeDisplayMode=Shared", StringComparison.Ordinal) &&
             rendered.Contains("TreeVisible=True", StringComparison.Ordinal) &&
             rendered.Contains("TreeVisible=False", StringComparison.Ordinal),
-            "v10 sessions persist tree display mode and per-pane tree visibility");
+            "v11 sessions persist tree display mode and per-pane tree visibility");
         Require(SessionStore.ParseComplete(rendered) is { } parsed &&
             parsed.PaneTreeVisibility?.SequenceEqual(expected) == true &&
             parsed.TreeDisplayMode == TreeDisplayMode.Shared,
@@ -36,13 +36,13 @@ internal static class PaneTreeSessionSmoke
 
         var v9 = string.Join(Environment.NewLine, rendered.Split('\n').Where(line =>
             !line.StartsWith("TreeDisplayMode=", StringComparison.Ordinal)))
-            .Replace("FormatVersion=10", "FormatVersion=9", StringComparison.Ordinal);
+            .Replace("FormatVersion=11", "FormatVersion=9", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(v9)?.TreeDisplayMode == TreeDisplayMode.PerPane,
             "v9 tree visibility migrates to per-pane mode");
         var v8 = string.Join(Environment.NewLine, rendered.Split('\n').Where(line =>
             !line.StartsWith("TreeVisible=", StringComparison.Ordinal) &&
             !line.StartsWith("TreeDisplayMode=", StringComparison.Ordinal)))
-            .Replace("FormatVersion=10", "FormatVersion=8", StringComparison.Ordinal);
+            .Replace("FormatVersion=11", "FormatVersion=8", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(v8)?.PaneTreeVisibility is null,
             "v8 sessions leave per-pane tree state to the existing profile default");
 
@@ -54,16 +54,16 @@ internal static class PaneTreeSessionSmoke
                 !line.StartsWith("TreeVisible=", StringComparison.Ordinal)))
         })
             Require(SessionStore.ParseComplete(invalid) is null,
-            "v10 profiles reject malformed or missing per-pane tree visibility");
+            "v11 profiles reject malformed or missing per-pane tree visibility");
 
         File.WriteAllText(sessionPath, v8);
         store = new SessionStore(sessionPath, Path.Combine(folder, "missing-pane-tree-session.json"));
         var loaded = store.Load()!;
         store.Save(loaded with { PaneTreeVisibility = expected });
-        var backups = Directory.GetFiles(folder, "pane-tree-session.ini.before-v10-*.bak");
+        var backups = Directory.GetFiles(folder, "pane-tree-session.ini.before-v11-*.bak");
         Require(backups.Length == 1 && File.ReadAllText(backups[0]) == v8 &&
-            File.ReadAllText(sessionPath).Contains("FormatVersion=10", StringComparison.Ordinal),
-            "upgrading v8 to v10 preserves the exact original before adding tree modes");
+            File.ReadAllText(sessionPath).Contains("FormatVersion=11", StringComparison.Ordinal),
+            "upgrading v8 to v11 preserves the exact original before adding new session fields");
     }
 
     private static void Require(bool valid, string message)

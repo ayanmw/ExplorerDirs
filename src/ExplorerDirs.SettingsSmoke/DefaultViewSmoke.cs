@@ -22,7 +22,7 @@ internal static class DefaultViewSmoke
         Check(storeType.GetMethod("Load")!.Invoke(reader, null) is null &&
             storeType.GetProperty("LoadWarning")!.GetValue(reader) is string,
             "actual older assembly rejects the newer profile");
-        var oldText = text.Replace("FormatVersion=10", "FormatVersion=2")
+        var oldText = text.Replace("FormatVersion=11", "FormatVersion=2")
             .Replace("Layout=11", "Layout=4")
             .Replace("DefaultIconSize=256" + Environment.NewLine, "");
         var oldState = storeType.GetMethod("Parse", BindingFlags.Static | BindingFlags.NonPublic)!
@@ -87,7 +87,7 @@ internal static class DefaultViewSmoke
                 "workspace extension preserves the exact default");
         }
 
-        var legacy = SessionStore.Render(state).Replace("FormatVersion=10", "FormatVersion=2")
+        var legacy = SessionStore.Render(state).Replace("FormatVersion=11", "FormatVersion=2")
             .Replace("DefaultIconSize=-1" + Environment.NewLine, "");
         var legacyPath = Path.Combine(folder, "old-v2.ini");
         File.WriteAllText(legacyPath, legacy);
@@ -96,10 +96,10 @@ internal static class DefaultViewSmoke
         Check(migrating.LoadWarning is null && old.DefaultIconSize == -1, "v2 keeps native default semantics");
         migrating.Save(old with { DefaultViewMode = 1, DefaultIconSize = 256 });
         migrating.Save(old with { DefaultViewMode = 1, DefaultIconSize = 96 });
-        var backups = Directory.GetFiles(folder, "old-v2.ini.before-v10-*.bak");
+        var backups = Directory.GetFiles(folder, "old-v2.ini.before-v11-*.bak");
         Check(backups.Length == 1 && File.ReadAllText(backups[0]) == legacy,
             "v2 upgrade keeps one exact original backup");
-        var v3Text = SessionStore.Render(state).Replace("FormatVersion=10", "FormatVersion=3");
+        var v3Text = SessionStore.Render(state).Replace("FormatVersion=11", "FormatVersion=3");
         var v3Path = Path.Combine(folder, "old-v3.ini");
         File.WriteAllText(v3Path, v3Text);
         var v3Store = new SessionStore(v3Path, Path.Combine(folder, "no-legacy.json"));
@@ -107,24 +107,24 @@ internal static class DefaultViewSmoke
         Check(v3Store.LoadWarning is null, "v3 remains readable without a damage warning");
         v3Store.Save(v3State with { Layout = 7 });
         v3Store.Save(v3State with { Layout = 8 });
-        var v3Backups = Directory.GetFiles(folder, "old-v3.ini.before-v10-*.bak");
+        var v3Backups = Directory.GetFiles(folder, "old-v3.ini.before-v11-*.bak");
         Check(v3Backups.Length == 1 && File.ReadAllText(v3Backups[0]) == v3Text &&
             new SessionStore(v3Path, Path.Combine(folder, "no-legacy.json")).Load()?.Layout == 8,
             "v3 upgrade backs up once and restores the new layout on restart");
-        Check(SessionStore.ParseComplete(SessionStore.Render(state with { Layout = 7 }).Replace("FormatVersion=10", "FormatVersion=3")) is null,
+        Check(SessionStore.ParseComplete(SessionStore.Render(state with { Layout = 7 }).Replace("FormatVersion=11", "FormatVersion=3")) is null,
             "new layout IDs require v4, not a mislabeled v3 snapshot");
-        var v4Text = SessionStore.Render(state with { Layout = 8 }).Replace("FormatVersion=10", "FormatVersion=4");
+        var v4Text = SessionStore.Render(state with { Layout = 8 }).Replace("FormatVersion=11", "FormatVersion=4");
         var v4Path = Path.Combine(folder, "old-v4.ini");
         File.WriteAllText(v4Path, v4Text);
         var v4Store = new SessionStore(v4Path, Path.Combine(folder, "no-legacy.json"));
         var v4State = v4Store.Load() ?? throw new Exception("V4 session lost.");
         Check(v4Store.LoadWarning is null && v4State.Layout == 8, "v4 keeps mirror layout");
         v4Store.Save(v4State with { Layout = 11 }); v4Store.Save(v4State with { Layout = 12 });
-        var v4Backups = Directory.GetFiles(folder, "old-v4.ini.before-v10-*.bak");
+        var v4Backups = Directory.GetFiles(folder, "old-v4.ini.before-v11-*.bak");
         Check(v4Backups.Length == 1 && File.ReadAllText(v4Backups[0]) == v4Text &&
             new SessionStore(v4Path, Path.Combine(folder, "no-legacy.json")).Load()?.Layout == 12,
             "v4 upgrade backs up once and restores four rows");
-        Check(SessionStore.ParseComplete(SessionStore.Render(state with { Layout = 9 }).Replace("FormatVersion=10", "FormatVersion=4")) is null,
+        Check(SessionStore.ParseComplete(SessionStore.Render(state with { Layout = 9 }).Replace("FormatVersion=11", "FormatVersion=4")) is null,
             "strip IDs require v5, not mislabeled v4");
         foreach (var invalid in new[] { "", "0", "-2", "1025", "text" })
         {

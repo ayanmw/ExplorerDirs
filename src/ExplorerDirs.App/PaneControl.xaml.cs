@@ -1053,7 +1053,7 @@ public partial class PaneControl : UserControl
     internal void ApplyQuickFilter()
     {
         if (Current is not { } state) return;
-        var settings = new QuickFilterSettings(QuickFilterBox.Text,
+        var settings = state.Browser.QuickFilter.WithNameFilter(QuickFilterBox.Text,
             QuickFilterMode.SelectedIndex == 1, FilterFoldersCheckBox.IsChecked == true);
         try { if (!state.Browser.SetQuickFilter(settings)) return; }
         catch (Exception ex)

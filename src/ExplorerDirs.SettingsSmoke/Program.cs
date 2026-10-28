@@ -490,7 +490,7 @@ var shellSessionState = state with
 var shellSessionText = SessionStore.Render(shellSessionState);
 var shellSessionRoundTrip = SessionStore.Parse(shellSessionText);
 Check(shellSessionRoundTrip?.Panes[0][0].Path == "shell:RecycleBinFolder" &&
-      shellSessionText.Contains("FormatVersion=10", StringComparison.Ordinal),
+      shellSessionText.Contains("FormatVersion=11", StringComparison.Ordinal),
     "supported Shell parsing identities round-trip in the existing session format");
 
 try
@@ -587,7 +587,7 @@ try
         "duplicated view has an independent column layout snapshot");
     var columnIni = Path.Combine(root, "columns.ini");
     var columnStore = new SessionStore(columnIni, Path.Combine(root, "missing-columns.json"));
-    var legacyColumns = SessionStore.Render(state).Replace("FormatVersion=10", "FormatVersion=1")
+    var legacyColumns = SessionStore.Render(state).Replace("FormatVersion=11", "FormatVersion=1")
         .Replace("DefaultIconSize=-1" + Environment.NewLine, "")
         .Replace("DisplayColumnCount=0" + Environment.NewLine, "");
     File.WriteAllText(columnIni, legacyColumns);
@@ -596,9 +596,9 @@ try
         "v1 loads without damage warning and leaves the Shell column defaults alone");
     columnStore.Save(oldColumnsState);
     columnStore.Save(oldColumnsState);
-    var upgradeBackups = Directory.GetFiles(root, "columns.ini.before-v10-*.bak");
+    var upgradeBackups = Directory.GetFiles(root, "columns.ini.before-v11-*.bak");
     Check(upgradeBackups.Length == 1 && File.ReadAllText(upgradeBackups[0]) == legacyColumns &&
-        File.ReadAllText(columnIni).Contains("FormatVersion=10"), "v1 migration keeps exactly one original snapshot");
+        File.ReadAllText(columnIni).Contains("FormatVersion=11"), "v1 migration keeps exactly one original snapshot");
     foreach (var damaged in new[]
     {
         columnsProfile.Replace("DisplayColumnCount=2", "DisplayColumnCount=1"),
@@ -1579,7 +1579,7 @@ try
         "invalid INI is preserved before overwrite");
 
     var futureIni = Path.Combine(root, "future.ini");
-    var futureProfile = completeProfile.Replace("FormatVersion=10", "FormatVersion=11", StringComparison.Ordinal);
+    var futureProfile = completeProfile.Replace("FormatVersion=11", "FormatVersion=12", StringComparison.Ordinal);
     File.WriteAllText(futureIni, futureProfile);
     var futureStore = new SessionStore(futureIni, Path.Combine(root, "missing-legacy.json"));
     Check(futureStore.Load() is null && futureStore.LoadWarning is not null,
@@ -1593,8 +1593,8 @@ try
     Check(File.ReadAllText(futureIni) == futureProfile, "newer format stays untouched");
 
     var duplicateFutureIni = Path.Combine(root, "duplicate-future.ini");
-    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=10",
-        "FormatVersion=11" + Environment.NewLine + "FormatVersion=10", StringComparison.Ordinal);
+    var duplicateFutureProfile = completeProfile.Replace("FormatVersion=11",
+        "FormatVersion=12" + Environment.NewLine + "FormatVersion=11", StringComparison.Ordinal);
     File.WriteAllText(duplicateFutureIni, duplicateFutureProfile);
     var duplicateFutureStore = new SessionStore(duplicateFutureIni, Path.Combine(root, "missing-legacy.json"));
     Check(duplicateFutureStore.Load() is null && duplicateFutureStore.LoadWarning is not null,

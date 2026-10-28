@@ -67,6 +67,11 @@ internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<
 internal sealed class SessionStore
 {
     internal const int MaximumTabsPerPane = 100;
+    private const int CurrentFormatVersion = 11;
+    private const int MaximumColumnFiltersPerTab = 16;
+    private const int MaximumColumnFilterValues = 256;
+    private const int MaximumColumnFilterValueLength = 512;
+    private const int MaximumColumnFilterPayloadLength = 128 * 1024;
     private readonly string _path;
     private readonly string _legacyPath;
     private bool _canOverwrite = true;
@@ -174,12 +179,11 @@ internal sealed class SessionStore
             throw new InvalidDataException($"单窗格超过 {MaximumTabsPerPane} 个标签，未覆盖会话配置；请减少标签后再保存。");
         var content = Render(state);
         if (!_olderVersionBackedUp && _lastSeenContent is not null &&
-            ParseProfile(_lastSeenContent).Version is >= 1 and <= 9)
+            ParseProfile(_lastSeenContent).Version is >= 1 and < CurrentFormatVersion)
         {
-            // Preserve exactly the snapshot we loaded; a concurrent edit is still
-            // rejected by WriteIfUnchanged below. Older apps reject v10 rather than
-            // silently replacing the selected navigation-tree display mode.
-            File.WriteAllText(_path + $".before-v10-{Guid.NewGuid():N}.bak", _lastSeenContent);
+            // Preserve exactly the snapshot we loaded before adding v11 state;
+            // concurrent edits are still rejected by WriteIfUnchanged below.
+            File.WriteAllText(_path + $".before-v{CurrentFormatVersion}-{Guid.NewGuid():N}.bak", _lastSeenContent);
             _olderVersionBackedUp = true;
         }
         PortableIniWriter.WriteIfUnchanged(_path, _lastSeenContent, content,
@@ -192,7 +196,7 @@ internal sealed class SessionStore
         var builder = new StringBuilder();
         builder.AppendLine("; Explorer Dirs portable profile. Close the app before editing.");
         builder.AppendLine("[General]");
-        builder.AppendLine("FormatVersion=10");
+        builder.AppendLine($"FormatVersion={CurrentFormatVersion}");
         builder.AppendLine($"Layout={state.Layout}");
         builder.AppendLine($"DefaultViewMode={state.DefaultViewMode}");
         builder.AppendLine($"DefaultIconSize={state.DefaultIconSize}");
@@ -230,6 +234,25 @@ internal sealed class SessionStore
                 builder.AppendLine($"FilterPattern={tab.QuickFilter.Pattern}");
                 builder.AppendLine($"FilterExcludeMatches={tab.QuickFilter.ExcludeMatches.ToString().ToLowerInvariant()}");
                 builder.AppendLine($"FilterFolders={tab.QuickFilter.FilterFolders.ToString().ToLowerInvariant()}");
+                var columnFilters = tab.QuickFilter.ColumnFilters;
+                if (columnFilters.Count > MaximumColumnFiltersPerTab)
+                    throw new InvalidDataException($"每个标签最多保存 {MaximumColumnFiltersPerTab} 个列值筛选条件。");
+                var encodedValuesLength = 0;
+                builder.AppendLine($"ColumnFilterCount={columnFilters.Count}");
+                for (var filterIndex = 0; filterIndex < columnFilters.Count; filterIndex++)
+                {
+                    var filter = columnFilters[filterIndex];
+                    var values = filter.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                    if (filter.Key.FormatId == Guid.Empty || values.Length is 0 or > MaximumColumnFilterValues ||
+                        values.Any(value => value.Length > MaximumColumnFilterValueLength || value.Contains('\r') || value.Contains('\n')))
+                        throw new InvalidDataException("列值筛选条件无效或超过可保存范围。");
+                    var encodedValues = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(values));
+                    encodedValuesLength += encodedValues.Length;
+                    if (encodedValuesLength > MaximumColumnFilterPayloadLength)
+                        throw new InvalidDataException("单个标签的列值筛选配置过大，未覆盖会话文件。");
+                    builder.AppendLine($"ColumnFilter{filterIndex}Key={filter.Key}");
+                    builder.AppendLine($"ColumnFilter{filterIndex}Values={encodedValues}");
+                }
                 builder.AppendLine($"PreviewPaneVisible={tab.PreviewPaneVisible.ToString().ToLowerInvariant()}");
                 builder.AppendLine($"DetailsPaneVisible={tab.DetailsPaneVisible.ToString().ToLowerInvariant()}");
             }
@@ -277,7 +300,7 @@ internal sealed class SessionStore
                 if (currentSection?.Equals("General", StringComparison.OrdinalIgnoreCase) == true &&
                     key.Equals("FormatVersion", StringComparison.OrdinalIgnoreCase) &&
                     BigInteger.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture,
-                        out var declaredVersion) && declaredVersion > 10)
+                    out var declaredVersion) && declaredVersion > CurrentFormatVersion)
                     newerFormatSeen = true;
                 if (current.ContainsKey(key)) complete = false;
                 current[key] = value;
@@ -287,8 +310,8 @@ internal sealed class SessionStore
 
         sections.TryGetValue("General", out var general);
         var version = general is null ? 0 : GetInt(general, "FormatVersion", 0);
-        if (newerFormatSeen || version > 10) return new ProfileParseResult(null, false, true);
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10)) complete = false;
+        if (newerFormatSeen || version > CurrentFormatVersion) return new ProfileParseResult(null, false, true);
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11)) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, version >= 5 ? 12 : version == 4 ? 8 : 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
         var defaultIconSize = version >= 3
@@ -405,7 +428,7 @@ internal sealed class SessionStore
                 }
             }
         }
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10) && panes.All(pane => pane.Count == 0))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11) && panes.All(pane => pane.Count == 0))
             return new ProfileParseResult(null, false, false);
         return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes,
             activePane, activeTabs, defaultIconSize, paneTreeVisibility, treeDisplayMode), complete, false, version);
@@ -432,7 +455,52 @@ internal sealed class SessionStore
         var pattern = values.GetValueOrDefault("FilterPattern", string.Empty);
         var exclude = ReadOptionalBool(values, "FilterExcludeMatches", false, ref complete);
         var folders = ReadOptionalBool(values, "FilterFolders", false, ref complete);
-        return new QuickFilterSettings(pattern, exclude, folders);
+        var columnFilters = version >= 11 ? ReadColumnFilters(values, ref complete) : [];
+        return new QuickFilterSettings(pattern, exclude, folders, columnFilters);
+    }
+
+    private static IReadOnlyList<ColumnValueFilter> ReadColumnFilters(Dictionary<string, string> values,
+        ref bool complete)
+    {
+        var count = ReadRequiredInt(values, "ColumnFilterCount", 0, 0, MaximumColumnFiltersPerTab, ref complete);
+        List<ColumnValueFilter> filters = [];
+        var payloadLength = 0;
+        for (var index = 0; index < count; index++)
+        {
+            if (!values.TryGetValue($"ColumnFilter{index}Key", out var keyText) ||
+                !values.TryGetValue($"ColumnFilter{index}Values", out var encodedValues))
+            {
+                complete = false;
+                continue;
+            }
+
+            payloadLength += encodedValues.Length;
+            if (payloadLength > MaximumColumnFilterPayloadLength || encodedValues.Length > MaximumColumnFilterPayloadLength)
+            {
+                complete = false;
+                continue;
+            }
+
+            var key = PropertyKeyState.Parse(keyText);
+            try
+            {
+                var decoded = JsonSerializer.Deserialize<string[]>(Convert.FromBase64String(encodedValues));
+                if (key is null || key.FormatId == Guid.Empty || decoded is null ||
+                    decoded.Length is 0 or > MaximumColumnFilterValues ||
+                    decoded.Any(value => value is null || value.Length > MaximumColumnFilterValueLength ||
+                        value.Contains('\r') || value.Contains('\n')))
+                {
+                    complete = false;
+                    continue;
+                }
+                filters.Add(new ColumnValueFilter(key, decoded));
+            }
+            catch (Exception ex) when (ex is FormatException or JsonException or ArgumentException)
+            {
+                complete = false;
+            }
+        }
+        return filters;
     }
 
     private static bool ReadOptionalBool(Dictionary<string, string> values, string key, bool fallback,
