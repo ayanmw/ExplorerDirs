@@ -1353,6 +1353,18 @@ internal static class Program
                     var hostWindow = (nint)hostType.GetField("_hostWindow", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[0])!;
                     SendMessage(hostWindow, 0x0100, (nint)0x2E, (nint)1); // Model Delete arriving immediately before the native removal.
                     inputRecorded = (long)inputVersionField.GetValue(hosts[0])! > inputVersionBeforeDelete;
+                    var postInputVersion = (long)inputVersionField.GetValue(hosts[0])!;
+                    var inputSelectionSettled = inputRecorded && WaitForPredicate(() =>
+                    {
+                        var snapshot = lastNativeSelectionField.GetValue(hosts[0]);
+                        var count = snapshot is null ? 0 :
+                            (int)snapshot.GetType().GetProperty("SelectedCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(snapshot)!;
+                        return (long)settledInputVersionField.GetValue(hosts[0])! == postInputVersion &&
+                            count == expectedSelection.Length;
+                    }, TimeSpan.FromSeconds(5));
+                    var selectedAfterInput = SelectedPaths(hostType, hosts[0], folders[0]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+                    if (!inputSelectionSettled || !selectedAfterInput.SequenceEqual(expectedSelection, StringComparer.OrdinalIgnoreCase))
+                        throw new Exception($"The post-input selection baseline did not settle before deletion: settled={inputSelectionSettled}, selected={string.Join('|', selectedAfterInput.Select(Path.GetFileName))}.");
                 }
                 var deleteClock = Stopwatch.StartNew();
                 ShellFixtureOperations.Run(root, new[] { folders[0] }, copy: false, deleteFrom: deleteName);
@@ -2588,6 +2600,29 @@ internal static class Program
                 if (!noSelection && string.IsNullOrWhiteSpace(focusBefore)) throw new Exception("Could not read the focused fixture item.");
                 if (unselectedFocus && !string.Equals(focusBefore, Path.Combine(folders[pane], "initial.txt"), StringComparison.OrdinalIgnoreCase))
                     throw new Exception($"Could not establish unselected focus: selected={selectedBefore}; focused={focusBefore}.");
+                if (!noSelection)
+                {
+                    // COM-built selections bypass the real-input hook; refresh must capture the settled focus/selection baseline.
+                    var noteInput = hostType.GetMethod("NoteNativeUserInput", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var inputVersion = hostType.GetField("_nativeUserInputVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var settledInputVersion = hostType.GetField("_settledNativeUserInputVersion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var savedSelection = hostType.GetField("_lastNativeSelection", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    noteInput.Invoke(hosts[pane], [IntPtr.Zero]);
+                    var baselineVersion = (long)inputVersion.GetValue(hosts[pane])!;
+                    var baselineSettled = WaitForPredicate(() =>
+                    {
+                        var snapshot = savedSelection.GetValue(hosts[pane]);
+                        var savedCount = snapshot is null ? 0 :
+                            (int)snapshot.GetType().GetProperty("SelectedCount", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(snapshot)!;
+                        return (long)settledInputVersion.GetValue(hosts[pane])! == baselineVersion &&
+                            savedCount == selectedBefore.Length;
+                    }, TimeSpan.FromSeconds(5));
+                    var selectionAfterCapture = SelectedPaths(hostType, hosts[pane], folders[pane]);
+                    var focusAfterCapture = (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
+                    if (!baselineSettled || !expectedSelection.SequenceEqual(selectionAfterCapture, StringComparer.OrdinalIgnoreCase) ||
+                        !string.Equals(focusBefore, focusAfterCapture, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"Could not settle the refresh selection/focus baseline: settled={baselineSettled}, selected={string.Join('|', selectionAfterCapture)}, focused={focusAfterCapture}.");
+                }
                 using var refreshMessageObserver = new MessageOnlyWindowObserver(GetWindowThreadProcessId(source.Handle, out _));
                 var refreshClock = Stopwatch.StartNew();
                 using var refreshShellObserver = new ChangeNotificationObserver(source, root, refreshClock);
@@ -2696,7 +2731,8 @@ internal static class Program
                 refreshed &= Count(hosts[pane]) == (deleteSelected ? 2 : 4);
                 var selectedAfterRefresh = SelectedPaths(hostType, hosts[pane], folders[pane]);
                 var focusAfterRefresh = (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
-                var expectedSelectionAfterRefresh = deleteSelected ? selectedBeforeRefresh.Where(File.Exists).ToArray() : selectedBeforeRefresh;
+                // Refresh must return to the user's pre-change selection; Shell may temporarily select the focused row while enumerating the new item.
+                var expectedSelectionAfterRefresh = deleteSelected ? expectedSelection.Where(File.Exists).ToArray() : expectedSelection;
                 var selectionPreserved = expectedSelectionAfterRefresh.SequenceEqual(selectedAfterRefresh, StringComparer.OrdinalIgnoreCase);
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)

@@ -1889,3 +1889,11 @@ Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `She
 生产 watcher 改写并观察到 `initial.txt`（7 B → 128 KiB）和 `second.txt`（6 B → 64 KiB）；没有额外注入通知。真实生产 `ExplorerBrowserHost` 当前行快照读到两个新大小，大小升序从 `second.txt|initial.txt` 自然变为 `initial.txt|second.txt`，约 1,122 ms 收敛。选区、焦点保持，整视图 Refresh fallback 增量为 0；父 HWND 隐藏且前台句柄未变。此次 observer 收到两条 `SHCNE_UPDATEITEM` 和一条目录更新。
 
 这补强了本机普通目录 Changed → 按项更新及元数据排序的后台链路，不覆盖 DirectUI 可见绘制、其他 Shell provider、网络/云目录或长时间稳定性。完整输出在 `src/.state/changed-metadata-no-flush-20261028.log`；失败的首轮未记录日志，且只证明了探针入口问题。
+
+### 2026-10-28：重验刷新时未选中焦点项的恢复
+
+重验 `--live-shell-refresh-unselected-focus` 时发现旧探针直接通过 Shell COM 设置选择与焦点，却没有更新产品的 native-input 快照。补上输入代际结算和“选区/焦点快照与夹具一致”的前置条件后，Release 隐藏生产宿主退出码 0：文件创建通知后，Shell 临时把焦点行 `initial.txt` 加入选区（刷新前观测为 3 项），调用产品 `ExplorerBrowserHost.Refresh()` 后恢复为用户原选区 `second.txt`、`third.txt`，未选中的 `initial.txt` 焦点也保留。原探针曾把 Shell 临时扩大的选区当作期望值，并出现焦点丢失；该结果属于基线不完整，不是有效产品回归证据。
+
+另行运行 `--live-shell-selection-delete-watcher` 退出码 0：生产 watcher 观察到删除，目标文件从视图和磁盘移除，选区与焦点均保持；批次约 805 ms 收敛。`--live-shell-selection-delete` 与 `--live-shell-selection-delete-after-input` 则关闭 watcher 并直接发送合成 `SHCNE_UPDATEDIR`，两者都观察到 Shell 将未选中的焦点行加入选区。后一模式已等待输入代际和快照结算，因此这个差异不是删除前快照尚未完成造成的；但它是 watcher 被人为关闭后的 Shell 原生通知对照，没有调用产品 `Refresh()`，不能据此归因生产 watcher 路径。该对照仍显示 Shell 自行重建视图时的选择行为差异，暂不改产品代码。
+
+本轮仅修正 HostProbe 的输入快照基线和期望值，未改产品逻辑；以上结果来自本机隐藏 `ExplorerBrowserHost` 与生成的临时文件，不涉及可见 UI、Explorer 桌面对照、网络目录或其它 Shell provider。自动刷新 P0 仍开放。
