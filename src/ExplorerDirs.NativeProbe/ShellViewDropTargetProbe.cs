@@ -69,11 +69,18 @@ internal static class ShellViewDropTargetProbe
             Marshal.WriteIntPtr(childPidls, relativeSource);
             Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, childPidls, 0, in DataObjectId, out dataObject));
 
+            var parentStyle = interactiveOleCopy ? 0x90000000u : 0x80000000u;
             parent = CreateWindowExW(0, "STATIC", interactiveOleCopy
                     ? "Explorer Dirs interactive OLE drop probe (temporary files only)"
                     : "Explorer Dirs isolated Shell drop target probe",
-                0x90000000, 20, 20, 680, 500, 0, 0, 0, 0); // WS_POPUP | WS_VISIBLE; interactive mode is CLI opt-in.
+                parentStyle, 20, 20, 680, 500, 0, 0, 0, 0); // Keep activation opt-in; Private Desktop probes show without activation.
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            if (!interactiveOleCopy)
+            {
+                _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE preserves visibility without activating the isolated parent.
+                if (!IsWindowVisible(parent))
+                    throw new InvalidOperationException("The Private Desktop Shell drop target parent did not become visible.");
+            }
             sourcePane = CreateWindowExW(0, "STATIC", "Explorer Dirs isolated Shell drop source pane",
                 0x50000000 | 0x02000000 | 0x04000000, 10, 10, 315, 440, parent, 0, 0, 0);
             if (sourcePane == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -629,6 +636,8 @@ internal static class ShellViewDropTargetProbe
     [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(nint window, out Rect bounds);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClipboardFormatNameW(ushort format, System.Text.StringBuilder name, int maxCount);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFileW(nint drop, uint file, System.Text.StringBuilder? path, uint pathLength);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint absoluteParent, nint relativeChild);

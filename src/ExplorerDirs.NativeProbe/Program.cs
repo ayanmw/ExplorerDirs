@@ -87,6 +87,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 1 && args[0] == "--private-desktop-window-destroy-control")
             return PrivateDesktopShellProbe.RunWindowDestroyControl();
+        if (args.Length == 1 && args[0] == "--private-desktop-window-visibility-control")
+            return PrivateDesktopShellProbe.RunWindowVisibilityControl();
         if (args.Length == 1 && args[0] == "--private-desktop-shared-window-destroy-control")
             return PrivateDesktopShellProbe.RunSharedDesktopWindowDestroyControl();
         if (args.Length == 1 && args[0] == "--private-desktop-shell-view-window-destroy-control")
@@ -218,6 +220,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --private-desktop-window-destroy-control (create and destroy one isolated STATIC window without Shell view creation or foreground change)");
+            Console.WriteLine("       --private-desktop-window-visibility-control (show and destroy a SW_SHOWNOACTIVATE STATIC window without Shell view creation)");
             Console.WriteLine("       --private-desktop-shared-window-destroy-control (two processes create/destroy STATIC windows on one isolated Desktop, without Shell views)");
             Console.WriteLine("       --private-desktop-shell-view-window-destroy-control (destroy a plain STATIC window while one real IShellView is active on the same isolated Desktop)");
             Console.WriteLine("       --private-desktop-single-pane-sync-cleanup (synchronously destroy one IShellView, its pane, and its parent on an isolated Desktop)");

@@ -164,6 +164,58 @@ internal static class PrivateDesktopShellProbe
         return destroyed && !remainsValid && GetForegroundWindow() == foreground ? 0 : 1;
     }, TimeSpan.FromSeconds(10));
 
+    internal static int RunWindowVisibilityControl() => Run("window-visibility-control", () =>
+    {
+        const uint wsPopup = 0x80000000u;
+        const int swShowNoActivate = 4;
+        return ProbeWindowVisibilityCase("show-noactivate", wsPopup, showNoActivate: true,
+            expectedVisible: true, swShowNoActivate) ? 0 : 1;
+    }, TimeSpan.FromSeconds(10));
+
+    private static bool ProbeWindowVisibilityCase(string label, uint style, bool showNoActivate,
+        bool expectedVisible, int showCommand = 0)
+    {
+        var foregroundBefore = GetForegroundWindow();
+        var activeBefore = GetActiveWindow();
+        Console.WriteLine($"window-visibility-control: case={label}; stage=create-start; style=0x{style:X8}");
+        Console.Out.Flush();
+        var window = CreateWindowExW(0, "STATIC", $"ExplorerDirs {label} control",
+            style, 20, 20, 160, 80, 0, 0, 0, 0);
+        if (window == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                $"Could not create the {label} STATIC control.");
+        Console.WriteLine($"window-visibility-control: case={label}; stage=create-complete; hwnd=0x{window:X}");
+        Console.Out.Flush();
+
+        try
+        {
+            if (showNoActivate)
+            {
+                Console.WriteLine($"window-visibility-control: case={label}; stage=show-noactivate-start; command={showCommand}");
+                Console.Out.Flush();
+                _ = ShowWindow(window, showCommand);
+                Console.WriteLine($"window-visibility-control: case={label}; stage=show-noactivate-complete");
+                Console.Out.Flush();
+            }
+
+            var visible = IsWindowVisible(window);
+            var foregroundAfter = GetForegroundWindow();
+            var activeAfter = GetActiveWindow();
+            Console.WriteLine($"window-visibility-control: case={label}; stage=destroy-start; visible={visible}; foreground-before=0x{foregroundBefore:X}; foreground-after=0x{foregroundAfter:X}; active-before=0x{activeBefore:X}; active-after=0x{activeAfter:X}");
+            Console.Out.Flush();
+            var destroyed = DestroyWindow(window);
+            var stillValid = IsWindow(window);
+            var passed = visible == expectedVisible && destroyed && !stillValid;
+            Console.WriteLine($"window-visibility-control: case={label}; stage=destroy-complete; hwnd=0x{window:X}; visible={visible}; expected-visible={expectedVisible}; destroy-returned={destroyed}; still-valid={stillValid}; passed={passed}");
+            Console.Out.Flush();
+            return passed;
+        }
+        finally
+        {
+            if (IsWindow(window)) _ = DestroyWindow(window);
+        }
+    }
+
     internal static int RunSharedDesktopWindowDestroyControl() => Run("shared-desktop-window-destroy-control", () =>
     {
         var foreground = GetForegroundWindow();
@@ -440,6 +492,12 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint window, int command);
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();

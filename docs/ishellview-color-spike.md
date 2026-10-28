@@ -1308,3 +1308,15 @@ Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌�
 从当前 `main` 重新运行 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --shell-view-drop-target-private-desktop`。探针在隔离桌面创建真实文件系统 `IShellView`，并通过真实 Shell 选中项 `IDataObject` 直接调用目标 `IDropTarget`：选中项数据对象目标和 `IShellFolder::CreateViewObject` 注册目标均返回 Copy effect，目标临时文件内容正确、源文件保留；`IShellView::GetItemObject` 的 drop-target 查询返回 `E_NOINTERFACE`。这些回调结果仅作诊断，不视为本轮通过，因为外层 watchdog 检测到用户桌面前台 HWND 从 `0x1E71D78` 变为 `0x14712D4`，整轮退出码为 1，`foreground-unchanged=False`。无法归因前台变化来源，不恢复前台、不弱化守卫，也不继续运行会创建 Shell view 的 Private Desktop 探针。本轮没有调用 `DoDragDrop` 或注入鼠标；临时夹具目录已确认清理。真实 OLE 拖放与该隔离条件仍未通过。
 
 同日静态复核探针创建路径时发现一个待验证风险：`ShellViewDropTargetProbe` 将顶层 `STATIC` parent 以 `WS_POPUP | WS_VISIBLE` 创建在已切换到 Private Desktop 的线程上，未使用 `SW_SHOWNOACTIVATE`；微软[`CreateWindow` 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowa)说明带 `WS_VISIBLE` 的创建路径会发送激活和显示所需消息，[`SW_SHOWNOACTIVATE`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow) 则明确显示而不激活。这个窗口路径可能影响隔离性，但现有失败运行的逐阶段 stdout 未保留，不能将其认定为前台变化根因。随后运行无 Shell 视图的 `private-desktop-window-destroy-control`，退出码 0 且外层前台保持不变；但内部 `IsWindowVisible=False`，所以该窗口销毁对照没有覆盖实际可见/激活路径，也不能验证或排除此假设。恢复 Shell-view 探针前，先增加不创建 Shell view 的精确窗口样式对照，分别验证隐藏创建、WS_VISIBLE 创建与显式非激活显示，确认外层 foreground 守卫稳定，再重新评估拖放探针；不移除守卫。
+
+### 2026-10-28 Private Desktop 窗口可见性与前台隔离对照
+
+为区分创建方式与销毁阻塞，增加 `private-desktop-window-visibility-control`，仅使用普通 `STATIC` 窗口，不创建 Shell view：
+
+- 隐藏 `WS_POPUP` 创建后立即销毁成功；窗口不可见，私有桌面活动/前台句柄均为 0。
+- `WS_POPUP | WS_VISIBLE` 创建成功且 `IsWindowVisible=True`；该窗口成为私有桌面的活动窗。随后的 `DestroyWindow` 在 10 秒内未返回，外层 watchdog 终止进程；用户桌面前台 HWND 前后相同。WCT 等待链包括 COM activation 与 `ChsIME`，但当前证据不能证明它是根因。
+- 隐藏创建后调用 `ShowWindow(SW_SHOWNOACTIVATE)`，窗口可见，私有桌面的活动/前台 HWND 仍为 0，`DestroyWindow` 成功，外层前台守卫通过。
+
+据此，Private Desktop drop probe 的顶层 parent 改为隐藏创建后非激活显示，交互式 OLE 模式仍保留可见创建路径。一次受守卫重跑中，选中项 IDataObject 和注册的文件夹 drop target 均通过直接 Copy，源文件保持；`IShellView.GetItemObject` 查询仍为 `E_NOINTERFACE`，对应 view target Copy 失败。外层前台 HWND 再次从 `0x2632026` 变化到 `0x4F1D0C`，故整轮退出码 1，不算通过。探针夹具已清理，进程退出；没有调用真实 `DoDragDrop` 或输入用户桌面。
+
+非激活显示控制能保持外层前台，但真实 Shell view 探针仍触发守卫失败。由于未能在前台变化发生时采集到精确阶段，不能断言是 Shell view 创建导致，也不能排除外部窗口活动。暂停继续创建 Shell view 的探针；不要恢复前台或移除守卫。日志：`20261028-135833-538ef870.stdout.log`（首次可见创建销毁阻塞）、`20261028-135906-d534142a.stdout.log`（带阶段标记的复验）、`20261028-135944-59c2aa2a.stdout.log`（非激活显示通过）、`20261028-140025-209e28ae.stdout.log`（drop probe 前台守卫失败）。

@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-> **IShellView 拖放最新复验（2026-10-28）：**目标 Shell 的两个直接 `IDropTarget` Copy 回调在诊断中复制成功，但 Private Desktop 外层守卫发现前台 HWND 改变，整轮退出码 1，因此不采纳为通过；不归因变化来源，也不继续创建 Shell view 的隔离探针，直到前台隔离条件可确认。该轮没有调用 `DoDragDrop`。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)。
+> **IShellView 拖放最新复验（2026-10-28）：**不创建 Shell view 的窗口对照显示：隐藏 `WS_POPUP` 可创建/销毁；`WS_VISIBLE` 窗口成为 Private Desktop 活动窗，销毁超过 10 秒未返回并由 watchdog 终止；改为 `SW_SHOWNOACTIVATE` 后窗口可见、非活动且可同步销毁，外层桌面前台不变。随后仅将该非激活显示用于 Private Desktop 拖放探针，两个直接 `IDropTarget` Copy 路径仍复制成功且源保留，但外层前台 HWND 再次变化（`0x2632026 → 0x4F1D0C`），整轮退出码 1，不采纳为通过；不能归因于窗口样式或排除同时发生的外部桌面活动。未调用 `DoDragDrop`，也不再创建 Shell-view 探针，直到前台隔离条件可确认。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
 
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |
