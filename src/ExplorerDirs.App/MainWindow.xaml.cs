@@ -783,16 +783,20 @@ public partial class MainWindow : Window
     {
         if (!menu.IsOpen) return;
         IReadOnlyCollection<string> values;
+        ShellFileViewExportCapture.ColumnValueCapture capture;
         try
         {
-            using var capture = pane.BeginColumnValueCapture(key);
-            while (!capture.ReadBatch(64))
+            capture = pane.BeginColumnValueCapture(key);
+            using (capture)
             {
-                await Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                while (!capture.ReadBatch(64))
+                {
+                    await Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
+                }
                 if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
+                values = capture.Values;
             }
-            if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
-            values = capture.Values;
         }
         catch (Exception ex)
         {
@@ -803,11 +807,12 @@ public partial class MainWindow : Window
         var currentFilter = pane.CurrentQuickFilter.ColumnFilters.FirstOrDefault(filter => filter.Key == key);
         var selectedValues = currentFilter?.Values.ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var allValues = values.Concat(selectedValues)
+        var allValues = await Task.Run(() => values.Concat(selectedValues)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(value => value, StringComparer.Ordinal)
-            .ToArray();
+            .ToArray());
+        if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
 
         menu.Items.Remove(loading);
         var clear = new MenuItem
