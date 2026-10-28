@@ -4360,4 +4360,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 ## 2026-10-28：从主分支准备新的集中验收候选
 
 - 发现旧集中验收文档仍指向已删除的 worktree。使用当前干净 main 提交 `89116c8` 重新运行 GUI smoke `PrepareOnly`，生成 `src/.state/gui-smoke/20261028-045252-741-88d8d1`；清单为 `prepared-not-run`，EXE/DLL 哈希复核一致，候选进程数为 0，未启动窗口。
-- 将新副本记录为唯一当前验收基线；原 worktree 候选保留为历史记录并明确标记不可用。27 项可见验收仍未运行，详见[候选身份](gui-acceptance-2026-10-28-main-prepared.md)和[集中验收清单](ui-acceptance-next-batch-2026-10-27.md)。
+- 当时将新副本记录为验收基线；原 worktree 候选保留为历史记录并明确标记不可用。随后加入 Explorer Shell 重启验收项并准备更新候选，详见下条。
+
+## 2026-10-28：将 Explorer Shell 重启纳入集中验收
+
+- GUI smoke 清单新增一项：先验证取消确认不触碰 Shell；实际重启只在保存工作并获明确授权的桌面会话中执行，记录桌面/任务栏/开始菜单恢复及 Explorer 文件窗口是否共用 Shell 进程。
+- 从干净 main 提交 `50cb324` 重新 `PrepareOnly`，候选 `src/.state/gui-smoke/20261028-045534-826-74a861` 的 EXE/DLL 哈希复核一致，状态 `prepared-not-run`，进程数为 0；28 项可见验收仍未执行。当前基线见[候选身份](gui-acceptance-2026-10-28-main-prepared.md)。

@@ -4,7 +4,7 @@
 
 ## 当前验收基线（2026-10-28，主分支）
 
-当前唯一验收候选为[main 主目录候选](gui-acceptance-2026-10-28-main-prepared.md)：源码提交 `89116c8f8832ed63c392b3ffc4ae97c7a4f6f28c`，状态 `prepared-not-run`，27 项待验收。下文保留的 2026-10-27 worktree 候选记录仅作历史证据；对应 worktree 已移除，旧候选目录未全部保留，不可再作为测试程序使用。
+当前唯一验收候选为[main 主目录候选](gui-acceptance-2026-10-28-main-prepared.md)：源码提交 `50cb324c9393271785f50b31eb8568f4b6f063d5`，状态 `prepared-not-run`，28 项待验收。下文保留的 2026-10-27 worktree 候选记录仅作历史证据；对应 worktree 已移除，旧候选目录未全部保留，不可再作为测试程序使用。
 
 ## 本批实际范围
 
