@@ -254,6 +254,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 再用无窗口 folder-contract smoke 查询 `IPropertyDescription`：`System.Document.ByteCount` 类型为 `VT_I4`，`GetSortDescription` 返回 `PDSD_SMALLEST_BIGGEST`（`0x3`），`GetTypeFlags` 为 `0x8000001A`，列状态为 `0x2`；标准 `PKEY_Size` 的类型为 `VT_UI8`，排序描述同为 `0x3`。该探针新构建 Release 成功（0 警告、0 错误），运行 exit code 0、未创建窗口。该排序描述只决定 UI 使用的排序文案（最小到最大），不是 DefView 已按属性值比较/重排的证据；不能把属性类型或 schema 描述视作排序已可用。下一步继续定位 DefView 的列排序比较接口/值消费路径；在升降序均实际按数值重排前，逐行大小列仍不满足迁移门槛。
 
+### 2026-10-29：标准 Size 与属性列的 Header 输入 A/B
+
+在相同 Private Desktop 视图中，对标准 `PKEY_Size` 的 Header 列 1 发送与属性列相同的 `WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_LBUTTONUP` 消息。两次点击后标准列行序分别为升序 `two.bin|ten - 副本.bin|ten.bin`、降序 `ten - 副本.bin|ten.bin|two.bin`，读回方向为 `-1`、`+1`，说明此输入模拟确实能触发 DefView 标准列重排。对已注册 `System.Document.ByteCount` 列 2 重复点击，方向状态为 `+1`、`-1`，行序仍是 `ten - 副本.bin|ten.bin|two.bin`。这将差异收窄到新增属性列的 DefView 比较/排序值消费路径，而不是 Header 点击模拟整体失效。
+
+最新日志：`src/.state/native-probe-watchdog/20261029-024146-7f855e87.stdout.log`。标准 Size 对照通过；整条隔离视图探针仍因未注册私有 PKEY 自定义列无值而 exit code 1，Private Desktop 前台未变化。产品和发布目录未改动。
+
 ### 2026-10-29：DefView 列点击通知对照
 
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。

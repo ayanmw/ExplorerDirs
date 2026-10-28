@@ -830,6 +830,24 @@ internal static class StaticShellFolderAdapterProbe
             if (names.Length != 3 || !names[0].Equals("two.bin", StringComparison.OrdinalIgnoreCase) ||
                 !names.Any(name => name.Equals("ten.bin", StringComparison.OrdinalIgnoreCase)))
                 throw new Exception("The Shell view did not sort by standard Size: " + string.Join('|', names));
+            var standardSizeHeaderClickOne = SendHeaderItemClick(view, 1);
+            Pump(300);
+            var standardSizeHeaderClickOneNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var standardSizeHeaderClickOneSort = ReadCurrentSortColumn(folderView);
+            var standardSizeHeaderClickTwo = SendHeaderItemClick(view, 1);
+            Pump(300);
+            var standardSizeHeaderClickTwoNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var standardSizeHeaderClickTwoSort = ReadCurrentSortColumn(folderView);
+            Console.WriteLine($"native-shell-item-bound-view: standard-size-header-clicks={standardSizeHeaderClickOne}/{standardSizeHeaderClickTwo}; one=[{string.Join('|', standardSizeHeaderClickOneNames)}] sort={standardSizeHeaderClickOneSort}; two=[{string.Join('|', standardSizeHeaderClickTwoNames)}] sort={standardSizeHeaderClickTwoSort}");
+            sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn { Key = sizeColumn, Direction = 1 }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(300);
 
             stage = "verify-custom-column-contract";
             var property = StaticShellColumnContract.PropertyKey;
