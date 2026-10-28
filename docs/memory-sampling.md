@@ -222,3 +222,11 @@ dnx dotnet-counters@10.0.750501 --source https://api.nuget.org/v3/index.json -- 
 - UTC `2026-10-28T01:16:42.516Z` 至 `01:18:43.101Z`，25 个样本覆盖约 120.6 秒。Working Set 全程 `244,756,480` B（233.42 MiB），Private Bytes `120,848,384` B（115.25 MiB），虚拟内存 `2,342,109,573,120` B，句柄 `1121`，线程 `34`；首末值及最小/最大值均相同。
 - 使用既有只读 sampler；没有启动、聚焦或操作窗口，也没有 GC、重启或剪裁工作集。窗格/标签数量和用户操作未记录，因此只说明这两分钟计数稳定，不能说明操作期间的增长、长期泄漏或具体分配来源。
 - 原始 CSV 留在忽略目录 `src/.state/memory-samples/background-followup-20261028.csv`，SHA-256 `58CF6724080214584BCD4F69627A0AA040AB33115C9404C23B3DC3AB8A305F35`。下一步仍需在固定操作序列下复采，再依据同一 PID 的变化决定分配栈调查。
+
+## 2026-10-28：四窗格 3,000 项压力中的 GUI 对象采样
+
+- 当前工作树 HostProbe Release build 通过，0 警告、0 错误。以隐藏 `dotnet`/HostProbe 进程运行 `--live-shell-directory-stress 3000`，外部 `perf-sample.ps1` 约每 750 ms 采样一次，共 20 点、14.518 秒；探针退出码 0，创建/删除事件各 3,000 个，删除后四窗格回到 3 项，选区与焦点恢复，删除侧一次 fallback 刷新，临时 fixture 清理完成。没有显示窗口或注入输入。
+- 进程级采样范围：Private Bytes 峰值 89.13 MiB、Working Set 峰值 141.91 MiB、句柄 372–1,001、线程 12–38；GDI 对象从启动期 1 增至 77–78，USER 对象从 9 增至 74–78。窗格建成后到 3,000 项创建/删除及静置阶段，GDI/USER 计数保持在 77–78 / 74–78，没有随每个文件单调增长。进程启动初期值不作为产品空闲基线。
+- HostProbe 自身的被动阶段检查点：四视图就绪时 Private Bytes / Working Set / 托管堆估算 / 句柄为 `77.20 / 126.41 / 1.14 MiB / 989`；创建后 `83.29 / 135.32 / 6.37 MiB / 999`；删除静置后 `90.39 / 143.21 / 13.01 MiB / 1,001`；释放四个 Shell 宿主后 `80.27 / 133.01 / 13.10 MiB / 898`。全程没有 Gen0/1/2 GC；托管堆估算不是存活对象证明。宿主释放后 Private Bytes 较删除静置检查点低约 10.12 MiB，GDI/USER 的释放后值没有在阶段检查点中读取。
+- 外部采样器的目标是 `dotnet` 测试进程，不是正式 `ExplorerDirs.App.exe`；首次样本也早于视图就绪。该结果只说明当前隐藏 ExplorerBrowser 压力夹具下 GUI 对象计数在文件 burst 后稳定、Shell 宿主释放时部分进程占用回落，不能解释正式 App 内存来源或排除长期增长。原始文件保存在忽略目录 `src/.state/memory-samples/current-stress3000/`；`perf-sample.json` SHA-256 `5649575B85B8F0E4A46A68DFDE583FE57E252C9E4443BB9915D40BE04F095F54`，`hostprobe.stdout.txt` SHA-256 `98B5ED16C5E55E6E8BFEC90B39FE8A0BA89BDEF53BA6A5082C097666AF6EF05`。
+- 下一步仍需在正式 App 的固定用户操作负载下采同一 PID，并把窗格/标签/操作阶段与 Private Bytes、托管计数、GDI/USER 和句柄同时关联；本轮没有改产品内存行为。
