@@ -1,4 +1,6 @@
-# 2026-10-27 当前源码隔离候选：已准备，未运行
+# 2026-10-27 worktree 隔离候选：历史记录，已移除
+
+本文件记录的二进制来自已移除的 `windows-accent-theme` worktree，旧候选目录不再作为当前测试版本。请改用[2026-10-28 main 主目录候选](gui-acceptance-2026-10-28-main-prepared.md)；旧版本号、哈希与准备结果仅作历史证据。
 
 这是开发验收副本，不是日常使用 release。替代 [62274bc 旧候选](gui-acceptance-2026-10-27-prepared.md)作为下一次产品验收基线；没有启动本候选、创建 Shell view、加载 UIA 或操作键鼠。
 

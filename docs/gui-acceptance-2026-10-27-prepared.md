@@ -1,4 +1,6 @@
-# 2026-10-27 隔离验收候选：已准备，未运行
+# 2026-10-27 worktree 隔离候选：历史记录，已移除
+
+本文件所记候选位于已移除的 `windows-accent-theme` worktree，路径不再可用。请使用[2026-10-28 main 主目录候选](gui-acceptance-2026-10-28-main-prepared.md)；下方身份与准备信息仅供历史追溯。
 
 后续已有[干净提交 5a6f3d2 的新候选](gui-acceptance-2026-10-27-current-source-prepared.md)替代本记录作为下一次验收基线。本页保留旧产物身份及验收顺序，不代表最新产品源码。
 

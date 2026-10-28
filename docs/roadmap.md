@@ -4356,3 +4356,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 工具菜单新增“重启 Windows 资源管理器”。用户确认后，通过桌面 Shell 窗口定位其所属 explorer.exe，后台结束该 Shell 进程并启动 Windows Explorer；先等待系统可能进行的自动 Shell 恢复，避免重复启动。未枚举并结束所有 Explorer 进程。
 - App Release 构建 0 警告/错误；没有实际重启 Explorer 或进行 UI 验收。Shell 自动恢复、桌面/开始菜单/任务栏恢复时间、Explorer 文件窗口与 Shell 是否共享进程仍需可见验收。
+
+## 2026-10-28：从主分支准备新的集中验收候选
+
+- 发现旧集中验收文档仍指向已删除的 worktree。使用当前干净 main 提交 `89116c8` 重新运行 GUI smoke `PrepareOnly`，生成 `src/.state/gui-smoke/20261028-045252-741-88d8d1`；清单为 `prepared-not-run`，EXE/DLL 哈希复核一致，候选进程数为 0，未启动窗口。
+- 将新副本记录为唯一当前验收基线；原 worktree 候选保留为历史记录并明确标记不可用。27 项可见验收仍未运行，详见[候选身份](gui-acceptance-2026-10-28-main-prepared.md)和[集中验收清单](ui-acceptance-next-batch-2026-10-27.md)。
