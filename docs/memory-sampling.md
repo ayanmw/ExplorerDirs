@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-28：记录四窗格压力阶段及 Shell 宿主释放后的占用
+
+- HostProbe 增加被动阶段检查点，并提供仅供隔离探针显式启用的 `EXPLORER_DIRS_HOSTPROBE_FORCE_GC_AFTER_DISPOSE=1` 完整 GC 对照；正式 App 不读取此变量。四阶段为 4 个 Shell 视图就绪、3,000 项创建完成、删除并静置 5 秒后、释放全部 Shell 宿主后。默认检查点不强制 GC；托管字节字段可能包括尚未回收的垃圾。
+- 当前工作树 `4a3f401cbc8cadebf9882af7c96637ad443396a9` 的 Release HostProbe 构建为 0 警告/错误。单轮产品监视模式压力运行退出码 0，四阶段（Private Bytes / Working Set / GC 托管堆估算 / 句柄）分别为：就绪 `75.88 / 125.36 MiB / 1.10 MiB / 984`；创建后 `82.34 / 134.88 MiB / 6.29 MiB / 998`；删除静置后 `89.87 / 143.30 MiB / 12.93 MiB / 1,020`；Shell 宿主 Dispose 后 `78.72 / 131.76 MiB / 13.02 MiB / 895`。Delete 后视图恢复 3 项，选区与焦点保持，3,000 个 watcher 事件完整，无 observer 错误。
+- 单独启用完整 GC 后，托管堆估算降到 `0.68 MiB`，最近 GC 堆大小为 `1.16 MiB`，Gen0/1/2 各发生 1 次；Private Bytes 为 `79.67 MiB`，比 GC 前的 Dispose 检查点略高约 `0.93 MiB`，而低于压力峰值约 `10.20 MiB`。因此多数托管堆估算是可回收的分配，但进程 Private Bytes 不会按托管堆差额同步下降；GC 堆保留、运行时、Shell 原生对象等来源仍未进一步区分。不得将强制 GC 对照解释成产品会自动清理或泄漏已排除。
+- 构建后完整 Release `SettingsSmoke` 全部通过。无窗口、无桌面输入、未操作 temp.76，也未更新 release。原始阶段输出在忽略目录 `src/.state/memory-samples/hostprobe-stress3000-full-gc-20261028.txt`，SHA-256 `C84BC6DC23F9EA09BE6B7705CF2EF29595AF7D05B87F1E3B4E3594EE573A5D3D`。这仍是隐藏 HostProbe 合成负载，不等同于完整正式 App 的长期工作曲线或分配栈。
+
 ## 2026-10-28：四窗格隐藏宿主的 3,000 项变更峰值
 
 - 用当前工作树 `4a3f401cbc8cadebf9882af7c96637ad443396a9` 构建 Release HostProbe，构建 0 警告/错误；加载的 App 程序集版本为 `0.6.0-preview.temp.3+4a3f401cbc8cadebf9882af7c96637ad443396a9`。以隐藏生产 ExplorerBrowser 宿主创建四窗格，向一个窗格写入并删除 3,000 个临时文件，其它窗格保留 3 项样本；外部每约 250 ms 采集进程级内存。全程未显示窗口、注入输入或操作 temp.76；夹具由探针清理。

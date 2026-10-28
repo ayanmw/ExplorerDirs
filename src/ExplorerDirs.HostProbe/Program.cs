@@ -2041,6 +2041,7 @@ internal static class Program
                     throw new Exception("The product directory monitor did not obtain an initial Shell count.");
                 var monitorStartCount = initialMonitorCount.GetValue(hosts[0]);
                 var monitorStartSamples = startSampleCount.GetValue(hosts[0]);
+                WriteDirectoryStressMemoryCheckpoint("four-pane-ready");
 
                 var folder = folders[0];
                 SelectAll(hostType, hosts[0]);
@@ -2312,6 +2313,7 @@ internal static class Program
                         !(bool)directorySelectionRestorePending.GetValue(hosts[0])! && expectedCount == Count(hosts[0]);
                 }, TimeSpan.FromSeconds(12));
                 var countsAfterCreate = hosts.Select(Count).ToArray();
+                WriteDirectoryStressMemoryCheckpoint("after-create-settled");
                 var selectedAfterCreate = SelectedPaths(hostType, hosts[0], folder).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 var focusAfterCreate = (string?)focusMethod.Invoke(hosts[0], [folder]);
                 var selectionRestoredAfterCreate = selectedBefore.SequenceEqual(selectedAfterCreate, StringComparer.OrdinalIgnoreCase);
@@ -2488,6 +2490,7 @@ internal static class Program
                 if (productMonitorEnabled) WaitForDelay(TimeSpan.FromSeconds(5));
                 postOperationSettleClock.Stop();
                 var countsAfterDelete = hosts.Select(Count).ToArray();
+                WriteDirectoryStressMemoryCheckpoint("after-delete-settled");
                 var selectedAfterDelete = SelectedPaths(hostType, hosts[0], folder).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 var focusAfterDelete = (string?)focusMethod.Invoke(hosts[0], [folder]);
                 var selectionRestoredAfterDelete = selectedBefore.SequenceEqual(selectedAfterDelete, StringComparer.OrdinalIgnoreCase);
@@ -3043,6 +3046,16 @@ internal static class Program
         finally
         {
             foreach (var host in hosts) host.Dispose();
+            if (args[0] is "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large")
+            {
+                WriteDirectoryStressMemoryCheckpoint("after-host-dispose");
+                if (Environment.GetEnvironmentVariable("EXPLORER_DIRS_HOSTPROBE_FORCE_GC_AFTER_DISPOSE") == "1")
+                {
+                    // This opt-in control distinguishes collectible managed garbage from process/native retention.
+                    GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+                    WriteDirectoryStressMemoryCheckpoint("after-host-dispose-forced-gc");
+                }
+            }
             if (junctionPath is not null) DeleteDirectoryJunction(junctionPath);
             // These hidden navigation/filter probes each allocate their own four-pane fixture under the build output.
             if (args[0] is "--search-navigation" or "--quick-filter" or "--file-view-export")
@@ -3068,6 +3081,21 @@ internal static class Program
             }
         }
 
+    }
+
+    private static void WriteDirectoryStressMemoryCheckpoint(string phase)
+    {
+        using var process = Process.GetCurrentProcess();
+        process.Refresh();
+        // Keep the observation passive: managed heap bytes may include uncollected garbage and no forced GC is triggered.
+        var gen0 = GC.CollectionCount(0);
+        var gen1 = GC.CollectionCount(1);
+        var gen2 = GC.CollectionCount(2);
+        var gc = GC.GetGCMemoryInfo();
+        var lastGc = gen0 + gen1 + gen2 == 0
+            ? "none"
+            : $"heap-bytes={gc.HeapSizeBytes},fragmented-bytes={gc.FragmentedBytes},committed-bytes={gc.TotalCommittedBytes}";
+        Console.WriteLine($"memory-checkpoint phase={phase} private-bytes={process.PrivateMemorySize64} working-set-bytes={process.WorkingSet64} managed-heap-allocated-bytes={GC.GetTotalMemory(forceFullCollection: false)} last-gc={lastGc} gen0={gen0} gen1={gen1} gen2={gen2} handles={process.HandleCount} threads={process.Threads.Count}");
     }
 
     private static int RunWatcherOverflowProbe(int fileCount)
