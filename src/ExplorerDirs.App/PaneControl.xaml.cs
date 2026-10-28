@@ -725,9 +725,12 @@ public partial class PaneControl : UserControl
     internal ExplorerBrowserHost.SelectedItem? GetSelectedQuickLinkItem() => Current?.Browser.GetSelectedItem();
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot() => Current?.Browser.CaptureFileViewExportSnapshot()
         ?? throw new InvalidOperationException("当前窗格没有可导出的文件视图。");
-    internal IReadOnlyList<string> CaptureColumnDisplayValues(PropertyKeyState key) =>
-        Current?.Browser.CaptureColumnDisplayValues(key)
+    internal ShellFileViewExportCapture.ColumnValueCapture BeginColumnValueCapture(PropertyKeyState key) =>
+        Current?.Browser.BeginColumnValueCapture(key)
         ?? throw new InvalidOperationException("当前窗格没有可读取的文件视图。");
+
+    internal bool IsCurrentColumnValueCapture(ShellFileViewExportCapture.ColumnValueCapture capture) =>
+        ReferenceEquals(Current?.Browser, capture.Source) && capture.Source?.IsCurrentColumnValueCapture(capture) == true;
 
     internal bool ApplyColumnValueFilter(PropertyKeyState key, IReadOnlyList<string> selectedValues)
     {

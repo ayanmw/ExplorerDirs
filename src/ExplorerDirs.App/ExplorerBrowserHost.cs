@@ -190,17 +190,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(view); }
     }
 
-    internal IReadOnlyList<string> CaptureColumnDisplayValues(PropertyKeyState key)
+    internal ShellFileViewExportCapture.ColumnValueCapture BeginColumnValueCapture(PropertyKeyState key)
     {
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
         try
         {
-            return ShellFileViewExportCapture.CaptureColumnDisplayValues(view, key,
+            var capture = ShellFileViewExportCapture.BeginColumnValueCapture(view, key,
                 quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter);
+            capture.Source = this;
+            capture.Generation = _viewReadiness.Generation;
+            return capture;
         }
         finally { Marshal.Release(view); }
     }
+
+    internal bool IsCurrentColumnValueCapture(ShellFileViewExportCapture.ColumnValueCapture capture) =>
+        ReferenceEquals(capture.Source, this) && capture.Generation == _viewReadiness.Generation &&
+        _browser is not null && IsVisible && !_viewReadiness.Pending;
 
     internal ProgramStarterPaneContext CaptureProgramStarterPaneContext()
     {

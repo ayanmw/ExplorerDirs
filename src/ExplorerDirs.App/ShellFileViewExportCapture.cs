@@ -37,7 +37,7 @@ internal static class ShellFileViewExportCapture
         return new FileViewExportSnapshot(snapshot.Columns, snapshot.Rows);
     }
 
-    internal static IReadOnlyList<string> CaptureColumnDisplayValues(nint folderView,
+    internal static ColumnValueCapture BeginColumnValueCapture(nint folderView,
         PropertyKeyState propertyKey, bool quickFilterActive)
     {
         var visibleColumnsResult = ShellColumnManager.CaptureForExport(folderView, out var visibleColumns);
@@ -52,73 +52,114 @@ internal static class ShellFileViewExportCapture
         }
         if (columnIndex < 0) throw new InvalidOperationException("所选列已不在当前文件视图中。");
 
-        // The checklist needs one property only; avoid materializing every visible column for every row.
         var column = visibleColumns[columnIndex];
-        var values = CaptureColumnValuesFromShellItems(folderView, column);
-        if (values is null && quickFilterActive)
-            values = CaptureColumnValuesFromFolderViewIndices(folderView, column);
-        return SortDistinctValues(values ?? throw new COMException("Shell 未能读取当前列值。"));
-    }
-
-    private static IReadOnlyList<string>? CaptureColumnValuesFromShellItems(nint folderView,
-        ShellExportColumn column)
-    {
-        var iid = ShellItemArrayId;
-        var result = At<GetItems>(folderView, 8)(folderView, AllViewInViewOrder, ref iid, out var items);
-        if (result < 0)
-        {
-            if (items != 0) Marshal.Release(items);
-            if (result is InvalidArgument or NotFound) return null;
-            Marshal.ThrowExceptionForHR(result);
-        }
-        if (items == 0) throw new COMException("Shell returned no item array for the current view.");
+        Marshal.AddRef(folderView);
+        nint items = 0;
+        nint folder = 0;
         try
         {
+            var iid = ShellItemArrayId;
+            var result = At<GetItems>(folderView, 8)(folderView, AllViewInViewOrder, ref iid, out items);
+            if (result < 0)
+            {
+                if (items != 0)
+                {
+                    Marshal.Release(items);
+                    items = 0;
+                }
+                if (!quickFilterActive || result is not (InvalidArgument or NotFound))
+                    Marshal.ThrowExceptionForHR(result);
+
+                var folderId = ShellFolderId;
+                Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out folder));
+                if (folder == 0) throw new COMException("Shell view returned no parent folder.");
+                Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, AllViewItems, out var indexCount));
+                if (indexCount < 0) throw new InvalidDataException("当前文件视图返回了无效项目数。");
+                return new ColumnValueCapture(folderView, 0, folder, indexCount, column);
+            }
+
+            if (items == 0) throw new COMException("Shell returned no item array for the current view.");
             Marshal.ThrowExceptionForHR(At<GetCount>(items, 7)(items, out var count));
             if (count > int.MaxValue) throw new InvalidDataException("当前文件视图项目数过多，无法筛选。");
-            var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var oneColumn = new[] { column };
-            for (uint index = 0; index < count; index++)
-            {
-                Marshal.ThrowExceptionForHR(At<GetItemAt>(items, 8)(items, index, out var shellItem));
-                try { values.Add(ReadRow(shellItem, oneColumn)[0]); }
-                finally { Marshal.Release(shellItem); }
-            }
-            return values.ToArray();
+            return new ColumnValueCapture(folderView, items, 0, (int)count, column);
         }
-        finally { Marshal.Release(items); }
+        catch
+        {
+            if (folder != 0) Marshal.Release(folder);
+            if (items != 0) Marshal.Release(items);
+            Marshal.Release(folderView);
+            throw;
+        }
     }
 
-    private static IReadOnlyList<string> CaptureColumnValuesFromFolderViewIndices(nint folderView,
-        ShellExportColumn column)
+    internal sealed class ColumnValueCapture : IDisposable
     {
-        var folderId = ShellFolderId;
-        Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out var folder));
-        if (folder == 0) throw new COMException("Shell view returned no parent folder.");
-        try
+        private readonly nint _folderView;
+        private readonly nint _items;
+        private readonly nint _folder;
+        private readonly ShellExportColumn _column;
+        private readonly int _count;
+        private readonly HashSet<string> _values = new(StringComparer.OrdinalIgnoreCase);
+        private int _index;
+        private bool _disposed;
+
+        internal ColumnValueCapture(nint folderView, nint items, nint folder, int count,
+            ShellExportColumn column)
         {
-            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, AllViewItems, out var count));
-            if (count < 0) throw new InvalidDataException("当前文件视图返回了无效项目数。");
-            var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var oneColumn = new[] { column };
-            for (var index = 0; index < count; index++)
+            _folderView = folderView;
+            _items = items;
+            _folder = folder;
+            _count = count;
+            _column = column;
+        }
+
+        internal ExplorerBrowserHost? Source { get; set; }
+        internal long Generation { get; set; }
+        internal IReadOnlyList<string> Values => SortDistinctValues(_values);
+
+        // Process a bounded number of Shell items per Dispatcher turn so a large
+        // checklist does not monopolize the window's input and paint loop.
+        internal bool ReadBatch(int maximumItems)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var end = Math.Min(_count, _index + Math.Max(1, maximumItems));
+            var oneColumn = new[] { _column };
+            while (_index < end)
             {
-                Marshal.ThrowExceptionForHR(At<GetItem>(folderView, 6)(folderView, index, out var childPidl));
-                if (childPidl == 0) throw new COMException("Shell view returned no item PIDL.");
-                try
+                if (_items != 0)
                 {
-                    var itemId = ShellItem2Id;
-                    Marshal.ThrowExceptionForHR(SHCreateItemWithParent(IntPtr.Zero, folder, childPidl,
-                        ref itemId, out var shellItem));
-                    if (shellItem == 0) throw new COMException("Shell returned no item for the current view index.");
-                    try { values.Add(ReadRow(shellItem, oneColumn)[0]); }
+                    Marshal.ThrowExceptionForHR(At<GetItemAt>(_items, 8)(_items, (uint)_index, out var shellItem));
+                    try { _values.Add(ReadRow(shellItem, oneColumn)[0]); }
                     finally { Marshal.Release(shellItem); }
                 }
-                finally { Marshal.FreeCoTaskMem(childPidl); }
+                else
+                {
+                    Marshal.ThrowExceptionForHR(At<GetItem>(_folderView, 6)(_folderView, _index, out var childPidl));
+                    if (childPidl == 0) throw new COMException("Shell view returned no item PIDL.");
+                    try
+                    {
+                        var itemId = ShellItem2Id;
+                        Marshal.ThrowExceptionForHR(SHCreateItemWithParent(IntPtr.Zero, _folder, childPidl,
+                            ref itemId, out var shellItem));
+                        if (shellItem == 0) throw new COMException("Shell returned no item for the current view index.");
+                        try { _values.Add(ReadRow(shellItem, oneColumn)[0]); }
+                        finally { Marshal.Release(shellItem); }
+                    }
+                    finally { Marshal.FreeCoTaskMem(childPidl); }
+                }
+                _index++;
             }
-            return values.ToArray();
+            return _index >= _count;
         }
-        finally { Marshal.Release(folder); }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            if (_folder != 0) Marshal.Release(_folder);
+            if (_items != 0) Marshal.Release(_items);
+            Marshal.Release(_folderView);
+        }
     }
 
     private static IReadOnlyList<string> SortDistinctValues(IEnumerable<string> values) =>

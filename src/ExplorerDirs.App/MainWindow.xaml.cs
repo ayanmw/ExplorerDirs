@@ -778,15 +778,25 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    private void PopulateColumnValueFilterMenu(ContextMenu menu, PaneControl pane, PropertyKeyState key,
+    private async void PopulateColumnValueFilterMenu(ContextMenu menu, PaneControl pane, PropertyKeyState key,
         string columnName, MenuItem loading)
     {
         if (!menu.IsOpen) return;
         IReadOnlyList<string> values;
-        try { values = pane.CaptureColumnDisplayValues(key); }
+        try
+        {
+            using var capture = pane.BeginColumnValueCapture(key);
+            while (!capture.ReadBatch(64))
+            {
+                await Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
+            }
+            if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
+            values = capture.Values;
+        }
         catch (Exception ex)
         {
-            loading.Header = $"读取列值失败：{ex.Message}";
+            if (menu.IsOpen) loading.Header = $"读取列值失败：{ex.Message}";
             return;
         }
 

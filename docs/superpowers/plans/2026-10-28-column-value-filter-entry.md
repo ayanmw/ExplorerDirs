@@ -47,3 +47,11 @@
 
 - [x] Run App Release build, full Release SettingsSmoke, and `git diff --check`.
 - [x] Review the final diff and commit the feature as one batch; defer visible acceptance to the user's next UI review.
+
+### Task 4: Keep value enumeration responsive
+
+**Files:** Modify `ShellFileViewExportCapture.cs`, `ExplorerBrowserHost.cs`, `PaneControl.xaml.cs`, and `MainWindow.xaml.cs`.
+
+- [x] Read at most 64 current-view items per Dispatcher turn, retaining Shell's existing visible-item and filtered-view paths.
+- [x] Stop and release the retained Shell interfaces when the menu closes, the active tab changes, or the view generation changes.
+- [x] Build the App Release configuration with zero warnings and errors; defer real large-directory and slow-provider response measurements to visible acceptance.
