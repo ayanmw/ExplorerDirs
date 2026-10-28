@@ -310,6 +310,16 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 此轮的超时自清理还暴露 watchdog 兼容问题：Windows PowerShell 5 不支持 `Process.Kill(bool)`，且原进程树自检在停止子进程后没有等待退出并重新读取进程状态。脚本现改用受支持的 `Stop-Process`，兼容 UTF-8 无 BOM 写入，并在有界等待后复查子进程；PowerShell 7 与 Windows PowerShell 5.1 的 watchdog 进程树自检均通过。
 
+### 2026-10-29：DefView 与自定义文件视图的支持边界复核
+
+复核微软 `IShellFolder::CreateViewObject` 与 Shell namespace extension 文档后，确认 `SHCreateShellFolderView` 返回的是系统 DefView；接口文档允许文件夹返回系统视图或自行实现的 `IShellView`，并要求每次请求都创建独立 view object。微软建议优先使用系统视图以保留自定义视图未必具备的功能。自定义 view 则必须自行创建并管理子窗口、内容呈现、交互、快捷菜单和拖放等职责；这不是向现有 DefView 注册一项列属性的扩展点。
+
+因此，当前探针确认 DefView 不消费新增列逐项值后，没有受支持的“给现有 DefView 补充 cell value/render/sort callback”可直接接入。完整自定义 `IShellView` 或自管列表是另一种架构，需要重新实现并逐项证明当前原生文件操作、菜单、键盘、拖放、通知、焦点与多窗格体验；这会扩大迁移面，不能作为逐行颜色/大小列的局部修补。此判断不证明任意第三方实现都绝对无法扩展 DefView，也不推断未公开的 DirectUI 内部行为。
+
+下一条有技术根据的实验仍是由自有 namespace 使用稳定的虚拟 PIDL 和 `IShellFolder2::CompareIDs`，而不是继续改写被 DefView 忽略的属性存储/legacy callback。该实验需要一个有效的 namespace 父位置；当前唯一已试的手工 CLSID PIDL 在 `CreateViewWindow` 超时，且没有注册 Desktop\NameSpace。临时挂载位置须先获用户明确授权。获批后应在隔离副本验证正常 Shell 解析、列逐项读取、数值升降序、原生文件操作与关闭清理；在这些门槛通过前产品继续使用 ExplorerBrowser。
+
+参考：[IShellFolder::CreateViewObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[Understanding Shell Namespace Extensions](https://learn.microsoft.com/en-us/windows/win32/shell/nse-works)、[Implementing a Folder View](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
+
 ### 2026-10-29：DefView 排序时的 ListView 消息观察
 
 为判断标准 Size 和 ByteCount 的差异是否来自 ListView 本身，探针在同一个 Private Desktop `SysListView32` 上安装短生命周期的只读 subclass：仅记录发往该 HWND 的 `LVM_FIRST..LVM_LAST` 范围消息，并立即交给原窗口过程。分别采集标准 Size `SetSortColumns`/两次合成 Header 鼠标消息路径，以及 ByteCount 两个方向；采样区间避开探针随后读取行文本的 LVM 查询。该观察只覆盖发给此 ListView HWND 的消息，不覆盖 DefView 父窗口、其他 HWND 或 Shell 内部 COM/模型调用。

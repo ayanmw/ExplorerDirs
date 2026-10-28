@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-29：继续验证隔离 `IShellView` 迁移的 Shell item 入口。`SHCreateItemWithParent` 创建的文件项及 `SHCreateShellItemArrayFromShellItem` 数组可保留包装父 `IUnknown` 和相对 child PIDL；`BHID_SFObject` 返回含实验列元数据的子 folder，`BHID_SFViewObject` 返回 `IShellView`。新 Private Desktop 门槛实际调用 `CreateViewWindow`：视图枚举、标准 Size 排序、列布局读回和 `CF_HDROP`/CIDA 数据格式均通过，前台 HWND/输入时间戳不变；原生背景菜单包含 `refresh`/`newfolder`/`viewlogicaldetails`，选中项菜单包含 `copy`/`delete`/`rename`/`properties`。已从选择 `IDataObject` 调用真实 `IFileOperation::CopyItems` 复制到兄弟目录和当前目录，源文件保留，当前视图收到通知并由 2 项收敛到 3 项；菜单动词实际将 Icon 切到 Details（状态读回 4）并刷新（项目数保持 3）。细节见[逐项颜色原型](ishellview-color-spike.md#2026-10-29shell-item-绑定视图的原生上下文菜单)。已配置的自定义列仍为空，DefView 只请求列头、不请求逐项 `GetDetailsOf`/`GetDetailsEx`/`CompareIDs`/`IPropertyStore`，因此原型仍未通过迁移门槛、不接入产品。受支持的 `IDataObject → SHCreateShellItemArrayFromDataObject → BHID_DataObject` 往返保留文件数据但父/child 身份退化为普通 filesystem PIDL；包装 PIDL 经 `ILCombine` 成普通绝对路径仍失败。前一轮在 `SHCreateShellItemArrayFromShellItem` 数组上调用 `BHID_DataObject` 虽然成功，但不符合微软文档限定的 handler 使用条件，不作为支持证据。下一步调查 DefView 不请求自定义列逐项属性值的原因；选中项重命名/删除、OLE 拖放及导航也仍待此绑定视图逐项验证。细节见[逐行列与 IShellView 调查](folder-size-column-investigation.md#2026-10-29-ishellitem-父级身份适配探针)及[实际绑定视图门槛](folder-size-column-investigation.md#2026-10-29-shell-item-绑定视图的-private-desktop-窗口门槛)。
+2026-10-29：隔离 `IShellView` 已验证 Shell item 入口、视图枚举/标准 Size 排序、菜单、部分文件操作与通知；新增列仍未被 DefView 请求逐项值。官方接口文档复核确认系统 DefView 没有受支持的 cell-value/render/sort 回调入口，而自定义 `IShellView` 会承担窗口、呈现、菜单、键盘、拖放等完整 view 职责。继续进行的有效实验应改为有效父级下的自有 namespace + 稳定虚拟 PIDL + `IShellFolder2::CompareIDs`，并验证 Shell 标准列读取与数值升降序；不能继续叠加 DefView 忽略的属性覆盖/legacy callback。该实验需要临时挂接 Desktop\NameSpace，尚未获用户明确授权，故本轮只收敛技术边界、不改产品、不重跑 Shell view；当前路线上下一步待用户允许这项隔离注册后执行。选中项重命名/删除、真实 OLE 拖放及完整产品接线仍待验证。细节见[逐行列调查](folder-size-column-investigation.md#2026-10-29-defview-与自定义文件视图的支持边界复核)。
 
 2026-10-29：提交 `bbc2f6a` 修正 Shell 视图重建期间的暂时选区扩张：当同一视图且无新输入时，若旧快照焦点项原本未选中、却出现在较大的新快照中，继续保留已确认的多选快照；异步枚举补齐其它项目仍可更新。纯门控回归和 HostProbe 确定性回调覆盖通过；四窗格 3,000 项创建/删除压力运行 6 轮均退出码 0，选区/焦点保持。完整 Release SettingsSmoke 通过。仅为隐藏本机 ExplorerBrowser 宿主证据，用户可见文件操作与其它 Shell provider 仍待集中验收。
 
@@ -4447,3 +4447,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。
 
 2026-10-28：列值筛选查表优化已提交（a73e467）。每列候选值达到 8 个时预建大小写不敏感 HashSet，避免 Shell 项目筛选对最多 256 个值逐项线性比较；较小列表继续线性查找以避免额外集合分配。新增边界 smoke 覆盖第 256 个匹配值和未选择值；完整 Release SettingsSmoke、App Release build（0 警告/错误）和 `git diff --check` 通过。真实 Shell 属性读取与可见筛选效果仍待集中验收。
+
+## 2026-10-29：收敛 DefView 自定义列的支持边界
+
+- 根据微软 `CreateViewObject` 与 namespace extension 文档复核，系统 DefView 可选择由文件夹创建独立 `IShellView`，但没有文档化的扩展回调能给现有 DefView 增加逐项绘制/排序值；自定义 view 则要自行负责子窗口与呈现、快捷菜单、交互及拖放等，微软也建议在功能要求允许时优先系统 view。
+- 这不是对所有 Shell 内部路径的绝对否定，而是针对已观测的 DefView 不请求属性值的当前样本，排除继续堆叠属性存储覆写、列映射或 legacy callback 的无依据路线。隔离迁移下一步收敛为有效 namespace 父级中的虚拟 PIDL/`IShellFolder2::CompareIDs` 实验。
+- 该 Private Desktop view 实验需要临时 Desktop\NameSpace 挂载；用户尚未明确授权，未写注册表、未创建 view、未改产品或 release。待授权后验证解析、列读取、数值排序、Shell 文件操作与清理。依据：[CreateViewObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[Namespace extension overview](https://learn.microsoft.com/en-us/windows/win32/shell/nse-works)、[Implementing a folder view](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
