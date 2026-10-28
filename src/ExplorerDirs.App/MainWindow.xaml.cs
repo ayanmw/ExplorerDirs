@@ -1813,6 +1813,27 @@ public partial class MainWindow : Window
 
     private void ProgramStarter_Click(object sender, RoutedEventArgs e) => OpenProgramStarterWindow();
 
+    private async void RestartWindowsExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        const string warning = "Windows 桌面、任务栏和开始菜单会短暂消失并重新加载。若文件资源管理器窗口与桌面 Shell 共用进程，这些窗口也可能关闭。继续重启吗？";
+        if (MessageBox.Show(this, warning, "重启 Windows 资源管理器",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        EnvironmentStatus.Text = "正在重启 Windows 资源管理器…";
+        try
+        {
+            await Task.Run(WindowsExplorerRestarter.Restart);
+            EnvironmentStatus.Text = "Windows 资源管理器 Shell 已重启。";
+        }
+        catch (Exception ex)
+        {
+            EnvironmentStatus.Text = $"重启 Windows 资源管理器失败：{ex.Message}";
+            MessageBox.Show(this, EnvironmentStatus.Text, "重启 Windows 资源管理器失败",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void OpenProgramStarterWindow()
     {
         if (_programStarterWindow is { IsVisible: true })
