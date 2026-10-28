@@ -451,7 +451,7 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 
 #### 2026-10-28 列值筛选后端接线
 
-`QuickFilterSettings` 现在保存以 `PROPERTYKEY` 标识的列值条件。一个属性所选值按不区分大小写的 OR 匹配，多属性条件按 AND 匹配；与文件名通配符同时存在时两者继续按 AND 组合。生产 `ShellFolderFilter` 仅在有列条件时调用 `IShellFolder2::GetDetailsEx`，再用 `InitPropVariantFromVariant` 和 `PSFormatForDisplayAlloc` 得到列显示文本；某属性无法读取时跳过该条件，避免误隐藏项目。会话 INI v11 把这些条件按标签写入 Base64/JSON，旧格式默认为无列条件，旧会话写回前备份；Q-Dir 扩展包含同一会话字符串，因此能往返本程序自定义条件。
+`QuickFilterSettings` 现在保存以 `PROPERTYKEY` 标识的列值条件。一个属性所选值按不区分大小写的 OR 匹配，多属性条件按 AND 匹配；与文件名通配符同时存在时两者继续按 AND 组合。生产 `ShellFolderFilter` 仅在有列条件时调用 `IShellFolder2::GetDetailsEx`，用 `VariantToPropVariant` 与 `PSFormatForDisplayAlloc` 得到列显示文本；某属性无法读取时跳过该条件，避免误隐藏项目。会话 INI v11 把这些条件按标签写入 Base64/JSON，旧格式默认为无列条件，旧会话写回前备份；Q-Dir 扩展包含同一会话字符串，因此能往返本程序自定义条件。
 
 后台已接入列值条件入口：DirectUI 列标题 SplitButton 的缓存箭头区域触发应用菜单，标题文字仍交给 Shell 排序；清单支持多选值、空白值和清除当前列条件，并立即应用到活动标签，其他列值条件与名称筛选保持不变。每列最多勾选 256 个值；套用前复用会话存储校验所有列条件的值数、长度和总载荷，超限时拒绝变更并保留当前条件，避免筛选临时生效但后续会话无法保存。入口接线的范围和后台验证见下方“列头箭头入口接线”。
 
@@ -469,6 +469,6 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 
 2026-10-28 列值筛选匹配性能：每列不超过 7 个选项仍用列表比较；达到 8 个时构建大小写不敏感查找集，减少大筛选条件下每个 Shell 项目的同步比较成本。候选值上限仍为 256，筛选、序列化和菜单顺序仍使用原值列表。完整 Release SettingsSmoke 与 App Release build 通过；实际 Shell provider 的耗时收益还未在真实大目录测量。
 
-2026-10-29 列值读取正确性与热路径修正：定向 COM 夹具先复现两处错误导入，`PropVariantClear` 被错误地从 `Propsys.dll` 查找，且 `InitPropVariantFromVariant` 不是系统导出入口；失败的属性读取因此抛出 `EntryPointNotFoundException`，被过滤器的 fail-open 保护吞掉，无法应用列条件。现改用 `Ole32.dll` 的 `PropVariantClear` 与 `Propsys.dll` 的 `VariantToPropVariant`。多列匹配按每个 Shell 项目只查询一次 `IShellFolder2`，并复用 PROPERTYKEY/VARIANT/PROPVARIANT 缓冲区，边读取边比较，不为每项创建结果数组。计数型 COM smoke 验证两列只做一次接口查询、不可读属性放行、可读匹配通过及首个不匹配短路；现有 SettingsSmoke 覆盖条件组合逻辑。Release 构建通过；真实 ExplorerBrowser/第三方 Shell 属性读取与列头交互仍待集中验收，未更新预览包。
+2026-10-29 列值读取正确性与热路径修正：定向 COM 夹具先复现两处错误导入，`PropVariantClear` 被错误地从 `Propsys.dll` 查找，且 `InitPropVariantFromVariant` 不是系统导出入口；失败的属性读取因此抛出 `EntryPointNotFoundException`，被过滤器的 fail-open 保护吞掉，无法应用列条件。现改用 `Ole32.dll` 的 `PropVariantClear` 与 `Propsys.dll` 的 `VariantToPropVariant`。多列匹配按每个 Shell 项目只查询一次 `IShellFolder2`，并复用 PROPERTYKEY/VARIANT/PROPVARIANT 缓冲区，边读取边比较，不为每项创建结果数组；真实隐藏 ExplorerBrowser HostProbe 还验证了当前 Windows 语言下 TXT/BIN 类型筛选、切换条件、名称与列条件 AND、清除恢复，以及其它窗格不受影响，父窗保持隐藏且前台 HWND 未变化。该探针只覆盖本机普通文件夹和属性 provider，不能替代列头菜单的可见命中、第三方/虚拟 provider 或慢速目录验收。计数型 COM smoke 与完整 Release SettingsSmoke 通过；App/HostProbe Release 构建成功，NuGet 漏洞源不可达产生 1 条 NU1900 警告。未更新预览包。
 
 2026-10-28 文件夹入口发布包补齐：正常发布版与隔离预览包均携带 `tools/folder-verb.ps1` 和 `FolderVerb.psm1`。打包脚本在 package layout 下默认定位本包 EXE；源码树仍要求明确指定 `releases/` 下的目标。发布隔离 smoke 验证包内脚本与目录参数能力清单对应；未修改真实注册表，菜单可见与实际启动仍待集中验收。

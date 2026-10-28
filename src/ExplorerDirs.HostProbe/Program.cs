@@ -128,7 +128,7 @@ internal static class Program
             try { return ProcessFixtureOperations.RunChild(args); }
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
         }
-        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--auto-column-width" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-mode" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--shell-selection-invert-modes" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
+        if (args.Length == 0 || args[0] is not ("--preview-pane" or "--cross-pane-drop-effects" or "--cross-pane-drop-multi" or "--cross-pane-drop" or "--live-updates" or "--live-updates-without-subclass" or "--live-shell-operations" or "--live-shell-independent-sta" or "--live-shell-child-process" or "--search-navigation" or "--quick-filter" or "--column-value-filter" or "--file-view-export" or "--file-command-states" or "--file-command-states-early" or "--ctrl-wheel-routing" or "--ctrl-wheel-window-chain" or "--auto-column-width" or "--rename-editor-key-routing" or "--live-shell-rename-editor" or "--live-shell-rename-editor-mode" or "--live-shell-rename-editor-pane-0" or "--live-shell-rename-editor-pane-1" or "--live-shell-rename-editor-pane-2" or "--live-shell-rename-editor-pane-3" or "--live-shell-hwnd-tree" or "--live-shell-visibility-updates" or "--live-shell-visibility-updates-pane-0" or "--live-shell-visibility-updates-pane-1" or "--live-shell-visibility-updates-pane-2" or "--live-shell-visibility-updates-pane-3" or "--live-shell-product-monitor" or "--live-shell-product-monitor-no-parent-observer" or "--live-shell-changed-metadata" or "--live-shell-watcher-recovery" or "--live-shell-product-monitor-early-updatedir" or "--live-shell-product-monitor-early-create" or "--live-shell-product-monitor-early-none" or "--live-shell-product-monitor-early-mkdir" or "--live-shell-product-monitor-early-mkdir-none" or "--live-shell-product-monitor-early-rmdir" or "--live-shell-product-monitor-early-rmdir-none" or "--live-shell-product-monitor-rmdir-boundary" or "--live-shell-product-monitor-early-delete" or "--live-shell-product-monitor-early-delete-none" or "--live-shell-cross-volume" or "--live-shell-directory-stress" or "--live-shell-directory-stress-native" or "--live-shell-directory-stress-large" or "--live-shell-selection-delete" or "--live-shell-selection-delete-after-input" or "--live-shell-selection-delete-watcher" or "--live-shell-selection-delete-native" or "--live-shell-selection-user-clear" or "--live-shell-selection-partial-snapshot" or "--live-shell-empty-directory-deferred-restore" or "--live-shell-deferred-restore-user-input" or "--live-shell-deferred-restore-stable-selection" or "--live-shell-deferred-restore-selection-mismatch" or "--live-shell-refresh-deferred-user-input" or "--live-shell-refresh-deferred-mouse" or "--live-shell-refresh-deferred-watcher-overflow" or "--live-shell-selection-large" or "--shell-selection-invert-modes" or "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback" or "--shell-change-registration-after-hosts" or "--probe-error-smoke")) return 2;
         var acceptsLargeSelectionArgument = args.Length == 2 && args[0] == "--live-shell-selection-large" &&
             int.TryParse(args[1], out var requestedSelectionCount) && requestedSelectionCount is >= 4 and <= 10001;
         var acceptsBurstArgument = args.Length == 2 &&
@@ -312,6 +312,8 @@ internal static class Program
                     File.WriteAllText(Path.Combine(folder, "drop.tmp"), "drop");
                     Directory.CreateDirectory(Path.Combine(folder, "folder.tmp"));
                 }
+                if (args[0] == "--column-value-filter")
+                    File.WriteAllText(Path.Combine(folder, "sample.bin"), "binary fixture");
                 folders.Add(folder);
                 var initialView = savedViews.Count == 4 ? savedViews[i] :
                     args[0] == "--search-navigation" ? SearchHostProbe.CreateViewState(stateType, i) : state;
@@ -529,6 +531,26 @@ internal static class Program
                     if (IsWindowVisible(source.Handle) || GetForegroundWindow() != foregroundBeforeProbe)
                         throw new Exception("Quick-filter probe showed its hidden parent or changed the foreground window.");
                     Console.WriteLine("quick-filter: parent-hidden=True foreground-unchanged=True");
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(ex);
+                    Dispatcher.CurrentDispatcher.InvokeShutdown();
+                    return 1;
+                }
+            }
+            if (args[0] == "--column-value-filter")
+            {
+                if (!WaitForCounts(hosts, expected: 2, TimeSpan.FromSeconds(10)) ||
+                    !WaitForAttachedViews(hostType, hosts, TimeSpan.FromSeconds(10)))
+                    throw new Exception("Column-value filter Shell fixtures did not finish navigation.");
+                try
+                {
+                    var result = ColumnValueFilterProbe.Run(hostType, hosts, folders, Count, ViewItemPaths);
+                    if (IsWindowVisible(source.Handle) || GetForegroundWindow() != foregroundBeforeProbe)
+                        throw new Exception("Column-value filter probe showed its hidden parent or changed the foreground window.");
+                    Console.WriteLine("column-value-filter: parent-hidden=True foreground-unchanged=True");
                     return result;
                 }
                 catch (Exception ex)
@@ -3108,7 +3130,7 @@ internal static class Program
             }
             if (junctionPath is not null) DeleteDirectoryJunction(junctionPath);
             // These hidden navigation/filter probes each allocate their own four-pane fixture under the build output.
-            if (args[0] is "--search-navigation" or "--quick-filter" or "--file-view-export")
+            if (args[0] is "--search-navigation" or "--quick-filter" or "--column-value-filter" or "--file-view-export")
                 DeleteGeneratedRoot(root, Path.Combine(AppContext.BaseDirectory, "fixtures"));
             if (args[0] is "--file-command-states" or "--file-command-states-early")
                 DeleteGeneratedRoot(root, Path.Combine(AppContext.BaseDirectory, "fixtures"));
