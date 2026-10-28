@@ -1,3 +1,5 @@
+> **Shell 选区恢复（2026-10-29）：**同一视图、无新用户输入时，若 Shell 在视图重建期间把先前未选中的焦点项临时加入多选，确认过的选区快照不会被该临时扩大的快照替换；异步枚举自然增加的选中项仍可更新快照。纯门控回归、隐藏生产 HostProbe 确定性回调场景、四窗格 3,000 项创建/删除压力及完整 Release SettingsSmoke 通过。未做可见交互验收；其它 Shell provider 和长期压力仍待集中验证。
+
 > **地址输入复核（2026-10-27）：**相对目录、环境变量与 `C:` 根目录规则早已在 AddressInputResolver 实现，与仅处理分隔符的 BreadcrumbPath 分开理解。本次仅修复显式 `\\?\` / `\\.\` 路径在前缀识别前被环境变量展开的问题，保留百分号目录字面量；普通输入继续展开当前进程变量。纯字符串回归与完整 SettingsSmoke 通过，未验证 Shell 对具体设备地址的支持。参考 [Q-Dir FAQ 146](https://www.softwareok.com/?faq=146&seite=faq-Q-DIR)、[Windows 路径命名空间](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。本项不在此前已固定的 141624 候选中。
 
 > **可见键盘验收补充（2026-10-27）：**用户在 125449/179260 四窗格 Details 夹具中确认一个样本 F2 可进入重命名，方向键保持编辑。只关闭该样本范围，未外推所有模式/窗格或全部 P0；F6 续测前隔离窗口已关闭。见[本轮证据](gui-acceptance-2026-10-27-shell-baseline.md)。

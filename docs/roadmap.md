@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：提交 `bbc2f6a` 修正 Shell 视图重建期间的暂时选区扩张：当同一视图且无新输入时，若旧快照焦点项原本未选中、却出现在较大的新快照中，继续保留已确认的多选快照；异步枚举补齐其它项目仍可更新。纯门控回归和 HostProbe 确定性回调覆盖通过；四窗格 3,000 项创建/删除压力运行 6 轮均退出码 0，选区/焦点保持。完整 Release SettingsSmoke 通过。仅为隐藏本机 ExplorerBrowser 宿主证据，用户可见文件操作与其它 Shell provider 仍待集中验收。
+
 2026-10-29：当前沙箱拒绝同进程客户端连接 `PipeOptions.CurrentUserOnly` 命名管道（`UnauthorizedAccessException: Access to the path is denied`）。路由协议与“无激活目标” smoke 现在先做实际连接预检；不可用时明确输出 `SKIP`，完整 SettingsSmoke 其余检查通过。该结果不验证跨进程路由协议本身；真实 Windows 用户会话仍需运行这些 IPC 检查。
 
 2026-10-29：列值筛选定向 COM smoke 暴露 `PropVariantClear` DLL 错误和不存在的 `InitPropVariantFromVariant` 入口；二者曾令 Shell 属性筛选在 fail-open 保护下总是放行。现改为 `Ole32.PropVariantClear` / `Propsys.VariantToPropVariant`，并将多列属性读取合并为每个项目一次 `IShellFolder2` 查询、复用原生缓冲区。计数型 COM smoke 验证接口查询次数、属性失败放行、匹配与不匹配结果；完整 Release SettingsSmoke 通过。App Release build 成功，0 错误，NuGet 漏洞数据源不可达产生 2 条 NU1900 警告。未启动 ExplorerBrowser/GUI，也未更新预览包。
