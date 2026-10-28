@@ -1,0 +1,4 @@
+LIBRARY ExplorerDirs.StaticShellFolderAdapter.dll
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

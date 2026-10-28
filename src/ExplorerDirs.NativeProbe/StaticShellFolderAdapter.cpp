@@ -12,6 +12,10 @@
 
 namespace
 {
+    volatile LONG g_syntheticLiveObjects = 0;
+    volatile LONG g_syntheticServerLocks = 0;
+    const CLSID kSyntheticFolderClassId =
+    { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
     // filesystem PIDLs and Shell operations while adding deterministic test columns.
     constexpr PROPERTYKEY kStaticSizeKey =
@@ -1248,6 +1252,7 @@ namespace
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2
     {
     public:
+        SyntheticSortFolder() { InterlockedIncrement(&g_syntheticLiveObjects); }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -1270,7 +1275,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
             if (!value) return E_POINTER;
-            *value = { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
+            *value = kSyntheticFolderClassId;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE value) override
@@ -1413,10 +1418,77 @@ namespace
             return S_OK;
         }
     private:
-        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); }
+        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); InterlockedDecrement(&g_syntheticLiveObjects); }
         volatile LONG _references = 1;
         PIDLIST_ABSOLUTE _root = nullptr;
     };
+
+    class SyntheticFolderClassFactory final : public IClassFactory
+    {
+    public:
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IClassFactory) return E_NOINTERFACE;
+            *value = static_cast<IClassFactory*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer, REFIID iid, void** value) override
+        {
+            if (outer) return CLASS_E_NOAGGREGATION;
+            auto* folder = new (std::nothrow) SyntheticSortFolder();
+            if (!folder) return E_OUTOFMEMORY;
+            const auto result = folder->QueryInterface(iid, value);
+            folder->Release();
+            return result;
+        }
+        HRESULT STDMETHODCALLTYPE LockServer(BOOL lock) override
+        {
+            if (lock) InterlockedIncrement(&g_syntheticServerLocks);
+            else if (InterlockedDecrement(&g_syntheticServerLocks) < 0)
+            {
+                InterlockedIncrement(&g_syntheticServerLocks);
+                return E_UNEXPECTED;
+            }
+            return S_OK;
+        }
+    private:
+        volatile LONG _references = 1;
+    };
+}
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls(instance);
+    }
+    return TRUE;
+}
+
+STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
+{
+    if (classId != kSyntheticFolderClassId) return CLASS_E_CLASSNOTAVAILABLE;
+    auto* factory = new (std::nothrow) SyntheticFolderClassFactory();
+    if (!factory) return E_OUTOFMEMORY;
+    const auto result = factory->QueryInterface(iid, value);
+    factory->Release();
+    return result;
+}
+
+STDAPI DllCanUnloadNow()
+{
+    return InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) == 0 ? S_OK : S_FALSE;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)

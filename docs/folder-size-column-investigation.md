@@ -274,6 +274,8 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 结论仅限于这个“未注册对象 + 物理文件夹绝对 PIDL”的构造：对象身份能从 `GetFolder` 读回，但不足以让 DefView 从对象枚举项目；`GetCurFolder` 的物理 PIDL 会被 Shell 当作文件系统位置，空 PIDL 会落到 Desktop。不能据此否定自有 PIDL namespace 中 `CompareIDs` 的标准大小排序，也不能把排序成功作为本轮结果。继续验证需要一个能够由绝对 PIDL 解析/绑定回合成 folder 的虚拟 namespace；本轮没有创建 Shell namespace/CLSID 注册表项，也没有修改产品或 release。下一阶段应先评估带完整清理与失败恢复的进程级临时注册方案，再继续比较器探针。`build-static-shell-folder-adapter.ps1` 和 NativeProbe Release 均构建成功（0 警告、0 错误）。
 
+后续只为诊断绝对 PIDL 绑定，加入了 COM `IClassFactory` 并在探针运行期间临时写入专用 `HKCU\Software\Classes\CLSID` 项；构建成功，注册表写入获准的隔离进程执行完成，probe/watchdog 退出后检查该 CLSID 已清除。仅此 CLSID 注册仍不足以解析 `::{GUID}`：`SHParseDisplayName` 返回 `E_INVALIDARG`，视图创建/枚举及大小排序均未发生。没有挂接 Desktop/This PC `NameSpace`，因此没有让此文件夹进入 Explorer 命名空间。微软的命名空间扩展文档要求把扩展 CLSID 放在一个命名空间位置；下一步是否临时增加 Desktop\NameSpace 项待用户明确确认。日志 `src/.state/native-probe-watchdog/20261029-033704-fb20dbd7.stdout.log`；前台窗口和输入时间戳保持不变。
+
 ### 2026-10-29：列映射与默认排序合同调用计数
 
 在 NativeProbe 适配器中增加 `MapColumnToSCID`、`GetDefaultColumn` 调用计数，并暂时启用一个只供实验的默认排序覆写（返回 ByteCount 列序号）。Private Desktop 创建绑定视图时，DefView 调用 `MapColumnToSCID` 40 次枚举列，但 `GetDefaultColumn` 为 0；初始读回排序仍为标准 Name 列，`CompareIDs` 为 0。仅在列枚举阶段看到 MapColumn 调用，随后标准 Size Header 排序以及 ByteCount `SetSortColumns`/Header 排序阶段两项计数均为 0。默认排序覆写因宿主完全不调用该方法而没有生效。

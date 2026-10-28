@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 using ExplorerDirs.App;
 
 internal static class SyntheticShellSortProbe
@@ -7,6 +8,8 @@ internal static class SyntheticShellSortProbe
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
+    private static readonly Guid ShellViewId = new("C0A651F5-B48B-11D2-B5ED-006097C686F6");
+    private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const int LvmFirst = 0x1000;
     private const int LvmGetItemCount = LvmFirst + 4;
@@ -21,17 +24,20 @@ internal static class SyntheticShellSortProbe
         if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
 
         nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
-        var fixture = Path.Combine(AppContext.BaseDirectory, "synthetic-shell-sort", Guid.NewGuid().ToString("N"));
+        var classKeyPath = $@"Software\Classes\CLSID\{{{SyntheticFolderClassId:D}}}";
         StreamViewHost? host = null;
         var viewWindowCreated = false;
         var parentDestroyed = false;
+        var classRegistrationCreated = false;
         try
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
-            Directory.CreateDirectory(fixture);
-            Check(SHParseDisplayName(fixture, 0, out rootPidl, 0, out _));
-            Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
+            RegisterSyntheticFolder(classKeyPath);
+            classRegistrationCreated = true;
+            Check(SHParseDisplayName($"::{{{SyntheticFolderClassId:D}}}", 0, out rootPidl, 0, out _));
+            Check(SHBindToObject(0, rootPidl, 0, in ShellFolder2Id, out folder));
+            Check(At<CreateViewObject>(folder, 8)(folder, 0, in ShellViewId, out view));
 
             host = new StreamViewHost(parent, []) { View = view };
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
@@ -84,7 +90,7 @@ internal static class SyntheticShellSortProbe
             host?.Dispose();
             if (module != 0) NativeLibrary.Free(module);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
-            if (Directory.Exists(fixture)) Directory.Delete(fixture);
+            if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
@@ -166,6 +172,34 @@ internal static class SyntheticShellSortProbe
         throw new FileNotFoundException("Run build-static-shell-folder-adapter.ps1 before the synthetic Shell sort probe.");
     }
 
+    private static void RegisterSyntheticFolder(string classKeyPath)
+    {
+        using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
+            ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
+        using var existing = classes.OpenSubKey($"CLSID\\{{{SyntheticFolderClassId:D}}}");
+        if (existing is not null)
+            throw new InvalidOperationException("The reserved synthetic folder CLSID already has a per-user registration; refusing to overwrite it.");
+
+        try
+        {
+            using var classKey = Registry.CurrentUser.CreateSubKey(classKeyPath, writable: true)
+                ?? throw new InvalidOperationException("Could not create the temporary synthetic folder CLSID key.");
+            classKey.SetValue(null, "ExplorerDirs isolated synthetic sort probe", RegistryValueKind.String);
+            using var inproc = classKey.CreateSubKey("InprocServer32", writable: true)
+                ?? throw new InvalidOperationException("Could not create the temporary InprocServer32 key.");
+            inproc.SetValue(null, FindAdapterLibrary(), RegistryValueKind.String);
+            inproc.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
+            using var shellFolder = classKey.CreateSubKey("ShellFolder", writable: true)
+                ?? throw new InvalidOperationException("Could not create the temporary ShellFolder key.");
+            shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
+        }
+        catch
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            throw;
+        }
+    }
+
     private static int ReadCounter(nint module, string name) =>
         Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, name))();
 
@@ -186,13 +220,13 @@ internal static class SyntheticShellSortProbe
         public int TextCapacity; public int Image; public nint Parameter; public int Indent; public int GroupId;
         public uint ColumnCount; public nint Columns; public nint ColumnFormats; public int Group;
     }
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, in Guid iid, out nint folder);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
@@ -201,6 +235,7 @@ internal static class SyntheticShellSortProbe
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bindContext, in Guid iid, out nint value);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
