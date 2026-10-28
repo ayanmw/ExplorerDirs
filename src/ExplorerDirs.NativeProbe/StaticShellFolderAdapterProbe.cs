@@ -406,7 +406,7 @@ internal static class StaticShellFolderAdapterProbe
                 $"property-description(custom/size/date-created/document-byte-count)=0x{customSchema:X8}/0x{sizeSchema:X8}/0x{dateCreatedSchema:X8}/0x{documentByteCount.HResult:X8}; " +
                 $"document-byte-count-type=0x{documentByteCount.VariantType:X4}(hr=0x{documentByteCount.TypeHResult:X8}); " +
                 $"document-byte-count-sort-description=0x{documentByteCount.SortDescription:X8}(hr=0x{documentByteCount.SortDescriptionHResult:X8}); type-flags=0x{documentByteCount.TypeFlags:X8}(hr=0x{documentByteCount.TypeFlagsHResult:X8}); " +
-                $"size-type=0x{sizePropertyDescription.VariantType:X4}; size-sort-description=0x{sizePropertyDescription.SortDescription:X8}; size-type-flags=0x{sizePropertyDescription.TypeFlags:X8}; " +
+                $"document-byte-count-sort-alias=[{documentByteCount.SortAliasEvidence}]; size-type=0x{sizePropertyDescription.VariantType:X4}; size-sort-description=0x{sizePropertyDescription.SortDescription:X8}; size-type-flags=0x{sizePropertyDescription.TypeFlags:X8}; size-sort-alias=[{sizePropertyDescription.SortAliasEvidence}]; " +
                 $"column-state=0x{documentByteCount.ColumnState:X8}(hr=0x{documentByteCount.ColumnStateHResult:X8}); window-created=False");
             return 0;
         }
@@ -1882,16 +1882,38 @@ internal static class StaticShellFolderAdapterProbe
     {
         var interfaceId = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
         var result = PSGetPropertyDescription(in key, in interfaceId, out var description);
-        if (result < 0 || description == 0) return new(result, 0, result, 0, result, 0, result, 0, result);
+        if (result < 0 || description == 0) return new(result, 0, result, 0, result, 0, result, 0, result, "unavailable");
         try
         {
             var typeResult = At<GetPropertyType>(description, 5)(description, out var variantType);
             var typeFlagsResult = At<GetPropertyTypeFlags>(description, 8)(description, 0x80001fff, out var typeFlags); // PDTF_MASK_ALL.
             var columnStateResult = At<GetPropertyColumnState>(description, 12)(description, out var columnState);
             var sortDescriptionResult = At<GetPropertySortDescription>(description, 16)(description, out var sortDescription);
-            return new(result, variantType, typeResult, typeFlags, typeFlagsResult, columnState, columnStateResult, sortDescription, sortDescriptionResult);
+            var sortAliasEvidence = GetPropertySortAliasEvidence(description);
+            return new(result, variantType, typeResult, typeFlags, typeFlagsResult, columnState, columnStateResult, sortDescription, sortDescriptionResult, sortAliasEvidence);
         }
         finally { Marshal.Release(description); }
+    }
+
+    private static string GetPropertySortAliasEvidence(nint description)
+    {
+        var aliasInfoIid = new Guid("F67104FC-2AF9-46FD-B32D-243C1404F3D1");
+        var propertyDescriptionIid = new Guid("6F79D558-3E96-4549-A1D1-7D75D2288814");
+        var queryResult = Marshal.QueryInterface(description, in aliasInfoIid, out var aliasInfo);
+        if (queryResult < 0 || aliasInfo == 0) return $"QI=0x{queryResult:X8}";
+        try
+        {
+            var result = At<GetSortByAlias>(aliasInfo, 23)(aliasInfo, in propertyDescriptionIid, out var aliasDescription);
+            if (result == 1 && aliasDescription == 0) return "no-primary-alias (S_FALSE)";
+            if (result < 0 || aliasDescription == 0) return $"GetSortByAlias=0x{result:X8}";
+            try
+            {
+                var keyResult = At<GetPropertyKey>(aliasDescription, 3)(aliasDescription, out var key);
+                return $"GetSortByAlias=0x{result:X8};GetPropertyKey=0x{keyResult:X8};key={key.FormatId:B}/{key.PropertyId}";
+            }
+            finally { Marshal.Release(aliasDescription); }
+        }
+        finally { Marshal.Release(aliasInfo); }
     }
 
     private static void CheckCompare(int hr, short expected, string label)
@@ -1969,7 +1991,7 @@ internal static class StaticShellFolderAdapterProbe
         public nint ReleaseUnknown;
     }
     private readonly record struct PropertyDescriptionEvidence(int HResult, ushort VariantType, int TypeHResult, uint TypeFlags, int TypeFlagsHResult,
-        uint ColumnState, int ColumnStateHResult, uint SortDescription, int SortDescriptionHResult);
+        uint ColumnState, int ColumnStateHResult, uint SortDescription, int SortDescriptionHResult, string SortAliasEvidence);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask;
@@ -2070,6 +2092,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyTypeFlags(nint self, uint mask, out uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyColumnState(nint self, out uint columnState);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertySortDescription(nint self, out uint description);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortByAlias(nint self, in Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyKey(nint self, out ShellColumnManager.NativeKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetProbeCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetLegacyDetailsCallbackProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();

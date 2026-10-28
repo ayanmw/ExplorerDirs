@@ -260,6 +260,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 最新日志：`src/.state/native-probe-watchdog/20261029-024146-7f855e87.stdout.log`。标准 Size 对照通过；整条隔离视图探针仍因未注册私有 PKEY 自定义列无值而 exit code 1，Private Desktop 前台未变化。产品和发布目录未改动。
 
+### 2026-10-29：属性排序别名排查
+
+按 Windows `IPropertyDescriptionAliasInfo` 合同读取 ByteCount 与 `PKEY_Size` 的主排序别名。两者查询都返回 `S_FALSE` 且没有别名对象；因此该次 A/B 中 ByteCount 失败而 Size 成功，不能归因于 ByteCount 缺少 sort-by alias（两边都没有）。无窗口 NativeProbe Release build 0 警告、0 错误，folder-contract smoke exit code 0、未创建窗口。下一步应继续查 `IShellFolder2` 列索引和 `IFolderView2` 属性键排序之间的映射/调用路径，特别是 DefView 为什么能对 Size 进入行重排，却没有向 adapter 发出 ByteCount 列比较。
+
+参考：[IPropertyDescriptionAliasInfo](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertydescriptionaliasinfo)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)、[IShellFolder2::GetDefaultColumn](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumn)。
+
 ### 2026-10-29：DefView 列点击通知对照
 
 在 Private Desktop 绑定视图的已注册 schema 列上，向 `SysListView32` 的父窗口发送 `WM_NOTIFY/LVN_COLUMNCLICK`（子项 2），用于对照程序化 `SetSortColumns`。第一次通知后顺序从 `2|10|10` 变为 `10|10|2`，与按可见字符串比较的次序一致；第二次同样的合成通知没有反转顺序。两次过程中 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍为 0，工厂统计保持原有 3 次显示读取。仅能确认 DefView 对第一次列点击通知改变了顺序；不能据此确认实际鼠标标题点击、内部比较算法或方向切换，因为合成通知没有经历真实的 Header/ListView 输入状态。
