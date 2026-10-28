@@ -239,3 +239,11 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 本轮说明：DefView 可以显示通过 `IPropertyStoreFactory` 提供且具有系统 schema 的额外属性列；此前的空白不只是 `GetDetailsEx` 回调未被消费。探针仅在绑定视图命令的生命周期内启用该 factory，其他 NativeProbe 路径仍委托原 Shell folder。尚未解释系统属性的排序路径，也未解决自定义私有 PKEY 的 schema/标题；因此“自定义逐行列显示及排序”硬门槛仍未通过，不能接入产品。最终输出：`src/.state/native-probe-watchdog/20261029-023213-192edcbb.stdout.log`，SHA-256 `DDA42C1CFBCC1296AE3F33F88482E0E56DAEA3F04E833B735759B17381DAA146`；探针按尚未满足私有 PKEY 门槛返回 exit code 1，已注册 schema 值显示、factory 调用计数、基础 Shell 操作检查均通过。
 
 参考：[IPropertyStoreFactory](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertystorefactory)、[IShellFolder::BindToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtoobject)、[GETPROPERTYSTOREFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/propsys/ne-propsys-getpropertystoreflags)。
+
+### 2026-10-29：已注册属性列排序方向读回
+
+在上述隔离探针中补充排序前后行序及 `IFolderView2::GetSortColumns` 读回。`System.Document.ByteCount` 列初始视图顺序为 `two.bin|ten - 副本.bin|ten.bin`，值为 `2|10|10`；设置方向 `1` 后，排序状态读回 `System.Document.ByteCount:1`，行序变为 `ten - 副本.bin|ten.bin|two.bin`。随后明确设置 SDK `SORT_DESCENDING=-1` 并刷新，视图读回方向已变成 `-1`，但行序和值仍为 `ten - 副本.bin|ten.bin|two.bin` / `10|10|2`。两次排序后 `CompareIDs`、逐项 `GetDetailsEx/GetDetailsOf` 仍无调用；属性工厂显示阶段仍是 3 次绑定/创建/取值。微软文档将 `SetSortColumns` 定义为设置并排序视图的操作，本机 SDK 也声明 `SORT_DESCENDING=-1`、`SORT_ASCENDING=1`；因此现有结果表明排序状态已读回，但 DefView 对该已注册属性列的重排/方向消费仍不符合预期。不能仅凭 `S_OK` 或状态读回宣称排序可用。
+
+本轮探针仍因未登记私有 PKEY 列没有值而以 exit code 1 结束；系统 schema 列显示与排序状态读回均有证据，实际排序门槛仍失败。日志 `src/.state/native-probe-watchdog/20261029-023517-d275bf4b.stdout.log`，SHA-256 `3F75F29366BABD94D055135A958575C5EBDA0FC4939546843705BF419E99834B`。
+
+参考：[IFolderView2::SetSortColumns](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setsortcolumns)、[SORTCOLUMN](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ns-shobjidl_core-sortcolumn)。

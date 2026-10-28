@@ -843,6 +843,7 @@ internal static class StaticShellFolderAdapterProbe
             ]));
             Check(ShellColumnManager.Capture(folderView, out var knownSchemaColumns));
             resetProbeCounters();
+            var knownSchemaInitialOrder = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -857,7 +858,49 @@ internal static class StaticShellFolderAdapterProbe
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var knownSchemaSortNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var knownSchemaSortCount));
+            var knownSchemaSortReadback = "none";
+            if (knownSchemaSortCount > 0)
+            {
+                var sortReadbackPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>() * knownSchemaSortCount);
+                try
+                {
+                    Check(At<GetSortColumns>(folderView, 28)(folderView, sortReadbackPointer, knownSchemaSortCount));
+                    var firstSort = Marshal.PtrToStructure<NativeSortColumn>(sortReadbackPointer);
+                    knownSchemaSortReadback = $"{firstSort.Key.FormatId}/{firstSort.Key.PropertyId}:{firstSort.Direction}";
+                }
+                finally { Marshal.FreeCoTaskMem(sortReadbackPointer); }
+            }
             var knownSchemaSortStats = ReadNativeComparisonStats();
+            sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn
+                {
+                    Key = new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 },
+                    Direction = -1
+                }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var knownSchemaDescendingNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var knownSchemaDescendingValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var knownSchemaDescendingSortCount));
+            var knownSchemaDescendingSortReadback = "none";
+            if (knownSchemaDescendingSortCount > 0)
+            {
+                var sortReadbackPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>() * knownSchemaDescendingSortCount);
+                try
+                {
+                    Check(At<GetSortColumns>(folderView, 28)(folderView, sortReadbackPointer, knownSchemaDescendingSortCount));
+                    var firstSort = Marshal.PtrToStructure<NativeSortColumn>(sortReadbackPointer);
+                    knownSchemaDescendingSortReadback = $"{firstSort.Key.FormatId}/{firstSort.Key.PropertyId}:{firstSort.Direction}";
+                }
+                finally { Marshal.FreeCoTaskMem(sortReadbackPointer); }
+            }
+            var knownSchemaDescendingStats = ReadNativeComparisonStats();
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -893,7 +936,7 @@ internal static class StaticShellFolderAdapterProbe
             var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var customHeaders = ReadDisplayedColumnHeaders(view);
             var customStats = ReadNativeComparisonStats();
-            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; known-schema-callbacks={knownSchemaStats}; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-sort-callbacks={knownSchemaSortStats}");
+            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}]; known-schema-descending-values=[{string.Join('|', knownSchemaDescendingValues)}]; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
             Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; headers=[{string.Join('|', customHeaders)}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; custom-column-callbacks={customStats}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
