@@ -138,6 +138,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunColor();
         if (args.Length == 1 && args[0] == "--explorerbrowser-color-notifications-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserColorNotifications();
+        if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
+            return PrivateDesktopShellProbe.RunColumnFilterCapability();
         if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")
             return PrivateDesktopShellProbe.RunMenuActivation();
         if (args.Length == 1 && args[0] == "--ishellview-session-restore-private-desktop")
@@ -247,6 +249,7 @@ internal static class Program
             Console.WriteLine("       --selection-commands (selection changes in a hidden fixture view; no file operations)");
             Console.WriteLine("       --color-capability (hidden child classes and available ListView colors)");
             Console.WriteLine("       --explorerbrowser-color-notifications-private-desktop (observe Shell view WM_NOTIFY without switching the user desktop)");
+            Console.WriteLine("       --column-filter-capability-private-desktop (probe native header dropdown and IShellFolder2 item properties on an isolated Windows Desktop)");
             Console.WriteLine("       --pane-capability (experimental hidden native navigation/preview frames)");
             Console.WriteLine("       --pane-capability-selected (same experiment after selecting an isolated text fixture)");
             Console.WriteLine("       --pane-capability-off (same experiment with initial pane state off)");
