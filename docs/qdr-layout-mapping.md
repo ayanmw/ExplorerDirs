@@ -152,12 +152,13 @@ SHA-256 `7C5BC49FB504340CA4E53DC599EEBC88A93A2A5D33154289C2CAD5ED57415074`。
 最终验收仍需在隔离 Q-Dir 实例中为十二种布局保存样例、互相读取导出，
 核对实际可见位置、标签、活动窗格及隐藏内容；不同 Q-Dir 版本也需单独记录结果。
 
-## `TreeNsplit` 宽度字段证据（2026-10-28）
+## `TreeNsplit` 宽度字段证据（更新于 2026-10-29）
 
 Q-Dir 官方 [FAQ 117 示例](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR)给出
-`Tree1split`～`Tree4split=2500`，但没有定义这些值的单位或换算方式。本机 Q-Dir 安装目录中
-`start.qdr`、`start2.qdr` 和一份收藏样本也全部为 `2500`；项目中发现的 275 份 `.qdr` 文件
-大多是 GUI smoke 生成夹具，值也全为 `2500`，不能视作 275 个独立布局样本。
+`Tree1split`～`Tree4split=2500`，但没有定义这些值的单位或换算方式。2026-10-29 只读检查
+Q-Dir 安装目录现有的四份配置（`New.nwp.qdr`、`start.qdr`、`start2.qdr` 与一份收藏样本），
+每份四个字段仍全部为 `2500`。此前项目中发现的 275 份 `.qdr` 文件大多是 GUI smoke
+生成夹具，值也全为 `2500`，不能视作 275 个独立布局样本。
 
 现有证据无法区分 2500 是 25% 比例、归一化整数还是其他编码，也没有不同宽度样本可校准。
 因此导入器继续提示未应用 `TreeNsplit`，不把它写入 `NavigationTreeWidths.ini` 或本程序扩展；
