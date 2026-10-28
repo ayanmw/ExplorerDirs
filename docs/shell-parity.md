@@ -432,4 +432,8 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 ### Explorer Shell 重启工具安全边界（2026-10-28）
 
-“工具 → 重启 Windows 资源管理器”先验证 `%WINDIR%\explorer.exe` 存在，并确认桌面 Shell 窗口所属进程的映像路径与该文件完全相同；若 Shell 是自定义进程或路径不可确认，则拒绝结束进程。自动恢复分支还会要求桌面 Shell 的 PID 已变化且新进程映像仍与 Windows `explorer.exe` 相同，避免将另一个进程短暂拥有 Shell 窗口误判为恢复成功。路径与 PID 判定有独立 SettingsSmoke，完整 SettingsSmoke 与 App Release build 通过。该检查不证明实际重启恢复时间；真实桌面、开始菜单、任务栏和共享进程文件窗口影响仍待集中验收。
+“工具 → 重启 Windows 资源管理器”先验证 `%WINDIR%\explorer.exe` 存在，并确认桌面 Shell 窗口所属进程的映像路径与该文件完全相同；若 Shell 是自定义进程或路径不可确认，则拒绝结束进程。自动恢复分支要求桌面 Shell 的 PID 已变化且新进程映像仍与 Windows `explorer.exe` 相同；自动恢复超时后启动的 fallback 也继续等待最多 10 秒，并用相同身份条件确认 Shell 已恢复，否则报告超时。路径、PID 和有界等待有独立 SettingsSmoke，完整 SettingsSmoke 与 App Release build 通过。该检查不证明实际重启恢复时间；真实桌面、开始菜单、任务栏和共享进程文件窗口影响仍待集中验收。
+
+### Q-Dir 列头过滤差距（2026-10-28）
+
+Q-Dir 官方 FAQ 38 把通配符快速过滤与“按列表列过滤”分别列出。当前 `QuickFilterSettings.Matches` 只对 Shell 项目名执行通配符匹配；`ShellFolderFilter` 没有按活动列读取项目属性，因此类型、大小、日期等列值的过滤尚未覆盖。FAQ 正文只说明可通过列标题过滤，没有公开具体手势、组合多个列条件的规则或可见状态；这些语义待后续查看官方示例/可见验收再确定，暂不改变现有原生列标题菜单。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。

@@ -4381,3 +4381,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 补齐手动启动路径：Windows 自动恢复等待超时后启动 `explorer.exe`，还会继续等待最多 10 秒，只有检测到不同于旧 PID、且映像确认为 `%WINDIR%\explorer.exe` 的桌面 Shell 才报告成功；仅仅启动进程不再算恢复完成。
 - Release SettingsSmoke 覆盖旧 Shell 持续存在时不得误报、有效新 Shell 出现后立即成功及有界轮询耗尽；完整 Release SettingsSmoke、App Release build（0 警告/错误）和 `git diff --check` 通过。没有操作实际 Explorer 进程或打开 UI；自动恢复与 fallback 的桌面、开始菜单和任务栏体验仍待集中可见验收。
+
+## 2026-10-28：补记 Q-Dir 列头过滤差距
+
+- 官方 FAQ 38 将按列过滤单独列在通配符快速过滤之后；当前 `QuickFilterSettings` 只匹配 Shell 项目名，没有按活动列读取属性值。将其记录为待评估的 P2 差距。公开文字未明确列标题触发方式、多列组合规则或筛选状态呈现；先取得更具体的交互证据，再决定是否及如何实现，不改动现有原生列标题菜单。详见[核心操作对照](shell-parity.md#q-dir-列头过滤差距2026-10-28)。
