@@ -1144,3 +1144,312 @@ extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
     if (folderView) folderView->Release();
     return hr;
 }
+
+namespace
+{
+    // Minimal, unregistered namespace used only to ask DefView whether it will
+    // call IShellFolder2::CompareIDs for the standard Size column.
+    struct SyntheticChild
+    {
+        USHORT cb;
+        USHORT id;
+        ULONGLONG size;
+        WCHAR name[32];
+    };
+
+    constexpr SyntheticChild kSyntheticChildren[] =
+    {
+        { sizeof(SyntheticChild), 1, 100, L"a-large.bin" },
+        { sizeof(SyntheticChild), 2, 2, L"two.bin" },
+        { sizeof(SyntheticChild), 3, 10, L"z-ten.bin" }
+    };
+    volatile LONG g_syntheticCompareCount = 0;
+    volatile LONG g_syntheticSizeCompareCount = 0;
+    volatile LONG g_syntheticEnumObjectsCount = 0;
+    volatile LONG g_syntheticEnumeratedItems = 0;
+
+    const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
+    {
+        if (!item || item->mkid.cb != sizeof(SyntheticChild)) return nullptr;
+        const auto* child = reinterpret_cast<const SyntheticChild*>(item);
+        return child->id >= 1 && child->id <= ARRAYSIZE(kSyntheticChildren) ? child : nullptr;
+    }
+
+    PIDLIST_RELATIVE CloneSyntheticChild(const SyntheticChild& child)
+    {
+        const auto bytes = sizeof(SyntheticChild) + sizeof(USHORT);
+        auto* copy = static_cast<BYTE*>(CoTaskMemAlloc(bytes));
+        if (!copy) return nullptr;
+        CopyMemory(copy, &child, sizeof(child));
+        ZeroMemory(copy + sizeof(child), sizeof(USHORT));
+        return reinterpret_cast<PITEMID_CHILD>(copy);
+    }
+
+    class SyntheticChildEnumerator final : public IEnumIDList
+    {
+    public:
+        explicit SyntheticChildEnumerator(ULONG index = 0) : _index(index) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IEnumIDList) return E_NOINTERFACE;
+            *value = static_cast<IEnumIDList*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE Next(ULONG count, PITEMID_CHILD* items, ULONG* fetched) override
+        {
+            if (!items || (count != 1 && !fetched)) return E_POINTER;
+            if (fetched) *fetched = 0;
+            ULONG made = 0;
+            while (made < count && _index < ARRAYSIZE(kSyntheticChildren))
+            {
+                items[made] = CloneSyntheticChild(kSyntheticChildren[_index]);
+                if (!items[made])
+                {
+                    for (ULONG index = 0; index < made; ++index) CoTaskMemFree(items[index]);
+                    return E_OUTOFMEMORY;
+                }
+                ++made;
+                ++_index;
+            }
+            if (fetched) *fetched = made;
+            InterlockedAdd(&g_syntheticEnumeratedItems, static_cast<LONG>(made));
+            return made == count ? S_OK : S_FALSE;
+        }
+        HRESULT STDMETHODCALLTYPE Skip(ULONG count) override
+        {
+            const auto available = static_cast<ULONG>(ARRAYSIZE(kSyntheticChildren));
+            const auto remaining = _index < available ? available - _index : 0;
+            const auto skipped = count < remaining ? count : remaining;
+            _index += skipped;
+            return skipped == count ? S_OK : S_FALSE;
+        }
+        HRESULT STDMETHODCALLTYPE Reset() override { _index = 0; return S_OK; }
+        HRESULT STDMETHODCALLTYPE Clone(IEnumIDList** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = new (std::nothrow) SyntheticChildEnumerator(_index);
+            return *value ? S_OK : E_OUTOFMEMORY;
+        }
+    private:
+        volatile LONG _references = 1;
+        ULONG _index;
+    };
+
+    class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2
+    {
+    public:
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid == IID_IUnknown || iid == IID_IShellFolder || iid == IID_IShellFolder2)
+                *value = static_cast<IShellFolder2*>(this);
+            else if (iid == IID_IPersist || iid == IID_IPersistFolder || iid == IID_IPersistFolder2)
+                *value = static_cast<IPersistFolder2*>(this);
+            else return E_NOINTERFACE;
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
+        {
+            if (!value) return E_POINTER;
+            *value = { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE value) override
+        {
+            if (!value) return E_INVALIDARG;
+            auto* copy = ILCloneFull(value);
+            if (!copy) return E_OUTOFMEMORY;
+            if (_root) CoTaskMemFree(_root);
+            _root = copy;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* value) override
+        {
+            if (!value) return E_POINTER;
+            if (!_root) return E_UNEXPECTED;
+            *value = ILCloneFull(_root);
+            if (!*value) return E_OUTOFMEMORY;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND, IBindCtx*, LPWSTR, ULONG*, PIDLIST_RELATIVE*, ULONG*) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            InterlockedIncrement(&g_syntheticEnumObjectsCount);
+            if (!(flags & SHCONTF_NONFOLDERS)) return S_FALSE;
+            *value = new (std::nothrow) SyntheticChildEnumerator();
+            return *value ? S_OK : E_OUTOFMEMORY;
+        }
+        HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE, IBindCtx*, REFIID, void**) override { return E_NOINTERFACE; }
+        HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE, IBindCtx*, REFIID, void**) override { return E_NOINTERFACE; }
+        HRESULT STDMETHODCALLTYPE CompareIDs(LPARAM column, PCUIDLIST_RELATIVE left, PCUIDLIST_RELATIVE right) override
+        {
+            const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
+            const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
+            if (!leftChild || !rightChild) return E_INVALIDARG;
+            InterlockedIncrement(&g_syntheticCompareCount);
+            short comparison = 0;
+            switch (LOWORD(column))
+            {
+            case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
+            case 1:
+                InterlockedIncrement(&g_syntheticSizeCompareCount);
+                comparison = leftChild->size < rightChild->size ? -1 : leftChild->size > rightChild->size ? 1 : 0;
+                break;
+            case 2: comparison = 0; break;
+            default: return E_INVALIDARG;
+            }
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
+        }
+        HRESULT STDMETHODCALLTYPE CreateViewObject(HWND, REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IShellView) return E_NOINTERFACE;
+            SFV_CREATE create{};
+            create.cbSize = sizeof(create);
+            create.pshf = this;
+            return SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+        }
+        HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY, SFGAOF* attributes) override
+        {
+            if (!attributes) return E_POINTER;
+            if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
+            *attributes &= SFGAO_CANDELETE | SFGAO_CANRENAME | SFGAO_CANCOPY;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND, UINT, PCUITEMID_CHILD_ARRAY, REFIID, UINT*, void**) override { return E_NOINTERFACE; }
+        HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF, STRRET* name) override
+        {
+            if (!name) return E_POINTER;
+            const auto* child = SyntheticData(item);
+            if (!child) return E_INVALIDARG;
+            name->uType = STRRET_WSTR;
+            const auto bytes = (wcslen(child->name) + 1) * sizeof(WCHAR);
+            name->pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
+            if (!name->pOleStr) return E_OUTOFMEMORY;
+            CopyMemory(name->pOleStr, child->name, bytes);
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE SetNameOf(HWND, PCUITEMID_CHILD, LPCWSTR, SHGDNF, PITEMID_CHILD*) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE GetDefaultSearchGUID(GUID*) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch**) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD, ULONG* sort, ULONG* display) override
+        {
+            if (!sort || !display) return E_POINTER;
+            *sort = 0;
+            *display = 0;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column, SHCOLSTATEF* state) override
+        {
+            if (!state) return E_POINTER;
+            if (column > 2) return E_INVALIDARG;
+            *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* key, VARIANT* value) override
+        {
+            if (!key || !value || *key != kSizeKey) return E_INVALIDARG;
+            const auto* child = SyntheticData(item);
+            if (!child) return E_INVALIDARG;
+            VariantInit(value);
+            value->vt = VT_UI8;
+            value->ullVal = child->size;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
+        {
+            if (!details || column > 2) return E_INVALIDARG;
+            const auto* child = SyntheticData(item);
+            std::wstring text;
+            if (!item)
+            {
+                text = column == 0 ? L"Name" : column == 1 ? L"Size" : L"Type";
+                details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
+                details->cxChar = column == 0 ? 24 : 12;
+            }
+            else
+            {
+                if (!child) return E_INVALIDARG;
+                text = column == 0 ? child->name : column == 1 ? std::to_wstring(child->size) : L"BIN File";
+                details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
+                details->cxChar = 16;
+            }
+            details->str.uType = STRRET_WSTR;
+            const auto bytes = (text.size() + 1) * sizeof(WCHAR);
+            details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
+            if (!details->str.pOleStr) return E_OUTOFMEMORY;
+            CopyMemory(details->str.pOleStr, text.c_str(), bytes);
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* key) override
+        {
+            if (!key) return E_POINTER;
+            if (column == 0) *key = PKEY_ItemNameDisplay;
+            else if (column == 1) *key = PKEY_Size;
+            else if (column == 2) *key = PKEY_ItemTypeText;
+            else return E_INVALIDARG;
+            return S_OK;
+        }
+    private:
+        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); }
+        volatile LONG _references = 1;
+        PIDLIST_ABSOLUTE _root = nullptr;
+    };
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)
+{
+    if (!rootPidl || !folder || !view) return E_POINTER;
+    *folder = nullptr;
+    *view = nullptr;
+    auto* instance = new (std::nothrow) SyntheticSortFolder();
+    if (!instance) return E_OUTOFMEMORY;
+    auto result = instance->Initialize(rootPidl);
+    if (FAILED(result)) { instance->Release(); return result; }
+    result = instance->CreateViewObject(nullptr, IID_IShellView, reinterpret_cast<void**>(view));
+    if (FAILED(result)) { instance->Release(); return result; }
+    *folder = static_cast<IShellFolder2*>(instance);
+    return result;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
+{
+    InterlockedExchange(&g_syntheticCompareCount, 0);
+    InterlockedExchange(&g_syntheticSizeCompareCount, 0);
+    InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
+    InterlockedExchange(&g_syntheticEnumeratedItems, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
+{ return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
+{ return InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumObjectsCount()
+{ return InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumeratedItemCount()
+{ return InterlockedCompareExchange(&g_syntheticEnumeratedItems, 0, 0); }

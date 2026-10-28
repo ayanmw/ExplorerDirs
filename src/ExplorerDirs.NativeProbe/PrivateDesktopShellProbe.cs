@@ -140,6 +140,9 @@ internal static class PrivateDesktopShellProbe
         Run("static-shell-item-bound-view", StaticShellFolderAdapterProbe.RunShellItemBoundView,
             TimeSpan.FromSeconds(90), initializeOle: true);
 
+    internal static int RunSyntheticShellSizeSort() =>
+        Run("synthetic-shell-size-sort", SyntheticShellSortProbe.Run, TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);
 

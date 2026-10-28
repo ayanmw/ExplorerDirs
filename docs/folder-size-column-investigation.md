@@ -268,6 +268,12 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 参考：[IPropertyDescriptionAliasInfo](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertydescriptionaliasinfo)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)、[IShellFolder2::GetDefaultColumn](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumn)。
 
+### 2026-10-29：未注册合成 Shell 文件夹的 DefView 边界
+
+新增 NativeProbe 合成文件夹，提供三个自有 PIDL 项目及标准 `PKEY_Size` 元数据；其 `CompareIDs` 按 `2/10/100` 数值比较，并记录 `EnumObjects`、项目枚举与比较器调用。Private Desktop 隔离运行中，`IFolderView2::GetFolder(IID_IShellFolder2)` 返回的根对象身份与探针对象一致，但实际视图项目数为 0，`EnumObjects=0`、枚举项数为 0，故尚未进入升降序和 `CompareIDs` 验证。此前将空 PIDL 作为根时，视图反而显示 Desktop 的 62 项；用自定义未知 CLSID PIDL 时探针挂起，已放弃此无效路径。最新运行 `src/.state/native-probe-watchdog/20261029-033247-644ad21e.stdout.log` 退出码 1，Private Desktop 前台 HWND 与输入时间戳均未变化。
+
+结论仅限于这个“未注册对象 + 物理文件夹绝对 PIDL”的构造：对象身份能从 `GetFolder` 读回，但不足以让 DefView 从对象枚举项目；`GetCurFolder` 的物理 PIDL 会被 Shell 当作文件系统位置，空 PIDL 会落到 Desktop。不能据此否定自有 PIDL namespace 中 `CompareIDs` 的标准大小排序，也不能把排序成功作为本轮结果。继续验证需要一个能够由绝对 PIDL 解析/绑定回合成 folder 的虚拟 namespace；本轮没有创建 Shell namespace/CLSID 注册表项，也没有修改产品或 release。下一阶段应先评估带完整清理与失败恢复的进程级临时注册方案，再继续比较器探针。`build-static-shell-folder-adapter.ps1` 和 NativeProbe Release 均构建成功（0 警告、0 错误）。
+
 ### 2026-10-29：列映射与默认排序合同调用计数
 
 在 NativeProbe 适配器中增加 `MapColumnToSCID`、`GetDefaultColumn` 调用计数，并暂时启用一个只供实验的默认排序覆写（返回 ByteCount 列序号）。Private Desktop 创建绑定视图时，DefView 调用 `MapColumnToSCID` 40 次枚举列，但 `GetDefaultColumn` 为 0；初始读回排序仍为标准 Name 列，`CompareIDs` 为 0。仅在列枚举阶段看到 MapColumn 调用，随后标准 Size Header 排序以及 ByteCount `SetSortColumns`/Header 排序阶段两项计数均为 0。默认排序覆写因宿主完全不调用该方法而没有生效。

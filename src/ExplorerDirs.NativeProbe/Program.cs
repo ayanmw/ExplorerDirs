@@ -63,6 +63,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(wrappedPidls: true);
         if (args.Length == 1 && args[0] == "--static-shell-item-bound-view-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellItemBoundView();
+        if (args.Length == 1 && args[0] == "--synthetic-shell-size-sort-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticShellSizeSort();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
             return PrivateDesktopShellProbe.RunStaticShellColumnAdapter(strictInterfaces: true, activateView: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike")
@@ -212,6 +214,7 @@ internal static class Program
             Console.WriteLine("       --static-shell-column-folder-smoke (native IShellFolder2 adapter CompareIDs; no window)");
             Console.WriteLine("       --static-shell-column-wrapped-folder-smoke (wrapped child PIDLs through native adapter contracts; no window)");
             Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
+            Console.WriteLine("       --synthetic-shell-size-sort-private-desktop (unregistered synthetic IShellFolder2/DefView Size-sort probe)");
             Console.WriteLine("       --static-shell-column-wrapped-adapter-private-desktop (wrapped PIDL IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");
             Console.WriteLine("       --ishellview-color-spike (isolated native IShellView color-hook feasibility probe; no ExplorerBrowser or input)");
