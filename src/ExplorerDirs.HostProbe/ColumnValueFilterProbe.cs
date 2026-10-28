@@ -18,6 +18,8 @@ internal static class ColumnValueFilterProbe
         var keyType = assembly.GetType("ExplorerDirs.App.PropertyKeyState", true)!;
         var key = Activator.CreateInstance(keyType, ItemTypeTextFormatId, 4u)
             ?? throw new Exception("Could not create the System.ItemTypeText property key.");
+        var itemNameKey = Activator.CreateInstance(keyType, ItemTypeTextFormatId, 10u)
+            ?? throw new Exception("Could not create the System.ItemNameDisplay property key.");
         var filterConstructor = filterType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Single(constructor => constructor.GetParameters().Length == 2);
         var setFilter = hostType.GetMethod("SetQuickFilter", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -41,28 +43,38 @@ internal static class ColumnValueFilterProbe
 
         Apply("", []);
         VerifyPane0(["initial.txt", "sample.bin"], "clearing initial filter restores the complete fixture");
-        Apply("", [textType]);
+        Apply("", (key, [textType]));
         VerifyPane0(["initial.txt"], "TXT type value filters the Shell view");
         VerifyOtherPanes();
-        Apply("", [binaryType]);
+        Apply("", (key, [textType, binaryType]));
+        VerifyPane0(["initial.txt", "sample.bin"], "multiple selected values in one column use OR");
+        VerifyOtherPanes();
+        Apply("", (key, [binaryType]));
         VerifyPane0(["sample.bin"], "switching the selected type value updates the Shell view");
         VerifyOtherPanes();
-        Apply("*.txt", [binaryType]);
+        Apply("", (key, [textType]), (itemNameKey, ["initial.txt"]));
+        VerifyPane0(["initial.txt"], "different column values combine with AND");
+        VerifyOtherPanes();
+        Apply("", (key, [textType]), (itemNameKey, ["sample.bin"]));
+        VerifyPane0([], "conflicting values in different columns hide all rows");
+        VerifyOtherPanes();
+        Apply("*.txt", (key, [binaryType]));
         VerifyPane0([], "name pattern and column value are combined with AND");
         VerifyOtherPanes();
-        Apply("*.txt", [textType]);
+        Apply("*.txt", (key, [textType]));
         VerifyPane0(["initial.txt"], "matching name pattern and column value remain visible");
         VerifyOtherPanes();
         Apply("", []);
         VerifyPane0(["initial.txt", "sample.bin"], "clearing column values restores the Shell view");
         VerifyOtherPanes();
-        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' switch/AND/clear=True independent-panes=True");
+        Console.WriteLine($"column-value-filter: property=System.ItemTypeText txt='{textType}' bin='{binaryType}' same-column-OR=True cross-column-AND=True pattern-AND=True switch/clear=True independent-panes=True");
         return 0;
 
-        void Apply(string pattern, string[] values)
+        void Apply(string pattern, params (object Key, string[] Values)[] filters)
         {
-            var filterArray = Array.CreateInstance(filterType, values.Length);
-            if (values.Length > 0) filterArray.SetValue(filterConstructor.Invoke([key, values]), 0);
+            var filterArray = Array.CreateInstance(filterType, filters.Length);
+            for (var index = 0; index < filters.Length; index++)
+                filterArray.SetValue(filterConstructor.Invoke([filters[index].Key, filters[index].Values]), index);
             var settings = Activator.CreateInstance(settingsType, pattern, false, false, filterArray)
                 ?? throw new Exception("Could not create QuickFilterSettings.");
             if (setFilter.Invoke(hosts[0], [settings]) is false)
