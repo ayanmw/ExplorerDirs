@@ -57,10 +57,18 @@ internal sealed record QuickFilterSettings
         foreach (var filter in _columnFilters)
         {
             var value = readValue(filter.Key);
-            if (value is not null && !filter.Values.Contains(value, StringComparer.OrdinalIgnoreCase)) return false;
+            if (value is not null && !filter.Contains(value)) return false;
         }
         return true;
     }
 }
 
-internal sealed record ColumnValueFilter(PropertyKeyState Key, IReadOnlyList<string> Values);
+internal sealed record ColumnValueFilter(PropertyKeyState Key, IReadOnlyList<string> Values)
+{
+    private readonly HashSet<string>? _valueLookup = Values.Count >= 8
+        ? new HashSet<string>(Values, StringComparer.OrdinalIgnoreCase)
+        : null;
+
+    internal bool Contains(string value) => _valueLookup?.Contains(value) ??
+        Values.Contains(value, StringComparer.OrdinalIgnoreCase);
+}

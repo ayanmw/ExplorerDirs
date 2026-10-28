@@ -37,6 +37,14 @@ internal static class ShellQuickFilterSmoke
             "a nonmatching value in any selected column rejects the item");
         Check(columns.MatchesColumnFilters(_ => null),
             "unavailable Shell properties fail open instead of hiding the item");
+
+        var manyValues = Enumerable.Range(0, QuickFilterSettings.MaximumColumnFilterValues)
+            .Select(index => $"VALUE-{index}").ToArray();
+        var manyValueFilter = new ColumnValueFilter(typeKey, manyValues);
+        Check(manyValueFilter.Contains("value-255"),
+            "large column value lists provide case-insensitive membership lookup");
+        Check(!manyValueFilter.Contains("value-256"),
+            "large column value lists reject values that were not selected");
     }
 
     private static void Check(bool condition, string message)
