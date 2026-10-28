@@ -441,3 +441,7 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列表列值过滤作为两种功
 #### 2026-10-28 Private Desktop 探针结果
 
 在不切换用户桌面的 Private Desktop ExplorerBrowser 视图中，UI Automation 能读到一个 `UIViewHeader` 和三个 `UIColumnHeader` SplitButton。把可见列从 Name/Size/Type 重排为 Type/Name/Size 后，`IColumnManager` 返回 property id `4/10/12`，UIA 列头也按“类型/名称/大小”排列，矩形随列宽同步；这为“当前列序 → PROPERTYKEY”的索引映射提供了本机证据。`IFolderFilter::ShouldShow` 对三个 fixture 项都成功 QI 到 `IShellFolder2`，`GetDetailsEx(PKEY_ItemTypeText)` 返回 3 个值，样本为“TXT 文件”“BIN 文件”；清除 filter 后项目数从 3 恢复为 3。UIA 声明支持 `ExpandCollapsePattern`，但调用 Expand 后状态仍为 Collapsed，且没有原生 `#32768` 菜单出现，不能据此认为下拉菜单可接管。探针未验证网络/云/虚拟 Shell provider、鼠标箭头区域、筛选值菜单 UI、标签保存或用户可见交互。下一步仅继续隔离检查列头点击区域与现有 Shell 下拉行为，再评审应用 Popup 的锚定/生命周期；不据此接入产品菜单。
+
+#### 2026-10-28 UIA Invoke 与前台守卫失败
+
+额外尝试对 DirectUI 列头 SplitButton 调用 UIA `InvokePattern.Invoke()`，该轮读到排序状态不变且没有 `#32768` Popup，但 Private Desktop 守卫报告前台 HWND 从 `0x272314` 变为 `0x59024C`，因此整轮以失败处理，不采纳其菜单行为结论。移除 Invoke 后再运行原只读能力探针，守卫仍报告 `0xE0B5E` 变为 `0x405F0` 并失败。现有证据不能把变化归因于 UIA、探针或外部活动；不得降低前台不变门槛。暂停继续运行 ExplorerBrowser 视图探针，待能确认稳定前台状态后再继续；列头真实鼠标箭头命中仍未验证。
