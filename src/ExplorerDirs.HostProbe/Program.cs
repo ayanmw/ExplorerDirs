@@ -2120,6 +2120,27 @@ internal static class Program
                 if (!selectionBaselineSettled)
                     throw new Exception("The stress probe could not capture the explicitly prepared selection as the product's current input baseline.");
 
+                // Shell may transiently add the focused row to a confirmed multi-selection during a view rebuild.
+                // Exercise that callback directly so the recovery gate is tested independently of timing luck.
+                SetSelectedFocus(hostType, hosts[0], folder, "initial.txt");
+                var transientSelectionReady = WaitForPredicate(() =>
+                    SelectedPaths(hostType, hosts[0], folder).Length == 3, TimeSpan.FromSeconds(2));
+                if (!transientSelectionReady)
+                    throw new Exception("The probe could not prepare the transient focused-row selection.");
+                InvokeShellSelectionChanged(hostType, hosts[0]);
+                var savedSnapshot = lastNativeSelection.GetValue(hosts[0]);
+                var savedSnapshotCount = savedSnapshot is null ? 0 :
+                    (int)savedSnapshot.GetType().GetProperty("SelectedCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(savedSnapshot)!;
+                if (savedSnapshotCount != selectedBefore.Length)
+                    throw new Exception($"The transient Shell focused-row selection replaced the confirmed snapshot: {savedSnapshotCount}.");
+                SetUnselectedFocus(hostType, hosts[0], folder, "initial.txt");
+                var baselineSelectionRestored = WaitForPredicate(() =>
+                    SelectedPaths(hostType, hosts[0], folder).Order(StringComparer.OrdinalIgnoreCase)
+                        .SequenceEqual(selectedBefore, StringComparer.OrdinalIgnoreCase), TimeSpan.FromSeconds(2));
+                if (!baselineSelectionRestored)
+                    throw new Exception("The probe could not restore the original multiselection after the transient callback check.");
+                InvokeShellSelectionChanged(hostType, hosts[0]);
+
                 var resetDiagnosticTrace = hostType.GetMethod("ResetDiagnosticTrace", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 foreach (var host in hosts) resetDiagnosticTrace.Invoke(host, null);
                 var shellSiteType = browserSites[0].GetType();

@@ -18,6 +18,7 @@ internal sealed class ShellViewSelectionSnapshot : IDisposable
     private readonly bool _focusedWasSelected;
     internal int SelectedCount => _selected.Count;
     internal bool HasFocusedItem => _focused != 0;
+    internal bool FocusedItemWasSelected => _focusedWasSelected;
 
     private ShellViewSelectionSnapshot(List<nint> selected, nint focused, bool focusedWasSelected)
     {
@@ -52,6 +53,9 @@ internal sealed class ShellViewSelectionSnapshot : IDisposable
             throw;
         }
     }
+
+    internal bool WasUnselectedFocusedItemAddedTo(ShellViewSelectionSnapshot other) =>
+        _focused != 0 && !_focusedWasSelected && other._selected.Any(item => ILIsEqual(_focused, item));
 
     internal static ShellViewSelectionSnapshot? Capture(nint folderView)
     {

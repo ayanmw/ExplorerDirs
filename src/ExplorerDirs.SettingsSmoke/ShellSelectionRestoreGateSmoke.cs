@@ -18,6 +18,15 @@ internal static class ShellSelectionRestoreGateSmoke
             "an incomplete smaller Shell selection does not replace the confirmed snapshot");
         Check(ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(true, true, 1, 2), expected: false,
             "a larger Shell selection replaces an incomplete snapshot during asynchronous enumeration");
+        Check(ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(true, true, 2, 3,
+            previousUnselectedFocusBecameSelected: true), expected: true,
+            "a prior unselected focus item added by Shell does not replace the confirmed selection during refresh");
+        Check(ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(true, true, 1, 2,
+            previousUnselectedFocusBecameSelected: false), expected: false,
+            "asynchronous enumeration can still grow a partial selection when focus selection is unchanged");
+        Check(ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(true, false, 2, 3,
+            previousUnselectedFocusBecameSelected: true), expected: false,
+            "new input still replaces a snapshot when the user selects the focused item");
         Check(ShellSelectionRestoreGate.ShouldRestore(true, 2, 7, 7), expected: true,
             "unchanged user-input generation restores surviving selection");
         Check(ShellSelectionRestoreGate.ShouldRetainSnapshotAfterEmptyCallback(true, 2, 7, 7), expected: true,

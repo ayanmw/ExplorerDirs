@@ -3145,14 +3145,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var sameView = _lastNativeSelectionNavigationVersion == _viewReadiness.NavigationVersion &&
                 string.Equals(_lastNativeSelectionPath, CurrentPath, StringComparison.OrdinalIgnoreCase);
             var inputUnchanged = _lastNativeSelectionInputVersion == currentInputVersion;
-            var previousSelectedCount = _lastNativeSelection?.SelectedCount ?? 0;
+            var previousSnapshot = _lastNativeSelection;
+            var previousSelectedCount = previousSnapshot?.SelectedCount ?? 0;
+            var previousUnselectedFocusBecameSelected = previousSnapshot?.WasUnselectedFocusedItemAddedTo(snapshot) == true;
             var keepExistingSnapshot = ShellSelectionRestoreGate.ShouldKeepExistingSnapshot(sameView,
-                inputUnchanged, previousSelectedCount, snapshot.SelectedCount);
-            TraceShellSelectionRestore("snapshot", $"decision={(keepExistingSnapshot ? "keep" : "replace")},previous={previousSelectedCount},current={snapshot.SelectedCount},same-view={sameView},input-unchanged={inputUnchanged}");
+                inputUnchanged, previousSelectedCount, snapshot.SelectedCount, previousUnselectedFocusBecameSelected);
+            TraceShellSelectionRestore("snapshot", $"decision={(keepExistingSnapshot ? "keep" : "replace")},previous={previousSelectedCount},current={snapshot.SelectedCount},same-view={sameView},input-unchanged={inputUnchanged},previous-unselected-focus-became-selected={previousUnselectedFocusBecameSelected},current-focus-selected={snapshot.FocusedItemWasSelected}");
             if (keepExistingSnapshot)
             {
-                // Shell can publish an intermediate subset while rebuilding a large view; keep the full
-                // selection until user input, navigation, or a complete replacement snapshot is observed.
+                // Shell can publish an intermediate subset or temporarily select the prior unselected focus item
+                // while rebuilding a large view; keep the confirmed selection through either transition.
                 snapshot.Dispose();
                 return;
             }

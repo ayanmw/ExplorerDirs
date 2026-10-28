@@ -3,9 +3,10 @@ namespace ExplorerDirs.App;
 internal static class ShellSelectionRestoreGate
 {
     internal static bool ShouldKeepExistingSnapshot(bool sameView, bool userInputUnchanged,
-        int previousSelectedCount, int currentSelectedCount)
+        int previousSelectedCount, int currentSelectedCount, bool previousUnselectedFocusBecameSelected = false)
         => sameView && userInputUnchanged && previousSelectedCount > 0 && currentSelectedCount > 0 &&
-            previousSelectedCount >= currentSelectedCount;
+            (previousSelectedCount >= currentSelectedCount ||
+             previousUnselectedFocusBecameSelected);
 
     internal static bool ShouldUseRefreshSnapshot(bool hasSnapshot, bool sameView, bool userInputUnchanged)
         => hasSnapshot && sameView && userInputUnchanged;
