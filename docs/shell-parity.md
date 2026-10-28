@@ -121,6 +121,8 @@
 
 > **标签栏显示模式（2026-10-26）：**对照 Q-Dir [FAQ 101](https://www.softwareok.com/?faq=101&seite=faq-Q-DIR) 的“始终显示 / 至少两个标签时显示”选项，视图菜单现在可切换两种模式，并保存到便携 `TabStripVisibility.ini`。默认保持始终显示；按每个窗格的标签数量显示/隐藏标题栏，Shell 视图、标签对象和会话不受影响。Tab/Shift+Tab 与 F6 停靠点同步移除隐藏的标签栏；策略/INI smoke、扩展焦点矩阵、完整 Release SettingsSmoke 和 App Release build 通过。真实菜单操作、切换后键盘焦点和跨重启可见效果尚未桌面验收。
 
+> **窗口标题栏内容模式（2026-10-29）：**Q-Dir 官方语言资源列出隐藏附加信息、完整路径、文件夹名、最近打开的收藏夹、所选对象完整路径五种标题栏内容。Explorer Dirs 在“视图 → 标题栏显示”提供前四者中除“最近打开的收藏夹”外的四种模式，并将偏好写入便携 `WindowTitle.ini`；当前模式只更新活动窗格的当前路径或唯一选中对象路径，应用名/版本标识始终保留。定向标题格式/设置 smoke、App Release build 和发布隔离脚本 smoke 通过；完整 SettingsSmoke 在无关的 owner 激活目标断言处失败。收藏夹模式因语义需要先确认真实 Q-Dir 行为而暂缓；菜单位置、Shell 选择变化和导航下的实际标题呈现仍待集中 UI 验收。[Q-Dir 官方语言资源](https://www.softwareok.eu/?seite=Freeware/Q-Dir/language/English)。
+
 > **Watcher 自然更新后的选区校正（2026-10-26）：**删除未选中项目时，隐藏生产宿主曾观察到 Shell 将原焦点项加入选区而无最终选区回调。现在 watcher 变化已结算且计数自然匹配时，若当前路径/导航/用户输入代际仍匹配，就按缓存快照复核并恢复原生选区与焦点；仅本轮有 watcher 变化时才触发，空闲轮询不触碰焦点。隐藏定向探针、用户清空选区、10,000 项产品压力和 Release SettingsSmoke 通过。真实 ExplorerBrowser 可见交互、其它 Shell provider 与 GUI 验收未做；自动刷新 P0 仍开放。详见[调查记录](live-update-investigation.md#2026-10-26-watcher-自然收敛时的选区漂移)。
 
 > **所有查看方式的列标题（2026-10-25）：**源码已在 ExplorerBrowser 初始化前启用 `FVO_CUSTOMPOSITION`，并在 `OnViewCreated` 清除两个列头隐藏标志，Shell 其余 folder flags 保持不变。纯逻辑 smoke 和 Release 构建通过；由于当前不使用 Computer Use，未运行隐藏 ExplorerBrowser 宿主探针或 GUI。八种模式的列头渲染、排序/排列、选区与原生菜单行为仍待验证；此项尚未作为已验收功能发布。

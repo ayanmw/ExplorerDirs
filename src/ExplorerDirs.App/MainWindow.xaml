@@ -72,6 +72,16 @@
                 <MenuItem x:Name="TabHeaderMaximumWidthMenu" Header="限制标签标题最大宽度" IsCheckable="True"
                           ToolTip="取消限制后，标签会按文件夹名称展开；名称较长时可能占用更多标签栏空间。"
                           Click="TabHeaderMaximumWidth_Click"/>
+                <MenuItem x:Name="WindowTitleDisplayMenu" Header="标题栏显示">
+                    <MenuItem x:Name="WindowTitleNoneMenu" Header="仅显示应用名" IsCheckable="True"
+                              Tag="None" Click="WindowTitleMode_Click"/>
+                    <MenuItem x:Name="WindowTitleFullPathMenu" Header="当前文件夹完整路径" IsCheckable="True"
+                              Tag="FullPath" Click="WindowTitleMode_Click"/>
+                    <MenuItem x:Name="WindowTitleFolderNameMenu" Header="当前文件夹名称" IsCheckable="True"
+                              Tag="FolderName" Click="WindowTitleMode_Click"/>
+                    <MenuItem x:Name="WindowTitleSelectedItemPathMenu" Header="所选项目完整路径" IsCheckable="True"
+                              Tag="SelectedItemPath" Click="WindowTitleMode_Click"/>
+                </MenuItem>
                 <MenuItem x:Name="FullScreenMenu" Header="全屏" InputGestureText="F11"
                           IsCheckable="True" Click="FullScreenMenu_Click"/>
                 <MenuItem x:Name="HiddenItemsMenu" Header="隐藏项目" SubmenuOpened="HiddenItemsMenu_SubmenuOpened">

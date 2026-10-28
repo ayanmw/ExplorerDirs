@@ -15,6 +15,13 @@ if (args is ["--tab-transfer-policy-smoke"])
     return;
 }
 
+if (args is ["--window-title-preference-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.WindowTitlePreferenceSmoke.Run(
+        Path.Combine(AppContext.BaseDirectory, "window-title-preference-smoke"));
+    return;
+}
+
 if (args is ["--view-state-restore-smoke"])
 {
     ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
@@ -424,6 +431,8 @@ ExplorerDirs.SettingsSmoke.WindowsExplorerProcessIdentitySmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
 ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
+ExplorerDirs.SettingsSmoke.WindowTitlePreferenceSmoke.Run(
+    Path.Combine(AppContext.BaseDirectory, "window-title-preference-smoke"));
 ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
 HiddenItemsPreferenceSmoke.Run();

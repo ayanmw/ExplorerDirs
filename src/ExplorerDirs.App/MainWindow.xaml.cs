@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private readonly TabStripVisibilityStore _tabStripVisibilityStore;
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly TabHeaderMaximumWidthStore _tabHeaderMaximumWidthStore;
+    private readonly WindowTitlePreferenceStore _windowTitlePreferenceStore;
     private readonly TabCloseButtonStore _tabCloseButtonStore;
     private readonly TabHoverActivationPreference _tabHoverActivationPreference;
     private readonly PortableBooleanPreference _newTabLocationPreference;
@@ -60,6 +61,9 @@ public partial class MainWindow : Window
     private bool _alwaysShowTabStrip;
     private bool _multilineTabHeaders;
     private bool _limitTabHeaderWidth = true;
+    private WindowTitleMode _windowTitleMode;
+    private string _applicationTitle = "Explorer Dirs";
+    private bool _windowTitleRefreshQueued;
     private bool _showTabCloseButtons;
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
     private bool _newTabUsesCurrentFolder;
@@ -166,10 +170,17 @@ public partial class MainWindow : Window
         _createWindow = createWindow;
         _restartApplication = restartApplication;
 #if DEBUG
-        Title = "Explorer Dirs · 开发调试";
+        _applicationTitle = "Explorer Dirs · 开发调试";
 #else
-        Title = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
+        _applicationTitle = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
 #endif
+        Title = _applicationTitle;
+        _windowTitlePreferenceStore = new WindowTitlePreferenceStore(Path.Combine(
+            _profileDirectory, "WindowTitle.ini"));
+        _windowTitleMode = _windowTitlePreferenceStore.Load();
+        if (_windowTitlePreferenceStore.LoadWarning is { } titleWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? titleWarning : $"{EnvironmentStatus.Text} {titleWarning}";
         var state = _sessionStore.Load();
         if (_sessionStore.LoadWarning is { } warning)
             EnvironmentStatus.Text = warning;
@@ -348,7 +359,11 @@ public partial class MainWindow : Window
             pane.SetStatusBarVisible(_showStatusBar);
             pane.SetStatusBarSelectionSizeVisible(_showSelectionSizeInStatusBar);
             pane.SetStatusBarFolderSizeWhenEmpty(_showFolderSizeWhenEmpty);
-            pane.CommandContextChanged += (_, _) => ScheduleFileCommandRefresh(pane);
+            pane.CommandContextChanged += (_, _) =>
+            {
+                ScheduleFileCommandRefresh(pane);
+                if (ReferenceEquals(ActivePane, pane)) QueueWindowTitleRefresh();
+            };
             pane.SelectedFolderForTree += Pane_SelectedFolderForTree;
             var paneIndex = index;
             pane.TreeWidth = _treeWidths.GetPaneWidth(index);
@@ -365,6 +380,7 @@ public partial class MainWindow : Window
                 ScheduleSave();
                 if (ReferenceEquals(ActivePane, pane)) SynchronizeSharedTree();
                 if (ReferenceEquals(ActivePane, pane)) UpdateShellPaneToggles();
+                if (ReferenceEquals(ActivePane, pane)) QueueWindowTitleRefresh();
             };
             pane.GotKeyboardFocus += (_, _) => SetActivePane(pane);
             pane.Activated += (_, _) =>
@@ -381,6 +397,7 @@ public partial class MainWindow : Window
 
         _layout = LayoutPreset.Find(state?.Layout ?? 4).Id;
         ActivePane = _panes[Math.Clamp(state?.ActivePane ?? 0, 0, _panes.Length - 1)];
+        UpdateWindowTitle();
         UpdateActivePaneVisuals();
         BuildLayoutControls();
         BuildFileCommandControls();
@@ -551,6 +568,7 @@ public partial class MainWindow : Window
             _lastFocusedPaneByLayout[_layout] = index;
         if (changed) SynchronizeSharedTree();
         UpdateShellPaneToggles();
+        if (changed) QueueWindowTitleRefresh();
         if (changed) ScheduleFileCommandRefresh(pane);
         if (changed) ScheduleSave();
     }
@@ -566,6 +584,59 @@ public partial class MainWindow : Window
         UpdateShellPaneToggles();
         UpdateTabStripVisibilityMenu();
         TabHeaderMaximumWidthMenu.IsChecked = _limitTabHeaderWidth;
+        UpdateWindowTitleMenuState();
+    }
+
+    private void WindowTitleMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value } ||
+            !Enum.TryParse(value, out WindowTitleMode mode) || !Enum.IsDefined(mode)) return;
+        try
+        {
+            _windowTitlePreferenceStore.Save(mode);
+            _windowTitleMode = mode;
+            UpdateWindowTitleMenuState();
+            UpdateWindowTitle();
+        }
+        catch (Exception ex)
+        {
+            UpdateWindowTitleMenuState();
+            EnvironmentStatus.Text = $"标题栏显示设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void UpdateWindowTitleMenuState()
+    {
+        WindowTitleNoneMenu.IsChecked = _windowTitleMode == WindowTitleMode.None;
+        WindowTitleFullPathMenu.IsChecked = _windowTitleMode == WindowTitleMode.FullPath;
+        WindowTitleFolderNameMenu.IsChecked = _windowTitleMode == WindowTitleMode.FolderName;
+        WindowTitleSelectedItemPathMenu.IsChecked = _windowTitleMode == WindowTitleMode.SelectedItemPath;
+    }
+
+    private void QueueWindowTitleRefresh()
+    {
+        if (_windowTitleRefreshQueued || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        _windowTitleRefreshQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            _windowTitleRefreshQueued = false;
+            if (!_closed) UpdateWindowTitle();
+        }));
+    }
+
+    private void UpdateWindowTitle()
+    {
+        var pane = ActivePane;
+        if (pane is null)
+        {
+            Title = _applicationTitle;
+            return;
+        }
+        var currentPath = pane.CurrentPath;
+        var selectedPath = _windowTitleMode == WindowTitleMode.SelectedItemPath
+            ? pane.GetSelectedQuickLinkItem()?.Path
+            : null;
+        Title = WindowTitlePresentation.Format(_applicationTitle, _windowTitleMode, currentPath, selectedPath);
     }
 
     private void MouseWheelFocus_Click(object sender, RoutedEventArgs e)

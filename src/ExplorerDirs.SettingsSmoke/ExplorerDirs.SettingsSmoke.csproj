@@ -100,6 +100,7 @@
     <Compile Include="../ExplorerDirs.App/TreeSelectionAutoExpand.cs" Link="TreeSelectionAutoExpand.cs" />
     <Compile Include="../ExplorerDirs.App/HiddenItemsPreference.cs" Link="HiddenItemsPreference.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePreferenceStore.cs" Link="ThemePreferenceStore.cs" />
+    <Compile Include="../ExplorerDirs.App/WindowTitlePresentation.cs" Link="WindowTitlePresentation.cs" />
     <Compile Include="../ExplorerDirs.App/SizeDisplayPreferenceStore.cs" Link="SizeDisplayPreferenceStore.cs" />
     <Compile Include="../ExplorerDirs.App/ThemePalette.cs" Link="ThemePalette.cs" />
     <Compile Include="../ExplorerDirs.App/NativeWindowFrameTheme.cs" Link="NativeWindowFrameTheme.cs" />
