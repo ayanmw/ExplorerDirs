@@ -115,7 +115,9 @@ internal static class ShellFileViewExportCapture
 
         internal ExplorerBrowserHost? Source { get; set; }
         internal long Generation { get; set; }
-        internal IReadOnlyList<string> Values => SortDistinctValues(_values);
+        // Keep the collected set unsorted here; the UI combines it with stale selected
+        // values and sorts the final menu once after the capture releases its COM handles.
+        internal IReadOnlyCollection<string> Values => _values;
 
         // Process a bounded number of Shell items per Dispatcher turn so a large
         // checklist does not monopolize the window's input and paint loop.
@@ -161,12 +163,6 @@ internal static class ShellFileViewExportCapture
             Marshal.Release(_folderView);
         }
     }
-
-    private static IReadOnlyList<string> SortDistinctValues(IEnumerable<string> values) =>
-        values.Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(value => value, StringComparer.Ordinal)
-            .ToArray();
 
     internal static FileViewPrintSnapshot CaptureForPrint(nint folderView, bool quickFilterActive, uint mode, int iconSize)
     {

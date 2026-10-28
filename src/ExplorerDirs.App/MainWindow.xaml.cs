@@ -782,7 +782,7 @@ public partial class MainWindow : Window
         string columnName, MenuItem loading)
     {
         if (!menu.IsOpen) return;
-        IReadOnlyList<string> values;
+        IReadOnlyCollection<string> values;
         try
         {
             using var capture = pane.BeginColumnValueCapture(key);
