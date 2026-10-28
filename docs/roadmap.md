@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-> **IShellView 拖放最新复验（2026-10-28）：**不创建 Shell view 的窗口对照显示：隐藏 `WS_POPUP` 可创建/销毁；`WS_VISIBLE` 窗口成为 Private Desktop 活动窗，销毁超过 10 秒未返回并由 watchdog 终止；改为 `SW_SHOWNOACTIVATE` 后窗口可见、非活动且可同步销毁，外层桌面前台不变。随后仅将该非激活显示用于 Private Desktop 拖放探针，两个直接 `IDropTarget` Copy 路径仍复制成功且源保留，但外层前台 HWND 再次变化（`0x2632026 → 0x4F1D0C`），整轮退出码 1，不采纳为通过；不能归因于窗口样式或排除同时发生的外部桌面活动。未调用 `DoDragDrop`，本轮仅新增阶段监视并运行无 Shell-view 控制，未复跑 Shell-view；阶段监视尚无 Shell-view 实证，前台隔离仍未确认。详见[拖放复验记录](ishellview-color-spike.md#2026-10-28复验-ishellview-drop-target-时-private-desktop-前台守卫失败)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
+> **IShellView 拖放最新复验（2026-10-28）：**非激活窗口的 Shell-view 探针仍未通过前台隔离：源/目标视图已创建，外层前台约在总阶段 `query-and-copy-start` 后 687 ms 从 `0x2632026` 变为 `0x10C1456`，整轮退出码 1。两个直接 `IDropTarget` Copy 路径返回成功、目标内容正确且源保留；将 `IShellView.GetItemObject` 作为目标仍返回 `E_NOINTERFACE`。未调用 `DoDragDrop`，当前结果不证明真实 OLE 拖放。源码已加入 DragEnter/DragOver/Drop 调用前后阶段标记，但这次运行所用二进制尚未包含这些细粒度标记；因此无法确定前台变化对应哪个 COM 回调，也不能排除同步外部桌面活动。临时夹具已清理且无残留 NativeProbe 进程；在确认前台隔离前不重复运行该 Shell-view 探针。详见[本轮拖放复验](ishellview-color-spike.md#2026-10-28-private-desktop-拖放探针前台阶段复验)及[窗口样式对照](ishellview-color-spike.md#2026-10-28-private-desktop-窗口可见性与前台隔离对照)。
 
 | 顺序 | 剩余工作 | 当前事实与下一步证据 |
 | --- | --- | --- |

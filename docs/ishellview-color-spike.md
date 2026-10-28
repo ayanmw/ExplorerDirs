@@ -1,5 +1,13 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-28：Private Desktop 拖放探针前台阶段复验
+
+使用 `scripts/native-probe-watchdog.ps1 -Probe drop-target-private-desktop -TimeoutSeconds 35` 运行当时的 Release NativeProbe。源与目标 `IShellView` 均创建；选中视图项提供的 `IDataObject` 可被目标目录及另一个注册 HWND 的 `IDropTarget` 直接 Copy，目标文件内容正确、Copy effect 为 `0x1`、源文件保留；但 `IShellView.GetItemObject` 作为 drop target 的查询返回 `E_NOINTERFACE`。结果仍是直接 COM 回调，不包含真实 `DoDragDrop`。
+
+外层前台守卫首次记录到 HWND 从 `0x2632026` 变为 `0x10C1456`，阶段为 `drop-target: query-and-copy-start`，距探针开始约 687 ms；watchdog 退出码 1。该阶段覆盖多个数据对象查询与拖放回调，不能定位单个 COM 调用，也不能排除外部桌面活动。运行后夹具目录不存在、无残留 `ExplorerDirs.NativeProbe.exe`。日志：`src/.state/native-probe-watchdog/20261028-140641-227d80f2.stdout.log` 与 `.stderr.log`。
+
+随后在源码中为 `DragEnter`、`DragOver`、`Drop` 分别加入调用前后阶段标记，供未来在前台隔离可确认时定位边界；当前已生成的日志不含这些新增标记。这些标记只提供时间相关性，不会自行阻止或归因前台切换。该失败轮次不作为迁移门槛通过，也不代表真实用户拖放失败。
+
 ## 2026-10-28：四窗格 WPF Shell 反向选择矩阵
 
 扩展 `--private-desktop-four-pane-wpf-host-keyboard-consumer`：四个 WPF 托管 `IShellView`、两项临时文件，在 4 个窗格 × 8 种 Shell 查看方式（大/中/小图标、超大图标、列表、详细信息、平铺、内容）逐项运行生产 `ShellSelectionCommands` 的反向选择。每项检查原选中项身份的补集、再次反选恢复、焦点索引保持及兄弟窗格无选区副作用。32 组全部通过；Ctrl+A、F2 四方向键编辑保持、跨窗格输入隔离、复制/重命名/删除通知和菜单生命周期也随组合探针通过。连续 3 次 Private Desktop 运行退出码 0，前台 HWND 不变、隔离窗口及 Shell 视图均完成清理；NativeProbe Release 构建 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261028-092506-b2dc8aaf.stdout.log`、`20261028-092546-d9e05ad9.stdout.log`、`20261028-092605-1a282d6e.stdout.log`。

@@ -318,8 +318,10 @@ internal static class ShellViewDropTargetProbe
     {
         LogAsyncOperationState(label, dataObject, "before-drag-enter");
         var allowedEffect = DropEffectCopy;
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-enter-start");
         var enterHr = At<DragEnter>(target, 3)(target, dataObject, 0x0001, ref point, ref allowedEffect);
         if (enterHr < 0) throw new COMException($"{label} DragEnter failed", enterHr);
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-enter-complete");
         LogAsyncOperationState(label, dataObject, "after-drag-enter");
         var enterEffect = allowedEffect & DropEffectMask;
         if (enterEffect == 0 || (enterEffect & ~DropEffectCopy) != 0)
@@ -330,8 +332,10 @@ internal static class ShellViewDropTargetProbe
         }
 
         var overEffect = DropEffectCopy;
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-over-start");
         var overHr = At<DragOver>(target, 4)(target, 0x0001, ref point, ref overEffect);
         if (overHr < 0) throw new COMException($"{label} DragOver failed", overHr);
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-over-complete");
         LogAsyncOperationState(label, dataObject, "after-drag-over");
         if ((overEffect & DropEffectMask) != DropEffectCopy)
         {
@@ -341,8 +345,10 @@ internal static class ShellViewDropTargetProbe
         }
 
         var dropEffect = overEffect & DropEffectMask;
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-start");
         var dropHr = At<Drop>(target, 6)(target, dataObject, dropKeyState, ref point, ref dropEffect);
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
+        PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-complete");
         LogAsyncOperationState(label, dataObject, "after-drop");
         var copied = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
         // A created file alone does not prove the Shell accepted Copy; Drop may return a different final effect.
