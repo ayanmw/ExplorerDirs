@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：只读检查本机 Q-Dir 安装目录中的 4 个 `.qdr`（`New.nwp.qdr`、`start.qdr`、`start2.qdr`、一个收藏夹工作区）均未包含 `ViewModeFlags`、`ColsID` 或 `FFlags` 键。它们现有的 `ViewMode`、树开关、焦点和比例值不能推出上述字段语义；因此不据这些样本补写导入映射，需在 Q-Dir 中切换对应选项并重新保存配置后再比对，或取得含这些键的真实配置样本。未启动 Q-Dir 或产品 GUI。
+
 2026-10-29：用本机三个 Q-Dir `.qdr` 文件执行真实配置导入→`QdrLaunchSession` 启动投影→本程序导出→再导入：42 标签、44 标签和单标签启动配置均通过，基础字段恢复且扩展会话逐字匹配。首轮发现 `QdrRoundTripProbe` 绕过产品启动投影，直接把未使用的隐藏窗格留空，导致单窗格配置触发 exporter 完整性校验；探针已改用产品相同的 `QdrLaunchSession.Create`，并新增单窗格回归。完整 Release SettingsSmoke 通过。此结果只验证本机配置在本程序内往返，不证明 Q-Dir GUI 读取本程序导出结果。
 
 2026-10-29：只读检查本机 Q-Dir 安装目录 `.qdr` 发现 `start.qdr`/`start2.qdr` 为 `tree_mode=2`，但四个 `TreeN` 均为 0，`TreeNsplit` 仍记录默认 2500。导入器此前只按 `tree_mode=0` 抑制宽度警告，导致所有窗格树关闭时仍提示忽略宽度。新增回归先复现该多余警告，再将提示门控改为：只有存在有效启用的窗格树或树开关不完整时才提示；四个有效树开关全为 0 时不提示。完整 Release SettingsSmoke 通过，未启动 Q-Dir 或产品 GUI；宽度单位仍未知，不导入 `TreeNsplit`。
