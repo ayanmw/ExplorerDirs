@@ -16,6 +16,9 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ParentAndItemId = new("B3A4B685-B685-4805-99D9-5DEAD2873236");
     private static readonly Guid DataObjectHandlerId = new("B8C0BD9F-ED24-455C-83E6-D5390C4FE8C4");
+    private static readonly Guid ShellFolderObjectHandlerId = new("3981E224-F559-11D3-8E3A-00C04F6837D5");
+    private static readonly Guid ShellViewObjectHandlerId = new("3981E226-F559-11D3-8E3A-00C04F6837D5");
+    private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -187,6 +190,8 @@ internal static class StaticShellFolderAdapterProbe
                 {
                     stage = "shell-item-parent-identity";
                     VerifyShellItemParentIdentity(adapter, items["two.bin"]);
+                    stage = "shell-item-folder-handlers";
+                    VerifyShellItemFolderHandlers(adapter, shellDetailsSize);
                 }
             }
             stage = "validate-adapter-columns";
@@ -675,7 +680,8 @@ internal static class StaticShellFolderAdapterProbe
             if (!sameParentIdentity || !sameChildIdentity)
                 throw new Exception("The Shell item did not preserve both the wrapped parent adapter identity and child PIDL.");
 
-            VerifyShellItemArrayDataObject(item, adapter, childPidl);
+            VerifyShellItemArrayIdentity(item, adapter, childPidl);
+            VerifyDataObjectShellItemArrayRoundTrip(adapter, childPidl);
         }
         finally
         {
@@ -690,11 +696,67 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    private static void VerifyShellItemArrayDataObject(nint item, nint adapter, nint childPidl)
+    private static void VerifyShellItemFolderHandlers(nint adapter, int shellDetailsSize)
+    {
+        nint childPidl = 0, item = 0, folder = 0, view = 0, folderView = 0, viewFolder = 0;
+        nint folderUnknown = 0, viewFolderUnknown = 0;
+        try
+        {
+            childPidl = ParseChild(adapter, "nested-folder");
+            var itemId = ShellItemId;
+            Check(SHCreateItemWithParent(0, adapter, childPidl, in itemId, out item));
+
+            var shellFolderId = ShellFolder2Id;
+            Check(At<BindShellItemHandler>(item, 3)(item, 0, in ShellFolderObjectHandlerId, in shellFolderId, out folder));
+            if (folder == 0 || !HasRegisteredSchemaColumn(folder, shellDetailsSize))
+                throw new Exception("BHID_SFObject did not bind to the wrapped child folder adapter.");
+
+            var shellViewId = ShellViewId;
+            Check(At<BindShellItemHandler>(item, 3)(item, 0, in ShellViewObjectHandlerId, in shellViewId, out view));
+            if (view == 0) throw new Exception("BHID_SFViewObject returned a null IShellView.");
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+            Check(At<GetFolder>(folderView, 5)(folderView, ref shellFolderId, out viewFolder));
+            Check(Marshal.QueryInterface(folder, in UnknownId, out folderUnknown));
+            Check(Marshal.QueryInterface(viewFolder, in UnknownId, out viewFolderUnknown));
+            if (folderUnknown != viewFolderUnknown)
+                throw new Exception("The Shell view created by BHID_SFViewObject did not retain the bound child folder identity.");
+
+            Console.WriteLine("native-shell-item-folder-handlers: BHID_SFObject=wrapped-folder-adapter; BHID_SFViewObject=IShellView-retains-same-folder; window-created=False");
+        }
+        finally
+        {
+            if (viewFolderUnknown != 0) Marshal.Release(viewFolderUnknown);
+            if (folderUnknown != 0) Marshal.Release(folderUnknown);
+            if (viewFolder != 0) Marshal.Release(viewFolder);
+            if (folderView != 0) Marshal.Release(folderView);
+            if (view != 0) Marshal.Release(view);
+            if (folder != 0) Marshal.Release(folder);
+            if (item != 0) Marshal.Release(item);
+            if (childPidl != 0) ILFree(childPidl);
+        }
+    }
+
+    private static bool HasRegisteredSchemaColumn(nint folder, int shellDetailsSize)
+    {
+        var details = Marshal.AllocCoTaskMem(shellDetailsSize);
+        try
+        {
+            for (uint column = 0; column < 64; column++)
+            {
+                Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
+                if (At<GetDetailsOf>(folder, 18)(folder, 0, column, details) >= 0 &&
+                    ReadDetailsText(details) == "Registered schema control")
+                    return true;
+            }
+            return false;
+        }
+        finally { Marshal.FreeCoTaskMem(details); }
+    }
+
+    private static void VerifyShellItemArrayIdentity(nint item, nint adapter, nint childPidl)
     {
         nint array = 0, selectedItem = 0, selectedParentAndItem = 0, selectedParent = 0;
         nint selectedParentUnknown = 0, adapterUnknown = 0, selectedParentPidl = 0, selectedChild = 0;
-        nint dataObject = 0;
         var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
         try
         {
@@ -710,16 +772,10 @@ internal static class StaticShellFolderAdapterProbe
             if (selectedParentUnknown != adapterUnknown || !ILIsEqual(childPidl, selectedChild))
                 throw new Exception("Shell item array enumeration changed the wrapped parent or child identity.");
 
-            var handlerId = DataObjectHandlerId;
-            var dataObjectId = DataObjectId;
-            Check(At<BindShellItemArrayHandler>(array, 3)(array, 0, in handlerId, in dataObjectId, out dataObject));
-            if (dataObject == 0) throw new Exception("IShellItemArray BindToHandler returned a null IDataObject.");
-            VerifyWrappedShellItemDataObject(dataObject);
-            Console.WriteLine("native-shell-item-array-probe: count=1; same-parent-IUnknown=True; same-child-PIDL=True; data-object=CF_HDROP+CIDA-filesystem-paths-valid; window-created=False");
+            Console.WriteLine("native-shell-item-array-probe: source=SHCreateShellItemArrayFromShellItem; count=1; same-parent-IUnknown=True; same-child-PIDL=True; window-created=False");
         }
         finally
         {
-            if (dataObject != 0) Marshal.Release(dataObject);
             if (adapterUnknown != 0) Marshal.Release(adapterUnknown);
             if (selectedParentUnknown != 0) Marshal.Release(selectedParentUnknown);
             if (selectedParentPidl != 0) ILFree(selectedParentPidl);
@@ -728,6 +784,55 @@ internal static class StaticShellFolderAdapterProbe
             if (selectedParentAndItem != 0) Marshal.Release(selectedParentAndItem);
             if (selectedItem != 0) Marshal.Release(selectedItem);
             if (array != 0) Marshal.Release(array);
+        }
+    }
+
+    private static void VerifyDataObjectShellItemArrayRoundTrip(nint adapter, nint childPidl)
+    {
+        nint childArray = 0, dataObject = 0, itemArray = 0, selectedItem = 0;
+        nint parentAndItem = 0, parentFolder = 0, parentPidl = 0, selectedChild = 0;
+        nint parentUnknown = 0, adapterUnknown = 0, returnedDataObject = 0;
+        var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
+        try
+        {
+            childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, childPidl);
+            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new Exception("Wrapped GetUIObjectOf returned a null IDataObject.");
+            VerifyWrappedShellItemDataObject(dataObject);
+
+            var arrayId = ShellItemArrayId;
+            Check(SHCreateShellItemArrayFromDataObject(dataObject, in arrayId, out itemArray));
+            if (At<GetShellItemArrayCount>(itemArray, 7)(itemArray, out var count) < 0 || count != 1)
+                throw new Exception($"IDataObject conversion did not contain exactly one item: {count}.");
+            Check(At<GetShellItemArrayItemAt>(itemArray, 8)(itemArray, 0, out selectedItem));
+            Check(Marshal.QueryInterface(selectedItem, in ParentAndItemId, out parentAndItem));
+            Check(At<GetParentAndItem>(parentAndItem, 4)(parentAndItem, out parentPidl, out parentFolder, out selectedChild));
+            Check(Marshal.QueryInterface(parentFolder, in unknownId, out parentUnknown));
+            Check(Marshal.QueryInterface(adapter, in unknownId, out adapterUnknown));
+            var sameParent = parentUnknown == adapterUnknown;
+            var sameChild = ILIsEqual(childPidl, selectedChild);
+
+            var handlerId = DataObjectHandlerId;
+            var dataObjectId = DataObjectId;
+            Check(At<BindShellItemArrayHandler>(itemArray, 3)(itemArray, 0, in handlerId, in dataObjectId, out returnedDataObject));
+            if (returnedDataObject == 0) throw new Exception("Supported IDataObject-created array returned a null IDataObject.");
+            VerifyWrappedShellItemDataObject(returnedDataObject);
+            Console.WriteLine($"native-shell-item-array-dataobject-roundtrip: count=1; same-parent-IUnknown={sameParent}; same-child-PIDL={sameChild}; roundtrip-data-object=valid; window-created=False");
+        }
+        finally
+        {
+            if (returnedDataObject != 0) Marshal.Release(returnedDataObject);
+            if (adapterUnknown != 0) Marshal.Release(adapterUnknown);
+            if (parentUnknown != 0) Marshal.Release(parentUnknown);
+            if (parentPidl != 0) ILFree(parentPidl);
+            if (selectedChild != 0) ILFree(selectedChild);
+            if (parentFolder != 0) Marshal.Release(parentFolder);
+            if (parentAndItem != 0) Marshal.Release(parentAndItem);
+            if (selectedItem != 0) Marshal.Release(selectedItem);
+            if (itemArray != 0) Marshal.Release(itemArray);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeCoTaskMem(childArray);
         }
     }
 
@@ -1187,6 +1292,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemArrayCount(nint self, out uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemArrayItemAt(nint self, uint index, out nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemArrayHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindShellItemHandler(nint self, nint bindContext, in Guid handler, in Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
@@ -1195,6 +1302,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateItemWithParent(nint parentPidl, nint parentFolder, nint childPidl, in Guid iid, out nint item);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateShellItemArrayFromShellItem(nint item, in Guid iid, out nint array);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateShellItemArrayFromDataObject(nint dataObject, in Guid iid, out nint array);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);

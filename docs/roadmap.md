@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：继续验证隔离 `IShellView` 迁移的 Shell item 入口。`SHCreateItemWithParent` 创建的文件项及 `SHCreateShellItemArrayFromShellItem` 数组可保留包装父 `IUnknown` 和相对 child PIDL；对子文件夹调用 `BHID_SFObject` 返回含实验列元数据的包装 folder，`BHID_SFViewObject` 返回的 `IShellView` 通过 `IFolderView2::GetFolder` 保留同一 folder 身份。两次 NativeProbe Release 运行均退出码 0、窗口未创建。受支持的 `IDataObject → SHCreateShellItemArrayFromDataObject → BHID_DataObject` 往返仍保留可读/可拖放文件数据，但父及 child 身份都退化为普通 filesystem PIDL；包装 PIDL 经 `ILCombine` 成普通绝对路径仍失败。故 Shell view 对象链现有更强正向证据，下一步进入隔离 view window 的项目枚举/列消费/操作门槛；尚未创建窗口、未通过菜单/拖放/通知和完整交互，不接入产品。前一轮在 `SHCreateShellItemArrayFromShellItem` 数组上调用 `BHID_DataObject` 虽然成功，但不符合微软文档限定的 handler 使用条件，不作为支持证据。细节见[逐行列与 IShellView 调查](folder-size-column-investigation.md#2026-10-29-ishellitem-父级身份适配探针)。
+
 2026-10-29：提交 `bbc2f6a` 修正 Shell 视图重建期间的暂时选区扩张：当同一视图且无新输入时，若旧快照焦点项原本未选中、却出现在较大的新快照中，继续保留已确认的多选快照；异步枚举补齐其它项目仍可更新。纯门控回归和 HostProbe 确定性回调覆盖通过；四窗格 3,000 项创建/删除压力运行 6 轮均退出码 0，选区/焦点保持。完整 Release SettingsSmoke 通过。仅为隐藏本机 ExplorerBrowser 宿主证据，用户可见文件操作与其它 Shell provider 仍待集中验收。
 
 2026-10-29：列值筛选性能验证扩展至 10,000 项普通本地目录（5,000 TXT + 5,000 BIN）。隐藏生产 ExplorerBrowser HostProbe 连续两轮筛选稳定收敛到 5,000 项分别耗时 183/172 ms，清除并恢复 10,000 项耗时 93/92 ms；四窗格隔离、临时夹具清理、父窗隐藏和前台不变均通过。计时覆盖筛选应用至三次稳定项目数读取，不包括列头菜单值清单枚举，也不代表机械盘、网络/云或第三方 provider。性能结果尚未表明需要继续优化；可见菜单与用户操作仍待集中验收。
