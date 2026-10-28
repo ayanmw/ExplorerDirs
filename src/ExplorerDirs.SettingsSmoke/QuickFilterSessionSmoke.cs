@@ -48,6 +48,15 @@ internal static class QuickFilterSessionSmoke
         Require(SessionStore.ParseComplete(v10)?.Panes[0][0].QuickFilter is { HasPattern: true, HasColumnFilters: false },
             "v10 profile keeps the name filter and defaults column-value filters to empty");
 
+        var durablePath = Path.Combine(root, "quick-filter-restart.ini");
+        new SessionStore(durablePath, Path.Combine(root, "missing-quick-filter-restart.json")).Save(state);
+        var reopened = new SessionStore(durablePath, Path.Combine(root, "missing-quick-filter-restart.json"))
+            .Load()?.Panes[0][0].QuickFilter;
+        Require(reopened is { Pattern: "*.txt;*.md", ExcludeMatches: true, FilterFolders: true } &&
+            reopened.ColumnFilters.Count == 1 && reopened.ColumnFilters[0].Key == typeKey &&
+            reopened.ColumnFilters[0].Values.SequenceEqual(["TXT 文件", "BIN 文件"]),
+            "column-value filters survive a disk write and reload through a fresh session store");
+
         var migrationPath = Path.Combine(root, "quick-filter-v5.ini");
         File.WriteAllText(migrationPath, legacy);
         var store = new SessionStore(migrationPath, Path.Combine(root, "missing-filter-session.json"));
