@@ -21,11 +21,13 @@
 
 ## Q-Dir 预览格式过滤的实现边界（2026-10-28 复核）
 
-Q-Dir [FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR) 将设置放在 Extras → more options → General，并说用 `*.*` 可查看预览中的所有格式；相邻 [FAQ 17](https://www.softwareok.com/?faq=17&seite=faq-Q-DIR) 说明 PDF 预览依赖 Windows 中安装的预览能力。FAQ 34 后半的通用说明混入按日期、大小、关键词过滤并减少列表项目的描述，不能据此确认该预览选项的完整语义。此次继续核对官方 [FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)：它明确称“文件过滤”可作用于每个 Explorer view，输入 `*.exe`、分号分隔的多个通配符，并选择是否过滤文件夹。这表明 Q-Dir 将快速文件过滤作为独立功能说明；FAQ 34 的预览过滤不能与该功能混为一谈。FAQ 34 究竟只限制预览资格，还是同时影响列表，仍需真实 Q-Dir 可见交互确认。
+Q-Dir [FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR) 将设置放在 Extras → more options → General，并说用 `*.*` 可查看预览中的所有格式。该页问答区还直接提到“Preview file extension list”，并举 PDF、JPG、TIF、ICO 预览扩展名作为问题/使用例；这使“按扩展名限制预览资格”成为较有支持的解释，但问答没有说明不匹配文件是否仍留在列表中。该 FAQ 后半的通用说明又混入按日期、大小、关键词过滤并减少列表项目的描述，不能把它当作该设置行为的直接证据。相邻 [FAQ 17](https://www.softwareok.com/?faq=17&seite=faq-Q-DIR) 说明 PDF 预览还依赖 Windows 已安装的预览能力。
+
+官方 [FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR) 则明确把文件过滤作为每个 Explorer view 的独立功能，支持 `*.exe`、分号分隔多个通配符，并可选择是否过滤文件夹。因此快速文件过滤与预览格式资格必须分开建模。当前可确认的结论是：预览格式资格过滤很可能只控制所选项目能否进入预览处理器；是否同时隐藏文件列表项，以及不匹配时预览窗格显示空白还是提示，仍需真实 Q-Dir 可见交互确认。
 
 当前应用的 `IFolderFilterSite` 是文件枚举过滤点；复用它会隐藏列表项目，语义不正确。微软定义的 `IExplorerPaneVisibility::GetPaneState` 只返回 Preview Pane 等整个窗格的可见状态，不能按当前选择文件的扩展名单独禁用预览。保持系统注册的 Preview Handler 与 ExplorerBrowser 原生窗格时，现有接入没有逐文件格式过滤钩子。改由应用自己托管 Preview Handler 则要接管 Shell 的预览处理器生命周期、窗口、焦点与快捷键交互；微软指出处理器通常在进程外系统宿主运行，这一变更扩大兼容和稳定性边界。
 
-本项目已有 Q-Dir 式每标签快速文件过滤；其行为按 FAQ 38 对照，不应重新实现或借用为预览资格过滤。在 Q-Dir 的 FAQ 34 实际行为得到确认前，不把快速筛选改造成预览过滤，也不随选择隐藏整个预览窗格。若确认它只限制预览资格，再评估逐项过滤需要的宿主边界；若它也筛选列表，则需按文件可见性功能单独对照。本项目当前架构事实不变：`IFolderFilterSite` 过滤的是列表枚举，`IExplorerPaneVisibility` 控制整个窗格，均不能表达“列表保留项目但不对特定扩展名预览”。接口依据：[Preview Handler Architecture](https://learn.microsoft.com/en-us/windows/win32/shell/preview-handlers)、[IExplorerPaneVisibility::GetPaneState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerpanevisibility-getpanestate)、[IExplorerBrowser](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowser)。
+本项目已有 Q-Dir 式每标签快速文件过滤；其行为按 FAQ 38 对照，不应重新实现或借用为预览资格过滤。在 Q-Dir 的可见行为得到确认前，不把快速筛选改造成预览过滤，也不随选择隐藏整个预览窗格。下一次可见对照只需区分三点：扩展名不匹配的文件是否仍在文件列表、预览区域显示什么、过滤名单是否逐窗格/全局。若只限制预览资格，再评估逐项过滤需要的宿主边界；若也筛选列表，则按文件可见性功能单独对照。本项目当前架构事实不变：`IFolderFilterSite` 过滤的是列表枚举，`IExplorerPaneVisibility` 控制整个窗格，均不能表达“列表保留项目但不对特定扩展名预览”。接口依据：[Preview Handler Architecture](https://learn.microsoft.com/en-us/windows/win32/shell/preview-handlers)、[IExplorerPaneVisibility::GetPaneState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerpanevisibility-getpanestate)、[IExplorerBrowser](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowser)。
 
 ## 后续验收
 

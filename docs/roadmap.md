@@ -2297,8 +2297,8 @@
 
 ## 2026-10-28：Q-Dir 预览格式过滤实现边界复核
 
-- Q-Dir FAQ 34 将通配符列在预览设置并说明 `*.*` 查看所有可预览格式；FAQ 38 单独说明每个 Explorer view 的文件过滤（通配符、多条件、是否包含文件夹）。FAQ 34 的通用段落混有列表过滤描述，预览设置是否同时过滤列表仍待可见交互确认。项目已实现每标签快速过滤，不能拿它代替逐项预览资格过滤。官方依据：[FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR)、[FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。Microsoft 文档确认 ExplorerBrowser 的 `IExplorerPaneVisibility` 只控制整个 Preview Pane 显示状态；复用 `IFolderFilterSite` 则会把文件从列表中隐藏。
-- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；差异保留为待评估，先待 Q-Dir 可见交互确认过滤作用于预览、列表或两者，再决定是否引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-28-复核)。
+- 复核 FAQ 34 正文及问答区：设置位于 General 预览选项，提示 `*.*` 可预览所有格式；问答直接提到 Preview file extension list，并讨论 PDF/JPG/TIF/ICO。该证据更支持按扩展名限制预览资格，但没有说明列表项是否同时隐藏；正文后半的日期/大小/关键词说明与 FAQ 38 的逐视图文件筛选描述不能互相替代。官方依据：[FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR)、[FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。
+- 若保留系统 Preview Handler，现有原生窗格接入没有确认可用的逐格式钩子；自建 Handler 宿主需承担 COM/焦点/快捷键生命周期并改变稳定性边界。本轮不误用快速筛选或按选择反复隐藏整窗格；集中 Q-Dir 验收只需确认不匹配文件是否仍显示在列表、预览区域状态及过滤范围，然后再决定是否引入自建宿主。细节见[预览窗格调查](preview-pane-investigation.md#q-Dir-预览格式过滤的实现边界-2026-10-28-复核)。
 
 ## 2026-10-25：F9 当前目录递归大小与子项计数
 
