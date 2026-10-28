@@ -429,3 +429,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 ### 标签栏菜单与系统 Explorer（2026-10-28）
 
 标签页右键菜单现在以“使用 Explorer 浏览”开头，将该标签 `Browser.CurrentPath` 传给 `explorer.exe`；空白标签栏右键显示当前标签菜单。原空白双击新建标签及标签项双击关闭规则不变。后台参数/接线 smoke 不启动子进程；真实 Explorer 导航和可见菜单定位待集中 UI 验收。
+
+### Explorer Shell 重启工具安全边界（2026-10-28）
+
+“工具 → 重启 Windows 资源管理器”先验证 `%WINDIR%\explorer.exe` 存在，并确认桌面 Shell 窗口所属进程的映像路径与该文件完全相同；若 Shell 是自定义进程或路径不可确认，则拒绝结束进程。路径比较有独立 SettingsSmoke，完整 SettingsSmoke 与 App Release build 通过。该检查不证明实际重启恢复时间；真实桌面、开始菜单、任务栏和共享进程文件窗口影响仍待集中验收。

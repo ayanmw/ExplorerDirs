@@ -4366,3 +4366,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - GUI smoke 清单新增一项：先验证取消确认不触碰 Shell；实际重启只在保存工作并获明确授权的桌面会话中执行，记录桌面/任务栏/开始菜单恢复及 Explorer 文件窗口是否共用 Shell 进程。
 - 从干净 main 提交 `50cb324` 重新 `PrepareOnly`，候选 `src/.state/gui-smoke/20261028-045534-826-74a861` 的 EXE/DLL 哈希复核一致，状态 `prepared-not-run`，进程数为 0；28 项可见验收仍未执行。当前基线见[候选身份](gui-acceptance-2026-10-28-main-prepared.md)。
+
+## 2026-10-28：限制 Explorer 重启目标进程
+
+- 源码复核发现重启工具此前仅凭 `GetShellWindow()` 的 PID 结束进程，未检查进程映像；自定义桌面 Shell 可能被误结束。现在先确认 Windows 目录下的 `explorer.exe` 存在，再要求 Shell 窗口所属进程映像规范化后与该文件路径大小写不敏感地完全相同，否则不结束任何进程并返回明确错误。
+- 路径身份 SettingsSmoke 先因缺少检查而按预期失败，接入后通过；完整 Release SettingsSmoke 通过，App Release build 0 警告/错误。未启动、结束任何 Explorer/Shell 进程，也未进行 UI 验收；取消确认与真实桌面恢复仍待集中验收。

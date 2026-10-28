@@ -15,7 +15,15 @@ internal static class WindowsExplorerRestarter
             shellProcessId == 0)
             throw new InvalidOperationException("Windows Shell 桌面窗口当前不可用。");
 
+        var explorerPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        if (!File.Exists(explorerPath))
+            throw new FileNotFoundException("找不到 Windows 资源管理器程序，未结束任何进程。", explorerPath);
+
         using var shellProcess = Process.GetProcessById((int)shellProcessId);
+        if (!MatchesExpectedExecutable(shellProcess.MainModule?.FileName, explorerPath))
+            throw new InvalidOperationException("桌面 Shell 不是由 Windows 自带的 explorer.exe 承载；未结束任何进程。");
+
         shellProcess.Kill();
         if (!shellProcess.WaitForExit((int)ShellRestartGracePeriod.TotalMilliseconds))
             throw new TimeoutException("Windows Shell 进程未能在 3 秒内退出。");
@@ -29,11 +37,6 @@ internal static class WindowsExplorerRestarter
 
             Thread.Sleep(100);
         }
-
-        var explorerPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
-        if (!File.Exists(explorerPath))
-            throw new FileNotFoundException("找不到 Windows 资源管理器程序。", explorerPath);
 
         using var startedProcess = Process.Start(new ProcessStartInfo(explorerPath)
         {
@@ -51,6 +54,22 @@ internal static class WindowsExplorerRestarter
 
         processId = 0;
         return false;
+    }
+
+    internal static bool MatchesExpectedExecutable(string? actualPath, string? expectedPath)
+    {
+        if (string.IsNullOrWhiteSpace(actualPath) || string.IsNullOrWhiteSpace(expectedPath))
+            return false;
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expectedPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     [DllImport("user32.dll")]

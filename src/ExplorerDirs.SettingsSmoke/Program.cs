@@ -412,7 +412,15 @@ if (args.Length == 1 && args[0] == "--environment-change-message-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--windows-explorer-process-identity-smoke")
+{
+    ExplorerDirs.SettingsSmoke.WindowsExplorerProcessIdentitySmoke.Run();
+    Console.WriteLine("Windows Explorer process identity smoke: PASS");
+    return;
+}
+
 ExplorerDirs.SettingsSmoke.EnvironmentChangeMessageSmoke.Run();
+ExplorerDirs.SettingsSmoke.WindowsExplorerProcessIdentitySmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellTabDropSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFolderFilterLayoutSmoke.Run();
 ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
