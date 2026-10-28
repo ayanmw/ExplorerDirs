@@ -4437,6 +4437,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 列映射计数对照已完成：DefView 初始化会调用 `MapColumnToSCID` 列举扩展列，但排序阶段不调用该映射或 adapter `CompareIDs`；`GetDefaultColumn` 在该绑定视图生命周期中也没有被调用。适配器的直接映射合同本身有效。后续聚焦可支持的 DefView 排序委托/通知接口，仍不把状态读回当作已重排。
 - `SFVM_GETSORTDEFAULTS` 回调收到一次，但按 SDK 参数写入 ByteCount 列并返回 `S_OK` 后，视图仍无排序状态、无重排、无 `CompareIDs`；其官方文档明确说系统文件夹视图对象不识别此消息。当前合成点击路径也未触发 `SFVM_COLUMNCLICK`。不再将这两个旧 callback 消息视作排序修复入口；后续验证要转向实际 ListView/Shell 排序委托边界及其完整操作兼容成本。
 - 数值排序结论复核：先以真实 `IFileOperation` 复制验证 2→3 项通知，再用名称顺序值为 `10/2/10` 的夹具排除名称顺序偶合。标准 `PKEY_Size` 能正常升降序；系统 ByteCount 列升降序两次都保持同一名称顺序和值 `10/2/10`，方向读回虽切换 `+1/-1`，实际未重排。后续调查改查 DefView/SysListView 排序委托边界；不把实验架构接入产品。
+- Private Desktop `SysListView32` 只读 subclass 观察：标准 Size 行序可以改变，但同一排序时段没有发给列表 HWND 的 `LVM_SORTITEMS/LVM_SORTITEMSEX` 或项目插入/删除/设置消息；ByteCount 也没有排序消息或新的属性读取。此证据支持“DefView 在内部项目顺序层处理排序”的推断，限定于已观察 HWND 和 LVM 消息，不断言 Shell 内部实现。下一步追 `SetSortColumns`/Header 通知到 DefView 比较与项目序列的调用边界。
 
 2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。
 

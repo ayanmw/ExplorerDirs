@@ -293,3 +293,11 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 标准 `PKEY_Size` 标题点击仍能按大小实际切换：升序 `two.bin|a-ten.bin|z-ten.bin`，降序 `a-ten.bin|z-ten.bin|two.bin`。ByteCount 设为升序后得到 `a-ten.bin|two.bin|z-ten.bin` / `10|2|10`，不满足预期 `2|10|10`；设为降序后行序与升序完全相同，仍为 `10|2|10`，不满足预期 `10|10|2`。方向状态分别读回 `+1/-1`，但方向变化没有重排行。故这条 DefView 路径对已注册 ByteCount 列的数值排序仍不工作；此前只看行名或使用 `2/10/10` 值序列的判断不够区分，应以本次非单调夹具复核为准。`CompareIDs` 及逐项属性读取回调仍为 0，显示值由 `IPropertyStoreFactory` 提供。日志：`src/.state/native-probe-watchdog/20261029-025919-177dca49.stdout.log`。Release 构建 0 警告/错误；探针以 exit code 1 结束，原因仍是未注册私有测试 PKEY 列为空值，不是夹具或 Shell 操作前置项失败；Private Desktop 前台句柄与输入时间戳未变。
 
 这把已注册系统属性列的限制确定到“方向状态可读回，但 DefView 保持了名称顺序，没有按属性值排序”，并排除了名称顺序与数字顺序偶然重合的解释。后续不继续堆叠列元数据或旧 callback 试探；下一步检查 DefView/SysListView 排序委托边界及其与 `IShellFolder2::CompareIDs` 的关系，评估是否需要自绘/自管列表及由此增加的 Shell 操作兼容成本。产品仍留在 ExplorerBrowser，未发布任何改动。
+
+### 2026-10-29：DefView 排序时的 ListView 消息观察
+
+为判断标准 Size 和 ByteCount 的差异是否来自 ListView 本身，探针在同一个 Private Desktop `SysListView32` 上安装短生命周期的只读 subclass：仅记录发往该 HWND 的 `LVM_FIRST..LVM_LAST` 范围消息，并立即交给原窗口过程。分别采集标准 Size `SetSortColumns`/两次合成 Header 鼠标消息路径，以及 ByteCount 两个方向；采样区间避开探针随后读取行文本的 LVM 查询。该观察只覆盖发给此 ListView HWND 的消息，不覆盖 DefView 父窗口、其他 HWND 或 Shell 内部 COM/模型调用。
+
+标准 Size 升降序行序仍正确改变，适配器 `CompareIDs` 仍为 0；但其排序区间没有看到 `LVM_SORTITEMS`（`0x1030`）、`LVM_SORTITEMSEX`（`0x1032`）或 LVM 插入/删除/设置项目消息。ByteCount 两个方向也没有这些操作消息、没有新的属性工厂读取，行序继续为 `a-ten.bin|two.bin|z-ten.bin`，值为 `10|2|10`。观测到的其他 LVM 流量主要是 Header/项目查询，不能解释为排序命令。NativeProbe Release 构建 0 警告/错误；Private Desktop 运行退出码 1，仍停在末尾未注册私有测试列为空值的既有门槛；前台 HWND 和输入时间戳不变。日志：`src/.state/native-probe-watchdog/20261029-030358-8441a1db.stdout.log`。
+
+这说明在所测本机 DefView 路径中，排序并非由它向 `SysListView32` 发送通用 ListView 排序/重排消息完成；更可能由 DefView 自己先改变 Shell 项目顺序，再由列表读取该顺序。这是根据限定 HWND 消息范围作出的推断，不是对 Shell 内部实现的证明。后续应追踪 `IFolderView2::SetSortColumns`、Header 通知到 DefView 项目序列/属性读取的边界，并优先验证能否通过受支持的 Shell folder 比较合同让 ByteCount 进入同一排序路径。产品和发布包仍未改变。

@@ -848,8 +848,10 @@ internal static class StaticShellFolderAdapterProbe
             Console.WriteLine("native-shell-item-bound-view: native-menu-verbs=viewlogicaldetails,refresh; details-mode-readback=True; refresh-count=3");
 
             stage = "verify-standard-size-sort";
+            using var listViewMessageObserver = new ListViewMessageObserver(FindListViewWindow(view));
             var nameColumn = new ShellColumnManager.NativeKey { FormatId = NameKeyFormat, PropertyId = 10 };
             var sizeColumn = new ShellColumnManager.NativeKey { FormatId = SizeKeyFormat, PropertyId = 12 };
+            listViewMessageObserver.Reset();
             var sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -859,6 +861,7 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            var standardSizeSetSortMessages = listViewMessageObserver.Snapshot();
             names = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             if (names.Length != 3 || !names[0].Equals("two.bin", StringComparison.OrdinalIgnoreCase) ||
                 !names.Any(name => name.Equals("a-ten.bin", StringComparison.OrdinalIgnoreCase)))
@@ -866,16 +869,20 @@ internal static class StaticShellFolderAdapterProbe
             var resetStandardSortProbeCounters = Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
                 NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"));
             resetStandardSortProbeCounters();
+            listViewMessageObserver.Reset();
             var standardSizeHeaderClickOne = SendHeaderItemClick(view, 1);
             Pump(300);
+            var standardSizeHeaderClickOneMessages = listViewMessageObserver.Snapshot();
             var standardSizeHeaderClickOneNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var standardSizeHeaderClickOneSort = ReadCurrentSortColumn(folderView);
+            listViewMessageObserver.Reset();
             var standardSizeHeaderClickTwo = SendHeaderItemClick(view, 1);
             Pump(300);
+            var standardSizeHeaderClickTwoMessages = listViewMessageObserver.Snapshot();
             var standardSizeHeaderClickTwoNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var standardSizeHeaderClickTwoSort = ReadCurrentSortColumn(folderView);
             var standardSizeHeaderClickStats = ReadNativeComparisonStats();
-            Console.WriteLine($"native-shell-item-bound-view: standard-size-header-clicks={standardSizeHeaderClickOne}/{standardSizeHeaderClickTwo}; one=[{string.Join('|', standardSizeHeaderClickOneNames)}] sort={standardSizeHeaderClickOneSort}; two=[{string.Join('|', standardSizeHeaderClickTwoNames)}] sort={standardSizeHeaderClickTwoSort}; callbacks={standardSizeHeaderClickStats}");
+            Console.WriteLine($"native-shell-item-bound-view: standard-size-header-clicks={standardSizeHeaderClickOne}/{standardSizeHeaderClickTwo}; one=[{string.Join('|', standardSizeHeaderClickOneNames)}] sort={standardSizeHeaderClickOneSort} listview-messages=[{standardSizeHeaderClickOneMessages}]; two=[{string.Join('|', standardSizeHeaderClickTwoNames)}] sort={standardSizeHeaderClickTwoSort} listview-messages=[{standardSizeHeaderClickTwoMessages}]; callbacks={standardSizeHeaderClickStats}; SetSortColumns-messages=[{standardSizeSetSortMessages}]");
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -922,17 +929,22 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(300);
+            listViewMessageObserver.Reset();
             var knownSchemaHeaderClickOneResult = SendHeaderItemClick(view, 2);
             Pump(300);
+            var knownSchemaHeaderClickOneMessages = listViewMessageObserver.Snapshot();
             var knownSchemaHeaderClickOneNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var knownSchemaHeaderClickOneValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var knownSchemaHeaderClickOneSort = ReadCurrentSortColumn(folderView);
+            listViewMessageObserver.Reset();
             var knownSchemaHeaderClickTwoResult = SendHeaderItemClick(view, 2);
             Pump(300);
+            var knownSchemaHeaderClickTwoMessages = listViewMessageObserver.Snapshot();
             var knownSchemaHeaderClickTwoNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var knownSchemaHeaderClickTwoValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var knownSchemaHeaderClickTwoSort = ReadCurrentSortColumn(folderView);
             resetProbeCounters();
+            listViewMessageObserver.Reset();
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -942,6 +954,8 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(300);
+            var customColumnSizeResetMessages = listViewMessageObserver.Snapshot();
+            listViewMessageObserver.Reset();
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -955,6 +969,7 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            var knownSchemaSetSortMessages = listViewMessageObserver.Snapshot();
             var knownSchemaSortNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var knownSchemaSortValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var knownSchemaAscendingNumericOrder = knownSchemaSortValues.SequenceEqual(new[] { "2", "10", "10" }, StringComparer.Ordinal);
@@ -972,6 +987,7 @@ internal static class StaticShellFolderAdapterProbe
                 finally { Marshal.FreeCoTaskMem(sortReadbackPointer); }
             }
             var knownSchemaSortStats = ReadNativeComparisonStats();
+            listViewMessageObserver.Reset();
             sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
             try
             {
@@ -985,6 +1001,7 @@ internal static class StaticShellFolderAdapterProbe
             finally { Marshal.FreeCoTaskMem(sortColumns); }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            var knownSchemaDescendingSetSortMessages = listViewMessageObserver.Snapshot();
             var knownSchemaDescendingNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
             var knownSchemaDescendingValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var knownSchemaDescendingNumericOrder = knownSchemaDescendingValues.SequenceEqual(new[] { "10", "10", "2" }, StringComparer.Ordinal);
@@ -1038,7 +1055,7 @@ internal static class StaticShellFolderAdapterProbe
             var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
             var customHeaders = ReadDisplayedColumnHeaders(view);
             var customStats = ReadNativeComparisonStats();
-            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; synthetic-column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; synthetic-column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; synthetic-column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; header-click-results={knownSchemaHeaderClickOneResult}/{knownSchemaHeaderClickTwoResult}; header-click-one=[{string.Join('|', knownSchemaHeaderClickOneNames)}] values=[{string.Join('|', knownSchemaHeaderClickOneValues)}] sort={knownSchemaHeaderClickOneSort}; header-click-two=[{string.Join('|', knownSchemaHeaderClickTwoNames)}] values=[{string.Join('|', knownSchemaHeaderClickTwoValues)}] sort={knownSchemaHeaderClickTwoSort}; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}] values=[{string.Join('|', knownSchemaSortValues)}] numeric-ascending={knownSchemaAscendingNumericOrder}; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}] values=[{string.Join('|', knownSchemaDescendingValues)}] numeric-descending={knownSchemaDescendingNumericOrder}; directions-reordered-rows={knownSchemaDirectionsReorderedRows}; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
+            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; synthetic-column-click-results={knownSchemaClickOneResult}/{knownSchemaClickTwoResult}; synthetic-column-click-one=[{string.Join('|', knownSchemaClickOneNames)}] values=[{string.Join('|', knownSchemaClickOneValues)}] callbacks={knownSchemaClickOneStats}; synthetic-column-click-two=[{string.Join('|', knownSchemaClickTwoNames)}] values=[{string.Join('|', knownSchemaClickTwoValues)}] callbacks={knownSchemaClickTwoStats}; header-click-results={knownSchemaHeaderClickOneResult}/{knownSchemaHeaderClickTwoResult}; header-click-one=[{string.Join('|', knownSchemaHeaderClickOneNames)}] values=[{string.Join('|', knownSchemaHeaderClickOneValues)}] sort={knownSchemaHeaderClickOneSort} listview-messages=[{knownSchemaHeaderClickOneMessages}]; header-click-two=[{string.Join('|', knownSchemaHeaderClickTwoNames)}] values=[{string.Join('|', knownSchemaHeaderClickTwoValues)}] sort={knownSchemaHeaderClickTwoSort} listview-messages=[{knownSchemaHeaderClickTwoMessages}]; size-reset-messages=[{customColumnSizeResetMessages}]; known-schema-sort-count={knownSchemaSortCount}; known-schema-sort-readback={knownSchemaSortReadback}; known-schema-sort-initial-order=[{string.Join('|', knownSchemaInitialOrder)}]; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}] values=[{string.Join('|', knownSchemaSortValues)}] numeric-ascending={knownSchemaAscendingNumericOrder} listview-messages=[{knownSchemaSetSortMessages}]; known-schema-descending-order=[{string.Join('|', knownSchemaDescendingNames)}] values=[{string.Join('|', knownSchemaDescendingValues)}] numeric-descending={knownSchemaDescendingNumericOrder} listview-messages=[{knownSchemaDescendingSetSortMessages}]; directions-reordered-rows={knownSchemaDirectionsReorderedRows}; known-schema-descending-sort-readback={knownSchemaDescendingSortReadback}; known-schema-descending-callbacks={knownSchemaDescendingStats}");
             Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; headers=[{string.Join('|', customHeaders)}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; custom-column-callbacks={customStats}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
@@ -1482,19 +1499,7 @@ internal static class StaticShellFolderAdapterProbe
 
     private static string[] ReadDisplayedColumnValues(nint view, int subItem, int expectedCount = 4)
     {
-        Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
-        nint listView = 0;
-        EnumChildWindows(viewWindow, (child, _) =>
-        {
-            var className = new System.Text.StringBuilder(32);
-            if (GetClassNameW(child, className, className.Capacity) > 0 && className.ToString() == "SysListView32")
-            {
-                listView = child;
-                return false;
-            }
-            return true;
-        }, 0);
-        if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child to query.");
+        var listView = FindListViewWindow(view);
 
         var count = unchecked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT
         if (count != expectedCount) throw new InvalidOperationException($"Expected {expectedCount} displayed rows, got {count}.");
@@ -1525,6 +1530,60 @@ internal static class StaticShellFolderAdapterProbe
         {
             Marshal.FreeHGlobal(itemPointer);
             Marshal.FreeHGlobal(textBuffer);
+        }
+    }
+
+    private static nint FindListViewWindow(nint view)
+    {
+        Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
+        nint listView = 0;
+        EnumChildWindows(viewWindow, (child, _) =>
+        {
+            var className = new System.Text.StringBuilder(32);
+            if (GetClassNameW(child, className, className.Capacity) > 0 && className.ToString() == "SysListView32")
+            {
+                listView = child;
+                return false;
+            }
+            return true;
+        }, 0);
+        if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child to observe.");
+        return listView;
+    }
+
+    private sealed class ListViewMessageObserver : IDisposable
+    {
+        private const nuint SubclassId = 0xED120129;
+        private readonly nint _window;
+        private readonly SubclassProcedure _procedure;
+        private readonly List<uint> _messages = [];
+        private bool _disposed;
+
+        public ListViewMessageObserver(nint window)
+        {
+            _window = window;
+            _procedure = Observe;
+            if (!SetWindowSubclass(_window, _procedure, SubclassId, 0))
+                throw new InvalidOperationException("Could not install the isolated ListView message observer.");
+        }
+
+        public void Reset() => _messages.Clear();
+
+        public string Snapshot() => string.Join(",", _messages.Select(message => $"0x{message:X4}"));
+
+        private nint Observe(nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nuint referenceData)
+        {
+            if (window == _window && message is >= 0x1000 and <= 0x10FF)
+                _messages.Add(message);
+            return DefSubclassProc(window, message, wParam, lParam);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            if (IsWindow(_window)) _ = RemoveWindowSubclass(_window, _procedure, SubclassId);
+            GC.KeepAlive(_procedure);
         }
     }
 
@@ -2211,6 +2270,9 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll", EntryPoint = "GetParent")] private static extern nint GetParentWindow(nint window);
     [DllImport("user32.dll", EntryPoint = "GetDlgCtrlID")] private static extern int GetDlgCtrlID(nint window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maxCount);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProcedure procedure, nuint subclassId, nuint referenceData);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProcedure procedure, nuint subclassId);
+    [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
@@ -2219,6 +2281,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string formatName);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     private delegate bool EnumChildProc(nint window, nint parameter);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProcedure(nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nuint referenceData);
     [DllImport("propsys.dll", PreserveSig = true)] private static extern int PSGetPropertyDescription(
         in ShellColumnManager.NativeKey key, in Guid interfaceId, out nint description);
 }
