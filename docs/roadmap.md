@@ -4299,3 +4299,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 在四 pane 隐藏 WPF `IShellView` 测试中，直接调用产品 `ShellFileCommands.Invoke(NewFolder)` / `NativeShellCommandMenu` 路径；该路径先初始化延迟“新建”子菜单，再通过当前菜单偏移调用 `IContextMenu::InvokeCommand`，返回 `S_OK`。此前未初始化子菜单的裸偏移调用返回 `E_FAIL`，canonical verb 字符串调用也能成功；本次改用产品适配器验证其真实路径。
 - 新目录在同目录三个 pane 中出现，独立 Pane 4 保持不变。Release NativeProbe build 0 警告/错误，完整流程连续 3 轮退出码 0，前台 HWND 未变且 fixture 清理完成。产品 ExplorerBrowser 的真实菜单输入、重命名体验仍待集中 UI 验收。详情见[隔离原型记录](ishellview-color-spike.md#2026-10-28wpf-隔离四窗格的原生新建文件夹命令)。
+
+## 2026-10-28：生产 ExplorerBrowser Ctrl+数字小键盘加号集成验证
+
+- 新增 HostProbe 的隐藏验证入口，通过生产四窗格 `ExplorerBrowserHost.TranslateAcceleratorCore` 发送 Ctrl+VK_ADD，并用生产 `ShellColumnManager` 固定/读取列宽。Details 模式的 Name 列从 110 增至 419；另外三个窗格的列设置保持不变，焦点保留在当前原生文件列表。
+- HostProbe Release build 0 警告/错误，隔离运行退出码 0；父窗口始终隐藏、前台 HWND 未变化，探针线程键盘状态恢复。没有打开产品窗口或发送实体键盘输入；本机实际数字小键盘与可见 UI 留待集中验收。

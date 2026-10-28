@@ -27,7 +27,7 @@
 | 方向键、Home、End | 文件项选择与滚动 | 由原生 Shell 视图处理；逐项待 GUI 验收 |
 | Ctrl+鼠标滚轮 | 按八种查看方式循环切换 | 本项目自定义行为；隐藏生产宿主的合成滚轮消息完成八种循环并保留选区，物理输入路由、可见效果与焦点待 GUI 验收 |
 | Ctrl+Shift+1～8 | 按 Explorer 顺序切换视图：超大图标、大图标、中等图标、小图标、列表、详细信息、平铺、内容 | 已接入；快捷键解析把 1～8 映射到八种 `ViewStyle`，与 Microsoft 示例中的 `2=大图标`、`6=详细信息` 一致。Microsoft 清单列到 1～9；第 9 键不由应用拦截，文件视图聚焦时交给原生 Shell，实际第 9 键行为与视图读回仍待 GUI 验收 |
-| Ctrl+数字小键盘 `+` | 自动调整详细信息视图中的列宽以适应内容 | 应用在文件视图焦点下将按键先交给 `IShellView.TranslateAccelerator`；Shell 返回 `S_FALSE` 时再发给原生 `SysListView32`，避免 WPF 截走该键。路由 smoke 通过；实体数字小键盘、ExplorerBrowser 实际列宽变化及可见 GUI 仍待验收 |
+| Ctrl+数字小键盘 `+` | 自动调整详细信息视图中的列宽以适应内容 | 路由 smoke 通过；隐藏生产 `ExplorerBrowserHost` 已验证 Name 列宽变化且其他窗格不受影响。实体数字小键盘与可见 UI 仍待集中验收 |
 | Ctrl+方向键后按空格 | 增加或取消单个项目的选择，不影响其他已选项目 | 快捷键 smoke 确认 Ctrl+↑、Ctrl+↓、Ctrl+空格不被应用拦截；原生 Shell 实际选择行为待 GUI 验收 |
 | Ctrl+拖动、Shift+拖动、Alt+拖动文件 | 分别复制、移动、创建快捷方式 | ExplorerBrowser 使用原生 Shell 拖放；跨窗格直接 `IDropTarget` 复制已有隔离探针，物理拖动手势、移动/快捷方式语义待 GUI 验收 |
 | F3、Ctrl+E、Ctrl+F | 聚焦当前窗格搜索框；Enter 或窗格“搜索”按钮在当前目录的 Shell 结果视图中搜索，Esc 返回目录 | 源码、菜单和工具栏入口已接入并通过构建及无窗口映射回归；真实结果、焦点和右键菜单待 GUI 验收 |

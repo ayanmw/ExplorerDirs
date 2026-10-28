@@ -353,7 +353,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 2026-10-25 隐藏 ExplorerBrowser 列头消息续验：附加生产 ShellBrowserSite 后，向 SysHeader32 定向发送标准按下/抬起窗口消息，Shell 排序方向发生切换；直接发 WM_NOTIFY 也能切换排序。两条路径的 ICommDlgBrowser3.OnColumnClicked 计数均为 0，表明本机 DefView 自行处理此排序。该测试没有物理输入或可见绘制，列头实际可见、鼠标命中及 GUI 排序仍待验收，见[路线图记录](roadmap.md#2026-10-25-explorerbrowser-列头通知路由与排序复测)。
 
-2026-10-25 Ctrl+数字小键盘加号补齐：文件视图按键先经 `IShellView.TranslateAccelerator`，仅对 `S_FALSE` 将 Ctrl+VK_ADD KeyDown 转交原生 `SysListView32`，由 Shell 自己计算列宽。Release SettingsSmoke 与 App 构建通过；未运行原生宿主/GUI，真实列宽变化待验收。详见[路线图](roadmap.md#2026-10-25ctrl数字小键盘加号转交原生列宽自适应)。
+2026-10-25 Ctrl+数字小键盘加号补齐：文件视图按键先经 `IShellView.TranslateAccelerator`，仅对 `S_FALSE` 将 Ctrl+VK_ADD KeyDown 转交原生 `SysListView32`，由 Shell 自己计算列宽。路由 smoke 与原生 `IShellView` 探针通过；2026-10-28 又在隐藏生产 `ExplorerBrowserHost` 中确认 Name 列从 110 增至 419，其他窗格列宽不变、焦点保留、桌面前台不变。实体数字小键盘与可见 UI 仍待集中验收。详见[路线图](roadmap.md#2026-10-25ctrl数字小键盘加号转交原生列宽自适应)。
 
 2026-10-26 焦点恢复的“文件区是否为空”查询改为显式 `IFolderView.ItemCount(SVGIO_ALLVIEW)`。SettingsSmoke 检查传入范围、空视图和失败计数；App Release 构建通过。隐藏 stock Shell 对 `SVGIO_BACKGROUND` 也返回总数的结果不能代替 API 契约证明；未验证可见多窗格焦点或真实方向键行为，详见[路线图](roadmap.md#2026-10-26焦点恢复使用明确的-shell-视图计数范围)。
 
