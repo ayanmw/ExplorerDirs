@@ -49,6 +49,108 @@ namespace
     volatile LONG g_legacyDetailsCallbackItemRequests = 0;
     volatile LONG g_legacyDetailsCallbackLastColumn = -1;
     volatile LONG g_legacyDetailsCallbackEnabled = 0;
+    volatile LONG g_propertyStoreFactoryBindRequests = 0;
+    volatile LONG g_propertyStoreFactoryCreateRequests = 0;
+    volatile LONG g_propertyStoreValueRequests = 0;
+    volatile LONG g_propertyStoreFactoryProbeEnabled = 0;
+
+    // Diagnostic-only property path: DefView ignored GetDetailsEx for extra
+    // columns, so this probe can expose a known-schema test value through the
+    // documented Shell folder property-store factory binding path.
+    class StaticByteCountPropertyStore final : public IPropertyStore
+    {
+    public:
+        explicit StaticByteCountPropertyStore(LONG value) : _value(value) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IPropertyStore) return E_NOINTERFACE;
+            *value = static_cast<IPropertyStore*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE GetCount(DWORD* count) override
+        {
+            if (!count) return E_POINTER;
+            *count = 1;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetAt(DWORD index, PROPERTYKEY* key) override
+        {
+            if (!key) return E_POINTER;
+            if (index != 0) return E_INVALIDARG;
+            *key = kDocumentByteCountKey;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key, PROPVARIANT* value) override
+        {
+            InterlockedIncrement(&g_propertyStoreValueRequests);
+            if (!value) return E_POINTER;
+            PropVariantInit(value);
+            if (key != kDocumentByteCountKey) return S_FALSE;
+            value->vt = VT_I4;
+            value->lVal = _value;
+            return S_OK;
+        }
+        HRESULT STDMETHODCALLTYPE SetValue(REFPROPERTYKEY, REFPROPVARIANT) override { return STG_E_ACCESSDENIED; }
+        HRESULT STDMETHODCALLTYPE Commit() override { return S_OK; }
+    private:
+        volatile LONG _references = 1;
+        LONG _value;
+    };
+
+    class StaticByteCountPropertyStoreFactory final : public IPropertyStoreFactory
+    {
+    public:
+        explicit StaticByteCountPropertyStoreFactory(LONG value) : _value(value) {}
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (iid != IID_IUnknown && iid != IID_IPropertyStoreFactory) return E_NOINTERFACE;
+            *value = static_cast<IPropertyStoreFactory*>(this);
+            AddRef();
+            return S_OK;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&_references); }
+        ULONG STDMETHODCALLTYPE Release() override
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT STDMETHODCALLTYPE GetPropertyStore(GETPROPERTYSTOREFLAGS, IUnknown*, REFIID iid, void** value) override
+        {
+            InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
+            return CreateStore(_value, iid, value);
+        }
+        HRESULT STDMETHODCALLTYPE GetPropertyStoreForKeys(const PROPERTYKEY*, UINT, GETPROPERTYSTOREFLAGS, REFIID iid, void** value) override
+        {
+            InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
+            return CreateStore(_value, iid, value);
+        }
+    private:
+        static HRESULT CreateStore(LONG propertyValue, REFIID iid, void** value)
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            auto* store = new (std::nothrow) StaticByteCountPropertyStore(propertyValue);
+            if (!store) return E_OUTOFMEMORY;
+            const auto result = store->QueryInterface(iid, value);
+            store->Release();
+            return result;
+        }
+        volatile LONG _references = 1;
+        LONG _value;
+    };
 
     class LegacyDetailsCallback final : public IShellFolderViewCB
     {
@@ -417,6 +519,21 @@ namespace
             PCUIDLIST_RELATIVE original = nullptr;
             auto result = UnwrapChildPidlView(item, &original);
             if (FAILED(result)) return result;
+            if (iid == IID_IPropertyStoreFactory && InterlockedCompareExchange(&g_propertyStoreFactoryProbeEnabled, 0, 0))
+            {
+                InterlockedIncrement(&g_propertyStoreFactoryBindRequests);
+                VARIANT size{};
+                VariantInit(&size);
+                result = _inner->GetDetailsEx(reinterpret_cast<PCUITEMID_CHILD>(original), &kSizeKey, &size);
+                if (FAILED(result)) { VariantClear(&size); return result; }
+                ULONGLONG byteCount = size.vt == VT_UI8 ? size.ullVal : size.vt == VT_I8 ? static_cast<ULONGLONG>(size.llVal) : 10;
+                VariantClear(&size);
+                const auto testValue = byteCount > LONG_MAX ? LONG_MAX : static_cast<LONG>(byteCount);
+                auto* factory = new (std::nothrow) StaticByteCountPropertyStoreFactory(testValue);
+                if (!factory) return E_OUTOFMEMORY;
+                *value = static_cast<IPropertyStoreFactory*>(factory);
+                return S_OK;
+            }
             if (!_wrappedPidls || (iid != IID_IShellFolder && iid != IID_IShellFolder2))
                 return _inner->BindToObject(original, bind, iid, value);
 
@@ -737,6 +854,26 @@ extern "C" __declspec(dllexport) void WINAPI ResetStaticShellColumnProbeCounters
     InterlockedExchange(&g_legacyDetailsCallbackHeaderRequests, 0);
     InterlockedExchange(&g_legacyDetailsCallbackItemRequests, 0);
     InterlockedExchange(&g_legacyDetailsCallbackLastColumn, -1);
+    InterlockedExchange(&g_propertyStoreFactoryBindRequests, 0);
+    InterlockedExchange(&g_propertyStoreFactoryCreateRequests, 0);
+    InterlockedExchange(&g_propertyStoreValueRequests, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreFactoryBindRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreFactoryBindRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreFactoryCreateRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreFactoryCreateRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) LONG WINAPI GetPropertyStoreValueRequestCount()
+{
+    return InterlockedCompareExchange(&g_propertyStoreValueRequests, 0, 0);
+}
+extern "C" __declspec(dllexport) void WINAPI SetStaticShellPropertyStoreFactoryProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_propertyStoreFactoryProbeEnabled, enabled ? 1 : 0);
 }
 
 extern "C" __declspec(dllexport) void WINAPI SetStaticShellLegacyDetailsCallbackProbe(BOOL enabled)

@@ -13,6 +13,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellFolderViewId = new("37A378C0-F82D-11CE-AE65-08002B2E1262");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid ShellItem2Id = new("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ParentAndItemId = new("B3A4B685-B685-4805-99D9-5DEAD2873236");
     private static readonly Guid DataObjectHandlerId = new("B8C0BD9F-ED24-455C-83E6-D5390C4FE8C4");
@@ -627,6 +628,7 @@ internal static class StaticShellFolderAdapterProbe
         StreamViewHost? host = null;
         var stage = "create-fixture";
         var result = 0;
+        var propertyStoreFactoryProbeEnabled = false;
         try
         {
             Directory.CreateDirectory(childPath);
@@ -644,8 +646,10 @@ internal static class StaticShellFolderAdapterProbe
             var createAdapter = Marshal.GetDelegateForFunctionPointer<CreateAdapter>(
                 NativeLibrary.GetExport(nativeLibrary, "CreateWrappedPidlShellFolderAdapter"));
             Check(createAdapter(folder, out adapter));
-            Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
-                NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"))();
+            Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
+                NativeLibrary.GetExport(nativeLibrary, "SetStaticShellPropertyStoreFactoryProbe"))(1);
+            propertyStoreFactoryProbeEnabled = true;
+            Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"))();
 
             stage = "bind-child-folder-adapter";
             childPidl = ParseChild(adapter, "nested-folder");
@@ -826,6 +830,57 @@ internal static class StaticShellFolderAdapterProbe
             stage = "verify-custom-column-contract";
             var property = StaticShellColumnContract.PropertyKey;
             var customColumn = new PropertyKeyState(property.FormatId, property.PropertyId);
+            var knownSchemaColumn = new PropertyKeyState(DocumentSummaryFormat, 4); // System.Document.ByteCount, VT_I4.
+            var resetProbeCounters = Marshal.GetDelegateForFunctionPointer<ResetProbeCounters>(
+                NativeLibrary.GetExport(nativeLibrary, "ResetStaticShellColumnProbeCounters"));
+
+            resetProbeCounters();
+            Check(ShellColumnManager.Apply(folderView,
+            [
+                new(new(nameColumn.FormatId, nameColumn.PropertyId), 220),
+                new(new(sizeColumn.FormatId, sizeColumn.PropertyId), 100),
+                new(knownSchemaColumn, 130)
+            ]));
+            Check(ShellColumnManager.Capture(folderView, out var knownSchemaColumns));
+            resetProbeCounters();
+            sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn
+                {
+                    Key = new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 },
+                    Direction = 1
+                }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var knownSchemaSortNames = ReadDisplayedColumnValues(view, 0, expectedCount: 3);
+            var knownSchemaSortStats = ReadNativeComparisonStats();
+            sortColumns = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
+            try
+            {
+                Marshal.StructureToPtr(new NativeSortColumn { Key = sizeColumn, Direction = 1 }, sortColumns, false);
+                Check(At<SetSortColumns>(folderView, 27)(folderView, sortColumns, 1));
+            }
+            finally { Marshal.FreeCoTaskMem(sortColumns); }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var knownSchemaValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
+            var knownSchemaHeaders = ReadDisplayedColumnHeaders(view);
+            var knownSchemaStats = ReadNativeComparisonStats();
+            if (!knownSchemaValues.SequenceEqual(new[] { "2", "10", "10" }, StringComparer.Ordinal))
+                throw new Exception("The registered-schema property-store control column did not display file byte counts: " + string.Join('|', knownSchemaValues));
+            var knownSchemaDirectEvidence = VerifyViewFolderDocumentByteCount(viewFolder, childFolder, shellDetailsSize);
+            resetProbeCounters();
+            var shellItemStoreEvidence = ReadShellItemPropertyStoreValue(childFolder, "ten.bin", knownSchemaColumn);
+            var shellItemStoreStats = ReadNativeComparisonStats();
+            resetProbeCounters();
+            var shellFolderStoreFactoryEvidence = ReadShellFolderPropertyStoreFactoryValue(childFolder, "ten.bin", knownSchemaColumn);
+            var shellFolderStoreFactoryStats = ReadNativeComparisonStats();
+
+            resetProbeCounters();
             Check(ShellColumnManager.Apply(folderView,
             [
                 new(new(nameColumn.FormatId, nameColumn.PropertyId), 220),
@@ -836,7 +891,10 @@ internal static class StaticShellFolderAdapterProbe
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var customValues = ReadDisplayedColumnValues(view, 2, expectedCount: 3);
-            Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; callbacks={ReadNativeComparisonStats()}; window-created=True; private-desktop-only=True");
+            var customHeaders = ReadDisplayedColumnHeaders(view);
+            var customStats = ReadNativeComparisonStats();
+            Console.WriteLine($"native-shell-item-bound-view: known-schema-key={knownSchemaColumn.FormatId}/{knownSchemaColumn.PropertyId}; known-schema-columns=[{string.Join('|', knownSchemaColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; known-schema-headers=[{string.Join('|', knownSchemaHeaders)}]; known-schema-values=[{string.Join('|', knownSchemaValues)}]; direct-folder-values=[{knownSchemaDirectEvidence}]; shell-item-property-store=[{shellItemStoreEvidence}]; shell-item-store-callbacks={shellItemStoreStats}; shell-folder-property-store-factory=[{shellFolderStoreFactoryEvidence}]; shell-folder-factory-callbacks={shellFolderStoreFactoryStats}; known-schema-callbacks={knownSchemaStats}; known-schema-sort-order=[{string.Join('|', knownSchemaSortNames)}]; known-schema-sort-callbacks={knownSchemaSortStats}");
+            Console.WriteLine($"native-shell-item-bound-view: rows={itemCount}; sorted-size-order=[{string.Join('|', names)}]; columns-readback=[{string.Join('|', appliedColumns?.Select(column => $"{column.Key.FormatId}/{column.Key.PropertyId}:{column.Width}") ?? [])}]; headers=[{string.Join('|', customHeaders)}]; custom-column-count={GetColumnCount(viewFolder, shellDetailsSize)}; custom-column-values=[{string.Join('|', customValues)}]; custom-column-callbacks={customStats}; window-created=True; private-desktop-only=True");
             var operationChild = ParseChild(childFolder, "two.bin");
             try { VerifyWrappedShellItemObjects(childFolder, operationChild); }
             finally { ILFree(operationChild); }
@@ -852,6 +910,11 @@ internal static class StaticShellFolderAdapterProbe
         }
         finally
         {
+            if (propertyStoreFactoryProbeEnabled && nativeLibrary != 0)
+            {
+                Marshal.GetDelegateForFunctionPointer<SetPropertyStoreFactoryProbe>(
+                    NativeLibrary.GetExport(nativeLibrary, "SetStaticShellPropertyStoreFactoryProbe"))(0);
+            }
             if (createdView && view != 0)
             {
                 try { Check(At<DestroyViewWindow>(view, 10)(view)); }
@@ -1310,6 +1373,53 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
+    private static string[] ReadDisplayedColumnHeaders(nint view)
+    {
+        Check(At<GetViewWindow>(view, 3)(view, out var viewWindow));
+        nint listView = 0;
+        EnumChildWindows(viewWindow, (child, _) =>
+        {
+            var className = new System.Text.StringBuilder(32);
+            if (GetClassNameW(child, className, className.Capacity) > 0 && className.ToString() == "SysListView32")
+            {
+                listView = child;
+                return false;
+            }
+            return true;
+        }, 0);
+        if (listView == 0) throw new InvalidOperationException("DefView has no SysListView32 child to query headers.");
+
+        var header = unchecked((nint)SendMessageW(listView, 0x101F, 0, 0));
+        if (header == 0) throw new InvalidOperationException("DefView ListView has no header control.");
+        var columnCount = unchecked((int)SendMessageW(header, 0x1200, 0, 0)); // HDM_GETITEMCOUNT.
+        var textBuffer = Marshal.AllocHGlobal(512 * sizeof(char));
+        var columnPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewColumn>());
+        try
+        {
+            var headers = new string[columnCount];
+            for (var index = 0; index < columnCount; index++)
+            {
+                Marshal.WriteInt16(textBuffer, 0);
+                var column = new NativeListViewColumn
+                {
+                    Mask = 0x0004, // LVCF_TEXT.
+                    Text = textBuffer,
+                    TextCapacity = 512
+                };
+                Marshal.StructureToPtr(column, columnPointer, false);
+                if (SendMessageW(listView, 0x105F, (nint)index, columnPointer) == 0)
+                    throw new InvalidOperationException($"Could not read DefView ListView header at index {index}.");
+                headers[index] = Marshal.PtrToStringUni(textBuffer) ?? string.Empty;
+            }
+            return headers;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(columnPointer);
+            Marshal.FreeHGlobal(textBuffer);
+        }
+    }
+
     private static nint ParseChild(nint adapter, string name)
     {
         var text = Marshal.StringToCoTaskMemUni(name);
@@ -1364,6 +1474,103 @@ internal static class StaticShellFolderAdapterProbe
             return verbs.ToArray();
         }
         finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static string VerifyViewFolderDocumentByteCount(nint viewFolder, nint childFolder, int shellDetailsSize)
+    {
+        var child = ParseChild(childFolder, "ten.bin");
+        var key = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
+        var value = Marshal.AllocCoTaskMem(24);
+        var details = Marshal.AllocCoTaskMem(shellDetailsSize);
+        try
+        {
+            Marshal.StructureToPtr(new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 }, key, false);
+            Marshal.GetNativeVariantForObject(0, value);
+            Check(At<GetDetailsEx>(viewFolder, 17)(viewFolder, child, key, value));
+            var propertyValue = Marshal.GetObjectForNativeVariant(value);
+            Marshal.Copy(new byte[shellDetailsSize], 0, details, shellDetailsSize);
+            var column = GetColumnCount(viewFolder, shellDetailsSize) - 1;
+            Check(At<GetDetailsOf>(viewFolder, 18)(viewFolder, child, (uint)column, details));
+            var detailsValue = ReadDetailsText(details);
+            if (propertyValue is not int number || number != 10 || detailsValue != "10")
+                throw new Exception($"The view folder did not directly return its registered-schema values: property={propertyValue}, details={detailsValue}.");
+            return $"System.Document.ByteCount={number};GetDetailsOf={detailsValue}";
+        }
+        finally
+        {
+            ILFree(child);
+            Marshal.FreeCoTaskMem(details);
+            Marshal.FreeCoTaskMem(value);
+            Marshal.FreeCoTaskMem(key);
+        }
+    }
+
+    private static string ReadShellItemPropertyStoreValue(nint folder, string childName, PropertyKeyState propertyKey)
+    {
+        var child = ParseChild(folder, childName);
+        nint item = 0, item2 = 0, store = 0;
+        var value = Marshal.AllocCoTaskMem(24);
+        try
+        {
+            var shellItemId = ShellItemId;
+            Check(SHCreateItemWithParent(0, folder, child, in shellItemId, out item));
+            Check(Marshal.QueryInterface(item, in ShellItem2Id, out item2));
+            var propertyStoreId = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+            var getPropertyStore = At<GetShellItemPropertyStore>(item2, 8);
+            var storeResult = getPropertyStore(item2, 0, in propertyStoreId, out store); // GPS_DEFAULT.
+            if (storeResult < 0 || store == 0) return $"GetPropertyStore=0x{storeResult:X8}";
+            try
+            {
+                var key = new ShellColumnManager.NativeKey { FormatId = propertyKey.FormatId, PropertyId = propertyKey.PropertyId };
+                Marshal.GetNativeVariantForObject(0, value);
+                var valueResult = At<GetPropertyStoreValue>(store, 5)(store, in key, value);
+                if (valueResult < 0) return $"GetValue=0x{valueResult:X8}";
+                var propertyValue = Marshal.GetObjectForNativeVariant(value);
+                return $"GetPropertyStore=S_OK;GetValue={propertyValue ?? "VT_EMPTY"}";
+            }
+            finally { Marshal.Release(store); }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(value);
+            if (item2 != 0) Marshal.Release(item2);
+            if (item != 0) Marshal.Release(item);
+            ILFree(child);
+        }
+    }
+
+    private static string ReadShellFolderPropertyStoreFactoryValue(nint folder, string childName, PropertyKeyState propertyKey)
+    {
+        var child = ParseChild(folder, childName);
+        nint factory = 0, store = 0;
+        var value = Marshal.AllocCoTaskMem(24);
+        try
+        {
+            var factoryId = new Guid("BC110B6D-57E8-4148-A9C6-91015AB2F3A5");
+            var bindResult = At<BindFolderChild>(folder, 5)(folder, child, 0, in factoryId, out factory);
+            if (bindResult < 0 || factory == 0) return $"BindToObject(IPropertyStoreFactory)=0x{bindResult:X8}";
+
+            var propertyStoreId = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+            var getPropertyStore = At<GetFactoryPropertyStore>(factory, 3);
+            var storeResult = getPropertyStore(factory, 0, 0, in propertyStoreId, out store); // GPS_DEFAULT.
+            if (storeResult < 0 || store == 0) return $"GetPropertyStore=0x{storeResult:X8}";
+            try
+            {
+                var key = new ShellColumnManager.NativeKey { FormatId = propertyKey.FormatId, PropertyId = propertyKey.PropertyId };
+                Marshal.GetNativeVariantForObject(0, value);
+                var valueResult = At<GetPropertyStoreValue>(store, 5)(store, in key, value);
+                if (valueResult < 0) return $"GetValue=0x{valueResult:X8}";
+                var propertyValue = Marshal.GetObjectForNativeVariant(value);
+                return $"BindToObject=S_OK;GetPropertyStore=S_OK;GetValue={propertyValue ?? "VT_EMPTY"}";
+            }
+            finally { Marshal.Release(store); }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(value);
+            if (factory != 0) Marshal.Release(factory);
+            ILFree(child);
+        }
     }
 
     private static void InvokeShellViewBackgroundVerb(nint view, nint owner, string expectedVerb)
@@ -1535,12 +1742,16 @@ internal static class StaticShellFolderAdapterProbe
             var propertyStoreBindObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToObjectRequestCount"))();
             var propertyStoreBindStorage = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreBindToStorageRequestCount"))();
             var propertyStoreUiObject = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreUiObjectRequestCount"))();
+            var propertyStoreFactoryBind = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreFactoryBindRequestCount"))();
+            var propertyStoreFactoryCreate = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreFactoryCreateRequestCount"))();
+            var propertyStoreGetValue = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetPropertyStoreValueRequestCount"))();
             var persistClass = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistClassRequestCount"))();
             var persistRoot = Marshal.GetDelegateForFunctionPointer<GetCompareCount>(NativeLibrary.GetExport(module, "GetStaticShellPersistRootRequestCount"))();
             return $"compare={total}/{custom}/{index}; Persistence(GetClassID/GetCurFolder)={persistClass}/{persistRoot}; size-CompareIDs={sizeCompare}; " +
                 $"document-byte-count(CompareIDs/GetDetailsEx/GetDetailsOf)={documentCompare}/{documentDetailsEx}/{documentDetailsOf}; " +
                 $"GetDetailsEx(custom/size)={detailsEx}/{sizeDetailsEx}; GetDetailsOf(custom total/header/item, size-item)={detailsOf}/{customHeaderDetailsOf}/{customItemDetailsOf}/{sizeDetailsOf}; IPropertyStore(QI/BindObject/BindStorage/UIObject)=" +
-                $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}";
+                $"{propertyStoreQuery}/{propertyStoreBindObject}/{propertyStoreBindStorage}/{propertyStoreUiObject}; IPropertyStoreFactory(Bind/Create/GetValue)=" +
+                $"{propertyStoreFactoryBind}/{propertyStoreFactoryCreate}/{propertyStoreGetValue}";
         }
         finally { NativeLibrary.Free(module); }
     }
@@ -1585,6 +1796,20 @@ internal static class StaticShellFolderAdapterProbe
         public nint Columns;
         public nint ColumnFormats;
         public int Group;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeListViewColumn
+    {
+        public uint Mask;
+        public int Format;
+        public int Width;
+        public nint Text;
+        public int TextCapacity;
+        public int SubItem;
+        public int Image;
+        public int Order;
+        public int MinimumWidth;
+        public int DefaultWidth;
+        public int IdealWidth;
     }
     [StructLayout(LayoutKind.Sequential)] private struct NativeInvokeInfo
     {
@@ -1658,6 +1883,11 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemPropertyStore(nint self, uint flags, in Guid iid, out nint store);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindFolderChild(nint self, nint item, nint bindContext, in Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFactoryPropertyStore(nint self, uint flags, nint factory, in Guid iid, out nint store);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

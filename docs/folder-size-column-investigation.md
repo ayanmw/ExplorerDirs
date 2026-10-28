@@ -229,3 +229,13 @@ Private Desktop 实测中，DefView 仍能创建并显示标准 Name/Size/Date �
 Private Desktop 记录：`src/.state/native-probe-watchdog/20261029-shell-item-bound-view.log`（末轮）；探针源码与命令保留，后续可复跑。产品代码、ExplorerBrowser 和 release 未改变。
 
 参考：[IShellItem::BindToHandler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitem-bindtohandler)、[IShellItemArray::BindToHandler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellitemarray-bindtohandler)、[SHCreateItemWithParent](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateitemwithparent)、[SHCreateShellItemArrayFromShellItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shcreateshellitemarrayfromshellitem)、[IParentAndItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iparentanditem)。
+
+### 2026-10-29：`IPropertyStoreFactory` 列值提供路径
+
+为区分“DefView 不读取 `GetDetailsEx`”与“DefView 不支持额外列”，在 `StaticShellFolderAdapter` 的 Private Desktop 专用绑定视图探针中增加一个最小 `IPropertyStoreFactory`。微软文档说明该工厂通常经 `IShellFolder::BindToObject` 或 `IShellItem::BindToHandler` 获取，且是实现 Shell 文件夹数据源时提供属性存储的受支持方式；工厂只暴露已有 schema 的 `System.Document.ByteCount`，测试值由对应文件实际长度转为 `VT_I4`。测试夹具长度为 `2/10/10` 字节。该实现仅编入 NativeProbe 原生 DLL，不触及产品代码、系统注册表或发布包。
+
+Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|10|10`，标题正确；DefView 通过新工厂路径发生 `BindToObject/创建 store/GetValue = 3/3/3`，而同一轮 `GetDetailsEx` 子项、`GetDetailsOf` 子项和 `CompareIDs` 仍为 0。显式从 `IShellItem2::GetPropertyStore` 和 folder `BindToObject(IPropertyStoreFactory)` 读取也分别得到 10。对照中，未登记的私有测试 PKEY 仍没有列标题或值，且显示列成功不等于排序成功：将已注册列设为排序键后，视图仍保持初始名称顺序 `ten - 副本.bin|ten.bin|two.bin`；标准 `PKEY_Size` 恢复后则按 `two.bin|ten - 副本.bin|ten.bin` 排序。前台 HWND 与输入时间戳不变，Private Desktop 由探针清理。
+
+本轮说明：DefView 可以显示通过 `IPropertyStoreFactory` 提供且具有系统 schema 的额外属性列；此前的空白不只是 `GetDetailsEx` 回调未被消费。探针仅在绑定视图命令的生命周期内启用该 factory，其他 NativeProbe 路径仍委托原 Shell folder。尚未解释系统属性的排序路径，也未解决自定义私有 PKEY 的 schema/标题；因此“自定义逐行列显示及排序”硬门槛仍未通过，不能接入产品。最终输出：`src/.state/native-probe-watchdog/20261029-023213-192edcbb.stdout.log`，SHA-256 `DDA42C1CFBCC1296AE3F33F88482E0E56DAEA3F04E833B735759B17381DAA146`；探针按尚未满足私有 PKEY 门槛返回 exit code 1，已注册 schema 值显示、factory 调用计数、基础 Shell 操作检查均通过。
+
+参考：[IPropertyStoreFactory](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nn-propsys-ipropertystorefactory)、[IShellFolder::BindToObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-bindtoobject)、[GETPROPERTYSTOREFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/propsys/ne-propsys-getpropertystoreflags)。
