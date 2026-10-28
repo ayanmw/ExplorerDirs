@@ -436,4 +436,4 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 ### Q-Dir 列头过滤差距（2026-10-28）
 
-Q-Dir 官方 FAQ 38 把通配符快速过滤与“按列表列过滤”分别列出。当前 `QuickFilterSettings.Matches` 只对 Shell 项目名执行通配符匹配；`ShellFolderFilter` 没有按活动列读取项目属性，因此类型、大小、日期等列值的过滤尚未覆盖。FAQ 正文只说明可通过列标题过滤，没有公开具体手势、组合多个列条件的规则或可见状态；这些语义待后续查看官方示例/可见验收再确定，暂不改变现有原生列标题菜单。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)。
+Q-Dir 官方 FAQ 38 将名称通配符过滤和列表列值过滤作为两种功能分别介绍，并明确每个视图有独立设置。示例图显示列标题的筛选入口打开该列的值清单，用户可勾选值过滤；因此本功能必须按标签分别保存，不能把筛选条件变成 pane 级或全局状态。当前 `QuickFilterSettings.Matches` 只对 Shell 项目名执行通配符匹配；`ShellFolderFilter` 没有按活动列读取项目属性，因此类型、大小、日期等列值的过滤尚未覆盖。项目继续保留 ExplorerBrowser 原生文件视图和原生文件区菜单，建议在原生列标题上增加筛选入口，按 `IShellFolder2` 属性值筛选，并与现有名称筛选共同生效；多列条件暂按 AND 语义设计。实现前还需确认列标题入口能否在当前 ExplorerBrowser/DirectUI 表头上稳定实现，以及不同 Shell namespace 属性读取失败时如何表现。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)（[官方示例图](https://www.softwareok.com/img/faq/Q-DIR/Dateien_filtern_ueber_den_Spaltenkopf_2021-03-03-08-34-51.png)）。
