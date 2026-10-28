@@ -4439,6 +4439,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 数值排序结论复核：先以真实 `IFileOperation` 复制验证 2→3 项通知，再用名称顺序值为 `10/2/10` 的夹具排除名称顺序偶合。标准 `PKEY_Size` 能正常升降序；系统 ByteCount 列升降序两次都保持同一名称顺序和值 `10/2/10`，方向读回虽切换 `+1/-1`，实际未重排。后续调查改查 DefView/SysListView 排序委托边界；不把实验架构接入产品。
 - Private Desktop `SysListView32` 只读 subclass 观察：标准 Size 行序可以改变，但同一排序时段没有发给列表 HWND 的 `LVM_SORTITEMS/LVM_SORTITEMSEX` 或项目插入/删除/设置消息；ByteCount 也没有排序消息或新的属性读取。此证据支持“DefView 在内部项目顺序层处理排序”的推断，限定于已观察 HWND 和 LVM 消息，不断言 Shell 内部实现。下一步追 `SetSortColumns`/Header 通知到 DefView 比较与项目序列的调用边界。
 - 对标准 `PKEY_Size` 做了 `IPropertyStoreFactory` 覆写 A/B：逐项读取确认返回 `a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`，但原生 Size 升序及 Header 升降序仍按磁盘实际字节大小排列。该 DefView 路径忽略子项属性工厂的 Size 覆写；不再投入“只替换属性存储”的方案。NativeProbe Release 构建通过；完整 Private Desktop 运行仍以 exit code 1 停在原有私有测试列为空值门槛，前台/输入守卫未变化。产品与 release 未改。详见 `folder-size-column-investigation.md` 的 2026-10-29 记录。
+- 尝试在隔离 adapter 的 `GetAttributesOf` 屏蔽 `SFGAO_FILESYSTEM|SFGAO_FILESYSANCESTOR`，但创建该 Shell view 时此 adapter 的 `GetAttributesOf` 调用数为 0，故没有实际改变视图属性，不能据此判断自定义 namespace 排序。无效探针接线已移除；下一步先查找 DefView 取得文件夹/属性身份的真实入口，随后再考虑独立的非文件系统 Shell namespace 对照。
 
 2026-10-28：Private Desktop 前台守卫现每 25 ms 记录首次 HWND 变化及最近探针阶段；drop target 路径在源/目标视图创建、Copy 阶段和清理前更新标签。NativeProbe Release build 0 警告/错误；无 Shell-view `SW_SHOWNOACTIVATE` 对照退出码 0、前台未变，验证监视没有破坏该路径。未重跑 Shell-view 探针，故尚未定位实际前台变化来源；继续保留守卫，不在未确认隔离条件时重复创建 Shell view。详见[阶段监视记录](ishellview-color-spike.md#2026-10-28-private-desktop-前台变化阶段监视)。
 

@@ -307,3 +307,7 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回明确的 `PKEY_Size` 覆盖值：`a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`；逐项直接读取均确认返回 `S_OK` 和目标值。随后设置标准 `PKEY_Size` 升序并刷新，DefView 行序仍是 `two.bin|a-ten.bin|z-ten.bin`，对应真实文件字节大小 `2|10|10`，而非覆盖值所要求的 `z-ten.bin|a-ten.bin|two.bin`。真实 Header 输入产生的两种方向行序也与真实文件大小对应。由此确认该视图的标准 Size 排序没有消费此子项 `IPropertyStoreFactory` 返回的 `PKEY_Size` 值；光装饰标准属性存储无法让递归目录大小参与 Explorer 原生大小排序。
 
 本轮 `StaticShellFolderAdapter.cpp` 原生构建成功，NativeProbe Release 构建 0 警告/错误；Private Desktop 探针前台句柄与输入时间戳未变。完整探针继续走过排序对照，但最终仍以 exit code 1 停在原有“未注册私有测试 PKEY 列值为空”门槛；该状态不推翻此次 Size 对照。完整输出：`src/.state/native-probe-watchdog/20261029-030918-8e9002cc.stdout.log`。没有改产品 ExplorerBrowser 或 release。后续应停止重复尝试覆写 `PKEY_Size`，转向评估 DefView 排序身份/属性来源与自定义 namespace 的真实代价；只有存在受支持的数值排序合同才继续该路径。
+
+### 2026-10-29：文件系统身份属性屏蔽探针未触发
+
+为验证 DefView 是否因 `SFGAO_FILESYSTEM` / `SFGAO_FILESYSANCESTOR` 走了文件系统专用排序路径，曾在隔离 adapter 的 `GetAttributesOf` 临时加入按开关屏蔽这两个标记，并在绑定子文件夹及创建 view 前启用。该 Private Desktop 运行的屏蔽计数仍为 0：Shell 在该阶段没有通过此 adapter 的 `GetAttributesOf` 查询项目属性，因此实际视图并未进入“标记被屏蔽”的条件。原生属性工厂数值与上一轮一致，标准 Size 仍按磁盘大小排序。故这次不构成身份屏蔽 A/B 结果，不能推断移除标记后的 Shell 行为；无效开关接线已移除。输出：`src/.state/native-probe-watchdog/20261029-031308-c29b7d62.stdout.log`，前台 HWND 与输入时间戳未变化，探针仍以既有私有属性列空值门槛 exit code 1 结束。下一步应先定位 Shell view 取得文件夹/属性身份的实际接口边界，再决定是否值得做隔离的非文件系统命名空间样本。
