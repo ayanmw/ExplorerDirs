@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：提交 `ba4036f` 新增“最近打开的收藏夹”窗口标题模式后，完整 Release `ExplorerDirs.SettingsSmoke` 输出 `Settings smoke: PASS`；App Release build 为 0 错误、2 条 NU1900（NuGet 漏洞数据源不可达）。未启动产品窗口。当前分支没有 ExplorerDirs.App 进程，因此本轮无法采集实际运行内存。`folder-verb-smoke.ps1` 在当前沙箱创建唯一隔离 HKCU 测试键时被拒绝访问；PowerShell 语法检查通过，未触碰真实 Explorer 注册表。
+
 2026-10-29：隔离 `IShellView` 已验证 Shell item 入口、视图枚举/标准 Size 排序、菜单、部分文件操作与通知；新增列仍未被 DefView 请求逐项值。官方接口文档复核确认系统 DefView 没有受支持的 cell-value/render/sort 回调入口，而自定义 `IShellView` 会承担窗口、呈现、菜单、键盘、拖放等完整 view 职责。继续进行的有效实验应改为有效父级下的自有 namespace + 稳定虚拟 PIDL + `IShellFolder2::CompareIDs`，并验证 Shell 标准列读取与数值升降序；不能继续叠加 DefView 忽略的属性覆盖/legacy callback。该实验需要临时挂接 Desktop\NameSpace，尚未获用户明确授权，故本轮只收敛技术边界、不改产品、不重跑 Shell view；当前路线上下一步待用户允许这项隔离注册后执行。选中项重命名/删除、真实 OLE 拖放及完整产品接线仍待验证。细节见[逐行列调查](folder-size-column-investigation.md#2026-10-29-defview-与自定义文件视图的支持边界复核)。
 
 2026-10-29：提交 `bbc2f6a` 修正 Shell 视图重建期间的暂时选区扩张：当同一视图且无新输入时，若旧快照焦点项原本未选中、却出现在较大的新快照中，继续保留已确认的多选快照；异步枚举补齐其它项目仍可更新。纯门控回归和 HostProbe 确定性回调覆盖通过；四窗格 3,000 项创建/删除压力运行 6 轮均退出码 0，选区/焦点保持。完整 Release SettingsSmoke 通过。仅为隐藏本机 ExplorerBrowser 宿主证据，用户可见文件操作与其它 Shell provider 仍待集中验收。
