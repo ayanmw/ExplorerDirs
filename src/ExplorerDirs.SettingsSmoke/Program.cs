@@ -686,7 +686,7 @@ try
     mutableShellSorts.Clear();
     Check(captureComplete && captured.SortColumns.Count == 1,
           "captured sort columns do not alias the Shell reader's list");
-    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null, null),
+    Check(StartupDirectory.Parse([]) == new StartupDirectoryRequest(null, null, null, null),
           "startup without a directory restores the normal session");
     Check(StartupDirectory.Parse([@"C:\Users\marvin"]).Directory == @"C:\Users\marvin" &&
           StartupDirectory.Parse([@"\\server\share\docs"]).Directory == @"\\server\share\docs",
@@ -697,6 +697,20 @@ try
           StartupDirectory.Parse([@"C:\work\folder"]).Directory == Path.GetFullPath(@"C:\work\folder") &&
           StartupDirectory.Parse([@"C:\work\saved.QDR"]).QdrFile == Path.GetFullPath(@"C:\work\saved.QDR"),
           "Q-Dir status arguments are distinguished from directory arguments by extension");
+    var selectComma = StartupDirectory.Parse([@"/select,C:\work\folder\sample.txt"]);
+    var selectCommaSeparated = StartupDirectory.Parse(["/select,", @"C:\work\folder\sample.txt"]);
+    var selectSpace = StartupDirectory.Parse(["/select", @"C:\work\folder with spaces\sample.txt"]);
+    Check(selectComma.Directory == Path.GetFullPath(@"C:\work\folder") &&
+          selectComma.SelectPath == Path.GetFullPath(@"C:\work\folder\sample.txt") &&
+          selectCommaSeparated.Directory == Path.GetFullPath(@"C:\work\folder") &&
+          selectCommaSeparated.SelectPath == Path.GetFullPath(@"C:\work\folder\sample.txt") &&
+          selectSpace.Directory == Path.GetFullPath(@"C:\work\folder with spaces") &&
+          selectSpace.SelectPath == Path.GetFullPath(@"C:\work\folder with spaces\sample.txt"),
+          "Explorer select startup forms open the parent directory and retain the selected item");
+    Check(StartupDirectory.Parse(["/root", @"C:\work\folder"]).Warning is not null &&
+          StartupDirectory.Parse(["/select,"]).Warning is not null &&
+          StartupDirectory.Parse(["/select", "\0"]).Warning is not null,
+          "unsupported and incomplete Explorer switches are rejected without changing startup state");
     Check(StartupDirectory.Parse(["", "extra"]).Directory is null &&
           StartupDirectory.Parse(["\0"]).Warning is not null,
           "unsupported or invalid arguments do not become a navigation target");
@@ -824,6 +838,34 @@ try
         Check(FolderOpenRouter.TryForwardAsync(qdrProfile, Path.Combine(root, "folder"), TimeSpan.FromSeconds(2))
                   .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
               "Q-Dir startup routing remains distinct from directory navigation");
+    }
+    var selectionProfile = Path.Combine(root, "router-select", "ExplorerDirs.ini");
+    string? selectedDirectory = null;
+    string? selectedPath = null;
+    var selectionCount = 0;
+    using (var selectionRouter = FolderOpenRouter.TryStart(selectionProfile, _ => Task.FromResult(false),
+               openSelection: (directory, item) =>
+               {
+                   selectedDirectory = directory;
+                   selectedPath = item;
+                   Interlocked.Increment(ref selectionCount);
+                   return Task.FromResult(true);
+               }) ?? throw new Exception("selection router did not start"))
+    {
+        var directory = Path.GetFullPath(Path.Combine(root, "select-folder"));
+        var item = Path.Combine(directory, "sample with spaces.txt");
+        var requestId = Guid.NewGuid();
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, directory, item,
+                  TimeSpan.FromSeconds(2), requestId).GetAwaiter().GetResult() == FolderForwardResult.Accepted &&
+              selectedDirectory == directory && selectedPath == item && selectionCount == 1,
+              "Explorer select requests route the containing folder and selected item to the existing process");
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, directory, item,
+                  TimeSpan.FromSeconds(2), requestId).GetAwaiter().GetResult() == FolderForwardResult.Accepted &&
+              selectionCount == 1,
+              "an ambiguous retry of the same select request does not select or open the item twice");
+        Check(FolderOpenRouter.TryForwardSelectionAsync(selectionProfile, Path.Combine(root, "other"), item,
+                  TimeSpan.FromSeconds(2)).GetAwaiter().GetResult() == FolderForwardResult.Rejected && selectionCount == 1,
+              "select routing rejects a parent directory that does not contain the requested item");
     }
     var unexpectedProfile = Path.Combine(root, "router-unexpected", "ExplorerDirs.ini");
     using (var unexpectedServer = new NamedPipeServerStream(FolderOpenRouter.PipeName(unexpectedProfile),

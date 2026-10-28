@@ -26,7 +26,21 @@ public partial class App : Application
         // A launch retry is the same logical request, while a second launch gets a fresh id.
         var startupRequestId = Guid.NewGuid();
         var initialForward = FolderForwardResult.Unavailable;
-        if (startupRequest.Directory is { } target)
+        if (startupRequest.SelectPath is { } selectedPath && startupRequest.Directory is { } selectedDirectory)
+        {
+            try
+            {
+                initialForward = FolderOpenRouter.TryForwardSelectionAsync(profilePath, selectedDirectory, selectedPath,
+                    TimeSpan.FromMilliseconds(150), startupRequestId).GetAwaiter().GetResult();
+                if (initialForward == FolderForwardResult.Accepted)
+                {
+                    Shutdown();
+                    return;
+                }
+            }
+            catch (Exception) { /* Open the parent and select the item in this process if routing is unavailable. */ }
+        }
+        else if (startupRequest.Directory is { } target)
         {
             try
             {
@@ -96,13 +110,22 @@ public partial class App : Application
             return await Dispatcher.InvokeAsync(() =>
                 (_folderTargetWindow ?? _openWindows.FirstOrDefault())?.OpenExternalDirectory(path) ?? false)
                 .Task.ConfigureAwait(false);
-        }, ActivateExistingWindowAsync, OpenQdrWorkspaceRequestAsync);
+        }, ActivateExistingWindowAsync, OpenQdrWorkspaceRequestAsync, async (directory, selected) =>
+        {
+            return await Dispatcher.InvokeAsync(() =>
+                (_folderTargetWindow ?? _openWindows.FirstOrDefault())?.OpenExternalSelection(directory, selected) ?? false)
+                .Task.ConfigureAwait(false);
+        });
         if (_folderOpenRouter is null)
         {
             FolderForwardResult retry;
             try
             {
-                retry = startupRequest.Directory is { } retryTarget
+                retry = startupRequest.SelectPath is { } retrySelection && startupRequest.Directory is { } retryDirectory
+                    ? FolderOpenRouter.TryForwardSelectionAsync(profilePath, retryDirectory, retrySelection,
+                        TimeSpan.FromSeconds(2), startupRequestId)
+                        .GetAwaiter().GetResult()
+                    : startupRequest.Directory is { } retryTarget
                     ? FolderOpenRouter.TryForwardAsync(profilePath, retryTarget, TimeSpan.FromSeconds(2), startupRequestId)
                         .GetAwaiter().GetResult()
                     : startupRequest.QdrFile is { } retryQdr
@@ -134,7 +157,8 @@ public partial class App : Application
             {
                 var window = CreateWindow(sessionPaths[index],
                     index == 0 ? startupRequest.Directory : null,
-                    index == 0 && warnings.Count > 0 ? string.Join(" ", warnings) : null);
+                    index == 0 && warnings.Count > 0 ? string.Join(" ", warnings) : null,
+                    index == 0 ? startupRequest.SelectPath : null);
                 if (index > 0 && !window.HasSavedWindowPlacement)
                 {
                     var previous = _openWindows[^2];
@@ -166,10 +190,12 @@ public partial class App : Application
         }
     }
 
-    private MainWindow CreateWindow(string sessionPath, string? startupDirectory, string? warning)
+    private MainWindow CreateWindow(string sessionPath, string? startupDirectory, string? warning,
+        string? startupSelectPath = null)
     {
         var window = new MainWindow(_themeController!, startupDirectory, warning, sessionPath,
-            System.IO.Path.GetDirectoryName(new SessionStore().Path), OpenSiblingWindow, RestartApplication);
+            System.IO.Path.GetDirectoryName(new SessionStore().Path), OpenSiblingWindow, RestartApplication,
+            startupSelectPath);
         window.Closed += (_, _) => OnWindowClosed(window);
         window.Activated += (_, _) => _folderTargetWindow = window;
         _openWindows.Add(window);

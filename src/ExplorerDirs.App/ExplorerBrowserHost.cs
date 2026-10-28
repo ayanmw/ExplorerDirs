@@ -1338,8 +1338,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
 
         CancelCreatedFileSelection();
-        var request = new CreatedFileSelectionRequest(_browser, CurrentPath, _viewReadiness.NavigationVersion,
-            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+        var request = CaptureFileSystemSelectionRequest();
         if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
         {
             if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
@@ -1349,18 +1348,45 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             if (!ShellCreatedItemNotification.NotifyCreatedFile(path, absolutePidl)) return false;
-
-            // Shell calls can pump messages. Keep the request tied to its original tab state.
+            // Shell calls can pump messages. Do not replace a newer selection request created reentrantly.
             if (_createdFileSelectionRequest is not null || !IsCreatedFileSelectionRequestCurrent(request)) return true;
-            _createdFileSelectionPidl = absolutePidl;
-            absolutePidl = IntPtr.Zero;
-            _createdFileSelectionRequest = request;
+            return QueueFileSystemSelection(absolutePidl, request);
         }
         finally
         {
             if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
         }
+    }
 
+    internal bool QueueFileSystemSelection(string path)
+    {
+        if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(path) ?? string.Empty),
+                Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
+        if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
+        {
+            if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
+            return false;
+        }
+        try
+        {
+            CancelCreatedFileSelection();
+            return QueueFileSystemSelection(absolutePidl, CaptureFileSystemSelectionRequest());
+        }
+        finally { Marshal.FreeCoTaskMem(absolutePidl); }
+    }
+
+    private CreatedFileSelectionRequest CaptureFileSystemSelectionRequest() =>
+        new(_browser!, CurrentPath, _viewReadiness.NavigationVersion,
+            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+
+    private bool QueueFileSystemSelection(IntPtr absolutePidl, CreatedFileSelectionRequest request)
+    {
+        // Shell calls can pump messages. Keep the request tied to its original tab state.
+        if (!IsCreatedFileSelectionRequestCurrent(request)) return false;
+        _createdFileSelectionPidl = ILClone(absolutePidl);
+        if (_createdFileSelectionPidl == IntPtr.Zero) return false;
+        _createdFileSelectionRequest = request;
         _createdFileSelectionAttempts = 0;
         _createdFileSelectionTimer = new DispatcherTimer(DispatcherPriority.Background)
         {

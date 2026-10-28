@@ -420,3 +420,4 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 > **四 pane WPF 选中项菜单隔离（2026-10-28）：**隐藏 Private Desktop 中四个原生 `IShellView` 均能为选中项提供含 `copy` 的 `IContextMenu`。初次失败时四个 view 在菜单测试前均残留 2 项选择，修复探针为每轮清空并复核全部 pane 后，完整流程连续 3 轮通过；不等于可见菜单跟踪或鼠标拖放验收。详见[隔离验证记录](ishellview-color-spike.md#2026-10-28四窗格-wpf-选中项菜单隔离复验)。
 
 > **四 pane WPF 新建文件夹命令（2026-10-28）：**隐藏原生背景菜单通过产品 `ShellFileCommands.Invoke(NewFolder)` 路径执行；适配器先初始化延迟“新建”子菜单，再以当前菜单偏移调用 `IContextMenu::InvokeCommand`。三个同目录 view 均观察到新文件夹，独立目录 pane 保持原状，连续 3 次通过。未初始化子菜单的单独偏移探针曾返回 `E_FAIL`，这不是产品适配器的结果。实际 ExplorerBrowser UI 的焦点/重命名体验仍待验收。详见[隔离验证记录](ishellview-color-spike.md#2026-10-28wpf-隔离四窗格的原生新建文件夹命令)。
+> **Explorer `/select` 启动定位（2026-10-28）：**启动解析支持 `/select,<对象>`、逗号后空格分隔及 `/select <对象>`；对象父目录与对象路径通过现有 profile 单实例协议路由，重试沿用请求 ID 去重。目标窗格只在相符导航完成后排队原生 Shell 选择，并绑定导航、选区、用户输入代际。Release SettingsSmoke 与 App Release 构建通过；未运行 ExplorerBrowser 或可见 GUI，Windows 实际参数拆分、Shell 高亮和焦点仍待集中验收。未知开关保持拒绝，不接管 Win+E/注册表。

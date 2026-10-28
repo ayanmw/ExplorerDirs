@@ -121,7 +121,7 @@ public partial class MainWindow : Window
 
     internal MainWindow(ApplicationThemeController? themeController, string? startupDirectory = null, string? startupWarning = null,
         string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null,
-        Action? restartApplication = null)
+        Action? restartApplication = null, string? startupSelectPath = null)
     {
         _themeController = themeController;
         InitializeComponent();
@@ -469,7 +469,8 @@ public partial class MainWindow : Window
         if (startupDirectory is not null)
         {
             SetActivePane(_panes[0]);
-            _panes[0].OpenPathInNewTab(startupDirectory);
+            if (startupSelectPath is null) _panes[0].OpenPathInNewTab(startupDirectory);
+            else _panes[0].OpenPathAndSelectInNewTab(startupDirectory, startupSelectPath);
         }
         if (startupWarning is not null)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
@@ -482,6 +483,18 @@ public partial class MainWindow : Window
     {
         if (!Path.IsPathFullyQualified(path)) return false;
         _panes[0].OpenPathInNewTab(path);
+        SetActivePane(_panes[0]);
+        RestoreFromMinimized();
+        Activate();
+        return true;
+    }
+
+    internal bool OpenExternalSelection(string directory, string selectedPath)
+    {
+        if (!Path.IsPathFullyQualified(directory) || !Path.IsPathFullyQualified(selectedPath) ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(selectedPath) ?? string.Empty),
+                Path.TrimEndingDirectorySeparator(directory), StringComparison.OrdinalIgnoreCase)) return false;
+        if (!_panes[0].OpenPathAndSelectInNewTab(directory, selectedPath)) return false;
         SetActivePane(_panes[0]);
         RestoreFromMinimized();
         Activate();

@@ -84,6 +84,7 @@ public partial class PaneControl : UserControl
         public bool IsPinned { get; set; }
         public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
+        public string? StartupSelectPath { get; set; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
     }
@@ -589,6 +590,12 @@ public partial class PaneControl : UserControl
     public void OpenPathInNewTab(string path)
     {
         if (CanAddTabs(1)) AddTab(path, _newTabView());
+    }
+    internal bool OpenPathAndSelectInNewTab(string directory, string selectedPath)
+    {
+        if (!CanAddTabs(1)) return false;
+        AddTab(directory, _newTabView(), startupSelectPath: selectedPath);
+        return true;
     }
     internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
         IReadOnlySet<int>? pinned = null)
@@ -1496,7 +1503,7 @@ public partial class PaneControl : UserControl
 
     private TabItem AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false,
         QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
-        AddressPathHistory? addressHistory = null)
+        AddressPathHistory? addressHistory = null, string? startupSelectPath = null)
     {
         if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
@@ -1504,7 +1511,7 @@ public partial class PaneControl : UserControl
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,
-            AddressHistory = addressHistory ?? new AddressPathHistory() };
+            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectPath = startupSelectPath };
         state.AddressHistory.Record(path);
         tab.Tag = state;
         browser.QuickFilterChanged += settings =>
@@ -1579,6 +1586,13 @@ public partial class PaneControl : UserControl
             var owner = state.Owner;
             var navigatedPath = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            if (completesInput && state.StartupSelectPath is { } startupSelectPath)
+            {
+                state.StartupSelectPath = null;
+                if (string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(startupSelectPath) ?? string.Empty),
+                        Path.TrimEndingDirectorySeparator(navigatedPath), StringComparison.OrdinalIgnoreCase))
+                    browser.QueueFileSystemSelection(startupSelectPath);
+            }
             if (completesInput)
             {
                 state.SearchRequestPending = false;
@@ -1649,6 +1663,7 @@ public partial class PaneControl : UserControl
         {
             if (!browser.IsCurrentNavigationRequest(notice.RequestVersion)) return;
             var owner = state.Owner;
+            state.StartupSelectPath = null;
             state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state))
                 owner._searchCloseFocusPending = null;
