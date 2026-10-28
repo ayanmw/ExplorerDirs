@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-29：只读检查本机 Q-Dir 安装目录 `.qdr` 发现 `start.qdr`/`start2.qdr` 为 `tree_mode=2`，但四个 `TreeN` 均为 0，`TreeNsplit` 仍记录默认 2500。导入器此前只按 `tree_mode=0` 抑制宽度警告，导致所有窗格树关闭时仍提示忽略宽度。新增回归先复现该多余警告，再将提示门控改为：只有存在有效启用的窗格树或树开关不完整时才提示；四个有效树开关全为 0 时不提示。完整 Release SettingsSmoke 通过，未启动 Q-Dir 或产品 GUI；宽度单位仍未知，不导入 `TreeNsplit`。
+
 2026-10-29：内存留存审查发现 `ExplorerBrowserHost` 在 Shell 选择恢复期间，即使 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE` 未启用，也会为每个视图最多保留 128 条诊断字符串。此集合有上限，不是无界泄漏，也没有证据说明它能解释用户观察到的整体内存差异；现已在 tracing 关闭时跳过记录，仅保留显式诊断所需数据。源码回归先按预期失败，再通过；定向 `--shell-selection-restore-gate-smoke` 与完整 Release `ExplorerDirs.SettingsSmoke` 均通过，App Release build 成功（0 错误，2 条 NU1900，因 NuGet 漏洞源不可达）。没有运行产品 UI；当前没有可归因的 ExplorerDirs.App 运行样本，因此不报告内存下降数值，也不将此项视为整体内存增长问题已解决。
 
 2026-10-29：提交 `ba4036f` 新增“最近打开的收藏夹”窗口标题模式后，完整 Release `ExplorerDirs.SettingsSmoke` 输出 `Settings smoke: PASS`；App Release build 为 0 错误、2 条 NU1900（NuGet 漏洞数据源不可达）。未启动产品窗口。当前没有 ExplorerDirs.App 进程，因此本轮无法采集实际运行内存。`folder-verb-smoke.ps1` 的首次本地权限内尝试被沙箱拒绝；随后按脚本作用域获批，在唯一 `HKCU\Software\ExplorerDirs.Tests\FolderVerb-*` 临时键下运行通过，完成幂等安装、冲突保护、外部编辑保护与清理检查，结束后无 FolderVerb 测试键残留，未触碰真实 Explorer 注册项。

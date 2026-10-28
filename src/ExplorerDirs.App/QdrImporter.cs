@@ -253,10 +253,11 @@ internal static class QdrImporter
             paneTreeVisibility = layoutMap.AppToNative.Select(index => treeKeys[index]!.Value).ToArray();
             warnings.Add("Q-Dir Tree1～Tree4 的 0/1 目前按逐窗格树开关解释；该映射尚未通过 Q-Dir 可见互操作确认。");
         }
-        // FAQ 117 includes split defaults even with the tree explicitly disabled;
-        // those values cannot affect this import and should not produce a warning.
+        // FAQ 117 and local Q-Dir workspaces include split defaults when every
+        // pane tree is disabled; those values cannot affect this import.
         var treeModeExplicitlyDisabled = values.TryGetValue("tree_mode", out var importedTreeMode) && importedTreeMode == "0";
-        if (!treeModeExplicitlyDisabled &&
+        var everyImportedPaneTreeDisabled = treeKeys.All(value => value == false);
+        if (!treeModeExplicitlyDisabled && !everyImportedPaneTreeDisabled &&
             Enumerable.Range(1, 4).Any(index => values.ContainsKey($"Tree{index}split")))
             warnings.Add("Q-Dir Tree1split～Tree4split 的比例单位尚未确认；不会应用目录树宽度。");
         if (values.ContainsKey("SPT"))

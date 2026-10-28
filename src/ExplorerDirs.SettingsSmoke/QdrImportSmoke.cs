@@ -220,13 +220,21 @@ internal static class QdrImportSmoke
                 warning.Contains("尚未通过 Q-Dir 可见互操作确认")),
             "the tentative Q-Dir tree-flag interpretation is disclosed in the import preview");
         var unsupportedTreeSettings = QdrImporter.Parse(
-            "Q-Dir Version=12.79\nViewMode=4\ntree_mode=2\nTree1=0\nTree2=0\nTree3=0\nTree4=0\n" +
+            "Q-Dir Version=12.79\nViewMode=4\ntree_mode=2\nTree1=1\nTree2=1\nTree3=1\nTree4=1\n" +
             "Tree1split=2500\nTree2split=2500\nTree3split=2500\nTree4split=2500\nDir1=C:\\left\n",
             (value, _) => value);
         Require(unsupportedTreeSettings.TreeDisplayMode == TreeDisplayMode.PerPane &&
                 !unsupportedTreeSettings.Warnings.Any(warning => warning.Contains("tree_mode")) &&
                 unsupportedTreeSettings.Warnings.Any(warning => warning.Contains("Tree1split")),
             "Q-Dir Each has one mode maps to per-pane trees while unknown split widths stay warned");
+        var disabledTreeSplits = QdrImporter.Parse(
+            "Q-Dir Version=12.79\nViewMode=4\ntree_mode=2\nTree1=0\nTree2=0\nTree3=0\nTree4=0\n" +
+            "Tree1split=2500\nTree2split=2500\nTree3split=2500\nTree4split=2500\nDir1=C:\\left\n",
+            (value, _) => value);
+        Require(disabledTreeSplits.TreeDisplayMode == TreeDisplayMode.PerPane &&
+                disabledTreeSplits.PaneTreeVisibility?.All(visible => !visible) == true &&
+                !disabledTreeSplits.Warnings.Any(warning => warning.Contains("Tree1split")),
+            "Q-Dir split defaults do not warn when every imported pane tree is disabled");
         var treeModeMappings = new (int Native, TreeDisplayMode App)[]
         {
             (0, TreeDisplayMode.None), (1, TreeDisplayMode.Shared), (2, TreeDisplayMode.PerPane)
