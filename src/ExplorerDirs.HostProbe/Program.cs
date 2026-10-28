@@ -2593,6 +2593,7 @@ internal static class Program
                 if (singleSelection) SelectOnlyItem(hostType, hosts[pane], folders[pane], "initial.txt");
                 else if (!noSelection) SelectAll(hostType, hosts[pane]);
                 if (unselectedFocus) SetUnselectedFocus(hostType, hosts[pane], folders[pane], "initial.txt");
+                else if (!noSelection) SetSelectedFocus(hostType, hosts[pane], folders[pane], "initial.txt");
                 var selectedBefore = noSelection ? [] : SelectedPaths(hostType, hosts[pane], folders[pane]);
                 var expectedSelection = noSelection ? [] : (singleSelection ? new[] { "initial.txt" } : unselectedFocus ? new[] { "second.txt", "third.txt" } : new[] { "initial.txt", "second.txt", "third.txt" })
                     .Select(name => Path.Combine(folders[pane], name)).Order(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -4387,6 +4388,28 @@ internal static class Program
             Marshal.FreeCoTaskMem(absolutePidl);
             Marshal.ReleaseComObject(shellView);
         }
+    }
+
+    private static void SetSelectedFocus(Type hostType, HwndHost host, string folder, string name)
+    {
+        var browser = hostType.GetField("_browser", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(host)!;
+        var browserInterface = hostType.GetNestedType("IExplorerBrowser", BindingFlags.NonPublic)!;
+        var shellViewId = new Guid("000214E3-0000-0000-C000-000000000046");
+        var viewObject = new object?[] { shellViewId, null };
+        Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!.Invoke(browser, viewObject)!);
+        var shellView = viewObject[1]!;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(folder, name), IntPtr.Zero, out var absolutePidl, 0, out _));
+            try
+            {
+                var relativePidl = ILFindLastID(absolutePidl);
+                var selectItem = hostType.GetNestedType("IShellView", BindingFlags.NonPublic)!.GetMethod("SelectItem")!;
+                Marshal.ThrowExceptionForHR((int)selectItem.Invoke(shellView, [relativePidl, 0x1u | 0x10u | 0x40000000u])!);
+            }
+            finally { Marshal.FreeCoTaskMem(absolutePidl); }
+        }
+        finally { Marshal.ReleaseComObject(shellView); }
     }
 
     private static string[] SelectedPaths(Type hostType, HwndHost host, string folder)
