@@ -55,6 +55,18 @@ if (args is ["--folder-open-router-protocol-smoke"])
     return;
 }
 
+if (args is ["--folder-open-router-no-target-smoke"])
+{
+    var activationRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.ActivationSmoke.{Guid.NewGuid():N}");
+    try
+    {
+        ExplorerDirs.SettingsSmoke.FolderOpenRouterProtocolSmoke.VerifyActivationWithoutTarget(
+            Path.Combine(activationRoot, "ExplorerDirs.ini"));
+    }
+    finally { if (Directory.Exists(activationRoot)) Directory.Delete(activationRoot, recursive: true); }
+    return;
+}
+
 if (args.Length >= 2 && args[0] == "--program-starter-argv-probe")
 {
     var resultPath = args[1];
@@ -749,6 +761,13 @@ try
               TimeSpan.FromMilliseconds(150)).GetAwaiter().GetResult() == FolderForwardResult.Rejected,
           "Q-Dir state requests use the route when available and reject non-qdr files");
     var routedPaths = new List<string>();
+    if (!ExplorerDirs.SettingsSmoke.FolderOpenRouterProtocolSmoke.IsCurrentUserPipeAvailable(
+            Path.Combine(root, "router-preflight", "ExplorerDirs.ini")))
+    {
+        Console.WriteLine("folder-open-router-integration: SKIP (current-user pipe client connection unavailable)");
+    }
+    else
+    {
     using (var router = FolderOpenRouter.TryStart(routerProfile, path =>
            {
                lock (routedPaths) routedPaths.Add(path);
@@ -757,9 +776,10 @@ try
     {
         Check(FolderOpenRouter.TryStart(routerProfile, _ => Task.FromResult(true)) is null,
               "only one window owns the folder route for a profile");
-        Check(FolderOpenRouter.TryActivateAsync(routerProfile, TimeSpan.FromSeconds(2))
-                  .GetAwaiter().GetResult() == FolderForwardResult.Rejected,
-              "an owner without an activation target does not falsely acknowledge activation");
+        var activationWithoutTarget = FolderOpenRouter.TryActivateAsync(routerProfile, TimeSpan.FromSeconds(2))
+            .GetAwaiter().GetResult();
+        Check(activationWithoutTarget == FolderForwardResult.Rejected,
+              $"an owner without an activation target does not falsely acknowledge activation (received {activationWithoutTarget})");
         Check(FolderOpenRouter.TryForwardAsync(routerProfile, routedPath, TimeSpan.FromSeconds(2))
                   .GetAwaiter().GetResult() == FolderForwardResult.Accepted,
               "a running window acknowledges a newly opened directory tab");
@@ -1007,6 +1027,7 @@ try
     using (replacementRouter)
         Check(releasedOnStop, "disposing a router releases ownership despite a pending window callback");
     _ = waitingForward.GetAwaiter().GetResult();
+    }
     Check(ShellItemKind.IsFileSystemFolder(0x60000000) &&
           !ShellItemKind.IsFileSystemFolder(0x40000000) &&
           !ShellItemKind.IsFileSystemFolder(0x60400000) &&

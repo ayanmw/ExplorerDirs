@@ -17,10 +17,17 @@ internal static class FolderOpenRouterProtocolSmoke
         Directory.CreateDirectory(root);
         try
         {
+            if (!IsCurrentUserPipeAvailable(Path.Combine(root, "preflight", "ExplorerDirs.ini")))
+            {
+                Console.WriteLine("folder-open-router-protocol-smoke: SKIP (current-user pipe client connection unavailable)");
+                return;
+            }
+
             VerifyHandshakeDoesNotDispatch(Path.Combine(root, "handshake", "ExplorerDirs.ini"));
             VerifyRetryIdempotency(Path.Combine(root, "retry", "ExplorerDirs.ini"),
                 Path.Combine(root, "same-folder"));
             VerifyQdrAndActivationIdempotency(root);
+            VerifyActivationWithoutTarget(Path.Combine(root, "activation-no-target", "ExplorerDirs.ini"));
             VerifyLegacySender(Path.Combine(root, "legacy", "ExplorerDirs.ini"),
                 Path.Combine(root, "legacy-folder"));
             VerifyLegacyPeerFallback(Path.Combine(root, "legacy-peer", "ExplorerDirs.ini"),
@@ -30,6 +37,24 @@ internal static class FolderOpenRouterProtocolSmoke
         finally
         {
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    internal static bool IsCurrentUserPipeAvailable(string profile)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(profile)!);
+        FolderOpenRouter? router = null;
+        try
+        {
+            router = FolderOpenRouter.TryStart(profile, _ => Task.FromResult(false),
+                () => Task.FromResult(true))
+                ?? throw new InvalidOperationException("The pipe preflight router did not start.");
+            return FolderOpenRouter.TryActivateAsync(profile, TimeSpan.FromSeconds(2))
+                .GetAwaiter().GetResult() == FolderForwardResult.Accepted;
+        }
+        finally
+        {
+            StopRouterAndWaitForLockRelease(profile, router);
         }
     }
 
@@ -185,6 +210,37 @@ internal static class FolderOpenRouterProtocolSmoke
         finally
         {
             StopRouterAndWaitForLockRelease(activationProfile, activationRouter);
+        }
+    }
+
+    internal static void VerifyActivationWithoutTarget(string profile)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(profile)!);
+        if (!IsCurrentUserPipeAvailable(Path.Combine(Path.GetDirectoryName(profile)!, "preflight", "ExplorerDirs.ini")))
+        {
+            Console.WriteLine("folder-open-router-no-target-smoke: SKIP (current-user pipe client connection unavailable)");
+            return;
+        }
+
+        FolderOpenRouter? router = null;
+        try
+        {
+            if (FolderOpenRouter.TryActivateAsync(profile, TimeSpan.FromMilliseconds(150))
+                    .GetAwaiter().GetResult() != FolderForwardResult.Unavailable)
+                throw new InvalidOperationException("Activation without a route must remain unavailable.");
+            router = FolderOpenRouter.TryStart(profile, _ => Task.FromResult(true))
+                ?? throw new InvalidOperationException("The no-activation-target router did not start.");
+            if (FolderOpenRouter.TryStart(profile, _ => Task.FromResult(true)) is not null)
+                throw new InvalidOperationException("A second window unexpectedly acquired the same profile route.");
+            var result = FolderOpenRouter.TryActivateAsync(profile, TimeSpan.FromSeconds(2))
+                .GetAwaiter().GetResult();
+            if (result != FolderForwardResult.Rejected)
+                throw new InvalidOperationException($"A route without an activation target returned {result} instead of Rejected.");
+            else Console.WriteLine("folder-open-router-no-target-smoke: PASS (rejected)");
+        }
+        finally
+        {
+            StopRouterAndWaitForLockRelease(profile, router);
         }
     }
 
