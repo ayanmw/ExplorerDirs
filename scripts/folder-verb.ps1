@@ -18,11 +18,23 @@ if ($Mode -eq 'Disable') {
     return
 }
 
-if ([string]::IsNullOrWhiteSpace($Executable)) {
-    throw 'Preview and Enable require -Executable.'
+$packageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$packagedApp = Join-Path $packageRoot 'app/ExplorerDirs.App.exe'
+$isPackagedRelease = [IO.File]::Exists($packagedApp) -or
+    [IO.File]::Exists((Join-Path $packageRoot 'ExplorerDirs.App.exe'))
+if ($isPackagedRelease) {
+    $releaseRoot = $packageRoot
+    if ([string]::IsNullOrWhiteSpace($Executable)) {
+        $Executable = if ([IO.File]::Exists($packagedApp)) { $packagedApp } else { Join-Path $packageRoot 'ExplorerDirs.App.exe' }
+    }
 }
-$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'releases'))
+else {
+    if ([string]::IsNullOrWhiteSpace($Executable)) {
+        throw 'Preview and Enable require -Executable when run from the source tree.'
+    }
+    $projectRoot = $packageRoot
+    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'releases'))
+}
 $fullExecutable = [IO.Path]::GetFullPath($Executable)
 if (-not $fullExecutable.StartsWith($releaseRoot + [IO.Path]::DirectorySeparatorChar,
     [StringComparison]::OrdinalIgnoreCase) -or

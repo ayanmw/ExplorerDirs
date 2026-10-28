@@ -82,6 +82,11 @@ $dllHash = (Get-FileHash -LiteralPath (Join-Path $payload 'ExplorerDirs.App.dll'
     'DirectoryArgument=true',
     "ExecutableSha256=$hash"
 ), [Text.UTF8Encoding]::new($false))
+$releaseTools = Join-Path $staging 'tools'
+New-Item -ItemType Directory -Path $releaseTools -Force | Out-Null
+foreach ($name in @('folder-verb.ps1', 'FolderVerb.psm1')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $releaseTools $name)
+}
 if ($IsolatedProfile) {
     $profileCopy = Join-Path $payload 'profile'
     New-Item -ItemType Directory -Path $profileCopy -Force | Out-Null

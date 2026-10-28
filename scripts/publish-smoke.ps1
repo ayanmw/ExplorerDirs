@@ -7,6 +7,8 @@ $fixtureProfile = Join-Path $fixture 'profile'
 try {
 New-Item -ItemType Directory -Path $fixtureScripts, $fixtureProfile | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'publish.ps1') -Destination (Join-Path $fixtureScripts 'publish.ps1')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'folder-verb.ps1') -Destination (Join-Path $fixtureScripts 'folder-verb.ps1')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FolderVerb.psm1') -Destination (Join-Path $fixtureScripts 'FolderVerb.psm1')
 
 # Execute the real packaging script against a generated repository. Replace only
 # dotnet publish, so no build is deployed and no executable is ever launched.
@@ -59,6 +61,17 @@ Get-ChildItem -LiteralPath $fixtureProfile -Recurse -File | ForEach-Object {
 
 $script = Join-Path $fixtureScripts 'publish.ps1'
 $release = & $script -Version 'fixture-v1' -IsolatedProfile
+$packagedFolderScript = Join-Path $release 'tools/folder-verb.ps1'
+if (-not (Test-Path -LiteralPath $packagedFolderScript -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $release 'tools/FolderVerb.psm1') -PathType Leaf)) {
+    throw 'Isolated preview omitted the folder-entry manager.'
+}
+$folderPreview = & $packagedFolderScript -Mode Preview
+if (-not $folderPreview.DirectoryArgumentDeclared -or
+    [IO.Path]::GetFullPath($folderPreview.Executable) -ne
+    [IO.Path]::GetFullPath((Join-Path $release 'app/ExplorerDirs.App.exe'))) {
+    throw 'Packaged folder-entry manager did not resolve its own isolated app and capability manifest.'
+}
 $copied = Join-Path $release 'app/profile'
 foreach ($name in $settings) {
     $path = Join-Path $copied $name
@@ -133,6 +146,12 @@ catch {
 if (-not $rejectedExisting) { throw 'An existing release was overwritten.' }
 $normal = & $script -Version 'fixture-normal'
 if (Test-Path -LiteralPath (Join-Path $normal 'profile')) { throw 'Normal release copied shared profile unexpectedly.' }
+$normalFolderPreview = & (Join-Path $normal 'tools/folder-verb.ps1') -Mode Preview
+if (-not $normalFolderPreview.DirectoryArgumentDeclared -or
+    [IO.Path]::GetFullPath($normalFolderPreview.Executable) -ne
+    [IO.Path]::GetFullPath((Join-Path $normal 'ExplorerDirs.App.exe'))) {
+    throw 'Packaged folder-entry manager did not resolve its normal release executable.'
+}
 $preview = & $script -Version 'preview-0.6.0-temp.4'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.6.0-preview.temp.4') {
     throw 'A temporary preview directory version was not applied to the published product version.'
