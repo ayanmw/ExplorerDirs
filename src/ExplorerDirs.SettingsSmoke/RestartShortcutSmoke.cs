@@ -11,6 +11,10 @@ internal static class RestartShortcutSmoke
             "Alt+F11 restarts the app");
         Check(KeyboardShortcuts.Resolve(0x7A, 0) == ExplorerShortcut.ToggleFullScreen,
             "F11 enters full-screen mode rather than only maximizing the window");
+        Check(KeyboardShortcuts.ShouldYieldToTextInput(ExplorerShortcut.RestartApplication) &&
+              !KeyboardShortcuts.ShouldYieldToTextInput(ExplorerShortcut.ToggleFullScreen) &&
+              KeyboardShortcuts.ShouldYieldToTextInput(ExplorerShortcut.NewFolder),
+            "restart and file-view commands yield while a text editor owns keyboard input");
 
         var repoRoot = FindRepoRoot();
         var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
@@ -18,8 +22,9 @@ internal static class RestartShortcutSmoke
         Check(mainWindow.Contains("case ExplorerShortcut.RestartApplication:", StringComparison.Ordinal) &&
               mainWindow.Contains("RequestRestartApplication();", StringComparison.Ordinal) &&
               mainWindow.Contains("_restartApplication();", StringComparison.Ordinal) &&
+              mainWindow.Contains("ShouldYieldToTextInput(shortcut)", StringComparison.Ordinal) &&
               mainWindow.Contains("MessageBoxButton.YesNo", StringComparison.Ordinal),
-            "restart shortcut uses the existing confirmation and session-safe restart callback");
+            "restart shortcut yields to text editing and uses the existing confirmation and session-safe restart callback");
         Check(mainWindow.Contains("case ExplorerShortcut.ToggleFullScreen:", StringComparison.Ordinal) &&
               mainWindow.Contains("ToggleFullScreen();", StringComparison.Ordinal) &&
               markup.Contains("Header=\"全屏\" InputGestureText=\"F11\"", StringComparison.Ordinal),

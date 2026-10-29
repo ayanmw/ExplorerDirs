@@ -98,6 +98,9 @@ internal static class KeyboardShortcuts
             ExplorerShortcut.NewFolder or
             (>= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ);
 
+    public static bool ShouldYieldToTextInput(ExplorerShortcut shortcut) =>
+        RequiresFileViewFocus(shortcut) || shortcut == ExplorerShortcut.RestartApplication;
+
     public static bool ShouldYieldDriveLToMagnifier(ExplorerShortcut shortcut, bool magnifierRunning) =>
         shortcut == ExplorerShortcut.NavigateDriveL && magnifierRunning;
 

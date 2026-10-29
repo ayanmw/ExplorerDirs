@@ -1799,7 +1799,7 @@ public partial class MainWindow : Window
         }
         if (shortcut == ExplorerShortcut.Parent && Keyboard.FocusedElement is TextBoxBase)
             return;
-        if (Keyboard.FocusedElement is TextBoxBase && KeyboardShortcuts.RequiresFileViewFocus(shortcut))
+        if (Keyboard.FocusedElement is TextBoxBase && KeyboardShortcuts.ShouldYieldToTextInput(shortcut))
             return;
         e.Handled = ExecuteShortcut(ActivePane, shortcut);
     }
