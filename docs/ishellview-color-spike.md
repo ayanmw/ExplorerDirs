@@ -1384,3 +1384,7 @@ NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL 
 ### 2026-10-29 多选 CopyItems 同名冲突
 
 临时目标预置 `root.txt` 且内容为 `keep-existing`；合成文件夹的双项 `IDataObject` 通过 `CopyItems` 复制，并启用 `FOF_RENAMEONCOLLISION` 及静默 flags。合同确认旧目标字节不变、无冲突文件成功复制、冲突文件以另一个名称落地，并检查中止状态。没有 UI 或 Shell view；这不代表产品冲突确认对话框已验证。
+
+### 2026-10-29 合成多选 IDataObject 驱动 DeleteItems
+
+复制合同成功后，树级 smoke 再从合成 `copy-destination` 文件夹重新枚举两份副本，通过 `GetUIObjectOf` 生成多选 `IDataObject`，调用 `IFileOperation::DeleteItems`、`PerformOperations` 与 `GetAnyOperationsAborted`，最后确认两个目标路径均已消失。删除仅针对本轮 smoke 创建的 fixture 副本；源文件和冲突处理目录不参与此删除。没有创建 Shell view 或窗口，也不覆盖产品视图刷新、撤销回收站行为或交互确认。

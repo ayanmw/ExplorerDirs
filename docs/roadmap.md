@@ -4535,3 +4535,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 在临时目标目录预置内容为 `keep-existing` 的 `root.txt`，用合成文件夹提供的双项 `IDataObject` 调用 `IFileOperation::CopyItems`，启用 `FOF_RENAMEONCOLLISION` 与静默/无确认/无错误 UI flags。
 - 验证原目标内容完全保留、第二个非冲突文件复制成功，并且目录出现另一个 `root*` 文件；检查中止状态。NativeProbe Release 与原生 `/W4 /WX` 构建、树级和既有 PIDL smoke 通过。只证明本地 filesystem 的冲突重命名策略，不覆盖产品 UI 冲突对话框或 Shell provider。
+
+## 2026-10-29：合成多选数据对象驱动 DeleteItems
+
+- 复制完成后重新绑定合成 `copy-destination` 文件夹并枚举两份生成文件，从该文件夹取得多选 `IDataObject`，交给 `IFileOperation::DeleteItems`；执行后检查 `GetAnyOperationsAborted` 并确认两个副本路径消失。
+- 删除范围限定在本轮临时 fixture 副本，保留根目录源文件供后续 `MoveItems` 检查。该验证补充无视图的本地批量删除合同，不代表产品撤销/回收站语义、可见交互或 ExplorerBrowser/IShellView 的视图更新。

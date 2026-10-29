@@ -1381,6 +1381,84 @@ namespace
         return foundCollisionCopy ? S_OK : E_FAIL;
     }
 
+    HRESULT DeleteSyntheticCopiedSelectionWithoutUi(IShellFolder2* root, const std::wstring& backingPath)
+    {
+        if (!root) return E_INVALIDARG;
+        PIDLIST_RELATIVE destinationChild = nullptr;
+        IShellFolder2* destinationFolder = nullptr;
+        IEnumIDList* enumerator = nullptr;
+        PITEMID_CHILD selected[2]{};
+        IDataObject* data = nullptr;
+        IFileOperation* operation = nullptr;
+
+        WCHAR destinationName[] = L"copy-destination";
+        auto result = root->ParseDisplayName(nullptr, nullptr, destinationName, nullptr, &destinationChild, nullptr);
+        if (SUCCEEDED(result) && !destinationChild) result = E_UNEXPECTED;
+        if (SUCCEEDED(result))
+            result = root->BindToObject(destinationChild, nullptr, IID_PPV_ARGS(&destinationFolder));
+        if (SUCCEEDED(result) && !destinationFolder) result = E_UNEXPECTED;
+        if (SUCCEEDED(result))
+            result = destinationFolder->EnumObjects(nullptr, SHCONTF_NONFOLDERS, &enumerator);
+        if (SUCCEEDED(result) && !enumerator) result = E_UNEXPECTED;
+        if (SUCCEEDED(result))
+        {
+            for (ULONG index = 0; index < ARRAYSIZE(selected); ++index)
+            {
+                ULONG fetched = 0;
+                result = enumerator->Next(1, &selected[index], &fetched);
+                const auto* child = SyntheticData(selected[index]);
+                const auto* expected = index == 0 ? L"root.txt" : L"second.txt";
+                if (result != S_OK || fetched != 1 || !child || _wcsicmp(child->name, expected) != 0)
+                {
+                    if (SUCCEEDED(result)) result = E_FAIL;
+                    break;
+                }
+            }
+        }
+        if (SUCCEEDED(result))
+        {
+            ULONG fetched = 0;
+            PITEMID_CHILD extra = nullptr;
+            result = enumerator->Next(1, &extra, &fetched);
+            if (extra) CoTaskMemFree(extra);
+            if (result == S_FALSE && fetched == 0) result = S_OK;
+            else if (SUCCEEDED(result)) result = E_FAIL;
+        }
+        if (SUCCEEDED(result))
+        {
+            PCUITEMID_CHILD selectedForData[] = { selected[0], selected[1] };
+            result = destinationFolder->GetUIObjectOf(nullptr, ARRAYSIZE(selectedForData), selectedForData,
+                IID_IDataObject, nullptr, reinterpret_cast<void**>(&data));
+        }
+        if (SUCCEEDED(result) && !data) result = E_UNEXPECTED;
+        if (SUCCEEDED(result))
+            result = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&operation));
+        if (SUCCEEDED(result))
+            result = operation->SetOperationFlags(FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI);
+        if (SUCCEEDED(result)) result = operation->DeleteItems(data);
+        if (SUCCEEDED(result)) result = operation->PerformOperations();
+        if (SUCCEEDED(result))
+        {
+            BOOL aborted = FALSE;
+            result = operation->GetAnyOperationsAborted(&aborted);
+            if (SUCCEEDED(result) && aborted) result = E_ABORT;
+        }
+
+        if (operation) operation->Release();
+        if (data) data->Release();
+        if (enumerator) enumerator->Release();
+        if (destinationFolder) destinationFolder->Release();
+        if (destinationChild) CoTaskMemFree(destinationChild);
+        for (auto* child : selected) if (child) CoTaskMemFree(child);
+        if (FAILED(result)) return result;
+
+        const auto destinationPath = backingPath + L"\\copy-destination\\";
+        return GetFileAttributesW((destinationPath + L"root.txt").c_str()) == INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesW((destinationPath + L"second.txt").c_str()) == INVALID_FILE_ATTRIBUTES
+            ? S_OK : E_FAIL;
+    }
+
     class SyntheticChildEnumerator final : public IEnumIDList
     {
     public:
@@ -2581,9 +2659,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         data->Release();
         if (FAILED(result)) goto cleanup;
     }
+    result = DeleteSyntheticCopiedSelectionWithoutUi(root, backingPath);
+    if (FAILED(result)) goto cleanup;
     TraceSyntheticSortStage("synthetic-folder-tree: native-item-data-object-passed");
     TraceSyntheticSortStage("synthetic-folder-tree: multi-select-copyitems-passed");
     TraceSyntheticSortStage("synthetic-folder-tree: copy-collision-rename-passed");
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-select-deleteitems-passed");
 
     result = root->EnumObjects(nullptr, static_cast<SHCONTF>(SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN), &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }

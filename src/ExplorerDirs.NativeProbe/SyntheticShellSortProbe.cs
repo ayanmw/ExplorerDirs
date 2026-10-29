@@ -46,7 +46,7 @@ public static class SyntheticShellSortProbe
                 Check(checkTree(fixture));
             }
             finally { NativeLibrary.Free(module); }
-            Console.WriteLine("synthetic-shell-folder-tree-smoke: nested-enumeration=True; multi-component-parse-bind-storage=True; native-item-menu=True; multi-select-CF_HDROP=True; CopyItems/MoveItems=True; collision-rename-preserved=True; shell-view-created=False");
+            Console.WriteLine("synthetic-shell-folder-tree-smoke: nested-enumeration=True; multi-component-parse-bind-storage=True; native-item-menu=True; multi-select-CF_HDROP=True; CopyItems/MoveItems/DeleteItems=True; collision-rename-preserved=True; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }
