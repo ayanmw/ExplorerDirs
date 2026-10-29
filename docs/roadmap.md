@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 键盘清单同步：源码的窗格焦点顺序和 `FocusTraversalSmoke` 已包含地址层级下拉及“此电脑”下拉，但键盘清单遗漏两项；现已按实际 Tab 顺序补齐文档。仅修正文档，不改变快捷键和焦点行为；真实控件焦点仍待集中 GUI 验收。
+
 2026-10-30 Q-Dir 地址栏快捷键补齐：按官方 Q-Dir 4.51 帮助将 `Alt+S` 接到现有地址编辑/全选入口；`Ctrl+S` 仍保留给 Program Starter。定向地址快捷键 smoke 先按预期失败，接线后通过；完整 Release `SettingsSmoke` 退出码 0，App Release build 0 警告/错误。物理键盘焦点仍待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
 
 2026-10-30 Q-Dir F7 地址层级菜单：按官方帮助将 `F7` 接到当前窗格的地址路径下拉菜单，复用已存在的祖先目录和常用 Shell 位置层级；`Shift+F7` 的新建文件夹绑定保持不变。定向 smoke 先按预期失败，接线后通过；新建文件夹快捷键回归、完整 Release `SettingsSmoke` 退出码 0、App Release build 0 警告/错误。真实菜单焦点与路径选择待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)

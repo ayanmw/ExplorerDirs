@@ -7,7 +7,7 @@
 | Backspace、Alt+↑ | 打开当前目录的上一级 | 已接入 Shell 导航；Backspace 按用户习惯定义，区别于 Windows Explorer 的“后退” |
 | Alt+←、Alt+→、Alt+Backspace、Alt+Shift+Backspace | 当前标签的后退、前进历史 | 四种组合复用 ExplorerBrowser 内置 TravelLog；源码已改为切换标签和布局时保留视图，真实历史保持待复测。Alt+Backspace / Alt+Shift+Backspace 对齐 Q-Dir 官方帮助列出的快捷键 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | Ctrl+Alt+A～Z | 跳转到对应的逻辑盘符根目录 | 仅拦截系统当前列出的盘符；缺失盘符交回 Shell，不探测网络盘就绪状态。Windows 放大镜运行时，`Ctrl+Alt+L` 交回系统以切换镜头模式。源码与无窗口映射 smoke 已接入；实际按键和断开网络盘的体验待 GUI 验收。快捷键依据 Q-Dir 4.51 官方帮助，当前 Q-Dir 版本的行为仍待可见确认 ([Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
-| Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、地址历史下拉、转到、新建标签、关闭标签、可见时的搜索输入/搜索/关闭控件、快速筛选输入/模式/筛选文件夹/预设/保存/删除/应用/关闭控件、标签标题、目录树（若显示）、详细信息列标题（若有）、文件项、状态栏“查看”入口的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 焦点映射与正反向遍历有无窗口回归；原生列标题/文件项之间及菜单关闭后的真实键盘焦点仍待 GUI 验收 |
+| Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、地址层级下拉、“此电脑”下拉、地址历史下拉、转到、新建标签、关闭标签、可见时的搜索输入/搜索/关闭控件、快速筛选输入/模式/筛选文件夹/预设/保存/删除/应用/关闭控件、标签标题、目录树（若显示）、详细信息列标题（若有）、文件项、状态栏“查看”入口的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 焦点映射与正反向遍历有无窗口回归；原生列标题/文件项之间及菜单关闭后的真实键盘焦点仍待 GUI 验收 |
 | Ctrl+Tab、Ctrl+Shift+Tab、标签标题聚焦时 Ctrl+←/→ | 按当前窗格标题显示顺序循环标签 | 已接入；Q-Dir 12.56 加入 Ctrl+←/→ 切标签，本项目仅在标签标题聚焦时处理，文件视图中的 Ctrl+方向键继续交给 Shell；`Ctrl+PageUp/PageDown` 保留给文件列表的原生上下翻页，Q-Dir FAQ 64 也建议用 `Ctrl+Tab` 切标签；拖动排序后的顺序待 GUI 验收 ([Q-Dir 版本记录](https://www.softwareok.com/?seite=Freeware/Q-Dir/History)、[FAQ 64](https://www.softwareok.com/?faq=64&seite=faq-Q-DIR)) |
 | Ctrl+1～9 | 跳到当前窗格按标题显示顺序排列的第 1～9 个标签；不存在对应标签时保持当前选择 | 源码映射与无窗口回归通过；重排和多窗格中的实际选择待 GUI 验收 |
 | 标签标题的 ←、→、Home、End | 按标题显示顺序切换标签；文件视图内的方向键仍交给 Shell | 已接入；待 GUI 验收 |
