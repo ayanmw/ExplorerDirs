@@ -18,6 +18,9 @@ internal static class ShellViewDropTargetProbe
     private const uint DropEffectMove = 2;
     private const uint DropEffectCopyOrMove = DropEffectCopy | DropEffectMove;
     private const uint DropEffectMask = 7;
+    private const uint KeyStateLeftButton = 0x0001;
+    private const uint KeyStateShift = 0x0004;
+    private const uint KeyStateControl = 0x0008;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
     private const int DragDropSDrop = 0x00040100;
     private const int DragDropSCancel = 0x00040101;
@@ -206,7 +209,7 @@ internal static class ShellViewDropTargetProbe
             var point = new PointL { X = boundsOnScreen.Left + Math.Max(1, boundsOnScreen.Right - boundsOnScreen.Left) / 2,
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
-            PrivateDesktopShellProbe.ReportStage("drop-target: query-and-copy-start");
+            PrivateDesktopShellProbe.ReportStage("drop-target: query-and-transfer-start");
             if (interactiveOle)
             {
                 System.Windows.Forms.Application.DoEvents();
@@ -251,10 +254,12 @@ internal static class ShellViewDropTargetProbe
             }
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point,
-                viewTargetPath, "IShellView.GetItemObject", "native-shell-drop-fixture");
-            // OLE invokes Drop after release; compare the selected-view object with its actual button-up state.
+                viewTargetPath, "IShellView.GetItemObject", "native-shell-drop-fixture",
+                expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
+            // Direct target calls provide the modifier state that real OLE would pass during the drag loop.
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
-                selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture", dropKeyState: 0);
+                selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture",
+                expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
             // Keep the registered folder target as a separate candidate with its own Shell data object.
             var secondSourcePath = registeredSourcePath;
             var secondSourcePidl = nint.Zero;
@@ -269,7 +274,8 @@ internal static class ShellViewDropTargetProbe
                 Marshal.WriteIntPtr(secondChildArray, secondChild);
                 Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, secondChildArray, 0, in DataObjectId, out secondDataObject));
                 folderTargetResult = TryTransfer(folderDropTarget, secondDataObject, point, registeredTargetPath,
-                    "IShellFolder.CreateViewObject (registered HWND target)", "native-shell-folder-drop-fixture");
+                    "IShellFolder.CreateViewObject (registered HWND target)", "native-shell-folder-drop-fixture",
+                    expectedEffect: DropEffectMove, modifierKeyState: KeyStateShift, sourcePath: secondSourcePath);
             }
             finally
             {
@@ -278,15 +284,15 @@ internal static class ShellViewDropTargetProbe
                 Marshal.FreeHGlobal(secondChildArray);
             }
 
-            var sourcePreserved = File.Exists(sourcePath) && File.ReadAllText(sourcePath) == "native-shell-drop-fixture" &&
+            var sourceStatesValid = File.Exists(sourcePath) && File.ReadAllText(sourcePath) == "native-shell-drop-fixture" &&
                 File.Exists(selectedSourcePath) && File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
-                File.Exists(secondSourcePath) && File.ReadAllText(secondSourcePath) == "native-shell-folder-drop-fixture";
+                !File.Exists(secondSourcePath);
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-copy={folderTargetResult}; sources-preserved={sourcePreserved}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !selectedDataObjectResult || !sourcePreserved)
-                throw new InvalidOperationException("An isolated source or destination Shell IDataObject copy failed, or a source was not preserved.");
-            PrivateDesktopShellProbe.ReportStage("drop-target: copy-complete");
+            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            if (!folderTargetResult || !selectedDataObjectResult || !sourceStatesValid)
+                throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");
+            PrivateDesktopShellProbe.ReportStage("drop-target: transfer-complete");
             return 0;
         }
         finally
@@ -340,30 +346,36 @@ internal static class ShellViewDropTargetProbe
     }
 
     private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label,
-        string expectedContents, uint dropKeyState = 0x0001)
+        string expectedContents, uint expectedEffect, uint modifierKeyState = 0, string? sourcePath = null)
     {
+        if (expectedEffect is not (DropEffectCopy or DropEffectMove))
+            throw new ArgumentOutOfRangeException(nameof(expectedEffect));
+        if (expectedEffect == DropEffectMove && sourcePath is null)
+            throw new ArgumentException("A move probe must verify its source path is removed.", nameof(sourcePath));
+
         LogAsyncOperationState(label, dataObject, "before-drag-enter");
-        var allowedEffect = DropEffectCopy;
+        var keyState = KeyStateLeftButton | modifierKeyState;
+        var allowedEffect = DropEffectCopyOrMove;
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-enter-start");
-        var enterHr = At<DragEnter>(target, 3)(target, dataObject, 0x0001, ref point, ref allowedEffect);
+        var enterHr = At<DragEnter>(target, 3)(target, dataObject, keyState, ref point, ref allowedEffect);
         if (enterHr < 0) throw new COMException($"{label} DragEnter failed", enterHr);
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-enter-complete");
         LogAsyncOperationState(label, dataObject, "after-drag-enter");
         var enterEffect = allowedEffect & DropEffectMask;
-        if (enterEffect == 0 || (enterEffect & ~DropEffectCopy) != 0)
+        if (enterEffect != expectedEffect)
         {
             _ = At<DragLeave>(target, 5)(target);
             Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; effect=0x{allowedEffect:X}");
             return false;
         }
 
-        var overEffect = DropEffectCopy;
+        var overEffect = DropEffectCopyOrMove;
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-over-start");
-        var overHr = At<DragOver>(target, 4)(target, 0x0001, ref point, ref overEffect);
+        var overHr = At<DragOver>(target, 4)(target, keyState, ref point, ref overEffect);
         if (overHr < 0) throw new COMException($"{label} DragOver failed", overHr);
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drag-over-complete");
         LogAsyncOperationState(label, dataObject, "after-drag-over");
-        if ((overEffect & DropEffectMask) != DropEffectCopy)
+        if ((overEffect & DropEffectMask) != expectedEffect)
         {
             _ = At<DragLeave>(target, 5)(target);
             Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; effect=0x{overEffect:X}");
@@ -372,16 +384,22 @@ internal static class ShellViewDropTargetProbe
 
         var dropEffect = overEffect & DropEffectMask;
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-start");
-        var dropHr = At<Drop>(target, 6)(target, dataObject, dropKeyState, ref point, ref dropEffect);
+        var dropHr = At<Drop>(target, 6)(target, dataObject, keyState, ref point, ref dropEffect);
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-complete");
         LogAsyncOperationState(label, dataObject, "after-drop");
-        var copied = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
-        // A created file alone does not prove the Shell accepted Copy; Drop may return a different final effect.
-        var copyEffectAccepted = (dropEffect & DropEffectMask) == DropEffectCopy;
+        var targetHasExpectedContents = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
+        var sourceStateMatchesEffect = sourcePath is null || expectedEffect == DropEffectMove && !File.Exists(sourcePath);
+        var performedEffectAvailable = TryReadShellDropEffect(dataObject, "Performed DropEffect", out var performedDropEffect);
+        var logicalEffectAvailable = TryReadShellDropEffect(dataObject, "Logical Performed DropEffect", out var logicalDropEffect);
+        var logicalEffectMatches = !logicalEffectAvailable || logicalDropEffect == expectedEffect;
+        var effectReportedDirectly = (dropEffect & DropEffectMask) == expectedEffect;
+        // The Shell's same-volume optimized move deletes the source during Drop and may report DROPEFFECT_NONE.
+        var optimizedMoveCompleted = expectedEffect == DropEffectMove && dropEffect == 0 && sourceStateMatchesEffect;
+        var requestedEffectAccepted = (effectReportedDirectly || optimizedMoveCompleted) && logicalEffectMatches;
         var targetFiles = Directory.GetFiles(Path.GetDirectoryName(destination)!).Select(Path.GetFileName).Order().ToArray();
-        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; drop-key-state=0x{dropKeyState:X}; drop=0x{dropHr:X8}; effect=0x{dropEffect:X}; copy-effect-accepted={copyEffectAccepted}; copied={copied}; destination-files={string.Join(',', targetFiles)}");
-        return copyEffectAccepted && copied;
+        Console.WriteLine($"shell-view-drop-target-candidate: target={label}; drag-enter=0x{enterHr:X8}; drag-over=0x{overHr:X8}; key-state=0x{keyState:X}; drop=0x{dropHr:X8}; expected-effect=0x{expectedEffect:X}; effect=0x{dropEffect:X}; performed-effect-available={performedEffectAvailable}; performed-effect=0x{performedDropEffect:X}; logical-effect-available={logicalEffectAvailable}; logical-effect=0x{logicalDropEffect:X}; optimized-move-completed={optimizedMoveCompleted}; effect-accepted={requestedEffectAccepted}; target-content-valid={targetHasExpectedContents}; source-state-valid={sourceStateMatchesEffect}; destination-files={string.Join(',', targetFiles)}");
+        return requestedEffectAccepted && targetHasExpectedContents && sourceStateMatchesEffect;
     }
 
     private static void LogAsyncOperationState(string label, nint dataObject, string stage)
@@ -615,9 +633,12 @@ internal static class ShellViewDropTargetProbe
     }
 
     private static bool TryReadLogicalPerformedDropEffect(nint dataObject, out uint effect)
+        => TryReadShellDropEffect(dataObject, "Logical Performed DropEffect", out effect);
+
+    private static bool TryReadShellDropEffect(nint dataObject, string formatName, out uint effect)
     {
         effect = 0;
-        var formatId = RegisterClipboardFormatW("Logical Performed DropEffect");
+        var formatId = RegisterClipboardFormatW(formatName);
         if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         var format = new FormatEtc { Format = checked((ushort)formatId), Aspect = 1, Index = -1, Medium = 1 };
         if (At<QueryGetData>(dataObject, 5)(dataObject, ref format) != 0) return false;
