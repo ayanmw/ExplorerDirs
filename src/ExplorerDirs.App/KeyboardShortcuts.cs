@@ -21,6 +21,8 @@ internal static class KeyboardShortcuts
     public static ExplorerShortcut Resolve(int key, int modifiers) => (key, modifiers) switch
     {
         (0x08, 0) => ExplorerShortcut.Parent,        // Backspace: Q-Dir-style parent
+        (0x08, 1) => ExplorerShortcut.Back,          // Q-Dir: Alt+Backspace.
+        (0x08, 5) => ExplorerShortcut.Forward,       // Q-Dir: Alt+Shift+Backspace.
         (0x26, 1) => ExplorerShortcut.Parent,        // Alt+Up
         (0x25, 1) => ExplorerShortcut.Back,          // Alt+Left
         (0x27, 1) => ExplorerShortcut.Forward,       // Alt+Right

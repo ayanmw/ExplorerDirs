@@ -232,6 +232,13 @@ if (args.Length == 1 && args[0] == "--qdir-new-folder-shortcut-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--qdir-history-shortcut-smoke")
+{
+    QDirHistoryShortcutSmoke.Run();
+    Console.WriteLine("Q-Dir history shortcut smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();
