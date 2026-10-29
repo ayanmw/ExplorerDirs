@@ -4599,6 +4599,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 系统 DbgHelp 的导出符号复核确认消息等待及 `CoWaitForMultipleHandles` 候选，未取得 combase/coreclr 私有 PDB；最近公开导出名不能替代逐帧符号化栈，根因仍未确认。
 - 从公共符号服务器取得匹配的 ntdll、win32u、coreclr PDB 后，`StackWalk64` 恢复主线程前四帧：`NtUserMsgWaitForMultipleObjectsEx` → combase ordinal 88 内部帧 → `CoWaitForMultipleHandles` → CLR 模块。CLR 之后 unwind 数据不足而失效；combase PDB 下载不可用（503/超时），故具体 COM 调用者及根因仍未知。
 
+- 后续两次重复 WPF 根宿主递归大小自定义列 probe：一轮有效通过，显示 10/4 并由 DefView 标题升降序排序；另一轮相同显示/排序断言通过，但前台 HWND 与输入时间戳变化，按隔离守卫判定无效。两轮探针进程、临时注册与 fixture 均已清理。该结果加强 WPF 根视图列消费的可重复性证据，但不证明产品迁移或桌面隔离稳定；暂停新的 Private Desktop view probe，产品仍使用 ExplorerBrowser。
+
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
 - 自定义列 key 探针发现：未注册 `PROPERTYKEY` 经 `GetDetailsOf` 可在 DefView 中同时显示 10 B 目录和 4 B 文件；`SetSortColumns` 因未知 schema 返回 `TYPE_E_ELEMENTNOTFOUND`，但原生列标题点击仍会排序并调用 provider `CompareIDs`。这是 NativeProbe 级可行性证据，完整 Private Desktop 运行因前台/输入守卫变化及清理超时不记为通过。先源码定位清理等待与守卫变化，再决定后续独立会话复测；本轮不动产品及 release。
