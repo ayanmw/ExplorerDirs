@@ -20,6 +20,12 @@ internal static class QuickFilterTabStateProbe
         Directory.CreateDirectory(directory);
         Directory.CreateDirectory(siblingDirectory);
         File.WriteAllText(Path.Combine(directory, "initial.txt"), "initial");
+        var hiddenPath = Path.Combine(directory, "hidden.txt");
+        var superHiddenPath = Path.Combine(directory, "super-hidden.txt");
+        File.WriteAllText(hiddenPath, "hidden");
+        File.SetAttributes(hiddenPath, FileAttributes.Hidden);
+        File.WriteAllText(superHiddenPath, "super-hidden");
+        File.SetAttributes(superHiddenPath, FileAttributes.Hidden | FileAttributes.System);
         Directory.CreateDirectory(Path.Combine(directory, "child"));
         var favoritesPath = Path.Combine(fixtureRoot, "QuickFilterFavorites.ini");
         var foregroundBefore = GetForegroundWindow();
@@ -73,9 +79,10 @@ internal static class QuickFilterTabStateProbe
                 [Path.Combine(fixtureRoot, "QuickFilterHistory.ini")], null)!;
             var hiddenItemsPreferenceType = app.GetType("ExplorerDirs.App.HiddenItemsPreference", throwOnError: true)!;
             var followWindows = Enum.Parse(hiddenItemsPreferenceType, "FollowWindows");
+            var hideHidden = Enum.Parse(hiddenItemsPreferenceType, "Hide");
             var foregroundBeforePane = GetForegroundWindow();
             pane = Activator.CreateInstance(paneType, InstanceMembers, null,
-                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, historyStore, followWindows, false, null, false }, null)!;
+                new object?[] { tabArray, viewFactory, null, 0, favoritesStore, historyStore, hideHidden, false, null, false }, null)!;
             HostProbeForegroundGuard.EnsureUnchanged(foregroundBeforePane, GetForegroundWindow(),
                 "creating the quick-filter PaneControl ExplorerBrowserHost");
 
@@ -102,6 +109,24 @@ internal static class QuickFilterTabStateProbe
                 "waiting for the initial quick-filter Shell tab");
             var countShellItems = typeof(Program).GetMethod("Count", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!;
             int ShellItemCount(object browser) => (int)countShellItems.Invoke(null, [browser])!;
+            void WaitForStableItemCount(object browser, int expected, string description)
+            {
+                var stable = 0;
+                var last = -1;
+                try
+                {
+                    WaitFor(() =>
+                    {
+                        last = ShellItemCount(browser);
+                        stable = last == expected ? stable + 1 : 0;
+                        return stable >= 3;
+                    }, TimeSpan.FromSeconds(10), description);
+                }
+                catch (TimeoutException ex)
+                {
+                    throw new TimeoutException($"{description}; last-count={last}.", ex);
+                }
+            }
             var stableItemReads = 0;
             var lastItemCount = -1;
             try
@@ -150,10 +175,26 @@ internal static class QuickFilterTabStateProbe
             AssertFilter(afterDuplicate[0].Filter, filter, "duplicating a tab leaves its source filter intact");
             AssertFilter(afterDuplicate[1].Filter, emptyFilter, "duplicating another tab leaves its filter intact");
             AssertFilter(afterDuplicate[2].Filter, filter, "duplicate copies the source filter");
-            WaitFor(() => ShellItemCount(afterDuplicate[0].Browser) == 1 &&
-                          ShellItemCount(afterDuplicate[1].Browser) == 2 &&
-                          ShellItemCount(afterDuplicate[2].Browser) == 1,
-                TimeSpan.FromSeconds(10), "New and duplicated tabs did not apply their independent column filter state.");
+            var tabItemCounts = new int[3];
+            try
+            {
+                WaitFor(() =>
+                {
+                    for (var index = 0; index < tabItemCounts.Length; index++)
+                        tabItemCounts[index] = ShellItemCount(afterDuplicate[index].Browser);
+                    return tabItemCounts[0] == 1 && tabItemCounts[1] == 2 && tabItemCounts[2] == 1;
+                }, TimeSpan.FromSeconds(10), "New and duplicated tabs did not apply their independent column filter state.");
+            }
+            catch (TimeoutException ex)
+            {
+                var filterCalls = afterDuplicate.Select(snapshot =>
+                {
+                    var activeFilter = snapshot.Browser.GetType().GetField("_quickFilter", InstanceMembers)!.GetValue(snapshot.Browser);
+                    return activeFilter is null ? -1 :
+                        (int)activeFilter.GetType().GetProperty("ShouldShowCalls", InstanceMembers)!.GetValue(activeFilter)!;
+                }).ToArray();
+                throw new TimeoutException($"New and duplicated tabs did not apply their independent column filter state; counts={string.Join(',', tabItemCounts)}; filter-calls={string.Join(',', filterCalls)}.", ex);
+            }
             var sourceViewStyle = GetViewStyle(afterDuplicate[0].View);
             var newTabViewStyle = GetViewStyle(afterDuplicate[1].View);
             var duplicateViewStyle = GetViewStyle(afterDuplicate[2].View);
@@ -195,12 +236,25 @@ internal static class QuickFilterTabStateProbe
             if (!Equals(shortcutHandler.DynamicInvoke(openSelection), false) || GetStates(pane).Count != 4)
                 throw new Exception("Shift+Enter was consumed for a file selection instead of remaining with Shell.");
 
+            // Exercise explicit per-app visibility through the production pane and Shell filter.
+            // The system-hidden fixture must remain excluded because the app never requests
+            // SHCONTF_INCLUDESUPERHIDDEN.
+            var setHiddenPreference = paneType.GetMethod("SetHiddenItemsPreference", InstanceMembers)!;
+            var showHidden = Enum.Parse(hiddenItemsPreferenceType, "Show");
+            setHiddenPreference.Invoke(pane, [showHidden]);
+            WaitForStableItemCount(afterNew[1].Browser, 3,
+                "Show-hidden preference did not reveal the ordinary hidden file while keeping the super-hidden file excluded");
+            setHiddenPreference.Invoke(pane, [hideHidden]);
+            WaitForStableItemCount(afterNew[1].Browser, 2,
+                "Hide-hidden preference did not hide the ordinary hidden file");
+            setHiddenPreference.Invoke(pane, [followWindows]);
+
             VerifyTabHistoryIsolation(pane, afterSelectionTab[1].Browser, afterSelectionTab[3].Browser,
                 directory, Path.Combine(directory, "child"), siblingDirectory);
 
             if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
             if (GetForegroundWindow() != foregroundBefore) throw new Exception("The probe changed the foreground window.");
-            Console.WriteLine($"quick-filter-tabs: disk-session-restore/new/duplicate/selected-folder/history-isolation state PASS; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source isolation=True; parent-hidden=True; foreground-unchanged=True");
+            Console.WriteLine($"quick-filter-tabs: disk-session-restore/new/duplicate/selected-folder/history-isolation PASS; hidden-items=Show:3/Hide:2/super-hidden-excluded; duplicate-view={DescribeView(afterDuplicate[2].View)}; file-selection-unhandled=True; source-isolation=True; parent-hidden=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -220,6 +274,8 @@ internal static class QuickFilterTabStateProbe
                 source.RootVisual = null;
                 source.Dispose();
             }
+            foreach (var path in new[] { hiddenPath, superHiddenPath })
+                if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
             if (Directory.Exists(fixtureRoot) && Path.GetDirectoryName(fixtureRoot) == fixtureParent)
                 Directory.Delete(fixtureRoot, recursive: true);
         }
@@ -236,7 +292,7 @@ internal static class QuickFilterTabStateProbe
         panesType.GetMethod("Add")!.Invoke(panes, [paneTabs]);
         var sessionStateType = app.GetType("ExplorerDirs.App.SessionState", throwOnError: true)!;
         var sessionState = Activator.CreateInstance(sessionStateType, InstanceMembers, null,
-            [4, 4u, panes, 0, null, -1, null, null], null)!;
+            [4, 4u, panes, 0, null, -1, null, null, null, null], null)!;
 
         var sessionPath = Path.Combine(fixtureRoot, "session.ini");
         var legacyPath = Path.Combine(fixtureRoot, "missing-legacy-session.json");

@@ -15,6 +15,7 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
     HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows) : IShellFolderFilter
 {
     private const uint FolderAttribute = 0x20000000;
+    private const uint HiddenAttribute = 0x00080000;
     private const uint DisplayNameFlags = 0x8001; // SHGDN_INFOLDER | SHGDN_FORPARSING
     private const uint ShellShowAllObjectsMask = 0x00000001; // SSF_SHOWALLOBJECTS
     private const uint IncludeHiddenItemsFlag = 0x00000080; // SHCONTF_INCLUDEHIDDEN
@@ -27,18 +28,35 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
 
     public int ShouldShow(nint shellFolder, nint folderPidl, nint itemPidl)
     {
-        // Hidden-item preferences can attach this callback without an active quick filter.
-        // In that case visibility is controlled by GetEnumFlags, so avoid per-item Shell lookups.
-        if (!_settings.HasAnyFilter) return 0;
+        // ExplorerBrowser may still enumerate hidden items when the Windows setting is on,
+        // even when GetEnumFlags omits SHCONTF_INCLUDEHIDDEN. Explicit Hide must therefore
+        // also filter SFGAO_HIDDEN items from the callback.
+        var hideHiddenItems = _hiddenItemsPreference == HiddenItemsPreference.Hide;
+        if (!_settings.HasAnyFilter && !hideHiddenItems) return 0;
         Interlocked.Increment(ref _shouldShowCalls);
         try
         {
             if (shellFolder == 0 || itemPidl == 0) return 0; // S_OK: unsupported Shell items stay visible.
             var isFolder = false;
-            if (!_settings.FilterFolders)
+            if (!_settings.FilterFolders || hideHiddenItems)
             {
-                if (!TryGetFolderState(shellFolder, itemPidl, out isFolder)) return 0;
-                if (isFolder) return 0;
+                var requestedAttributes = FolderAttribute | (hideHiddenItems ? HiddenAttribute : 0);
+                if (!TryGetAttributes(shellFolder, itemPidl, requestedAttributes, out var attributes))
+                {
+                    if (!_settings.FilterFolders)
+                    {
+                        if (!TryGetAttributes(shellFolder, itemPidl, FolderAttribute, out attributes)) return 0;
+                        isFolder = (attributes & FolderAttribute) != 0;
+                        if (isFolder) return 0;
+                    }
+                    // If a provider rejects the combined mask, fail open for hidden metadata.
+                }
+                else
+                {
+                    isFolder = (attributes & FolderAttribute) != 0;
+                    if (!_settings.FilterFolders && isFolder) return 0;
+                    if (hideHiddenItems && (attributes & HiddenAttribute) != 0) return 1;
+                }
             }
             if (_settings.HasPattern)
             {
@@ -89,19 +107,20 @@ internal sealed class ShellFolderFilter(QuickFilterSettings settings,
         return (shellSettings & ShellShowAllObjectsMask) != 0;
     }
 
-    private static bool TryGetFolderState(nint shellFolder, nint itemPidl, out bool isFolder)
+    private static bool TryGetAttributes(nint shellFolder, nint itemPidl, uint requestedAttributes,
+        out uint attributes)
     {
-        isFolder = false;
+        attributes = 0;
         // GetAttributesOf needs a PIDL pointer and a UINT mask; keep their per-item buffers together.
         var buffer = Marshal.AllocHGlobal(nint.Size + sizeof(uint));
-        var attributes = IntPtr.Add(buffer, nint.Size);
+        var attributeBuffer = IntPtr.Add(buffer, nint.Size);
         try
         {
             Marshal.WriteIntPtr(buffer, itemPidl);
-            Marshal.WriteInt32(attributes, unchecked((int)FolderAttribute));
-            var hr = GetMethod<GetAttributesOf>(shellFolder, 9)(shellFolder, 1, buffer, attributes);
+            Marshal.WriteInt32(attributeBuffer, unchecked((int)requestedAttributes));
+            var hr = GetMethod<GetAttributesOf>(shellFolder, 9)(shellFolder, 1, buffer, attributeBuffer);
             if (hr < 0) return false;
-            isFolder = (unchecked((uint)Marshal.ReadInt32(attributes)) & FolderAttribute) != 0;
+            attributes = unchecked((uint)Marshal.ReadInt32(attributeBuffer));
             return true;
         }
         finally { Marshal.FreeHGlobal(buffer); }

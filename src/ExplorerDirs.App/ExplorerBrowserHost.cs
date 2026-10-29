@@ -2431,7 +2431,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             generation == _viewReadiness.Generation;
         var previousSettings = _quickFilterSettings;
         var previousFilter = _quickFilter;
-        var previousActive = _browserSite.QuickFilterActive;
+        var previousFilterActive = _browserSite.ShellFolderFilterActive;
         var attachmentAttempted = false;
         LastQuickFilterStatus = $"start pattern={settings.Pattern},exclude={settings.ExcludeMatches},folders={settings.FilterFolders}";
         var pendingRestore = _pendingQuickFilterGroupRestore;
@@ -2465,7 +2465,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             attachmentAttempted = true;
             UpdateQuickFilterAttachment(searchActive);
             if (!Current()) return false;
-            LastQuickFilterStatus += $"; filter-attached={_browserSite.QuickFilterActive}";
+            LastQuickFilterStatus += $"; filter-attached={_browserSite.ShellFolderFilterActive}";
             QuickFilterChanged?.Invoke(_quickFilterSettings);
             if (!Current()) return false;
             // An uncreated tab keeps this preference for BuildWindowCore; there
@@ -2488,7 +2488,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // native failure does not guarantee that no state changed.
             _quickFilterSettings = previousSettings;
             _quickFilter = previousFilter;
-            _browserSite.QuickFilterActive = previousActive;
+            _browserSite.ShellFolderFilterActive = previousFilterActive;
             var failures = new List<Exception> { original };
             try { if (attachmentAttempted) UpdateQuickFilterAttachment(searchActive); }
             catch (Exception ex) { failures.Add(new InvalidOperationException("恢复原筛选失败。", ex)); }
@@ -2693,12 +2693,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         if (_browser is null) return;
         var applyQuickFilter = ShellFolderFilter.ShouldApplyQuickFilter(searchActive, _quickFilterSettings.HasAnyFilter);
+        var applyFolderFilter = applyQuickFilter || _hiddenItemsPreference != HiddenItemsPreference.FollowWindows;
         var filter = ShellFolderFilter.ShouldAttachFilter(_quickFilterSettings.HasAnyFilter, searchActive,
             _hiddenItemsPreference)
             ? _quickFilter ??= new ShellFolderFilter(
                 applyQuickFilter ? _quickFilterSettings : QuickFilterSettings.Empty, _hiddenItemsPreference)
             : null;
-        _browserSite.QuickFilterActive = applyQuickFilter;
+        // DefView bypasses ShouldShow when NOINCLUDEITEM is set. Explicit hidden-item
+        // preferences also need the callback even when no text/column filter is active.
+        _browserSite.ShellFolderFilterActive = applyFolderFilter;
         if (filter is null) _quickFilter = null;
         var browserUnknown = Marshal.GetIUnknownForObject(_browser);
         try

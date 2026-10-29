@@ -14,7 +14,7 @@ internal sealed class ShellBrowserSite : IShellServiceProvider, IComDialogBrowse
     internal static readonly Guid ExplorerPaneVisibilityServiceId = new("E07010EC-BC17-44C0-97B0-46C7C95B9EDC");
     internal const uint NoIncludeItemFlag = 0x00000010;
     internal ExplorerShellPane VisibleShellPane { get; set; }
-    internal bool QuickFilterActive { get; set; }
+    internal bool ShellFolderFilterActive { get; set; }
     internal long SelectionVersion { get; private set; }
     internal event Action<IntPtr>? SelectionChanged;
     private readonly bool _traceStateChanges = Environment.GetEnvironmentVariable("EXPLORER_DIRS_SHELL_CALLBACK_TRACE") == "1" ||
@@ -154,7 +154,7 @@ internal sealed class ShellBrowserSite : IShellServiceProvider, IComDialogBrowse
         {
             // The native folder filter is bypassed when NOINCLUDEITEM is set; let
             // DefView consult the filter for ordinary filtered directories.
-            flags = QuickFilterActive ? 0 : NoIncludeItemFlag;
+            flags = ShellFolderFilterActive ? 0 : NoIncludeItemFlag;
             return 0;
         }
         finally { _viewFlagsTiming.Stop(startedAt); }
