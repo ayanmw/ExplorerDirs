@@ -9,6 +9,7 @@ internal static class SyntheticShellSortProbe
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
@@ -23,11 +24,15 @@ internal static class SyntheticShellSortProbe
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
+        var copyDestination = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort-Copy");
         if (Directory.Exists(backingFolder))
             throw new InvalidOperationException($"Refusing to reuse an existing synthetic Shell sort fixture directory: {backingFolder}");
+        if (Directory.Exists(copyDestination))
+            throw new InvalidOperationException($"Refusing to reuse an existing synthetic Shell sort copy destination: {copyDestination}");
         try
         {
             Directory.CreateDirectory(backingFolder);
+            Directory.CreateDirectory(copyDestination);
             File.WriteAllBytes(Path.Combine(backingFolder, "a-large.bin"), Enumerable.Repeat((byte)0xA1, 100).ToArray());
             File.WriteAllBytes(Path.Combine(backingFolder, "two.bin"), [0x02, 0x02]);
             File.WriteAllBytes(Path.Combine(backingFolder, "z-ten.bin"), Enumerable.Repeat((byte)0x10, 10).ToArray());
@@ -35,6 +40,7 @@ internal static class SyntheticShellSortProbe
         catch
         {
             if (Directory.Exists(backingFolder)) Directory.Delete(backingFolder, recursive: true);
+            if (Directory.Exists(copyDestination)) Directory.Delete(copyDestination, recursive: true);
             throw;
         }
         var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace sort probe",
@@ -42,6 +48,7 @@ internal static class SyntheticShellSortProbe
         if (parent == 0)
         {
             Directory.Delete(backingFolder, recursive: true);
+            Directory.Delete(copyDestination, recursive: true);
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
         }
 
@@ -164,17 +171,91 @@ internal static class SyntheticShellSortProbe
             var dataObjectHr = At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectionDataObject);
             var hdropHr = unchecked((int)0x80004005);
             var cidaHr = unchecked((int)0x80004005);
+            string? hdropPath = null;
+            string? cidaPath = null;
+            var copyResult = "not-run";
             if (selectionDataObject != 0)
             {
                 try
                 {
-                    hdropHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, new FormatEtc { Format = 15, Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal });
+                    var hdropFormat = new FormatEtc { Format = 15, Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal };
+                    hdropHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, hdropFormat);
+                    if (hdropHr >= 0)
+                    {
+                        var getHdropHr = At<GetData>(selectionDataObject, 3)(selectionDataObject, ref hdropFormat, out var hdropMedium);
+                        Check(getHdropHr);
+                        try
+                        {
+                            if (hdropMedium.Tymed != TymedHGlobal || hdropMedium.Value == 0) throw new InvalidOperationException("CF_HDROP did not return a valid HGLOBAL medium.");
+                            var dropFiles = GlobalLock(hdropMedium.Value);
+                            if (dropFiles == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not lock CF_HDROP data.");
+                            try
+                            {
+                                var pathOffset = Marshal.ReadInt32(dropFiles);
+                                if (pathOffset < 20 || Marshal.ReadInt32(dropFiles, 16) != 1) throw new InvalidOperationException("CF_HDROP did not contain a valid Unicode DROPFILES block.");
+                                hdropPath = Marshal.PtrToStringUni(dropFiles + pathOffset);
+                            }
+                            finally { GlobalUnlock(hdropMedium.Value); }
+                        }
+                        finally { ReleaseStgMedium(ref hdropMedium); }
+                    }
                     var cidaFormat = RegisterClipboardFormatW("Shell IDList Array");
-                    cidaHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, new FormatEtc { Format = unchecked((short)cidaFormat), Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal });
+                    var cidaEtc = new FormatEtc { Format = unchecked((short)cidaFormat), Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal };
+                    cidaHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, cidaEtc);
+                    if (cidaHr >= 0)
+                    {
+                        var getCidaHr = At<GetData>(selectionDataObject, 3)(selectionDataObject, ref cidaEtc, out var cidaMedium);
+                        Check(getCidaHr);
+                        try
+                        {
+                            if (cidaMedium.Tymed != TymedHGlobal || cidaMedium.Value == 0) throw new InvalidOperationException("Shell IDList Array did not return a valid HGLOBAL medium.");
+                            var cida = GlobalLock(cidaMedium.Value);
+                            if (cida == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not lock Shell IDList Array data.");
+                            try
+                            {
+                                var cidaSize = GlobalSize(cidaMedium.Value).ToUInt64();
+                                var childCount = unchecked((uint)Marshal.ReadInt32(cida));
+                                var parentOffset = unchecked((uint)Marshal.ReadInt32(cida, 4));
+                                var childOffset = unchecked((uint)Marshal.ReadInt32(cida, 8));
+                                if (childCount != 1 || cidaSize < 12 || parentOffset >= cidaSize || childOffset >= cidaSize)
+                                    throw new InvalidOperationException("Shell IDList Array had an invalid count or PIDL offset.");
+                                var absolutePidl = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
+                                if (absolutePidl == 0) throw new InvalidOperationException("Could not combine the CIDA parent and child PIDLs.");
+                                try
+                                {
+                                    var pathBuffer = new StringBuilder(32768);
+                                    if (!SHGetPathFromIDListW(absolutePidl, pathBuffer)) throw new InvalidOperationException("CIDA did not resolve to a filesystem path.");
+                                    cidaPath = pathBuffer.ToString();
+                                }
+                                finally { ILFree(absolutePidl); }
+                            }
+                            finally { GlobalUnlock(cidaMedium.Value); }
+                        }
+                        finally { ReleaseStgMedium(ref cidaMedium); }
+                    }
+                    var fileOperationClass = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+                    var fileOperationInterface = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+                    var createOperationHr = CoCreateInstance(ref fileOperationClass, 0, 1, ref fileOperationInterface, out var fileOperation);
+                    Check(createOperationHr);
+                    try
+                    {
+                        Check(At<SetOperationFlags>(fileOperation, 5)(fileOperation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                        var shellItemInterface = ShellItemId;
+                        Check(SHCreateItemFromParsingName(copyDestination, 0, ref shellItemInterface, out var destinationItem));
+                        try { Check(At<CopyItems>(fileOperation, 17)(fileOperation, selectionDataObject, destinationItem)); }
+                        finally { Marshal.Release(destinationItem); }
+                        Check(At<PerformOperations>(fileOperation, 21)(fileOperation));
+                        Check(At<GetAnyOperationsAborted>(fileOperation, 22)(fileOperation, out var aborted));
+                        var copiedPath = Path.Combine(copyDestination, "a-large.bin");
+                        if (aborted != 0 || !File.Exists(copiedPath) || new FileInfo(copiedPath).Length != 100 || !File.Exists(hdropPath))
+                            throw new IOException("IFileOperation did not copy the selected synthetic item or modified its source.");
+                        copyResult = "copied=100-byte a-large.bin; source-preserved=True";
+                    }
+                    finally { Marshal.Release(fileOperation); }
                 }
                 finally { Marshal.Release(selectionDataObject); }
             }
-            Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8}; CIDA-hr=0x{cidaHr:X8}");
+            Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8} path={hdropPath}; CIDA-hr=0x{cidaHr:X8} path={cidaPath}; IFileOperation={copyResult}");
             var listView = FindListView(view);
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
@@ -189,6 +270,9 @@ internal static class SyntheticShellSortProbe
                 !descending.SequenceEqual(new[] { "a-large.bin", "z-ten.bin", "two.bin" }) ||
                 selectionMenuHr < 0 || selectionMenuQueryHr < 0 || selectionMenuItemCount == 0 ||
                 dataObjectHr < 0 || hdropHr < 0 || cidaHr < 0 ||
+                !string.Equals(hdropPath, Path.Combine(backingFolder, "a-large.bin"), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(cidaPath, hdropPath, StringComparison.OrdinalIgnoreCase) ||
+                copyResult == "not-run" || Directory.EnumerateFiles(copyDestination).Count() != 1 ||
                 classFactoryCreateCount == 0 ||
                 ascendingCompareCount == 0 || descendingCompareCount == 0 ||
                 ReadCounter(module, "GetSyntheticSizeCompareCount") == 0)
@@ -210,6 +294,7 @@ internal static class SyntheticShellSortProbe
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
             Directory.Delete(backingFolder, recursive: true);
+            Directory.Delete(copyDestination, recursive: true);
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
         }
     }
@@ -354,6 +439,14 @@ internal static class SyntheticShellSortProbe
     {
         public short Format; public nint TargetDevice; public uint Aspect; public int Index; public uint Tymed;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct StorageMedium
+    {
+        public uint Tymed; public nint Value; public nint ReleaseUnknown;
+    }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask; public nint Text;
@@ -375,6 +468,7 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryGetData(nint self, in FormatEtc format);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref FormatEtc format, out StorageMedium medium);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
@@ -392,5 +486,14 @@ internal static class SyntheticShellSortProbe
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern uint RegisterClipboardFormatW(string format);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalUnlock(nint memory);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nuint GlobalSize(nint memory);
+    [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref StorageMedium medium);
+    [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
+    [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SHGetPathFromIDListW(nint pidl, StringBuilder path);
+    [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, ref Guid interfaceId, out nint item);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
 }

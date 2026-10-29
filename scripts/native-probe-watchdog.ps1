@@ -99,6 +99,7 @@ $stderrPath = Join-Path $logDirectory "$runId.stderr.log"
 $syntheticClassKey = 'HKCU:\Software\Classes\CLSID\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
 $syntheticNamespaceKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
 $syntheticBackingFolder = Join-Path ([IO.Path]::GetTempPath()) 'ExplorerDirs-SyntheticShellSort'
+$syntheticCopyDestination = Join-Path ([IO.Path]::GetTempPath()) 'ExplorerDirs-SyntheticShellSort-Copy'
 if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
     if (Test-Path -LiteralPath $syntheticClassKey) {
         throw "Refusing synthetic Shell sort probe because its reserved CLSID key already exists: $syntheticClassKey"
@@ -108,6 +109,9 @@ if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
     }
     if (Test-Path -LiteralPath $syntheticBackingFolder) {
         throw "Refusing synthetic Shell sort probe because its reserved fixture directory already exists: $syntheticBackingFolder"
+    }
+    if (Test-Path -LiteralPath $syntheticCopyDestination) {
+        throw "Refusing synthetic Shell sort probe because its reserved copy destination already exists: $syntheticCopyDestination"
     }
 }
 # Keep native Shell probes outside the app process so a probe crash or hang
@@ -129,6 +133,7 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
         Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $syntheticBackingFolder -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $syntheticCopyDestination -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($TestTimeoutPath) {
         $grandchildId = if (Test-Path -LiteralPath $timeoutTreePidPath) {
@@ -167,6 +172,7 @@ if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
     Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $syntheticBackingFolder -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $syntheticCopyDestination -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Output "status=exited; exitCode=$exitCode; stdout=$stdoutPath; stderr=$stderrPath"
 if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Encoding oem }

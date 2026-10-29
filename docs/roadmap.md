@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-29：隔离原生 namespace 原型已修复一个探针自身的 PIDL 生命周期错误，并验证真实 DefView 可创建、按虚拟列升降序排序；背景与选中项分别可构建原生菜单，选中 `IDataObject` 声明支持 `CF_HDROP` 和 `Shell IDList Array`。临时 HKCU 注册和测试目录均清理，未接入产品 ExplorerBrowser。下一步只在隔离夹具验证实际数据提取与文件操作，再继续拖放、通知、历史/焦点和多视图生命周期门槛；在这些门槛完成前不迁移产品宿主。细节见[原生 Shell 架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
+2026-10-29：隔离原生 namespace 原型已修复探针自身的 PIDL 生命周期错误，并验证真实 DefView 可创建、按虚拟列升降序排序；背景/选中菜单可构建。选中 IDataObject 的 `CF_HDROP` 与 CIDA 实际取出后均指向夹具中的同一文件，`IFileOperation.CopyItems` 已将 100 字节样本复制到独立临时目标且保留源文件。临时 HKCU 注册及源/目标目录均清理，未接入产品 ExplorerBrowser。下一步验证删除/重命名及 Shell 通知，再继续 OLE 拖放、导航/焦点和多视图生命周期门槛；在这些门槛完成前不迁移产品宿主。细节见[原生 Shell 架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
 
 2026-10-29：完成标签栏隐藏模式的后台实现：保留原有“始终显示 / 多标签时显示”，新增仅隐藏标题条的选项，标签对象、浏览状态与快捷键不受影响。便携配置升至版本 2，并兼容读取旧版本布尔值；未知更高版本拒绝写入。定向与完整 smoke、App Release build 通过。未启动产品 GUI，菜单操作、焦点导航、跨重启展示仍待集中验收。
 
