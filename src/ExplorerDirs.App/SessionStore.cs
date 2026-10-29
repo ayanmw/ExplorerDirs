@@ -101,15 +101,63 @@ internal sealed record QdrColorMetadata(string? UseColor, string? UseTreeColor, 
         value.Length <= 4096 && !value.Contains('\r') && !value.Contains('\n') && !value.Contains('\0');
 }
 
+internal sealed record QdrOpaqueField(string Key, string Value);
+internal sealed record QdrOpaqueSection(string Name, IReadOnlyList<string> Rows);
+internal sealed record QdrOpaqueMetadata(IReadOnlyList<QdrOpaqueField> RootFields,
+    IReadOnlyList<QdrOpaqueSection> Sections)
+{
+    private const int MaximumRootFields = 4096;
+    private const int MaximumSections = 256;
+    private const int MaximumRowsPerSection = 4096;
+    private const int MaximumLineLength = 8192;
+    private const int MaximumPayloadLength = 1024 * 1024;
+
+    internal bool IsValid
+    {
+        get
+        {
+            if (RootFields is null || Sections is null || RootFields.Count > MaximumRootFields ||
+                Sections.Count > MaximumSections) return false;
+            var payloadLength = 0;
+            foreach (var opaqueField in RootFields)
+            {
+                if (opaqueField is null || string.IsNullOrWhiteSpace(opaqueField.Key) || opaqueField.Key.Length > 256 ||
+                    opaqueField.Key.Contains('=') || HasLineBreakOrNull(opaqueField.Key) || opaqueField.Value is null ||
+                    opaqueField.Value.Length > MaximumLineLength || HasLineBreakOrNull(opaqueField.Value)) return false;
+                payloadLength += Encoding.UTF8.GetByteCount(opaqueField.Key) + Encoding.UTF8.GetByteCount(opaqueField.Value);
+                if (payloadLength > MaximumPayloadLength) return false;
+            }
+            foreach (var section in Sections)
+            {
+                if (section is null || string.IsNullOrWhiteSpace(section.Name) || section.Name.Length > 256 ||
+                    section.Name.Contains('[') || section.Name.Contains(']') || HasLineBreakOrNull(section.Name) ||
+                    section.Rows is null || section.Rows.Count > MaximumRowsPerSection) return false;
+                payloadLength += Encoding.UTF8.GetByteCount(section.Name);
+                foreach (var row in section.Rows)
+                {
+                    if (row is null || row.Length > MaximumLineLength || HasLineBreakOrNull(row)) return false;
+                    payloadLength += Encoding.UTF8.GetByteCount(row);
+                    if (payloadLength > MaximumPayloadLength) return false;
+                }
+            }
+            return JsonSerializer.SerializeToUtf8Bytes(this).Length <= MaximumPayloadLength;
+        }
+    }
+
+    private static bool HasLineBreakOrNull(string value) =>
+        value.Contains('\r') || value.Contains('\n') || value.Contains('\0');
+}
+
 internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<TabSettings>> Panes,
     int ActivePane = 0, IReadOnlyList<int>? ActiveTabIndices = null, int DefaultIconSize = -1,
     IReadOnlyList<bool>? PaneTreeVisibility = null, TreeDisplayMode? TreeDisplayMode = null,
-    QdrTreeSplitState? QdrTreeSplits = null, QdrColorMetadata? QdrColorMetadata = null);
+    QdrTreeSplitState? QdrTreeSplits = null, QdrColorMetadata? QdrColorMetadata = null,
+    QdrOpaqueMetadata? QdrOpaqueMetadata = null);
 
 internal sealed class SessionStore
 {
     internal const int MaximumTabsPerPane = 100;
-    private const int CurrentFormatVersion = 13;
+    private const int CurrentFormatVersion = 14;
     private const int MaximumColumnFiltersPerTab = 16;
     private const int MaximumColumnFilterValueLength = 512;
     private const int MaximumColumnFilterPayloadLength = 128 * 1024;
@@ -278,6 +326,13 @@ internal sealed class SessionStore
             builder.AppendLine("QdrColorMetadata=" + Convert.ToBase64String(
                 JsonSerializer.SerializeToUtf8Bytes(qdrColorMetadata)));
         }
+        if (state.QdrOpaqueMetadata is { } qdrOpaqueMetadata)
+        {
+            if (!qdrOpaqueMetadata.IsValid)
+                throw new InvalidDataException("保留的 Q-Dir 未识别字段或区段超出安全范围，未覆盖会话配置。");
+            builder.AppendLine("QdrOpaqueMetadata=" + Convert.ToBase64String(
+                JsonSerializer.SerializeToUtf8Bytes(qdrOpaqueMetadata)));
+        }
         for (var paneIndex = 0; paneIndex < 4; paneIndex++)
         {
             var tabs = state.Panes.ElementAtOrDefault(paneIndex) ?? [];
@@ -380,7 +435,7 @@ internal sealed class SessionStore
         sections.TryGetValue("General", out var general);
         var version = general is null ? 0 : GetInt(general, "FormatVersion", 0);
         if (newerFormatSeen || version > CurrentFormatVersion) return new ProfileParseResult(null, false, true);
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13)) complete = false;
+        if (version is < 1 or > CurrentFormatVersion) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, version >= 5 ? 12 : version == 4 ? 8 : 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
         var defaultIconSize = version >= 3
@@ -392,6 +447,7 @@ internal sealed class SessionStore
             : version == 9 ? ExplorerDirs.App.TreeDisplayMode.PerPane : null;
         var qdrTreeSplits = version >= 12 ? ReadQdrTreeSplits(general, ref complete) : null;
         var qdrColorMetadata = version >= 13 ? ReadQdrColorMetadata(general, ref complete) : null;
+        var qdrOpaqueMetadata = version >= 14 ? ReadQdrOpaqueMetadata(general, ref complete) : null;
         var panes = new List<List<TabSettings>>();
         var activeTabs = new List<int>();
         var paneTreeVisibility = version >= 9 ? new List<bool>(4) : null;
@@ -499,11 +555,29 @@ internal sealed class SessionStore
                 }
             }
         }
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13) && panes.All(pane => pane.Count == 0))
+        if ((version is < 1 or > CurrentFormatVersion) && panes.All(pane => pane.Count == 0))
             return new ProfileParseResult(null, false, false);
         return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes,
             activePane, activeTabs, defaultIconSize, paneTreeVisibility, treeDisplayMode, qdrTreeSplits,
-            qdrColorMetadata), complete, false, version);
+            qdrColorMetadata, qdrOpaqueMetadata), complete, false, version);
+    }
+
+    private static QdrOpaqueMetadata? ReadQdrOpaqueMetadata(Dictionary<string, string>? general, ref bool complete)
+    {
+        if (general is null || !general.TryGetValue("QdrOpaqueMetadata", out var encoded)) return null;
+        try
+        {
+            if (encoded.Length > 1_400_000) throw new InvalidDataException();
+            var bytes = Convert.FromBase64String(encoded);
+            if (bytes.Length > 1024 * 1024) throw new InvalidDataException();
+            var metadata = JsonSerializer.Deserialize<QdrOpaqueMetadata>(bytes);
+            if (metadata is { IsValid: true }) return metadata;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException or InvalidDataException or NotSupportedException)
+        {
+        }
+        complete = false;
+        return null;
     }
 
     private static QdrColorMetadata? ReadQdrColorMetadata(Dictionary<string, string>? general, ref bool complete)

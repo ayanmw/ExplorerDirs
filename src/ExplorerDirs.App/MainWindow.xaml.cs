@@ -82,6 +82,7 @@ public partial class MainWindow : Window
     private NavigationTreeWidths _treeWidths;
     private QdrTreeSplitState? _qdrTreeSplits;
     private QdrColorMetadata? _qdrColorMetadata;
+    private QdrOpaqueMetadata? _qdrOpaqueMetadata;
     private readonly bool[] _paneTreeVisibility = new bool[4];
     private TreeDisplayMode _treeDisplayMode = TreeDisplayMode.PerPane;
     private bool _treeSelectionAutoExpand = true;
@@ -296,6 +297,7 @@ public partial class MainWindow : Window
         _treeWidths = _treeWidthsStore.Load();
         _qdrTreeSplits = state?.QdrTreeSplits;
         _qdrColorMetadata = state?.QdrColorMetadata;
+        _qdrOpaqueMetadata = state?.QdrOpaqueMetadata;
         var defaultTreeVisible = _treePreferences.Load();
         _treeDisplayMode = state?.TreeDisplayMode ??
             (defaultTreeVisible ? TreeDisplayMode.PerPane : TreeDisplayMode.None);
@@ -2823,7 +2825,8 @@ public partial class MainWindow : Window
             var snapshot = new SessionState(_layout, _defaultViewMode,
                 _panes.Select(pane => pane.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
                 _panes.Select(pane => pane.SelectedTabIndex).ToArray(), _defaultIconSize,
-                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata);
+                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata,
+                _qdrOpaqueMetadata);
             if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > SessionStore.MaximumTabsPerPane))
                 throw new InvalidOperationException($"导入后单窗格将超过 {SessionStore.MaximumTabsPerPane} 个标签，请先关闭一些标签再导入。");
             var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
@@ -2862,6 +2865,7 @@ public partial class MainWindow : Window
             }
             _qdrTreeSplits = import.QdrTreeSplits;
             _qdrColorMetadata = import.QdrColorMetadata;
+            _qdrOpaqueMetadata = import.QdrOpaqueMetadata;
             if (import.PaneTreeVisibility is { Count: 4 } importedTreeVisibility)
                 for (var pane = 0; pane < 4; pane++)
                 {
@@ -3228,7 +3232,8 @@ public partial class MainWindow : Window
                 _panes.Select(p => p.SnapshotTabs().ToList()).ToList(),
                 Array.IndexOf(_panes, ActivePane),
                 _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
-                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata));
+                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata,
+                _qdrOpaqueMetadata));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
             if (placementFailure is not null)
             {
@@ -3256,7 +3261,8 @@ public partial class MainWindow : Window
     internal SessionState SnapshotSession() => new(_layout, _defaultViewMode,
         _panes.Select(p => p.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
         _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
-        _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata);
+        _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits, _qdrColorMetadata,
+        _qdrOpaqueMetadata);
 
     internal IReadOnlyList<PinnedTabEntry> SnapshotPinnedTabs() =>
         _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();

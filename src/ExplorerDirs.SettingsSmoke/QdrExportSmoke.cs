@@ -17,6 +17,31 @@ internal static class QdrExportSmoke
              [new(@"Z:\offline", view, new QuickFilterSettings("*.csv", false, false))], [new(@"\\server\share", view)],
              [new(@"C:\hidden", view)]], 2, [1, 0, 0, 0], PaneTreeVisibility: [true, false, true, false],
             TreeDisplayMode: TreeDisplayMode.Shared);
+        var opaqueState = state with
+        {
+            QdrOpaqueMetadata = new QdrOpaqueMetadata(
+                [new QdrOpaqueField("FutureRootOption", "value=with=equals")],
+                [new QdrOpaqueSection("FutureSection", ["Option=42", "Dir2=C:\\not-a-root-tab"])])
+        };
+        var opaqueText = QdrExporter.Render(opaqueState, []);
+        var opaqueRoundTrip = QdrImporter.Parse(opaqueText, (value, _) => value);
+        var opaqueSession = SessionStore.ParseComplete(SessionStore.Render(opaqueState));
+        Check(opaqueText.Contains("FutureRootOption=value=with=equals\r\n") &&
+            opaqueText.Contains("[FutureSection]\r\nOption=42\r\nDir2=C:\\not-a-root-tab\r\n") &&
+            SameOpaqueMetadata(opaqueRoundTrip.QdrOpaqueMetadata, opaqueState.QdrOpaqueMetadata) &&
+            SameOpaqueMetadata(opaqueRoundTrip.ExtendedState?.QdrOpaqueMetadata, opaqueState.QdrOpaqueMetadata) &&
+            SameOpaqueMetadata(opaqueSession?.QdrOpaqueMetadata, opaqueState.QdrOpaqueMetadata),
+            "unsupported Q-Dir root fields and sections survive export/import and portable session persistence");
+        var editedOpaqueText = opaqueText.Replace("FutureRootOption=value=with=equals", "FutureRootOption=external-edit", StringComparison.Ordinal);
+        var editedOpaque = QdrImporter.Parse(editedOpaqueText, (value, _) => value);
+        Check(editedOpaque.ExtendedState is null &&
+            editedOpaque.QdrOpaqueMetadata?.RootFields.Single().Value == "external-edit",
+            "editing an opaque Q-Dir field invalidates stale Explorer Dirs extension data");
+        var editedOpaqueSection = QdrImporter.Parse(
+            opaqueText.Replace("Option=42", "Option=43", StringComparison.Ordinal), (value, _) => value);
+        Check(editedOpaqueSection.ExtendedState is null &&
+            editedOpaqueSection.QdrOpaqueMetadata?.Sections.Single().Rows[0] == "Option=43",
+            "editing an opaque Q-Dir section invalidates stale Explorer Dirs extension data");
         var pins = new[] { new PinnedTabEntry(0, 0, state.Panes[0][0].Path) };
         var treeWidths = NavigationTreeWidths.Defaults with
         { Shared = 245, Pane0 = 135, Pane1 = 175, Pane2 = 215, Pane3 = 285 };
@@ -376,4 +401,10 @@ internal static class QdrExportSmoke
         left is null ? right is null : right is not null && left.UseColor == right.UseColor &&
         left.UseTreeColor == right.UseTreeColor && left.ColorTheme == right.ColorTheme &&
         left.Filter2Rows.SequenceEqual(right.Filter2Rows);
+
+    private static bool SameOpaqueMetadata(QdrOpaqueMetadata? left, QdrOpaqueMetadata? right) =>
+        left is null ? right is null : right is not null &&
+        left.RootFields.SequenceEqual(right.RootFields) && left.Sections.Count == right.Sections.Count &&
+        left.Sections.Zip(right.Sections).All(pair => pair.First.Name == pair.Second.Name &&
+            pair.First.Rows.SequenceEqual(pair.Second.Rows));
 }

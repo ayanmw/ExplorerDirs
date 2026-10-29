@@ -12,7 +12,7 @@ internal static class QuickFilterSessionSmoke
             [[new TabSettings(@"C:\filter-fixture", ViewState.Default(), filter)], [], [], []],
             QdrColorMetadata: new QdrColorMetadata("1", "0", "dark", ["0=*.jpg=1=FF0000=-1=1=-1=0"]));
         var rendered = SessionStore.Render(state);
-        Require(rendered.Contains("FormatVersion=13", StringComparison.Ordinal), "session format advances to v13 for opaque Q-Dir color metadata");
+        Require(rendered.Contains("FormatVersion=14", StringComparison.Ordinal), "session format advances to v14 for opaque Q-Dir metadata");
         Require(rendered.Contains("FilterPattern=*.txt;*.md", StringComparison.Ordinal) &&
             rendered.Contains("FilterExcludeMatches=true", StringComparison.Ordinal) &&
             rendered.Contains("FilterFolders=true", StringComparison.Ordinal), "filter settings serialize per tab");
@@ -30,7 +30,7 @@ internal static class QuickFilterSessionSmoke
 
         var colorMetadataLine = rendered.Split(Environment.NewLine)
             .Single(line => line.StartsWith("QdrColorMetadata=", StringComparison.Ordinal));
-        var legacy = rendered.Replace("FormatVersion=13", "FormatVersion=5", StringComparison.Ordinal)
+        var legacy = rendered.Replace("FormatVersion=14", "FormatVersion=5", StringComparison.Ordinal)
             .Replace(colorMetadataLine + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("FilterPattern=*.txt;*.md" + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("FilterExcludeMatches=true" + Environment.NewLine, "", StringComparison.Ordinal)
@@ -53,11 +53,11 @@ internal static class QuickFilterSessionSmoke
         var malformedColorPayload = rendered.Replace("QdrColorMetadata=", "QdrColorMetadata=bad!", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(malformedColorPayload) is null,
             "malformed opaque Q-Dir color payload rejects an incomplete profile snapshot");
-        var v12 = rendered.Replace("FormatVersion=13", "FormatVersion=12", StringComparison.Ordinal)
+        var v12 = rendered.Replace("FormatVersion=14", "FormatVersion=12", StringComparison.Ordinal)
             .Replace(colorMetadataLine + Environment.NewLine, "", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(v12)?.QdrColorMetadata is null,
             "v12 sessions upgrade with no fabricated Q-Dir color metadata");
-        var v10 = rendered.Replace("FormatVersion=13", "FormatVersion=10", StringComparison.Ordinal)
+        var v10 = rendered.Replace("FormatVersion=14", "FormatVersion=10", StringComparison.Ordinal)
             .Replace("ColumnFilterCount=1" + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("ColumnFilter0Key=" + typeKey + Environment.NewLine, "", StringComparison.Ordinal)
             .Replace("ColumnFilter0Values=" + Convert.ToBase64String(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new[] { "TXT 文件", "BIN 文件" })) + Environment.NewLine, "", StringComparison.Ordinal);
@@ -83,10 +83,10 @@ internal static class QuickFilterSessionSmoke
         var store = new SessionStore(migrationPath, Path.Combine(root, "missing-filter-session.json"));
         var loaded = store.Load() ?? throw new Exception("v5 profile failed to load");
         store.Save(loaded);
-        var backups = Directory.GetFiles(root, "quick-filter-v5.ini.before-v13-*.bak");
+        var backups = Directory.GetFiles(root, "quick-filter-v5.ini.before-v14-*.bak");
         Require(backups.Length == 1 && File.ReadAllText(backups[0]) == legacy &&
-            File.ReadAllText(migrationPath).Contains("FormatVersion=13", StringComparison.Ordinal),
-            "v5 upgrade keeps the original snapshot before writing v13");
+            File.ReadAllText(migrationPath).Contains("FormatVersion=14", StringComparison.Ordinal),
+            "v5 upgrade keeps the original snapshot before writing v14");
         Console.WriteLine("Quick filter session smoke: PASS");
     }
 

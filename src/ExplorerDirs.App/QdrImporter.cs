@@ -15,7 +15,8 @@ internal sealed record QdrImportResult(List<List<TabSettings>> Panes, int[] Sele
     TreeDisplayMode? TreeDisplayMode = null,
     NavigationTreeWidths? NavigationTreeWidths = null,
     QdrTreeSplitState? QdrTreeSplits = null,
-    QdrColorMetadata? QdrColorMetadata = null)
+    QdrColorMetadata? QdrColorMetadata = null,
+    QdrOpaqueMetadata? QdrOpaqueMetadata = null)
 {
     public int TabCount => Panes.Sum(pane => pane.Count);
 }
@@ -27,6 +28,9 @@ internal static class QdrImporter
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex RecognizedKey = new(
         "^(?:Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|SP[0-2]|SPT|VorschauPos|useColor|useTreeColor|colorthema|windowplacement|UNICODE|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?|ExplorerDirs\\.(?:FormatVersion|BaseHash|State))$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex ExportedKey = new(
+        "^(?:Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|useColor|useTreeColor|colorthema|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?|ExplorerDirs\\.(?:FormatVersion|BaseHash|State))$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex NumberedSuffix = new("^(.*?)(?:[1-4])(?:_[0-9]{1,2})?$",
         RegexOptions.CultureInvariant);
@@ -70,6 +74,8 @@ internal static class QdrImporter
         var duplicate = false;
         var inRootSection = true;
         var inFilter2 = false;
+        var opaqueSections = new List<QdrOpaqueSection>();
+        List<string>? currentOpaqueSectionRows = null;
         var filter2RuleCount = 0;
         var filter2Patterns = new List<string>(6);
         var filter2Rows = new List<string>();
@@ -86,6 +92,12 @@ internal static class QdrImporter
             {
                 inRootSection = false;
                 inFilter2 = line.Equals("[Filter2]".AsSpan(), StringComparison.OrdinalIgnoreCase);
+                currentOpaqueSectionRows = null;
+                if (!inFilter2)
+                {
+                    currentOpaqueSectionRows = [];
+                    opaqueSections.Add(new QdrOpaqueSection(line[1..^1].Trim().ToString(), currentOpaqueSectionRows));
+                }
                 continue;
             }
             if (inFilter2)
@@ -107,7 +119,11 @@ internal static class QdrImporter
                 }
                 continue;
             }
-            if (!inRootSection) continue;
+            if (!inRootSection)
+            {
+                if (currentOpaqueSectionRows is not null) currentOpaqueSectionRows.Add(line.ToString());
+                continue;
+            }
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
             // Plain Dir paths may legitimately contain &, so never split those.
             var splitMetadata = line.StartsWith("Folder".AsSpan(), StringComparison.OrdinalIgnoreCase);
@@ -135,8 +151,8 @@ internal static class QdrImporter
         var unsupportedFields = values.Keys.Where(key => !RecognizedKey.IsMatch(key))
             .Select(SummarizeFieldName).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         if (unsupportedFields.Length > 0)
-            warnings.Add("检测到未识别且未应用的字段名：" + string.Join("、", unsupportedFields.Take(8)) +
-                (unsupportedFields.Length > 8 ? "等" : "") + "。预览不会显示这些字段的值。");
+            warnings.Add("检测到未识别字段：" + string.Join("、", unsupportedFields.Take(8)) +
+                (unsupportedFields.Length > 8 ? "等" : "") + "。字段会随配置保留，但不会应用；预览不会显示其值。");
         var previewVisible = false;
         if (values.TryGetValue("Vorschau", out var previewText))
         {
@@ -264,6 +280,7 @@ internal static class QdrImporter
         // pane tree is disabled; those values cannot affect this import.
         var qdrTreeSplits = ReadQdrTreeSplits(values, warnings);
         var qdrColorMetadata = ReadQdrColorMetadata(values, filter2Rows, warnings);
+        var qdrOpaqueMetadata = ReadQdrOpaqueMetadata(values, opaqueSections, warnings);
         var treeModeExplicitlyDisabled = values.TryGetValue("tree_mode", out var importedTreeMode) && importedTreeMode == "0";
         var everyImportedPaneTreeDisabled = treeKeys.All(value => value == false);
         if (!treeModeExplicitlyDisabled && !everyImportedPaneTreeDisabled &&
@@ -317,7 +334,8 @@ internal static class QdrImporter
                 Proportions: proportions is not null && layout is { } knownLayout
                     ? new Dictionary<int, LayoutProportions> { [knownLayout] = proportions } : null,
                 PaneTreeVisibility: paneTreeVisibility, TreeDisplayMode: treeDisplayMode,
-                QdrTreeSplits: qdrTreeSplits, QdrColorMetadata: qdrColorMetadata));
+                QdrTreeSplits: qdrTreeSplits, QdrColorMetadata: qdrColorMetadata,
+                QdrOpaqueMetadata: qdrOpaqueMetadata));
         if (result.TabCount == 0) throw new InvalidDataException("未找到可导入的文件夹；当前会话未改变。");
         return result;
     }
@@ -351,6 +369,23 @@ internal static class QdrImporter
             metadata.Filter2Rows.Count == 0) return null;
         if (metadata.IsValid) return metadata;
         warnings.Add("Q-Dir 颜色配置超出安全保留范围；未保留其颜色字段。");
+        return null;
+    }
+
+    private static QdrOpaqueMetadata? ReadQdrOpaqueMetadata(IReadOnlyDictionary<string, string> values,
+        IReadOnlyList<QdrOpaqueSection> sections, ICollection<string> warnings)
+    {
+        var rootFields = values.Where(pair => !ExportedKey.IsMatch(pair.Key))
+            .Select(pair => new QdrOpaqueField(pair.Key, pair.Value)).ToArray();
+        if (rootFields.Length == 0 && sections.Count == 0) return null;
+        var metadata = new QdrOpaqueMetadata(rootFields, sections);
+        if (metadata.IsValid)
+        {
+            if (sections.Count > 0)
+                warnings.Add($"已保留 {sections.Count} 个非 Filter2 区段的原始内容；当前不会应用这些区段。");
+            return metadata;
+        }
+        warnings.Add("部分未识别 Q-Dir 字段或区段超出安全保留范围；这些原始内容不会导出。");
         return null;
     }
 

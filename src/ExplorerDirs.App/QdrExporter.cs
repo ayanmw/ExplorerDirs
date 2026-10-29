@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace ExplorerDirs.App;
 
@@ -15,9 +14,6 @@ internal static class QdrExporter
     private sealed record Extension(string Session, List<PinnedTabEntry> Pins,
         Dictionary<int, LayoutProportions>? Proportions = null,
         NavigationTreeWidths? NavigationTreeWidths = null);
-    private static readonly Regex BaseKey = new(
-        @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|SP[0-2]|useColor|useTreeColor|colorthema|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     // Call only on a state-only background worker: Shell binding may wait for remote providers.
     internal static QdrExportDocument Prepare(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
@@ -120,15 +116,30 @@ internal static class QdrExporter
                 if (nativeView is not null) values["ColsAndSort" + suffix] = nativeView;
             }
         }
+        if (state.QdrOpaqueMetadata is { } opaqueMetadata)
+        {
+            if (!opaqueMetadata.IsValid)
+                throw new InvalidDataException("保留的 Q-Dir 未识别字段或区段超出安全范围，未导出状态文件。");
+            foreach (var field in opaqueMetadata.RootFields) values.TryAdd(field.Key, field.Value);
+        }
         var output = new StringBuilder("; Exported by Explorer Dirs; Q-Dir plain-text fields plus versioned extension.\r\n");
         foreach (var (key, value) in values) output.Append(key).Append('=').Append(value).Append("\r\n");
         var payload = new Extension(SessionStore.Render(state), pins.ToList(), proportions?.ToDictionary(), treeWidths);
         var extensionVersion = treeWidths is not null ? 4 : proportions is null ? 1 :
             proportions.Values.Any(value => value.BottomHorizontal is not null) ? 3 : 2;
         output.Append(Prefix).Append("FormatVersion=").Append(extensionVersion).Append("\r\n")
-            .Append(Prefix).Append("BaseHash=").Append(HashBase(values, state.QdrColorMetadata)).Append("\r\n")
+            .Append(Prefix).Append("BaseHash=").Append(HashBase(values, state.QdrColorMetadata,
+                state.QdrOpaqueMetadata)).Append("\r\n")
             .Append(Prefix).Append("State=").Append(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(payload)))
             .Append("\r\n");
+        if (state.QdrOpaqueMetadata is { Sections.Count: > 0 } opaqueSections)
+        {
+            foreach (var section in opaqueSections.Sections)
+            {
+                output.Append('[').Append(section.Name).Append("]\r\n");
+                foreach (var row in section.Rows) output.Append(row).Append("\r\n");
+            }
+        }
         // Filter2 is a final INI section: keep app extension key/value fields before it so
         // the importer's section-aware parser does not mistake them for Filter2 row data.
         if (state.QdrColorMetadata is { Filter2Rows.Count: > 0 } filterMetadata)
@@ -168,7 +179,8 @@ internal static class QdrExporter
         {
             var version = values.GetValueOrDefault(Prefix + "FormatVersion");
             if (duplicate || version is not ("1" or "2" or "3" or "4") ||
-                values.GetValueOrDefault(Prefix + "BaseHash") != HashBase(values, basic.QdrColorMetadata))
+                values.GetValueOrDefault(Prefix + "BaseHash") != HashBase(values, basic.QdrColorMetadata,
+                    basic.QdrOpaqueMetadata))
                 throw new InvalidDataException();
             var bytes = Convert.FromBase64String(values[Prefix + "State"]);
             var extension = JsonSerializer.Deserialize<Extension>(bytes) ?? throw new InvalidDataException();
@@ -194,7 +206,8 @@ internal static class QdrExporter
                 ["已读取 Explorer Dirs 扩展：布局、活动窗格、标签视图、目录树模式/宽度/逐窗格状态、每标签快速筛选、预览/详情窗格、固定标签及新标签默认查看方式。",
                  "不导入主题、窗口位置或启动命令。"], state, extension.Pins, state.ActivePane,
                 extension.Proportions ?? basic.Proportions, state.PaneTreeVisibility, state.TreeDisplayMode,
-                extension.NavigationTreeWidths, state.QdrTreeSplits, state.QdrColorMetadata);
+                extension.NavigationTreeWidths, state.QdrTreeSplits, state.QdrColorMetadata,
+                state.QdrOpaqueMetadata);
         }
         catch (Exception ex) when (ex is InvalidDataException or FormatException or JsonException or
             ArgumentException or KeyNotFoundException or NullReferenceException)
@@ -212,13 +225,26 @@ internal static class QdrExporter
             throw new InvalidDataException("工作区布局比例不完整或无效。");
     }
 
-    private static string HashBase(Dictionary<string, string> values, QdrColorMetadata? colorMetadata = null)
+    private static string HashBase(Dictionary<string, string> values, QdrColorMetadata? colorMetadata = null,
+        QdrOpaqueMetadata? opaqueMetadata = null)
     {
-        var baseFields = values.Where(pair => BaseKey.IsMatch(pair.Key))
+        var baseFields = values.Where(pair =>
+                !pair.Key.Equals(Prefix + "FormatVersion", StringComparison.OrdinalIgnoreCase) &&
+                !pair.Key.Equals(Prefix + "BaseHash", StringComparison.OrdinalIgnoreCase) &&
+                !pair.Key.Equals(Prefix + "State", StringComparison.OrdinalIgnoreCase))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .Select(pair => pair.Key.ToUpperInvariant() + "=" + pair.Value).ToList();
         if (colorMetadata is { Filter2Rows.Count: > 0 })
             baseFields.AddRange(["[FILTER2]", .. colorMetadata.Filter2Rows]);
+        if (opaqueMetadata is { } opaque)
+        {
+            foreach (var section in opaque.Sections)
+            {
+                baseFields.Add($"[OPAQUE-SECTION]{section.Name.Length}:{section.Name}");
+                baseFields.AddRange(section.Rows.Select(row => $"{row.Length}:{row}"));
+                baseFields.Add("[OPAQUE-SECTION-END]");
+            }
+        }
         var canonical = string.Join("\n", baseFields);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }

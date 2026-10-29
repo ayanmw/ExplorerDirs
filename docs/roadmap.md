@@ -4705,4 +4705,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：`.qdr` 区段边界修正
 
 - 导入器只把 INI 根级字段作为布局/标签输入；`[Filter2]` 仍单独读取颜色规则，其他区段内容不再误解析为根级 `DirN`、`ViewModeN` 等键。此前非 Filter2 区段中的同名字段可能污染导入标签或触发错误警告。
-- SettingsSmoke 新增含根级与 `[OtherState]` 重名字段的回归，完整 Release SettingsSmoke 与 App Release 构建通过，0 警告/错误。未启动 GUI 或 Q-Dir；其他区段暂时忽略而非无损往返，Q-Dir 未识别字段保留仍是后续兼容工作。
+- 后续补齐不透明往返：未识别根字段和非 Filter2 区段保存在便携会话 v14 并在 QDR 导出时带回；应用会生成的受支持字段以当前状态为准。BaseHash 覆盖所有根字段及保留区段，外部修改会让旧 Explorer Dirs 扩展失效。单次保留上限 1 MiB，超限则不保留。
+- Release SettingsSmoke 覆盖未知根字段/区段的导出、导入、会话持久化及外部编辑失效；完整 SettingsSmoke 与 App Release build 通过，0 警告/错误。未启动 GUI 或 Q-Dir；Q-Dir 对未知字段的实际读取及跨版本行为仍待互操作验收。
