@@ -293,9 +293,9 @@ internal static class SyntheticShellSortProbe
 
             var originalPath = Path.Combine(backingFolder, "a-large.bin");
             var renamedPath = Path.Combine(backingFolder, "a-large-renamed.bin");
-            SetListViewSelectionAndFocus(listView, "two.bin", ReadNames(listView, module));
-            SetListViewSelectionAndFocus(listView2, "two.bin", ReadNames(listView2, module));
-            RenameShellItem(originalPath, "a-large-renamed.bin");
+            SetListViewSelectionAndFocus(listView, "two.bin", WaitForNames(listView, module, "two.bin"));
+            SetListViewSelectionAndFocus(listView2, "two.bin", WaitForNames(listView2, module, "two.bin"));
+            RenameSelectedShellItem(view, listView, module, "a-large.bin", "two.bin", "a-large-renamed.bin");
             if (File.Exists(originalPath) || !File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation rename did not update its backing filesystem fixture.");
             var renameAutoUpdated = false;
             var renameAutoUpdated2 = false;
@@ -336,7 +336,7 @@ internal static class SyntheticShellSortProbe
             if (!renameSelectionRetained) throw new IOException("The automatic rename refresh did not preserve selection and keyboard focus on the unchanged item.");
             if (!renameSelectionRetained2) throw new IOException("The second view did not preserve selection and keyboard focus on the unchanged item.");
 
-            DeleteShellItem(renamedPath);
+            DeleteSelectedShellItem(view, listView, module, "a-large-renamed.bin", "two.bin");
             if (File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation delete left the backing filesystem item present.");
             var deleteAutoUpdated = false;
             var deleteAutoUpdated2 = false;
@@ -434,42 +434,59 @@ internal static class SyntheticShellSortProbe
         return ReadNames(listView, module);
     }
 
-    private static void RenameShellItem(string path, string newName)
+    private static void RenameSelectedShellItem(nint view, nint listView, nint module, string itemName, string restoreFocusName, string newName)
     {
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
         var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
         var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
-        Check(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation));
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(dataObject); Check(createOperationHr); }
         try
         {
             Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
-            var shellItemId = ShellItemId;
-            Check(SHCreateItemFromParsingName(path, 0, ref shellItemId, out var item));
-            try { Check(At<RenameItem>(operation, 12)(operation, item, newName, 0)); }
-            finally { Marshal.Release(item); }
+            Check(At<RenameItems>(operation, 13)(operation, dataObject, newName));
             Check(At<PerformOperations>(operation, 21)(operation));
             Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
-            if (aborted != 0) throw new IOException("The isolated Shell rename was aborted.");
+            if (aborted != 0) throw new IOException("The isolated virtual-view Shell rename was aborted.");
         }
-        finally { Marshal.Release(operation); }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(dataObject);
+        }
     }
 
-    private static void DeleteShellItem(string path)
+    private static void DeleteSelectedShellItem(nint view, nint listView, nint module, string itemName, string restoreFocusName)
     {
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
         var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
         var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
-        Check(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation));
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(dataObject); Check(createOperationHr); }
         try
         {
             Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
-            var shellItemId = ShellItemId;
-            Check(SHCreateItemFromParsingName(path, 0, ref shellItemId, out var item));
-            try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
-            finally { Marshal.Release(item); }
+            Check(At<DeleteItems>(operation, 19)(operation, dataObject));
             Check(At<PerformOperations>(operation, 21)(operation));
             Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
-            if (aborted != 0) throw new IOException("The isolated Shell delete was aborted.");
+            if (aborted != 0) throw new IOException("The isolated virtual-view Shell delete was aborted.");
         }
-        finally { Marshal.Release(operation); }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(dataObject);
+        }
+    }
+
+    private static nint GetSelectionDataObject(nint view, nint listView, nint module, string itemName, string restoreFocusName)
+    {
+        SetListViewSelectionAndFocus(listView, itemName, ReadNames(listView, module));
+        var dataObjectId = DataObjectId;
+        Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var dataObject)); // SVGIO_SELECTION.
+        if (dataObject == 0) throw new IOException($"The synthetic view returned no Shell IDataObject for selected item '{itemName}'.");
+        try { SetListViewSelectionAndFocus(listView, restoreFocusName, ReadNames(listView, module)); }
+        catch { Marshal.Release(dataObject); throw; }
+        return dataObject;
     }
 
     private static string[] ReadNames(nint listView, nint module, int expectedCount = 3)
@@ -498,6 +515,19 @@ internal static class SyntheticShellSortProbe
         }
         finally { Marshal.FreeHGlobal(text); }
         return values;
+    }
+
+    private static string[] WaitForNames(nint listView, nint module, string expectedName)
+    {
+        var deadline = Environment.TickCount64 + 2500;
+        string[] names;
+        do
+        {
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (names.Length == 3 && names.Contains(expectedName, StringComparer.OrdinalIgnoreCase)) return names;
+            Pump(50);
+        } while (Environment.TickCount64 < deadline);
+        throw new TimeoutException($"The synthetic Shell view did not settle to three rows including '{expectedName}' within 2.5 seconds; current=[{string.Join('|', names)}].");
     }
 
     private static void SetListViewSelectionAndFocus(nint listView, string name, string[] names)
@@ -637,8 +667,8 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint progressSink);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint progressSink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask; public nint Text;
