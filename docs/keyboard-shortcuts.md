@@ -11,7 +11,7 @@
 | Ctrl+Tab、Ctrl+Shift+Tab、标签标题聚焦时 Ctrl+←/→ | 按当前窗格标题显示顺序循环标签 | 已接入；Q-Dir 12.56 加入 Ctrl+←/→ 切标签，本项目仅在标签标题聚焦时处理，文件视图中的 Ctrl+方向键继续交给 Shell；`Ctrl+PageUp/PageDown` 保留给文件列表的原生上下翻页，Q-Dir FAQ 64 也建议用 `Ctrl+Tab` 切标签；拖动排序后的顺序待 GUI 验收 ([Q-Dir 版本记录](https://www.softwareok.com/?seite=Freeware/Q-Dir/History)、[FAQ 64](https://www.softwareok.com/?faq=64&seite=faq-Q-DIR)) |
 | Ctrl+1～9 | 跳到当前窗格按标题显示顺序排列的第 1～9 个标签；不存在对应标签时保持当前选择 | 源码映射与无窗口回归通过；重排和多窗格中的实际选择待 GUI 验收 |
 | 标签标题的 ←、→、Home、End | 按标题显示顺序切换标签；文件视图内的方向键仍交给 Shell | 已接入；待 GUI 验收 |
-| Alt+D、Ctrl+L | 从面包屑进入完整地址编辑并全选路径 | 已接入；真实焦点待 GUI 验收 |
+| Alt+D、Alt+S、Ctrl+L | 从面包屑进入完整地址编辑并全选路径 | 已接入；Alt+S 对齐 Q-Dir 4.51 官方帮助“地址栏聚焦并选中内容”；Ctrl+S 仍启动 Program Starter。真实焦点待 GUI 验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F4 | Modern 地址栏第一次打开当前标签路径所在的 Shell 文件夹树，再按一次进入完整路径编辑；Classic 地址栏直接进入编辑 | 源码已接入每窗格原生 Shell 树、当前目录定位和虚拟文件夹解析名路由；Escape、切标签、窗格隐藏及窗口失焦关闭。历史仍由独立下拉按钮打开。可见位置、F4/Escape 焦点与虚拟命名空间操作待 GUI 验收 |
 | F5 | 刷新当前文件视图 | 已接入 |
 | F9 | 计算或取消当前文件系统目录的递归总大小、文件数与子目录数 | 已接入后台显式扫描；不自动扫描、不跟随重解析点；导航/切标签/隐藏窗格时取消；实际多窗格状态栏体验待 GUI 验收 |

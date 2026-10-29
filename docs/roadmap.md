@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 Q-Dir 地址栏快捷键补齐：按官方 Q-Dir 4.51 帮助将 `Alt+S` 接到现有地址编辑/全选入口；`Ctrl+S` 仍保留给 Program Starter。定向地址快捷键 smoke 先按预期失败，接线后通过；完整 Release `SettingsSmoke` 退出码 0，App Release build 0 警告/错误。物理键盘焦点仍待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
+
 2026-10-30 Q-Dir “Copy Path”：在“编辑”菜单增加“复制所选项目完整路径”，单选原样复制，多选按行复制；虚拟 Shell 位置或空选区不写入部分/无效路径。定向路径格式 smoke、完整 Release `SettingsSmoke`、App Release build（0 警告/错误）、`ExplorerDirs.HostProbe --selected-paths-clipboard` 真实生产 Shell 单选/多选取值（隐藏宿主、前台不变、未触碰剪贴板）及 `git diff --check` 通过；未启动 GUI。下一次集中验收需检查菜单状态、剪贴板文本、虚拟项目拒绝，以及复制后原文件视图仍可立即用方向键操作。[Shell 功能对照](shell-parity.md)
 
 2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。

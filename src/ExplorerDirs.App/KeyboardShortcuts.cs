@@ -39,6 +39,7 @@ internal static class KeyboardShortcuts
         (0x75, 0) => ExplorerShortcut.NextFocusRegion,    // F6
         (0x75, 4) => ExplorerShortcut.PreviousFocusRegion, // Shift+F6
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
+        (0x53, 1) => ExplorerShortcut.Address,        // Q-Dir: Alt+S focuses the address bar.
         (0x4c, 1) => ExplorerShortcut.ScreenMagnifier, // Q-Dir: Alt+L.
         (0x4c, 2) => ExplorerShortcut.Address,       // Ctrl+L
         (0x73, 0) => ExplorerShortcut.AddressTree, // F4: Q-Dir Modern address tree / path-edit cycle.
