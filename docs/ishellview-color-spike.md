@@ -1400,3 +1400,5 @@ NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell �
 为避免注入鼠标/键盘，临时探针曾尝试让 `IDropSource::QueryContinueDrag` 首次调用即返回 `DRAGDROP_S_DROP`，并在 Private Desktop 内调用真实 OLE `DoDragDrop`。NativeProbe Release 构建成功，但调用停在 `drop-target: query-and-transfer-start`，内部 12 秒 watchdog 返回 124；没有 `DoDragDrop` 返回记录，也没有证据确认目标 `Drop` 回调或文件传输结果。外层守卫同时观察到前台句柄从 LockApp 变为 0、输入时间戳改变，原因未知。探针进程已退出，唯一 GUID 临时夹具已逐项核对并清理；未创建跨卷夹具，也未主动恢复或抢占前台。
 
 该自动化策略不能作为隔离安全的闭环验证方式，临时试验代码已移除，不再重跑。真实 `DoDragDrop` 源端循环及鼠标命中仍未验证；产品继续使用 ExplorerBrowser。后续若要验证，需要采用用户可见且明确授权的交互验收窗口，并由用户控制开始或取消拖动；不得把本次卡住解释为产品缺陷或 Shell 已执行目标 Drop。日志：`src/.state/native-probe-watchdog/20261030-000138-46fb9cf9.stdout.log`。
+
+事后静态对照发现，临时测试源未等待发起鼠标键先进入按下状态；现有隔离源则先观察到发起键按下，再等释放后返回 Drop。微软文档说明 `QueryContinueDrag` 由 OLE 拖放循环在输入状态变化时调用，因此“没有真实按键状态变化，回调未被触发”是一个与卡点相符的假设，但日志没有回调计数或线程栈，无法确认它就是原因。当前可执行的可靠路径仍是已有可见交互探针，由用户在隔离窗口完成拖动；暂不再运行自动释放试验。
