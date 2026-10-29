@@ -80,6 +80,9 @@ public static class SyntheticShellSortProbe
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
         bool exerciseUpdateNotifications = false)
     {
+        var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "all";
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("all" or "single-item" or "item-plus-parent" or "full-view-refresh"))
+            throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
         var copyDestination = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort-Copy");
@@ -262,7 +265,7 @@ public static class SyntheticShellSortProbe
                     ascendingComparisons == 0 || descendingComparisons == 0 || GetForegroundWindow() != foreground)
                     return 1;
                 if (exerciseUpdateNotifications)
-                    ProbeSizeUpdateNotifications(module, folder, view, sizeListView, rootPidl, backingFolder);
+                    ProbeSizeUpdateNotifications(module, folder, folderView, view, sizeListView, rootPidl, backingFolder, sizeUpdateStrategy);
                 ReportProbeStage("assertions-complete");
                 return 0;
             }
@@ -734,9 +737,11 @@ public static class SyntheticShellSortProbe
         }
     }
 
-    private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint view, nint listView,
-        nint rootPidl, string backingFolder)
+    private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint folderView, nint view, nint listView,
+        nint rootPidl, string backingFolder, string strategyFilter)
     {
+        Check(ShellColumnManager.Capture(folderView, out var restoreColumns));
+        if (restoreColumns is null) throw new InvalidOperationException("Could not capture the initial recursive-size view columns.");
         Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, "child", 0, out var childPidl, 0));
         if (childPidl == 0) throw new InvalidOperationException("The synthetic namespace did not parse its child folder PIDL.");
         var absoluteChildPidl = ILCombine(rootPidl, childPidl);
@@ -745,16 +750,20 @@ public static class SyntheticShellSortProbe
 
         try
         {
-            RunSizeUpdateStrategy("single-item", 10, 1, () =>
-                SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
-                module, view, listView, backingFolder);
-            RunSizeUpdateStrategy("item-plus-parent", 10, 1, () =>
-            {
-                SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
-                SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
-            }, module, view, listView, backingFolder);
-            RunSizeUpdateStrategy("full-view-refresh", 10, 1, () =>
-                Check(At<RefreshView>(view, 8)(view)), module, view, listView, backingFolder);
+            Console.WriteLine($"synthetic-size-update: selected-strategy={strategyFilter}");
+            if (strategyFilter is "all" or "single-item")
+                RunSizeUpdateStrategy("single-item", 10, 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, restoreColumns, ref listView, backingFolder);
+            if (strategyFilter is "all" or "item-plus-parent")
+                RunSizeUpdateStrategy("item-plus-parent", 10, 1, () =>
+                {
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
+                    SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
+                }, module, folderView, view, restoreColumns, ref listView, backingFolder);
+            if (strategyFilter is "all" or "full-view-refresh")
+                RunSizeUpdateStrategy("full-view-refresh", 10, 1, () =>
+                    Check(At<RefreshView>(view, 8)(view)), module, folderView, view, restoreColumns, ref listView, backingFolder);
         }
         finally
         {
@@ -763,14 +772,19 @@ public static class SyntheticShellSortProbe
     }
 
     private static void RunSizeUpdateStrategy(string name, long initialSize, long updatedSize, Action notify,
-        nint module, nint view, nint listView, string backingFolder)
+        nint module, nint folderView, nint view, IReadOnlyList<DisplayColumnState> restoreColumns,
+        ref nint listView, string backingFolder)
     {
         SetSyntheticSizeOverride(module, initialSize);
         SetBackingChildSize(backingFolder, initialSize);
         Check(At<RefreshView>(view, 8)(view));
+        Check(ShellColumnManager.Apply(folderView, restoreColumns));
+        listView = FindListView(view);
         var before = WaitForSizeState(listView, module, "10", expectedFirstName: "child", expectedSelection: null);
-        if (!before.OrderUpdated || !before.ValueUpdated)
+        if (!before.OrderUpdated)
             throw new TimeoutException($"Could not restore the recursive-size baseline before '{name}': {FormatSizeState(before)}");
+        if (!before.ValueUpdated)
+            Console.WriteLine($"synthetic-size-update: strategy={name}; baseline-size-column-visible=False; baseline-state=[{FormatSizeState(before)}]");
 
         SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
         SetBackingChildSize(backingFolder, updatedSize);
@@ -784,21 +798,30 @@ public static class SyntheticShellSortProbe
         notify();
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
-        var elapsedMs = Environment.TickCount64 - notificationStarted;
+        var settleMs = Environment.TickCount64 - notificationStarted;
+        var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
+        var systemSizeColumnPresent = columnsAfter?.Any(column =>
+            column.Key.FormatId == SizeFormatId && column.Key.PropertyId == 12) == true;
+        var recursiveSizeColumnPresent = columnsAfter?.Any(column =>
+            column.Key.FormatId == RecursiveSizeFormatId && column.Key.PropertyId == 1) == true;
+        var columnKeys = columnsAfter is null ? "<unavailable>" :
+            string.Join('|', columnsAfter.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}"));
         var enumsAfter = ReadCounter(module, "GetSyntheticEnumObjectsCount");
         var rowsEnumeratedAfter = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
         var detailsAfter = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
-        Console.WriteLine($"synthetic-size-update: strategy={name}; elapsed-ms={elapsedMs}; value-updated={after.ValueUpdated}; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
     }
 
-    private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, string[] Names, string[] Sizes)
+    private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)
         WaitForSizeState(nint listView, nint module, string expectedChildSize, string expectedFirstName, string? expectedSelection)
     {
         var deadline = Environment.TickCount64 + 2500;
         string[] names = [];
         string[] sizes = [];
+        var sizeColumnProbe = string.Empty;
+        var sizeColumnIndex = -1;
         bool valueUpdated = false, orderUpdated = false, selectionPreserved = expectedSelection is null;
         while (Environment.TickCount64 < deadline)
         {
@@ -806,29 +829,43 @@ public static class SyntheticShellSortProbe
             try
             {
                 names = ReadNames(listView, module, expectedCount: -1);
-                sizes = ReadColumnTexts(listView, module, subItem: 1, expectedCount: -1);
+                sizeColumnIndex = -1;
+                sizes = [];
+                var observedColumns = new List<string>();
+                var childCandidateIndex = Array.FindIndex(names, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+                var fileIndex = Array.FindIndex(names, name => string.Equals(name, "small.bin", StringComparison.OrdinalIgnoreCase));
+                for (var columnIndex = 1; columnIndex <= 8 && childCandidateIndex >= 0 && fileIndex >= 0; columnIndex++)
+                {
+                    var columnTexts = ReadColumnTexts(listView, module, subItem: columnIndex, expectedCount: -1);
+                    observedColumns.Add($"{columnIndex}=[{string.Join('|', columnTexts)}]");
+                    if (columnTexts.Length == names.Length &&
+                        string.Equals(columnTexts[childCandidateIndex], expectedChildSize, StringComparison.Ordinal) &&
+                        string.Equals(columnTexts[fileIndex], "4", StringComparison.Ordinal))
+                    {
+                        sizeColumnIndex = columnIndex;
+                        sizes = columnTexts;
+                        break;
+                    }
+                }
+                sizeColumnProbe = string.Join(';', observedColumns);
             }
             finally
             {
                 SetSizeMetricsObservation(module, enabled: false);
             }
-            if (names.Length != 2 || sizes.Length != 2)
-            {
-                Pump(50);
-                continue;
-            }
             var childIndex = Array.FindIndex(names, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
-            valueUpdated = childIndex >= 0 && string.Equals(sizes[childIndex], expectedChildSize, StringComparison.Ordinal);
+            valueUpdated = sizeColumnIndex >= 1 && childIndex >= 0 &&
+                string.Equals(sizes[childIndex], expectedChildSize, StringComparison.Ordinal);
             orderUpdated = names.Length > 0 && string.Equals(names[0], expectedFirstName, StringComparison.OrdinalIgnoreCase);
             selectionPreserved = expectedSelection is null || HasSelectionAndFocus(listView, names, expectedSelection);
-            if (valueUpdated && orderUpdated && selectionPreserved) break;
+            if ((valueUpdated || sizeColumnIndex < 1) && orderUpdated && selectionPreserved) break;
             Pump(50);
         }
-        return (valueUpdated, orderUpdated, selectionPreserved, names, sizes);
+        return (valueUpdated, orderUpdated, selectionPreserved, sizeColumnIndex, names, sizes, sizeColumnProbe);
     }
 
-    private static string FormatSizeState((bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, string[] Names, string[] Sizes) state) =>
-        $"value-updated={state.ValueUpdated}; order-updated={state.OrderUpdated}; names=[{string.Join('|', state.Names)}]; sizes=[{string.Join('|', state.Sizes)}]";
+    private static string FormatSizeState((bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe) state) =>
+        $"value-updated={state.ValueUpdated}; order-updated={state.OrderUpdated}; size-column-index={state.SizeColumnIndex}; names=[{string.Join('|', state.Names)}]; sizes=[{string.Join('|', state.Sizes)}]; columns=[{state.SizeColumnProbe}]";
 
     private static void SetSyntheticSizeOverride(nint module, long size) =>
         Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
