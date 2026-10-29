@@ -325,7 +325,8 @@ public static class SyntheticShellSortProbe
             }
             Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8} path={hdropPath}; CIDA-hr=0x{cidaHr:X8} path={cidaPath}; IFileOperation={copyResult}");
             VerifyMultiSelectionCancellation(folderView, view, module, backingFolder, Path.Combine(copyDestination, "MultiSelection"));
-            var initial = ReadNames(listView, module);
+            // IFileOperation cancellation can leave DefView finishing an asynchronous refresh; wait for the fixture rows before sorting.
+            var initial = WaitForNames(listView, module, "a-large.bin");
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
             var ascendingCompareCount = ReadCounter(module, "GetSyntheticSizeCompareCount");
             var descending = SortAndRead(module, folderView, view, listView, direction: -1);
