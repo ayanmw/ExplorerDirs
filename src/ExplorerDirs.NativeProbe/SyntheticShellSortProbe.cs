@@ -19,6 +19,8 @@ public static class SyntheticShellSortProbe
     private const int LvmSetItemState = LvmFirst + 43;
     private const int LvmGetItemState = LvmFirst + 44;
     private const int LvmGetItemTextW = LvmFirst + 115;
+    private const uint ShcneUpdatedir = 0x00001000;
+    private const uint ShcneUpdateitem = 0x00002000;
     private const uint LvisFocused = 0x0001;
     private const uint LvisSelected = 0x0002;
     private const uint LvifText = 0x0001;
@@ -54,10 +56,11 @@ public static class SyntheticShellSortProbe
     }
 
     internal static int RunRecursiveDirectorySizeSort() =>
-        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true);
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, exerciseUpdateNotifications: true);
 
     internal static int RunRecursiveDirectorySizeSortWithWpfHost() =>
-        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, useWpfParent: true);
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, exerciseUpdateNotifications: true);
 
     internal static int RunNativeLibraryUnloadContractSmoke()
     {
@@ -74,7 +77,8 @@ public static class SyntheticShellSortProbe
     }
 
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
-        bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false)
+        bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
+        bool exerciseUpdateNotifications = false)
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -257,6 +261,8 @@ public static class SyntheticShellSortProbe
                     !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
                     ascendingComparisons == 0 || descendingComparisons == 0 || GetForegroundWindow() != foreground)
                     return 1;
+                if (exerciseUpdateNotifications)
+                    ProbeSizeUpdateNotifications(module, folder, view, sizeListView, rootPidl, backingFolder);
                 ReportProbeStage("assertions-complete");
                 return 0;
             }
@@ -655,6 +661,9 @@ public static class SyntheticShellSortProbe
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-2");
             if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
+            if (module != 0 && exerciseUpdateNotifications)
+                _ = Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
+                    NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(-1);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");
@@ -722,6 +731,103 @@ public static class SyntheticShellSortProbe
             Directory.Delete(copyDestination, recursive: true);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-complete");
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
+        }
+    }
+
+    private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint view, nint listView,
+        nint rootPidl, string backingFolder)
+    {
+        Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, "child", 0, out var childPidl, 0));
+        if (childPidl == 0) throw new InvalidOperationException("The synthetic namespace did not parse its child folder PIDL.");
+        var absoluteChildPidl = ILCombine(rootPidl, childPidl);
+        ILFree(childPidl);
+        if (absoluteChildPidl == 0) throw new InvalidOperationException("Could not combine the absolute child PIDL for the update notification.");
+
+        try
+        {
+            RunSizeUpdateStrategy("single-item", 10, 1, () =>
+                SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                module, view, listView, backingFolder);
+            RunSizeUpdateStrategy("item-plus-parent", 10, 1, () =>
+            {
+                SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
+                SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
+            }, module, view, listView, backingFolder);
+            RunSizeUpdateStrategy("full-view-refresh", 10, 1, () =>
+                Check(At<RefreshView>(view, 8)(view)), module, view, listView, backingFolder);
+        }
+        finally
+        {
+            ILFree(absoluteChildPidl);
+        }
+    }
+
+    private static void RunSizeUpdateStrategy(string name, long initialSize, long updatedSize, Action notify,
+        nint module, nint view, nint listView, string backingFolder)
+    {
+        SetSyntheticSizeOverride(module, initialSize);
+        SetBackingChildSize(backingFolder, initialSize);
+        Check(At<RefreshView>(view, 8)(view));
+        var before = WaitForSizeState(listView, module, "10", expectedFirstName: "child", expectedSelection: null);
+        if (!before.OrderUpdated || !before.ValueUpdated)
+            throw new TimeoutException($"Could not restore the recursive-size baseline before '{name}': {FormatSizeState(before)}");
+
+        SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
+        SetBackingChildSize(backingFolder, updatedSize);
+        SetSyntheticSizeOverride(module, updatedSize);
+        notify();
+
+        var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; value-updated={after.ValueUpdated}; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
+    }
+
+    private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, string[] Names, string[] Sizes)
+        WaitForSizeState(nint listView, nint module, string expectedChildSize, string expectedFirstName, string? expectedSelection)
+    {
+        var deadline = Environment.TickCount64 + 2500;
+        string[] names = [];
+        string[] sizes = [];
+        bool valueUpdated = false, orderUpdated = false, selectionPreserved = expectedSelection is null;
+        while (Environment.TickCount64 < deadline)
+        {
+            names = ReadNames(listView, module, expectedCount: -1);
+            sizes = ReadColumnTexts(listView, module, subItem: 1, expectedCount: -1);
+            if (names.Length != 2 || sizes.Length != 2)
+            {
+                Pump(50);
+                continue;
+            }
+            var childIndex = Array.FindIndex(names, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+            valueUpdated = childIndex >= 0 && string.Equals(sizes[childIndex], expectedChildSize, StringComparison.Ordinal);
+            orderUpdated = names.Length > 0 && string.Equals(names[0], expectedFirstName, StringComparison.OrdinalIgnoreCase);
+            selectionPreserved = expectedSelection is null || HasSelectionAndFocus(listView, names, expectedSelection);
+            if (valueUpdated && orderUpdated && selectionPreserved) break;
+            Pump(50);
+        }
+        return (valueUpdated, orderUpdated, selectionPreserved, names, sizes);
+    }
+
+    private static string FormatSizeState((bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, string[] Names, string[] Sizes) state) =>
+        $"value-updated={state.ValueUpdated}; order-updated={state.OrderUpdated}; names=[{string.Join('|', state.Names)}]; sizes=[{string.Join('|', state.Sizes)}]";
+
+    private static void SetSyntheticSizeOverride(nint module, long size) =>
+        Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
+            NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(size));
+
+    private static void SetBackingChildSize(string backingFolder, long size)
+    {
+        var child = Path.Combine(backingFolder, "child");
+        if (Directory.Exists(child)) Directory.Delete(child, recursive: true);
+        Directory.CreateDirectory(child);
+        if (size == 10)
+        {
+            Directory.CreateDirectory(Path.Combine(child, "nested"));
+            File.WriteAllBytes(Path.Combine(child, "direct.bin"), new byte[6]);
+            File.WriteAllBytes(Path.Combine(child, "nested", "deep.bin"), new byte[4]);
+        }
+        else
+        {
+            File.WriteAllBytes(Path.Combine(child, "direct.bin"), new byte[checked((int)size)]);
         }
     }
 
@@ -1270,7 +1376,9 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
@@ -1433,6 +1541,7 @@ public static class SyntheticShellSortProbe
     [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref StorageMedium medium);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
+    [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SHGetPathFromIDListW(nint pidl, StringBuilder path);
     [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, ref Guid interfaceId, out nint item);

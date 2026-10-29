@@ -1225,6 +1225,7 @@ namespace
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    volatile LONG64 g_syntheticChildSizeOverride = -1;
     constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
     { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
     volatile LONG g_syntheticEnumObjectsCount = 0;
@@ -1237,6 +1238,17 @@ namespace
         if (!item || item->mkid.cb != sizeof(SyntheticChild)) return nullptr;
         const auto* child = reinterpret_cast<const SyntheticChild*>(item);
         return child->id != 0 ? child : nullptr;
+    }
+
+    ULONGLONG SyntheticSize(const SyntheticChild* child)
+    {
+        if (child && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
+            _wcsicmp(child->name, L"child") == 0)
+        {
+            const auto overrideSize = InterlockedCompareExchange64(&g_syntheticChildSizeOverride, -1, -1);
+            if (overrideSize >= 0) return static_cast<ULONGLONG>(overrideSize);
+        }
+        return child ? child->size : 0;
     }
 
     HRESULT GetSyntheticDirectorySize(const std::wstring& directory, ULONGLONG* size)
@@ -1984,7 +1996,8 @@ namespace
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
                 InterlockedIncrement(&g_syntheticSizeCompareCount);
-                comparison = leftChild->size < rightChild->size ? -1 : leftChild->size > rightChild->size ? 1 : 0;
+                comparison = SyntheticSize(leftChild) < SyntheticSize(rightChild) ? -1 :
+                    SyntheticSize(leftChild) > SyntheticSize(rightChild) ? 1 : 0;
                 break;
             case 2: comparison = 0; break;
             default: return E_INVALIDARG;
@@ -2168,7 +2181,7 @@ namespace
             if (!child) return E_INVALIDARG;
             VariantInit(value);
             value->vt = VT_UI8;
-            value->ullVal = child->size;
+            value->ullVal = SyntheticSize(child);
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
@@ -2192,7 +2205,7 @@ namespace
             {
                 if (!child) return E_INVALIDARG;
                 text = column == 0 ? child->name : column == 1 ?
-                    std::to_wstring(child->size) :
+                    std::to_wstring(SyntheticSize(child)) :
                     ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File");
                 details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
@@ -2707,6 +2720,20 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         const bool recursiveSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 10;
         VariantClear(&sizeValue);
         if (!recursiveSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 1);
+        details = {};
+        result = root->GetDetailsOf(item, 1, &details);
+        const bool updatedSizeDisplayed = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"1") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        VariantInit(&sizeValue);
+        result = root->GetDetailsEx(item, &kSyntheticRecursiveSizeKey, &sizeValue);
+        const bool updatedSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 1;
+        VariantClear(&sizeValue);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+        if (!updatedSizeDisplayed || !updatedSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         childFolder = item;
         item = nullptr;
         {
@@ -3182,6 +3209,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProb
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticChildSizeOverrideForProbe(LONGLONG size)
+{
+    if (size < -1) return E_INVALIDARG;
+    InterlockedExchange64(&g_syntheticChildSizeOverride, size);
     return S_OK;
 }
 

@@ -6,6 +6,8 @@
 
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
+2026-10-30：继续准备递归目录大小更新的 Shell 通知 A/B。NativeProbe 现依次测单项 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR` 和整视图刷新，并采集列值、排序、选区/焦点是否更新；合成值覆盖单独通过无窗口合同 smoke。NativeProbe Release、原生 `/W4 /WX`、DLL unload contract 和 folder-tree smoke 通过；前台 HWND 仍为 0，未运行 Shell view A/B。产品和 release 未改。下一步在桌面边界稳定时运行 A/B 与 watchdog 清理复测，再根据观测决定是否实施后台大小缓存和逐项更新。
+
 2026-10-30：本轮源码级复核发现递归大小排序探针先卸载合成 Shell COM DLL、撤销临时 namespace 注册，再销毁可能仍含 Shell 子窗口的父 HWND，存在生命周期风险。已调整探针为先销毁父窗口树，再撤销注册，并修正 `DllCanUnloadNow` 计数以包含枚举器和 class factory；无窗口合同 smoke 先失败、补齐后通过。NativeProbe Release 与原生 `/W4 /WX` 构建通过。watchdog 已接入递归大小/WPF 对照命令，支持外部进程 timeout dump，25 秒捕获早于 probe 内部 30 秒超时；timeout-tree 自检已验证可写出 MDMP 并清理进程。真实 Shell 挂起 dump 尚未采集/分析，不能声称卡死已修复。后续在桌面边界允许时复测。产品和 release 均未改。详见[调查记录](folder-size-column-investigation.md#合成-namespace-排序对照与清理停滞)。
 
 2026-10-30 主干后台基线：提交 `9c47a79` 为合成 Shell 排序探针加入逐阶段清理诊断后，完整 Release `ExplorerDirs.SettingsSmoke` 通过，App Release build 0 错误；唯一警告为 NuGet 漏洞源不可达产生的 `NU1900`。本轮未改产品功能、未启动窗口、未更新 release。该结果确认既有后台回归通过，不改变文件操作/焦点、真实 OLE 拖放、自动刷新可见体验及 IShellView 迁移等开放门槛。
