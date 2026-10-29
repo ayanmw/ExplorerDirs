@@ -3616,10 +3616,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 QueueDirectoryChange(version, queue, change.Delta, change.ForceRefresh);
             }, onEventFailure);
         };
-        watcher.Error += (_, _) =>
+        watcher.Error += (_, eventArgs) =>
         {
             _directoryChangeWatcherEventGate.TryInvoke(watcher, () =>
             {
+                var error = eventArgs.GetException();
+                RecordDirectoryChangeWatcherError(path, version, navigationVersion, queue, recovery, watcher, error);
                 var change = ShellDirectoryChangeMonitorOptions.ForError();
                 QueueDirectoryChange(version, queue, change.Delta, change.ForceRefresh);
                 ScheduleDirectoryChangeWatcherRecovery(path, version, navigationVersion, queue,
@@ -3627,6 +3629,28 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }, onEventFailure);
         };
         return watcher;
+    }
+
+    private void RecordDirectoryChangeWatcherError(string path, long version, long navigationVersion,
+        ShellDirectoryChangeQueue queue, ShellDirectoryWatcherRecovery recovery, FileSystemWatcher watcher,
+        Exception error)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        try
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (!IsDirectoryChangeWatcherRecoveryCurrent(path, version, navigationVersion, queue, recovery) ||
+                    !ReferenceEquals(_directoryChangeWatcher, watcher)) return;
+
+                // Keep overflow and other watcher failures distinguishable even when recreation succeeds.
+                LastShellRefreshStatus = $"directory-watcher-error={error.GetType().Name},hr=0x{error.HResult:X8}";
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            // The owning Dispatcher can shut down between the check and enqueue.
+        }
     }
 
     private static void DisposeDirectoryChangeWatcher(FileSystemWatcher watcher)

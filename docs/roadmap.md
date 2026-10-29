@@ -12,6 +12,8 @@
 
 近期执行顺序：已为“使用系统 Explorer 浏览”和用户级文件夹入口整理[集中验收清单](gui-acceptance-system-entry.md)。下一步继续从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项；依赖真实消息循环、物理键鼠或当前用户 Explorer 扩展菜单的项目留待集中验收。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
+2026-10-30 自动刷新诊断：目录 watcher 的 `Error` 事件此前只触发强制协调和重建，未保留错误类型。现将异常类型与 HRESULT 记录到 `LastShellRefreshStatus`，并在 Dispatcher 写入前验证导航、目录、队列、恢复实例和 watcher 仍匹配。App Release build 0 警告/错误；未运行 ExplorerBrowser 或注入真实 watcher 错误，自动刷新 P0 与可见体验门槛不变。详见[调查记录](live-update-investigation.md#2026-10-30记录目录-watcher-错误类型)。
+
 2026-10-30 IShellView 隔离迁移复验：当前 Release NativeProbe 的四窗格 WPF consumer 再次通过（退出码 0）。反向选择、Ctrl+A、F2 方向键隔离、Shell 文件操作通知、原生视图菜单及 WPF 根窗同步销毁均通过，前台 HWND 与最后输入时间不变。该结果只加强隔离宿主证据；ExplorerBrowser 产品接线、物理输入、完整 OLE 拖放与可见验收仍开放。详细记录见[隔离原型](ishellview-color-spike.md#2026-10-30当前主线复跑四窗格-wpf-consumer)。
 
 2026-10-30 递归目录大小隔离更新 A/B：WPF 根宿主下有效临时 Shell namespace 可建立视图，初始递归值显示与数值排序正确；单项通知、父目录通知和整视图刷新均未恢复派生列值，整视图刷新还丢失选区/焦点并耗时约 2.64 秒。宿主未超时，临时注册与夹具均清理。该路线不接入产品，后续不再叠加同类 DefView 刷新技巧；详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30wpf-根宿主下递归大小列更新-ab)。

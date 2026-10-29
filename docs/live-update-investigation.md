@@ -1903,3 +1903,7 @@ Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `She
 继续运行 `--live-shell-selection-delete-native`：探针通过真实 `IFileOperation` 创建并删除副本，不注入 `SHCNE_UPDATEDIR`，但会关闭产品 watcher，以隔离 Shell 自身通知路径。夹具重建并核对删除前选区为 `second.txt`、`third.txt`、焦点为未选中 `initial.txt` 后，副本删除完成、计数收敛；最终 Shell 选区多出 `initial.txt` 与未操作的 `selection-delete-target.txt`，焦点仍为 `initial.txt`，因此该对照退出码为 1。它表明无 watcher 时原生 Shell 通知后的选区与用户输入快照不同；仍不等同于应用的正常 watcher/Refresh 路径。
 
 在相同源码下重跑 `--live-shell-selection-delete-watcher`，退出码 0：生产 watcher 收到删除事件，约 804 ms 后视图和磁盘均移除目标，`second.txt`/`third.txt` 选区及 `initial.txt` 焦点保持。结合上一节的强制 UPDATEDIR 对照，当前需要保留生产 watcher 负责的快照恢复；没有证据支持关闭 watcher 或仅依赖 Shell 自然通知。本轮只调整隔离测试的夹具选区建立方式，没有改产品 watcher、刷新或 Shell 通知逻辑。
+
+### 2026-10-30：记录目录 watcher 错误类型
+
+源码复核发现 `FileSystemWatcher.Error` 已触发强制协调和 watcher 重建，但丢弃了 `ErrorEventArgs` 中的异常；因此即使恢复成功，诊断状态也无法区分缓冲区溢出与其它 watcher 错误。现在将异常类型与 HRESULT 写入 `LastShellRefreshStatus`，并在 Dispatcher 上复核导航代次、路径、队列、恢复实例和 watcher 身份后才写状态，避免迟到错误污染新目录。原有刷新/重建和退避逻辑不变。App Release build 通过，0 警告/错误，`git diff --check` 通过；本轮没有触发真实 watcher 错误或启动 ExplorerBrowser，错误运行时状态和自动恢复仍待后续安全宿主/可见验收。
