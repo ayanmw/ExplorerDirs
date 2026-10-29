@@ -1180,6 +1180,7 @@ namespace
     volatile LONG g_syntheticSizeCompareCount = 0;
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
+    volatile LONG g_syntheticClassFactoryCreateCount = 0;
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
     {
@@ -1458,6 +1459,7 @@ namespace
         HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer, REFIID iid, void** value) override
         {
             if (outer) return CLASS_E_NOAGGREGATION;
+            InterlockedIncrement(&g_syntheticClassFactoryCreateCount);
             auto* folder = new (std::nothrow) SyntheticSortFolder();
             if (!folder) return E_OUTOFMEMORY;
             const auto result = folder->QueryInterface(iid, value);
@@ -1510,17 +1512,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCI
     if (!rootPidl || !folder || !view) return E_POINTER;
     *folder = nullptr;
     *view = nullptr;
-    auto* instance = new (std::nothrow) SyntheticSortFolder();
-    if (!instance) return E_OUTOFMEMORY;
-    TraceSyntheticSortStage("synthetic-sort: initialize-enter");
-    auto result = instance->Initialize(rootPidl);
-    TraceSyntheticSortStage("synthetic-sort: initialize-return");
-    if (FAILED(result)) { instance->Release(); return result; }
-    TraceSyntheticSortStage("synthetic-sort: export-create-view-object-enter");
-    result = instance->CreateViewObject(nullptr, IID_IShellView, reinterpret_cast<void**>(view));
+    IShellFolder* parent = nullptr;
+    PCUITEMID_CHILD relativePidl = nullptr;
+    auto result = SHBindToParent(rootPidl, IID_PPV_ARGS(&parent), &relativePidl);
+    TraceSyntheticSortStage("synthetic-sort: SHBindToParent-return");
+    if (FAILED(result)) return result;
+    result = parent->BindToObject(relativePidl, nullptr, IID_PPV_ARGS(folder));
+    parent->Release();
+    TraceSyntheticSortStage("synthetic-sort: namespace-BindToObject-return");
+    if (FAILED(result)) return result;
+    TraceSyntheticSortStage("synthetic-sort: namespace-CreateViewObject-enter");
+    result = (*folder)->CreateViewObject(nullptr, IID_IShellView, reinterpret_cast<void**>(view));
     TraceSyntheticSortStage("synthetic-sort: export-create-view-object-return");
-    if (FAILED(result)) { instance->Release(); return result; }
-    *folder = static_cast<IShellFolder2*>(instance);
+    if (FAILED(result)) { (*folder)->Release(); *folder = nullptr; }
     return result;
 }
 
@@ -1530,6 +1534,7 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticSizeCompareCount, 0);
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
+    InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
@@ -1543,3 +1548,6 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumObjectsCount()
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumeratedItemCount()
 { return InterlockedCompareExchange(&g_syntheticEnumeratedItems, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticClassFactoryCreateCount()
+{ return InterlockedCompareExchange(&g_syntheticClassFactoryCreateCount, 0, 0); }

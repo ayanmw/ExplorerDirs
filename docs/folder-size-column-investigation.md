@@ -336,6 +336,16 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 本结果证明：具备有效 Shell namespace 父级后，独立虚拟 `IShellFolder2`/DefView 原型能够通过 `CompareIDs` 提供可消费的静态数值排序；它也定位了前一轮挂起与 namespace PIDL 未通过 Shell 正常解析相伴。它**不**证明完整系统资源管理器导航入口已实现，也未验证实际文件操作、第三方扩展、可见交互、多窗格及动态递归目录大小值；产品仍使用 ExplorerBrowser，未改 release。首次默认沙箱运行因注册表写权限拒绝而在创建任何键前退出；授权的限时隔离执行随后通过，完整日志为 `src/.state/native-probe-watchdog/20261029-081402-b9b3cce0.stdout.log`。
 
+### 2026-10-29：Shell 绑定激活 namespace COM 对象并保留排序
+
+随后将探针从“Shell 解析 PIDL、再由导出函数直接 `new` 适配器”推进到真正绑定：`SHBindToParent` 取得 Desktop 父文件夹，`IShellFolder::BindToObject` 按解析出的相对 PIDL 绑定目标；原生 DLL 的 `DllGetClassObject`/注册 class factory 负责创建文件夹对象，再从该对象调用 `CreateViewObject`。探针要求 class factory 实际创建计数大于 0，防止绕开 Shell 注册激活路径时误通过。
+
+结果：`SHBindToParent`、`BindToObject`、`CreateViewObject` 均返回；注册 class factory 创建计数为 1；`IFolderView2::GetFolder` 与根文件夹 COM identity 一致；初始、升序、降序行序及 `CompareIDs` 计数继续符合前一节的预期。Release 原生 DLL `/W4 /WX` 与 NativeProbe 构建通过，隔离探针 exit code 0；前台 HWND 和输入时间戳未变，结束后两个临时注册键均不存在。完整日志：`src/.state/native-probe-watchdog/20261029-081657-b53c6798.stdout.log`。
+
+同一探针随后只查询背景菜单、不显示或调用任何命令：`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 成功，`IContextMenu::QueryContextMenu` 返回 7 个顶层菜单项、20 个 canonical verbs，包括 `undo`、`paste`、`refresh`、`groupby`、`sortascending`/`sortdescending`、多种 `viewlogical*` 和 `viewcolsettings`。该菜单对象证明 DefView 可提供背景菜单命令合同，不证明屏幕显示、命令状态或命令执行效果。最新日志：`src/.state/native-probe-watchdog/20261029-082138-0341f57e.stdout.log`。
+
+此结果证明的是 namespace 的正常 COM 绑定、DefView 数值比较接线和背景菜单对象的可查询性。合成文件夹仍故意不实现子项 `GetUIObjectOf`、重命名/绑定及数据对象，因此没有验证选中项目菜单、复制移动、拖放或真实文件操作；不能把它当作可用的资源管理器替代视图或产品迁移验收。
+
 ### 2026-10-29：标准 Size 的属性存储覆写对照
 
 NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回明确的 `PKEY_Size` 覆盖值：`a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`；逐项直接读取均确认返回 `S_OK` 和目标值。随后设置标准 `PKEY_Size` 升序并刷新，DefView 行序仍是 `two.bin|a-ten.bin|z-ten.bin`，对应真实文件字节大小 `2|10|10`，而非覆盖值所要求的 `z-ten.bin|a-ten.bin|two.bin`。真实 Header 输入产生的两种方向行序也与真实文件大小对应。由此确认该视图的标准 Size 排序没有消费此子项 `IPropertyStoreFactory` 返回的 `PKEY_Size` 值；光装饰标准属性存储无法让递归目录大小参与 Explorer 原生大小排序。

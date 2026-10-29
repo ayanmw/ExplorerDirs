@@ -7,6 +7,7 @@ internal static class SyntheticShellSortProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
@@ -43,7 +44,8 @@ internal static class SyntheticShellSortProbe
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
             Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
-            Console.WriteLine("synthetic-shell-size-sort: synthetic folder and view returned");
+            var classFactoryCreateCount = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
+            Console.WriteLine($"synthetic-shell-size-sort: Shell-bound folder and view returned; registered-class-factory-creates={classFactoryCreateCount}");
 
             Console.WriteLine("synthetic-shell-size-sort: creating StreamViewHost");
             host = new StreamViewHost(parent, []) { View = view };
@@ -74,6 +76,45 @@ internal static class SyntheticShellSortProbe
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            var contextMenuId = ContextMenuId;
+            var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var backgroundMenu); // SVGIO_BACKGROUND
+            var menuQueryHr = unchecked((int)0x80004005);
+            var shellMenuItemCount = 0;
+            var shellMenuVerbs = new List<string>();
+            try
+            {
+                if (backgroundMenu != 0)
+                {
+                    var menu = CreatePopupMenu();
+                    if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create an in-memory Shell menu.");
+                    try
+                    {
+                        menuQueryHr = At<QueryContextMenu>(backgroundMenu, 3)(backgroundMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                        if (menuQueryHr >= 0)
+                        {
+                            shellMenuItemCount = GetMenuItemCount(menu);
+                            var verbBuffer = Marshal.AllocHGlobal(512);
+                            try
+                            {
+                                var commandCount = menuQueryHr & 0xffff;
+                                for (var offset = 0; offset < commandCount; offset++)
+                                {
+                                    Marshal.WriteInt16(verbBuffer, 0);
+                                    if (At<GetCommandString>(backgroundMenu, 5)(backgroundMenu, (uint)offset, 4, 0, verbBuffer, 256) == 0)
+                                    {
+                                        var verb = Marshal.PtrToStringUni(verbBuffer);
+                                        if (!string.IsNullOrWhiteSpace(verb)) shellMenuVerbs.Add(verb);
+                                    }
+                                }
+                            }
+                            finally { Marshal.FreeHGlobal(verbBuffer); }
+                        }
+                    }
+                    finally { DestroyMenu(menu); }
+                }
+            }
+            finally { if (backgroundMenu != 0) Marshal.Release(backgroundMenu); }
+            Console.WriteLine($"synthetic-shell-size-sort: background-IContextMenu-hr=0x{contextMenuHr:X8}; available={contextMenuHr >= 0}; QueryContextMenu-hr=0x{menuQueryHr:X8}; menu-items={shellMenuItemCount}; canonical-verbs=[{string.Join('|', shellMenuVerbs)}]");
             var listView = FindListView(view);
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
@@ -86,6 +127,7 @@ internal static class SyntheticShellSortProbe
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
                 !ascending.SequenceEqual(new[] { "two.bin", "z-ten.bin", "a-large.bin" }) ||
                 !descending.SequenceEqual(new[] { "a-large.bin", "z-ten.bin", "two.bin" }) ||
+                classFactoryCreateCount == 0 ||
                 ascendingCompareCount == 0 || descendingCompareCount == 0 ||
                 ReadCounter(module, "GetSyntheticSizeCompareCount") == 0)
                 return 1;
@@ -262,6 +304,9 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
     private delegate bool EnumChildProcedure(nint child, nint parameter);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
@@ -272,5 +317,8 @@ internal static class SyntheticShellSortProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProcedure callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
 }
