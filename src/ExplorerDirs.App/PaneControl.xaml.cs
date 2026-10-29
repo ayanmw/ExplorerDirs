@@ -724,6 +724,9 @@ public partial class PaneControl : UserControl
     }
     internal ProgramStarterPaneContext CaptureProgramStarterPaneContext() => Current?.Browser.CaptureProgramStarterPaneContext()
         ?? throw new InvalidOperationException("当前窗格没有可读取的文件视图。");
+    internal IReadOnlyList<string> CaptureSelectedPathsForClipboard() =>
+        Current?.Browser.CaptureSelectedPathsForClipboard()
+        ?? throw new InvalidOperationException("当前没有可读取的文件视图。");
     internal ExplorerBrowserHost.SelectedItem? GetSelectedQuickLinkItem() => Current?.Browser.GetSelectedItem();
     internal FileViewExportSnapshot CaptureFileViewExportSnapshot() => Current?.Browser.CaptureFileViewExportSnapshot()
         ?? throw new InvalidOperationException("当前窗格没有可导出的文件视图。");

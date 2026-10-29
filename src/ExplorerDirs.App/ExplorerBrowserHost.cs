@@ -229,6 +229,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return CaptureProgramStarterItemPaths(1).Where(Path.IsPathFullyQualified).ToArray();
     }
 
+    internal IReadOnlyList<string> CaptureSelectedPathsForClipboard()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        var paths = CaptureProgramStarterItemPaths(1);
+        if (paths.Any(path => !Path.IsPathFullyQualified(path)))
+            throw new InvalidOperationException("所选项目包含无法转换为文件系统完整路径的 Shell 项目。");
+        return paths;
+    }
+
     internal PhotoPrintSelectionResult CapturePhotoPrintSelection()
     {
         if (_browser is null || !IsVisible || _viewReadiness.Pending)

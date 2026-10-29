@@ -97,6 +97,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<ShellFileCommand, MenuItem> _fileCommandMenus = [];
     private readonly Dictionary<ShellFileCommand, Button> _fileCommandButtons = [];
     private readonly Dictionary<ShellSelectionCommand, MenuItem> _selectionMenus = [];
+    private MenuItem? _copySelectedPathsMenu;
     private bool _queryingFileCommands;
     private readonly Dictionary<ViewStyle, MenuItem> _defaultViewMenuItems = [];
     private readonly MenuItem _customDefaultViewMenu = new()
@@ -2166,6 +2167,10 @@ public partial class MainWindow : Window
             _selectionMenus[command] = item;
             FileCommandsMenu.Items.Add(item);
         }
+        FileCommandsMenu.Items.Add(new Separator());
+        _copySelectedPathsMenu = new MenuItem { Header = "复制所选项目完整路径" };
+        _copySelectedPathsMenu.Click += CopySelectedPaths_Click;
+        FileCommandsMenu.Items.Add(_copySelectedPathsMenu);
     }
 
     private void PasteSpecialMenu_SubmenuOpened(object sender, RoutedEventArgs e)
@@ -2304,6 +2309,8 @@ public partial class MainWindow : Window
             foreach (var (command, item) in _selectionMenus)
                 item.IsEnabled = counts is not null &&
                     (command == ShellSelectionCommand.None ? counts.Selected > 0 : counts.Total > 0);
+            if (_copySelectedPathsMenu is not null)
+                _copySelectedPathsMenu.IsEnabled = counts is { Selected: > 0 };
         }
         finally
         {
@@ -2325,6 +2332,32 @@ public partial class MainWindow : Window
     }
 
     private void NewFolder_Click(object sender, RoutedEventArgs e) => CreateNewFolder(ActivePane);
+    private void CopySelectedPaths_Click(object sender, RoutedEventArgs e)
+    {
+        var pane = ActivePane;
+        try
+        {
+            var paths = pane.CaptureSelectedPathsForClipboard();
+            if (!SelectedPathsClipboardText.TryFormat(paths, out var text))
+            {
+                EnvironmentStatus.Text = "没有可复制的所选项目完整路径。";
+            }
+            else
+            {
+                Clipboard.SetText(text, TextDataFormat.UnicodeText);
+                EnvironmentStatus.Text = paths.Count == 1
+                    ? "已复制所选项目完整路径。"
+                    : $"已复制 {paths.Count} 个所选项目完整路径。";
+            }
+        }
+        catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
+        {
+            EnvironmentStatus.Text = $"复制所选项目路径失败：{ex.Message}";
+        }
+        _fileViewFocusDesired = true;
+        pane.FocusCurrentView();
+        RefreshFileCommands();
+    }
     private void CreateNewFolder(PaneControl pane)
     {
         _fileViewFocusDesired = true;

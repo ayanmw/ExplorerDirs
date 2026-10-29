@@ -246,6 +246,13 @@ if (args.Length == 1 && args[0] == "--qdir-drive-shortcut-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--selected-paths-clipboard-smoke")
+{
+    SelectedPathsClipboardSmoke.Run();
+    Console.WriteLine("Selected paths clipboard smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--qdir-magnifier-shortcut-smoke")
 {
     QDirMagnifierShortcutSmoke.Run();
@@ -606,6 +613,8 @@ try
     AddressPathMenuSmoke.Run();
     QDirNewFolderShortcutSmoke.Run();
     Console.WriteLine("Q-Dir new folder shortcut smoke: PASS");
+    SelectedPathsClipboardSmoke.Run();
+    Console.WriteLine("Selected paths clipboard smoke: PASS");
     DiskSpaceSmoke.Run(root).GetAwaiter().GetResult();
     ShellFileCommandsSmoke.Run();
     ShellCommandRefreshGateSmoke.Run();
