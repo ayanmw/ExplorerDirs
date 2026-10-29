@@ -16,13 +16,34 @@ internal static class SyntheticShellSortProbe
     private const int LvmGetItemCount = LvmFirst + 4;
     private const int LvmGetItemTextW = LvmFirst + 115;
     private const uint LvifText = 0x0001;
+    private const uint DvaspectContent = 1;
+    private const uint TymedHGlobal = 1;
 
     internal static int Run()
     {
         var foreground = GetForegroundWindow();
+        var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
+        if (Directory.Exists(backingFolder))
+            throw new InvalidOperationException($"Refusing to reuse an existing synthetic Shell sort fixture directory: {backingFolder}");
+        try
+        {
+            Directory.CreateDirectory(backingFolder);
+            File.WriteAllBytes(Path.Combine(backingFolder, "a-large.bin"), Enumerable.Repeat((byte)0xA1, 100).ToArray());
+            File.WriteAllBytes(Path.Combine(backingFolder, "two.bin"), [0x02, 0x02]);
+            File.WriteAllBytes(Path.Combine(backingFolder, "z-ten.bin"), Enumerable.Repeat((byte)0x10, 10).ToArray());
+        }
+        catch
+        {
+            if (Directory.Exists(backingFolder)) Directory.Delete(backingFolder, recursive: true);
+            throw;
+        }
         var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace sort probe",
             0x80000000, 0, 0, 900, 600, 0, 0, 0, 0);
-        if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
+        if (parent == 0)
+        {
+            Directory.Delete(backingFolder, recursive: true);
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
+        }
 
         nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
         var classKeyPath = $@"Software\Classes\CLSID\{{{SyntheticFolderClassId:D}}}";
@@ -36,6 +57,7 @@ internal static class SyntheticShellSortProbe
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
+            Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
             RegisterSyntheticNamespace(namespaceKeyPath);
@@ -121,11 +143,38 @@ internal static class SyntheticShellSortProbe
             if (selectedCount != 1) throw new InvalidOperationException($"Expected exactly one selected synthetic item before querying its Shell objects; got {selectedCount}.");
             var selectionMenuId = ContextMenuId;
             var selectionMenuHr = At<GetItemObject>(view, 15)(view, 1, ref selectionMenuId, out var selectionMenu); // SVGIO_SELECTION
-            if (selectionMenu != 0) Marshal.Release(selectionMenu);
+            var selectionMenuQueryHr = unchecked((int)0x80004005);
+            var selectionMenuItemCount = 0;
+            if (selectionMenu != 0)
+            {
+                var selectionMenuHandle = CreatePopupMenu();
+                if (selectionMenuHandle == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create an in-memory selected-item Shell menu.");
+                try
+                {
+                    selectionMenuQueryHr = At<QueryContextMenu>(selectionMenu, 3)(selectionMenu, selectionMenuHandle, 0, 1, 0x7fff, 0x10 | 0x800);
+                    if (selectionMenuQueryHr >= 0) selectionMenuItemCount = GetMenuItemCount(selectionMenuHandle);
+                }
+                finally
+                {
+                    DestroyMenu(selectionMenuHandle);
+                    Marshal.Release(selectionMenu);
+                }
+            }
             var dataObjectId = DataObjectId;
             var dataObjectHr = At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectionDataObject);
-            if (selectionDataObject != 0) Marshal.Release(selectionDataObject);
-            Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; available={selectionMenuHr >= 0}; selected-IDataObject-hr=0x{dataObjectHr:X8}; available={dataObjectHr >= 0}");
+            var hdropHr = unchecked((int)0x80004005);
+            var cidaHr = unchecked((int)0x80004005);
+            if (selectionDataObject != 0)
+            {
+                try
+                {
+                    hdropHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, new FormatEtc { Format = 15, Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal });
+                    var cidaFormat = RegisterClipboardFormatW("Shell IDList Array");
+                    cidaHr = At<QueryGetData>(selectionDataObject, 5)(selectionDataObject, new FormatEtc { Format = unchecked((short)cidaFormat), Aspect = DvaspectContent, Index = -1, Tymed = TymedHGlobal });
+                }
+                finally { Marshal.Release(selectionDataObject); }
+            }
+            Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8}; CIDA-hr=0x{cidaHr:X8}");
             var listView = FindListView(view);
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
@@ -138,6 +187,8 @@ internal static class SyntheticShellSortProbe
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
                 !ascending.SequenceEqual(new[] { "two.bin", "z-ten.bin", "a-large.bin" }) ||
                 !descending.SequenceEqual(new[] { "a-large.bin", "z-ten.bin", "two.bin" }) ||
+                selectionMenuHr < 0 || selectionMenuQueryHr < 0 || selectionMenuItemCount == 0 ||
+                dataObjectHr < 0 || hdropHr < 0 || cidaHr < 0 ||
                 classFactoryCreateCount == 0 ||
                 ascendingCompareCount == 0 || descendingCompareCount == 0 ||
                 ReadCounter(module, "GetSyntheticSizeCompareCount") == 0)
@@ -158,6 +209,7 @@ internal static class SyntheticShellSortProbe
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
+            Directory.Delete(backingFolder, recursive: true);
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
         }
     }
@@ -298,6 +350,10 @@ internal static class SyntheticShellSortProbe
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
+    {
+        public short Format; public nint TargetDevice; public uint Aspect; public int Index; public uint Tymed;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask; public nint Text;
@@ -307,6 +363,7 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
@@ -317,6 +374,7 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryGetData(nint self, in FormatEtc format);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
@@ -333,5 +391,6 @@ internal static class SyntheticShellSortProbe
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern uint RegisterClipboardFormatW(string format);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
 }

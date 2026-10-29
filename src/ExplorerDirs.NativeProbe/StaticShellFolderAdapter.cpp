@@ -1181,6 +1181,7 @@ namespace
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
+    std::wstring g_syntheticSortBackingPath;
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
     {
@@ -1290,11 +1291,33 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE value) override
         {
+            TraceSyntheticSortStage("synthetic-sort: Initialize-enter");
             if (!value) return E_INVALIDARG;
             auto* copy = ILCloneFull(value);
             if (!copy) return E_OUTOFMEMORY;
+            if (g_syntheticSortBackingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
+            PIDLIST_ABSOLUTE backingPidl = nullptr;
+            TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-enter");
+            auto result = SHParseDisplayName(g_syntheticSortBackingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
+            TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-return");
+            if (FAILED(result)) { CoTaskMemFree(copy); return result; }
+            IShellFolder* parent = nullptr;
+            PCUITEMID_CHILD child = nullptr;
+            TraceSyntheticSortStage("synthetic-sort: backing-SHBindToParent-enter");
+            result = SHBindToParent(backingPidl, IID_PPV_ARGS(&parent), &child);
+            TraceSyntheticSortStage("synthetic-sort: backing-SHBindToParent-return");
+            if (FAILED(result)) { CoTaskMemFree(backingPidl); CoTaskMemFree(copy); return result; }
+            IShellFolder2* backingFolder = nullptr;
+            TraceSyntheticSortStage("synthetic-sort: backing-folder-BindToObject-enter");
+            result = parent->BindToObject(child, nullptr, IID_PPV_ARGS(&backingFolder));
+            parent->Release();
+            CoTaskMemFree(backingPidl);
+            TraceSyntheticSortStage("synthetic-sort: backing-folder-BindToObject-return");
+            if (FAILED(result)) { CoTaskMemFree(copy); return result; }
             if (_root) CoTaskMemFree(_root);
             _root = copy;
+            if (_inner) _inner->Release();
+            _inner = backingFolder;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* value) override
@@ -1338,26 +1361,57 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE CreateViewObject(HWND, REFIID iid, void** value) override
         {
-            TraceSyntheticSortStage("synthetic-sort: create-view-object-enter");
             if (!value) return E_POINTER;
             *value = nullptr;
             if (iid != IID_IShellView) return E_NOINTERFACE;
             SFV_CREATE create{};
             create.cbSize = sizeof(create);
             create.pshf = this;
-            TraceSyntheticSortStage("synthetic-sort: SHCreateShellFolderView-enter");
             const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
-            TraceSyntheticSortStage("synthetic-sort: SHCreateShellFolderView-return");
             return result;
         }
-        HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY, SFGAOF* attributes) override
+        HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
         {
             if (!attributes) return E_POINTER;
             if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
-            *attributes &= SFGAO_CANDELETE | SFGAO_CANRENAME | SFGAO_CANCOPY;
-            return S_OK;
+            if (!_inner) return E_UNEXPECTED;
+            std::vector<PITEMID_CHILD> original;
+            try { original.resize(count, nullptr); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            HRESULT result = S_OK;
+            for (UINT index = 0; index < count; ++index)
+            {
+                const auto* child = SyntheticData(items[index]);
+                if (!child) { result = E_INVALIDARG; break; }
+                ULONG eaten = 0;
+                result = _inner->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(child->name), &eaten, &original[index], nullptr);
+                if (FAILED(result)) break;
+            }
+            if (SUCCEEDED(result)) result = _inner->GetAttributesOf(count, const_cast<PCUITEMID_CHILD_ARRAY>(original.data()), attributes);
+            for (auto item : original) if (item) CoTaskMemFree(item);
+            return result;
         }
-        HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND, UINT, PCUITEMID_CHILD_ARRAY, REFIID, UINT*, void**) override { return E_NOINTERFACE; }
+        HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (!_inner || count == 0 || !items) return E_NOINTERFACE;
+            std::vector<PITEMID_CHILD> original;
+            try { original.resize(count, nullptr); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            HRESULT result = S_OK;
+            for (UINT index = 0; index < count; ++index)
+            {
+                const auto* child = SyntheticData(items[index]);
+                if (!child) { result = E_INVALIDARG; break; }
+                ULONG eaten = 0;
+                result = _inner->ParseDisplayName(owner, nullptr, const_cast<LPWSTR>(child->name), &eaten, &original[index], nullptr);
+                if (FAILED(result)) break;
+            }
+            if (SUCCEEDED(result)) result = _inner->GetUIObjectOf(owner, count, const_cast<PCUITEMID_CHILD_ARRAY>(original.data()), iid, reserved, value);
+            for (auto* child : original) if (child) CoTaskMemFree(child);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD item, SHGDNF, STRRET* name) override
         {
             if (!name) return E_POINTER;
@@ -1432,9 +1486,10 @@ namespace
             return S_OK;
         }
     private:
-        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); InterlockedDecrement(&g_syntheticLiveObjects); }
+        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
         volatile LONG _references = 1;
         PIDLIST_ABSOLUTE _root = nullptr;
+        IShellFolder2* _inner = nullptr;
     };
 
     class SyntheticFolderClassFactory final : public IClassFactory
@@ -1526,6 +1581,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCI
     TraceSyntheticSortStage("synthetic-sort: export-create-view-object-return");
     if (FAILED(result)) { (*folder)->Release(); *folder = nullptr; }
     return result;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWSTR path)
+{
+    if (!path || !*path) return E_INVALIDARG;
+    try { g_syntheticSortBackingPath.assign(path); }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+    return S_OK;
 }
 
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
