@@ -650,16 +650,17 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
+            // Destroy Shell's child windows while the view, browser site, and folder objects they call back into are still alive.
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-1");
+            if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-2");
+            if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");
             if (folderView != 0) Marshal.Release(folderView);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-2");
             if (folderView2 != 0) Marshal.Release(folderView2);
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-1");
-            if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-2");
-            if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-view-1");
             if (view != 0) Marshal.Release(view);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-view-2");
