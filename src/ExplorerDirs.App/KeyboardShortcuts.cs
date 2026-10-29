@@ -11,7 +11,13 @@ internal enum ExplorerShortcut
     CalculateDirectorySize,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
     PasteSpecial,
-    AutoFitColumns
+    AutoFitColumns,
+    NavigateDriveA, NavigateDriveB, NavigateDriveC, NavigateDriveD, NavigateDriveE,
+    NavigateDriveF, NavigateDriveG, NavigateDriveH, NavigateDriveI, NavigateDriveJ,
+    NavigateDriveK, NavigateDriveL, NavigateDriveM, NavigateDriveN, NavigateDriveO,
+    NavigateDriveP, NavigateDriveQ, NavigateDriveR, NavigateDriveS, NavigateDriveT,
+    NavigateDriveU, NavigateDriveV, NavigateDriveW, NavigateDriveX, NavigateDriveY,
+    NavigateDriveZ
 }
 
 internal static class KeyboardShortcuts
@@ -46,6 +52,7 @@ internal static class KeyboardShortcuts
         (0x4e, 6) => ExplorerShortcut.NewFolder,     // Ctrl+Shift+N
         (0x76, 4) => ExplorerShortcut.NewFolder,     // Q-Dir: Shift+F7.
         (0x74, 4) => ExplorerShortcut.NewFolder,     // Q-Dir: Shift+F5 opens New > New Folder.
+        (>= 0x41 and <= 0x5a, 3) => ExplorerShortcut.NavigateDriveA + (key - 0x41), // Q-Dir: Ctrl+Alt+drive letter.
         (0x56, 6) => ExplorerShortcut.PasteSpecial,  // Q-Dir: save clipboard content as a file.
         (0x41, 6) => ExplorerShortcut.InvertSelection, // Q-Dir: Ctrl+Shift+A.
         (0x45, 6) => ExplorerShortcut.ExpandTree,    // Ctrl+Shift+E
@@ -85,7 +92,8 @@ internal static class KeyboardShortcuts
             ExplorerShortcut.PasteSpecial or
             ExplorerShortcut.ProgramStarter or
             ExplorerShortcut.AutoFitColumns or
-            ExplorerShortcut.NewFolder;
+            ExplorerShortcut.NewFolder or
+            (>= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ);
 
     public static int NextPane(int current, int visibleCount, bool reverse)
     {

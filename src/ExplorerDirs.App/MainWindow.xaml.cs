@@ -1811,6 +1811,14 @@ public partial class MainWindow : Window
     {
         if (shortcut == ExplorerShortcut.None) return false;
         if (shortcut == ExplorerShortcut.AutoFitColumns) return false; // HwndHost forwards this Shell action after TranslateAccelerator declines it.
+        if (shortcut is >= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ)
+        {
+            var driveRoot = $"{(char)('A' + (int)shortcut - (int)ExplorerShortcut.NavigateDriveA)}:\\";
+            if (!Environment.GetLogicalDrives().Contains(driveRoot, StringComparer.OrdinalIgnoreCase)) return false;
+            SetActivePane(source);
+            source.NavigateTo(driveRoot);
+            return true;
+        }
         if (shortcut == ExplorerShortcut.ExpandTree)
         {
             if (!source.ExpandTreeToCurrent()) return false;

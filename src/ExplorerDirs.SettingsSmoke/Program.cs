@@ -239,6 +239,13 @@ if (args.Length == 1 && args[0] == "--qdir-history-shortcut-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--qdir-drive-shortcut-smoke")
+{
+    QDirDriveShortcutSmoke.Run();
+    Console.WriteLine("Q-Dir drive shortcut smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();

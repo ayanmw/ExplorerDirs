@@ -10,6 +10,8 @@
 
 2026-10-30 当前主线后台基线：`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release --no-restore` 完整通过，exit code 0；`ExplorerDirs.App` Release build 0 警告/错误。覆盖的是已存在的设置/路由/状态 smoke 与托管 App 编译，不包含真实文件视图 UI、Shell 菜单、物理输入或 ExplorerBrowser 可见行为。本轮未修改产品源码或 release。
 
+2026-10-30 Q-Dir 盘符快捷键：按 Q-Dir 4.51 官方帮助补入文件视图聚焦时的 `Ctrl+Alt+A～Z`，跳转至对应已列出的逻辑盘符根目录；未列出的盘符交回 Shell，不主动探测网络盘就绪状态。映射、严格修饰键及文本输入焦点边界 smoke、完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误；未运行窗口或物理按键。可见键盘行为和当前安装版 Q-Dir 对照留待集中验收。[快捷键清单](keyboard-shortcuts.md)
+
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
 2026-10-30：继续准备递归目录大小更新的 Shell 通知 A/B。NativeProbe 现依次测单项 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR` 和整视图刷新，并采集列值、排序、选区/焦点是否更新；无窗口合同 smoke 还确认合成值覆盖更新列属性并让 `CompareIDs` 按 1 对 4 字节文件重新排序，清除覆盖后比较关系恢复。NativeProbe Release、原生 `/W4 /WX`、DLL unload contract 和 folder-tree smoke 通过；前台 HWND 仍为 0，未运行 Shell view A/B。产品和 release 未改。下一步在桌面边界稳定时运行 A/B 与 watchdog 清理复测，再根据观测决定是否实施后台大小缓存和逐项更新。
