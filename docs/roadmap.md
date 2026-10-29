@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 主干后台基线：提交 `9c47a79` 为合成 Shell 排序探针加入逐阶段清理诊断后，完整 Release `ExplorerDirs.SettingsSmoke` 通过，App Release build 0 错误；唯一警告为 NuGet 漏洞源不可达产生的 `NU1900`。本轮未改产品功能、未启动窗口、未更新 release。该结果确认既有后台回归通过，不改变文件操作/焦点、真实 OLE 拖放、自动刷新可见体验及 IShellView 迁移等开放门槛。
+
 2026-10-29：隔离 namespace 生命周期探针改为在两个视图均有待处理刷新时先调用 `IShellView::DestroyViewWindow`，再取消关闭视图的刷新，并确认兄弟视图仍刷新、释放后无迟到回调。探针内部断言均通过，关闭期间未观察到刷新回调；但外层 Private Desktop 守卫检测到前台从 LockApp 变为 ChatGPT 且输入时间戳变化，因此整轮不计为隔离通过。未接入产品，也未重跑窗口探针；需在桌面边界稳定时复验，且该场景仍不覆盖真实 HWND 销毁重入或并发 Shell 通知。源码改动仅调整 NativeProbe 场景顺序。详见[架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
 
 2026-10-29：Release `--shell-view-color-policy-smoke` exit 0；其中 `ShellViewDragSource.VerifyContract` 覆盖 OLE 源的 Escape 取消、等待观察到初始鼠标键后才允许结束、释放后返回 Drop，以及让 Windows 处理 None/Copy/Move 光标反馈。该命令未创建 Shell view 或文件；仅证明 COM 回调合同，不证明真实 `DoDragDrop`、指针命中、目标协商、Copy/Move 结果或产品行为。
