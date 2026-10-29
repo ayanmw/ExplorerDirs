@@ -43,6 +43,9 @@ internal static class QdrRoundTripProbe
             !basic.PaneTreeVisibility!.SequenceEqual(expectedTrees))
             throw new InvalidDataException("Q-Dir 基础字段未能保留目录树状态。");
 
+        if (!SameColorMetadata(basic.QdrColorMetadata, expected.QdrColorMetadata))
+            throw new InvalidDataException("Q-Dir 基础字段未能保留颜色开关、主题或 Filter2 规则。");
+
         for (var pane = 0; pane < expected.Panes.Count; pane++)
         for (var tab = 0; tab < expected.Panes[pane].Count; tab++)
         {
@@ -68,4 +71,9 @@ internal static class QdrRoundTripProbe
                 !basic.Proportions.TryGetValue(pair.Key, out var value) || value != pair.Value)))
             throw new InvalidDataException("Q-Dir 基础字段未能保留布局分隔比例。");
     }
+
+    private static bool SameColorMetadata(QdrColorMetadata? left, QdrColorMetadata? right) =>
+        left is null ? right is null : right is not null &&
+        left.UseColor == right.UseColor && left.UseTreeColor == right.UseTreeColor &&
+        left.ColorTheme == right.ColorTheme && left.Filter2Rows.SequenceEqual(right.Filter2Rows);
 }

@@ -4683,3 +4683,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：保留恢复后的 watcher 错误诊断
 
 溢出恢复成功后，通用刷新状态会被覆盖为 `refreshed; rows=0`，错误根因无法回查。现增加独立的 `LastDirectoryChangeWatcherError`，保留最近一次当前目录 watcher 错误类型/HRESULT，并在新目录启动监视时重置。真实 10,000 项本地溢出场景的 RED/GREEN HostProbe 与 Release build 通过；未启动可见窗口、不改变刷新策略。详情见[目录变更调查](live-update-investigation.md#2026-10-30保留-watcher-错误诊断至恢复完成)。
+
+## 2026-10-30：Q-Dir 颜色元数据真实夹具往返断言
+
+新增验收夹具 `qdr-color-metadata.qdr` 的后台往返复核确认：导入后保留 `useColor=1`、`useTreeColor=0`、`colorthema=0` 及 `[Filter2]` 四条有序规则；扩展会话往返与移除 Explorer Dirs 扩展后的 Q-Dir 基础字段往返均通过，夹具 SHA-256 保持 `70D8C32A0F9B0831A4AD060FAA87A982B7E077DD4791A2F375023D6BF9AC8D34`。复核发现 `--roundtrip-qdr` 原先虽检查基础布局/标签/视图，但没有比较颜色元数据；现补上基础字段颜色开关、主题和有序 Filter2 行断言。针对该夹具往返、完整 Release SettingsSmoke 和 App Release build 均通过，0 警告/错误。仅证明文件状态兼容，颜色规则未在 ExplorerBrowser 应用；Q-Dir 实际打开/重存及可见 UI 仍待集中验收。
