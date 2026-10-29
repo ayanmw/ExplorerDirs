@@ -36,6 +36,7 @@ internal static class ShellMiddleClickTargetSmoke
         var root = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.MiddleClick.{Guid.NewGuid():N}");
         var child = Path.Combine(root, "child folder");
         Directory.CreateDirectory(child);
+        File.WriteAllText(Path.Combine(root, "ordinary file.txt"), "middle-click target fixture");
         try
         {
             Require(ShellFolderChildIdentity.TryResolveChildFolder(root, "child folder", out var childIdentity) &&
@@ -44,6 +45,8 @@ internal static class ShellMiddleClickTargetSmoke
             Require(!ShellFolderChildIdentity.TryResolveChildFolder(root, "..", out _) &&
                     !ShellFolderChildIdentity.TryResolveChildFolder(root, "missing", out _),
                 "Shell child resolution rejects traversal and names that do not exist under the parent");
+            Require(!ShellFolderChildIdentity.TryResolveChildFolder(root, "ordinary file.txt", out _),
+                "a clicked Shell file cannot be promoted to a folder target");
             var systemDriveName = Path.GetPathRoot(Environment.SystemDirectory)!.TrimEnd('\\');
             Require(ShellFolderChildIdentity.TryResolveChildFolder("shell:MyComputerFolder", systemDriveName,
                         out var virtualDriveIdentity) &&
