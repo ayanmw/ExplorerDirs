@@ -1389,8 +1389,8 @@ NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL 
 
 复制合同成功后，树级 smoke 再从合成 `copy-destination` 文件夹重新枚举两份副本，通过 `GetUIObjectOf` 生成多选 `IDataObject`，调用 `IFileOperation::DeleteItems`、`PerformOperations` 与 `GetAnyOperationsAborted`，最后确认两个目标路径均已消失。删除仅针对本轮 smoke 创建的 fixture 副本；源文件和冲突处理目录不参与此删除。没有创建 Shell view 或窗口，也不覆盖产品视图刷新、撤销回收站行为或交互确认。
 
-### 2026-10-29 目标端 Ctrl+Copy、默认 Move 与 Shift+Move
+### 2026-10-29 目标端 Copy/Move 键效果与跨卷默认行为
 
-Private Desktop `drop-target-private-desktop` 探针现对 `IShellFolder::CreateViewObject` 返回并注册到目标窗格 HWND 的真实 Shell `IDropTarget`，直接调用 DragEnter/DragOver/Drop，并让两个效果都可用。Ctrl 状态（keyState `0x9`）下，所选项 `IDataObject` 返回 Copy=1，目标文件内容正确且源保留。Shift 状态（keyState `0x5`）下，临时文件被移至目标：目标内容正确、源路径消失。另补同卷无修饰键（keyState `0x1`）对照，Shell 默认执行 Move。两种同卷优化移动中 `IDropTarget::Drop` 返回 effect=0；数据对象的 `Performed DropEffect` 与 `Logical Performed DropEffect` 均读回 Move=2。修正先前仅检查 Drop 返回 effect 的误报后，三种情景连续两次 Private Desktop watchdog exit 0，前台 HWND 和输入时间戳保持不变，临时目录清理完成。
+Private Desktop `drop-target-private-desktop` 探针现对 `IShellFolder::CreateViewObject` 返回并注册到目标窗格 HWND 的真实 Shell `IDropTarget`，直接调用 DragEnter/DragOver/Drop，并让两个效果都可用。Ctrl 状态（keyState `0x9`）下，所选项 `IDataObject` 返回 Copy=1，目标文件内容正确且源保留。Shift 状态（keyState `0x5`）下，同卷临时文件被移至目标：目标内容正确、源路径消失。无修饰键（keyState `0x1`）在同卷默认执行 Move；C: 源到 D: 目标的跨卷对照则默认执行 Copy，目标内容正确且源保留。两种同卷优化移动中 `IDropTarget::Drop` 返回 effect=0；数据对象的 `Performed DropEffect` 与 `Logical Performed DropEffect` 均读回 Move=2。四种情景连续两次 Private Desktop watchdog exit 0，前台 HWND 和输入时间戳保持不变，C: 与 D: 临时夹具均清理完成。跨卷情景仅在探针二进制目录与系统临时目录位于不同卷时执行；不满足时日志会标为不可用。
 
-NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell 回调、修饰键状态与本地临时文件结果；没有进入真实 `DoDragDrop` 循环，也未验证鼠标输入、源端结束协议、不同卷默认行为、跨窗格可见交互或产品接线。不能据此关闭拖放迁移门槛。
+NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell 回调、修饰键状态与本地临时文件结果；没有进入真实 `DoDragDrop` 循环，也未验证鼠标输入、源端结束协议、跨窗格可见交互或产品接线。不能据此关闭拖放迁移门槛。

@@ -46,6 +46,8 @@ internal static class ShellViewDropTargetProbe
 
         var foreground = GetForegroundWindow();
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-NativeProbe", Guid.NewGuid().ToString("N"));
+        // Keep this fixture beside the probe binary so it can be on a different volume from the system temp root.
+        var crossVolumeRoot = Path.Combine(AppContext.BaseDirectory, ".native-probe-cross-volume-" + Guid.NewGuid().ToString("N"));
         var sourceFolderPath = Path.Combine(root, "source");
         var targetFolderPath = Path.Combine(root, "target");
         var sourcePath = Path.Combine(sourceFolderPath, "view-target.txt");
@@ -54,9 +56,14 @@ internal static class ShellViewDropTargetProbe
         var selectedTargetPath = Path.Combine(targetFolderPath, "selected-view.txt");
         var registeredTargetPath = Path.Combine(targetFolderPath, "registered-target.txt");
         var viewTargetPath = Path.Combine(targetFolderPath, "view-target.txt");
+        var crossVolumeSourcePath = Path.Combine(sourceFolderPath, "cross-volume.txt");
+        var crossVolumeTargetPath = Path.Combine(crossVolumeRoot, "cross-volume.txt");
+        var crossVolumeAvailable = !string.Equals(Path.GetPathRoot(root), Path.GetPathRoot(crossVolumeRoot), StringComparison.OrdinalIgnoreCase);
         nint parent = 0, sourcePane = 0, targetPane = 0, sourceFolderPidl = 0, sourceItemPidl = 0,
             selectedSourcePidl = 0, targetFolderPidl = 0;
         nint sourceFolder = 0, targetFolder = 0, sourceView = 0, targetView = 0;
+        nint crossVolumeFolderPidl = 0, crossVolumeFolder = 0, crossVolumeDropTarget = 0, crossVolumeDataObject = 0,
+            crossVolumeSourcePidl = 0, crossVolumeChildPidls = 0;
         nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
         nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, childPidls = 0;
         StreamViewHost? sourceHost = null, targetHost = null;
@@ -260,6 +267,28 @@ internal static class ShellViewDropTargetProbe
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
                 selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture",
                 expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
+            var crossVolumeCopyResult = false;
+            if (!interactiveOle && crossVolumeAvailable)
+            {
+                Directory.CreateDirectory(crossVolumeRoot);
+                File.WriteAllText(crossVolumeSourcePath, "native-shell-cross-volume-fixture");
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(crossVolumeSourcePath, 0, out crossVolumeSourcePidl, 0, out _));
+                var relativeCrossVolumeSource = ILFindChild(sourceFolderPidl, crossVolumeSourcePidl);
+                if (relativeCrossVolumeSource == 0)
+                    throw new InvalidOperationException("The cross-volume source item is not relative to its source folder.");
+                crossVolumeChildPidls = Marshal.AllocHGlobal(IntPtr.Size);
+                Marshal.WriteIntPtr(crossVolumeChildPidls, relativeCrossVolumeSource);
+                Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, crossVolumeChildPidls, 0,
+                    in DataObjectId, out crossVolumeDataObject));
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(crossVolumeRoot, 0, out crossVolumeFolderPidl, 0, out _));
+                Marshal.ThrowExceptionForHR(SHBindToObject(0, crossVolumeFolderPidl, 0, in ShellFolderId, out crossVolumeFolder));
+                Marshal.ThrowExceptionForHR(At<CreateViewObject>(crossVolumeFolder, 8)(crossVolumeFolder, targetPane,
+                    ref dropTargetId, out crossVolumeDropTarget));
+                crossVolumeCopyResult = TryTransfer(crossVolumeDropTarget, crossVolumeDataObject, point,
+                    crossVolumeTargetPath, "SHCreateDataObject (cross-volume default)",
+                    "native-shell-cross-volume-fixture", expectedEffect: DropEffectCopy,
+                    sourcePath: crossVolumeSourcePath);
+            }
             var defaultMoveResult = TryTransfer(folderDropTarget, dataObject, point, viewTargetPath,
                 "SHCreateDataObject (same-volume default)", "native-shell-drop-fixture",
                 expectedEffect: DropEffectMove, sourcePath: sourcePath);
@@ -289,11 +318,14 @@ internal static class ShellViewDropTargetProbe
 
             var sourceStatesValid = !File.Exists(sourcePath) &&
                 File.Exists(selectedSourcePath) && File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
+                (!crossVolumeAvailable || File.Exists(crossVolumeSourcePath) &&
+                    File.ReadAllText(crossVolumeSourcePath) == "native-shell-cross-volume-fixture") &&
                 !File.Exists(secondSourcePath);
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !selectedDataObjectResult || !defaultMoveResult || !sourceStatesValid)
+            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            if (!folderTargetResult || !selectedDataObjectResult || !defaultMoveResult ||
+                crossVolumeAvailable && !crossVolumeCopyResult || !sourceStatesValid)
                 throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");
             PrivateDesktopShellProbe.ReportStage("drop-target: transfer-complete");
             return 0;
@@ -313,6 +345,8 @@ internal static class ShellViewDropTargetProbe
             if (sourceHostPointer != 0) Marshal.Release(sourceHostPointer);
             if (viewDropTarget != 0) Marshal.Release(viewDropTarget);
             if (folderDropTarget != 0) Marshal.Release(folderDropTarget);
+            if (crossVolumeDropTarget != 0) Marshal.Release(crossVolumeDropTarget);
+            if (crossVolumeDataObject != 0) Marshal.Release(crossVolumeDataObject);
             if (selectedDataObject != 0) Marshal.Release(selectedDataObject);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (sourceFolderView != 0) Marshal.Release(sourceFolderView);
@@ -320,11 +354,15 @@ internal static class ShellViewDropTargetProbe
             if (targetView != 0) Marshal.Release(targetView);
             if (sourceFolder != 0) Marshal.Release(sourceFolder);
             if (targetFolder != 0) Marshal.Release(targetFolder);
+            if (crossVolumeFolder != 0) Marshal.Release(crossVolumeFolder);
             if (sourceFolderPidl != 0) Marshal.FreeCoTaskMem(sourceFolderPidl);
             if (sourceItemPidl != 0) Marshal.FreeCoTaskMem(sourceItemPidl);
             if (targetFolderPidl != 0) Marshal.FreeCoTaskMem(targetFolderPidl);
+            if (crossVolumeFolderPidl != 0) Marshal.FreeCoTaskMem(crossVolumeFolderPidl);
+            if (crossVolumeSourcePidl != 0) Marshal.FreeCoTaskMem(crossVolumeSourcePidl);
             if (selectedSourcePidl != 0) Marshal.FreeCoTaskMem(selectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
+            if (crossVolumeChildPidls != 0) Marshal.FreeHGlobal(crossVolumeChildPidls);
             if (interactiveOle)
                 CleanupParentWindow(parent, interactiveOle: true);
             else
@@ -338,6 +376,12 @@ internal static class ShellViewDropTargetProbe
             try { Directory.Delete(root, recursive: true); }
             catch (DirectoryNotFoundException) { }
             catch (IOException) { }
+            if (crossVolumeAvailable)
+            {
+                try { Directory.Delete(crossVolumeRoot, recursive: true); }
+                catch (DirectoryNotFoundException) { }
+                catch (IOException) { }
+            }
         }
     }
 
@@ -392,7 +436,9 @@ internal static class ShellViewDropTargetProbe
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-complete");
         LogAsyncOperationState(label, dataObject, "after-drop");
         var targetHasExpectedContents = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
-        var sourceStateMatchesEffect = sourcePath is null || expectedEffect == DropEffectMove && !File.Exists(sourcePath);
+        var sourceStateMatchesEffect = sourcePath is null ||
+            (expectedEffect == DropEffectCopy && File.Exists(sourcePath) && File.ReadAllText(sourcePath) == expectedContents) ||
+            (expectedEffect == DropEffectMove && !File.Exists(sourcePath));
         var performedEffectAvailable = TryReadShellDropEffect(dataObject, "Performed DropEffect", out var performedDropEffect);
         var logicalEffectAvailable = TryReadShellDropEffect(dataObject, "Logical Performed DropEffect", out var logicalDropEffect);
         var logicalEffectMatches = !logicalEffectAvailable || logicalDropEffect == expectedEffect;
