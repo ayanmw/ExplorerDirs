@@ -113,7 +113,10 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-shell-size-sort: Shell-bound folder and view returned; registered-class-factory-creates={classFactoryCreateCount}");
 
             Console.WriteLine("synthetic-shell-size-sort: creating StreamViewHost");
-            host = new StreamViewHost(parent, []) { View = view };
+            var browserSite = new ShellBrowserSite();
+            browserSite.SelectionChanged += shellView =>
+                Console.WriteLine($"synthetic-shell-size-sort: CDBOSC_SELCHANGE view=0x{unchecked((nuint)shellView):X}");
+            host = new StreamViewHost(parent, []) { View = view, BrowserSite = browserSite };
             Console.WriteLine("synthetic-shell-size-sort: StreamViewHost created");
             hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
             Console.WriteLine("synthetic-shell-size-sort: browser interface acquired");
@@ -146,7 +149,10 @@ public static class SyntheticShellSortProbe
             if (parent2 == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the second Private Desktop probe parent.");
             var createSyntheticView = Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"));
             Check(createSyntheticView(rootPidl, out folder2, out view2));
-            host2 = new StreamViewHost(parent2, []) { View = view2 };
+            var browserSite2 = new ShellBrowserSite();
+            browserSite2.SelectionChanged += shellView =>
+                Console.WriteLine($"synthetic-shell-size-sort: CDBOSC_SELCHANGE view=0x{unchecked((nuint)shellView):X}");
+            host2 = new StreamViewHost(parent2, []) { View = view2, BrowserSite = browserSite2 };
             hostPointer2 = Marshal.GetComInterfaceForObject(host2, typeof(IStreamProbeBrowser));
             Check(At<CreateViewWindow>(view2, 9)(view2, 0, ref settings, hostPointer2, ref bounds, out _));
             viewWindowCreated2 = true;
