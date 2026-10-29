@@ -2236,6 +2236,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     IEnumIDList* enumerator = nullptr;
     PITEMID_CHILD childFolder = nullptr;
     PITEMID_CHILD childFile = nullptr;
+    PITEMID_CHILD secondFile = nullptr;
     IShellFolder2* nested = nullptr;
     IEnumIDList* nestedEnumerator = nullptr;
     IPersistFolder2* nestedPersist = nullptr;
@@ -2380,6 +2381,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         childFile = item;
         item = nullptr;
         result = enumerator->Next(1, &item, &fetched);
+        const bool correctSecondFile = result == S_OK && fetched == 1 && SyntheticData(item) &&
+            _wcsicmp(SyntheticData(item)->name, L"second.txt") == 0 &&
+            !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY);
+        if (!correctSecondFile) { if (item) CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        secondFile = item;
+        item = nullptr;
+        result = enumerator->Next(1, &item, &fetched);
         if (item) CoTaskMemFree(item);
         if (result != S_FALSE || fetched != 0) { result = E_FAIL; goto cleanup; }
     }
@@ -2404,9 +2412,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     TraceSyntheticSortStage("synthetic-folder-tree: native-item-context-menu-passed");
 
     {
-        PCUITEMID_CHILD selected[] = { childFile };
+        PCUITEMID_CHILD selected[] = { childFile, secondFile };
         IDataObject* data = nullptr;
-        result = root->GetUIObjectOf(nullptr, 1, selected, IID_IDataObject, nullptr,
+        result = root->GetUIObjectOf(nullptr, ARRAYSIZE(selected), selected, IID_IDataObject, nullptr,
             reinterpret_cast<void**>(&data));
         if (FAILED(result) || !data) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
         FORMATETC format{ CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
@@ -2414,12 +2422,25 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         result = data->GetData(&format, &medium);
         data->Release();
         if (FAILED(result)) goto cleanup;
-        WCHAR droppedPath[MAX_PATH]{};
-        const auto count = DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0, droppedPath, ARRAYSIZE(droppedPath));
-        const auto expectedPath = std::wstring(backingPath) + L"\\root.txt";
-        const bool hasSelectedPath = count > 0 && _wcsicmp(droppedPath, expectedPath.c_str()) == 0;
+        const auto drop = static_cast<HDROP>(medium.hGlobal);
+        const auto count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        WCHAR droppedPaths[2][MAX_PATH]{};
+        bool allPathsRead = count == ARRAYSIZE(selected);
+        for (UINT index = 0; allPathsRead && index < ARRAYSIZE(selected); ++index)
+        {
+            if (DragQueryFileW(drop, index, droppedPaths[index], ARRAYSIZE(droppedPaths[index])) == 0)
+            {
+                allPathsRead = false;
+                break;
+            }
+        }
+        const auto expectedRoot = std::wstring(backingPath) + L"\\root.txt";
+        const auto expectedSecond = std::wstring(backingPath) + L"\\second.txt";
+        const bool hasSelectedPaths = allPathsRead &&
+            ((_wcsicmp(droppedPaths[0], expectedRoot.c_str()) == 0 && _wcsicmp(droppedPaths[1], expectedSecond.c_str()) == 0) ||
+             (_wcsicmp(droppedPaths[1], expectedRoot.c_str()) == 0 && _wcsicmp(droppedPaths[0], expectedSecond.c_str()) == 0));
         ReleaseStgMedium(&medium);
-        if (!hasSelectedPath) { result = E_FAIL; goto cleanup; }
+        if (!hasSelectedPaths) { result = E_FAIL; goto cleanup; }
     }
     TraceSyntheticSortStage("synthetic-folder-tree: native-item-data-object-passed");
 
@@ -2444,7 +2465,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             if (SyntheticData(item)->attributes & FILE_ATTRIBUTE_HIDDEN) foundHidden = true;
             CoTaskMemFree(item);
         }
-        if (count != 2 || !foundHidden) { result = E_FAIL; goto cleanup; }
+        if (count != 3 || !foundHidden) { result = E_FAIL; goto cleanup; }
     }
     enumerator->Release();
     enumerator = nullptr;
@@ -2532,6 +2553,7 @@ cleanup:
     if (nested) nested->Release();
     if (deepEnumerator) deepEnumerator->Release();
     if (deepFolder) deepFolder->Release();
+    if (secondFile) CoTaskMemFree(secondFile);
     if (childFile) CoTaskMemFree(childFile);
     if (childFolder) CoTaskMemFree(childFolder);
     if (enumerator) enumerator->Release();

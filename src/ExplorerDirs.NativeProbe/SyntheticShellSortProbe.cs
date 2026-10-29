@@ -32,6 +32,7 @@ public static class SyntheticShellSortProbe
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             Directory.CreateDirectory(Path.Combine(fixture, "child", "nested-folder"));
             File.WriteAllText(Path.Combine(fixture, "root.txt"), "root");
+            File.WriteAllText(Path.Combine(fixture, "second.txt"), "second");
             var hiddenFile = Path.Combine(fixture, "hidden.txt");
             File.WriteAllText(hiddenFile, "hidden");
             File.SetAttributes(hiddenFile, File.GetAttributes(hiddenFile) | FileAttributes.Hidden);
@@ -45,7 +46,7 @@ public static class SyntheticShellSortProbe
                 Check(checkTree(fixture));
             }
             finally { NativeLibrary.Free(module); }
-            Console.WriteLine("synthetic-shell-folder-tree-smoke: nested-enumeration=True; multi-component-parse-bind-storage=True; native-item-menu=True; CF_HDROP=True; shell-view-created=False");
+            Console.WriteLine("synthetic-shell-folder-tree-smoke: nested-enumeration=True; multi-component-parse-bind-storage=True; native-item-menu=True; multi-select-CF_HDROP=True; shell-view-created=False");
             return 0;
         }
         finally { Directory.Delete(fixture, recursive: true); }

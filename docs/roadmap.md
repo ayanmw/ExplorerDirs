@@ -4514,3 +4514,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 树级 smoke 现在从合成文件夹取得普通文件的原生 `IContextMenu` 并查询默认命令，同时取得原生 `IDataObject` 的 `CF_HDROP`，核对其中仍是 backing filesystem 的真实夹具路径。菜单只在内存 HMENU 中构造，不显示、不调用命令；没有创建 Shell view 或窗口。
 - 新增菜单与数据对象合同后，树级 smoke、普通 PIDL 合同和包装 PIDL 合同通过；NativeProbe Release 与原生适配器 `/W4 /WX` 构建通过，0 警告/错误。该项验证 adapter 未切断选中项的系统菜单和文件传递数据；不代表菜单可见交互、OLE 拖放闭环或产品 ExplorerBrowser 集成。
+
+## 2026-10-29：合成项多选文件数据对象
+
+- 扩展临时树夹具至两个可见文件；从适配器 `GetUIObjectOf(IDataObject)` 为两项同时取得 Shell 数据对象，并验证 `CF_HDROP` 中两条完整路径都指向被选条目（不依赖返回顺序）。单项原生菜单合同和此前多级路径/绑定/流合同仍通过。
+- 原生 `/W4 /WX`、NativeProbe Release 和树级、普通 PIDL、包装 PIDL smoke 通过，0 警告/错误。仅证明多选 `IDataObject`/`CF_HDROP` 转发；不证明真实选择输入、粘贴/拖放闭环或产品视图行为。
