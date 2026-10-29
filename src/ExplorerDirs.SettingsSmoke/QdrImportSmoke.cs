@@ -152,6 +152,13 @@ internal static class QdrImportSmoke
         Require(duplicatedColorRows.QdrColorMetadata?.Filter2Rows.SequenceEqual(
                     ["0=*.jpg=1=FF0000", "0=*.png=1=00FF00"]) == true,
             "opaque Q-Dir Filter2 rows preserve source order and duplicate numeric keys");
+        var otherSections = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nDir1=C:\\root-only\n[OtherState]\nDir2=C:\\must-not-import\nViewMode2=2\nFutureOption=1\n",
+            (value, _) => value);
+        Require(otherSections.TabCount == 1 && otherSections.Panes[0][0].Path == @"C:\root-only" &&
+                !otherSections.Panes.SelectMany(pane => pane).Any(tab => tab.Path == @"C:\must-not-import") &&
+                !otherSections.Warnings.Any(warning => warning.Contains("FutureOption")),
+            "non-root Q-Dir sections are not misread as root layout fields");
         var longFilterPattern = new string('x', 70);
         var manyFilterRules = string.Join("\n", Enumerable.Range(0, 8).Select(index =>
             $"{index}={(index == 0 ? longFilterPattern : $"pattern-{index}")}=1=00AA00=-1=1=-1=0"));

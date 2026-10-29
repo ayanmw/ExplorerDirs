@@ -68,6 +68,7 @@ internal static class QdrImporter
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var warnings = new HashSet<string>();
         var duplicate = false;
+        var inRootSection = true;
         var inFilter2 = false;
         var filter2RuleCount = 0;
         var filter2Patterns = new List<string>(6);
@@ -83,6 +84,7 @@ internal static class QdrImporter
                 line.StartsWith("#".AsSpan(), StringComparison.Ordinal)) continue;
             if (line.StartsWith('[') && line.EndsWith(']'))
             {
+                inRootSection = false;
                 inFilter2 = line.Equals("[Filter2]".AsSpan(), StringComparison.OrdinalIgnoreCase);
                 continue;
             }
@@ -105,6 +107,7 @@ internal static class QdrImporter
                 }
                 continue;
             }
+            if (!inRootSection) continue;
             // Q-Dir puts metadata on the same line as the current Folder PIDL.
             // Plain Dir paths may legitimately contain &, so never split those.
             var splitMetadata = line.StartsWith("Folder".AsSpan(), StringComparison.OrdinalIgnoreCase);
