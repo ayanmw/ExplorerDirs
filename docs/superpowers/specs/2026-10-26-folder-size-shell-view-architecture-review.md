@@ -98,3 +98,10 @@ Property Schema 方向已由 Microsoft API 契约排除为无机器状态的运�
 2026-10-29 虚拟 namespace → filesystem 项目委托原型：经用户授权，仅在独立 Private Desktop 探针和临时 HKCU CLSID/Desktop NameSpace 注册中，把虚拟行映射到专用 TEMP 文件夹；不修改产品视图或日常 profile。首轮崩溃根因是探针在 `SHBindToParent` 后过早释放绝对 PIDL，而返回的相对 child PIDL 仍指向该内存；延后释放后，`CreateViewWindow`、DefView 行选择与 Shell 对象创建均通过。背景 `IContextMenu` 的 `QueryContextMenu` 返回 7 项，选中项目菜单返回 29 项；选中 `IDataObject` 的 `CF_HDROP` 和 `Shell IDList Array` 实际 `GetData` 均成功，二者 PIDL/路径都指向夹具中的 `a-large.bin`。系统 `IFileOperation.CopyItems` 将该 100 字节文件复制到独立临时目标，目标内容正确且源文件保留。同一视图通过 adapter 的 `CompareIDs` 对 `2/10/100` 文件大小完成升序、降序排序。看门狗检查临时 CLSID、namespace 键、源目录和目标目录全部清理，前台窗口未变化。尚未验证删除/重命名、真实 OLE 拖放源/目标、Shell 变更通知、导航历史、多视图生命周期或产品接线；不能称为迁移门槛通过。下一步继续用隔离夹具验证删除/重命名与 Shell 变更通知，再推进拖放、导航/焦点和多视图生命周期门槛。
 
 2026-10-29 view HWND 销毁顺序诊断：两个 view 均有 pending refresh 时，先调用 IShellView::DestroyViewWindow，再用 GetWindow/IsWindow 确认两个 HWND 已销毁；泵送 STA 400 ms 后，两轮仍各收到两个延迟刷新回调，Refresh 和后续选区恢复均返回成功。随后 owner 调用 ReleaseSyntheticSortViewHold，释放后的回调数保持为 0。pending timer 仍持有 folder/view COM 引用，因此这不是已证明的 use-after-free；但 HWND 销毁本身不会取消原型中的 pending 工作，owner 必须先按 view 取消 timer 并释放 callback hold，再销毁窗口。该验证不覆盖 DestroyViewWindow 内部重入、跨线程通知竞争或产品宿主生命周期。现有探针 finally 的释放顺序符合该要求。
+
+## 2026-10-29 补充：刷新周期中的通知合并和逐视图取消
+
+- 新增确定性回归：启动 view 1 的延迟刷新，在选区恢复窗口中创建 `late-update.bin` 并发送该 view 的 `SFVM_FSNOTIFY`。旧行为会丢弃此通知；修复后当前刷新周期结束时安排一次 follow-up refresh，文件最终出现在 DefView 列表。重复到来的通知在同一 pending 周期内合并。
+- 两轮 Private Desktop 运行均通过；日志确认 notification received during selection restore，follow-up refresh callback 数为 1，late item 可见。第一轮运行还发现原测试在 Shell 开始异步枚举前过早读取 ListView；测试现已等待目标项实际出现后再判定，避免把时序误差当作实现失败。
+- 新增 per-view cancel probe：只取消 view 1 的待处理 timer，再销毁其窗口；view 1 HWND 失效、view 2 HWND 仍有效，随后仅 view 2 的刷新回调运行。释放其余 hold 并泵送 STA 后，回调数不再增加。两轮 watchdog exit 0、前台不变，退出后专用 HKCU CLSID/NameSpace、TEMP 夹具和探针进程已清理。
+- 这一结果支持隔离原型采用“owner 销毁窗口前取消对应 view timer”的顺序，并修正原型中丢失刷新通知的情形；它不证明产品生命周期代码已修复，也不覆盖 `DestroyViewWindow` 内部重入、跨线程竞态、真实 OLE 拖放或产品 UI。产品仍保持 ExplorerBrowser。

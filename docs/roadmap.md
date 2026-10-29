@@ -4482,3 +4482,10 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 补充验证（2026-10-29）：立即在 `IShellView::Refresh` 后恢复时，DefView 行数暂时为 0，无法定位选中项；增加延迟恢复后，在未变化的单个文件 `two.bin` 上 selected/focused 状态恢复为 `0x3`。双视图实验发现单一全局待刷新槽会漏掉第二个视图；改为每视图独立 pending 与 STA 消息队列定时器，并在未完成枚举时最多重试 2.5 秒后，两轮 Private Desktop 运行中两个视图的重命名/删除自动刷新、单选与焦点恢复均通过。随后以虚拟 view 的选区 `IDataObject` 调用 `IFileOperation::RenameItems` 和 `DeleteItems`，两个 view 均收到 Shell 通知并保留未操作项的选择/焦点；最终实现连续两轮通过。再对两个 view 同时排入刷新并调用探针 hold-release，随后泵送 STA 400 ms；两轮均确认待处理 timer 被取消、回调计数不再增加。此证据覆盖显式释放顺序，不覆盖 view HWND 销毁过程中的重入/并发竞态。多选和被操作项目本身的选择语义仍属迁移门槛。
 
 2026-10-29 IShellView 生命周期后续验证：在双视图均有 pending refresh 时先销毁两个 IShellView 窗口，并以 GetWindow/IsWindow 证实 HWND 均失效；两轮均观察到两个延迟回调仍在 HWND 销毁后运行，包含 Refresh 与选区恢复，随后显式释放 view hold 后无新回调。说明 owner 必须先取消每 view 的待处理 timer 并撤销回调持有，再调用 DestroyViewWindow。这不是 use-after-free 证据（timer 持有 COM 引用），也未覆盖 DestroyViewWindow 调用内部重入、跨线程竞争或产品宿主。真实 OLE DoDragDrop 循环仍是 IShellView 迁移门槛的重要缺项。探针 Release build 0 警告/错误；两轮 Private Desktop watchdog exit 0、前台未变化、HKCU 探针注册及临时目录清理。
+
+## 2026-10-29：隔离 Shell 视图通知合并与逐视图取消
+
+- 隔离 NativeProbe 发现：view 1 收到文件系统通知后进入延迟选区恢复期间，紧接着到达的第二条 `SFVM_FSNOTIFY` 被旧逻辑合并丢弃，导致列表可能停留在旧内容。探针现在在当前刷新周期结束时安排一次 follow-up refresh；同一刷新周期内多条通知仍合并为一次后续刷新。
+- 新增逐 `IShellView` 的取消入口，并验证先取消 view 1 的待处理 timer、再销毁 view 1；view 1 不再回调，view 2 的 HWND 仍存活且它自己的待处理刷新正常执行。释放剩余 view hold 后没有额外回调。
+- 两轮 Private Desktop watchdog 均退出码 0；`late-update.bin` 在第二条通知后可见、follow-up 回调数为 1、兄弟视图仍存活、释放后回调数为 0、前台 HWND 未变化。临时 HKCU CLSID/NameSpace、TEMP 夹具和 NativeProbe 进程均已清理。
+- 本次只更改隔离原型，产品 ExplorerBrowser 未迁移。该证据不覆盖产品宿主、真正 OLE 拖放、`DestroyViewWindow` 内部重入、跨线程并发 Shell 通知或可见 UI。后续架构门槛继续覆盖生命周期、焦点/导航和真实拖放，最终集中做 UI 验收。

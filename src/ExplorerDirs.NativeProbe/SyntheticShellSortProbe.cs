@@ -387,28 +387,55 @@ internal static class SyntheticShellSortProbe
                 return 1;
 
             var deferredRefreshCounter = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, "GetSyntheticDeferredRefreshCount"));
+            var scheduleSingleRefresh = Marshal.GetDelegateForFunctionPointer<ScheduleSingleRefresh>(NativeLibrary.GetExport(module, "ScheduleSyntheticSortRefreshForProbe"));
+            var notifySingleRefresh = Marshal.GetDelegateForFunctionPointer<NotifySingleRefresh>(NativeLibrary.GetExport(module, "NotifySyntheticSortRefreshForProbe"));
+            var coalescedRefreshStart = deferredRefreshCounter();
+            Check(scheduleSingleRefresh(view));
+            var firstRefreshDeadline = Environment.TickCount64 + 2500;
+            while (deferredRefreshCounter() == coalescedRefreshStart && Environment.TickCount64 < firstRefreshDeadline) Pump(10);
+            if (deferredRefreshCounter() != coalescedRefreshStart + 1)
+                throw new TimeoutException("The first per-view refresh callback did not run before the coalescing probe.");
+            var lateFilePath = Path.Combine(backingFolder, "late-update.bin");
+            File.WriteAllBytes(lateFilePath, [0x7A]);
+            var followupNotification = notifySingleRefresh(view);
+            if (followupNotification < 0) Marshal.ThrowExceptionForHR(followupNotification);
+            var followupRefreshDeadline = Environment.TickCount64 + 2500;
+            while (deferredRefreshCounter() < coalescedRefreshStart + 2 && Environment.TickCount64 < followupRefreshDeadline) Pump(20);
+            var lateUpdateNames = ReadNames(listView, module, expectedCount: -1);
+            var lateItemDeadline = Environment.TickCount64 + 2500;
+            while (!lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase) && Environment.TickCount64 < lateItemDeadline)
+            {
+                Pump(50);
+                lateUpdateNames = ReadNames(listView, module, expectedCount: -1);
+            }
+            Console.WriteLine($"synthetic-shell-size-sort: notification-during-selection-restore={followupNotification}; followup-refresh-callbacks={deferredRefreshCounter() - coalescedRefreshStart - 1}; late-item-visible={lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase)}");
+            if (deferredRefreshCounter() < coalescedRefreshStart + 2 ||
+                !lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase))
+                throw new IOException("A Shell change notification received during selection restoration did not trigger a follow-up view refresh.");
+            Pump(350);
+
             var refreshCountBeforeCancel = deferredRefreshCounter();
             var pendingRefreshes = Marshal.GetDelegateForFunctionPointer<SchedulePendingRefreshes>(NativeLibrary.GetExport(module, "ScheduleSyntheticSortRefreshesForProbe"))();
             if (pendingRefreshes != 2) throw new InvalidOperationException($"Expected to schedule one pending refresh per view, got {pendingRefreshes}.");
+            var cancelledRefresh = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module, "CancelSyntheticSortRefreshForProbe"))(view);
+            Check(cancelledRefresh);
             Check(At<DestroyViewWindow>(view, 10)(view));
             viewWindowCreated = false;
             Check(At<GetWindow>(view, 3)(view, out var destroyedViewWindow));
-            Check(At<DestroyViewWindow>(view2, 10)(view2));
-            viewWindowCreated2 = false;
-            Check(At<GetWindow>(view2, 3)(view2, out var destroyedViewWindow2));
-            var shellViewsDestroyed = !IsWindow(destroyedViewWindow) && !IsWindow(destroyedViewWindow2);
-            if (!shellViewsDestroyed) throw new InvalidOperationException("IShellView.DestroyViewWindow returned, but a view HWND remained alive.");
-            Console.WriteLine("synthetic-shell-size-sort: both-view-hwnds-destroyed-before-pending-refresh");
+            Check(At<GetWindow>(view2, 3)(view2, out var survivingViewWindow));
+            if (IsWindow(destroyedViewWindow) || !IsWindow(survivingViewWindow))
+                throw new InvalidOperationException("The cancelled first view was not destroyed, or the uncancelled sibling view was lost.");
+            Console.WriteLine("synthetic-shell-size-sort: first-view-refresh-cancelled-before-destroy; sibling-view-remains-live");
             Pump(400);
             var callbacksAfterViewDestroy = deferredRefreshCounter() - refreshCountBeforeCancel;
-            Console.WriteLine($"synthetic-shell-size-sort: callbacks-after-view-window-destroy={callbacksAfterViewDestroy}");
-            if (callbacksAfterViewDestroy != 2)
-                throw new InvalidOperationException($"Expected both queued view refresh callbacks to run after DestroyViewWindow, got {callbacksAfterViewDestroy}.");
+            Console.WriteLine($"synthetic-shell-size-sort: sibling-refresh-callbacks={callbacksAfterViewDestroy}; cancelled-view-callbacks=0");
+            if (callbacksAfterViewDestroy != 1)
+                throw new InvalidOperationException($"Expected only the uncancelled sibling view refresh to run, got {callbacksAfterViewDestroy} callbacks.");
             Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             Pump(400);
             if (deferredRefreshCounter() != refreshCountBeforeCancel + callbacksAfterViewDestroy)
                 throw new InvalidOperationException("A deferred refresh callback ran after the probe released both view holds.");
-            Console.WriteLine($"synthetic-shell-size-sort: pending-refresh-cancelled-on-release=2; callbacks-after-release=0; destroyed-view-refreshes={callbacksAfterViewDestroy}");
+            Console.WriteLine("synthetic-shell-size-sort: pending-refresh-cancelled-on-release=1; callbacks-after-release=0");
             return 0;
         }
         finally
@@ -692,6 +719,9 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SchedulePendingRefreshes();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CancelViewRefresh(nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ScheduleSingleRefresh(nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
