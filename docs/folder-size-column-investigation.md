@@ -348,6 +348,10 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 此结果证明的是 namespace 的正常 COM 绑定、DefView 数值比较接线和背景菜单对象的可查询性。合成文件夹仍故意不实现子项 `GetUIObjectOf`、重命名/绑定及数据对象，因此没有验证选中项目菜单、复制移动、拖放或真实文件操作；不能把它当作可用的资源管理器替代视图或产品迁移验收。
 
+#### 后续进展（2026-10-29，取代上述初始缺口状态）
+
+提交 `7e4e767` 为 synthetic folder 增加真实 filesystem backing folder，并在 `GetAttributesOf` 与 `GetUIObjectOf` 中将合成子项名称解析为 backing folder 的 child PIDL 后委托 Shell 对象请求。之后的隔离探针验证选中项 `IContextMenu` 与 `IDataObject`，取出 `CF_HDROP` 和 CIDA；多选 `IFileOperation.CopyItems`、取消后保留选择/焦点、`RenameItems`、`DeleteItems` 均已通过相应探针。`MoveItems` 的源/目标及两个视图更新断言通过，但该轮 watchdog 因前台切至 LockApp 返回失败，不记为整轮通过。以上仍是 Private Desktop 上的程序化 Shell 证据，不覆盖真实 OLE `DoDragDrop`、ExplorerBrowser 产品接线或可见用户交互。
+
 ### 2026-10-29：标准 Size 的属性存储覆写对照
 
 NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回明确的 `PKEY_Size` 覆盖值：`a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`；逐项直接读取均确认返回 `S_OK` 和目标值。随后设置标准 `PKEY_Size` 升序并刷新，DefView 行序仍是 `two.bin|a-ten.bin|z-ten.bin`，对应真实文件字节大小 `2|10|10`，而非覆盖值所要求的 `z-ten.bin|a-ten.bin|two.bin`。真实 Header 输入产生的两种方向行序也与真实文件大小对应。由此确认该视图的标准 Size 排序没有消费此子项 `IPropertyStoreFactory` 返回的 `PKEY_Size` 值；光装饰标准属性存储无法让递归目录大小参与 Explorer 原生大小排序。
