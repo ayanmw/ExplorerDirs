@@ -2169,7 +2169,10 @@ namespace
                 selection->Release();
             }
             char stateTrace[128]{};
-            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured selected=%zu focused=%d", _pendingSelected.size(), _pendingHasFocused ? 1 : 0);
+            HWND viewWindow = nullptr;
+            if (_shellView) _shellView->GetWindow(&viewWindow);
+            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured view=0x%p selected=%zu focused=%d",
+                viewWindow, _pendingSelected.size(), _pendingHasFocused ? 1 : 0);
             TraceSyntheticSortStage(stateTrace);
             folderView->Release();
             return S_OK;
@@ -2228,7 +2231,10 @@ namespace
                         }
                     }
                 }
-                StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-restored rows=%d selected=%d focus-identity=%d", itemCount, restoredSelectionCount, _pendingHasFocused ? 1 : 0);
+                HWND viewWindow = nullptr;
+                if (_shellView) _shellView->GetWindow(&viewWindow);
+                StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-restored view=0x%p rows=%d selected=%d focus-identity=%d",
+                    viewWindow, itemCount, restoredSelectionCount, _pendingHasFocused ? 1 : 0);
                 TraceSyntheticSortStage(stateTrace);
             }
             folderView->Release();

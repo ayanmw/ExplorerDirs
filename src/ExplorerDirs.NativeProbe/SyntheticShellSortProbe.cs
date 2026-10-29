@@ -158,7 +158,11 @@ public static class SyntheticShellSortProbe
             Check(At<SetViewModeAndIconSize>(folderView2, 35)(folderView2, 4, 16)); // FVM_DETAILS.
             Check(At<RefreshView>(view2, 8)(view2));
             Pump(300);
+            var listView = FindListView(view);
             listView2 = FindListView(view2);
+            Check(At<GetWindow>(view, 3)(view, out var shellViewWindow1));
+            Check(At<GetWindow>(view2, 3)(view2, out var shellViewWindow2));
+            Console.WriteLine($"synthetic-shell-size-sort: view-windows=0x{unchecked((nuint)shellViewWindow1):X}/0x{unchecked((nuint)shellViewWindow2):X}; list-windows=0x{unchecked((nuint)listView):X}/0x{unchecked((nuint)listView2):X}");
             var secondInitial = ReadNames(listView2, module);
             Console.WriteLine($"synthetic-shell-size-sort: second-view-initial=[{string.Join('|', secondInitial)}]");
             var contextMenuId = ContextMenuId;
@@ -312,7 +316,6 @@ public static class SyntheticShellSortProbe
                 finally { Marshal.Release(selectionDataObject); }
             }
             Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8} path={hdropPath}; CIDA-hr=0x{cidaHr:X8} path={cidaPath}; IFileOperation={copyResult}");
-            var listView = FindListView(view);
             VerifyMultiSelectionCancellation(folderView, view, module, backingFolder, Path.Combine(copyDestination, "MultiSelection"));
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
@@ -408,6 +411,8 @@ public static class SyntheticShellSortProbe
             var moveAutoUpdated2 = false;
             var moveSelectionRetained = false;
             var moveSelectionRetained2 = false;
+            uint moveState = 0;
+            uint moveState2 = 0;
             var moveDeadline = Environment.TickCount64 + 2500;
             string[] afterMove = [];
             string[] afterMove2 = [];
@@ -418,12 +423,12 @@ public static class SyntheticShellSortProbe
                 afterMove2 = ReadNames(listView2, module, expectedCount: -1);
                 moveAutoUpdated = !afterMove.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) && afterMove.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
                 moveAutoUpdated2 = !afterMove2.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) && afterMove2.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
-                var moveState = StateForName(listView, afterMove, "two.bin");
-                var moveState2 = StateForName(listView2, afterMove2, "two.bin");
+                moveState = StateForName(listView, afterMove, "two.bin");
+                moveState2 = StateForName(listView2, afterMove2, "two.bin");
                 moveSelectionRetained = (moveState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
                 moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             }
-            Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
+            Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; two-state-view1=0x{moveState:X}; two-state-view2=0x{moveState2:X}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
             if (!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2 ||
                 !File.Exists(Path.Combine(moveDestination, "z-ten.bin")) || File.Exists(Path.Combine(backingFolder, "z-ten.bin")))
                 throw new IOException("The Shell move did not update both views and preserve the unaffected item focus.");
