@@ -16,6 +16,7 @@ internal static class ShellViewDropTargetProbe
     private static readonly Guid FormatEnumeratorId = new("00000103-0000-0000-C000-000000000046");
     private const uint DropEffectCopy = 1;
     private const uint DropEffectMove = 2;
+    private const uint DropEffectCopyOrMove = DropEffectCopy | DropEffectMove;
     private const uint DropEffectMask = 7;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
     private const int DragDropSDrop = 0x00040100;
@@ -212,7 +213,7 @@ internal static class ShellViewDropTargetProbe
                 var requestedOperation = interactiveOleEffect == DropEffectMove ? "Move" : "Copy";
                 var keyInstruction = interactiveOleEffect == DropEffectMove
                     ? "Hold Shift while dragging and release over the target pane"
-                    : "Drag without modifier keys and release over the target pane";
+                    : "Hold Ctrl while dragging and release over the target pane";
                 Console.WriteLine($"Move the pointer over the selected source file without clicking. Press Enter here, then press and drag the left mouse button. {keyInstruction}. Escape cancels. Requested effect: {requestedOperation}.");
                 if (Console.ReadLine() is null)
                     throw new InvalidOperationException("The interactive OLE drop probe did not receive its explicit start confirmation.");
@@ -223,11 +224,12 @@ internal static class ShellViewDropTargetProbe
                 uint performedEffect;
                 try
                 {
-                    dragResult = ShellViewDragSource.RunOleLoop(dataObjectRcw, interactiveOleEffect, 0x0001, out performedEffect);
+                    dragResult = ShellViewDragSource.RunOleLoop(dataObjectRcw, DropEffectCopyOrMove, 0x0001, out performedEffect);
                 }
                 finally { _ = Marshal.ReleaseComObject(dataObjectRcw); }
 
                 System.Windows.Forms.Application.DoEvents();
+                var hasLogicalEffect = TryReadLogicalPerformedDropEffect(selectedDataObject, out var logicalEffect);
                 var targetHasExpectedContents = File.Exists(selectedTargetPath) &&
                     File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture";
                 var sourceHasExpectedContents = File.Exists(selectedSourcePath) &&
@@ -235,7 +237,8 @@ internal static class ShellViewDropTargetProbe
                 var sourceStateMatchesEffect = interactiveOleEffect == DropEffectCopy
                     ? sourceHasExpectedContents
                     : !File.Exists(selectedSourcePath);
-                Console.WriteLine($"shell-view-ole-drop-transfer: requested-effect=0x{interactiveOleEffect:X}; result=0x{dragResult:X8}; performed-effect=0x{performedEffect:X}; target-content-valid={targetHasExpectedContents}; source-state-valid={sourceStateMatchesEffect}; source-exists={File.Exists(selectedSourcePath)}; interactive-input=True");
+                var logicalEffectMatches = !hasLogicalEffect || logicalEffect == interactiveOleEffect;
+                Console.WriteLine($"shell-view-ole-drop-transfer: requested-effect=0x{interactiveOleEffect:X}; result=0x{dragResult:X8}; DoDragDrop-effect=0x{performedEffect:X}; logical-effect-available={hasLogicalEffect}; logical-effect=0x{logicalEffect:X}; logical-effect-matches={logicalEffectMatches}; target-content-valid={targetHasExpectedContents}; source-state-valid={sourceStateMatchesEffect}; source-exists={File.Exists(selectedSourcePath)}; interactive-input=True");
 
                 if (dragResult == DragDropSCancel)
                 {
@@ -243,8 +246,8 @@ internal static class ShellViewDropTargetProbe
                     return 2;
                 }
                 if (dragResult < 0) Marshal.ThrowExceptionForHR(dragResult);
-                return dragResult == DragDropSDrop && performedEffect == interactiveOleEffect &&
-                    targetHasExpectedContents && sourceStateMatchesEffect ? 0 : 1;
+                return dragResult == DragDropSDrop && logicalEffectMatches && targetHasExpectedContents &&
+                    sourceStateMatchesEffect ? 0 : 1;
             }
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point,
@@ -609,6 +612,33 @@ internal static class ShellViewDropTargetProbe
         Console.WriteLine($"shell-view-drop-target-optional-format: source={label}; format={formatName}; query=0x{queryHr:X8}");
         // IDataObject::QueryGetData communicates support with S_OK; S_FALSE must not trigger GetData.
         if (queryHr == 0) LogGlobalPayload(label, dataObject, formatName);
+    }
+
+    private static bool TryReadLogicalPerformedDropEffect(nint dataObject, out uint effect)
+    {
+        effect = 0;
+        var formatId = RegisterClipboardFormatW("Logical Performed DropEffect");
+        if (formatId == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        var format = new FormatEtc { Format = checked((ushort)formatId), Aspect = 1, Index = -1, Medium = 1 };
+        if (At<QueryGetData>(dataObject, 5)(dataObject, ref format) != 0) return false;
+
+        var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
+        if (getDataHr < 0) return false;
+
+        nint locked = 0;
+        try
+        {
+            if (medium.Tymed != 1 || GlobalSize(medium.Handle) < sizeof(uint)) return false;
+            locked = GlobalLock(medium.Handle);
+            if (locked == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            effect = unchecked((uint)Marshal.ReadInt32(locked));
+            return true;
+        }
+        finally
+        {
+            if (locked != 0) _ = GlobalUnlock(medium.Handle);
+            ReleaseStgMedium(ref medium);
+        }
     }
 
     private static int ReadCidaOffset(nint cida, long size, int index)
