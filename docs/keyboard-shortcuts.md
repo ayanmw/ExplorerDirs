@@ -23,7 +23,7 @@
 | Ctrl+A、Ctrl+C/Ctrl+Insert、Ctrl+X、Ctrl+V/Shift+Insert、Ctrl+Z、Ctrl+Y | 全选、复制、剪切、粘贴、撤销、重做 | Shell 先处理；若未接手，应用使用对应原生 Shell 视图命令兜底。Ctrl+Insert 与 Shift+Insert 是微软清单中的复制/粘贴别名，映射 smoke 通过；真实文件操作与 Undo/Redo 序列仍待 GUI 验收 |
 | Ctrl+Shift+A | 在文件视图中反向选择当前 Shell 视图的文件项；文本输入框聚焦时保留给输入控件 | 已接入 Q-Dir 对应操作；选择算法及身份保持有隐藏回归，物理按键待 GUI 验收 |
 | Enter、F2、Ctrl+D、Delete、Shift+Delete、Alt+Enter、Shift+F10、Shift+右键 | 打开、重命名、删除到回收站、永久删除、属性、打开原生上下文菜单；Shift+右键在 Windows 11 请求“显示更多选项”菜单 | 方向键在原生重命名 Edit 聚焦时直接送入编辑框；SettingsSmoke 覆盖四方向 KeyDown 与 KeyUp 边界。四窗格隐藏生产宿主验证无修饰方向键保持焦点，Shift+←/→ 在编辑框中选择文字并恢复探针线程键盘状态。其它按键与鼠标消息由原生 Shell 视图处理；实际文件操作、菜单类型、目标和物理键盘焦点仍待 GUI 验收 |
-| Ctrl+Shift+N | 在当前窗格用 Shell 背景菜单命令新建文件夹 | 已接入；提供“文件”菜单和工具栏入口以避开其他应用的全局热键；新文件夹进入重命名的时序待 GUI 复测 |
+| Ctrl+Shift+N、Shift+F7 | 在当前窗格用 Shell 背景菜单命令新建文件夹 | 两种组合复用同一 Shell 命令；Ctrl+Shift+N 对齐 Explorer，Shift+F7 对齐 Q-Dir；提供“文件”菜单和工具栏入口作为热键冲突时的替代方式；新文件夹进入重命名的时序待 GUI 复测 |
 | 方向键、Home、End | 文件项选择与滚动 | 由原生 Shell 视图处理；逐项待 GUI 验收 |
 | Ctrl+鼠标滚轮 | 按八种查看方式循环切换 | 本项目自定义行为；隐藏生产宿主的合成滚轮消息完成八种循环并保留选区，物理输入路由、可见效果与焦点待 GUI 验收 |
 | Ctrl+Shift+1～8 | 按 Explorer 顺序切换视图：超大图标、大图标、中等图标、小图标、列表、详细信息、平铺、内容 | 已接入；快捷键解析把 1～8 映射到八种 `ViewStyle`，与 Microsoft 示例中的 `2=大图标`、`6=详细信息` 一致。Microsoft 清单列到 1～9；第 9 键不由应用拦截，文件视图聚焦时交给原生 Shell，实际第 9 键行为与视图读回仍待 GUI 验收 |
@@ -49,7 +49,7 @@
 
 地址编辑框内按 Esc 恢复面包屑和文件视图焦点；Tab / Shift+Tab 仍将地址编辑视为一个焦点停靠点。点击面包屑路径段不增加键盘停靠点。
 
-其他程序注册的系统级热键可能先于本程序收到按键；前台应用无法可靠阻止其触发。若 Ctrl+Shift+N 等组合键冲突，请使用本程序的菜单或工具栏入口。隔离 GUI 布局及搜索冒烟脚本不发送键盘或鼠标输入，仍会打开测试窗口，因此只在明确空闲的桌面时段手动启用。文件操作快捷键需人工验收。
+其他程序注册的系统级热键可能先于本程序收到按键；前台应用无法可靠阻止其触发。若 Ctrl+Shift+N 或 Shift+F7 等组合键冲突，请使用本程序的菜单或工具栏入口。隔离 GUI 布局及搜索冒烟脚本不发送键盘或鼠标输入，仍会打开测试窗口，因此只在明确空闲的桌面时段手动启用。文件操作快捷键需人工验收。
 
 Q-Dir 官方快捷键清单还列出两项与 Explorer 相冲突的定义：Q-Dir 使用 `Ctrl+N` 新建文件夹、`Shift+F6` 切换查看方式；本项目按用户已选定的多窗口会话方案及 Explorer 焦点顺序，分别保留 `Ctrl+N` 新窗口、`Ctrl+Shift+N` 新建文件夹和 `Shift+F6` 反向遍历主要区域。Q-Dir 的视图切换由本项目 `Ctrl+鼠标滚轮` 与 `Ctrl+Shift+1…8` 提供。依据：[Q-Dir 官方英文快捷键/菜单清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)、[Microsoft Windows / File Explorer 快捷键清单](https://support.microsoft.com/en-us/accessibility/windows/keyboard-shortcuts-in-windows)。
 

@@ -42,6 +42,7 @@ internal static class KeyboardShortcuts
         (0x0d, 4) => ExplorerShortcut.OpenSelectionInNewTab, // Q-Dir: open selected folder in a new tab.
         (0x6b, 2) => ExplorerShortcut.AutoFitColumns, // Ctrl+NumPad+: let the native Details view size columns.
         (0x4e, 6) => ExplorerShortcut.NewFolder,     // Ctrl+Shift+N
+        (0x76, 4) => ExplorerShortcut.NewFolder,     // Q-Dir: Shift+F7.
         (0x56, 6) => ExplorerShortcut.PasteSpecial,  // Q-Dir: save clipboard content as a file.
         (0x41, 6) => ExplorerShortcut.InvertSelection, // Q-Dir: Ctrl+Shift+A.
         (0x45, 6) => ExplorerShortcut.ExpandTree,    // Ctrl+Shift+E

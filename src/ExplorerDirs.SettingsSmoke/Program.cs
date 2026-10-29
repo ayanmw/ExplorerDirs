@@ -225,6 +225,13 @@ if (args.Length == 1 && args[0] == "--classic-address-bar-path-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--qdir-new-folder-shortcut-smoke")
+{
+    QDirNewFolderShortcutSmoke.Run();
+    Console.WriteLine("Q-Dir new folder shortcut smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();
@@ -576,6 +583,8 @@ try
     ClassicAddressBarPathSmoke.Run();
     Console.WriteLine("Classic address bar path smoke: PASS");
     AddressPathMenuSmoke.Run();
+    QDirNewFolderShortcutSmoke.Run();
+    Console.WriteLine("Q-Dir new folder shortcut smoke: PASS");
     DiskSpaceSmoke.Run(root).GetAwaiter().GetResult();
     ShellFileCommandsSmoke.Run();
     ShellCommandRefreshGateSmoke.Run();
