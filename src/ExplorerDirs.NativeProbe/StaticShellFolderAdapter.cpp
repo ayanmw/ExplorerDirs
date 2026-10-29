@@ -1589,7 +1589,8 @@ namespace
     {
     public:
         explicit SyntheticChildEnumerator(std::vector<SyntheticChild> children, ULONG index = 0)
-            : _children(std::move(children)), _index(index) {}
+            : _children(std::move(children)), _index(index) { InterlockedIncrement(&g_syntheticLiveObjects); }
+        ~SyntheticChildEnumerator() { InterlockedDecrement(&g_syntheticLiveObjects); }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -2534,6 +2535,8 @@ namespace
     class SyntheticFolderClassFactory final : public IClassFactory
     {
     public:
+        SyntheticFolderClassFactory() { InterlockedIncrement(&g_syntheticLiveObjects); }
+        ~SyntheticFolderClassFactory() { InterlockedDecrement(&g_syntheticLiveObjects); }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -2598,6 +2601,28 @@ STDAPI DllCanUnloadNow()
 {
     return InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) == 0 &&
         InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) == 0 ? S_OK : S_FALSE;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticDllUnloadContractSmoke()
+{
+    const auto before = DllCanUnloadNow();
+    auto* enumerator = new (std::nothrow) SyntheticChildEnumerator({});
+    if (!enumerator) return E_OUTOFMEMORY;
+    const auto whileEnumeratorAlive = DllCanUnloadNow();
+    enumerator->Release();
+    const auto afterEnumerator = DllCanUnloadNow();
+    auto* factory = new (std::nothrow) SyntheticFolderClassFactory();
+    if (!factory) return E_OUTOFMEMORY;
+    const auto whileFactoryAlive = DllCanUnloadNow();
+    factory->Release();
+    const auto afterFactory = DllCanUnloadNow();
+    char message[192]{};
+    sprintf_s(message, "synthetic-dll-unload-contract: before=0x%08X; enumerator=0x%08X->0x%08X; factory=0x%08X->0x%08X",
+        static_cast<unsigned>(before), static_cast<unsigned>(whileEnumeratorAlive), static_cast<unsigned>(afterEnumerator),
+        static_cast<unsigned>(whileFactoryAlive), static_cast<unsigned>(afterFactory));
+    OutputDebugStringA(message);
+    return before == S_OK && whileEnumeratorAlive == S_FALSE && afterEnumerator == S_OK &&
+        whileFactoryAlive == S_FALSE && afterFactory == S_OK ? S_OK : E_FAIL;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCIDLIST_ABSOLUTE rootPidl, IShellFolder2** folder, IShellView** view)

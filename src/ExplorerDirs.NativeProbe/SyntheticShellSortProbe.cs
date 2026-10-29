@@ -59,6 +59,20 @@ public static class SyntheticShellSortProbe
     internal static int RunRecursiveDirectorySizeSortWithWpfHost() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, useWpfParent: true);
 
+    internal static int RunNativeLibraryUnloadContractSmoke()
+    {
+        var module = NativeLibrary.Load(FindAdapterLibrary());
+        try
+        {
+            var smoke = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                NativeLibrary.GetExport(module, "RunSyntheticDllUnloadContractSmoke"));
+            var result = smoke();
+            Console.WriteLine($"synthetic-dll-unload-contract: result=0x{result:X8}; passed={result >= 0}");
+            return result >= 0 ? 0 : 1;
+        }
+        finally { NativeLibrary.Free(module); }
+    }
+
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false)
     {
@@ -1388,6 +1402,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProcedure(
         nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CanUnloadNativeLibrary();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeLibraryUnloadContractSmoke();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
