@@ -1,10 +1,12 @@
 # 路线图
 
-## 当前执行入口（2026-10-29 后台复核）
+## 当前执行入口（2026-10-30 后台复核）
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-30：完成三种独立干净视图的 Shell 更新 A/B。单项通知和单项+父目录通知都枚举 2 行、比较 1 次，但刷新后 `IColumnManager` 列集不含大小列，`GetDetailsOf`/大小属性读取为 0；排序更新且选区/焦点保留。整视图刷新枚举 4 行、比较 2 次，同样丢大小列，且 2.5 秒后选区/焦点未恢复。各 Private Desktop 运行前台句柄与输入 tick 未变，watchdog 退出码 0，临时注册与夹具清理完成。结果仅适用于隔离的自有 `IShellView`/DefView 合成目录，不代表 ExplorerBrowser 产品表现。NativeProbe Release 和原生 `/W4 /WX` 已构建；下一步在更新后恢复列布局，再测 Shell 是否重取派生大小属性。产品与 release 未改。
+2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。
+
+近期执行顺序：先完成当前源代码批次的静态复核与提交；随后对已实现但尚待集中可见验收的“使用系统 Explorer 浏览”和用户级文件夹入口准备一份短验收清单；继续开发从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
@@ -4620,4 +4622,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 自定义列 key 探针发现：未注册 `PROPERTYKEY` 经 `GetDetailsOf` 可在 DefView 中同时显示 10 B 目录和 4 B 文件；`SetSortColumns` 因未知 schema 返回 `TYPE_E_ELEMENTNOTFOUND`，但原生列标题点击仍会排序并调用 provider `CompareIDs`。这是 NativeProbe 级可行性证据，完整 Private Desktop 运行因前台/输入守卫变化及清理超时不记为通过。先源码定位清理等待与守卫变化，再决定后续独立会话复测；本轮不动产品及 release。
 - 旧 watchdog 仅记录通用 `probe-entered`，Wait-chain 只能显示 COM 等待，无法定位最后执行的清理调用。NativeProbe 现为 `ReleaseSyntheticSortViewHold`、每个 view/COM release、`DestroyViewWindow`、host dispose、DLL unload、注册与 fixture 清理设置独立阶段标记；后台 Release build 和树级 smoke 通过。该诊断代码未由新的 Private Desktop view 运行验证。
 - WPF 根宿主的单项加父目录通知同样在约 1 秒内只枚举 2 行一次，保留焦点，但没有大小列 provider 重读；整视图刷新在约 2.6 秒内枚举 4 行两次、丢失焦点/选区，也没有重读。两者 watchdog 均 exit 0 且桌面守卫通过。下一步验证对 Shell ListView 单行发送 `LVM_UPDATE`/重绘是否能触发其 provider 重新读取，而不重建整视图；只作隔离可行性检查，不作为产品集成决定。详见[逐行大小调查](folder-size-column-investigation.md)。
-- 单行 `LVM_UPDATE` 返回成功但不触发 provider 读取；`LVM_REDRAWITEMS + UpdateWindow` 也不重读列值，另触发一次两行枚举/比较，焦点仍保留。WPF 隔离探针完整通过且已清理。直接操作 DefView 内部 ListView 不是当前的更新方案；下一步回到 Shell folder/view 通知合同，检查能否在 provider 侧改变列映射/缓存标识以触发 DefView 行属性失效。产品与 release 未改。
+- 单行 `LVM_UPDATE` 返回成功但不触发 provider 读取；`LVM_REDRAWITEMS + UpdateWindow` 也不重读列值，另触发一次两行枚举/比较，焦点仍保留。WPF 隔离探针完整通过且已清理。直接操作 DefView 内部 ListView 不是当前的更新方案。
+
+2026-10-30 WPF 根宿主补测“删除后重建”通知：对同一个绝对子 PIDL 依次发送 `SHCNE_DELETE` 与 `SHCNE_CREATE`，约 1.36 秒内只发生一次两行枚举和一次大小比较，焦点/选区保持，但通知后没有 `GetDetailsOf`/`GetDetailsEx` 调用，大小文本仍未恢复。watchdog exit code 0，前台 HWND/输入 tick 不变，临时 CLSID/NameSpace 注册与夹具已清理；日志 `src/.state/native-probe-watchdog/20261030-034248-535f69ba.stdout.log`。该策略未解决列值刷新，不能作为后续路径。
+
+API 边界复核：本机 Windows SDK `IFolderView2` 提供整视图 redraw 开关，但没有受支持的逐行属性值失效/重取入口；`IShellFolderView::RefreshObject` 已由 Microsoft 标记为 Windows 7 起不再可用的 legacy 接口。结合上述通知与 ListView 消息矩阵，当前 DefView 路径未找到受支持的逐项派生列更新机制。下一步不继续尝试内部 ListView 消息或重复通知；若需要实时派生列，应另行评审自有视图/数据模型及维护成本，并先通过 Shell 操作、导航、焦点、拖放、通知等兼容门槛。产品仍使用 ExplorerBrowser。

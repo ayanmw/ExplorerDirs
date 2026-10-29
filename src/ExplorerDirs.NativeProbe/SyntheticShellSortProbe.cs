@@ -21,6 +21,8 @@ public static class SyntheticShellSortProbe
     private const int LvmGetItemTextW = LvmFirst + 115;
     private const uint ShcneUpdatedir = 0x00001000;
     private const uint ShcneUpdateitem = 0x00002000;
+    private const uint ShcneCreate = 0x00000002;
+    private const uint ShcneDelete = 0x00000004;
     private const uint LvisFocused = 0x0001;
     private const uint LvisSelected = 0x0002;
     private const uint LvifText = 0x0001;
@@ -81,7 +83,7 @@ public static class SyntheticShellSortProbe
         bool exerciseUpdateNotifications = false)
     {
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "all";
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("all" or "single-item" or "item-plus-parent" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("all" or "single-item" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -760,6 +762,12 @@ public static class SyntheticShellSortProbe
                 {
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
                     SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
+                }, module, folderView, view, restoreColumns, ref listView, backingFolder);
+            if (strategyFilter == "delete-create")
+                RunSizeUpdateStrategy("delete-create", 10, 1, () =>
+                {
+                    SHChangeNotify(ShcneDelete, 0, absoluteChildPidl, 0);
+                    SHChangeNotify(ShcneCreate, 0, absoluteChildPidl, 0);
                 }, module, folderView, view, restoreColumns, ref listView, backingFolder);
             if (strategyFilter is "all" or "full-view-refresh")
                 RunSizeUpdateStrategy("full-view-refresh", 10, 1, () =>
