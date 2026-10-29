@@ -5,7 +5,8 @@ $id = [Guid]::NewGuid().ToString('N')
 $registryBases = @(
     "Software\ExplorerDirs.Tests\FolderVerb-$id-Owned",
     "Software\ExplorerDirs.Tests\FolderVerb-$id-Conflict",
-    "Software\ExplorerDirs.Tests\FolderVerb-$id-Modified"
+    "Software\ExplorerDirs.Tests\FolderVerb-$id-Modified",
+    "Software\ExplorerDirs.Tests\FolderVerb-$id-WriteFailure"
 )
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "ExplorerDirs-FolderVerb-$id"
 $executable = Join-Path $tempRoot 'release package\ExplorerDirs.App.exe'
@@ -97,6 +98,42 @@ try {
         "$modifiedBase\Directory\shell\ExplorerDirs.Open\command", $false)
     try { Assert ($commandKey.GetValue('') -eq $changedCommand) 'uninstall must preserve the external command verbatim' }
     finally { $commandKey.Dispose() }
+
+    $rollbackBase = $registryBases[3]
+    $partialPath = "$rollbackBase\Directory\shell\ExplorerDirs.Open"
+    $partialKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($partialPath, $true)
+    try {
+        $partialKey.SetValue('ExplorerDirsOwner', 'ExplorerDirs.FolderVerb.v1', [Microsoft.Win32.RegistryValueKind]::String)
+        $partialKey.SetValue('', '在 Explorer Dirs 中打开', [Microsoft.Win32.RegistryValueKind]::String)
+        $partialKey.SetValue('ExplorerDirsTarget', $executable, [Microsoft.Win32.RegistryValueKind]::String)
+        $partialKey.SetValue('Icon', $executable, [Microsoft.Win32.RegistryValueKind]::String)
+        $emptyCommand = $partialKey.CreateSubKey('command', $true)
+        $emptyCommand.Dispose()
+    }
+    finally { $partialKey.Dispose() }
+
+    $module = Get-Module FolderVerb
+    $removedPartial = & $module {
+        param($path, $target, $expectedCommand)
+        Remove-VerbOnRollback $path $target $expectedCommand
+    } $partialPath $executable ('"' + $executable + '" "%1"')
+    Assert $removedPartial 'rollback must remove a partial key containing only values written by this install'
+    Assert-State $rollbackBase @('missing', 'missing')
+
+    $editedPartial = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($partialPath, $true)
+    try {
+        $editedPartial.SetValue('ExplorerDirsOwner', 'ExplorerDirs.FolderVerb.v1', [Microsoft.Win32.RegistryValueKind]::String)
+        $editedPartial.SetValue('', '在 Explorer Dirs 中打开', [Microsoft.Win32.RegistryValueKind]::String)
+        $editedPartial.SetValue('ExplorerDirsTarget', $executable, [Microsoft.Win32.RegistryValueKind]::String)
+        $editedPartial.SetValue('Icon', 'C:\External\FolderHandler.exe', [Microsoft.Win32.RegistryValueKind]::String)
+    }
+    finally { $editedPartial.Dispose() }
+    $preservedPartial = & $module {
+        param($path, $target, $expectedCommand)
+        Remove-VerbOnRollback $path $target $expectedCommand
+    } $partialPath $executable ('"' + $executable + '" "%1"')
+    Assert (-not $preservedPartial) 'rollback must preserve an externally edited partial key'
+    Assert-State $rollbackBase @('conflict', 'missing')
 
     Write-Output 'Folder verb isolated registry smoke: PASS'
 }
