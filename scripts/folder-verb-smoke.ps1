@@ -6,7 +6,8 @@ $registryBases = @(
     "Software\ExplorerDirs.Tests\FolderVerb-$id-Owned",
     "Software\ExplorerDirs.Tests\FolderVerb-$id-Conflict",
     "Software\ExplorerDirs.Tests\FolderVerb-$id-Modified",
-    "Software\ExplorerDirs.Tests\FolderVerb-$id-WriteFailure"
+    "Software\ExplorerDirs.Tests\FolderVerb-$id-WriteFailure",
+    "Software\ExplorerDirs.Tests\FolderVerb-$id-InjectedFailure"
 )
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "ExplorerDirs-FolderVerb-$id"
 $executable = Join-Path $tempRoot 'release package\ExplorerDirs.App.exe'
@@ -143,6 +144,36 @@ try {
     } $partialPath $executable ('"' + $executable + '" "%1"')
     Assert (-not $preservedPartial) 'rollback must preserve an externally edited partial key'
     Assert-State $rollbackBase @('conflict', 'missing')
+
+    # Exercise Enable-ExplorerDirsFolderVerb's actual catch/rollback path by failing
+    # during the second registration after the first one was fully installed.
+    $writeFailureBase = $registryBases[4]
+    $writeFailureModule = Get-Module FolderVerb
+    $writeFailure = & $writeFailureModule {
+        param($target, $base)
+        $originalSetter = (Get-Command Set-VerbRegistryValue).ScriptBlock
+        $script:verbWriteCount = 0
+        function Set-VerbRegistryValue {
+            param($Key, [string]$Name, [string]$Value)
+            $script:verbWriteCount++
+            if ($script:verbWriteCount -eq 7) { throw 'Injected registry write failure.' }
+            $Key.SetValue($Name, $Value, [Microsoft.Win32.RegistryValueKind]::String)
+        }
+        try {
+            Enable-ExplorerDirsFolderVerb -Executable $target -RegistryBase $base | Out-Null
+            $false
+        }
+        catch {
+            if ($_.Exception.Message -ne 'Injected registry write failure.') { throw }
+            $true
+        }
+        finally {
+            Set-Item Function:Set-VerbRegistryValue -Value $originalSetter
+            Remove-Variable verbWriteCount -Scope Script -ErrorAction SilentlyContinue
+        }
+    } $executable $writeFailureBase
+    Assert $writeFailure 'the install must surface a mid-write registry failure'
+    Assert-State $writeFailureBase @('missing', 'missing')
 
     Write-Output 'Folder verb isolated registry smoke: PASS'
 }

@@ -17,6 +17,10 @@ function Get-VerbCommand([string]$executable) {
     '"' + $executable + '" "%1"'
 }
 
+function Set-VerbRegistryValue([Microsoft.Win32.RegistryKey]$key, [string]$name, [string]$value) {
+    $key.SetValue($name, $value, [Microsoft.Win32.RegistryValueKind]::String)
+}
+
 function Test-ExplorerDirsRoutingCapability {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
@@ -147,12 +151,12 @@ function Enable-ExplorerDirsFolderVerb {
             $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($path, $true)
             $created.Add($path)
             try {
-                $key.SetValue('ExplorerDirsOwner', $owner, [Microsoft.Win32.RegistryValueKind]::String)
-                $key.SetValue('', $label, [Microsoft.Win32.RegistryValueKind]::String)
-                $key.SetValue('ExplorerDirsTarget', $fullExecutable, [Microsoft.Win32.RegistryValueKind]::String)
-                $key.SetValue('Icon', $fullExecutable, [Microsoft.Win32.RegistryValueKind]::String)
+                Set-VerbRegistryValue $key 'ExplorerDirsOwner' $owner
+                Set-VerbRegistryValue $key '' $label
+                Set-VerbRegistryValue $key 'ExplorerDirsTarget' $fullExecutable
+                Set-VerbRegistryValue $key 'Icon' $fullExecutable
                 $commandKey = $key.CreateSubKey('command', $true)
-                try { $commandKey.SetValue('', $command, [Microsoft.Win32.RegistryValueKind]::String) }
+                try { Set-VerbRegistryValue $commandKey '' $command }
                 finally { $commandKey.Dispose() }
             }
             finally { $key.Dispose() }
