@@ -108,7 +108,7 @@ temp.74 的完整 Release `SettingsSmoke`、App Release 构建通过，包内版
 
 ## 预览发布版
 
-最新预览包为 [temp.78](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.78/app/ExplorerDirs.App.exe)，使用独立 profile。它已包含标题栏显示模式、列值筛选修复与性能改进、筛选期间的选区保护，以及 `.qdr` 树宽度提示修正。可见交互仍待集中验收，包括列头筛选入口、文件操作焦点、Shell 虚拟位置、跨窗格拖放及 Q-Dir 实际互操作。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
+最新预览包为 [temp.79](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.79/app/ExplorerDirs.App.exe)，使用独立 profile。相较 temp.78，增加保留标签的隐藏标签栏、支持虚拟 Shell 文件夹的新标签打开，以及“工具 → 文件夹入口…”管理窗口；重启 Explorer 的 PID 身份校验也已加固。全量后台 Release SettingsSmoke 与发布隔离 smoke 通过，未启动应用、未启用文件夹入口。可见交互仍待集中验收，包括列头筛选、Explorer 菜单、Shell 虚拟位置、中键打开、入口菜单及 Q-Dir 实际互操作。持续功能差距见[Q-Dir / Explorer 核心操作对照](docs/shell-parity.md)。需要 .NET 10 Windows Desktop Runtime。
 
 ## 开发调试
 
@@ -140,7 +140,7 @@ pwsh -NoProfile -File .\src\ExplorerDirs.GuiSmoke\run.ps1 -PrepareOnly
 
 已有 Explorer Dirs 进程运行时，可先用 `Get-Process ExplorerDirs.App | Select-Object Id, StartTime` 选定实例，再执行 `powershell.exe -NoProfile -File .\scripts\perf-sample.ps1 -ProcessId <PID> -Samples 12 -IntervalMilliseconds 5000 -AsJson`。脚本只读采样工作集、私有内存、CPU、句柄与线程，不启动或控制 GUI，也不输出程序路径；可执行文件以 SHA-256 和“发布版/源码测试版/其他副本”标识。当前只有控制台进程的采样回归，尚无真实 Explorer Dirs 长时间运行数据。源码已减少周期保存时对隐藏标签的 Shell 查询：切换标签或布局前捕获其视图状态，隐藏后使用缓存；此优化尚待真实窗口验证。[Q-Dir 短时只读对标快照](docs/q-dir-performance-snapshot-2026-10-16.md)不能替代本程序测量。
 
-`scripts/folder-verb.ps1` 提供可逆的**可选**文件夹/磁盘右键入口。源码现已在“工具 → 文件夹入口…”提供应用内状态查看、发布版预览和显式启用/禁用；界面只在发布包中开放，调试目录不会注册入口。默认保持未启用；启用前要求能力清单、精确 SHA-256 和用户确认。启用仍待可见 GUI 验收；此入口不会更改文件夹默认打开动作或 Win+E。当前 temp.78 预览包尚未包含该界面，真实系统关联没有被修改。
+`scripts/folder-verb.ps1` 提供可逆的**可选**文件夹/磁盘右键入口。发布版在“工具 → 文件夹入口…”提供应用内状态查看、发布版预览和显式启用/禁用；界面只在发布包中开放，调试目录不会注册入口。默认保持未启用；启用前要求能力清单、精确 SHA-256 和用户确认。temp.79 包含该界面，真实菜单显示和启动仍待可见验收；此入口不会更改文件夹默认打开动作或 Win+E。系统关联未被修改。
 
 源码中的同配置窗口文件夹请求使用命名管道转交；对连接后未发完整请求的客户端设置读取超时，避免阻塞下一次请求。路由器关闭时也会取消尚在等待窗口回调的请求并释放配置锁。客户端对异常回执保留“结果不确定”状态，不把它当作明确拒绝；运行中的窗口若长期不就绪仍可能令请求排队。空头、不完整负载、异常回执及关闭期间悬挂回调的控制台回归通过，真实窗口转交仍待验收，此改动已包含在 temp16。
 
