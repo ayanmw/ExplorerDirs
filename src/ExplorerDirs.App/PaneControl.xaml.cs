@@ -517,6 +517,8 @@ public partial class PaneControl : UserControl
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
+    private string AddressTextPath => ClassicAddressBarPath.Format(CurrentPath,
+        Current?.Browser.IsFileSystemLocation == true);
     internal bool IsCurrentFileSystemLocation => Current?.Browser.IsFileSystemLocation == true;
     internal bool TreeIsVisible => TreeVisible;
     internal double TreeWidth
@@ -1350,7 +1352,7 @@ public partial class PaneControl : UserControl
     {
         if (!_addressEditing)
         {
-            Address.Text = CurrentPath;
+            Address.Text = AddressTextPath;
             _addressEditing = true;
             BreadcrumbScroll.Visibility = Visibility.Collapsed;
             Address.Visibility = Visibility.Visible;
@@ -2570,7 +2572,7 @@ public partial class PaneControl : UserControl
     private void ShowBreadcrumb()
     {
         _addressEditing = false;
-        Address.Text = CurrentPath;
+        Address.Text = AddressTextPath;
         Address.IsReadOnly = true;
         Address.Visibility = _classicAddressBar ? Visibility.Visible : Visibility.Collapsed;
         BreadcrumbScroll.Visibility = _classicAddressBar ? Visibility.Collapsed : Visibility.Visible;
@@ -2639,7 +2641,7 @@ public partial class PaneControl : UserControl
                 return;
             }
             _addressNavigationPending = false;
-            Address.Text = CurrentPath;
+            Address.Text = AddressTextPath;
             ShowBreadcrumb();
             Activated?.Invoke(this, EventArgs.Empty);
             RestoreFileFocusWhenActive();
@@ -2662,14 +2664,14 @@ public partial class PaneControl : UserControl
     private void Address_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
         if (!_addressEditing || ReferenceEquals(e.NewFocus, GoButton)) return;
-        Address.Text = CurrentPath;
+        Address.Text = AddressTextPath;
         ShowBreadcrumb();
     }
 
     private void GoButton_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
         if (!_addressEditing || ReferenceEquals(e.NewFocus, Address)) return;
-        Address.Text = CurrentPath;
+        Address.Text = AddressTextPath;
         ShowBreadcrumb();
     }
     private void NewTab_Click(object sender, RoutedEventArgs e) => NewTab();

@@ -218,6 +218,13 @@ if (args.Length == 1 && args[0] == "--address-path-history-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--classic-address-bar-path-smoke")
+{
+    ClassicAddressBarPathSmoke.Run();
+    Console.WriteLine("Classic address bar path smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();
@@ -566,6 +573,8 @@ try
     ShellViewReadinessSmoke.Run();
     ShellHistorySmoke.Run();
     AddressPathHistorySmoke.Run();
+    ClassicAddressBarPathSmoke.Run();
+    Console.WriteLine("Classic address bar path smoke: PASS");
     AddressPathMenuSmoke.Run();
     DiskSpaceSmoke.Run(root).GetAwaiter().GetResult();
     ShellFileCommandsSmoke.Run();

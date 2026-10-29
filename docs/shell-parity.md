@@ -1,3 +1,5 @@
+2026-10-30 经典地址栏文件系统路径补齐末尾分隔符：经典栏和编辑框显示完整目录路径时，为普通文件系统目录补 `\`，盘符根目录不重复添加，虚拟 Shell 位置保持原有解析名。经典栏显示路径与实际导航身份分开，不改变会话/历史值。回归覆盖普通目录、盘符根、UNC 目录和虚拟位置；后台 SettingsSmoke 与 App Release build 通过。未启动 GUI，实际复制路径和编辑导航待集中可见验收。[Q-Dir 地址栏 FAQ](https://www.softwareok.com/?faq=92&seite=faq-Q-DIR)
+
 > **Shell 选区恢复（2026-10-29）：**同一视图、无新用户输入时，若 Shell 在视图重建期间把先前未选中的焦点项临时加入多选，确认过的选区快照不会被该临时扩大的快照替换；异步枚举自然增加的选中项仍可更新快照。纯门控回归、隐藏生产 HostProbe 确定性回调场景、四窗格 3,000 项创建/删除压力及完整 Release SettingsSmoke 通过。未做可见交互验收；其它 Shell provider 和长期压力仍待集中验证。
 
 > **地址输入复核（2026-10-27）：**相对目录、环境变量与 `C:` 根目录规则早已在 AddressInputResolver 实现，与仅处理分隔符的 BreadcrumbPath 分开理解。本次仅修复显式 `\\?\` / `\\.\` 路径在前缀识别前被环境变量展开的问题，保留百分号目录字面量；普通输入继续展开当前进程变量。纯字符串回归与完整 SettingsSmoke 通过，未验证 Shell 对具体设备地址的支持。参考 [Q-Dir FAQ 146](https://www.softwareok.com/?faq=146&seite=faq-Q-DIR)、[Windows 路径命名空间](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file)。本项不在此前已固定的 141624 候选中。
