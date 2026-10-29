@@ -1036,22 +1036,34 @@ public static class SyntheticShellSortProbe
         private const int LvnItemChanged = -101;
         private const uint LvisFocused = 0x0001;
         private const uint LvisSelected = 0x0002;
+        private const uint LvmFirst = 0x1000;
+        private const uint LvmSetItem = LvmFirst + 6;
+        private const uint LvmDeleteItem = LvmFirst + 8;
+        private const uint LvmDeleteAllItems = LvmFirst + 9;
+        private const uint LvmSetItemState = LvmFirst + 43;
+        private const uint LvmGetNextItem = LvmFirst + 12;
         private static readonly SubclassProcedure Procedure = WindowProcedure;
         private static nuint _nextSubclassId = 0xE170;
         private readonly nint _parent;
+        private readonly nint _listView;
         private readonly nuint _subclassId;
+        private readonly nuint _listViewSubclassId;
         private readonly GCHandle _self;
         private readonly string _label;
 
         internal ListViewSelectionObserver(nint listView, string label)
         {
             _label = label;
+            _listView = listView;
             _parent = GetParent(listView);
             if (_parent == 0) throw new InvalidOperationException($"Could not find the {label} ListView notification parent.");
             _subclassId = unchecked(++_nextSubclassId);
+            _listViewSubclassId = unchecked(++_nextSubclassId);
             _self = GCHandle.Alloc(this);
-            if (!SetWindowSubclass(_parent, Procedure, _subclassId, GCHandle.ToIntPtr(_self)))
+            if (!SetWindowSubclass(_listView, Procedure, _listViewSubclassId, GCHandle.ToIntPtr(_self)) ||
+                !SetWindowSubclass(_parent, Procedure, _subclassId, GCHandle.ToIntPtr(_self)))
             {
+                if (IsWindow(_listView)) _ = RemoveWindowSubclass(_listView, Procedure, _listViewSubclassId);
                 _self.Free();
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                     $"Could not observe {label} ListView selection notifications.");
@@ -1061,8 +1073,27 @@ public static class SyntheticShellSortProbe
         private static nint WindowProcedure(nint window, uint message, nuint wParam, nint lParam,
             nuint subclassId, nint referenceData)
         {
+            var result = default(nint);
+            var defaultCalled = false;
             try
             {
+                if (GCHandle.FromIntPtr(referenceData).Target is ListViewSelectionObserver observer &&
+                    window == observer._listView &&
+                    message is LvmSetItem or LvmSetItemState or LvmDeleteItem or LvmDeleteAllItems)
+                {
+                    var selectedBefore = GetListViewIndex(window, LvisSelected);
+                    var focusedBefore = GetListViewIndex(window, LvisFocused);
+                    result = DefSubclassProc(window, message, wParam, lParam);
+                    defaultCalled = true;
+                    var selectedAfter = GetListViewIndex(window, LvisSelected);
+                    var focusedAfter = GetListViewIndex(window, LvisFocused);
+                    if (selectedBefore != selectedAfter || focusedBefore != focusedAfter)
+                    {
+                        Console.WriteLine($"synthetic-shell-size-sort: ListView-state {observer._label} msg=0x{message:X}; index={unchecked((long)wParam)}; selected={selectedBefore}->{selectedAfter}; focused={focusedBefore}->{focusedAfter}");
+                    }
+                    return result;
+                }
+
                 if (message == WmNotify && lParam != 0)
                 {
                     var header = Marshal.PtrToStructure<NativeNotifyHeader>(lParam);
@@ -1070,9 +1101,9 @@ public static class SyntheticShellSortProbe
                     {
                         var change = Marshal.PtrToStructure<NativeListViewChange>(lParam);
                         if (((change.NewState ^ change.OldState) & (LvisSelected | LvisFocused)) != 0 &&
-                            GCHandle.FromIntPtr(referenceData).Target is ListViewSelectionObserver observer)
+                            GCHandle.FromIntPtr(referenceData).Target is ListViewSelectionObserver changeObserver)
                         {
-                            Console.WriteLine($"synthetic-shell-size-sort: LVN_ITEMCHANGED {observer._label} item={change.Item}; old=0x{change.OldState:X}; new=0x{change.NewState:X}; changed=0x{change.Changed:X}");
+                            Console.WriteLine($"synthetic-shell-size-sort: LVN_ITEMCHANGED {changeObserver._label} item={change.Item}; old=0x{change.OldState:X}; new=0x{change.NewState:X}; changed=0x{change.Changed:X}");
                         }
                     }
                 }
@@ -1081,14 +1112,18 @@ public static class SyntheticShellSortProbe
             {
                 Console.Error.WriteLine($"synthetic-shell-size-sort: selection-notify-observer-error={exception.GetType().Name}");
             }
-            return DefSubclassProc(window, message, wParam, lParam);
+            return defaultCalled ? result : DefSubclassProc(window, message, wParam, lParam);
         }
+
+        private static int GetListViewIndex(nint listView, uint state)
+            => checked((int)SendMessageW(listView, unchecked((int)LvmGetNextItem), unchecked((nint)(-1)), unchecked((nint)state)));
 
         public void Dispose()
         {
             if (_self.IsAllocated)
             {
                 if (IsWindow(_parent)) _ = RemoveWindowSubclass(_parent, Procedure, _subclassId);
+                if (IsWindow(_listView)) _ = RemoveWindowSubclass(_listView, Procedure, _listViewSubclassId);
                 _self.Free();
             }
         }

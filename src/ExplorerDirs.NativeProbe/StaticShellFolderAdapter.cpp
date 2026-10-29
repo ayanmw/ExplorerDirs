@@ -3,6 +3,7 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
+#include <commctrl.h>
 #include <propsys.h>
 #include <propkey.h>
 #include <strsafe.h>
@@ -21,6 +22,30 @@ namespace
         DWORD written = 0;
         WriteFile(output, stage, static_cast<DWORD>(strlen(stage)), &written, nullptr);
         WriteFile(output, "\r\n", 2, &written, nullptr);
+    }
+
+    struct SyntheticListViewSearch
+    {
+        HWND window = nullptr;
+    };
+
+    BOOL CALLBACK FindSyntheticListView(HWND window, LPARAM parameter)
+    {
+        wchar_t className[64]{};
+        if (GetClassNameW(window, className, ARRAYSIZE(className)) > 0 &&
+            _wcsicmp(className, WC_LISTVIEWW) == 0)
+        {
+            static_cast<SyntheticListViewSearch*>(reinterpret_cast<void*>(parameter))->window = window;
+            return FALSE;
+        }
+        return TRUE;
+    }
+
+    HWND GetSyntheticListView(HWND viewWindow)
+    {
+        SyntheticListViewSearch search{};
+        if (viewWindow) EnumChildWindows(viewWindow, FindSyntheticListView, reinterpret_cast<LPARAM>(&search));
+        return search.window;
     }
 
     volatile LONG g_syntheticLiveObjects = 0;
@@ -2168,11 +2193,14 @@ namespace
                 catch (const std::bad_alloc&) { _pendingSelected.clear(); _pendingHasFocused = false; }
                 selection->Release();
             }
-            char stateTrace[128]{};
             HWND viewWindow = nullptr;
             if (_shellView) _shellView->GetWindow(&viewWindow);
-            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured view=0x%p selected=%zu focused=%d",
-                viewWindow, _pendingSelected.size(), _pendingHasFocused ? 1 : 0);
+            const auto listView = GetSyntheticListView(viewWindow);
+            const auto listSelected = listView ? static_cast<int>(SendMessageW(listView, LVM_GETNEXTITEM, static_cast<WPARAM>(-1), LVNI_SELECTED)) : -1;
+            const auto listFocused = listView ? static_cast<int>(SendMessageW(listView, LVM_GETNEXTITEM, static_cast<WPARAM>(-1), LVNI_FOCUSED)) : -1;
+            char stateTrace[192]{};
+            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured view=0x%p selected=%zu focused=%d list-selected=%d list-focused=%d",
+                viewWindow, _pendingSelected.size(), _pendingHasFocused ? 1 : 0, listSelected, listFocused);
             TraceSyntheticSortStage(stateTrace);
             folderView->Release();
             return S_OK;
