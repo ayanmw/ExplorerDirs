@@ -12,6 +12,8 @@
 
 近期执行顺序：已为“使用系统 Explorer 浏览”和用户级文件夹入口整理[集中验收清单](gui-acceptance-system-entry.md)。下一步继续从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项；依赖真实消息循环、物理键鼠或当前用户 Explorer 扩展菜单的项目留待集中验收。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
+2026-10-30：在 `3028b40` 后重新执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，候选 `src/.state/gui-smoke/20261029-214047-035-7386f6` 与当前干净主线对应，状态 `prepared-not-run`，仍有 35 项待验收。EXE/DLL 哈希独立复核一致：`9DE1995B6B7FC0D357B604B3D176721B9D73603BDF6947A0E801267CD48F8BBA` / `F93CA70EA1DCE934BC3E88356C2D34777DD7EECA9292DABDB295AB21EFCAF961`。未启动候选窗口；仅更新[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)，不属于日常 release。
+
 2026-10-30 自动刷新诊断：目录 watcher 的 `Error` 事件此前只触发强制协调和重建，未保留错误类型。现将异常类型与 HRESULT 记录到 `LastShellRefreshStatus`，并在 Dispatcher 写入前验证导航、目录、队列、恢复实例和 watcher 仍匹配。App Release build 0 警告/错误；未运行 ExplorerBrowser 或注入真实 watcher 错误，自动刷新 P0 与可见体验门槛不变。详见[调查记录](live-update-investigation.md#2026-10-30记录目录-watcher-错误类型)。
 
 2026-10-30 IShellView 隔离迁移复验：当前 Release NativeProbe 的四窗格 WPF consumer 再次通过（退出码 0）。反向选择、Ctrl+A、F2 方向键隔离、Shell 文件操作通知、原生视图菜单及 WPF 根窗同步销毁均通过，前台 HWND 与最后输入时间不变。该结果只加强隔离宿主证据；ExplorerBrowser 产品接线、物理输入、完整 OLE 拖放与可见验收仍开放。详细记录见[隔离原型](ishellview-color-spike.md#2026-10-30当前主线复跑四窗格-wpf-consumer)。
