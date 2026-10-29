@@ -4691,3 +4691,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：Q-Dir 克隆视图的标签差距复核
 
 依据 [Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)，Q-Dir 克隆视图包含当前路径、查看设置、选中对象及浏览历史。源码核对确认 Explorer Dirs 跨窗格移动标签会保留原 Browser 和 Shell Travel Log；复制标签则新建 Browser，并复制当前路径、视图设置、快速筛选、预览/详情状态及地址下拉历史，但没有复制当前文件选区或 Shell Back/Forward 历史。因此不能把复制标签描述为 Q-Dir 完整克隆。后续若追齐该功能，应先决定扩展现有“复制标签”语义，还是增加独立“克隆视图”动作；完整历史若无法由 Shell 宿主安全转移，还需定义兼容的应用级历史模型。仅做了官方资料与源码静态核对，未改产品代码、未启动 GUI。
+
+补充可行性依据：项目既有 [`native-navigation-probe.md`](native-navigation-probe.md#问题与结论) 记录了 ExplorerBrowser 直接查询 `ITravelLogStg` 返回 `E_NOINTERFACE`，通过 `IServiceProvider` 查询 TravelLog 服务返回 `E_NOTIMPL`；公开 ExplorerBrowser 接口没有宿主间复制 TravelLog 的入口。忠实克隆历史因此不能靠共享/复制现有 COM 对象完成，需要应用级导航序列及每个历史停靠点的选区模型，并验证虚拟目录、搜索位置、被取消/失败导航和分支截断。这个范围超出安全的复制标签小修，需在明确用户交互语义后再设计。
