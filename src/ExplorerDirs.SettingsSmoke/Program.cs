@@ -15,6 +15,13 @@ if (args is ["--shell-middle-click-target-smoke"])
     return;
 }
 
+if (args is ["--folder-entry-manager-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.FolderEntryManagerSmoke.Run();
+    Console.WriteLine("Folder entry manager smoke: PASS");
+    return;
+}
+
 if (args is ["--tab-transfer-policy-smoke"])
 {
     ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();

@@ -3,18 +3,28 @@ param(
     [string]$Mode = 'Status',
     [string]$Executable,
     [string]$ExpectedSha256,
-    [switch]$ConfirmVerifiedRelease
+    [switch]$ConfirmVerifiedRelease,
+    [switch]$AsJson
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'FolderVerb.psm1') -Force
 
+function Write-FolderVerbOutput {
+    param($Value)
+    if ($AsJson) {
+        if ($null -eq $Value) { '[]' }
+        else { ConvertTo-Json -InputObject $Value -Compress -Depth 5 }
+    }
+    else { $Value }
+}
+
 if ($Mode -eq 'Status') {
-    Get-ExplorerDirsFolderVerbState
+    Write-FolderVerbOutput @(Get-ExplorerDirsFolderVerbState)
     return
 }
 if ($Mode -eq 'Disable') {
-    Disable-ExplorerDirsFolderVerb
+    Write-FolderVerbOutput @(Disable-ExplorerDirsFolderVerb)
     return
 }
 
@@ -45,7 +55,7 @@ if (-not $fullExecutable.StartsWith($releaseRoot + [IO.Path]::DirectorySeparator
 $hash = (Get-FileHash -LiteralPath $fullExecutable -Algorithm SHA256).Hash
 $capabilityDeclared = Test-ExplorerDirsRoutingCapability -Executable $fullExecutable -Sha256 $hash
 if ($Mode -eq 'Preview') {
-    [pscustomobject]@{
+    $preview = [pscustomobject]@{
         Executable = $fullExecutable
         Sha256 = $hash
         DirectoryArgumentDeclared = $capabilityDeclared
@@ -54,6 +64,7 @@ if ($Mode -eq 'Preview') {
         Command = '"' + $fullExecutable + '" "%1"'
         CurrentState = @(Get-ExplorerDirsFolderVerbState)
     }
+    Write-FolderVerbOutput $preview
     return
 }
 
@@ -62,4 +73,4 @@ if (-not $capabilityDeclared -or -not $ConfirmVerifiedRelease -or
     $hash -ne $ExpectedSha256.ToUpperInvariant()) {
     throw 'Enable requires a matching routing capability, -ConfirmVerifiedRelease and the exact SHA256 shown by Preview.'
 }
-Enable-ExplorerDirsFolderVerb -Executable $fullExecutable
+Write-FolderVerbOutput @(Enable-ExplorerDirsFolderVerb -Executable $fullExecutable)

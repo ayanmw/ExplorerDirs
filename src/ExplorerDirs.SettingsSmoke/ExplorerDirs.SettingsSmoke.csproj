@@ -166,5 +166,6 @@
     <Compile Include="../ExplorerDirs.App/ShellStatusCountRefreshGate.cs" Link="ShellStatusCountRefreshGate.cs" />
     <Compile Include="../ExplorerDirs.App/SystemExplorerLauncher.cs" Link="SystemExplorerLauncher.cs" />
     <Compile Include="../ExplorerDirs.App/WindowsExplorerRestarter.cs" Link="WindowsExplorerRestarter.cs" />
+    <Compile Include="../ExplorerDirs.App/FolderEntryManager.cs" Link="FolderEntryManager.cs" />
   </ItemGroup>
 </Project>

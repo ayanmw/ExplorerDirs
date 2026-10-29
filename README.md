@@ -140,7 +140,7 @@ pwsh -NoProfile -File .\src\ExplorerDirs.GuiSmoke\run.ps1 -PrepareOnly
 
 已有 Explorer Dirs 进程运行时，可先用 `Get-Process ExplorerDirs.App | Select-Object Id, StartTime` 选定实例，再执行 `powershell.exe -NoProfile -File .\scripts\perf-sample.ps1 -ProcessId <PID> -Samples 12 -IntervalMilliseconds 5000 -AsJson`。脚本只读采样工作集、私有内存、CPU、句柄与线程，不启动或控制 GUI，也不输出程序路径；可执行文件以 SHA-256 和“发布版/源码测试版/其他副本”标识。当前只有控制台进程的采样回归，尚无真实 Explorer Dirs 长时间运行数据。源码已减少周期保存时对隐藏标签的 Shell 查询：切换标签或布局前捕获其视图状态，隐藏后使用缓存；此优化尚待真实窗口验证。[Q-Dir 短时只读对标快照](docs/q-dir-performance-snapshot-2026-10-16.md)不能替代本程序测量。
 
-`scripts/folder-verb.ps1` 已准备可逆的**可选**文件夹/磁盘右键入口。默认 `Status` 和 `Preview` 只读；启用要求发布版随附的 `FolderRoutingCapability.ini`、精确 SHA-256 和明确确认。当前 temp.78 发布包通过只读 Preview，目录参数能力清单与 EXE 哈希匹配；隔离注册表位置已验证启用、重复启用、外部修改保护及卸载。实际菜单显示和目录启动仍待空闲桌面验收。此入口不会更改文件夹默认打开动作或 Win+E，当前真实系统关联没有被修改。
+`scripts/folder-verb.ps1` 提供可逆的**可选**文件夹/磁盘右键入口。源码现已在“工具 → 文件夹入口…”提供应用内状态查看、发布版预览和显式启用/禁用；界面只在发布包中开放，调试目录不会注册入口。默认保持未启用；启用前要求能力清单、精确 SHA-256 和用户确认。启用仍待可见 GUI 验收；此入口不会更改文件夹默认打开动作或 Win+E。当前 temp.78 预览包尚未包含该界面，真实系统关联没有被修改。
 
 源码中的同配置窗口文件夹请求使用命名管道转交；对连接后未发完整请求的客户端设置读取超时，避免阻塞下一次请求。路由器关闭时也会取消尚在等待窗口回调的请求并释放配置锁。客户端对异常回执保留“结果不确定”状态，不把它当作明确拒绝；运行中的窗口若长期不就绪仍可能令请求排队。空头、不完整负载、异常回执及关闭期间悬挂回调的控制台回归通过，真实窗口转交仍待验收，此改动已包含在 temp16。
 

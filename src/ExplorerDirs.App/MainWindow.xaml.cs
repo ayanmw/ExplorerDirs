@@ -2007,6 +2007,12 @@ public partial class MainWindow : Window
 
     private void ProgramStarter_Click(object sender, RoutedEventArgs e) => OpenProgramStarterWindow();
 
+    private void FolderEntryManager_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new FolderEntryManagerWindow(_themeController) { Owner = this };
+        window.ShowDialog();
+    }
+
     private async void RestartWindowsExplorer_Click(object sender, RoutedEventArgs e)
     {
         const string warning = "Windows 桌面、任务栏和开始菜单会短暂消失并重新加载。若文件资源管理器窗口与桌面 Shell 共用进程，这些窗口也可能关闭。继续重启吗？";

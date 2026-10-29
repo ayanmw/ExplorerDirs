@@ -72,6 +72,19 @@ if (-not $folderPreview.DirectoryArgumentDeclared -or
     [IO.Path]::GetFullPath((Join-Path $release 'app/ExplorerDirs.App.exe'))) {
     throw 'Packaged folder-entry manager did not resolve its own isolated app and capability manifest.'
 }
+$folderPreviewJson = & $packagedFolderScript -Mode Preview -AsJson | ConvertFrom-Json
+if (-not $folderPreviewJson.DirectoryArgumentDeclared -or
+    [IO.Path]::GetFullPath($folderPreviewJson.Executable) -ne
+    [IO.Path]::GetFullPath((Join-Path $release 'app/ExplorerDirs.App.exe')) -or
+    $folderPreviewJson.Sha256 -ne (Get-FileHash -LiteralPath (Join-Path $release 'app/ExplorerDirs.App.exe') -Algorithm SHA256).Hash -or
+    $folderPreviewJson.CurrentState.Count -ne 2) {
+    throw 'Packaged folder-entry manager emitted incomplete machine-readable status.'
+}
+$folderStatusJson = & $packagedFolderScript -Mode Status -AsJson | ConvertFrom-Json
+if ($folderStatusJson.Count -ne 2 -or
+    @($folderStatusJson | Where-Object { $_.State -notin @('missing', 'owned', 'conflict') }).Count -ne 0) {
+    throw 'Packaged folder-entry manager emitted invalid machine-readable status.'
+}
 $copied = Join-Path $release 'app/profile'
 foreach ($name in $settings) {
     $path = Join-Path $copied $name
@@ -151,6 +164,13 @@ if (-not $normalFolderPreview.DirectoryArgumentDeclared -or
     [IO.Path]::GetFullPath($normalFolderPreview.Executable) -ne
     [IO.Path]::GetFullPath((Join-Path $normal 'ExplorerDirs.App.exe'))) {
     throw 'Packaged folder-entry manager did not resolve its normal release executable.'
+}
+$normalFolderPreviewJson = & (Join-Path $normal 'tools/folder-verb.ps1') -Mode Preview -AsJson | ConvertFrom-Json
+if (-not $normalFolderPreviewJson.DirectoryArgumentDeclared -or
+    [IO.Path]::GetFullPath($normalFolderPreviewJson.Executable) -ne
+    [IO.Path]::GetFullPath((Join-Path $normal 'ExplorerDirs.App.exe')) -or
+    $normalFolderPreviewJson.CurrentState.Count -ne 2) {
+    throw 'Normal folder-entry manager emitted incomplete machine-readable status.'
 }
 $preview = & $script -Version 'preview-0.6.0-temp.4'
 if ($global:lastPublishArguments -notcontains '-p:Version=0.6.0-preview.temp.4') {

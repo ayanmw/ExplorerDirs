@@ -131,6 +131,7 @@
             </MenuItem>
             <MenuItem Header="工具(_O)">
                 <MenuItem Header="程序启动器…" InputGestureText="Ctrl+S" Click="ProgramStarter_Click"/>
+                <MenuItem Header="文件夹入口…" Click="FolderEntryManager_Click"/>
                 <MenuItem Header="重启 Windows 资源管理器…" Click="RestartWindowsExplorer_Click"/>
                 <Separator/>
                 <MenuItem Header="选项">
