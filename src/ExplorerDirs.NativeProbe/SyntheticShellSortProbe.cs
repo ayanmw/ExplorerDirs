@@ -52,7 +52,10 @@ public static class SyntheticShellSortProbe
         finally { Directory.Delete(fixture, recursive: true); }
     }
 
-    internal static int Run()
+    internal static int RunRecursiveDirectorySizeSort() =>
+        Run(recursiveDirectorySizeSortOnly: true, maskFilesystemAttributes: true);
+
+    internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false)
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -65,9 +68,19 @@ public static class SyntheticShellSortProbe
         {
             Directory.CreateDirectory(backingFolder);
             Directory.CreateDirectory(copyDestination);
-            File.WriteAllBytes(Path.Combine(backingFolder, "a-large.bin"), Enumerable.Repeat((byte)0xA1, 100).ToArray());
-            File.WriteAllBytes(Path.Combine(backingFolder, "two.bin"), [0x02, 0x02]);
-            File.WriteAllBytes(Path.Combine(backingFolder, "z-ten.bin"), Enumerable.Repeat((byte)0x10, 10).ToArray());
+            if (recursiveDirectorySizeSortOnly)
+            {
+                Directory.CreateDirectory(Path.Combine(backingFolder, "child", "nested"));
+                File.WriteAllBytes(Path.Combine(backingFolder, "child", "direct.bin"), new byte[6]);
+                File.WriteAllBytes(Path.Combine(backingFolder, "child", "nested", "deep.bin"), new byte[4]);
+                File.WriteAllBytes(Path.Combine(backingFolder, "small.bin"), new byte[4]);
+            }
+            else
+            {
+                File.WriteAllBytes(Path.Combine(backingFolder, "a-large.bin"), Enumerable.Repeat((byte)0xA1, 100).ToArray());
+                File.WriteAllBytes(Path.Combine(backingFolder, "two.bin"), [0x02, 0x02]);
+                File.WriteAllBytes(Path.Combine(backingFolder, "z-ten.bin"), Enumerable.Repeat((byte)0x10, 10).ToArray());
+            }
         }
         catch
         {
@@ -99,6 +112,8 @@ public static class SyntheticShellSortProbe
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticMaskFilesystemAttributesForProbe"))(maskFilesystemAttributes ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
@@ -126,6 +141,8 @@ public static class SyntheticShellSortProbe
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             Console.WriteLine("synthetic-shell-size-sort: IShellView.CreateViewWindow returned");
             viewWindowCreated = true;
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Creating the synthetic Shell view changed the user's foreground window.");
             _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the Private Desktop only.
             Pump(700);
             if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
@@ -144,6 +161,34 @@ public static class SyntheticShellSortProbe
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            if (recursiveDirectorySizeSortOnly)
+            {
+                var sizeListView = FindListView(view);
+                var initialNames = WaitForNames(sizeListView, module, "child", expectedCount: 2);
+                var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: 2);
+                var detailsExRequests = ReadCounter(module, "GetSyntheticSizeDetailsExCount");
+                var detailsExFolderRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFolderCount");
+                var detailsExFileRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFileCount");
+                var detailsOfItemRequests = ReadCounter(module, "GetSyntheticItemDetailsOfCount");
+                var detailsOfSizeRequests = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
+                var propertyStoreFactoryRequests = ReadCounter(module, "GetSyntheticPropertyStoreFactoryRequestCount");
+                var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
+                var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
+                var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
+                var ascendingNames = SortAndRead(module, folderView, view, sizeListView, direction: 1, expectedCount: 2);
+                var ascendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
+                var descendingNames = SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: 2);
+                var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{string.Join('|', ascendingNames)}]; descending=[{string.Join('|', descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+                var displayedDirectorySize = childIndex >= 0 && initialSizes[childIndex].Contains("10", StringComparison.Ordinal);
+                if (!displayedDirectorySize ||
+                    !ascendingNames.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase) ||
+                    !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
+                    ascendingComparisons == 0 || descendingComparisons == 0 || GetForegroundWindow() != foreground)
+                    return 1;
+                return 0;
+            }
             parent2 = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace second view",
                 0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
             if (parent2 == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the second Private Desktop probe parent.");
@@ -560,7 +605,8 @@ public static class SyntheticShellSortProbe
         }
     }
 
-    private static string[] SortAndRead(nint module, nint folderView, nint view, nint listView, int direction)
+    private static string[] SortAndRead(nint module, nint folderView, nint view, nint listView, int direction,
+        int expectedCount = 3)
     {
         Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
         var sort = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeSortColumn>());
@@ -576,7 +622,7 @@ public static class SyntheticShellSortProbe
         finally { Marshal.FreeCoTaskMem(sort); }
         Check(At<RefreshView>(view, 8)(view));
         Pump(400);
-        return ReadNames(listView, module);
+        return ReadNames(listView, module, expectedCount);
     }
 
     private static void RenameSelectedShellItem(nint view, nint listView, nint module, string itemName, string restoreFocusName, string newName)
@@ -714,6 +760,9 @@ public static class SyntheticShellSortProbe
     }
 
     private static string[] ReadNames(nint listView, nint module, int expectedCount = 3)
+        => ReadColumnTexts(listView, module, subItem: 0, expectedCount: expectedCount);
+
+    private static string[] ReadColumnTexts(nint listView, nint module, int subItem, int expectedCount)
     {
         var count = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
         if (expectedCount >= 0 && count != expectedCount)
@@ -725,7 +774,7 @@ public static class SyntheticShellSortProbe
             for (var index = 0; index < count; index++)
             {
                 Marshal.WriteInt16(text, 0);
-                var item = new NativeListViewItem { Mask = LvifText, Item = index, SubItem = 0, Text = text, TextCapacity = 1024 };
+                var item = new NativeListViewItem { Mask = LvifText, Item = index, SubItem = subItem, Text = text, TextCapacity = 1024 };
                 var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
                 try
                 {
@@ -741,17 +790,17 @@ public static class SyntheticShellSortProbe
         return values;
     }
 
-    private static string[] WaitForNames(nint listView, nint module, string expectedName)
+    private static string[] WaitForNames(nint listView, nint module, string expectedName, int expectedCount = 3)
     {
         var deadline = Environment.TickCount64 + 2500;
         string[] names;
         do
         {
             names = ReadNames(listView, module, expectedCount: -1);
-            if (names.Length == 3 && names.Contains(expectedName, StringComparer.OrdinalIgnoreCase)) return names;
+            if (names.Length == expectedCount && names.Contains(expectedName, StringComparer.OrdinalIgnoreCase)) return names;
             Pump(50);
         } while (Environment.TickCount64 < deadline);
-        throw new TimeoutException($"The synthetic Shell view did not settle to three rows including '{expectedName}' within 2.5 seconds; current=[{string.Join('|', names)}].");
+        throw new TimeoutException($"The synthetic Shell view did not settle to {expectedCount} rows including '{expectedName}' within 2.5 seconds; current=[{string.Join('|', names)}].");
     }
 
     private static void SetListViewSelectionAndFocus(nint listView, string name, string[] names)
@@ -1071,6 +1120,7 @@ public static class SyntheticShellSortProbe
         public uint ColumnCount; public nint Columns; public nint ColumnFormats; public int Group;
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();

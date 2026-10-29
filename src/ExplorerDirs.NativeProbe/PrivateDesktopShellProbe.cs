@@ -141,7 +141,11 @@ internal static class PrivateDesktopShellProbe
             TimeSpan.FromSeconds(90), initializeOle: true);
 
     internal static int RunSyntheticShellSizeSort() =>
-        Run("synthetic-shell-size-sort", SyntheticShellSortProbe.Run, TimeSpan.FromSeconds(45), initializeOle: true);
+        Run("synthetic-shell-size-sort", () => SyntheticShellSortProbe.Run(), TimeSpan.FromSeconds(45), initializeOle: true);
+
+    internal static int RunSyntheticRecursiveDirectorySizeSort() =>
+        Run("synthetic-recursive-directory-size-sort", () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSort(),
+            TimeSpan.FromSeconds(30), initializeOle: true);
 
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);

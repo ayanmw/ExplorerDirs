@@ -1209,6 +1209,17 @@ namespace
     };
     volatile LONG g_syntheticCompareCount = 0;
     volatile LONG g_syntheticSizeCompareCount = 0;
+    volatile LONG g_syntheticItemDetailsOfCount = 0;
+    volatile LONG g_syntheticSizeDetailsExCount = 0;
+    volatile LONG g_syntheticSizeDetailsExFolderCount = 0;
+    volatile LONG g_syntheticSizeDetailsExFileCount = 0;
+    volatile LONG g_syntheticSizeDetailsOfItemCount = 0;
+    volatile LONG g_syntheticPropertyStoreFactoryRequests = 0;
+    volatile LONG g_syntheticPropertyStoreRequests = 0;
+    volatile LONG g_syntheticOtherUiObjectRequests = 0;
+    volatile LONG g_syntheticGetAttributesOfCount = 0;
+    volatile LONG g_syntheticFilesystemAttributeCount = 0;
+    volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
@@ -2015,12 +2026,26 @@ namespace
                 result = _inner->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(child->name), &eaten, &original[index], nullptr);
                 if (FAILED(result)) break;
             }
-            if (SUCCEEDED(result)) result = _inner->GetAttributesOf(count, const_cast<PCUITEMID_CHILD_ARRAY>(original.data()), attributes);
+            if (SUCCEEDED(result))
+            {
+                result = _inner->GetAttributesOf(count, const_cast<PCUITEMID_CHILD_ARRAY>(original.data()), attributes);
+                if (SUCCEEDED(result))
+                {
+                    InterlockedIncrement(&g_syntheticGetAttributesOfCount);
+                    if (*attributes & (SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR))
+                        InterlockedIncrement(&g_syntheticFilesystemAttributeCount);
+                    if (InterlockedCompareExchange(&g_syntheticMaskFilesystemAttributes, 0, 0))
+                        *attributes &= ~(SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR);
+                }
+            }
             for (auto item : original) if (item) CoTaskMemFree(item);
             return result;
         }
         HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
         {
+            if (iid == IID_IPropertyStoreFactory) InterlockedIncrement(&g_syntheticPropertyStoreFactoryRequests);
+            else if (iid == IID_IPropertyStore) InterlockedIncrement(&g_syntheticPropertyStoreRequests);
+            else InterlockedIncrement(&g_syntheticOtherUiObjectRequests);
             if (!value) return E_POINTER;
             *value = nullptr;
             if (!_inner || count == 0 || !items) return E_NOINTERFACE;
@@ -2095,6 +2120,15 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* key, VARIANT* value) override
         {
+            if (key && *key == kSizeKey)
+            {
+                InterlockedIncrement(&g_syntheticSizeDetailsExCount);
+                const auto* child = SyntheticData(item);
+                if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+                    InterlockedIncrement(&g_syntheticSizeDetailsExFolderCount);
+                else if (child)
+                    InterlockedIncrement(&g_syntheticSizeDetailsExFileCount);
+            }
             if (!key || !value || *key != kSizeKey) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
@@ -2105,6 +2139,11 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
         {
+            if (item)
+            {
+                InterlockedIncrement(&g_syntheticItemDetailsOfCount);
+                if (column == 1) InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
+            }
             if (!details || column > 2) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
             std::wstring text;
@@ -2948,6 +2987,16 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
     InterlockedExchange(&g_syntheticSizeCompareCount, 0);
+    InterlockedExchange(&g_syntheticItemDetailsOfCount, 0);
+    InterlockedExchange(&g_syntheticSizeDetailsExCount, 0);
+    InterlockedExchange(&g_syntheticSizeDetailsExFolderCount, 0);
+    InterlockedExchange(&g_syntheticSizeDetailsExFileCount, 0);
+    InterlockedExchange(&g_syntheticSizeDetailsOfItemCount, 0);
+    InterlockedExchange(&g_syntheticPropertyStoreFactoryRequests, 0);
+    InterlockedExchange(&g_syntheticPropertyStoreRequests, 0);
+    InterlockedExchange(&g_syntheticOtherUiObjectRequests, 0);
+    InterlockedExchange(&g_syntheticGetAttributesOfCount, 0);
+    InterlockedExchange(&g_syntheticFilesystemAttributeCount, 0);
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
@@ -3023,6 +3072,39 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
 { return InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExCount()
+{ return InterlockedCompareExchange(&g_syntheticSizeDetailsExCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExFolderCount()
+{ return InterlockedCompareExchange(&g_syntheticSizeDetailsExFolderCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsExFileCount()
+{ return InterlockedCompareExchange(&g_syntheticSizeDetailsExFileCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeDetailsOfItemCount()
+{ return InterlockedCompareExchange(&g_syntheticSizeDetailsOfItemCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticItemDetailsOfCount()
+{ return InterlockedCompareExchange(&g_syntheticItemDetailsOfCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticPropertyStoreFactoryRequestCount()
+{ return InterlockedCompareExchange(&g_syntheticPropertyStoreFactoryRequests, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticPropertyStoreRequestCount()
+{ return InterlockedCompareExchange(&g_syntheticPropertyStoreRequests, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticGetAttributesOfCount()
+{ return InterlockedCompareExchange(&g_syntheticGetAttributesOfCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticFilesystemAttributeCount()
+{ return InterlockedCompareExchange(&g_syntheticFilesystemAttributeCount, 0, 0); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticMaskFilesystemAttributesForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticMaskFilesystemAttributes, enabled ? 1 : 0);
+    return S_OK;
+}
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumObjectsCount()
 { return InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0); }

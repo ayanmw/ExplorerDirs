@@ -4570,3 +4570,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 在注册生命周期 smoke 中复现：宿主持有两个 HWND 注册时，若第二个注册已被撤销，再 Dispose 会收到 `DRAGDROP_E_NOTREGISTERED (0x80040100)` 并中断其它清理。新增幂等处理：把此 HRESULT 当作目标已撤销，平衡对应 `OleInitialize`；其它 HRESULT 仍失败。
 - 回归先按预期失败，修复后 NativeProbe Release build 0 警告/错误，扩展 smoke 通过：预撤销的目标清理成功，兄弟 HWND 可重新注册；原四 HWND、多 host 冲突、选择性撤销、整体 Dispose 和前台不变检查均保持通过。该结果不验证 Shell view 上的实际拖放或产品行为。
+
+## 2026-10-30：递归目录大小的原生视图消费验证
+
+- NativeProbe 的合成 namespace 已能生成递归字节数并通过 `CompareIDs` 排序，但 DefView 仍不显示目录行的 Size 文本。额外的 Private Desktop 属性屏蔽 A/B 确认 `GetAttributesOf` 确实清除了 `SFGAO_FILESYSTEM` 和 `SFGAO_FILESYSANCESTOR`（17 次查询中 13 次包含相关标记），目录 `GetDetailsOf`、`GetDetailsEx` 和 property store 请求仍为 0。
+- 按 Size 排序结果仍正确（4 B 文件在 10 B 递归目录之前，反向排序相反），说明这份合成样本的比较排序合同有效；但仅屏蔽 filesystem 标记不足以让 DefView 消费目录属性。结论只适用于当前包装真实 filesystem PIDL 的隔离 adapter，不代表全自有 PIDL namespace。
+- 这是架构探针证据，未接入产品、未改 release。产品继续使用 ExplorerBrowser，F9 递归扫描仍是显式汇总路径；若未来要逐行派生列，后续研究需转向完整虚拟 namespace 的属性供应与 Shell 操作兼容门槛，而不再重复尝试此标记屏蔽变体。
