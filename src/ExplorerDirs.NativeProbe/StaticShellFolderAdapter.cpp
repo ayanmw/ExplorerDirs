@@ -1171,14 +1171,15 @@ namespace
         USHORT cb;
         USHORT id;
         ULONGLONG size;
-        WCHAR name[32];
+        DWORD attributes;
+        WCHAR name[MAX_PATH];
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
     {
-        { sizeof(SyntheticChild), 1, 100, L"a-large.bin" },
-        { sizeof(SyntheticChild), 2, 2, L"two.bin" },
-        { sizeof(SyntheticChild), 3, 10, L"z-ten.bin" }
+        { sizeof(SyntheticChild), 1, 100, 0, L"a-large.bin" },
+        { sizeof(SyntheticChild), 2, 2, 0, L"two.bin" },
+        { sizeof(SyntheticChild), 3, 10, 0, L"z-ten.bin" }
     };
     volatile LONG g_syntheticCompareCount = 0;
     volatile LONG g_syntheticSizeCompareCount = 0;
@@ -1194,11 +1195,11 @@ namespace
         return child->id != 0 ? child : nullptr;
     }
 
-    std::vector<SyntheticChild> EnumerateBackingChildren()
+    std::vector<SyntheticChild> EnumerateBackingChildren(const std::wstring& backingPath, SHCONTF flags)
     {
         std::vector<SyntheticChild> children;
-        if (g_syntheticSortBackingPath.empty()) return children;
-        std::wstring pattern = g_syntheticSortBackingPath + L"\\*";
+        if (backingPath.empty()) return children;
+        std::wstring pattern = backingPath + L"\\*";
         WIN32_FIND_DATAW entry{};
         const auto search = FindFirstFileW(pattern.c_str(), &entry);
         if (search == INVALID_HANDLE_VALUE) return children;
@@ -1206,13 +1207,19 @@ namespace
         {
             do
             {
-                if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                const bool isFolder = (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                const bool isHidden = (entry.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0;
+                const bool isSuperHidden = isHidden && (entry.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) != 0;
+                if ((isFolder && !(flags & SHCONTF_FOLDERS)) || (!isFolder && !(flags & SHCONTF_NONFOLDERS)) ||
+                    (isSuperHidden && !(flags & SHCONTF_INCLUDESUPERHIDDEN)) ||
+                    (isHidden && !(flags & (SHCONTF_INCLUDEHIDDEN | SHCONTF_INCLUDESUPERHIDDEN))) ||
                     wcscmp(entry.cFileName, L".") == 0 || wcscmp(entry.cFileName, L"..") == 0 ||
                     wcslen(entry.cFileName) >= ARRAYSIZE(SyntheticChild::name)) continue;
                 SyntheticChild child{};
                 child.cb = sizeof(SyntheticChild);
                 child.id = static_cast<USHORT>(children.size() + 1);
                 child.size = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
+                child.attributes = entry.dwFileAttributes;
                 wcscpy_s(child.name, entry.cFileName);
                 children.push_back(child);
             } while (FindNextFileW(search, &entry));
@@ -1369,6 +1376,8 @@ namespace
             _backingRoot = backingRoot;
             if (_inner) _inner->Release();
             _inner = backingFolder;
+            try { _backingPath = g_syntheticSortBackingPath; }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* value) override
@@ -1402,19 +1411,110 @@ namespace
             *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
             return S_OK;
         }
-        HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND, IBindCtx*, LPWSTR, ULONG*, PIDLIST_RELATIVE*, ULONG*) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND owner, IBindCtx* bind, LPWSTR name, ULONG* eaten,
+            PIDLIST_RELATIVE* item, ULONG* attributes) override
+        {
+            if (!item) return E_POINTER;
+            *item = nullptr;
+            if (!_inner || !name) return E_INVALIDARG;
+            PITEMID_CHILD original = nullptr;
+            auto result = _inner->ParseDisplayName(owner, bind, name, eaten, &original, attributes);
+            if (FAILED(result))
+            {
+                char message[192]{};
+                sprintf_s(message, "synthetic-folder-tree: backing ParseDisplayName failed hr=0x%08X name=%ls eaten=%u",
+                    static_cast<unsigned>(result), name, eaten ? *eaten : 0);
+                TraceSyntheticSortStage(message);
+                return result;
+            }
+            SyntheticChild child{};
+            result = DescribeBackingChild(original, &child);
+            if (SUCCEEDED(result))
+            {
+                *item = CloneSyntheticChild(child);
+                if (!*item) result = E_OUTOFMEMORY;
+                else if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
+            }
+            CoTaskMemFree(original);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
         {
             if (!value) return E_POINTER;
             *value = nullptr;
             InterlockedIncrement(&g_syntheticEnumObjectsCount);
-            if (!(flags & SHCONTF_NONFOLDERS)) return S_FALSE;
-            try { *value = new (std::nothrow) SyntheticChildEnumerator(EnumerateBackingChildren()); }
+            if (!_inner) return E_UNEXPECTED;
+            try { *value = new (std::nothrow) SyntheticChildEnumerator(EnumerateBackingChildren(_backingPath, flags)); }
             catch (const std::bad_alloc&) { *value = nullptr; }
             return *value ? S_OK : E_OUTOFMEMORY;
         }
-        HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE, IBindCtx*, REFIID, void**) override { return E_NOINTERFACE; }
-        HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE, IBindCtx*, REFIID, void**) override { return E_NOINTERFACE; }
+        HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (!_inner) return E_UNEXPECTED;
+            const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(item));
+            if (!child) return E_INVALIDARG;
+            PITEMID_CHILD original = nullptr;
+            auto result = _inner->ParseDisplayName(nullptr, bind, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
+            if (FAILED(result)) return result;
+            SFGAOF itemAttributes = SFGAO_FOLDER;
+            result = _inner->GetAttributesOf(1, const_cast<PCUITEMID_CHILD_ARRAY>(&original), &itemAttributes);
+            if (FAILED(result) || !(itemAttributes & SFGAO_FOLDER))
+            {
+                CoTaskMemFree(original);
+                return FAILED(result) ? result : E_NOINTERFACE;
+            }
+            if (iid != IID_IUnknown && iid != IID_IShellFolder && iid != IID_IShellFolder2)
+            {
+                result = _inner->BindToObject(original, bind, iid, value);
+                CoTaskMemFree(original);
+                return result;
+            }
+
+            IShellFolder2* backingChild = nullptr;
+            result = _inner->BindToObject(original, bind, IID_PPV_ARGS(&backingChild));
+            if (FAILED(result)) { CoTaskMemFree(original); return result; }
+            auto* nestedRoot = ILCombine(_root, reinterpret_cast<PCUIDLIST_RELATIVE>(item));
+            auto* nestedBackingRoot = ILCombine(_backingRoot, original);
+            CoTaskMemFree(original);
+            if (!nestedRoot || !nestedBackingRoot)
+            {
+                if (nestedRoot) CoTaskMemFree(nestedRoot);
+                if (nestedBackingRoot) CoTaskMemFree(nestedBackingRoot);
+                backingChild->Release();
+                return E_OUTOFMEMORY;
+            }
+            auto* nested = new (std::nothrow) SyntheticSortFolder();
+            if (!nested)
+            {
+                CoTaskMemFree(nestedRoot);
+                CoTaskMemFree(nestedBackingRoot);
+                backingChild->Release();
+                return E_OUTOFMEMORY;
+            }
+            nested->_root = nestedRoot;
+            nested->_backingRoot = nestedBackingRoot;
+            nested->_inner = backingChild;
+            try { nested->_backingPath = _backingPath + L"\\" + child->name; }
+            catch (const std::bad_alloc&) { nested->Release(); return E_OUTOFMEMORY; }
+            result = nested->QueryInterface(iid, value);
+            nested->Release();
+            return result;
+        }
+        HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            if (!_inner) return E_UNEXPECTED;
+            const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(item));
+            if (!child) return E_INVALIDARG;
+            PITEMID_CHILD original = nullptr;
+            auto result = _inner->ParseDisplayName(nullptr, bind, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
+            if (SUCCEEDED(result)) result = _inner->BindToStorage(original, bind, iid, value);
+            if (original) CoTaskMemFree(original);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE CompareIDs(LPARAM column, PCUIDLIST_RELATIVE left, PCUIDLIST_RELATIVE right) override
         {
             const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
@@ -1514,7 +1614,31 @@ namespace
             CopyMemory(name->pOleStr, child->name, bytes);
             return S_OK;
         }
-        HRESULT STDMETHODCALLTYPE SetNameOf(HWND, PCUITEMID_CHILD, LPCWSTR, SHGDNF, PITEMID_CHILD*) override { return E_NOTIMPL; }
+        HRESULT STDMETHODCALLTYPE SetNameOf(HWND owner, PCUITEMID_CHILD item, LPCWSTR name, SHGDNF flags,
+            PITEMID_CHILD* renamed) override
+        {
+            if (!renamed) return E_POINTER;
+            *renamed = nullptr;
+            if (!_inner) return E_UNEXPECTED;
+            const auto* child = SyntheticData(item);
+            if (!child) return E_INVALIDARG;
+            PITEMID_CHILD original = nullptr;
+            auto result = _inner->ParseDisplayName(owner, nullptr, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
+            if (FAILED(result)) return result;
+            PITEMID_CHILD rawRenamed = nullptr;
+            result = _inner->SetNameOf(owner, original, name, flags, &rawRenamed);
+            CoTaskMemFree(original);
+            if (FAILED(result)) return result;
+            SyntheticChild description{};
+            result = DescribeBackingChild(rawRenamed, &description);
+            if (SUCCEEDED(result))
+            {
+                *renamed = CloneSyntheticChild(description);
+                if (!*renamed) result = E_OUTOFMEMORY;
+            }
+            CoTaskMemFree(rawRenamed);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE GetDefaultSearchGUID(GUID*) override { return E_NOTIMPL; }
         HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch**) override { return E_NOTIMPL; }
         HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD, ULONG* sort, ULONG* display) override
@@ -1555,7 +1679,9 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
-                text = column == 0 ? child->name : column == 1 ? std::to_wstring(child->size) : L"BIN File";
+                text = column == 0 ? child->name : column == 1 ?
+                    ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"" : std::to_wstring(child->size)) :
+                    ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File");
                 details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
             }
@@ -1596,6 +1722,90 @@ namespace
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
+        HRESULT DescribeBackingChild(PCUITEMID_CHILD original, SyntheticChild* child)
+        {
+            if (!original || !child || !_inner) return E_INVALIDARG;
+            *child = {};
+            child->cb = sizeof(SyntheticChild);
+            child->id = 1;
+            STRRET displayName{};
+            auto result = _inner->GetDisplayNameOf(original, SHGDN_INFOLDER, &displayName);
+            if (FAILED(result))
+            {
+                char message[128]{};
+                sprintf_s(message, "synthetic-folder-tree: GetDisplayNameOf failed hr=0x%08X", static_cast<unsigned>(result));
+                TraceSyntheticSortStage(message);
+                return result;
+            }
+            if (displayName.uType == STRRET_WSTR && displayName.pOleStr)
+            {
+                if (wcslen(displayName.pOleStr) >= ARRAYSIZE(child->name)) result = HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+                else wcscpy_s(child->name, displayName.pOleStr);
+                CoTaskMemFree(displayName.pOleStr);
+            }
+            else if (displayName.uType == STRRET_CSTR)
+            {
+                if (MultiByteToWideChar(CP_ACP, 0, displayName.cStr, -1, child->name, ARRAYSIZE(child->name)) == 0)
+                    result = HRESULT_FROM_WIN32(GetLastError());
+            }
+            else if (displayName.uType == STRRET_OFFSET)
+            {
+                if (displayName.uOffset >= original->mkid.cb)
+                    result = E_INVALIDARG;
+                else
+                {
+                    const auto* nameBytes = reinterpret_cast<const char*>(original) + displayName.uOffset;
+                    const auto available = original->mkid.cb - displayName.uOffset;
+                    const auto* terminator = static_cast<const char*>(memchr(nameBytes, '\0', available));
+                    if (!terminator)
+                        result = E_INVALIDARG;
+                    else if (MultiByteToWideChar(CP_ACP, 0, nameBytes,
+                                 static_cast<int>(terminator - nameBytes + 1), child->name, ARRAYSIZE(child->name)) == 0)
+                        result = HRESULT_FROM_WIN32(GetLastError());
+                }
+            }
+            else result = E_UNEXPECTED;
+            if (FAILED(result))
+            {
+                char message[160]{};
+                sprintf_s(message, "synthetic-folder-tree: display-name conversion failed hr=0x%08X type=%u cb=%u offset=%u",
+                    static_cast<unsigned>(result), displayName.uType, original->mkid.cb, displayName.uOffset);
+                TraceSyntheticSortStage(message);
+                return result;
+            }
+
+            SFGAOF attributes = SFGAO_FOLDER | SFGAO_HIDDEN;
+            result = _inner->GetAttributesOf(1, const_cast<PCUITEMID_CHILD_ARRAY>(&original), &attributes);
+            if (FAILED(result))
+            {
+                char message[128]{};
+                sprintf_s(message, "synthetic-folder-tree: GetAttributesOf failed hr=0x%08X", static_cast<unsigned>(result));
+                TraceSyntheticSortStage(message);
+                return result;
+            }
+            if (attributes & SFGAO_FOLDER) child->attributes |= FILE_ATTRIBUTE_DIRECTORY;
+            if (attributes & SFGAO_HIDDEN) child->attributes |= FILE_ATTRIBUTE_HIDDEN;
+            if (!(child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                VARIANT size{};
+                VariantInit(&size);
+                result = _inner->GetDetailsEx(original, &kSizeKey, &size);
+                if (SUCCEEDED(result))
+                {
+                    if (size.vt == VT_UI8) child->size = size.ullVal;
+                    else if (size.vt == VT_I8 && size.llVal >= 0) child->size = static_cast<ULONGLONG>(size.llVal);
+                }
+                VariantClear(&size);
+                if (FAILED(result))
+                {
+                    char message[128]{};
+                    sprintf_s(message, "synthetic-folder-tree: GetDetailsEx(size) failed hr=0x%08X", static_cast<unsigned>(result));
+                    TraceSyntheticSortStage(message);
+                    return result;
+                }
+            }
+            return S_OK;
+        }
         HRESULT CaptureSelection()
         {
             IFolderView2* folderView = nullptr;
@@ -1789,6 +1999,7 @@ namespace
         PIDLIST_ABSOLUTE _root = nullptr;
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
+        std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
         SyntheticChild _pendingFocused{};
@@ -1895,6 +2106,210 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWS
     try { g_syntheticSortBackingPath.assign(path); }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
     return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PCWSTR backingPath)
+{
+    if (!backingPath || !*backingPath) return E_INVALIDARG;
+    auto result = SetSyntheticSortBackingPath(backingPath);
+    if (FAILED(result)) return result;
+
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    SyntheticSortFolder* root = nullptr;
+    IEnumIDList* enumerator = nullptr;
+    PITEMID_CHILD childFolder = nullptr;
+    IShellFolder2* nested = nullptr;
+    IEnumIDList* nestedEnumerator = nullptr;
+    IPersistFolder2* nestedPersist = nullptr;
+    PIDLIST_ABSOLUTE nestedRootPidl = nullptr;
+    result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+    if (FAILED(result)) goto cleanup;
+
+    root = new (std::nothrow) SyntheticSortFolder();
+    if (!root) { result = E_OUTOFMEMORY; goto cleanup; }
+    result = root->Initialize(rootPidl);
+    if (FAILED(result)) goto cleanup;
+
+    result = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &enumerator);
+    if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    {
+        PITEMID_CHILD item = nullptr;
+        ULONG fetched = 0;
+        result = enumerator->Next(1, &item, &fetched);
+        if (result != S_OK || fetched != 1 || !SyntheticData(item) ||
+            _wcsicmp(SyntheticData(item)->name, L"child") != 0 ||
+            !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            if (item) CoTaskMemFree(item);
+            result = E_FAIL;
+            goto cleanup;
+        }
+        childFolder = item;
+        item = nullptr;
+        result = enumerator->Next(1, &item, &fetched);
+        if (item) CoTaskMemFree(item);
+        if (result != S_FALSE || fetched != 0) { result = E_FAIL; goto cleanup; }
+    }
+    enumerator->Release();
+    enumerator = nullptr;
+    TraceSyntheticSortStage("synthetic-folder-tree: folder-enumeration-passed");
+
+    {
+        WCHAR childName[] = L"child";
+        ULONG eaten = 0;
+        SFGAOF attributes = SFGAO_FOLDER;
+        PIDLIST_RELATIVE parsed = nullptr;
+        result = root->ParseDisplayName(nullptr, nullptr, childName, &eaten, &parsed, &attributes);
+        const bool parsedFolder = SUCCEEDED(result) && eaten == ARRAYSIZE(childName) - 1 &&
+            SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed)) &&
+            (SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed))->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            (attributes & SFGAO_FOLDER);
+        if (!parsedFolder)
+        {
+            char message[192]{};
+            const auto* parsedChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed));
+            sprintf_s(message, "synthetic-folder-tree: ParseDisplayName assertion failed hr=0x%08X eaten=%u pidl=%u attrs=0x%08X name=%ls childAttrs=0x%08X",
+                static_cast<unsigned>(result), eaten, parsedChild ? 1u : 0u, static_cast<unsigned>(attributes),
+                parsedChild ? parsedChild->name : L"<null>", parsedChild ? parsedChild->attributes : 0u);
+            TraceSyntheticSortStage(message);
+        }
+        if (parsed) CoTaskMemFree(parsed);
+        if (!parsedFolder) { result = E_FAIL; goto cleanup; }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: parse-display-name-passed");
+
+    result = root->EnumObjects(nullptr, SHCONTF_NONFOLDERS, &enumerator);
+    if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    {
+        PITEMID_CHILD item = nullptr;
+        ULONG fetched = 0;
+        result = enumerator->Next(1, &item, &fetched);
+        const bool correctFile = result == S_OK && fetched == 1 && SyntheticData(item) &&
+            _wcsicmp(SyntheticData(item)->name, L"root.txt") == 0 &&
+            !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY);
+        if (item) CoTaskMemFree(item);
+        if (!correctFile) { result = E_FAIL; goto cleanup; }
+        item = nullptr;
+        result = enumerator->Next(1, &item, &fetched);
+        if (item) CoTaskMemFree(item);
+        if (result != S_FALSE || fetched != 0) { result = E_FAIL; goto cleanup; }
+    }
+    enumerator->Release();
+    enumerator = nullptr;
+    TraceSyntheticSortStage("synthetic-folder-tree: file-and-hidden-enumeration-passed");
+
+    result = root->EnumObjects(nullptr, static_cast<SHCONTF>(SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN), &enumerator);
+    if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    {
+        ULONG count = 0;
+        bool foundHidden = false;
+        for (;;)
+        {
+            PITEMID_CHILD item = nullptr;
+            ULONG fetched = 0;
+            result = enumerator->Next(1, &item, &fetched);
+            if (result == S_FALSE) break;
+            if (FAILED(result) || fetched != 1 || !SyntheticData(item))
+            {
+                if (item) CoTaskMemFree(item);
+                result = FAILED(result) ? result : E_FAIL;
+                goto cleanup;
+            }
+            ++count;
+            if (SyntheticData(item)->attributes & FILE_ATTRIBUTE_HIDDEN) foundHidden = true;
+            CoTaskMemFree(item);
+        }
+        if (count != 2 || !foundHidden) { result = E_FAIL; goto cleanup; }
+    }
+    enumerator->Release();
+    enumerator = nullptr;
+
+    result = root->BindToObject(childFolder, nullptr, IID_PPV_ARGS(&nested));
+    if (FAILED(result) || !nested) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    result = nested->QueryInterface(IID_PPV_ARGS(&nestedPersist));
+    if (FAILED(result) || !nestedPersist) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    result = nestedPersist->GetCurFolder(&nestedRootPidl);
+    if (FAILED(result) || !nestedRootPidl || !ILIsParent(rootPidl, nestedRootPidl, TRUE))
+    {
+        if (SUCCEEDED(result)) result = E_FAIL;
+        goto cleanup;
+    }
+    CoTaskMemFree(nestedRootPidl);
+    nestedRootPidl = nullptr;
+    nestedPersist->Release();
+    nestedPersist = nullptr;
+    result = nested->EnumObjects(nullptr, SHCONTF_NONFOLDERS, &nestedEnumerator);
+    if (FAILED(result) || !nestedEnumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    {
+        PITEMID_CHILD item = nullptr;
+        ULONG fetched = 0;
+        result = nestedEnumerator->Next(1, &item, &fetched);
+        const bool correctFile = result == S_OK && fetched == 1 && SyntheticData(item) &&
+            _wcsicmp(SyntheticData(item)->name, L"nested.txt") == 0;
+        if (item) CoTaskMemFree(item);
+        if (!correctFile) { result = E_FAIL; goto cleanup; }
+        item = nullptr;
+        result = nestedEnumerator->Next(1, &item, &fetched);
+        if (item) CoTaskMemFree(item);
+        if (result != S_FALSE || fetched != 0) { result = E_FAIL; goto cleanup; }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: nested-enumeration-passed");
+    {
+        WCHAR fileName[] = L"nested.txt";
+        ULONG eaten = 0;
+        PIDLIST_RELATIVE parsed = nullptr;
+        result = nested->ParseDisplayName(nullptr, nullptr, fileName, &eaten, &parsed, nullptr);
+        if (FAILED(result) || !parsed || eaten != ARRAYSIZE(fileName) - 1 ||
+            !SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed)) ||
+            _wcsicmp(SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed))->name, fileName) != 0)
+        {
+            if (parsed) CoTaskMemFree(parsed);
+            result = E_FAIL;
+            goto cleanup;
+        }
+        IStream* stream = nullptr;
+        result = nested->BindToStorage(parsed, nullptr, IID_PPV_ARGS(&stream));
+        CoTaskMemFree(parsed);
+        if (FAILED(result) || !stream) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        char contents[7]{};
+        ULONG bytesRead = 0;
+        result = stream->Read(contents, 6, &bytesRead);
+        stream->Release();
+        if (FAILED(result) || bytesRead != 6 || std::string(contents, 6) != "nested")
+        {
+            result = E_FAIL;
+            goto cleanup;
+        }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: nested-storage-passed");
+    nested->Release();
+    nested = nullptr;
+    result = S_OK;
+
+    {
+        PITEMID_CHILD renamedFolder = nullptr;
+        result = root->SetNameOf(nullptr, childFolder, L"renamed-child", SHGDN_INFOLDER, &renamedFolder);
+        const bool renamed = SUCCEEDED(result) && renamedFolder && SyntheticData(renamedFolder) &&
+            _wcsicmp(SyntheticData(renamedFolder)->name, L"renamed-child") == 0;
+        if (renamedFolder) CoTaskMemFree(renamedFolder);
+        if (!renamed || GetFileAttributesW((std::wstring(backingPath) + L"\\renamed-child\\nested.txt").c_str()) == INVALID_FILE_ATTRIBUTES)
+        {
+            result = E_FAIL;
+            goto cleanup;
+        }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-passed");
+
+cleanup:
+    if (nestedRootPidl) CoTaskMemFree(nestedRootPidl);
+    if (nestedPersist) nestedPersist->Release();
+    if (nestedEnumerator) nestedEnumerator->Release();
+    if (nested) nested->Release();
+    if (childFolder) CoTaskMemFree(childFolder);
+    if (enumerator) enumerator->Release();
+    if (root) root->Release();
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    return result;
 }
 
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()

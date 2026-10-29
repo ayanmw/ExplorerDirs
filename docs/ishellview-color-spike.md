@@ -1350,3 +1350,9 @@ Release NativeProbe 构建 0 警告/错误。该证据只覆盖隐藏私有桌�
 前台守卫现于主线程等待 Private Desktop worker 时每 25 ms 采样一次用户桌面的 `GetForegroundWindow()`。首次发现 HWND 不同，会记录 elapsed time 和当前最近阶段；当前拖放探针在源视图创建、目标视图创建、Copy 查询及清理前更新阶段标记。该监视只记录，不恢复前台、不取消调用，也不放宽最终前台守卫。
 
 NativeProbe Release build 0 警告/错误；随后仅重跑无 Shell-view 的 `SW_SHOWNOACTIVATE` STATIC 窗口控制，退出码 0，stage-at-return 已输出，`foreground-change-observed=False`，前后台 HWND 同为 `0x9901DE`。没有重跑 Shell-view 探针，因此尚无证据证明该监视能将先前前台变化定位到具体阶段。下一次 Shell-view 复验仍需先确认隔离桌面和前台守卫条件；若守卫变化，保留采样日志并判失败，不恢复前台。日志：`20261028-140547-3e07b6e4.stdout.log`。
+
+### 2026-10-29 合成文件夹树合同（无视图）
+
+隔离适配器由单层文件枚举扩为临时 filesystem-backed 文件夹树：根与子层都覆盖 folder/non-folder/hidden 过滤、`ParseDisplayName`、嵌套 `BindToObject` 与根 PIDL 往返，另验证 `BindToStorage(IStream)` 读取及 `SetNameOf` 实际重命名。初次合同失败定位到底层 filesystem `ParseDisplayName` 成功但不写 `eaten`；包装层在合成单项 PIDL 映射成功后填充消费字符数。
+
+原生 `/W4 /WX`、NativeProbe Release 构建与 tree/普通 PIDL/wrapped PIDL smoke 均通过，未创建 Shell view 或窗口。该证据只证明 namespace adapter 的文件夹合同，不包含 DefView、交互或产品兼容；原型仍未接入 Explorer Dirs。

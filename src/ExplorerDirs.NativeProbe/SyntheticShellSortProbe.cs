@@ -24,6 +24,31 @@ public static class SyntheticShellSortProbe
     private const uint DvaspectContent = 1;
     private const uint TymedHGlobal = 1;
 
+    internal static int RunFolderTreeContractSmoke()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellTree-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(fixture, "child"));
+            File.WriteAllText(Path.Combine(fixture, "root.txt"), "root");
+            var hiddenFile = Path.Combine(fixture, "hidden.txt");
+            File.WriteAllText(hiddenFile, "hidden");
+            File.SetAttributes(hiddenFile, File.GetAttributes(hiddenFile) | FileAttributes.Hidden);
+            File.WriteAllText(Path.Combine(fixture, "child", "nested.txt"), "nested");
+            var module = NativeLibrary.Load(FindAdapterLibrary());
+            try
+            {
+                var checkTree = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
+                    NativeLibrary.GetExport(module, "RunSyntheticFolderTreeContractSmoke"));
+                Check(checkTree(fixture));
+            }
+            finally { NativeLibrary.Free(module); }
+            Console.WriteLine("synthetic-shell-folder-tree-smoke: root-and-nested-file-enumeration=True; shell-view-created=False");
+            return 0;
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
+    }
+
     internal static int Run()
     {
         var foreground = GetForegroundWindow();
@@ -968,6 +993,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);

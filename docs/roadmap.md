@@ -4497,3 +4497,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 2026-10-29 IShellView 文件操作取消门槛：从 synthetic view 的 `SVGIO_SELECTION` 取得实际 Shell `IDataObject`，经 `IFileOperation::Advise` 连接进度 sink，并连续排入两次 `CopyItems`。`PreCopyItem` 第一次调用返回 `E_ABORT` 后，两轮均仅回调一次、`PerformOperations` 返回 `E_ABORT`、取消目标目录为空；`GetAnyOperationsAborted` 读数为 0，仍作为独立状态记录。两轮 Private Desktop watchdog exit 0、前台不变，临时注册/夹具/进程均已清理。仅是隔离默认 DefView 与本地临时文件证据，不代表产品对话框或真实用户取消验收。依据：[PreCopyItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperationprogresssink-precopyitem)。
 
 2026-10-29 多选 Copy 取消后视图状态：扩展同一隔离 NativeProbe，让 DefView 选中 `two.bin` 与 `z-ten.bin`，把 selection `IDataObject` 交给两次排队的 `IFileOperation::CopyItems`，并在 `PreCopyItem` 返回 `E_ABORT`。两轮完整 Private Desktop watchdog 均确认取消后仍选中 2 项，`two.bin` 保持 focused，目标目录为空，前台守卫和清理通过；Release build 0 警告/错误。之后一次附加 CIDA 计数实验读到 2 个子项，但整轮后来因前台 HWND 改变并在后续第二视图焦点断言失败而中止，因此不作为整轮通过记录，也不保留该额外断言。该验证仅覆盖隔离 DefView 的程序化 Copy 取消与多选/焦点保留，不代表产品 ExplorerBrowser 或真实用户取消行为。
+
+## 2026-10-29：合成 Shell 文件夹树合同（无视图）
+
+- NativeProbe 的临时合成 `IShellFolder2` 现在能枚举实际夹具中的目录与文件，遵循 folder/non-folder/hidden flags，并将子目录绑定为带正确根 PIDL 的下一层适配器；覆盖根/子层 `ParseDisplayName`、`GetCurFolder`、`BindToStorage(IStream)` 和真实隔离目录重命名。底层 filesystem `ParseDisplayName` 成功时不填写 `eaten`，适配层现按成功映射的名称长度返回该值。
+- 原生适配器 `/W4 /WX` 与 NativeProbe Release 构建通过，0 警告/错误；树级 smoke、既有普通 PIDL 合同及包装 PIDL 合同通过。smoke 创建并清理临时 fixture，未创建 `IShellView`、窗口或触发可见 UI。
+- 这补足 namespace 树和子文件夹存储合同，不证明 DefView/自绘列表的导航、焦点、菜单、拖放、通知或产品集成；产品仍使用 ExplorerBrowser。后续需在独立 Windows 会话里运行真实视图/输入门槛，再评审是否继续迁移。
