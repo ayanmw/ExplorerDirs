@@ -1302,6 +1302,85 @@ namespace
             verifyCopiedContents(L"second.txt", "second") ? S_OK : E_FAIL;
     }
 
+    HRESULT CopySyntheticSelectionCollisionWithoutUi(IDataObject* data, const std::wstring& backingPath)
+    {
+        if (!data) return E_INVALIDARG;
+        const auto destinationPath = backingPath + L"\\collision-destination";
+        if (!CreateDirectoryW(destinationPath.c_str(), nullptr)) return HRESULT_FROM_WIN32(GetLastError());
+        const auto existingPath = destinationPath + L"\\root.txt";
+        const auto existing = CreateFileW(existingPath.c_str(), GENERIC_WRITE, 0, nullptr,
+            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (existing == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        constexpr char existingContents[] = "keep-existing";
+        DWORD bytesWritten = 0;
+        const bool wroteExisting = WriteFile(existing, existingContents, sizeof(existingContents) - 1,
+            &bytesWritten, nullptr) && bytesWritten == sizeof(existingContents) - 1;
+        const DWORD writeError = wroteExisting ? ERROR_SUCCESS : GetLastError();
+        CloseHandle(existing);
+        if (!wroteExisting) return HRESULT_FROM_WIN32(writeError ? writeError : ERROR_WRITE_FAULT);
+
+        PIDLIST_ABSOLUTE destinationPidl = nullptr;
+        auto result = SHParseDisplayName(destinationPath.c_str(), nullptr, &destinationPidl, 0, nullptr);
+        IShellItem* destination = nullptr;
+        if (SUCCEEDED(result)) result = SHCreateItemFromIDList(destinationPidl, IID_PPV_ARGS(&destination));
+        if (destinationPidl) CoTaskMemFree(destinationPidl);
+
+        IFileOperation* operation = nullptr;
+        if (SUCCEEDED(result))
+            result = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&operation));
+        if (SUCCEEDED(result))
+            result = operation->SetOperationFlags(FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_RENAMEONCOLLISION);
+        if (SUCCEEDED(result)) result = operation->CopyItems(data, destination);
+        if (SUCCEEDED(result)) result = operation->PerformOperations();
+        if (SUCCEEDED(result))
+        {
+            BOOL aborted = FALSE;
+            result = operation->GetAnyOperationsAborted(&aborted);
+            if (SUCCEEDED(result) && aborted) result = E_ABORT;
+        }
+        if (operation) operation->Release();
+        if (destination) destination->Release();
+        if (FAILED(result)) return result;
+
+        const auto existingFile = CreateFileW(existingPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (existingFile == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        char actualExisting[32]{};
+        DWORD existingBytes = 0;
+        const bool preserved = ReadFile(existingFile, actualExisting, sizeof(actualExisting), &existingBytes, nullptr) &&
+            existingBytes == static_cast<DWORD>(sizeof(existingContents) - 1) &&
+            memcmp(actualExisting, existingContents, sizeof(existingContents) - 1) == 0;
+        CloseHandle(existingFile);
+        if (!preserved) return E_FAIL;
+
+        const auto copiedSecond = destinationPath + L"\\second.txt";
+        const auto second = CreateFileW(copiedSecond.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (second == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        char secondContents[16]{};
+        DWORD secondBytes = 0;
+        const bool copied = ReadFile(second, secondContents, sizeof(secondContents), &secondBytes, nullptr) &&
+            secondBytes == 6 && memcmp(secondContents, "second", 6) == 0;
+        CloseHandle(second);
+        if (!copied) return E_FAIL;
+
+        WIN32_FIND_DATAW entry{};
+        const auto search = FindFirstFileW((destinationPath + L"\\root*").c_str(), &entry);
+        if (search == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        bool foundCollisionCopy = false;
+        do
+        {
+            if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && _wcsicmp(entry.cFileName, L"root.txt") != 0)
+            {
+                foundCollisionCopy = true;
+                break;
+            }
+        } while (FindNextFileW(search, &entry));
+        FindClose(search);
+        return foundCollisionCopy ? S_OK : E_FAIL;
+    }
+
     class SyntheticChildEnumerator final : public IEnumIDList
     {
     public:
@@ -2498,11 +2577,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             goto cleanup;
         }
         result = TransferSyntheticSelectionWithoutUi(data, backingPath, false);
+        if (SUCCEEDED(result)) result = CopySyntheticSelectionCollisionWithoutUi(data, backingPath);
         data->Release();
         if (FAILED(result)) goto cleanup;
     }
     TraceSyntheticSortStage("synthetic-folder-tree: native-item-data-object-passed");
     TraceSyntheticSortStage("synthetic-folder-tree: multi-select-copyitems-passed");
+    TraceSyntheticSortStage("synthetic-folder-tree: copy-collision-rename-passed");
 
     result = root->EnumObjects(nullptr, static_cast<SHCONTF>(SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN), &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }

@@ -1380,3 +1380,7 @@ NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL 
 ### 2026-10-29 多选 `IDataObject` 到 IFileOperation 移动
 
 树级 smoke 对同一合成文件夹的双项 `IDataObject` 执行 `IFileOperation::MoveItems` 到临时目标目录，检查 `PerformOperations`、`GetAnyOperationsAborted`、源文件消失和目标内容一致。使用静默/无确认/无错误 UI flags，无 Shell view 或窗口。此证据覆盖本地同卷后台移动，不涵盖跨卷移动、剪切/粘贴 UI、Shell provider 互操作或产品 view notification。
+
+### 2026-10-29 多选 CopyItems 同名冲突
+
+临时目标预置 `root.txt` 且内容为 `keep-existing`；合成文件夹的双项 `IDataObject` 通过 `CopyItems` 复制，并启用 `FOF_RENAMEONCOLLISION` 及静默 flags。合同确认旧目标字节不变、无冲突文件成功复制、冲突文件以另一个名称落地，并检查中止状态。没有 UI 或 Shell view；这不代表产品冲突确认对话框已验证。

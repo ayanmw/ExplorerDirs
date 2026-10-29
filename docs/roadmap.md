@@ -4530,3 +4530,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 扩展树级临时 smoke：对原生 Shell 文件夹返回的双项 `IDataObject` 调用 `IFileOperation::MoveItems`，再执行 `PerformOperations` 并读取中止状态。两个源文件均消失，目标目录中内容逐项一致；源夹具在 smoke 退出时统一清理。
 - 操作继续使用 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，不显示进度/确认/错误对话框。原生 `/W4 /WX`、NativeProbe Release、树级 smoke 及普通/包装 PIDL smoke 通过，0 警告/错误。只证明无视图下本地 Shell 多选 MoveItems，不证明用户剪切/粘贴、跨卷、多 provider 或产品视图更新。
+
+## 2026-10-29：合成多选复制的同名冲突处理
+
+- 在临时目标目录预置内容为 `keep-existing` 的 `root.txt`，用合成文件夹提供的双项 `IDataObject` 调用 `IFileOperation::CopyItems`，启用 `FOF_RENAMEONCOLLISION` 与静默/无确认/无错误 UI flags。
+- 验证原目标内容完全保留、第二个非冲突文件复制成功，并且目录出现另一个 `root*` 文件；检查中止状态。NativeProbe Release 与原生 `/W4 /WX` 构建、树级和既有 PIDL smoke 通过。只证明本地 filesystem 的冲突重命名策略，不覆盖产品 UI 冲突对话框或 Shell provider。
