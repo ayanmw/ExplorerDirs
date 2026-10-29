@@ -15,18 +15,29 @@ internal static class ShellViewDropTargetProbe
     private static readonly Guid AsyncDataObjectId = new("3D8B0590-F691-11D2-8EA9-006097DF5BD4");
     private static readonly Guid FormatEnumeratorId = new("00000103-0000-0000-C000-000000000046");
     private const uint DropEffectCopy = 1;
+    private const uint DropEffectMove = 2;
     private const uint DropEffectMask = 7;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
     private const int DragDropSDrop = 0x00040100;
     private const int DragDropSCancel = 0x00040101;
 
-    internal static int Run() => RunCore(interactiveOleCopy: false);
+    internal static int Run() => RunCore(interactiveOleEffect: 0);
 
-    internal static int RunInteractiveOleCopy() => RunCore(interactiveOleCopy: true);
+    internal static int RunInteractiveOleCopy() => RunInteractiveOleTransfer(DropEffectCopy);
 
-    private static int RunCore(bool interactiveOleCopy)
+    internal static int RunInteractiveOleMove() => RunInteractiveOleTransfer(DropEffectMove);
+
+    internal static int RunInteractiveOleTransfer(uint requestedEffect)
     {
-        if (interactiveOleCopy && Console.IsInputRedirected)
+        if (requestedEffect is not (DropEffectCopy or DropEffectMove))
+            throw new ArgumentOutOfRangeException(nameof(requestedEffect));
+        return RunCore(requestedEffect);
+    }
+
+    private static int RunCore(uint interactiveOleEffect)
+    {
+        var interactiveOle = interactiveOleEffect != 0;
+        if (interactiveOle && Console.IsInputRedirected)
             throw new InvalidOperationException("The interactive OLE drop probe requires an attached console for its explicit start prompt.");
 
         var foreground = GetForegroundWindow();
@@ -70,13 +81,13 @@ internal static class ShellViewDropTargetProbe
             Marshal.WriteIntPtr(childPidls, relativeSource);
             Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 1, childPidls, 0, in DataObjectId, out dataObject));
 
-            var parentStyle = interactiveOleCopy ? 0x90000000u : 0x80000000u;
-            parent = CreateWindowExW(0, "STATIC", interactiveOleCopy
+            var parentStyle = interactiveOle ? 0x90000000u : 0x80000000u;
+            parent = CreateWindowExW(0, "STATIC", interactiveOle
                     ? "Explorer Dirs interactive OLE drop probe (temporary files only)"
                     : "Explorer Dirs isolated Shell drop target probe",
                 parentStyle, 20, 20, 680, 500, 0, 0, 0, 0); // Keep activation opt-in; Private Desktop probes show without activation.
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-            if (!interactiveOleCopy)
+            if (!interactiveOle)
             {
                 _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE preserves visibility without activating the isolated parent.
                 if (!IsWindowVisible(parent))
@@ -195,10 +206,14 @@ internal static class ShellViewDropTargetProbe
                 Y = boundsOnScreen.Top + Math.Max(1, boundsOnScreen.Bottom - boundsOnScreen.Top) / 2 };
 
             PrivateDesktopShellProbe.ReportStage("drop-target: query-and-copy-start");
-            if (interactiveOleCopy)
+            if (interactiveOle)
             {
                 System.Windows.Forms.Application.DoEvents();
-                Console.WriteLine("Move the pointer over the selected source file without clicking. Press Enter here, then press and drag the left mouse button into the target pane; release there. Escape cancels.");
+                var requestedOperation = interactiveOleEffect == DropEffectMove ? "Move" : "Copy";
+                var keyInstruction = interactiveOleEffect == DropEffectMove
+                    ? "Hold Shift while dragging and release over the target pane"
+                    : "Drag without modifier keys and release over the target pane";
+                Console.WriteLine($"Move the pointer over the selected source file without clicking. Press Enter here, then press and drag the left mouse button. {keyInstruction}. Escape cancels. Requested effect: {requestedOperation}.");
                 if (Console.ReadLine() is null)
                     throw new InvalidOperationException("The interactive OLE drop probe did not receive its explicit start confirmation.");
 
@@ -208,20 +223,28 @@ internal static class ShellViewDropTargetProbe
                 uint performedEffect;
                 try
                 {
-                    dragResult = ShellViewDragSource.RunOleLoop(dataObjectRcw, DropEffectCopy, 0x0001, out performedEffect);
+                    dragResult = ShellViewDragSource.RunOleLoop(dataObjectRcw, interactiveOleEffect, 0x0001, out performedEffect);
                 }
                 finally { _ = Marshal.ReleaseComObject(dataObjectRcw); }
 
                 System.Windows.Forms.Application.DoEvents();
-                var copied = File.Exists(selectedTargetPath) &&
+                var targetHasExpectedContents = File.Exists(selectedTargetPath) &&
                     File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture";
-                var sourceStillExists = File.Exists(selectedSourcePath) &&
+                var sourceHasExpectedContents = File.Exists(selectedSourcePath) &&
                     File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture";
-                Console.WriteLine($"shell-view-ole-drop-copy: result=0x{dragResult:X8}; effect=0x{performedEffect:X}; copied={copied}; source-preserved={sourceStillExists}; interactive-input=True");
+                var sourceStateMatchesEffect = interactiveOleEffect == DropEffectCopy
+                    ? sourceHasExpectedContents
+                    : !File.Exists(selectedSourcePath);
+                Console.WriteLine($"shell-view-ole-drop-transfer: requested-effect=0x{interactiveOleEffect:X}; result=0x{dragResult:X8}; performed-effect=0x{performedEffect:X}; target-content-valid={targetHasExpectedContents}; source-state-valid={sourceStateMatchesEffect}; source-exists={File.Exists(selectedSourcePath)}; interactive-input=True");
 
-                if (dragResult == DragDropSCancel) return 0;
+                if (dragResult == DragDropSCancel)
+                {
+                    Console.WriteLine("shell-view-ole-drop-transfer: cancelled=True; acceptance=not-run");
+                    return 2;
+                }
                 if (dragResult < 0) Marshal.ThrowExceptionForHR(dragResult);
-                return dragResult == DragDropSDrop && performedEffect == DropEffectCopy && copied && sourceStillExists ? 0 : 1;
+                return dragResult == DragDropSDrop && performedEffect == interactiveOleEffect &&
+                    targetHasExpectedContents && sourceStateMatchesEffect ? 0 : 1;
             }
 
             var viewTargetResult = viewDropTarget != 0 && TryTransfer(viewDropTarget, dataObject, point,
@@ -290,8 +313,8 @@ internal static class ShellViewDropTargetProbe
             if (targetFolderPidl != 0) Marshal.FreeCoTaskMem(targetFolderPidl);
             if (selectedSourcePidl != 0) Marshal.FreeCoTaskMem(selectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
-            if (interactiveOleCopy)
-                CleanupParentWindow(parent, interactiveOleCopy: true);
+            if (interactiveOle)
+                CleanupParentWindow(parent, interactiveOle: true);
             else
             {
                 if (sourcePane != 0 && !DestroyWindow(sourcePane))
@@ -306,9 +329,9 @@ internal static class ShellViewDropTargetProbe
         }
     }
 
-    internal static void CleanupParentWindow(nint parent, bool interactiveOleCopy)
+    internal static void CleanupParentWindow(nint parent, bool interactiveOle)
     {
-        if (!interactiveOleCopy || parent == 0) return;
+        if (!interactiveOle || parent == 0) return;
         if (!DestroyWindow(parent))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }

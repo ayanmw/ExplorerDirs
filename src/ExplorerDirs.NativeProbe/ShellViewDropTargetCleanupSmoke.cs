@@ -21,10 +21,10 @@ internal static class ShellViewDropTargetCleanupSmoke
             if (privateDesktopParent == 0 || interactiveParent == 0 || interactivePane == 0)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
 
-            ShellViewDropTargetProbe.CleanupParentWindow(privateDesktopParent, interactiveOleCopy: false);
+            ShellViewDropTargetProbe.CleanupParentWindow(privateDesktopParent, interactiveOle: false);
             Check(IsWindow(privateDesktopParent), "Private Desktop top-level windows remain for watchdog cleanup");
 
-            ShellViewDropTargetProbe.CleanupParentWindow(interactiveParent, interactiveOleCopy: true);
+            ShellViewDropTargetProbe.CleanupParentWindow(interactiveParent, interactiveOle: true);
             Check(!IsWindow(interactiveParent) && !IsWindow(interactivePane),
                 "interactive probe top-level window and pane children are destroyed during cleanup");
             interactiveParent = 0;

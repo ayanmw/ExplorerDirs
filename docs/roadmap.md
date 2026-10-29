@@ -4544,3 +4544,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 复制完成后重新绑定合成 `copy-destination` 文件夹并枚举两份生成文件，从该文件夹取得多选 `IDataObject`，交给 `IFileOperation::DeleteItems`；执行后检查 `GetAnyOperationsAborted` 并确认两个副本路径消失。
 - 删除范围限定在本轮临时 fixture 副本，保留根目录源文件供后续 `MoveItems` 检查。该验证补充无视图的本地批量删除合同，不代表产品撤销/回收站语义、可见交互或 ExplorerBrowser/IShellView 的视图更新。
+
+## 2026-10-29：准备真实 OLE Copy/Move 验收入口
+
+- 隔离的可见 `IShellView` 拖放原型现提供明确分开的 OLE Copy 与 Shift+Move 入口，只允许本次指定的效果；完成后分别断言报告的 effect、目标内容和源项保留/移除状态。用户取消时会以非通过状态退出并记录 `acceptance=not-run`，避免把取消误报为验收通过。
+- NativeProbe Release build 通过（0 警告、0 错误）；无可见 Shell view 的清理 smoke 通过，确认交互窗口清理与 Private Desktop 窗口保留路径，并确认前台未变化。`git diff --check` 通过。
+- 本批次没有启动交互窗口，也没有实际调用 `DoDragDrop`；因此真实鼠标 Copy/Shift+Move、Shell 目标接受效果及源项变化仍未验证，IShellView 迁移门槛保持开放。产品仍使用 ExplorerBrowser。
