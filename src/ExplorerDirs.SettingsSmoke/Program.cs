@@ -55,6 +55,12 @@ if (args is ["--folder-open-router-protocol-smoke"])
     return;
 }
 
+if (args is ["--shell-selection-folder-resolver-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ShellSelectionFolderResolverSmoke.Run();
+    return;
+}
+
 if (args is ["--folder-open-router-no-target-smoke"])
 {
     var activationRoot = Path.Combine(Path.GetTempPath(), $"ExplorerDirs.ActivationSmoke.{Guid.NewGuid():N}");

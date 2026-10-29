@@ -5161,14 +5161,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     return null;
                 try
                 {
-                    if (item.GetAttributes(0x20000000, out var attributes) < 0 || (attributes & 0x20000000) == 0 ||
+                    if (item.GetAttributes(0x20000000, out var attributes) < 0 ||
                         item.GetDisplayName(0x80028000, out var name) < 0 || name == IntPtr.Zero) return null;
                     try
                     {
-                        var identity = Marshal.PtrToStringUni(name);
-                        if (identity is null || !ShellLocationIdentity.TryGetFolderPidl(identity, out var pidl)) return null;
-                        Marshal.FreeCoTaskMem(pidl);
-                        return identity;
+                        return ShellSelectionFolderResolver.TryResolve(Marshal.PtrToStringUni(name), attributes, out var identity)
+                            ? identity
+                            : null;
                     }
                     finally { Marshal.FreeCoTaskMem(name); }
                 }
@@ -5182,9 +5181,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal bool OpenSelectedFolderInNewTab(Action<string> openPath)
     {
-        var selected = GetSelectedItem();
-        if (selected is not { IsFileSystemFolder: true }) return false;
-        openPath(selected.Path);
+        var identity = GetSelectedFolderLocation();
+        if (identity is null) return false;
+        openPath(identity);
         return true;
     }
 
