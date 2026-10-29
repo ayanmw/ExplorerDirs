@@ -1220,6 +1220,7 @@ namespace
     volatile LONG g_syntheticGetAttributesOfCount = 0;
     volatile LONG g_syntheticFilesystemAttributeCount = 0;
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
+    volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
@@ -2014,6 +2015,23 @@ namespace
             if (!attributes) return E_POINTER;
             if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
             if (!_inner) return E_UNEXPECTED;
+            if (InterlockedCompareExchange(&g_syntheticOwnAttributesForProbe, 0, 0))
+            {
+                const SFGAOF requested = *attributes;
+                SFGAOF supported = static_cast<SFGAOF>(~0u);
+                for (UINT index = 0; index < count; ++index)
+                {
+                    const auto* child = SyntheticData(items[index]);
+                    if (!child) return E_INVALIDARG;
+                    const SFGAOF itemAttributes = (child->attributes & FILE_ATTRIBUTE_DIRECTORY)
+                        ? SFGAO_FOLDER | SFGAO_HASSUBFOLDER
+                        : SFGAO_STREAM;
+                    supported &= itemAttributes;
+                }
+                *attributes = requested & supported;
+                InterlockedIncrement(&g_syntheticGetAttributesOfCount);
+                return S_OK;
+            }
             std::vector<PITEMID_CHILD> original;
             try { original.resize(count, nullptr); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -2997,6 +3015,8 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticOtherUiObjectRequests, 0);
     InterlockedExchange(&g_syntheticGetAttributesOfCount, 0);
     InterlockedExchange(&g_syntheticFilesystemAttributeCount, 0);
+    InterlockedExchange(&g_syntheticMaskFilesystemAttributes, 0);
+    InterlockedExchange(&g_syntheticOwnAttributesForProbe, 0);
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
@@ -3103,6 +3123,12 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticFilesystemAttributeCoun
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticMaskFilesystemAttributesForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticMaskFilesystemAttributes, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticOwnAttributesForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 

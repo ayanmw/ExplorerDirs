@@ -53,9 +53,10 @@ public static class SyntheticShellSortProbe
     }
 
     internal static int RunRecursiveDirectorySizeSort() =>
-        Run(recursiveDirectorySizeSortOnly: true, maskFilesystemAttributes: true);
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true);
 
-    internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false)
+    internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
+        bool selfOwnedAttributes = false)
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -114,6 +115,8 @@ public static class SyntheticShellSortProbe
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticMaskFilesystemAttributesForProbe"))(maskFilesystemAttributes ? 1 : 0));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticOwnAttributesForProbe"))(selfOwnedAttributes ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
@@ -179,7 +182,7 @@ public static class SyntheticShellSortProbe
                 var ascendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
                 var descendingNames = SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: 2);
                 var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{string.Join('|', ascendingNames)}]; descending=[{string.Join('|', descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{string.Join('|', ascendingNames)}]; descending=[{string.Join('|', descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 var displayedDirectorySize = childIndex >= 0 && initialSizes[childIndex].Contains("10", StringComparison.Ordinal);
                 if (!displayedDirectorySize ||
