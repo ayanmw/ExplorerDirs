@@ -49,6 +49,8 @@ try {
     $directoryPath = "$ownedBase\Directory\shell\ExplorerDirs.Open"
     $directoryKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($directoryPath, $false)
     try {
+        Assert ($directoryKey.GetValue('') -eq '在 Explorer Dirs 中打开') `
+            'the folder context-menu label must match the Chinese application UI'
         $expectedCommand = '"' + $executable + '" "%1"'
         Assert ($directoryKey.GetValue('command') -eq $null) 'the verb key must not store its command at the wrong level'
         $commandKey = $directoryKey.OpenSubKey('command', $false)

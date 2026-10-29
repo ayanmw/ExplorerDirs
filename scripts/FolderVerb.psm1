@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $verbName = 'ExplorerDirs.Open'
 $owner = 'ExplorerDirs.FolderVerb.v1'
-$label = 'Open in Explorer Dirs'
+$label = '在 Explorer Dirs 中打开'
 
 function Get-VerbPaths([string]$basePath) {
     @(
