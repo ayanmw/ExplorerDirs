@@ -6,6 +6,26 @@ internal static class WindowsExplorerProcessIdentitySmoke
 {
     internal static void Run()
     {
+        var shellHandleGate = typeof(WindowsExplorerRestarter).GetMethod(
+            "IsExpectedShellProcess", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Check(shellHandleGate is not null,
+            "termination requires an identity check for the already-open process handle");
+        bool IsExpectedShellProcess(uint originalShellPid, uint openedHandlePid, uint currentShellPid,
+            string? actualPath, string expectedPath) => (bool)shellHandleGate!.Invoke(null,
+                [originalShellPid, openedHandlePid, currentShellPid, actualPath, expectedPath])!;
+        Check(IsExpectedShellProcess(100, 100, 100,
+                @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
+            "the opened handle is the current desktop Shell and points to Windows Explorer");
+        Check(!IsExpectedShellProcess(100, 101, 100,
+                @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
+            "a handle opened for a reused or different PID is rejected");
+        Check(!IsExpectedShellProcess(100, 100, 101,
+                @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
+            "a changed desktop Shell prevents termination of the previously opened process");
+        Check(!IsExpectedShellProcess(100, 100, 100,
+                @"C:\Tools\custom-shell.exe", @"C:\Windows\explorer.exe"),
+            "a process handle with a different executable image is rejected");
+
         Check(WindowsExplorerRestarter.MatchesExpectedExecutable(
                 @"C:\Windows\explorer.exe", @"C:\Windows\explorer.exe"),
             "the registered Windows Explorer executable is allowed");

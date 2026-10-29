@@ -2,11 +2,18 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace ExplorerDirs.App;
 
 internal static class WindowsExplorerRestarter
 {
+    private const uint ProcessTerminate = 0x0001;
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint Synchronize = 0x00100000;
+    private const uint WaitObject0 = 0;
+    private const uint WaitTimeout = 0x00000102;
     private static readonly TimeSpan ShellRestartGracePeriod = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan FallbackShellRecoveryPeriod = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ShellRecoveryPollInterval = TimeSpan.FromMilliseconds(100);
@@ -23,17 +30,29 @@ internal static class WindowsExplorerRestarter
         if (!File.Exists(explorerPath))
             throw new FileNotFoundException("找不到 Windows 资源管理器程序，未结束任何进程。", explorerPath);
 
-        using var shellProcess = Process.GetProcessById((int)shellProcessId);
-        if (!MatchesExpectedExecutable(shellProcess.MainModule?.FileName, explorerPath))
+        using var shellProcessHandle = OpenProcess(
+            ProcessTerminate | ProcessQueryLimitedInformation | Synchronize, false, shellProcessId);
+        if (shellProcessHandle.IsInvalid)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法打开桌面 Shell 进程；未结束任何进程。");
+
+        var openedProcessId = GetProcessId(shellProcessHandle);
+        var executablePath = ReadProcessImagePath(shellProcessHandle);
+        if (!MatchesExpectedExecutable(executablePath, explorerPath))
             throw new InvalidOperationException("桌面 Shell 不是由 Windows 自带的 explorer.exe 承载；未结束任何进程。");
 
-        if (!IsCurrentShellProcess(shellProcessId, () =>
-                TryGetShellProcessId(out var currentProcessId) ? currentProcessId : 0))
+        if (!IsExpectedShellProcess(shellProcessId, openedProcessId,
+                TryGetShellProcessId(out var currentProcessId) ? currentProcessId : 0,
+                executablePath, explorerPath))
             throw new InvalidOperationException("桌面 Shell 已变化；未结束任何进程。");
 
-        shellProcess.Kill();
-        if (!shellProcess.WaitForExit((int)ShellRestartGracePeriod.TotalMilliseconds))
+        if (!TerminateProcess(shellProcessHandle, 0))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法结束桌面 Shell 进程。");
+
+        var waitResult = WaitForSingleObject(shellProcessHandle, (uint)ShellRestartGracePeriod.TotalMilliseconds);
+        if (waitResult == WaitTimeout)
             throw new TimeoutException("Windows Shell 进程未能在 3 秒内退出。");
+        if (waitResult != WaitObject0)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "等待 Windows Shell 进程退出失败。");
 
         // Windows may automatically relaunch the registered shell after its process exits.
         if (WaitForExpectedReplacementShell(shellProcessId, explorerPath,
@@ -108,6 +127,12 @@ internal static class WindowsExplorerRestarter
     internal static bool IsCurrentShellProcess(uint expectedProcessId, Func<uint> readCurrentProcessId) =>
         expectedProcessId != 0 && readCurrentProcessId() == expectedProcessId;
 
+    internal static bool IsExpectedShellProcess(uint originalShellProcessId, uint openedHandleProcessId,
+        uint currentShellProcessId, string? actualPath, string expectedPath) =>
+        originalShellProcessId != 0 && openedHandleProcessId == originalShellProcessId &&
+        currentShellProcessId == originalShellProcessId &&
+        MatchesExpectedExecutable(actualPath, expectedPath);
+
     internal static bool IsExpectedReplacementShell(uint previousProcessId, uint currentProcessId,
         string? actualPath, string? expectedPath) =>
         previousProcessId != 0 && currentProcessId != 0 && currentProcessId != previousProcessId &&
@@ -120,14 +145,24 @@ internal static class WindowsExplorerRestarter
 
         try
         {
-            using var process = Process.GetProcessById((int)currentProcessId);
-            return (currentProcessId, process.MainModule?.FileName);
+            using var processHandle = OpenProcess(ProcessQueryLimitedInformation, false, currentProcessId);
+            if (processHandle.IsInvalid) return (currentProcessId, null);
+            return (GetProcessId(processHandle), ReadProcessImagePath(processHandle));
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        catch (Win32Exception)
         {
             // A Shell process can exit between reading GetShellWindow and opening its process handle.
             return (currentProcessId, null);
         }
+    }
+
+    private static string? ReadProcessImagePath(SafeProcessHandle processHandle)
+    {
+        var path = new StringBuilder(32768);
+        uint pathLength = (uint)path.Capacity;
+        if (!QueryFullProcessImageName(processHandle, 0, path, ref pathLength)) return null;
+        path.Length = checked((int)pathLength);
+        return path.ToString();
     }
 
     [DllImport("user32.dll")]
@@ -135,4 +170,23 @@ internal static class WindowsExplorerRestarter
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(nint windowHandle, out uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true,
+        EntryPoint = "QueryFullProcessImageNameW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle processHandle, uint flags,
+        StringBuilder executableName, ref uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetProcessId(SafeProcessHandle processHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(SafeProcessHandle processHandle, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
 }
