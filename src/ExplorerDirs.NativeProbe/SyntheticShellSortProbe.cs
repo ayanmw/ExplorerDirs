@@ -390,11 +390,25 @@ internal static class SyntheticShellSortProbe
             var refreshCountBeforeCancel = deferredRefreshCounter();
             var pendingRefreshes = Marshal.GetDelegateForFunctionPointer<SchedulePendingRefreshes>(NativeLibrary.GetExport(module, "ScheduleSyntheticSortRefreshesForProbe"))();
             if (pendingRefreshes != 2) throw new InvalidOperationException($"Expected to schedule one pending refresh per view, got {pendingRefreshes}.");
+            Check(At<DestroyViewWindow>(view, 10)(view));
+            viewWindowCreated = false;
+            Check(At<GetWindow>(view, 3)(view, out var destroyedViewWindow));
+            Check(At<DestroyViewWindow>(view2, 10)(view2));
+            viewWindowCreated2 = false;
+            Check(At<GetWindow>(view2, 3)(view2, out var destroyedViewWindow2));
+            var shellViewsDestroyed = !IsWindow(destroyedViewWindow) && !IsWindow(destroyedViewWindow2);
+            if (!shellViewsDestroyed) throw new InvalidOperationException("IShellView.DestroyViewWindow returned, but a view HWND remained alive.");
+            Console.WriteLine("synthetic-shell-size-sort: both-view-hwnds-destroyed-before-pending-refresh");
+            Pump(400);
+            var callbacksAfterViewDestroy = deferredRefreshCounter() - refreshCountBeforeCancel;
+            Console.WriteLine($"synthetic-shell-size-sort: callbacks-after-view-window-destroy={callbacksAfterViewDestroy}");
+            if (callbacksAfterViewDestroy != 2)
+                throw new InvalidOperationException($"Expected both queued view refresh callbacks to run after DestroyViewWindow, got {callbacksAfterViewDestroy}.");
             Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             Pump(400);
-            if (deferredRefreshCounter() != refreshCountBeforeCancel)
+            if (deferredRefreshCounter() != refreshCountBeforeCancel + callbacksAfterViewDestroy)
                 throw new InvalidOperationException("A deferred refresh callback ran after the probe released both view holds.");
-            Console.WriteLine("synthetic-shell-size-sort: pending-refresh-cancelled-on-release=2; callbacks-after-release=0");
+            Console.WriteLine($"synthetic-shell-size-sort: pending-refresh-cancelled-on-release=2; callbacks-after-release=0; destroyed-view-refreshes={callbacksAfterViewDestroy}");
             return 0;
         }
         finally
@@ -710,6 +724,7 @@ internal static class SyntheticShellSortProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
