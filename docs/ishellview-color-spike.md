@@ -128,6 +128,12 @@ NativeProbe 增加了独立 `IDropSource` COM 对象，按启动拖动时的鼠�
 
 这验证单一宿主可在同一 STA 并存管理四个 HWND 注册、选择性撤销及集中释放，重复注册失败不会取代既有 owner；仍使用普通 STATIC HWND 与假 `IDropTarget`，不证明 Shell 文件夹目标是否能注册在真实 view HWND，也未调用 `DoDragDrop`。
 
+### 2026-10-30：drop target 重复撤销的幂等清理
+
+先扩展注册生命周期 smoke：在两份测试 HWND 注册后，直接撤销第二个 HWND，再 Dispose 宿主。原实现按预期复现失败，`RevokeDragDrop` 返回 `DRAGDROP_E_NOTREGISTERED (0x80040100)`，在释放其对应 `OleInitialize` 计数前抛异常，且中断了兄弟窗口注册的清理。修复将“目标已不注册”视为撤销已完成，仍对 STA 线程校验并平衡 `OleUninitialize`；其它 HRESULT 继续报错。微软文档确认该结果码表示指定 HWND 没有已注册的 drop target，`RevokeDragDrop` 同时会释放目标接口引用。
+
+修复后 NativeProbe Release build 0 警告/错误，扩展 smoke 通过；确认已外部撤销的 HWND 可被宿主正常释放，兄弟 HWND 也可再次注册，既有四 pane/重复注册/选择性撤销/整体 Dispose 回归保持通过，前台不变。此处证明的是注册释放的幂等与 OLE 初始化计数平衡；不覆盖真实 `IShellView` HWND、`DoDragDrop`、文件传输或产品接线。
+
 ## 2026-10-27：拒绝无效的 OLE 宿主窗口句柄
 
 `StreamViewHost.GetWindow` 现在在父 HWND 为零或已失效时将输出清零并返回 `E_FAIL`，有效 HWND 才返回 `S_OK`。之前实现会对无窗口宿主返回 `S_OK` 和零句柄，违背 `IOleWindow::GetWindow` 的失败语义。

@@ -4565,3 +4565,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 守卫同时记录用户桌面前台从 LockApp HWND 变为 0，输入时间戳也变化，原因未知。探针进程退出，唯一 GUID 临时夹具已逐项检查并清理；没有主动切换或恢复前台。自动放置策略不再重试，临时探针代码已撤销。日志：`src/.state/native-probe-watchdog/20261030-000138-46fb9cf9.stdout.log`。
 - 该尝试不是产品缺陷复现，也不能证明 Shell 已到达目标 `Drop`。真实鼠标拖放及 `DoDragDrop` 端到端迁移门槛仍未通过；Explorer Dirs 产品继续使用 ExplorerBrowser。后续若重新验证，需安排用户可见且明确授权的交互验收，由用户控制拖动与取消。
 - 事后静态对照发现试验源没有等待发起鼠标键按下，而现有隔离 `IDropSource` 先确认按下、再等待释放；微软说明 OLE 会在输入状态变化时调用 `QueryContinueDrag`。这可能解释无输入试验一直未推进，但缺少回调计数和线程栈，仍是待证假设。随后重跑既有 `--shell-view-drop-target-registration-smoke` 通过（四 HWND、重复注册拒绝、选择性撤销、Dispose 清理及前台不变），仅确认注册生命周期合同，不补足真实 OLE 拖放证据。
+
+## 2026-10-30：隔离 OLE drop target 重复撤销修复
+
+- 在注册生命周期 smoke 中复现：宿主持有两个 HWND 注册时，若第二个注册已被撤销，再 Dispose 会收到 `DRAGDROP_E_NOTREGISTERED (0x80040100)` 并中断其它清理。新增幂等处理：把此 HRESULT 当作目标已撤销，平衡对应 `OleInitialize`；其它 HRESULT 仍失败。
+- 回归先按预期失败，修复后 NativeProbe Release build 0 警告/错误，扩展 smoke 通过：预撤销的目标清理成功，兄弟 HWND 可重新注册；原四 HWND、多 host 冲突、选择性撤销、整体 Dispose 和前台不变检查均保持通过。该结果不验证 Shell view 上的实际拖放或产品行为。

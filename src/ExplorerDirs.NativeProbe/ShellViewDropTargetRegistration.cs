@@ -5,6 +5,7 @@ namespace ExplorerDirs.NativeProbe;
 // The host owns this registration and must dispose it before destroying the Shell view HWND.
 internal sealed class ShellViewDropTargetRegistration : IDisposable
 {
+    private const int DragDropENotRegistered = unchecked((int)0x80040100);
     private readonly nint _window;
     private readonly uint _threadId;
     private bool _registered = true;
@@ -39,7 +40,8 @@ internal sealed class ShellViewDropTargetRegistration : IDisposable
             throw new InvalidOperationException("The OLE drop target must be revoked on the STA thread that registered it.");
 
         var hr = RevokeDragDrop(_window);
-        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        // Repeated cleanup is complete when OLE has already removed this HWND registration.
+        if (hr < 0 && hr != DragDropENotRegistered) Marshal.ThrowExceptionForHR(hr);
         _registered = false;
         OleUninitialize();
     }

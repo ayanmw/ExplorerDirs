@@ -60,7 +60,8 @@ internal static class ShellViewDropTargetRegistrationSmoke
 
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The hidden drop-target registration smoke changed the foreground window.");
-            Console.WriteLine("shell-view-drop-target-registration-smoke=passed; four-pane-single-host=True; duplicate-owner-rollback=True; selective-revoke=True; dispose-revokes-rest=True; foreground-unchanged=True");
+            VerifyAlreadyRevokedTargetDoesNotAbortCleanup();
+            Console.WriteLine("shell-view-drop-target-registration-smoke=passed; four-pane-single-host=True; duplicate-owner-rollback=True; selective-revoke=True; dispose-revokes-rest=True; already-revoked-target-is-idempotent=True; foreground-unchanged=True");
             return 0;
         }
         finally
@@ -78,8 +79,61 @@ internal static class ShellViewDropTargetRegistrationSmoke
         if (hr < 0) Marshal.ThrowExceptionForHR(hr);
     }
 
+    private static void VerifyAlreadyRevokedTargetDoesNotAbortCleanup()
+    {
+        var windows = new List<nint>();
+        var targets = new List<nint>();
+        StreamViewHost? host = null;
+        var disposeFailed = false;
+        try
+        {
+            host = new StreamViewHost(0, []);
+            for (var pane = 0; pane < 2; pane++)
+            {
+                var window = CreateWindowExW(0, "STATIC", $"Explorer Dirs stale drop target pane {pane + 1}",
+                    0, -10000, -10000, 40, 40, 0, 0, 0, 0);
+                if (window == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                windows.Add(window);
+                var target = Marshal.GetComInterfaceForObject(new SmokeDropTarget(), typeof(ISmokeDropTarget));
+                targets.Add(target);
+                host.RegisterDropTarget(window, target);
+            }
+
+            // Simulate OLE having already removed one target before its owner retires.
+            Check(RevokeDragDrop(windows[1]));
+            try
+            {
+                host.Dispose();
+                host = null;
+            }
+            catch
+            {
+                disposeFailed = true;
+                throw;
+            }
+
+            var reuseResult = RegisterDragDrop(windows[0], targets[0]);
+            Check(reuseResult);
+            Check(RevokeDragDrop(windows[0]));
+            Console.WriteLine("PASS Dispose tolerates an already-revoked HWND and still clears sibling registrations");
+        }
+        finally
+        {
+            if (disposeFailed)
+            {
+                // Restore the test STA after proving the current failure path leaks its OLE init references.
+                foreach (var window in windows) _ = RevokeDragDrop(window);
+                foreach (var _ in windows) OleUninitialize();
+            }
+            else host?.Dispose();
+            foreach (var target in targets) Marshal.Release(target);
+            foreach (var window in windows) _ = DestroyWindow(window);
+        }
+    }
+
     [DllImport("ole32.dll")] private static extern int RegisterDragDrop(nint window, nint target);
     [DllImport("ole32.dll")] private static extern int RevokeDragDrop(nint window);
+    [DllImport("ole32.dll")] private static extern void OleUninitialize();
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint CreateWindowExW(uint exStyle, string className, string windowName, uint style,
         int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
