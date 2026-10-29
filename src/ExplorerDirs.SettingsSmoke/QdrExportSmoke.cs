@@ -27,6 +27,20 @@ internal static class QdrExportSmoke
             widthRoundTrip.NavigationTreeWidths == treeWidths &&
             widthRoundTrip.Proportions?.GetValueOrDefault(state.Layout) == proportions[state.Layout],
             "extension v4 round-trips all five independent navigation-tree widths with layout proportions");
+        var splitState = state with
+        { QdrTreeSplits = new QdrTreeSplitState("002500", null, "17", "2147483647") };
+        var splitText = QdrExporter.Render(splitState, pins);
+        var splitRoundTrip = QdrImporter.Parse(splitText, (value, _) => value);
+        Check(splitText.Contains("Tree1split=002500\r\n") &&
+            !splitText.Contains("Tree2split=", StringComparison.Ordinal) &&
+            splitText.Contains("Tree3split=17\r\n") &&
+            splitRoundTrip.QdrTreeSplits == splitState.QdrTreeSplits &&
+            splitRoundTrip.ExtendedState?.QdrTreeSplits == splitState.QdrTreeSplits,
+            "opaque Q-Dir split values preserve exact native pane keys and text through export/import");
+        var editedSplitText = splitText.Replace("Tree1split=002500", "Tree1split=2500", StringComparison.Ordinal);
+        var editedSplit = QdrImporter.Parse(editedSplitText, (value, _) => value);
+        Check(editedSplit.ExtendedState is null && editedSplit.QdrTreeSplits?.Pane1 == "2500",
+            "editing a preserved Q-Dir split base field invalidates the stale application extension");
         var backupPath = Path.Combine(root, "qdr-background-backup", "session.bak");
         var backupWarnings = Task.Run(() => QdrExporter.SaveBackup(backupPath, state, pins,
             proportions, treeWidths)).GetAwaiter().GetResult();

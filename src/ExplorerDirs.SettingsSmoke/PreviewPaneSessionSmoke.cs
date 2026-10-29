@@ -10,7 +10,7 @@ internal static class PreviewPaneSessionSmoke
         var details = new SessionState(4, 4,
             [[new TabSettings(@"C:\details", ViewState.Default(), detailsPaneVisible: true)], [], [], []]);
         var rendered = SessionStore.Render(visible);
-        Require(rendered.Contains("FormatVersion=11", StringComparison.Ordinal), "shell pane session advances to v11");
+        Require(rendered.Contains("FormatVersion=12", StringComparison.Ordinal), "shell pane session advances to v12");
         Require(rendered.Contains("PreviewPaneVisible=true", StringComparison.Ordinal), "visible preview state is written per tab");
         Require(SessionStore.ParseComplete(rendered)?.Panes[0][0].PreviewPaneVisible == true,
             "visible preview state round-trips");
@@ -20,7 +20,7 @@ internal static class PreviewPaneSessionSmoke
                 SessionStore.ParseComplete(detailsText)?.Panes[0][0].PreviewPaneVisible == false,
             "visible details state round-trips exclusively");
 
-        var version7 = rendered.Replace("FormatVersion=11", "FormatVersion=7", StringComparison.Ordinal)
+        var version7 = rendered.Replace("FormatVersion=12", "FormatVersion=7", StringComparison.Ordinal)
             .Replace("DetailsPaneVisible=false" + Environment.NewLine, string.Empty, StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(version7)?.Panes[0][0].PreviewPaneVisible == true &&
                 SessionStore.ParseComplete(version7)?.Panes[0][0].DetailsPaneVisible == false,
@@ -47,9 +47,9 @@ internal static class PreviewPaneSessionSmoke
         var store = new SessionStore(path, Path.Combine(folder, "missing.json"));
         Require(store.Load() is not null, "v7 session remains readable before upgrade");
         store.Save(visible);
-        var backups = Directory.GetFiles(folder, "ExplorerDirs.ini.before-v11-*.bak");
+        var backups = Directory.GetFiles(folder, "ExplorerDirs.ini.before-v12-*.bak");
         Require(backups.Length == 1 && File.ReadAllText(backups[0]) == version7,
-            "v7 session is backed up exactly before writing v11");
+            "v7 session is backed up exactly before writing v12");
         Require(SessionStore.ParseComplete(File.ReadAllText(path))?.Panes[0][0].PreviewPaneVisible == true,
             "upgraded session retains enabled preview state");
         Console.WriteLine("Shell pane session smoke: PASS");

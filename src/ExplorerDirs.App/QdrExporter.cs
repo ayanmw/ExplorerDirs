@@ -16,7 +16,7 @@ internal static class QdrExporter
         Dictionary<int, LayoutProportions>? Proportions = null,
         NavigationTreeWidths? NavigationTreeWidths = null);
     private static readonly Regex BaseKey = new(
-        @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4]|SP[0-2]|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
+        @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|SP[0-2]|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     // Call only on a state-only background worker: Shell binding may wait for remote providers.
@@ -80,6 +80,14 @@ internal static class QdrExporter
         };
         for (var pane = 0; pane < 4; pane++)
             values[$"Tree{layoutMap.AppToNative[pane] + 1}"] = state.PaneTreeVisibility?.ElementAtOrDefault(pane) == true ? "1" : "0";
+        if (state.QdrTreeSplits is { } qdrTreeSplits)
+        {
+            if (!qdrTreeSplits.IsValid)
+                throw new InvalidDataException("保留的 Q-Dir 目录树分隔值无效，未导出状态文件。");
+            for (var pane = 0; pane < 4; pane++)
+                if (qdrTreeSplits.Values.ElementAt(pane) is { } value)
+                    values[$"Tree{pane + 1}split"] = value;
+        }
         if (proportions is not null) QdrProportions.Write(values, state.Layout, proportions[state.Layout]);
         for (var pane = 0; pane < 4; pane++)
         {
@@ -171,7 +179,7 @@ internal static class QdrExporter
                 ["已读取 Explorer Dirs 扩展：布局、活动窗格、标签视图、目录树模式/宽度/逐窗格状态、每标签快速筛选、预览/详情窗格、固定标签及新标签默认查看方式。",
                  "不导入主题、窗口位置或启动命令。"], state, extension.Pins, state.ActivePane,
                 extension.Proportions ?? basic.Proportions, state.PaneTreeVisibility, state.TreeDisplayMode,
-                extension.NavigationTreeWidths);
+                extension.NavigationTreeWidths, state.QdrTreeSplits);
         }
         catch (Exception ex) when (ex is InvalidDataException or FormatException or JsonException or
             ArgumentException or KeyNotFoundException or NullReferenceException)

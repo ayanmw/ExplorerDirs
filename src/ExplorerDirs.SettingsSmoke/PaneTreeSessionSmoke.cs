@@ -18,23 +18,32 @@ internal static class PaneTreeSessionSmoke
         ];
         var expected = new[] { true, false, true, false };
         var state = new SessionState(4, 4, panes, PaneTreeVisibility: expected,
-            TreeDisplayMode: TreeDisplayMode.Shared);
+            TreeDisplayMode: TreeDisplayMode.Shared,
+            QdrTreeSplits: new QdrTreeSplitState("002500", "2500", null, "0007"));
         var rendered = SessionStore.Render(state);
-        Require(rendered.Contains("FormatVersion=11", StringComparison.Ordinal) &&
+        Require(rendered.Contains("FormatVersion=12", StringComparison.Ordinal) &&
             rendered.Contains("TreeDisplayMode=Shared", StringComparison.Ordinal) &&
+            rendered.Contains("QdrTreeSplit1=002500", StringComparison.Ordinal) &&
+            rendered.Contains("QdrTreeSplit4=0007", StringComparison.Ordinal) &&
             rendered.Contains("TreeVisible=True", StringComparison.Ordinal) &&
             rendered.Contains("TreeVisible=False", StringComparison.Ordinal),
-            "v11 sessions persist tree display mode and per-pane tree visibility");
+            "v12 sessions persist tree mode, visibility, and opaque Q-Dir split values");
         Require(SessionStore.ParseComplete(rendered) is { } parsed &&
             parsed.PaneTreeVisibility?.SequenceEqual(expected) == true &&
-            parsed.TreeDisplayMode == TreeDisplayMode.Shared,
-            "tree mode and per-pane visibility round-trip with the session");
+            parsed.TreeDisplayMode == TreeDisplayMode.Shared &&
+            parsed.QdrTreeSplits == state.QdrTreeSplits,
+            "tree mode, visibility, and exact Q-Dir split text round-trip with the session");
         var defaultTreeState = SessionStore.Render(state with { PaneTreeVisibility = null });
         Require(SessionStore.ParseComplete(defaultTreeState) is { } defaultParsed &&
             SessionStore.Render(defaultParsed) == defaultTreeState,
             "a rendered session without explicit tree visibility remains complete and stable");
 
-        var v9 = string.Join(Environment.NewLine, rendered.Split('\n').Where(line =>
+        var v11 = string.Join(Environment.NewLine, rendered.Split('\n').Where(line =>
+            !line.StartsWith("QdrTreeSplit", StringComparison.Ordinal)))
+            .Replace("FormatVersion=12", "FormatVersion=11", StringComparison.Ordinal);
+        Require(SessionStore.ParseComplete(v11)?.QdrTreeSplits is null,
+            "v11 sessions remain readable without Q-Dir split metadata");
+        var v9 = string.Join(Environment.NewLine, v11.Split('\n').Where(line =>
             !line.StartsWith("TreeDisplayMode=", StringComparison.Ordinal)))
             .Replace("FormatVersion=11", "FormatVersion=9", StringComparison.Ordinal);
         Require(SessionStore.ParseComplete(v9)?.TreeDisplayMode == TreeDisplayMode.PerPane,
@@ -49,6 +58,7 @@ internal static class PaneTreeSessionSmoke
         foreach (var invalid in new[]
         {
             rendered.Replace("TreeVisible=True", "TreeVisible=maybe", StringComparison.Ordinal),
+            rendered.Replace("QdrTreeSplit1=002500", "QdrTreeSplit1=25oops", StringComparison.Ordinal),
             string.Join(Environment.NewLine, rendered.Split('\n').Where(line =>
                 !line.StartsWith("[Pane2]", StringComparison.Ordinal) &&
                 !line.StartsWith("TreeVisible=", StringComparison.Ordinal)))
@@ -56,14 +66,14 @@ internal static class PaneTreeSessionSmoke
             Require(SessionStore.ParseComplete(invalid) is null,
             "v11 profiles reject malformed or missing per-pane tree visibility");
 
-        File.WriteAllText(sessionPath, v8);
+        File.WriteAllText(sessionPath, v11);
         store = new SessionStore(sessionPath, Path.Combine(folder, "missing-pane-tree-session.json"));
         var loaded = store.Load()!;
         store.Save(loaded with { PaneTreeVisibility = expected });
-        var backups = Directory.GetFiles(folder, "pane-tree-session.ini.before-v11-*.bak");
-        Require(backups.Length == 1 && File.ReadAllText(backups[0]) == v8 &&
-            File.ReadAllText(sessionPath).Contains("FormatVersion=11", StringComparison.Ordinal),
-            "upgrading v8 to v11 preserves the exact original before adding new session fields");
+        var backups = Directory.GetFiles(folder, "pane-tree-session.ini.before-v12-*.bak");
+        Require(backups.Length == 1 && File.ReadAllText(backups[0]) == v11 &&
+            File.ReadAllText(sessionPath).Contains("FormatVersion=12", StringComparison.Ordinal),
+            "upgrading v11 to v12 preserves the exact original before adding Q-Dir split metadata");
     }
 
     private static void Require(bool valid, string message)

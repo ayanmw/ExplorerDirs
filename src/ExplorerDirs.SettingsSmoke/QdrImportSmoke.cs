@@ -268,15 +268,23 @@ internal static class QdrImportSmoke
                 !documentedTreeExample.Warnings.Any(warning => warning.Contains("tree_mode")),
             "the official Q-Dir example does not warn about ignored tree widths when tree mode is explicitly disabled");
         var activeTreeSplit = QdrImporter.Parse(
-            "Q-Dir Version=12.79\nViewMode=4\ntree_mode=2\nTree1split=2500\nDir1=C:\\left\n",
+            "Q-Dir Version=12.79\nViewMode=4\ntree_mode=2\nTree1split=002500\nDir1=C:\\left\n",
             (value, _) => value);
-        Require(activeTreeSplit.Warnings.Any(warning => warning.Contains("Tree1split")),
-            "Q-Dir tree widths remain warned when an enabled tree mode may consume them");
+        Require(activeTreeSplit.Warnings.Any(warning => warning.Contains("Tree1split")) &&
+                activeTreeSplit.QdrTreeSplits?.Pane1 == "002500",
+            "Q-Dir tree widths remain unapplied and their valid source text is retained verbatim");
+        Require(QdrLaunchSession.Create(activeTreeSplit, root).QdrTreeSplits == activeTreeSplit.QdrTreeSplits,
+            "startup from an imported Q-Dir file carries opaque split values into the portable session");
         var unrecognizedTreeModeSplit = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=4\ntree_mode=bad\nTree1split=2500\nDir1=C:\\left\n",
             (value, _) => value);
         Require(unrecognizedTreeModeSplit.Warnings.Any(warning => warning.Contains("Tree1split")),
             "Q-Dir tree widths remain warned when the tree mode is invalid");
+        var malformedTreeSplit = QdrImporter.Parse(
+            "Q-Dir Version=12.79\nViewMode=4\nTree1split=2500px\nDir1=C:\\left\n", (value, _) => value);
+        Require(malformedTreeSplit.QdrTreeSplits is null &&
+                malformedTreeSplit.Warnings.Any(warning => warning.Contains("Tree1split")),
+            "malformed Q-Dir split values are not preserved or applied");
         var malformedTree = QdrImporter.Parse(
             "Q-Dir Version=12.79\nViewMode=0\nTree1=1\nTree2=bad\nDir1=C:\\left\n", (value, _) => value);
         Require(malformedTree.PaneTreeVisibility is null && malformedTree.Warnings.Any(w => w.Contains("目录树")),

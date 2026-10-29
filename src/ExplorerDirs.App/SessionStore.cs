@@ -60,14 +60,23 @@ internal sealed record TabSettings
 }
 internal enum TreeDisplayMode { None, PerPane, Shared }
 
+internal sealed record QdrTreeSplitState(string? Pane1, string? Pane2, string? Pane3, string? Pane4)
+{
+    internal bool IsValid => Values.All(value => value is null ||
+        value.Length is > 0 and <= 32 && int.TryParse(value, NumberStyles.None,
+            CultureInfo.InvariantCulture, out _));
+    internal IEnumerable<string?> Values => [Pane1, Pane2, Pane3, Pane4];
+}
+
 internal sealed record SessionState(int Layout, uint DefaultViewMode, List<List<TabSettings>> Panes,
     int ActivePane = 0, IReadOnlyList<int>? ActiveTabIndices = null, int DefaultIconSize = -1,
-    IReadOnlyList<bool>? PaneTreeVisibility = null, TreeDisplayMode? TreeDisplayMode = null);
+    IReadOnlyList<bool>? PaneTreeVisibility = null, TreeDisplayMode? TreeDisplayMode = null,
+    QdrTreeSplitState? QdrTreeSplits = null);
 
 internal sealed class SessionStore
 {
     internal const int MaximumTabsPerPane = 100;
-    private const int CurrentFormatVersion = 11;
+    private const int CurrentFormatVersion = 12;
     private const int MaximumColumnFiltersPerTab = 16;
     private const int MaximumColumnFilterValueLength = 512;
     private const int MaximumColumnFilterPayloadLength = 128 * 1024;
@@ -221,6 +230,14 @@ internal sealed class SessionStore
         builder.AppendLine($"DefaultIconSize={state.DefaultIconSize}");
         builder.AppendLine($"ActivePane={Math.Clamp(state.ActivePane, 0, 3)}");
         builder.AppendLine($"TreeDisplayMode={state.TreeDisplayMode ?? ExplorerDirs.App.TreeDisplayMode.PerPane}");
+        if (state.QdrTreeSplits is { } qdrTreeSplits)
+        {
+            if (!qdrTreeSplits.IsValid)
+                throw new InvalidDataException("保留的 Q-Dir 目录树分隔值无效，未覆盖会话配置。");
+            for (var pane = 0; pane < 4; pane++)
+                if (qdrTreeSplits.Values.ElementAt(pane) is { } value)
+                    builder.AppendLine($"QdrTreeSplit{pane + 1}={value}");
+        }
         for (var paneIndex = 0; paneIndex < 4; paneIndex++)
         {
             var tabs = state.Panes.ElementAtOrDefault(paneIndex) ?? [];
@@ -323,7 +340,7 @@ internal sealed class SessionStore
         sections.TryGetValue("General", out var general);
         var version = general is null ? 0 : GetInt(general, "FormatVersion", 0);
         if (newerFormatSeen || version > CurrentFormatVersion) return new ProfileParseResult(null, false, true);
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11)) complete = false;
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12)) complete = false;
         var layout = ReadRequiredInt(general, "Layout", 4, 1, version >= 5 ? 12 : version == 4 ? 8 : 6, ref complete);
         var defaultView = ReadRequiredInt(general, "DefaultViewMode", 4, 1, 8, ref complete);
         var defaultIconSize = version >= 3
@@ -333,6 +350,7 @@ internal sealed class SessionStore
         TreeDisplayMode? treeDisplayMode = version >= 10
             ? ReadTreeDisplayMode(general, ref complete)
             : version == 9 ? ExplorerDirs.App.TreeDisplayMode.PerPane : null;
+        var qdrTreeSplits = version >= 12 ? ReadQdrTreeSplits(general, ref complete) : null;
         var panes = new List<List<TabSettings>>();
         var activeTabs = new List<int>();
         var paneTreeVisibility = version >= 9 ? new List<bool>(4) : null;
@@ -440,10 +458,27 @@ internal sealed class SessionStore
                 }
             }
         }
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11) && panes.All(pane => pane.Count == 0))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12) && panes.All(pane => pane.Count == 0))
             return new ProfileParseResult(null, false, false);
         return new ProfileParseResult(new SessionState(layout, (uint)defaultView, panes,
-            activePane, activeTabs, defaultIconSize, paneTreeVisibility, treeDisplayMode), complete, false, version);
+            activePane, activeTabs, defaultIconSize, paneTreeVisibility, treeDisplayMode, qdrTreeSplits), complete, false, version);
+    }
+
+    private static QdrTreeSplitState? ReadQdrTreeSplits(Dictionary<string, string>? general, ref bool complete)
+    {
+        if (general is null) return null;
+        var values = new string?[4];
+        var any = false;
+        for (var pane = 0; pane < values.Length; pane++)
+        {
+            if (!general.TryGetValue($"QdrTreeSplit{pane + 1}", out var value)) continue;
+            any = true;
+            if (value.Length is > 0 and <= 32 && int.TryParse(value, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out _)) values[pane] = value;
+            else complete = false;
+        }
+        return any && values.Any(value => value is not null)
+            ? new QdrTreeSplitState(values[0], values[1], values[2], values[3]) : null;
     }
 
     private static TreeDisplayMode? ReadTreeDisplayMode(Dictionary<string, string>? general, ref bool complete)

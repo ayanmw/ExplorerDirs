@@ -13,7 +13,8 @@ internal sealed record QdrImportResult(List<List<TabSettings>> Panes, int[] Sele
     IReadOnlyDictionary<int, LayoutProportions>? Proportions = null,
     IReadOnlyList<bool>? PaneTreeVisibility = null,
     TreeDisplayMode? TreeDisplayMode = null,
-    NavigationTreeWidths? NavigationTreeWidths = null)
+    NavigationTreeWidths? NavigationTreeWidths = null,
+    QdrTreeSplitState? QdrTreeSplits = null)
 {
     public int TabCount => Panes.Sum(pane => pane.Count);
 }
@@ -255,6 +256,7 @@ internal static class QdrImporter
         }
         // FAQ 117 and local Q-Dir workspaces include split defaults when every
         // pane tree is disabled; those values cannot affect this import.
+        var qdrTreeSplits = ReadQdrTreeSplits(values, warnings);
         var treeModeExplicitlyDisabled = values.TryGetValue("tree_mode", out var importedTreeMode) && importedTreeMode == "0";
         var everyImportedPaneTreeDisabled = treeKeys.All(value => value == false);
         if (!treeModeExplicitlyDisabled && !everyImportedPaneTreeDisabled &&
@@ -302,9 +304,30 @@ internal static class QdrImporter
             new QdrImportResult(panes, selected, layout, warnings.ToArray(), ActivePane: activePane,
                 Proportions: proportions is not null && layout is { } knownLayout
                     ? new Dictionary<int, LayoutProportions> { [knownLayout] = proportions } : null,
-                PaneTreeVisibility: paneTreeVisibility, TreeDisplayMode: treeDisplayMode));
+                PaneTreeVisibility: paneTreeVisibility, TreeDisplayMode: treeDisplayMode,
+                QdrTreeSplits: qdrTreeSplits));
         if (result.TabCount == 0) throw new InvalidDataException("未找到可导入的文件夹；当前会话未改变。");
         return result;
+    }
+
+    private static QdrTreeSplitState? ReadQdrTreeSplits(
+        IReadOnlyDictionary<string, string> values, ICollection<string> warnings)
+    {
+        var malformed = false;
+        var splits = Enumerable.Range(1, 4).Select(pane =>
+        {
+            if (!values.TryGetValue($"Tree{pane}split", out var value)) return null;
+            if (value.Length is 0 or > 32 ||
+                !int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                malformed = true;
+                return null;
+            }
+            return value;
+        }).ToArray();
+        if (malformed) warnings.Add("部分 Q-Dir TreeNsplit 值不是有效的非负整数；这些原值不会保留或应用。");
+        return splits.Any(value => value is not null)
+            ? new QdrTreeSplitState(splits[0], splits[1], splits[2], splits[3]) : null;
     }
 
     private static void AddUnsupportedColorSwitchWarning(

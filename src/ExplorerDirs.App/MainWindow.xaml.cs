@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private readonly PortableBooleanPreference _treeSelectionAutoExpandPreferenceStore;
     private readonly NavigationTreeWidthsStore _treeWidthsStore;
     private NavigationTreeWidths _treeWidths;
+    private QdrTreeSplitState? _qdrTreeSplits;
     private readonly bool[] _paneTreeVisibility = new bool[4];
     private TreeDisplayMode _treeDisplayMode = TreeDisplayMode.PerPane;
     private bool _treeSelectionAutoExpand = true;
@@ -292,6 +293,7 @@ public partial class MainWindow : Window
         _treeWidthsStore = new NavigationTreeWidthsStore(Path.Combine(
             _profileDirectory, "NavigationTreeWidths.ini"));
         _treeWidths = _treeWidthsStore.Load();
+        _qdrTreeSplits = state?.QdrTreeSplits;
         var defaultTreeVisible = _treePreferences.Load();
         _treeDisplayMode = state?.TreeDisplayMode ??
             (defaultTreeVisible ? TreeDisplayMode.PerPane : TreeDisplayMode.None);
@@ -372,12 +374,17 @@ public partial class MainWindow : Window
             pane.TreeWidthChanged += (_, _) =>
             {
                 _treeWidths = _treeWidths.WithPaneWidth(paneIndex, pane.TreeWidth);
+                _qdrTreeSplits = null;
                 SaveTreeWidths();
             };
             pane.StateChanged += (_, _) =>
             {
                 if (_treeDisplayMode == TreeDisplayMode.PerPane)
+                {
+                    if (!_importingQdr && _paneTreeVisibility[paneIndex] != pane.TreeIsVisible)
+                        _qdrTreeSplits = null;
                     _paneTreeVisibility[paneIndex] = pane.TreeIsVisible;
+                }
                 UpdateTreeModeMenu();
                 ScheduleSave();
                 if (ReferenceEquals(ActivePane, pane)) SynchronizeSharedTree();
@@ -1095,6 +1102,7 @@ public partial class MainWindow : Window
         {
             ApplyTreeDisplayMode();
             UpdateTreeModeMenu();
+            if (oldMode != mode) _qdrTreeSplits = null;
             ScheduleSave();
             EnvironmentStatus.Text = mode switch
             {
@@ -1198,6 +1206,7 @@ public partial class MainWindow : Window
         var width = SharedTreeColumn.Width.Value;
         if (!NavigationTreeWidths.IsWidth(width)) return;
         _treeWidths = _treeWidths with { Shared = width };
+        _qdrTreeSplits = null;
         SaveTreeWidths();
     }
 
@@ -2812,7 +2821,7 @@ public partial class MainWindow : Window
             var snapshot = new SessionState(_layout, _defaultViewMode,
                 _panes.Select(pane => pane.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
                 _panes.Select(pane => pane.SelectedTabIndex).ToArray(), _defaultIconSize,
-                _paneTreeVisibility.ToArray(), _treeDisplayMode);
+                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits);
             if (Enumerable.Range(0, 4).Any(index => snapshot.Panes[index].Count + import.Panes[index].Count > SessionStore.MaximumTabsPerPane))
                 throw new InvalidOperationException($"导入后单窗格将超过 {SessionStore.MaximumTabsPerPane} 个标签，请先关闭一些标签再导入。");
             var backup = _sessionStore.Path + $".before-qdr-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.bak";
@@ -2849,6 +2858,7 @@ public partial class MainWindow : Window
                 for (var pane = 0; pane < _panes.Length; pane++)
                     _panes[pane].TreeWidth = importedTreeWidths.GetPaneWidth(pane);
             }
+            _qdrTreeSplits = import.QdrTreeSplits;
             if (import.PaneTreeVisibility is { Count: 4 } importedTreeVisibility)
                 for (var pane = 0; pane < 4; pane++)
                 {
@@ -3215,7 +3225,7 @@ public partial class MainWindow : Window
                 _panes.Select(p => p.SnapshotTabs().ToList()).ToList(),
                 Array.IndexOf(_panes, ActivePane),
                 _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
-                _paneTreeVisibility.ToArray(), _treeDisplayMode));
+                _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits));
             _pinnedTabsStore.Save(_panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray());
             if (placementFailure is not null)
             {
@@ -3243,7 +3253,7 @@ public partial class MainWindow : Window
     internal SessionState SnapshotSession() => new(_layout, _defaultViewMode,
         _panes.Select(p => p.SnapshotTabs().ToList()).ToList(), Array.IndexOf(_panes, ActivePane),
         _panes.Select(p => p.SelectedTabIndex).ToArray(), _defaultIconSize,
-        _paneTreeVisibility.ToArray(), _treeDisplayMode);
+        _paneTreeVisibility.ToArray(), _treeDisplayMode, _qdrTreeSplits);
 
     internal IReadOnlyList<PinnedTabEntry> SnapshotPinnedTabs() =>
         _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
