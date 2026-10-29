@@ -59,6 +59,10 @@ Microsoft 文档说明，`IShellFolder2` 为文件夹视图提供项目列详情
 
 结论：当前托管 CCW 适配器不能证明此架构可行。若继续，下一步应先做一个极小的原生 COM `IShellFolder`/`IShellFolder2` shim（可由 C++ 实现），通过 `QueryInterface` 将未实现接口委托给真实文件系统文件夹，并仅在隔离夹具中重复同一静态列门槛；然后再考虑浏览器服务、PIDL 操作和文件变更通知。该原生 shim 仍只是架构实验，不授权产品迁移，也不加入递归扫描。失败的托管适配器源文件和运行入口已撤下，保留策略 smoke 与本评审结论，避免留下一个被误认为可工作的原型。
 
+2026-10-29 独立虚拟 namespace 文件变更原型：在用户授权的隔离 Private Desktop 中，合成非文件系统 PIDL 由 `IShellFolder2::CompareIDs` 完成 Size 升降序；枚举器改为读取专用临时目录。DefView 通过 `SFVM_GETNOTIFY` 注册 backing folder 通知，`IFileOperation` 重命名和删除触发 `SFVM_FSNOTIFY`。在通知回调内同步调用 `IShellView::Refresh` 导致测试进程以 `0xC000041D` 退出；改为当前 STA 的 1 ms 线程定时器延后刷新后，重命名和删除都在 2.5 秒观察窗口内自动更新，随后显式 Refresh 结果也正确。为保证单视图探针期间 view 有效，原生夹具临时保留 view 引用，并在探针 finally 中显式释放；这只是隔离测试生命周期处理，不是已验证的多视图产品所有权方案。相同探针再次通过标准排序、空白/选中 Shell 菜单、`CF_HDROP`/CIDA 数据对象及 `IFileOperation::CopyItems`。Release NativeProbe 和原生 `/W4 /WX` 构建均为 0 警告/错误，前台守卫通过，临时 Namespace/CLSID 和两个夹具目录退出后均不存在。
+
+此结果证明隔离的单视图原型可把文件系统变化通知接回虚拟 DefView；刷新调度目前是单进程单待处理视图的探针实现，不覆盖多窗格并发、真正拖放、键盘/焦点、第三方扩展菜单、错误/冲突/撤销、性能或可见 UI。产品仍使用 ExplorerBrowser，本结果不足以批准迁移；后续仍须按迁移门槛继续补证并集中做可见验收。
+
 2026-10-26 原生 shim 进度：`StaticShellFolderAdapter.cpp` 已由本机 Visual Studio x64 编译器以 `/W4 /WX` 编译成功。隔离探针读回适配器的列标题、默认状态、PROPERTYKEY 映射和 `UInt64` 值；DefView 的 `IColumnManager` 读回新增列及顺序，`IFolderView2` 也读回测试 PROPERTYKEY 作为排序键。无窗口 COM 直测进一步确认 `CompareIDs` 对 `2/10/100` 及相等值返回正确的数字顺序，因此比较器实现通过。原生验证确认 DefView 的 `GetFolder` 返回同一适配器身份，但实际文件顺序没有变化，适配器的 `CompareIDs` 未被调用，Shell 的 `GetDetailsEx` 计数也只有探针预检的一次，故新增列既未参与项目排序，也未被 DefView 取值。Private Desktop 上无激活地显示父窗口仍未触发列取值或排序，且前台监测保持不变。加入 `IShellView.UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 后，外层前台监测报告变化；该激活调用现已从探针移除，后续不得在用户桌面上执行。当前证据不足以建议产品接入，排序门槛失败，需查明 DefView 激活/求值前置条件及安全隔离方式。
 
 2026-10-27 无窗口 adapter 合同补强：`--static-shell-column-folder-smoke` 现在在创建任何窗口前，直接验证 `GetDefaultColumnState`、`MapColumnToSCID`、标题、四个 `GetDetailsOf` 文本、四个明确为 `VT_UI8` 的 `GetDetailsEx` 值以及数字比较。NativeProbe Release build 0 警告、0 错误，运行输出 `state=0x12; title-and-four-values=valid; variant=UInt64; compare-2-10=-1; compare-10-100=-1; compare-equal=0; compare-100-2=1; window-created=False`。这确认 shim 的静态 folder contract，不改变 DefView 未读取该列的结论；下一步仍是安全且可重复地触发/观察 DefView 求值，不接入产品。

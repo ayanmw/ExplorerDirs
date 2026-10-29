@@ -4471,3 +4471,10 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 根据微软 `CreateViewObject` 与 namespace extension 文档复核，系统 DefView 可选择由文件夹创建独立 `IShellView`，但没有文档化的扩展回调能给现有 DefView 增加逐项绘制/排序值；自定义 view 则要自行负责子窗口与呈现、快捷菜单、交互及拖放等，微软也建议在功能要求允许时优先系统 view。
 - 这不是对所有 Shell 内部路径的绝对否定，而是针对已观测的 DefView 不请求属性值的当前样本，排除继续堆叠属性存储覆写、列映射或 legacy callback 的无依据路线。隔离迁移下一步收敛为有效 namespace 父级中的虚拟 PIDL/`IShellFolder2::CompareIDs` 实验。
 - 该 Private Desktop view 实验需要临时 Desktop\NameSpace 挂载；用户尚未明确授权，未写注册表、未创建 view、未改产品或 release。待授权后验证解析、列读取、数值排序、Shell 文件操作与清理。依据：[CreateViewObject](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-createviewobject)、[Namespace extension overview](https://learn.microsoft.com/en-us/windows/win32/shell/nse-works)、[Implementing a folder view](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview)。
+
+## 2026-10-29：独立虚拟 Shell 视图通知与文件操作原型
+
+- 用户授权后，在 Private Desktop 临时注册的 Shell namespace 中，以合成非文件系统 PIDL 和 backing 临时目录运行单个 DefView。原生 `CompareIDs` 的 Size 升降序、空白/选中 `IContextMenu`、选中项 `IDataObject` 的 `CF_HDROP`/CIDA、真实 `IFileOperation::CopyItems` 均通过。
+- 通过 `SFVM_GETNOTIFY` 订阅 backing folder 后，真实 `IFileOperation` 重命名和删除均到达 `SFVM_FSNOTIFY`。在回调中直接同步 `IShellView::Refresh` 会导致 `0xC000041D`；改为 STA 线程定时器延后刷新后，重命名和删除均在 2.5 秒内自动反映到 DefView，显式刷新后的磁盘枚举也正确。单视图探针暂时保留 view 引用，并在 finally 显式释放；这没有验证多视图所有权模型。
+- NativeProbe Release build、原生 `/W4 /WX` build 和 `git diff --check` 通过；watchdog 退出后专用 HKCU namespace/CLSID、源夹具和复制夹具均清理，前台窗口未变化。实验没有打开用户可见窗口。
+- 证据限于一个隐藏隔离视图及小型本地夹具；单进程单待处理视图刷新队列尚不能证明多窗格并发、真实鼠标 OLE 拖放、焦点/键盘、第三方菜单扩展、失败/撤销路径、性能或可见体验。产品继续使用 ExplorerBrowser，IShellView 迁移仍未获批；后续按迁移门槛逐项补证，最终集中做 UI 验收。详见[IShellView 架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。

@@ -5,6 +5,7 @@
 #include <propsys.h>
 #include <propkey.h>
 #include <strsafe.h>
+#include <algorithm>
 #include <new>
 #include <string>
 #include <vector>
@@ -23,6 +24,8 @@ namespace
 
     volatile LONG g_syntheticLiveObjects = 0;
     volatile LONG g_syntheticServerLocks = 0;
+    PVOID volatile g_syntheticRefreshPending = nullptr;
+    PVOID volatile g_syntheticSortViewHold = nullptr;
     const CLSID kSyntheticFolderClassId =
     { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
@@ -1187,7 +1190,45 @@ namespace
     {
         if (!item || item->mkid.cb != sizeof(SyntheticChild)) return nullptr;
         const auto* child = reinterpret_cast<const SyntheticChild*>(item);
-        return child->id >= 1 && child->id <= ARRAYSIZE(kSyntheticChildren) ? child : nullptr;
+        return child->id != 0 ? child : nullptr;
+    }
+
+    std::vector<SyntheticChild> EnumerateBackingChildren()
+    {
+        std::vector<SyntheticChild> children;
+        if (g_syntheticSortBackingPath.empty()) return children;
+        std::wstring pattern = g_syntheticSortBackingPath + L"\\*";
+        WIN32_FIND_DATAW entry{};
+        const auto search = FindFirstFileW(pattern.c_str(), &entry);
+        if (search == INVALID_HANDLE_VALUE) return children;
+        try
+        {
+            do
+            {
+                if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                    wcscmp(entry.cFileName, L".") == 0 || wcscmp(entry.cFileName, L"..") == 0 ||
+                    wcslen(entry.cFileName) >= ARRAYSIZE(SyntheticChild::name)) continue;
+                SyntheticChild child{};
+                child.cb = sizeof(SyntheticChild);
+                child.id = static_cast<USHORT>(children.size() + 1);
+                child.size = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
+                wcscpy_s(child.name, entry.cFileName);
+                children.push_back(child);
+            } while (FindNextFileW(search, &entry));
+        }
+        catch (...)
+        {
+            FindClose(search);
+            throw;
+        }
+        FindClose(search);
+        std::sort(children.begin(), children.end(), [](const SyntheticChild& left, const SyntheticChild& right)
+        {
+            return _wcsicmp(left.name, right.name) < 0;
+        });
+        for (size_t index = 0; index < children.size(); ++index)
+            children[index].id = static_cast<USHORT>(index + 1);
+        return children;
     }
 
     PIDLIST_RELATIVE CloneSyntheticChild(const SyntheticChild& child)
@@ -1203,7 +1244,8 @@ namespace
     class SyntheticChildEnumerator final : public IEnumIDList
     {
     public:
-        explicit SyntheticChildEnumerator(ULONG index = 0) : _index(index) {}
+        explicit SyntheticChildEnumerator(std::vector<SyntheticChild> children, ULONG index = 0)
+            : _children(std::move(children)), _index(index) {}
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -1225,9 +1267,9 @@ namespace
             if (!items || (count != 1 && !fetched)) return E_POINTER;
             if (fetched) *fetched = 0;
             ULONG made = 0;
-            while (made < count && _index < ARRAYSIZE(kSyntheticChildren))
+            while (made < count && _index < _children.size())
             {
-                items[made] = CloneSyntheticChild(kSyntheticChildren[_index]);
+                items[made] = CloneSyntheticChild(_children[_index]);
                 if (!items[made])
                 {
                     for (ULONG index = 0; index < made; ++index) CoTaskMemFree(items[index]);
@@ -1242,7 +1284,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE Skip(ULONG count) override
         {
-            const auto available = static_cast<ULONG>(ARRAYSIZE(kSyntheticChildren));
+            const auto available = static_cast<ULONG>(_children.size());
             const auto remaining = _index < available ? available - _index : 0;
             const auto skipped = count < remaining ? count : remaining;
             _index += skipped;
@@ -1252,15 +1294,17 @@ namespace
         HRESULT STDMETHODCALLTYPE Clone(IEnumIDList** value) override
         {
             if (!value) return E_POINTER;
-            *value = new (std::nothrow) SyntheticChildEnumerator(_index);
+            try { *value = new (std::nothrow) SyntheticChildEnumerator(_children, _index); }
+            catch (const std::bad_alloc&) { *value = nullptr; }
             return *value ? S_OK : E_OUTOFMEMORY;
         }
     private:
         volatile LONG _references = 1;
+        std::vector<SyntheticChild> _children;
         ULONG _index;
     };
 
-    class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2
+    class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
     {
     public:
         SyntheticSortFolder() { InterlockedIncrement(&g_syntheticLiveObjects); }
@@ -1272,6 +1316,8 @@ namespace
                 *value = static_cast<IShellFolder2*>(this);
             else if (iid == IID_IPersist || iid == IID_IPersistFolder || iid == IID_IPersistFolder2)
                 *value = static_cast<IPersistFolder2*>(this);
+            else if (iid == IID_IShellFolderViewCB)
+                *value = static_cast<IShellFolderViewCB*>(this);
             else return E_NOINTERFACE;
             AddRef();
             return S_OK;
@@ -1301,21 +1347,25 @@ namespace
             auto result = SHParseDisplayName(g_syntheticSortBackingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
             TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-return");
             if (FAILED(result)) { CoTaskMemFree(copy); return result; }
+            auto* backingRoot = ILCloneFull(backingPidl);
+            if (!backingRoot) { CoTaskMemFree(backingPidl); CoTaskMemFree(copy); return E_OUTOFMEMORY; }
             IShellFolder* parent = nullptr;
             PCUITEMID_CHILD child = nullptr;
             TraceSyntheticSortStage("synthetic-sort: backing-SHBindToParent-enter");
             result = SHBindToParent(backingPidl, IID_PPV_ARGS(&parent), &child);
             TraceSyntheticSortStage("synthetic-sort: backing-SHBindToParent-return");
-            if (FAILED(result)) { CoTaskMemFree(backingPidl); CoTaskMemFree(copy); return result; }
+            if (FAILED(result)) { CoTaskMemFree(backingRoot); CoTaskMemFree(backingPidl); CoTaskMemFree(copy); return result; }
             IShellFolder2* backingFolder = nullptr;
             TraceSyntheticSortStage("synthetic-sort: backing-folder-BindToObject-enter");
             result = parent->BindToObject(child, nullptr, IID_PPV_ARGS(&backingFolder));
             parent->Release();
             CoTaskMemFree(backingPidl);
             TraceSyntheticSortStage("synthetic-sort: backing-folder-BindToObject-return");
-            if (FAILED(result)) { CoTaskMemFree(copy); return result; }
+            if (FAILED(result)) { CoTaskMemFree(backingRoot); CoTaskMemFree(copy); return result; }
             if (_root) CoTaskMemFree(_root);
             _root = copy;
+            if (_backingRoot) CoTaskMemFree(_backingRoot);
+            _backingRoot = backingRoot;
             if (_inner) _inner->Release();
             _inner = backingFolder;
             return S_OK;
@@ -1328,6 +1378,29 @@ namespace
             if (!*value) return E_OUTOFMEMORY;
             return S_OK;
         }
+        HRESULT STDMETHODCALLTYPE MessageSFVCB(UINT message, WPARAM wParam, LPARAM lParam) override
+        {
+            if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
+            if (message == SFVM_FSNOTIFY)
+            {
+                TraceSyntheticSortStage("synthetic-sort: SFVM_FSNOTIFY");
+                return ScheduleRefresh();
+            }
+            if (message == SFVM_SETISFV)
+            {
+                TraceSyntheticSortStage("synthetic-sort: SFVM_SETISFV");
+                return lParam ? S_OK : E_POINTER;
+            }
+            if (message == SFVM_WINDOWCREATED)
+            {
+                TraceSyntheticSortStage("synthetic-sort: SFVM_WINDOWCREATED");
+            }
+            if (message != SFVM_GETNOTIFY) return E_NOTIMPL;
+            if (!wParam || !lParam || !_backingRoot) return E_POINTER;
+            *reinterpret_cast<PIDLIST_ABSOLUTE*>(wParam) = _backingRoot;
+            *reinterpret_cast<LONG*>(lParam) = SHCNE_ALLEVENTS;
+            return S_OK;
+        }
         HRESULT STDMETHODCALLTYPE ParseDisplayName(HWND, IBindCtx*, LPWSTR, ULONG*, PIDLIST_RELATIVE*, ULONG*) override { return E_NOTIMPL; }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
         {
@@ -1335,7 +1408,8 @@ namespace
             *value = nullptr;
             InterlockedIncrement(&g_syntheticEnumObjectsCount);
             if (!(flags & SHCONTF_NONFOLDERS)) return S_FALSE;
-            *value = new (std::nothrow) SyntheticChildEnumerator();
+            try { *value = new (std::nothrow) SyntheticChildEnumerator(EnumerateBackingChildren()); }
+            catch (const std::bad_alloc&) { *value = nullptr; }
             return *value ? S_OK : E_OUTOFMEMORY;
         }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE, IBindCtx*, REFIID, void**) override { return E_NOINTERFACE; }
@@ -1367,7 +1441,14 @@ namespace
             SFV_CREATE create{};
             create.cbSize = sizeof(create);
             create.pshf = this;
+            create.psfvcb = static_cast<IShellFolderViewCB*>(this);
             const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
+            if (SUCCEEDED(result) && *value && InterlockedCompareExchangePointer(&g_syntheticSortViewHold, this, nullptr) == nullptr)
+            {
+                AddRef();
+                _shellView = static_cast<IShellView*>(*value);
+                _shellView->AddRef();
+            }
             return result;
         }
         HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count, PCUITEMID_CHILD_ARRAY items, SFGAOF* attributes) override
@@ -1485,10 +1566,40 @@ namespace
             else return E_INVALIDARG;
             return S_OK;
         }
+        void ReleaseViewHold()
+        {
+            auto* view = _shellView;
+            _shellView = nullptr;
+            if (view) view->Release();
+        }
     private:
-        ~SyntheticSortFolder() { if (_root) CoTaskMemFree(_root); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
+        HRESULT ScheduleRefresh()
+        {
+            if (!_shellView) return E_UNEXPECTED;
+            AddRef();
+            if (InterlockedCompareExchangePointer(&g_syntheticRefreshPending, this, nullptr) != nullptr) { Release(); return S_FALSE; }
+            if (!SetTimer(nullptr, 0, 1, RefreshTimerProc))
+            {
+                InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr);
+                Release();
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+            return S_OK;
+        }
+        static VOID CALLBACK RefreshTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
+        {
+            KillTimer(nullptr, timerId);
+            auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr));
+            if (!folder) return;
+            const auto result = folder->_shellView ? folder->_shellView->Refresh() : E_UNEXPECTED;
+            TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-refresh-returned" : "synthetic-sort: deferred-refresh-failed");
+            folder->Release();
+        }
+        ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
         volatile LONG _references = 1;
         PIDLIST_ABSOLUTE _root = nullptr;
+        PIDLIST_ABSOLUTE _backingRoot = nullptr;
+        IShellView* _shellView = nullptr;
         IShellFolder2* _inner = nullptr;
     };
 
@@ -1598,6 +1709,14 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
+{
+    auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticSortViewHold, nullptr));
+    if (!folder) return;
+    folder->ReleaseViewHold();
+    folder->Release();
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()

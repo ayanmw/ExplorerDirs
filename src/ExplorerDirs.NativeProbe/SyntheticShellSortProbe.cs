@@ -264,6 +264,43 @@ internal static class SyntheticShellSortProbe
             var descendingCompareCount = ReadCounter(module, "GetSyntheticSizeCompareCount");
             var totalCompareCount = ReadCounter(module, "GetSyntheticSortCompareCount");
 
+            var originalPath = Path.Combine(backingFolder, "a-large.bin");
+            var renamedPath = Path.Combine(backingFolder, "a-large-renamed.bin");
+            RenameShellItem(originalPath, "a-large-renamed.bin");
+            if (File.Exists(originalPath) || !File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation rename did not update its backing filesystem fixture.");
+            var renameAutoUpdated = false;
+            var renameNotificationDeadline = Environment.TickCount64 + 2500;
+            while (!renameAutoUpdated && Environment.TickCount64 < renameNotificationDeadline)
+            {
+                Pump(100);
+                var afterRenameNotification = ReadNames(listView, module, expectedCount: -1);
+                renameAutoUpdated = afterRenameNotification.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+            }
+            if (!renameAutoUpdated) throw new IOException("The virtual namespace view did not react to the backing folder's Shell rename notification.");
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var afterRename = ReadNames(listView, module);
+            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated={renameAutoUpdated}; after-refresh-rename=[{string.Join('|', afterRename)}]");
+            if (!afterRename.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
+                throw new IOException("Refreshing the namespace view did not enumerate the renamed backing filesystem item.");
+
+            DeleteShellItem(renamedPath);
+            if (File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation delete left the backing filesystem item present.");
+            var deleteAutoUpdated = false;
+            var deleteNotificationDeadline = Environment.TickCount64 + 2500;
+            while (!deleteAutoUpdated && Environment.TickCount64 < deleteNotificationDeadline)
+            {
+                Pump(100);
+                var afterDeleteNotification = ReadNames(listView, module, expectedCount: -1);
+                deleteAutoUpdated = !afterDeleteNotification.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+            }
+            Check(At<RefreshView>(view, 8)(view));
+            Pump(400);
+            var afterDelete = ReadNames(listView, module, expectedCount: 2);
+            Console.WriteLine($"synthetic-shell-size-sort: delete-auto-updated={deleteAutoUpdated}; after-refresh-delete=[{string.Join('|', afterDelete)}]");
+            if (afterDelete.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
+                throw new IOException("Refreshing the namespace view retained a deleted backing filesystem item.");
+
             Console.WriteLine($"synthetic-shell-size-sort: initial=[{string.Join('|', initial)}]; ascending=[{string.Join('|', ascending)}]; descending=[{string.Join('|', descending)}]; size-CompareIDs-ascending={ascendingCompareCount}; size-CompareIDs-descending={descendingCompareCount}; total-CompareIDs={totalCompareCount}; foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
                 !ascending.SequenceEqual(new[] { "two.bin", "z-ten.bin", "a-large.bin" }) ||
@@ -281,6 +318,7 @@ internal static class SyntheticShellSortProbe
         }
         finally
         {
+            if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (folderView != 0) Marshal.Release(folderView);
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
             if (view != 0) Marshal.Release(view);
@@ -318,11 +356,49 @@ internal static class SyntheticShellSortProbe
         return ReadNames(listView, module);
     }
 
-    private static string[] ReadNames(nint listView, nint module)
+    private static void RenameShellItem(string path, string newName)
+    {
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        Check(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation));
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemId = ShellItemId;
+            Check(SHCreateItemFromParsingName(path, 0, ref shellItemId, out var item));
+            try { Check(At<RenameItem>(operation, 12)(operation, item, newName, 0)); }
+            finally { Marshal.Release(item); }
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The isolated Shell rename was aborted.");
+        }
+        finally { Marshal.Release(operation); }
+    }
+
+    private static void DeleteShellItem(string path)
+    {
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        Check(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation));
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemId = ShellItemId;
+            Check(SHCreateItemFromParsingName(path, 0, ref shellItemId, out var item));
+            try { Check(At<DeleteItem>(operation, 18)(operation, item, 0)); }
+            finally { Marshal.Release(item); }
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The isolated Shell delete was aborted.");
+        }
+        finally { Marshal.Release(operation); }
+    }
+
+    private static string[] ReadNames(nint listView, nint module, int expectedCount = 3)
     {
         var count = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
-        if (count != 3)
-            throw new InvalidOperationException($"Expected three synthetic rows, got {count}; EnumObjects={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}.");
+        if (expectedCount >= 0 && count != expectedCount)
+            throw new InvalidOperationException($"Expected {expectedCount} synthetic rows, got {count}; EnumObjects={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}.");
         var values = new string[count];
         var text = Marshal.AllocHGlobal(1024 * sizeof(char));
         try
@@ -447,6 +523,9 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint progressSink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint progressSink);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask; public nint Text;
