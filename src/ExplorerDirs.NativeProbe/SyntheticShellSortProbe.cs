@@ -632,6 +632,16 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
             if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (recursiveDirectorySizeSortOnly &&
+                Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_CLEAR_FOCUS_BEFORE_PARENT_DESTROY") == "1")
+            {
+                var focusedWindow = GetFocus();
+                var capturedWindow = GetCapture();
+                var releasedCapture = capturedWindow != 0 && IsChild(parent, capturedWindow) && ReleaseCapture();
+                var clearedFocus = focusedWindow != 0 && (focusedWindow == parent || IsChild(parent, focusedWindow)) && SetFocus(0) != 0;
+                Console.WriteLine($"synthetic-recursive-directory-size-view: cleanup-input-state focus=0x{focusedWindow:X}; capture=0x{capturedWindow:X}; released-capture={releasedCapture}; cleared-focus={clearedFocus}");
+                ReportProbeStage($"cleanup-input-state-cleared focus=0x{focusedWindow:X} capture=0x{capturedWindow:X}");
+            }
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-1");
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
@@ -1327,6 +1337,11 @@ public static class SyntheticShellSortProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
+    [DllImport("user32.dll")] private static extern nint GetFocus();
+    [DllImport("user32.dll")] private static extern nint GetCapture();
+    [DllImport("user32.dll")] private static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
+    [DllImport("user32.dll")] private static extern bool IsChild(nint parent, nint child);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetParent(nint window);
