@@ -1417,26 +1417,114 @@ namespace
             if (!item) return E_POINTER;
             *item = nullptr;
             if (!_inner || !name) return E_INVALIDARG;
+            IShellFolder2* backingFolder = _inner;
+            backingFolder->AddRef();
+            std::vector<SyntheticChild> children;
             PITEMID_CHILD original = nullptr;
-            auto result = _inner->ParseDisplayName(owner, bind, name, eaten, &original, attributes);
-            if (FAILED(result))
+            auto result = S_OK;
+            try
             {
-                char message[192]{};
-                sprintf_s(message, "synthetic-folder-tree: backing ParseDisplayName failed hr=0x%08X name=%ls eaten=%u",
-                    static_cast<unsigned>(result), name, eaten ? *eaten : 0);
-                TraceSyntheticSortStage(message);
-                return result;
+                const auto nameLength = wcslen(name);
+                if (nameLength == 0) result = E_INVALIDARG;
+                size_t start = 0;
+                while (SUCCEEDED(result) && start < nameLength)
+                {
+                    auto end = start;
+                    while (end < nameLength && name[end] != L'\\' && name[end] != L'/') ++end;
+                    if (end == start)
+                    {
+                        result = E_INVALIDARG;
+                        break;
+                    }
+                    const std::wstring componentName(name + start, end - start);
+                    const bool hasNext = end < nameLength;
+                    if (hasNext && end + 1 == nameLength)
+                    {
+                        result = E_INVALIDARG;
+                        break;
+                    }
+                    result = backingFolder->ParseDisplayName(owner, bind,
+                        const_cast<LPWSTR>(componentName.c_str()), nullptr, &original,
+                        hasNext ? nullptr : attributes);
+                    if (FAILED(result) || !original)
+                    {
+                        if (SUCCEEDED(result)) result = E_UNEXPECTED;
+                        char message[192]{};
+                        sprintf_s(message, "synthetic-folder-tree: backing path component parse failed hr=0x%08X", static_cast<unsigned>(result));
+                        TraceSyntheticSortStage(message);
+                        break;
+                    }
+                    if (!ILIsEmpty(ILNext(reinterpret_cast<PCUIDLIST_RELATIVE>(original))))
+                    {
+                        result = E_UNEXPECTED;
+                        break;
+                    }
+                    SyntheticChild child{};
+                    result = DescribeBackingChild(backingFolder,
+                        reinterpret_cast<PCUITEMID_CHILD>(original), &child);
+                    if (FAILED(result))
+                    {
+                        char message[128]{};
+                        sprintf_s(message, "synthetic-folder-tree: path component description failed hr=0x%08X", static_cast<unsigned>(result));
+                        TraceSyntheticSortStage(message);
+                        break;
+                    }
+                    children.push_back(child);
+                    if (hasNext)
+                    {
+                        if (!(child.attributes & FILE_ATTRIBUTE_DIRECTORY))
+                        {
+                            result = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
+                            break;
+                        }
+                        const auto componentBytes = original->mkid.cb + sizeof(USHORT);
+                        auto* singleChild = static_cast<BYTE*>(CoTaskMemAlloc(componentBytes));
+                        if (!singleChild)
+                        {
+                            result = E_OUTOFMEMORY;
+                            break;
+                        }
+                        CopyMemory(singleChild, original, original->mkid.cb);
+                        ZeroMemory(singleChild + original->mkid.cb, sizeof(USHORT));
+                        IShellFolder2* nestedFolder = nullptr;
+                        result = backingFolder->BindToObject(
+                            reinterpret_cast<PCUIDLIST_RELATIVE>(singleChild), bind, IID_PPV_ARGS(&nestedFolder));
+                        CoTaskMemFree(singleChild);
+                        if (FAILED(result))
+                        {
+                            char message[128]{};
+                            sprintf_s(message, "synthetic-folder-tree: path component bind failed hr=0x%08X", static_cast<unsigned>(result));
+                            TraceSyntheticSortStage(message);
+                            break;
+                        }
+                        backingFolder->Release();
+                        backingFolder = nestedFolder;
+                    }
+                    CoTaskMemFree(original);
+                    original = nullptr;
+                    start = end + 1;
+                }
             }
-            SyntheticChild child{};
-            result = DescribeBackingChild(original, &child);
-            if (SUCCEEDED(result))
+            catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; }
+            if (original) CoTaskMemFree(original);
+            backingFolder->Release();
+            if (FAILED(result)) return result;
+            if (children.empty()) return E_INVALIDARG;
+
+            const auto bytes = children.size() * sizeof(SyntheticChild) + sizeof(USHORT);
+            if (bytes > USHRT_MAX) return HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+            auto* composite = static_cast<BYTE*>(CoTaskMemAlloc(bytes));
+            if (!composite) return E_OUTOFMEMORY;
+            auto* cursor = composite;
+            for (const auto& child : children)
             {
-                *item = CloneSyntheticChild(child);
-                if (!*item) result = E_OUTOFMEMORY;
-                else if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
+                CopyMemory(cursor, &child, sizeof(child));
+                cursor += sizeof(child);
             }
-            CoTaskMemFree(original);
-            return result;
+            ZeroMemory(cursor, sizeof(USHORT));
+            *item = reinterpret_cast<PITEMID_CHILD>(composite);
+            if (eaten) *eaten = static_cast<ULONG>(wcslen(name));
+            return S_OK;
         }
         HRESULT STDMETHODCALLTYPE EnumObjects(HWND, SHCONTF flags, IEnumIDList** value) override
         {
@@ -1465,17 +1553,30 @@ namespace
                 CoTaskMemFree(original);
                 return FAILED(result) ? result : E_NOINTERFACE;
             }
+            const auto* remaining = ILNext(item);
+            const bool hasRemaining = !ILIsEmpty(remaining);
             if (iid != IID_IUnknown && iid != IID_IShellFolder && iid != IID_IShellFolder2)
             {
-                result = _inner->BindToObject(original, bind, iid, value);
-                CoTaskMemFree(original);
-                return result;
+                if (!hasRemaining)
+                {
+                    result = _inner->BindToObject(original, bind, iid, value);
+                    CoTaskMemFree(original);
+                    return result;
+                }
             }
 
             IShellFolder2* backingChild = nullptr;
             result = _inner->BindToObject(original, bind, IID_PPV_ARGS(&backingChild));
             if (FAILED(result)) { CoTaskMemFree(original); return result; }
-            auto* nestedRoot = ILCombine(_root, reinterpret_cast<PCUIDLIST_RELATIVE>(item));
+            auto* firstChild = CloneSyntheticChild(*child);
+            if (!firstChild)
+            {
+                CoTaskMemFree(original);
+                backingChild->Release();
+                return E_OUTOFMEMORY;
+            }
+            auto* nestedRoot = ILCombine(_root, reinterpret_cast<PCUIDLIST_RELATIVE>(firstChild));
+            CoTaskMemFree(firstChild);
             auto* nestedBackingRoot = ILCombine(_backingRoot, original);
             CoTaskMemFree(original);
             if (!nestedRoot || !nestedBackingRoot)
@@ -1498,7 +1599,9 @@ namespace
             nested->_inner = backingChild;
             try { nested->_backingPath = _backingPath + L"\\" + child->name; }
             catch (const std::bad_alloc&) { nested->Release(); return E_OUTOFMEMORY; }
-            result = nested->QueryInterface(iid, value);
+            result = hasRemaining
+                ? nested->BindToObject(remaining, bind, iid, value)
+                : nested->QueryInterface(iid, value);
             nested->Release();
             return result;
         }
@@ -1509,6 +1612,19 @@ namespace
             if (!_inner) return E_UNEXPECTED;
             const auto* child = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(item));
             if (!child) return E_INVALIDARG;
+            const auto* remaining = ILNext(item);
+            if (!ILIsEmpty(remaining))
+            {
+                auto* firstChild = CloneSyntheticChild(*child);
+                if (!firstChild) return E_OUTOFMEMORY;
+                IShellFolder2* nestedFolder = nullptr;
+                auto result = BindToObject(reinterpret_cast<PCUIDLIST_RELATIVE>(firstChild), bind,
+                    IID_PPV_ARGS(&nestedFolder));
+                CoTaskMemFree(firstChild);
+                if (SUCCEEDED(result)) result = nestedFolder->BindToStorage(remaining, bind, iid, value);
+                if (nestedFolder) nestedFolder->Release();
+                return result;
+            }
             PITEMID_CHILD original = nullptr;
             auto result = _inner->ParseDisplayName(nullptr, bind, const_cast<LPWSTR>(child->name), nullptr, &original, nullptr);
             if (SUCCEEDED(result)) result = _inner->BindToStorage(original, bind, iid, value);
@@ -1630,7 +1746,7 @@ namespace
             CoTaskMemFree(original);
             if (FAILED(result)) return result;
             SyntheticChild description{};
-            result = DescribeBackingChild(rawRenamed, &description);
+            result = DescribeBackingChild(_inner, rawRenamed, &description);
             if (SUCCEEDED(result))
             {
                 *renamed = CloneSyntheticChild(description);
@@ -1722,14 +1838,14 @@ namespace
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
-        HRESULT DescribeBackingChild(PCUITEMID_CHILD original, SyntheticChild* child)
+        HRESULT DescribeBackingChild(IShellFolder2* backingFolder, PCUITEMID_CHILD original, SyntheticChild* child)
         {
-            if (!original || !child || !_inner) return E_INVALIDARG;
+            if (!original || !child || !backingFolder) return E_INVALIDARG;
             *child = {};
             child->cb = sizeof(SyntheticChild);
             child->id = 1;
             STRRET displayName{};
-            auto result = _inner->GetDisplayNameOf(original, SHGDN_INFOLDER, &displayName);
+            auto result = backingFolder->GetDisplayNameOf(original, SHGDN_INFOLDER, &displayName);
             if (FAILED(result))
             {
                 char message[128]{};
@@ -1775,7 +1891,7 @@ namespace
             }
 
             SFGAOF attributes = SFGAO_FOLDER | SFGAO_HIDDEN;
-            result = _inner->GetAttributesOf(1, const_cast<PCUITEMID_CHILD_ARRAY>(&original), &attributes);
+            result = backingFolder->GetAttributesOf(1, const_cast<PCUITEMID_CHILD_ARRAY>(&original), &attributes);
             if (FAILED(result))
             {
                 char message[128]{};
@@ -1789,7 +1905,7 @@ namespace
             {
                 VARIANT size{};
                 VariantInit(&size);
-                result = _inner->GetDetailsEx(original, &kSizeKey, &size);
+                result = backingFolder->GetDetailsEx(original, &kSizeKey, &size);
                 if (SUCCEEDED(result))
                 {
                     if (size.vt == VT_UI8) child->size = size.ullVal;
@@ -2121,6 +2237,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     IShellFolder2* nested = nullptr;
     IEnumIDList* nestedEnumerator = nullptr;
     IPersistFolder2* nestedPersist = nullptr;
+    IShellFolder2* deepFolder = nullptr;
+    IEnumIDList* deepEnumerator = nullptr;
     PIDLIST_ABSOLUTE nestedRootPidl = nullptr;
     result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
     if (FAILED(result)) goto cleanup;
@@ -2177,6 +2295,75 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         if (!parsedFolder) { result = E_FAIL; goto cleanup; }
     }
     TraceSyntheticSortStage("synthetic-folder-tree: parse-display-name-passed");
+
+    {
+        WCHAR relativePath[] = L"child\\nested.txt";
+        ULONG eaten = 0;
+        PIDLIST_RELATIVE parsed = nullptr;
+        result = root->ParseDisplayName(nullptr, nullptr, relativePath, &eaten, &parsed, nullptr);
+        const auto* first = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(parsed));
+        const auto* second = parsed ? SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(ILNext(parsed))) : nullptr;
+        const bool parsedPath = SUCCEEDED(result) && eaten == ARRAYSIZE(relativePath) - 1 && first && second &&
+            _wcsicmp(first->name, L"child") == 0 && (first->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            _wcsicmp(second->name, L"nested.txt") == 0 && ILIsEmpty(ILNext(ILNext(parsed)));
+        if (!parsedPath)
+        {
+            char message[224]{};
+            sprintf_s(message, "synthetic-folder-tree: multi-component assertion failed hr=0x%08X eaten=%u pidl=%u first=%ls second=%ls",
+                static_cast<unsigned>(result), eaten, parsed ? 1u : 0u,
+                first ? first->name : L"<null>", second ? second->name : L"<null>");
+            TraceSyntheticSortStage(message);
+        }
+        bool parsedStorage = false;
+        if (parsedPath)
+        {
+            IStream* stream = nullptr;
+            result = root->BindToStorage(parsed, nullptr, IID_PPV_ARGS(&stream));
+            if (SUCCEEDED(result) && stream)
+            {
+                char contents[7]{};
+                ULONG bytesRead = 0;
+                result = stream->Read(contents, 6, &bytesRead);
+                parsedStorage = SUCCEEDED(result) && bytesRead == 6 && std::string(contents, 6) == "nested";
+                stream->Release();
+            }
+            if (!parsedStorage && SUCCEEDED(result)) result = E_FAIL;
+        }
+        if (parsed) CoTaskMemFree(parsed);
+        if (!parsedPath || !parsedStorage) { result = E_FAIL; goto cleanup; }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-component-parse-passed");
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-component-storage-passed");
+
+    {
+        WCHAR folderPath[] = L"child\\nested-folder";
+        ULONG eaten = 0;
+        PIDLIST_RELATIVE parsed = nullptr;
+        result = root->ParseDisplayName(nullptr, nullptr, folderPath, &eaten, &parsed, nullptr);
+        if (FAILED(result) || !parsed || eaten != ARRAYSIZE(folderPath) - 1)
+        {
+            if (parsed) CoTaskMemFree(parsed);
+            if (SUCCEEDED(result)) result = E_FAIL;
+            goto cleanup;
+        }
+        result = root->BindToObject(parsed, nullptr, IID_PPV_ARGS(&deepFolder));
+        CoTaskMemFree(parsed);
+        if (FAILED(result) || !deepFolder) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        result = deepFolder->EnumObjects(nullptr, SHCONTF_NONFOLDERS, &deepEnumerator);
+        if (FAILED(result) || !deepEnumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        PITEMID_CHILD item = nullptr;
+        ULONG fetched = 0;
+        result = deepEnumerator->Next(1, &item, &fetched);
+        const bool foundDeepFile = result == S_OK && fetched == 1 && SyntheticData(item) &&
+            _wcsicmp(SyntheticData(item)->name, L"deep.txt") == 0;
+        if (item) CoTaskMemFree(item);
+        if (!foundDeepFile) { result = E_FAIL; goto cleanup; }
+        deepEnumerator->Release();
+        deepEnumerator = nullptr;
+        deepFolder->Release();
+        deepFolder = nullptr;
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-component-bind-passed");
 
     result = root->EnumObjects(nullptr, SHCONTF_NONFOLDERS, &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
@@ -2305,6 +2492,8 @@ cleanup:
     if (nestedPersist) nestedPersist->Release();
     if (nestedEnumerator) nestedEnumerator->Release();
     if (nested) nested->Release();
+    if (deepEnumerator) deepEnumerator->Release();
+    if (deepFolder) deepFolder->Release();
     if (childFolder) CoTaskMemFree(childFolder);
     if (enumerator) enumerator->Release();
     if (root) root->Release();

@@ -4503,3 +4503,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - NativeProbe 的临时合成 `IShellFolder2` 现在能枚举实际夹具中的目录与文件，遵循 folder/non-folder/hidden flags，并将子目录绑定为带正确根 PIDL 的下一层适配器；覆盖根/子层 `ParseDisplayName`、`GetCurFolder`、`BindToStorage(IStream)` 和真实隔离目录重命名。底层 filesystem `ParseDisplayName` 成功时不填写 `eaten`，适配层现按成功映射的名称长度返回该值。
 - 原生适配器 `/W4 /WX` 与 NativeProbe Release 构建通过，0 警告/错误；树级 smoke、既有普通 PIDL 合同及包装 PIDL 合同通过。smoke 创建并清理临时 fixture，未创建 `IShellView`、窗口或触发可见 UI。
 - 这补足 namespace 树和子文件夹存储合同，不证明 DefView/自绘列表的导航、焦点、菜单、拖放、通知或产品集成；产品仍使用 ExplorerBrowser。后续需在独立 Windows 会话里运行真实视图/输入门槛，再评审是否继续迁移。
+
+## 2026-10-29：合成 Shell 文件夹树的多级路径合同
+
+- 将合成 `IShellFolder2` 的 `ParseDisplayName` 从单项扩展到分隔路径：逐段委托 filesystem Shell，生成包含每层合成 `SHITEMID` 的相对 PIDL，并返回完整 consumed 字符数。`BindToObject` 递归支持多层文件夹 PIDL；`BindToStorage` 可从根直接打开深层文件流。
+- NativeProbe 临时树 smoke 验证 `child\nested.txt` 的双段 PIDL、`child\nested-folder` 的组合绑定与深层枚举、从根打开 `nested.txt` 并读回内容；既有 enumeration、hidden、单层绑定/流、`GetCurFolder` 和重命名合同仍通过。原生 `/W4 /WX`、NativeProbe Release 构建及普通/包装 PIDL smoke 均通过，0 警告/错误。
+- 测试仅用真实临时文件夹和 COM `IShellFolder2` 方法，未创建 `IShellView`、窗口或用户桌面输入。它推进的是 namespace PIDL 层级合同；Shell 的真实导航/DefView、焦点、菜单、拖放、通知及产品接线尚未验证，产品仍使用 ExplorerBrowser。

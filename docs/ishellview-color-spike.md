@@ -1356,3 +1356,9 @@ NativeProbe Release build 0 警告/错误；随后仅重跑无 Shell-view 的 `S
 隔离适配器由单层文件枚举扩为临时 filesystem-backed 文件夹树：根与子层都覆盖 folder/non-folder/hidden 过滤、`ParseDisplayName`、嵌套 `BindToObject` 与根 PIDL 往返，另验证 `BindToStorage(IStream)` 读取及 `SetNameOf` 实际重命名。初次合同失败定位到底层 filesystem `ParseDisplayName` 成功但不写 `eaten`；包装层在合成单项 PIDL 映射成功后填充消费字符数。
 
 原生 `/W4 /WX`、NativeProbe Release 构建与 tree/普通 PIDL/wrapped PIDL smoke 均通过，未创建 Shell view 或窗口。该证据只证明 namespace adapter 的文件夹合同，不包含 DefView、交互或产品兼容；原型仍未接入 Explorer Dirs。
+
+### 2026-10-29 多级 Shell parsing 与 storage/bind 合同
+
+合成 `IShellFolder2` 现在逐段解析相对路径并构造多组件 synthetic PIDL；`BindToObject` 可从根递归绑定到多级子文件夹，`BindToStorage` 可沿多组件 PIDL 绑定深层文件流。合同测试覆盖 `child\nested.txt` 的两段 PIDL、`child\nested-folder` 的组合绑定及深层枚举，以及从根打开深层 `IStream` 并读回内容。单层枚举、隐藏项过滤、嵌套 `GetCurFolder`、单层流与重命名回归保持通过。
+
+NativeProbe Release、原生 `/W4 /WX` 和普通/包装 PIDL smoke 通过。未创建 `IShellView` 或窗口；这些证据仅验证合成 namespace 的方法合同，不代表真实 DefView 导航或产品兼容。
