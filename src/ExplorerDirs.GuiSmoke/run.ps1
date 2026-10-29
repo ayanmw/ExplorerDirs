@@ -87,12 +87,14 @@ $programStarterFixturePath = Join-Path $runRoot 'qdir-program-items.ini'
 $qdrColorBaseline = Join-Path $runRoot 'qdr-color-baseline.qdr'
 [IO.File]::WriteAllLines($qdrColorBaseline, [string[]]@(
     'Q-Dir Version=12.79',
+    'ViewMode=0',
     'ViewMode1=4',
     "Dir1=$testDirectory"
 ), [Text.UTF8Encoding]::new($false))
 $qdrColorMetadataFixture = Join-Path $runRoot 'qdr-color-metadata.qdr'
 [IO.File]::WriteAllLines($qdrColorMetadataFixture, [string[]]@(
     'Q-Dir Version=12.79',
+    'ViewMode=0',
     'ViewMode1=4',
     'useColor=1',
     'useTreeColor=0',
