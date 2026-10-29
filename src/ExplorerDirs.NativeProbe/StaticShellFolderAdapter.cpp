@@ -1573,6 +1573,102 @@ namespace
             if (view) view->Release();
         }
     private:
+        HRESULT CaptureSelection()
+        {
+            IFolderView2* folderView = nullptr;
+            auto result = _shellView ? _shellView->QueryInterface(IID_PPV_ARGS(&folderView)) : E_UNEXPECTED;
+            if (FAILED(result)) return result;
+            _pendingSelected.clear();
+            _pendingHasFocused = false;
+            int focusedIndex = -1;
+            if (SUCCEEDED(folderView->GetFocusedItem(&focusedIndex)) && focusedIndex >= 0)
+            {
+                PITEMID_CHILD item = nullptr;
+                if (SUCCEEDED(folderView->Item(focusedIndex, &item)))
+                {
+                    if (const auto* data = SyntheticData(item)) { _pendingFocused = *data; _pendingHasFocused = true; }
+                    CoTaskMemFree(item);
+                }
+            }
+            IEnumIDList* selection = nullptr;
+            result = folderView->Items(SVGIO_SELECTION, IID_PPV_ARGS(&selection));
+            if (SUCCEEDED(result) && selection)
+            {
+                try
+                {
+                    while (true)
+                    {
+                        PITEMID_CHILD item = nullptr;
+                        ULONG fetched = 0;
+                        result = selection->Next(1, &item, &fetched);
+                        if (result != S_OK || fetched != 1) { if (item) CoTaskMemFree(item); break; }
+                        if (const auto* data = SyntheticData(item)) _pendingSelected.push_back(*data);
+                        CoTaskMemFree(item);
+                    }
+                }
+                catch (const std::bad_alloc&) { _pendingSelected.clear(); _pendingHasFocused = false; }
+                selection->Release();
+            }
+            char stateTrace[128]{};
+            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured selected=%zu focused=%d", _pendingSelected.size(), _pendingHasFocused ? 1 : 0);
+            TraceSyntheticSortStage(stateTrace);
+            folderView->Release();
+            return S_OK;
+        }
+        HRESULT RefreshView()
+        {
+            return _shellView ? _shellView->Refresh() : E_UNEXPECTED;
+        }
+        HRESULT RestoreSelection()
+        {
+            IFolderView2* folderView = nullptr;
+            auto result = _shellView ? _shellView->QueryInterface(IID_PPV_ARGS(&folderView)) : E_UNEXPECTED;
+            if (FAILED(result)) return result;
+            int itemCount = 0;
+            char stateTrace[128]{};
+            if (SUCCEEDED(folderView->ItemCount(SVGIO_ALLVIEW, &itemCount)))
+            {
+                bool firstSelection = true;
+                int restoredSelectionCount = 0;
+                for (const auto& selectedItem : _pendingSelected)
+                {
+                    for (int index = 0; index < itemCount; ++index)
+                    {
+                        PITEMID_CHILD item = nullptr;
+                        if (FAILED(folderView->Item(index, &item))) continue;
+                        const auto* data = SyntheticData(item);
+                        const bool match = data && _wcsicmp(data->name, selectedItem.name) == 0;
+                        CoTaskMemFree(item);
+                        if (match)
+                        {
+                            const DWORD flags = SVSI_SELECT | SVSI_NOTAKEFOCUS | (firstSelection ? SVSI_DESELECTOTHERS : 0);
+                            result = folderView->SelectItem(index, flags);
+                            if (FAILED(result)) break;
+                            ++restoredSelectionCount;
+                            firstSelection = false;
+                            break;
+                        }
+                    }
+                    if (FAILED(result)) break;
+                }
+                if (SUCCEEDED(result) && _pendingHasFocused)
+                {
+                    for (int index = 0; index < itemCount; ++index)
+                    {
+                        PITEMID_CHILD item = nullptr;
+                        if (FAILED(folderView->Item(index, &item))) continue;
+                        const auto* data = SyntheticData(item);
+                        const bool match = data && _wcsicmp(data->name, _pendingFocused.name) == 0;
+                        CoTaskMemFree(item);
+                        if (match) { result = folderView->SelectItem(index, SVSI_SELECT | SVSI_FOCUSED | SVSI_NOTAKEFOCUS); break; }
+                    }
+                }
+                StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-restored rows=%d selected=%d focus-identity=%d", itemCount, restoredSelectionCount, _pendingHasFocused ? 1 : 0);
+                TraceSyntheticSortStage(stateTrace);
+            }
+            folderView->Release();
+            return result;
+        }
         HRESULT ScheduleRefresh()
         {
             if (!_shellView) return E_UNEXPECTED;
@@ -1591,8 +1687,23 @@ namespace
             KillTimer(nullptr, timerId);
             auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr));
             if (!folder) return;
-            const auto result = folder->_shellView ? folder->_shellView->Refresh() : E_UNEXPECTED;
+            auto result = folder->CaptureSelection();
+            if (SUCCEEDED(result)) result = folder->RefreshView();
             TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-refresh-returned" : "synthetic-sort: deferred-refresh-failed");
+            if (SUCCEEDED(result) && InterlockedCompareExchangePointer(&g_syntheticRefreshPending, folder, nullptr) == nullptr)
+            {
+                if (SetTimer(nullptr, 0, 250, RestoreTimerProc)) return;
+                InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr);
+            }
+            folder->Release();
+        }
+        static VOID CALLBACK RestoreTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
+        {
+            KillTimer(nullptr, timerId);
+            auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr));
+            if (!folder) return;
+            const auto result = folder->RestoreSelection();
+            TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-selection-restored" : "synthetic-sort: deferred-selection-restore-failed");
             folder->Release();
         }
         ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
@@ -1601,6 +1712,9 @@ namespace
         PIDLIST_ABSOLUTE _backingRoot = nullptr;
         IShellView* _shellView = nullptr;
         IShellFolder2* _inner = nullptr;
+        std::vector<SyntheticChild> _pendingSelected;
+        SyntheticChild _pendingFocused{};
+        bool _pendingHasFocused = false;
     };
 
     class SyntheticFolderClassFactory final : public IClassFactory

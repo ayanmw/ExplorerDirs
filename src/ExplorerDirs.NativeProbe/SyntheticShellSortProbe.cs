@@ -15,7 +15,11 @@ internal static class SyntheticShellSortProbe
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private const int LvmFirst = 0x1000;
     private const int LvmGetItemCount = LvmFirst + 4;
+    private const int LvmSetItemState = LvmFirst + 43;
+    private const int LvmGetItemState = LvmFirst + 44;
     private const int LvmGetItemTextW = LvmFirst + 115;
+    private const uint LvisFocused = 0x0001;
+    private const uint LvisSelected = 0x0002;
     private const uint LvifText = 0x0001;
     private const uint DvaspectContent = 1;
     private const uint TymedHGlobal = 1;
@@ -266,6 +270,7 @@ internal static class SyntheticShellSortProbe
 
             var originalPath = Path.Combine(backingFolder, "a-large.bin");
             var renamedPath = Path.Combine(backingFolder, "a-large-renamed.bin");
+            SetListViewSelectionAndFocus(listView, "two.bin", ReadNames(listView, module));
             RenameShellItem(originalPath, "a-large-renamed.bin");
             if (File.Exists(originalPath) || !File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation rename did not update its backing filesystem fixture.");
             var renameAutoUpdated = false;
@@ -277,29 +282,49 @@ internal static class SyntheticShellSortProbe
                 renameAutoUpdated = afterRenameNotification.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
             }
             if (!renameAutoUpdated) throw new IOException("The virtual namespace view did not react to the backing folder's Shell rename notification.");
+            var renameAutoNames = ReadNames(listView, module);
+            var renameAutoState = StateForName(listView, renameAutoNames, "two.bin");
+            var renameSelectionRetained = (renameAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+            var renameSelectionDeadline = Environment.TickCount64 + 2500;
+            while (!renameSelectionRetained && Environment.TickCount64 < renameSelectionDeadline)
+            {
+                Pump(50);
+                renameAutoNames = ReadNames(listView, module);
+                renameAutoState = StateForName(listView, renameAutoNames, "two.bin");
+                renameSelectionRetained = (renameAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+            }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var afterRename = ReadNames(listView, module);
-            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated={renameAutoUpdated}; after-refresh-rename=[{string.Join('|', afterRename)}]");
+            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated={renameAutoUpdated}; rename-auto-selection-retained={renameSelectionRetained}; two-state=0x{renameAutoState:X}; after-refresh-rename=[{string.Join('|', afterRename)}]");
             if (!afterRename.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
                 throw new IOException("Refreshing the namespace view did not enumerate the renamed backing filesystem item.");
+            if (!renameSelectionRetained) throw new IOException("The automatic rename refresh did not preserve selection and keyboard focus on the unchanged item.");
 
             DeleteShellItem(renamedPath);
             if (File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation delete left the backing filesystem item present.");
             var deleteAutoUpdated = false;
-            var deleteNotificationDeadline = Environment.TickCount64 + 2500;
-            while (!deleteAutoUpdated && Environment.TickCount64 < deleteNotificationDeadline)
+            var deleteAutoSelectionRetained = false;
+            var deleteAutoNames = Array.Empty<string>();
+            var deleteAutoDeadline = Environment.TickCount64 + 2500;
+            while ((!deleteAutoUpdated || !deleteAutoSelectionRetained) && Environment.TickCount64 < deleteAutoDeadline)
             {
                 Pump(100);
-                var afterDeleteNotification = ReadNames(listView, module, expectedCount: -1);
-                deleteAutoUpdated = !afterDeleteNotification.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+                deleteAutoNames = ReadNames(listView, module, expectedCount: -1);
+                deleteAutoUpdated = !deleteAutoNames.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+                var deleteAutoState = StateForName(listView, deleteAutoNames, "two.bin");
+                deleteAutoSelectionRetained = (deleteAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             }
+            if (!deleteAutoUpdated) throw new IOException("The virtual namespace view did not react to the backing folder's Shell delete notification.");
+            var finalDeleteState = StateForName(listView, deleteAutoNames, "two.bin");
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var afterDelete = ReadNames(listView, module, expectedCount: 2);
-            Console.WriteLine($"synthetic-shell-size-sort: delete-auto-updated={deleteAutoUpdated}; after-refresh-delete=[{string.Join('|', afterDelete)}]");
+            var deleteSelectionRetained = HasSelectionAndFocus(listView, afterDelete, "two.bin");
+            Console.WriteLine($"synthetic-shell-size-sort: delete-auto-updated={deleteAutoUpdated}; delete-auto-selection-retained={deleteAutoSelectionRetained}; two-state=0x{finalDeleteState:X}; after-refresh-delete=[{string.Join('|', afterDelete)}]; rename-selection-retained={renameSelectionRetained}; delete-selection-retained={deleteSelectionRetained}");
             if (afterDelete.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
                 throw new IOException("Refreshing the namespace view retained a deleted backing filesystem item.");
+            if (!deleteAutoSelectionRetained) throw new IOException("The automatic delete refresh did not preserve selection and keyboard focus on the unchanged item.");
 
             Console.WriteLine($"synthetic-shell-size-sort: initial=[{string.Join('|', initial)}]; ascending=[{string.Join('|', ascending)}]; descending=[{string.Join('|', descending)}]; size-CompareIDs-ascending={ascendingCompareCount}; size-CompareIDs-descending={descendingCompareCount}; total-CompareIDs={totalCompareCount}; foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
@@ -420,6 +445,41 @@ internal static class SyntheticShellSortProbe
         }
         finally { Marshal.FreeHGlobal(text); }
         return values;
+    }
+
+    private static void SetListViewSelectionAndFocus(nint listView, string name, string[] names)
+    {
+        var index = Array.FindIndex(names, item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) throw new InvalidOperationException($"Could not find '{name}' to establish the selection/focus probe state.");
+        SetListViewState(listView, -1, state: 0, stateMask: LvisSelected | LvisFocused);
+        SetListViewState(listView, index, state: LvisSelected | LvisFocused, stateMask: LvisSelected | LvisFocused);
+        if (!HasSelectionAndFocus(listView, names, name)) throw new InvalidOperationException("Could not establish the selection/focus probe state.");
+    }
+
+    private static bool HasSelectionAndFocus(nint listView, string[] names, string name)
+    {
+        var state = StateForName(listView, names, name);
+        return (state & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+    }
+
+    private static uint StateForName(nint listView, string[] names, string name)
+    {
+        var index = Array.FindIndex(names, item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        return index < 0 ? 0 : GetListViewState(listView, index);
+    }
+
+    private static uint GetListViewState(nint listView, int index) =>
+        unchecked((uint)SendMessageW(listView, LvmGetItemState, index, (nint)(LvisSelected | LvisFocused)));
+
+    private static void SetListViewState(nint listView, int index, uint state, uint stateMask)
+    {
+        var item = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(new NativeListViewItem { State = state, StateMask = stateMask }, item, false);
+            SendMessageW(listView, LvmSetItemState, index, item);
+        }
+        finally { Marshal.FreeHGlobal(item); }
     }
 
     private static nint FindListView(nint view)

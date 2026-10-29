@@ -4478,3 +4478,5 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 通过 `SFVM_GETNOTIFY` 订阅 backing folder 后，真实 `IFileOperation` 重命名和删除均到达 `SFVM_FSNOTIFY`。在回调中直接同步 `IShellView::Refresh` 会导致 `0xC000041D`；改为 STA 线程定时器延后刷新后，重命名和删除均在 2.5 秒内自动反映到 DefView，显式刷新后的磁盘枚举也正确。单视图探针暂时保留 view 引用，并在 finally 显式释放；这没有验证多视图所有权模型。
 - NativeProbe Release build、原生 `/W4 /WX` build 和 `git diff --check` 通过；watchdog 退出后专用 HKCU namespace/CLSID、源夹具和复制夹具均清理，前台窗口未变化。实验没有打开用户可见窗口。
 - 证据限于一个隐藏隔离视图及小型本地夹具；单进程单待处理视图刷新队列尚不能证明多窗格并发、真实鼠标 OLE 拖放、焦点/键盘、第三方菜单扩展、失败/撤销路径、性能或可见体验。产品继续使用 ExplorerBrowser，IShellView 迁移仍未获批；后续按迁移门槛逐项补证，最终集中做 UI 验收。详见[IShellView 架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
+
+补充验证（2026-10-29）：立即在 `IShellView::Refresh` 后恢复时，DefView 行数暂时为 0，无法定位选中项；改为第二个 250 ms STA 定时器后，在未变化的单个文件 `two.bin` 上，重命名及删除刷新后的 selected/focused 状态均恢复为 `0x3`。当前仅验证单选且焦点项未被操作；多选、被重命名/删除项的状态语义和多视图并发仍未验证。单进程单待处理视图队列、隔离 view 引用释放的限制不变。
