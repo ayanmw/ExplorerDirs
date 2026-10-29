@@ -12,6 +12,8 @@
 
 2026-10-30 IShellView 隔离迁移复验：当前 Release NativeProbe 的四窗格 WPF consumer 再次通过（退出码 0）。反向选择、Ctrl+A、F2 方向键隔离、Shell 文件操作通知、原生视图菜单及 WPF 根窗同步销毁均通过，前台 HWND 与最后输入时间不变。该结果只加强隔离宿主证据；ExplorerBrowser 产品接线、物理输入、完整 OLE 拖放与可见验收仍开放。详细记录见[隔离原型](ishellview-color-spike.md#2026-10-30当前主线复跑四窗格-wpf-consumer)。
 
+2026-10-30 递归目录大小隔离更新 A/B：WPF 根宿主下有效临时 Shell namespace 可建立视图，初始递归值显示与数值排序正确；单项通知、父目录通知和整视图刷新均未恢复派生列值，整视图刷新还丢失选区/焦点并耗时约 2.64 秒。宿主未超时，临时注册与夹具均清理。该路线不接入产品，后续不再叠加同类 DefView 刷新技巧；详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30wpf-根宿主下递归大小列更新-ab)。
+
 2026-10-30 Q-Dir 快速链接 Ctrl+单击：按 [Q-Dir 官方说明](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English) 补齐文件夹链接的 Ctrl+单击新窗口行为。新窗口复制来源会话后，在其活动窗格导航到快捷链接目标；普通单击仍在当前活动窗格导航，文件/程序快捷方式在两种修饰键状态下继续交给 Windows Shell 启动。目标须由 Shell 明确确认为文件夹；若新窗口创建失败，保持来源窗口不变并显示状态提示。快速链接目标策略与菜单接线 smoke、完整 Release SettingsSmoke、App Release build 通过；未启动 GUI，物理 Ctrl+单击与可见新窗口体验留待集中验收。
 
 2026-10-30 Q-Dir 窗格焦点快捷键：Q-Dir 官方帮助规定 Ctrl+1…4 聚焦对应 Q-View，但 Explorer Dirs 已用 Ctrl+1…9 切换标签。本项目新增 Ctrl+Alt+1…4 聚焦布局中对应的可见窗格，并把焦点放进文件视图；隐藏窗格请求不改变当前活动窗格，文本输入控件保留按键。路由、键位不冲突和文本焦点策略已有 smoke；可见窗格间的真实焦点切换仍待 GUI 验收。[Q-Dir 4.51 官方帮助](https://www.softwareok.com/?seite=q-dir-hilfe)

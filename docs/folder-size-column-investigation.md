@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-30：WPF 根宿主下递归大小列更新 A/B
+
+在隔离 Private Desktop 中通过受保护的临时 Desktop `NameSpace` 注册解析到真实文件系统夹具的 namespace；自有 adapter 使用 `IShellFolder2::CompareIDs` 提供数值比较，并由 WPF `HwndSource` 承载 `IShellView`。视图初次建立时，递归目录 `child` 显示大小 `10`，文件 `small.bin` 显示大小 `4`；升序和降序都按数值正确重排。前台 HWND 与最后输入时间未变。
+
+改变目录内容后依次比较 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR`、`IShellView::Refresh` 三种更新。三种策略的 Shell 列快照都不含递归大小属性列，刷新期间没有新的逐项属性读取；均无法读回递归列值。前两种策略在该夹具下保留选区/焦点，但整视图刷新后选区/焦点状态不再匹配。整视图刷新结算约 2.64 秒，慢于通知策略且未恢复派生列。WPF 根宿主下本次没有复现 `CreateViewWindow` 或父窗口销毁超时，Private Desktop watchdog 正常退出；adapter DLL 因仍有 Shell 引用而保留至一次性探针进程退出。watchdog 确认临时 CLSID、Desktop namespace 注册、夹具目录和子进程均已清理，没有生成超时 dump。
+
+本轮证明 WPF 根宿主使这个合成 namespace 视图能够完成排序与 A/B 生命周期，但没有解决 DefView 在更新后丢弃自定义列及其逐项值的问题；整视图刷新还带来约 2.64 秒延迟与选区/焦点损失。因此不进入 ExplorerBrowser 产品集成，也不继续叠加这三种通知技巧。日志：`src/.state/native-probe-watchdog/20261030-051635-7c532fdf.stdout.log`，stderr 为空。该结果只适用于本机隔离 adapter / DefView，不代表 ExplorerBrowser 产品菜单或视图行为。
+
 ## 结论（2026-10-25）
 
 当前文件列表是 ExplorerBrowser 提供的原生 Shell 视图，列通过 `IColumnManager` 读取和应用；该接口只能选择当前 Shell 文件夹已经支持的属性列，不能向现有视图注册任意新列。`IColumnProvider` 已是 Vista 前的旧方案，不能作为当前 Windows 的扩展路线。
