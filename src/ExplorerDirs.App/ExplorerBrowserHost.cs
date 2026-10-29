@@ -142,6 +142,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private long _nativeUserInputVersion;
     private Task<string?>? _middleClickFolderProbe;
     private string? _middleClickParentPath;
+    private bool _middleClickParentIsFileSystem;
     private long _middleClickNavigationVersion;
     private long _middleClickInputVersion;
     private long _settledNativeUserInputVersion;
@@ -3363,13 +3364,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void BeginMiddleClickFolderProbe()
     {
         _middleClickFolderProbe = null;
-        if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive ||
-            _viewWindow == IntPtr.Zero || !Path.IsPathFullyQualified(CurrentPath)) return;
+        if (_browser is null || _location.IsSearchActive || _viewWindow == IntPtr.Zero) return;
         _middleClickParentPath = CurrentPath;
+        _middleClickParentIsFileSystem = _location.IsFileSystemLocation;
         _middleClickNavigationVersion = _viewReadiness.NavigationVersion;
         _middleClickInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         _middleClickFolderProbe = GetCursorPos(out var point)
-            ? ProbeFileSystemFolderAtPoint(new ShellMenuPoint(point.X, point.Y), _middleClickParentPath, _viewWindow)
+            ? ProbeFolderAtPoint(new ShellMenuPoint(point.X, point.Y), _middleClickParentPath,
+                _middleClickParentIsFileSystem, _viewWindow)
             : Task.FromResult<string?>(null);
     }
 
@@ -3382,6 +3384,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var viewWindow = _viewWindow;
         _middleClickFolderProbe = null;
         _middleClickParentPath = null;
+        _middleClickParentIsFileSystem = false;
         if (probe is null || parentPath is null) return;
         _ = probe.ContinueWith(completed =>
         {
@@ -5045,13 +5048,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
-    private Task<string?> ProbeFileSystemFolderAtPoint(ShellMenuPoint point, string parentPath, IntPtr viewWindow)
+    private Task<string?> ProbeFolderAtPoint(ShellMenuPoint point, string parentPath,
+        bool parentIsFileSystem, IntPtr viewWindow)
     {
         return Task.Run(() =>
         {
             try
             {
                 var itemName = HitTestListItemName(point, viewWindow);
+                if (!parentIsFileSystem)
+                    return ShellFolderChildIdentity.TryResolveChildFolder(parentPath, itemName, out var identity)
+                        ? identity
+                        : null;
                 if (!ShellMiddleClickTarget.TryGetChildPath(parentPath, itemName, out var candidate)) return null;
                 var itemId = ShellItemId;
                 if (SHCreateItemFromParsingName(candidate, IntPtr.Zero, ref itemId, out var item) < 0)

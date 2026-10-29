@@ -9,6 +9,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--shell-middle-click-target-smoke"])
+{
+    ShellMiddleClickTargetSmoke.Run();
+    return;
+}
+
 if (args is ["--tab-transfer-policy-smoke"])
 {
     ExplorerDirs.SettingsSmoke.CrossPaneTabTransferSmoke.Run();
