@@ -10,6 +10,8 @@
 
 2026-10-30 Q-Dir 快速链接 Ctrl+单击：按 [Q-Dir 官方说明](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English) 补齐文件夹链接的 Ctrl+单击新窗口行为。新窗口复制来源会话后，在其活动窗格导航到快捷链接目标；普通单击仍在当前活动窗格导航，文件/程序快捷方式在两种修饰键状态下继续交给 Windows Shell 启动。目标须由 Shell 明确确认为文件夹；若新窗口创建失败，保持来源窗口不变并显示状态提示。快速链接目标策略与菜单接线 smoke、完整 Release SettingsSmoke、App Release build 通过；未启动 GUI，物理 Ctrl+单击与可见新窗口体验留待集中验收。
 
+2026-10-30 Q-Dir 窗格焦点快捷键：Q-Dir 官方帮助规定 Ctrl+1…4 聚焦对应 Q-View，但 Explorer Dirs 已用 Ctrl+1…9 切换标签。本项目新增 Ctrl+Alt+1…4 聚焦布局中对应的可见窗格，并把焦点放进文件视图；隐藏窗格请求不改变当前活动窗格，文本输入控件保留按键。路由、键位不冲突和文本焦点策略已有 smoke；可见窗格间的真实焦点切换仍待 GUI 验收。[Q-Dir 4.51 官方帮助](https://www.softwareok.com/?seite=q-dir-hilfe)
+
 2026-10-30：后台快捷键复核时检查到 Alt+F11 虽已有 Q-Dir 同款应用内重启入口，但窗口级预览键路由没有避开文本框焦点，可能在地址/搜索编辑中弹出重启确认。现将该快捷键与文件视图命令一同交还给文本输入控件；焦点策略定向 smoke、完整 Release SettingsSmoke 与 App Release build 均通过（0 警告、0 错误）。Shift+F6 继续保留本项目既有的反向焦点区域导航，不覆盖为 Q-Dir 的查看方式循环，因为路线图已确认该差异以保持 Explorer 键盘导航。
 
 2026-10-30 当前主线后台基线：`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release --no-restore` 完整通过，exit code 0；`ExplorerDirs.App` Release build 0 警告/错误。覆盖的是已存在的设置/路由/状态 smoke 与托管 App 编译，不包含真实文件视图 UI、Shell 菜单、物理输入或 ExplorerBrowser 可见行为。本轮未修改产品源码或 release。

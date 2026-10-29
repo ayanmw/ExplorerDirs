@@ -39,6 +39,7 @@
 | F6、Shift+F6 | 在每个可见窗格的地址栏、可见搜索输入、可见快速筛选输入、标签标题、可见目录树、详细信息列标题（若有）、文件区和状态栏“查看”入口之间正反向循环；跳过窗格内的小按钮 | 停靠点映射有无窗口回归；按[详情窗格设计](superpowers/specs/2026-10-24-details-pane-design.md)不为原生预览/详情窗格增加独立停靠点。Shell 窗格切换后的真实焦点和菜单退出焦点仍待 GUI 验收 |
 | Alt+P、Alt+Shift+P、Ctrl+Shift+E | 切换当前标签的预览窗格、详情窗格；将可见目录树展开并定位到当前目录 | Alt+P/Alt+Shift+P 分别切换互斥的原生 Shell 帧，状态按标签保存；菜单/工具栏显示快捷键。Ctrl+Shift+E 将当前窗格树展开到目录。SettingsSmoke 和隐藏生产宿主回归通过；窗格可见渲染、实际尺寸、焦点及树交互待 GUI 验收 |
 | Ctrl+N | 复制当前窗口及其布局/标签，并创建独立会话 | 已接入独立窗口 INI 和 `WindowSessions.ini` 顺序清单；收藏夹与应用偏好仍按 profile 共享，固定标签随窗口会话保存。隐藏配置回归通过；可见快捷键、新窗口并行交互和重启恢复待 GUI 验收 |
+| Ctrl+Alt+1…4 | 聚焦布局中的第 1…4 个可见窗格，并把键盘焦点放入其文件视图 | 避开 Ctrl+1…9 切换标签；当前布局没有对应窗格时不切换；文本编辑控件保留组合键。路由/焦点目标索引由 SettingsSmoke 覆盖，真实快捷键和可见焦点仍待 GUI 验收 |
 | Windows+E | 打开文件资源管理器 | 仍由 Windows 系统处理；本应用未注册全局热键或接管系统 Shell。作为后续可逆系统集成项单独规划，不计为当前已支持快捷键 |
 
 2026-10-24 微软现行 File Explorer 快捷键清单复核：[Alt+Shift+P](https://support.microsoft.com/en-gb/accessibility/windows/keyboard-shortcuts-in-windows) 切换详情窗格；[Num Lock+* / + / -](https://support.microsoft.com/en-au/accessibility/windows/keyboard-shortcuts-in-windows) 是目录树中的展开/折叠命令，应由获得焦点的原生目录树处理，不应映射到文件列表。生产 `NativeShellTree` 原生控件与 WPF `ShellTreeHost.TranslateAcceleratorCore` 隐藏宿主都通过 `+` 展开、`*` 递归展开子目录、`-` 折叠测试；WPF 探针仅在加速器未处理时按消息循环派发，并确认前台窗口未变。两项测试都由探针直接建立隔离树状态，不验证实体 Num Lock 输入、用户 Tab/F6 获得焦点或可见焦点体验，仍需桌面验收。
@@ -53,7 +54,7 @@
 
 其他程序注册的系统级热键可能先于本程序收到按键；前台应用无法可靠阻止其触发。若 Ctrl+Shift+N、Shift+F7 或 Shift+F5 等组合键冲突，请使用本程序的菜单或工具栏入口。隔离 GUI 布局及搜索冒烟脚本不发送键盘或鼠标输入，仍会打开测试窗口，因此只在明确空闲的桌面时段手动启用。文件操作快捷键需人工验收。
 
-Q-Dir 官方快捷键清单还列出与本项目不同的定义：Q-Dir 使用 `Ctrl+N` 新建文件夹、`Shift+F6` 切换查看方式；本项目按用户已选定的多窗口会话方案及 Explorer 焦点顺序，分别保留 `Ctrl+N` 新窗口、`Ctrl+Shift+N` 新建文件夹和 `Shift+F6` 反向遍历主要区域。Q-Dir 的视图切换由本项目 `Ctrl+鼠标滚轮` 与 `Ctrl+Shift+1…8` 提供。Q-Dir 4.51 官方帮助还记载 `Ctrl+1…4` 聚焦对应 Q-View；本项目已用 `Ctrl+1…9` 切换标签，两个映射冲突，暂不把 pane 焦点重映射到这些按键。来源：[Q-Dir 官方英文快捷键/菜单清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)、[Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)、[Microsoft Windows / File Explorer 快捷键清单](https://support.microsoft.com/en-us/accessibility/windows/keyboard-shortcuts-in-windows)。
+Q-Dir 官方快捷键清单还列出与本项目不同的定义：Q-Dir 使用 `Ctrl+N` 新建文件夹、`Shift+F6` 切换查看方式；本项目按用户已选定的多窗口会话方案及 Explorer 焦点顺序，分别保留 `Ctrl+N` 新窗口、`Ctrl+Shift+N` 新建文件夹和 `Shift+F6` 反向遍历主要区域。Q-Dir 的视图切换由本项目 `Ctrl+鼠标滚轮` 与 `Ctrl+Shift+1…8` 提供。Q-Dir 4.51 官方帮助还记载 `Ctrl+1…4` 聚焦对应 Q-View；本项目保留 `Ctrl+1…9` 切换标签，并以 `Ctrl+Alt+1…4` 提供无冲突的可见窗格聚焦。来源：[Q-Dir 官方英文快捷键/菜单清单](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)、[Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)、[Microsoft Windows / File Explorer 快捷键清单](https://support.microsoft.com/en-us/accessibility/windows/keyboard-shortcuts-in-windows)。
 
 2026-10-25 地址历史下拉采用当前标签已访问目录作为数据范围；导航历史独立于 Shell 前进/后退 TravelLog，最多保留最近 20 个唯一路径，复制标签会复制运行时列表，进程重启后重新从当前目录建立。SettingsSmoke 覆盖去重、最近顺序、容量和副本隔离；下拉菜单的可见呈现、键盘选择和导航结果仍待 GUI 验收。
 

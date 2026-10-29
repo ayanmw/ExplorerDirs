@@ -5,7 +5,7 @@ internal enum ExplorerShortcut
     None, Parent, Back, Forward, NextFocusStop, PreviousFocusStop,
     NextFocusRegion, PreviousFocusRegion, Address, AddressTree,
     NewTab, NewWindow, QuickFolderMenu, ProgramStarter, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab, OpenSelectionInNewTab,
-    Tab1, Tab2, Tab3, Tab4, Tab5, Tab6, Tab7, Tab8, Tab9, NewFolder, InvertSelection,
+    Tab1, Tab2, Tab3, Tab4, Tab5, Tab6, Tab7, Tab8, Tab9, FocusPane1, FocusPane2, FocusPane3, FocusPane4, NewFolder, InvertSelection,
     Refresh, Search, QuickFilter, ExpandTree, TogglePreviewPane, ToggleDetailsPane, ToggleFullScreen,
     RestartApplication,
     CalculateDirectorySize,
@@ -50,6 +50,7 @@ internal static class KeyboardShortcuts
         (0x57, 2) => ExplorerShortcut.CloseTab,
         (0x4b, 2) => ExplorerShortcut.DuplicateTab,
         (0x0d, 4) => ExplorerShortcut.OpenSelectionInNewTab, // Q-Dir: open selected folder in a new tab.
+        (>= 0x31 and <= 0x34, 3) => ExplorerShortcut.FocusPane1 + (key - 0x31), // Q-Dir: Ctrl+1-4 focuses a Q-View; Alt avoids the tab shortcut conflict.
         (0x6b, 2) => ExplorerShortcut.AutoFitColumns, // Ctrl+NumPad+: let the native Details view size columns.
         (0x4e, 6) => ExplorerShortcut.NewFolder,     // Ctrl+Shift+N
         (0x76, 4) => ExplorerShortcut.NewFolder,     // Q-Dir: Shift+F7.
@@ -95,6 +96,7 @@ internal static class KeyboardShortcuts
             ExplorerShortcut.ProgramStarter or
             ExplorerShortcut.ScreenMagnifier or
             ExplorerShortcut.AutoFitColumns or
+            (>= ExplorerShortcut.FocusPane1 and <= ExplorerShortcut.FocusPane4) or
             ExplorerShortcut.NewFolder or
             (>= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ);
 
@@ -103,6 +105,13 @@ internal static class KeyboardShortcuts
 
     public static bool ShouldYieldDriveLToMagnifier(ExplorerShortcut shortcut, bool magnifierRunning) =>
         shortcut == ExplorerShortcut.NavigateDriveL && magnifierRunning;
+
+    public static int? ResolveFocusedPaneIndex(ExplorerShortcut shortcut, int visiblePaneCount)
+    {
+        if (shortcut is < ExplorerShortcut.FocusPane1 or > ExplorerShortcut.FocusPane4) return null;
+        var index = (int)shortcut - (int)ExplorerShortcut.FocusPane1;
+        return index < visiblePaneCount ? index : null;
+    }
 
     public static int NextPane(int current, int visibleCount, bool reverse)
     {

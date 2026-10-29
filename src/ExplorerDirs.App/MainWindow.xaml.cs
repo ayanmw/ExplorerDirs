@@ -1811,6 +1811,18 @@ public partial class MainWindow : Window
     {
         if (shortcut == ExplorerShortcut.None) return false;
         if (shortcut == ExplorerShortcut.AutoFitColumns) return false; // HwndHost forwards this Shell action after TranslateAccelerator declines it.
+        if (shortcut is >= ExplorerShortcut.FocusPane1 and <= ExplorerShortcut.FocusPane4)
+        {
+            var paneIndex = KeyboardShortcuts.ResolveFocusedPaneIndex(
+                shortcut, LayoutPreset.Find(_layout).Slots.Length);
+            if (paneIndex is { } index)
+            {
+                var pane = _panes[index];
+                SetActivePane(pane);
+                pane.FocusCurrentView();
+            }
+            return true;
+        }
         if (shortcut is >= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ)
         {
             if (shortcut == ExplorerShortcut.NavigateDriveL &&
