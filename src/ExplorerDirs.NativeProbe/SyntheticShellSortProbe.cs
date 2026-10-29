@@ -285,7 +285,7 @@ public static class SyntheticShellSortProbe
             }
             Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8} path={hdropPath}; CIDA-hr=0x{cidaHr:X8} path={cidaPath}; IFileOperation={copyResult}");
             var listView = FindListView(view);
-            VerifyMultiSelectionCancellation(folderView, view, module, Path.Combine(copyDestination, "MultiSelection"));
+            VerifyMultiSelectionCancellation(folderView, view, module, backingFolder, Path.Combine(copyDestination, "MultiSelection"));
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
             var ascendingCompareCount = ReadCounter(module, "GetSyntheticSizeCompareCount");
@@ -755,7 +755,7 @@ public static class SyntheticShellSortProbe
         finally { Marshal.Release(operation); }
     }
 
-    private static void VerifyMultiSelectionCancellation(nint folderView, nint view, nint module, string destinationFolder)
+    private static void VerifyMultiSelectionCancellation(nint folderView, nint view, nint module, string backingFolder, string destinationFolder)
     {
         var listView = FindListView(view);
         var names = ReadNames(listView, module);
@@ -786,8 +786,45 @@ public static class SyntheticShellSortProbe
                 throw new IOException($"Cancelling a multi-selection copy changed the view's selection or focus: selected={selectedAfterCancel}; first=0x{firstState:X}; second=0x{secondState:X}.");
             Console.WriteLine("synthetic-shell-size-sort: cancelled-multi-selection-preserved=True; selected=2; focused=two.bin");
             Pump(800); // Aborted IFileOperation still emits Shell invalidations; let the asynchronous view refresh finish before the next operation.
+            VerifySuccessfulMultiSelectionCopy(selectedItems, backingFolder, Path.Combine(destinationFolder, "Successful"));
         }
         finally { Marshal.Release(selectedItems); }
+    }
+
+    private static void VerifySuccessfulMultiSelectionCopy(nint selectedItems, string backingFolder, string destinationFolder)
+    {
+        if (Directory.Exists(destinationFolder))
+            throw new InvalidOperationException($"Refusing to reuse the isolated multi-copy destination: {destinationFolder}");
+        Directory.CreateDirectory(destinationFolder);
+        var fileOperationClass = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var fileOperationInterface = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        Check(CoCreateInstance(ref fileOperationClass, 0, 1, ref fileOperationInterface, out var operation));
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            try
+            {
+                Check(At<CopyItems>(operation, 17)(operation, selectedItems, destinationItem));
+                Check(At<PerformOperations>(operation, 21)(operation));
+                Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                var expectedNames = new[] { "two.bin", "z-ten.bin" };
+                var copiedNames = Directory.EnumerateFiles(destinationFolder).Select(Path.GetFileName).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                if (aborted != 0 || !copiedNames.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase))
+                    throw new IOException($"The selected Shell data object did not copy exactly two files: aborted={aborted}; files=[{string.Join('|', copiedNames)}].");
+                foreach (var name in expectedNames)
+                {
+                    var sourceBytes = File.ReadAllBytes(Path.Combine(backingFolder, name));
+                    var copiedBytes = File.ReadAllBytes(Path.Combine(destinationFolder, name));
+                    if (!sourceBytes.AsSpan().SequenceEqual(copiedBytes))
+                        throw new IOException($"The copied multi-selection item '{name}' did not match its source bytes.");
+                }
+                Console.WriteLine("synthetic-shell-size-sort: successful-multi-selection-copy=True; copied=2; sources-preserved=True; content-matches=True");
+            }
+            finally { Marshal.Release(destinationItem); }
+        }
+        finally { Marshal.Release(operation); }
     }
 
     [ComVisible(true)]

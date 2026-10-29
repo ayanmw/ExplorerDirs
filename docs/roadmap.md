@@ -6,6 +6,8 @@
 
 2026-10-29：隔离原生 namespace 原型已修复探针自身的 PIDL 生命周期错误，并验证真实 DefView 可创建、按虚拟列升降序排序；背景/选中菜单可构建。选中 `IDataObject` 的 `CF_HDROP` 与 CIDA 实际取出后均指向夹具中的同一文件；`IFileOperation.CopyItems` 已复制样本。双视图的重命名/删除现改用虚拟视图选区返回的 `IDataObject` 调用 `RenameItems`/`DeleteItems`，两视图均收到通知且未操作项的选择/焦点恢复，两轮通过。临时 HKCU 注册及夹具目录均清理，未接入产品 ExplorerBrowser。下一步仍缺完整 OLE `DoDragDrop` 源/目标循环及视图生命周期边界；在迁移门槛完成前不迁移产品宿主。细节见[原生 Shell 架构评审](superpowers/specs/2026-10-26-folder-size-shell-view-architecture-review.md)。
 
+2026-10-29：在隔离 synthetic DefView 探针中补充多选成功 Copy：选中 `two.bin` 与 `z-ten.bin`，从 Shell selection `IDataObject` 执行 `IFileOperation.CopyItems`，确认目标恰有两项、逐字节匹配源文件且源文件保留；原有多选取消后保持两项选中及焦点的验证仍通过。完整 Private Desktop watchdog exit 0，NativeProbe Release build 0 警告/错误，结束后临时 CLSID/NameSpace 和源/目标夹具均不存在。运行期间外层曾短暂观察到前台从 TortoiseGitProc 变为 TortoiseGitUDiff；首次变化时输入时间戳未变，探针结束时原前台恢复，但变化原因未能归因，因此不将其视为“全程前台未变”的证据。结果仅覆盖隔离 Shell data object 与程序化复制，不等同于真实鼠标 OLE 拖放或产品行为。
+
 2026-10-29：完成标签栏隐藏模式的后台实现：保留原有“始终显示 / 多标签时显示”，新增仅隐藏标题条的选项，标签对象、浏览状态与快捷键不受影响。便携配置升至版本 2，并兼容读取旧版本布尔值；未知更高版本拒绝写入。定向与完整 smoke、App Release build 通过。未启动产品 GUI，菜单操作、焦点导航、跨重启展示仍待集中验收。
 
 2026-10-29：重新运行文件夹入口的隔离注册表 smoke。脚本仅在随机 `HKCU\Software\ExplorerDirs.Tests\FolderVerb-*` 临时键及系统临时目录中验证能力清单哈希、安装/重复安装/卸载、预存冲突拒绝和外部编辑保护；退出后检查无残留测试键或临时目录。全部通过，未接触真实 `HKCU\Software\Classes\Directory/Drive` 关联项。该证据修复了此前因沙箱拒绝 HKCU 写入而缺失的隔离测试，不代表真实 Explorer 菜单可见或启动体验已验收。
