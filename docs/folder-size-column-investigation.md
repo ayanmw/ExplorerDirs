@@ -444,4 +444,4 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 
 2026-10-30：A/B 输出增加通知到视图状态收敛的耗时，以及 `EnumObjects` 调用/行数、逐项大小列读取、自定义属性读取和大小比较次数，便于区分重枚举与局部刷新。注意这些计数覆盖探针通过 ListView 读取结果时产生的属性请求；它们用于同一探针内的相对比较，不代表纯 Shell 刷新开销。Release 构建、无窗口 folder-tree smoke、DLL unload contract 和 `git diff --check` 通过；本轮仍未启动真实 Shell view A/B。
 
-2026-10-30：修正上条 A/B 计数的观察者干扰：探针读取 ListView 文本时，用仅作用于当前 STA 线程的标记屏蔽同步回调产生的枚举、大小属性和比较计数；消息泵期间仍正常累计 Shell 更新工作。原生适配器 `/W4 /WX` 与 NativeProbe Release 构建、无窗口 folder-tree smoke、DLL unload contract 均通过。该变化提高相对计数的可解释性，但尚未实际运行通知 A/B，仍需运行时确认事件回调线程与观察线程一致。
+2026-10-30：修正上条 A/B 计数的观察者干扰：探针读取 ListView 文本时，用仅作用于当前 STA 线程的标记屏蔽同步回调产生的枚举、大小属性和比较计数；消息泵期间仍正常累计 Shell 更新工作。无窗口 folder-tree smoke 直接调用 `GetDetailsOf`、`GetDetailsEx`、`CompareIDs`、`EnumObjects` 和枚举器 `Next`，确认观察标记开启时这些查询不会污染计数；输出 `metric-observer-exclusion-passed`。原生适配器 `/W4 /WX`、NativeProbe Release、folder-tree smoke、DLL unload contract 均通过。该合同证明当前线程的屏蔽逻辑，不代表异线程 Shell 调用行为；真实通知 A/B 尚未运行。

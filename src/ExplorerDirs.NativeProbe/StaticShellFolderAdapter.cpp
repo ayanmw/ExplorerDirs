@@ -2745,6 +2745,45 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         const bool updatedSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 1;
         VariantClear(&sizeValue);
         if (!updatedSizeDisplayed || !updatedSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        const auto sizeDetailsBeforeObservation = InterlockedCompareExchange(&g_syntheticSizeDetailsOfItemCount, 0, 0);
+        const auto customPropertyBeforeObservation = InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExCount, 0, 0);
+        const auto sizeCompareBeforeObservation = InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0);
+        const auto enumCallsBeforeObservation = InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0);
+        const auto enumeratedRowsBeforeObservation = InterlockedCompareExchange(&g_syntheticEnumeratedItems, 0, 0);
+        g_syntheticSizeMetricsObservation = TRUE;
+        SHELLDETAILS observedDetails{};
+        const auto observedDetailsResult = root->GetDetailsOf(item, 1, &observedDetails);
+        if (observedDetails.str.uType == STRRET_WSTR && observedDetails.str.pOleStr)
+            CoTaskMemFree(observedDetails.str.pOleStr);
+        VARIANT observedProperty{};
+        const auto observedPropertyResult = root->GetDetailsEx(item, &kSyntheticRecursiveSizeKey, &observedProperty);
+        const bool observedPropertyValue = SUCCEEDED(observedPropertyResult) &&
+            observedProperty.vt == VT_UI8 && observedProperty.ullVal == 1;
+        VariantClear(&observedProperty);
+        const auto observedCompareResult = root->CompareIDs(1, item, item);
+        IEnumIDList* observedEnumerator = nullptr;
+        auto observedEnumResult = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &observedEnumerator);
+        PITEMID_CHILD observedRow = nullptr;
+        ULONG observedFetched = 0;
+        if (SUCCEEDED(observedEnumResult) && observedEnumerator)
+            observedEnumResult = observedEnumerator->Next(1, &observedRow, &observedFetched);
+        g_syntheticSizeMetricsObservation = FALSE;
+        if (observedRow) CoTaskMemFree(observedRow);
+        if (observedEnumerator) observedEnumerator->Release();
+        const bool observerCallbacksExcluded =
+            InterlockedCompareExchange(&g_syntheticSizeDetailsOfItemCount, 0, 0) == sizeDetailsBeforeObservation &&
+            InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExCount, 0, 0) == customPropertyBeforeObservation &&
+            InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0) == sizeCompareBeforeObservation &&
+            InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0) == enumCallsBeforeObservation &&
+            InterlockedCompareExchange(&g_syntheticEnumeratedItems, 0, 0) == enumeratedRowsBeforeObservation;
+        if (FAILED(observedDetailsResult) || !observedPropertyValue || FAILED(observedCompareResult) ||
+            FAILED(observedEnumResult) || observedFetched != 1 || !observerCallbacksExcluded)
+        {
+            CoTaskMemFree(item);
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: metric-observer-exclusion-passed");
         childFolder = item;
         item = nullptr;
         {

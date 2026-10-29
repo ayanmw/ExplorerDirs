@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-30：递归目录大小通知 A/B 探针增加耗时和 Shell 查询计数，并以 STA 线程局部标记排除探针读取 ListView 文本时的同步属性回调。原生适配器 `/W4 /WX`、NativeProbe Release build、无窗口 folder-tree smoke、DLL unload contract 通过。前台 HWND 为 0 且最近有用户输入，未运行临时 namespace 注册的 Shell view A/B；产品与 release 未改。
+2026-10-30：递归目录大小通知 A/B 探针增加耗时和 Shell 查询计数，并以 STA 线程局部标记排除探针读取 ListView 文本时的同步属性回调；无窗口合同 smoke 验证该标记覆盖详情、比较、枚举与行读取调用。原生适配器 `/W4 /WX`、NativeProbe Release build、folder-tree smoke、DLL unload contract 通过。前台 HWND 为 0 且最近有用户输入，未运行临时 namespace 注册的 Shell view A/B；产品与 release 未改。
 
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
