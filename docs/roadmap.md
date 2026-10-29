@@ -4601,6 +4601,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 后续两次重复 WPF 根宿主递归大小自定义列 probe：一轮有效通过，显示 10/4 并由 DefView 标题升降序排序；另一轮相同显示/排序断言通过，但前台 HWND 与输入时间戳变化，按隔离守卫判定无效。两轮探针进程、临时注册与 fixture 均已清理。该结果加强 WPF 根视图列消费的可重复性证据，但不证明产品迁移或桌面隔离稳定；暂停新的 Private Desktop view probe，产品仍使用 ExplorerBrowser。
 - 静态审查 NativeProbe 递归列实现发现，枚举时同步递归计算每个目录大小，每次刷新都会重算，当前没有缓存、取消或异步行更新。微型夹具不提供大型目录性能证据；产品化前需先有后台可取消计算/缓存设计并按树规模量测。
+- 更新路径方面，原型 `SFVM_FSNOTIFY` 当前触发整视图 `IShellView::Refresh`；微软的 `IShellFolderView::RefreshObject` 可重绘单项，但是否重新取列值/更新排序尚未验证。作为后续隔离视图检查项，不能先假定它解决异步列值更新。
 
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
