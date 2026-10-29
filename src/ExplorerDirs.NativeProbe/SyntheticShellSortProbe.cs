@@ -24,17 +24,23 @@ internal static class SyntheticShellSortProbe
 
         nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
         var classKeyPath = $@"Software\Classes\CLSID\{{{SyntheticFolderClassId:D}}}";
+        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{SyntheticFolderClassId:D}}}";
         StreamViewHost? host = null;
         var viewWindowCreated = false;
         var parentDestroyed = false;
         var classRegistrationCreated = false;
+        var namespaceRegistrationCreated = false;
         try
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
-            rootPidl = CreateClsidPidl(SyntheticFolderClassId);
+            RegisterSyntheticNamespace(namespaceKeyPath);
+            namespaceRegistrationCreated = true;
+            Check(SHParseDisplayName($"::{SyntheticFolderClassId:B}", 0, out rootPidl, 0, out _));
+            if (rootPidl == 0) throw new InvalidOperationException("Shell resolved the synthetic namespace without returning an absolute PIDL.");
+            Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
             Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
             Console.WriteLine("synthetic-shell-size-sort: synthetic folder and view returned");
@@ -95,6 +101,7 @@ internal static class SyntheticShellSortProbe
             host?.Dispose();
             if (module != 0) NativeLibrary.Free(module);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
+            if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
@@ -205,13 +212,23 @@ internal static class SyntheticShellSortProbe
         }
     }
 
-    private static nint CreateClsidPidl(Guid classId)
+    private static void RegisterSyntheticNamespace(string namespaceKeyPath)
     {
-        var pidl = Marshal.AllocCoTaskMem(sizeof(ushort) + 16 + sizeof(ushort));
-        Marshal.WriteInt16(pidl, 18);
-        Marshal.Copy(classId.ToByteArray(), 0, pidl + sizeof(ushort), 16);
-        Marshal.WriteInt16(pidl, 18, 0);
-        return pidl;
+        using var existing = Registry.CurrentUser.OpenSubKey(namespaceKeyPath);
+        if (existing is not null)
+            throw new InvalidOperationException("The reserved synthetic Desktop\\NameSpace key already exists; refusing to overwrite it.");
+
+        try
+        {
+            using var namespaceKey = Registry.CurrentUser.CreateSubKey(namespaceKeyPath, writable: true)
+                ?? throw new InvalidOperationException("Could not create the temporary Desktop\\NameSpace key.");
+            namespaceKey.SetValue(null, "ExplorerDirs isolated synthetic sort probe", RegistryValueKind.String);
+        }
+        catch
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+            throw;
+        }
     }
 
     private static int ReadCounter(nint module, string name) =>
@@ -255,4 +272,5 @@ internal static class SyntheticShellSortProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProcedure callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
 }

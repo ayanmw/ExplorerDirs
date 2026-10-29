@@ -93,12 +93,18 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $runId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().ToString('N').Substring(0, 8))
 $stdoutPath = Join-Path $logDirectory "$runId.stdout.log"
 $stderrPath = Join-Path $logDirectory "$runId.stderr.log"
-# The synthetic sort probe uses one reserved per-user CLSID registration. Refuse
-# to touch a pre-existing key, then remove the temporary key even if the child
-# must be killed by this watchdog before its own finally block runs.
+# The synthetic sort probe uses one reserved per-user CLSID and Desktop namespace
+# registration. Refuse to touch either pre-existing key, then remove both even if
+# the child must be killed by this watchdog before its own finally block runs.
 $syntheticClassKey = 'HKCU:\Software\Classes\CLSID\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
-if ($Probe -eq 'synthetic-shell-size-sort-private-desktop' -and (Test-Path -LiteralPath $syntheticClassKey)) {
-    throw "Refusing synthetic Shell sort probe because its reserved CLSID key already exists: $syntheticClassKey"
+$syntheticNamespaceKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
+if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
+    if (Test-Path -LiteralPath $syntheticClassKey) {
+        throw "Refusing synthetic Shell sort probe because its reserved CLSID key already exists: $syntheticClassKey"
+    }
+    if (Test-Path -LiteralPath $syntheticNamespaceKey) {
+        throw "Refusing synthetic Shell sort probe because its reserved Desktop namespace key already exists: $syntheticNamespaceKey"
+    }
 }
 # Keep native Shell probes outside the app process so a probe crash or hang
 # cannot terminate Explorer Dirs itself.
@@ -116,6 +122,7 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     }
     $process.WaitForExit()
     if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
+        Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($TestTimeoutPath) {
@@ -152,6 +159,7 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
 $process.WaitForExit() # Drain redirected output after process termination.
 $exitCode = $process.ExitCode
 if ($Probe -eq 'synthetic-shell-size-sort-private-desktop') {
+    Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Output "status=exited; exitCode=$exitCode; stdout=$stdoutPath; stderr=$stderrPath"

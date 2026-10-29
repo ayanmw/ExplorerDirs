@@ -328,6 +328,14 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 这说明在所测本机 DefView 路径中，排序并非由它向 `SysListView32` 发送通用 ListView 排序/重排消息完成；更可能由 DefView 自己先改变 Shell 项目顺序，再由列表读取该顺序。这是根据限定 HWND 消息范围作出的推断，不是对 Shell 内部实现的证明。后续应追踪 `IFolderView2::SetSortColumns`、Header 通知到 DefView 项目序列/属性读取的边界，并优先验证能否通过受支持的 Shell folder 比较合同让 ByteCount 进入同一排序路径。产品和发布包仍未改变。
 
+### 2026-10-29：临时 Desktop namespace 解析与数值排序通过
+
+用户明确授权后，NativeProbe 在唯一保留的测试 CLSID `{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}` 下，临时创建当前用户 `Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace` 项，并从 `SHParseDisplayName("::{GUID}")` 获取 Shell 解析出的绝对 PIDL；不再手工拼接一个未挂载的 CLSID PIDL。探针随后创建该 namespace 的标准 DefView，在隔离 Private Desktop 中读回三项静态样本，并分别执行 `PKEY_Size` 数值升序与降序。
+
+结果：Shell parsing name 解析成功；`CreateViewWindow` 及时返回（此前相同未挂载 PIDL 路径 45 秒超时）；初始名称序为 `a-large.bin|two.bin|z-ten.bin`，升序为 `two.bin|z-ten.bin|a-large.bin`，降序为 `a-large.bin|z-ten.bin|two.bin`；`CompareIDs` 的 Size 比较器在升、降序阶段均各被调用 3 次。探针 exit code 0，前台 HWND 与输入时间戳保持不变。正常结束后由独立检查确认临时 CLSID 与 Desktop `NameSpace` 两个键均不存在。
+
+本结果证明：具备有效 Shell namespace 父级后，独立虚拟 `IShellFolder2`/DefView 原型能够通过 `CompareIDs` 提供可消费的静态数值排序；它也定位了前一轮挂起与 namespace PIDL 未通过 Shell 正常解析相伴。它**不**证明完整系统资源管理器导航入口已实现，也未验证实际文件操作、第三方扩展、可见交互、多窗格及动态递归目录大小值；产品仍使用 ExplorerBrowser，未改 release。首次默认沙箱运行因注册表写权限拒绝而在创建任何键前退出；授权的限时隔离执行随后通过，完整日志为 `src/.state/native-probe-watchdog/20261029-081402-b9b3cce0.stdout.log`。
+
 ### 2026-10-29：标准 Size 的属性存储覆写对照
 
 NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回明确的 `PKEY_Size` 覆盖值：`a-ten.bin=100`、`two.bin=200`、`z-ten.bin=10`；逐项直接读取均确认返回 `S_OK` 和目标值。随后设置标准 `PKEY_Size` 升序并刷新，DefView 行序仍是 `two.bin|a-ten.bin|z-ten.bin`，对应真实文件字节大小 `2|10|10`，而非覆盖值所要求的 `z-ten.bin|a-ten.bin|two.bin`。真实 Header 输入产生的两种方向行序也与真实文件大小对应。由此确认该视图的标准 Size 排序没有消费此子项 `IPropertyStoreFactory` 返回的 `PKEY_Size` 值；光装饰标准属性存储无法让递归目录大小参与 Explorer 原生大小排序。
