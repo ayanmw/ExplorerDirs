@@ -4590,6 +4590,11 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 按 Size 排序结果仍正确（4 B 文件在 10 B 递归目录之前，反向排序相反），说明这份合成样本的比较排序合同有效；但仅屏蔽 filesystem 标记不足以让 DefView 消费目录属性。结论只适用于当前包装真实 filesystem PIDL 的隔离 adapter，不代表全自有 PIDL namespace。
 - 这是架构探针证据，未接入产品、未改 release。产品继续使用 ExplorerBrowser，F9 递归扫描仍是显式汇总路径；若未来要逐行派生列，后续研究需转向完整虚拟 namespace 的属性供应与 Shell 操作兼容门槛，而不再重复尝试此标记屏蔽变体。
 
+## 2026-10-30：IShellView WPF 根宿主清理对照
+- Private Desktop 合成递归大小视图改用 WPF `HwndSource` 作为父根后完整返回（watchdog exit code 0）；目录值 10、文件值 4 正常显示，升序/降序各调用一次 `CompareIDs` 并按值重排。
+- `HwndSource.Dispose` 销毁父根成功，前台 HWND 和最后输入时间戳保持不变。`DllCanUnloadNow` 在仍有 COM 引用时返回 `S_FALSE`，模块留待探针进程退出回收。
+- 结果与此前原生 `STATIC` 根销毁卡住的观察形成对照，提示继续聚焦宿主根窗口销毁路径；尚未同轮复跑 `STATIC` 基线或取得卡住调用栈，根因未证实。产品仍使用 ExplorerBrowser，本次只更新隔离架构证据，不代表产品迁移门槛已通过。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-30wpf-根宿主清理对照)。
+
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
 - 自定义列 key 探针发现：未注册 `PROPERTYKEY` 经 `GetDetailsOf` 可在 DefView 中同时显示 10 B 目录和 4 B 文件；`SetSortColumns` 因未知 schema 返回 `TYPE_E_ELEMENTNOTFOUND`，但原生列标题点击仍会排序并调用 provider `CompareIDs`。这是 NativeProbe 级可行性证据，完整 Private Desktop 运行因前台/输入守卫变化及清理超时不记为通过。先源码定位清理等待与守卫变化，再决定后续独立会话复测；本轮不动产品及 release。

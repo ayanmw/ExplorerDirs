@@ -415,3 +415,7 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 另外复核 timeout dump 的采集进程：watchdog 现在可通过绝对路径参数 `-TimeoutDumpPath` 在超时时由外部进程写入可选 minidump，并在尝试采集后再终止 probe。一般 probe 启用该选项时外层超时额外留 10 秒；递归目录大小视图 probe 则会在 25 秒先由 watchdog 捕获，早于其 30 秒内部超时。watchdog 现已接入递归大小基线和 WPF 根宿主两个命令。直接运行 probe 时原环境变量 `EXPLORER_DIRS_NATIVEPROBE_TIMEOUT_DUMP_PATH` 仍控制其进程内转储。无窗口 PowerShell timeout-tree 自检验证外部采集写出带 `MDMP` 签名的文件（最近一次 872,986 bytes），且父子进程按预期退出。该自检只证明外部写转储与超时清理，不证明卡死现场的 dump 内容可供完整栈回溯；尚未运行任何视图 probe。
 
 与这条正向对照并行的 strict adapter 诊断仍为负：虽然 `SetSortColumns` 返回成功并可读回排序 key/direction，DefView 排序时没有调用 adapter 的 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，列表行序不变。由此当前可行路线是自有 PIDL namespace，不是把真实 filesystem folder 包一层后期待默认 DefView 使用其派生比较器。下一步只针对清理阶段做源码/线程等待诊断；未定位前不再扩展实时扫描缓存或产品接线。产品仍使用 ExplorerBrowser，用户要求保留的 Shell 菜单、剪贴板、文件操作、拖放及刷新兼容门槛全部仍需通过。
+
+2026-10-30：首次在 Private Desktop 运行 WPF 根对照，watchdog 退出码 0。`HwndSource` 根下的合成 `IShellView` 显示目录递归大小 10、文件大小 4，升序为 `small.bin|child`，降序为 `child|small.bin`，`CompareIDs` 两方向各调用一次。父窗口通过 `HwndSource.Dispose` 销毁，探针完整返回；用户桌面前台 HWND 与最后输入时间戳均未变化。检查时 `DllCanUnloadNow` 返回 `S_FALSE`，所以 DLL 保留至探针进程退出，符合避免卸载仍被 COM 对象引用模块的策略。
+
+这与此前原生 `STATIC` 根的 `DestroyWindow(parent)` 阶段卡住形成对照，支持将父窗口/宿主销毁路径作为挂起原因的主要调查方向；但尚未在同一轮重跑 `STATIC` 基线，也没有 WPF 根下的卡顿转储或 WM_DESTROY 调用栈，因此不能断言已找到根因。该结果仅证明隔离合成 namespace 的显示、排序和 WPF 根清理，不代表 ExplorerBrowser 产品已经迁移或通过 Shell 菜单、焦点、拖放、操作、通知等迁移门槛。
