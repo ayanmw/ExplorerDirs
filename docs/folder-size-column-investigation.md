@@ -342,7 +342,9 @@ Private Desktop 实测：已注册 `System.Document.ByteCount` 列显示为 `2|1
 
 结果：`SHBindToParent`、`BindToObject`、`CreateViewObject` 均返回；注册 class factory 创建计数为 1；`IFolderView2::GetFolder` 与根文件夹 COM identity 一致；初始、升序、降序行序及 `CompareIDs` 计数继续符合前一节的预期。Release 原生 DLL `/W4 /WX` 与 NativeProbe 构建通过，隔离探针 exit code 0；前台 HWND 和输入时间戳未变，结束后两个临时注册键均不存在。完整日志：`src/.state/native-probe-watchdog/20261029-081657-b53c6798.stdout.log`。
 
-同一探针随后只查询背景菜单、不显示或调用任何命令：`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 成功，`IContextMenu::QueryContextMenu` 返回 7 个顶层菜单项、20 个 canonical verbs，包括 `undo`、`paste`、`refresh`、`groupby`、`sortascending`/`sortdescending`、多种 `viewlogical*` 和 `viewcolsettings`。该菜单对象证明 DefView 可提供背景菜单命令合同，不证明屏幕显示、命令状态或命令执行效果。最新日志：`src/.state/native-probe-watchdog/20261029-082138-0341f57e.stdout.log`。
+同一探针随后只查询背景菜单、不显示或调用任何命令：`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 成功，`IContextMenu::QueryContextMenu` 返回 7 个顶层菜单项、20 个 canonical verbs，包括 `undo`、`paste`、`refresh`、`groupby`、`sortascending`/`sortdescending`、多种 `viewlogical*` 和 `viewcolsettings`。该菜单对象证明 DefView 可提供背景菜单命令合同，不证明屏幕显示、命令状态或命令执行效果。日志：`src/.state/native-probe-watchdog/20261029-082138-0341f57e.stdout.log`。
+
+再选中第一个合成项目，并用 `IFolderView2::ItemCount(SVGIO_SELECTION)` 确认选择数为 1 后查询项目接口：`GetItemObject(SVGIO_SELECTION, IID_IContextMenu)` 返回 `E_NOINTERFACE`，`GetItemObject(SVGIO_SELECTION, IID_IDataObject)` 返回 `E_FAIL`。因此缺口不是“选择没有成功”；当前合成 folder 的 `GetUIObjectOf` 明确尚未实现，不能提供选中项的 Shell 扩展菜单或标准剪贴板数据对象。完整日志：`src/.state/native-probe-watchdog/20261029-082350-9a619d15.stdout.log`。本测试没有执行复制、剪切、删除或重命名。
 
 此结果证明的是 namespace 的正常 COM 绑定、DefView 数值比较接线和背景菜单对象的可查询性。合成文件夹仍故意不实现子项 `GetUIObjectOf`、重命名/绑定及数据对象，因此没有验证选中项目菜单、复制移动、拖放或真实文件操作；不能把它当作可用的资源管理器替代视图或产品迁移验收。
 

@@ -8,6 +8,7 @@ internal static class SyntheticShellSortProbe
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
@@ -115,6 +116,16 @@ internal static class SyntheticShellSortProbe
             }
             finally { if (backgroundMenu != 0) Marshal.Release(backgroundMenu); }
             Console.WriteLine($"synthetic-shell-size-sort: background-IContextMenu-hr=0x{contextMenuHr:X8}; available={contextMenuHr >= 0}; QueryContextMenu-hr=0x{menuQueryHr:X8}; menu-items={shellMenuItemCount}; canonical-verbs=[{string.Join('|', shellMenuVerbs)}]");
+            Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x1u | 0x4u)); // Select the first item without moving focus.
+            Check(At<GetItemCount>(folderView, 7)(folderView, 1, out var selectedCount)); // SVGIO_SELECTION
+            if (selectedCount != 1) throw new InvalidOperationException($"Expected exactly one selected synthetic item before querying its Shell objects; got {selectedCount}.");
+            var selectionMenuId = ContextMenuId;
+            var selectionMenuHr = At<GetItemObject>(view, 15)(view, 1, ref selectionMenuId, out var selectionMenu); // SVGIO_SELECTION
+            if (selectionMenu != 0) Marshal.Release(selectionMenu);
+            var dataObjectId = DataObjectId;
+            var dataObjectHr = At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectionDataObject);
+            if (selectionDataObject != 0) Marshal.Release(selectionDataObject);
+            Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; available={selectionMenuHr >= 0}; selected-IDataObject-hr=0x{dataObjectHr:X8}; available={dataObjectHr >= 0}");
             var listView = FindListView(view);
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
@@ -307,6 +318,8 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
     private delegate bool EnumChildProcedure(nint child, nint parameter);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
