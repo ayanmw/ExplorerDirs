@@ -406,4 +406,6 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 
 后续 A/B 在父窗口销毁前记录并清除属于测试窗口的焦点/鼠标捕获：捕获窗口为 0，焦点曾属于该测试视图且已清除，但 `DestroyWindow(parent)` 仍在同阶段阻塞；COM/ChsIME 等待链未变。因此“仅因测试视图保留键盘焦点或鼠标捕获”不足以解释停滞。该轮前台守卫在阻塞约 15 秒时检测到前台从 LockApp 变为无窗口句柄，且最后输入 tick 改变；整轮不计为 Private Desktop 隔离通过，不能判断该变化由探针还是外部输入造成。A/B 开关只在 `EXPLORER_DIRS_NATIVEPROBE_CLEAR_FOCUS_BEFORE_PARENT_DESTROY=1` 时对测试父窗口清除输入状态，不影响产品代码。NativeProbe Release 构建 0 警告/错误；目前停止新的 Private Desktop 重试，后续需在桌面边界稳定时再查父窗口 `WM_DESTROY`/子窗口清理调用栈。
 
+为避免后续超时只剩 Wait Chain，PrivateDesktopShellProbe 现支持可选的进程 minidump：只有设置绝对路径环境变量 `EXPLORER_DIRS_NATIVEPROBE_TIMEOUT_DUMP_PATH` 才会在超时时调用 `MiniDumpWriteDump`，使用 `CreateNew` 防止覆盖旧证据；默认不生成转储。无 Shell 窗口的自检生成转储并经 `MiniDumpReadDumpStream` 核对 `MDMP` 头、线程列表及线程信息流。NativeProbe Release 构建 0 警告/错误。自检转储不是卡死现场；新的 Private Desktop 复验尚未在此开关下运行，因此仍没有父窗口销毁等待的线程栈证据。
+
 与这条正向对照并行的 strict adapter 诊断仍为负：虽然 `SetSortColumns` 返回成功并可读回排序 key/direction，DefView 排序时没有调用 adapter 的 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，列表行序不变。由此当前可行路线是自有 PIDL namespace，不是把真实 filesystem folder 包一层后期待默认 DefView 使用其派生比较器。下一步只针对清理阶段做源码/线程等待诊断；未定位前不再扩展实时扫描缓存或产品接线。产品仍使用 ExplorerBrowser，用户要求保留的 Shell 菜单、剪贴板、文件操作、拖放及刷新兼容门槛全部仍需通过。

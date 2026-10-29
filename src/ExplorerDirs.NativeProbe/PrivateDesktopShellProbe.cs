@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using ExplorerDirs.NativeProbe;
+using Microsoft.Win32.SafeHandles;
 
 // Runs focus-sensitive Shell probes on a separate, never-switched Windows Desktop.
 // This keeps SetFocus activation inside the probe desktop instead of the user's desktop.
@@ -16,6 +17,34 @@ internal static class PrivateDesktopShellProbe
     private static string _activeProbeStage = "idle";
 
     internal static void ReportStage(string stage) => Volatile.Write(ref _activeProbeStage, stage);
+
+    internal static int RunMiniDumpCaptureSmoke(string path)
+    {
+        try
+        {
+            CaptureMiniDump(path);
+            var dump = File.ReadAllBytes(path);
+            if (dump.Length < 32 || !dump.AsSpan(0, 4).SequenceEqual("MDMP"u8))
+                throw new InvalidDataException("The captured file does not have a minidump signature/header.");
+            var pinnedDump = GCHandle.Alloc(dump, GCHandleType.Pinned);
+            try
+            {
+                if (!MiniDumpReadDumpStream(pinnedDump.AddrOfPinnedObject(), 3, out _, out var threads, out var threadBytes) ||
+                    threadBytes < 4 || Marshal.ReadInt32(threads) < 1)
+                    throw new InvalidDataException("The minidump has no readable thread list.");
+                if (!MiniDumpReadDumpStream(pinnedDump.AddrOfPinnedObject(), 17, out _, out _, out _))
+                    throw new InvalidDataException("The minidump has no thread-info stream.");
+                Console.WriteLine($"native-minidump-smoke: signature=MDMP; thread-count={Marshal.ReadInt32(threads)}; thread-info=True; bytes={dump.Length}; path={path}");
+            }
+            finally { pinnedDump.Free(); }
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"native-minidump-smoke: failed={exception.GetType().Name}: {exception.Message}");
+            return 1;
+        }
+    }
 
     internal static int RunHostFilter() => Run("host-filter", ShellViewHostFilterProbe.RunForPrivateDesktop);
 
@@ -372,6 +401,7 @@ internal static class PrivateDesktopShellProbe
             var foregroundAtTimeout = GetForegroundWindow();
             var threadId = unchecked((uint)Volatile.Read(ref workerThreadId));
             Console.Error.WriteLine($"private-desktop-probe: kind={kind}; timeout=True; worker-tid={threadId}; stage={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=[{foregroundBeforeDescription}]; foreground-at-timeout=[{DescribeWindow(foregroundAtTimeout)}]; last-input-before={lastInputBefore}; last-input-at-timeout={GetLastInputTick()}; probe did not return before the deadline");
+            CaptureTimeoutDumpIfRequested();
             CaptureWaitChain(threadId);
             return 124;
         }
@@ -416,6 +446,33 @@ internal static class PrivateDesktopShellProbe
     {
         var info = new LastInputInfo { Size = unchecked((uint)Marshal.SizeOf<LastInputInfo>()) };
         return GetLastInputInfo(ref info) ? info.Time.ToString() : "unavailable";
+    }
+
+    private static void CaptureTimeoutDumpIfRequested()
+    {
+        var path = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_TIMEOUT_DUMP_PATH");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            CaptureMiniDump(path);
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"native-minidump: failed={exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private static void CaptureMiniDump(string path)
+    {
+        if (!Path.IsPathFullyQualified(path))
+            throw new ArgumentException("A minidump output path must be absolute.", nameof(path));
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        const uint miniDumpWithThreadInfo = 0x00001000;
+        if (!MiniDumpWriteDump(GetCurrentProcess(), unchecked((uint)Environment.ProcessId),
+                stream.SafeFileHandle, miniDumpWithThreadInfo, 0, 0, 0))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "MiniDumpWriteDump failed.");
+        stream.Flush(flushToDisk: true);
+        Console.Error.WriteLine($"native-minidump: captured=True; bytes={stream.Length}; path={path}");
     }
 
     private static void CaptureWaitChain(uint threadId)
@@ -587,6 +644,19 @@ internal static class PrivateDesktopShellProbe
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll")]
+    private static extern nint GetCurrentProcess();
+
+    [DllImport("dbghelp.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MiniDumpWriteDump(nint process, uint processId, SafeFileHandle file,
+        uint dumpType, nint exceptionInformation, nint userStreamInformation, nint callbackInformation);
+
+    [DllImport("dbghelp.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MiniDumpReadDumpStream(nint baseOfDump, uint streamNumber,
+        out nint directory, out nint streamPointer, out uint streamSize);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint GetModuleHandleW(string moduleName);
