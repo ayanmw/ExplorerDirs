@@ -24,6 +24,7 @@ namespace
 
     volatile LONG g_syntheticLiveObjects = 0;
     volatile LONG g_syntheticServerLocks = 0;
+    volatile LONG g_syntheticDeferredRefreshCount = 0;
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     const CLSID kSyntheticFolderClassId =
@@ -1588,6 +1589,7 @@ namespace
             if (timerId) KillTimer(nullptr, timerId);
             Release();
         }
+        HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
     private:
         HRESULT CaptureSelection()
         {
@@ -1721,6 +1723,7 @@ namespace
             KillTimer(nullptr, timerId);
             auto* folder = FindPendingRefresh(timerId);
             if (!folder) return;
+            InterlockedIncrement(&g_syntheticDeferredRefreshCount);
             folder->_refreshTimerId = 0;
             auto result = folder->CaptureSelection();
             if (SUCCEEDED(result)) result = folder->RefreshView();
@@ -1889,6 +1892,23 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
         folder->Release();
     }
 }
+
+extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForProbe()
+{
+    LONG scheduled = 0;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder) continue;
+        const auto result = folder->ScheduleRefreshForProbe();
+        if (FAILED(result)) return result;
+        if (result == S_OK) ++scheduled;
+    }
+    return scheduled;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDeferredRefreshCount()
+{ return InterlockedCompareExchange(&g_syntheticDeferredRefreshCount, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 { return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }

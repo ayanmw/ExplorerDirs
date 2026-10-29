@@ -385,6 +385,16 @@ internal static class SyntheticShellSortProbe
                 ascendingCompareCount == 0 || descendingCompareCount == 0 ||
                 ReadCounter(module, "GetSyntheticSizeCompareCount") == 0)
                 return 1;
+
+            var deferredRefreshCounter = Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, "GetSyntheticDeferredRefreshCount"));
+            var refreshCountBeforeCancel = deferredRefreshCounter();
+            var pendingRefreshes = Marshal.GetDelegateForFunctionPointer<SchedulePendingRefreshes>(NativeLibrary.GetExport(module, "ScheduleSyntheticSortRefreshesForProbe"))();
+            if (pendingRefreshes != 2) throw new InvalidOperationException($"Expected to schedule one pending refresh per view, got {pendingRefreshes}.");
+            Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
+            Pump(400);
+            if (deferredRefreshCounter() != refreshCountBeforeCancel)
+                throw new InvalidOperationException("A deferred refresh callback ran after the probe released both view holds.");
+            Console.WriteLine("synthetic-shell-size-sort: pending-refresh-cancelled-on-release=2; callbacks-after-release=0");
             return 0;
         }
         finally
@@ -667,6 +677,7 @@ internal static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SchedulePendingRefreshes();
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
