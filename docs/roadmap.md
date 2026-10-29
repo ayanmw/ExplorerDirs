@@ -4600,6 +4600,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 从公共符号服务器取得匹配的 ntdll、win32u、coreclr PDB 后，`StackWalk64` 恢复主线程前四帧：`NtUserMsgWaitForMultipleObjectsEx` → combase ordinal 88 内部帧 → `CoWaitForMultipleHandles` → CLR 模块。CLR 之后 unwind 数据不足而失效；combase PDB 下载不可用（503/超时），故具体 COM 调用者及根因仍未知。
 
 - 后续两次重复 WPF 根宿主递归大小自定义列 probe：一轮有效通过，显示 10/4 并由 DefView 标题升降序排序；另一轮相同显示/排序断言通过，但前台 HWND 与输入时间戳变化，按隔离守卫判定无效。两轮探针进程、临时注册与 fixture 均已清理。该结果加强 WPF 根视图列消费的可重复性证据，但不证明产品迁移或桌面隔离稳定；暂停新的 Private Desktop view probe，产品仍使用 ExplorerBrowser。
+- 静态审查 NativeProbe 递归列实现发现，枚举时同步递归计算每个目录大小，每次刷新都会重算，当前没有缓存、取消或异步行更新。微型夹具不提供大型目录性能证据；产品化前需先有后台可取消计算/缓存设计并按树规模量测。
 
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
