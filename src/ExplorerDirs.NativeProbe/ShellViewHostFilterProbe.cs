@@ -812,12 +812,73 @@ internal static class ShellViewHostFilterProbe
             var renameArrowResults = VerifyRenameArrowRouting(folderView, listView, viewWindow, host.View, visibleNames, mode.Name);
             results.Add($"{mode.Name}=shell:{actualShellMode}/{iconSize},list:{actualListViewMode},items:{visibleItems},rename-arrows:[{string.Join(',', renameArrowResults)}]");
         }
+        VerifyShellNativeViewModes(folderView, listView);
         // Keep the following linear Down-key probe in Details, where its expected next-row behavior is defined.
         Check(setMode(folderView, 4, 16));
         _ = SendMessageW(listView, LvmSetView, 1, 0);
         Application.DoEvents();
         _ = ShowWindow(parent, 0); // SW_HIDE; restore the probe's original hidden-parent boundary.
         Console.WriteLine("ishellview-host-filter: synchronized-view-modes=" + string.Join('|', results));
+    }
+
+    private static void VerifyShellNativeViewModes(nint folderView, nint listView)
+    {
+        const int LvmGetView = 0x108F;
+        var setMode = At<SetViewModeAndIconSize>(folderView, 35);
+        var getMode = At<GetViewModeAndIconSize>(folderView, 36);
+        var results = new List<string>();
+        var initialNames = ReadVisibleItemNames(folderView, 2);
+        var keepIndex = Array.FindIndex(initialNames, name => name.Equals("keep.txt", StringComparison.OrdinalIgnoreCase));
+        if (keepIndex < 0) throw new Exception("The Shell view mode probe has no persistent selection item.");
+        Check(At<SelectItem>(folderView, 15)(folderView, keepIndex, 0x1u | 0x4u | 0x10u | 0x40000000u));
+
+        foreach (var style in ViewStyle.All)
+        {
+            var requestedSize = ViewStyle.NativeIconSize(style.Mode, style.IconSize);
+            Check(setMode(folderView, style.Mode, requestedSize));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            int visibleItems;
+            do
+            {
+                Application.DoEvents();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out visibleItems));
+                if (visibleItems == 2) break;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < deadline);
+
+            Check(getMode(folderView, out var actualMode, out var actualSize));
+            var listViewMode = SendMessageW(listView, LvmGetView, 0, 0).ToInt32();
+            var names = ReadVisibleItemNames(folderView, visibleItems);
+            Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedItems));
+            Check(At<GetFocusedItem>(folderView, 10)(folderView, out var focusedIndex));
+            var focusedName = focusedIndex >= 0 && focusedIndex < names.Length ? names[focusedIndex] : string.Empty;
+            var expectedListViewMode = style.Mode switch
+            {
+                1 => 0, // FVM_ICON -> LV_VIEW_ICON.
+                2 => 2, // FVM_SMALLICON -> LV_VIEW_SMALLICON.
+                3 => 3, // FVM_LIST -> LV_VIEW_LIST.
+                4 => 1, // FVM_DETAILS -> LV_VIEW_DETAILS.
+                6 => 4, // FVM_TILE -> LV_VIEW_TILE.
+                _ => -1 // Content is not one of the five documented SysListView32 modes.
+            };
+            var expectedSizeMatches = requestedSize <= 0 || actualSize == requestedSize;
+            var listViewModeMatches = expectedListViewMode < 0 || listViewMode == expectedListViewMode;
+            var selectionPreserved = selectedItems == 1 && focusedName.Equals("keep.txt", StringComparison.OrdinalIgnoreCase);
+            var itemsMatch = visibleItems == 2 && names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .SequenceEqual(["child", "keep.txt"], StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"ishellview-native-view-mode: name={style.Name}; requested={style.Mode}/{requestedSize}; actual={actualMode}/{actualSize}; list-view={listViewMode}; items={visibleItems}; names={string.Join(',', names)}; selection={selectedItems}/{focusedName}; item-set-preserved={itemsMatch}; selection-preserved={selectionPreserved}");
+
+            if (actualMode != style.Mode || !expectedSizeMatches || !listViewModeMatches || !itemsMatch || !selectionPreserved)
+                throw new Exception($"IShellView did not apply {style.Name} through its native view API: requested={style.Mode}/{requestedSize}, actual={actualMode}/{actualSize}, list={listViewMode}, items={visibleItems}, names={string.Join(',', names)}, selection={selectedItems}/{focusedName}.");
+            results.Add($"{style.Name}={actualMode}/{actualSize}/list:{listViewMode}/items:{visibleItems}");
+        }
+
+        for (var index = 0; index < initialNames.Length; index++)
+            Check(At<SelectItem>(folderView, 15)(folderView, index, 0));
+        Check(At<ItemCount>(folderView, 7)(folderView, 1, out var finalSelectionCount));
+        if (finalSelectionCount != 0) throw new Exception("The native view mode probe did not restore its empty selection baseline.");
+
+        Console.WriteLine("ishellview-host-filter: shell-api-view-modes=" + string.Join('|', results));
     }
 
     private static IReadOnlyList<string> VerifyRenameArrowRouting(nint folderView, nint listView, nint viewWindow, nint view,
