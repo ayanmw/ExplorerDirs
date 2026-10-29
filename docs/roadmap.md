@@ -14,6 +14,8 @@
 
 2026-10-30：为下一次受控的 Private Desktop 超时增加显式路径 minidump 采集（不设置 `EXPLORER_DIRS_NATIVEPROBE_TIMEOUT_DUMP_PATH` 时不生成 dump）；无 Shell 窗口自检确认 MDMP 头、线程列表与线程信息流可读取。另加 opt-in WPF `HwndSource` 根宿主的递归列排序/清理对照，保留原 `STATIC` 基线。NativeProbe Release 构建 0 警告/错误。尚未运行新对照、重跑卡住视图或取得实际线程栈；这些是诊断准备，不代表已定位或修复生命周期问题。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-30-合成-namespace-排序对照与清理停滞)。
 
+2026-10-30：复核逐行大小异步更新的受支持接口后，将隔离验证候选从 legacy `IShellFolderView::RefreshObject` 改为 `SHChangeNotify(SHCNE_UPDATEITEM)`。公开文档只保证这是既有 Shell 项目的变更通知，没有保证 DefView 会重取扩展列、重排或保留选区；通知还可能合并为目录级事件。尚未运行行为探针；Private Desktop view 探针仍暂停至隔离边界稳定。产品未改，ExplorerBrowser 保持现状。详见[调查记录](folder-size-column-investigation.md#2026-10-30-支持路径候选复核)。
+
 2026-10-30：键盘“在新标签打开所选文件夹”（Shift+Enter/Ctrl+Shift+T）改为读取 Shell 绝对解析名，并要求 Shell folder 属性及当前系统 provider 均确认该位置为文件夹；因此支持可解析的虚拟 Shell 文件夹，同时保留搜索位置、非文件夹及不受支持 namespace 的拒绝行为。文件视图中键新标签仍限普通文件系统目录。定向 resolver smoke、完整 Release SettingsSmoke 均通过；App Release build 0 错误，3 条 NU1900（NuGet 漏洞源不可达）。未启动窗口，真实键盘输入与可见新标签行为仍待集中 GUI 验收；未更新 release。
 
 2026-10-30：文件视图中键开新标签现在除普通路径外，也可解析受支持 Shell 父文件夹内的 UI Automation 命中项：通过父 `IShellFolder::ParseDisplayName` 取得相对 PIDL、组合为绝对 PIDL，并由 Shell 再确认目标是文件夹。定向 smoke 已在临时文件夹及“此电脑”系统盘上通过；非法名称、缺失子项、普通文件目标和过期请求均拒绝。完整 Release SettingsSmoke 通过；App Release build 0 错误、2 条 NU1900（NuGet 漏洞源不可达）。没有运行产品 GUI，虚拟 provider 与真实中键命中仍待集中验收。
@@ -4603,7 +4605,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 后续两次重复 WPF 根宿主递归大小自定义列 probe：一轮有效通过，显示 10/4 并由 DefView 标题升降序排序；另一轮相同显示/排序断言通过，但前台 HWND 与输入时间戳变化，按隔离守卫判定无效。两轮探针进程、临时注册与 fixture 均已清理。该结果加强 WPF 根视图列消费的可重复性证据，但不证明产品迁移或桌面隔离稳定；暂停新的 Private Desktop view probe，产品仍使用 ExplorerBrowser。
 - 静态审查 NativeProbe 递归列实现发现，枚举时同步递归计算每个目录大小，每次刷新都会重算，当前没有缓存、取消或异步行更新。微型夹具不提供大型目录性能证据；产品化前需先有后台可取消计算/缓存设计并按树规模量测。
-- 更新路径方面，原型 `SFVM_FSNOTIFY` 当前触发整视图 `IShellView::Refresh`；微软的 `IShellFolderView::RefreshObject` 可重绘单项，但是否重新取列值/更新排序尚未验证。作为后续隔离视图检查项，不能先假定它解决异步列值更新。
+- 更新路径方面，原型 `SFVM_FSNOTIFY` 当前触发整视图 `IShellView::Refresh`。legacy `IShellFolderView::RefreshObject` 不可作为产品实现依赖；下一项受支持接口验证候选为 `SHChangeNotify(SHCNE_UPDATEITEM)`，但是否重新取列值/更新排序仍未知，也不能先假定它解决异步列值更新。
 
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
