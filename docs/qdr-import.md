@@ -12,6 +12,8 @@
 
 2026-10-29 追加只读核对安装目录现存的四份 `.qdr`（含当前工作区、启动状态与收藏配置）：`Tree1split`～`Tree4split` 在四份文件中仍全部为 `2500`。这扩大了样本覆盖数量，但没有提供任何非默认宽度或已知可见宽度对照，因此不会据此猜测 `TreeNsplit` 的单位、方向或窗格映射；本程序继续在导入预览中提示这些字段未应用。
 
+2026-10-30 扩展只读盘点本机 Q-Dir 安装目录、用户 `Documents` 及常见 Q-Dir 配置/下载/桌面位置，并搜索 `D:\projects` 的 `.qdr` 样本；找到 5 份可读配置（安装目录 4 份，`Documents\default.qdr` 1 份）。五份均为 `Tree1`～`Tree4=0`、`Tree1split`～`Tree4split=2500`，`tree_mode=2`。扩大样本范围仍未获得树开启或非默认宽度对照；静态整数格式字符串也不说明值的单位，因此 `TreeNsplit` 继续不导入。未启动 Q-Dir、未改动配置或注册表。
+
 `Tree1`～`Tree4` 采用布尔解释是基于字段名、格式串 `%d` 和 Q-Dir“逐窗格开启/关闭”说明的实现假设；本机样本的值均为 0，仍未通过可见互操作确认 1/0。官方 [FAQ 26](https://www.softwareok.com/?faq=26&seite=faq-Q-DIR) 说明可用一棵共享树服务全部视图，[FAQ 32](https://www.softwareok.com/?faq=32&seite=faq-Q-DIR) 说明可分别启用各视图的目录树；[FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR) 列出 `tree_mode` 与 `Tree1split`～`Tree4split` 示例，但没有给出分隔值单位。`tree_mode` 数值映射已于 2026-10-25 通过本机 PE 菜单资源、代码分支和官方字符串表确定；`TreeNsplit` 的宽度单位/方向/适用视图仍待受控配置样本或可见互操作确认。本程序自有目录树宽度由 Explorer Dirs 扩展 v4 保存，使用 DIP，不转换或冒充 Q-Dir 的 `TreeNsplit`。
 
 2026-10-18：源码入口“文件 → 导入 Q-Dir 配置 (.qdr)…”。选择文件后先显示标签数量与未支持项，确认后追加到对应窗格；不关闭已有标签、不修改源文件。导入前将当前会话写入同一 profile 下的 `ExplorerDirs.ini.before-qdr-*.bak`。备份或完整快照失败则不追加。
