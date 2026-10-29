@@ -1,3 +1,5 @@
+2026-10-30 目录树图标后台复核：当前 Release `NativeProbe --tree-host-core` 验证生产 `NativeShellTree` 在隐藏父窗格绑定系统 512 项图像列表，并能读到普通目录正常/选中图标索引；根替换、折叠/展开、输入隔离和销毁检查通过，前台未变。`--tree-icon-render-ab` 中默认 Shell 树与显式系统图像列表绘制均为 `193/193` 像素匹配，初始化 1×1 与最终尺寸像素一致；`--tree-icon-callback-smoke` 回调读到正常/展开索引 `3/3`。这说明目前没有发现代码层图像索引或初始化尺寸缺陷，但不覆盖 WPF `HwndHost` 最终合成、多窗格或产品可见绘制；目录树图标仍保留集中 GUI 验收项。
+
 2026-10-30 Q-Dir “Copy Path”：编辑菜单新增“复制所选项目完整路径”，从当前 Shell 选区读取各项目的完整路径并以 Unicode 多行文本写入剪贴板；若选择为空或含不可转换成完整文件系统路径的虚拟 Shell 项目，则拒绝整次复制，避免部分结果。单路径不加引号，多路径每项一行；不加入工具栏，也不改变文件区原生右键菜单。格式 smoke 与隐藏真实 ExplorerBrowserHost 单选/多选路径捕获均通过，夹具只含临时文件、前台未变且未操作系统剪贴板；真实菜单可用状态、剪贴板内容及复制后的焦点恢复待集中 GUI 验收。对标依据：[Q-Dir 官方英文功能清单](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)。
 
 2026-10-30 经典地址栏文件系统路径补齐末尾分隔符：经典栏和编辑框显示完整目录路径时，为普通文件系统目录补 `\`，盘符根目录不重复添加，虚拟 Shell 位置保持原有解析名。经典栏显示路径与实际导航身份分开，不改变会话/历史值。回归覆盖普通目录、盘符根、UNC 目录和虚拟位置；后台 SettingsSmoke 与 App Release build 通过。未启动 GUI，实际复制路径和编辑导航待集中可见验收。[Q-Dir 地址栏 FAQ](https://www.softwareok.com/?faq=92&seite=faq-Q-DIR)

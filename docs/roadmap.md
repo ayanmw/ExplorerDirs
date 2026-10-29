@@ -8,6 +8,8 @@
 
 2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。
 
+2026-10-30 目录树图标后台复核：生产 `NativeShellTree` 隐藏宿主读到有效的系统图像列表句柄和普通目录图标索引；默认与显式图像列表的像素、初始化尺寸与最终尺寸 A/B 均一致，前台不变。没有证据支持再改图标选择代码；当前待确认点是 WPF `HwndHost` 的最终可见绘制，保留到集中 GUI 验收。
+
 近期执行顺序：已为“使用系统 Explorer 浏览”和用户级文件夹入口整理[集中验收清单](gui-acceptance-system-entry.md)。下一步继续从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项；依赖真实消息循环、物理键鼠或当前用户 Explorer 扩展菜单的项目留待集中验收。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
 2026-10-30 IShellView 隔离迁移复验：当前 Release NativeProbe 的四窗格 WPF consumer 再次通过（退出码 0）。反向选择、Ctrl+A、F2 方向键隔离、Shell 文件操作通知、原生视图菜单及 WPF 根窗同步销毁均通过，前台 HWND 与最后输入时间不变。该结果只加强隔离宿主证据；ExplorerBrowser 产品接线、物理输入、完整 OLE 拖放与可见验收仍开放。详细记录见[隔离原型](ishellview-color-spike.md#2026-10-30当前主线复跑四窗格-wpf-consumer)。
