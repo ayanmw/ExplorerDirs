@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-30：本轮源码级复核发现递归大小排序探针先卸载合成 Shell COM DLL、撤销临时 namespace 注册，再销毁可能仍含 Shell 子窗口的父 HWND，存在生命周期风险。已调整探针为先销毁父窗口树，再撤销注册，并修正 `DllCanUnloadNow` 计数以包含枚举器和 class factory；无窗口合同 smoke 先失败、补齐后通过。NativeProbe Release 与原生 `/W4 /WX` 构建通过。尚未运行新视图 probe，不能声称卡死已修复；后续在桌面边界允许时用超时 dump 复测。产品和 release 均未改。详见[调查记录](folder-size-column-investigation.md#合成-namespace-排序对照与清理停滞)。
+2026-10-30：本轮源码级复核发现递归大小排序探针先卸载合成 Shell COM DLL、撤销临时 namespace 注册，再销毁可能仍含 Shell 子窗口的父 HWND，存在生命周期风险。已调整探针为先销毁父窗口树，再撤销注册，并修正 `DllCanUnloadNow` 计数以包含枚举器和 class factory；无窗口合同 smoke 先失败、补齐后通过。NativeProbe Release 与原生 `/W4 /WX` 构建通过。watchdog 现在支持外部进程超时 dump，timeout-tree 自检已验证可写出 MDMP 并清理进程；真实 Shell 挂起 dump 尚未采集/分析，不能声称卡死已修复。后续在桌面边界允许时复测。产品和 release 均未改。详见[调查记录](folder-size-column-investigation.md#合成-namespace-排序对照与清理停滞)。
 
 2026-10-30 主干后台基线：提交 `9c47a79` 为合成 Shell 排序探针加入逐阶段清理诊断后，完整 Release `ExplorerDirs.SettingsSmoke` 通过，App Release build 0 错误；唯一警告为 NuGet 漏洞源不可达产生的 `NU1900`。本轮未改产品功能、未启动窗口、未更新 release。该结果确认既有后台回归通过，不改变文件操作/焦点、真实 OLE 拖放、自动刷新可见体验及 IShellView 迁移等开放门槛。
 

@@ -5,7 +5,8 @@ param(
     [string]$VirtualScope,
     [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'session-restore-sync-cleanup-private-desktop', 'private-desktop-window-destroy-control', 'private-desktop-window-visibility-control', 'private-desktop-shared-window-destroy-control', 'private-desktop-shell-view-window-destroy-control', 'private-desktop-single-pane-sync-cleanup', 'private-desktop-2pane-sync-cleanup', 'private-desktop-3pane-sync-cleanup', 'private-desktop-4pane-sync-cleanup', 'private-desktop-4pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-nofocus-sync-cleanup', 'private-desktop-single-pane-menu-active-sync-cleanup', 'private-desktop-single-pane-menu-detached-ime-sync-cleanup', 'private-desktop-single-pane-menu-disabled-ime-sync-cleanup', 'private-desktop-single-pane-menu-ole-init-sync-cleanup', 'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup', 'private-desktop-single-pane-menu-wpf-ole-sync-cleanup', 'private-desktop-single-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-wpf-host-keyboard-consumer', 'private-desktop-four-pane-wpf-host-directory-isolation', 'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup', 'private-desktop-single-pane-menu-late-coordinator-dispose', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop', 'static-shell-item-bound-view-private-desktop', 'synthetic-shell-size-sort-private-desktop')]
     [string]$Probe = 'color',
-    [switch]$TestTimeoutPath
+    [switch]$TestTimeoutPath,
+    [string]$TimeoutDumpPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,9 +88,64 @@ else {
     }
     $arguments = '"{0}" {1}' -f $probeAssembly, $probeArgument
 }
-
 $logDirectory = Join-Path $repoRoot 'src/.state/native-probe-watchdog'
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+$timeoutDumpPath = $TimeoutDumpPath
+if (-not [string]::IsNullOrWhiteSpace($timeoutDumpPath) -and -not [IO.Path]::IsPathFullyQualified($timeoutDumpPath)) {
+    throw 'TimeoutDumpPath must be an absolute path.'
+}
+if (-not $TestTimeoutPath -and -not [string]::IsNullOrWhiteSpace($timeoutDumpPath)) {
+    # Let the probe's own timeout diagnostics run first; this external capture is the fallback if they stall.
+    $runTimeoutSeconds += 10
+}
+$timeoutDumpWriterLoaded = $false
+function Save-TimeoutDumpFromWatchdog([int]$ProcessId, [string]$Path) {
+    if (-not $script:timeoutDumpWriterLoaded) {
+        $source = @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class ExplorerDirsTimeoutDumpWriter {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("dbghelp.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MiniDumpWriteDump(IntPtr process, uint processId, SafeFileHandle file,
+        uint dumpType, IntPtr exceptionInformation, IntPtr userStreamInformation, IntPtr callbackInformation);
+
+    public static long Capture(int processId, string path) {
+        const uint processQueryInformation = 0x0400;
+        const uint processVmRead = 0x0010;
+        var process = OpenProcess(processQueryInformation | processVmRead, false, processId);
+        if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess failed.");
+        try {
+            var fullPath = Path.GetFullPath(path);
+            using (var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read)) {
+                const uint miniDumpWithThreadInfo = 0x00001000;
+                if (!MiniDumpWriteDump(process, (uint)processId, stream.SafeFileHandle, miniDumpWithThreadInfo,
+                        IntPtr.Zero, IntPtr.Zero, IntPtr.Zero))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "MiniDumpWriteDump failed.");
+                stream.Flush(true);
+                return stream.Length;
+            }
+        }
+        finally { CloseHandle(process); }
+    }
+}
+'@
+        Add-Type -TypeDefinition $source -Language CSharp
+        $script:timeoutDumpWriterLoaded = $true
+    }
+
+    $dumpBytes = [ExplorerDirsTimeoutDumpWriter]::Capture($ProcessId, $Path)
+    Write-Output "timeout-minidump=captured; pid=$ProcessId; bytes=$dumpBytes; path=$Path; writer=watchdog-process"
+}
 $runId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().ToString('N').Substring(0, 8))
 $stdoutPath = Join-Path $logDirectory "$runId.stdout.log"
 $stderrPath = Join-Path $logDirectory "$runId.stderr.log"
@@ -120,6 +176,14 @@ $process = Start-Process -FilePath $executable -ArgumentList $arguments -Working
     -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
 if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
+    if (-not [string]::IsNullOrWhiteSpace($timeoutDumpPath)) {
+        try {
+            Save-TimeoutDumpFromWatchdog -ProcessId $process.Id -Path $timeoutDumpPath
+        }
+        catch {
+            Write-Warning "Watchdog could not capture timeout dump for PID $($process.Id): $($_.Exception.Message)"
+        }
+    }
     try {
         # Process.Kill(bool) is unavailable in Windows PowerShell 5.1; this
         # watchdog owns the direct probe process and kills any test grandchild below explicitly.
