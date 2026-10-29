@@ -34,6 +34,10 @@ internal static class AddressPathMenu
         return entries;
     }
 
+    internal static IReadOnlyList<AddressPathMenuEntry> BuildComputerMenu() =>
+        Build(ThisPcIdentity, BuildComputerLocations().Skip(1)
+            .Select(location => location with { ParentIdentity = null }));
+
     private static IReadOnlyList<AddressPathMenuLocation> BuildCommonLocations()
     {
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -47,13 +51,7 @@ internal static class AddressPathMenu
             new("此电脑", ThisPcIdentity)
         };
 
-        foreach (var driveRoot in Environment.GetLogicalDrives())
-        {
-            var drive = new DriveInfo(driveRoot);
-            var volumeLabel = GetFixedDriveVolumeLabel(drive);
-            locations.Add(new(GetDriveHeader(driveRoot, drive.DriveType, volumeLabel),
-                driveRoot, ThisPcIdentity));
-        }
+        locations.AddRange(BuildComputerLocations().Skip(1));
 
         locations.AddRange(
         [
@@ -62,6 +60,19 @@ internal static class AddressPathMenu
             new("控制面板", "shell:ControlPanelFolder"),
             new("回收站", "shell:RecycleBinFolder")
         ]);
+        return locations;
+    }
+
+    private static IReadOnlyList<AddressPathMenuLocation> BuildComputerLocations()
+    {
+        var locations = new List<AddressPathMenuLocation> { new("此电脑", ThisPcIdentity) };
+        foreach (var driveRoot in Environment.GetLogicalDrives())
+        {
+            var drive = new DriveInfo(driveRoot);
+            var volumeLabel = GetFixedDriveVolumeLabel(drive);
+            locations.Add(new(GetDriveHeader(driveRoot, drive.DriveType, volumeLabel),
+                driveRoot, ThisPcIdentity));
+        }
         return locations;
     }
 

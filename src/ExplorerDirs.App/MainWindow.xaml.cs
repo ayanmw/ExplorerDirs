@@ -1865,6 +1865,7 @@ public partial class MainWindow : Window
             case ExplorerShortcut.Address: source.FocusAddress(); break;
             case ExplorerShortcut.AddressTree: source.HandleAddressTreeShortcut(); break;
             case ExplorerShortcut.AddressLocations: source.ShowAddressMenu(); break;
+            case ExplorerShortcut.AddressComputer: source.ShowComputerMenu(); break;
             case ExplorerShortcut.NewTab: source.NewTab(); source.FocusCurrentView(); break;
             case ExplorerShortcut.NewWindow: _createWindow?.Invoke(this); break;
             case ExplorerShortcut.QuickFolderMenu:

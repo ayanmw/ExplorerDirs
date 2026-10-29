@@ -14,6 +14,7 @@
 | Alt+D、Alt+S、Ctrl+L | 从面包屑进入完整地址编辑并全选路径 | 已接入；Alt+S 对齐 Q-Dir 4.51 官方帮助“地址栏聚焦并选中内容”；Ctrl+S 仍启动 Program Starter。真实焦点待 GUI 验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F4 | Modern 地址栏第一次打开当前标签路径所在的 Shell 文件夹树，再按一次进入完整路径编辑；Classic 地址栏直接进入编辑 | 源码已接入每窗格原生 Shell 树、当前目录定位和虚拟文件夹解析名路由；Escape、切标签、窗格隐藏及窗口失焦关闭。历史仍由独立下拉按钮打开。可见位置、F4/Escape 焦点与虚拟命名空间操作待 GUI 验收 |
 | F7 | 打开当前地址路径的层级菜单，快速定位上级目录或常用 Shell 位置 | 复用地址栏下拉按钮已有的祖先目录/常用位置菜单；Shift+F7 仍新建文件夹。源码路由待可见菜单与键盘选择验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
+| F8 | 打开“此电脑”菜单，直接选择本机逻辑驱动器 | 菜单从当前系统动态枚举驱动器，并提供“此电脑”入口；源码路由待可见菜单与键盘选择验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F5 | 刷新当前文件视图 | 已接入 |
 | F9 | 计算或取消当前文件系统目录的递归总大小、文件数与子目录数 | 已接入后台显式扫描；不自动扫描、不跟随重解析点；导航/切标签/隐藏窗格时取消；实际多窗格状态栏体验待 GUI 验收 |
 | F11 | 在沉浸式无边框全屏与进入前的窗口状态间切换；也可从“视图 → 全屏”操作 | 已接入；覆盖当前显示器并恢复普通/最大化状态，同时保留进入前菜单栏、主工具栏和状态栏各自的显隐状态。窗口状态转换有 smoke 覆盖；可见 GUI、多显示器、DPI、任务栏遮挡与 Shell 子视图缩放仍待验收 ([Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)) |

@@ -41,6 +41,14 @@ internal static class AddressPathMenuSmoke
                 StringComparer.OrdinalIgnoreCase)),
             "the path menu includes logical drives discovered at build time");
 
+        var computerMenu = AddressPathMenu.BuildComputerMenu();
+        Check(computerMenu[0].Identity == "shell:MyComputerFolder" && computerMenu[0].IsCurrent,
+            "the F8 menu begins at This PC");
+        Check(computerMenu.Skip(1).All(entry => entry.ParentIdentity is null) &&
+              Environment.GetLogicalDrives().All(rootPath => computerMenu.Any(entry =>
+                  string.Equals(entry.Identity, rootPath, StringComparison.OrdinalIgnoreCase))),
+            "the F8 menu lists current logical drives directly under This PC");
+
         Check(AddressPathMenu.GetDriveHeader(@"C:\", System.IO.DriveType.Fixed, "Windows") == "Windows (C:)",
             "drive labels include the local volume label and drive letter");
         Check(AddressPathMenu.GetDriveHeader(@"D:\", System.IO.DriveType.Fixed, "") == "本地磁盘 (D:)",

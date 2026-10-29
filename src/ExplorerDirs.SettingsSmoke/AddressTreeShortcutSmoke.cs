@@ -12,6 +12,10 @@ internal static class AddressTreeShortcutSmoke
             "Ctrl+S remains the Program Starter shortcut");
         Check(KeyboardShortcuts.Resolve(0x76, 0) == ExplorerShortcut.AddressLocations,
             "Q-Dir F7 opens the current path hierarchy menu");
+        Check(KeyboardShortcuts.Resolve(0x77, 0) == ExplorerShortcut.AddressComputer,
+            "Q-Dir F8 opens the This PC menu");
+        Check(KeyboardShortcuts.Resolve(0x77, 1) == ExplorerShortcut.None,
+            "modified F8 remains unclaimed");
         Check(KeyboardShortcuts.Resolve(0x76, 4) == ExplorerShortcut.NewFolder,
             "Shift+F7 remains the new-folder shortcut");
         Check(KeyboardShortcuts.Resolve(0x73, 0) == ExplorerShortcut.AddressTree,

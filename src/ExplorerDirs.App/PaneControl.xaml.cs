@@ -1448,18 +1448,30 @@ public partial class PaneControl : UserControl
     internal void ShowAddressMenu()
     {
         if (Current is not { } state) return;
+        ShowAddressMenu(state, AddressPathMenu.Build(state.Path));
+    }
+
+    internal void ShowComputerMenu()
+    {
+        if (Current is not { } state) return;
+        ShowAddressMenu(state, AddressPathMenu.BuildComputerMenu());
+    }
+
+    private void ShowAddressMenu(TabState state, IReadOnlyList<AddressPathMenuEntry> entries)
+    {
         var menu = new ContextMenu
         {
             PlacementTarget = AddressHost,
             Placement = PlacementMode.Bottom,
             DataContext = state
         };
-        var entries = AddressPathMenu.Build(state.Path);
         var addedCommonSeparator = false;
         var itemsByIdentity = new Dictionary<string, MenuItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
-            if (!entry.IsAncestor && !addedCommonSeparator)
+            // Only separate top-level common locations from the current path; nested drives
+            // belong to their This PC parent and must not create a stray root-menu separator.
+            if (!entry.IsAncestor && entry.ParentIdentity is null && !addedCommonSeparator)
             {
                 menu.Items.Add(new Separator());
                 addedCommonSeparator = true;

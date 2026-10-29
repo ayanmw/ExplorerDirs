@@ -290,7 +290,8 @@ internal sealed class ShellTreeHost : HwndHost
             var shortcut = KeyboardShortcuts.Resolve(unchecked((int)msg.wParam), (int)modifiers);
             if (shortcut is ExplorerShortcut.NextFocusStop or ExplorerShortcut.PreviousFocusStop
                 or ExplorerShortcut.NextFocusRegion or ExplorerShortcut.PreviousFocusRegion
-                or ExplorerShortcut.Address or ExplorerShortcut.AddressTree or ExplorerShortcut.AddressLocations)
+                or ExplorerShortcut.Address or ExplorerShortcut.AddressTree or ExplorerShortcut.AddressLocations
+                or ExplorerShortcut.AddressComputer)
                 return ShortcutHandler?.Invoke(shortcut) == true;
         }
         return base.TranslateAcceleratorCore(ref msg, modifiers);
