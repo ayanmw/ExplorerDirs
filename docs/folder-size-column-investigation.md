@@ -419,3 +419,5 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 2026-10-30：首次在 Private Desktop 运行 WPF 根对照，watchdog 退出码 0。`HwndSource` 根下的合成 `IShellView` 显示目录递归大小 10、文件大小 4，升序为 `small.bin|child`，降序为 `child|small.bin`，`CompareIDs` 两方向各调用一次。父窗口通过 `HwndSource.Dispose` 销毁，探针完整返回；用户桌面前台 HWND 与最后输入时间戳均未变化。检查时 `DllCanUnloadNow` 返回 `S_FALSE`，所以 DLL 保留至探针进程退出，符合避免卸载仍被 COM 对象引用模块的策略。
 
 这与此前原生 `STATIC` 根的 `DestroyWindow(parent)` 阶段卡住形成对照，支持将父窗口/宿主销毁路径作为挂起原因的主要调查方向；但尚未在同一轮重跑 `STATIC` 基线，也没有 WPF 根下的卡顿转储或 WM_DESTROY 调用栈，因此不能断言已找到根因。该结果仅证明隔离合成 namespace 的显示、排序和 WPF 根清理，不代表 ExplorerBrowser 产品已经迁移或通过 Shell 菜单、焦点、拖放、操作、通知等迁移门槛。
+
+随后用同一 watchdog 与夹具重跑原生 `STATIC` 基线，停在 `cleanup-destroy-parent-window-1`，外层 watchdog 捕获 561,128-byte `MDMP` 并终止探针；watchdog 检查确认保留的临时 CLSID/NameSpace 注册和新夹具均已清理。但前台监视在该阶段 5.7 秒时记录用户桌面从锁屏 HWND 变为 `0`，最后输入时间戳也变化；因此此基线的桌面隔离条件不成立，不能与前述 WPF 根成功组成有效 A/B 结论。转储目前只确认有 `MDMP` 头和 32 个 stream，尚未解析卡住线程栈。WPF 根仍是一个可重复的正向线索，STATIC 销毁挂起仍未定位。
