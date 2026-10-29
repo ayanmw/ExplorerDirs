@@ -408,4 +408,6 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 
 为避免后续超时只剩 Wait Chain，PrivateDesktopShellProbe 现支持可选的进程 minidump：只有设置绝对路径环境变量 `EXPLORER_DIRS_NATIVEPROBE_TIMEOUT_DUMP_PATH` 才会在超时时调用 `MiniDumpWriteDump`，使用 `CreateNew` 防止覆盖旧证据；默认不生成转储。无 Shell 窗口的自检生成转储并经 `MiniDumpReadDumpStream` 核对 `MDMP` 头、线程列表及线程信息流。NativeProbe Release 构建 0 警告/错误。自检转储不是卡死现场；新的 Private Desktop 复验尚未在此开关下运行，因此仍没有父窗口销毁等待的线程栈证据。
 
+另加入 opt-in `--synthetic-recursive-directory-size-wpf-host-private-desktop` 对照：保持递归大小数据、视图排序及其它断言不变，只将探针父窗口从原生 `STATIC` 换为 WPF `HwndSource` 根，并通过 `HwndSource.Dispose` 回收。依据是既有独立菜单生命周期探针在 WPF 根窗可正常完成，而原生 `STATIC` 根窗会卡在 `DestroyWindow`；这是对照假设，不是根因结论。保留原 `--synthetic-recursive-directory-size-private-desktop` 作为基线。NativeProbe Release 构建 0 警告/错误；受当前后台优先边界约束，此新视图分支尚未运行，不能报告清理修复。
+
 与这条正向对照并行的 strict adapter 诊断仍为负：虽然 `SetSortColumns` 返回成功并可读回排序 key/direction，DefView 排序时没有调用 adapter 的 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，列表行序不变。由此当前可行路线是自有 PIDL namespace，不是把真实 filesystem folder 包一层后期待默认 DefView 使用其派生比较器。下一步只针对清理阶段做源码/线程等待诊断；未定位前不再扩展实时扫描缓存或产品接线。产品仍使用 ExplorerBrowser，用户要求保留的 Shell 菜单、剪贴板、文件操作、拖放及刷新兼容门槛全部仍需通过。

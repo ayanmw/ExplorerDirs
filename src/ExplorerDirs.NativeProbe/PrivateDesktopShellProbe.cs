@@ -176,6 +176,10 @@ internal static class PrivateDesktopShellProbe
         Run("synthetic-recursive-directory-size-sort", () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSort(),
             TimeSpan.FromSeconds(30), initializeOle: true);
 
+    internal static int RunSyntheticRecursiveDirectorySizeSortWithWpfHost() =>
+        Run("synthetic-recursive-directory-size-sort-wpf-host", () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSortWithWpfHost(),
+            TimeSpan.FromSeconds(30), initializeOle: true);
+
     internal static int RunCommonListViewColorBaseline() => Run("common-listview-color-baseline",
         CommonListViewColorBaseline.Run);
 

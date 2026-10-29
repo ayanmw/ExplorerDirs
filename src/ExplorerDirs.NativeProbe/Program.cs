@@ -67,6 +67,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticShellSizeSort();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSort();
+        if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-wpf-host-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
         if (args.Length == 1 && args[0] == "--static-shell-column-adapter-activated-strict-private-desktop")
@@ -224,6 +226,7 @@ internal static class Program
             Console.WriteLine("       --static-shell-column-adapter-private-desktop (native IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --synthetic-shell-size-sort-private-desktop (unregistered synthetic IShellFolder2/DefView Size-sort probe)");
             Console.WriteLine("       --synthetic-recursive-directory-size-private-desktop (isolated DefView folder size text and sort check)");
+            Console.WriteLine("       --synthetic-recursive-directory-size-wpf-host-private-desktop (same check with a WPF HwndSource root for cleanup comparison)");
             Console.WriteLine("       --synthetic-shell-folder-tree-smoke (synthetic folder enumeration/binding contract only; no Shell view)");
             Console.WriteLine("       --static-shell-column-wrapped-adapter-private-desktop (wrapped PIDL IShellFolder2/DefView probe on an isolated Windows Desktop)");
             Console.WriteLine("       --file-operation-collision (isolated IFileOperation copy collision; preserves the existing destination)");

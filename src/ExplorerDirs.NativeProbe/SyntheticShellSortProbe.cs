@@ -56,8 +56,11 @@ public static class SyntheticShellSortProbe
     internal static int RunRecursiveDirectorySizeSort() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true);
 
+    internal static int RunRecursiveDirectorySizeSortWithWpfHost() =>
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, useWpfParent: true);
+
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
-        bool selfOwnedAttributes = false, bool customSizeColumn = false)
+        bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false)
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -90,10 +93,38 @@ public static class SyntheticShellSortProbe
             if (Directory.Exists(copyDestination)) Directory.Delete(copyDestination, recursive: true);
             throw;
         }
-        var parent = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace sort probe",
-            0x80000000, 0, 0, 900, 600, 0, 0, 0, 0);
+        System.Windows.Interop.HwndSource? wpfParentSource = null;
+        nint parent;
+        try
+        {
+            if (useWpfParent)
+            {
+                var parameters = new System.Windows.Interop.HwndSourceParameters("ExplorerDirs synthetic size sort WPF root")
+                {
+                    Width = 900,
+                    Height = 600,
+                    WindowStyle = 0x10CF0000
+                };
+                wpfParentSource = new System.Windows.Interop.HwndSource(parameters);
+                wpfParentSource.RootVisual = new System.Windows.Controls.Grid();
+                parent = wpfParentSource.Handle;
+            }
+            else
+            {
+                parent = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace sort probe",
+                    0x80000000, 0, 0, 900, 600, 0, 0, 0, 0);
+            }
+        }
+        catch
+        {
+            wpfParentSource?.Dispose();
+            Directory.Delete(backingFolder, recursive: true);
+            Directory.Delete(copyDestination, recursive: true);
+            throw;
+        }
         if (parent == 0)
         {
+            wpfParentSource?.Dispose();
             Directory.Delete(backingFolder, recursive: true);
             Directory.Delete(copyDestination, recursive: true);
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
@@ -110,6 +141,8 @@ public static class SyntheticShellSortProbe
         var parentDestroyed = false;
         var classRegistrationCreated = false;
         var namespaceRegistrationCreated = false;
+        if (recursiveDirectorySizeSortOnly)
+            Console.WriteLine($"synthetic-recursive-directory-size-view: parent-kind={(wpfParentSource is null ? "native-static" : "wpf-hwndsource")}; hwnd=0x{parent:X}");
         try
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
@@ -643,7 +676,16 @@ public static class SyntheticShellSortProbe
                 ReportProbeStage($"cleanup-input-state-cleared focus=0x{focusedWindow:X} capture=0x{capturedWindow:X}");
             }
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-1");
-            parentDestroyed = DestroyWindow(parent);
+            if (wpfParentSource is not null)
+            {
+                wpfParentSource.Dispose();
+                wpfParentSource = null;
+                parentDestroyed = !IsWindow(parent);
+            }
+            else
+            {
+                parentDestroyed = DestroyWindow(parent);
+            }
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-2");
             if (parent2 != 0 && !DestroyWindow(parent2)) throw new InvalidOperationException("The second Private Desktop synthetic-view parent did not destroy cleanly.");
