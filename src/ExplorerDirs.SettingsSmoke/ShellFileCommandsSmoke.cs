@@ -25,6 +25,24 @@ internal static class ShellFileCommandsSmoke
         Check(ShellFileKeyboardActions.Resolve(0x41, 2) == ShellFileKeyboardAction.SelectAll &&
             ShellFileKeyboardActions.Resolve(0x58, 2) == ShellFileKeyboardAction.Cut,
             "Ctrl+A and Ctrl+X stay on the native Shell file-view command path");
+        Check(KeyboardShortcuts.Resolve(0x56, 1) == ExplorerShortcut.MoveSelectedItems &&
+              KeyboardShortcuts.Resolve(0x4B, 1) == ExplorerShortcut.CopySelectedItems &&
+              KeyboardShortcuts.Resolve(0x56, 5) == ExplorerShortcut.None &&
+              KeyboardShortcuts.Resolve(0x4B, 5) == ExplorerShortcut.None &&
+              KeyboardShortcuts.RequiresFileViewFocus(ExplorerShortcut.MoveSelectedItems) &&
+              KeyboardShortcuts.RequiresFileViewFocus(ExplorerShortcut.CopySelectedItems) &&
+              KeyboardShortcuts.ShouldYieldToTextInput(ExplorerShortcut.MoveSelectedItems) &&
+              KeyboardShortcuts.ShouldYieldToTextInput(ExplorerShortcut.CopySelectedItems),
+            "Q-Dir Alt+V/Alt+K are file-view-only operations and yield to text input");
+        Check(ShellFileCommands.FromQDirShortcut(ExplorerShortcut.MoveSelectedItems) == ShellFileCommand.Cut &&
+              ShellFileCommands.FromQDirShortcut(ExplorerShortcut.CopySelectedItems) == ShellFileCommand.Copy &&
+              ShellFileCommands.FromQDirShortcut(ExplorerShortcut.Refresh) is null,
+            "Q-Dir operation shortcuts dispatch through the corresponding native Shell command");
+        Check(ShellFileCommands.All.Single(info => info.Command == ShellFileCommand.Cut) is
+                  { Verb: "cut", Shortcut: "Ctrl+X / Alt+V" } &&
+              ShellFileCommands.All.Single(info => info.Command == ShellFileCommand.Copy) is
+                  { Verb: "copy", Shortcut: "Ctrl+C / Alt+K" },
+            "Q-Dir move/copy aliases continue to invoke canonical Shell cut/copy verbs");
         foreach (var (key, modifiers) in new[] { (0x41, 2), (0x43, 2), (0x56, 2), (0x58, 2),
                      (0x5A, 2), (0x59, 2), (0x2D, 2), (0x2D, 4) })
         {

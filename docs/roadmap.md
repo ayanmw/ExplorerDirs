@@ -10,6 +10,8 @@
 
 2026-10-30 Q-Dir F8“此电脑”菜单：新增 `F8` 快捷键，在当前窗格弹出“此电脑”及系统当前逻辑驱动器入口；驱动器目标和图标复用 Shell 地址菜单能力，未修改 F7 路径层级菜单。定向快捷键和菜单数据 smoke 通过；真实菜单外观、焦点和键盘选择待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
 
+2026-10-30 Q-Dir Alt+V / Alt+K 文件操作别名：`Alt+V` 通过编辑菜单现有 Shell `cut` 动词剪切所选项目，供后续粘贴移动；`Alt+K` 通过 `copy` 动词复制所选项目。仅文件视图获得焦点时执行，地址/搜索文本和 Shell 重命名输入不截获；编辑菜单快捷键文字显示两个组合。Shell 命令路由、焦点门控、别名冲突修饰键 smoke 通过；真实键盘、剪贴板及后续粘贴文件操作待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
+
 2026-10-30 Q-Dir “Copy Path”：在“编辑”菜单增加“复制所选项目完整路径”，单选原样复制，多选按行复制；虚拟 Shell 位置或空选区不写入部分/无效路径。定向路径格式 smoke、完整 Release `SettingsSmoke`、App Release build（0 警告/错误）、`ExplorerDirs.HostProbe --selected-paths-clipboard` 真实生产 Shell 单选/多选取值（隐藏宿主、前台不变、未触碰剪贴板）及 `git diff --check` 通过；未启动 GUI。下一次集中验收需检查菜单状态、剪贴板文本、虚拟项目拒绝，以及复制后原文件视图仍可立即用方向键操作。[Shell 功能对照](shell-parity.md)
 
 2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。

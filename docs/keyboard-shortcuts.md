@@ -24,7 +24,7 @@
 | Ctrl+T、Ctrl+W、Ctrl+Shift+T、Ctrl+K | 新建、关闭、恢复/打开所选文件夹、复制标签 | Ctrl+Shift+T 在文件视图聚焦且仅选中一个文件系统文件夹时于新标签打开它；否则恢复最近关闭的标签。输入框与目录树聚焦时不读取旧文件选区。Ctrl+W 关闭当前标签；每窗格最后一个标签会保留，不像 Explorer 在最后一个标签时关闭窗口。 |
 | Ctrl+Q | 打开快速链接菜单 | 已接入独立便携 `QuickLinks` 目录，支持目录快捷方式在活动窗格打开、程序/文件快捷方式由 Windows Shell 启动；真实菜单焦点与可见行为待 GUI 验收 |
 | Shift+Enter | 文件视图中将当前选择的文件夹在新标签页中打开；选择文件、无单一文件夹选择或文本输入框聚焦时交回对应控件 | 原生 `HwndHost` 路径与 WPF 未处理键路由都调用同一文件区焦点门控；SettingsSmoke 覆盖成功、焦点不在文件区及无唯一普通文件系统文件夹选择三种情况。物理按键与可见 GUI 仍待验收 |
-| Ctrl+A、Ctrl+C/Ctrl+Insert、Ctrl+X、Ctrl+V/Shift+Insert、Ctrl+Z、Ctrl+Y | 全选、复制、剪切、粘贴、撤销、重做 | Shell 先处理；若未接手，应用使用对应原生 Shell 视图命令兜底。Ctrl+Insert 与 Shift+Insert 是微软清单中的复制/粘贴别名，映射 smoke 通过；真实文件操作与 Undo/Redo 序列仍待 GUI 验收 |
+| Ctrl+A、Ctrl+C/Ctrl+Insert、Ctrl+X、Ctrl+V/Shift+Insert、Ctrl+Z、Ctrl+Y、Alt+V、Alt+K | 全选、复制、剪切、粘贴、撤销、重做；Alt+V 剪切所选项目供后续粘贴移动，Alt+K 复制所选项目供后续粘贴 | 常用快捷键由 Shell 优先处理；若未接手，应用使用对应原生 Shell 视图命令兜底。Alt+V/Alt+K 复用编辑菜单的 Shell `cut`/`copy` 动词，仅在文件视图聚焦时触发；文本编辑和重命名时让按键继续由输入控件处理。映射 smoke 通过；真实文件操作与 Undo/Redo 序列仍待 GUI 验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | Ctrl+Shift+A | 在文件视图中反向选择当前 Shell 视图的文件项；文本输入框聚焦时保留给输入控件 | 已接入 Q-Dir 对应操作；选择算法及身份保持有隐藏回归，物理按键待 GUI 验收 |
 | Ctrl+Shift+C | 复制文件视图中选中项目的完整路径，不加引号；多项按行排列 | 已接入 Q-Dir Copy Path 快捷键，限文件视图焦点；地址栏/搜索等文本输入仍由输入控件处理。映射 smoke 通过，物理按键及剪贴板内容待 GUI 验收 |
 | Enter、F2、Ctrl+D、Delete、Shift+Delete、Alt+Enter、Shift+F10、Shift+右键 | 打开、重命名、删除到回收站、永久删除、属性、打开原生上下文菜单；Shift+右键在 Windows 11 请求“显示更多选项”菜单 | 方向键在原生重命名 Edit 聚焦时直接送入编辑框；SettingsSmoke 覆盖四方向 KeyDown 与 KeyUp 边界。四窗格隐藏生产宿主验证无修饰方向键保持焦点，Shift+←/→ 在编辑框中选择文字并恢复探针线程键盘状态。其它按键与鼠标消息由原生 Shell 视图处理；实际文件操作、菜单类型、目标和物理键盘焦点仍待 GUI 验收 |

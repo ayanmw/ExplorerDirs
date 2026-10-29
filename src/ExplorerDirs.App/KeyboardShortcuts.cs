@@ -7,7 +7,7 @@ internal enum ExplorerShortcut
     NewTab, NewWindow, QuickFolderMenu, ProgramStarter, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab, OpenSelectionInNewTab,
     Tab1, Tab2, Tab3, Tab4, Tab5, Tab6, Tab7, Tab8, Tab9, FocusPane1, FocusPane2, FocusPane3, FocusPane4, NewFolder, InvertSelection,
     Refresh, Search, QuickFilter, ExpandTree, TogglePreviewPane, ToggleDetailsPane, ToggleFullScreen,
-    RestartApplication,
+    RestartApplication, MoveSelectedItems, CopySelectedItems,
     CalculateDirectorySize,
     ScreenMagnifier,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
@@ -40,6 +40,8 @@ internal static class KeyboardShortcuts
         (0x75, 4) => ExplorerShortcut.PreviousFocusRegion, // Shift+F6
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
         (0x53, 1) => ExplorerShortcut.Address,        // Q-Dir: Alt+S focuses the address bar.
+        (0x56, 1) => ExplorerShortcut.MoveSelectedItems, // Q-Dir: Alt+V cuts selected items for a later paste.
+        (0x4b, 1) => ExplorerShortcut.CopySelectedItems, // Q-Dir: Alt+K copies selected items for a later paste.
         (0x76, 0) => ExplorerShortcut.AddressLocations, // Q-Dir: F7 opens the address path hierarchy.
         (0x77, 0) => ExplorerShortcut.AddressComputer, // Q-Dir: F8 opens the This PC menu.
         (0x4c, 1) => ExplorerShortcut.ScreenMagnifier, // Q-Dir: Alt+L.
@@ -98,6 +100,8 @@ internal static class KeyboardShortcuts
             ExplorerShortcut.SearchSelectedFolder or
             ExplorerShortcut.PasteSpecial or
             ExplorerShortcut.CopySelectedPaths or
+            ExplorerShortcut.MoveSelectedItems or
+            ExplorerShortcut.CopySelectedItems or
             ExplorerShortcut.ProgramStarter or
             ExplorerShortcut.ScreenMagnifier or
             ExplorerShortcut.AutoFitColumns or

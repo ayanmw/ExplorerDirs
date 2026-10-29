@@ -22,7 +22,7 @@ internal static class SelectedPathsClipboardSmoke
 
         var repoRoot = FindRepoRoot();
         var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
-        Check(mainWindow.Contains("if (shortcut == ExplorerShortcut.CopySelectedPaths && !source.HasFileViewFocus) return false;", StringComparison.Ordinal) &&
+        Check(mainWindow.Contains("shortcut == ExplorerShortcut.CopySelectedPaths && !source.HasFileViewFocus", StringComparison.Ordinal) &&
               mainWindow.Contains("case ExplorerShortcut.CopySelectedPaths:", StringComparison.Ordinal) &&
               mainWindow.Contains("CopySelectedPaths(source);", StringComparison.Ordinal) &&
               mainWindow.Contains("InputGestureText = \"Ctrl+Shift+C\"", StringComparison.Ordinal),
