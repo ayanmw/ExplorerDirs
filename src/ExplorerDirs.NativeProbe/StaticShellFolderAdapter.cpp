@@ -1250,6 +1250,57 @@ namespace
         return reinterpret_cast<PITEMID_CHILD>(copy);
     }
 
+    HRESULT CopySyntheticSelectionWithoutUi(IDataObject* data, const std::wstring& backingPath)
+    {
+        if (!data) return E_INVALIDARG;
+        const auto destinationPath = backingPath + L"\\copy-destination";
+        if (!CreateDirectoryW(destinationPath.c_str(), nullptr)) return HRESULT_FROM_WIN32(GetLastError());
+
+        PIDLIST_ABSOLUTE destinationPidl = nullptr;
+        auto result = SHParseDisplayName(destinationPath.c_str(), nullptr, &destinationPidl, 0, nullptr);
+        IShellItem* destination = nullptr;
+        if (SUCCEEDED(result)) result = SHCreateItemFromIDList(destinationPidl, IID_PPV_ARGS(&destination));
+        if (destinationPidl) CoTaskMemFree(destinationPidl);
+
+        IFileOperation* operation = nullptr;
+        if (SUCCEEDED(result))
+            result = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&operation));
+        if (SUCCEEDED(result))
+            result = operation->SetOperationFlags(FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI);
+        if (SUCCEEDED(result)) result = operation->CopyItems(data, destination);
+        if (SUCCEEDED(result)) result = operation->PerformOperations();
+        if (SUCCEEDED(result))
+        {
+            BOOL aborted = FALSE;
+            result = operation->GetAnyOperationsAborted(&aborted);
+            if (SUCCEEDED(result) && aborted) result = E_ABORT;
+        }
+        if (operation) operation->Release();
+        if (destination) destination->Release();
+        if (FAILED(result)) return result;
+
+        const auto verifyCopiedContents = [&destinationPath](PCWSTR name, const char* expected)
+        {
+            const auto path = destinationPath + L"\\" + name;
+            const auto file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE) return false;
+            char actual[16]{};
+            DWORD bytesRead = 0;
+            const auto expectedLength = static_cast<DWORD>(strlen(expected));
+            const bool matches = ReadFile(file, actual, sizeof(actual), &bytesRead, nullptr) &&
+                bytesRead == expectedLength && memcmp(actual, expected, expectedLength) == 0;
+            CloseHandle(file);
+            return matches;
+        };
+        const bool sourcesRemain =
+            GetFileAttributesW((backingPath + L"\\root.txt").c_str()) != INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesW((backingPath + L"\\second.txt").c_str()) != INVALID_FILE_ATTRIBUTES;
+        return sourcesRemain && verifyCopiedContents(L"root.txt", "root") &&
+            verifyCopiedContents(L"second.txt", "second") ? S_OK : E_FAIL;
+    }
+
     class SyntheticChildEnumerator final : public IEnumIDList
     {
     public:
@@ -2420,8 +2471,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         FORMATETC format{ CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
         STGMEDIUM medium{};
         result = data->GetData(&format, &medium);
-        data->Release();
-        if (FAILED(result)) goto cleanup;
+        if (FAILED(result)) { data->Release(); goto cleanup; }
         const auto drop = static_cast<HDROP>(medium.hGlobal);
         const auto count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
         WCHAR droppedPaths[2][MAX_PATH]{};
@@ -2440,9 +2490,18 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             ((_wcsicmp(droppedPaths[0], expectedRoot.c_str()) == 0 && _wcsicmp(droppedPaths[1], expectedSecond.c_str()) == 0) ||
              (_wcsicmp(droppedPaths[1], expectedRoot.c_str()) == 0 && _wcsicmp(droppedPaths[0], expectedSecond.c_str()) == 0));
         ReleaseStgMedium(&medium);
-        if (!hasSelectedPaths) { result = E_FAIL; goto cleanup; }
+        if (!hasSelectedPaths)
+        {
+            data->Release();
+            result = E_FAIL;
+            goto cleanup;
+        }
+        result = CopySyntheticSelectionWithoutUi(data, backingPath);
+        data->Release();
+        if (FAILED(result)) goto cleanup;
     }
     TraceSyntheticSortStage("synthetic-folder-tree: native-item-data-object-passed");
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-select-copyitems-passed");
 
     result = root->EnumObjects(nullptr, static_cast<SHCONTF>(SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN), &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }

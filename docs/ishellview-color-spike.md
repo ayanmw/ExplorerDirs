@@ -1370,3 +1370,9 @@ NativeProbe Release、原生 `/W4 /WX` 和普通/包装 PIDL smoke 通过。未�
 ### 2026-10-29 多选 `IDataObject` 文件传递
 
 临时文件树现在包含两个可见文件。合成文件夹一次对两项调用 `GetUIObjectOf(IDataObject)`，再用 `CF_HDROP` 读取路径；合同要求两项路径均存在，不依赖枚举顺序。单项菜单、单/多组件 PIDL、深层绑定与流读取保持通过。它只证明 Shell 数据对象可以携带多选文件路径，不覆盖真实用户选择、剪贴板粘贴或 OLE 拖放；产品仍未接入该适配器。
+
+### 2026-10-29 多选 `IDataObject` 到 IFileOperation 复制
+
+合成树 smoke 将适配器为两个选中项返回的 `IDataObject` 交给 Windows `IFileOperation::CopyItems`，目标为临时 backing tree 内新建目录；执行 `PerformOperations`，检查 `GetAnyOperationsAborted`，并逐项核对目标文件内容及源文件仍存在。操作使用静默/无确认/无错误 UI flags；没有创建 Shell view、窗口或进度 UI。
+
+NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL smoke 均通过。该项证明 native Shell 多项数据对象能驱动后台本地复制，不代表产品接线、交互确认 UI、虚拟 provider、网络复制或 OLE 拖放已通过。

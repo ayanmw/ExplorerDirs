@@ -4519,3 +4519,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 
 - 扩展临时树夹具至两个可见文件；从适配器 `GetUIObjectOf(IDataObject)` 为两项同时取得 Shell 数据对象，并验证 `CF_HDROP` 中两条完整路径都指向被选条目（不依赖返回顺序）。单项原生菜单合同和此前多级路径/绑定/流合同仍通过。
 - 原生 `/W4 /WX`、NativeProbe Release 和树级、普通 PIDL、包装 PIDL smoke 通过，0 警告/错误。仅证明多选 `IDataObject`/`CF_HDROP` 转发；不证明真实选择输入、粘贴/拖放闭环或产品视图行为。
+
+## 2026-10-29：合成多选数据对象驱动 IFileOperation 复制
+
+- 将合成文件夹返回的双项 `IDataObject` 直接交给 `IFileOperation::CopyItems`，目标为 fixture 内的真实临时目录；随后调用 `PerformOperations` 并检查 `GetAnyOperationsAborted`。目标中的两个文件内容均与源一致，源文件仍保留。
+- 使用 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，未设置 owner window 或进度对话框。原生 `/W4 /WX`、NativeProbe Release、树级 smoke、普通/包装 PIDL smoke 通过，0 警告/错误；临时树在退出时清理。
+- 这是无 Shell view 下真实本地文件系统的 Shell 批量复制证据，提升了阶段 4 的操作合同覆盖；不验证产品 ExplorerBrowser、可见进度/冲突确认、剪贴板循环或 OLE 鼠标拖放。
