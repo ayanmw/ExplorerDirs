@@ -385,3 +385,13 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 探针进程退出码 1 是预期的显示断言失败（未获得目录 Size 文本），不是 watchdog 超时或崩溃。Private Desktop 前台仍是原 LockApp HWND，输入时间戳未变化；结束后临时 CLSID、Desktop `NameSpace` 项、夹具和探针进程均已确认清理。NativeProbe Release build 0 警告/错误。该结果进一步否定“在包装 filesystem PIDL 的 DefView adapter 上屏蔽标记即可显示逐行大小”的路线；它仍不评估全自有、非 filesystem PIDL namespace 的完整属性消费与文件操作兼容性。产品和 release 未改。
 
 随后追加更强对照：不再委托 backing folder 的 `GetAttributesOf`，而直接从合成 PIDL 元数据对文件返回 `SFGAO_STREAM`、对目录返回 `SFGAO_FOLDER | SFGAO_HASSUBFOLDER`。DefView 的 17 次属性查询均收到 provider-owned 属性，filesystem 标记为 0；但目录 Size 查询仍为 0，大小文本仍是 `|1 KB`，文件 Size 查询为 1，升降序与前轮一致。该结果说明被测 DefView 在此标准 `PKEY_Size` 列中仍跳过目录行，即使目录属性完全由虚拟 provider 提供；它尚不能区分 DefView 对标准大小列的目录语义与当前 Shell folder 属性合同的其它限制。probe 同样因显示断言返回 1，Private Desktop 前台/输入守卫及注册表、夹具清理通过，原生 `/W4 /WX` 和 NativeProbe Release 构建通过。接下来应测试独立 provider-owned 自定义列键是否会请求目录值；若仍不消费，就停止在标准列上反复变体，评估完整虚拟列/视图实现成本。
+
+## 2026-10-30：provider-owned 自定义列显示与标题排序
+
+把合成 folder 第 2 列映射到未注册的专用 `PROPERTYKEY`，列值通过 `IShellFolder2::GetDetailsOf` 返回。DefView 对两行都调用该方法，目录/文件文本分别为 `10` 和 `4`；标准和自定义 `GetDetailsEx` 请求均为 0。直接调用 `IFolderView2::SetSortColumns` 配此未知 key 返回 `TYPE_E_ELEMENTNOTFOUND`，说明未知 key 没有可用的属性描述排序路径。
+
+随后对隔离 `SysHeader32` 的自定义列发送按下/释放鼠标消息（只作用于 Private Desktop 的 view HWND）。DefView 经原生标题排序，行序变为升序 `small.bin|child`、再变为降序 `child|small.bin`，provider `CompareIDs` 每次各调用一次。这是目前最有希望的原生路径：未注册的专用列 key 可以显示目录派生值，并可由 DefView 标题排序路由到 `CompareIDs`；它仍是 NativeProbe 的合成 Shell folder，不代表 Explorer Dirs 产品接线或完整文件操作/拖放/通知兼容。
+
+同轮以已注册 `System.Document.ByteCount` 作对照时，DefView 改用 `GetDetailsEx`，只请求文件值，目录仍为空；对该属性的标题排序也没有通过。该 32 位语义不适用于产品的递归字节数，只作为 schema 行为对照。
+
+虽然自定义列探针已输出正确文本、两种行序及 `CompareIDs` 计数，整轮未通过：Private Desktop watchdog 约 5.9 秒后观察到桌面前台句柄与最后输入时间戳变化，随后 worker 未按时返回，exit code 124。不能据此判断前台变化由测试导致，也不能把它视为产品卡死。临时 CLSID/NameSpace 注册与进程已清理；watchdog 中断 `finally` 后留下的两个明确命名 TEMP 夹具目录仍待清理。后续应先从源码梳理 header-click 后的 view/COM 清理等待点和守卫变化来源；在此之前不再运行新的 Private Desktop view probe。Release 构建与原生 `/W4 /WX` 构建通过，产品和 release 未改。

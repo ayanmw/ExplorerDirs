@@ -1214,6 +1214,9 @@ namespace
     volatile LONG g_syntheticSizeDetailsExFolderCount = 0;
     volatile LONG g_syntheticSizeDetailsExFileCount = 0;
     volatile LONG g_syntheticSizeDetailsOfItemCount = 0;
+    volatile LONG g_syntheticCustomSizeDetailsExCount = 0;
+    volatile LONG g_syntheticCustomSizeDetailsExFolderCount = 0;
+    volatile LONG g_syntheticCustomSizeDetailsExFileCount = 0;
     volatile LONG g_syntheticPropertyStoreFactoryRequests = 0;
     volatile LONG g_syntheticPropertyStoreRequests = 0;
     volatile LONG g_syntheticOtherUiObjectRequests = 0;
@@ -1221,6 +1224,9 @@ namespace
     volatile LONG g_syntheticFilesystemAttributeCount = 0;
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
+    volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
+    { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
@@ -2147,7 +2153,16 @@ namespace
                 else if (child)
                     InterlockedIncrement(&g_syntheticSizeDetailsExFileCount);
             }
-            if (!key || !value || *key != kSizeKey) return E_INVALIDARG;
+            if (key && *key == kSyntheticRecursiveSizeKey)
+            {
+                InterlockedIncrement(&g_syntheticCustomSizeDetailsExCount);
+                const auto* child = SyntheticData(item);
+                if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+                    InterlockedIncrement(&g_syntheticCustomSizeDetailsExFolderCount);
+                else if (child)
+                    InterlockedIncrement(&g_syntheticCustomSizeDetailsExFileCount);
+            }
+            if (!key || !value || (*key != kSizeKey && *key != kSyntheticRecursiveSizeKey)) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
             VariantInit(value);
@@ -2167,7 +2182,8 @@ namespace
             std::wstring text;
             if (!item)
             {
-                text = column == 0 ? L"Name" : column == 1 ? L"Size" : L"Type";
+                text = column == 0 ? L"Name" : column == 1 ?
+                    (InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) ? L"Recursive Size" : L"Size") : L"Type";
                 details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = column == 0 ? 24 : 12;
             }
@@ -2191,6 +2207,8 @@ namespace
         {
             if (!key) return E_POINTER;
             if (column == 0) *key = PKEY_ItemNameDisplay;
+            else if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0))
+                *key = kSyntheticRecursiveSizeKey;
             else if (column == 1) *key = PKEY_Size;
             else if (column == 2) *key = PKEY_ItemTypeText;
             else return E_INVALIDARG;
@@ -3010,6 +3028,9 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticSizeDetailsExFolderCount, 0);
     InterlockedExchange(&g_syntheticSizeDetailsExFileCount, 0);
     InterlockedExchange(&g_syntheticSizeDetailsOfItemCount, 0);
+    InterlockedExchange(&g_syntheticCustomSizeDetailsExCount, 0);
+    InterlockedExchange(&g_syntheticCustomSizeDetailsExFolderCount, 0);
+    InterlockedExchange(&g_syntheticCustomSizeDetailsExFileCount, 0);
     InterlockedExchange(&g_syntheticPropertyStoreFactoryRequests, 0);
     InterlockedExchange(&g_syntheticPropertyStoreRequests, 0);
     InterlockedExchange(&g_syntheticOtherUiObjectRequests, 0);
@@ -3017,6 +3038,7 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticFilesystemAttributeCount, 0);
     InterlockedExchange(&g_syntheticMaskFilesystemAttributes, 0);
     InterlockedExchange(&g_syntheticOwnAttributesForProbe, 0);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
@@ -3131,6 +3153,21 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProb
     InterlockedExchange(&g_syntheticOwnAttributesForProbe, enabled ? 1 : 0);
     return S_OK;
 }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExCount()
+{ return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExFolderCount()
+{ return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExFolderCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticCustomSizeDetailsExFileCount()
+{ return InterlockedCompareExchange(&g_syntheticCustomSizeDetailsExFileCount, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticEnumObjectsCount()
 { return InterlockedCompareExchange(&g_syntheticEnumObjectsCount, 0, 0); }

@@ -13,6 +13,7 @@ public static class SyntheticShellSortProbe
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+    private static readonly Guid RecursiveSizeFormatId = new("7E1F84B7-C052-4E51-8A3C-869254A6B910");
     private const int LvmFirst = 0x1000;
     private const int LvmGetItemCount = LvmFirst + 4;
     private const int LvmSetItemState = LvmFirst + 43;
@@ -53,10 +54,10 @@ public static class SyntheticShellSortProbe
     }
 
     internal static int RunRecursiveDirectorySizeSort() =>
-        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true);
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true);
 
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
-        bool selfOwnedAttributes = false)
+        bool selfOwnedAttributes = false, bool customSizeColumn = false)
     {
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -117,6 +118,8 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticMaskFilesystemAttributesForProbe"))(maskFilesystemAttributes ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticOwnAttributesForProbe"))(selfOwnedAttributes ? 1 : 0));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticCustomSizeColumnForProbe"))(customSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
@@ -172,17 +175,34 @@ public static class SyntheticShellSortProbe
                 var detailsExRequests = ReadCounter(module, "GetSyntheticSizeDetailsExCount");
                 var detailsExFolderRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFolderCount");
                 var detailsExFileRequests = ReadCounter(module, "GetSyntheticSizeDetailsExFileCount");
+                var customDetailsExRequests = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
+                var customDetailsExFolderRequests = ReadCounter(module, "GetSyntheticCustomSizeDetailsExFolderCount");
+                var customDetailsExFileRequests = ReadCounter(module, "GetSyntheticCustomSizeDetailsExFileCount");
                 var detailsOfItemRequests = ReadCounter(module, "GetSyntheticItemDetailsOfCount");
                 var detailsOfSizeRequests = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
                 var propertyStoreFactoryRequests = ReadCounter(module, "GetSyntheticPropertyStoreFactoryRequestCount");
                 var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
                 var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
-                var ascendingNames = SortAndRead(module, folderView, view, sizeListView, direction: 1, expectedCount: 2);
+                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
+                string[] ascendingNames;
+                try
+                {
+                    ascendingNames = customSizeColumn
+                        ? SortByHeader(module, sizeListView, columnIndex: 1, expectedCount: 2, stage: "header-sort-ascending")
+                        : SortAndRead(module, folderView, view, sizeListView, direction: 1, expectedCount: 2);
+                }
+                catch (COMException error)
+                {
+                    Console.WriteLine($"synthetic-recursive-directory-size-view: sort-error=0x{error.HResult:X8}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    return 1;
+                }
                 var ascendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
-                var descendingNames = SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: 2);
+                var descendingNames = customSizeColumn
+                    ? SortByHeader(module, sizeListView, columnIndex: 1, expectedCount: 2, stage: "header-sort-descending")
+                    : SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: 2);
                 var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{string.Join('|', ascendingNames)}]; descending=[{string.Join('|', descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; initial=[{string.Join('|', initialNames)}]; size-text=[{string.Join('|', initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{string.Join('|', ascendingNames)}]; descending=[{string.Join('|', descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 var displayedDirectorySize = childIndex >= 0 && initialSizes[childIndex].Contains("10", StringComparison.Ordinal);
                 if (!displayedDirectorySize ||
@@ -582,11 +602,14 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-native-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-views");
             if (folderView != 0) Marshal.Release(folderView);
             if (folderView2 != 0) Marshal.Release(folderView2);
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
             if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-com-objects");
             if (view != 0) Marshal.Release(view);
             if (view2 != 0) Marshal.Release(view2);
             if (folder != 0) Marshal.Release(folder);
@@ -597,13 +620,16 @@ public static class SyntheticShellSortProbe
             host2?.Dispose();
             if (module != 0) NativeLibrary.Free(module);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
             if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-windows");
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
             if (parent2 != 0 && !DestroyWindow(parent2)) throw new InvalidOperationException("The second Private Desktop synthetic-view parent did not destroy cleanly.");
             Directory.Delete(backingFolder, recursive: true);
             Directory.Delete(copyDestination, recursive: true);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-complete");
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
         }
     }
@@ -627,6 +653,34 @@ public static class SyntheticShellSortProbe
         Pump(400);
         return ReadNames(listView, module, expectedCount);
     }
+
+    private static string[] SortByHeader(nint module, nint listView, int columnIndex, int expectedCount, string stage)
+    {
+        ReportProbeStage(stage + "-begin");
+        Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
+        var header = SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER.
+        if (header == 0) throw new InvalidOperationException("The synthetic DefView has no header control.");
+        var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            if (SendMessageW(header, 0x1207, columnIndex, rectanglePointer) == 0) // HDM_GETITEMRECT.
+                throw new InvalidOperationException($"Could not read the synthetic header column {columnIndex} rectangle.");
+            var rectangle = Marshal.PtrToStructure<NativeRect>(rectanglePointer);
+            var x = (rectangle.Left + rectangle.Right) / 2;
+            var y = (rectangle.Top + rectangle.Bottom) / 2;
+            var coordinates = unchecked((nint)((y << 16) | (x & 0xffff)));
+            SendMessageW(header, 0x0200, 0, coordinates); // WM_MOUSEMOVE.
+            SendMessageW(header, 0x0201, 1, coordinates); // WM_LBUTTONDOWN.
+            SendMessageW(header, 0x0202, 0, coordinates); // WM_LBUTTONUP.
+        }
+        finally { Marshal.FreeHGlobal(rectanglePointer); }
+        Pump(350);
+        ReportProbeStage(stage + "-complete");
+        return ReadNames(listView, module, expectedCount);
+    }
+
+    private static void ReportProbeStage(string stage) =>
+        PrivateDesktopShellProbe.ReportStage("synthetic-recursive-directory-size:" + stage);
 
     private static void RenameSelectedShellItem(nint view, nint listView, nint module, string itemName, string restoreFocusName, string newName)
     {
@@ -1094,6 +1148,7 @@ public static class SyntheticShellSortProbe
     }
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
     {
         public short Format; public nint TargetDevice; public uint Aspect; public int Index; public uint Tymed;
