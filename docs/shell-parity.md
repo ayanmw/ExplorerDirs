@@ -2,6 +2,8 @@
 
 2026-10-30 复制标签继承文件选区：同窗格复制和 Ctrl+拖动复制标签会携带当前可寻址的文件系统选区，并在新 Shell view 导航完成后恢复；同目录多个选中项通过生产 `IShellView.SelectItem` 批量逻辑选择，操作仍受导航版本、输入版本和焦点保护。隐藏 HostProbe 对两个临时文件完成 Shell 选中、复制状态传递及副本选区读回；不包含虚拟 Shell 项目，也未做可见 GUI 验收。
 
+2026-10-30 复制标签的部分失效选区：副本准备期间已删除/不可解析的选中路径现在被单项跳过，其余仍可解析的同目录文件继续恢复；若没有可恢复项则不建立延迟请求。隐藏生产 ExplorerBrowser HostProbe 覆盖一项存活、一项缺失及全部缺失，不涉及用户文件或可见 UI。
+
 2026-10-30 目录树图标后台复核：当前 Release `NativeProbe --tree-host-core` 验证生产 `NativeShellTree` 在隐藏父窗格绑定系统 512 项图像列表，并能读到普通目录正常/选中图标索引；根替换、折叠/展开、输入隔离和销毁检查通过，前台未变。`--tree-icon-render-ab` 中默认 Shell 树与显式系统图像列表绘制均为 `193/193` 像素匹配，初始化 1×1 与最终尺寸像素一致；`--tree-icon-callback-smoke` 回调读到正常/展开索引 `3/3`。这说明目前没有发现代码层图像索引或初始化尺寸缺陷，但不覆盖 WPF `HwndHost` 最终合成、多窗格或产品可见绘制；目录树图标仍保留集中 GUI 验收项。
 
 2026-10-30 Q-Dir “Copy Path”：编辑菜单新增“复制所选项目完整路径”，并接入 `Ctrl+Shift+C`；仅文件视图有焦点时执行，文本输入仍保留原行为。从当前 Shell 选区读取完整路径并以 Unicode 多行文本写入剪贴板；若选择为空或含不可转换成完整文件系统路径的虚拟 Shell 项目，则拒绝整次复制，避免部分结果。单路径不加引号，多路径每项一行；不加入工具栏，也不改变文件区原生右键菜单。格式、快捷键路由 smoke 与隐藏真实 ExplorerBrowserHost 单选/多选路径捕获均通过，夹具只含临时文件，前台未变且未操作系统剪贴板；真实菜单可用状态、剪贴板内容、物理快捷键及复制后的焦点恢复待集中 GUI 验收。对标依据：[Q-Dir 官方英文功能清单](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish)及[官方 Copy Path 快捷键提示](https://softwareok.com/?page=Windows%2FTip%2FQ-Dir%2F23)。

@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 复制标签选区遇到已删除项目：复核复制标签恢复队列发现，选中项中任一路径在副本导航完成前失效，会使整批选区都不恢复。现跳过无法由 Shell 解析的失效项，仅在同目录内为仍存在的文件排队；所有项均失效时不启动空请求。隐藏生产 ExplorerBrowser HostProbe 先复现失败，再验证保留项被排队、失效项被排除及全失效不创建请求；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）和 `git diff --check` 通过。没有启动 GUI 或触碰用户文件，实际删除竞态和可见多选仍待集中验收。
+
 2026-10-30 复制标签保留文件选区：同窗格复制与跨窗格复制现在捕获当前标签中可寻址的文件系统选区，并在副本完成导航后将选区恢复到新 Shell view。Release HostProbe 用临时目录中的两个文件验证源选区、克隆状态传递、生产批量 `IShellView.SelectItem` 调用及副本选区读回；移动标签原对象/HWND/Back 历史和关闭清理回归也通过。Release SettingsSmoke、App/HostProbe Release build 与 `git diff --check` 通过；隐藏窗口未激活且前台不变。虚拟 Shell 选项不纳入此恢复，实际复制标签键鼠和可见焦点仍待集中 GUI 验收。
 
 2026-10-30 ExplorerBrowser 隐藏项目偏好修复：隐藏生产宿主在普通隐藏文件、系统隐藏文件夹具上先复现显式 Hide 仍列出普通隐藏项（Shell 列表计数 3，而预期 2）。根因是 `ShellBrowserSite.GetViewFlags` 在 `QuickFilterActive=false` 时设置 `NOINCLUDEITEM`，使 DefView 绕过已安装的 `IFolderFilter::ShouldShow`；显式 Show/Hide 现都启用 Shell folder-filter 回调，Hide 用 `SFGAO_HIDDEN` 排除普通隐藏项，GetEnumFlags 仍不请求 `SHCONTF_INCLUDESUPERHIDDEN`。隐藏 `PaneControl`/真实 ExplorerBrowser 宿主复验 Show=3、Hide=2、系统隐藏项始终不出现；`SettingsSmoke`、HostProbe 和 App Release build 通过。没有改 Windows 全局设置或显示窗口；外部切换后通知、其他 Shell provider 与可见菜单验收仍开放。

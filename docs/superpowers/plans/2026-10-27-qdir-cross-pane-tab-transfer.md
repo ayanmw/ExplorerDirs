@@ -10,3 +10,4 @@
 - [x] 检查 diff 并提交本地 Git。
 - [x] 复制标签时保留同目录文件系统选区，并在目标 Shell view 导航完成后恢复。
 - [x] 隐藏 HostProbe 验证多文件选区在独立 Shell view 中实际恢复，运行 Release SettingsSmoke、App/HostProbe Release build 与 diff 检查后单独提交。
+- [x] 选区成员在复制期间消失时跳过失效项，并覆盖部分存活与全部失效路径。

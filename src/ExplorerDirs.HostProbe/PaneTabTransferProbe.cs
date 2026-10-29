@@ -147,9 +147,19 @@ internal static class PaneTabTransferProbe
                 TimeSpan.FromSeconds(15), "Back navigated through the pre-move Shell history");
 
             SelectShellItems(browserType, browser, sourceA, ["probe.txt", "probe-2.txt"]);
-            var selectedPaths = (IReadOnlyList<string>)browserType.GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!
-                .Invoke(browser, null)!;
-            Ensure(selectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
+            IReadOnlyList<string>? selectedPaths = null;
+            PumpUntil(() =>
+            {
+                try
+                {
+                    selectedPaths = (IReadOnlyList<string>)browserType
+                        .GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!.Invoke(browser, null)!;
+                    return selectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
+                        .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase);
+                }
+                catch { return false; }
+            }, TimeSpan.FromSeconds(5), "the source Shell selection became readable");
+            Ensure(selectedPaths!.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
                     .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
                 "the source Shell view starts with both clone-selection fixtures selected");
 
@@ -177,6 +187,22 @@ internal static class PaneTabTransferProbe
             Ensure(copiedSelectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
                     .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
                 "the copied Shell view applies and reports the original multi-selection");
+            var queueSelections = browserType.GetMethods(InstanceMembers).Single(method =>
+                method.Name == "QueueFileSystemSelections" && method.GetParameters().Length == 1 &&
+                method.GetParameters()[0].ParameterType == typeof(IReadOnlyList<string>));
+            var survivingPath = Path.Combine(sourceA, "probe.txt");
+            var vanishedPath = Path.Combine(sourceA, "deleted-before-restore.txt");
+            var queued = (bool)queueSelections.Invoke(copiedBrowser, [new[] { survivingPath, vanishedPath }])!;
+            Ensure(queued, "a vanished copied item does not cancel restoration of surviving selected files");
+            var queuedPidls = (System.Collections.ICollection)browserType
+                .GetField("_createdFileSelectionPidls", InstanceMembers)!.GetValue(copiedBrowser)!;
+            Ensure(queuedPidls.Count == 1, "the queued restore omits the vanished path and keeps the surviving path");
+            browserType.GetMethod("CancelCreatedFileSelection", InstanceMembers)!.Invoke(copiedBrowser, [null]);
+            var noSurvivors = (bool)queueSelections.Invoke(copiedBrowser,
+                [new[] { vanishedPath, Path.Combine(sourceA, "also-deleted.txt") }])!;
+            Ensure(!noSurvivors && browserType.GetField("_createdFileSelectionPidls", InstanceMembers)!
+                    .GetValue(copiedBrowser) is null,
+                "an entirely vanished copied selection creates no empty restore request");
 
             paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [state]);
             Ensure(targetTabsControl.Items.Count == 1 && !targetTabsControl.Items.Contains(movedTab),

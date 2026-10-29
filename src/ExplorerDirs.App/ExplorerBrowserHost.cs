@@ -1562,11 +1562,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
             {
                 if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
-                foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl);
-                return false;
+                // A copied selection is a snapshot; skip items removed before the new view is ready.
+                continue;
             }
+            if (absolutePidl == IntPtr.Zero) continue;
             pidls.Add(absolutePidl);
         }
+        if (pidls.Count == 0) return false;
         try
         {
             CancelCreatedFileSelection();
