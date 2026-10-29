@@ -2,6 +2,8 @@
 
 2026-10-24：应用会话现为 v10，v1～v9 会话升级前保留 `.before-v10-*` 原文。v6 加入每标签快速筛选，v7 加入每标签原生预览窗格开关，v8 加入互斥的每标签详情窗格状态，v9 加入逐窗格目录树显示状态，v10 加入共享/逐窗格/关闭三种应用内树模式。Q-Dir 的 `Tree1`～`Tree4` 仍按暂定 0/1 目录树开关读写并映射到窗格，导入预览会注明该映射尚未通过可见互操作确认。自 2026-10-25 起，基础字段 `tree_mode` 已按静态映射支持导入和导出；本程序扩展仍用于保存逐窗格树状态。`TreeNsplit` 仍不应用到本程序目录树宽度；有效非负整数原值会随 v12 会话跨重启保留并在导出的 `.qdr` 中原样往返，树模式/可见性/宽度被本程序更改后会清除。单位与适用范围未确认，预览仍会警告未应用。
 
+2026-10-30 会话 v13 增加 Q-Dir 颜色元数据保真：`useColor`、`useTreeColor`、`colorthema` 与 `[Filter2]` 中数字开头的规则行写入便携会话，并在 `.qdr` 再导出时按原顺序写回。规则字段不解释、不应用到 ExplorerBrowser；导入预览说明其已保留但未应用。规则行纳入 `ExplorerDirs.BaseHash`，修改后会拒绝旧扩展快照并采用用户修改的 Q-Dir 基础数据。载荷有 1 MiB 安全上限；超限时规则整体不保留并在预览警告。后台会话、QDR 往返和完整 Release SettingsSmoke 已验证；尚未用 Q-Dir 实际打开并重新保存含颜色规则的配置。
+
 2026-10-25 官方 FAQ 117 示例的未支持位置字段：`SPT` 含义未确认，`VorschauPos` 预览位置尚未支持；导入预览会逐项说明这两个字段未应用。FAQ 只标注 `VorschauPos` 为 Preview，并给出 `Vorschau=0`、`VorschauPos=7500`，没有说明单位、方向或 0–10000 范围。当前本机 `start.qdr` 与 Quick-Link 样本也都只有 `Vorschau=0` 且 `VorschauPos=7500`，缺少启用预览且位置不同的对照，因此还不足以确定映射。不会把 `SPT` 误当成相同单位的窗格比例，也不会猜测 `VorschauPos` 的比例语义。[Q-Dir 官方 FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR)
 
 2026-10-26 复核 FAQ 117 公布的示例配置后，确认其中为 `tree_mode=0`、`Tree1`～`Tree4=0`，四个 `TreeNsplit` 都是 `2500`；这些值处于目录树关闭样例，不能说明树启用时的宽度单位、方向或逐窗格适用规则。公开资料仍没有可用于映射的变化样本，因此导入器继续提示并跳过 `TreeNsplit`，不把默认数字转换为本程序的 DIP 宽度。[Q-Dir 官方 FAQ 117](https://www.softwareok.com/?faq=117&seite=faq-Q-DIR)

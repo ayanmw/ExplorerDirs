@@ -16,7 +16,7 @@ internal static class QdrExporter
         Dictionary<int, LayoutProportions>? Proportions = null,
         NavigationTreeWidths? NavigationTreeWidths = null);
     private static readonly Regex BaseKey = new(
-        @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|SP[0-2]|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
+        @"^(Q-Dir Version|ViewMode|Focus|Vorschau|tree_mode|Tree[1-4](?:split)?|SP[0-2]|useColor|useTreeColor|colorthema|(?:Dir|Folder|CurPos|ViewMode|ColsAndSort)[1-4](?:_[0-9]{1,2})?)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     // Call only on a state-only background worker: Shell binding may wait for remote providers.
@@ -88,6 +88,14 @@ internal static class QdrExporter
                 if (qdrTreeSplits.Values.ElementAt(pane) is { } value)
                     values[$"Tree{pane + 1}split"] = value;
         }
+        if (state.QdrColorMetadata is { } qdrColorMetadata)
+        {
+            if (!qdrColorMetadata.IsValid)
+                throw new InvalidDataException("保留的 Q-Dir 颜色元数据无效，未导出状态文件。");
+            if (qdrColorMetadata.UseColor is { } useColor) values["useColor"] = useColor;
+            if (qdrColorMetadata.UseTreeColor is { } useTreeColor) values["useTreeColor"] = useTreeColor;
+            if (qdrColorMetadata.ColorTheme is { } colorTheme) values["colorthema"] = colorTheme;
+        }
         if (proportions is not null) QdrProportions.Write(values, state.Layout, proportions[state.Layout]);
         for (var pane = 0; pane < 4; pane++)
         {
@@ -118,9 +126,16 @@ internal static class QdrExporter
         var extensionVersion = treeWidths is not null ? 4 : proportions is null ? 1 :
             proportions.Values.Any(value => value.BottomHorizontal is not null) ? 3 : 2;
         output.Append(Prefix).Append("FormatVersion=").Append(extensionVersion).Append("\r\n")
-            .Append(Prefix).Append("BaseHash=").Append(HashBase(values)).Append("\r\n")
+            .Append(Prefix).Append("BaseHash=").Append(HashBase(values, state.QdrColorMetadata)).Append("\r\n")
             .Append(Prefix).Append("State=").Append(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(payload)))
             .Append("\r\n");
+        // Filter2 is a final INI section: keep app extension key/value fields before it so
+        // the importer's section-aware parser does not mistake them for Filter2 row data.
+        if (state.QdrColorMetadata is { Filter2Rows.Count: > 0 } filterMetadata)
+        {
+            output.Append("[Filter2]\r\n");
+            foreach (var row in filterMetadata.Filter2Rows) output.Append(row).Append("\r\n");
+        }
         var text = output.ToString();
         if (Encoding.Unicode.GetByteCount(text) + 2 > QdrImporter.MaximumBytes)
             throw new InvalidDataException("导出状态超过 8 MB，请减少标签后重试。");
@@ -153,7 +168,7 @@ internal static class QdrExporter
         {
             var version = values.GetValueOrDefault(Prefix + "FormatVersion");
             if (duplicate || version is not ("1" or "2" or "3" or "4") ||
-                values.GetValueOrDefault(Prefix + "BaseHash") != HashBase(values))
+                values.GetValueOrDefault(Prefix + "BaseHash") != HashBase(values, basic.QdrColorMetadata))
                 throw new InvalidDataException();
             var bytes = Convert.FromBase64String(values[Prefix + "State"]);
             var extension = JsonSerializer.Deserialize<Extension>(bytes) ?? throw new InvalidDataException();
@@ -179,7 +194,7 @@ internal static class QdrExporter
                 ["已读取 Explorer Dirs 扩展：布局、活动窗格、标签视图、目录树模式/宽度/逐窗格状态、每标签快速筛选、预览/详情窗格、固定标签及新标签默认查看方式。",
                  "不导入主题、窗口位置或启动命令。"], state, extension.Pins, state.ActivePane,
                 extension.Proportions ?? basic.Proportions, state.PaneTreeVisibility, state.TreeDisplayMode,
-                extension.NavigationTreeWidths, state.QdrTreeSplits);
+                extension.NavigationTreeWidths, state.QdrTreeSplits, state.QdrColorMetadata);
         }
         catch (Exception ex) when (ex is InvalidDataException or FormatException or JsonException or
             ArgumentException or KeyNotFoundException or NullReferenceException)
@@ -197,11 +212,14 @@ internal static class QdrExporter
             throw new InvalidDataException("工作区布局比例不完整或无效。");
     }
 
-    private static string HashBase(Dictionary<string, string> values)
+    private static string HashBase(Dictionary<string, string> values, QdrColorMetadata? colorMetadata = null)
     {
-        var canonical = string.Join("\n", values.Where(pair => BaseKey.IsMatch(pair.Key))
+        var baseFields = values.Where(pair => BaseKey.IsMatch(pair.Key))
             .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(pair => pair.Key.ToUpperInvariant() + "=" + pair.Value));
+            .Select(pair => pair.Key.ToUpperInvariant() + "=" + pair.Value).ToList();
+        if (colorMetadata is { Filter2Rows.Count: > 0 })
+            baseFields.AddRange(["[FILTER2]", .. colorMetadata.Filter2Rows]);
+        var canonical = string.Join("\n", baseFields);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 

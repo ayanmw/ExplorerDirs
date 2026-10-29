@@ -133,15 +133,25 @@ internal static class QdrImportSmoke
                 qdrColorInvalid.Warnings.All(warning => !warning.Contains("maybe")),
             "invalid Q-Dir color switch values are reported without echoing the raw value");
         var qdrColorRules = QdrImporter.Parse(
-            "Q-Dir Version=7.84\nViewMode=0\nuseColor=1\nDir1=C:\\left\n" +
+            "Q-Dir Version=7.84\nViewMode=0\nuseColor=1\nuseTreeColor=0\ncolorthema=dark\nDir1=C:\\left\n" +
             "[Filter2]\n0=*.jpg=1=FF0000=-1=1=-1=0\n1=#BG-A=1=-1=-1=1=-1=0\n",
             (value, _) => value);
         Require(qdrColorRules.Warnings.Any(warning => warning.Contains("Filter2") && warning.Contains("2") &&
-                    warning.Contains("颜色规则") && warning.Contains("未导入") &&
+                    warning.Contains("颜色规则") && warning.Contains("未应用") &&
                     warning.Contains("*.jpg") && warning.Contains("#BG-A")) &&
                 qdrColorRules.Warnings.All(warning => !warning.Contains("FF0000")) &&
                 !qdrColorRules.Warnings.Any(warning => warning.Contains("未识别且未应用的字段名")),
             "Q-Dir import preview lists Filter2 rule patterns without interpreting or exposing color values");
+        Require(qdrColorRules.QdrColorMetadata is { UseColor: "1", UseTreeColor: "0", ColorTheme: "dark" } colorMetadata &&
+                colorMetadata.Filter2Rows.SequenceEqual(["0=*.jpg=1=FF0000=-1=1=-1=0", "1=#BG-A=1=-1=-1=1=-1=0"]) &&
+                QdrLaunchSession.Create(qdrColorRules, root).QdrColorMetadata == colorMetadata,
+            "Q-Dir color switches and ordered Filter2 rows remain opaque across import and startup session creation");
+        var duplicatedColorRows = QdrImporter.Parse(
+            "Q-Dir Version=7.84\nViewMode=0\nDir1=C:\\left\n[Filter2]\n0=*.jpg=1=FF0000\n0=*.png=1=00FF00\n",
+            (value, _) => value);
+        Require(duplicatedColorRows.QdrColorMetadata?.Filter2Rows.SequenceEqual(
+                    ["0=*.jpg=1=FF0000", "0=*.png=1=00FF00"]) == true,
+            "opaque Q-Dir Filter2 rows preserve source order and duplicate numeric keys");
         var longFilterPattern = new string('x', 70);
         var manyFilterRules = string.Join("\n", Enumerable.Range(0, 8).Select(index =>
             $"{index}={(index == 0 ? longFilterPattern : $"pattern-{index}")}=1=00AA00=-1=1=-1=0"));

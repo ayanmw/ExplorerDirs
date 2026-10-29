@@ -37,6 +37,27 @@ internal static class QdrExportSmoke
             splitRoundTrip.QdrTreeSplits == splitState.QdrTreeSplits &&
             splitRoundTrip.ExtendedState?.QdrTreeSplits == splitState.QdrTreeSplits,
             "opaque Q-Dir split values preserve exact native pane keys and text through export/import");
+        var colorState = state with
+        { QdrColorMetadata = new QdrColorMetadata("1", "0", "dark", ["1=*.png=1=00FF00=-1=1=-1=0", "0=#BG-A=1=-1=-1=1=-1=0"]) };
+        var colorText = QdrExporter.Render(colorState, pins);
+        var colorRoundTrip = QdrImporter.Parse(colorText, (value, _) => value);
+        Check(colorText.Contains("\r\nuseColor=1\r\n") && colorText.Contains("\r\nuseTreeColor=0\r\n") &&
+            colorText.Contains("\r\ncolorthema=dark\r\n") &&
+            colorText.Contains("\r\n[Filter2]\r\n1=*.png=1=00FF00=-1=1=-1=0\r\n0=#BG-A=1=-1=-1=1=-1=0\r\n"),
+            "opaque Q-Dir color switches, theme, and ordered Filter2 rows export as Q-Dir base fields");
+        var sameBaseColor = SameColorMetadata(colorRoundTrip.QdrColorMetadata, colorState.QdrColorMetadata);
+        var sameExtensionColor = SameColorMetadata(colorRoundTrip.ExtendedState?.QdrColorMetadata, colorState.QdrColorMetadata);
+        Check(sameBaseColor && sameExtensionColor,
+            $"opaque Q-Dir color metadata round-trips in the base import and portable extension (base={sameBaseColor}, extension={sameExtensionColor}, extended={colorRoundTrip.ExtendedState is not null}, warnings={string.Join(" | ", colorRoundTrip.Warnings)})");
+        var editedColorRule = colorText.Replace("1=*.png=1=00FF00", "1=*.png=1=FF00FF", StringComparison.Ordinal);
+        var editedColorImport = QdrImporter.Parse(editedColorRule, (value, _) => value);
+        Check(editedColorImport.ExtendedState is null && editedColorImport.QdrColorMetadata?.Filter2Rows[0].Contains("FF00FF") == true,
+            "editing an opaque Filter2 rule invalidates the stale Explorer Dirs extension while retaining edited base data");
+        var baseOnlyColorText = string.Join('\n', colorText.Split('\n').Where(line =>
+            !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase)));
+        Check(SameColorMetadata(QdrImporter.Parse(baseOnlyColorText, (value, _) => value).QdrColorMetadata,
+                colorState.QdrColorMetadata),
+            "Q-Dir color metadata remains available when the application extension is removed");
         var editedSplitText = splitText.Replace("Tree1split=002500", "Tree1split=2500", StringComparison.Ordinal);
         var editedSplit = QdrImporter.Parse(editedSplitText, (value, _) => value);
         Check(editedSplit.ExtendedState is null && editedSplit.QdrTreeSplits?.Pane1 == "2500",
@@ -350,4 +371,9 @@ internal static class QdrExportSmoke
         left.FilterFolders == right.FilterFolders && left.ColumnFilters.Count == right.ColumnFilters.Count &&
         left.ColumnFilters.Zip(right.ColumnFilters).All(pair => pair.First.Key == pair.Second.Key &&
             pair.First.Values.SequenceEqual(pair.Second.Values));
+
+    private static bool SameColorMetadata(QdrColorMetadata? left, QdrColorMetadata? right) =>
+        left is null ? right is null : right is not null && left.UseColor == right.UseColor &&
+        left.UseTreeColor == right.UseTreeColor && left.ColorTheme == right.ColorTheme &&
+        left.Filter2Rows.SequenceEqual(right.Filter2Rows);
 }

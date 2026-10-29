@@ -14,7 +14,8 @@ internal sealed record QdrImportResult(List<List<TabSettings>> Panes, int[] Sele
     IReadOnlyList<bool>? PaneTreeVisibility = null,
     TreeDisplayMode? TreeDisplayMode = null,
     NavigationTreeWidths? NavigationTreeWidths = null,
-    QdrTreeSplitState? QdrTreeSplits = null)
+    QdrTreeSplitState? QdrTreeSplits = null,
+    QdrColorMetadata? QdrColorMetadata = null)
 {
     public int TabCount => Panes.Sum(pane => pane.Count);
 }
@@ -70,6 +71,7 @@ internal static class QdrImporter
         var inFilter2 = false;
         var filter2RuleCount = 0;
         var filter2Patterns = new List<string>(6);
+        var filter2Rows = new List<string>();
         var remaining = text.AsSpan();
         while (!remaining.IsEmpty)
         {
@@ -91,6 +93,7 @@ internal static class QdrImporter
                     CultureInfo.InvariantCulture, out _))
                 {
                     filter2RuleCount++;
+                    filter2Rows.Add(line.ToString());
                     var patternStart = equals + 1;
                     var patternEnd = line[patternStart..].IndexOf('=');
                     if (patternEnd >= 0) patternEnd += patternStart;
@@ -257,6 +260,7 @@ internal static class QdrImporter
         // FAQ 117 and local Q-Dir workspaces include split defaults when every
         // pane tree is disabled; those values cannot affect this import.
         var qdrTreeSplits = ReadQdrTreeSplits(values, warnings);
+        var qdrColorMetadata = ReadQdrColorMetadata(values, filter2Rows, warnings);
         var treeModeExplicitlyDisabled = values.TryGetValue("tree_mode", out var importedTreeMode) && importedTreeMode == "0";
         var everyImportedPaneTreeDisabled = treeKeys.All(value => value == false);
         if (!treeModeExplicitlyDisabled && !everyImportedPaneTreeDisabled &&
@@ -290,13 +294,18 @@ internal static class QdrImporter
                 warnings.Add("活动窗格无法映射、当前布局不显示该窗格或其中没有可导入目录；未恢复该活动窗格。");
         }
         var proportions = QdrProportions.Read(values, layout, warnings);
-        warnings.Add("不导入颜色规则、背景值、窗口位置及程序启动命令。");
+        warnings.Add("窗口位置及程序启动命令不导入。");
+        if (qdrColorMetadata is not null)
+            warnings.Add("Q-Dir 颜色规则和背景值会保留在配置中，但当前 ExplorerBrowser 视图不会应用它们。");
         if (filter2RuleCount > 0)
         {
             var patternSummary = filter2Patterns.Count == 0 ? "" : "规则模式：" +
                 string.Join("、", filter2Patterns) +
                 (filter2RuleCount > filter2Patterns.Count ? "等" : "");
-            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；当前版本未导入。{patternSummary}");
+            var preservation = qdrColorMetadata?.Filter2Rows.Count == filter2RuleCount
+                ? "已保留原始行，当前版本未应用。"
+                : "超过安全保留范围，原始行未保留。";
+            warnings.Add($"检测到 {filter2RuleCount} 条 Q-Dir Filter2 颜色规则；{preservation}{patternSummary}");
         }
         AddUnsupportedColorSwitchWarning(values, "useColor", warnings);
         AddUnsupportedColorSwitchWarning(values, "useTreeColor", warnings);
@@ -305,7 +314,7 @@ internal static class QdrImporter
                 Proportions: proportions is not null && layout is { } knownLayout
                     ? new Dictionary<int, LayoutProportions> { [knownLayout] = proportions } : null,
                 PaneTreeVisibility: paneTreeVisibility, TreeDisplayMode: treeDisplayMode,
-                QdrTreeSplits: qdrTreeSplits));
+                QdrTreeSplits: qdrTreeSplits, QdrColorMetadata: qdrColorMetadata));
         if (result.TabCount == 0) throw new InvalidDataException("未找到可导入的文件夹；当前会话未改变。");
         return result;
     }
@@ -328,6 +337,18 @@ internal static class QdrImporter
         if (malformed) warnings.Add("部分 Q-Dir TreeNsplit 值不是有效的非负整数；这些原值不会保留或应用。");
         return splits.Any(value => value is not null)
             ? new QdrTreeSplitState(splits[0], splits[1], splits[2], splits[3]) : null;
+    }
+
+    private static QdrColorMetadata? ReadQdrColorMetadata(IReadOnlyDictionary<string, string> values,
+        IReadOnlyList<string> filter2Rows, ICollection<string> warnings)
+    {
+        var metadata = new QdrColorMetadata(values.GetValueOrDefault("useColor"),
+            values.GetValueOrDefault("useTreeColor"), values.GetValueOrDefault("colorthema"), filter2Rows);
+        if (metadata.UseColor is null && metadata.UseTreeColor is null && metadata.ColorTheme is null &&
+            metadata.Filter2Rows.Count == 0) return null;
+        if (metadata.IsValid) return metadata;
+        warnings.Add("Q-Dir 颜色配置超出安全保留范围；未保留其颜色字段。");
+        return null;
     }
 
     private static void AddUnsupportedColorSwitchWarning(

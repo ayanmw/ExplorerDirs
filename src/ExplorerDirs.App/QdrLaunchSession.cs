@@ -11,6 +11,6 @@ internal static class QdrLaunchSession
             : [new TabSettings(homeDirectory, ViewState.Default())]).ToList();
         return new SessionState(import.Layout ?? 4, 4, panes,
             Math.Clamp(import.ActivePane ?? 0, 0, 3), import.SelectedTabs.ToArray(), -1,
-            import.PaneTreeVisibility, import.TreeDisplayMode, import.QdrTreeSplits);
+            import.PaneTreeVisibility, import.TreeDisplayMode, import.QdrTreeSplits, import.QdrColorMetadata);
     }
 }
