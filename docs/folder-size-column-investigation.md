@@ -395,3 +395,5 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 同轮以已注册 `System.Document.ByteCount` 作对照时，DefView 改用 `GetDetailsEx`，只请求文件值，目录仍为空；对该属性的标题排序也没有通过。该 32 位语义不适用于产品的递归字节数，只作为 schema 行为对照。
 
 虽然自定义列探针已输出正确文本、两种行序及 `CompareIDs` 计数，整轮未通过：Private Desktop watchdog 约 5.9 秒后观察到桌面前台句柄与最后输入时间戳变化，随后 worker 未按时返回，exit code 124。不能据此判断前台变化由测试导致，也不能把它视为产品卡死。临时 CLSID/NameSpace 注册与进程已清理；watchdog 中断 `finally` 后留下的两个明确命名 TEMP 夹具目录仍待清理。后续应先从源码梳理 header-click 后的 view/COM 清理等待点和守卫变化来源；在此之前不再运行新的 Private Desktop view probe。Release 构建与原生 `/W4 /WX` 构建通过，产品和 release 未改。
+
+源码复核发现该次运行时 watchdog 的阶段标记始终停留在通用 `probe-entered`，无法区分是 `ReleaseSyntheticSortViewHold`、`DestroyViewWindow`、COM 释放、host Dispose、DLL unload、注册清理还是 fixture 删除等待。Wait-chain 只显示 worker 正在等待并涉及 COM activation/`ChsIME`，不足以定位某个被调用函数，也不能归因于 header-click。现在 NativeProbe 在每个清理调用前分别报告阶段；该诊断改动通过 Release 构建及无窗口树级 smoke，尚未重跑 Private Desktop。下一次得到有效阶段证据前，不调整释放顺序。

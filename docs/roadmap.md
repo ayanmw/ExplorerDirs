@@ -4577,6 +4577,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 按 Size 排序结果仍正确（4 B 文件在 10 B 递归目录之前，反向排序相反），说明这份合成样本的比较排序合同有效；但仅屏蔽 filesystem 标记不足以让 DefView 消费目录属性。结论只适用于当前包装真实 filesystem PIDL 的隔离 adapter，不代表全自有 PIDL namespace。
 - 这是架构探针证据，未接入产品、未改 release。产品继续使用 ExplorerBrowser，F9 递归扫描仍是显式汇总路径；若未来要逐行派生列，后续研究需转向完整虚拟 namespace 的属性供应与 Shell 操作兼容门槛，而不再重复尝试此标记屏蔽变体。
 
-- 追加 provider-owned attributes 对照：DefView 的 `GetAttributesOf` 由合成 PIDL 直接提供 folder/stream 属性，不再委托 filesystem；结果仍不请求目录 Size 元数据，标准 `PKEY_Size` 列保持为空。下一项隔离实验将测试 provider-owned 自定义列键；若目录仍被跳过，转向评估完整自定义列/视图架构，不接入产品。
+- provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
 - 自定义列 key 探针发现：未注册 `PROPERTYKEY` 经 `GetDetailsOf` 可在 DefView 中同时显示 10 B 目录和 4 B 文件；`SetSortColumns` 因未知 schema 返回 `TYPE_E_ELEMENTNOTFOUND`，但原生列标题点击仍会排序并调用 provider `CompareIDs`。这是 NativeProbe 级可行性证据，完整 Private Desktop 运行因前台/输入守卫变化及清理超时不记为通过。先源码定位清理等待与守卫变化，再决定后续独立会话复测；本轮不动产品及 release。
+- 旧 watchdog 仅记录通用 `probe-entered`，Wait-chain 只能显示 COM 等待，无法定位最后执行的清理调用。NativeProbe 现为 `ReleaseSyntheticSortViewHold`、每个 view/COM release、`DestroyViewWindow`、host dispose、DLL unload、注册与 fixture 清理设置独立阶段标记；后台 Release build 和树级 smoke 通过。该诊断代码未由新的 Private Desktop view 运行验证。

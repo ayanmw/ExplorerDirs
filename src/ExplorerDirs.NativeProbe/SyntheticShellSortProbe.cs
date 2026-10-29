@@ -210,6 +210,7 @@ public static class SyntheticShellSortProbe
                     !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
                     ascendingComparisons == 0 || descendingComparisons == 0 || GetForegroundWindow() != foreground)
                     return 1;
+                ReportProbeStage("assertions-complete");
                 return 0;
             }
             parent2 = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace second view",
@@ -602,32 +603,43 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-native-view-holds");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-views");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");
             if (folderView != 0) Marshal.Release(folderView);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-2");
             if (folderView2 != 0) Marshal.Release(folderView2);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-1");
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-2");
             if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-com-objects");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-view-1");
             if (view != 0) Marshal.Release(view);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-view-2");
             if (view2 != 0) Marshal.Release(view2);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-objects");
             if (folder != 0) Marshal.Release(folder);
             if (folder2 != 0) Marshal.Release(folder2);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-browser-sites");
             if (hostPointer != 0) Marshal.Release(hostPointer);
             if (hostPointer2 != 0) Marshal.Release(hostPointer2);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-dispose-browser-hosts");
             host?.Dispose();
             host2?.Dispose();
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-free-native-library");
             if (module != 0) NativeLibrary.Free(module);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
             if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-windows");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-1");
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-2");
             if (parent2 != 0 && !DestroyWindow(parent2)) throw new InvalidOperationException("The second Private Desktop synthetic-view parent did not destroy cleanly.");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-delete-backing-fixture");
             Directory.Delete(backingFolder, recursive: true);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-delete-copy-fixture");
             Directory.Delete(copyDestination, recursive: true);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-complete");
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");
