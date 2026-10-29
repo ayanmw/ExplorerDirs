@@ -3,7 +3,7 @@ using System.Text;
 using Microsoft.Win32;
 using ExplorerDirs.App;
 
-internal static class SyntheticShellSortProbe
+public static class SyntheticShellSortProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
@@ -279,6 +279,7 @@ internal static class SyntheticShellSortProbe
                         copyResult = "copied=100-byte a-large.bin; source-preserved=True";
                     }
                     finally { Marshal.Release(fileOperation); }
+                    VerifyCancelledCopies(backingFolder, copyDestination);
                 }
                 finally { Marshal.Release(selectionDataObject); }
             }
@@ -711,6 +712,95 @@ internal static class SyntheticShellSortProbe
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
+    private static void VerifyCancelledCopies(string sourceFolder, string destinationFolder)
+    {
+        var fileOperationClass = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var fileOperationInterface = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        Check(CoCreateInstance(ref fileOperationClass, 0, 1, ref fileOperationInterface, out var operation));
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            try
+            {
+                var sink = new CancelFirstCopySink();
+                var sinkPointer = Marshal.GetComInterfaceForObject(sink, typeof(IFileOperationProgressSinkProbe));
+                try
+                {
+                    var copyItem = At<CopyItem>(operation, 16);
+                    foreach (var fileName in new[] { "two.bin", "z-ten.bin" })
+                    {
+                        shellItemInterface = ShellItemId;
+                        Check(SHCreateItemFromParsingName(Path.Combine(sourceFolder, fileName), 0, ref shellItemInterface, out var sourceItem));
+                        try { Check(copyItem(operation, sourceItem, destinationItem, $"cancelled-{fileName}", sinkPointer)); }
+                        finally { Marshal.Release(sourceItem); }
+                    }
+                    var performResult = At<PerformOperations>(operation, 21)(operation);
+                    Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                    if (sink.PreCopyCalls != 1 || performResult != unchecked((int)0x80004004) ||
+                        File.Exists(Path.Combine(destinationFolder, "cancelled-two.bin")) ||
+                        File.Exists(Path.Combine(destinationFolder, "cancelled-z-ten.bin")))
+                        throw new IOException($"IFileOperation cancellation did not stop the queued copy batch: pre-copy={sink.PreCopyCalls}; aborted={aborted}; perform=0x{performResult:X8}.");
+                    Console.WriteLine($"synthetic-shell-size-sort: cancelled-copy-batch=True; pre-copy-callbacks={sink.PreCopyCalls}; queued-items=2; copied-items=0; any-operations-aborted={aborted}; perform-hr=0x{performResult:X8}");
+                }
+                finally { Marshal.Release(sinkPointer); }
+            }
+            finally { Marshal.Release(destinationItem); }
+        }
+        finally { Marshal.Release(operation); }
+    }
+
+    [ComVisible(true)]
+    [Guid("04B0F1A7-9490-44BC-96E1-4296A31252E2")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IFileOperationProgressSinkProbe
+    {
+        [PreserveSig] int StartOperations();
+        [PreserveSig] int FinishOperations(int result);
+        [PreserveSig] int PreRenameItem(uint flags, nint item, [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+        [PreserveSig] int PostRenameItem(uint flags, nint item, [MarshalAs(UnmanagedType.LPWStr)] string? newName, int result, nint newItem);
+        [PreserveSig] int PreMoveItem(uint flags, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+        [PreserveSig] int PostMoveItem(uint flags, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string? newName, int result, nint newItem);
+        [PreserveSig] int PreCopyItem(uint flags, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+        [PreserveSig] int PostCopyItem(uint flags, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string? newName, int result, nint newItem);
+        [PreserveSig] int PreDeleteItem(uint flags, nint item);
+        [PreserveSig] int PostDeleteItem(uint flags, nint item, int result, nint newItem);
+        [PreserveSig] int PreNewItem(uint flags, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string? name);
+        [PreserveSig] int PostNewItem(uint flags, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string? name, int result, nint newItem);
+        [PreserveSig] int UpdateProgress(uint workTotal, uint workSoFar);
+        [PreserveSig] int ResetTimer(out ulong elapsed);
+        [PreserveSig] int PauseTimer();
+        [PreserveSig] int ResumeTimer();
+    }
+
+    [ComVisible(true)]
+    [ClassInterface(ClassInterfaceType.None)]
+    public sealed class CancelFirstCopySink : IFileOperationProgressSinkProbe
+    {
+        public int PreCopyCalls { get; private set; }
+        public int StartOperations() => 0;
+        public int FinishOperations(int result) => 0;
+        public int PreRenameItem(uint flags, nint item, string? newName) => 0;
+        public int PostRenameItem(uint flags, nint item, string? newName, int result, nint newItem) => 0;
+        public int PreMoveItem(uint flags, nint item, nint destination, string? newName) => 0;
+        public int PostMoveItem(uint flags, nint item, nint destination, string? newName, int result, nint newItem) => 0;
+        public int PreCopyItem(uint flags, nint item, nint destination, string? newName)
+        {
+            PreCopyCalls++;
+            return unchecked((int)0x80004004); // An error from PreCopyItem cancels this and every queued operation.
+        }
+        public int PostCopyItem(uint flags, nint item, nint destination, string? newName, int result, nint newItem) => 0;
+        public int PreDeleteItem(uint flags, nint item) => 0;
+        public int PostDeleteItem(uint flags, nint item, int result, nint newItem) => 0;
+        public int PreNewItem(uint flags, nint destination, uint attributes, string? name) => 0;
+        public int PostNewItem(uint flags, nint destination, uint attributes, string? name, int result, nint newItem) => 0;
+        public int UpdateProgress(uint workTotal, uint workSoFar) => 0;
+        public int ResetTimer(out ulong elapsed) { elapsed = 0; return 0; }
+        public int PauseTimer() => 0;
+        public int ResumeTimer() => 0;
+    }
+
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
     [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
     {
@@ -721,6 +811,7 @@ internal static class SyntheticShellSortProbe
         public uint Tymed; public nint Value; public nint ReleaseUnknown;
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint source, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint progressSink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
