@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 集中验收候选同步：此前候选落后于复制标签的文件选区恢复修复。本轮从干净主线 `83bf7e6f03b759b610f6be4013be3f6bce62cf87` 重新执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261029-234737-419-12d50d/`，保留 37 项集中验收步骤并更新可执行文件、程序集及 Q-Dir 颜色配置夹具哈希。BuildIdentity 与固定哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。过程未启动窗口或创建 ExplorerBrowser；候选仍为 `prepared-not-run`，待后续用户集中可见验收。
+
 2026-10-30 复制标签选区遇到已删除项目：复核复制标签恢复队列发现，选中项中任一路径在副本导航完成前失效，会使整批选区都不恢复。现跳过无法由 Shell 解析的失效项，仅在同目录内为仍存在的文件排队；所有项均失效时不启动空请求。隐藏生产 ExplorerBrowser HostProbe 先复现失败，再验证保留项被排队、失效项被排除及全失效不创建请求；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）和 `git diff --check` 通过。没有启动 GUI 或触碰用户文件，实际删除竞态和可见多选仍待集中验收。
 
 2026-10-30 复制标签保留文件选区：同窗格复制与跨窗格复制现在捕获当前标签中可寻址的文件系统选区，并在副本完成导航后将选区恢复到新 Shell view。Release HostProbe 用临时目录中的两个文件验证源选区、克隆状态传递、生产批量 `IShellView.SelectItem` 调用及副本选区读回；移动标签原对象/HWND/Back 历史和关闭清理回归也通过。Release SettingsSmoke、App/HostProbe Release build 与 `git diff --check` 通过；隐藏窗口未激活且前台不变。虚拟 Shell 选项不纳入此恢复，实际复制标签键鼠和可见焦点仍待集中 GUI 验收。
