@@ -57,10 +57,13 @@ internal static class SyntheticShellSortProbe
         }
 
         nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
+        nint parent2 = 0, folder2 = 0, view2 = 0, folderView2 = 0, hostPointer2 = 0, listView2 = 0;
         var classKeyPath = $@"Software\Classes\CLSID\{{{SyntheticFolderClassId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{SyntheticFolderClassId:D}}}";
         StreamViewHost? host = null;
+        StreamViewHost? host2 = null;
         var viewWindowCreated = false;
+        var viewWindowCreated2 = false;
         var parentDestroyed = false;
         var classRegistrationCreated = false;
         var namespaceRegistrationCreated = false;
@@ -110,6 +113,26 @@ internal static class SyntheticShellSortProbe
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
+            parent2 = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace second view",
+                0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
+            if (parent2 == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the second Private Desktop probe parent.");
+            var createSyntheticView = Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"));
+            Check(createSyntheticView(rootPidl, out folder2, out view2));
+            host2 = new StreamViewHost(parent2, []) { View = view2 };
+            hostPointer2 = Marshal.GetComInterfaceForObject(host2, typeof(IStreamProbeBrowser));
+            Check(At<CreateViewWindow>(view2, 9)(view2, 0, ref settings, hostPointer2, ref bounds, out _));
+            viewWindowCreated2 = true;
+            _ = ShowWindow(parent2, 4); // SW_SHOWNOACTIVATE on the Private Desktop only.
+            Pump(400);
+            if (!IsWindowVisible(parent2) || GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("The second synthetic Shell view crossed the Private Desktop/foreground boundary.");
+            Check(Marshal.QueryInterface(view2, in FolderView2Id, out folderView2));
+            Check(At<SetViewModeAndIconSize>(folderView2, 35)(folderView2, 4, 16)); // FVM_DETAILS.
+            Check(At<RefreshView>(view2, 8)(view2));
+            Pump(300);
+            listView2 = FindListView(view2);
+            var secondInitial = ReadNames(listView2, module);
+            Console.WriteLine($"synthetic-shell-size-sort: second-view-initial=[{string.Join('|', secondInitial)}]");
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var backgroundMenu); // SVGIO_BACKGROUND
             var menuQueryHr = unchecked((int)0x80004005);
@@ -271,60 +294,83 @@ internal static class SyntheticShellSortProbe
             var originalPath = Path.Combine(backingFolder, "a-large.bin");
             var renamedPath = Path.Combine(backingFolder, "a-large-renamed.bin");
             SetListViewSelectionAndFocus(listView, "two.bin", ReadNames(listView, module));
+            SetListViewSelectionAndFocus(listView2, "two.bin", ReadNames(listView2, module));
             RenameShellItem(originalPath, "a-large-renamed.bin");
             if (File.Exists(originalPath) || !File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation rename did not update its backing filesystem fixture.");
             var renameAutoUpdated = false;
+            var renameAutoUpdated2 = false;
             var renameNotificationDeadline = Environment.TickCount64 + 2500;
-            while (!renameAutoUpdated && Environment.TickCount64 < renameNotificationDeadline)
+            while ((!renameAutoUpdated || !renameAutoUpdated2) && Environment.TickCount64 < renameNotificationDeadline)
             {
                 Pump(100);
                 var afterRenameNotification = ReadNames(listView, module, expectedCount: -1);
+                var afterRenameNotification2 = ReadNames(listView2, module, expectedCount: -1);
                 renameAutoUpdated = afterRenameNotification.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+                renameAutoUpdated2 = afterRenameNotification2.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
             }
-            if (!renameAutoUpdated) throw new IOException("The virtual namespace view did not react to the backing folder's Shell rename notification.");
+            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated-view1={renameAutoUpdated}; rename-auto-updated-view2={renameAutoUpdated2}");
+            if (!renameAutoUpdated || !renameAutoUpdated2) throw new IOException("Both virtual namespace views did not react to the backing folder's Shell rename notification.");
             var renameAutoNames = ReadNames(listView, module);
             var renameAutoState = StateForName(listView, renameAutoNames, "two.bin");
             var renameSelectionRetained = (renameAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+            var renameNames2 = ReadNames(listView2, module, expectedCount: -1);
+            var renameState2 = StateForName(listView2, renameNames2, "two.bin");
+            var renameSelectionRetained2 = (renameState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             var renameSelectionDeadline = Environment.TickCount64 + 2500;
-            while (!renameSelectionRetained && Environment.TickCount64 < renameSelectionDeadline)
+            while ((!renameSelectionRetained || !renameSelectionRetained2) && Environment.TickCount64 < renameSelectionDeadline)
             {
                 Pump(50);
                 renameAutoNames = ReadNames(listView, module);
                 renameAutoState = StateForName(listView, renameAutoNames, "two.bin");
                 renameSelectionRetained = (renameAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+                renameNames2 = ReadNames(listView2, module, expectedCount: -1);
+                renameState2 = StateForName(listView2, renameNames2, "two.bin");
+                renameSelectionRetained2 = (renameState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             }
             Check(At<RefreshView>(view, 8)(view));
             Pump(400);
             var afterRename = ReadNames(listView, module);
-            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated={renameAutoUpdated}; rename-auto-selection-retained={renameSelectionRetained}; two-state=0x{renameAutoState:X}; after-refresh-rename=[{string.Join('|', afterRename)}]");
+            Console.WriteLine($"synthetic-shell-size-sort: rename-auto-updated={renameAutoUpdated}; selection-view1={renameSelectionRetained}; selection-view2={renameSelectionRetained2}; two-state=0x{renameAutoState:X}; after-refresh-rename=[{string.Join('|', afterRename)}]");
             if (!afterRename.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
                 throw new IOException("Refreshing the namespace view did not enumerate the renamed backing filesystem item.");
             if (!renameSelectionRetained) throw new IOException("The automatic rename refresh did not preserve selection and keyboard focus on the unchanged item.");
+            if (!renameSelectionRetained2) throw new IOException("The second view did not preserve selection and keyboard focus on the unchanged item.");
 
             DeleteShellItem(renamedPath);
             if (File.Exists(renamedPath)) throw new IOException("The isolated IFileOperation delete left the backing filesystem item present.");
             var deleteAutoUpdated = false;
+            var deleteAutoUpdated2 = false;
             var deleteAutoSelectionRetained = false;
+            var deleteAutoSelectionRetained2 = false;
             var deleteAutoNames = Array.Empty<string>();
+            var deleteAutoNames2 = Array.Empty<string>();
             var deleteAutoDeadline = Environment.TickCount64 + 2500;
-            while ((!deleteAutoUpdated || !deleteAutoSelectionRetained) && Environment.TickCount64 < deleteAutoDeadline)
+            while ((!deleteAutoUpdated || !deleteAutoUpdated2 || !deleteAutoSelectionRetained || !deleteAutoSelectionRetained2) && Environment.TickCount64 < deleteAutoDeadline)
             {
                 Pump(100);
                 deleteAutoNames = ReadNames(listView, module, expectedCount: -1);
+                deleteAutoNames2 = ReadNames(listView2, module, expectedCount: -1);
                 deleteAutoUpdated = !deleteAutoNames.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
+                deleteAutoUpdated2 = !deleteAutoNames2.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase);
                 var deleteAutoState = StateForName(listView, deleteAutoNames, "two.bin");
+                var deleteAutoState2 = StateForName(listView2, deleteAutoNames2, "two.bin");
                 deleteAutoSelectionRetained = (deleteAutoState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+                deleteAutoSelectionRetained2 = (deleteAutoState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             }
-            if (!deleteAutoUpdated) throw new IOException("The virtual namespace view did not react to the backing folder's Shell delete notification.");
+            Console.WriteLine($"synthetic-shell-size-sort: delete-auto-updated-view1={deleteAutoUpdated}; delete-auto-updated-view2={deleteAutoUpdated2}; selection-view1={deleteAutoSelectionRetained}; selection-view2={deleteAutoSelectionRetained2}");
+            if (!deleteAutoUpdated || !deleteAutoUpdated2) throw new IOException("Both virtual namespace views did not react to the backing folder's Shell delete notification.");
             var finalDeleteState = StateForName(listView, deleteAutoNames, "two.bin");
             Check(At<RefreshView>(view, 8)(view));
+            Check(At<RefreshView>(view2, 8)(view2));
             Pump(400);
             var afterDelete = ReadNames(listView, module, expectedCount: 2);
+            var afterDelete2 = ReadNames(listView2, module, expectedCount: 2);
             var deleteSelectionRetained = HasSelectionAndFocus(listView, afterDelete, "two.bin");
-            Console.WriteLine($"synthetic-shell-size-sort: delete-auto-updated={deleteAutoUpdated}; delete-auto-selection-retained={deleteAutoSelectionRetained}; two-state=0x{finalDeleteState:X}; after-refresh-delete=[{string.Join('|', afterDelete)}]; rename-selection-retained={renameSelectionRetained}; delete-selection-retained={deleteSelectionRetained}");
+            Console.WriteLine($"synthetic-shell-size-sort: after-refresh-delete-view1=[{string.Join('|', afterDelete)}]; view2=[{string.Join('|', afterDelete2)}]; two-state=0x{finalDeleteState:X}; rename-selection-retained={renameSelectionRetained}; delete-selection-retained={deleteSelectionRetained}");
             if (afterDelete.Contains("a-large-renamed.bin", StringComparer.OrdinalIgnoreCase))
                 throw new IOException("Refreshing the namespace view retained a deleted backing filesystem item.");
             if (!deleteAutoSelectionRetained) throw new IOException("The automatic delete refresh did not preserve selection and keyboard focus on the unchanged item.");
+            if (!deleteAutoSelectionRetained2) throw new IOException("The second view did not preserve selection and keyboard focus on the unchanged item.");
 
             Console.WriteLine($"synthetic-shell-size-sort: initial=[{string.Join('|', initial)}]; ascending=[{string.Join('|', ascending)}]; descending=[{string.Join('|', descending)}]; size-CompareIDs-ascending={ascendingCompareCount}; size-CompareIDs-descending={descendingCompareCount}; total-CompareIDs={totalCompareCount}; foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
@@ -345,17 +391,24 @@ internal static class SyntheticShellSortProbe
         {
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (folderView != 0) Marshal.Release(folderView);
+            if (folderView2 != 0) Marshal.Release(folderView2);
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
             if (view != 0) Marshal.Release(view);
+            if (view2 != 0) Marshal.Release(view2);
             if (folder != 0) Marshal.Release(folder);
+            if (folder2 != 0) Marshal.Release(folder2);
             if (hostPointer != 0) Marshal.Release(hostPointer);
+            if (hostPointer2 != 0) Marshal.Release(hostPointer2);
             host?.Dispose();
+            host2?.Dispose();
             if (module != 0) NativeLibrary.Free(module);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
             if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             parentDestroyed = DestroyWindow(parent);
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
+            if (parent2 != 0 && !DestroyWindow(parent2)) throw new InvalidOperationException("The second Private Desktop synthetic-view parent did not destroy cleanly.");
             Directory.Delete(backingFolder, recursive: true);
             Directory.Delete(copyDestination, recursive: true);
             if (GetForegroundWindow() != foreground) throw new InvalidOperationException("The synthetic Shell sort probe changed the user's foreground window.");

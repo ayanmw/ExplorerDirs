@@ -24,8 +24,8 @@ namespace
 
     volatile LONG g_syntheticLiveObjects = 0;
     volatile LONG g_syntheticServerLocks = 0;
-    PVOID volatile g_syntheticRefreshPending = nullptr;
-    PVOID volatile g_syntheticSortViewHold = nullptr;
+    constexpr size_t kSyntheticSortViewHoldCount = 8;
+    PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     const CLSID kSyntheticFolderClassId =
     { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
@@ -1443,11 +1443,19 @@ namespace
             create.pshf = this;
             create.psfvcb = static_cast<IShellFolderViewCB*>(this);
             const auto result = SHCreateShellFolderView(&create, reinterpret_cast<IShellView**>(value));
-            if (SUCCEEDED(result) && *value && InterlockedCompareExchangePointer(&g_syntheticSortViewHold, this, nullptr) == nullptr)
+            if (SUCCEEDED(result) && *value && !_shellView)
             {
-                AddRef();
-                _shellView = static_cast<IShellView*>(*value);
-                _shellView->AddRef();
+                for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+                {
+                    auto* existing = InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], this, nullptr);
+                    if (!existing || existing == this)
+                    {
+                        AddRef();
+                        _shellView = static_cast<IShellView*>(*value);
+                        _shellView->AddRef();
+                        break;
+                    }
+                }
             }
             return result;
         }
@@ -1572,6 +1580,14 @@ namespace
             _shellView = nullptr;
             if (view) view->Release();
         }
+        void CancelPendingRefresh()
+        {
+            if (InterlockedExchange(&_refreshPending, 0) == 0) return;
+            const auto timerId = _refreshTimerId;
+            _refreshTimerId = 0;
+            if (timerId) KillTimer(nullptr, timerId);
+            Release();
+        }
     private:
         HRESULT CaptureSelection()
         {
@@ -1625,11 +1641,12 @@ namespace
             auto result = _shellView ? _shellView->QueryInterface(IID_PPV_ARGS(&folderView)) : E_UNEXPECTED;
             if (FAILED(result)) return result;
             int itemCount = 0;
+            int restoredSelectionCount = 0;
+            bool focusedItemRestored = !_pendingHasFocused;
             char stateTrace[128]{};
             if (SUCCEEDED(folderView->ItemCount(SVGIO_ALLVIEW, &itemCount)))
             {
                 bool firstSelection = true;
-                int restoredSelectionCount = 0;
                 for (const auto& selectedItem : _pendingSelected)
                 {
                     for (int index = 0; index < itemCount; ++index)
@@ -1660,50 +1677,83 @@ namespace
                         const auto* data = SyntheticData(item);
                         const bool match = data && _wcsicmp(data->name, _pendingFocused.name) == 0;
                         CoTaskMemFree(item);
-                        if (match) { result = folderView->SelectItem(index, SVSI_SELECT | SVSI_FOCUSED | SVSI_NOTAKEFOCUS); break; }
+                        if (match)
+                        {
+                            result = folderView->SelectItem(index, SVSI_SELECT | SVSI_FOCUSED | SVSI_NOTAKEFOCUS);
+                            focusedItemRestored = SUCCEEDED(result);
+                            break;
+                        }
                     }
                 }
                 StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-restored rows=%d selected=%d focus-identity=%d", itemCount, restoredSelectionCount, _pendingHasFocused ? 1 : 0);
                 TraceSyntheticSortStage(stateTrace);
             }
             folderView->Release();
+            if (SUCCEEDED(result) && (restoredSelectionCount < static_cast<int>(_pendingSelected.size()) || !focusedItemRestored)) return S_FALSE;
             return result;
         }
         HRESULT ScheduleRefresh()
         {
             if (!_shellView) return E_UNEXPECTED;
+            if (InterlockedCompareExchange(&_refreshPending, 1, 0) != 0) return S_FALSE;
             AddRef();
-            if (InterlockedCompareExchangePointer(&g_syntheticRefreshPending, this, nullptr) != nullptr) { Release(); return S_FALSE; }
-            if (!SetTimer(nullptr, 0, 1, RefreshTimerProc))
+            const auto timerId = SetTimer(nullptr, 0, 1, RefreshTimerProc);
+            if (!timerId)
             {
-                InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr);
+                InterlockedExchange(&_refreshPending, 0);
                 Release();
                 return HRESULT_FROM_WIN32(GetLastError());
             }
+            _refreshTimerId = timerId;
             return S_OK;
+        }
+        static SyntheticSortFolder* FindPendingRefresh(UINT_PTR timerId)
+        {
+            for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+            {
+                auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+                if (folder && folder->_refreshTimerId == timerId) return folder;
+            }
+            return nullptr;
         }
         static VOID CALLBACK RefreshTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
         {
             KillTimer(nullptr, timerId);
-            auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr));
+            auto* folder = FindPendingRefresh(timerId);
             if (!folder) return;
+            folder->_refreshTimerId = 0;
             auto result = folder->CaptureSelection();
             if (SUCCEEDED(result)) result = folder->RefreshView();
             TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-refresh-returned" : "synthetic-sort: deferred-refresh-failed");
-            if (SUCCEEDED(result) && InterlockedCompareExchangePointer(&g_syntheticRefreshPending, folder, nullptr) == nullptr)
+            const auto restoreTimer = SUCCEEDED(result) ? SetTimer(nullptr, 0, 250, RestoreTimerProc) : 0;
+            if (restoreTimer)
             {
-                if (SetTimer(nullptr, 0, 250, RestoreTimerProc)) return;
-                InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr);
+                folder->_restoreDeadline = GetTickCount64() + 2500;
+                folder->_refreshTimerId = restoreTimer;
+                return;
             }
+            InterlockedExchange(&folder->_refreshPending, 0);
             folder->Release();
         }
         static VOID CALLBACK RestoreTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
         {
             KillTimer(nullptr, timerId);
-            auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticRefreshPending, nullptr));
+            auto* folder = FindPendingRefresh(timerId);
             if (!folder) return;
+            folder->_refreshTimerId = 0;
             const auto result = folder->RestoreSelection();
+            if (result == S_FALSE && GetTickCount64() < folder->_restoreDeadline)
+            {
+                const auto retryTimer = SetTimer(nullptr, 0, 100, RestoreTimerProc);
+                if (retryTimer)
+                {
+                    folder->_refreshTimerId = retryTimer;
+                    TraceSyntheticSortStage("synthetic-sort: deferred-selection-retry");
+                    return;
+                }
+            }
             TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-selection-restored" : "synthetic-sort: deferred-selection-restore-failed");
+            InterlockedExchange(&folder->_refreshPending, 0);
             folder->Release();
         }
         ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
@@ -1715,6 +1765,9 @@ namespace
         std::vector<SyntheticChild> _pendingSelected;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
+        volatile LONG _refreshPending = 0;
+        UINT_PTR _refreshTimerId = 0;
+        ULONGLONG _restoreDeadline = 0;
     };
 
     class SyntheticFolderClassFactory final : public IClassFactory
@@ -1827,10 +1880,14 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 
 extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
 {
-    auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticSortViewHold, nullptr));
-    if (!folder) return;
-    folder->ReleaseViewHold();
-    folder->Release();
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticSortViewHolds[index], nullptr));
+        if (!folder) continue;
+        folder->CancelPendingRefresh();
+        folder->ReleaseViewHold();
+        folder->Release();
+    }
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
