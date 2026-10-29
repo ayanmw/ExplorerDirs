@@ -4525,3 +4525,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 将合成文件夹返回的双项 `IDataObject` 直接交给 `IFileOperation::CopyItems`，目标为 fixture 内的真实临时目录；随后调用 `PerformOperations` 并检查 `GetAnyOperationsAborted`。目标中的两个文件内容均与源一致，源文件仍保留。
 - 使用 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，未设置 owner window 或进度对话框。原生 `/W4 /WX`、NativeProbe Release、树级 smoke、普通/包装 PIDL smoke 通过，0 警告/错误；临时树在退出时清理。
 - 这是无 Shell view 下真实本地文件系统的 Shell 批量复制证据，提升了阶段 4 的操作合同覆盖；不验证产品 ExplorerBrowser、可见进度/冲突确认、剪贴板循环或 OLE 鼠标拖放。
+
+## 2026-10-29：合成多选数据对象驱动 IFileOperation 移动
+
+- 扩展树级临时 smoke：对原生 Shell 文件夹返回的双项 `IDataObject` 调用 `IFileOperation::MoveItems`，再执行 `PerformOperations` 并读取中止状态。两个源文件均消失，目标目录中内容逐项一致；源夹具在 smoke 退出时统一清理。
+- 操作继续使用 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，不显示进度/确认/错误对话框。原生 `/W4 /WX`、NativeProbe Release、树级 smoke 及普通/包装 PIDL smoke 通过，0 警告/错误。只证明无视图下本地 Shell 多选 MoveItems，不证明用户剪切/粘贴、跨卷、多 provider 或产品视图更新。

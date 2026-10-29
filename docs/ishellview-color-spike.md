@@ -1376,3 +1376,7 @@ NativeProbe Release、原生 `/W4 /WX` 和普通/包装 PIDL smoke 通过。未�
 合成树 smoke 将适配器为两个选中项返回的 `IDataObject` 交给 Windows `IFileOperation::CopyItems`，目标为临时 backing tree 内新建目录；执行 `PerformOperations`，检查 `GetAnyOperationsAborted`，并逐项核对目标文件内容及源文件仍存在。操作使用静默/无确认/无错误 UI flags；没有创建 Shell view、窗口或进度 UI。
 
 NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL smoke 均通过。该项证明 native Shell 多项数据对象能驱动后台本地复制，不代表产品接线、交互确认 UI、虚拟 provider、网络复制或 OLE 拖放已通过。
+
+### 2026-10-29 多选 `IDataObject` 到 IFileOperation 移动
+
+树级 smoke 对同一合成文件夹的双项 `IDataObject` 执行 `IFileOperation::MoveItems` 到临时目标目录，检查 `PerformOperations`、`GetAnyOperationsAborted`、源文件消失和目标内容一致。使用静默/无确认/无错误 UI flags，无 Shell view 或窗口。此证据覆盖本地同卷后台移动，不涵盖跨卷移动、剪切/粘贴 UI、Shell provider 互操作或产品 view notification。

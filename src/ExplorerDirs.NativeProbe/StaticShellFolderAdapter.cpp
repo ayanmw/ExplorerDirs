@@ -1250,10 +1250,10 @@ namespace
         return reinterpret_cast<PITEMID_CHILD>(copy);
     }
 
-    HRESULT CopySyntheticSelectionWithoutUi(IDataObject* data, const std::wstring& backingPath)
+    HRESULT TransferSyntheticSelectionWithoutUi(IDataObject* data, const std::wstring& backingPath, bool move)
     {
         if (!data) return E_INVALIDARG;
-        const auto destinationPath = backingPath + L"\\copy-destination";
+        const auto destinationPath = backingPath + (move ? L"\\move-destination" : L"\\copy-destination");
         if (!CreateDirectoryW(destinationPath.c_str(), nullptr)) return HRESULT_FROM_WIN32(GetLastError());
 
         PIDLIST_ABSOLUTE destinationPidl = nullptr;
@@ -1268,7 +1268,8 @@ namespace
                 IID_PPV_ARGS(&operation));
         if (SUCCEEDED(result))
             result = operation->SetOperationFlags(FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI);
-        if (SUCCEEDED(result)) result = operation->CopyItems(data, destination);
+        if (SUCCEEDED(result))
+            result = move ? operation->MoveItems(data, destination) : operation->CopyItems(data, destination);
         if (SUCCEEDED(result)) result = operation->PerformOperations();
         if (SUCCEEDED(result))
         {
@@ -1294,10 +1295,10 @@ namespace
             CloseHandle(file);
             return matches;
         };
-        const bool sourcesRemain =
-            GetFileAttributesW((backingPath + L"\\root.txt").c_str()) != INVALID_FILE_ATTRIBUTES &&
-            GetFileAttributesW((backingPath + L"\\second.txt").c_str()) != INVALID_FILE_ATTRIBUTES;
-        return sourcesRemain && verifyCopiedContents(L"root.txt", "root") &&
+        const bool sourceRootExists = GetFileAttributesW((backingPath + L"\\root.txt").c_str()) != INVALID_FILE_ATTRIBUTES;
+        const bool sourceSecondExists = GetFileAttributesW((backingPath + L"\\second.txt").c_str()) != INVALID_FILE_ATTRIBUTES;
+        const bool sourceStateCorrect = move ? !sourceRootExists && !sourceSecondExists : sourceRootExists && sourceSecondExists;
+        return sourceStateCorrect && verifyCopiedContents(L"root.txt", "root") &&
             verifyCopiedContents(L"second.txt", "second") ? S_OK : E_FAIL;
     }
 
@@ -2496,7 +2497,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
-        result = CopySyntheticSelectionWithoutUi(data, backingPath);
+        result = TransferSyntheticSelectionWithoutUi(data, backingPath, false);
         data->Release();
         if (FAILED(result)) goto cleanup;
     }
@@ -2604,6 +2605,18 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         }
     }
     TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-passed");
+
+    {
+        PCUITEMID_CHILD selected[] = { childFile, secondFile };
+        IDataObject* data = nullptr;
+        result = root->GetUIObjectOf(nullptr, ARRAYSIZE(selected), selected, IID_IDataObject, nullptr,
+            reinterpret_cast<void**>(&data));
+        if (FAILED(result) || !data) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        result = TransferSyntheticSelectionWithoutUi(data, backingPath, true);
+        data->Release();
+        if (FAILED(result)) goto cleanup;
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: multi-select-moveitems-passed");
 
 cleanup:
     if (nestedRootPidl) CoTaskMemFree(nestedRootPidl);
