@@ -260,6 +260,9 @@ internal static class ShellViewDropTargetProbe
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
                 selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture",
                 expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
+            var defaultMoveResult = TryTransfer(folderDropTarget, dataObject, point, viewTargetPath,
+                "SHCreateDataObject (same-volume default)", "native-shell-drop-fixture",
+                expectedEffect: DropEffectMove, sourcePath: sourcePath);
             // Keep the registered folder target as a separate candidate with its own Shell data object.
             var secondSourcePath = registeredSourcePath;
             var secondSourcePidl = nint.Zero;
@@ -284,13 +287,13 @@ internal static class ShellViewDropTargetProbe
                 Marshal.FreeHGlobal(secondChildArray);
             }
 
-            var sourceStatesValid = File.Exists(sourcePath) && File.ReadAllText(sourcePath) == "native-shell-drop-fixture" &&
+            var sourceStatesValid = !File.Exists(sourcePath) &&
                 File.Exists(selectedSourcePath) && File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
                 !File.Exists(secondSourcePath);
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; registered-folder-target-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !selectedDataObjectResult || !sourceStatesValid)
+            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            if (!folderTargetResult || !selectedDataObjectResult || !defaultMoveResult || !sourceStatesValid)
                 throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");
             PrivateDesktopShellProbe.ReportStage("drop-target: transfer-complete");
             return 0;

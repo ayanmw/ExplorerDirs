@@ -4500,6 +4500,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 2026-10-29 刷新通知 burst 合并复验：在 view 1 的选区恢复窗口中连续注入三条 `SFVM_FSNOTIFY`，两轮 Private Desktop watchdog 均只触发 1 次 follow-up refresh，新增 `late-update.bin` 最终可见；view 1 取消/销毁后 view 2 单独刷新，释放后回调数为 0。两轮退出码 0、前台 HWND 未变；HKCU 探针注册、TEMP 夹具和探针进程均已清理。此结果只验证隔离原型同一刷新周期内的 burst 合并，不外推到产品宿主、跨线程通知或真实 OLE 拖放。
 2026-10-29 IShellView 文件操作取消门槛：从 synthetic view 的 `SVGIO_SELECTION` 取得实际 Shell `IDataObject`，经 `IFileOperation::Advise` 连接进度 sink，并连续排入两次 `CopyItems`。`PreCopyItem` 第一次调用返回 `E_ABORT` 后，两轮均仅回调一次、`PerformOperations` 返回 `E_ABORT`、取消目标目录为空；`GetAnyOperationsAborted` 读数为 0，仍作为独立状态记录。两轮 Private Desktop watchdog exit 0、前台不变，临时注册/夹具/进程均已清理。仅是隔离默认 DefView 与本地临时文件证据，不代表产品对话框或真实用户取消验收。依据：[PreCopyItem](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperationprogresssink-precopyitem)。
 
+2026-10-29 IShellView 拖放目标按键效果补充：隔离 Private Desktop `IDropTarget` 直接调用现通过 Ctrl+Copy、同卷无修饰键默认 Move、Shift+Move 三种情景；核对目标内容、源文件状态及 `Performed/Logical Performed DropEffect`。无修饰键同卷行为与 Shift 一样报告 Move=2；优化移动时 `Drop` 返回 effect=0，不能单独据此判断未移动。NativeProbe Release build 0 警告/错误，新增场景连续两轮 watchdog exit 0，前台/输入守卫与 fixture 清理通过。真实 `DoDragDrop` 源端循环、鼠标命中、不同卷默认行为、产品接线/可见验收仍未完成；IShellView 迁移门槛继续开放。
+
 2026-10-29 多选 Copy 取消后视图状态：扩展同一隔离 NativeProbe，让 DefView 选中 `two.bin` 与 `z-ten.bin`，把 selection `IDataObject` 交给两次排队的 `IFileOperation::CopyItems`，并在 `PreCopyItem` 返回 `E_ABORT`。两轮完整 Private Desktop watchdog 均确认取消后仍选中 2 项，`two.bin` 保持 focused，目标目录为空，前台守卫和清理通过；Release build 0 警告/错误。之后一次附加 CIDA 计数实验读到 2 个子项，但整轮后来因前台 HWND 改变并在后续第二视图焦点断言失败而中止，因此不作为整轮通过记录，也不保留该额外断言。该验证仅覆盖隔离 DefView 的程序化 Copy 取消与多选/焦点保留，不代表产品 ExplorerBrowser 或真实用户取消行为。
 
 ## 2026-10-29：合成 Shell 文件夹树合同（无视图）
