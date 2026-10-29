@@ -10,10 +10,10 @@ internal static class QDirNewFolderShortcutSmoke
         Check(KeyboardShortcuts.Resolve(0x74, 4) == ExplorerShortcut.NewFolder &&
               KeyboardShortcuts.Resolve(0x74, 0) == ExplorerShortcut.Refresh,
             "Q-Dir Shift+F5 creates a folder while F5 still refreshes");
-        Check(KeyboardShortcuts.Resolve(0x76, 0) == ExplorerShortcut.None &&
+        Check(KeyboardShortcuts.Resolve(0x76, 0) == ExplorerShortcut.AddressLocations &&
               KeyboardShortcuts.Resolve(0x76, 2) == ExplorerShortcut.None &&
               KeyboardShortcuts.Resolve(0x76, 6) == ExplorerShortcut.None,
-            "F7 variants other than Shift+F7 remain unclaimed");
+            "F7 opens the address path hierarchy while modified variants remain unclaimed");
     }
 
     private static void Check(bool condition, string message)

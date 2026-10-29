@@ -1443,7 +1443,9 @@ public partial class PaneControl : UserControl
         e.Handled = true;
     }
 
-    private void AddressMenu_Click(object sender, RoutedEventArgs e)
+    private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressMenu();
+
+    internal void ShowAddressMenu()
     {
         if (Current is not { } state) return;
         var menu = new ContextMenu

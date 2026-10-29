@@ -10,6 +10,10 @@ internal static class AddressTreeShortcutSmoke
             "Q-Dir Alt+S focuses address path editing");
         Check(KeyboardShortcuts.Resolve(0x53, 2) == ExplorerShortcut.ProgramStarter,
             "Ctrl+S remains the Program Starter shortcut");
+        Check(KeyboardShortcuts.Resolve(0x76, 0) == ExplorerShortcut.AddressLocations,
+            "Q-Dir F7 opens the current path hierarchy menu");
+        Check(KeyboardShortcuts.Resolve(0x76, 4) == ExplorerShortcut.NewFolder,
+            "Shift+F7 remains the new-folder shortcut");
         Check(KeyboardShortcuts.Resolve(0x73, 0) == ExplorerShortcut.AddressTree,
             "F4 routes to the address tree transition rather than opening address history");
         Check(AddressTreeShortcutState.Next(classicAddressBar: false, treeOpen: false) ==

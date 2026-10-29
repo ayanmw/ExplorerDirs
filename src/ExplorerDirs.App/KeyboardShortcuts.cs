@@ -3,7 +3,7 @@ namespace ExplorerDirs.App;
 internal enum ExplorerShortcut
 {
     None, Parent, Back, Forward, NextFocusStop, PreviousFocusStop,
-    NextFocusRegion, PreviousFocusRegion, Address, AddressTree,
+    NextFocusRegion, PreviousFocusRegion, Address, AddressTree, AddressLocations,
     NewTab, NewWindow, QuickFolderMenu, ProgramStarter, CloseTab, DuplicateTab, ReopenTab, NextTab, PreviousTab, OpenSelectionInNewTab,
     Tab1, Tab2, Tab3, Tab4, Tab5, Tab6, Tab7, Tab8, Tab9, FocusPane1, FocusPane2, FocusPane3, FocusPane4, NewFolder, InvertSelection,
     Refresh, Search, QuickFilter, ExpandTree, TogglePreviewPane, ToggleDetailsPane, ToggleFullScreen,
@@ -40,6 +40,7 @@ internal static class KeyboardShortcuts
         (0x75, 4) => ExplorerShortcut.PreviousFocusRegion, // Shift+F6
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
         (0x53, 1) => ExplorerShortcut.Address,        // Q-Dir: Alt+S focuses the address bar.
+        (0x76, 0) => ExplorerShortcut.AddressLocations, // Q-Dir: F7 opens the address path hierarchy.
         (0x4c, 1) => ExplorerShortcut.ScreenMagnifier, // Q-Dir: Alt+L.
         (0x4c, 2) => ExplorerShortcut.Address,       // Ctrl+L
         (0x73, 0) => ExplorerShortcut.AddressTree, // F4: Q-Dir Modern address tree / path-edit cycle.
