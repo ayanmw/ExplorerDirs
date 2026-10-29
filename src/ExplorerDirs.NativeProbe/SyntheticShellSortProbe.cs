@@ -397,8 +397,13 @@ internal static class SyntheticShellSortProbe
                 throw new TimeoutException("The first per-view refresh callback did not run before the coalescing probe.");
             var lateFilePath = Path.Combine(backingFolder, "late-update.bin");
             File.WriteAllBytes(lateFilePath, [0x7A]);
-            var followupNotification = notifySingleRefresh(view);
-            if (followupNotification < 0) Marshal.ThrowExceptionForHR(followupNotification);
+            var followupNotificationResults = new int[3];
+            for (var notificationIndex = 0; notificationIndex < followupNotificationResults.Length; notificationIndex++)
+            {
+                followupNotificationResults[notificationIndex] = notifySingleRefresh(view);
+                if (followupNotificationResults[notificationIndex] < 0)
+                    Marshal.ThrowExceptionForHR(followupNotificationResults[notificationIndex]);
+            }
             var followupRefreshDeadline = Environment.TickCount64 + 2500;
             while (deferredRefreshCounter() < coalescedRefreshStart + 2 && Environment.TickCount64 < followupRefreshDeadline) Pump(20);
             var lateUpdateNames = ReadNames(listView, module, expectedCount: -1);
@@ -408,10 +413,12 @@ internal static class SyntheticShellSortProbe
                 Pump(50);
                 lateUpdateNames = ReadNames(listView, module, expectedCount: -1);
             }
-            Console.WriteLine($"synthetic-shell-size-sort: notification-during-selection-restore={followupNotification}; followup-refresh-callbacks={deferredRefreshCounter() - coalescedRefreshStart - 1}; late-item-visible={lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase)}");
+            var followupRefreshCallbacks = deferredRefreshCounter() - coalescedRefreshStart - 1;
+            Console.WriteLine($"synthetic-shell-size-sort: notifications-during-selection-restore={followupNotificationResults.Length}; followup-refresh-callbacks={followupRefreshCallbacks}; late-item-visible={lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase)}");
             if (deferredRefreshCounter() < coalescedRefreshStart + 2 ||
+                followupRefreshCallbacks != 1 ||
                 !lateUpdateNames.Contains("late-update.bin", StringComparer.OrdinalIgnoreCase))
-                throw new IOException("A Shell change notification received during selection restoration did not trigger a follow-up view refresh.");
+                throw new IOException("Shell change notifications received during selection restoration did not coalesce into one follow-up refresh that exposed the late item.");
             Pump(350);
 
             var refreshCountBeforeCancel = deferredRefreshCounter();

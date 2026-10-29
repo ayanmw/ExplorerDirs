@@ -105,3 +105,4 @@ Property Schema 方向已由 Microsoft API 契约排除为无机器状态的运�
 - 两轮 Private Desktop 运行均通过；日志确认 notification received during selection restore，follow-up refresh callback 数为 1，late item 可见。第一轮运行还发现原测试在 Shell 开始异步枚举前过早读取 ListView；测试现已等待目标项实际出现后再判定，避免把时序误差当作实现失败。
 - 新增 per-view cancel probe：只取消 view 1 的待处理 timer，再销毁其窗口；view 1 HWND 失效、view 2 HWND 仍有效，随后仅 view 2 的刷新回调运行。释放其余 hold 并泵送 STA 后，回调数不再增加。两轮 watchdog exit 0、前台不变，退出后专用 HKCU CLSID/NameSpace、TEMP 夹具和探针进程已清理。
 - 这一结果支持隔离原型采用“owner 销毁窗口前取消对应 view timer”的顺序，并修正原型中丢失刷新通知的情形；它不证明产品生命周期代码已修复，也不覆盖 `DestroyViewWindow` 内部重入、跨线程竞态、真实 OLE 拖放或产品 UI。产品仍保持 ExplorerBrowser。
+2026-10-29 burst 通知补充验证：将选区恢复期间的单条变更通知扩展为连续三条 `SFVM_FSNOTIFY`；两轮均恰好执行一次 follow-up refresh，迟到文件在 DefView 中可见。逐 view 取消/兄弟 view 保持刷新、释放后无回调和 foreground invariant 同时通过，watchdog exit 0。仅覆盖同一 STA/pending 周期的探针通知合并。
