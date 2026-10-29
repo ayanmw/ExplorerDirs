@@ -279,7 +279,7 @@ public static class SyntheticShellSortProbe
                         copyResult = "copied=100-byte a-large.bin; source-preserved=True";
                     }
                     finally { Marshal.Release(fileOperation); }
-                    VerifyCancelledCopies(backingFolder, copyDestination);
+                    VerifyCancelledCopies(selectionDataObject, copyDestination);
                 }
                 finally { Marshal.Release(selectionDataObject); }
             }
@@ -712,8 +712,12 @@ public static class SyntheticShellSortProbe
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
     private static void Check(int hr) => Marshal.ThrowExceptionForHR(hr);
 
-    private static void VerifyCancelledCopies(string sourceFolder, string destinationFolder)
+    private static void VerifyCancelledCopies(nint selectedItems, string destinationFolder)
     {
+        var cancellationFolder = Path.Combine(destinationFolder, "Cancelled");
+        if (Directory.Exists(cancellationFolder))
+            throw new InvalidOperationException($"Refusing to reuse the isolated cancellation destination: {cancellationFolder}");
+        Directory.CreateDirectory(cancellationFolder);
         var fileOperationClass = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
         var fileOperationInterface = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
         Check(CoCreateInstance(ref fileOperationClass, 0, 1, ref fileOperationInterface, out var operation));
@@ -721,28 +725,27 @@ public static class SyntheticShellSortProbe
         {
             Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
             var shellItemInterface = ShellItemId;
-            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            Check(SHCreateItemFromParsingName(cancellationFolder, 0, ref shellItemInterface, out var destinationItem));
             try
             {
                 var sink = new CancelFirstCopySink();
                 var sinkPointer = Marshal.GetComInterfaceForObject(sink, typeof(IFileOperationProgressSinkProbe));
                 try
                 {
-                    var copyItem = At<CopyItem>(operation, 16);
-                    foreach (var fileName in new[] { "two.bin", "z-ten.bin" })
+                    Check(At<Advise>(operation, 3)(operation, sinkPointer, out var adviseCookie));
+                    try
                     {
-                        shellItemInterface = ShellItemId;
-                        Check(SHCreateItemFromParsingName(Path.Combine(sourceFolder, fileName), 0, ref shellItemInterface, out var sourceItem));
-                        try { Check(copyItem(operation, sourceItem, destinationItem, $"cancelled-{fileName}", sinkPointer)); }
-                        finally { Marshal.Release(sourceItem); }
+                        var copyItems = At<CopyItems>(operation, 17);
+                        Check(copyItems(operation, selectedItems, destinationItem));
+                        Check(copyItems(operation, selectedItems, destinationItem));
+                        var performResult = At<PerformOperations>(operation, 21)(operation);
+                        Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                        if (sink.PreCopyCalls != 1 || performResult != unchecked((int)0x80004004) ||
+                            Directory.EnumerateFileSystemEntries(cancellationFolder).Any())
+                            throw new IOException($"IFileOperation cancellation did not stop the queued view-selection copy batch: pre-copy={sink.PreCopyCalls}; aborted={aborted}; perform=0x{performResult:X8}.");
+                        Console.WriteLine($"synthetic-shell-size-sort: cancelled-view-copy-batch=True; pre-copy-callbacks={sink.PreCopyCalls}; queued-view-copies=2; copied-items=0; any-operations-aborted={aborted}; perform-hr=0x{performResult:X8}");
                     }
-                    var performResult = At<PerformOperations>(operation, 21)(operation);
-                    Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
-                    if (sink.PreCopyCalls != 1 || performResult != unchecked((int)0x80004004) ||
-                        File.Exists(Path.Combine(destinationFolder, "cancelled-two.bin")) ||
-                        File.Exists(Path.Combine(destinationFolder, "cancelled-z-ten.bin")))
-                        throw new IOException($"IFileOperation cancellation did not stop the queued copy batch: pre-copy={sink.PreCopyCalls}; aborted={aborted}; perform=0x{performResult:X8}.");
-                    Console.WriteLine($"synthetic-shell-size-sort: cancelled-copy-batch=True; pre-copy-callbacks={sink.PreCopyCalls}; queued-items=2; copied-items=0; any-operations-aborted={aborted}; perform-hr=0x{performResult:X8}");
+                    finally { Check(At<Unadvise>(operation, 4)(operation, adviseCookie)); }
                 }
                 finally { Marshal.Release(sinkPointer); }
             }
@@ -811,7 +814,8 @@ public static class SyntheticShellSortProbe
         public uint Tymed; public nint Value; public nint ReleaseUnknown;
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint source, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint progressSink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Advise(nint self, nint progressSink, out uint cookie);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
