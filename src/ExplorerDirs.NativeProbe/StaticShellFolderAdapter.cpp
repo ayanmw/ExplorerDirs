@@ -1221,17 +1221,70 @@ namespace
         return child->id != 0 ? child : nullptr;
     }
 
-    std::vector<SyntheticChild> EnumerateBackingChildren(const std::wstring& backingPath, SHCONTF flags)
+    HRESULT GetSyntheticDirectorySize(const std::wstring& directory, ULONGLONG* size)
     {
-        std::vector<SyntheticChild> children;
-        if (backingPath.empty()) return children;
-        std::wstring pattern = backingPath + L"\\*";
+        if (!size) return E_POINTER;
+        *size = 0;
+        std::wstring pattern;
+        try { pattern = directory + L"\\*"; }
+        catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+
         WIN32_FIND_DATAW entry{};
         const auto search = FindFirstFileW(pattern.c_str(), &entry);
-        if (search == INVALID_HANDLE_VALUE) return children;
+        if (search == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        HRESULT result = S_OK;
+        bool hasEntry = true;
+        while (hasEntry)
+        {
+            if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0)
+            {
+                ULONGLONG entrySize = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
+                if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                    !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    std::wstring childPath;
+                    try { childPath = directory + L"\\" + entry.cFileName; }
+                    catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
+                    result = GetSyntheticDirectorySize(childPath, &entrySize);
+                    if (FAILED(result)) break;
+                }
+                if (~static_cast<ULONGLONG>(0) - *size < entrySize)
+                {
+                    result = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                    break;
+                }
+                *size += entrySize;
+            }
+            hasEntry = FindNextFileW(search, &entry) != FALSE;
+            if (!hasEntry)
+            {
+                const DWORD error = GetLastError();
+                if (error != ERROR_NO_MORE_FILES) result = HRESULT_FROM_WIN32(error);
+            }
+            if (FAILED(result)) break;
+        }
+        FindClose(search);
+        if (FAILED(result)) *size = 0;
+        return result;
+    }
+
+    HRESULT EnumerateBackingChildren(const std::wstring& backingPath, SHCONTF flags,
+        std::vector<SyntheticChild>* children)
+    {
+        if (!children) return E_POINTER;
+        children->clear();
+        if (backingPath.empty()) return S_OK;
+        std::wstring pattern;
+        try { pattern = backingPath + L"\\*"; }
+        catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+        WIN32_FIND_DATAW entry{};
+        const auto search = FindFirstFileW(pattern.c_str(), &entry);
+        if (search == INVALID_HANDLE_VALUE) return HRESULT_FROM_WIN32(GetLastError());
+        HRESULT result = S_OK;
+        bool hasEntry = true;
         try
         {
-            do
+            while (hasEntry)
             {
                 const bool isFolder = (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 const bool isHidden = (entry.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0;
@@ -1240,15 +1293,40 @@ namespace
                     (isSuperHidden && !(flags & SHCONTF_INCLUDESUPERHIDDEN)) ||
                     (isHidden && !(flags & (SHCONTF_INCLUDEHIDDEN | SHCONTF_INCLUDESUPERHIDDEN))) ||
                     wcscmp(entry.cFileName, L".") == 0 || wcscmp(entry.cFileName, L"..") == 0 ||
-                    wcslen(entry.cFileName) >= ARRAYSIZE(SyntheticChild::name)) continue;
+                    wcslen(entry.cFileName) >= ARRAYSIZE(SyntheticChild::name))
+                {
+                    hasEntry = FindNextFileW(search, &entry) != FALSE;
+                    if (!hasEntry)
+                    {
+                        const DWORD error = GetLastError();
+                        if (error != ERROR_NO_MORE_FILES) result = HRESULT_FROM_WIN32(error);
+                    }
+                    if (FAILED(result)) break;
+                    continue;
+                }
                 SyntheticChild child{};
                 child.cb = sizeof(SyntheticChild);
-                child.id = static_cast<USHORT>(children.size() + 1);
+                child.id = static_cast<USHORT>(children->size() + 1);
                 child.size = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
+                if (isFolder && !isSuperHidden && !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    std::wstring childPath;
+                    try { childPath = backingPath + L"\\" + entry.cFileName; }
+                    catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
+                    result = GetSyntheticDirectorySize(childPath, &child.size);
+                    if (FAILED(result)) break;
+                }
                 child.attributes = entry.dwFileAttributes;
                 wcscpy_s(child.name, entry.cFileName);
-                children.push_back(child);
-            } while (FindNextFileW(search, &entry));
+                children->push_back(child);
+                hasEntry = FindNextFileW(search, &entry) != FALSE;
+                if (!hasEntry)
+                {
+                    const DWORD error = GetLastError();
+                    if (error != ERROR_NO_MORE_FILES) result = HRESULT_FROM_WIN32(error);
+                }
+                if (FAILED(result)) break;
+            }
         }
         catch (...)
         {
@@ -1256,13 +1334,18 @@ namespace
             throw;
         }
         FindClose(search);
-        std::sort(children.begin(), children.end(), [](const SyntheticChild& left, const SyntheticChild& right)
+        if (FAILED(result))
+        {
+            children->clear();
+            return result;
+        }
+        std::sort(children->begin(), children->end(), [](const SyntheticChild& left, const SyntheticChild& right)
         {
             return _wcsicmp(left.name, right.name) < 0;
         });
-        for (size_t index = 0; index < children.size(); ++index)
-            children[index].id = static_cast<USHORT>(index + 1);
-        return children;
+        for (size_t index = 0; index < children->size(); ++index)
+            (*children)[index].id = static_cast<USHORT>(index + 1);
+        return S_OK;
     }
 
     PIDLIST_RELATIVE CloneSyntheticChild(const SyntheticChild& child)
@@ -1767,8 +1850,12 @@ namespace
             *value = nullptr;
             InterlockedIncrement(&g_syntheticEnumObjectsCount);
             if (!_inner) return E_UNEXPECTED;
-            try { *value = new (std::nothrow) SyntheticChildEnumerator(EnumerateBackingChildren(_backingPath, flags)); }
-            catch (const std::bad_alloc&) { *value = nullptr; }
+            std::vector<SyntheticChild> children;
+            HRESULT result = S_OK;
+            try { result = EnumerateBackingChildren(_backingPath, flags, &children); }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            if (FAILED(result)) return result;
+            *value = new (std::nothrow) SyntheticChildEnumerator(std::move(children));
             return *value ? S_OK : E_OUTOFMEMORY;
         }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
@@ -2031,7 +2118,7 @@ namespace
             {
                 if (!child) return E_INVALIDARG;
                 text = column == 0 ? child->name : column == 1 ?
-                    ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"" : std::to_wstring(child->size)) :
+                    std::to_wstring(child->size) :
                     ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File");
                 details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
@@ -2502,12 +2589,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         result = enumerator->Next(1, &item, &fetched);
         if (result != S_OK || fetched != 1 || !SyntheticData(item) ||
             _wcsicmp(SyntheticData(item)->name, L"child") != 0 ||
-            !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY))
+            !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            SyntheticData(item)->size != 10)
         {
             if (item) CoTaskMemFree(item);
             result = E_FAIL;
             goto cleanup;
         }
+        SHELLDETAILS details{};
+        result = root->GetDetailsOf(item, 1, &details);
+        const bool recursiveSizeDisplayed = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        if (!recursiveSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         childFolder = item;
         item = nullptr;
         result = enumerator->Next(1, &item, &fetched);

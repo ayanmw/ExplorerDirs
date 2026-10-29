@@ -369,3 +369,9 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 因此此前的 property-store 覆写、属性别名、列映射及文件系统属性屏蔽试验到此收束；若要继续验证递归目录大小排序，应使用独立的非文件系统 PIDL/`IShellFolder2` 样本，并直接计数 `CompareIDs` 调用与升降序行序。产品仍保持 ExplorerBrowser，不接入这个架构原型。
 
 本轮没有运行新的 Shell-view 探针。项目的 Private Desktop 前台守卫曾记录到用户桌面前台 HWND 变化，现行规则要求先确认隔离问题，再继续创建新的 Shell view；故自有 namespace 原型的 DefView 排序行为仍未实测。参考：[Microsoft Explorer Data Provider sample](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/Win7Samples/winui/shell/shellextensibility/explorerdataprovider)、[IShellFolder::CompareIDs](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-compareids)。
+
+## 2026-10-30：合成文件夹递归大小元数据合同
+
+- NativeProbe 合成 namespace 现为普通目录项计算递归文件字节数：包含该目录及其子目录中的文件，不计目录自身；遇到 reparse-point 子目录不继续遍历。目录项的 `GetDetailsOf(Size)` 同样返回数值文本。
+- 无窗口树级 smoke 使用两层夹具，`child\nested.txt` 为 6 字节、`child\nested-folder\deep.txt` 为 4 字节；合成目录大小与 Shell 行文本均断言为 10。先前断言按预期失败，改动后原生 `/W4 /WX` 构建和 `--synthetic-shell-folder-tree-smoke` 通过，现有 PIDL、绑定、存储、文件操作合同继续通过。
+- 这只是 NativeProbe 的递归属性生产合同：没有创建 DefView/`IShellView`，因此不证明 Details 视图会显示该目录值、按它升降序排序，或主题/刷新行为正确。枚举时同步遍历整棵子树也不是产品策略；产品仍保留用户选定的 F9 显式扫描方式，不在导航或刷新时递归扫描。需在独立视图原型中验证列消费与排序，并评估性能后才能考虑产品接线。

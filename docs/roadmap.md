@@ -813,7 +813,7 @@
 - 无窗口 `PSGetPropertyDescription` 读回原型自定义 `PROPERTYKEY` 为 `TYPE_E_ELEMENTNOTFOUND (0x8002802B)`，标准 `System.Size` 为 `S_OK`，确认原型自定义键缺少已加载的 property description。此结果与 DefView 空列相符但不证明因果；机器级 schema 不在日常系统注册。
 - 同一未激活 DefView 增加已登记的 `System.DateCreated` 对照列后，ListView 可读取其时间文本，而紧邻的未登记派生列仍为空；此前名称和 Size 也正常。此结果强烈支持 schema 是新增列读取的门槛，但排序回调仍为 0，未登记键注册后的行为尚未验证。当前未找到 Windows Sandbox，DISM 状态查询需提升权限；不在日常系统试注册 schema。
 - 复核 [PSRegisterPropertySchema 官方文档](https://learn.microsoft.com/en-us/windows/win32/api/propsys/nf-propsys-psregisterpropertyschema)：注册 schema 会影响整台机器，调用者需要对 `HKEY_LOCAL_MACHINE` 的写权限，且文档明确不支持按用户 profile 注册。因此不能用当前便携应用进程做无副作用验证；自定义逐项属性要继续验证，应先准备可丢弃的隔离 Windows VM，再测注册后 DefView 是否读取属性并执行排序。
-- 逐行大小列仍是有价值但高难度的 Q-Dir 差距：需要在不抢用户前台的隔离环境中找到安全、可重复的活动 DefView 求值条件，之后才评估真实 PIDL 委托、Shell 菜单/操作、拖放、通知与每标签状态。当前没有批准迁移 ExplorerBrowser，也不加入递归大小列或自绘列表。
+- 逐行大小列仍是有价值但高难度的 Q-Dir 差距：NativeProbe 的合成文件夹现能为目录生成递归字节数并通过无视图合同；DefView 实际显示/排序、Shell 菜单/操作、拖放、通知与每标签状态尚未闭合。当前没有批准迁移 ExplorerBrowser，也不加入产品递归大小列或自绘列表。详见[逐行大小列调查](folder-size-column-investigation.md)。
 
 ## 2026-10-26：窗口暂时失焦时保留文件操作焦点恢复
 
