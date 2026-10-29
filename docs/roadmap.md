@@ -4687,3 +4687,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：Q-Dir 颜色元数据真实夹具往返断言
 
 新增验收夹具 `qdr-color-metadata.qdr` 的后台往返复核确认：导入后保留 `useColor=1`、`useTreeColor=0`、`colorthema=0` 及 `[Filter2]` 四条有序规则；扩展会话往返与移除 Explorer Dirs 扩展后的 Q-Dir 基础字段往返均通过，夹具 SHA-256 保持 `70D8C32A0F9B0831A4AD060FAA87A982B7E077DD4791A2F375023D6BF9AC8D34`。复核发现 `--roundtrip-qdr` 原先虽检查基础布局/标签/视图，但没有比较颜色元数据；现补上基础字段颜色开关、主题和有序 Filter2 行断言。针对该夹具往返、完整 Release SettingsSmoke 和 App Release build 均通过，0 警告/错误。仅证明文件状态兼容，颜色规则未在 ExplorerBrowser 应用；Q-Dir 实际打开/重存及可见 UI 仍待集中验收。
+
+## 2026-10-30：Q-Dir 克隆视图的标签差距复核
+
+依据 [Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)，Q-Dir 克隆视图包含当前路径、查看设置、选中对象及浏览历史。源码核对确认 Explorer Dirs 跨窗格移动标签会保留原 Browser 和 Shell Travel Log；复制标签则新建 Browser，并复制当前路径、视图设置、快速筛选、预览/详情状态及地址下拉历史，但没有复制当前文件选区或 Shell Back/Forward 历史。因此不能把复制标签描述为 Q-Dir 完整克隆。后续若追齐该功能，应先决定扩展现有“复制标签”语义，还是增加独立“克隆视图”动作；完整历史若无法由 Shell 宿主安全转移，还需定义兼容的应用级历史模型。仅做了官方资料与源码静态核对，未改产品代码、未启动 GUI。
