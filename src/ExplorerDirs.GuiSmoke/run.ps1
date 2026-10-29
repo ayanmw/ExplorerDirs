@@ -113,6 +113,20 @@ if ((Get-Item -LiteralPath $assemblyPath).VersionInfo.ProductVersion -ne $buildI
     throw 'Acceptance assembly does not contain its unique build identity.'
 }
 
+# Keep the isolated release package shape intact so release-only management
+# tools can be accepted without ever registering them during PrepareOnly.
+$executableHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+[IO.File]::WriteAllLines((Join-Path $appDirectory 'FolderRoutingCapability.ini'), [string[]]@(
+    'FormatVersion=1',
+    'DirectoryArgument=true',
+    "ExecutableSha256=$executableHash"
+), [Text.UTF8Encoding]::new($false))
+$toolsDirectory = Join-Path $runRoot 'tools'
+New-Item -ItemType Directory -Path $toolsDirectory -Force | Out-Null
+foreach ($name in @('folder-verb.ps1', 'FolderVerb.psm1')) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot "scripts\$name") -Destination (Join-Path $toolsDirectory $name)
+}
+
 # A Release app copied outside releases/ uses the profile beside its executable.
 $profileDirectory = Join-Path $appDirectory 'profile'
 New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
@@ -173,7 +187,7 @@ $manifest = [ordered]@{
     QdrProgramFixtureSha256 = (Get-FileHash -LiteralPath $programStarterFixturePath -Algorithm SHA256).Hash
     InitialLayout = 4
     VisiblePaneCount = 4
-    ExecutableSha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    ExecutableSha256 = $executableHash
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     FocusTrace = if ($CaptureFocusTrace) { 'focus-trace.log' } else { $null }
     PendingAcceptance = @(
@@ -205,7 +219,7 @@ $manifest = [ordered]@{
         'Navigate one pane to RecursiveSizeFixture, press F9 and verify the status counter advances before the final 10,000-file summary; start a second scan, press F9 to cancel, then navigate away and confirm stale progress does not return',
         'Open Tools > Program Starter; add and save one inert test entry, then restart and verify it returns from the isolated profile ProgramStarter.ini. Import qdir-program-items.ini and verify both rows and all fields in preview; cancel and confirm ProgramStarter.ini is unchanged, then import again and explicitly apply. Verify the fixture SHA-256 is unchanged, the Q-Dir source was not modified, and imported programs were not launched',
         'Test Tools > Restart Windows Explorer in a disposable desktop session only: first cancel the confirmation and verify the Shell process is unchanged; before confirming a restart, save work and close any Explorer windows that must remain open. Then verify the desktop, taskbar, and Start menu return, and record whether Explorer folder windows shared the Shell process. Do not execute this acceptance against an active user session without explicit confirmation',
-        'From the isolated preview root, run tools/folder-verb.ps1 -Mode Preview and verify the shown EXE path, SHA-256, capability declaration, and current entry status. Keep the real user registry unchanged during this acceptance; enabling or disabling the actual folder context entry requires a separate explicit user choice',
+        'Open Tools > Folder Entry; verify Directory/Drive status and preview the isolated EXE path, SHA-256, and directory-argument capability. The isolated package includes tools/folder-verb.ps1 and its exact-hash capability manifest. Keep the real user registry unchanged; enabling or disabling the actual folder context entry requires a separate explicit user choice',
         'QDR import/export, cancellation, and native Q-Dir compatibility',
         'Theme regression: in both Light and Dark, verify cold start, duplicated tabs, pane switching, scrollbar endpoints, directory trees and native context menus retain the accepted temp.76 appearance without white flashes, delayed/double borders or transparent gutters; compare after import cancel, minimal qdr-color-baseline.qdr import and restart',
         'Run capacity checks last on a fresh isolated profile with one tab in pane-1: import TabCapacityFixture (99 incoming tabs) to reach 100, verify New/Duplicate/Middle-click/drag-copy or drag-move into that pane cannot add a tab and keep the source/selection. Reimport is rejected before partial append. At capacity Reopen Closed must preserve its history; freeing a slot permits recovery. Do not use the resulting 100-tab workload as the normal memory baseline'
