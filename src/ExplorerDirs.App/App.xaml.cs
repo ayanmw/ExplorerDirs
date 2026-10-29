@@ -278,9 +278,9 @@ public partial class App : Application
         }
     }
 
-    private void OpenSiblingWindow(MainWindow source)
+    private MainWindow? OpenSiblingWindow(MainWindow source)
     {
-        if (_windowSessions is null) return;
+        if (_windowSessions is null) return null;
         string? sessionPath = null;
         try
         {
@@ -289,6 +289,7 @@ public partial class App : Application
             window.CascadeFrom(source);
             window.Show();
             window.Activate();
+            return window;
         }
         catch (Exception ex)
         {
@@ -298,6 +299,7 @@ public partial class App : Application
                 catch (Exception) { }
             }
             source.ReportSessionIssue($"新窗口创建失败：{ex.Message}");
+            return null;
         }
     }
 

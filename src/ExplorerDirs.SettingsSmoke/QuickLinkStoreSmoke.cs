@@ -24,6 +24,16 @@ internal static class QuickLinkStoreSmoke
             var failedProbe = QuickLinkAvailability.Evaluate(() => throw providerFailure);
             Check(!failedProbe.CanAdd && ReferenceEquals(failedProbe.Error, providerFailure),
                 "a Shell namespace exception is contained and reported as unavailable");
+            Check(QuickLinkOpenPolicy.Resolve(isFolder: true, controlPressed: false) == QuickLinkOpenDestination.CurrentPane &&
+                  QuickLinkOpenPolicy.Resolve(isFolder: true, controlPressed: true) == QuickLinkOpenDestination.NewWindow &&
+                  QuickLinkOpenPolicy.Resolve(isFolder: false, controlPressed: true) == QuickLinkOpenDestination.Shell,
+                "Ctrl opens folder quick links in a new window while file/program links remain Shell launches");
+            var repoRoot = FindRepoRoot();
+            var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+            Check(mainWindow.Contains("Keyboard.Modifiers & ModifierKeys.Control", StringComparison.Ordinal) &&
+                  mainWindow.Contains("case QuickLinkOpenDestination.NewWindow:", StringComparison.Ordinal) &&
+                  mainWindow.Contains("window.ActivePane.NavigateTo(target)", StringComparison.Ordinal),
+                "quick-link menu modifier routes a confirmed Shell folder into the copied window's active pane");
 
             var store = new QuickLinkStore(linksDirectory);
             Check(store.Load().Count == 0, "missing quick links directory loads empty");
@@ -87,6 +97,16 @@ internal static class QuickLinkStoreSmoke
     private static void Check(bool condition, string name)
     {
         if (!condition) throw new Exception($"Quick link smoke failed: {name}");
+    }
+
+    private static string FindRepoRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md"))) return directory.FullName;
+        }
+        throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
     }
 
     private static void ExpectThrows<T>(Action action, string name) where T : Exception

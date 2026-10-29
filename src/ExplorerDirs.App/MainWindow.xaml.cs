@@ -31,7 +31,7 @@ public partial class MainWindow : Window
     private bool _lastNonMinimizedMaximized;
     private readonly ApplicationThemeController? _themeController;
     private readonly string _profileDirectory;
-    private readonly Action<MainWindow>? _createWindow;
+    private readonly Func<MainWindow, MainWindow?>? _createWindow;
     private readonly Action? _restartApplication;
     private FullScreenPresentation? _fullScreenRestoreState;
     private readonly FavoritesStore _favoritesStore;
@@ -127,7 +127,7 @@ public partial class MainWindow : Window
         : this(null, startupDirectory, startupWarning) { }
 
     internal MainWindow(ApplicationThemeController? themeController, string? startupDirectory = null, string? startupWarning = null,
-        string? sessionPath = null, string? profileDirectory = null, Action<MainWindow>? createWindow = null,
+        string? sessionPath = null, string? profileDirectory = null, Func<MainWindow, MainWindow?>? createWindow = null,
         Action? restartApplication = null, string? startupSelectPath = null)
     {
         _themeController = themeController;
@@ -2447,22 +2447,41 @@ public partial class MainWindow : Window
             QuickLinksMenu.Items.Add(new MenuItem { Header = "（暂无快速链接）", IsEnabled = false });
         foreach (var entry in entries)
         {
-            var item = new MenuItem { Header = entry.Name, ToolTip = entry.Path };
-            item.Click += (_, _) => OpenQuickLink(entry.Path);
+            var item = new MenuItem
+            {
+                Header = entry.Name,
+                ToolTip = $"{entry.Path}{Environment.NewLine}按住 Ctrl 单击文件夹可在新窗口打开"
+            };
+            item.Click += (_, _) => OpenQuickLink(entry.Path,
+                (Keyboard.Modifiers & ModifierKeys.Control) != 0);
             QuickLinksMenu.Items.Add(item);
         }
     }
 
-    private void OpenQuickLink(string shortcutPath)
+    private void OpenQuickLink(string shortcutPath, bool controlPressed)
     {
         try
         {
-            if (_quickLinkStore.TryGetTarget(shortcutPath, out var target) &&
-                ShellLocationIdentity.TryGetFolderPidl(target, out var folderPidl))
+            if (_quickLinkStore.TryGetTarget(shortcutPath, out var target))
             {
-                Marshal.FreeCoTaskMem(folderPidl);
-                ActivePane.NavigateTo(target);
-                return;
+                var isFolder = ShellLocationIdentity.TryGetFolderPidl(target, out var folderPidl);
+                if (isFolder) Marshal.FreeCoTaskMem(folderPidl);
+                switch (QuickLinkOpenPolicy.Resolve(isFolder, controlPressed))
+                {
+                    case QuickLinkOpenDestination.CurrentPane:
+                        ActivePane.NavigateTo(target);
+                        return;
+                    case QuickLinkOpenDestination.NewWindow:
+                        var window = _createWindow?.Invoke(this);
+                        if (window is null)
+                        {
+                            EnvironmentStatus.Text = "无法创建快速链接目标窗口。";
+                            return;
+                        }
+                        window.ActivePane.NavigateTo(target);
+                        window.ActivePane.FocusCurrentView();
+                        return;
+                }
             }
             Process.Start(new ProcessStartInfo(shortcutPath) { UseShellExecute = true });
         }

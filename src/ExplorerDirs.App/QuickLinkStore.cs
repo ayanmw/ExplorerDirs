@@ -6,6 +6,16 @@ namespace ExplorerDirs.App;
 
 internal sealed record QuickLinkEntry(string Name, string Path);
 
+internal enum QuickLinkOpenDestination { Shell, CurrentPane, NewWindow }
+
+internal static class QuickLinkOpenPolicy
+{
+    internal static QuickLinkOpenDestination Resolve(bool isFolder, bool controlPressed) =>
+        !isFolder ? QuickLinkOpenDestination.Shell
+            : controlPressed ? QuickLinkOpenDestination.NewWindow
+            : QuickLinkOpenDestination.CurrentPane;
+}
+
 internal sealed class QuickLinkStore(string directory)
 {
     private static readonly Guid ShellLinkClassId = new("00021401-0000-0000-C000-000000000046");
