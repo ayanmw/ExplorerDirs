@@ -6,7 +6,7 @@
 
 2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。
 
-近期执行顺序：先完成当前源代码批次的静态复核与提交；随后对已实现但尚待集中可见验收的“使用系统 Explorer 浏览”和用户级文件夹入口准备一份短验收清单；继续开发从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
+近期执行顺序：已为“使用系统 Explorer 浏览”和用户级文件夹入口整理[集中验收清单](gui-acceptance-system-entry.md)。下一步继续从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项；依赖真实消息循环、物理键鼠或当前用户 Explorer 扩展菜单的项目留待集中验收。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
