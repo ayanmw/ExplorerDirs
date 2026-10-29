@@ -1835,6 +1835,7 @@ public partial class MainWindow : Window
             source.NavigateTo(driveRoot);
             return true;
         }
+        if (shortcut == ExplorerShortcut.CopySelectedPaths && !source.HasFileViewFocus) return false;
         if (shortcut == ExplorerShortcut.ExpandTree)
         {
             if (!source.ExpandTreeToCurrent()) return false;
@@ -1906,6 +1907,9 @@ public partial class MainWindow : Window
                 _fileViewFocusDesired = true;
                 FileCommandsMenu.IsSubmenuOpen = true;
                 PasteSpecialMenu.IsSubmenuOpen = true;
+                break;
+            case ExplorerShortcut.CopySelectedPaths:
+                CopySelectedPaths(source);
                 break;
             case ExplorerShortcut.Refresh: source.RefreshCurrent(); break;
             case ExplorerShortcut.CalculateDirectorySize: source.ToggleRecursiveDirectorySize(); break;
@@ -2168,7 +2172,7 @@ public partial class MainWindow : Window
             FileCommandsMenu.Items.Add(item);
         }
         FileCommandsMenu.Items.Add(new Separator());
-        _copySelectedPathsMenu = new MenuItem { Header = "复制所选项目完整路径" };
+        _copySelectedPathsMenu = new MenuItem { Header = "复制所选项目完整路径", InputGestureText = "Ctrl+Shift+C" };
         _copySelectedPathsMenu.Click += CopySelectedPaths_Click;
         FileCommandsMenu.Items.Add(_copySelectedPathsMenu);
     }
@@ -2332,9 +2336,10 @@ public partial class MainWindow : Window
     }
 
     private void NewFolder_Click(object sender, RoutedEventArgs e) => CreateNewFolder(ActivePane);
-    private void CopySelectedPaths_Click(object sender, RoutedEventArgs e)
+    private void CopySelectedPaths_Click(object sender, RoutedEventArgs e) => CopySelectedPaths(ActivePane);
+
+    private void CopySelectedPaths(PaneControl pane)
     {
-        var pane = ActivePane;
         try
         {
             var paths = pane.CaptureSelectedPathsForClipboard();

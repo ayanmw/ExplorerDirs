@@ -22,6 +22,8 @@
 
 2026-10-30：后台快捷键复核时检查到 Alt+F11 虽已有 Q-Dir 同款应用内重启入口，但窗口级预览键路由没有避开文本框焦点，可能在地址/搜索编辑中弹出重启确认。现将该快捷键与文件视图命令一同交还给文本输入控件；焦点策略定向 smoke、完整 Release SettingsSmoke 与 App Release build 均通过（0 警告、0 错误）。Shift+F6 继续保留本项目既有的反向焦点区域导航，不覆盖为 Q-Dir 的查看方式循环，因为路线图已确认该差异以保持 Explorer 键盘导航。
 
+2026-10-30 Q-Dir Copy Path 快捷键：官方功能提示记载 `Ctrl+Shift+C` 复制所选路径且不加引号。当前主线已具备完整路径复制命令，本批将该组合接入统一快捷键解析器，复用现有 Shell 路径读取/剪贴板动作，仅在文件视图聚焦时触发，并在“编辑”菜单显示快捷键。回归先以预期失败确认映射缺失，接线后完整 Release SettingsSmoke 通过；App Release build、剪贴板真实写入和物理键盘交互仍待验证/集中验收。未制作预览包。依据：[Q-Dir 官方提示](https://softwareok.com/?page=Windows%2FTip%2FQ-Dir%2F23)。
+
 2026-10-30 当前主线后台基线：`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release --no-restore` 完整通过，exit code 0；`ExplorerDirs.App` Release build 0 警告/错误。覆盖的是已存在的设置/路由/状态 smoke 与托管 App 编译，不包含真实文件视图 UI、Shell 菜单、物理输入或 ExplorerBrowser 可见行为。本轮未修改产品源码或 release。
 
 2026-10-30 Q-Dir 盘符快捷键：按 Q-Dir 4.51 官方帮助补入文件视图聚焦时的 `Ctrl+Alt+A～Z`，跳转至对应已列出的逻辑盘符根目录；未列出的盘符交回 Shell，不主动探测网络盘就绪状态。映射、严格修饰键及文本输入焦点边界 smoke、完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误；未运行窗口或物理按键。可见键盘行为和当前安装版 Q-Dir 对照留待集中验收。[快捷键清单](keyboard-shortcuts.md)

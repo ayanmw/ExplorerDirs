@@ -11,7 +11,7 @@ internal enum ExplorerShortcut
     CalculateDirectorySize,
     ScreenMagnifier,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
-    PasteSpecial,
+    PasteSpecial, CopySelectedPaths,
     AutoFitColumns,
     NavigateDriveA, NavigateDriveB, NavigateDriveC, NavigateDriveD, NavigateDriveE,
     NavigateDriveF, NavigateDriveG, NavigateDriveH, NavigateDriveI, NavigateDriveJ,
@@ -57,6 +57,7 @@ internal static class KeyboardShortcuts
         (0x74, 4) => ExplorerShortcut.NewFolder,     // Q-Dir: Shift+F5 opens New > New Folder.
         (>= 0x41 and <= 0x5a, 3) => ExplorerShortcut.NavigateDriveA + (key - 0x41), // Q-Dir: Ctrl+Alt+drive letter.
         (0x56, 6) => ExplorerShortcut.PasteSpecial,  // Q-Dir: save clipboard content as a file.
+        (0x43, 6) => ExplorerShortcut.CopySelectedPaths, // Q-Dir: copy selected paths without quotes.
         (0x41, 6) => ExplorerShortcut.InvertSelection, // Q-Dir: Ctrl+Shift+A.
         (0x45, 6) => ExplorerShortcut.ExpandTree,    // Ctrl+Shift+E
         (0x50, 1) => ExplorerShortcut.TogglePreviewPane, // Alt+P
@@ -93,6 +94,7 @@ internal static class KeyboardShortcuts
         shortcut is ExplorerShortcut.OpenSelectionInNewTab or ExplorerShortcut.InvertSelection or
             ExplorerShortcut.SearchSelectedFolder or
             ExplorerShortcut.PasteSpecial or
+            ExplorerShortcut.CopySelectedPaths or
             ExplorerShortcut.ProgramStarter or
             ExplorerShortcut.ScreenMagnifier or
             ExplorerShortcut.AutoFitColumns or
