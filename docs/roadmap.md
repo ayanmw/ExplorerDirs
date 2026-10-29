@@ -8,6 +8,8 @@
 
 2026-10-29：在隔离 synthetic DefView 探针中补充多选成功 Copy：选中 `two.bin` 与 `z-ten.bin`，从 Shell selection `IDataObject` 执行 `IFileOperation.CopyItems`，确认目标恰有两项、逐字节匹配源文件且源文件保留；原有多选取消后保持两项选中及焦点的验证仍通过。完整 Private Desktop watchdog exit 0，NativeProbe Release build 0 警告/错误，结束后临时 CLSID/NameSpace 和源/目标夹具均不存在。运行期间外层曾短暂观察到前台从 TortoiseGitProc 变为 TortoiseGitUDiff；首次变化时输入时间戳未变，探针结束时原前台恢复，但变化原因未能归因，因此不将其视为“全程前台未变”的证据。结果仅覆盖隔离 Shell data object 与程序化复制，不等同于真实鼠标 OLE 拖放或产品行为。
 
+2026-10-29：将隔离原型的 `IFileOperation.MoveItems` 加入双视图文件操作序列：删除 `a-large-renamed.bin` 后将 `z-ten.bin` 移到独立目标目录。探针日志确认源文件消失、目标文件存在且字节一致；两个视图都移除源项，并保留未移动 `two.bin` 的选中与焦点。Release build 0 警告/错误。但这轮 watchdog exit 1：运行期间外层前台从 Task Manager 变为 LockApp，输入时间戳改变，因此不计为完整 Private Desktop 通过；探针 finally 和 watchdog 均已清除临时 CLSID/NameSpace、源/目标夹具及进程。需在前台稳定时重跑同一场景后，才能把该项标为完整验证。该程序化 Move 不代表真实鼠标 OLE 拖放。
+
 2026-10-29：完成标签栏隐藏模式的后台实现：保留原有“始终显示 / 多标签时显示”，新增仅隐藏标题条的选项，标签对象、浏览状态与快捷键不受影响。便携配置升至版本 2，并兼容读取旧版本布尔值；未知更高版本拒绝写入。定向与完整 smoke、App Release build 通过。未启动产品 GUI，菜单操作、焦点导航、跨重启展示仍待集中验收。
 
 2026-10-29：重新运行文件夹入口的隔离注册表 smoke。脚本仅在随机 `HKCU\Software\ExplorerDirs.Tests\FolderVerb-*` 临时键及系统临时目录中验证能力清单哈希、安装/重复安装/卸载、预存冲突拒绝和外部编辑保护；退出后检查无残留测试键或临时目录。全部通过，未接触真实 `HKCU\Software\Classes\Directory/Drive` 关联项。该证据修复了此前因沙箱拒绝 HKCU 写入而缺失的隔离测试，不代表真实 Explorer 菜单可见或启动体验已验收。

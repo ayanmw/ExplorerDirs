@@ -374,6 +374,32 @@ public static class SyntheticShellSortProbe
             if (!deleteAutoSelectionRetained) throw new IOException("The automatic delete refresh did not preserve selection and keyboard focus on the unchanged item.");
             if (!deleteAutoSelectionRetained2) throw new IOException("The second view did not preserve selection and keyboard focus on the unchanged item.");
 
+            var moveDestination = Path.Combine(copyDestination, "Moved");
+            MoveSelectedShellItem(view, listView, module, backingFolder, "z-ten.bin", "two.bin", moveDestination);
+            var moveAutoUpdated = false;
+            var moveAutoUpdated2 = false;
+            var moveSelectionRetained = false;
+            var moveSelectionRetained2 = false;
+            var moveDeadline = Environment.TickCount64 + 2500;
+            string[] afterMove = [];
+            string[] afterMove2 = [];
+            while ((!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2) && Environment.TickCount64 < moveDeadline)
+            {
+                Pump(100);
+                afterMove = ReadNames(listView, module, expectedCount: -1);
+                afterMove2 = ReadNames(listView2, module, expectedCount: -1);
+                moveAutoUpdated = !afterMove.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) && afterMove.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
+                moveAutoUpdated2 = !afterMove2.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) && afterMove2.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
+                var moveState = StateForName(listView, afterMove, "two.bin");
+                var moveState2 = StateForName(listView2, afterMove2, "two.bin");
+                moveSelectionRetained = (moveState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+                moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+            }
+            Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
+            if (!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2 ||
+                !File.Exists(Path.Combine(moveDestination, "z-ten.bin")) || File.Exists(Path.Combine(backingFolder, "z-ten.bin")))
+                throw new IOException("The Shell move did not update both views and preserve the unaffected item focus.");
+
             Console.WriteLine($"synthetic-shell-size-sort: initial=[{string.Join('|', initial)}]; ascending=[{string.Join('|', ascending)}]; descending=[{string.Join('|', descending)}]; size-CompareIDs-ascending={ascendingCompareCount}; size-CompareIDs-descending={descendingCompareCount}; total-CompareIDs={totalCompareCount}; foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
                 !ascending.SequenceEqual(new[] { "two.bin", "z-ten.bin", "a-large.bin" }) ||
@@ -538,13 +564,47 @@ public static class SyntheticShellSortProbe
         }
     }
 
+    private static void MoveSelectedShellItem(nint view, nint listView, nint module, string backingFolder, string itemName, string restoreFocusName, string destinationFolder)
+    {
+        if (Directory.Exists(destinationFolder))
+            throw new InvalidOperationException($"Refusing to reuse the isolated Shell move destination: {destinationFolder}");
+        Directory.CreateDirectory(destinationFolder);
+        var sourcePath = Path.Combine(backingFolder, itemName);
+        var expectedBytes = File.ReadAllBytes(sourcePath);
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(dataObject); Check(createOperationHr); }
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            try { Check(At<MoveItems>(operation, 15)(operation, dataObject, destinationItem)); }
+            finally { Marshal.Release(destinationItem); }
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            var movedPath = Path.Combine(destinationFolder, itemName);
+            if (aborted != 0 || File.Exists(sourcePath) || !File.Exists(movedPath) ||
+                !expectedBytes.AsSpan().SequenceEqual(File.ReadAllBytes(movedPath)))
+                throw new IOException($"IFileOperation did not move '{itemName}' with matching content: aborted={aborted}; source-exists={File.Exists(sourcePath)}; destination-exists={File.Exists(movedPath)}.");
+        }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(dataObject);
+        }
+    }
+
     private static nint GetSelectionDataObject(nint view, nint listView, nint module, string itemName, string restoreFocusName)
     {
-        SetListViewSelectionAndFocus(listView, itemName, ReadNames(listView, module));
+        // This helper also runs after earlier file operations have reduced the fixture row count.
+        SetListViewSelectionAndFocus(listView, itemName, ReadNames(listView, module, expectedCount: -1));
         var dataObjectId = DataObjectId;
         Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var dataObject)); // SVGIO_SELECTION.
         if (dataObject == 0) throw new IOException($"The synthetic view returned no Shell IDataObject for selected item '{itemName}'.");
-        try { SetListViewSelectionAndFocus(listView, restoreFocusName, ReadNames(listView, module)); }
+        try { SetListViewSelectionAndFocus(listView, restoreFocusName, ReadNames(listView, module, expectedCount: -1)); }
         catch { Marshal.Release(dataObject); throw; }
         return dataObject;
     }
@@ -890,6 +950,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Advise(nint self, nint progressSink, out uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();
