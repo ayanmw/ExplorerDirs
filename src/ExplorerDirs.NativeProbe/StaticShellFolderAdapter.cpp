@@ -2731,8 +2731,6 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         result = root->GetDetailsEx(item, &kSyntheticRecursiveSizeKey, &sizeValue);
         const bool updatedSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 1;
         VariantClear(&sizeValue);
-        InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
-        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
         if (!updatedSizeDisplayed || !updatedSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         childFolder = item;
         item = nullptr;
@@ -2742,6 +2740,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             PIDLIST_RELATIVE rootFile = nullptr;
             result = root->ParseDisplayName(nullptr, nullptr, rootFileName,
                 &rootFileNameEaten, &rootFile, nullptr);
+            const auto overrideFolderAfterFile = SUCCEEDED(result) ? root->CompareIDs(1, childFolder, rootFile) : result;
+            const auto overrideFileAfterFolder = SUCCEEDED(result) ? root->CompareIDs(1, rootFile, childFolder) : result;
+            const bool recursiveSizeOverrideSortsNumerically = SUCCEEDED(result) && rootFile &&
+                rootFileNameEaten == ARRAYSIZE(rootFileName) - 1 &&
+                static_cast<SHORT>(HRESULT_CODE(overrideFolderAfterFile)) < 0 &&
+                static_cast<SHORT>(HRESULT_CODE(overrideFileAfterFolder)) > 0;
+            InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+            InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
             const auto folderAfterFile = SUCCEEDED(result) ? root->CompareIDs(1, childFolder, rootFile) : result;
             const auto fileAfterFolder = SUCCEEDED(result) ? root->CompareIDs(1, rootFile, childFolder) : result;
             const bool recursiveSizeSortsNumerically = SUCCEEDED(result) && rootFile &&
@@ -2749,7 +2755,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
                 static_cast<SHORT>(HRESULT_CODE(folderAfterFile)) > 0 &&
                 static_cast<SHORT>(HRESULT_CODE(fileAfterFolder)) < 0;
             if (rootFile) CoTaskMemFree(rootFile);
-            if (!recursiveSizeSortsNumerically) { result = E_FAIL; goto cleanup; }
+            if (!recursiveSizeOverrideSortsNumerically || !recursiveSizeSortsNumerically)
+            { result = E_FAIL; goto cleanup; }
         }
         result = enumerator->Next(1, &item, &fetched);
         if (item) CoTaskMemFree(item);
@@ -3056,6 +3063,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     TraceSyntheticSortStage("synthetic-folder-tree: multi-select-moveitems-passed");
 
 cleanup:
+    InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
     if (nestedRootPidl) CoTaskMemFree(nestedRootPidl);
     if (nestedPersist) nestedPersist->Release();
     if (nestedEnumerator) nestedEnumerator->Release();
