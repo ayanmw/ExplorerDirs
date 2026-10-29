@@ -4558,3 +4558,9 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 扩展 Private Desktop `IDropTarget` 探针，在真实 Shell 选中项数据对象上以 Ctrl 状态核对 Copy；另用独立临时 Shell 数据对象以 Shift 状态核对同卷 Move。Copy 返回 effect=1、目标内容正确、源仍存在；Move 将文件真实移到目标，源项消失，目标内容正确。移动时 `IDropTarget::Drop` 返回 effect=0，但 `Performed DropEffect` 与 `Logical Performed DropEffect` 均返回 Move=2，证明不能要求优化移动的 Drop 返回值必须为 2。
 - 首轮因断言错误把 effect=0 判失败；根据文件状态及两个 Shell 数据对象完成格式定位后修正。第二轮 watchdog exit 0、前台句柄与输入时间戳未变化，临时夹具已清除。NativeProbe Release build 0 警告/错误。
 - 该验证覆盖真实 Shell 目标对 Ctrl/Shift 状态的直接 COM 回调和同卷移动结果，不包含完整 `DoDragDrop` 源端循环、物理鼠标输入、无修饰键默认行为或产品 WPF 接线；IShellView 迁移门槛仍开放。
+
+## 2026-10-30：无输入 OLE DoDragDrop 自动放置试验未通过
+
+- 为在不发送鼠标/键盘输入的情况下验证 OLE 源端闭环，临时测试源在首次 `QueryContinueDrag` 时返回 `DRAGDROP_S_DROP`。NativeProbe Release 构建成功；Private Desktop 探针卡在 `drop-target: query-and-transfer-start`，12 秒内部 watchdog 返回 124，未记录 `DoDragDrop` 返回或目标 `Drop` /文件结果。
+- 守卫同时记录用户桌面前台从 LockApp HWND 变为 0，输入时间戳也变化，原因未知。探针进程退出，唯一 GUID 临时夹具已逐项检查并清理；没有主动切换或恢复前台。自动放置策略不再重试，临时探针代码已撤销。日志：`src/.state/native-probe-watchdog/20261030-000138-46fb9cf9.stdout.log`。
+- 该尝试不是产品缺陷复现，也不能证明 Shell 已到达目标 `Drop`。真实鼠标拖放及 `DoDragDrop` 端到端迁移门槛仍未通过；Explorer Dirs 产品继续使用 ExplorerBrowser。后续若重新验证，需安排用户可见且明确授权的交互验收，由用户控制拖动与取消。

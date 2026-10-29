@@ -1394,3 +1394,9 @@ NativeProbe Release 与原生 `/W4 /WX` 构建、树级/普通 PIDL/包装 PIDL 
 Private Desktop `drop-target-private-desktop` 探针现对 `IShellFolder::CreateViewObject` 返回并注册到目标窗格 HWND 的真实 Shell `IDropTarget`，直接调用 DragEnter/DragOver/Drop，并让两个效果都可用。Ctrl 状态（keyState `0x9`）下，所选项 `IDataObject` 返回 Copy=1，目标文件内容正确且源保留。Shift 状态（keyState `0x5`）下，同卷及 C:→D: 跨卷临时文件都被移至目标：目标内容正确、源路径消失。无修饰键（keyState `0x1`）在同卷默认执行 Move；C: 源到 D: 目标的跨卷对照则默认执行 Copy，目标内容正确且源保留。两种同卷优化移动和跨卷 Shift Move 中 `IDropTarget::Drop` 返回 effect=0；数据对象的 `Performed DropEffect` 与 `Logical Performed DropEffect` 均读回 Move=2。五种情景连续两次 Private Desktop watchdog exit 0，前台 HWND 和输入时间戳保持不变，C: 与 D: 临时夹具均清理完成。跨卷情景仅在探针二进制目录与系统临时目录位于不同卷时执行；不满足时日志会标为不可用。
 
 NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell 回调、修饰键状态与本地临时文件结果；没有进入真实 `DoDragDrop` 循环，也未验证鼠标输入、源端结束协议、跨窗格可见交互或产品接线。不能据此关闭拖放迁移门槛。
+
+### 2026-10-30 无输入 OLE DoDragDrop 自动放置尝试（未通过）
+
+为避免注入鼠标/键盘，临时探针曾尝试让 `IDropSource::QueryContinueDrag` 首次调用即返回 `DRAGDROP_S_DROP`，并在 Private Desktop 内调用真实 OLE `DoDragDrop`。NativeProbe Release 构建成功，但调用停在 `drop-target: query-and-transfer-start`，内部 12 秒 watchdog 返回 124；没有 `DoDragDrop` 返回记录，也没有证据确认目标 `Drop` 回调或文件传输结果。外层守卫同时观察到前台句柄从 LockApp 变为 0、输入时间戳改变，原因未知。探针进程已退出，唯一 GUID 临时夹具已逐项核对并清理；未创建跨卷夹具，也未主动恢复或抢占前台。
+
+该自动化策略不能作为隔离安全的闭环验证方式，临时试验代码已移除，不再重跑。真实 `DoDragDrop` 源端循环及鼠标命中仍未验证；产品继续使用 ExplorerBrowser。后续若要验证，需要采用用户可见且明确授权的交互验收窗口，并由用户控制开始或取消拖动；不得把本次卡住解释为产品缺陷或 Shell 已执行目标 Drop。日志：`src/.state/native-probe-watchdog/20261030-000138-46fb9cf9.stdout.log`。
