@@ -2602,6 +2602,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
         if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
         if (!recursiveSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        VARIANT sizeValue{};
+        result = root->GetDetailsEx(item, &kSizeKey, &sizeValue);
+        const bool recursiveSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 10;
+        VariantClear(&sizeValue);
+        if (!recursiveSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         childFolder = item;
         item = nullptr;
         {

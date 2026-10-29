@@ -373,5 +373,5 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 ## 2026-10-30：合成文件夹递归大小元数据合同
 
 - NativeProbe 合成 namespace 现为普通目录项计算递归文件字节数：包含该目录及其子目录中的文件，不计目录自身；遇到 reparse-point 子目录不继续遍历。目录项的 `GetDetailsOf(Size)` 同样返回数值文本。
-- 无窗口树级 smoke 使用两层夹具，`child\nested.txt` 为 6 字节、`child\nested-folder\deep.txt` 为 4 字节；合成目录大小与 Shell 行文本均断言为 10。并与 4 字节的 `root.txt` 执行 `CompareIDs` 双向比较，确认目录大于文件、反向比较小于文件。先前递归大小断言按预期失败，改动后原生 `/W4 /WX` 构建和 `--synthetic-shell-folder-tree-smoke` 通过，现有 PIDL、绑定、存储、文件操作合同继续通过。
+- 无窗口树级 smoke 使用两层夹具，`child\nested.txt` 为 6 字节、`child\nested-folder\deep.txt` 为 4 字节；合成目录大小、Shell 行文本及 `GetDetailsEx(PKEY_Size)` 的 `VT_UI8` 均断言为 10。并与 4 字节的 `root.txt` 执行 `CompareIDs` 双向比较，确认目录大于文件、反向比较小于文件。先前递归大小断言按预期失败，改动后原生 `/W4 /WX` 构建和 `--synthetic-shell-folder-tree-smoke` 通过，现有 PIDL、绑定、存储、文件操作合同继续通过。
 - 这只是 NativeProbe 的递归属性生产合同：没有创建 DefView/`IShellView`，因此不证明 Details 视图会显示该目录值、按它升降序排序，或主题/刷新行为正确。枚举时同步遍历整棵子树也不是产品策略；产品仍保留用户选定的 F9 显式扫描方式，不在导航或刷新时递归扫描。需在独立视图原型中验证列消费与排序，并评估性能后才能考虑产品接线。
