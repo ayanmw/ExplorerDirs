@@ -1362,3 +1362,7 @@ NativeProbe Release build 0 警告/错误；随后仅重跑无 Shell-view 的 `S
 合成 `IShellFolder2` 现在逐段解析相对路径并构造多组件 synthetic PIDL；`BindToObject` 可从根递归绑定到多级子文件夹，`BindToStorage` 可沿多组件 PIDL 绑定深层文件流。合同测试覆盖 `child\nested.txt` 的两段 PIDL、`child\nested-folder` 的组合绑定及深层枚举，以及从根打开深层 `IStream` 并读回内容。单层枚举、隐藏项过滤、嵌套 `GetCurFolder`、单层流与重命名回归保持通过。
 
 NativeProbe Release、原生 `/W4 /WX` 和普通/包装 PIDL smoke 通过。未创建 `IShellView` 或窗口；这些证据仅验证合成 namespace 的方法合同，不代表真实 DefView 导航或产品兼容。
+
+### 2026-10-29 合成项的 Shell 菜单与文件数据对象
+
+无视图的临时树 smoke 现在调用合成文件夹的 `GetUIObjectOf`：查询真实文件的默认 `IContextMenu` 命令，并从 `IDataObject` 读取 `CF_HDROP` 后核对 backing filesystem 路径。查询只建立 HMENU，不展示、不执行；未创建 Shell view 或窗口。树、multi-component PIDL、普通/wrapped PIDL 合同与 Release 原生/托管构建均通过。此证据只证明接口转发和数据对象格式，不证明可见菜单、OLE `DoDragDrop` 或产品接线。

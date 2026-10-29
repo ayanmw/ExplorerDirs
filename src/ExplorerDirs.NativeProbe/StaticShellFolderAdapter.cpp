@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <shellapi.h>
 #include <propsys.h>
 #include <propkey.h>
 #include <strsafe.h>
@@ -2234,6 +2235,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     SyntheticSortFolder* root = nullptr;
     IEnumIDList* enumerator = nullptr;
     PITEMID_CHILD childFolder = nullptr;
+    PITEMID_CHILD childFile = nullptr;
     IShellFolder2* nested = nullptr;
     IEnumIDList* nestedEnumerator = nullptr;
     IPersistFolder2* nestedPersist = nullptr;
@@ -2374,8 +2376,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         const bool correctFile = result == S_OK && fetched == 1 && SyntheticData(item) &&
             _wcsicmp(SyntheticData(item)->name, L"root.txt") == 0 &&
             !(SyntheticData(item)->attributes & FILE_ATTRIBUTE_DIRECTORY);
-        if (item) CoTaskMemFree(item);
-        if (!correctFile) { result = E_FAIL; goto cleanup; }
+        if (!correctFile) { if (item) CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        childFile = item;
         item = nullptr;
         result = enumerator->Next(1, &item, &fetched);
         if (item) CoTaskMemFree(item);
@@ -2384,6 +2386,42 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     enumerator->Release();
     enumerator = nullptr;
     TraceSyntheticSortStage("synthetic-folder-tree: file-and-hidden-enumeration-passed");
+
+    {
+        PCUITEMID_CHILD selected[] = { childFile };
+        IContextMenu* contextMenu = nullptr;
+        result = root->GetUIObjectOf(nullptr, 1, selected, IID_IContextMenu, nullptr,
+            reinterpret_cast<void**>(&contextMenu));
+        if (FAILED(result) || !contextMenu) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        HMENU menu = CreatePopupMenu();
+        if (!menu) { contextMenu->Release(); result = HRESULT_FROM_WIN32(GetLastError()); goto cleanup; }
+        result = contextMenu->QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_DEFAULTONLY);
+        const bool hasNativeCommands = SUCCEEDED(result) && GetMenuItemCount(menu) > 0;
+        DestroyMenu(menu);
+        contextMenu->Release();
+        if (!hasNativeCommands) { if (SUCCEEDED(result)) result = E_FAIL; goto cleanup; }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: native-item-context-menu-passed");
+
+    {
+        PCUITEMID_CHILD selected[] = { childFile };
+        IDataObject* data = nullptr;
+        result = root->GetUIObjectOf(nullptr, 1, selected, IID_IDataObject, nullptr,
+            reinterpret_cast<void**>(&data));
+        if (FAILED(result) || !data) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+        FORMATETC format{ CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        STGMEDIUM medium{};
+        result = data->GetData(&format, &medium);
+        data->Release();
+        if (FAILED(result)) goto cleanup;
+        WCHAR droppedPath[MAX_PATH]{};
+        const auto count = DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0, droppedPath, ARRAYSIZE(droppedPath));
+        const auto expectedPath = std::wstring(backingPath) + L"\\root.txt";
+        const bool hasSelectedPath = count > 0 && _wcsicmp(droppedPath, expectedPath.c_str()) == 0;
+        ReleaseStgMedium(&medium);
+        if (!hasSelectedPath) { result = E_FAIL; goto cleanup; }
+    }
+    TraceSyntheticSortStage("synthetic-folder-tree: native-item-data-object-passed");
 
     result = root->EnumObjects(nullptr, static_cast<SHCONTF>(SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN), &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
@@ -2494,6 +2532,7 @@ cleanup:
     if (nested) nested->Release();
     if (deepEnumerator) deepEnumerator->Release();
     if (deepFolder) deepFolder->Release();
+    if (childFile) CoTaskMemFree(childFile);
     if (childFolder) CoTaskMemFree(childFolder);
     if (enumerator) enumerator->Release();
     if (root) root->Release();

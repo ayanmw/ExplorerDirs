@@ -4509,3 +4509,8 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - 将合成 `IShellFolder2` 的 `ParseDisplayName` 从单项扩展到分隔路径：逐段委托 filesystem Shell，生成包含每层合成 `SHITEMID` 的相对 PIDL，并返回完整 consumed 字符数。`BindToObject` 递归支持多层文件夹 PIDL；`BindToStorage` 可从根直接打开深层文件流。
 - NativeProbe 临时树 smoke 验证 `child\nested.txt` 的双段 PIDL、`child\nested-folder` 的组合绑定与深层枚举、从根打开 `nested.txt` 并读回内容；既有 enumeration、hidden、单层绑定/流、`GetCurFolder` 和重命名合同仍通过。原生 `/W4 /WX`、NativeProbe Release 构建及普通/包装 PIDL smoke 均通过，0 警告/错误。
 - 测试仅用真实临时文件夹和 COM `IShellFolder2` 方法，未创建 `IShellView`、窗口或用户桌面输入。它推进的是 namespace PIDL 层级合同；Shell 的真实导航/DefView、焦点、菜单、拖放、通知及产品接线尚未验证，产品仍使用 ExplorerBrowser。
+
+## 2026-10-29：合成 Shell 项目的原生菜单与数据对象
+
+- 树级 smoke 现在从合成文件夹取得普通文件的原生 `IContextMenu` 并查询默认命令，同时取得原生 `IDataObject` 的 `CF_HDROP`，核对其中仍是 backing filesystem 的真实夹具路径。菜单只在内存 HMENU 中构造，不显示、不调用命令；没有创建 Shell view 或窗口。
+- 新增菜单与数据对象合同后，树级 smoke、普通 PIDL 合同和包装 PIDL 合同通过；NativeProbe Release 与原生适配器 `/W4 /WX` 构建通过，0 警告/错误。该项验证 adapter 未切断选中项的系统菜单和文件传递数据；不代表菜单可见交互、OLE 拖放闭环或产品 ExplorerBrowser 集成。
