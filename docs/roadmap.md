@@ -12,6 +12,8 @@
 
 2026-10-30 Q-Dir 盘符快捷键：按 Q-Dir 4.51 官方帮助补入文件视图聚焦时的 `Ctrl+Alt+A～Z`，跳转至对应已列出的逻辑盘符根目录；未列出的盘符交回 Shell，不主动探测网络盘就绪状态。映射、严格修饰键及文本输入焦点边界 smoke、完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误；未运行窗口或物理按键。可见键盘行为和当前安装版 Q-Dir 对照留待集中验收。[快捷键清单](keyboard-shortcuts.md)
 
+2026-10-30 Q-Dir Alt+L 放大镜入口：将“工具 → 屏幕放大镜”和 Alt+L 接到 Windows 自带 `Magnify.exe`，保持 Windows 的镜头/全屏/停靠模式与系统快捷键实现，不另做屏幕采集放大器，不注册全局热键。为保留 Windows 放大镜运行期间的 `Ctrl+Alt+L` 镜头切换，本程序在检测到 Magnify 进程时让出同组合键（若无法读取进程状态也优先让系统处理）；定向 smoke 覆盖 Alt+L 解析、文本输入保护、组合键边界、让行策略及系统程序启动参数。未实际启动放大镜或打开 Explorer Dirs 窗口，真实辅助功能交互待集中验收。[快捷键清单](keyboard-shortcuts.md) · [Q-Dir 功能对照](shell-parity.md#2026-10-30-官方功能清单补核)
+
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
 2026-10-30：继续准备递归目录大小更新的 Shell 通知 A/B。NativeProbe 现依次测单项 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR` 和整视图刷新，并采集列值、排序、选区/焦点是否更新；无窗口合同 smoke 还确认合成值覆盖更新列属性并让 `CompareIDs` 按 1 对 4 字节文件重新排序，清除覆盖后比较关系恢复。NativeProbe Release、原生 `/W4 /WX`、DLL unload contract 和 folder-tree smoke 通过；前台 HWND 仍为 0，未运行 Shell view A/B。产品和 release 未改。下一步在桌面边界稳定时运行 A/B 与 watchdog 清理复测，再根据观测决定是否实施后台大小缓存和逐项更新。

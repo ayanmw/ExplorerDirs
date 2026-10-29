@@ -177,6 +177,7 @@
                 </MenuItem>
                 <Separator/>
                 <MenuItem Header="打开崩溃诊断目录" Click="OpenCrashLogDirectory_Click"/>
+                <MenuItem Header="屏幕放大镜" InputGestureText="Alt+L" Click="OpenWindowsMagnifier_Click"/>
                 <MenuItem Header="网络驱动器">
                     <MenuItem Header="映射网络驱动器…" Click="ConnectNetworkDrive_Click"/>
                     <MenuItem Header="断开网络驱动器…" Click="DisconnectNetworkDrive_Click"/>

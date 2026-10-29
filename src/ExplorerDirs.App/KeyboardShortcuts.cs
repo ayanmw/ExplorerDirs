@@ -9,6 +9,7 @@ internal enum ExplorerShortcut
     Refresh, Search, QuickFilter, ExpandTree, TogglePreviewPane, ToggleDetailsPane, ToggleFullScreen,
     RestartApplication,
     CalculateDirectorySize,
+    ScreenMagnifier,
     View1, View2, View3, View4, View5, View6, View7, View8, SearchSelectedFolder, ActivateMenu,
     PasteSpecial,
     AutoFitColumns,
@@ -38,6 +39,7 @@ internal static class KeyboardShortcuts
         (0x75, 0) => ExplorerShortcut.NextFocusRegion,    // F6
         (0x75, 4) => ExplorerShortcut.PreviousFocusRegion, // Shift+F6
         (0x44, 1) => ExplorerShortcut.Address,        // Alt+D
+        (0x4c, 1) => ExplorerShortcut.ScreenMagnifier, // Q-Dir: Alt+L.
         (0x4c, 2) => ExplorerShortcut.Address,       // Ctrl+L
         (0x73, 0) => ExplorerShortcut.AddressTree, // F4: Q-Dir Modern address tree / path-edit cycle.
         (0x54, 2) => ExplorerShortcut.NewTab,
@@ -91,9 +93,13 @@ internal static class KeyboardShortcuts
             ExplorerShortcut.SearchSelectedFolder or
             ExplorerShortcut.PasteSpecial or
             ExplorerShortcut.ProgramStarter or
+            ExplorerShortcut.ScreenMagnifier or
             ExplorerShortcut.AutoFitColumns or
             ExplorerShortcut.NewFolder or
             (>= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ);
+
+    public static bool ShouldYieldDriveLToMagnifier(ExplorerShortcut shortcut, bool magnifierRunning) =>
+        shortcut == ExplorerShortcut.NavigateDriveL && magnifierRunning;
 
     public static int NextPane(int current, int visibleCount, bool reverse)
     {

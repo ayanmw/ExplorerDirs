@@ -246,6 +246,13 @@ if (args.Length == 1 && args[0] == "--qdir-drive-shortcut-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--qdir-magnifier-shortcut-smoke")
+{
+    QDirMagnifierShortcutSmoke.Run();
+    Console.WriteLine("Q-Dir magnifier shortcut smoke: PASS");
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--file-view-export-smoke")
 {
     FileViewExportSmoke.Run();

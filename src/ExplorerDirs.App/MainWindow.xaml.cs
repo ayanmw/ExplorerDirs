@@ -1813,6 +1813,9 @@ public partial class MainWindow : Window
         if (shortcut == ExplorerShortcut.AutoFitColumns) return false; // HwndHost forwards this Shell action after TranslateAccelerator declines it.
         if (shortcut is >= ExplorerShortcut.NavigateDriveA and <= ExplorerShortcut.NavigateDriveZ)
         {
+            if (shortcut == ExplorerShortcut.NavigateDriveL &&
+                KeyboardShortcuts.ShouldYieldDriveLToMagnifier(shortcut, WindowsMagnifierLauncher.IsRunning()))
+                return false;
             var driveRoot = $"{(char)('A' + (int)shortcut - (int)ExplorerShortcut.NavigateDriveA)}:\\";
             if (!Environment.GetLogicalDrives().Contains(driveRoot, StringComparer.OrdinalIgnoreCase)) return false;
             SetActivePane(source);
@@ -1855,6 +1858,9 @@ public partial class MainWindow : Window
                 break;
             case ExplorerShortcut.ProgramStarter:
                 OpenProgramStarterWindow();
+                break;
+            case ExplorerShortcut.ScreenMagnifier:
+                OpenWindowsMagnifier();
                 break;
             case ExplorerShortcut.RestartApplication:
                 RequestRestartApplication();
@@ -2579,6 +2585,18 @@ public partial class MainWindow : Window
     }
 
     private void RefreshEnvironment_Click(object sender, RoutedEventArgs e) => RefreshEnvironment();
+
+    private void OpenWindowsMagnifier_Click(object sender, RoutedEventArgs e) => OpenWindowsMagnifier();
+
+    private void OpenWindowsMagnifier()
+    {
+        try { WindowsMagnifierLauncher.Open(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"无法启动 Windows 放大镜：{ex.Message}", "屏幕放大镜",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void ConnectNetworkDrive_Click(object sender, RoutedEventArgs e) =>
         ShowNetworkDriveDialog(_networkDriveDialogs.Connect, "映射网络驱动器");

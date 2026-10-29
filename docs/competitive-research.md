@@ -65,6 +65,6 @@ Q-Dir [FAQ 84](https://www.softwareok.com/?faq=84&seite=faq-Q-DIR) 另说明筛�
 
 - 文件选择、剪贴板、删除、刷新等基础命令由 Explorer Dirs 原生 ExplorerBrowser/Shell 路径处理；Alt+Left/Right、Backspace、Ctrl+Q、Ctrl+S、Ctrl+M、F3 与 Alt+F3 已在应用侧接入。实现清单及待 GUI 项见[快捷键表](keyboard-shortcuts.md)。
 - 两个明确保留的交互差异：Q-Dir 的 Ctrl+N 是新建文件夹，Explorer Dirs 用 Ctrl+N 创建独立会话窗口，并以 Ctrl+Shift+N/菜单/工具栏新建文件夹；Q-Dir 的 Shift+F6 切换查看方式，Explorer Dirs 用 F6/Shift+F6 正反向遍历主要焦点区域，另用 Ctrl+Shift+1～8 与 Ctrl+滚轮切换查看方式。这些选择符合已确认的多窗口和 Explorer 键盘焦点方案，不因对照而重映射。
-- Alt+L 屏幕放大镜属于辅助工具，不在当前文件管理核心范围；记录为低优先级 Q-Dir 差异，不把它混入 Shell 文件操作或抢占系统级快捷键。
+- Alt+L 屏幕放大镜属于辅助工具，不改变文件管理核心范围；本项目现以“工具 → 屏幕放大镜”和 Alt+L 直接启动 Windows Magnifier 对齐入口，不复制另一套放大器，也不注册全局快捷键。实际启动仍待可见验收。
 
 该复核没有发现应立即改映射的核心快捷键缺口，因此没有改快捷键代码。公开字符串/帮助不能证明本机 Q-Dir 12.79 的实际按键运行时行为；Q-Dir 与 Explorer Dirs 的真实键盘比较仍待获准的隔离可见验收。

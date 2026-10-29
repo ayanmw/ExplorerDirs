@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Backspace、Alt+↑ | 打开当前目录的上一级 | 已接入 Shell 导航；Backspace 按用户习惯定义，区别于 Windows Explorer 的“后退” |
 | Alt+←、Alt+→、Alt+Backspace、Alt+Shift+Backspace | 当前标签的后退、前进历史 | 四种组合复用 ExplorerBrowser 内置 TravelLog；源码已改为切换标签和布局时保留视图，真实历史保持待复测。Alt+Backspace / Alt+Shift+Backspace 对齐 Q-Dir 官方帮助列出的快捷键 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
-| Ctrl+Alt+A～Z | 跳转到对应的逻辑盘符根目录 | 仅拦截系统当前列出的盘符；缺失盘符交回 Shell，不探测网络盘就绪状态。源码与无窗口映射 smoke 已接入；实际按键和断开网络盘的体验待 GUI 验收。快捷键依据 Q-Dir 4.51 官方帮助，当前 Q-Dir 版本的行为仍待可见确认 ([Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
+| Ctrl+Alt+A～Z | 跳转到对应的逻辑盘符根目录 | 仅拦截系统当前列出的盘符；缺失盘符交回 Shell，不探测网络盘就绪状态。Windows 放大镜运行时，`Ctrl+Alt+L` 交回系统以切换镜头模式。源码与无窗口映射 smoke 已接入；实际按键和断开网络盘的体验待 GUI 验收。快捷键依据 Q-Dir 4.51 官方帮助，当前 Q-Dir 版本的行为仍待可见确认 ([Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、地址历史下拉、转到、新建标签、关闭标签、可见时的搜索输入/搜索/关闭控件、快速筛选输入/模式/筛选文件夹/预设/保存/删除/应用/关闭控件、标签标题、目录树（若显示）、详细信息列标题（若有）、文件项、状态栏“查看”入口的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 焦点映射与正反向遍历有无窗口回归；原生列标题/文件项之间及菜单关闭后的真实键盘焦点仍待 GUI 验收 |
 | Ctrl+Tab、Ctrl+Shift+Tab、标签标题聚焦时 Ctrl+←/→ | 按当前窗格标题显示顺序循环标签 | 已接入；Q-Dir 12.56 加入 Ctrl+←/→ 切标签，本项目仅在标签标题聚焦时处理，文件视图中的 Ctrl+方向键继续交给 Shell；`Ctrl+PageUp/PageDown` 保留给文件列表的原生上下翻页，Q-Dir FAQ 64 也建议用 `Ctrl+Tab` 切标签；拖动排序后的顺序待 GUI 验收 ([Q-Dir 版本记录](https://www.softwareok.com/?seite=Freeware/Q-Dir/History)、[FAQ 64](https://www.softwareok.com/?faq=64&seite=faq-Q-DIR)) |
 | Ctrl+1～9 | 跳到当前窗格按标题显示顺序排列的第 1～9 个标签；不存在对应标签时保持当前选择 | 源码映射与无窗口回归通过；重排和多窗格中的实际选择待 GUI 验收 |
@@ -17,6 +17,7 @@
 | F9 | 计算或取消当前文件系统目录的递归总大小、文件数与子目录数 | 已接入后台显式扫描；不自动扫描、不跟随重解析点；导航/切标签/隐藏窗格时取消；实际多窗格状态栏体验待 GUI 验收 |
 | F11 | 在沉浸式无边框全屏与进入前的窗口状态间切换；也可从“视图 → 全屏”操作 | 已接入；覆盖当前显示器并恢复普通/最大化状态，同时保留进入前菜单栏、主工具栏和状态栏各自的显隐状态。窗口状态转换有 smoke 覆盖；可见 GUI、多显示器、DPI、任务栏遮挡与 Shell 子视图缩放仍待验收 ([Q-Dir 官方命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)) |
 | Alt+F11 | 保存当前进程的窗口会话并重启 Explorer Dirs | 已接入 Q-Dir 同款快捷键；仍使用应用内确认和会话保存，不注册系统级热键 |
+| Alt+L | 启动 Windows 屏幕放大镜 | “工具 → 屏幕放大镜”提供同一入口；直接启动 Windows `System32\Magnify.exe`，不实现自有屏幕采集，也不注册全局热键。启动参数与快捷键解析有无窗口 smoke；放大镜实际启动与焦点行为待 GUI 验收 |
 | F10 | 激活菜单栏并打开“文件”菜单 | 已接入源码；真实焦点和关闭/再次按键行为待 GUI 验收 |
 | Ctrl+T、Ctrl+W、Ctrl+Shift+T、Ctrl+K | 新建、关闭、恢复/打开所选文件夹、复制标签 | Ctrl+Shift+T 在文件视图聚焦且仅选中一个文件系统文件夹时于新标签打开它；否则恢复最近关闭的标签。输入框与目录树聚焦时不读取旧文件选区。Ctrl+W 关闭当前标签；每窗格最后一个标签会保留，不像 Explorer 在最后一个标签时关闭窗口。 |
 | Ctrl+Q | 打开快速链接菜单 | 已接入独立便携 `QuickLinks` 目录，支持目录快捷方式在活动窗格打开、程序/文件快捷方式由 Windows Shell 启动；真实菜单焦点与可见行为待 GUI 验收 |
