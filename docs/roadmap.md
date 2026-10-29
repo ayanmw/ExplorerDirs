@@ -28,7 +28,7 @@
 
 2026-10-30：在干净提交 `bf49df9` 后运行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，候选 `src/.state/gui-smoke/20261029-221003-686-b08353` 状态为 `prepared-not-run`，36 项待验收。EXE/DLL 哈希独立复核一致：`290FA2AC3E6310B6229C0669F74F04D8A020423C373C016B1B2B1810BB4D53AA` / `C7572E73F143D144A23BD986E04D7B0895C7E8DDA8D7C1E6672F463A89F5B12B`。候选没有启动窗口，不属于日常 release；详情见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
-2026-10-30 自动刷新诊断：目录 watcher 的 `Error` 事件此前只触发强制协调和重建，未保留错误类型。现将异常类型与 HRESULT 记录到 `LastShellRefreshStatus`，并在 Dispatcher 写入前验证导航、目录、队列、恢复实例和 watcher 仍匹配。App Release build 0 警告/错误；未运行 ExplorerBrowser 或注入真实 watcher 错误，自动刷新 P0 与可见体验门槛不变。详见[调查记录](live-update-investigation.md#2026-10-30记录目录-watcher-错误类型)。
+2026-10-30 自动刷新诊断：目录 watcher 的 `Error` 事件此前只触发强制协调和重建，未保留错误类型。现将异常类型与 HRESULT 记录到 `LastShellRefreshStatus`，并在 Dispatcher 写入前验证导航、目录、队列、恢复实例和 watcher 仍匹配。随后真实四窗格生产宿主以 10,000 项并发本地创建触发 watcher Error 并恢复通过；错误持久诊断另见本路线图后续条目。自动刷新 P0 与可见体验门槛不变。详见[调查记录](live-update-investigation.md#2026-10-30记录目录-watcher-错误类型)。
 
 2026-10-30 IShellView 隔离迁移复验：当前 Release NativeProbe 的四窗格 WPF consumer 再次通过（退出码 0）。反向选择、Ctrl+A、F2 方向键隔离、Shell 文件操作通知、原生视图菜单及 WPF 根窗同步销毁均通过，前台 HWND 与最后输入时间不变。该结果只加强隔离宿主证据；ExplorerBrowser 产品接线、物理输入、完整 OLE 拖放与可见验收仍开放。详细记录见[隔离原型](ishellview-color-spike.md#2026-10-30当前主线复跑四窗格-wpf-consumer)。
 
