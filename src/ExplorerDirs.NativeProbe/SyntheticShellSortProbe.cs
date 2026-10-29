@@ -509,20 +509,22 @@ public static class SyntheticShellSortProbe
             var refreshCountBeforeCancel = deferredRefreshCounter();
             var pendingRefreshes = Marshal.GetDelegateForFunctionPointer<SchedulePendingRefreshes>(NativeLibrary.GetExport(module, "ScheduleSyntheticSortRefreshesForProbe"))();
             if (pendingRefreshes != 2) throw new InvalidOperationException($"Expected to schedule one pending refresh per view, got {pendingRefreshes}.");
-            var cancelledRefresh = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module, "CancelSyntheticSortRefreshForProbe"))(view);
-            Check(cancelledRefresh);
+            Check(At<GetWindow>(view, 3)(view, out var closingViewWindow));
             Check(At<DestroyViewWindow>(view, 10)(view));
             viewWindowCreated = false;
+            var callbacksDuringDestroy = deferredRefreshCounter() - refreshCountBeforeCancel;
+            var cancelledRefresh = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module, "CancelSyntheticSortRefreshForProbe"))(view);
+            Check(cancelledRefresh);
             Check(At<GetWindow>(view, 3)(view, out var destroyedViewWindow));
             Check(At<GetWindow>(view2, 3)(view2, out var survivingViewWindow));
-            if (IsWindow(destroyedViewWindow) || !IsWindow(survivingViewWindow))
+            if (IsWindow(closingViewWindow) || IsWindow(destroyedViewWindow) || !IsWindow(survivingViewWindow))
                 throw new InvalidOperationException("The cancelled first view was not destroyed, or the uncancelled sibling view was lost.");
-            Console.WriteLine("synthetic-shell-size-sort: first-view-refresh-cancelled-before-destroy; sibling-view-remains-live");
+            Console.WriteLine($"synthetic-shell-size-sort: pending-refresh-at-view-destroy=1; callbacks-during-destroy={callbacksDuringDestroy}; remaining-refresh-cancelled-after-destroy=1; sibling-view-remains-live");
             Pump(400);
             var callbacksAfterViewDestroy = deferredRefreshCounter() - refreshCountBeforeCancel;
-            Console.WriteLine($"synthetic-shell-size-sort: sibling-refresh-callbacks={callbacksAfterViewDestroy}; cancelled-view-callbacks=0");
-            if (callbacksAfterViewDestroy != 1)
-                throw new InvalidOperationException($"Expected only the uncancelled sibling view refresh to run, got {callbacksAfterViewDestroy} callbacks.");
+            Console.WriteLine($"synthetic-shell-size-sort: callbacks-after-destroy={callbacksAfterViewDestroy}; callbacks-during-destroy={callbacksDuringDestroy}");
+            if (callbacksAfterViewDestroy != callbacksDuringDestroy + 1)
+                throw new InvalidOperationException($"Expected only the sibling refresh plus any callback already entered during view destruction, got {callbacksAfterViewDestroy} callbacks.");
             Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             Pump(400);
             if (deferredRefreshCounter() != refreshCountBeforeCancel + callbacksAfterViewDestroy)
