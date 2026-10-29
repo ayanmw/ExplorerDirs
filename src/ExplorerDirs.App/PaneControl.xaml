@@ -33,6 +33,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition x:Name="AddressMenuColumn" Width="24"/>
+                        <ColumnDefinition x:Name="AddressComputerColumn" Width="24"/>
                         <ColumnDefinition x:Name="AddressHistoryColumn" Width="24"/>
                     </Grid.ColumnDefinitions>
                     <ScrollViewer x:Name="BreadcrumbScroll" Grid.Column="0" HorizontalScrollBarVisibility="Hidden"
@@ -49,7 +50,10 @@
                     <Button x:Name="AddressMenuButton" Grid.Column="1" Width="24" Padding="0"
                             ToolTip="上级目录和常用系统位置" AutomationProperties.Name="路径位置"
                             Click="AddressMenu_Click"/>
-                    <Button x:Name="AddressHistoryButton" Grid.Column="2" Width="24" Padding="0"
+                    <Button x:Name="AddressComputerButton" Grid.Column="2" Width="24" Padding="0"
+                            ToolTip="此电脑和本机驱动器 (F8)" AutomationProperties.Name="此电脑"
+                            Click="AddressComputer_Click"/>
+                    <Button x:Name="AddressHistoryButton" Grid.Column="3" Width="24" Padding="0"
                             ToolTip="地址历史" AutomationProperties.Name="地址历史"
                             Click="AddressHistory_Click"/>
                 </Grid>

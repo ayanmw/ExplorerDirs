@@ -39,7 +39,7 @@ internal static class FocusTraversalSmoke
                 "F6 reverses every Shift+F6 transition across major pane regions");
         }
 
-        for (var options = 0; options < 1024; options++)
+        for (var options = 0; options < 2048; options++)
         {
             var hasSearch = (options & 1) != 0;
             var hasFilter = (options & 2) != 0;
@@ -48,6 +48,7 @@ internal static class FocusTraversalSmoke
             var hasTreeButton = (options & 16) != 0;
             var hasAddressHistoryButton = (options & 32) != 0;
             var hasAddressMenuButton = (options & 64) != 0;
+            var hasAddressComputerButton = (options & 1024) != 0;
             var hasPaneViewStyleButton = (options & 128) != 0;
             var hasTabHeader = (options & 256) != 0;
             var hasStatusBar = (options & 512) != 0;
@@ -56,6 +57,7 @@ internal static class FocusTraversalSmoke
                 paneViewStyleButtonVisible: hasPaneViewStyleButton,
                 addressHistoryButtonVisible: hasAddressHistoryButton,
                 addressPathButtonVisible: hasAddressMenuButton,
+                addressComputerButtonVisible: hasAddressComputerButton,
                 tabHeaderVisible: hasTabHeader,
                 statusBarVisible: hasStatusBar);
             var expectedSearchCount = hasSearch ? 3 : 0;
@@ -63,12 +65,16 @@ internal static class FocusTraversalSmoke
             // The per-pane view-style button is keyboard-focusable in the actual toolbar;
             // it must remain in the custom Tab cycle instead of being skipped.
             var expectedNavigationStops = 8 + (hasTreeButton ? 1 : 0) + (hasPaneViewStyleButton ? 1 : 0) +
-                (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
+                (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0) +
+                (hasAddressComputerButton ? 1 : 0);
             var expectedPaneViewStyle = hasPaneViewStyleButton ? 4 + (hasTreeButton ? 1 : 0) : -1;
             var expectedAddress = 4 + (hasTreeButton ? 1 : 0) + (hasPaneViewStyleButton ? 1 : 0);
             var expectedAddressMenu = hasAddressMenuButton ? expectedAddress + 1 : -1;
-            var expectedAddressHistory = hasAddressHistoryButton ? expectedAddress + 1 + (hasAddressMenuButton ? 1 : 0) : -1;
-            var expectedGo = expectedAddress + 1 + (hasAddressHistoryButton ? 1 : 0) + (hasAddressMenuButton ? 1 : 0);
+            var expectedAddressComputer = hasAddressComputerButton ? expectedAddress + 1 + (hasAddressMenuButton ? 1 : 0) : -1;
+            var expectedAddressHistory = hasAddressHistoryButton ? expectedAddress + 1 +
+                (hasAddressMenuButton ? 1 : 0) + (hasAddressComputerButton ? 1 : 0) : -1;
+            var expectedGo = expectedAddress + 1 + (hasAddressHistoryButton ? 1 : 0) +
+                (hasAddressMenuButton ? 1 : 0) + (hasAddressComputerButton ? 1 : 0);
             var nextAfterFilter = expectedNavigationStops + expectedSearchCount + expectedFilterCount;
             var expectedTabHeader = hasTabHeader ? nextAfterFilter : -1;
             var expectedTree = nextAfterFilter + (hasTabHeader ? 1 : 0);
@@ -76,7 +82,8 @@ internal static class FocusTraversalSmoke
             var expectedFileView = expectedColumnHeader + (hasColumnHeader ? 1 : 0);
             Check(map.NavigationStopCount == expectedNavigationStops && map.TreeButton == (hasTreeButton ? 4 : -1) &&
                   map.PaneViewStyle == expectedPaneViewStyle &&
-                  map.AddressMenu == expectedAddressMenu && map.AddressHistory == expectedAddressHistory && map.Address == expectedAddress && map.Go == expectedGo &&
+                  map.AddressMenu == expectedAddressMenu && map.AddressComputer == expectedAddressComputer &&
+                  map.AddressHistory == expectedAddressHistory && map.Address == expectedAddress && map.Go == expectedGo &&
                   map.NewTab == expectedGo + 1 && map.CloseTab == expectedGo + 2 &&
                   map.SearchStart == expectedNavigationStops && map.SearchCount == expectedSearchCount &&
                   map.FilterStart == expectedNavigationStops + expectedSearchCount && map.FilterCount == expectedFilterCount &&

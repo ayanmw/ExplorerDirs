@@ -49,6 +49,7 @@ internal static class ExplorerChromeIconSmoke
               paneCode.Contains("RefreshButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               paneCode.Contains("TreeButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               paneCode.Contains("AddressMenuButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
+              paneCode.Contains("AddressComputerButton.Content = new Image", StringComparison.Ordinal) &&
               paneCode.Contains("AddressHistoryButton.Content = ExplorerChromeIcons.CreatePath", StringComparison.Ordinal) &&
               paneMarkup.Contains("Click=\"Back_Click\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("Click=\"Forward_Click\"", StringComparison.Ordinal) &&
@@ -56,7 +57,12 @@ internal static class ExplorerChromeIconSmoke
               paneMarkup.Contains("Click=\"Refresh_Click\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("Click=\"Tree_Click\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("Click=\"AddressMenu_Click\"", StringComparison.Ordinal) &&
+              paneMarkup.Contains("AutomationProperties.Name=\"此电脑\"", StringComparison.Ordinal) &&
+              paneMarkup.Contains("Click=\"AddressComputer_Click\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("Click=\"AddressHistory_Click\"", StringComparison.Ordinal) &&
+              paneCode.Contains("addressComputerButtonVisible: true", StringComparison.Ordinal) &&
+              paneCode.Contains("AddressComputerButton, AddressHistoryButton", StringComparison.Ordinal) &&
+              paneCode.Contains("AddressPathMenu.BuildComputerMenu(), AddressComputerButton", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"后退\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"前进\"", StringComparison.Ordinal) &&
               paneMarkup.Contains("AutomationProperties.Name=\"上级目录\"", StringComparison.Ordinal),

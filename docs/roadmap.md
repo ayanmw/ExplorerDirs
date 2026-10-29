@@ -10,6 +10,8 @@
 
 2026-10-30 Q-Dir F8“此电脑”菜单：新增 `F8` 快捷键，在当前窗格弹出“此电脑”及系统当前逻辑驱动器入口；驱动器目标和图标复用 Shell 地址菜单能力，未修改 F7 路径层级菜单。定向快捷键和菜单数据 smoke 通过；真实菜单外观、焦点和键盘选择待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
 
+2026-10-30 Q-Dir F8 按钮入口：在地址栏旁新增独立“此电脑”按钮，使用 Shell 系统图标并将菜单锚定到该按钮；Tab/Shift+Tab 顺序纳入新按钮。焦点矩阵扩至 2,048 种控件组合，按钮与菜单路由 smoke 和 App Release build 通过；按钮实际绘制、菜单定位及真实键盘焦点仍待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
+
 2026-10-30 Q-Dir Alt+V / Alt+K 文件操作别名：`Alt+V` 通过编辑菜单现有 Shell `cut` 动词剪切所选项目，供后续粘贴移动；`Alt+K` 通过 `copy` 动词复制所选项目。仅文件视图获得焦点时执行，地址/搜索文本和 Shell 重命名输入不截获；编辑菜单快捷键文字显示两个组合。Shell 命令路由、焦点门控、别名冲突修饰键 smoke 通过；真实键盘、剪贴板及后续粘贴文件操作待集中 GUI 验收。[快捷键清单](keyboard-shortcuts.md)
 
 2026-10-30 Q-Dir “Copy Path”：在“编辑”菜单增加“复制所选项目完整路径”，单选原样复制，多选按行复制；虚拟 Shell 位置或空选区不写入部分/无效路径。定向路径格式 smoke、完整 Release `SettingsSmoke`、App Release build（0 警告/错误）、`ExplorerDirs.HostProbe --selected-paths-clipboard` 真实生产 Shell 单选/多选取值（隐藏宿主、前台不变、未触碰剪贴板）及 `git diff --check` 通过；未启动 GUI。下一次集中验收需检查菜单状态、剪贴板文本、虚拟项目拒绝，以及复制后原文件视图仍可立即用方向键操作。[Shell 功能对照](shell-parity.md)

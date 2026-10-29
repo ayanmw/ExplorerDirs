@@ -198,6 +198,12 @@ public partial class PaneControl : UserControl
         ToolbarViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         ViewStyleButton.Content = ViewStyleMenu.CreateToolbarIcon();
         AddressMenuButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.AddressDropDown), 12);
+        AddressComputerButton.Content = new Image
+        {
+            Source = ShellIconProvider.GetIcon("shell:MyComputerFolder", isDirectory: true),
+            Width = 16,
+            Height = 16
+        };
         AddressHistoryButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.History), 14);
         AddressTreeHost.DirectorySelected += identity =>
         {
@@ -896,6 +902,7 @@ public partial class PaneControl : UserControl
         paneViewStyleButtonVisible: ToolbarViewStyleButton.Visibility == Visibility.Visible,
         addressHistoryButtonVisible: true,
         addressPathButtonVisible: true,
+        addressComputerButtonVisible: true,
         tabHeaderVisible: Tabs.Visibility == Visibility.Visible,
         statusBarVisible: StatusBarRow.Visibility == Visibility.Visible);
     internal int FocusStopCount => FocusMap.Count;
@@ -916,9 +923,9 @@ public partial class PaneControl : UserControl
         var focus = FocusMap;
         UIElement[] controls = focus.TreeButton >= 0
             ? [BackButton, ForwardButton, UpButton, RefreshButton, TreeButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton]
             : [BackButton, ForwardButton, UpButton, RefreshButton, ToolbarViewStyleButton,
-                Address, AddressMenuButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
+                Address, AddressMenuButton, AddressComputerButton, AddressHistoryButton, GoButton, NewTabButton, CloseTabButton];
         for (var index = 0; index < controls.Length; index++)
             if (controls[index].IsKeyboardFocusWithin) return index;
         if (focus.SearchCount == 3)
@@ -961,6 +968,7 @@ public partial class PaneControl : UserControl
         if (stop == focus.PaneViewStyle) target = ToolbarViewStyleButton;
         if (stop == focus.Address) { FocusAddress(); return Address.IsKeyboardFocused; }
         if (stop == focus.AddressMenu) target = AddressMenuButton;
+        if (stop == focus.AddressComputer) target = AddressComputerButton;
         if (stop == focus.AddressHistory) target = AddressHistoryButton;
         if (stop == focus.Go) target = GoButton;
         if (stop == focus.NewTab) target = NewTabButton;
@@ -1444,24 +1452,26 @@ public partial class PaneControl : UserControl
     }
 
     private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressMenu();
+    private void AddressComputer_Click(object sender, RoutedEventArgs e) => ShowComputerMenu();
 
     internal void ShowAddressMenu()
     {
         if (Current is not { } state) return;
-        ShowAddressMenu(state, AddressPathMenu.Build(state.Path));
+        ShowAddressMenu(state, AddressPathMenu.Build(state.Path), AddressMenuButton);
     }
 
     internal void ShowComputerMenu()
     {
         if (Current is not { } state) return;
-        ShowAddressMenu(state, AddressPathMenu.BuildComputerMenu());
+        ShowAddressMenu(state, AddressPathMenu.BuildComputerMenu(), AddressComputerButton);
     }
 
-    private void ShowAddressMenu(TabState state, IReadOnlyList<AddressPathMenuEntry> entries)
+    private void ShowAddressMenu(TabState state, IReadOnlyList<AddressPathMenuEntry> entries,
+        FrameworkElement placementTarget)
     {
         var menu = new ContextMenu
         {
-            PlacementTarget = AddressHost,
+            PlacementTarget = placementTarget,
             Placement = PlacementMode.Bottom,
             DataContext = state
         };
@@ -1516,7 +1526,9 @@ public partial class PaneControl : UserControl
         RefreshButton.Width = navigationWidth;
         AddressHistoryButton.Width = compact ? 20 : 24;
         AddressMenuButton.Width = compact ? 20 : 24;
+        AddressComputerButton.Width = compact ? 20 : 24;
         AddressMenuColumn.Width = new GridLength(compact ? 20 : 24);
+        AddressComputerColumn.Width = new GridLength(compact ? 20 : 24);
         AddressHistoryColumn.Width = new GridLength(compact ? 20 : 24);
         NewTabButton.Width = navigationWidth;
         CloseTabButton.Width = navigationWidth;
