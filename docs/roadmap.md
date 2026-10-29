@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30：递归目录大小通知 A/B 探针增加耗时和 Shell 查询计数（枚举调用/行数、大小列与属性读取、比较次数）；计数包含探针读取 ListView 文本时触发的属性请求，只作同一探针内相对参考。NativeProbe Release build、无窗口 folder-tree smoke、DLL unload contract、`git diff --check` 通过。Shell view A/B 仍因未确认前台桌面边界而未运行；产品与 release 未改。
+
 2026-10-30：继续排查递归目录大小 Shell 原型的清理停滞。源码显示异常返回路径先释放 `IFolderView2`、再销毁 `IShellView` 子窗口；现调整 teardown 为先 `DestroyViewWindow`，保留 view/browser-site/folder 引用直至子窗口销毁，再释放 COM 引用与 parent。NativeProbe Release、原生 `/W4 /WX`、无窗口 DLL unload contract 与 synthetic folder tree smoke 均通过；未运行 Private Desktop view probe，不能声称 STA 等待已解决。产品/release 未改。后续在桌面边界稳定时，用带外部 watchdog/minidump 的递归大小探针复测清理阶段。
 
 2026-10-30：继续准备递归目录大小更新的 Shell 通知 A/B。NativeProbe 现依次测单项 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR` 和整视图刷新，并采集列值、排序、选区/焦点是否更新；无窗口合同 smoke 还确认合成值覆盖更新列属性并让 `CompareIDs` 按 1 对 4 字节文件重新排序，清除覆盖后比较关系恢复。NativeProbe Release、原生 `/W4 /WX`、DLL unload contract 和 folder-tree smoke 通过；前台 HWND 仍为 0，未运行 Shell view A/B。产品和 release 未改。下一步在桌面边界稳定时运行 A/B 与 watchdog 清理复测，再根据观测决定是否实施后台大小缓存和逐项更新。

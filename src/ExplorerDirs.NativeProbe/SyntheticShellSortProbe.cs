@@ -775,10 +775,22 @@ public static class SyntheticShellSortProbe
         SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
         SetBackingChildSize(backingFolder, updatedSize);
         SetSyntheticSizeOverride(module, updatedSize);
+        var enumsBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        var rowsEnumeratedBefore = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
+        var detailsBefore = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
+        var comparesBefore = ReadCounter(module, "GetSyntheticSizeCompareCount");
+        var propertiesBefore = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
+        var notificationStarted = Environment.TickCount64;
         notify();
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
-        Console.WriteLine($"synthetic-size-update: strategy={name}; value-updated={after.ValueUpdated}; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
+        var elapsedMs = Environment.TickCount64 - notificationStarted;
+        var enumsAfter = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        var rowsEnumeratedAfter = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
+        var detailsAfter = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
+        var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
+        var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; elapsed-ms={elapsedMs}; value-updated={after.ValueUpdated}; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
     }
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, string[] Names, string[] Sizes)
