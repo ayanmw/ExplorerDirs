@@ -358,6 +358,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         .OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")) +
         "; samples=" + string.Join('|', _nativeUserMessageSamples);
     internal string LastShellRefreshStatus { get; private set; } = "not-started";
+    internal string LastDirectoryChangeWatcherError { get; private set; } = "none";
     internal string LastQuickFilterStatus { get; private set; } = "not-started";
     internal string NativeViewMessageTimingSnapshot => string.Join('|', _nativeViewMessageTimings.OrderByDescending(pair => pair.Value.ShellMaxTicks)
         .ThenByDescending(pair => pair.Value.HostMaxTicks).Select(pair =>
@@ -3415,6 +3416,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void StartDirectoryChangeMonitor(string path, long navigationVersion)
     {
         StopDirectoryChangeMonitor();
+        LastDirectoryChangeWatcherError = "none";
         DirectoryChangeInitialCount = null;
         DirectoryChangeStartSampleCount = 0;
         if (_location.IsSearchActive || !IsSupportedDirectoryChangePath(path)) return;
@@ -3644,7 +3646,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     !ReferenceEquals(_directoryChangeWatcher, watcher)) return;
 
                 // Keep overflow and other watcher failures distinguishable even when recreation succeeds.
-                LastShellRefreshStatus = $"directory-watcher-error={error.GetType().Name},hr=0x{error.HResult:X8}";
+                LastDirectoryChangeWatcherError = $"{error.GetType().Name},hr=0x{error.HResult:X8}";
+                LastShellRefreshStatus = $"directory-watcher-error={LastDirectoryChangeWatcherError}";
             }));
         }
         catch (InvalidOperationException)

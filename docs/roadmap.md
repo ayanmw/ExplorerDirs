@@ -4675,3 +4675,7 @@ API 边界复核：本机 Windows SDK `IFolderView2` 提供整视图 redraw 开�
 ## 2026-10-30：自动刷新 watcher 溢出恢复复验
 
 Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并发文件创建触发一次 `FileSystemWatcher.Error`，恢复强制刷新后四窗格计数、队列结算及受检窗格的选区/焦点均通过，退出码 0；无可见窗口或生产逻辑变更。此次补充本机目录溢出恢复证据，不能关闭自动刷新 P0，网络/虚拟 Shell 与可见交互仍待验证。详见[目录变更调查](live-update-investigation.md#2026-10-30真实-watcher-溢出后的生产宿主恢复)。
+
+## 2026-10-30：保留恢复后的 watcher 错误诊断
+
+溢出恢复成功后，通用刷新状态会被覆盖为 `refreshed; rows=0`，错误根因无法回查。现增加独立的 `LastDirectoryChangeWatcherError`，保留最近一次当前目录 watcher 错误类型/HRESULT，并在新目录启动监视时重置。真实 10,000 项本地溢出场景的 RED/GREEN HostProbe 与 Release build 通过；未启动可见窗口、不改变刷新策略。详情见[目录变更调查](live-update-investigation.md#2026-10-30保留-watcher-错误诊断至恢复完成)。

@@ -1908,6 +1908,12 @@ Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `She
 
 源码复核发现 `FileSystemWatcher.Error` 已触发强制协调和 watcher 重建，但丢弃了 `ErrorEventArgs` 中的异常；因此即使恢复成功，诊断状态也无法区分缓冲区溢出与其它 watcher 错误。现在将异常类型与 HRESULT 写入 `LastShellRefreshStatus`，并在 Dispatcher 上复核导航代次、路径、队列、恢复实例和 watcher 身份后才写状态，避免迟到错误污染新目录。原有刷新/重建和退避逻辑不变。App Release build 通过，0 警告/错误，`git diff --check` 通过；本轮没有触发真实 watcher 错误或启动 ExplorerBrowser，错误运行时状态和自动恢复仍待后续安全宿主/可见验收。
 
+随后真实溢出探针发现成功刷新会把 `LastShellRefreshStatus` 覆盖为 `refreshed; rows=0`，导致错误类型虽短暂写入，却不能在恢复后检查。新增独立的 `LastDirectoryChangeWatcherError`，仅在当前路径/监视器身份仍有效时记录，新的目录监视启动时清空；不改变用户界面状态、重试或刷新行为。
+
 ## 2026-10-30：真实 watcher 溢出后的生产宿主恢复
 
 运行 Release HostProbe `--live-shell-refresh-deferred-watcher-overflow`，退出码 0。隐藏的四窗格 ExplorerBrowser 生产宿主中，对第 4 窗格并发创建 10,000 个隔离临时文件，真实 `FileSystemWatcher.Error` 收到 1 次；溢出恢复强制刷新已触发，所有批次 pending delta 清零，最终视图计数与夹具一致为 `2/2/3/10003`。刷新等待期间向第 1 窗格注入的输入代次完成结算，两个受检查窗格的选区与焦点均保留，溢出重试计时器停止。夹具位于探针专用临时目录并由探针回收；未打开可见窗口、未改生产代码。该单机本地文件夹样本验证 watcher 溢出恢复闭环，不覆盖网络盘、虚拟 Shell 位置、长时间连续溢出或可见窗口体验。
+
+## 2026-10-30：保留 watcher 错误诊断至恢复完成
+
+为溢出探针增加恢复后的错误状态断言，旧实现按预期失败：真实 watcher 溢出后最终计数与焦点/选区虽正确，`LastShellRefreshStatus` 已被覆盖为 `refreshed; rows=0`。修正后 HostProbe Release build 0 警告/错误；同一 10,000 项并发本地夹具触发 2 次真实 `FileSystemWatcher.Error`，`LastDirectoryChangeWatcherError` 在恢复结束后仍为 `InternalBufferOverflowException,hr=0x80131905`，目录计数为 `2/2/3/10003`、pending delta 为 0、两处选区/焦点恢复，退出码 0。新导航会清除旧错误，避免把前一目录的诊断误认为当前状态。该字段仅供内部诊断，不是 UI 提示；无可见窗口，网络/虚拟 Shell 与长期溢出行为仍未验证。
