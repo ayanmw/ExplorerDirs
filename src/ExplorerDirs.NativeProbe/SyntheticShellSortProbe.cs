@@ -802,8 +802,16 @@ public static class SyntheticShellSortProbe
         bool valueUpdated = false, orderUpdated = false, selectionPreserved = expectedSelection is null;
         while (Environment.TickCount64 < deadline)
         {
-            names = ReadNames(listView, module, expectedCount: -1);
-            sizes = ReadColumnTexts(listView, module, subItem: 1, expectedCount: -1);
+            SetSizeMetricsObservation(module, enabled: true);
+            try
+            {
+                names = ReadNames(listView, module, expectedCount: -1);
+                sizes = ReadColumnTexts(listView, module, subItem: 1, expectedCount: -1);
+            }
+            finally
+            {
+                SetSizeMetricsObservation(module, enabled: false);
+            }
             if (names.Length != 2 || sizes.Length != 2)
             {
                 Pump(50);
@@ -1181,6 +1189,10 @@ public static class SyntheticShellSortProbe
 
     private static int ReadCounter(nint module, string name) =>
         Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, name))();
+
+    private static void SetSizeMetricsObservation(nint module, bool enabled) =>
+        Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+            NativeLibrary.GetExport(module, "SetSyntheticSizeMetricsObservationForProbe"))(enabled ? 1 : 0));
 
     private static void Pump(int milliseconds)
     {

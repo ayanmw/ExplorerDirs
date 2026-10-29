@@ -1226,6 +1226,9 @@ namespace
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
+    // Exclude synchronous property callbacks caused by the probe's own
+    // ListView text reads from notification-strategy counters.
+    thread_local BOOL g_syntheticSizeMetricsObservation = FALSE;
     constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
     { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
     volatile LONG g_syntheticEnumObjectsCount = 0;
@@ -1636,7 +1639,8 @@ namespace
                 ++_index;
             }
             if (fetched) *fetched = made;
-            InterlockedAdd(&g_syntheticEnumeratedItems, static_cast<LONG>(made));
+            if (!g_syntheticSizeMetricsObservation)
+                InterlockedAdd(&g_syntheticEnumeratedItems, static_cast<LONG>(made));
             return made == count ? S_OK : S_FALSE;
         }
         HRESULT STDMETHODCALLTYPE Skip(ULONG count) override
@@ -1879,7 +1883,7 @@ namespace
         {
             if (!value) return E_POINTER;
             *value = nullptr;
-            InterlockedIncrement(&g_syntheticEnumObjectsCount);
+            if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticEnumObjectsCount);
             if (!_inner) return E_UNEXPECTED;
             std::vector<SyntheticChild> children;
             HRESULT result = S_OK;
@@ -1995,7 +1999,7 @@ namespace
             {
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
-                InterlockedIncrement(&g_syntheticSizeCompareCount);
+                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeCompareCount);
                 comparison = SyntheticSize(leftChild) < SyntheticSize(rightChild) ? -1 :
                     SyntheticSize(leftChild) > SyntheticSize(rightChild) ? 1 : 0;
                 break;
@@ -2160,21 +2164,29 @@ namespace
         {
             if (key && *key == kSizeKey)
             {
-                InterlockedIncrement(&g_syntheticSizeDetailsExCount);
+                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExCount);
                 const auto* child = SyntheticData(item);
                 if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    InterlockedIncrement(&g_syntheticSizeDetailsExFolderCount);
+                {
+                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExFolderCount);
+                }
                 else if (child)
-                    InterlockedIncrement(&g_syntheticSizeDetailsExFileCount);
+                {
+                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExFileCount);
+                }
             }
             if (key && *key == kSyntheticRecursiveSizeKey)
             {
-                InterlockedIncrement(&g_syntheticCustomSizeDetailsExCount);
+                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExCount);
                 const auto* child = SyntheticData(item);
                 if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    InterlockedIncrement(&g_syntheticCustomSizeDetailsExFolderCount);
+                {
+                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExFolderCount);
+                }
                 else if (child)
-                    InterlockedIncrement(&g_syntheticCustomSizeDetailsExFileCount);
+                {
+                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExFileCount);
+                }
             }
             if (!key || !value || (*key != kSizeKey && *key != kSyntheticRecursiveSizeKey)) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
@@ -2188,8 +2200,9 @@ namespace
         {
             if (item)
             {
-                InterlockedIncrement(&g_syntheticItemDetailsOfCount);
-                if (column == 1) InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
+                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticItemDetailsOfCount);
+                if (column == 1 && !g_syntheticSizeMetricsObservation)
+                    InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
             }
             if (!details || column > 2) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
@@ -3218,6 +3231,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProb
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSizeMetricsObservationForProbe(BOOL enabled)
+{
+    g_syntheticSizeMetricsObservation = enabled ? TRUE : FALSE;
     return S_OK;
 }
 

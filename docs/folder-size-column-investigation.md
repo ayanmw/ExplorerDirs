@@ -443,3 +443,5 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 2026-10-30 清理链源码复核：递归大小分支在断言后直接返回，进入 `finally` 时先释放 `IFolderView2`，再调用 `IShellView::DestroyViewWindow`；这让视图子窗口销毁发生在其 view/browser-site COM 引用部分释放之后。现已把两个 `DestroyViewWindow` 调用移到 `IFolderView2`、view、文件夹和 browser-site 释放之前，并在子窗口回收后再释放合成对象引用、宿主与顶层 parent。该顺序符合“先销毁 Shell view window，再释放宿主依赖”的生命周期要求，但仍只是原型代码的修正假设，不证明此前 COM STA 等待因此消失。NativeProbe Release 编译、原生适配器 `/W4 /WX` 编译、无窗口 DLL unload contract 和 synthetic folder tree smoke 均通过；本轮没有运行 Private Desktop view，也没有卡死现场复测。下一步仍需在桌面边界稳定时运行带外部 watchdog/minidump 的递归大小对照，并检查是否越过 `cleanup-destroy-view-window-1` 阶段。产品和 release 均未改。
 
 2026-10-30：A/B 输出增加通知到视图状态收敛的耗时，以及 `EnumObjects` 调用/行数、逐项大小列读取、自定义属性读取和大小比较次数，便于区分重枚举与局部刷新。注意这些计数覆盖探针通过 ListView 读取结果时产生的属性请求；它们用于同一探针内的相对比较，不代表纯 Shell 刷新开销。Release 构建、无窗口 folder-tree smoke、DLL unload contract 和 `git diff --check` 通过；本轮仍未启动真实 Shell view A/B。
+
+2026-10-30：修正上条 A/B 计数的观察者干扰：探针读取 ListView 文本时，用仅作用于当前 STA 线程的标记屏蔽同步回调产生的枚举、大小属性和比较计数；消息泵期间仍正常累计 Shell 更新工作。原生适配器 `/W4 /WX` 与 NativeProbe Release 构建、无窗口 folder-tree smoke、DLL unload contract 均通过。该变化提高相对计数的可解释性，但尚未实际运行通知 A/B，仍需运行时确认事件回调线程与观察线程一致。
