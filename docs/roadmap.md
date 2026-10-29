@@ -26,7 +26,7 @@
 
 近期执行顺序：已为“使用系统 Explorer 浏览”和用户级文件夹入口整理[集中验收清单](gui-acceptance-system-entry.md)。下一步继续从仍开放的 Shell parity 缺口中选取无需 GUI 的实现项；依赖真实消息循环、物理键鼠或当前用户 Explorer 扩展菜单的项目留待集中验收。新功能的成功标准与验证范围在对应批次记录，不将探针证据当作产品可见验收。
 
-2026-10-30：在 `3028b40` 后重新执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，候选 `src/.state/gui-smoke/20261029-214047-035-7386f6` 与当前干净主线对应，状态 `prepared-not-run`，仍有 35 项待验收。EXE/DLL 哈希独立复核一致：`9DE1995B6B7FC0D357B604B3D176721B9D73603BDF6947A0E801267CD48F8BBA` / `F93CA70EA1DCE934BC3E88356C2D34777DD7EECA9292DABDB295AB21EFCAF961`。未启动候选窗口；仅更新[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)，不属于日常 release。
+2026-10-30：在干净提交 `bf49df9` 后运行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，候选 `src/.state/gui-smoke/20261029-221003-686-b08353` 状态为 `prepared-not-run`，36 项待验收。EXE/DLL 哈希独立复核一致：`290FA2AC3E6310B6229C0669F74F04D8A020423C373C016B1B2B1810BB4D53AA` / `C7572E73F143D144A23BD986E04D7B0895C7E8DDA8D7C1E6672F463A89F5B12B`。候选没有启动窗口，不属于日常 release；详情见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
 2026-10-30 自动刷新诊断：目录 watcher 的 `Error` 事件此前只触发强制协调和重建，未保留错误类型。现将异常类型与 HRESULT 记录到 `LastShellRefreshStatus`，并在 Dispatcher 写入前验证导航、目录、队列、恢复实例和 watcher 仍匹配。App Release build 0 警告/错误；未运行 ExplorerBrowser 或注入真实 watcher 错误，自动刷新 P0 与可见体验门槛不变。详见[调查记录](live-update-investigation.md#2026-10-30记录目录-watcher-错误类型)。
 
