@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 复制标签保留文件选区：同窗格复制与跨窗格复制现在捕获当前标签中可寻址的文件系统选区，并在副本完成导航后将选区恢复到新 Shell view。Release HostProbe 用临时目录中的两个文件验证源选区、克隆状态传递、生产批量 `IShellView.SelectItem` 调用及副本选区读回；移动标签原对象/HWND/Back 历史和关闭清理回归也通过。Release SettingsSmoke、App/HostProbe Release build 与 `git diff --check` 通过；隐藏窗口未激活且前台不变。虚拟 Shell 选项不纳入此恢复，实际复制标签键鼠和可见焦点仍待集中 GUI 验收。
+
 2026-10-30 ExplorerBrowser 隐藏项目偏好修复：隐藏生产宿主在普通隐藏文件、系统隐藏文件夹具上先复现显式 Hide 仍列出普通隐藏项（Shell 列表计数 3，而预期 2）。根因是 `ShellBrowserSite.GetViewFlags` 在 `QuickFilterActive=false` 时设置 `NOINCLUDEITEM`，使 DefView 绕过已安装的 `IFolderFilter::ShouldShow`；显式 Show/Hide 现都启用 Shell folder-filter 回调，Hide 用 `SFGAO_HIDDEN` 排除普通隐藏项，GetEnumFlags 仍不请求 `SHCONTF_INCLUDESUPERHIDDEN`。隐藏 `PaneControl`/真实 ExplorerBrowser 宿主复验 Show=3、Hide=2、系统隐藏项始终不出现；`SettingsSmoke`、HostProbe 和 App Release build 通过。没有改 Windows 全局设置或显示窗口；外部切换后通知、其他 Shell provider 与可见菜单验收仍开放。
 
 2026-10-30 文件夹入口安装事务回滚复验：此前的 smoke 只直接调用回滚 helper。本轮在注册表值写入边界注入一次异常，让 `Enable-ExplorerDirsFolderVerb` 完整执行创建、失败捕获与回滚；第二个注册项部分写入失败后两个新注册项均恢复为缺失，既有外部改值保护用例仍通过。`publish-smoke.ps1` 也通过，确认隔离预览包会携带此模块并能读取包内程序能力清单。受控异常不等同于真实注册表 ACL/系统写入故障；没有修改日常 `HKCU\Software\Classes`、启动 GUI 或产出真实 release。

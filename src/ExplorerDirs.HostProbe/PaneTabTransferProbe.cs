@@ -21,6 +21,7 @@ internal static class PaneTabTransferProbe
             Directory.CreateDirectory(path);
             File.WriteAllText(Path.Combine(path, "probe.txt"), path);
         }
+        File.WriteAllText(Path.Combine(sourceA, "probe-2.txt"), "second selected item");
 
         HwndSource? host = null;
         UIElement? sourcePane = null;
@@ -54,9 +55,9 @@ internal static class PaneTabTransferProbe
             var targetTabs = Array.CreateInstance(tabSettingsType, 1);
             targetTabs.SetValue(Activator.CreateInstance(tabSettingsType, [targetPath, view, emptyFilter, false, false]), 0);
             sourcePane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null], null)!;
+                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false], null)!;
             targetPane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null], null)!;
+                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false], null)!;
 
             if (unhostedCopyOrder)
             {
@@ -145,9 +146,24 @@ internal static class PaneTabTransferProbe
                     StringComparison.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(15), "Back navigated through the pre-move Shell history");
 
+            SelectShellItems(browserType, browser, sourceA, ["probe.txt", "probe-2.txt"]);
+            var selectedPaths = (IReadOnlyList<string>)browserType.GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!
+                .Invoke(browser, null)!;
+            Ensure(selectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
+                    .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
+                "the source Shell view starts with both clone-selection fixtures selected");
+
             var copy = (bool)paneType.GetMethod("CopyTabFrom", InstanceMembers)!
                 .Invoke(sourcePane, [state, null, true])!;
             Ensure(copy, "Ctrl-drag copy can create a tab in a pane whose only tab was moved away");
+            var pendingCopy = (TabItem)sourceTabsControl.SelectedItem!;
+            var pendingCopyState = pendingCopy.Tag!;
+            var startupSelections = (IReadOnlyList<string>?)pendingCopyState.GetType()
+                .GetProperty("StartupSelectPaths", InstanceMembers)!.GetValue(pendingCopyState);
+            Ensure(startupSelections is not null && startupSelections.Select(Path.GetFileName)
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
+                "copy carries the selected filesystem entries into the cloned tab's startup restore request");
             PumpUntil(() => sourceTabsControl.Items.Count == 2 &&
                 string.Equals(ReadBrowserPath(sourceTabsControl.SelectedItem!), sourceA, StringComparison.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(15), "the independent copied browser became ready");
@@ -155,6 +171,12 @@ internal static class PaneTabTransferProbe
             var copiedBrowser = browserProperty.GetValue(copiedState)!;
             Ensure(!ReferenceEquals(copiedState, state) && !ReferenceEquals(copiedBrowser, browser),
                 "copy creates an independent tab and Shell host");
+            ApplyCopiedShellSelections(browserType, copiedBrowser, sourceA, ["probe.txt", "probe-2.txt"]);
+            var copiedSelectedPaths = (IReadOnlyList<string>)browserType
+                .GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!.Invoke(copiedBrowser, null)!;
+            Ensure(copiedSelectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
+                    .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
+                "the copied Shell view applies and reports the original multi-selection");
 
             paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [state]);
             Ensure(targetTabsControl.Items.Count == 1 && !targetTabsControl.Items.Contains(movedTab),
@@ -667,6 +689,65 @@ internal static class PaneTabTransferProbe
         return (string)browser.GetType().GetProperty("CurrentPath", InstanceMembers)!.GetValue(browser)!;
     }
 
+    private static void SelectShellItems(Type hostType, object browser, string folder, IReadOnlyList<string> names)
+    {
+        var shellBrowser = hostType.GetField("_browser", InstanceMembers)!.GetValue(browser)!;
+        var shellViewId = new Guid("000214E3-0000-0000-C000-000000000046");
+        var viewObject = new object?[] { shellViewId, null };
+        var browserInterface = hostType.GetNestedType("IExplorerBrowser", BindingFlags.NonPublic)!;
+        Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!.Invoke(shellBrowser, viewObject)!);
+        var shellView = viewObject[1]!;
+        var selectItem = hostType.GetNestedType("IShellView", BindingFlags.NonPublic)!.GetMethod("SelectItem")!;
+        try
+        {
+            for (var index = 0; index < names.Count; index++)
+            {
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(folder, names[index]), 0,
+                    out var absolutePidl, 0, out _));
+                try
+                {
+                    var flags = index == 0 ? 0x15u : 0x11u;
+                    Marshal.ThrowExceptionForHR((int)selectItem.Invoke(shellView,
+                        [ILFindLastID(absolutePidl), flags])!);
+                }
+                finally { Marshal.FreeCoTaskMem(absolutePidl); }
+            }
+        }
+        finally { Marshal.ReleaseComObject(shellView); }
+    }
+
+    private static void ApplyCopiedShellSelections(Type hostType, object browser, string folder,
+        IReadOnlyList<string> names)
+    {
+        var shellBrowser = hostType.GetField("_browser", InstanceMembers)!.GetValue(browser)!;
+        var shellViewId = new Guid("000214E3-0000-0000-C000-000000000046");
+        var viewObject = new object?[] { shellViewId, null };
+        var browserInterface = hostType.GetNestedType("IExplorerBrowser", BindingFlags.NonPublic)!;
+        Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!.Invoke(shellBrowser, viewObject)!);
+        var shellView = viewObject[1]!;
+        var absolutePidls = new List<nint>(names.Count);
+        try
+        {
+            foreach (var name in names)
+            {
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(folder, name), 0,
+                    out var absolutePidl, 0, out _));
+                absolutePidls.Add(absolutePidl);
+            }
+            // Route through the production batch helper so this checks the same native flags and
+            // per-item continuation logic without activating the hidden test window.
+            var helper = hostType.GetMethod("ApplyFileSystemSelectionBatch", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var result = helper.Invoke(null, [shellView, absolutePidls, (Func<bool>)(() => true)])!;
+            Ensure((bool)result.GetType().GetField("Item1")!.GetValue(result)!,
+                "production Shell selection batch applies every copied item");
+        }
+        finally
+        {
+            foreach (var pidl in absolutePidls) Marshal.FreeCoTaskMem(pidl);
+            Marshal.ReleaseComObject(shellView);
+        }
+    }
+
     private static void PumpUntil(Func<bool> predicate, TimeSpan timeout, string description)
     {
         var frame = new DispatcherFrame();
@@ -724,6 +805,9 @@ internal static class PaneTabTransferProbe
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint requested, out uint attributes);
+    [DllImport("shell32.dll")] private static extern nint ILFindLastID(nint pidl);
     [DllImport("user32.dll")]
     private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")]

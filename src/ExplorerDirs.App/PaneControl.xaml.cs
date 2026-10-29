@@ -85,7 +85,7 @@ public partial class PaneControl : UserControl
         public bool IsPinned { get; set; }
         public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
-        public string? StartupSelectPath { get; set; }
+        public IReadOnlyList<string>? StartupSelectPaths { get; set; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
     }
@@ -605,7 +605,7 @@ public partial class PaneControl : UserControl
     internal bool OpenPathAndSelectInNewTab(string directory, string selectedPath)
     {
         if (!CanAddTabs(1)) return false;
-        AddTab(directory, _newTabView(), startupSelectPath: selectedPath);
+        AddTab(directory, _newTabView(), startupSelectPaths: [selectedPath]);
         return true;
     }
     internal void ImportTabs(IReadOnlyList<TabSettings> tabs, int selectedIndex,
@@ -637,10 +637,11 @@ public partial class PaneControl : UserControl
                 Status.Text = "视图配置暂时不可读取，未复制标签。";
                 return;
             }
+            var selectedPaths = state.Browser.CaptureSelectedFileSystemPaths();
             AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
-                addressHistory: state.AddressHistory.Copy());
+                addressHistory: state.AddressHistory.Copy(), startupSelectPaths: selectedPaths);
         }
         catch (Exception ex)
         {
@@ -1586,7 +1587,7 @@ public partial class PaneControl : UserControl
 
     private TabItem AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false,
         QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
-        AddressPathHistory? addressHistory = null, string? startupSelectPath = null)
+        AddressPathHistory? addressHistory = null, IReadOnlyList<string>? startupSelectPaths = null)
     {
         if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
@@ -1595,7 +1596,7 @@ public partial class PaneControl : UserControl
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,
-            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectPath = startupSelectPath };
+            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectPaths = startupSelectPaths };
         state.AddressHistory.Record(path);
         tab.Tag = state;
         browser.QuickFilterChanged += settings =>
@@ -1670,12 +1671,13 @@ public partial class PaneControl : UserControl
             var owner = state.Owner;
             var navigatedPath = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
-            if (completesInput && state.StartupSelectPath is { } startupSelectPath)
+            if (completesInput && state.StartupSelectPaths is { } startupSelectPaths)
             {
-                state.StartupSelectPath = null;
-                if (string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(startupSelectPath) ?? string.Empty),
-                        Path.TrimEndingDirectorySeparator(navigatedPath), StringComparison.OrdinalIgnoreCase))
-                    browser.QueueFileSystemSelection(startupSelectPath);
+                state.StartupSelectPaths = null;
+                var paths = startupSelectPaths.Where(selectedPath =>
+                    string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(selectedPath) ?? string.Empty),
+                        Path.TrimEndingDirectorySeparator(navigatedPath), StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (paths.Length > 0) browser.QueueFileSystemSelections(paths);
             }
             if (completesInput)
             {
@@ -1747,7 +1749,7 @@ public partial class PaneControl : UserControl
         {
             if (!browser.IsCurrentNavigationRequest(notice.RequestVersion)) return;
             var owner = state.Owner;
-            state.StartupSelectPath = null;
+            state.StartupSelectPaths = null;
             state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state))
                 owner._searchCloseFocusPending = null;
@@ -2419,11 +2421,12 @@ public partial class PaneControl : UserControl
             var view = source.Browser.CaptureViewState();
             if (source.Browser.ViewCaptureFailed)
                 throw new InvalidOperationException("Shell 视图状态暂时不可读取；未复制标签。");
+            var selectedPaths = source.Browser.CaptureSelectedFileSystemPaths();
             var copy = AddTab(source.Browser.CurrentPath, view, select: false, pinned: source.IsPinned,
                 quickFilter: source.Browser.QuickFilter,
                 previewPaneVisible: source.Browser.PreviewPaneVisible,
                 detailsPaneVisible: source.Browser.DetailsPaneVisible,
-                addressHistory: source.AddressHistory.Copy());
+                addressHistory: source.AddressHistory.Copy(), startupSelectPaths: selectedPaths);
             _tabOrder.Remove(copy);
             // AddTab already inserted the copy. Exclude it before counting the
             // pinned partition, or a blank-strip copy lands after an ordinary tab.

@@ -110,7 +110,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _columnFilterArrowMouseDown;
     private DispatcherTimer? _newFolderRenameTimer;
     private DispatcherTimer? _createdFileSelectionTimer;
-    private IntPtr _createdFileSelectionPidl;
+    private List<IntPtr>? _createdFileSelectionPidls;
     private CreatedFileSelectionRequest? _createdFileSelectionRequest;
     private int _createdFileSelectionAttempts;
     private FolderCreationObservation? _newFolderObservation;
@@ -1542,20 +1542,37 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal bool QueueFileSystemSelection(string path)
     {
+        return QueueFileSystemSelections([path]);
+    }
+
+    internal bool QueueFileSystemSelections(IReadOnlyList<string> paths)
+    {
         if (_browser is null || !_location.IsFileSystemLocation || _location.IsSearchActive ||
-            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(path) ?? string.Empty),
-                Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase)) return false;
-        if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
+            paths.Count == 0) return false;
+        List<IntPtr> pidls = [];
+        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
-            return false;
+            if (!Path.IsPathFullyQualified(path) ||
+                !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(path) ?? string.Empty),
+                    Path.TrimEndingDirectorySeparator(CurrentPath), StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl);
+                return false;
+            }
+            if (SHParseDisplayName(path, IntPtr.Zero, out var absolutePidl, 0, out _) < 0)
+            {
+                if (absolutePidl != IntPtr.Zero) Marshal.FreeCoTaskMem(absolutePidl);
+                foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl);
+                return false;
+            }
+            pidls.Add(absolutePidl);
         }
         try
         {
             CancelCreatedFileSelection();
-            return QueueFileSystemSelection(absolutePidl, CaptureFileSystemSelectionRequest());
+            return QueueFileSystemSelections(pidls, CaptureFileSystemSelectionRequest());
         }
-        finally { Marshal.FreeCoTaskMem(absolutePidl); }
+        finally { foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl); }
     }
 
     private CreatedFileSelectionRequest CaptureFileSystemSelectionRequest() =>
@@ -1563,11 +1580,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
 
     private bool QueueFileSystemSelection(IntPtr absolutePidl, CreatedFileSelectionRequest request)
+        => QueueFileSystemSelections([absolutePidl], request);
+
+    private bool QueueFileSystemSelections(IReadOnlyList<IntPtr> absolutePidls,
+        CreatedFileSelectionRequest request)
     {
         // Shell calls can pump messages. Keep the request tied to its original tab state.
-        if (!IsCreatedFileSelectionRequestCurrent(request)) return false;
-        _createdFileSelectionPidl = ILClone(absolutePidl);
-        if (_createdFileSelectionPidl == IntPtr.Zero) return false;
+        if (absolutePidls.Count == 0 || !IsCreatedFileSelectionRequestCurrent(request)) return false;
+        List<IntPtr> clones = new(absolutePidls.Count);
+        foreach (var absolutePidl in absolutePidls)
+        {
+            var clone = ILClone(absolutePidl);
+            if (clone == IntPtr.Zero)
+            {
+                foreach (var pidl in clones) Marshal.FreeCoTaskMem(pidl);
+                return false;
+            }
+            clones.Add(clone);
+        }
+        _createdFileSelectionPidls = clones;
         _createdFileSelectionRequest = request;
         _createdFileSelectionAttempts = 0;
         _createdFileSelectionTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -1582,7 +1613,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private void CreatedFileSelectionTimer_Tick(object? sender, EventArgs e)
     {
         var request = _createdFileSelectionRequest;
-        if (request is null || _createdFileSelectionPidl == IntPtr.Zero ||
+        var pidls = _createdFileSelectionPidls;
+        if (request is null || pidls is not { Count: > 0 } ||
             !IsCreatedFileSelectionRequestCurrent(request) || !IsVisible ||
             Window.GetWindow(this)?.IsActive != true || MayRestoreFocus?.Invoke() != true ||
             IsRenameEditorFocused())
@@ -1604,24 +1636,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         CancelCreatedFileSelection(request);
                         return;
                     }
-                    // A nested Paste Special can replace/free the request while SelectItem pumps messages.
-                    var childPidl = ILClone(ILFindLastID(_createdFileSelectionPidl));
-                    if (childPidl != IntPtr.Zero)
+                    var batch = ApplyFileSystemSelectionBatch((IShellView)viewObject, pidls, () =>
                     {
-                        int result;
-                        try { result = ((IShellView)viewObject).SelectItem(childPidl, 0x1d); }
-                        finally { Marshal.FreeCoTaskMem(childPidl); }
-                        if (result >= 0)
-                        {
-                            var stillOwnsRequest = ReferenceEquals(_createdFileSelectionRequest, request);
-                            CancelCreatedFileSelection(request);
-                            if (stillOwnsRequest && IsCreatedFileSelectionLocationCurrent(request) &&
-                                request.InputVersion == _nativeUserInputVersion && MayRestoreFocus?.Invoke() == true &&
-                                Window.GetWindow(this)?.IsActive == true)
-                                FocusView();
-                            return;
-                        }
+                        return ReferenceEquals(_createdFileSelectionRequest, request) &&
+                        IsCreatedFileSelectionLocationCurrent(request) &&
+                        request.InputVersion == _nativeUserInputVersion && MayRestoreFocus?.Invoke() == true &&
+                        Window.GetWindow(this)?.IsActive == true;
+                    });
+                    if (batch.Complete)
+                    {
+                        var stillOwnsRequest = ReferenceEquals(_createdFileSelectionRequest, request);
+                        CancelCreatedFileSelection(request);
+                        if (stillOwnsRequest && IsCreatedFileSelectionLocationCurrent(request) &&
+                            request.InputVersion == _nativeUserInputVersion && MayRestoreFocus?.Invoke() == true &&
+                            Window.GetWindow(this)?.IsActive == true)
+                            FocusView();
+                        return;
                     }
+                    // Do not retry a partially applied batch after our own selection notifications change the
+                    // Shell selection version; a failed first item remains eligible for the normal retry path.
+                    if (batch.AppliedAny) CancelCreatedFileSelection(request);
                 }
                 finally { Marshal.ReleaseComObject(viewObject); }
             }
@@ -1631,6 +1665,26 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (!ReferenceEquals(_createdFileSelectionRequest, request)) return;
 
         if (_createdFileSelectionAttempts >= 20) CancelCreatedFileSelection(request);
+    }
+
+    private static (bool Complete, bool AppliedAny) ApplyFileSystemSelectionBatch(IShellView shellView,
+        IReadOnlyList<IntPtr> absolutePidls, Func<bool> mayContinue)
+    {
+        var appliedAny = false;
+        for (var index = 0; index < absolutePidls.Count; index++)
+        {
+            if (!mayContinue()) return (false, appliedAny);
+            // First select clears prior selection; remaining items join the batch.
+            var childPidl = ILClone(ILFindLastID(absolutePidls[index]));
+            if (childPidl == IntPtr.Zero) return (false, appliedAny);
+            int result;
+            try { result = shellView.SelectItem(childPidl, index == 0 ? 0x1du : 0x9u); }
+            finally { Marshal.FreeCoTaskMem(childPidl); }
+            if (result < 0) return (false, appliedAny);
+            appliedAny = true;
+            if (!mayContinue()) return (false, true);
+        }
+        return (true, appliedAny);
     }
 
     private bool IsCreatedFileSelectionRequestCurrent(CreatedFileSelectionRequest request) =>
@@ -1651,10 +1705,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _createdFileSelectionTimer.Tick -= CreatedFileSelectionTimer_Tick;
             _createdFileSelectionTimer = null;
         }
-        if (_createdFileSelectionPidl != IntPtr.Zero)
+        if (_createdFileSelectionPidls is { } pidls)
         {
-            Marshal.FreeCoTaskMem(_createdFileSelectionPidl);
-            _createdFileSelectionPidl = IntPtr.Zero;
+            foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl);
+            _createdFileSelectionPidls = null;
         }
         _createdFileSelectionRequest = null;
         _createdFileSelectionAttempts = 0;
