@@ -285,6 +285,7 @@ public static class SyntheticShellSortProbe
             }
             Console.WriteLine($"synthetic-shell-size-sort: selected-items={selectedCount}; selected-item-IContextMenu-hr=0x{selectionMenuHr:X8}; QueryContextMenu-hr=0x{selectionMenuQueryHr:X8}; menu-items={selectionMenuItemCount}; selected-IDataObject-hr=0x{dataObjectHr:X8}; CF_HDROP-hr=0x{hdropHr:X8} path={hdropPath}; CIDA-hr=0x{cidaHr:X8} path={cidaPath}; IFileOperation={copyResult}");
             var listView = FindListView(view);
+            VerifyMultiSelectionCancellation(folderView, view, module, Path.Combine(copyDestination, "MultiSelection"));
             var initial = ReadNames(listView, module);
             var ascending = SortAndRead(module, folderView, view, listView, direction: 1);
             var ascendingCompareCount = ReadCounter(module, "GetSyntheticSizeCompareCount");
@@ -752,6 +753,41 @@ public static class SyntheticShellSortProbe
             finally { Marshal.Release(destinationItem); }
         }
         finally { Marshal.Release(operation); }
+    }
+
+    private static void VerifyMultiSelectionCancellation(nint folderView, nint view, nint module, string destinationFolder)
+    {
+        var listView = FindListView(view);
+        var names = ReadNames(listView, module);
+        var firstIndex = Array.FindIndex(names, name => string.Equals(name, "two.bin", StringComparison.OrdinalIgnoreCase));
+        var secondIndex = Array.FindIndex(names, name => string.Equals(name, "z-ten.bin", StringComparison.OrdinalIgnoreCase));
+        if (firstIndex < 0 || secondIndex < 0 || firstIndex == secondIndex)
+            throw new InvalidOperationException("The isolated multi-select cancellation fixture items were not present in the Shell view.");
+
+        var selectItem = At<SelectItem>(folderView, 15);
+        Check(selectItem(folderView, firstIndex, 0x1u | 0x4u | 0x10u | 0x40000000u));
+        Check(selectItem(folderView, secondIndex, 0x1u | 0x40000000u));
+        Check(At<GetItemCount>(folderView, 7)(folderView, 1, out var selectedCount));
+        if (selectedCount != 2) throw new InvalidOperationException($"Expected two selected Shell items for the cancellation probe, got {selectedCount}.");
+
+        var dataObjectId = DataObjectId;
+        Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectedItems));
+        if (selectedItems == 0) throw new InvalidOperationException("The two-item Shell selection did not produce a data object.");
+        try
+        {
+            VerifyCancelledCopies(selectedItems, destinationFolder);
+            Check(At<GetItemCount>(folderView, 7)(folderView, 1, out var selectedAfterCancel));
+            var afterNames = ReadNames(listView, module);
+            var firstState = StateForName(listView, afterNames, "two.bin");
+            var secondState = StateForName(listView, afterNames, "z-ten.bin");
+            if (selectedAfterCancel != 2 ||
+                (firstState & (LvisSelected | LvisFocused)) != (LvisSelected | LvisFocused) ||
+                (secondState & LvisSelected) == 0)
+                throw new IOException($"Cancelling a multi-selection copy changed the view's selection or focus: selected={selectedAfterCancel}; first=0x{firstState:X}; second=0x{secondState:X}.");
+            Console.WriteLine("synthetic-shell-size-sort: cancelled-multi-selection-preserved=True; selected=2; focused=two.bin");
+            Pump(800); // Aborted IFileOperation still emits Shell invalidations; let the asynchronous view refresh finish before the next operation.
+        }
+        finally { Marshal.Release(selectedItems); }
     }
 
     [ComVisible(true)]
