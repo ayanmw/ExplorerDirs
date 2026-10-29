@@ -90,6 +90,20 @@ $qdrColorBaseline = Join-Path $runRoot 'qdr-color-baseline.qdr'
     'ViewMode1=4',
     "Dir1=$testDirectory"
 ), [Text.UTF8Encoding]::new($false))
+$qdrColorMetadataFixture = Join-Path $runRoot 'qdr-color-metadata.qdr'
+[IO.File]::WriteAllLines($qdrColorMetadataFixture, [string[]]@(
+    'Q-Dir Version=12.79',
+    'ViewMode1=4',
+    'useColor=1',
+    'useTreeColor=0',
+    'colorthema=0',
+    "Dir1=$testDirectory",
+    '[Filter2]',
+    '0=#Hidden=1=-1=1=1=-1=0',
+    '1=*.zip;*.rar;=1=00AA00=-1=1=-1=0',
+    '2=#BG=1=-1=-1=1=-1=0',
+    '3=#BG-A=1=-1=-1=1=-1=0'
+), [Text.UTF8Encoding]::new($false))
 
 # Import into the initially single-tab pane to reach the supported 100-tab
 # boundary without creating 99 tabs by hand. All paths are disposable fixtures.
@@ -182,6 +196,8 @@ $manifest = [ordered]@{
     ParentDirectoryItem = $parentDirectoryItem
     RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
     QdrColorBaseline = 'qdr-color-baseline.qdr'
+    QdrColorMetadataFixture = 'qdr-color-metadata.qdr'
+    QdrColorMetadataFixtureSha256 = (Get-FileHash -LiteralPath $qdrColorMetadataFixture -Algorithm SHA256).Hash
     TabCapacityFixture = 'qdr-tab-capacity-99.qdr'
     PercentPathFixture = 'acceptance-files/percent-paths'
     PercentPathProcessVariable = $percentVariable
@@ -228,6 +244,7 @@ $manifest = [ordered]@{
         'Open Tools > Program Starter; add and save one inert test entry, then restart and verify it returns from the isolated profile ProgramStarter.ini. Import qdir-program-items.ini and verify both rows and all fields in preview; cancel and confirm ProgramStarter.ini is unchanged, then import again and explicitly apply. Verify the fixture SHA-256 is unchanged, the Q-Dir source was not modified, and imported programs were not launched',
         'Test Tools > Restart Windows Explorer in a disposable desktop session only: first cancel the confirmation and verify the Shell process is unchanged; before confirming a restart, save work and close any Explorer windows that must remain open. Then verify the desktop, taskbar, and Start menu return, and record whether Explorer folder windows shared the Shell process. Do not execute this acceptance against an active user session without explicit confirmation',
         'Open Tools > Folder Entry; verify Directory/Drive status and preview the isolated EXE path, SHA-256, and directory-argument capability. The isolated package includes tools/folder-verb.ps1 and its exact-hash capability manifest. Keep the real user registry unchanged; enabling or disabling the actual folder context entry requires a separate explicit user choice',
+        'Import qdr-color-metadata.qdr and confirm the preview says Q-Dir colors are retained but not applied. Export to a new .qdr and compare useColor, useTreeColor, colorthema and all [Filter2] rows in the same order. Keep the fixture SHA-256 unchanged. If checking Q-Dir GUI compatibility, open only the exported copy and close without saving over the fixture; do not claim visible file coloring from metadata preservation',
         'QDR import/export, cancellation, and native Q-Dir compatibility',
         'Theme regression: in both Light and Dark, verify cold start, duplicated tabs, pane switching, scrollbar endpoints, directory trees and native context menus retain the accepted temp.76 appearance without white flashes, delayed/double borders or transparent gutters; compare after import cancel, minimal qdr-color-baseline.qdr import and restart',
         'Run capacity checks last on a fresh isolated profile with one tab in pane-1: import TabCapacityFixture (99 incoming tabs) to reach 100, verify New/Duplicate/Middle-click/drag-copy or drag-move into that pane cannot add a tab and keep the source/selection. Reimport is rejected before partial append. At capacity Reopen Closed must preserve its history; freeing a slot permits recovery. Do not use the resulting 100-tab workload as the normal memory baseline'
