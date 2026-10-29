@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using System.IO;
 
 namespace ExplorerDirs.SettingsSmoke;
 
@@ -13,8 +14,10 @@ internal static class SystemExplorerLauncherSmoke
         })
         {
             var start = SystemExplorerLauncher.CreateStartInfo(path);
-            Require(start.FileName.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase),
-                "launches the Windows Explorer executable");
+            var expectedExecutable = Path.GetFullPath(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"));
+            Require(start.FileName.Equals(expectedExecutable, StringComparison.OrdinalIgnoreCase),
+                "launches the Windows Explorer executable by its absolute system path");
             Require(start.UseShellExecute && start.ArgumentList.SequenceEqual([path]),
                 "passes the exact filesystem or Shell namespace path as one argument");
         }

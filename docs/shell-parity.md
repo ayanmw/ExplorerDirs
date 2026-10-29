@@ -441,7 +441,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 ### 标签栏菜单与系统 Explorer（2026-10-28）
 
-标签页右键菜单现在以“使用 Explorer 浏览”开头，将该标签 `Browser.CurrentPath` 传给 `explorer.exe`；空白标签栏右键显示当前标签菜单。原空白双击新建标签及标签项双击关闭规则不变。后台参数/接线 smoke 不启动子进程；真实 Explorer 导航和可见菜单定位待集中 UI 验收。
+标签页右键菜单现在以“使用 Explorer 浏览”开头，将该标签 `Browser.CurrentPath` 作为单一参数传给 Windows 目录下的系统 `explorer.exe` 完整路径，避免依赖裸文件名解析；空白标签栏右键显示当前标签菜单。原空白双击新建标签及标签项双击关闭规则不变。定向参数 smoke 确认文件系统路径和 Shell namespace 路径原样保留，且不启动子进程；真实 Explorer 导航和可见菜单定位待集中 UI 验收。
 
 ### Explorer Shell 重启工具安全边界（2026-10-28）
 

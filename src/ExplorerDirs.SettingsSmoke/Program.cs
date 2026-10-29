@@ -15,6 +15,12 @@ if (args is ["--shell-middle-click-target-smoke"])
     return;
 }
 
+if (args is ["--system-explorer-launcher-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.SystemExplorerLauncherSmoke.Run();
+    return;
+}
+
 if (args is ["--folder-entry-manager-smoke"])
 {
     ExplorerDirs.SettingsSmoke.FolderEntryManagerSmoke.Run();

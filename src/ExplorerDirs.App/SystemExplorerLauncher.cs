@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace ExplorerDirs.App;
 
@@ -7,7 +8,8 @@ internal static class SystemExplorerLauncher
     internal static ProcessStartInfo CreateStartInfo(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+        var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        var start = new ProcessStartInfo(executable) { UseShellExecute = true };
         start.ArgumentList.Add(path);
         return start;
     }
