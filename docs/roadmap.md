@@ -4595,6 +4595,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 - `HwndSource.Dispose` 销毁父根成功，前台 HWND 和最后输入时间戳保持不变。`DllCanUnloadNow` 在仍有 COM 引用时返回 `S_FALSE`，模块留待探针进程退出回收。
 - 结果与此前原生 `STATIC` 根销毁卡住的观察形成对照，提示继续聚焦宿主根窗口销毁路径；尚未同轮复跑 `STATIC` 基线或取得卡住调用栈，根因未证实。产品仍使用 ExplorerBrowser，本次只更新隔离架构证据，不代表产品迁移门槛已通过。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-30wpf-根宿主清理对照)。
 - 随后同 watchdog 重跑 `STATIC` 基线，仍停在父窗口销毁并捕获 561,128-byte minidump；watchdog 清理临时注册与夹具成功。但前台从锁屏 HWND 变为 `0` 且最后输入时间戳变化，故此轮隔离条件失效，不作为 A/B 通过或根因证据；转储头与目录确认有 14 个 stream（含 14 个线程及线程信息流），线程栈未解析。
+- 只读解析主线程上下文后，TID 24940 当前 RIP 对应同版本 `win32u!NtUserMsgWaitForMultipleObjectsEx+0x14`；栈内地址还落在 COM `CoWaitForMultipleHandles` 与 CLR 模块区域，其它线程多位于 ntdll 等待入口。模式与 STA/COM 消息等待相符，不能据此断言死锁或具体根因；仍需符号化调用栈。
 
 - provider-owned attributes 对照显示：DefView 的 `GetAttributesOf` 可由合成 PIDL 直接提供 folder/stream 属性，但标准 `PKEY_Size` 列仍不请求目录值。后续未注册自定义列 key 的隔离实验则能显示目录派生值，并经标题点击调用 `CompareIDs` 排序；`SetSortColumns` 对未知 key 仍返回 `TYPE_E_ELEMENTNOTFOUND`。该路径仍只在 NativeProbe 验证，未接入产品。
 
