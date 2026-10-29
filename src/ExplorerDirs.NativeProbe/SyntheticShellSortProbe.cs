@@ -169,6 +169,8 @@ public static class SyntheticShellSortProbe
             Check(At<GetWindow>(view, 3)(view, out var shellViewWindow1));
             Check(At<GetWindow>(view2, 3)(view2, out var shellViewWindow2));
             Console.WriteLine($"synthetic-shell-size-sort: view-windows=0x{unchecked((nuint)shellViewWindow1):X}/0x{unchecked((nuint)shellViewWindow2):X}; list-windows=0x{unchecked((nuint)listView):X}/0x{unchecked((nuint)listView2):X}");
+            using var selectionObserver1 = new ListViewSelectionObserver(listView, "view1");
+            using var selectionObserver2 = new ListViewSelectionObserver(listView2, "view2");
             var secondInitial = ReadNames(listView2, module);
             Console.WriteLine($"synthetic-shell-size-sort: second-view-initial=[{string.Join('|', secondInitial)}]");
             var contextMenuId = ContextMenuId;
@@ -1027,11 +1029,92 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
     private delegate bool EnumChildProcedure(nint child, nint parameter);
 
+    // Observe native LVN_ITEMCHANGED so move-refresh traces show when DefView itself clears selection.
+    private sealed class ListViewSelectionObserver : IDisposable
+    {
+        private const uint WmNotify = 0x004E;
+        private const int LvnItemChanged = -101;
+        private const uint LvisFocused = 0x0001;
+        private const uint LvisSelected = 0x0002;
+        private static readonly SubclassProcedure Procedure = WindowProcedure;
+        private static nuint _nextSubclassId = 0xE170;
+        private readonly nint _parent;
+        private readonly nuint _subclassId;
+        private readonly GCHandle _self;
+        private readonly string _label;
+
+        internal ListViewSelectionObserver(nint listView, string label)
+        {
+            _label = label;
+            _parent = GetParent(listView);
+            if (_parent == 0) throw new InvalidOperationException($"Could not find the {label} ListView notification parent.");
+            _subclassId = unchecked(++_nextSubclassId);
+            _self = GCHandle.Alloc(this);
+            if (!SetWindowSubclass(_parent, Procedure, _subclassId, GCHandle.ToIntPtr(_self)))
+            {
+                _self.Free();
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    $"Could not observe {label} ListView selection notifications.");
+            }
+        }
+
+        private static nint WindowProcedure(nint window, uint message, nuint wParam, nint lParam,
+            nuint subclassId, nint referenceData)
+        {
+            try
+            {
+                if (message == WmNotify && lParam != 0)
+                {
+                    var header = Marshal.PtrToStructure<NativeNotifyHeader>(lParam);
+                    if (header.Code == LvnItemChanged)
+                    {
+                        var change = Marshal.PtrToStructure<NativeListViewChange>(lParam);
+                        if (((change.NewState ^ change.OldState) & (LvisSelected | LvisFocused)) != 0 &&
+                            GCHandle.FromIntPtr(referenceData).Target is ListViewSelectionObserver observer)
+                        {
+                            Console.WriteLine($"synthetic-shell-size-sort: LVN_ITEMCHANGED {observer._label} item={change.Item}; old=0x{change.OldState:X}; new=0x{change.NewState:X}; changed=0x{change.Changed:X}");
+                        }
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"synthetic-shell-size-sort: selection-notify-observer-error={exception.GetType().Name}");
+            }
+            return DefSubclassProc(window, message, wParam, lParam);
+        }
+
+        public void Dispose()
+        {
+            if (_self.IsAllocated)
+            {
+                if (IsWindow(_parent)) _ = RemoveWindowSubclass(_parent, Procedure, _subclassId);
+                _self.Free();
+            }
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct NativeNotifyHeader
+    {
+        public nint WindowFrom; public nuint IdFrom; public int Code;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeListViewChange
+    {
+        public NativeNotifyHeader Header; public int Item; public int SubItem;
+        public uint NewState; public uint OldState; public uint Changed; public nint ItemData;
+    }
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProcedure(
+        nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern nint GetParent(nint window);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProcedure procedure, nuint subclassId, nint referenceData);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProcedure procedure, nuint subclassId);
+    [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProcedure callback, nint parameter);
