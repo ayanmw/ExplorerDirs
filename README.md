@@ -4,7 +4,7 @@
 
 最新已发布预览版为 [temp.79](D:/projects/explorer-dirs/releases/preview-0.6.0-temp.79/app/ExplorerDirs.App.exe)，使用独立 profile。它包含保留标签的隐藏标签栏、虚拟 Shell 文件夹新标签打开、文件夹入口管理窗口，以及 Explorer 重启 PID 身份保护；后台构建和发布隔离检查通过，未启动该版本，也未启用系统入口。版本详情见[temp.79 说明](docs/releases/preview-0.6.0-temp.79.md)。
 
-主线在 temp.79 之后新增了“编辑 → 复制所选项目完整路径”及文件视图快捷键 `Ctrl+Shift+C`，并用隐藏生产 Shell 宿主验证单选/多选路径读取。该功能尚未发布；当前 GUI 集中验收候选基于主线 `89d5ad8`，位于 `src/.state/gui-smoke/20261029-210710-414-36eaf8/`，35 项可见验收仍待运行。候选记录与哈希见[主线验收候选](docs/gui-acceptance-2026-10-30-main-prepared.md)。
+主线在 temp.79 之后新增了“编辑 → 复制所选项目完整路径”及文件视图快捷键 `Ctrl+Shift+C`，并用隐藏生产 Shell 宿主验证单选/多选路径读取。该功能尚未发布；最新 GUI 集中验收候选基于主线 `41c1a60`，位于 `src/.state/gui-smoke/20261029-212632-525-ee20a3/`，35 项可见验收仍待运行。候选记录与哈希见[最新主线验收候选](docs/gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
 产品仍使用 ExplorerBrowser；隔离 IShellView 原型没有替换产品宿主。真实鼠标/键盘、Shell 菜单、Q-Dir `.qdr` 互操作与内存固定负载采样仍有待完成项，状态和证据范围见[路线图](docs/roadmap.md)及[Q-Dir / Explorer 功能对照](docs/shell-parity.md)。
 
