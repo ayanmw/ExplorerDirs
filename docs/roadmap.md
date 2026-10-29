@@ -4671,3 +4671,7 @@ Q-Dir GUI 互操作仍待验收，见[格式依据](qdr-import.md#2026-10-21code
 2026-10-30 WPF 根宿主补测“删除后重建”通知：对同一个绝对子 PIDL 依次发送 `SHCNE_DELETE` 与 `SHCNE_CREATE`，约 1.36 秒内只发生一次两行枚举和一次大小比较，焦点/选区保持，但通知后没有 `GetDetailsOf`/`GetDetailsEx` 调用，大小文本仍未恢复。watchdog exit code 0，前台 HWND/输入 tick 不变，临时 CLSID/NameSpace 注册与夹具已清理；日志 `src/.state/native-probe-watchdog/20261030-034248-535f69ba.stdout.log`。该策略未解决列值刷新，不能作为后续路径。
 
 API 边界复核：本机 Windows SDK `IFolderView2` 提供整视图 redraw 开关，但没有受支持的逐行属性值失效/重取入口；`IShellFolderView::RefreshObject` 已由 Microsoft 标记为 Windows 7 起不再可用的 legacy 接口。结合上述通知与 ListView 消息矩阵，当前 DefView 路径未找到受支持的逐项派生列更新机制。下一步不继续尝试内部 ListView 消息或重复通知；若需要实时派生列，应另行评审自有视图/数据模型及维护成本，并先通过 Shell 操作、导航、焦点、拖放、通知等兼容门槛。产品仍使用 ExplorerBrowser。
+
+## 2026-10-30：自动刷新 watcher 溢出恢复复验
+
+Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并发文件创建触发一次 `FileSystemWatcher.Error`，恢复强制刷新后四窗格计数、队列结算及受检窗格的选区/焦点均通过，退出码 0；无可见窗口或生产逻辑变更。此次补充本机目录溢出恢复证据，不能关闭自动刷新 P0，网络/虚拟 Shell 与可见交互仍待验证。详见[目录变更调查](live-update-investigation.md#2026-10-30真实-watcher-溢出后的生产宿主恢复)。
