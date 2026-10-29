@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-30：当前主线复跑四窗格 WPF consumer
+
+使用当前 Release NativeProbe 重跑 `scripts/native-probe-watchdog.ps1 -Probe private-desktop-four-pane-wpf-host-keyboard-consumer -TimeoutSeconds 40`，退出码 0。四个 pane 的 Ctrl+A、八种视图反向选择矩阵、F2 四方向键与错误 pane 路由隔离、真实 `IFileOperation` 复制/重命名/删除后的四窗格通知收敛、原生 Details/排序/分组选单和同步清理均通过；WPF 根窗收到 `WM_NCDESTROY`。Private Desktop 前后台 HWND 与最后输入时间保持不变，探针进程退出且无遗留 NativeProbe 进程。日志：`src/.state/native-probe-watchdog/20261030-051503-3379c5f6.stdout.log`；stderr 为空。此复跑确认隔离 consumer 组合仍可工作，不验证产品 ExplorerBrowser、物理输入、可见 OLE 拖放或迁移完整性。
+
 ## 2026-10-29：Shell item 绑定视图的原生上下文菜单
 
 在自定义 `IShellFolder` 适配器产生的嵌套文件夹 `IShellItem` 上，通过 `BHID_SFViewObject` 建立实际 Shell view，再分别查询 `GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 与 `GetItemObject(SVGIO_SELECTION, IID_IContextMenu)`。背景菜单的 `QueryContextMenu` 返回 194 条命令、31 个菜单项，并枚举到 `refresh`、`newfolder`、`viewlogicaldetails`；选中一项后，选中项菜单返回 135 条命令、27 个菜单项，并枚举到 `copy`、`delete`、`rename`、`properties`。随后从该视图选择取出原生 `IDataObject`，交给 `IFileOperation::CopyItems` 分别复制到兄弟目录和当前视图目录；两个副本内容检查通过，源文件保留，当前视图通过 Shell 通知从 2 项更新为 3 项，同目录副本名由系统本地化为 `ten - 副本.bin`。菜单只查询和枚举，未显示或调用菜单命令；没有执行真实鼠标 OLE 拖放。
