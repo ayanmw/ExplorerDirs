@@ -441,6 +441,8 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 “工具 → 重启 Windows 资源管理器”先验证 `%WINDIR%\explorer.exe` 存在，并确认桌面 Shell 窗口所属进程的映像路径与该文件完全相同；若 Shell 是自定义进程或路径不可确认，则拒绝结束进程。自动恢复分支要求桌面 Shell 的 PID 已变化且新进程映像仍与 Windows `explorer.exe` 相同；自动恢复超时后启动的 fallback 也继续等待最多 10 秒，并用相同身份条件确认 Shell 已恢复，否则报告超时。路径、PID 和有界等待有独立 SettingsSmoke，完整 SettingsSmoke 与 App Release build 通过。该检查不证明实际重启恢复时间；真实桌面、开始菜单、任务栏和共享进程文件窗口影响仍待集中验收。
 
+2026-10-30 安全复核补充：原实现先按 PID 检查 `Process.MainModule`，随后 `Process.Kill()` 再按 PID 打开进程；若检查与终止之间 PID 被系统复用，二者可能指向不同进程。现改为一次打开带终止、查询和等待权限的 SafeProcessHandle，通过该句柄读取 PID/映像路径、复核当前桌面 Shell PID，并用同一句柄终止及等待，避免终止阶段重新按 PID 解析。身份门控 smoke 覆盖句柄 PID 不匹配、Shell PID 变化和错误映像路径；App Release build 及定向 smoke 通过。完整 SettingsSmoke 本轮未通过：先前执行在既有 `EnvironmentChangeMessageSmoke` 的 `HwndSource` 创建处超时，故不能据此报告全量回归通过；也没有实际重启桌面 Shell 或做 GUI 验收。
+
 ### Q-Dir 列头过滤差距（2026-10-28）
 
 Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说明每个视图有独立设置。Explorer Dirs 已接入按标签保存的列值条件：文件名通配符与列条件按 AND 组合，同一属性多选值按 OR 匹配，不同属性条件按 AND 匹配；属性不可读取时保留项目可见。列头 DirectUI SplitButton 的可见边界与 Shell `IColumnManager` 列顺序对应，箭头区域打开列值清单，标题文字仍由 Shell 处理排序；不依赖不存在的 `SysHeader32`、`HDF_SPLITBUTTON` 或 `HDN_DROPDOWN`。清单读取分批让出 Dispatcher，单列值与会话载荷都有上限校验。当前差距是实际 ExplorerBrowser 中的列头命中、值清单样式/定位、筛选结果、慢速及虚拟 Shell provider、复制标签与跨重启表现尚未可见验收；后台接线证据见下文。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)（[官方示例图](https://www.softwareok.com/img/faq/Q-DIR/Dateien_filtern_ueber_den_Spaltenkopf_2021-03-03-08-34-51.png)）、[IShellFolder2::GetDetailsEx](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdetailsex)。
