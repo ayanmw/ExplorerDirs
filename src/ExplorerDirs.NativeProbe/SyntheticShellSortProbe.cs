@@ -413,8 +413,21 @@ public static class SyntheticShellSortProbe
             if (!deleteAutoSelectionRetained) throw new IOException("The automatic delete refresh did not preserve selection and keyboard focus on the unchanged item.");
             if (!deleteAutoSelectionRetained2) throw new IOException("The second view did not preserve selection and keyboard focus on the unchanged item.");
 
+            var previousListView = listView;
+            var previousListView2 = listView2;
+            listView = FindListView(view);
+            listView2 = FindListView(view2);
+            Console.WriteLine($"synthetic-shell-size-sort: pre-move-listviews view1=0x{unchecked((nuint)listView):X} (previous=0x{unchecked((nuint)previousListView):X}, previous-valid={IsWindow(previousListView)}); view2=0x{unchecked((nuint)listView2):X} (previous=0x{unchecked((nuint)previousListView2):X}, previous-valid={IsWindow(previousListView2)})");
+            SetListViewSelectionAndFocus(listView, "two.bin", ReadNames(listView, module, expectedCount: -1));
+            SetListViewSelectionAndFocus(listView2, "two.bin", ReadNames(listView2, module, expectedCount: -1));
+            var preMoveNames1 = ReadNames(listView, module, expectedCount: -1);
+            var preMoveNames2 = ReadNames(listView2, module, expectedCount: -1);
+            if (!HasSelectionAndFocus(listView, preMoveNames1, "two.bin") ||
+                !HasSelectionAndFocus(listView2, preMoveNames2, "two.bin"))
+                throw new IOException("Could not establish independent two.bin selections in both views before testing MoveItems.");
+            Console.WriteLine("synthetic-shell-size-sort: move-precondition-selection-view1=True; view2=True");
             var moveDestination = Path.Combine(copyDestination, "Moved");
-            MoveSelectedShellItem(view, listView, module, backingFolder, "z-ten.bin", "two.bin", moveDestination);
+            MoveSelectedShellItem(view, listView, view2, listView2, module, backingFolder, "z-ten.bin", "two.bin", moveDestination);
             var moveAutoUpdated = false;
             var moveAutoUpdated2 = false;
             var moveSelectionRetained = false;
@@ -427,6 +440,8 @@ public static class SyntheticShellSortProbe
             while ((!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2) && Environment.TickCount64 < moveDeadline)
             {
                 Pump(100);
+                listView = FindListView(view);
+                listView2 = FindListView(view2);
                 afterMove = ReadNames(listView, module, expectedCount: -1);
                 afterMove2 = ReadNames(listView2, module, expectedCount: -1);
                 moveAutoUpdated = !afterMove.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) && afterMove.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
@@ -605,14 +620,19 @@ public static class SyntheticShellSortProbe
         }
     }
 
-    private static void MoveSelectedShellItem(nint view, nint listView, nint module, string backingFolder, string itemName, string restoreFocusName, string destinationFolder)
+    private static void MoveSelectedShellItem(nint view, nint listView, nint view2, nint listView2, nint module, string backingFolder, string itemName, string restoreFocusName, string destinationFolder)
     {
         if (Directory.Exists(destinationFolder))
             throw new InvalidOperationException($"Refusing to reuse the isolated Shell move destination: {destinationFolder}");
         Directory.CreateDirectory(destinationFolder);
         var sourcePath = Path.Combine(backingFolder, itemName);
         var expectedBytes = File.ReadAllBytes(sourcePath);
-        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName, listView2);
+        var beforeMoveNames1 = ReadNames(listView, module, expectedCount: -1);
+        var beforeMoveNames2 = ReadNames(listView2, module, expectedCount: -1);
+        var beforeMoveState1 = StateForName(listView, beforeMoveNames1, restoreFocusName);
+        var beforeMoveState2 = StateForName(listView2, beforeMoveNames2, restoreFocusName);
+        Console.WriteLine($"synthetic-shell-size-sort: before-PerformOperations view1={restoreFocusName}:0x{beforeMoveState1:X}; view2={restoreFocusName}:0x{beforeMoveState2:X}; names1=[{string.Join('|', beforeMoveNames1)}]; names2=[{string.Join('|', beforeMoveNames2)}]");
         var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
         var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
         var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
@@ -638,16 +658,56 @@ public static class SyntheticShellSortProbe
         }
     }
 
-    private static nint GetSelectionDataObject(nint view, nint listView, nint module, string itemName, string restoreFocusName)
+    private static nint GetSelectionDataObject(nint view, nint listView, nint module, string itemName, string restoreFocusName,
+        nint companionListView = 0)
     {
         // This helper also runs after earlier file operations have reduced the fixture row count.
+        if (companionListView != 0)
+        {
+            TraceSelectionPair("before-source-select", listView, companionListView, module, restoreFocusName);
+            EnsureCompanionSelection("before-source-select", companionListView, module, restoreFocusName);
+        }
         SetListViewSelectionAndFocus(listView, itemName, ReadNames(listView, module, expectedCount: -1));
+        if (companionListView != 0)
+        {
+            TraceSelectionPair("after-source-select", listView, companionListView, module, restoreFocusName);
+            EnsureCompanionSelection("after-source-select", companionListView, module, restoreFocusName);
+        }
         var dataObjectId = DataObjectId;
         Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var dataObject)); // SVGIO_SELECTION.
         if (dataObject == 0) throw new IOException($"The synthetic view returned no Shell IDataObject for selected item '{itemName}'.");
-        try { SetListViewSelectionAndFocus(listView, restoreFocusName, ReadNames(listView, module, expectedCount: -1)); }
+        try
+        {
+            if (companionListView != 0)
+            {
+                TraceSelectionPair("after-selection-data-object", listView, companionListView, module, restoreFocusName);
+                EnsureCompanionSelection("after-selection-data-object", companionListView, module, restoreFocusName);
+            }
+            SetListViewSelectionAndFocus(listView, restoreFocusName, ReadNames(listView, module, expectedCount: -1));
+            if (companionListView != 0)
+            {
+                TraceSelectionPair("after-selection-restore", listView, companionListView, module, restoreFocusName);
+                EnsureCompanionSelection("after-selection-restore", companionListView, module, restoreFocusName);
+            }
+            return dataObject;
+        }
         catch { Marshal.Release(dataObject); throw; }
-        return dataObject;
+    }
+
+    private static void EnsureCompanionSelection(string stage, nint companionListView, nint module, string itemName)
+    {
+        var names = ReadNames(companionListView, module, expectedCount: -1);
+        if (!HasSelectionAndFocus(companionListView, names, itemName))
+            throw new IOException($"The source-view selection setup disturbed the companion view at {stage}: '{itemName}' lost selection or focus.");
+    }
+
+    private static void TraceSelectionPair(string stage, nint listView1, nint listView2, nint module, string name)
+    {
+        var names1 = ReadNames(listView1, module, expectedCount: -1);
+        var names2 = ReadNames(listView2, module, expectedCount: -1);
+        var state1 = StateForName(listView1, names1, name);
+        var state2 = StateForName(listView2, names2, name);
+        Console.WriteLine($"synthetic-shell-size-sort: {stage} item={name}; view1=0x{state1:X}; view2=0x{state2:X}; names1=[{string.Join('|', names1)}]; names2=[{string.Join('|', names2)}]");
     }
 
     private static string[] ReadNames(nint listView, nint module, int expectedCount = 3)

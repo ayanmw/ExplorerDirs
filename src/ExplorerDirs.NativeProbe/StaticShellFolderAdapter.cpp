@@ -2199,8 +2199,8 @@ namespace
             const auto listSelected = listView ? static_cast<int>(SendMessageW(listView, LVM_GETNEXTITEM, static_cast<WPARAM>(-1), LVNI_SELECTED)) : -1;
             const auto listFocused = listView ? static_cast<int>(SendMessageW(listView, LVM_GETNEXTITEM, static_cast<WPARAM>(-1), LVNI_FOCUSED)) : -1;
             char stateTrace[192]{};
-            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured view=0x%p selected=%zu focused=%d list-selected=%d list-focused=%d",
-                viewWindow, _pendingSelected.size(), _pendingHasFocused ? 1 : 0, listSelected, listFocused);
+            StringCchPrintfA(stateTrace, ARRAYSIZE(stateTrace), "synthetic-sort: refresh-state-captured view=0x%p list=0x%p selected=%zu focused=%d list-selected=%d list-focused=%d",
+                viewWindow, listView, _pendingSelected.size(), _pendingHasFocused ? 1 : 0, listSelected, listFocused);
             TraceSyntheticSortStage(stateTrace);
             folderView->Release();
             return S_OK;
