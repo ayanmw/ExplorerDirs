@@ -397,3 +397,11 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 虽然自定义列探针已输出正确文本、两种行序及 `CompareIDs` 计数，整轮未通过：Private Desktop watchdog 约 5.9 秒后观察到桌面前台句柄与最后输入时间戳变化，随后 worker 未按时返回，exit code 124。不能据此判断前台变化由测试导致，也不能把它视为产品卡死。临时 CLSID/NameSpace 注册与进程已清理；watchdog 中断 `finally` 后留下的两个明确命名 TEMP 夹具目录仍待清理。后续应先从源码梳理 header-click 后的 view/COM 清理等待点和守卫变化来源；在此之前不再运行新的 Private Desktop view probe。Release 构建与原生 `/W4 /WX` 构建通过，产品和 release 未改。
 
 源码复核发现该次运行时 watchdog 的阶段标记始终停留在通用 `probe-entered`，无法区分是 `ReleaseSyntheticSortViewHold`、`DestroyViewWindow`、COM 释放、host Dispose、DLL unload、注册清理还是 fixture 删除等待。Wait-chain 只显示 worker 正在等待并涉及 COM activation/`ChsIME`，不足以定位某个被调用函数，也不能归因于 header-click。现在 NativeProbe 在每个清理调用前分别报告阶段；该诊断改动通过 Release 构建及无窗口树级 smoke，尚未重跑 Private Desktop。下一次得到有效阶段证据前，不调整释放顺序。
+
+## 2026-10-30：合成 namespace 排序对照与清理停滞
+
+继续以独立 `TEMP/TMP` 目录运行既有 Private Desktop 探针，避免触碰默认临时路径中已有的旧夹具。普通文件大小探针成功退出：初始名称顺序为 `a-large.bin|two.bin|z-ten.bin`，按实际 Shell `PKEY_Size` 数值比较后升序为 `two.bin|z-ten.bin|a-large.bin`、降序为 `a-large.bin|z-ten.bin|two.bin`；`CompareIDs` 在两个方向均有调用，Shell 选区、菜单、程序化 Copy、Rename、Delete、Move 与通知链也通过探针断言。Private Desktop 前台及最后输入时间均未变。日志：`src/.state/native-column-sort-e15695b821f34975a2a9848508e6cc5f/synthetic-shell-sort.log`。
+
+同目录递归目录大小视图探针在结果断言后未能完成清理：日志先确认目录 `child` 显示 10、文件 `small.bin` 显示 4，升序为 `small.bin|child`、降序为 `child|small.bin`，比较器两个方向各调用一次；随后卡在 `cleanup-destroy-parent-window-1`。Wait-chain 显示 worker 等待 COM，链上有 `ChsIME` COM activation；前台与输入时间未变。故结果支持“自有虚拟 namespace 可提供并排序递归大小”，但这一轮不是完整生命周期通过，也未确认 ChsIME 是根因。保留了本轮隔离目录与日志以便继续检查，没有修改用户临时目录、产品 Shell 视图或发布版。
+
+与这条正向对照并行的 strict adapter 诊断仍为负：虽然 `SetSortColumns` 返回成功并可读回排序 key/direction，DefView 排序时没有调用 adapter 的 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，列表行序不变。由此当前可行路线是自有 PIDL namespace，不是把真实 filesystem folder 包一层后期待默认 DefView 使用其派生比较器。下一步只针对清理阶段做源码/线程等待诊断；未定位前不再扩展实时扫描缓存或产品接线。产品仍使用 ExplorerBrowser，用户要求保留的 Shell 菜单、剪贴板、文件操作、拖放及刷新兼容门槛全部仍需通过。

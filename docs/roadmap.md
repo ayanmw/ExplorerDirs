@@ -6,6 +6,8 @@
 
 2026-10-30 主干后台基线：提交 `9c47a79` 为合成 Shell 排序探针加入逐阶段清理诊断后，完整 Release `ExplorerDirs.SettingsSmoke` 通过，App Release build 0 错误；唯一警告为 NuGet 漏洞源不可达产生的 `NU1900`。本轮未改产品功能、未启动窗口、未更新 release。该结果确认既有后台回归通过，不改变文件操作/焦点、真实 OLE 拖放、自动刷新可见体验及 IShellView 迁移等开放门槛。
 
+2026-10-30：继续评估逐行派生大小列的隔离 `IShellView` 路线。注册 schema / property store adapter 的 DefView 实验虽能读回排序键，但排序阶段没有触发 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，行序不变；合成 namespace 对照则按真实夹具文件的大小通过升降序，并可将递归目录大小显示为 10、文件显示为 4，升降序均正确重排且分别触发比较器。递归目录探针在结果断言之后卡于销毁父窗口阶段，等待链指向 COM/ChsIME；前台与输入时间未变，因此仅记录排序显示证据，整轮生命周期门槛不通过。产品仍使用 ExplorerBrowser；下一步先隔离定位 COM 清理停滞，再决定是否继续扩大 namespace 原型。证据与边界见[逐行大小调查](folder-size-column-investigation.md#2026-10-30-合成-namespace-排序对照与清理停滞)。
+
 2026-10-30：键盘“在新标签打开所选文件夹”（Shift+Enter/Ctrl+Shift+T）改为读取 Shell 绝对解析名，并要求 Shell folder 属性及当前系统 provider 均确认该位置为文件夹；因此支持可解析的虚拟 Shell 文件夹，同时保留搜索位置、非文件夹及不受支持 namespace 的拒绝行为。文件视图中键新标签仍限普通文件系统目录。定向 resolver smoke、完整 Release SettingsSmoke 均通过；App Release build 0 错误，3 条 NU1900（NuGet 漏洞源不可达）。未启动窗口，真实键盘输入与可见新标签行为仍待集中 GUI 验收；未更新 release。
 
 2026-10-30：文件视图中键开新标签现在除普通路径外，也可解析受支持 Shell 父文件夹内的 UI Automation 命中项：通过父 `IShellFolder::ParseDisplayName` 取得相对 PIDL、组合为绝对 PIDL，并由 Shell 再确认目标是文件夹。定向 smoke 已在临时文件夹及“此电脑”系统盘上通过；非法名称、缺失子项、普通文件目标和过期请求均拒绝。完整 Release SettingsSmoke 通过；App Release build 0 错误、2 条 NU1900（NuGet 漏洞源不可达）。没有运行产品 GUI，虚拟 provider 与真实中键命中仍待集中验收。
