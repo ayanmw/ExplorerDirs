@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30：本轮源码级复核发现递归大小排序探针先卸载合成 Shell COM DLL、撤销临时 namespace 注册，再销毁可能仍含 Shell 子窗口的父 HWND，存在生命周期风险。已调整探针为先销毁父窗口树，再撤销注册并按 `DllCanUnloadNow` 决定卸载；NativeProbe Release 构建 0 警告/错误。尚未运行新 probe，不能声称卡死已修复；后续在桌面边界允许时用超时 dump 复测。产品和 release 均未改。详见[调查记录](folder-size-column-investigation.md#合成-namespace-排序对照与清理停滞)。
+
 2026-10-30 主干后台基线：提交 `9c47a79` 为合成 Shell 排序探针加入逐阶段清理诊断后，完整 Release `ExplorerDirs.SettingsSmoke` 通过，App Release build 0 错误；唯一警告为 NuGet 漏洞源不可达产生的 `NU1900`。本轮未改产品功能、未启动窗口、未更新 release。该结果确认既有后台回归通过，不改变文件操作/焦点、真实 OLE 拖放、自动刷新可见体验及 IShellView 迁移等开放门槛。
 
 2026-10-30：继续评估逐行派生大小列的隔离 `IShellView` 路线。注册 schema / property store adapter 的 DefView 实验虽能读回排序键，但排序阶段没有触发 `CompareIDs`、属性读取或 legacy `SFVM_GETDETAILSOF`，行序不变；合成 namespace 对照则按真实夹具文件的大小通过升降序，并可将递归目录大小显示为 10、文件显示为 4，升降序均正确重排且分别触发比较器。递归目录探针在结果断言之后卡于销毁父窗口阶段，等待链指向 COM/ChsIME；首次前台与输入时间未变。随后清除测试窗口焦点的 A/B 仍卡在相同位置，且该次守卫观测到前台/输入时间改变，因此不计作隔离通过。产品仍使用 ExplorerBrowser；后续需桌面边界稳定时再检查父窗口/子窗口销毁调用栈。证据与边界见[逐行大小调查](folder-size-column-investigation.md#2026-10-30-合成-namespace-排序对照与清理停滞)。

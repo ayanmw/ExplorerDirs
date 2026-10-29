@@ -659,12 +659,6 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-dispose-browser-hosts");
             host?.Dispose();
             host2?.Dispose();
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-free-native-library");
-            if (module != 0) NativeLibrary.Free(module);
-            if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
-            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
-            if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
-            if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
             if (recursiveDirectorySizeSortOnly &&
                 Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_CLEAR_FOCUS_BEFORE_PARENT_DESTROY") == "1")
             {
@@ -689,6 +683,24 @@ public static class SyntheticShellSortProbe
             if (!parentDestroyed) throw new InvalidOperationException("The Private Desktop synthetic-view parent did not destroy cleanly.");
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-parent-window-2");
             if (parent2 != 0 && !DestroyWindow(parent2)) throw new InvalidOperationException("The second Private Desktop synthetic-view parent did not destroy cleanly.");
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
+            if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
+            if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
+            if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-check-native-library-unload");
+            if (module != 0)
+            {
+                var canUnloadNow = Marshal.GetDelegateForFunctionPointer<CanUnloadNativeLibrary>(
+                    NativeLibrary.GetExport(module, "DllCanUnloadNow"))();
+                var unloaded = canUnloadNow == 0;
+                Console.WriteLine($"synthetic-recursive-directory-size-view: dll-can-unload-now=0x{canUnloadNow:X8}; freed={unloaded}; retained-until-process-exit={!unloaded}");
+                if (unloaded)
+                {
+                    if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-free-native-library");
+                    NativeLibrary.Free(module);
+                    module = 0;
+                }
+            }
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-delete-backing-fixture");
             Directory.Delete(backingFolder, recursive: true);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-delete-copy-fixture");
@@ -1375,6 +1387,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProcedure(
         nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CanUnloadNativeLibrary();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
