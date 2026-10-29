@@ -101,6 +101,16 @@ try {
 
     $rollbackBase = $registryBases[3]
     $partialPath = "$rollbackBase\Directory\shell\ExplorerDirs.Open"
+    $emptyKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($partialPath, $true)
+    $emptyKey.Dispose()
+    $module = Get-Module FolderVerb
+    $removedEmpty = & $module {
+        param($path, $target, $expectedCommand)
+        Remove-VerbOnRollback $path $target $expectedCommand
+    } $partialPath $executable ('"' + $executable + '" "%1"')
+    Assert $removedEmpty 'rollback must remove an empty key created before the first value write'
+    Assert-State $rollbackBase @('missing', 'missing')
+
     $partialKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($partialPath, $true)
     try {
         $partialKey.SetValue('ExplorerDirsOwner', 'ExplorerDirs.FolderVerb.v1', [Microsoft.Win32.RegistryValueKind]::String)
@@ -112,7 +122,6 @@ try {
     }
     finally { $partialKey.Dispose() }
 
-    $module = Get-Module FolderVerb
     $removedPartial = & $module {
         param($path, $target, $expectedCommand)
         Remove-VerbOnRollback $path $target $expectedCommand

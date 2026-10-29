@@ -62,7 +62,8 @@ function Test-VerbRollbackState([Microsoft.Win32.RegistryKey]$key, [string]$Exec
         [pscustomobject]@{ Name = 'Icon'; Value = $Executable }
     )
     $valueNames = @($key.GetValueNames())
-    if ($valueNames.Count -eq 0 -or $valueNames.Count -gt $expectedValues.Count) { return $false }
+    # An empty leaf can result from failure before the first write; its path is tracked as newly created by this attempt.
+    if ($valueNames.Count -gt $expectedValues.Count) { return $false }
     # Registry value enumeration order is unspecified; validate membership against the write prefix instead.
     for ($index = 0; $index -lt $valueNames.Count; $index++) {
         $expected = $expectedValues[$index]
