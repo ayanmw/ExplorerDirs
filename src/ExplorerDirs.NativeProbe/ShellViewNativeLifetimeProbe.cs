@@ -163,6 +163,124 @@ internal static class ShellViewNativeLifetimeProbe
         }
     }
 
+    internal static int RunViewStageTrace()
+    {
+        var foreground = GetForegroundWindow();
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-ViewStage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(fixture);
+        for (var index = 0; index < 4; index++)
+            File.WriteAllText(Path.Combine(fixture, $"item-{index}.txt"), "fixture");
+        nint parent = 0, folderPidl = 0, folder = 0, view = 0, viewWindow = 0, folderView = 0, hostPointer = 0;
+        StreamViewHost? host = null;
+        var viewWindowCreated = false;
+        var measurements = new List<(string Stage, int Handles, int? SelfProcessHandles, Dictionary<string, int>? Types)>();
+
+        void Capture(string stage)
+        {
+            if (!GetProcessHandleCount(GetCurrentProcess(), out var count))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessHandleCount failed.");
+            var handleTypes = TryCaptureHandleTypeCounts();
+            var selfProcessPrefix = $"Process[{Environment.ProcessId}:";
+            var selfProcessHandles = handleTypes?
+                .Where(item => item.Key.StartsWith(selfProcessPrefix, StringComparison.Ordinal))
+                .Sum(item => item.Value);
+            measurements.Add((stage, count, selfProcessHandles, handleTypes));
+        }
+
+        try
+        {
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden IShellView stage trace",
+                0x80000000, 0, 0, 640, 480, 0, 0, 0, 0);
+            if (parent == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Hidden parent creation failed.");
+            Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
+            Check(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out folder));
+            Capture("baseline");
+
+            var viewId = ShellViewId;
+            Check(At<CreateViewObject>(folder, 8)(folder, parent, ref viewId, out view));
+            Capture("CreateViewObject");
+            host = new StreamViewHost(parent, []) { View = view };
+            hostPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            Capture("IShellBrowser interface");
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
+            viewWindowCreated = true;
+            Capture("CreateViewWindow");
+
+            var folderViewId = FolderViewId;
+            Check(Marshal.QueryInterface(view, in folderViewId, out folderView));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            int itemCount;
+            do
+            {
+                Application.DoEvents();
+                Check(At<ItemCount>(folderView, 7)(folderView, 2, out itemCount));
+                if (itemCount == 4) break;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < deadline);
+            if (itemCount != 4) throw new InvalidOperationException($"The staged view enumerated {itemCount}/4 fixture items.");
+            Capture("enumeration settled");
+
+            Marshal.Release(folderView);
+            folderView = 0;
+            Check(At<DestroyViewWindow>(view, 10)(view));
+            viewWindowCreated = false;
+            Capture("DestroyViewWindow returned");
+            var destroyDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(250);
+            while (IsWindow(viewWindow) && DateTime.UtcNow < destroyDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(5);
+            }
+            if (IsWindow(viewWindow)) throw new InvalidOperationException("DestroyViewWindow did not invalidate its HWND during the stage trace.");
+            Capture("destroy message pump settled");
+
+            host.View = 0;
+            Marshal.Release(view);
+            view = 0;
+            Capture("IShellView released");
+            Marshal.Release(hostPointer);
+            hostPointer = 0;
+            Capture("IShellBrowser interface released");
+            host.Dispose();
+            host = null;
+            Capture("host disposed");
+            if (CountChildWindows(parent) != 0 || IsWindowVisible(parent) || GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("The staged view cleanup crossed the hidden/foreground boundary.");
+
+            var baselineHandles = measurements[0].Handles;
+            var baselineTypes = measurements[0].Types;
+            var finalTypes = measurements[^1].Types;
+            var typeDelta = baselineTypes is null || finalTypes is null
+                ? "unavailable"
+                : string.Join(',', baselineTypes.Keys.Union(finalTypes.Keys, StringComparer.Ordinal)
+                    .Select(name => (Name: name, Delta: finalTypes.GetValueOrDefault(name) - baselineTypes.GetValueOrDefault(name)))
+                    .Where(item => item.Delta != 0)
+                    .Select(item => $"{item.Name}:{item.Delta:+#;-#;0}"));
+            Console.WriteLine($"ishellview-native-view-stage-trace: {string.Join(';', measurements.Select(item => $"{item.Stage}={item.Handles}(delta={item.Handles - baselineHandles:+#;-#;0},self-process-handles={item.SelfProcessHandles?.ToString() ?? "unavailable"})"))}; final-handle-type-delta=[{typeDelta}]; child-windows=0; foreground-unchanged=True");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"ishellview-native-view-stage-trace: failed={exception.GetType().Name}:{exception.Message}");
+            return 1;
+        }
+        finally
+        {
+            if (folderView != 0) Marshal.Release(folderView);
+            if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (host is not null) host.View = 0;
+            if (view != 0) Marshal.Release(view);
+            if (hostPointer != 0) Marshal.Release(hostPointer);
+            host?.Dispose();
+            if (folder != 0) Marshal.Release(folder);
+            if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
+            if (parent != 0 && IsWindow(parent)) _ = DestroyWindow(parent);
+            try { Directory.Delete(fixture, recursive: true); } catch { }
+        }
+    }
+
     private static int CreateAndDestroyOneView(nint folder, nint parent, StreamViewHost? sharedHost,
         nint sharedHostPointer)
     {
@@ -333,6 +451,7 @@ internal static class ShellViewNativeLifetimeProbe
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     [DllImport("user32.dll")] private static extern int GetGuiResources(nint process, uint flags);
     [DllImport("kernel32.dll")] private static extern nint GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetProcessHandleCount(nint process, out int handleCount);
     [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(nint process, int informationClass,
         nint information, int informationLength, out int returnLength);
     [DllImport("ntdll.dll")] private static extern int NtQueryObject(nint handle, int informationClass,
