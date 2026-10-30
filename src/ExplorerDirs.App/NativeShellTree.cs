@@ -10,7 +10,6 @@ internal sealed class NativeShellTree : IDisposable
     private const uint NstcsHasExpandos = 0x00000001;
     private const uint NstcsRootHasExpando = 0x00000040;
     private const uint NstcsShowSelectionAlways = 0x00000080;
-    private const uint NstcsSpringExpand = 0x00000010;
     private const uint NstcsDisableDragDrop = 0x00001000;
     private const uint NstcsNoOrderStream = 0x00002000;
     private const uint NstcsNoEditLabels = 0x00010000;
@@ -24,7 +23,7 @@ internal sealed class NativeShellTree : IDisposable
     private int _synchronizing;
 
     internal static uint BuildControlStyles() =>
-        NstcsHasExpandos | NstcsRootHasExpando | NstcsShowSelectionAlways | NstcsSpringExpand |
+        NstcsHasExpandos | NstcsRootHasExpando | NstcsShowSelectionAlways |
         NstcsDisableDragDrop | NstcsNoOrderStream | NstcsNoEditLabels;
 
     internal nint WindowHandle { get; private set; }
@@ -66,8 +65,9 @@ internal sealed class NativeShellTree : IDisposable
         {
             Check(CoCreateInstance(ref clsid, 0, 1, ref iid, out _tree));
             var bounds = new Rect { Right = Math.Max(1, width), Bottom = Math.Max(1, height) };
-            // Spring-expand hovered folders while preserving the Shell tree's standard external drop target.
-            // Disable only in-tree reordering and label edits; NOORDERSTREAM avoids non-portable ordering state.
+            // Keep the Shell tree's standard external drop target, while disabling in-tree reordering and
+            // label edits. NSTCS_SPRINGEXPAND collapses other expanded nodes; it is not drag-hover expansion.
+            // NOORDERSTREAM avoids non-portable ordering state.
             Check(Method<Initialize>(3)(_tree, parent, ref bounds, BuildControlStyles()));
             var windowId = new Guid("00000114-0000-0000-C000-000000000046");
             Check(Marshal.QueryInterface(_tree, in windowId, out var window));
