@@ -27,9 +27,9 @@ internal static class RecursiveDirectoryScannerSmoke
             // Warm both paths first so the comparison is not dominated by the first metadata-cache pass.
             _ = RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None);
             _ = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, CancellationToken.None);
-            var full = Measure(() => RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None), rootPath);
-            var selected = Measure(() => RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                root, requestedPaths, CancellationToken.None), rootPath);
+            var full = Measure(progress => RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None, progress), rootPath);
+            var selected = Measure(progress => RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                root, requestedPaths, CancellationToken.None, progress), rootPath);
             var fullRetained = MeasureRetained(() => RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None));
             var selectedRetained = MeasureRetained(() => RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
                 root, requestedPaths, CancellationToken.None));
@@ -40,29 +40,35 @@ internal static class RecursiveDirectoryScannerSmoke
             var saved = full.AllocatedBytes - selected.AllocatedBytes;
             var savedPercent = full.AllocatedBytes == 0 ? 0 : 100d * saved / full.AllocatedBytes;
             var retainedDelta = fullRetained - selectedRetained;
+            if (full.PeakLiveBytes - selected.PeakLiveBytes < 500_000)
+                throw new InvalidOperationException("The requested-path scan did not reduce sampled peak live heap by at least 500,000 bytes.");
             Console.WriteLine($"recursive-directory-scan-allocation: directories={directoryCount}; " +
                 $"full-results={full.ResultCount}; requested-results={selected.ResultCount}; " +
                 $"full-allocated={full.AllocatedBytes}; requested-allocated={selected.AllocatedBytes}; " +
                 $"delta={saved}; delta-percent={savedPercent:F1}; " +
                 $"full-retained-estimate={fullRetained}; requested-retained-estimate={selectedRetained}; " +
                 $"retained-delta-estimate={retainedDelta}; " +
+                $"full-peak-live-estimate={full.PeakLiveBytes}; requested-peak-live-estimate={selected.PeakLiveBytes}; " +
                 $"full-ms={full.ElapsedMilliseconds}; requested-ms={selected.ElapsedMilliseconds}; " +
                 "scope=managed-allocations-and-approximate-live-heap-only");
         }
         finally { Directory.Delete(root, recursive: true); }
 
-        static (long AllocatedBytes, int ResultCount, RecursiveDirectoryScanResult Root, long ElapsedMilliseconds) Measure(
-            Func<IReadOnlyDictionary<string, RecursiveDirectoryScanResult>> scan, string rootPath)
+        static (long AllocatedBytes, int ResultCount, RecursiveDirectoryScanResult Root,
+            long ElapsedMilliseconds, long PeakLiveBytes) Measure(
+            Func<Action<long>?, IReadOnlyDictionary<string, RecursiveDirectoryScanResult>> scan, string rootPath)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
             var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            long peakLiveBytes = 0;
+            void SampleLiveHeap(long _) => peakLiveBytes = Math.Max(peakLiveBytes, GC.GetTotalMemory(forceFullCollection: true));
             var clock = Stopwatch.StartNew();
-            var results = scan();
+            var results = scan(SampleLiveHeap);
             clock.Stop();
             var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-            return (allocated, results.Count, results[rootPath], clock.ElapsedMilliseconds);
+            return (allocated, results.Count, results[rootPath], clock.ElapsedMilliseconds, peakLiveBytes);
         }
 
         static long MeasureRetained(Func<IReadOnlyDictionary<string, RecursiveDirectoryScanResult>> scan)
@@ -159,6 +165,27 @@ internal static class RecursiveDirectoryScannerSmoke
                 throw new Exception("a canceled recursive scan completed successfully");
             }
             catch (OperationCanceledException) { }
+
+            var cancellationRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveTreeCancel-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(cancellationRoot);
+            try
+            {
+                for (var index = 0; index < 300; index++)
+                    Directory.CreateDirectory(Path.Combine(cancellationRoot, $"child-{index:D3}"));
+                using var duringScanCancellation = new CancellationTokenSource();
+                var canceledDuringEnumeration = false;
+                try
+                {
+                    RecursiveDirectoryScanner.ScanDirectoryTree(cancellationRoot, duringScanCancellation.Token,
+                        _ => duringScanCancellation.Cancel());
+                }
+                catch (OperationCanceledException) { canceledDuringEnumeration = true; }
+                Check(canceledDuringEnumeration,
+                    "directory tree scan observes cancellation during enumeration");
+            }
+            finally { Directory.Delete(cancellationRoot, recursive: true); }
+            Check(!Directory.Exists(cancellationRoot),
+                "canceled directory tree scan releases active enumerators for fixture cleanup");
 
             Check(!RecursiveDirectoryScanner.ShouldDescend(FileAttributes.Directory | FileAttributes.ReparsePoint) &&
                   RecursiveDirectoryScanner.ShouldDescend(FileAttributes.Directory),

@@ -2,9 +2,9 @@
 
 ## 2026-10-30：目录树扫描器托管内存 A/B
 
-为量化隔离 ListView 逐行派生值扫描的返回数据开销，增加 `--recursive-directory-scan-allocation-probe`。探针在临时夹具创建 5,000 个空子目录，先预热完整/指定路径两条扫描路径，再分别测量 `GC.GetAllocatedBytesForCurrentThread`、扫描耗时以及结果集合保留期间强制 GC 后的 `GC.GetTotalMemory` 差值。完整扫描返回 5,001 个目录结果；仅请求根目录和 3 个子目录时返回 4 个结果。观测托管分配分别为 4,154,296 B / 3,463,760 B，减少 690,536 B（16.6%）；强制 GC 后存活托管堆估算为 1,755,912 B / 1,288 B，减少约 1.67 MiB。预热后本次耗时为 849 / 492 ms，但仅单轮且目录枚举顺序固定，不用作性能结论。
+为量化隔离 ListView 逐行派生值扫描的内存开销，增加 `--recursive-directory-scan-allocation-probe`。探针创建 5,000 个空子目录，预热完整/指定路径两条扫描路径，然后测量 `GC.GetAllocatedBytesForCurrentThread`、强制 GC 后的存活堆估算及扫描期间分批强制 GC 采样的最大存活堆。扫描器同时改为惰性深度优先枚举器帧：父目录枚举暂停在当前子目录，子树完成后即累计并关闭；取消时 finally 释放全部活动帧，不再预先把同级所有子目录节点压入待处理栈。待处理枚举器/打开句柄数量因此随当前目录深度增长，而非随一个目录的全部子项数增长。完整扫描返回 5,001 项；指定路径扫描仅返回根目录和 3 个子目录共 4 项。最终托管分配为 4,052,080 B / 3,361,544 B，差 690,536 B（17.0%）；强制 GC 后存活堆估算为 1,755,912 B / 1,288 B；遍历中采样的峰值估算为 1,822,952 B / 69,064 B。单轮耗时为 470 / 532 ms，未证明扫描速度改善。
 
-`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release -- --recursive-directory-scan-allocation-probe` 可重跑该诊断。分配计数不包括 Windows Shell、文件系统缓存、COM/原生堆，也不是进程 Private Bytes/Working Set；夹具主要是空目录且探针不创建 ExplorerBrowser，因此不能外推到实际目录或产品内存节省。App Release build 为 0 警告/错误；递归扫描 smoke、完整 Release SettingsSmoke 和隐藏 `--common-listview-relative-size-contract` 均通过，前台未变化。产品仍未接入递归逐行列。
+`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release -- --recursive-directory-scan-allocation-probe` 可重跑该诊断。采样值只覆盖托管堆，不包括 Windows Shell、文件系统缓存、COM/原生堆，也不是 Private Bytes/Working Set；夹具主要是空目录且探针不创建 ExplorerBrowser，因此不能外推到实际目录或产品内存节省。递归扫描 smoke 另外核对扫描中取消可及时退出，且取消后 fixture 可立即删除（枚举句柄已释放）。App Release build 为 0 警告/错误；递归扫描 smoke、完整 Release SettingsSmoke 和隐藏 `--common-listview-relative-size-contract` 均通过，前台未变化。产品仍未接入递归逐行列。
 
 ## 2026-10-30：自定义列可见性合同复核
 

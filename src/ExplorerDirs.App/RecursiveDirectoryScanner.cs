@@ -241,69 +241,97 @@ internal static class RecursiveDirectoryScanner
 
         var results = new Dictionary<string, RecursiveDirectoryScanResult>(
             resultPaths?.Count ?? 0, StringComparer.OrdinalIgnoreCase);
-        var pending = new Stack<(DirectoryScanNode Node, bool Complete)>();
-        pending.Push((rootNode, Complete: false));
+        // Retain only active ancestors, not every sibling directory path; this bounds traversal state by depth.
+        var frames = new Stack<DirectoryScanFrame>();
         long entriesChecked = 0;
-        while (pending.TryPop(out var work))
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var node = work.Node;
-            if (work.Complete)
-            {
-                if (IncludeResult(node, resultPaths)) results.Add(node.Path, node.ToResult());
-                if (node.Parent is { } parent)
-                {
-                    parent.Bytes = checked(parent.Bytes + node.Bytes);
-                    parent.Files = checked(parent.Files + node.Files);
-                    parent.Directories = checked(parent.Directories + 1 + node.Directories);
-                    parent.Unreadable = checked(parent.Unreadable + node.Unreadable);
-                }
-                continue;
-            }
-
-            // Post-order completion keeps only pending sibling/subtree nodes alive;
-            // the former all-directory node list duplicated the traversal's peak memory.
-            pending.Push((node, Complete: true));
-            try
-            {
-                foreach (var path in Directory.EnumerateFileSystemEntries(node.Path))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    entriesChecked++;
-                    if (entriesChecked % ProgressEntryInterval == 0) progress?.Invoke(entriesChecked);
-                    FileAttributes attributes;
-                    try { attributes = File.GetAttributes(path); }
-                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-                    { node.Unreadable = checked(node.Unreadable + 1); continue; }
-
-                    if ((attributes & FileAttributes.Directory) != 0)
-                    {
-                        if (!ShouldDescend(attributes))
-                        { node.Unreadable = checked(node.Unreadable + 1); continue; }
-                        var child = new DirectoryScanNode(Path.GetFullPath(path), node);
-                        pending.Push((child, Complete: false));
-                        continue;
-                    }
-                    if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    { node.Unreadable = checked(node.Unreadable + 1); continue; }
-
-                    try
-                    {
-                        node.Bytes = checked(node.Bytes + (ulong)new FileInfo(path).Length);
-                        node.Files = checked(node.Files + 1);
-                    }
-                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or OverflowException)
-                    { node.Unreadable = checked(node.Unreadable + 1); }
-                }
-            }
+            try { frames.Push(OpenDirectory(rootNode)); }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-            { node.Unreadable = checked(node.Unreadable + 1); }
+            {
+                rootNode.Unreadable = checked(rootNode.Unreadable + 1);
+                CompleteNode(rootNode);
+            }
+            while (frames.TryPeek(out var frame))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                bool hasEntry;
+                try { hasEntry = frame.Entries.MoveNext(); }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                {
+                    frame.Node.Unreadable = checked(frame.Node.Unreadable + 1);
+                    CompleteCurrentDirectory();
+                    continue;
+                }
+                if (!hasEntry)
+                {
+                    CompleteCurrentDirectory();
+                    continue;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                entriesChecked++;
+                if (entriesChecked % ProgressEntryInterval == 0) progress?.Invoke(entriesChecked);
+                var path = frame.Entries.Current;
+                FileAttributes attributes;
+                try { attributes = File.GetAttributes(path); }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
+
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    if (!ShouldDescend(attributes))
+                    { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
+                    var child = new DirectoryScanNode(Path.GetFullPath(path), frame.Node);
+                    try { frames.Push(OpenDirectory(child)); }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    {
+                        child.Unreadable = checked(child.Unreadable + 1);
+                        CompleteNode(child);
+                    }
+                    continue;
+                }
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
+
+                try
+                {
+                    frame.Node.Bytes = checked(frame.Node.Bytes + (ulong)new FileInfo(path).Length);
+                    frame.Node.Files = checked(frame.Node.Files + 1);
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or OverflowException)
+                { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); }
+            }
+        }
+        finally
+        {
+            while (frames.TryPop(out var frame)) frame.Dispose();
         }
 
         if (entriesChecked > 0 && entriesChecked % ProgressEntryInterval != 0)
             progress?.Invoke(entriesChecked);
 
         return results;
+
+        DirectoryScanFrame OpenDirectory(DirectoryScanNode node) =>
+            new(node, Directory.EnumerateFileSystemEntries(node.Path).GetEnumerator());
+
+        void CompleteCurrentDirectory()
+        {
+            var completed = frames.Pop();
+            completed.Dispose();
+            CompleteNode(completed.Node);
+        }
+
+        void CompleteNode(DirectoryScanNode node)
+        {
+            if (IncludeResult(node, resultPaths)) results.Add(node.Path, node.ToResult());
+            if (node.Parent is not { } parent) return;
+            parent.Bytes = checked(parent.Bytes + node.Bytes);
+            parent.Files = checked(parent.Files + node.Files);
+            parent.Directories = checked(parent.Directories + 1 + node.Directories);
+            parent.Unreadable = checked(parent.Unreadable + node.Unreadable);
+        }
     }
 
     private static bool IncludeResult(DirectoryScanNode node, HashSet<string>? resultPaths) =>
@@ -319,6 +347,14 @@ internal static class RecursiveDirectoryScanner
         internal long Unreadable;
 
         internal RecursiveDirectoryScanResult ToResult() => new(Bytes, Files, Directories, Unreadable);
+    }
+
+    private sealed class DirectoryScanFrame(DirectoryScanNode node, IEnumerator<string> entries) : IDisposable
+    {
+        internal DirectoryScanNode Node { get; } = node;
+        internal IEnumerator<string> Entries { get; } = entries;
+
+        public void Dispose() => Entries.Dispose();
     }
 
     internal static bool ShouldDescend(FileAttributes attributes) =>
