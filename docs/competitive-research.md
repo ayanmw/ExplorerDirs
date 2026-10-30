@@ -28,9 +28,9 @@ Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树�
 
 ## 2026-10-31 官方 Soft-Refresh 行为补查
 
-Q-Dir FAQ 112 将 Soft-Refresh 的新名称列为“Disable auto sorting when rename or copy items”，说明启用后在拖放、粘贴或刷新等情形下抑制列表自动重排，避免文件位置突然变化；该说明没有定义每种操作结束时的最终排序时机、不同查看方式的范围或失败回退。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)
+Q-Dir 的公开资料实际列出两个不同选项，不能合并解释：语言表 ID 53016 是“Soft-Refresh, not re-enumerate the view (drop, copy, refreshed)”；ID 53033 是“Disable auto sorting when rename or copy items”。FAQ 112 把后一个新名称称为 Soft-Refresh，并描述其在新增项目时避免自动重排；FAQ 139 将该开关放在“Tools → List View”中。由此可确认“不重枚举”和“禁用自动排序”是不同的 Q-Dir 行为入口，但公开资料没有说清二者内部交互、逐操作刷新时机及失败回退。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)、[FAQ 139](https://www.softwareok.com/?faq=139&seite=faq-Q-DIR)、[官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK)
 
-Windows 的 `FWF_AUTOARRANGE` 公开语义是自动排列视图元素；它不等同于 Q-Dir 所述的“暂缓文件项重排”。`FWF_NOENUMREFRESH` 的公开语义则是刷新时不重新枚举视图，直接常驻使用会让内容变陈旧，不能拿来冒充 Soft-Refresh。[Microsoft FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags) 因此当前没有证据支持用一个已有 Shell flag 完整复刻该行为。Explorer Dirs 目前遵循 Shell 的正常自动排序与刷新；若要补齐，需先明确它是逐标签偏好还是全局偏好，并以创建/重命名/粘贴/拖放/F5 验证最终排序、选区和内容新鲜度，再选择是否实现。
+Windows 的 `FWF_AUTOARRANGE` 公开语义是自动排列视图元素；`FWF_NOENUMREFRESH` 的语义是不重新枚举视图。现有证据不足以证明其中任一 flag 可安全复刻 Q-Dir 的完整行为。Explorer Dirs 尚无这两个独立设置；实现前应先分别验证复制/拖放/重命名的排序行为和 F5/外部变化的内容新鲜度，并再决定持久化范围，避免把“不重枚举”误用于普通刷新。
 
 ## 2026-10-27 Win+E 入口对照
 
