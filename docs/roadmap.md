@@ -18,6 +18,8 @@
 
 2026-10-31 当前主线隔离行模型复测（记录提交 `76baf11`）：`--common-listview-relative-size-contract` 通过异步扫描、派生值/比例重算、数值排序、会话排序键及焦点行保持；`--shell-change-reconciliation` 通过 Shell 创建/更新/文件重命名/目录重命名/删除通知、稳定行身份、目录大小重扫与选区焦点保持。两个探针输出均确认窗口隐藏且前台未变。此证据仅覆盖标准 `SysListView32` 行模型，不创建 ExplorerBrowser/IShellView，也不覆盖产品 Q-Dir 列显示、列头排序交互、原生背景菜单或拖放。详细结果见[逐行大小架构调查](folder-size-column-investigation.md#2026-10-31当前主线重复运行行模型后台合同)。
 
+2026-10-31 自有 ListView 的 Shell 菜单边界复测：`--common-listview-data-contract` 通过行 PIDL 经父 `IShellFolder::GetUIObjectOf` 查询项目菜单，canonical verb 有 `cut/copy/delete/rename/properties`；直接父 `IShellFolder::CreateViewObject` 的背景菜单仍没有查看/排序/分组/刷新。探针没有显示 Popup 或执行命令。后续自有文件视图迁移门槛必须补上 Explorer 视图级背景菜单与命令路由，不能用文件夹菜单替代；产品继续使用 ExplorerBrowser。详情见[Shell 菜单差异调查](folder-size-column-investigation.md#2026-10-31当前主线-shell-项目菜单与背景菜单差异复测)。
+
 2026-10-31 递归目录树扫描取消边界：可见文件夹大小原型在进入递归扫描前会先物化需要返回的路径集合；现在集合构建逐项检查 CancellationToken，取消后不再继续枚举剩余目标。SettingsSmoke 先验证旧行为会在预取消时仍消费路径，再覆盖枚举中途取消；定向扫描 smoke、完整 Release SettingsSmoke、App 与 NativeProbe Release build 均通过（0 警告/错误）。此项仅减少隔离逐行大小原型在刷新/关闭后的无效准备工作，不接入产品 ExplorerBrowser，也未测量大型/网络目标的实际取消延迟。
 
 2026-10-31 隔离逐行大小列复用单位格式：`CommonListViewColorBaseline` 的大小单元格不再固定输出字节数，而调用应用已有 `ByteSizeFormatter`，支持传入自动/固定单位、精度和千位分隔设置；尚未扫描的行保留空白，不显示虚假的零值。接线合同先在旧代码上失败，定向 smoke 覆盖自动 MB、字节千分位及未扫描状态通过。此项仅验证隔离 ListView 原型可复用格式策略；未连入用户配置或产品 ExplorerBrowser，Shell 列和可见 UI 仍未实现。

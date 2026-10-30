@@ -723,3 +723,9 @@ Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 r
 `--shell-change-reconciliation` 再次通过真实 Shell create/update/file-rename/folder-rename/delete 通知：行 ID 保持/退休符合预期，目录重命名后旧递归缓存被清除并重扫，大小与内容计数更新为 `12 B`、2 files、1 folder；每次扫描在 worker 执行并由 owner 发布，列表重排及删除后的选中/焦点仍保持。输出为 `foreground-unchanged=True`、`hidden-window=True`。
 
 重复结果确认隔离数据模型和标准 `SysListView32` 投影在当前主线上可复现；它没有创建 ExplorerBrowser 或 `IShellView`，没有测试列标题输入、原生背景菜单、拖放和用户键盘，因此仍不构成产品文件视图迁移或 Q-Dir 逐行列验收。
+
+### 2026-10-31：当前主线 Shell 项目菜单与背景菜单差异复测
+
+在同一隐藏 `--common-listview-data-contract` 中重新通过行 PIDL 向父 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 查询项目菜单，并向父 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询背景菜单。项目菜单取得 154 个菜单项/扩展命令，canonical verb 包含 `delete`、`rename`、`properties`、`cut`、`copy`、`paste`、`copyaspath`；背景菜单包含 115 项/扩展命令，但它的菜单树不含查看、排序、分组或刷新。两次查询都没有显示菜单或执行菜单命令，前台 HWND 保持不变。
+
+这确认自有 `SysListView32` 可按当前行 PIDL 取得 Windows Shell 项目菜单对象，但不能通过父文件夹菜单得到与产品 ExplorerBrowser 相同的文件区背景菜单。该差异与 Explorer Dirs 的原始要求一致：文件区右键行为需要保留 Explorer 视图上下文；若继续自有视图原型，必须先证明背景查看/排序/分组/刷新命令有可靠的当前视图路由，不能把普通 `IShellFolder` 菜单称为 Explorer 等价菜单。此次仅查询菜单对象和 canonical verb，没有验证可见 Popup、物理命中、命令执行、第三方扩展或产品迁移。
