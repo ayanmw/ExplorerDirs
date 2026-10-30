@@ -4898,3 +4898,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - F5 仍使用 `IShellView::Refresh`，这是 Explorer 对 F5 的标准 Shell 操作；查看方式切换只调用 `IFolderView2::SetViewModeAndIconSize`，此前并未重新导航或完整刷新。
 - 文件列表现在在原生刷新期间暂缓重绘，并在本轮异步刷新完成回调清理时恢复；查看方式切换只在同步设置视图模式期间暂缓重绘。若 Shell 不支持 `IFolderView2::SetRedraw`，操作按原路径继续。
 - ExplorerDirs.App Release 构建通过（0 警告/错误），本次可见 UI 闪烁尚未验收；实际空窗、刷新耗时及慢速/虚拟 Shell 位置的行为留待集中 UI 验收。没有重建 ExplorerBrowser，也未改导航/刷新语义。
+
+### 反馈后的第二轮调整
+
+- 用户反馈 F5 与切换查看方式仍会出现明显列表黑屏。检查发现查看方式的重绘抑制包住 `SetViewModeAndIconSize`，现移除这层抑制，让 Shell 控件自行完成模式重排。
+- F5 的 `IShellView::Refresh` 仍只刷新当前 Shell 文件视图内容。重绘恢复不再仅凭 WPF `ContextIdle` 判定，而是等待原生行数连续三次相同（50 ms 采样），最多等待 1.5 秒；恢复绘制后只使当前 Shell 视图 HWND 失效一次，补上重绘请求。不会重新创建 ExplorerBrowser 或导航到同一路径。
+- App Release 构建通过（0 警告/错误）。当前未打开可见 UI；黑屏持续时间、慢速/虚拟 Shell 位置的体验需后续集中验收，本次不宣称视觉问题已解决。

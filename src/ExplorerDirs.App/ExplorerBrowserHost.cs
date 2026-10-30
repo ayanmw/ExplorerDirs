@@ -28,6 +28,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private const uint BrowseBack = 0x4000;
     private const uint BrowseForward = 0x8000;
     private const uint AncestorRootOwner = 3;
+    private const uint RedrawInvalidate = 0x0001;
+    private const uint RedrawAllChildren = 0x0080;
     // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
     private const int ShellCut = 0x7018;
     private const int ShellCopy = 0x7019;
@@ -2518,7 +2520,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 // Let the native view paint a real mode transition. This changes presentation only;
                 // it must not refresh or navigate the folder.
-                using var redraw = ShellViewRedrawLease.TrySuppress(view);
                 if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
                         new NativeViewStateTarget(view, Current),
                         result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
@@ -3163,83 +3164,115 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
             }
 
-            // Shell rebuilds the item list asynchronously after Refresh. Run
-            // completion after the same dispatcher phase used for selection restore.
+            // The Shell refills the native list asynchronously after Refresh. ContextIdle
+            // alone does not mean enumeration has finished, so keep redraw suppressed until
+            // the visible row count has settled (with a bounded fallback for virtual folders).
             var selectionOwnershipTransferred = false;
             var completionCleaned = 0;
+            DispatcherTimer? refreshPaintWait = null;
             void FinishRefreshCompletion()
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
+                refreshPaintWait?.Stop();
                 refreshRedraw?.Dispose();
+                // IFolderView2::SetRedraw re-enables painting but does not guarantee that
+                // the native child receives a paint message after its rows were repopulated.
+                if (IsCurrentRefreshRequest() && IsWindow(_viewWindow))
+                    _ = RedrawWindow(_viewWindow, IntPtr.Zero, IntPtr.Zero,
+                        RedrawInvalidate | RedrawAllChildren);
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
-            DispatcherOperation restore;
-            try
+
+            void CompleteRefresh()
             {
-                // Refresh completion may read the full row count and restore selection through
-                // synchronous Shell calls. Give the refreshed list a chance to paint first.
-                restore = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+                try
                 {
-                    try
+                    ShellRefreshCompletion.Run(() =>
                     {
-                        ShellRefreshCompletion.Run(() =>
+                        if (!IsCurrentRefreshRequest()) return;
+                        var rows = ReadDirectoryMonitorItemCount();
+                        if (!IsCurrentRefreshRequest()) return;
+                        LastShellRefreshStatus = $"refreshed; rows={rows}";
+                        if (selection is not null && inputVersion == Interlocked.Read(ref _nativeUserInputVersion))
                         {
+                            DirectoryChangeLastRefreshViewCountAtRestore = ReadDirectoryMonitorItemCount() ?? -1;
                             if (!IsCurrentRefreshRequest()) return;
-                            var rows = ReadDirectoryMonitorItemCount();
+                            var restoreClock = Stopwatch.StartNew();
+                            var restored = RestoreSelectionAfterRefresh(selection, path, navigationVersion,
+                                allowSelectedFocusFallback: false, source: "refresh");
+                            restoreClock.Stop();
                             if (!IsCurrentRefreshRequest()) return;
-                            LastShellRefreshStatus = $"refreshed; rows={rows}";
-                            if (selection is not null && inputVersion == Interlocked.Read(ref _nativeUserInputVersion))
-                            {
-                                DirectoryChangeLastRefreshViewCountAtRestore = ReadDirectoryMonitorItemCount() ?? -1;
-                                if (!IsCurrentRefreshRequest()) return;
-                                var restoreClock = Stopwatch.StartNew();
-                                var restored = RestoreSelectionAfterRefresh(selection, path, navigationVersion,
-                                    allowSelectedFocusFallback: false, source: "refresh");
-                                restoreClock.Stop();
-                                if (!IsCurrentRefreshRequest()) return;
-                                DirectoryChangeLastRefreshRestoreMilliseconds = restoreClock.ElapsedMilliseconds;
-                                DirectoryChangeLastRefreshSelectionRestored = restored.SelectionRestored;
-                                DirectoryChangeLastRefreshFocusRestored = restored.FocusRestored;
-                                if (!restored.SelectionRestored || !restored.FocusRestored)
-                                    selectionOwnershipTransferred = ScheduleDeferredRefreshSelectionRestore(
-                                        selection, path, navigationVersion, inputVersion, restored.SelectionRestored);
-                            }
-                            else if (selection is not null)
-                            {
-                                DirectoryChangeLastRefreshSelectionRestored = false;
-                                DirectoryChangeLastRefreshFocusRestored = false;
-                            }
-                        }, IsCurrentRefreshRequest, afterRefresh, error =>
+                            DirectoryChangeLastRefreshRestoreMilliseconds = restoreClock.ElapsedMilliseconds;
+                            DirectoryChangeLastRefreshSelectionRestored = restored.SelectionRestored;
+                            DirectoryChangeLastRefreshFocusRestored = restored.FocusRestored;
+                            if (!restored.SelectionRestored || !restored.FocusRestored)
+                                selectionOwnershipTransferred = ScheduleDeferredRefreshSelectionRestore(
+                                    selection, path, navigationVersion, inputVersion, restored.SelectionRestored);
+                        }
+                        else if (selection is not null)
                         {
-                            LastShellRefreshStatus = $"refresh-completion-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
-                            MenuError?.Invoke(this, $"Shell 文件视图刷新完成失败（0x{error.HResult:X8}）。");
-                        });
-                    }
-                    finally
-                    {
-                        FinishRefreshCompletion();
-                    }
-                }));
-            }
-            catch
-            {
-                FinishRefreshCompletion();
-                throw;
-            }
-            restore.Aborted += (_, _) => FinishRefreshCompletion();
-            if (restore.Status == DispatcherOperationStatus.Aborted)
-            {
-                FinishRefreshCompletion();
-                if (IsCurrentRefreshRequest())
-                {
-                    LastShellRefreshStatus = "dispatcher-completion-aborted";
-                    ShellRefreshCompletion.Run(static () => { }, IsCurrentRefreshRequest, afterRefresh, error =>
+                            DirectoryChangeLastRefreshSelectionRestored = false;
+                            DirectoryChangeLastRefreshFocusRestored = false;
+                        }
+                    }, IsCurrentRefreshRequest, afterRefresh, error =>
                     {
                         LastShellRefreshStatus = $"refresh-completion-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
                         MenuError?.Invoke(this, $"Shell 文件视图刷新完成失败（0x{error.HResult:X8}）。");
                     });
                 }
+                finally
+                {
+                    FinishRefreshCompletion();
+                }
+            }
+
+            try
+            {
+                var refreshStartedAt = Stopwatch.GetTimestamp();
+                var lastObservedCount = -1;
+                var stableCountSamples = 0;
+                refreshPaintWait = new DispatcherTimer(DispatcherPriority.Background)
+                {
+                    Interval = TimeSpan.FromMilliseconds(50)
+                };
+                refreshPaintWait.Tick += (_, _) =>
+                {
+                    if (!IsCurrentRefreshRequest())
+                    {
+                        FinishRefreshCompletion();
+                        return;
+                    }
+
+                    int? count;
+                    try { count = ReadDirectoryMonitorItemCount(); }
+                    catch (Exception ex) when (ex is COMException or InvalidComObjectException)
+                    {
+                        count = null;
+                    }
+                    if (count is { } currentCount)
+                    {
+                        stableCountSamples = currentCount == lastObservedCount ? stableCountSamples + 1 : 0;
+                        lastObservedCount = currentCount;
+                    }
+                    else
+                    {
+                        lastObservedCount = -1;
+                        stableCountSamples = 0;
+                    }
+
+                    // Wait for three identical samples, but never keep a Shell provider's list
+                    // frozen indefinitely if it cannot report a stable count.
+                    if ((stableCountSamples >= 2 && count is not null) ||
+                        Stopwatch.GetElapsedTime(refreshStartedAt) >= TimeSpan.FromMilliseconds(1500))
+                        CompleteRefresh();
+                };
+                refreshPaintWait.Start();
+            }
+            catch
+            {
+                FinishRefreshCompletion();
+                throw;
             }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
@@ -5881,6 +5914,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")]
