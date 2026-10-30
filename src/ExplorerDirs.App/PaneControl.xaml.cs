@@ -963,7 +963,7 @@ public partial class PaneControl : UserControl
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
                 addressHistory: state.AddressHistory.Copy(), startupSelectItems: selectedItems,
-                navigationHistory: ShellTabNavigationHistory.FromSnapshot(state.NavigationHistory.Snapshot(), state.NavigationHistory.Index),
+                navigationHistory: state.NavigationHistory.Clone(),
                 startupSearchUri: cloneSearchUri, replayClonedHistory: true);
         }
         catch (Exception ex)

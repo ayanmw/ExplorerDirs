@@ -39,7 +39,7 @@ internal static class ShellTabNavigationHistorySmoke
             "only one history traversal can be pending and a failed request can be cancelled");
 
         var historySnapshot = history.Snapshot();
-        var cloned = ShellTabNavigationHistory.FromSnapshot(historySnapshot, history.Index);
+        var cloned = history.Clone();
         var clonedMiddleSelection = cloned.Snapshot()[1].SelectedItems;
         var sharesImmutableSnapshot = ReferenceEquals(historySnapshot[1].SelectedItems, clonedMiddleSelection);
         var cloneKeepsSelection = cloned.Current == history.Current && cloned.TryBeginMove(back: true, out var cloneTarget) &&
@@ -82,7 +82,7 @@ internal static class ShellTabNavigationHistorySmoke
         Check(complete.Snapshot().Count == 121 && complete.Snapshot()[0].Location == @"C:\0" &&
               complete.Current == @"C:\120" && complete.Index == 120,
             "cloned view history retains every recorded location beyond 100 stops");
-        var completeClone = ShellTabNavigationHistory.FromSnapshot(complete.Snapshot(), complete.Index);
+        var completeClone = complete.Clone();
         var reachesFirst = true;
         for (var index = 119; index >= 0; index--)
         {
@@ -109,8 +109,9 @@ internal static class ShellTabNavigationHistorySmoke
         var cloneEnd = paneSource.IndexOf("private static bool NavigateHistoryLocation", cloneStart, StringComparison.Ordinal);
         var cloneCode = paneSource[cloneStart..cloneEnd];
         Check(paneSource.Contains("\"克隆当前视图\", () => CloneView(state)", StringComparison.Ordinal) &&
-              !duplicateCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
-              cloneCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
+              !duplicateCode.Contains("NavigationHistory.Clone()", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.NavigationHistory.Clone()", StringComparison.Ordinal) &&
+              !cloneCode.Contains("state.NavigationHistory.Snapshot()", StringComparison.Ordinal) &&
               cloneCode.Contains("CaptureSelectedShellParsingNames", StringComparison.Ordinal) &&
               cloneCode.Contains("var viewGeneration = state.Browser.ViewGeneration;", StringComparison.Ordinal) &&
               cloneCode.Contains("var navigationVersion = state.Browser.NavigationVersion;", StringComparison.Ordinal) &&

@@ -34,8 +34,7 @@ internal sealed class ShellTabNavigationHistory
     internal bool CanGoBack => _pendingIndex is null && _index > 0;
     internal bool CanGoForward => _pendingIndex is null && _index < _locations.Count - 1;
 
-    internal static ShellTabNavigationHistory FromSnapshot(IReadOnlyList<Stop> locations, int index) =>
-        new(locations, index);
+    internal ShellTabNavigationHistory Clone() => new(_locations, _index);
 
     internal IReadOnlyList<Stop> Snapshot() => _locations.ToArray();
 
