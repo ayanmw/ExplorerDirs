@@ -10,6 +10,8 @@
 
 2026-10-31 原生 `IShellView` 生命周期资源采样：Private Desktop 隔离探针预热 5 轮后创建/销毁 200 个完整 stock 视图；每轮四项均枚举成功，`DestroyViewWindow` 后没有残留子 HWND，GDI/USER 计数不增长。两次测量中，第 20 至第 200 轮的进程句柄均增加 180；句柄类型快照显示这 180 个均指向 NativeProbe 自身 PID，最后强制 GC 后仍在。新增句柄值/访问掩码采样确认首末快照间的 180 个句柄访问掩码均为 `0x1410`；样本句柄值不同，不能按单个句柄误认为重复引用。Private Bytes 在两轮末端分别比首样高约 2.7 MiB 和 2.9 MiB，中间有回落，不能据此认定持续线性泄漏。复用单个 `IShellBrowser` 的 60 轮 A/B 仍约每轮增加一个同类句柄；对象级对照只做 200 次 `IShellFolder::CreateViewObject`/Release、不创建窗口时，仅增 12 个混合类型句柄，没有 Process 句柄。追加单轮分阶段探针后，`CreateViewObject` 和取得宿主接口时句柄数不变；`CreateViewWindow` 后总句柄 +95；等待文件枚举完成时总句柄 +187，并首次观察到 4 个访问掩码均为 `0x1410` 的自进程 Process 句柄；`DestroyViewWindow`、消息泵稳定、释放 `IShellView`/宿主接口后这 4 个仍在。该阶段关联不能证明由 Shell view 直接创建，也不能解释重复生命周期中的 +180。总句柄差值还受 Shell/运行时初始化影响。当前尚不能区分 Shell/COM 依赖组件保留与未释放资源；结果不代表 ExplorerBrowser 产品宿主。Process Handle Tracing 隔离试验已启用，但栈帧未返回；枚举完成的第一时间复制原始记录后，仍见 ChangeNotify 线程（`shcore.dll+0x43930`）OPEN，以及探针主线程 CLOSE/OPEN。由于事件只记录数值句柄、槽位可复用，且已知 `OpenProcess` 控制也没有栈帧，线程记录不足以归属最终存活对象。句柄类型扫描已避免 `Process.GetProcessById` 额外开关句柄；Release 构建和两次 Private Desktop 阶段探针通过，前台及输入未变。下一步改用带内核句柄事件/栈的 ETW 对照同宿主无枚举与完整枚举路径；若系统未提供可用栈，再回到基于句柄对象生命周期的差分实验。以上仍是隔离原生探针，不代表 ExplorerBrowser 产品宿主，诊断代码不接入产品。
 
+2026-10-31 ETW 句柄追踪权限检查：本机 WPR `Handle` 配置存在，但普通权限执行 `wpr -start Handle -filemode` 返回 `0x80070005 Access is denied`；记录未启动，没有 ETL，也没有更改 WPR 状态。仅在可用的授权管理环境下再考虑该系统级追踪，不把权限拒绝当成 ETW 能力结论。
+
 2026-10-31 Q-Dir 官方功能差距补查：官方语言表分别列出 `Soft-Refresh, not re-enumerate the view` 与 `Disable auto sorting when rename or copy items`；FAQ 112/139 对后者的文案和用途有补充，但没有说明两个开关如何交互。Explorer Dirs 当前没有这两项偏好。不能把 `FWF_AUTOARRANGE` 或 `FWF_NOENUMREFRESH` 直接当作完整等价实现；暂列 P2，先验证外部变化/F5 的内容新鲜度与复制/重命名/拖放时的排序行为，再确定两个功能各自的持久化范围，不改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
 
 2026-10-31 02:07 CST：只读采样仍在运行的 `preview-0.6.0-temp.80` PID `47460` 5 分钟（61 点）。Working Set `220.61–220.70 MiB`，Private Bytes `115.30–115.48 MiB`，首末均轻微回落；GDI 全程 95。负载未固定，不能据此排除操作期间增长或定位来源。完整身份、哈希及边界见[内存采样记录](memory-sampling.md#2026-10-31-0207-北京时间temp80-当前运行实例五分钟只读采样)。
@@ -4999,6 +5001,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
 - Q-Dir 官方 FAQ 将 Soft-Refresh 定义为复制/拖放/重命名等导致项目变化时禁止自动重排列表，并非“不重新枚举”的 F5 替代方案；因此它不能解释或直接修复当前的刷新空白。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)
 - 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
+
+2026-10-31 隐藏 ExplorerBrowser HostProbe 重跑 F5：产品刷新入口执行后四窗格计数仍为 `4/4/4/4`，活动窗格三项选区及原焦点文件均恢复，HostProbe 前台守卫未报错；刷新过渡日志没有采到 paint 样本。该隐藏宿主不提供真实屏幕像素，不能判断肉眼黑屏/闪动是否消失；不据此改变重绘租约或宣称可见问题已修复。仍需将 F5 与查看方式切换纳入集中可见验收。
 
 ## 2026-10-31：F5 改走 Shell 目录更新通知
 
