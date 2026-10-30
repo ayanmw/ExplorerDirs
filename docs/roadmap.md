@@ -8,6 +8,8 @@
 
 2026-10-30 文件列表刷新重绘（当前源码复核）：F5 仅调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；该 Shell API 按设计重新核对并填充当前视图内容。切换查看方式仅对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 `Refresh` 或重新导航；完整排序/分组/列状态读取延后到 Dispatcher Background。当前主线不持有同步或异步 `SetRedraw` 租约，由 DefView 控制列表绘制。源码没有发现额外的整视图刷新调用；用户仍报告 F5 与模式切换期间列表明显变黑/消失。现有隐藏计时只测调用/行数，不能确定空白像素由 Shell 内部重填、模式重排还是调用后的焦点/选择绘制造成。之前的“同步模式切换重绘租约”候选结论已由当前实现取代，不应按该方案继续。下一步应在集中可见验收中分别记录列表空白时段与文件重新出现时段；在没有像素证据前不再叠加重绘抑制或额外刷新。见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
+2026-10-30 查看方式重复应用去重：`SetViewStyle` 现在先读取当前 Shell 模式和图标尺寸；如果与请求完全相同，就跳过重复 `SetViewModeAndIconSize`，仍按原流程更新本地状态缓存并延后捕获完整视图状态。读取失败时保留原 setter 路径。App Release 构建通过（0 警告/错误）。该改动只避免“再次选择当前查看方式”的冗余原生布局写入；真实模式切换的黑屏/重排及 F5 的列表空白未解决，仍需集中 UI 验收分别计时。
+
 2026-10-30 查看方式切换减少重复焦点激活：检查调用链发现 Ctrl+Shift 及 Ctrl+滚轮从 Shell 文件视图触发后仍立即运行 `FocusCurrentView()`，再次执行 `IShellView.UIActivate`、查询/恢复 focused item 和可能的 UIA focus。现在仅在切换前焦点不属于当前 native 文件视图时执行恢复；工具栏/菜单切换仍恢复到文件区。App Release 构建通过（0 警告/错误）；未运行测试或 GUI，因此这只是移除已确认的重复工作，不代表视觉闪烁已解决。待集中验收核对快捷键/滚轮不丢焦点，菜单操作仍回到文件区，并观察列表重排是否减少闪烁。
 
 2026-10-30 刷新后的焦点恢复避免重复聚焦：`ShellViewSelectionSnapshot.Restore` 已先核对当前选区，但仍会对快照焦点项无条件调用 `IShellView.SelectItem(SVSI_FOCUSED)`。现在先用其相对 PIDL 核对 Shell 当前 focused item；只有焦点未保留时才发送恢复命令，原有失败验证与选中项回退不变。App Release 构建通过（0 警告/错误）；未运行测试或 GUI。该改动减少刷新完成后的重复焦点命令，不代表 Shell 初始重枚举黑屏已解决，需集中验收选区/焦点和重绘。

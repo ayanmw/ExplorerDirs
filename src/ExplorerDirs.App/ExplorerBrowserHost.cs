@@ -2508,10 +2508,20 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
-            // Let the native view paint its mode transition. This changes presentation only;
-            // it must not refresh or navigate the folder.
-            if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
-                    result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+            var requestedIconSize = ViewStyle.NativeIconSize(style.Mode, style.IconSize);
+            var currentModeResult = GetMethod<GetViewModeAndIconSizeDelegate>(view, 36)(view,
+                out var currentMode, out var currentIconSize);
+            if (!Current()) return false;
+            // Re-selecting the active mode is a no-op. Avoid asking DefView to reapply
+            // an identical layout, which can otherwise trigger an unnecessary list reflow.
+            if (currentModeResult < 0 || currentMode != style.Mode || currentIconSize != requestedIconSize)
+            {
+                // Let the native view paint a real mode transition. This changes presentation only;
+                // it must not refresh or navigate the folder.
+                if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
+                        new NativeViewStateTarget(view, Current),
+                        result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+            }
         }
         catch (COMException ex)
         {
