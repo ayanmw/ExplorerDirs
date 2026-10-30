@@ -38,11 +38,20 @@ internal static class ShellTabNavigationHistorySmoke
               !history.TryBeginMove(back: true, out _) && history.CancelPendingMove(),
             "only one history traversal can be pending and a failed request can be cancelled");
 
-        var cloned = ShellTabNavigationHistory.FromSnapshot(history.Snapshot(), history.Index);
-        Check(cloned.Current == history.Current && cloned.TryBeginMove(back: true, out var cloneTarget) &&
-              cloneTarget == @"C:\middle" && cloned.CommitLocation(@"C:\middle") &&
-              cloned.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
-            "a cloned view keeps independent locations and per-stop selections");
+        var historySnapshot = history.Snapshot();
+        var cloned = ShellTabNavigationHistory.FromSnapshot(historySnapshot, history.Index);
+        var clonedMiddleSelection = cloned.Snapshot()[1].SelectedItems;
+        var sharesImmutableSnapshot = ReferenceEquals(historySnapshot[1].SelectedItems, clonedMiddleSelection);
+        var cloneKeepsSelection = cloned.Current == history.Current && cloned.TryBeginMove(back: true, out var cloneTarget) &&
+            cloneTarget == @"C:\middle" && cloned.CommitLocation(@"C:\middle") &&
+            cloned.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]);
+        history.TryBeginMove(back: true, out _);
+        history.CommitLocation(@"C:\middle");
+        history.UpdateCurrentSelection([@"C:\middle\changed.txt"]);
+        Check(sharesImmutableSnapshot && cloneKeepsSelection &&
+              cloned.Snapshot()[1].SelectedItems.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]) &&
+              history.CurrentSelection.SequenceEqual([@"C:\middle\changed.txt"]),
+            "a cloned view shares immutable selection storage without coupling later source updates");
 
         var namesRead = 0;
         var searchSelectionIndexes = ShellSelectionMatch.FindViewIndexes(EnumerateNames(),

@@ -22,7 +22,9 @@ internal sealed class ShellTabNavigationHistory
     {
         if (locations.Count == 0) throw new ArgumentException("Navigation history cannot be empty.", nameof(locations));
         if ((uint)index >= (uint)locations.Count) throw new ArgumentOutOfRangeException(nameof(index));
-        _locations = locations.Select(stop => new Stop(stop.Location, stop.SelectedItems.ToArray())).ToList();
+        // Stops and their selection lists are immutable snapshots; copy the bounded
+        // history container while sharing selection storage with the cloned view.
+        _locations = locations.ToList();
         _index = index;
     }
 
@@ -36,14 +38,13 @@ internal sealed class ShellTabNavigationHistory
     internal static ShellTabNavigationHistory FromSnapshot(IReadOnlyList<Stop> locations, int index) =>
         new(locations, index);
 
-    internal IReadOnlyList<Stop> Snapshot() =>
-        _locations.Select(stop => new Stop(stop.Location, stop.SelectedItems.ToArray())).ToArray();
+    internal IReadOnlyList<Stop> Snapshot() => _locations.ToArray();
 
     internal void UpdateCurrentSelection(IEnumerable<string> selectedItems)
     {
         var selected = selectedItems.Where(item => !string.IsNullOrWhiteSpace(item))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        _locations[_index] = _locations[_index] with { SelectedItems = selected };
+        _locations[_index] = _locations[_index] with { SelectedItems = Array.AsReadOnly(selected) };
     }
 
     internal void Record(string location)
