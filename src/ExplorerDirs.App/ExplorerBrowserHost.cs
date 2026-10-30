@@ -2508,7 +2508,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
-            using var redraw = ShellViewRedrawLease.TrySuppress(view);
             // Change only mode/size: do not reapply cached sorting or grouping.
             if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
                     result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
@@ -3083,7 +3082,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
-            try { refreshResult = shellView.Refresh(); }
+            try
+            {
+                refreshResult = ShellViewRedrawLease.RunSuppressed(redrawLease, shellView.Refresh);
+                redrawLease = null;
+            }
             catch when (!IsCurrentRefreshRequest())
             {
                 redrawLease?.Dispose();

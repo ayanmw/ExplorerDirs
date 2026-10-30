@@ -337,7 +337,7 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 ## 本轮代码与下一轮验收
 
-2026-10-30 F5 与查看方式切换重绘优化：F5 仍调用 Shell `IShellView.Refresh()`，仅在异步重枚举及已有选区/焦点恢复期间调用 `IFolderView2.SetRedraw(FALSE)`，完成、过期导航、异常与 dispatcher 中止均恢复绘制；查看方式变更原本不做完整目录刷新，仅在 `SetViewModeAndIconSize` 前后抑制过渡重绘。App/SettingsSmoke/NativeProbe Release 构建、重绘租约 smoke、隐藏刷新 A/B、生产宿主刷新选区/焦点及查看模式状态探针通过。没有渲染可见像素；下一次集中验收需单独确认 F5 与八种查看方式的黑屏/闪烁、选择/焦点和滚动条效果。实现和证据边界见[刷新闪烁调查](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+2026-10-30 F5 与查看方式切换重绘调整：F5 仍调用 Shell `IShellView.Refresh()`，但 `IFolderView2.SetRedraw` 仅覆盖同步调用，避免异步重枚举期间 Shell 已清空列表却仍被禁止绘制；查看方式只调用 `SetViewModeAndIconSize`，不重刷新目录，也不再额外关闭控件重绘，交由原生 Shell 控件重排和绘制。App/NativeProbe Release 构建、完整 SettingsSmoke、重绘租约生命周期 smoke 和隐藏刷新 A/B 行数收敛通过。最新隐藏查看方式探针触发前台边界保护，不能记为完整通过；没有渲染可见像素。需在后续集中 UI 验收确认 F5 与查看方式切换的黑屏/闪烁、选择/焦点和滚动条效果。实现和证据边界见[刷新闪烁调查](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-19 桌面实测：隔离构建粘贴后方向键可用；Shift+Delete 确认后却切到另一窗格。焦点日志证明另一窗格的 Static 容器收到 WM_SETFOCUS 后误更新了活动窗格。候选修复只认可文件内容窗口及其子窗口的焦点；修复后 GUI 未复测（用户 Esc 停止）。此修复收入用户要求的临时预览包，不能标记验收通过。
 

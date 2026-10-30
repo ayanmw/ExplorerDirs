@@ -58,11 +58,11 @@
 - Probe: `src/ExplorerDirs.NativeProbe/RefreshComparisonProbe.cs`
 - Smoke: `src/ExplorerDirs.SettingsSmoke/ShellViewRedrawLeaseSmoke.cs`
 
-- [x] Keep F5 on `IShellView.Refresh()` and suppress `IFolderView2` redraw only until the asynchronous refresh/selection completion runs; restore it on stale navigation, exceptions, negative HRESULTs, dispatcher aborts and normal completion.
-- [x] Suppress redraw around `SetViewModeAndIconSize` only; view-style switching does not invoke full `IShellView.Refresh()`.
-- [x] Add a hidden-host comparison route and lease lifecycle smoke. Shell row enumeration settles with redraw suppressed and the native view is still responsible for the final paint after redraw is restored.
+- [x] Keep F5 on `IShellView.Refresh()`, but restore `IFolderView2` redraw as soon as the synchronous call returns. The previous lease lasted through asynchronous enumeration and selection recovery, potentially leaving an emptied native list unable to paint while it repopulated.
+- [x] Do not suppress redraw around `SetViewModeAndIconSize`; the mode change does not call `IShellView.Refresh()`, so the native Shell view should paint its own reflow.
+- [x] Add lease-scope smoke coverage proving redraw is restored immediately after the synchronous Shell call.
 - [x] Run the hidden production-host `--live-shell-refresh` probe: all four panes stayed at the expected row counts; the refreshed pane preserved 3 selected items and the focused item.
-- [x] Run native `--view-style-capability`: all supported styles retained selection identity and sort/group state, with no navigation and unchanged foreground.
+- [x] Run native `--view-style-capability`; the latest run preserved selection/sort/group state across the modes but tripped its foreground-boundary guard, so it is not a clean end-to-end pass.
 - [ ] Confirm visible F5 and view-style transitions no longer show a black/blank list; hidden probes cannot establish visual flicker.
 
 ## Evidence and limits
@@ -75,8 +75,8 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Task 4 adds a temporary `IFolderView2::SetRedraw(FALSE/TRUE)` lease in the product; the new hidden-host route confirms row convergence while redraw is suppressed, but the visual effect remains unverified until a visible UI acceptance pass.
+The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. The product now restores `IFolderView2::SetRedraw` immediately after the synchronous `IShellView.Refresh()` call; async enumeration and selection recovery are allowed to paint. The hidden-host route confirms row convergence only, so the visual effect remains unverified until a visible UI acceptance pass.
 
-Latest hidden-host pass: `baseline=1027 ms`, `updatedir=559 ms`, `ishellview=62 ms`, `ishellview-redraw-suppressed=59 ms`; all routes observed three rows, parent HWND stayed hidden, and foreground stayed unchanged. An earlier pass observed a foreground change and correctly returned failure; a repeat passed. This is not evidence about perceived flicker.
+Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 
-The product-host F5 probe passed on retry after one foreground-guard abort: it confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. The native view-style capability probe passed across all supported styles and grouped/ungrouped states, preserving selection identity, sort/group state, no-navigation, and foreground. Neither probe renders visible pixels.
+The earlier product-host F5 probe confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. In the latest run, the hidden native view-style probe reported supported modes and preserved selection/sort/group state, then exited with its foreground-boundary guard because the foreground changed; do not treat that run as a clean end-to-end pass. Neither probe renders visible pixels.

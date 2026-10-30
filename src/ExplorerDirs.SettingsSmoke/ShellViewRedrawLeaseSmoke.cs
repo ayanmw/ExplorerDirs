@@ -23,6 +23,22 @@ internal static class ShellViewRedrawLeaseSmoke
         });
         Check(failure is null && calls.SequenceEqual([false]),
             "a failed suppression returns no lease and does not claim that redraw was disabled");
+
+        var order = new List<string>();
+        var refreshLease = ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(redraw =>
+            {
+                order.Add(redraw ? "redraw-on" : "redraw-off");
+                return 0;
+            }) ?? throw new InvalidOperationException("A successful redraw suppression should return a lease.");
+        ExplorerDirs.App.ShellViewRedrawLease.RunSuppressed(
+            refreshLease,
+            () =>
+            {
+                order.Add("refresh");
+                return 0;
+            });
+        Check(order.SequenceEqual(["redraw-off", "refresh", "redraw-on"]),
+            "refresh suppression ends as soon as the synchronous Shell call returns");
         Console.WriteLine("Shell view redraw lease smoke: PASS");
     }
 

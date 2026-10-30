@@ -34,6 +34,11 @@ internal sealed class ShellViewRedrawLease : IDisposable
             () => Marshal.Release(folderView2));
     }
 
+    internal static T RunSuppressed<T>(ShellViewRedrawLease? lease, Func<T> action)
+    {
+        using (lease) return action();
+    }
+
     public void Dispose()
     {
         var setRedraw = Interlocked.Exchange(ref _setRedraw, null);
