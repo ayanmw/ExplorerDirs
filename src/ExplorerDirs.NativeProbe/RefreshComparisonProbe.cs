@@ -16,7 +16,7 @@ internal static class RefreshComparisonProbe
         try
         {
             var succeeded = true;
-            foreach (var route in new[] { "baseline", "updatedir", "ishellview" })
+            foreach (var route in new[] { "baseline", "updatedir", "ishellview", "ishellview-redraw-suppressed" })
             {
                 var folder = Path.Combine(root, route);
                 Directory.CreateDirectory(folder);
@@ -29,7 +29,19 @@ internal static class RefreshComparisonProbe
                 File.WriteAllText(Path.Combine(folder, "added.txt"), "external change");
                 var elapsed = Stopwatch.StartNew();
                 if (route == "updatedir") SHChangeNotify(ShellDirectoryUpdated, PathAndFlushNoWait, folder, 0);
-                else if (route == "ishellview") view.Refresh();
+                else if (route.StartsWith("ishellview", StringComparison.Ordinal))
+                {
+                    using var redraw = route.EndsWith("redraw-suppressed", StringComparison.Ordinal)
+                        ? view.SuppressRedraw() : null;
+                    view.Refresh();
+                    var settledWhileSuppressed = PumpUntil(() => view.Count() == 3, 5000);
+                    redraw?.Dispose();
+                    elapsed.Stop();
+                    var countWhileSuppressed = view.Count();
+                    Console.WriteLine($"refresh-route={route}; settled={settledWhileSuppressed}; rows={countWhileSuppressed}; elapsed-ms={elapsed.ElapsedMilliseconds}; hidden-parent={ !IsWindowVisible(view.Parent) }");
+                    succeeded &= settledWhileSuppressed && countWhileSuppressed == 3 && !IsWindowVisible(view.Parent);
+                    continue;
+                }
                 var settled = PumpUntil(() => view.Count() == 3, 5000);
                 elapsed.Stop();
                 var count = view.Count();
@@ -94,6 +106,14 @@ internal static class RefreshComparisonProbe
                 Marshal.ThrowExceptionForHR(result);
                 return count;
             }
+            finally { Marshal.Release(view); }
+        }
+
+        internal IDisposable? SuppressRedraw()
+        {
+            var iid = new Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
+            Marshal.ThrowExceptionForHR(At<GetInterface>(_browser, 17)(_browser, ref iid, out var view));
+            try { return ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(view); }
             finally { Marshal.Release(view); }
         }
 

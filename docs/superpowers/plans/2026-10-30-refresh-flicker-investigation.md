@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Do not replace the native Shell view or freeze rendered pixels.
+- Do not replace the native Shell view or cache/freeze rendered pixels as a substitute for Shell updates. A temporary native redraw suppression may be used while the existing view updates, provided Shell remains responsible for the final paint.
 - Do not broadcast unrelated refreshes from the product unless the effect is understood and accepted.
 - Keep the current path for virtual/non-filesystem Shell locations.
 - Do not use the user's visible desktop for experiments.
@@ -50,6 +50,21 @@
 - [x] Do not add a filesystem-only product route; retain the existing direct Shell refresh behavior.
 - [x] Commit the isolated probe and investigation evidence on `main` (`bc2d357`); visible UI acceptance remains separate.
 
+### Task 4: Test Shell-owned redraw suppression
+
+**Files:**
+- Modify: `src/ExplorerDirs.App/ExplorerBrowserHost.cs`
+- Add: `src/ExplorerDirs.App/ShellViewRedrawLease.cs`
+- Probe: `src/ExplorerDirs.NativeProbe/RefreshComparisonProbe.cs`
+- Smoke: `src/ExplorerDirs.SettingsSmoke/ShellViewRedrawLeaseSmoke.cs`
+
+- [x] Keep F5 on `IShellView.Refresh()` and suppress `IFolderView2` redraw only until the asynchronous refresh/selection completion runs; restore it on stale navigation, exceptions, negative HRESULTs, dispatcher aborts and normal completion.
+- [x] Suppress redraw around `SetViewModeAndIconSize` only; view-style switching does not invoke full `IShellView.Refresh()`.
+- [x] Add a hidden-host comparison route and lease lifecycle smoke. Shell row enumeration settles with redraw suppressed and the native view is still responsible for the final paint after redraw is restored.
+- [x] Run the hidden production-host `--live-shell-refresh` probe: all four panes stayed at the expected row counts; the refreshed pane preserved 3 selected items and the focused item.
+- [x] Run native `--view-style-capability`: all supported styles retained selection identity and sort/group state, with no navigation and unchanged foreground.
+- [ ] Confirm visible F5 and view-style transitions no longer show a black/blank list; hidden probes cannot establish visual flicker.
+
 ## Evidence and limits
 
 `dotnet ExplorerDirs.NativeProbe.dll --refresh-comparison` ran three times with an invisible parent window and unchanged foreground. Each trial observed 3 rows from an initial 2:
@@ -60,4 +75,8 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-This probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. No product refresh code changed.
+The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Task 4 adds a temporary `IFolderView2::SetRedraw(FALSE/TRUE)` lease in the product; the new hidden-host route confirms row convergence while redraw is suppressed, but the visual effect remains unverified until a visible UI acceptance pass.
+
+Latest hidden-host pass: `baseline=1027 ms`, `updatedir=559 ms`, `ishellview=62 ms`, `ishellview-redraw-suppressed=59 ms`; all routes observed three rows, parent HWND stayed hidden, and foreground stayed unchanged. An earlier pass observed a foreground change and correctly returned failure; a repeat passed. This is not evidence about perceived flicker.
+
+The product-host F5 probe passed on retry after one foreground-guard abort: it confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. The native view-style capability probe passed across all supported styles and grouped/ungrouped states, preserving selection identity, sort/group state, no-navigation, and foreground. Neither probe renders visible pixels.

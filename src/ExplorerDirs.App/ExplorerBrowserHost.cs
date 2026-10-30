@@ -2508,6 +2508,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
+            using var redraw = ShellViewRedrawLease.TrySuppress(view);
             // Change only mode/size: do not reapply cached sorting or grouping.
             if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
                     result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
@@ -3056,17 +3057,43 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
             var selectionRecoverySuppression = _selectionRecoverySuppression.Acquire(navigationVersion);
+            ShellViewRedrawLease? redrawLease = null;
+            try
+            {
+                var redrawView = GetFolderView2Pointer();
+                if (redrawView != IntPtr.Zero)
+                {
+                    try { redrawLease = ShellViewRedrawLease.TrySuppress(redrawView); }
+                    finally { Marshal.Release(redrawView); }
+                }
+            }
+            catch
+            {
+                redrawLease?.Dispose();
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                throw;
+            }
+            if (!IsCurrentRefreshRequest())
+            {
+                redrawLease?.Dispose();
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                return;
+            }
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try { refreshResult = shellView.Refresh(); }
             catch when (!IsCurrentRefreshRequest())
             {
+                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
+                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3074,6 +3101,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
+                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3081,6 +3109,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
+                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
@@ -3093,6 +3122,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             void FinishRefreshCompletion()
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
+                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }

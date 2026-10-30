@@ -11,6 +11,9 @@
     <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../ExplorerDirs.App/ShellViewRedrawLease.cs" Link="ShellViewRedrawLease.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="System.IO" />
     <Using Include="System.Windows.Controls.Image" Alias="Image" />
     <Using Include="System.Windows.HorizontalAlignment" Alias="HorizontalAlignment" />
