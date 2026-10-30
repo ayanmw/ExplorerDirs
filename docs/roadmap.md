@@ -18,6 +18,8 @@
 
 集中验收候选已刷新：从干净提交 `db5c8daf54e3106f31023760f92f61d6708ddd74` 执行 `run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-005620-783-418f8b/`，39 项，manifest 为 `prepared-not-run` 且 `SourceWorkingTreeDirty=false`。EXE、App DLL 和颜色夹具的实际 SHA-256 与 manifest 完全匹配；10,000 个唯一名称的列筛选分页及最近收藏标题双窗口恢复均进入验收清单。仅准备隔离副本，未启动窗口或创建 ExplorerBrowser；清单、构建身份与哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
+集中验收候选再次刷新：从干净提交 `0bb2a1e1ae36961cbb3c753df7561e9cbfce3685` 执行 `run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-012049-679-6e864e/`。manifest 为 `prepared-not-run`、`SourceWorkingTreeDirty=false`，39 项待验收；EXE、App DLL 和 Q-Dir 颜色夹具哈希已复读确认。清单保留独立“克隆视图”验收场景（含普通目录、搜索选区、逐站导航、前进分支截断及捕获期间状态变化），不替换“复制标签”现有语义。未启动窗口或创建 ExplorerBrowser；当前身份见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
+
 2026-10-30 克隆视图快照一致性保护：克隆时 Shell 视图设置和选区分两次读取，COM 重入期间可能导航到另一位置。现捕获目录/搜索 URI、导航与视图代次、选区代次，并验证导航历史仍指向同一位置；任一值变化就拒绝生成不一致的克隆。定向 SettingsSmoke 覆盖保护接线与历史位置匹配；App Release build、完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，COM 重入时序仍待隔离 HostProbe/集中验收。
 
 2026-10-30 列值筛选菜单临时内存：捕获完成后把唯一列值集合从仍需保留的 Shell 捕获对象中移出；菜单排序直接合并当前已选值并生成最终数组，避免旧 HashSet、LINQ 去重链和菜单项在构建期间共同保留。列表语义（大小写不敏感去重、保留已选但当前不可见的值、区域排序）由 Release SettingsSmoke 覆盖，App Release build 0 警告/错误、完整 SettingsSmoke 退出码 0。没有创建 ExplorerBrowser/GUI，也未测量极大列值清单的实际 MB；菜单视觉项仍与唯一值数量线性增长，保留后续优化空间。
