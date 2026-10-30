@@ -88,6 +88,17 @@ internal static class ShellListViewRowModelSmoke
               reconciled.Rows[1].RecursiveBytes == targetWithSummary.RecursiveBytes &&
               reconciled.Rows[1].RecursiveSummary == targetWithSummary.RecursiveSummary,
             "all old PIDLs are returned for release and matching scan summaries survive metadata refresh");
+
+        var selection = ExplorerDirs.NativeProbe.ShellListViewSelectionSnapshot.Capture(
+            rows, [target.Id, sibling.Id], focusedRowId: sibling.Id);
+        var reorderedSelection = selection.Resolve([added, sibling, changedTarget]);
+        Check(reorderedSelection.Select(state => (state.RowId, state.Selected, state.Focused))
+                  .SequenceEqual([(added.Id, false, false), (sibling.Id, true, true), (target.Id, true, false)]),
+            "selection and focus resolve by stable row ID after insertion, removal, and reordering");
+        var retiredFocusSelection = selection.Resolve([added, changedTarget]);
+        Check(retiredFocusSelection.All(state => !state.Focused) &&
+              retiredFocusSelection.Single(state => state.RowId == target.Id).Selected,
+            "a missing focused identity is cleared without changing selection on surviving rows");
         Console.WriteLine("Shell ListView row model smoke: PASS");
 
         static void Check(bool condition, string behavior)

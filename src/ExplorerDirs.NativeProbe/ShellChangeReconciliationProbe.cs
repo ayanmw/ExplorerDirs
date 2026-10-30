@@ -34,6 +34,7 @@ internal static class ShellChangeReconciliationProbe
             Marshal.ThrowExceptionForHR(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out shellFolder));
             current = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
             var stableId = current.Rows.Single(row => row.DisplayName == "stable.txt").Id;
+            var selection = ShellListViewSelectionSnapshot.Capture(current.Rows, [stableId], focusedRowId: stableId);
             var watch = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
             registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
                 ChangeMessage, 1, ref watch);
@@ -57,16 +58,22 @@ internal static class ShellChangeReconciliationProbe
             ShellListViewEnumerator.FreeRows(updated.RetiredRows);
             current = updatedEnumeration with { Rows = updated.Rows.ToList() };
             var updateIdPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
+            var selectionAfterUpdatePreserved = HasStableSelection(current.Rows);
 
             var renamedPath = Path.Combine(fixture, "renamed.txt");
             File.Move(createdPath, renamedPath);
             SHChangeNotify(RenamedItem, PathUnicode, createdPath, renamedPath);
             var renameEvent = window.WaitFor([RenamedItem], TimeSpan.FromSeconds(5));
             var renamedEnumeration = WaitForRow(folderPidl, shellFolder, row => row.DisplayName == "renamed.txt");
+            renamedEnumeration = renamedEnumeration with
+            {
+                Rows = renamedEnumeration.Rows.OrderByDescending(row => row.DisplayName, StringComparer.OrdinalIgnoreCase).ToList()
+            };
             var renamed = ShellListViewRowModel.Reconcile(current.Rows, renamedEnumeration.Rows, updated.NextId);
             ShellListViewEnumerator.FreeRows(renamed.RetiredRows);
             current = renamedEnumeration with { Rows = renamed.Rows.ToList() };
             var renamedId = current.Rows.Single(row => row.DisplayName == "renamed.txt").Id;
+            var selectionAfterReorderPreserved = HasStableSelection(current.Rows);
 
             File.Delete(renamedPath);
             SHChangeNotify(Deleted, PathUnicode, renamedPath, null);
@@ -79,14 +86,20 @@ internal static class ShellChangeReconciliationProbe
             current = deletedEnumeration with { Rows = deleted.Rows.ToList() };
 
             var stableIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
+            var selectionAfterDeletePreserved = HasStableSelection(current.Rows);
             var addedNewIdentity = createdId != stableId && renamedId != createdId && renamedId != stableId;
             Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; delete-notified={deleteEvent}; " +
                 $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-got-new-id={addedNewIdentity}; deleted-id-retired={retiredRenamedId}; " +
+                $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false}");
             if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved || !addedNewIdentity ||
-                !retiredRenamedId || current.Rows.Count != 1 || GetForegroundWindow() != foreground || IsWindowVisible(window.Handle))
+                !retiredRenamedId || !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
+                current.Rows.Count != 1 || GetForegroundWindow() != foreground || IsWindowVisible(window.Handle))
                 throw new InvalidOperationException("Shell change notification reconciliation contract failed.");
             return 0;
+
+            bool HasStableSelection(IReadOnlyList<ShellListViewRow> rows) => selection.Resolve(rows)
+                .Any(state => state.RowId == stableId && state.Selected && state.Focused);
         }
         finally
         {

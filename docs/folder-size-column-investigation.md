@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：变更后的选区与焦点按行身份映射
+
+隔离 `ShellListViewSelectionSnapshot` 保存选中行 ID 集合和 focused row ID，并在新枚举顺序中解析为每行的选中/焦点状态。NativeProbe 的 Shell 通知夹具现跨 create、update-directory、重命名后的逆序行快照及 delete，对未变化的 `stable.txt` 选中/焦点身份做映射；行消失时不把焦点转移给另一行。SettingsSmoke 覆盖新增、删除、重排、多选、焦点消失及旧快照隔离；隐藏 Shell 通知合同连续通过 3 轮，前台不变。
+
+该结果仍停留在行身份与状态映射层，没有把状态写回原生 `SysListView32`，也没有在 `IShellView` 中读回/恢复实际选区、焦点、滚动或 Shell 排序。后续要用隐藏原生列表验证状态回写，再评估真实 `IShellView` 的通知/重排门槛；产品 ExplorerBrowser 不变。
+
 ## 2026-10-31：隐藏窗口 Shell 变更通知驱动对账
 
 NativeProbe 新增 `--shell-change-reconciliation`：用不可见的 message-only HWND 注册 `SHChangeNotifyRegister`（Shell/interrupt 来源及 `SHCNRF_NewDelivery`），并通过 `SHChangeNotification_Lock/Unlock` 读取事件。夹具在注册后依次新建文件、更新目录、重命名和删除文件，各操作调用 `SHChangeNotify`；收到通知后再重新枚举并运行行模型对账。
