@@ -16,6 +16,12 @@ internal static class CreatedFileSelectionRequestSmoke
             "navigation to another path cancels selection");
         Check(!request.IsCurrent(browser, @"C:\work", false, false, false, 4, 8, 12, 16),
             "a virtual location cancels selection");
+        var shellRequest = new CreatedFileSelectionRequest(browser, "shell:MyComputerFolder", 4, 8, 12, 16,
+            SupportsVirtualLocation: true);
+        Check(shellRequest.IsCurrent(browser, "shell:MyComputerFolder", false, false, false, 4, 8, 12, 16),
+            "a cloned selection request may target a virtual Shell folder");
+        Check(!shellRequest.IsCurrent(browser, "shell:MyComputerFolder", false, true, false, 4, 8, 12, 16),
+            "virtual Shell selection restoration still rejects search results");
         Check(!request.IsCurrent(browser, @"C:\work", true, true, false, 4, 8, 12, 16),
             "search results cancel filesystem-file selection");
         Check(!request.IsCurrent(browser, @"C:\work", true, false, true, 4, 8, 12, 16),

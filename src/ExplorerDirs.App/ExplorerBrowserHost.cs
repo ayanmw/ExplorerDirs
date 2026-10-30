@@ -229,6 +229,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return CaptureProgramStarterItemPaths(1).Where(Path.IsPathFullyQualified).ToArray();
     }
 
+    internal IReadOnlyList<string> CaptureSelectedShellParsingNames()
+    {
+        if (_browser is null || !IsVisible || _viewReadiness.Pending)
+            throw new InvalidOperationException("当前文件视图尚未准备完成。");
+        return CaptureProgramStarterItemPaths(1).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray();
+    }
+
     internal IReadOnlyList<string> CaptureSelectedPathsForClipboard()
     {
         if (_browser is null || !IsVisible || _viewReadiness.Pending)
@@ -1577,9 +1584,38 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl); }
     }
 
+    internal bool QueueShellItemSelections(IReadOnlyList<string> parsingNames)
+    {
+        if (_browser is null || _location.IsSearchActive || parsingNames.Count == 0) return false;
+        var request = CaptureShellSelectionRequest();
+        List<IntPtr> childPidls = [];
+        foreach (var name in parsingNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!IsCreatedFileSelectionRequestCurrent(request)) break;
+            if (ShellSelectionPidl.TryGetDirectChild(CurrentPath, name, out var childPidl))
+                childPidls.Add(childPidl);
+        }
+        if (childPidls.Count == 0 || !IsCreatedFileSelectionRequestCurrent(request))
+        {
+            foreach (var pidl in childPidls) Marshal.FreeCoTaskMem(pidl);
+            return false;
+        }
+        try
+        {
+            CancelCreatedFileSelection();
+            return QueueFileSystemSelections(childPidls, request);
+        }
+        finally { foreach (var pidl in childPidls) Marshal.FreeCoTaskMem(pidl); }
+    }
+
     private CreatedFileSelectionRequest CaptureFileSystemSelectionRequest() =>
         new(_browser!, CurrentPath, _viewReadiness.NavigationVersion,
             _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion);
+
+    private CreatedFileSelectionRequest CaptureShellSelectionRequest() =>
+        new(_browser!, CurrentPath, _viewReadiness.NavigationVersion,
+            _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion,
+            SupportsVirtualLocation: true);
 
     private bool QueueFileSystemSelection(IntPtr absolutePidl, CreatedFileSelectionRequest request)
         => QueueFileSystemSelections([absolutePidl], request);

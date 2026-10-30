@@ -153,7 +153,7 @@ internal static class PaneTabTransferProbe
                 try
                 {
                     selectedPaths = (IReadOnlyList<string>)browserType
-                        .GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!.Invoke(browser, null)!;
+                        .GetMethod("CaptureSelectedShellParsingNames", InstanceMembers)!.Invoke(browser, null)!;
                     return selectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
                         .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase);
                 }
@@ -169,11 +169,11 @@ internal static class PaneTabTransferProbe
             var pendingCopy = (TabItem)sourceTabsControl.SelectedItem!;
             var pendingCopyState = pendingCopy.Tag!;
             var startupSelections = (IReadOnlyList<string>?)pendingCopyState.GetType()
-                .GetProperty("StartupSelectPaths", InstanceMembers)!.GetValue(pendingCopyState);
+                .GetProperty("StartupSelectItems", InstanceMembers)!.GetValue(pendingCopyState);
             Ensure(startupSelections is not null && startupSelections.Select(Path.GetFileName)
                     .Order(StringComparer.OrdinalIgnoreCase)
                     .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
-                "copy carries the selected filesystem entries into the cloned tab's startup restore request");
+                "copy carries selected Shell parsing names into the cloned tab's startup restore request");
             PumpUntil(() => sourceTabsControl.Items.Count == 2 &&
                 string.Equals(ReadBrowserPath(sourceTabsControl.SelectedItem!), sourceA, StringComparison.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(15), "the independent copied browser became ready");

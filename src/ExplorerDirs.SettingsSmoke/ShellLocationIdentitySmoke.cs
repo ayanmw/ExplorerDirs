@@ -22,6 +22,27 @@ internal static class ShellLocationIdentitySmoke
             "an encoded Q-Dir PIDL resolver may preserve any absolute Shell folder identity");
     }
 
+    private static void RunDirectChildPidlSmoke()
+    {
+        var drive = Path.GetPathRoot(Environment.SystemDirectory)!;
+        var resolved = ShellSelectionPidl.TryGetDirectChild("shell:MyComputerFolder", drive, out var child);
+        try
+        {
+            Check(resolved && child != IntPtr.Zero,
+                "a drive selected under This PC resolves to a relative Shell child PIDL");
+        }
+        finally { if (child != IntPtr.Zero) Marshal.FreeCoTaskMem(child); }
+
+        resolved = ShellSelectionPidl.TryGetDirectChild("shell:MyComputerFolder",
+            Path.Combine(Environment.SystemDirectory, "not-a-drive-child"), out child);
+        try
+        {
+            Check(!resolved && child == IntPtr.Zero,
+                "an item that is not a direct child of the current Shell folder is rejected");
+        }
+        finally { if (child != IntPtr.Zero) Marshal.FreeCoTaskMem(child); }
+    }
+
     internal static void Run()
     {
         Check(ShellLocationIdentity.TryNormalize("C:\\Users\\Marvin", out var directory, out var isFileSystem) &&
@@ -42,6 +63,7 @@ internal static class ShellLocationIdentitySmoke
             unknownAlias == "shell:UnknownNamespace" && !isFileSystem,
             "unknown Shell aliases remain candidates until native folder resolution confirms availability");
         RunShellNameSyntaxOnly();
+        RunDirectChildPidlSmoke();
         Check(!ShellLocationIdentity.TryNormalize("https://example.invalid/::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", out _, out _),
             "absolute Shell parsing names do not make protocol URIs acceptable");
         Check(ShellLocationIdentity.TryNormalize("C:\\archive.zip", out var archive, out isFileSystem) &&

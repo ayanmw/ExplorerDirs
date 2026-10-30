@@ -1,7 +1,8 @@
 namespace ExplorerDirs.App;
 
 internal sealed record CreatedFileSelectionRequest(object Browser, string Directory,
-    long NavigationVersion, long Generation, long SelectionVersion, long InputVersion)
+    long NavigationVersion, long Generation, long SelectionVersion, long InputVersion,
+    bool SupportsVirtualLocation = false)
 {
     internal bool IsCurrent(object? browser, string directory, bool isFileSystemLocation,
         bool isSearchActive, bool navigationPending, long navigationVersion, long generation,
@@ -14,6 +15,6 @@ internal sealed record CreatedFileSelectionRequest(object Browser, string Direct
         bool isSearchActive, bool navigationPending, long navigationVersion, long generation) =>
         ReferenceEquals(Browser, browser) &&
         string.Equals(Directory, directory, StringComparison.OrdinalIgnoreCase) &&
-        isFileSystemLocation && !isSearchActive && !navigationPending &&
+        (isFileSystemLocation || SupportsVirtualLocation) && !isSearchActive && !navigationPending &&
         NavigationVersion == navigationVersion && Generation == generation;
 }

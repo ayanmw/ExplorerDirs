@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="../ExplorerDirs.App/ShellHistoryEvents.cs" Link="ShellHistoryEvents.cs" />
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellSelectionPidl.cs" Link="ShellSelectionPidl.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionFolderResolver.cs" Link="ShellSelectionFolderResolver.cs" />
     <Compile Include="../ExplorerDirs.App/SelectedPathsClipboardText.cs" Link="SelectedPathsClipboardText.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />

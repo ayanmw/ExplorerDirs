@@ -8,7 +8,9 @@
 
 2026-10-30 复制标签选区遇到已删除项目：复核复制标签恢复队列发现，选中项中任一路径在副本导航完成前失效，会使整批选区都不恢复。现跳过无法由 Shell 解析的失效项，仅在同目录内为仍存在的文件排队；所有项均失效时不启动空请求。隐藏生产 ExplorerBrowser HostProbe 先复现失败，再验证保留项被排队、失效项被排除及全失效不创建请求；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）和 `git diff --check` 通过。没有启动 GUI 或触碰用户文件，实际删除竞态和可见多选仍待集中验收。
 
-2026-10-30 复制标签差距表复核：前两批已将可寻址的文件系统选区随复制标签恢复，并跳过导航完成前已删除/不可解析的项目。现更新功能对照表，避免继续把选区恢复列为未实现。剩余明确差距是 Shell Back/Forward 历史不能跨 ExplorerBrowser 宿主转移；是否以应用级历史重放扩展现有复制语义，仍需先定义虚拟位置、搜索、分支截断和每站选区的行为，不在此处猜测。
+2026-10-30 复制标签差距表复核：前两批已将可寻址的文件系统选区随复制标签恢复，并跳过导航完成前已删除/不可解析的项目。现更新功能对照表，避免继续把选区恢复列为未实现。剩余明确差距是 Shell Back/Forward 历史不能跨 ExplorerBrowser 宿主转移；下一阶段按现有复制标签语义设计应用级历史重放，覆盖虚拟位置、搜索、分支截断和每站选区。
+
+2026-10-30 复制标签恢复虚拟 Shell 选区：选区快照现在保留 Shell 项目的绝对解析名；克隆视图就绪后，只有能解析为当前 Shell 文件夹直接子 PIDL 的项目才交给现有批量选择与焦点保护流程，已删除、不可解析或非直接子项会跳过。SettingsSmoke 直接验证从“此电脑”解析系统盘的相对 PIDL，并拒绝非子项；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）通过。没有启动 ExplorerBrowser 或 GUI，因此复制“此电脑”驱动器等虚拟项的实际选择仍待后续集中验收；Shell Back/Forward 历史差距仍开放。
 
 2026-10-30 复制标签保留文件选区：同窗格复制与跨窗格复制现在捕获当前标签中可寻址的文件系统选区，并在副本完成导航后将选区恢复到新 Shell view。Release HostProbe 用临时目录中的两个文件验证源选区、克隆状态传递、生产批量 `IShellView.SelectItem` 调用及副本选区读回；移动标签原对象/HWND/Back 历史和关闭清理回归也通过。Release SettingsSmoke、App/HostProbe Release build 与 `git diff --check` 通过；隐藏窗口未激活且前台不变。虚拟 Shell 选项不纳入此恢复，实际复制标签键鼠和可见焦点仍待集中 GUI 验收。
 
