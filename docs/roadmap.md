@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 逐行派生列接口复核：Microsoft 文档只承诺 `SHCOLSTATE_ONBYDEFAULT` 是 Explorer Details view 的默认展示提示；`IColumnManager.SetColumns` 设置当前视图列序且会清除列状态。隔离探针的通知后 `Apply` 虽返回 `S_OK`，自定义大小列仍不可见且 provider 未收到值请求，故不把 HRESULT 当成恢复成功。当前读数不能解释为单一缺陷；停止重复通用列重放/行重绘尝试。下一步若继续需在新视图记录 `GetDetailsOf`、默认列状态、SCID 映射及 `CM_ENUM_ALL` 列键的完整接口链，否则先保持产品未接线。只读复核发现两个已知测试 CLSID 及 Desktop NameSpace 项仍存在，因此不启动会添加注册项的 Private Desktop 实验。详情见[派生列接口复核](folder-size-column-investigation.md#2026-10-30自定义列可见性合同复核)。
+
 2026-10-30 14:22 UTC：再次对仍运行的正式预览 temp.78 PID `19580` 做同一 PID 60 秒被动采样，未启动、重启或操作窗口。13 个样本的 Working Set 为 `361.69–367.72 MiB`，Private Bytes 为 `178.79–183.09 MiB`；句柄 `1,375–1,456`、线程 `71–91`、GDI `1,205–1,240`、USER `157–179`。操作负载未固定，首末变化不能作为泄漏证据或来源归因；原始 CSV 与限制说明见[内存采样记录](memory-sampling.md#2026-10-30-1422-北京时间temp78-当前运行实例一分钟只读复采)。
 
 2026-10-30 06:06 UTC：从干净主线提交 `290d05a0a455618abcf15dd57a70d21e0d8a7412` 重新准备四窗格集中验收副本 `src/.state/gui-smoke/20261030-060610-762-f18303/`。manifest 标记 `prepared-not-run`、40 项待验收、`SourceWorkingTreeDirty=false`；EXE/DLL 哈希已记录。仅构建并准备隔离副本，没有启动窗口、创建 ExplorerBrowser 或操作桌面。用户已确认克隆视图为独立于复制标签的命令；此副本验收清单覆盖其历史与选区路径。候选详情见[最新验收候选](gui-acceptance-2026-10-30-main-prepared-latest.md)。

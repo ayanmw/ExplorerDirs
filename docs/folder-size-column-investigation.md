@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-30：自定义列可见性合同复核
+
+Microsoft 文档将 `IShellFolder2::GetDefaultColumnState` 的 `SHCOLSTATE_ONBYDEFAULT` 定义为 Windows Explorer Details view 默认应显示该列；它没有说明 Shell 通知后必须继续显示，也没有承诺 ExplorerBrowser 或 DefView 会把未注册属性键作为持久可见列。[GetDefaultColumnState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumnstate) `GetDetailsOf(nullptr, iColumn)` 提供文件夹列名及同一列索引的数据，但它本身不保存用户当前列集合。[GetDetailsOf](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishelldetails-getdetailsof)
+
+`IColumnManager::SetColumns` 的合同是设置该视图要显示的 PROPERTYKEY 顺序，并会清除全部列状态，需随后逐列调用 `SetColumnInfo`。[SetColumns](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-icolumnmanager-setcolumns) 本项目隔离探针观察到：新建视图初始可按 `GetDetailsOf` 显示并排序 provider 自定义递归大小列；通知后 DefView 不再读取其值，当前 `IColumnManager.Capture` 集合也不含自定义 key。通知后仅将 Name 与自定义 key 传给 `ShellColumnManager.Apply` 返回 `S_OK`，但读取到的大小列索引仍为 `-1`，provider 对该列的 `GetDetailsOf` / `GetDetailsEx` 请求数仍为 0。因此 `S_OK` 不能作为自定义列已恢复的证据；现有数据尚不足以把原因定为某个单一 Shell 回调或属性类型问题。
+
+据此停止重复尝试通用 `IColumnManager.Capture/Apply` 和标准行重绘消息。若继续该方向，下一项实验必须记录视图初始化前后 `GetDetailsOf(NULL, iColumn)`、`GetDefaultColumnState`、`MapColumnToSCID` 与 `IColumnManager.GetColumns(CM_ENUM_ALL)` 的调用/返回值，并从无通知的新视图检查列键来源；没有可证明受支持的可见列持久化机制之前，不接入产品。2026-10-30 只读环境检查仍发现两个已知测试 CLSID `{4864fed2-6004-4e3c-9e07-d3f10f560a2c}` 与 `{a17d2a61-4c0b-4b22-8e36-35d92cbc1170}` 同时存在于 HKCU CLSID 和 Desktop `NameSpace`；此前清理操作遭执行策略拒绝，本轮没有重试删除，也不新增注册型探针。产品仍使用 ExplorerBrowser。
+
 ## 2026-10-30：视图架构与派生列可行性复核
 
 本次把隔离 `IShellView` 结果与标准 Win32 `SysListView32` 控件合同合并评估，目的仅是判断下一步架构，不改变产品当前的 ExplorerBrowser。
@@ -565,3 +573,4 @@ API 静态核对（Microsoft `IColumnManager` 文档，2026-10-30）：`CM_ENUM_
 2026-10-30 单项通知后显式重设派生列的探针新增 opt-in `single-item-reapply-column` 策略：通知后只把 `PKEY_ItemNameDisplay` 和递归大小属性键重新应用到同一 `IColumnManager`，再读取行值、顺序、选区及 provider 计数。为避免固定 CLSID/夹具被旧隔离运行占用，探针改为每轮生成 CLSID 和 GUID 夹具，并在启动时记录标识；原有固定/旧注册不会被复用或覆盖。NativeProbe Release build（0 警告/错误）及无窗口 `--synthetic-shell-folder-tree-smoke`（exit 0，`shell-view-created=False`）通过。
 
 首次运行误用了不执行通知策略的 `--synthetic-shell-size-sort-private-desktop`；该结果未包含目标测量。随后正确入口 `--synthetic-recursive-directory-size-private-desktop` 实际观察到初始自定义列显示 `10/4` 且可排序；`IColumnManager.Apply` 返回 `S_OK`，捕获结果仍含递归大小 key，但通知后 DefView 行值读取为不可见（列索引 `-1`），provider 的大小读取/属性读取计数均为 0，选区/焦点保持。此轮最后输入 tick 发生变化，且在销毁 `STATIC` 根窗口时超时并停在 `cleanup-destroy-parent-window-1`；因此上述输出只作诊断线索，不能算有效 A/B 通过或最终否定结论。watchdog 进程已退出，但未到清理段；本轮唯一 CLSID `{4864fed2-6004-4e3c-9e07-d3f10f560a2c}`、NameSpace 项及 GUID 夹具 `ExplorerDirs-SyntheticShellSort-8b0ab5f22b194579b2e5fa2f5ae00a71` / `ExplorerDirs-SyntheticShellSort-Copy-8b0ab5f22b194579b2e5fa2f5ae00a71` 仍待清理。尝试清理时执行策略拒绝了删除操作，未改用其他途径；旧固定 CLSID `{a17d2a61-4c0b-4b22-8e36-35d92cbc1170}` 和 `*-stale-*` 目录均未触碰。下一轮只考虑 WPF 根宿主 Private Desktop 分支，并需先解决此轮残留清理授权/路径，或使用不产生永久注册的替代激活路径。产品仍未改，ExplorerBrowser 保持现状。
+
