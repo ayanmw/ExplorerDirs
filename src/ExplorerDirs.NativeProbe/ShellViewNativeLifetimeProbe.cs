@@ -26,6 +26,8 @@ internal static class ShellViewNativeLifetimeProbe
         var samples = new List<ResourceSample>();
         Dictionary<string, int>? firstHandleTypes = null;
         Dictionary<string, int>? lastHandleTypes = null;
+        IReadOnlyDictionary<long, uint>? firstSelfProcessHandles = null;
+        IReadOnlyDictionary<long, uint>? lastSelfProcessHandles = null;
         try
         {
             parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden IShellView lifecycle probe",
@@ -60,6 +62,8 @@ internal static class ShellViewNativeLifetimeProbe
                 {
                     firstHandleTypes ??= TryCaptureHandleTypeCounts();
                     lastHandleTypes = TryCaptureHandleTypeCounts();
+                    firstSelfProcessHandles ??= TryCaptureSelfProcessHandleEntries();
+                    lastSelfProcessHandles = TryCaptureSelfProcessHandleEntries();
                     var sample = CaptureResources(index - WarmupViews + 1);
                     samples.Add(sample);
                     Console.WriteLine($"ishellview-native-lifetime-sample: cycle={sample.Cycle}; handles={sample.Handles}; gdi={sample.Gdi}; user={sample.User}; private-bytes={sample.PrivateBytes}; child-windows=0");
@@ -80,11 +84,21 @@ internal static class ShellViewNativeLifetimeProbe
                     .Where(item => item.Delta != 0).OrderByDescending(item => item.Delta)
                     .Select(item => $"{item.Name}:{item.Delta:+#;-#;0}"))
                 : "unavailable";
+            var addedSelfProcessHandleEntries = firstSelfProcessHandles is not null && lastSelfProcessHandles is not null
+                ? lastSelfProcessHandles.Where(entry => !firstSelfProcessHandles.ContainsKey(entry.Key)).ToArray()
+                : null;
+            var addedSelfProcessHandles = addedSelfProcessHandleEntries is null
+                ? "unavailable"
+                : $"count={addedSelfProcessHandleEntries.Length};access-masks=[{string.Join(',', addedSelfProcessHandleEntries
+                    .GroupBy(entry => entry.Value).OrderByDescending(group => group.Count())
+                    .Select(group => $"0x{group.Key:X}:{group.Count()}"))}];" +
+                  $"sample-values=[{string.Join(',', addedSelfProcessHandleEntries.Take(8).Select(entry => $"0x{entry.Key:X}"))}]";
             Console.WriteLine($"ishellview-native-lifetime: views={WarmupViews + MeasuredViews}; warmup={WarmupViews}; measured={MeasuredViews}; " +
                 $"browser-host-reused={reuseBrowserHost}; " +
                 $"handles-delta={last.Handles - first.Handles}; gdi-delta={last.Gdi - first.Gdi}; user-delta={last.User - first.User}; " +
                 $"private-bytes-delta={last.PrivateBytes - first.PrivateBytes}; post-gc-handles-delta={afterCollection.Handles - first.Handles}; " +
                 $"post-gc-private-bytes-delta={afterCollection.PrivateBytes - first.PrivateBytes}; handle-type-delta=[{handleTypeDelta}]; " +
+                $"added-self-process-handles-from-first-to-last-sample=[{addedSelfProcessHandles}]; " +
                 $"child-windows-after-each-destroy=0; parent-visible=False; foreground-unchanged=True");
             return 0;
         }
@@ -173,7 +187,8 @@ internal static class ShellViewNativeLifetimeProbe
         nint parent = 0, folderPidl = 0, folder = 0, view = 0, viewWindow = 0, folderView = 0, hostPointer = 0;
         StreamViewHost? host = null;
         var viewWindowCreated = false;
-        var measurements = new List<(string Stage, int Handles, int? SelfProcessHandles, Dictionary<string, int>? Types)>();
+        var measurements = new List<(string Stage, int Handles, int? SelfProcessHandles, Dictionary<string, int>? Types,
+            IReadOnlyDictionary<long, uint>? SelfProcessHandleEntries)>();
 
         void Capture(string stage)
         {
@@ -184,7 +199,8 @@ internal static class ShellViewNativeLifetimeProbe
             var selfProcessHandles = handleTypes?
                 .Where(item => item.Key.StartsWith(selfProcessPrefix, StringComparison.Ordinal))
                 .Sum(item => item.Value);
-            measurements.Add((stage, count, selfProcessHandles, handleTypes));
+            var selfProcessHandleEntries = TryCaptureSelfProcessHandleEntries();
+            measurements.Add((stage, count, selfProcessHandles, handleTypes, selfProcessHandleEntries));
         }
 
         try
@@ -258,7 +274,17 @@ internal static class ShellViewNativeLifetimeProbe
                     .Select(name => (Name: name, Delta: finalTypes.GetValueOrDefault(name) - baselineTypes.GetValueOrDefault(name)))
                     .Where(item => item.Delta != 0)
                     .Select(item => $"{item.Name}:{item.Delta:+#;-#;0}"));
-            Console.WriteLine($"ishellview-native-view-stage-trace: {string.Join(';', measurements.Select(item => $"{item.Stage}={item.Handles}(delta={item.Handles - baselineHandles:+#;-#;0},self-process-handles={item.SelfProcessHandles?.ToString() ?? "unavailable"})"))}; final-handle-type-delta=[{typeDelta}]; child-windows=0; foreground-unchanged=True");
+            var baselineSelfHandles = measurements[0].SelfProcessHandleEntries;
+            var selfHandleTimeline = string.Join(';', measurements.Select(item =>
+            {
+                if (baselineSelfHandles is null || item.SelfProcessHandleEntries is null)
+                    return $"{item.Stage}=unavailable";
+                var added = item.SelfProcessHandleEntries
+                    .Where(entry => !baselineSelfHandles.ContainsKey(entry.Key))
+                    .Select(entry => $"0x{entry.Key:X}:access=0x{entry.Value:X}");
+                return $"{item.Stage}=[{string.Join(',', added)}]";
+            }));
+            Console.WriteLine($"ishellview-native-view-stage-trace: {string.Join(';', measurements.Select(item => $"{item.Stage}={item.Handles}(delta={item.Handles - baselineHandles:+#;-#;0},self-process-handles={item.SelfProcessHandles?.ToString() ?? "unavailable"})"))}; final-handle-type-delta=[{typeDelta}]; added-self-process-handle-values=[{selfHandleTimeline}]; child-windows=0; foreground-unchanged=True");
             return 0;
         }
         catch (Exception exception)
@@ -410,6 +436,67 @@ internal static class ShellViewNativeLifetimeProbe
         catch (Exception exception)
         {
             Console.WriteLine($"ishellview-native-lifetime: handle-type-snapshot-unavailable={exception.GetType().Name}:{exception.Message}");
+            return null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(typeInformation);
+            Marshal.FreeHGlobal(processInformation);
+            Marshal.FreeHGlobal(snapshot);
+        }
+    }
+
+    private static IReadOnlyDictionary<long, uint>? TryCaptureSelfProcessHandleEntries()
+    {
+        if (!Environment.Is64BitProcess) return null;
+        const int processHandleInformation = 51;
+        const int objectTypeInformation = 2;
+        const int headerSize = 16;
+        const int entrySize = 40;
+        const int bufferSize = 1024 * 1024;
+        var snapshot = Marshal.AllocHGlobal(bufferSize);
+        var typeInformation = Marshal.AllocHGlobal(1024);
+        var processInformation = Marshal.AllocHGlobal(48);
+        try
+        {
+            var status = NtQueryInformationProcess(GetCurrentProcess(), processHandleInformation,
+                snapshot, bufferSize, out _);
+            if (status < 0) throw new InvalidOperationException($"NtQueryInformationProcess(handle table) failed: 0x{status:X8}.");
+            var handleCount = Marshal.ReadInt64(snapshot);
+            if (handleCount < 0 || handleCount > (bufferSize - headerSize) / entrySize)
+                throw new InvalidOperationException($"Unexpected process handle snapshot count: {handleCount}.");
+
+            // PROCESS_HANDLE_SNAPSHOT_INFORMATION entries place HANDLE first,
+            // GrantedAccess at 24, and ObjectTypeIndex at 28 on x64.
+            var namesByType = new Dictionary<int, string>();
+            var result = new Dictionary<long, uint>();
+            for (var index = 0; index < handleCount; index++)
+            {
+                var entry = snapshot + headerSize + checked((int)index * entrySize);
+                var handle = Marshal.ReadIntPtr(entry);
+                var typeIndex = Marshal.ReadInt32(entry, 28);
+                if (typeIndex == 0) continue;
+                if (!namesByType.TryGetValue(typeIndex, out var typeName))
+                {
+                    status = NtQueryObject(handle, objectTypeInformation, typeInformation, 1024, out _);
+                    // Handles may close while the process handle table snapshot is being decoded.
+                    if (status < 0) continue;
+                    var nameLength = unchecked((ushort)Marshal.ReadInt16(typeInformation));
+                    var nameBuffer = Marshal.ReadIntPtr(typeInformation, 8);
+                    typeName = Marshal.PtrToStringUni(nameBuffer, nameLength / sizeof(char)) ?? "<unnamed>";
+                    namesByType.Add(typeIndex, typeName);
+                }
+                if (typeName != "Process") continue;
+                status = NtQueryInformationProcess(handle, 0, processInformation, 48, out _);
+                if (status < 0 || Marshal.ReadIntPtr(processInformation, 32).ToInt64() != Environment.ProcessId) continue;
+                var grantedAccess = unchecked((uint)Marshal.ReadInt32(entry, 24));
+                result[handle.ToInt64()] = grantedAccess;
+            }
+            return result;
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"ishellview-native-lifetime: self-process-handle-snapshot-unavailable={exception.GetType().Name}:{exception.Message}");
             return null;
         }
         finally
