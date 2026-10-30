@@ -52,6 +52,42 @@ internal static class ShellListViewRowModelSmoke
             "rows outside the scan and virtual Shell rows retain their previous values");
         Check(target.RecursiveBytes == 4 && target.RecursiveSummary is null,
             "publishing a scan snapshot does not mutate the previous row snapshot");
+
+        var changedTarget = target with
+        {
+            AbsolutePidl = 0x301,
+            RelativePidl = 0x401,
+            DisplayName = "small (updated)",
+            RecursiveBytes = null,
+            RecursiveSummary = null
+        };
+        var added = target with
+        {
+            Id = 0,
+            AbsolutePidl = 0x303,
+            RelativePidl = 0x403,
+            DisplayName = "added",
+            ParsingName = Path.Combine(Path.GetDirectoryName(targetPath)!, "added"),
+            FileSystemPath = Path.Combine(Path.GetDirectoryName(targetPath)!, "added"),
+            RecursiveBytes = null
+        };
+        var oldRemoved = virtualRow;
+        var updatedSibling = sibling with { AbsolutePidl = 0x302, RelativePidl = 0x402, DisplayName = "sibling updated" };
+        var targetWithSummary = target with { RecursiveSummary = scan[targetPath] };
+        var reconciled = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
+            [targetWithSummary, sibling, oldRemoved], [updatedSibling, changedTarget, added], nextId: 10);
+
+        Check(reconciled.Rows.Select(row => row.Id).SequenceEqual([sibling.Id, target.Id, 10L]) &&
+              reconciled.Rows[0].DisplayName == updatedSibling.DisplayName &&
+              reconciled.Rows[1].DisplayName == changedTarget.DisplayName &&
+              reconciled.Rows[1].AbsolutePidl == changedTarget.AbsolutePidl &&
+              reconciled.NextId == 11,
+            "re-enumeration preserves IDs through reordering, refreshes Shell data, and allocates new IDs");
+        Check(reconciled.RetiredRows.Select(row => row.AbsolutePidl).ToHashSet()
+                  .SetEquals([target.AbsolutePidl, sibling.AbsolutePidl, oldRemoved.AbsolutePidl]) &&
+              reconciled.Rows[1].RecursiveBytes == targetWithSummary.RecursiveBytes &&
+              reconciled.Rows[1].RecursiveSummary == targetWithSummary.RecursiveSummary,
+            "all old PIDLs are returned for release and matching scan summaries survive metadata refresh");
         Console.WriteLine("Shell ListView row model smoke: PASS");
 
         static void Check(bool condition, string behavior)

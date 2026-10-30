@@ -10,7 +10,7 @@
 
 2026-10-31 02:15 CST：同一 PID 的 .NET Runtime counters 6 点采样显示最近一次 GC 报告堆约 `11.41–12.09 MiB`、GC committed `28.07 MiB`，同期进程 Private Bytes 约 `115.93 MiB`；只观察到一次 Gen 0。此数据说明 GC 堆不是进程提交量的全部，不能把余量直接归为 Shell/native 分配；分配速率仍需固定工作负载后再归因。详见[采样记录](memory-sampling.md#2026-10-31-0215-csttemp80-net-runtime-计数附加采样)。
 
-2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，文件变化触发仍是原型 FileSystemWatcher，产品没有逐行派生列。下一步在隔离行模型内验证 Shell 通知带来的新增、更新、删除，以及 PIDL 生命周期和重排后的焦点/选区；保持产品 ExplorerBrowser，直到迁移硬门槛逐项得到证据。详见[架构调查](folder-size-column-investigation.md#2026-10-31扫描结果进入稳定-shell-行模型)。
+2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，文件变化触发仍是原型 FileSystemWatcher，产品没有逐行派生列。随后纯行模型快照对账已覆盖重新枚举后的重排、元数据更新、新增/移除、稳定 ID 与 PIDL 退休集合；这还没有 Shell 通知订阅、真实选区/焦点恢复证据。下一步在隐藏窗口验证 Shell 通知到达后自动重新枚举/对账，再检查 PIDL 生命周期和行身份；保持产品 ExplorerBrowser，直到迁移硬门槛逐项得到证据。详见[架构调查](folder-size-column-investigation.md#2026-10-31重新枚举后的行身份对账)。
 
 2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
