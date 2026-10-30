@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ExplorerDirs.App;
 
 // Control-only baseline used to separate common-control custom draw behavior from Shell DefView.
 internal static class CommonListViewColorBaseline
@@ -300,6 +301,126 @@ internal static class CommonListViewColorBaseline
             }
             if (shellFolder != 0) Marshal.Release(shellFolder);
             if (fixturePidl != 0) Marshal.FreeCoTaskMem(fixturePidl);
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            var fixtureRoot = Path.GetDirectoryName(fixture)!;
+            if (Directory.Exists(fixtureRoot) && !Directory.EnumerateFileSystemEntries(fixtureRoot).Any())
+                Directory.Delete(fixtureRoot);
+        }
+    }
+
+    internal static int RunNavigationContract()
+    {
+        var foregroundBefore = GetForegroundWindow();
+        var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs.ListViewNavigation", Guid.NewGuid().ToString("N"));
+        var folderPidls = new List<nint>();
+        var enumeratedRows = new List<ShellRow>();
+        var boundFolders = new List<nint>();
+        try
+        {
+            var child = Path.Combine(fixture, "child");
+            var grandchild = Path.Combine(child, "grandchild");
+            var branch = Path.Combine(fixture, "branch");
+            Directory.CreateDirectory(grandchild);
+            Directory.CreateDirectory(branch);
+            File.WriteAllBytes(Path.Combine(fixture, "root.txt"), new byte[3]);
+            File.WriteAllBytes(Path.Combine(child, "child.txt"), new byte[4]);
+            File.WriteAllBytes(Path.Combine(grandchild, "leaf.txt"), new byte[5]);
+            File.WriteAllBytes(Path.Combine(branch, "branch.txt"), new byte[6]);
+
+            var expectedChildren = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                [fixture] = ["branch", "child", "root.txt"],
+                [child] = ["child.txt", "grandchild"],
+                [grandchild] = ["leaf.txt"],
+                [branch] = ["branch.txt"]
+            };
+            var recursiveSizes = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Path.GetFullPath(Path.Combine(fixture, "branch"))] = 6,
+                [Path.GetFullPath(Path.Combine(fixture, "child"))] = 9,
+                [Path.GetFullPath(Path.Combine(fixture, "root.txt"))] = 3,
+                [Path.GetFullPath(Path.Combine(child, "child.txt"))] = 4,
+                [Path.GetFullPath(Path.Combine(child, "grandchild"))] = 5,
+                [Path.GetFullPath(Path.Combine(grandchild, "leaf.txt"))] = 5,
+                [Path.GetFullPath(Path.Combine(branch, "branch.txt"))] = 6
+            };
+
+            var enumeratedByLocation = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var location in expectedChildren.Keys)
+            {
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(location, 0, out var pidl, 0, out _));
+                folderPidls.Add(pidl);
+                Marshal.ThrowExceptionForHR(SHBindToObject(0, pidl, 0, in ShellFolderId, out var shellFolder));
+                boundFolders.Add(shellFolder);
+                var expectedAtLocation = expectedChildren[location].ToDictionary(
+                    name => Path.GetFullPath(Path.Combine(location, name)),
+                    name => recursiveSizes[Path.GetFullPath(Path.Combine(location, name))],
+                    StringComparer.OrdinalIgnoreCase);
+                var shellRows = EnumerateShellRows(pidl, shellFolder, expectedAtLocation);
+                enumeratedRows.AddRange(shellRows.Rows);
+                var actualNames = shellRows.Rows.Select(row => row.DisplayName).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                var expectedNames = expectedChildren[location].OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                if (!actualNames.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase) ||
+                    shellRows.Rows.Any(row => !row.FromShellEnumeration || row.AbsolutePidl == 0 || row.RelativePidl == 0))
+                    throw new InvalidOperationException($"Shell row enumeration did not match the fixture at {location}.");
+                enumeratedByLocation[location] = actualNames;
+            }
+
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(child, 0, out var childPidl, 0, out _));
+            folderPidls.Add(childPidl);
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var rootPidl, 0, out _));
+            folderPidls.Add(rootPidl);
+            var parentPidl = ILClone(childPidl);
+            if (parentPidl == 0) throw new InvalidOperationException("Could not clone the child PIDL to derive its parent.");
+            var shellParentMatches = false;
+            try
+            {
+                shellParentMatches = ILRemoveLastID(parentPidl) && ILIsEqual(parentPidl, rootPidl);
+            }
+            finally { ILFree(parentPidl); }
+
+            var history = new ShellTabNavigationHistory(fixture);
+            history.Record(child);
+            history.Record(grandchild);
+            var backToChild = history.TryBeginMove(back: true, out var backChild) && backChild == child &&
+                history.CommitLocation(child);
+            var backToRoot = history.TryBeginMove(back: true, out var backRoot) && backRoot == fixture &&
+                history.CommitLocation(fixture);
+            var forwardToChild = history.TryBeginMove(back: false, out var forwardChild) && forwardChild == child &&
+                history.CommitLocation(child);
+            var returnedToRootBeforeBranch = history.TryBeginMove(back: true, out backRoot) && backRoot == fixture &&
+                history.CommitLocation(fixture);
+            history.Record(branch);
+            var branchReplacedForwardHistory = returnedToRootBeforeBranch &&
+                history.Snapshot().Select(stop => stop.Location).SequenceEqual(new[] { fixture, branch }, StringComparer.OrdinalIgnoreCase);
+            var forwardUnavailableAfterBranch = !history.CanGoForward;
+            var passed = shellParentMatches && backToChild && backToRoot && forwardToChild &&
+                branchReplacedForwardHistory && forwardUnavailableAfterBranch &&
+                enumeratedByLocation.Count == expectedChildren.Count && GetForegroundWindow() == foregroundBefore;
+            Console.WriteLine($"common-listview-navigation-contract: shell-rows-by-location={enumeratedByLocation.Count};" +
+                $"root-rows={string.Join('|', enumeratedByLocation[fixture])};" +
+                $"child-rows={string.Join('|', enumeratedByLocation[child])};" +
+                $"grandchild-rows={string.Join('|', enumeratedByLocation[grandchild])};" +
+                $"branch-rows={string.Join('|', enumeratedByLocation[branch])};" +
+                $"shell-parent-pidl-matches={shellParentMatches};back-child={backToChild};back-root={backToRoot};" +
+                $"forward-child={forwardToChild};branch-clears-forward-history={branchReplacedForwardHistory};" +
+                $"forward-unavailable-after-branch={forwardUnavailableAfterBranch};foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
+            return passed ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("common-listview-navigation-contract: " + ex);
+            return 1;
+        }
+        finally
+        {
+            foreach (var row in enumeratedRows)
+            {
+                if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
+                if (row.RelativePidl != 0) ILFree(row.RelativePidl);
+            }
+            foreach (var shellFolder in boundFolders) Marshal.Release(shellFolder);
+            foreach (var pidl in folderPidls) Marshal.FreeCoTaskMem(pidl);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
             var fixtureRoot = Path.GetDirectoryName(fixture)!;
             if (Directory.Exists(fixtureRoot) && !Directory.EnumerateFileSystemEntries(fixtureRoot).Any())
@@ -896,6 +1017,8 @@ internal static class CommonListViewColorBaseline
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILClone(nint pidl);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern bool ILRemoveLastID(nint pidl);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern bool ILIsEqual(nint first, nint second);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", PreserveSig = true)] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll", PreserveSig = true)] private static extern bool DestroyMenu(nint menu);

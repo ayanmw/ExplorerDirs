@@ -4801,3 +4801,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - `--common-listview-data-contract` 在不可见的普通 Win32 ListView 中使用真实 `IShellFolder::EnumObjects` 行；图标来自 Shell 共享系统图像列表。更新派生大小并排序后，稳定行 ID、PIDL 身份以及 `small-folder` 的选中/焦点保持一致。
 - 同一隐藏合同用所选行的 Shell `IDataObject` 和 `IFileOperation` 完成复制、移动、重命名、删除，并核对临时夹具结果；菜单对象可查询，但 folder 背景菜单不含查看/排序/分组/刷新。完整 Explorer 视图菜单所需的 `IShellView.GetItemObject` 尚未接入。
 - 结论：自有 ListView 已验证接入 Shell 枚举、系统图标和常用文件操作的可行性；迁移的核心体验门槛仍包括完整视图菜单、拖放、导航、键盘、通知和虚拟位置。该合同不可外推为 Explorer 等价或产品可迁移结论，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：Shell 子目录与导航历史合同
+
+- 新增 `--common-listview-navigation-contract`，在隐藏 NativeProbe 中用临时目录树调用 Shell 文件夹枚举，核对四个位置的直接子项和父子 PIDL 关系，并复用产品 `ShellTabNavigationHistory` 验证后退、前进以及分支导航清空前向历史。首轮发现既有枚举辅助函数按整份夹具计数，逐目录调用失败；改为传入当前目录直接子项后通过。NativeProbe Release、导航合同、既有数据/文件操作合同、完整 Release SettingsSmoke 与 App Release build 均通过，前台句柄保持不变。
+- 这只验证 Shell PIDL/行数据和产品历史状态模型的组合边界；没有创建 `IShellView`、ExplorerBrowser 或实际 ListView 窗口，也没有真实按键、焦点、导航提交/取消或产品 UI 接线证据。迁移门槛保持开放，产品继续使用 ExplorerBrowser。
