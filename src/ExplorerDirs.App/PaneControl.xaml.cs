@@ -689,7 +689,7 @@ public partial class PaneControl : UserControl
             Status.Text = $"复制标签失败：{ex.Message}";
         }
     }
-    public void RefreshCurrent() => Current?.Browser.Refresh();
+    public void RefreshCurrent() => Current?.Browser.RefreshPreservingLastFrame();
 
     internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
     {
@@ -2187,7 +2187,7 @@ public partial class PaneControl : UserControl
         if (string.IsNullOrWhiteSpace(path))
         {
             _addressNavigationPending = false;
-            RefreshCurrent();
+            Current?.Browser.Refresh();
             ShowBreadcrumb();
             return;
         }

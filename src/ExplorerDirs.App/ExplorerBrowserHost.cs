@@ -2735,9 +2735,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
-    public void Refresh()
+    public void Refresh() => RefreshWithPresentation(preserveLastFrame: false);
+
+    internal void RefreshPreservingLastFrame() => RefreshWithPresentation(preserveLastFrame: true);
+
+    private void RefreshWithPresentation(bool preserveLastFrame)
     {
-        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null), error =>
+        // Keep the redraw experiment limited to an explicit user refresh. Directory
+        // notifications, filters and other internal refreshes must paint changes promptly.
+        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, preserveLastFrame), error =>
         {
             LastShellRefreshStatus = $"refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
             MenuError?.Invoke(this, $"Shell 文件视图刷新失败（0x{error.HResult:X8}）。请稍后重试。");
@@ -3035,7 +3041,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(browserUnknown); }
     }
 
-    private void Refresh(Action? afterRefresh)
+    private void Refresh(Action? afterRefresh, bool preserveLastFrame = false)
     {
         if (_browser is null)
         {
@@ -3120,7 +3126,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
             ShellViewRedrawLease? refreshRedraw = null;
-            try { refreshRedraw = TrySuppressCurrentViewRedraw(); }
+            try
+            {
+                if (preserveLastFrame) refreshRedraw = TrySuppressCurrentViewRedraw();
+            }
             catch
             {
                 selectionRecoverySuppression.Dispose();
