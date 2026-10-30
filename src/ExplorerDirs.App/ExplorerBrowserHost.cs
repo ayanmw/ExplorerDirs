@@ -5282,12 +5282,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (_nativeUserMessageSamples.Count < 64)
                     _nativeUserMessageSamples.Add($"{Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms/{message:X}/{WindowClass(hwnd)}/{wParam.ToInt64():X}/{lParam.ToInt64():X}");
             }
-            if (_traceNativeUserMessages && message is 0x000F or 0x0014 && _nativePaintTransitionStartedAt != 0)
-            {
-                var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
-                if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
-                    _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{WindowClass(hwnd)}/{hwnd:X}");
-            }
             if (message == 0x0100 && IsTraceKey(wParam.ToInt64()))
                 Trace($"native key={wParam.ToInt64():X} hwnd={hwnd} class={WindowClass(hwnd)} focus={FocusClass()}");
             if (message is 0x0007 or 0x0008)
@@ -5412,6 +5406,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         IntPtr result;
         try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
         finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
+        if (_traceNativeUserMessages && message is 0x000F or 0x0014 && _nativePaintTransitionStartedAt != 0)
+        {
+            var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
+            if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
+            {
+                var shellPaintTicks = Stopwatch.GetTimestamp() - beforeShell;
+                _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellPaintTicks):F2}/result={result.ToInt64():X}");
+            }
+        }
         if (timingSample)
         {
             var shellElapsed = Stopwatch.GetTimestamp() - beforeShell;

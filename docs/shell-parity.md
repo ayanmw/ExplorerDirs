@@ -343,7 +343,7 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 2026-10-31 当前源码复核：F5 菜单/工具栏入口实际调用 `RefreshPreservingLastFrame()`，仅显式用户刷新会在 `IShellView.Refresh()` 期间短暂使用 `IFolderView2.SetRedraw` 租约，待 Shell 行数稳定或达到 1.5 秒上限后释放；自动目录变化、筛选和其它内部刷新不使用该租约。查看方式只调用当前 `IFolderView2.SetViewModeAndIconSize`，没有刷新目录或重建视图；完整视图状态读回延后到 Dispatcher `ContextIdle`。因此上文“F5 已移除 `SetRedraw`”已被后续改动取代。此处仅核实调用链，未能据此确认两种操作的空白帧是否改善；可见闪烁仍待集中 UI 验收。
 
-2026-10-31 诊断补充：当 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE=1` 时，F5 和实际模式变更会各自记录随后 2 秒内原生视图子窗口的 `WM_PAINT` / `WM_ERASEBKGND` 时间线，最多 256 条；其余运行不采集这组消息，也不改绘制或输入。该数据用于后续区分 Shell 背景擦除与列表绘制时序，不能单独证明画面颜色、空白持续时间或命中目标安全。
+2026-10-31 诊断补充：当 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE=1` 时，F5 和实际模式变更会各自记录随后 2 秒内原生视图子窗口的 `WM_PAINT` / `WM_ERASEBKGND` 时间线、Shell 处理耗时和返回值，最多 256 条；其余运行不采集这组消息，也不改绘制或输入。该数据用于后续区分 Shell 背景擦除与列表绘制时序，不能单独证明画面颜色、空白持续时间或命中目标安全。
 
 2026-10-30 刷新后焦点恢复：`ShellViewSelectionSnapshot.Restore` 在写入 focused-item 状态前先读取当前焦点 PIDL 身份；刷新后 Shell 已保留原项目焦点时跳过冗余 `SelectItem(SVSI_FOCUSED)`，焦点丢失时沿用原恢复/回退路径。App Release 构建通过，0 警告/错误；没有运行测试或 ExplorerBrowser。该项是减少不必要的列表状态变更，不证明刷新期间的空白已消除。
 
