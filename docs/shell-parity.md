@@ -1,3 +1,5 @@
+2026-10-30 克隆历史容量边界：Q-Dir 官方 FAQ 将视图克隆描述为包含“完整浏览历史”，历史记录也说明 Duplicate Tab 携带 history；公开资料未说明条目上限。Explorer Dirs 的独立克隆视图最多重放 100 个位置，因此超过 100 次导航时可能丢失最早位置。此上限也约束每标签历史快照的内存；在确认 Q-Dir 实际上限前，不宣称完整历史等价，也不直接改成无限增长。后续集中验收用超过 100 个不同目录的可回退路径核对其行为；来源：[Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)、[Q-Dir 历史](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory)。
+
 2026-10-30 Q-Dir 地址栏 F8 入口：F8 与新增的“此电脑”按钮打开相同的动态驱动器菜单；菜单锚定各自入口，按钮也加入窗格 Tab/Shift+Tab 焦点序列。焦点矩阵与菜单/按钮接线 smoke、Release SettingsSmoke 和 App Release build 通过；按钮实际呈现、屏幕位置、菜单弹出边界及真实键盘路径待集中 GUI 验收。
 
 2026-10-30 复制标签继承文件选区：同窗格复制和 Ctrl+拖动复制标签会携带当前可寻址的文件系统选区，并在新 Shell view 导航完成后恢复；同目录多个选中项通过生产 `IShellView.SelectItem` 批量逻辑选择，操作仍受导航版本、输入版本和焦点保护。隐藏 HostProbe 对两个临时文件完成 Shell 选中、复制状态传递及副本选区读回；不包含虚拟 Shell 项目，也未做可见 GUI 验收。
