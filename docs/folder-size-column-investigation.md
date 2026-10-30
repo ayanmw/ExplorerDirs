@@ -74,6 +74,12 @@ NativeProbe Release build 为 0 警告/错误；`--common-listview-data-contract
 
 NativeProbe Release build 为 0 警告/错误；普通文件系统数据/操作合同、9 项虚拟控制面板合同和异步相对大小更新合同通过，前台未变。该步统一了隔离原型的枚举/行创建入口，但未统一后续文件操作、通知、绘制、交互，也未接入产品 ExplorerBrowser；PIDL 所有权通过合同正常结束路径验证，异常注入下的逐分支故障测试及可见 GUI 未覆盖。
 
+## 2026-10-31：虚拟 Shell 文件夹的下一层绑定与枚举
+
+扩展 `--common-listview-virtual-folder-contract`：对 Control Panel 枚举出的每个非文件系统项目，依据 Shell 属性确认其为文件夹后，用其绝对 PIDL 绑定子 `IShellFolder`，再调用共用 `ShellListViewEnumerator` 读取下一层行，最后释放子行 PIDL 与 folder 接口。当前机器的 9 个虚拟项目全部可绑定，共枚举出 72 个下一层项目。
+
+NativeProbe Release build 0 警告/错误，扩展后的虚拟合同通过；9/9 子文件夹绑定、行身份、共享模型、隐藏窗口及前台不变均满足。它证明这组 Control Panel 虚拟文件夹可沿 PIDL 继续导航并复用同一枚举入口；不代表所有 Shell provider 均可绑定，也没有验证逐项打开、项目操作、菜单、拖放、通知或产品交互。Explorer Dirs 产品仍使用 ExplorerBrowser。
+
 ## 2026-10-30：Shell 系统图标索引接入 ListView 合同
 
 在 Shell 枚举行创建期间，对每个实际解析路径调用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)`，记录共享系统图像列表句柄和行图标索引。创建隐藏 `SysListView32` 后通过 `LVM_SETIMAGELIST` 挂载 Shell 返回的共享小图标列表；插入每行时设置 `LVIF_IMAGE`，再以 `LVM_GETITEM` 验证图标索引与 row ID 对应，并在派生值排序后再次核对映射。

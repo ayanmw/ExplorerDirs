@@ -78,16 +78,37 @@ internal static class CommonListViewVirtualFolderContract
             var hidden = !IsWindowVisible(parent) && !IsWindowVisible(listView);
             var hasVirtualRootIdentity = (rootAttributes & ShellFileSystem) == 0 || rootParsingName.StartsWith("::{", StringComparison.Ordinal);
             var virtualChildRows = rows.Count(row => (row.Attributes & ShellFileSystem) == 0);
+            var virtualFolderRows = rows.Where(row =>
+                (row.Attributes & ShellFolder) != 0 && (row.Attributes & ShellFileSystem) == 0).ToArray();
+            var boundVirtualFolders = 0;
+            var nestedVirtualRows = 0;
+            foreach (var row in virtualFolderRows)
+            {
+                Marshal.ThrowExceptionForHR(SHBindToObject(0, row.AbsolutePidl, 0,
+                    in ShellFolderId, out var childFolder));
+                if (childFolder == 0) throw new InvalidOperationException("Shell returned a null virtual child folder.");
+                try
+                {
+                    var childEnumeration = ShellListViewEnumerator.Enumerate(row.AbsolutePidl, childFolder);
+                    boundVirtualFolders++;
+                    nestedVirtualRows += childEnumeration.Rows.Count;
+                    ShellListViewEnumerator.FreeRows(childEnumeration.Rows);
+                }
+                finally { Marshal.Release(childFolder); }
+            }
             var imageListAttached = attachedImageList == systemImageList;
             var sharedRowModelCorrect = rows.All(row => row.FromShellEnumeration &&
                 row.ParsingName.Length > 0 && row.SystemImageIndex >= 0 &&
                 (((row.Attributes & ShellFileSystem) != 0) == (row.FileSystemPath is not null)) &&
                 row.RecursiveBytes is null);
             var success = identityAndRowsMatch && imageListAttached && foregroundUnchanged && hidden &&
-                hasVirtualRootIdentity && virtualChildRows > 0 && sharedRowModelCorrect;
+                hasVirtualRootIdentity && virtualChildRows > 0 && virtualFolderRows.Length > 0 &&
+                boundVirtualFolders == virtualFolderRows.Length && sharedRowModelCorrect;
             Console.WriteLine($"common-listview-virtual-folder-contract: root-is-virtual={hasVirtualRootIdentity};" +
                 $"children={rows.Count};filesystem-children={rows.Count(row => (row.Attributes & ShellFileSystem) != 0)};" +
-                $"virtual-children={virtualChildRows};shell-image-list-attached={imageListAttached};" +
+                $"virtual-children={virtualChildRows};virtual-folders={virtualFolderRows.Length};" +
+                $"bound-virtual-folders={boundVirtualFolders};nested-virtual-children={nestedVirtualRows};" +
+                $"shell-image-list-attached={imageListAttached};" +
                 $"pidl-row-identity={identityAndRowsMatch};shared-row-model={sharedRowModelCorrect};" +
                 $"hidden={hidden};foreground-unchanged={foregroundUnchanged};passed={success}");
             return success ? 0 : 1;
