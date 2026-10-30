@@ -39,7 +39,7 @@
 - Produces assembly metadata keys `GitCommit`, `GitCommitTimeUtc`, `SourceTreeState`, and individual effective build parameter keys.
 - `AssemblyInformationalVersion` includes the source commit; no build timestamp is added.
 
-- [x] Verify emitted values for a dirty source tree using focused SettingsSmoke checks; verify clean metadata after committing.
+- [x] Verify exact emitted values for both dirty (pre-commit) and clean (post-commit) source trees using focused SettingsSmoke checks.
 - [x] Pass commit ID, `%cI` committer time, source state, and normalized effective build properties through the publish script.
 - [x] Publish twice with identical inputs and compare every payload file hash; report any nondeterministic output rather than suppressing it.
 
@@ -64,5 +64,5 @@
 
 ### Task 3: Verify and commit
 
-- [ ] Build App and SettingsSmoke Release; run the focused metadata/source wiring checks after commit.
-- [ ] Inspect the final diff and commit this feature batch on `main`.
+- [x] Build App and SettingsSmoke Release; run the focused metadata/source wiring checks after commit.
+- [x] Inspect the final diff and commit this feature batch on `main` (`8e5dde0`).

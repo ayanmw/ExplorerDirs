@@ -48,7 +48,7 @@
 
 - [x] Keep `IShellView.Refresh()` because the notification route showed no row-availability or visual benefit.
 - [x] Do not add a filesystem-only product route; retain the existing direct Shell refresh behavior.
-- [ ] Commit the isolated probe and investigation evidence on `main`; visible UI acceptance remains separate.
+- [x] Commit the isolated probe and investigation evidence on `main` (`bc2d357`); visible UI acceptance remains separate.
 
 ## Evidence and limits
 
