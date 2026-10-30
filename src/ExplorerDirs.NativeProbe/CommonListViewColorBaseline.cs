@@ -29,6 +29,7 @@ internal static class CommonListViewColorBaseline
     private static readonly ListViewCompareProc SizeCompare = CompareBySize;
     private static Dictionary<long, ShellRow>? _shellRowsById;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Dictionary<nuint, uint> Colors = new() { [0] = 0x00F0E0D0, [1] = 0x00D0F0E0 };
     private static readonly Dictionary<nuint, uint> Samples = [];
     private static readonly Dictionary<nuint, string> Writes = [];
@@ -231,12 +232,28 @@ internal static class CommonListViewColorBaseline
             var shellImageListAttached = enumeration.SystemImageList != 0 && attachedImageList == enumeration.SystemImageList;
             var sortedRowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
+            var foregroundBeforeItemMenu = GetForegroundWindow();
+            var itemMenu = QueryItemContextMenu(shellFolder, shellRows[0].RelativePidl);
+            var foregroundAfterItemMenu = GetForegroundWindow();
+            var backgroundMenu = QueryBackgroundContextMenu(shellFolder);
+            var foregroundAfterBackgroundMenu = GetForegroundWindow();
+            var itemShellMenuAvailable = itemMenu.CommandCount > 0;
+            var backgroundShellMenuAvailable = backgroundMenu.CommandCount > 0;
+            var itemMenuForegroundUnchanged = foregroundAfterItemMenu == foregroundBeforeItemMenu;
+            var backgroundMenuForegroundUnchanged = foregroundAfterBackgroundMenu == foregroundAfterItemMenu;
+            var backgroundMenuLabels = backgroundMenu.RootLabels;
+            var backgroundMenuContainsView = MenuContainsAny(backgroundMenuLabels, "查看", "视图", "View");
+            var backgroundMenuContainsSort = MenuContainsAny(backgroundMenuLabels, "排序方式", "Sort by");
+            var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
+            var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
                 selectedName == "small-folder" && selectedFocusedCount == 1 &&
                 selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked && shellIconsAvailable &&
                 shellImageListAttached && rowIconsBound && sortedRowIconsBound &&
+                itemShellMenuAvailable && backgroundShellMenuAvailable &&
+                itemMenuForegroundUnchanged && backgroundMenuForegroundUnchanged &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
@@ -246,6 +263,16 @@ internal static class CommonListViewColorBaseline
                 $"shell-icons-available={shellIconsAvailable};" +
                 $"system-image-list-attached={shellImageListAttached};row-icons-bound={rowIconsBound};" +
                 $"sorted-row-icons-bound={sortedRowIconsBound};" +
+                $"item-shell-menu={itemShellMenuAvailable};background-shell-menu={backgroundShellMenuAvailable};" +
+                $"item-shell-menu-commands={itemMenu.CommandCount};background-shell-menu-commands={backgroundMenu.CommandCount};" +
+                $"item-shell-verbs={string.Join(',', itemMenu.Verbs.Take(12))};" +
+                $"background-shell-verbs={string.Join(',', backgroundMenu.Verbs.Take(12))};" +
+                $"background-standard-entries=view:{backgroundMenuContainsView},sort:{backgroundMenuContainsSort}," +
+                $"group:{backgroundMenuContainsGroup},refresh:{backgroundMenuContainsRefresh};" +
+                $"folder-background-root-items={string.Join('|', backgroundMenu.RootLabels)};" +
+                $"item-menu-foreground-unchanged={itemMenuForegroundUnchanged};" +
+                $"background-menu-foreground-unchanged={backgroundMenuForegroundUnchanged};" +
+                $"foreground-handles=0x{foregroundBefore.ToInt64():X}/0x{foregroundAfterItemMenu.ToInt64():X}/0x{foregroundAfterBackgroundMenu.ToInt64():X};" +
                 $"selected-focused-count={selectedFocusedCount};visible=False;" +
                 $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
             return passed ? 0 : 1;
@@ -261,7 +288,10 @@ internal static class CommonListViewColorBaseline
             _listView = 0;
             _shellRowsById = null;
             foreach (var row in shellRows)
+            {
                 if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
+                if (row.RelativePidl != 0) ILFree(row.RelativePidl);
+            }
             if (shellFolder != 0) Marshal.Release(shellFolder);
             if (fixturePidl != 0) Marshal.FreeCoTaskMem(fixturePidl);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
@@ -286,6 +316,7 @@ internal static class CommonListViewColorBaseline
                 if (fetched == 0) break;
                 if (relativePidl == 0) throw new InvalidOperationException("Shell enumeration returned a null child PIDL.");
                 nint absolutePidl = 0;
+                nint relativePidlClone = 0;
                 try
                 {
                     absolutePidl = ILCombine(folderPidl, relativePidl);
@@ -303,13 +334,17 @@ internal static class CommonListViewColorBaseline
                     if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
                         throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
                     var systemImageIndex = GetShellSystemImageIndex(fullPath, ref systemImageList);
-                    rows.Add(new ShellRow(0, absolutePidl, display, parsing!, recursiveBytes,
+                    relativePidlClone = ILClone(relativePidl);
+                    if (relativePidlClone == 0) throw new InvalidOperationException("Could not retain the enumerated relative PIDL for native Shell commands.");
+                    rows.Add(new ShellRow(0, absolutePidl, relativePidlClone, display, parsing!, recursiveBytes,
                         FromShellEnumeration: true, SystemImageIndex: systemImageIndex));
                     absolutePidl = 0;
+                    relativePidlClone = 0;
                 }
                 finally
                 {
                     if (absolutePidl != 0) ILFree(absolutePidl);
+                    if (relativePidlClone != 0) ILFree(relativePidlClone);
                     ILFree(relativePidl);
                 }
             }
@@ -323,7 +358,10 @@ internal static class CommonListViewColorBaseline
         catch
         {
             foreach (var row in rows)
+            {
                 if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
+                if (row.RelativePidl != 0) ILFree(row.RelativePidl);
+            }
             throw;
         }
         finally { Marshal.Release(enumerator); }
@@ -338,6 +376,95 @@ internal static class CommonListViewColorBaseline
         if (imageList == 0) imageList = result;
         else if (imageList != result) throw new InvalidOperationException("Shell returned different shared image lists for one view.");
         return info.ImageIndex;
+    }
+
+    private static ContextMenuQuery QueryItemContextMenu(nint shellFolder, nint relativePidl)
+    {
+        var childArray = Marshal.AllocHGlobal(IntPtr.Size);
+        nint contextMenu = 0, menu = 0;
+        try
+        {
+            Marshal.WriteIntPtr(childArray, relativePidl);
+            Marshal.ThrowExceptionForHR(At<GetUiObjectOf>(shellFolder, 10)(shellFolder, 0, 1,
+                childArray, in ContextMenuId, 0, out contextMenu));
+            return QueryContextMenu(contextMenu, out menu);
+        }
+        finally
+        {
+            if (menu != 0) DestroyMenu(menu);
+            if (contextMenu != 0) Marshal.Release(contextMenu);
+            Marshal.FreeHGlobal(childArray);
+        }
+    }
+
+    private static ContextMenuQuery QueryBackgroundContextMenu(nint shellFolder)
+    {
+        nint contextMenu = 0, menu = 0;
+        try
+        {
+            Marshal.ThrowExceptionForHR(At<CreateViewObject>(shellFolder, 8)(shellFolder, 0, in ContextMenuId, out contextMenu));
+            return QueryContextMenu(contextMenu, out menu);
+        }
+        finally
+        {
+            if (menu != 0) DestroyMenu(menu);
+            if (contextMenu != 0) Marshal.Release(contextMenu);
+        }
+    }
+
+    private static ContextMenuQuery QueryContextMenu(nint contextMenu, out nint menu)
+    {
+        menu = CreatePopupMenu();
+        if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Native Shell menu handle creation failed.");
+        var result = At<QueryContextMenuNative>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x0800);
+        Marshal.ThrowExceptionForHR(result);
+        var commandCount = (uint)(result & 0xffff);
+        return new ContextMenuQuery(commandCount, GetContextMenuVerbs(contextMenu, commandCount), GetRootMenuLabels(menu));
+    }
+
+    private static string[] GetRootMenuLabels(nint menu)
+    {
+        var labels = new List<string>();
+        var count = GetMenuItemCount(menu);
+        for (var position = 0; position < count; position++)
+        {
+            var text = new System.Text.StringBuilder(512);
+            if (GetMenuStringW(menu, (uint)position, text, text.Capacity, 0x400) > 0)
+                labels.Add(text.ToString());
+        }
+        return labels.ToArray();
+    }
+
+    private static string[] GetContextMenuVerbs(nint contextMenu, uint commandCount)
+    {
+        var buffer = Marshal.AllocHGlobal(1024);
+        try
+        {
+            var verbs = new List<string>();
+            for (uint offset = 0; offset < commandCount; offset++)
+            {
+                Marshal.WriteInt16(buffer, 0);
+                Marshal.WriteInt16(buffer, 1022, 0);
+                if (At<GetCommandString>(contextMenu, 5)(contextMenu, offset, 4, 0, buffer, 512) != 0) continue;
+                var verb = Marshal.PtrToStringUni(buffer);
+                if (!string.IsNullOrWhiteSpace(verb)) verbs.Add(verb);
+            }
+            return verbs.ToArray();
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static bool MenuContainsAny(IEnumerable<string> labels, params string[] candidates) =>
+        labels.Any(label => candidates.Any(candidate => NormalizeMenuLabel(label)
+            .StartsWith(candidate, StringComparison.OrdinalIgnoreCase)));
+
+    private static string NormalizeMenuLabel(string label)
+    {
+        var normalized = label.Replace("&", string.Empty, StringComparison.Ordinal).Trim();
+        var accelerator = normalized.LastIndexOf('(');
+        if (accelerator > 0 && normalized.EndsWith(')') && normalized.Length - accelerator <= 4)
+            normalized = normalized[..accelerator].TrimEnd();
+        return normalized;
     }
 
     private static T At<T>(nint instance, int slot) where T : Delegate =>
@@ -539,6 +666,10 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ListViewCompareProc(nint first, nint second, nint sortParameter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid iid, nint reserved, out nint result);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint result);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenuNative(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint buffer, uint maxLength);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
@@ -562,9 +693,10 @@ internal static class CommonListViewColorBaseline
         public nint Window; public uint Id; public nuint WParam; public nint LParam; public uint Time; public int X, Y;
         public uint Private;
     }
-    private sealed record ShellRow(long Id, nint AbsolutePidl, string DisplayName, string ParsingName,
+    private sealed record ShellRow(long Id, nint AbsolutePidl, nint RelativePidl, string DisplayName, string ParsingName,
         ulong RecursiveBytes, bool FromShellEnumeration = false, int SystemImageIndex = -1);
     private sealed record ListShellRows(List<ShellRow> Rows, nint SystemImageList);
+    private sealed record ContextMenuQuery(uint CommandCount, string[] Verbs, string[] RootLabels);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct ShellFileInfo
     {
         public nint Icon;
@@ -584,7 +716,12 @@ internal static class CommonListViewColorBaseline
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern nint SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILClone(nint pidl);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
+    [DllImport("user32.dll", PreserveSig = true)] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll", PreserveSig = true)] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW", PreserveSig = true)] private static extern int GetMenuStringW(nint menu, uint item, System.Text.StringBuilder text, int maxLength, uint flags);
+    [DllImport("user32.dll", PreserveSig = true)] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll")] private static extern bool UpdateWindow(nint window);
     [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
     [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);

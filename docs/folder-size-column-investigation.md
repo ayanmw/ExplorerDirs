@@ -8,9 +8,9 @@
 | --- | --- | --- | --- |
 | ExplorerBrowser / 系统 DefView | 可使用文件夹已有列；当前没有受支持的任意派生列接入及逐项重取路径 | 最强，继续由 Windows Shell 提供查看、菜单、导航和文件操作 | 改动最小；现有逐行大小探针在刷新后读回错误/缺失的值，不能满足该列 |
 | 自建 Shell namespace + `IShellView` / DefView | 初次可由 `IShellFolder2` 提供值并通过 `CompareIDs` 排序；显式恢复列和通知后，当前 DefView 没有重新请求派生值 | 可复用 DefView 的原生菜单与不少 Shell 命令，但 namespace/PIDL、通知、拖放等仍需适配 | 已有隔离文件夹适配器和操作合同；有效刷新基线仍失败，不能作为产品替代视图 |
-| 自有 `SysListView32` 数据模型 | 已验证 `IShellFolder::EnumObjects` 子 PIDL、row ID 和系统图标索引可映射；派生值更新、排序及选中/焦点身份保持通过 | 默认不会自动拥有 Shell 视图能力；仍需验证并接入 `IContextMenu`、`IDataObject`、`IFileOperation`、OLE 拖放、Shell 通知、导航及键盘路由 | 隐藏探针已挂载 Shell 共享小图标列表并读回行索引；尚无可见绘制、全视图模式、虚拟位置、原生菜单/操作、性能/内存或完整输入验收，产品化工作量高 |
+| 自有 `SysListView32` 数据模型 | 已验证 `IShellFolder::EnumObjects` 子 PIDL、row ID 和系统图标索引可映射；派生值更新、排序及选中/焦点身份保持通过 | `IShellFolder` 可提供项目菜单及文件夹背景菜单，但不含当前 Shell view 的查看/排序/分组/刷新命令；还需接入文件操作、拖放、通知、导航及键盘路由 | 隐藏探针已挂载 Shell 共享小图标列表并取得两类 folder context menu；尚无完整 Explorer 视图菜单、可见绘制、虚拟位置、性能/内存或完整输入验收，产品化工作量高 |
 
-**结论：**逐行派生值的技术控制权要求应用持有行数据模型；继续调整 DefView 通知不是有证据的路线。隔离原型已从真实 Shell 文件夹枚举子 PIDL 并放入普通 `SysListView32` 行模型；下一阶段仍需验证详细信息视图与系统图标、原生项目/背景菜单、复制/移动/删除、重命名、拖放、外部变更刷新、焦点/选区及目录导航。成功门槛应同时包括真实文件 Shell 行能更新派生值并保持排序/焦点，以及 Shell 操作合同不退化；在此之前不迁移产品，不以合成控件的内存或绘制结果推断实际收益。
+**结论：**逐行派生值的技术控制权要求应用持有行数据模型；继续调整 DefView 通知不是有证据的路线。隔离原型已从真实 Shell 文件夹枚举子 PIDL 并放入普通 `SysListView32` 行模型；下一阶段仍需验证可见详细视图/图标、视图级原生菜单、复制/移动/删除、重命名、拖放、外部变更刷新、焦点/选区及目录导航。成功门槛应同时包括真实文件 Shell 行能更新派生值并保持排序/焦点，以及 Shell 操作合同不退化；在此之前不迁移产品，不以合成控件的内存或绘制结果推断实际收益。
 
 **资源判断：**现有证据不足以声称自有 ListView 能降低内存。ExplorerBrowser 仍会在应用中运行，若只替换控件但继续并行保留旧 Shell hosts，短期反而可能增加常驻对象。内存必须在同机、同目录集、同查看模式、同窗格数与相同操作序列下测量，并分别比较启动稳定态和长时间刷新后的 private bytes/working set；测量之前不把迁移收益列为理由。
 
@@ -33,6 +33,12 @@
 在 Shell 枚举行创建期间，对每个实际解析路径调用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)`，记录共享系统图像列表句柄和行图标索引。创建隐藏 `SysListView32` 后通过 `LVM_SETIMAGELIST` 挂载 Shell 返回的共享小图标列表；插入每行时设置 `LVIF_IMAGE`，再以 `LVM_GETITEM` 验证图标索引与 row ID 对应，并在派生值排序后再次核对映射。
 
 新图标合同先因 `shell-icons-available=False` 失败；接线后 Release build 与 `--common-listview-data-contract` 通过，输出 `system-image-list-attached=True`、`row-icons-bound=True`、`sorted-row-icons-bound=True`。测试没有可见窗口或像素采样，因此只证明索引查询、共享列表挂载和控件数据读回，不证明图标实际绘制外观、DPI/主题效果、Shell overlay 或产品体验。Explorer Dirs 产品未改。
+
+## 2026-10-30：Shell 项目菜单与视图菜单边界
+
+用枚举得到的子 PIDL 经 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 查询项目菜单，并经父 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询文件夹背景菜单；两者都返回菜单命令，查询期间没有显示菜单、执行命令或改变前台窗口。当前系统上菜单命令数分别为 154 和 115，数量包含已安装的扩展，不能按数量推断 Windows 自带命令数。背景菜单根项包含扩展项、新建、属性；没有查看、排序、分组、刷新。
+
+源码对照确认，产品从 `ExplorerBrowser.GetCurrentView` 取得当前 `IShellView`，再通过 `IShellView::GetItemObject(SVGIO_BACKGROUND/SVGIO_SELECTION, IID_IContextMenu)` 获取以当前视图为上下文的菜单对象；这与直接从 `IShellFolder` 查询的对象不同。故本探针只证明项目/文件夹 context menu 可按 PIDL 查询，不证明自有 ListView 能复用完整 Explorer 文件区菜单。若继续实验自有视图，必须单独证明视图级菜单命令能正确作用于它自己的查看、排序、分组状态；否则保留 ExplorerBrowser 是维持该项体验的已知路径。未修改产品或 GUI。
 
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 

@@ -4783,3 +4783,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 通过 `SHGetFileInfo` 为枚举行查询 Shell 共享小图标列表和图标索引；隐藏 ListView 挂载共享 image list 并写入每行 `LVIF_IMAGE`，再读回索引与 row ID 映射。排序后映射仍稳定；新增图标索引断言先失败，再通过；NativeProbe Release build 和完整隐藏数据合同通过，窗口不可见、前台未变。
 - 此结果不含可见像素/主题/DPI/overlay 验收，也未验证原生菜单、命令、文件操作、拖放、通知、导航、键盘、性能/内存或产品集成。Explorer Dirs 产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：项目菜单与视图菜单的接口边界
+
+- 使用真实枚举项 PIDL 查询 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 项目菜单，并用 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询背景菜单。两者都能取到菜单命令，未显示或执行；前台句柄保持不变。当前机器的 folder 背景菜单根项只有扩展项、新建及属性，查看/排序/分组/刷新不在其中。
+- 对照产品源码，完整文件区菜单来自当前 `IShellView.GetItemObject`，不是 `IShellFolder` 的背景菜单对象。探针合同只确认两种 folder context menu 可查询，不把它标为完整 Explorer 菜单通过。自有 ListView 如要继续，仍须证明视图级菜单命令作用于自有状态；否则保留 ExplorerBrowser 才能保留当前原生视图菜单路径。详见[派生大小列架构调查](folder-size-column-investigation.md)。
