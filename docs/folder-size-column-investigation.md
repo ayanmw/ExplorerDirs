@@ -8,6 +8,12 @@
 
 NativeProbe Release build 0 警告/错误，虚拟文件夹合同通过；窗口保持隐藏且前台未变化。结果证明这些 Control Panel 项目提供了项目级菜单与可往返的 CIDA 数据对象；不证明原生菜单可见、命令可执行或真实拖放/剪贴板体验正确，也不代表所有 Shell namespace 均提供这些接口。产品仍使用 ExplorerBrowser。
 
+### 2026-10-31：Control Panel 虚拟位置的真实 IShellView
+
+将 Control Panel 加入既有 Private Desktop 单目标探针后，`BrowseObject → SHBindToObject → CreateViewObject(IID_IShellView) → CreateViewWindow` 成功。该 view 的 `GetItemObject(SVGIO_BACKGROUND, IID_IContextMenu)` 和内存 `QueryContextMenu` 成功，读出 8 个顶层菜单项：查看、排序方式、分组依据、刷新、粘贴、撤消删除等；没有显示菜单或调用命令。`IID_IDropTarget` 查询返回 `S_OK`。
+
+此 provider 的 `IFolderView2::ItemCount(SVGIO_ALLVIEW)` 返回 `E_FAIL`，其 view HWND 下也没有 `SysListView32` 子控件。因此“能够创建真实 Shell view 并取得原生菜单”不等于“可由统一的 ListView 行模型接管并保留所有 Explorer 能力”。菜单内容是本机此位置的观测，未验证可见菜单、启用状态、命令行为、焦点、拖放或其它 Windows 版本/provider。Private Desktop watchdog 退出码 0，前台句柄和输入时间戳未变化，临时探针资源清理完成；产品仍使用 ExplorerBrowser。
+
 ## 2026-10-31：隔离扫描的异步发布与文件变化触发
 
 目录树扫描协调器新增 `RunLatestAsync`：扫描在后台线程运行，完成后通过 owner `SynchronizationContext` 发布；发布前再次核对 ticket，避免旧扫描结果覆盖新访问或更新。隐藏 ListView 合同将递归数据扫描迁出 STA，并通过真实临时目录中的 `FileSystemWatcher` 修改文件来触发下一轮扫描和结果发布，不再由测试代码手动重扫。合同断言事件已观察、结果已应用、扫描线程与 owner 分离、更新在原 owner 线程发布，同时检查递归文件/子目录数、相对大小和升降序、行身份、焦点/选区及前台窗口不变。`DirectoryTreeScanCoordinatorSmoke` 的最新结果优先发布、旧结果不发布合同、递归扫描 smoke、NativeProbe/App Release build 与隐藏 `--common-listview-relative-size-contract` 均通过；探针输出 `file-change-observed=True`、`update-applied=True`、`visible=False`、`foreground-unchanged=True`。

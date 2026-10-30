@@ -44,6 +44,7 @@ internal static class ShellViewHostFilterProbe
         string? zipPath = null;
         nint parent = 0, folderPidl = 0, childFolderPidl = 0, grandchildFolderPidl = 0, alternateFolderPidl = 0, volumeRootPidl = 0, virtualFolderPidl = 0, searchFolderPidl = 0, filePidl = 0, folder = 0, view = 0, viewPointer = 0, viewWindow = 0, folderView = 0;
         bool created = false;
+        var itemCountLastHResult = 0;
         FilteredHost? host = null;
         Exception? navigationError = null;
 
@@ -139,6 +140,7 @@ internal static class ShellViewHostFilterProbe
                     "Desktop" => "shell:Desktop",
                     "ThisPC" => "shell:MyComputerFolder",
                     "RecycleBin" => "shell:RecycleBinFolder",
+                    "ControlPanel" => "::{26EE0668-A00A-44D7-9371-BEB064C98683}",
                     "Libraries" => "shell:Libraries",
                     "NetworkPlaces" => "shell:NetworkPlacesFolder",
                     "SearchFolder" => ShellSearchLocation.BuildUri(fixture, "nested"),
@@ -495,10 +497,13 @@ internal static class ShellViewHostFilterProbe
                     TraceVirtualScope($"{label}-browse-before", foreground);
                     Check(host.BrowseObject(virtualFolderPidl, 0));
                     TraceVirtualScope($"{label}-browse-after", foreground);
-                    var itemCount = AdoptPendingView(expectedItemCount: null);
+                    var itemCount = AdoptPendingView(expectedItemCount: null,
+                        allowItemCountFailure: label == "ControlPanel");
                     if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"The isolated host did not retain the {label} PIDL.");
-                    Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; enumerated-items={itemCount}; {InspectNativeContracts(readVerbs: label != "ZipContainer")}");
+                    var listView = FindChildByClass(viewWindow, "SysListView32");
+                    var listViewItems = listView == 0 ? -1 : SendMessageW(listView, 0x1004, 0, 0).ToInt32();
+                    Console.WriteLine($"ishellview-host-filter: virtual-shell-view-created=True; target={label}; folder-view-items={itemCount}; folder-view-items-hr=0x{itemCountLastHResult:X8}; list-view-items={listViewItems}; {InspectNativeContracts(readVerbs: label is not "ZipContainer" and not "ControlPanel")}");
                     TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
@@ -518,7 +523,7 @@ internal static class ShellViewHostFilterProbe
                 return zipPath;
             }
 
-            int AdoptPendingView(int? expectedItemCount)
+            int AdoptPendingView(int? expectedItemCount, bool allowItemCountFailure = false)
             {
                 if (host.PendingView == 0) throw new Exception("Shell navigation did not create a pending view.");
                 if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
@@ -534,7 +539,13 @@ internal static class ShellViewHostFilterProbe
                 do
                 {
                     Application.DoEvents();
-                    Check(At<ItemCount>(folderView, 7)(folderView, 2, out itemCount));
+                    var itemCountHr = At<ItemCount>(folderView, 7)(folderView, 2, out itemCount);
+                    itemCountLastHResult = itemCountHr;
+                    if (itemCountHr < 0)
+                    {
+                        if (allowItemCountFailure) return -1;
+                        Check(itemCountHr);
+                    }
                     if (itemCount == expectedItemCount) return itemCount;
                     Thread.Sleep(10);
                 } while (DateTime.UtcNow < waitUntil);
@@ -548,7 +559,9 @@ internal static class ShellViewHostFilterProbe
                 var menuHr = At<GetItemObject>(view, 15)(view, 0, ref menuId, out var contextMenu);
                 var dropHr = Marshal.QueryInterface(view, in DropTargetId, out var dropTarget);
                 var menuQueryHr = unchecked((int)0x80004005);
+                var menuItemCount = -1;
                 var verbs = new List<string>();
+                var menuCaptions = new List<string>();
                 var coreStates = new List<string>();
                 nint menu = 0;
                 nint commandBuffer = 0;
@@ -560,6 +573,16 @@ internal static class ShellViewHostFilterProbe
                         if (menu != 0)
                         {
                             menuQueryHr = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                            if (menuQueryHr >= 0)
+                            {
+                                menuItemCount = GetMenuItemCount(menu);
+                                for (var index = 0; index < menuItemCount; index++)
+                                {
+                                    var caption = new System.Text.StringBuilder(256);
+                                    if (GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400) > 0)
+                                        menuCaptions.Add(caption.ToString());
+                                }
+                            }
                             if (readVerbs && menuQueryHr >= 0)
                             {
                                 commandBuffer = Marshal.AllocHGlobal(512);
@@ -602,7 +625,7 @@ internal static class ShellViewHostFilterProbe
                     if (dropTarget != 0) Marshal.Release(dropTarget);
                 }
                 var verbReport = readVerbs ? $"verbs=[{string.Join(',', verbs)}]" : "verbs=skipped-provider-compatibility";
-                return $"background-menu=0x{menuHr:X8}/query=0x{menuQueryHr:X8}/{verbReport}/core-state=[{string.Join(',', coreStates)}];drop-target=0x{dropHr:X8}";
+                return $"background-menu=0x{menuHr:X8}/query=0x{menuQueryHr:X8}/items={menuItemCount}/captions=[{string.Join('|', menuCaptions)}]/{verbReport}/core-state=[{string.Join(',', coreStates)}];drop-target=0x{dropHr:X8}";
             }
 
         }

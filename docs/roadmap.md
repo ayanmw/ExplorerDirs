@@ -4976,6 +4976,11 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - Control Panel 根 `IShellFolder::CreateViewObject(IContextMenu)` 可查询，但 `QueryContextMenu` 返回 0 项。这与视图级菜单是不同接口；不能拿文件夹背景菜单替代 `IShellView` 的查看、排序、刷新命令。
 - NativeProbe Release build 与合同通过，窗口隐藏且前台未变化。未显示菜单、执行命令或验证真实拖放/剪贴板。产品未改变，仍使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
 
+## 2026-10-31：Control Panel 的真实虚拟 IShellView
+
+- Private Desktop 单目标探针创建 Control Panel 的真实 `IShellView` 成功。view 级背景 `IContextMenu` 可查询，内存菜单有 8 个顶层项，含查看、排序、分组和刷新；未显示/执行菜单。`IID_IDropTarget` 查询返回 `S_OK`。
+- 该 view 的 `IFolderView2::ItemCount(SVGIO_ALLVIEW)` 返回 `E_FAIL`，没有 `SysListView32` 子控件。说明虚拟 provider 的真实 Shell 视图和菜单可用，但不能据此假设每种 Shell 位置都支持统一 ListView 行接管。前台/输入未变化，watchdog 与清理通过。产品未改动；其余菜单状态、命令、拖放和可见体验仍待验证。详见[派生大小列调查](folder-size-column-investigation.md)。
+
 ## 2026-10-31：F5 空白区间的源码边界复核
 
 - 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
