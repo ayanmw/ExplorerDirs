@@ -10,7 +10,7 @@
 
 2026-10-30 预览发布 `preview-0.6.0-temp.81`：从干净主线提交 `52358ace42d9008022a1f4858568101aab81ec98` 发布，提交时间 `2026-10-30T23:43:30+08:00`，`BuildTags=none`，包内独立 profile。EXE/DLL SHA-256 为 `516E09919543B5EC06D65E1339C8BC5EF97893B09C16066E385F0176FDDE8694` / `29C3EE4719F2444C7F62C7BEE7A262C8161D019056E710D51E86119F7B491532`，与 `app/SHA256.txt` 一致；PowerShell 7 发布隔离 smoke 通过。未启动 GUI；F5/查看方式的可见空白、选区、焦点和滚动位置仍待集中验收。版本说明见[preview-0.6.0-temp.81](releases/preview-0.6.0-temp.81.md)。
 
-2026-10-30 文件列表刷新重绘（新候选，待可见验收）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。F5 现在在 Shell 重新填充列表期间暂缓原生列表重绘，待行数连续稳定或达到 1.5 秒上限后恢复；不再对子控件调用 `RedrawWindow(...ALLCHILDREN)`。查看方式切换继续让 Shell 自行重排，完整状态读取延后执行。该重绘暂停是待可见 A/B 的候选，未证明能缩短黑屏；待验收检查 F5 旧行是否保留、最终重绘、慢目录/虚拟位置、选区焦点及滚动位置。构建和可见结果记入[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)；最新集中验收候选需在本批构建后重备。
+2026-10-30 文件列表刷新重绘（新候选，待可见验收）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。F5 在 Shell 重新填充列表期间暂缓原生列表重绘，待行数连续稳定或 Dispatcher 首次检查到 1.5 秒阈值后恢复；主线程被同步 Shell 调用阻塞时，该阈值不是墙钟硬上限。此 API 只控制绘制，不保证禁用输入，旧画面与当前命中项可能短暂错位，因此验收必须检查点击/键盘的目标正确性；不通过则撤回此候选。不会对子控件调用 `RedrawWindow(...ALLCHILDREN)`。查看方式切换继续让 Shell 自行重排，完整状态读取延后执行。黑屏和交互安全均未可见验证；候选与证据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-30 列表重绘让路：F5 的 `IShellView.Refresh()` 与查看方式的 `SetViewModeAndIconSize` 都保留在当前 Shell 视图内；两者之后的同步状态读取、行数检查和选区/焦点恢复改为 `DispatcherPriority.ContextIdle`，让排队中的 Shell 绘制消息先有机会处理。App Release build 通过（0 警告/错误），未运行测试或 UI。该调整只减少应用收尾工作抢占首次绘制的机会，不改变 Shell 自身的重枚举/重排，也不证明黑屏时段已缩短；F5 与各查看方式的视觉时长留待集中验收。完整 Shell 视图重建不在这两条调用路径中。
 
