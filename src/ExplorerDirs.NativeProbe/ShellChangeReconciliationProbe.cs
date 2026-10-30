@@ -32,6 +32,7 @@ internal static class ShellChangeReconciliationProbe
     private const uint LvisSelected = 0x0002;
     private const uint LvinSelected = 0x0002;
     private const uint LvinFocused = 0x0001;
+    private const uint SigDnDesktopAbsoluteParsing = 0x80028000;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
 
     internal static int Run()
@@ -496,10 +497,10 @@ internal static class ShellChangeReconciliationProbe
                         {
                             var oldPidl = Marshal.ReadIntPtr(pidls);
                             var newPidl = Marshal.ReadIntPtr(pidls, IntPtr.Size);
-                            var oldPath = FileSystemPath(oldPidl);
-                            var newPath = FileSystemPath(newPidl);
-                            if (oldPath is not null && newPath is not null)
-                                _renamedParsingNames[Path.GetFullPath(newPath)] = Path.GetFullPath(oldPath);
+                            var oldParsingName = AbsoluteParsingName(oldPidl);
+                            var newParsingName = AbsoluteParsingName(newPidl);
+                            if (oldParsingName is not null && newParsingName is not null)
+                                _renamedParsingNames[newParsingName] = oldParsingName;
                         }
                     }
                     finally { _ = SHChangeNotificationUnlock(changeLock); }
@@ -508,9 +509,9 @@ internal static class ShellChangeReconciliationProbe
             base.WndProc(ref message);
         }
 
-        private static string? FileSystemPath(nint pidl)
+        private static string? AbsoluteParsingName(nint pidl)
         {
-            if (pidl == 0 || SHGetNameFromIDList(pidl, 0x80058000, out var name) < 0) return null;
+            if (pidl == 0 || SHGetNameFromIDList(pidl, SigDnDesktopAbsoluteParsing, out var name) < 0) return null;
             try { return Marshal.PtrToStringUni(name); }
             finally { Marshal.FreeCoTaskMem(name); }
         }

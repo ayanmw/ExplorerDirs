@@ -714,4 +714,4 @@ Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 r
 
 ### 2026-10-31：真实 Shell 文件和目录重命名身份映射
 
-重命名通知窗口在 `SHChangeNotification_Lock` 有效期内读取 `SHCNE_RENAMEITEM` 与 `SHCNE_RENAMEFOLDER` 的旧/新 PIDL，并用文件系统路径构造行模型映射。探针先复现目录重命名后 row ID 丢失；接入目录事件后通过。隐藏行模型合同现确认文件/目录重命名均保留稳定 row ID；目录路径变化时旧递归大小和计数立即清空，异步重扫后回写新的 12 B、2 files、1 folder，稳定选择/焦点保持。Release NativeProbe 构建及 `--shell-change-reconciliation` 通过，窗口隐藏且前台 HWND 未变。`SHCNE_RENAMEFOLDER` 当前以文件系统目录路径验证；虚拟 Shell 项、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
+重命名通知窗口在 `SHChangeNotification_Lock` 有效期内读取 `SHCNE_RENAMEITEM` 与 `SHCNE_RENAMEFOLDER` 的旧/新 PIDL，并用 `SIGDN_DESKTOPABSOLUTEPARSING` 提取与行模型相同的 Shell 绝对解析名，避免映射仅适用于文件系统项目。探针先复现目录重命名后 row ID 丢失；接入目录事件后通过。隐藏行模型合同现确认文件/目录重命名均保留稳定 row ID；目录路径变化时旧递归大小和计数立即清空，异步重扫后回写新的 12 B、2 files、1 folder，稳定选择/焦点保持。Release NativeProbe 构建及 `--shell-change-reconciliation` 通过，窗口隐藏且前台 HWND 未变。`SHCNE_RENAMEFOLDER` 当前以文件系统目录路径验证；虚拟 Shell 项、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
