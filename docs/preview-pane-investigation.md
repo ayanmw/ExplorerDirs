@@ -29,6 +29,8 @@ Q-Dir [FAQ 34](https://www.softwareok.com/?faq=34&seite=faq-Q-DIR) 将设置放�
 
 本项目已有 Q-Dir 式每标签快速文件过滤；其行为按 FAQ 38 对照，不应重新实现或借用为预览资格过滤。在 Q-Dir 的可见行为得到确认前，不把快速筛选改造成预览过滤，也不随选择隐藏整个预览窗格。下一次可见对照只需区分三点：扩展名不匹配的文件是否仍在文件列表、预览区域显示什么、过滤名单是否逐窗格/全局。若只限制预览资格，再评估逐项过滤需要的宿主边界；若也筛选列表，则按文件可见性功能单独对照。本项目当前架构事实不变：`IFolderFilterSite` 过滤的是列表枚举，`IExplorerPaneVisibility` 控制整个窗格，均不能表达“列表保留项目但不对特定扩展名预览”。接口依据：[Preview Handler Architecture](https://learn.microsoft.com/en-us/windows/win32/shell/preview-handlers)、[IExplorerPaneVisibility::GetPaneState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iexplorerpanevisibility-getpanestate)、[IExplorerBrowser](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-iexplorerbrowser)。
 
+2026-10-31 用户决定：先等集中 Q-Dir 可见验收再选择“仅禁用预览”还是“同时过滤列表”。因此本项目不新增预览资格配置、不借用快速筛选，也不随选择显隐整个原生预览窗格。该决定解决的是交互语义顺序；实现边界仍需在验收后按实际行为复核。
+
 ## 后续验收
 
 在用户明确安排的隔离可见窗口时，检查文本、图片、PDF 等已注册处理器是否在 Preview Host 中显示；切换文件、标签和布局；开关预览后检查文件区尺寸、焦点、Tab/F6 与导航状态。产品菜单/工具栏、默认关闭和每标签保存语义已接入，仍待验证它们的可见交互及重启恢复。未通过渲染与布局验收前，不将预览功能标记为完成，也不发布。
