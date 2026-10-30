@@ -280,12 +280,13 @@ internal static class PaneTabTransferProbe
             var searchSelection = ReadSelectedShellNames(browserType, browser);
             Ensure(searchSelection.Length == 1, "a concrete Shell search result was selected before cloning");
             var searchHistorySelection = navigationHistoryType.GetProperty("CurrentSelection", InstanceMembers)!;
-            PumpUntil(() => ((IReadOnlyList<string>)searchHistorySelection.GetValue(navigationHistory)!)
-                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
-                TimeSpan.FromSeconds(5), "the source history captured its Shell search result selection");
+            // Direct SelectItem does not promise a user selection callback; clone must snapshot the live view.
             var sourceSearchUri = (string)browserType.GetProperty("CurrentSearchUri", InstanceMembers)!.GetValue(browser)!;
 
             paneType.GetMethod("CloneView", InstanceMembers)!.Invoke(targetPane, [state]);
+            Ensure(((IReadOnlyList<string>)searchHistorySelection.GetValue(navigationHistory)!)
+                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                "cloning captures the live Shell search selection even if the source history callback is pending");
             PumpUntil(() => targetTabsControl.Items.Count == 3 &&
                 string.Equals(browserType.GetProperty("CurrentSearchUri", InstanceMembers)!.GetValue(
                     browserProperty.GetValue(((TabItem)targetTabsControl.SelectedItem!).Tag!)) as string,
