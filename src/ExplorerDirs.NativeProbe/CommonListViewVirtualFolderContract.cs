@@ -18,10 +18,6 @@ internal static class CommonListViewVirtualFolderContract
     private const int LvmSetImageList = 0x1003;
     private const int LvmGetImageList = 0x1002;
     private const int LvsilSmall = 1;
-    private const uint SigDnDesktopAbsoluteParsing = 0x80028000;
-    private const uint ShgfiSysIconIndex = 0x00004000;
-    private const uint ShgfiSmallIcon = 0x00000001;
-    private const uint ShgfiPidl = 0x00000008;
     private const uint ShcontfFolders = 0x00000020;
     private const uint ShcontfNonFolders = 0x00000040;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
@@ -40,10 +36,7 @@ internal static class CommonListViewVirtualFolderContract
             if ((rootAttributes & ShellFolder) == 0)
                 throw new InvalidOperationException("Control Panel must resolve as a Shell folder.");
 
-            Marshal.ThrowExceptionForHR(SHGetNameFromIDList(rootPidl, SigDnDesktopAbsoluteParsing, out var rootNamePointer));
-            string rootParsingName;
-            try { rootParsingName = Marshal.PtrToStringUni(rootNamePointer) ?? string.Empty; }
-            finally { Marshal.FreeCoTaskMem(rootNamePointer); }
+            var rootParsingName = ShellListViewRowIdentity.GetAbsoluteParsingName(rootPidl);
             if (string.IsNullOrWhiteSpace(rootParsingName))
                 throw new InvalidOperationException("Control Panel did not expose an absolute parsing name.");
 
@@ -62,35 +55,8 @@ internal static class CommonListViewVirtualFolderContract
                 {
                     absolutePidl = ILCombine(rootPidl, relativePidl);
                     if (absolutePidl == 0) throw new InvalidOperationException("Could not combine a virtual parent and child PIDL.");
-                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl, 0, out var displayPointer));
-                    string displayName;
-                    try { displayName = Marshal.PtrToStringUni(displayPointer) ?? string.Empty; }
-                    finally { Marshal.FreeCoTaskMem(displayPointer); }
-                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl,
-                        SigDnDesktopAbsoluteParsing, out var parsingPointer));
-                    string parsingName;
-                    try { parsingName = Marshal.PtrToStringUni(parsingPointer) ?? string.Empty; }
-                    finally { Marshal.FreeCoTaskMem(parsingPointer); }
-                    if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(parsingName))
-                        throw new InvalidOperationException("A virtual Shell child has no display or parsing name.");
-
-                    var childArray = Marshal.AllocHGlobal(IntPtr.Size);
-                    uint attributes = ShellFolder | ShellFileSystem;
-                    try
-                    {
-                        Marshal.WriteIntPtr(childArray, relativePidl);
-                        Marshal.ThrowExceptionForHR(At<GetAttributesOf>(shellFolder, 9)(shellFolder, 1,
-                            childArray, ref attributes));
-                    }
-                    finally { Marshal.FreeHGlobal(childArray); }
-
-                    var iconList = SHGetFileInfo(absolutePidl, 0, out var fileInfo,
-                        (uint)Marshal.SizeOf<ShellFileInfo>(), ShgfiPidl | ShgfiSysIconIndex | ShgfiSmallIcon);
-                    if (iconList == 0 || fileInfo.ImageIndex < 0)
-                        throw new InvalidOperationException("Shell did not return a system icon for an enumerated virtual child.");
-                    if (systemImageList == 0) systemImageList = iconList;
-                    else if (systemImageList != iconList)
-                        throw new InvalidOperationException("Virtual rows did not share one Shell system image list.");
+                    var identity = ShellListViewRowIdentity.Capture(shellFolder, relativePidl, absolutePidl,
+                        ref systemImageList);
 
                     var retainedAbsolute = ILClone(absolutePidl);
                     var retainedRelative = ILClone(relativePidl);
@@ -100,8 +66,8 @@ internal static class CommonListViewVirtualFolderContract
                         if (retainedRelative != 0) ILFree(retainedRelative);
                         throw new InvalidOperationException("Could not retain Shell row PIDLs.");
                     }
-                    rows.Add(new ShellRow(rows.Count + 1, retainedAbsolute, retainedRelative, displayName,
-                        parsingName, attributes, fileInfo.ImageIndex));
+                    rows.Add(new ShellRow(rows.Count + 1, retainedAbsolute, retainedRelative,
+                        identity.DisplayName, identity.ParsingName, identity.Attributes, identity.SystemImageIndex));
                 }
                 finally
                 {
@@ -268,7 +234,6 @@ internal static class CommonListViewVirtualFolderContract
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint pidl, out uint fetched);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint children, ref uint attributes);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct ListViewColumn
     {
@@ -281,12 +246,6 @@ internal static class CommonListViewVirtualFolderContract
         public int TextMax, Image; public nint Param; public int Indent, GroupId, Columns;
         public nint ColumnIndices, ColumnFormat, Group;
     }
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct ShellFileInfo
-    {
-        public nint Icon; public int ImageIndex; public uint Attributes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string? DisplayName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string? TypeName;
-    }
     private sealed record ShellRow(long Id, nint AbsolutePidl, nint RelativePidl, string DisplayName,
         string ParsingName, uint Attributes, int ImageIndex);
 
@@ -294,12 +253,10 @@ internal static class CommonListViewVirtualFolderContract
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILClone(nint pidl);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern nint SHGetFileInfo(nint item, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);

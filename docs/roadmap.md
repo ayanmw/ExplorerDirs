@@ -4950,3 +4950,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 用户决定先等集中 Q-Dir 验收后再决定：扩展名不匹配的文件是否留在文件列表。Q-Dir FAQ 34 同时提到预览扩展名列表与“过滤后减少文件视图项目”，单靠公开页不能确认实际语义；FAQ 38 的每视图文件过滤是另一项功能。
 - 在验收确认前不新增预览资格过滤设置，不复用会隐藏列表项目的 `IFolderFilterSite`，也不按选择显隐整个原生预览窗格。详情见[预览窗格调查](preview-pane-investigation.md#q-dir-预览格式过滤的实现边界2026-10-28-复核)。
+
+## 2026-10-31：NativeProbe 共享 Shell 行身份读取
+
+- 文件系统与虚拟 Shell 行探针共享显示名、绝对解析名、属性、PIDL 图标索引读取；文件系统路径仅为真实 filesystem 项目提供。
+- NativeProbe Release build、虚拟 Control Panel（9 个虚拟子项）、文件系统数据/操作及导航合同通过，前台窗口未变。仅为隔离探针代码整理，未接入产品。详见[派生大小列调查](folder-size-column-investigation.md)。

@@ -592,23 +592,17 @@ internal static class CommonListViewColorBaseline
                 {
                     absolutePidl = ILCombine(folderPidl, relativePidl);
                     if (absolutePidl == 0) throw new InvalidOperationException("Could not combine the Shell parent and enumerated child PIDLs.");
-                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl, 0, out var displayName));
-                    string? display;
-                    try { display = Marshal.PtrToStringUni(displayName); }
-                    finally { Marshal.FreeCoTaskMem(displayName); }
-                    if (string.IsNullOrWhiteSpace(display)) throw new InvalidOperationException("Shell returned an empty normal display name.");
-                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl, 0x80058000, out var parsingName));
-                    string? parsing;
-                    try { parsing = Marshal.PtrToStringUni(parsingName); }
-                    finally { Marshal.FreeCoTaskMem(parsingName); }
-                    var fullPath = Path.GetFullPath(parsing ?? string.Empty);
+                    var identity = ShellListViewRowIdentity.Capture(shellFolder, relativePidl, absolutePidl,
+                        ref systemImageList);
+                    var fileSystemPath = identity.FileSystemPath ??
+                        throw new InvalidOperationException("A filesystem fixture row has no filesystem path.");
+                    var fullPath = Path.GetFullPath(fileSystemPath);
                     if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
                         throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
-                    var systemImageIndex = GetShellSystemImageIndex(fullPath, ref systemImageList);
                     relativePidlClone = ILClone(relativePidl);
                     if (relativePidlClone == 0) throw new InvalidOperationException("Could not retain the enumerated relative PIDL for native Shell commands.");
-                    rows.Add(new ShellRow(0, absolutePidl, relativePidlClone, display, parsing!, recursiveBytes,
-                        FromShellEnumeration: true, SystemImageIndex: systemImageIndex));
+                    rows.Add(new ShellRow(0, absolutePidl, relativePidlClone, identity.DisplayName, fileSystemPath,
+                        recursiveBytes, FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex));
                     absolutePidl = 0;
                     relativePidlClone = 0;
                 }
@@ -636,17 +630,6 @@ internal static class CommonListViewColorBaseline
             throw;
         }
         finally { Marshal.Release(enumerator); }
-    }
-
-    private static int GetShellSystemImageIndex(string path, ref nint imageList)
-    {
-        var result = SHGetFileInfo(path, 0, out var info,
-            (uint)Marshal.SizeOf<ShellFileInfo>(), 0x4000 | 0x1); // SHGFI_SYSICONINDEX | SHGFI_SMALLICON.
-        if (result == 0 || info.ImageIndex < 0)
-            throw new InvalidOperationException($"Shell did not return a system icon for {path}.");
-        if (imageList == 0) imageList = result;
-        else if (imageList != result) throw new InvalidOperationException("Shell returned different shared image lists for one view.");
-        return info.ImageIndex;
     }
 
     private static ContextMenuQuery QueryItemContextMenu(nint shellFolder, nint relativePidl)
@@ -1196,14 +1179,6 @@ internal static class CommonListViewColorBaseline
         ulong RecursiveBytes, bool FromShellEnumeration = false, int SystemImageIndex = -1);
     private sealed record ListShellRows(List<ShellRow> Rows, nint SystemImageList);
     private sealed record ContextMenuQuery(uint CommandCount, string[] Verbs, string[] RootLabels, string[] AllLabels);
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct ShellFileInfo
-    {
-        public nint Icon;
-        public int ImageIndex;
-        public uint Attributes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string? DisplayName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string? TypeName;
-    }
     [DllImport("comctl32.dll", SetLastError = true)] private static extern bool InitCommonControlsEx(ref InitCommonControls init);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, DrawProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, DrawProc callback, nuint id);
@@ -1215,7 +1190,6 @@ internal static class CommonListViewColorBaseline
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, ref Guid interfaceId, out nint item);
     [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern nint SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILClone(nint pidl);
