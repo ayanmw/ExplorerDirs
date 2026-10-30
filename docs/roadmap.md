@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-31 Q-Dir 目录树拖入悬停展开：`NativeShellTree` 初始化加入 Windows `NSTCS_SPRINGEXPAND`。Release SettingsSmoke 定向样例通过，确认该样式与 `NSTCS_DISABLEDRAGDROP`、`NSTCS_NOEDITLABELS` 同时存在；保持禁用树内重排和标签编辑。微软文档说明 `NSTCS_DISABLEDRAGDROP` 只禁止控件内部拖放，外部项目仍可拖入树控件，因此此次只补上原生悬停展开。当前使用 Windows 默认延时，不提供 Q-Dir 的自定义延时档位；真实文件拖入、目录落点及展开时长仍待集中 UI 验收。[功能矩阵](shell-parity.md#本轮代码与下一轮验收)。
+
 2026-10-31 04:12 北京时间内存观察：对仍运行的 temp.80 PID `47460` 做 60 秒只读复采（13 点），Working Set `223.19→223.15 MiB`、Private Bytes `114.84→114.75 MiB`，句柄 `1,112–1,114`、线程 `35–37`、GDI `95`、USER `105–107`；本窗口没有单调增长。未操作应用且没有固定负载，因此此样本只反映短时静置计数，不能排除用户操作期间或长期运行的增长，也不能归因来源；身份、哈希和完整限制见[内存采样记录](memory-sampling.md#2026-10-31-0412-北京时间temp80-当前运行实例一分钟被动复采)。
 
 2026-10-31 后台回归复核：App Release 构建（0 警告/错误）、完整 Release SettingsSmoke 和 `--static-shell-column-folder-smoke` 均通过。原生适配器无窗口合同再次确认列标题、`UInt64` 值及 `2/10/10/100` 数值比较正确；输出明确 `window-created=False`。这不改变 DefView 未读取自定义派生列的结论，也不代表产品列、Shell view 或可见交互通过。

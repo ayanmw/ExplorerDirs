@@ -222,6 +222,12 @@ if (args.Length == 1 && args[0] == "--native-shell-tree-icon-fallback-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--shell-tree-control-style-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellTreeControlStyleSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--shell-icon-provider-smoke")
 {
     ExplorerDirs.SettingsSmoke.ShellIconProviderSmoke.Run();

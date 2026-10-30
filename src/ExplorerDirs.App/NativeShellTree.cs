@@ -7,6 +7,13 @@ namespace ExplorerDirs.App;
 // This object never navigates an ExplorerBrowser or changes foreground/focus.
 internal sealed class NativeShellTree : IDisposable
 {
+    private const uint NstcsHasExpandos = 0x00000001;
+    private const uint NstcsRootHasExpando = 0x00000040;
+    private const uint NstcsShowSelectionAlways = 0x00000080;
+    private const uint NstcsSpringExpand = 0x00000010;
+    private const uint NstcsDisableDragDrop = 0x00001000;
+    private const uint NstcsNoOrderStream = 0x00002000;
+    private const uint NstcsNoEditLabels = 0x00010000;
     private static readonly Guid ItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly NativeTreeEvents _events;
@@ -15,6 +22,11 @@ internal sealed class NativeShellTree : IDisposable
     private bool _advised;
     private nint _root;
     private int _synchronizing;
+
+    internal static uint BuildControlStyles() =>
+        NstcsHasExpandos | NstcsRootHasExpando | NstcsShowSelectionAlways | NstcsSpringExpand |
+        NstcsDisableDragDrop | NstcsNoOrderStream | NstcsNoEditLabels;
+
     internal nint WindowHandle { get; private set; }
     internal long SelectionRevision { get; private set; }
     internal event Action<string?>? SelectionChanged;
@@ -54,9 +66,9 @@ internal sealed class NativeShellTree : IDisposable
         {
             Check(CoCreateInstance(ref clsid, 0, 1, ref iid, out _tree));
             var bounds = new Rect { Right = Math.Max(1, width), Bottom = Math.Max(1, height) };
-            // No label edits or drag/drop until those file-operation paths are accepted.
-            // NOORDERSTREAM avoids native ordering persistence outside portable settings.
-            Check(Method<Initialize>(3)(_tree, parent, ref bounds, 0x1 | 0x40 | 0x80 | 0x1000 | 0x2000 | 0x10000));
+            // Spring-expand hovered folders while preserving the Shell tree's standard external drop target.
+            // Disable only in-tree reordering and label edits; NOORDERSTREAM avoids non-portable ordering state.
+            Check(Method<Initialize>(3)(_tree, parent, ref bounds, BuildControlStyles()));
             var windowId = new Guid("00000114-0000-0000-C000-000000000046");
             Check(Marshal.QueryInterface(_tree, in windowId, out var window));
             try
