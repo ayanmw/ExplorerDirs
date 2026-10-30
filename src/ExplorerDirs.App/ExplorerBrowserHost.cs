@@ -2508,9 +2508,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
-            // Change only mode/size: do not reapply cached sorting or grouping.
-            if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
-                    result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+            // Coalesce the synchronous view-mode reflow into one Shell-owned repaint.
+            // This changes presentation only; it does not refresh or navigate the folder.
+            using (ShellViewRedrawLease.TrySuppress(view))
+            {
+                if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
+                        result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+            }
         }
         catch (COMException ex)
         {

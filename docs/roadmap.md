@@ -6,7 +6,7 @@
 
 2026-10-30 地址路径下拉：箭头按钮现打开已存在的原生 Shell 目录树并定位当前目录，弹出宽度随地址栏并保证窄窗格 300 DIP 可用宽度；F4 两阶段编辑与 F7 祖先路径菜单保持独立，F8 继续打开“此电脑”驱动器菜单。App Release 构建通过；`GuiSmoke -PrepareOnly` 已准备 41 项集中验收副本 `src/.state/gui-smoke/20261030-140234-531-f81d0c/`，新增箭头弹出宽度、当前目录展开及单窗格导航检查。准备状态为 `prepared-not-run`，没有启动窗口；可见位置、键盘焦点和虚拟 Shell 位置仍待验收，见[候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
-2026-10-30 文件列表刷新重绘：F5 保留 `IShellView.Refresh()`，重绘抑制现缩短到同步调用结束，异步重枚举期间允许 Shell 绘制新行；查看方式只调用 `SetViewModeAndIconSize`，不重刷新目录，也不再额外关闭控件重绘。App/NativeProbe Release 构建、完整 SettingsSmoke、重绘租约生命周期 smoke、隐藏刷新 A/B 行数收敛通过。最新隐藏查看方式探针触发前台边界保护，不能作为完整通过；可见黑屏是否消失仍待集中 UI 验收，详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+2026-10-30 文件列表刷新重绘：F5 保留 `IShellView.Refresh()`，重绘抑制现缩短到同步调用结束，异步重枚举期间允许 Shell 绘制新行；查看方式只调用 `SetViewModeAndIconSize`，不重刷新目录。用户仍观察到模式切换闪烁，因此本轮重新将重绘租约限制在同步模式/图标尺寸更新期间，尝试合并 Shell 自身的同步重排绘制；目录刷新继续允许异步行枚举绘制。App Release 构建通过；上次 NativeProbe/SettingsSmoke 证据覆盖旧实现，不代表这次重绘租约改动。最新隐藏查看方式探针曾触发前台边界保护，可见闪烁、选区/焦点/滚动恢复仍待集中 UI 验收，详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-30 F5/查看方式验收准备：GuiSmoke 清单新增已填充目录 F5、外部文件创建、行区空白/黑屏、列表框架稳定、查看方式重排及选择/焦点/滚动位置检查。准备时发现脚本把自定义身份传给 `InformationalVersion`，但项目构建目标会依据 `Version + GitCommit` 重设该值，导致产物身份校验失败；改为只为隔离候选覆写合法 SemVer `Version`，并保留真实 Git commit 后，已在干净提交 `da0eff3` 上成功生成 `src/.state/gui-smoke/20261030-135148-367-fa7b4a/`。manifest 为 `prepared-not-run`、`SourceWorkingTreeDirty=false`、41 项待验收；EXE SHA-256=`CF13B170C0F3DFC4733C3C2EBE62C731F189ED9A1A02F34034DBD58F28AD51F5`。准备过程未启动窗口。视觉效果仍须后续集中 GUI 验收。
 
