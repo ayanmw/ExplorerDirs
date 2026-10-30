@@ -4,12 +4,12 @@
 
 ## 固定身份
 
-- 源提交：`d1b87772f0d04fa70fe5bbf6bb8a9e2f01266740`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261030-142652-235-958c87/`。
-- BuildIdentity：`0.6.0-preview.20261030-142652-235-958c87+d1b87772f0d04fa70fe5bbf6bb8a9e2f01266740`。
+- 源提交：`94d5f77ee0b733840ab6abdf3a983765f253df75`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261030-143142-309-7cf46d/`。
+- BuildIdentity：`0.6.0-preview.20261030-143142-309-7cf46d+94d5f77ee0b733840ab6abdf3a983765f253df75`。
 - 状态：`prepared-not-run`，41 项待验收；初始为四窗格布局。
-- EXE SHA-256：`8F75FF15F6CB9DD3A2BA9552A32748890B244DEFB316A8FF2558C75C2B312CDA`。
-- App DLL SHA-256：`88EA452DEA98AFC043C9060A464B5666F7434ECA13474D3E9E88ADFE52229397`。
+- EXE SHA-256：`52C947C0D9D3C180249D34F3959E7846172D44A2CEFD50B1A5719CCF7922D054`。
+- App DLL SHA-256：`F57B2FF2FDF8A5ABD988C01A1D93E2AC1E4A5E8343856AE9C72B1C9F994FE249`。
 - Q-Dir 颜色、标签容量及 Program Starter 夹具哈希与逐项清单记录在副本 `preparation.json`。
 - `acceptance-files/` 含克隆历史、跨窗格文件操作、10,000 项筛选/大小扫描等隔离夹具；profile 与用户正式配置分离。
 
