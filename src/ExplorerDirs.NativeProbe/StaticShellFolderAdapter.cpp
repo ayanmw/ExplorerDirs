@@ -2722,6 +2722,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
+        SHCOLUMNID mappedSizeKey{};
+        result = root->MapColumnToSCID(1, &mappedSizeKey);
+        const bool standardSizeKeyMapped = SUCCEEDED(result) && mappedSizeKey == kSizeKey;
+        if (!standardSizeKeyMapped) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         SHELLDETAILS details{};
         result = root->GetDetailsOf(item, 1, &details);
         const bool recursiveSizeDisplayed = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
@@ -2735,13 +2739,25 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         if (!recursiveSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
         InterlockedExchange64(&g_syntheticChildSizeOverride, 1);
+        SHCOLUMNID mappedRecursiveSizeKey{};
+        result = root->MapColumnToSCID(1, &mappedRecursiveSizeKey);
+        const bool recursiveSizeKeyMapped = SUCCEEDED(result) &&
+            mappedRecursiveSizeKey == kSyntheticRecursiveSizeKey;
+        if (!recursiveSizeKeyMapped)
+        {
+            InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+            InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+            CoTaskMemFree(item);
+            result = E_FAIL;
+            goto cleanup;
+        }
         details = {};
         result = root->GetDetailsOf(item, 1, &details);
         const bool updatedSizeDisplayed = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
             details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"1") == 0;
         if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
         VariantInit(&sizeValue);
-        result = root->GetDetailsEx(item, &kSyntheticRecursiveSizeKey, &sizeValue);
+        result = root->GetDetailsEx(item, &mappedRecursiveSizeKey, &sizeValue);
         const bool updatedSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 1;
         VariantClear(&sizeValue);
         if (!updatedSizeDisplayed || !updatedSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }

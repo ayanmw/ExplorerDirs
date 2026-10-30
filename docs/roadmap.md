@@ -8,7 +8,7 @@
 
 2026-10-30 克隆视图真实 Shell 历史复验：隐藏生产 HostProbe 通过真实 `PaneControl` / ExplorerBrowser 在 A/B 两目录间捕获不同选区，独立克隆后后退/前进并核对各站位置/选区快照；逐站用生产 Shell selection batch 应用于克隆 view，源标签历史和状态保持独立。Release HostProbe 通过、前台未变。宿主无活动 WPF `Window`，焦点保护按设计拦截自动选区恢复；本轮不能证明可见窗口的延迟恢复/焦点，搜索异步与虚拟 provider 未覆盖，留待集中验收。详细见[核心操作对照](shell-parity.md)。
 
-2026-10-30 逐行派生列架构评审：隔离 `IShellView` 初次可提供并排序自定义大小值，但刷新后 DefView 没有重取值；标准 `SysListView32` 隐藏数据合同已证明单元格更新、按新值排序和项目选区/焦点身份保持。若要继续逐行派生列，应先做单窗格隔离自有 ListView 原型，使用真实 Shell 行对象验证菜单、文件操作、拖放、通知、导航及焦点合同；不直接迁移 ExplorerBrowser。内存收益尚无证据，必须在同机同目录集及同操作序列下测量。具体路线和门槛见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30视图架构与派生列可行性复核)。
+2026-10-30 逐行派生列架构评审：隔离 `IShellView` 初次可提供并排序自定义大小值，但刷新后 DefView 没有重取值；标准 `SysListView32` 隐藏数据合同已证明单元格更新、按新值排序和项目选区/焦点身份保持。若要继续逐行派生列，应先做单窗格隔离自有 ListView 原型，使用真实 Shell 行对象验证菜单、文件操作、拖放、通知、导航及焦点合同；不直接迁移 ExplorerBrowser。内存收益尚无证据，必须在同机同目录集及同操作序列下测量。无窗口 folder-tree smoke 现已核对自定义列的索引、映射 key 和显示/属性值一致；DefView 通知后为何不重取值仍未解释。具体路线和门槛见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30视图架构与派生列可行性复核)。
 
 2026-10-30 Q-Dir 标签组资料边界：官方英文/英国英文字符串表有“Tab Group / Move to new Tab Group / Copy to new Tab Group / Use Tab Groups”菜单标签；检索官方 FAQ 与版本记录仍未找到组作用域、跨窗格关系或保存规则。按项目规则不分析 Q-Dir 二进制；标签组维持 P2 待评估，在集中可见验收确认交互前不猜测菜单和 INI 模型。详见[核心操作对照](shell-parity.md)。
 
