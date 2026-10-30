@@ -38,6 +38,19 @@ internal static class WindowTitlePreferenceSmoke
             preference.Save(WindowTitleMode.RecentFavorite);
             Check(new WindowTitlePreferenceStore(path).Load() == WindowTitleMode.RecentFavorite,
                 "recent favorite mode preference roundtrip");
+
+            var firstWindowPath = Path.Combine(root, "window-1.RecentFavorite.ini");
+            var secondWindowPath = Path.Combine(root, "window-2.RecentFavorite.ini");
+            var firstWindowFavorite = new RecentFavoritePathStore(firstWindowPath);
+            var secondWindowFavorite = new RecentFavoritePathStore(secondWindowPath);
+            Check(firstWindowFavorite.Load() is null && secondWindowFavorite.Load() is null,
+                "recent favorite session starts empty for each window");
+            firstWindowFavorite.Save(@"D:\Workspaces\first=workspace");
+            secondWindowFavorite.Save(@"D:\Workspaces\second workspace");
+            Check(new RecentFavoritePathStore(firstWindowPath).Load() == @"D:\Workspaces\first=workspace" &&
+                  new RecentFavoritePathStore(secondWindowPath).Load() == @"D:\Workspaces\second workspace",
+                "recent favorite paths roundtrip independently per window session and preserve equals signs");
+
             File.WriteAllText(path, "[WindowTitle]\nFormatVersion=99\nMode=FullPath\n");
             var future = new WindowTitlePreferenceStore(path);
             Check(future.Load() == WindowTitleMode.None && future.LoadWarning is not null,

@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private readonly MultilineTabHeadersStore _multilineTabHeadersStore;
     private readonly TabHeaderMaximumWidthStore _tabHeaderMaximumWidthStore;
     private readonly WindowTitlePreferenceStore _windowTitlePreferenceStore;
+    private readonly RecentFavoritePathStore _recentFavoritePathStore;
     private readonly TabCloseButtonStore _tabCloseButtonStore;
     private readonly TabHoverActivationPreference _tabHoverActivationPreference;
     private readonly PortableBooleanPreference _newTabLocationPreference;
@@ -159,6 +160,11 @@ public partial class MainWindow : Window
         _fileCommandRefreshTimer.Tick += FileCommandRefreshTimer_Tick;
         var primarySessionPath = new SessionStore().Path;
         _sessionStore = new SessionStore(sessionPath ?? primarySessionPath);
+        _recentFavoritePathStore = new RecentFavoritePathStore(
+            RecentFavoritePathStore.PathForSession(_sessionStore.Path));
+        _recentFavoritePath = _recentFavoritePathStore.Load();
+        if (_recentFavoritePathStore.LoadWarning is { } recentFavoriteWarning)
+            EnvironmentStatus.Text = recentFavoriteWarning;
         _windowPlacementStore = new WindowPlacementStore(WindowPlacementStore.PathForSession(_sessionStore.Path));
         _savedWindowPlacement = _windowPlacementStore.Load();
         _lastNonMinimizedMaximized = _savedWindowPlacement?.Maximized == true;
@@ -2709,6 +2715,14 @@ public partial class MainWindow : Window
         var pane = ActivePane;
         // Only an explicit favorite-menu action changes this title source; ordinary navigation does not.
         _recentFavoritePath = path;
+        try
+        {
+            _recentFavoritePathStore.Save(path);
+        }
+        catch (Exception ex)
+        {
+            EnvironmentStatus.Text = $"最近收藏标题记录保存失败：{ex.Message}";
+        }
         QueueWindowTitleRefresh();
         _fileViewFocusDesired = true;
         pane.NavigateTo(path);
