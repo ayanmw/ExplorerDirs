@@ -66,10 +66,13 @@ internal static class ShellListViewRowModel
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
-            if (row.FileSystemPath is { } path &&
-                results.TryGetValue(Path.GetFullPath(path), out var summary))
+            if (IsFilesystemFolder(row))
             {
-                row = row with { RecursiveBytes = summary.Bytes, RecursiveSummary = summary };
+                if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var summary))
+                    row = row with { RecursiveBytes = summary.Bytes, RecursiveSummary = summary };
+                else
+                    // A completed scan without this folder must not leave an older value looking current.
+                    row = row with { RecursiveBytes = null, RecursiveSummary = null };
             }
             updated[index] = row;
         }
