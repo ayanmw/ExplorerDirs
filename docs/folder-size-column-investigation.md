@@ -68,6 +68,12 @@ Microsoft 文档将 `IShellFolder2::GetDefaultColumnState` 的 `SHCOLSTATE_ONBYD
 
 NativeProbe Release build 为 0 警告/错误；`--common-listview-data-contract`、`--common-listview-virtual-folder-contract` 和 `--common-listview-relative-size-contract` 均通过，窗口不可见且前台未变。相对大小合同仍通过异步更新、排序和选区/焦点断言。该步把两类数据形状合并到同一原型模型，但没有统一两种枚举、属性读取或操作管线；没有验证系统图标实际绘制、虚拟项目操作/拖放/菜单/键盘、产品 Shell 通知或 GUI。Explorer Dirs 产品仍使用 ExplorerBrowser。
 
+## 2026-10-31：文件系统与虚拟 Shell 共用枚举入口
+
+新增 `ShellListViewEnumerator`，统一 `IEnumIDList` 遍历、父子 PIDL 组合、共享行身份读取、绝对/相对 PIDL 保留及失败清理。两类调用方共用该入口；普通文件系统合同通过回调关联夹具递归大小并在枚举后排序，虚拟控制面板合同保留 Shell 的原始枚举顺序且不提供大小值。
+
+NativeProbe Release build 为 0 警告/错误；普通文件系统数据/操作合同、9 项虚拟控制面板合同和异步相对大小更新合同通过，前台未变。该步统一了隔离原型的枚举/行创建入口，但未统一后续文件操作、通知、绘制、交互，也未接入产品 ExplorerBrowser；PIDL 所有权通过合同正常结束路径验证，异常注入下的逐分支故障测试及可见 GUI 未覆盖。
+
 ## 2026-10-30：Shell 系统图标索引接入 ListView 合同
 
 在 Shell 枚举行创建期间，对每个实际解析路径调用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)`，记录共享系统图像列表句柄和行图标索引。创建隐藏 `SysListView32` 后通过 `LVM_SETIMAGELIST` 挂载 Shell 返回的共享小图标列表；插入每行时设置 `LVIF_IMAGE`，再以 `LVM_GETITEM` 验证图标索引与 row ID 对应，并在派生值排序后再次核对映射。

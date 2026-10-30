@@ -649,62 +649,30 @@ internal static class CommonListViewColorBaseline
     private static ListShellRows EnumerateShellRows(nint folderPidl, nint shellFolder,
         IReadOnlyDictionary<string, ulong> recursiveSizes)
     {
-        Marshal.ThrowExceptionForHR(At<EnumObjects>(shellFolder, 4)(shellFolder, 0, 0x60, out var enumerator));
-        var rows = new List<ShellListViewRow>();
-        nint systemImageList = 0;
+        var enumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder, identity =>
+        {
+            var fileSystemPath = identity.FileSystemPath ??
+                throw new InvalidOperationException("A filesystem fixture row has no filesystem path.");
+            var fullPath = Path.GetFullPath(fileSystemPath);
+            if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
+                throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
+            return recursiveBytes;
+        });
         try
         {
-            while (true)
-            {
-                var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var relativePidl, out var fetched);
-                if (nextHr < 0) Marshal.ThrowExceptionForHR(nextHr);
-                if (fetched == 0) break;
-                if (relativePidl == 0) throw new InvalidOperationException("Shell enumeration returned a null child PIDL.");
-                nint absolutePidl = 0;
-                nint relativePidlClone = 0;
-                try
-                {
-                    absolutePidl = ILCombine(folderPidl, relativePidl);
-                    if (absolutePidl == 0) throw new InvalidOperationException("Could not combine the Shell parent and enumerated child PIDLs.");
-                    var identity = ShellListViewRowIdentity.Capture(shellFolder, relativePidl, absolutePidl,
-                        ref systemImageList);
-                    var fileSystemPath = identity.FileSystemPath ??
-                        throw new InvalidOperationException("A filesystem fixture row has no filesystem path.");
-                    var fullPath = Path.GetFullPath(fileSystemPath);
-                    if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
-                        throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
-                    relativePidlClone = ILClone(relativePidl);
-                    if (relativePidlClone == 0) throw new InvalidOperationException("Could not retain the enumerated relative PIDL for native Shell commands.");
-                    rows.Add(new ShellListViewRow(0, absolutePidl, relativePidlClone, identity.DisplayName,
-                        identity.ParsingName, fileSystemPath, identity.Attributes, recursiveBytes,
-                        FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex));
-                    absolutePidl = 0;
-                    relativePidlClone = 0;
-                }
-                finally
-                {
-                    if (absolutePidl != 0) ILFree(absolutePidl);
-                    if (relativePidlClone != 0) ILFree(relativePidlClone);
-                    ILFree(relativePidl);
-                }
-            }
+            var rows = enumeration.Rows;
             rows.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.DisplayName, right.DisplayName));
             if (rows.Count != recursiveSizes.Count)
                 throw new InvalidOperationException($"Shell enumeration returned {rows.Count} rows; expected {recursiveSizes.Count}.");
             for (var index = 0; index < rows.Count; index++)
                 rows[index] = rows[index] with { Id = index + 1 };
-            return new ListShellRows(rows, systemImageList);
+            return new ListShellRows(rows, enumeration.SystemImageList);
         }
         catch
         {
-            foreach (var row in rows)
-            {
-                if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
-                if (row.RelativePidl != 0) ILFree(row.RelativePidl);
-            }
+            ShellListViewEnumerator.FreeRows(enumeration.Rows);
             throw;
         }
-        finally { Marshal.Release(enumerator); }
     }
 
     private static ContextMenuQuery QueryItemContextMenu(nint shellFolder, nint relativePidl)
@@ -1214,8 +1182,6 @@ internal static class CommonListViewColorBaseline
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint DrawProc(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ListViewCompareProc(nint first, nint second, nint sortParameter);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid iid, nint reserved, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenuNative(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);

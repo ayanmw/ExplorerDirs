@@ -19,8 +19,6 @@ internal static class CommonListViewVirtualFolderContract
     private const int LvmSetImageList = 0x1003;
     private const int LvmGetImageList = 0x1002;
     private const int LvsilSmall = 1;
-    private const uint ShcontfFolders = 0x00000020;
-    private const uint ShcontfNonFolders = 0x00000040;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ControlPanelId = new("26EE0668-A00A-44D7-9371-BEB064C98683");
 
@@ -28,7 +26,7 @@ internal static class CommonListViewVirtualFolderContract
     {
         var foregroundBefore = GetForegroundWindow();
         var rootText = $"::{{{ControlPanelId:D}}}";
-        nint parent = 0, listView = 0, rootPidl = 0, shellFolder = 0, enumerator = 0, systemImageList = 0;
+        nint parent = 0, listView = 0, rootPidl = 0, shellFolder = 0, systemImageList = 0;
         var rows = new List<ShellListViewRow>();
         try
         {
@@ -42,42 +40,9 @@ internal static class CommonListViewVirtualFolderContract
                 throw new InvalidOperationException("Control Panel did not expose an absolute parsing name.");
 
             Marshal.ThrowExceptionForHR(SHBindToObject(0, rootPidl, 0, in ShellFolderId, out shellFolder));
-            Marshal.ThrowExceptionForHR(At<EnumObjects>(shellFolder, 4)(shellFolder, 0,
-                ShcontfFolders | ShcontfNonFolders, out enumerator));
-
-            while (true)
-            {
-                var hr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var relativePidl, out var fetched);
-                if (hr < 0) Marshal.ThrowExceptionForHR(hr);
-                if (fetched == 0) break;
-                if (relativePidl == 0) throw new InvalidOperationException("Shell enumeration returned a null PIDL.");
-                nint absolutePidl = 0;
-                try
-                {
-                    absolutePidl = ILCombine(rootPidl, relativePidl);
-                    if (absolutePidl == 0) throw new InvalidOperationException("Could not combine a virtual parent and child PIDL.");
-                    var identity = ShellListViewRowIdentity.Capture(shellFolder, relativePidl, absolutePidl,
-                        ref systemImageList);
-
-                    var retainedAbsolute = ILClone(absolutePidl);
-                    var retainedRelative = ILClone(relativePidl);
-                    if (retainedAbsolute == 0 || retainedRelative == 0)
-                    {
-                        if (retainedAbsolute != 0) ILFree(retainedAbsolute);
-                        if (retainedRelative != 0) ILFree(retainedRelative);
-                        throw new InvalidOperationException("Could not retain Shell row PIDLs.");
-                    }
-                    rows.Add(new ShellListViewRow(rows.Count + 1, retainedAbsolute, retainedRelative,
-                        identity.DisplayName, identity.ParsingName, identity.FileSystemPath, identity.Attributes,
-                        RecursiveBytes: null, FromShellEnumeration: true,
-                        SystemImageIndex: identity.SystemImageIndex));
-                }
-                finally
-                {
-                    if (absolutePidl != 0) ILFree(absolutePidl);
-                    ILFree(relativePidl);
-                }
-            }
+            var enumeration = ShellListViewEnumerator.Enumerate(rootPidl, shellFolder);
+            rows.AddRange(enumeration.Rows);
+            systemImageList = enumeration.SystemImageList;
             if (rows.Count == 0) throw new InvalidOperationException("Control Panel returned no enumerable Shell children.");
 
             var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
@@ -136,12 +101,7 @@ internal static class CommonListViewVirtualFolderContract
         {
             if (listView != 0 && IsWindow(listView)) DestroyWindow(listView);
             if (parent != 0 && IsWindow(parent)) DestroyWindow(parent);
-            foreach (var row in rows)
-            {
-                if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
-                if (row.RelativePidl != 0) ILFree(row.RelativePidl);
-            }
-            if (enumerator != 0) Marshal.Release(enumerator);
+            ShellListViewEnumerator.FreeRows(rows);
             if (shellFolder != 0) Marshal.Release(shellFolder);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
         }
@@ -239,8 +199,6 @@ internal static class CommonListViewVirtualFolderContract
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint pidl, out uint fetched);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct ListViewColumn
     {
@@ -258,9 +216,6 @@ internal static class CommonListViewVirtualFolderContract
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILClone(nint pidl);
-    [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
