@@ -890,7 +890,7 @@
 | 2 | P0 Shell 日常可靠性 | 文件操作与焦点恢复、空白处右键目标区分、真实拖放、Tab/Shift+Tab、标签历史及 watcher 自动刷新仍有可见验收缺口；隐藏探针和状态回归不能替代真实用户输入 | 在安全桌面以隔离测试目录按[本轮代码与下一轮验收](shell-parity.md#本轮代码与下一轮验收)逐项验收；当前无桌面授权，继续修复有源码依据且可无窗口验证的项目 |
 | 3 | 内存与稳定性观察 | 闲置视图释放的实测收益约 2 MB，已移除；只读采样器现输出每个样本相对起点的工作集/Private Bytes 变化量及 Private Bytes 每分钟变化率（JSON schema 3）。10 月 27 日已有 temp.74 运行样本：三分钟内 Private Bytes 158.44→158.89 MiB，范围 153.06–162.65 MiB，不能证明长期无增长；详见 [只读采样记录](memory-sampling.md) | 继续复用 `scripts/perf-sample.ps1`，固定发布二进制、PID 生命周期、窗格/标签数量及目录操作；分别观察 Working Set、Private Bytes、线程、句柄和 CPU，只有持续增长证据后再定位托管堆或 Shell 原生分配 |
 | 4 | 已接入组件的可见体验 | 目录树图标已在隐藏直接 NativeShellTree 中与系统图像模板逐像素匹配（193/193）；用户截图所示进程是 temp.58，早于后续图像列表绑定代码，WPF `HwndHost` 可见绘制仍未验收。主题/强调色、地址菜单、查看方式入口、预览/详情窗格、搜索/筛选、导入导出 `.qdr` 等仍有实际控件绘制、焦点、布局及跨重启体验待验收 | 合并到同一隔离预览版验收清单，记录精确版本、进程路径与哈希；优先在之后的预览包复核目录树图标，再按可复现差异修复 |
-| 5 | 尚未确定实现边界的 Q-Dir 差异 | 逐项大小实际复用 Size 列，文件/目录数复用 Type 列；支持单位、精度、百分比、失焦暂停和可选排序策略。FAQ 82 将百分比说明为同目录项目间比例，但精确分母和默认设置待实测。隔离 DefView 尚未读取 adapter 逐项属性；预览格式过滤没有确认接口，`TreeNsplit` 含义未知 | 先在安全隔离环境验证原生列读取、文件夹排序策略与计算生命周期，再决定是否继续原型；不在导航期递归扫描、不接入产品 ExplorerBrowser，其他未知字段继续等待真实行为/配置证据。当前会话的静态列 smoke 通过且未创建窗口，DefView 消费门槛未改变；未发现可直接使用的 VM 管理命令 |
+| 5 | 尚未确定实现边界的 Q-Dir 差异 | 逐项大小实际复用 Size 列，文件/目录数复用 Type 列；支持单位、精度、百分比、失焦暂停和可选排序策略。FAQ 82 将百分比说明为同目录项目间比例，但精确分母和默认设置待实测。隔离 DefView 尚未读取 adapter 逐项属性；预览格式过滤没有确认接口，`TreeNsplit` 含义未知 | 隔离普通 ListView 的行合同现使用产品递归扫描器真实计算，再绑定真实 Shell 枚举行并验证值更新、数值排序和选择身份；这推进自有视图数据管线，但没有通过 DefView 消费或 Shell view 迁移门槛。后续仍需确认列/菜单/拖放/通知/导航/键盘兼容性与计算生命周期，再决定是否继续原型；不接入产品 ExplorerBrowser，其他未知字段继续等待真实行为/配置证据 |
 
 ### “已实现”与“已验收”的口径
 
@@ -4801,6 +4801,11 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - `--common-listview-data-contract` 在不可见的普通 Win32 ListView 中使用真实 `IShellFolder::EnumObjects` 行；图标来自 Shell 共享系统图像列表。更新派生大小并排序后，稳定行 ID、PIDL 身份以及 `small-folder` 的选中/焦点保持一致。
 - 同一隐藏合同用所选行的 Shell `IDataObject` 和 `IFileOperation` 完成复制、移动、重命名、删除，并核对临时夹具结果；菜单对象可查询，但 folder 背景菜单不含查看/排序/分组/刷新。完整 Explorer 视图菜单所需的 `IShellView.GetItemObject` 尚未接入。
 - 结论：自有 ListView 已验证接入 Shell 枚举、系统图标和常用文件操作的可行性；迁移的核心体验门槛仍包括完整视图菜单、拖放、导航、键盘、通知和虚拟位置。该合同不可外推为 Explorer 等价或产品可迁移结论，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：递归扫描结果进入 Shell 行模型
+
+- `--common-listview-data-contract` 不再手工注入目录大小：先对临时 `large-folder` / `small-folder` 调用产品 `RecursiveDirectoryScanner`，把实际扫描字节数交给 Shell 枚举行；随后将小目录的载荷从 4 字节改成 2 字节，重新扫描并更新同一 Shell row ID，按新值排序，验证选中和焦点仍随 `small-folder` 保持。首轮以未链接扫描器的预期编译错误确认探针缺少生产扫描路径，接入后 NativeProbe Release、数据/文件操作合同、完整 Release SettingsSmoke 与 App Release build 通过。
+- 这是递归大小计算到自有行模型的数据合同，不是产品列实现或可见 ListView 绘制；未验证扫描异步/UI 生命周期、实际 Shell DefView 列、拖放/菜单/通知/键盘或可见排序。产品仍使用 ExplorerBrowser。
 
 ### 本批次追加：Shell 子目录与导航历史合同
 

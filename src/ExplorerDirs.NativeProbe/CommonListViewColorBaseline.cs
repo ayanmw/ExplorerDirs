@@ -170,12 +170,14 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallFolder);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[10]);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[4]);
+            var largeScan = RecursiveDirectoryScanner.Scan(largeFolder, CancellationToken.None);
+            var smallScan = RecursiveDirectoryScanner.Scan(smallFolder, CancellationToken.None);
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, fixturePidl, 0, in ShellFolderId, out shellFolder));
             var enumeration = EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
             {
-                [Path.GetFullPath(largeFolder)] = 10,
-                [Path.GetFullPath(smallFolder)] = 4
+                [Path.GetFullPath(largeFolder)] = largeScan.Bytes,
+                [Path.GetFullPath(smallFolder)] = smallScan.Bytes
             });
             shellRows.AddRange(enumeration.Rows);
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
@@ -207,12 +209,19 @@ internal static class CommonListViewColorBaseline
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            var initialSizeRows = $"{GetItemText(listView, 0, 1)},{GetItemText(listView, 1, 1)}";
             var initialShellPaths = string.Join('|', Enumerable.Range(0, 2).Select(index =>
                 _shellRowsById[GetItemParam(listView, index)].ParsingName));
+            var recursiveScanBacked = largeScan.Bytes == 10 && smallScan.Bytes == 4 &&
+                largeScan.Files == 1 && smallScan.Files == 1 &&
+                largeScan.Directories == 0 && smallScan.Directories == 0 &&
+                largeScan.Unreadable == 0 && smallScan.Unreadable == 0 && initialSizeRows == "10 B,4 B";
             SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
             SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
-            _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = 2 };
-            SetItemText(listView, 1, 1, "2 B");
+            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[2]);
+            var updatedSmallScan = RecursiveDirectoryScanner.Scan(smallFolder, CancellationToken.None);
+            _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
+            SetItemText(listView, 1, 1, $"{updatedSmallScan.Bytes} B");
             var liveValue = GetItemText(listView, 1, 1);
             var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
                 Marshal.GetFunctionPointerForDelegate(SizeCompare));
@@ -250,7 +259,9 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
             var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, shellFolder, selectedId, fixture);
-            var passed = initialRows == "large-folder:1,small-folder:2" &&
+            var passed = recursiveScanBacked && updatedSmallScan.Bytes == 2 && updatedSmallScan.Files == 1 &&
+                updatedSmallScan.Directories == 0 && updatedSmallScan.Unreadable == 0 &&
+                initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
                 selectedName == "small-folder" && selectedFocusedCount == 1 &&
@@ -260,7 +271,9 @@ internal static class CommonListViewColorBaseline
                 itemMenuForegroundUnchanged && backgroundMenuForegroundUnchanged &&
                 selectedShellOperations &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
-            Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
+            Console.WriteLine($"common-listview-data-contract: initial={initialRows};" +
+                $"initial-scanned-sizes={initialSizeRows};shell-paths={initialShellPaths};" +
+                $"recursive-scan-backed={recursiveScanBacked};updated-scanned-bytes={updatedSmallScan.Bytes};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
                 $"selected-focused-after-sort={selectedName};selected-shell-row-id={selectedId};" +
                 $"shell-pidl-identities-preserved={shellIdentityPreserved};" +

@@ -18,6 +18,7 @@
     <Compile Include="../ExplorerDirs.App/QdrViewSettings.cs" Link="QdrViewSettings.cs" />
     <Compile Include="../ExplorerDirs.App/ShellHistoryEvents.cs" Link="ShellHistoryEvents.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTabNavigationHistory.cs" Link="ShellTabNavigationHistory.cs" />
+    <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
