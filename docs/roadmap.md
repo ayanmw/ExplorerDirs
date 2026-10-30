@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
+
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
 
 2026-10-31 隔离 Shell 重命名映射扩展到绝对解析名：收集 `SHCNE_RENAMEITEM` / `SHCNE_RENAMEFOLDER` 通知时改用 `SIGDN_DESKTOPABSOLUTEPARSING`，匹配行模型的 Shell 身份，而非只支持文件系统路径；目录重命名 row ID 丢失回归仍通过。目录路径变化后旧递归大小/计数清空，后台重扫回写新值；创建/更新/重命名/删除、选择焦点恢复均通过，窗口隐藏且前台未变。NativeProbe Release build 0 警告、0 错误。证据限于隐藏 `SysListView32` 探针；虚拟 Shell、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
@@ -50,7 +52,7 @@
 
 2026-10-31 目录树拖入展开延时档位：目录树菜单新增 0.2、0.5、1、1.5、2、3 秒选项，默认维持原来的 1 秒；设置保存到独立 `NavigationTreeDragHoverDelay.ini`，已有共享树/逐窗格树立即更新，正在计时的悬停重新开始计时。配置支持外部修改冲突保护、格式损坏备份及未来版本不覆盖。Release 定向 SettingsSmoke 覆盖六档往返、非法档拒绝和未来格式保护；完整 SettingsSmoke/App Release/NativeProbe Release build 待本批次收尾。真实 `DoDragDrop`、可见菜单和默认放置行为仍待集中 UI 验收；未据配置冒烟宣称 Shell 拖放已通过。
 
-2026-10-31 F5 绘制租约收窄：普通文件系统目录优先用 `SHCNE_UPDATEDIR` 原地同步，现仅在该通知不可用、退回 `IShellView.Refresh()` 时申请短期 `IFolderView2.SetRedraw(FALSE)`；此前成功通知路径也被冻结，可能让旧画面停留在更新期间。门控合同在 Release `SettingsSmoke` 中覆盖通知成功/失败与普通刷新，完整 smoke 和 App Release build 通过（0 警告/错误）。这只修正冻结范围；F5 的像素闪烁、冻结时输入命中、慢目录和虚拟 Shell 路径仍待集中 GUI 验收。实现依据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+2026-10-31 F5 绘制租约收窄（中间方案，已撤回）：当时曾让普通文件系统目录优先用 `SHCNE_UPDATEDIR`，并在退回 `IShellView.Refresh()` 时短暂调用 `IFolderView2.SetRedraw(FALSE)`。后续比较发现普通目录广播通知的行数可见时间更长；用户仍观察到明显空白后，产品最终回到所有位置直接调用当前 `IShellView.Refresh()`，移除产品绘制租约。此前关于通知成功/失败门控及租约范围的记录是历史试验，不应作为当前行为。详情见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 04:12 北京时间内存观察：对仍运行的 temp.80 PID `47460` 做 60 秒只读复采（13 点），Working Set `223.19→223.15 MiB`、Private Bytes `114.84→114.75 MiB`，句柄 `1,112–1,114`、线程 `35–37`、GDI `95`、USER `105–107`；本窗口没有单调增长。未操作应用且没有固定负载，因此此样本只反映短时静置计数，不能排除用户操作期间或长期运行的增长，也不能归因来源；身份、哈希和完整限制见[内存采样记录](memory-sampling.md#2026-10-31-0412-北京时间temp80-当前运行实例一分钟被动复采)。
 
