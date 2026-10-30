@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 Q-Dir 标签组资料边界：官方英文/英国英文字符串表有“Tab Group / Move to new Tab Group / Copy to new Tab Group / Use Tab Groups”菜单标签；检索官方 FAQ 与版本记录仍未找到组作用域、跨窗格关系或保存规则。按项目规则不分析 Q-Dir 二进制；标签组维持 P2 待评估，在集中可见验收确认交互前不猜测菜单和 INI 模型。详见[核心操作对照](shell-parity.md)。
+
 2026-10-30 克隆视图历史选区存储：导航历史快照中的每站选区只通过只读列表暴露，克隆视图现在复制最多 100 个位置的容器并共享这些不可变选区存储，避免 Snapshot 与 FromSnapshot 对每个位置重复复制文件名引用数组。Release SettingsSmoke 验证共享存储且源视图后续更新不会影响克隆；完整 SettingsSmoke 与 App Release build 通过。没有运行正式 App，且未采集同 PID 前后数据；这减少的是托管引用数组和短期副本，不复制字符串，也没有可报告的 MB 节省。详细边界见[memory sampling 记录](memory-sampling.md)。
 
 2026-10-30 最近收藏标题跨重启保存：Q-Dir 的“最近打开的收藏夹”标题模式原先只记录当前进程内最后显式打开的收藏路径。现将该路径写入当前窗口 session 旁的 `RecentFavorite.ini`，与 profile 全局标题显示模式分离，多个窗口各自恢复且不会互相覆盖；普通导航仍不更新此值。新增 Release SettingsSmoke 覆盖空状态、每窗口隔离、带等号路径往返。没有启动 GUI；重启后窗口标题实际显示仍待集中验收。
