@@ -4965,3 +4965,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 现有 2 秒绘制时间线在诊断开启时增加 `SysListView32` 的 `WM_SETREDRAW`、删除/插入/更新行、排序和布局消息，并在消息处理后采样行数；不读取文件名/文本，最多 256 条。该记录可区分列表数据被清空/重填与单纯重绘，正常运行不启用。
 - App Release build 与完整 Release SettingsSmoke 通过；没有创建窗口。当前仍无屏幕像素证据，诊断本身不改变刷新/视图切换行为，用户可见改善待集中验收。
+
+## 2026-10-31：刷新集中 GUI 验收候选
+
+- 由当前干净主线 `7366323386e6f0d12d3c23c34b9fa355b8c022a3` 执行 `run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-170136-670-23c890/`。manifest 为 `prepared-not-run`，初始四窗格、41 项待验收；EXE 与 App DLL 的 SHA-256 均独立复核匹配 manifest。
+- 候选包含 F5 刷新及查看方式切换的可见验收场景，未启动应用或创建 ExplorerBrowser，不是 `releases/` 日常预览包。当前最新身份见[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
