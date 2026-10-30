@@ -79,19 +79,19 @@ internal static class ShellTabNavigationHistorySmoke
 
         var complete = new ShellTabNavigationHistory(@"C:\0");
         for (var index = 1; index <= 120; index++) complete.Record($@"C:\{index}");
-        Check(complete.Snapshot().Count == 121 && complete.Snapshot()[0].Location == @"C:\0" &&
-              complete.Current == @"C:\120" && complete.Index == 120,
-            "cloned view history retains every recorded location beyond 100 stops");
+        Check(complete.Snapshot().Count == 100 && complete.Snapshot()[0].Location == @"C:\21" &&
+              complete.Current == @"C:\120" && complete.Index == 99,
+            "cloned view history retains the most recent 100 locations");
         var completeClone = complete.Clone();
         var reachesFirst = true;
-        for (var index = 119; index >= 0; index--)
+        for (var index = 119; index >= 21; index--)
         {
             reachesFirst &= completeClone.TryBeginMove(back: true, out var target) &&
                             target == $@"C:\{index}" && completeClone.CommitLocation(target);
         }
-        Check(reachesFirst && completeClone.Current == @"C:\0" && !completeClone.CanGoBack &&
-              complete.Current == @"C:\120" && complete.Index == 120,
-            "a cloned view can reach the oldest stop after 100+ navigations without moving the source history");
+        Check(reachesFirst && completeClone.Current == @"C:\21" && !completeClone.CanGoBack &&
+              complete.Current == @"C:\120" && complete.Index == 99,
+            "a cloned view can reach the oldest retained stop without moving the source history");
 
         var repoRoot = FindRepoRoot();
         var paneSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));

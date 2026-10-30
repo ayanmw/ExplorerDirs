@@ -6,6 +6,7 @@ namespace ExplorerDirs.App;
 /// </summary>
 internal sealed class ShellTabNavigationHistory
 {
+    private const int MaximumStops = 100;
     internal sealed record Stop(string Location, IReadOnlyList<string> SelectedItems);
 
     private readonly List<Stop> _locations;
@@ -59,6 +60,11 @@ internal sealed class ShellTabNavigationHistory
             _locations.RemoveRange(_index + 1, _locations.Count - _index - 1);
         _locations.Add(new(location, []));
         _index = _locations.Count - 1;
+        if (_locations.Count > MaximumStops)
+        {
+            _locations.RemoveAt(0);
+            _index--;
+        }
     }
 
     internal bool TryBeginMove(bool back, out string location)

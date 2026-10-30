@@ -1,4 +1,4 @@
-2026-10-30 克隆历史容量：应用级克隆历史不再设置固定站数上限，避免截断 Q-Dir 克隆视图所携带的完整浏览历史。历史位置和每站选区快照会随导航增长并驻留内存；克隆时直接复制列表容器且共享不可变选区快照，避免中间完整数组副本。长会话的内存占用需纳入后续采样，100+ 站产品可见后退/前进仍待集中验收。源码优化没有常驻内存 MB 实测。来源：[Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)、[Q-Dir 历史](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory)。
+2026-10-30 克隆历史容量：用户确认每标签最多保留 100 个导航位置；超过时移除最旧位置，克隆视图复制这 100 个以内的历史及逐站选区。克隆时直接复制列表容器且共享不可变选区快照，避免中间完整数组副本。容量策略变更后的构建与 smoke 尚未运行；来源：[Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)、[Q-Dir 历史](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory)。
 
 2026-10-30 Q-Dir 地址栏 F8 入口：F8 与新增的“此电脑”按钮打开相同的动态驱动器菜单；菜单锚定各自入口，按钮也加入窗格 Tab/Shift+Tab 焦点序列。焦点矩阵与菜单/按钮接线 smoke、Release SettingsSmoke 和 App Release build 通过；按钮实际呈现、屏幕位置、菜单弹出边界及真实键盘路径待集中 GUI 验收。
 
