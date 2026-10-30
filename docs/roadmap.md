@@ -6,7 +6,7 @@
 
 2026-10-30 克隆视图快照一致性保护：克隆时 Shell 视图设置和选区分两次读取，COM 重入期间可能导航到另一位置。现捕获目录/搜索 URI、导航与视图代次、选区代次，并验证导航历史仍指向同一位置；任一值变化就拒绝生成不一致的克隆。定向 SettingsSmoke 覆盖保护接线与历史位置匹配；App Release build、完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，COM 重入时序仍待隔离 HostProbe/集中验收。
 
-2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果，并用原生 `IFolderView.SelectItem(index, …)` 恢复匹配的绝对解析名；等待所有快照项出现后再批量恢复，避免只选中部分结果。匹配采用流式枚举，全部命中即停止；条目数不变时最多每 5 次轮询重扫，避免每 100 ms 扫描整份搜索结果。解析名匹配、流式早停、搜索请求位置/代次保护及代码接线 smoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
+2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果并匹配保存的绝对解析名；选中前重新取得当前行 PIDL、核对其解析名，再通过 `IShellView.SelectItem(PIDL, …)` 按项目身份选中，避免异步插入结果后旧行号选中另一项目。等待所有快照项出现后再批量恢复；匹配采用流式枚举，全部命中即停止，条目数不变时最多每 5 次轮询重扫。解析名匹配、PIDL 身份校验、流式早停和请求门控 SettingsSmoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
 
 2026-10-30 集中验收候选同步：从干净主线 `e96976c39089b0f77ccf4ffd400c28fc09a6f5a9` 执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-003019-700-b8acd5/`，包含 39 项待验收清单，并将克隆视图逐站选区、搜索结果选区及快照一致性列入后续实机检查。manifest 中 `SourceWorkingTreeDirty=false`；EXE/DLL/颜色夹具哈希与候选身份见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。准备过程未启动窗口、创建 ExplorerBrowser 或发送输入；候选状态为 `prepared-not-run`，等待后续集中验收。
 
