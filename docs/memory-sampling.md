@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-31 05:10 北京时间：temp.80 当前运行实例一分钟被动复采
+
+- UTC `2026-10-30T21:10:00Z`–`21:11:00Z`，对 PID `47460` 每 5 秒采样，共 13 点，覆盖 60.226 秒。对象仍为启动于 `2026-10-30T16:13:34.219Z` 的 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`；ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。EXE SHA-256 `C146179AAB2686411D4ED66667DB60A1547A9A6A0A2EE53F3C137F36666EF760`；DLL SHA-256 `8E473D1161266B01202AC1B7B196FA48DE00EDD86865FAB118322C894A3E9EBC`。
+- Working Set `234,307,584→234,266,624 B`（约 `223.4→223.4 MiB`，下降 `40 KiB`）；Private Bytes `120,778,752→120,696,832 B`（约 `115.2→115.1 MiB`，下降 `80 KiB`）。Working Set 峰值 `234,307,584 B`，Private Bytes 峰值 `120,778,752 B`。句柄 `1,114→1,109`（范围 `1,109–1,114`），线程 `36→34`（范围 `34–36`），GDI `95` 全程不变，USER `106→105`（范围 `105–106`）；累计 CPU `63.812→63.953 s`。
+- 进程计数在本窗口未呈单调增长。未固定或记录窗格/标签和文件操作负载；该样本只描述此进程在一分钟被动观察期的表现，不能排除实际浏览期间或长期运行的增长，也不能归因托管/原生组件。采样命令为 `scripts/perf-sample.ps1 -ProcessId 47460 -Samples 13 -IntervalMilliseconds 5000 -AsJson`；本轮没有把标准输出原始 JSON 另存为文件。
+
 ## 2026-10-31 04:12 北京时间：temp.80 当前运行实例一分钟被动复采
 
 - UTC `2026-10-30T20:12:55Z`–`20:13:55Z`，对 PID `47460` 每 5 秒采样，共 13 点，覆盖 60.172 秒。进程启动时间 `2026-10-30T16:13:34.219Z`；路径为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。EXE SHA-256 `C146179AAB2686411D4ED66667DB60A1547A9A6A0A2EE53F3C137F36666EF760`；应用 DLL SHA-256 `8E473D1161266B01202AC1B7B196FA48DE00EDD86865FAB118322C894A3E9EBC`。未启动、重启、聚焦或操作应用。
