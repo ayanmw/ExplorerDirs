@@ -1503,6 +1503,7 @@ public partial class PaneControl : UserControl
     {
         var identity = Current is { } state && ShellLocationIdentity.TryGetFolderPidl(state.Path, out var pidl)
             ? FreeAddressTreePidl(pidl, state.Path) : null;
+        AddressTreeBorder.Width = Math.Max(300, AddressHost.ActualWidth);
         AddressTreeHost.SetAddressTreeLocation(identity);
         AddressTreePopup.IsOpen = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>

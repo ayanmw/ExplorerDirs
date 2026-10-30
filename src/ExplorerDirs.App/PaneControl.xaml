@@ -60,7 +60,8 @@
             </DockPanel>
             <Popup x:Name="AddressTreePopup" PlacementTarget="{Binding ElementName=AddressHost}"
                    Placement="Bottom" StaysOpen="False" Closed="AddressTreePopup_Closed">
-                <Border BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}" BorderThickness="1" Background="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"
+                <Border x:Name="AddressTreeBorder" BorderBrush="{DynamicResource ExplorerDirs.BorderBrush}"
+                        BorderThickness="1" Background="{DynamicResource ExplorerDirs.WindowBackgroundBrush}"
                         Width="300" Height="340">
                     <local:ShellTreeHost x:Name="AddressTreeHost"/>
                 </Border>
