@@ -12,6 +12,9 @@ internal static class ShellViewNativeLifetimeProbe
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
+    private const int ProcessHandleTracingInformation = 32;
+    private const int ProcessHandleTracingQueryInformation = 32;
+    private const int ProcessHandleTracingOpen = 1;
 
     internal static int Run(bool reuseBrowserHost = false)
     {
@@ -187,6 +190,7 @@ internal static class ShellViewNativeLifetimeProbe
         nint parent = 0, folderPidl = 0, folder = 0, view = 0, viewWindow = 0, folderView = 0, hostPointer = 0;
         StreamViewHost? host = null;
         var viewWindowCreated = false;
+        var handleTracingEnabled = false;
         var measurements = new List<(string Stage, int Handles, int? SelfProcessHandles, Dictionary<string, int>? Types,
             IReadOnlyDictionary<long, uint>? SelfProcessHandleEntries)>();
 
@@ -210,6 +214,9 @@ internal static class ShellViewNativeLifetimeProbe
             if (parent == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Hidden parent creation failed.");
             Check(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
             Check(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out folder));
+            handleTracingEnabled = TryEnableProcessHandleTracing(out var tracingStatus);
+            var traceControl = handleTracingEnabled ? CaptureKnownProcessHandleTrace() : "unavailable:tracing-disabled";
+            Console.WriteLine($"ishellview-native-view-stage-trace: process-handle-tracing-enabled={handleTracingEnabled}; status=0x{tracingStatus:X8}; known-open-close-control=[{traceControl}]");
             Capture("baseline");
 
             var viewId = ShellViewId;
@@ -275,6 +282,10 @@ internal static class ShellViewNativeLifetimeProbe
                     .Where(item => item.Delta != 0)
                     .Select(item => $"{item.Name}:{item.Delta:+#;-#;0}"));
             var baselineSelfHandles = measurements[0].SelfProcessHandleEntries;
+            var enumeratedSelfHandles = measurements.FirstOrDefault(item => item.Stage == "enumeration settled").SelfProcessHandleEntries;
+            var handlesAppearingAtEnumeration = baselineSelfHandles is not null && enumeratedSelfHandles is not null
+                ? enumeratedSelfHandles.Keys.Where(handle => !baselineSelfHandles.ContainsKey(handle)).ToArray()
+                : [];
             var selfHandleTimeline = string.Join(';', measurements.Select(item =>
             {
                 if (baselineSelfHandles is null || item.SelfProcessHandleEntries is null)
@@ -284,7 +295,10 @@ internal static class ShellViewNativeLifetimeProbe
                     .Select(entry => $"0x{entry.Key:X}:access=0x{entry.Value:X}");
                 return $"{item.Stage}=[{string.Join(',', added)}]";
             }));
-            Console.WriteLine($"ishellview-native-view-stage-trace: {string.Join(';', measurements.Select(item => $"{item.Stage}={item.Handles}(delta={item.Handles - baselineHandles:+#;-#;0},self-process-handles={item.SelfProcessHandles?.ToString() ?? "unavailable"})"))}; final-handle-type-delta=[{typeDelta}]; added-self-process-handle-values=[{selfHandleTimeline}]; child-windows=0; foreground-unchanged=True");
+            var stackTraceSummary = handleTracingEnabled
+                ? string.Join(';', handlesAppearingAtEnumeration.Select(DescribeProcessHandleTrace))
+                : "unavailable:tracing-disabled";
+            Console.WriteLine($"ishellview-native-view-stage-trace: {string.Join(';', measurements.Select(item => $"{item.Stage}={item.Handles}(delta={item.Handles - baselineHandles:+#;-#;0},self-process-handles={item.SelfProcessHandles?.ToString() ?? "unavailable"})"))}; final-handle-type-delta=[{typeDelta}]; added-self-process-handle-values=[{selfHandleTimeline}]; enumeration-open-stacks=[{stackTraceSummary}]; child-windows=0; foreground-unchanged=True");
             return 0;
         }
         catch (Exception exception)
@@ -294,6 +308,7 @@ internal static class ShellViewNativeLifetimeProbe
         }
         finally
         {
+            if (handleTracingEnabled) _ = NtSetInformationProcess(GetCurrentProcess(), ProcessHandleTracingInformation, 0, 0);
             if (folderView != 0) Marshal.Release(folderView);
             if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
             if (host is not null) host.View = 0;
@@ -415,17 +430,10 @@ internal static class ShellViewNativeLifetimeProbe
                     if (status >= 0)
                     {
                         var targetProcessId = Marshal.ReadIntPtr(processInformation, 32).ToInt64();
-                        var targetName = "unknown";
-                        try
-                        {
-                            using var targetProcess = Process.GetProcessById(checked((int)targetProcessId));
-                            targetName = targetProcess.ProcessName;
-                        }
-                        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or Win32Exception)
-                        {
-                            targetName = "exited";
-                        }
-                        typeName = $"Process[{targetProcessId}:{targetName}]";
+                        // Avoid opening another Process handle while measuring handle growth and tracing opens.
+                        typeName = targetProcessId == Environment.ProcessId
+                            ? $"Process[{targetProcessId}:self]"
+                            : $"Process[{targetProcessId}]";
                     }
                     else typeName = "Process[unqueryable]";
                 }
@@ -507,6 +515,124 @@ internal static class ShellViewNativeLifetimeProbe
         }
     }
 
+    private static bool TryEnableProcessHandleTracing(out int status)
+    {
+        var enable = new ProcessHandleTracingEnableEx { Flags = 1, TotalSlots = 8192 };
+        status = 0;
+        // PROCESS_HANDLE_TRACING_ENABLE_EX is two ULONGs; use a stable unmanaged buffer for the native call.
+        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<ProcessHandleTracingEnableEx>());
+        try
+        {
+            Marshal.StructureToPtr(enable, pointer, false);
+            status = NtSetInformationProcess(GetCurrentProcess(), ProcessHandleTracingInformation,
+                pointer, Marshal.SizeOf<ProcessHandleTracingEnableEx>());
+            return status >= 0;
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    private static string DescribeProcessHandleTrace(long handleValue)
+    {
+        const int maximumTraces = 512;
+        const int queryHeaderSize = 16;
+        const int entrySize = 160;
+        const int stackOffset = 32;
+        const int maximumStackFrames = 16;
+        var buffer = Marshal.AllocHGlobal(queryHeaderSize + maximumTraces * entrySize);
+        try
+        {
+            Marshal.WriteIntPtr(buffer, new nint(handleValue));
+            var status = NtQueryInformationProcess(GetCurrentProcess(), ProcessHandleTracingQueryInformation,
+                buffer, queryHeaderSize + maximumTraces * entrySize, out var returnedLength);
+            if (status < 0)
+                return $"handle=0x{handleValue:X}:query=0x{status:X8}:bytes={returnedLength}";
+            var traceCount = Marshal.ReadInt32(buffer, 8);
+            if (traceCount < 0 || traceCount > maximumTraces)
+                return $"handle=0x{handleValue:X}:invalid-trace-count={traceCount}";
+
+            var process = Process.GetCurrentProcess();
+            try
+            {
+                var modules = process.Modules.Cast<ProcessModule>()
+                    .Select(module => (Name: module.ModuleName, Start: module.BaseAddress.ToInt64(),
+                        End: module.BaseAddress.ToInt64() + module.ModuleMemorySize))
+                    .ToArray();
+                var traces = new List<string>(traceCount);
+                for (var traceIndex = 0; traceIndex < traceCount; traceIndex++)
+                {
+                    var entry = buffer + queryHeaderSize + traceIndex * entrySize;
+                    var traceHandle = Marshal.ReadIntPtr(entry).ToInt64();
+                    var threadId = Marshal.ReadIntPtr(entry, 16).ToInt64();
+                    var operation = Marshal.ReadInt32(entry, 24);
+                    if (traceHandle != handleValue) continue;
+                    var frames = new List<string>(8);
+                    for (var frameIndex = 0; frameIndex < maximumStackFrames && frames.Count < 8; frameIndex++)
+                    {
+                        var address = Marshal.ReadIntPtr(entry, stackOffset + frameIndex * nint.Size).ToInt64();
+                        if (address == 0) break;
+                        var module = modules.FirstOrDefault(candidate => address >= candidate.Start && address < candidate.End);
+                        frames.Add(module.Name is null
+                            ? $"0x{address:X}"
+                            : $"{module.Name}+0x{address - module.Start:X}");
+                    }
+                    var operationName = operation switch
+                    {
+                        ProcessHandleTracingOpen => "open",
+                        2 => "close",
+                        3 => "badref",
+                        _ => $"type-{operation}"
+                    };
+                    traces.Add($"{operationName};thread={DescribeThread(threadId, modules)};frames={frames.Count};stack={string.Join('>', frames)}");
+                }
+                return $"handle=0x{handleValue:X};{(traces.Count == 0 ? "open-trace=not-found" : string.Join('|', traces))}";
+            }
+            finally { process.Dispose(); }
+        }
+        catch (Exception exception)
+        {
+            return $"handle=0x{handleValue:X}:trace-error={exception.GetType().Name}:{exception.Message}";
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static string CaptureKnownProcessHandleTrace()
+    {
+        const uint rights = 0x00000400 | 0x00000010 | 0x00001000;
+        var handle = OpenProcess(rights, false, unchecked((uint)Environment.ProcessId));
+        if (handle == 0) return $"OpenProcess-failed={Marshal.GetLastWin32Error()}";
+        try { return DescribeProcessHandleTrace(handle.ToInt64()); }
+        finally { _ = CloseHandle(handle); }
+    }
+
+    private static string DescribeThread(long threadId,
+        (string Name, long Start, long End)[] modules)
+    {
+        const uint access = 0x00000040 | 0x00000800; // THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION
+        var thread = OpenThread(access, false, unchecked((uint)threadId));
+        if (thread == 0) return $"{threadId}:thread-unavailable={Marshal.GetLastWin32Error()}";
+        nint description = 0, startBuffer = 0;
+        try
+        {
+            var descriptionStatus = GetThreadDescription(thread, out description);
+            var descriptionText = descriptionStatus < 0 || description == 0
+                ? "unnamed"
+                : Marshal.PtrToStringUni(description) ?? "unnamed";
+            startBuffer = Marshal.AllocHGlobal(nint.Size);
+            var startStatus = NtQueryInformationThread(thread, 9, startBuffer, nint.Size, out _);
+            if (startStatus < 0) return $"{threadId}:{descriptionText};start-query=0x{startStatus:X8}";
+            var start = Marshal.ReadIntPtr(startBuffer).ToInt64();
+            var module = modules.FirstOrDefault(candidate => start >= candidate.Start && start < candidate.End);
+            var startText = module.Name is null ? $"0x{start:X}" : $"{module.Name}+0x{start - module.Start:X}";
+            return $"{threadId}:{descriptionText};start={startText}";
+        }
+        finally
+        {
+            if (startBuffer != 0) Marshal.FreeHGlobal(startBuffer);
+            if (description != 0) _ = LocalFree(description);
+            _ = CloseHandle(thread);
+        }
+    }
+
     private static int CountChildWindows(nint parent)
     {
         var count = 0;
@@ -521,6 +647,7 @@ internal static class ShellViewNativeLifetimeProbe
 
     private readonly record struct ResourceSample(int Cycle, int Handles, int Gdi, int User, long PrivateBytes);
 
+    [StructLayout(LayoutKind.Sequential)] private struct ProcessHandleTracingEnableEx { public uint Flags, TotalSlots; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
@@ -535,11 +662,22 @@ internal static class ShellViewNativeLifetimeProbe
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern nint GetParent(nint window);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nint OpenProcess(uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(nint handle);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern nint OpenThread(uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint threadId);
+    [DllImport("kernel32.dll")] private static extern int GetThreadDescription(nint thread, out nint description);
+    [DllImport("kernel32.dll")] private static extern nint LocalFree(nint memory);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     [DllImport("user32.dll")] private static extern int GetGuiResources(nint process, uint flags);
     [DllImport("kernel32.dll")] private static extern nint GetCurrentProcess();
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetProcessHandleCount(nint process, out int handleCount);
     [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(nint process, int informationClass,
+        nint information, int informationLength, out int returnLength);
+    [DllImport("ntdll.dll")] private static extern int NtSetInformationProcess(nint process, int informationClass,
+        nint information, int informationLength);
+    [DllImport("ntdll.dll")] private static extern int NtQueryInformationThread(nint thread, int informationClass,
         nint information, int informationLength, out int returnLength);
     [DllImport("ntdll.dll")] private static extern int NtQueryObject(nint handle, int informationClass,
         nint information, int informationLength, out int returnLength);
