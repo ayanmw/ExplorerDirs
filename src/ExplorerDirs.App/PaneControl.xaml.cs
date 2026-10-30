@@ -850,9 +850,13 @@ public partial class PaneControl : UserControl
     private bool TrySetViewStyle(ViewStyle style)
     {
         var state = Current;
+        var restoreFileFocus = state?.Browser.HasNativeFocus() != true;
         if (state?.Browser.SetViewStyle(style) != true || Current != state) return false;
         StateChanged?.Invoke(this, EventArgs.Empty);
-        FocusCurrentView();
+        // A keyboard or Ctrl+wheel change already originates in the Shell view.
+        // Re-activating it and re-reading the focused item here overlaps native
+        // mode reflow; toolbar/menu changes still return focus to the file view.
+        if (restoreFileFocus) FocusCurrentView();
         return true;
     }
     private bool CycleViewStyle(int delta)
