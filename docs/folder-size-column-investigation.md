@@ -40,7 +40,7 @@
 
 源码对照确认，产品从 `ExplorerBrowser.GetCurrentView` 取得当前 `IShellView`，再通过 `IShellView::GetItemObject(SVGIO_BACKGROUND/SVGIO_SELECTION, IID_IContextMenu)` 获取以当前视图为上下文的菜单对象；这与直接从 `IShellFolder` 查询的对象不同。故本探针只证明项目/文件夹 context menu 可按 PIDL 查询，不证明自有 ListView 能复用完整 Explorer 文件区菜单。若继续实验自有视图，必须单独证明视图级菜单命令能正确作用于它自己的查看、排序、分组状态；否则保留 ExplorerBrowser 是维持该项体验的已知路径。未修改产品或 GUI。
 
-在同一隐藏 ListView 合同中，按排序后仍选中的 row ID 取回对应的相对 PIDL，通过父 `IShellFolder::GetUIObjectOf(IID_IDataObject)` 获取 Shell 当前选中项数据对象，并将它交给 `IFileOperation::CopyItems`；目标载荷与源逐字节相同，源保持不变。随后将该副本以 `MoveItem` 移入另一个临时目录，再以 `RenameItem` 更改名称，最后以 `DeleteItem` 删除改名后的副本；每项操作都确认未中止，移动/改名后的载荷仍与原始源逐字节相同，删除后目标路径不存在，原始源保留。临时夹具由探针清理；操作前后前台句柄均未改变。这验证隐藏行身份到 Shell `IDataObject` 再到原生文件操作的单选复制/移动/重命名/删除路径，不证明剪切/系统剪贴板、Shell 通知后视图刷新、OLE 拖放或完整菜单操作合同。
+多选扩展本轮已取得局部行为结果：隐藏 ListView 以两个已选行对应的相对 PIDL 请求父 `IShellFolder::GetUIObjectOf(IID_IDataObject)`，`IFileOperation::CopyItems` 两项目标载荷都与来源逐字节相同；其中一个副本后续 Move/Rename/Delete 也均未中止且内容/路径断言通过。整条 NativeProbe 运行退出码为 1，因为窗口前台守卫观察到 HWND 从 `0x861542` 变为 `0x530EDC`；运行后只读查询将当前前台识别为 TortoiseGit 提交对话框，但无法判断切换是否由探针或同时发生的桌面活动引起。因此本轮不计为完整隐藏合同通过，也不把前台变化归因于实现。Release 构建为 0 警告/错误；未重跑该可能与共享桌面冲突的探针。此局部结果只验证普通隐藏 ListView 组装的双选 Shell 数据对象复制，不证明真实 `IShellView` 选区、系统剪贴板、Shell 通知后视图刷新、OLE 拖放或完整菜单操作合同。
 
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 

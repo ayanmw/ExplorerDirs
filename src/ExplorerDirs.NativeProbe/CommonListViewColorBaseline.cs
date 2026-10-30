@@ -189,7 +189,7 @@ internal static class CommonListViewColorBaseline
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                     "Hidden ListView parent creation failed.");
             listView = CreateWindowExW(0, "SysListView32", "",
-                0x40000000 | 0x00000001 | 0x00000004,
+                0x40000000 | 0x00000001 | 0x00000008,
                 0, 0, 380, 180, parent, 0, GetModuleHandleW(null), 0);
             if (listView == 0)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
@@ -426,6 +426,23 @@ internal static class CommonListViewColorBaseline
         if (selectedRowId <= 0 || _shellRowsById is null ||
             !_shellRowsById.TryGetValue(selectedRowId, out var row) || row.AbsolutePidl == 0)
             throw new InvalidOperationException("The selected ListView row has no retained Shell absolute PIDL.");
+        var selectedRows = _shellRowsById.Values.OrderBy(candidate => candidate.Id).ToArray();
+        if (selectedRows.Length != 2 || selectedRows.All(candidate => candidate.Id != selectedRowId))
+            throw new InvalidOperationException("The multi-selection Shell data-object fixture must contain exactly two enumerated rows.");
+
+        SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
+        for (var index = 0; index < selectedRows.Length; index++)
+        {
+            SetItemState(listView, index, LvisSelected, LvisSelected);
+            if (GetItemParam(listView, index) == selectedRowId)
+                SetItemState(listView, index, LvisFocused, LvisFocused);
+        }
+        var selectedRowItems = Enumerable.Range(0, selectedRows.Length)
+            .Where(index => (GetItemState(listView, index) & LvisSelected) != 0)
+            .Select(index => _shellRowsById[GetItemParam(listView, index)])
+            .ToArray();
+        if (selectedRowItems.Length != 2 || selectedRowItems.All(candidate => candidate.Id != selectedRowId))
+            throw new InvalidOperationException("The ListView did not retain the expected two selected Shell rows.");
 
         var destinationPath = Path.Combine(fixture, "copy-destination");
         var moveDestinationPath = Path.Combine(fixture, "move-destination");
@@ -433,13 +450,14 @@ internal static class CommonListViewColorBaseline
         Directory.CreateDirectory(moveDestinationPath);
         var foregroundBeforeOperations = GetForegroundWindow();
         var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-        var childArray = Marshal.AllocHGlobal(IntPtr.Size);
+        var childArray = Marshal.AllocHGlobal(IntPtr.Size * selectedRowItems.Length);
         nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0,
             renameItem = 0, renameOperation = 0, deleteItem = 0, deleteOperation = 0, selectedDataObject = 0;
         try
         {
-            Marshal.WriteIntPtr(childArray, row.RelativePidl);
-            Marshal.ThrowExceptionForHR(At<GetUiObjectOf>(shellFolder, 10)(shellFolder, 0, 1,
+            for (var index = 0; index < selectedRowItems.Length; index++)
+                Marshal.WriteIntPtr(childArray, index * IntPtr.Size, selectedRowItems[index].RelativePidl);
+            Marshal.ThrowExceptionForHR(At<GetUiObjectOf>(shellFolder, 10)(shellFolder, 0, (uint)selectedRowItems.Length,
                 childArray, in DataObjectId, 0, out selectedDataObject));
             if (selectedDataObject == 0) return false;
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
@@ -457,7 +475,14 @@ internal static class CommonListViewColorBaseline
             var sourceLength = File.Exists(sourcePayload) ? new FileInfo(sourcePayload).Length : -1;
             var copiedLength = File.Exists(copiedPayload) ? new FileInfo(copiedPayload).Length : -1;
             // RecursiveBytes was deliberately changed above for the sort check; compare the Shell copy with its disk source instead.
-            var copied = aborted == 0 && sourceLength >= 0 && copiedLength == sourceLength &&
+            var allSelectedRowsCopied = selectedRowItems.All(selectedRow =>
+            {
+                var selectedSource = Path.Combine(selectedRow.ParsingName, "payload.bin");
+                var selectedCopy = Path.Combine(destinationPath, Path.GetFileName(selectedRow.ParsingName), "payload.bin");
+                return File.Exists(selectedSource) && File.Exists(selectedCopy) &&
+                    File.ReadAllBytes(selectedSource).SequenceEqual(File.ReadAllBytes(selectedCopy));
+            });
+            var copied = aborted == 0 && allSelectedRowsCopied && sourceLength >= 0 && copiedLength == sourceLength &&
                 File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(copiedPayload));
             var foregroundAfterCopy = GetForegroundWindow();
             if (!copied || !File.Exists(sourcePayload)) return false;
@@ -509,7 +534,7 @@ internal static class CommonListViewColorBaseline
             var foregroundAfterDelete = GetForegroundWindow();
             Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};copy-aborted={aborted};" +
                 $"move-aborted={moveAborted};rename-aborted={renameAborted};delete-aborted={deleteAborted};copy-payload-matches-source={copied};" +
-                $"copy-items-source=selected-Shell-IDataObject;" +
+                $"copy-items-source=selected-Shell-IDataObject;selected-row-count={selectedRowItems.Length};all-selected-rows-copied={allSelectedRowsCopied};" +
                 $"move-payload-matches-source={moved};rename-payload-matches-source={renamed};" +
                 $"delete-removed={deleted};source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};move-source-renamed={renamed};" +
                 $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/" +
