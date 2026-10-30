@@ -1,3 +1,5 @@
+using System.Windows.Threading;
+
 namespace ExplorerDirs.SettingsSmoke;
 
 internal static class DirectoryTreeScanCoordinatorSmoke
@@ -39,11 +41,70 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         Check(fourth.CancellationToken.IsCancellationRequested && !coordinator.IsCurrent(fourth),
             "disposing a scan owner cancels outstanding work and blocks stale publication");
 
-        Console.WriteLine("Directory tree scan coordinator smoke: PASS");
+        VerifyLatestAsyncPublication();
 
-        static void Check(bool condition, string message)
+        Console.WriteLine("Directory tree scan coordinator smoke: PASS");
+    }
+
+    private static void VerifyLatestAsyncPublication()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
         {
-            if (!condition) throw new InvalidOperationException(message);
-        }
+            try
+            {
+                using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                var context = new DispatcherSynchronizationContext(dispatcher);
+                var ownerThreadId = Environment.CurrentManagedThreadId;
+                var oldWorkerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var oldPublished = false;
+                var currentValue = 0;
+                var currentPublishedOnOwner = false;
+                var oldRequest = owner.RunLatestAsync(
+                    token =>
+                    {
+                        oldWorkerStarted.SetResult();
+                        token.WaitHandle.WaitOne();
+                        token.ThrowIfCancellationRequested();
+                        return -1;
+                    }, context, _ => oldPublished = true);
+                oldWorkerStarted.Task.GetAwaiter().GetResult();
+                var currentRequest = owner.RunLatestAsync(
+                    _ => 42, context, value =>
+                    {
+                        currentValue = value;
+                        currentPublishedOnOwner = Environment.CurrentManagedThreadId == ownerThreadId;
+                    });
+                PumpDispatcherUntil(Task.WhenAll(oldRequest, currentRequest));
+                Check(!oldRequest.GetAwaiter().GetResult() && !oldPublished &&
+                      currentRequest.GetAwaiter().GetResult() && currentValue == 42 && currentPublishedOnOwner,
+                    "only the latest completed scan publishes on the owner synchronization context");
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new InvalidOperationException("Latest asynchronous publication smoke failed.", failure);
+    }
+
+    private static void PumpDispatcherUntil(Task task)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        timer.Tick += (_, _) => { if (task.IsCompleted) frame.Continue = false; };
+        timer.Start();
+        try { Dispatcher.PushFrame(frame); }
+        finally { timer.Stop(); }
+        task.GetAwaiter().GetResult();
+    }
+
+    private static void Check(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 }

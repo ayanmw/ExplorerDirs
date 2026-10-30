@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：隔离扫描的异步发布与文件变化触发
+
+目录树扫描协调器新增 `RunLatestAsync`：扫描在后台线程运行，完成后通过 owner `SynchronizationContext` 发布；发布前再次核对 ticket，避免旧扫描结果覆盖新访问或更新。隐藏 ListView 合同将递归数据扫描迁出 STA，并通过真实临时目录中的 `FileSystemWatcher` 修改文件来触发下一轮扫描和结果发布，不再由测试代码手动重扫。合同断言事件已观察、结果已应用、扫描线程与 owner 分离、更新在原 owner 线程发布，同时检查递归文件/子目录数、相对大小和升降序、行身份、焦点/选区及前台窗口不变。`DirectoryTreeScanCoordinatorSmoke` 的最新结果优先发布、旧结果不发布合同、递归扫描 smoke、NativeProbe/App Release build 与隐藏 `--common-listview-relative-size-contract` 均通过；探针输出 `file-change-observed=True`、`update-applied=True`、`visible=False`、`foreground-unchanged=True`。
+
+这是 NativeProbe 内部的异步数据流验证，不是产品实时列或 Shell 通知集成：更新触发来自原型自己的 `FileSystemWatcher`，没有接入 ExplorerBrowser/IShellView 产品宿主，也没有验证真实文件视图刷新、跨窗格冲突、网络路径延迟、性能/内存收益或 GUI 表现。产品仍使用 ExplorerBrowser，逐行大小列仍未接入。
+
 ## 2026-10-30：目录树扫描器托管内存 A/B
 
 为量化隔离 ListView 逐行派生值扫描的内存开销，增加 `--recursive-directory-scan-allocation-probe`。探针创建 5,000 个空子目录，预热完整/指定路径两条扫描路径，然后测量 `GC.GetAllocatedBytesForCurrentThread`、强制 GC 后的存活堆估算及扫描期间分批强制 GC 采样的最大存活堆。扫描器同时改为惰性深度优先枚举器帧：父目录枚举暂停在当前子目录，子树完成后即累计并关闭；取消时 finally 释放全部活动帧，不再预先把同级所有子目录节点压入待处理栈。待处理枚举器/打开句柄数量因此随当前目录深度增长，而非随一个目录的全部子项数增长。完整扫描返回 5,001 项；指定路径扫描仅返回根目录和 3 个子目录共 4 项。最终托管分配为 4,052,080 B / 3,361,544 B，差 690,536 B（17.0%）；强制 GC 后存活堆估算为 1,755,912 B / 1,288 B；遍历中采样的峰值估算为 1,822,952 B / 69,064 B。最新复验单轮耗时为 741 / 491 ms，仍不作扫描速度结论。

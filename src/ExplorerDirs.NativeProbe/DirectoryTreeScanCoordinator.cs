@@ -29,6 +29,43 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
             return !_disposed && ReferenceEquals(_current, ticket) && !ticket.CancellationToken.IsCancellationRequested;
     }
 
+    internal async Task<bool> RunLatestAsync<T>(Func<CancellationToken, T> scan,
+        SynchronizationContext ownerContext, Action<T> publish)
+    {
+        ArgumentNullException.ThrowIfNull(scan);
+        ArgumentNullException.ThrowIfNull(ownerContext);
+        ArgumentNullException.ThrowIfNull(publish);
+        var ticket = Begin();
+        T result;
+        try
+        {
+            result = await Task.Run(() => scan(ticket.CancellationToken), ticket.CancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!IsCurrent(ticket))
+        {
+            return false;
+        }
+
+        if (!IsCurrent(ticket)) return false;
+        var published = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ownerContext.Post(_ =>
+        {
+            if (!IsCurrent(ticket))
+            {
+                published.TrySetResult(false);
+                return;
+            }
+            try
+            {
+                publish(result);
+                published.TrySetResult(true);
+            }
+            catch (Exception exception) { published.TrySetException(exception); }
+        }, null);
+        return await published.Task.ConfigureAwait(false);
+    }
+
     internal void CancelCurrent()
     {
         DirectoryTreeScanTicket? retired;

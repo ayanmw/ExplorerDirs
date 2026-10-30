@@ -176,27 +176,27 @@ internal static class CommonListViewColorBaseline
     {
         var ownerThreadId = Environment.CurrentManagedThreadId;
         var dispatcher = Dispatcher.CurrentDispatcher;
-        var ticket = scans.Begin();
-        var scan = Task.Run(() => (
-            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, ticket.CancellationToken),
-            WorkerThreadId: Environment.CurrentManagedThreadId));
+        var context = new DispatcherSynchronizationContext(dispatcher);
+        (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int WorkerThreadId) result = (null!, 0);
+        var scan = scans.RunLatestAsync(ticket => (
+            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, ticket),
+            WorkerThreadId: Environment.CurrentManagedThreadId), context, value => result = value);
+        PumpDispatcherUntil(() => scan.IsCompleted);
+        if (!scan.GetAwaiter().GetResult()) throw new OperationCanceledException("The directory scan was retired before publication.");
+        return (result.Results, ownerThreadId, result.WorkerThreadId);
+    }
+
+    private static void PumpDispatcherUntil(Func<bool> completed)
+    {
         var frame = new DispatcherFrame();
         var poll = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(10)
         };
-        poll.Tick += (_, _) =>
-        {
-            if (!scan.IsCompleted) return;
-            _ = scan.GetAwaiter().GetResult();
-            frame.Continue = false;
-        };
+        poll.Tick += (_, _) => { if (completed()) frame.Continue = false; };
         poll.Start();
         try { Dispatcher.PushFrame(frame); }
         finally { poll.Stop(); }
-        if (!scans.IsCurrent(ticket)) throw new OperationCanceledException(ticket.CancellationToken);
-        var result = scan.GetAwaiter().GetResult();
-        return (result.Results, ownerThreadId, result.WorkerThreadId);
     }
 
     private static int RunDataContract(bool relativeSizesOnly)
@@ -302,31 +302,59 @@ internal static class CommonListViewColorBaseline
                 ApplyRelativeSizeSort(listView, savedRelativeSort) != 0 && GetItemParam(listView, 0) == 2;
             var updatedPayloadBytes = relativeSizesOnly ? 20UL : 2UL;
             var payloadPath = Path.Combine(smallFolder, "payload.bin");
+            var smallNestedFolder = Path.Combine(smallFolder, "nested");
+            Directory.CreateDirectory(smallNestedFolder);
+            File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
+            File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-2.bin"), []);
             var fileChangeObserved = true;
+            var updateApplied = true;
+            var updateOwnerThreadId = Environment.CurrentManagedThreadId;
+            (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int OwnerThreadId, int WorkerThreadId)? updateScan = null;
             if (relativeSizesOnly)
             {
                 using var fileChangeSignal = new ManualResetEventSlim();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                var context = new DispatcherSynchronizationContext(dispatcher);
+                Task<bool>? updateRequest = null;
+                var updateRequested = 0;
                 using var watcher = new FileSystemWatcher(smallFolder, Path.GetFileName(payloadPath))
                 {
                     NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size
                 };
-                watcher.Changed += (_, _) => fileChangeSignal.Set();
+                watcher.Changed += (_, _) =>
+                {
+                    if (Interlocked.Exchange(ref updateRequested, 1) != 0) return;
+                    fileChangeSignal.Set();
+                    _ = dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                    {
+                        var requestOwnerThreadId = Environment.CurrentManagedThreadId;
+                        updateRequest = scanCoordinator.RunLatestAsync(ticket => (
+                            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                                fixture, requestedScanPaths, ticket),
+                            OwnerThreadId: requestOwnerThreadId,
+                            WorkerThreadId: Environment.CurrentManagedThreadId), context,
+                            value => updateScan = value);
+                    }));
+                };
                 watcher.EnableRaisingEvents = true;
                 File.WriteAllBytes(payloadPath, new byte[checked((int)updatedPayloadBytes)]);
                 fileChangeObserved = fileChangeSignal.Wait(TimeSpan.FromSeconds(5));
+                if (fileChangeObserved)
+                {
+                    PumpDispatcherUntil(() => updateRequest is not null && updateRequest.IsCompleted);
+                    updateApplied = updateRequest!.GetAwaiter().GetResult();
+                }
             }
             else
             {
                 File.WriteAllBytes(payloadPath, new byte[checked((int)updatedPayloadBytes)]);
             }
-            var smallNestedFolder = Path.Combine(smallFolder, "nested");
-            Directory.CreateDirectory(smallNestedFolder);
-            File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
-            File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-2.bin"), []);
-            var updateScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
-            var updatedScans = updateScan.Results;
-            var updateScanRanOffOwnerThread = updateScan.WorkerThreadId != updateScan.OwnerThreadId;
-            var updateScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == updateScan.OwnerThreadId;
+            if (!relativeSizesOnly)
+                updateScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
+            var updatedScans = updateScan?.Results ?? new Dictionary<string, RecursiveDirectoryScanResult>();
+            var updateScanRanOffOwnerThread = updateScan?.WorkerThreadId != updateScan?.OwnerThreadId;
+            var updateScanReturnedToOwnerThread = updateScan?.OwnerThreadId == updateOwnerThreadId &&
+                Environment.CurrentManagedThreadId == updateOwnerThreadId;
             var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
@@ -369,14 +397,14 @@ internal static class CommonListViewColorBaseline
                     savedRelativeSort.SequenceEqual([new SortColumnState(RelativeSizeSortKey, 1)]) &&
                     descendingRelativeSortResult != 0 && descendingRelativeSortRows == "large-folder:1,small-folder:2" &&
                     descendingRelativeSortFocusPreserved && ascendingSortRestoredAfterDirectionChange &&
-                    fileChangeObserved &&
+                    fileChangeObserved && updateApplied &&
                     initialRelativeSortFocusPreserved && updatedRelativeSortFocusPreserved &&
                     relativeSizeSorted && !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
                     GetForegroundWindow() == foregroundBefore;
                 Console.WriteLine($"common-listview-relative-size-contract: initial={initialRelativeSizeRows};" +
                     $"updated={updatedRelativeSizeRows};initial-values-correct={initialRelativeSizes};" +
                     $"updated-values-correct={updatedRelativeSizes};initial-contents={initialContentsRows};" +
-                    $"scan-worker-threads={initialScan.WorkerThreadId}/{updateScan.WorkerThreadId};" +
+                    $"scan-worker-threads={initialScan.WorkerThreadId}/{updateScan!.Value.WorkerThreadId};" +
                     $"scan-owner-thread={initialScan.OwnerThreadId};" +
                     $"scans-off-owner-thread={initialScanRanOffOwnerThread}/{updateScanRanOffOwnerThread};" +
                     $"returned-to-owner-thread={initialScanReturnedToOwnerThread}/{updateScanReturnedToOwnerThread};" +
@@ -387,6 +415,7 @@ internal static class CommonListViewColorBaseline
                     $"descending-restored={descendingRelativeSortRows};descending-focus-preserved={descendingRelativeSortFocusPreserved};" +
                     $"ascending-restored-after-direction-change={ascendingSortRestoredAfterDirectionChange};" +
                     $"relative-sort-correct={relativeSizeSorted};file-change-observed={fileChangeObserved};" +
+                    $"update-applied={updateApplied};" +
                     $"focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
                     $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
                 return relativeContractPassed ? 0 : 1;

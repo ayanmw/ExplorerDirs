@@ -10,6 +10,8 @@
 
 2026-10-31 逐行大小扫描请求代际：NativeProbe 隔离层现用 `DirectoryTreeScanCoordinator` 管理扫描 ticket；新扫描取消上一轮，导航/视图退休和 owner dispose 会取消当前 worker，结果仅在 owner 验证 ticket 仍为当前代际后继续更新行。SettingsSmoke 的 worker 级取消/过期门控合同先因缺失协调器编译失败，再通过；相对大小 ListView 隐藏合同也通过，前台不变。该项只验证原型扫描生命周期，不是产品列接线或 UI 性能证据。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31-隔离扫描代际与过期结果门控)。
 
+2026-10-31 逐行大小列异步发布：扫描结果经 owner `SynchronizationContext` 回到原 STA 发布，并在发布时再次拒绝过期 ticket；隐藏 ListView 合同改由真实临时目录 `FileSystemWatcher` 事件触发更新，不再手动重扫。协调器最新结果发布/过期结果拒绝 smoke、递归扫描 smoke、App/NativeProbe Release build 和隐藏相对大小数据合同通过；结果包含 `update-applied=True`，前台不变且 HWND 隐藏。该原型没有接入产品 Shell 宿主，也不证明真实 ExplorerBrowser/IShellView 通知、实时列刷新、性能或 GUI 行为。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31隔离扫描的异步发布与文件变化触发)。
+
 2026-10-31 自有 ListView 虚拟 Shell 行合同：NativeProbe Release build 后运行 `--common-listview-virtual-folder-contract`，从虚拟控制面板枚举 9 个非文件系统 Shell 子项，将 PIDL、解析名和系统图标索引映射到隐藏 `SysListView32` 行并逐项读回；退出码 0，前台不变且窗口不可见。该结果只补强自有行模型的虚拟位置身份/显示接入，不覆盖项目操作、菜单、拖放、通知、导航输入、性能/内存或产品集成；Explorer Dirs 仍使用 ExplorerBrowser。详见[逐行大小列架构调查](folder-size-column-investigation.md#2026-10-31虚拟-shell-项目进入自有-listview-行模型)。
 
 2026-10-30 自有 ListView 递归列扫描内存：扫描器使用惰性深度优先枚举器帧，活动枚举器数量随目录深度而非同级子项数增长；子树完成后立即累计并关闭，取消时 finally 释放活动帧。5,000 个同级目录夹具中，完整结果与 4 条指定结果的托管分配分别为 4,052,080 B / 3,361,544 B，减少 690,536 B（17.0%）；强制 GC 后存活托管堆估算分别为 1,755,912 B / 1,288 B；扫描期间采样峰值估算为 1,822,952 B / 69,064 B。最新单轮耗时 741/491 ms，不作为速度结论。以上仅衡量托管堆，不能外推 Private Bytes、工作集或 ExplorerBrowser 的实际节省。递归扫描分配诊断、取消/句柄清理 smoke、完整 Release SettingsSmoke 和 App Release 构建通过；原型仍未接入产品逐行列。详情见[逐行大小列调查](folder-size-column-investigation.md)。
