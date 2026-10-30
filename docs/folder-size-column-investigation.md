@@ -40,7 +40,7 @@
 
 源码对照确认，产品从 `ExplorerBrowser.GetCurrentView` 取得当前 `IShellView`，再通过 `IShellView::GetItemObject(SVGIO_BACKGROUND/SVGIO_SELECTION, IID_IContextMenu)` 获取以当前视图为上下文的菜单对象；这与直接从 `IShellFolder` 查询的对象不同。故本探针只证明项目/文件夹 context menu 可按 PIDL 查询，不证明自有 ListView 能复用完整 Explorer 文件区菜单。若继续实验自有视图，必须单独证明视图级菜单命令能正确作用于它自己的查看、排序、分组状态；否则保留 ExplorerBrowser 是维持该项体验的已知路径。未修改产品或 GUI。
 
-在同一隐藏 ListView 合同中，按排序后仍选中的 row ID 取回真实 Shell 绝对 PIDL，创建 `IShellItem` 并将该目录交给 `IFileOperation::CopyItem`；目标载荷与源逐字节相同，源保持不变。随后将该副本以 `IFileOperation::MoveItem` 移入另一个临时目录，确认中间副本已移走且目标载荷仍匹配。临时夹具由探针清理；两个操作前后前台句柄均未改变。这只验证从自有行身份发起一项原生 Shell 复制及一项目录移动，不证明剪切/删除/重命名、Shell 通知后视图刷新、剪贴板、拖放或完整菜单操作合同。
+在同一隐藏 ListView 合同中，按排序后仍选中的 row ID 取回真实 Shell 绝对 PIDL，创建 `IShellItem` 并将该目录交给 `IFileOperation::CopyItem`；目标载荷与源逐字节相同，源保持不变。随后将该副本以 `IFileOperation::MoveItem` 移入另一个临时目录，再以 `RenameItem` 更改名称；每项操作都确认未中止，移动/改名后的载荷仍与原始源逐字节相同，原始源保留，旧目标路径已移除。临时夹具由探针清理；操作前后前台句柄均未改变。这只验证从自有行身份发起原生 Shell 复制、移动和重命名，不证明剪切/删除、Shell 通知后视图刷新、剪贴板、拖放或完整菜单操作合同。
 
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 

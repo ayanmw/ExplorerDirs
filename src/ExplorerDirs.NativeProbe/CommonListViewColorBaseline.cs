@@ -433,7 +433,8 @@ internal static class CommonListViewColorBaseline
         var foregroundBeforeOperations = GetForegroundWindow();
         var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(row.AbsolutePidl, ref itemId, out var sourceItem));
-        nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0;
+        nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0,
+            renameItem = 0, renameOperation = 0;
         try
         {
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
@@ -472,14 +473,36 @@ internal static class CommonListViewColorBaseline
                 new FileInfo(movedPayload).Length == sourceLength &&
                 File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(movedPayload));
             var foregroundAfterMove = GetForegroundWindow();
+            if (!moved) return false;
+
+            var movedFolder = Path.Combine(moveDestinationPath, "moved-selected-folder");
+            var renamedFolder = Path.Combine(moveDestinationPath, "renamed-selected-folder");
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(movedFolder, 0, ref itemId, out renameItem));
+            var renameClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var renameInterfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref renameClassId, 0, 1, ref renameInterfaceId, out renameOperation));
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(renameOperation, 5)(renameOperation, flags));
+            Marshal.ThrowExceptionForHR(At<RenameItem>(renameOperation, 12)(renameOperation, renameItem,
+                "renamed-selected-folder", 0));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(renameOperation, 21)(renameOperation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(renameOperation, 22)(renameOperation, out var renameAborted));
+            var renamedPayload = Path.Combine(renamedFolder, "payload.bin");
+            var renamed = renameAborted == 0 && File.Exists(sourcePayload) && !Directory.Exists(movedFolder) &&
+                File.Exists(renamedPayload) && new FileInfo(renamedPayload).Length == sourceLength &&
+                File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(renamedPayload));
+            var foregroundAfterRename = GetForegroundWindow();
             Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};copy-aborted={aborted};" +
-                $"move-aborted={moveAborted};copy-payload-matches-source={copied};move-payload-matches-source={moved};" +
-                $"source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};" +
-                $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/0x{foregroundAfterMove.ToInt64():X}");
-            return moved;
+                $"move-aborted={moveAborted};rename-aborted={renameAborted};copy-payload-matches-source={copied};" +
+                $"move-payload-matches-source={moved};rename-payload-matches-source={renamed};" +
+                $"source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};move-source-renamed={renamed};" +
+                $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/" +
+                $"0x{foregroundAfterMove.ToInt64():X}/0x{foregroundAfterRename.ToInt64():X}");
+            return renamed;
         }
         finally
         {
+            if (renameOperation != 0) Marshal.Release(renameOperation);
+            if (renameItem != 0) Marshal.Release(renameItem);
             if (moveOperation != 0) Marshal.Release(moveOperation);
             if (moveDestinationItem != 0) Marshal.Release(moveDestinationItem);
             if (moveSourceItem != 0) Marshal.Release(moveSourceItem);
@@ -774,6 +797,7 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
