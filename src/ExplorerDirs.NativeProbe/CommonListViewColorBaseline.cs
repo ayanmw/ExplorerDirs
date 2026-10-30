@@ -158,6 +158,12 @@ internal static class CommonListViewColorBaseline
     }
 
     internal static int RunDataContract()
+        => RunDataContract(relativeSizesOnly: false);
+
+    internal static int RunRelativeSizeContract()
+        => RunDataContract(relativeSizesOnly: true);
+
+    private static int RunDataContract(bool relativeSizesOnly)
     {
         var foregroundBefore = GetForegroundWindow();
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs.ListViewShellRows", Guid.NewGuid().ToString("N"));
@@ -241,6 +247,19 @@ internal static class CommonListViewColorBaseline
             var updatedRelativeSizeRows = $"{GetItemText(listView, 0, 2)},{GetItemText(listView, 1, 2)}";
             var updatedRelativeSizes = ParseRelativeSize(GetItemText(listView, 0, 2)) == RecursiveSizePercentage.Calculate(10, 12) &&
                 ParseRelativeSize(GetItemText(listView, 1, 2)) == RecursiveSizePercentage.Calculate(2, 12);
+            if (relativeSizesOnly)
+            {
+                var relativeContractPassed = initialRelativeSizes && updatedRelativeSizes &&
+                    initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 12 &&
+                    GetItemParam(listView, 0) == 1 && GetItemParam(listView, 1) == 2 &&
+                    !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
+                Console.WriteLine($"common-listview-relative-size-contract: initial={initialRelativeSizeRows};" +
+                    $"updated={updatedRelativeSizeRows};initial-values-correct={initialRelativeSizes};" +
+                    $"updated-values-correct={updatedRelativeSizes};parent-bytes={updatedFixtureScan.Bytes};" +
+                    $"row-ids-stable={GetItemParam(listView, 0) == 1 && GetItemParam(listView, 1) == 2};" +
+                    $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
+                return relativeContractPassed ? 0 : 1;
+            }
             var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
                 Marshal.GetFunctionPointerForDelegate(SizeCompare));
             var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +

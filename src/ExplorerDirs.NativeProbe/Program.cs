@@ -181,6 +181,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunCommonListViewColorBaseline();
         if (args.Length == 1 && args[0] == "--common-listview-data-contract")
             return CommonListViewColorBaseline.RunDataContract();
+        if (args.Length == 1 && args[0] == "--common-listview-relative-size-contract")
+            return CommonListViewColorBaseline.RunRelativeSizeContract();
         if (args.Length == 1 && args[0] == "--common-listview-navigation-contract")
             return CommonListViewColorBaseline.RunNavigationContract();
         if (args.Length == 1 && args[0] == "--ishellview-grouped-filter-export")
@@ -269,6 +271,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
             Console.WriteLine("       --common-listview-color-baseline-private-desktop (standard ListView custom-draw control comparison)");
             Console.WriteLine("       --common-listview-data-contract (hidden standard ListView update/sort contract)");
+            Console.WriteLine("       --common-listview-relative-size-contract (hidden Shell row relative-size update contract)");
             Console.WriteLine("       --common-listview-navigation-contract (hidden Shell folder PIDL, parent, and history contract)");
         Console.WriteLine("       --ishellview-color-spike-offscreen (same probe with WS_VISIBLE window outside the virtual desktop; no input)");
             Console.WriteLine("       --auto-column-width (hidden native IShellView Ctrl+NumPad+ column-width probe)");

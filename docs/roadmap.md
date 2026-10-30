@@ -4821,3 +4821,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - Q-Dir 官方 FAQ 82 说明大小列下划线百分比是当前目录中项目的相对大小；显示精度和舍入规则未公开。隔离 helper 以同级项目所在目录的递归总可访问字节数作分母，返回 `decimal` 百分比，未规定显示精度或格式舍入，零分母为空值。
 - SettingsSmoke 覆盖 10/14、4/14，及小目录变化后 10/12、2/12 与零分母；完整 SettingsSmoke、NativeProbe Release build、App Release build 均通过。NativeProbe 仅完成列接线并构建，未运行完整 Shell/窗口合同；产品 UI、配置、可见格式与排序仍未接入，产品继续使用 ExplorerBrowser 和 F9 显式扫描策略。细节见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30-同目录递归大小比例隔离原型)。来源：[Q-Dir FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR)。
+
+
+## 2026-10-30：独立验证同目录递归大小比例列更新
+
+- 为比例列加独立 `--common-listview-relative-size-contract` 入口，仅执行真实 Shell 枚举、递归扫描及隐藏普通 ListView 行更新，跳过菜单和文件操作。10/14、4/14 更新为 10/12、2/12 后，同级比例均重算正确；稳定行 ID、不可见窗口及 foreground 守卫通过。NativeProbe Release build 与专用合同退出码 0。产品界面和 Q-Dir 精确格式仍未接入；详见[逐行大小调查](folder-size-column-investigation.md#2026-10-30-比例列独立隐藏合同)。
