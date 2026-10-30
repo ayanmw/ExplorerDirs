@@ -66,7 +66,7 @@
 
 2026-10-30 克隆视图真实 Shell 历史复验：隐藏生产 HostProbe 通过真实 `PaneControl` / ExplorerBrowser 在 A/B 两目录间捕获不同选区，独立克隆后后退/前进并核对各站位置/选区快照；逐站用生产 Shell selection batch 应用于克隆 view，源标签历史和状态保持独立。Release HostProbe 通过、前台未变。宿主无活动 WPF `Window`，焦点保护按设计拦截自动选区恢复；本轮不能证明可见窗口的延迟恢复/焦点，搜索异步与虚拟 provider 未覆盖，留待集中验收。详细见[核心操作对照](shell-parity.md)。
 
-2026-10-30 隔离 ListView 自定义排序会话恢复：普通 `SysListView32` 原型现用应用私有属性 key 表示递归相对大小列排序，并通过 `SessionStore.Render` / `ParseComplete` 做内存往返；排序 target 按保存方向执行升序/降序，重排后按稳定 Shell row ID 还原选中和项目焦点。NativeProbe Release build 0 警告/错误；本轮未运行窗口/数据合同，因此这只是已编译的原型实现，不能声称排序往返运行通过。产品 ExplorerBrowser 仍不能用此 app-only key 调用 `IFolderView2::SetSortColumns`，未做产品接线或 UI 变更。
+2026-10-30 隔离 ListView 自定义排序会话恢复：普通 `SysListView32` 原型现用应用私有属性 key 表示递归相对大小列排序，并通过 `SessionStore.Render` / `ParseComplete` 做内存往返；排序 target 按保存方向执行升序/降序，重排后按稳定 Shell row ID 还原选中和项目焦点。NativeProbe Release build 0 警告/错误；随后隐藏 `--common-listview-relative-size-contract` 退出码 0，输出确认 session sort key/direction 往返、降序排序、改回升序及选中/焦点身份保持，窗口不可见且前台 HWND 未变。产品 ExplorerBrowser 仍不能用此 app-only key 调用 `IFolderView2::SetSortColumns`，未做产品接线或 UI 变更。
 
 2026-10-30 逐行派生列架构评审：隔离 `IShellView` 初次可提供并排序自定义大小值，但刷新后 DefView 没有重取值；标准 `SysListView32` 隐藏数据合同已证明单元格更新、按新值排序和项目选区/焦点身份保持。若要继续逐行派生列，应先做单窗格隔离自有 ListView 原型，使用真实 Shell 行对象验证菜单、文件操作、拖放、通知、导航及焦点合同；不直接迁移 ExplorerBrowser。内存收益尚无证据，必须在同机同目录集及同操作序列下测量。无窗口 folder-tree smoke 现已核对自定义列的索引、映射 key 和显示/属性值一致；DefView 通知后为何不重取值仍未解释。具体路线和门槛见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30视图架构与派生列可行性复核)。
 
