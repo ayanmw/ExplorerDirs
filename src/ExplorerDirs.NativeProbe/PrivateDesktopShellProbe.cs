@@ -390,6 +390,7 @@ internal static class PrivateDesktopShellProbe
         var timeoutLimit = timeout ?? TimeSpan.FromSeconds(25);
         var waitTimer = Stopwatch.StartNew();
         var foregroundChangeObserved = false;
+        var inputChangeObserved = false;
         while (!probeReturned.Wait(TimeSpan.FromMilliseconds(25)) && waitTimer.Elapsed < timeoutLimit)
         {
             var currentForeground = GetForegroundWindow();
@@ -397,6 +398,13 @@ internal static class PrivateDesktopShellProbe
             {
                 foregroundChangeObserved = true;
                 Console.Error.WriteLine($"private-desktop-probe: kind={kind}; first-foreground-change=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=[{foregroundBeforeDescription}]; foreground-now=[{DescribeWindow(currentForeground)}]; last-input-before={lastInputBefore}; last-input-at-change={GetLastInputTick()}");
+            }
+
+            var currentLastInput = GetLastInputTick();
+            if (!inputChangeObserved && !string.Equals(currentLastInput, lastInputBefore, StringComparison.Ordinal))
+            {
+                inputChangeObserved = true;
+                Console.Error.WriteLine($"private-desktop-probe: kind={kind}; input-change-detected=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; last-input-before={lastInputBefore}; last-input-now={currentLastInput}");
             }
         }
 
@@ -417,7 +425,11 @@ internal static class PrivateDesktopShellProbe
             Console.Error.WriteLine($"private-desktop-probe: kind={kind}; foreground-change-detected-at-completion=True; stage={Volatile.Read(ref _activeProbeStage)}; elapsed-ms={waitTimer.Elapsed.TotalMilliseconds:F0}; foreground-before=[{foregroundBeforeDescription}]; foreground-after=[{DescribeWindow(foregroundAfter)}]; last-input-before={lastInputBefore}; last-input-at-completion={GetLastInputTick()}");
         }
         var foregroundUnchanged = foregroundBefore == foregroundAfter;
-        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; stage-at-return={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=[{foregroundBeforeDescription}]; foreground-after=[{DescribeWindow(foregroundAfter)}]; last-input-before={lastInputBefore}; last-input-at-return={GetLastInputTick()}; foreground-unchanged={foregroundUnchanged}; process-exit-owns-desktop-cleanup=True");
+        var lastInputAtReturn = GetLastInputTick();
+        inputChangeObserved |= !string.Equals(lastInputAtReturn, lastInputBefore, StringComparison.Ordinal);
+        var isolationClean = PrivateDesktopIsolationPolicy.IsClean(foregroundChangeObserved,
+            foregroundUnchanged, inputChangeObserved);
+        Console.WriteLine($"private-desktop-probe: kind={kind}; name={desktopName}; stage-at-return={Volatile.Read(ref _activeProbeStage)}; foreground-change-observed={foregroundChangeObserved}; foreground-before=[{foregroundBeforeDescription}]; foreground-after=[{DescribeWindow(foregroundAfter)}]; last-input-before={lastInputBefore}; last-input-at-return={lastInputAtReturn}; input-change-observed={inputChangeObserved}; foreground-unchanged={foregroundUnchanged}; isolation-clean={isolationClean}; process-exit-owns-desktop-cleanup=True");
 
         if (failure is not null)
         {
@@ -425,7 +437,7 @@ internal static class PrivateDesktopShellProbe
             return 1;
         }
 
-        if (!foregroundUnchanged)
+        if (!isolationClean)
             return 1;
 
         return result;

@@ -85,6 +85,8 @@ internal static class Program
             return ShellViewDropTargetRegistrationSmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-cleanup-smoke")
             return ShellViewDropTargetCleanupSmoke.Run();
+        if (args.Length == 1 && args[0] == "--private-desktop-isolation-policy-smoke")
+            return PrivateDesktopIsolationPolicySmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-private-desktop")
             return PrivateDesktopShellProbe.RunDropTarget();
         if (args.Length == 2 && args[0] == "--shell-view-ole-drop-copy" && args[1] == "--AllowInteractiveDesktopControl")
@@ -244,6 +246,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-host-filter (hidden direct IShellView ICommDlgBrowser3 filtering fixture)");
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
+            Console.WriteLine("       --private-desktop-isolation-policy-smoke (test the isolation result policy without creating windows)");
             Console.WriteLine("       --native-minidump-smoke <absolute-path> (write and inspect an opt-in diagnostic minidump; no Shell window)");
             Console.WriteLine("       --private-desktop-window-destroy-control (create and destroy one isolated STATIC window without Shell view creation or foreground change)");
             Console.WriteLine("       --private-desktop-window-visibility-control (show and destroy a SW_SHOWNOACTIVATE STATIC window without Shell view creation)");
