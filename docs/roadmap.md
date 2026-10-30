@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 05:41 UTC：基于干净主线 `6be4ea7a8dc2ecd11652de27252e9fd588fa3471` 刷新集中验收副本，路径 `src/.state/gui-smoke/20261030-054109-636-da4cf7/`，状态 `prepared-not-run`，39 项待可见验收。较早优先级表中的候选提交与哈希已过期；以[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)为准。准备仅构建并复制隔离副本，未启动 GUI、创建 ExplorerBrowser 或操作桌面。
+
 2026-10-30 当前运行内存快照：只读采样正式预览 `temp.78` 的同一 PID 19580 约 1 分钟，Working Set 为 362.0→364.1 MiB、Private Bytes 为 179.7→181.6 MiB，句柄约 1407–1443、线程 77–90。未控制用户操作，不能据此判断泄漏或归因；后续应在固定窗格/标签/目录与操作序列下复采。详情见[内存采样记录](memory-sampling.md#2026-10-30temp78-当前运行实例一分钟快照)。
 
 2026-10-30 集中验收候选更新：用户确认采用独立“克隆视图”命令，保留“复制标签”语义；源码和隐藏 HostProbe 已覆盖该分流、最多 100 站的可重放历史、逐站选区及普通/虚拟/搜索位置。将当前干净主线 `14e6aa5cfc2f6fbc9a230211faf3a0270f8fa0fa` 重新执行 `GuiSmoke/run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-052522-882-ebcdd5/`，39 项 `prepared-not-run`。只构建隔离副本和夹具，未启动窗口或创建 ExplorerBrowser。候选身份、SHA-256 与可见验收清单见[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)；克隆逐站焦点、异步搜索结果和实际菜单操作仍待用户集中验收。
