@@ -8,7 +8,7 @@
 
 2026-10-30 集中验收候选（最新）：在提交 `b3e7229d60d21575f7bde53e1db653df759b441b` 上运行 `GuiSmoke -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-153400-994-5c9bdd/`。`preparation.json` 标记 `prepared-not-run`、41 项待验收、`SourceWorkingTreeDirty=false`；BuildIdentity 为 `0.6.0-preview.20261030-153400-994-5c9bdd+b3e7229d60d21575f7bde53e1db653df759b441b`，EXE/DLL SHA-256 为 `DDFE53B03119F0FC9316F2D09A49A7BEA23C6EB835F3B0EB22BEC1F8307E36E5` / `581DEC406577157166CDA57FE781370C131DEAFBEB0E429C053E6BD132CD6154`。F5 与查看方式的列表刷新黑屏/选区焦点验收已列入清单；准备过程中没有启动窗口、创建 ExplorerBrowser 或发送输入。完整身份与验收重点见[候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
-2026-10-30 文件列表刷新重绘（当前源码复核）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。当前实现从 F5 的 ContextIdle 恢复改为观察原生行数连续三次相同（50 ms 采样，1.5 s 上限），随后启用重绘并失效当前 view HWND；查看方式切换不再包裹 `SetRedraw`。App Release build 通过。该逻辑尚未可见验收；新候选列有填充目录 F5/外部创建与详情、列表、图标、平铺、内容视图的黑屏时长、框架稳定性、滚动位置、选区和焦点检查。见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)和[最新候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
+2026-10-30 文件列表刷新重绘（当前源码复核）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。当前实现让 Shell 自己绘制刷新过程；行数采样仅用于延后选区/焦点恢复，不冻结或强制整片重绘。查看方式切换的完整状态读取继续延后到 Shell 模式 setter 返回之后。App Release build 通过。视觉效果尚未可见验收；集中候选仍需检查填充目录 F5/外部创建与详情、列表、图标、平铺、内容视图的空白时长、框架稳定性、滚动位置、选区和焦点。见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)和[最新候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
 2026-10-30 列表重绘让路：F5 的 `IShellView.Refresh()` 与查看方式的 `SetViewModeAndIconSize` 都保留在当前 Shell 视图内；两者之后的同步状态读取、行数检查和选区/焦点恢复改为 `DispatcherPriority.ContextIdle`，让排队中的 Shell 绘制消息先有机会处理。App Release build 通过（0 警告/错误），未运行测试或 UI。该调整只减少应用收尾工作抢占首次绘制的机会，不改变 Shell 自身的重枚举/重排，也不证明黑屏时段已缩短；F5 与各查看方式的视觉时长留待集中验收。完整 Shell 视图重建不在这两条调用路径中。
 
@@ -4900,6 +4900,12 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - F5 仍使用 `IShellView::Refresh`，这是 Explorer 对 F5 的标准 Shell 操作；查看方式切换只调用 `IFolderView2::SetViewModeAndIconSize`，此前并未重新导航或完整刷新。
 - 文件列表现在在原生刷新期间暂缓重绘，并在本轮异步刷新完成回调清理时恢复；查看方式切换只在同步设置视图模式期间暂缓重绘。若 Shell 不支持 `IFolderView2::SetRedraw`，操作按原路径继续。
 - ExplorerDirs.App Release 构建通过（0 警告/错误），本次可见 UI 闪烁尚未验收；实际空窗、刷新耗时及慢速/虚拟 Shell 位置的行为留待集中 UI 验收。没有重建 ExplorerBrowser，也未改导航/刷新语义。
+
+### 后续修正
+
+- 用户仍观察到 F5 列表黑屏。源码复核发现刷新期间关闭 `IFolderView2` 重绘，并在异步完成后对当前 view HWND 连同所有子控件执行强制失效，会额外制造整片列表的重绘窗口。现移除这两步；`IShellView.Refresh()` 继续由 Shell 原生处理，完成等待仅用于之后恢复选区和焦点。
+- 查看方式切换继续只设置当前 `IFolderView2` 的模式和图标尺寸，没有重导航、重建浏览器或调用 F5。原有延后状态读取保留，以免阻塞 Shell 自己的重排和首次绘制。
+- App Release 构建通过（0 警告、0 错误）。后台探针不采集屏幕像素，本次视觉是否改善仍需集中 UI 验收；不会据此声称黑屏已消失。
 
 ### 反馈后的第二轮调整
 

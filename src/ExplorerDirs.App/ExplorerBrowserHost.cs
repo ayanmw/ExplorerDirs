@@ -28,8 +28,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private const uint BrowseBack = 0x4000;
     private const uint BrowseForward = 0x8000;
     private const uint AncestorRootOwner = 3;
-    private const uint RedrawInvalidate = 0x0001;
-    private const uint RedrawAllChildren = 0x0080;
     // Standard Shell view command IDs from shlobj.h; the Shell executes the operations.
     private const int ShellCut = 0x7018;
     private const int ShellCopy = 0x7019;
@@ -2686,23 +2684,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
-    private ShellViewRedrawLease? TrySuppressCurrentViewRedraw()
-    {
-        var view = GetFolderView2Pointer();
-        if (view == IntPtr.Zero) return null;
-        try
-        {
-            // Redraw suppression is only a visual optimization. Keep the Shell operation
-            // usable when a provider does not support IFolderView2::SetRedraw.
-            return ShellViewRedrawLease.TrySuppress(view);
-        }
-        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
-        {
-            return null;
-        }
-        finally { Marshal.Release(view); }
-    }
-
     private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -3119,14 +3100,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
-            var refreshRedraw = TrySuppressCurrentViewRedraw();
-            if (!IsCurrentRefreshRequest())
-            {
-                refreshRedraw?.Dispose();
-                selectionRecoverySuppression.Dispose();
-                selection?.Dispose();
-                return;
-            }
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
@@ -3135,14 +3108,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch when (!IsCurrentRefreshRequest())
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3150,7 +3121,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3158,15 +3128,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
             }
 
-            // The Shell refills the native list asynchronously after Refresh. ContextIdle
-            // alone does not mean enumeration has finished, so keep redraw suppressed until
-            // the visible row count has settled (with a bounded fallback for virtual folders).
+            // Shell refills the current native list asynchronously. Keep the completion wait
+            // for selection restoration only; freezing and invalidating the whole view here
+            // replaces Shell's incremental paint with a visibly blank full repaint.
             var selectionOwnershipTransferred = false;
             var completionCleaned = 0;
             DispatcherTimer? refreshPaintWait = null;
@@ -3174,12 +3143,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
                 refreshPaintWait?.Stop();
-                refreshRedraw?.Dispose();
-                // IFolderView2::SetRedraw re-enables painting but does not guarantee that
-                // the native child receives a paint message after its rows were repopulated.
-                if (IsCurrentRefreshRequest() && IsWindow(_viewWindow))
-                    _ = RedrawWindow(_viewWindow, IntPtr.Zero, IntPtr.Zero,
-                        RedrawInvalidate | RedrawAllChildren);
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
@@ -5914,9 +5877,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")]

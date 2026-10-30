@@ -78,18 +78,16 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Product F5 calls `IShellView.Refresh()` directly on the current view; mode changes call `SetViewModeAndIconSize` on that same view and do not call `Refresh`. Task 4 left redraw timing to DefView; Task 5 now evaluates a lease held through asynchronous refresh completion. The mode setter's full state readback runs later at dispatcher background priority; the accepted mode and normalized icon size are cached first, while browser/navigation generations prevent a delayed read from updating a retired view. Neither hidden-host evidence nor the refresh comparison renders pixels. F5 and mode-switch visuals therefore remain unverified until a visible UI acceptance pass.
+The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Product F5 calls `IShellView.Refresh()` directly on the current view; mode changes call `SetViewModeAndIconSize` on that same view and do not call `Refresh`. Current source leaves redraw timing to DefView. The mode setter's full state readback runs later at dispatcher background priority; the accepted mode and normalized icon size are cached first, while browser/navigation generations prevent a delayed read from updating a retired view. Neither hidden-host evidence nor the refresh comparison renders pixels. F5 and mode-switch visuals therefore remain unverified until a visible UI acceptance pass.
 
 Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 
-### Task 5: Hold Shell redraw through refresh completion
+### Task 5: Bounded redraw lease experiment and rollback
 
-The user continues to report a visible blank interval during F5 and view-mode changes. The previous redraw lease was removed because it covered only the synchronous `IShellView::Refresh()` call and had no evidence that its timing helped. A new experiment keeps redraw disabled on the same `IFolderView2` until the current asynchronous refresh completion callback, while the view-mode lease covers only its synchronous setter. This does not cache old pixels or replace Shell painting; Shell still supplies the final frame.
+- [x] Add a bounded asynchronous redraw lease and prepare a clean isolated GUI candidate. The candidate was not launched, so the experiment never established a visual benefit.
+- [x] Remove the F5 redraw lease and forced whole-view invalidation after source review showed that the app was freezing painting and then explicitly repainting the full native view. The refresh completion wait remains for selection/focus recovery only.
+- [ ] Visually confirm the updated F5 behavior and view-style transitions; check a slow directory, selection/focus, scrolling, and a virtual Shell location.
 
-- [x] Add the bounded asynchronous redraw lease and failure fallback; build Release successfully.
-- [x] Prepare a clean, isolated GUI acceptance copy at `src/.state/gui-smoke/20261030-151719-336-e07622/` from commit `6f4fb0bcc682f380046d205841b68853392ad8d8`.
-- [ ] Visually confirm whether the list remains painted during F5 and whether it updates cleanly at completion; check a slow directory, selection/focus, scrolling, and virtual Shell path behavior. Keep or remove the experiment based on these observations.
-
-Ruling: treat this as a separate timing experiment from the rejected synchronous-only lease. The acceptance copy is prepared but not launched; without visual evidence its outcome is unknown.
+The latest source build validates compilation only. Neither hidden-host row-count probes nor this plan's source review measures rendered pixels; visual acceptance remains open.
 
 The earlier product-host F5 probe confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. In the latest run, the hidden native view-style probe reported supported modes and preserved selection/sort/group state, then exited with its foreground-boundary guard because the foreground changed; do not treat that run as a clean end-to-end pass. Neither probe renders visible pixels.
