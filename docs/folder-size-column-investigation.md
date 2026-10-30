@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-30：显式重放自定义列的刷新基线复核
+
+此前更新 A/B 用 `IColumnManager.Capture` 的返回值重放刷新前列集合；该集合从未包含合成 namespace 的递归大小键，因此通知后的“无列值”不能单独证明通知本身没有刷新能力。本轮改用固定的 Name / Recursive Size / Type 三列，经 `SetColumns` 与 `SetColumnInfo` 显式重放自定义键，并在通知前检查基线。
+
+初始视图仍显示 `child=10`、`small.bin=4`，且原生列标题排序基线通过。`IShellView::Refresh` 后，显式 `ShellColumnManager.Apply` 返回成功，随后 `IColumnManager.Capture` 也返回成功并读回递归大小属性键；但 DefView 的实际行文本没有恢复为 `10/4`，列 1 读到 `1200/4`，无法在正确值基线上继续通知 A/B。探针现在检测到这一状态后会明确输出 `notification-skipped=True`，不再把缺少有效列值的后续结果误当作通知比较。
+
+WPF `HwndSource` Private Desktop 探针退出码 0，桌面前台 HWND 和最后输入时间未变，临时 CLSID、Desktop namespace 注册及夹具清理完成。退出码只表示探针完整结束；“显式列恢复”这一行为断言失败，所以本轮没有通过该恢复路线，也没有验证通知能否刷新一个正确重建的自定义列。早期以标准列快照为恢复基线的通知结果需按无有效列值基线解读。产品仍使用 ExplorerBrowser，未接入该原型。日志：`src/.state/native-probe-watchdog/20261030-093242-358ea2af.stdout.log`。
+
 ## 2026-10-30：WPF 根宿主下递归大小列更新 A/B
 
 在隔离 Private Desktop 中通过受保护的临时 Desktop `NameSpace` 注册解析到真实文件系统夹具的 namespace；自有 adapter 使用 `IShellFolder2::CompareIDs` 提供数值比较，并由 WPF `HwndSource` 承载 `IShellView`。视图初次建立时，递归目录 `child` 显示大小 `10`，文件 `small.bin` 显示大小 `4`；升序和降序都按数值正确重排。前台 HWND 与最后输入时间未变。

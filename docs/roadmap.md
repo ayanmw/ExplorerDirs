@@ -64,7 +64,7 @@
 
 2026-10-30 Q-Dir “Copy Path”：在“编辑”菜单增加“复制所选项目完整路径”，单选原样复制，多选按行复制；虚拟 Shell 位置或空选区不写入部分/无效路径。定向路径格式 smoke、完整 Release `SettingsSmoke`、App Release build（0 警告/错误）、`ExplorerDirs.HostProbe --selected-paths-clipboard` 真实生产 Shell 单选/多选取值（隐藏宿主、前台不变、未触碰剪贴板）及 `git diff --check` 通过；未启动 GUI。下一次集中验收需检查菜单状态、剪贴板文本、虚拟项目拒绝，以及复制后原文件视图仍可立即用方向键操作。[Shell 功能对照](shell-parity.md)
 
-2026-10-30：逐行递归大小这一隔离 `IShellView` 假设已完成当前 DefView 通知路径验证，不进入产品集成。单项更新、单项加父目录更新、整视图刷新、`LVM_UPDATE`/重绘及“删除后重建”通知都没有让 DefView 再次请求自定义列值；整视图刷新成本更高且会丢焦点/选区。`IColumnManager` 捕获集合在通知前就不含自定义属性列，不能用它恢复该列。结果只适用于隔离合成 namespace，不代表 ExplorerBrowser 产品行为。NativeProbe Release 与原生 `/W4 /WX` 已构建；产品和 release 未改。后续若重开该方向，需要提出新的受支持架构假设，不再叠加未经证实的 DefView 刷新技巧。
+2026-10-30：修正逐行递归大小隔离 A/B 的基线解释。此前 `IColumnManager.Capture` 快照不包含合成 namespace 的自定义递归列，旧通知轮次因此没有先恢复有效值列，不能单独据此断言各通知策略无法刷新正确列值。新 WPF `HwndSource` Private Desktop 探针显式调用 `SetColumns`/`SetColumnInfo` 重放 Name/Recursive Size/Type；调用成功且 `Capture` 读回自定义键，但 DefView 行内容仍为 `1200/4` 而不是预期 `10/4`，探针检测到无效基线后跳过通知。初始视图仍显示 `10/4` 并可排序。该轮退出码 0、前台与输入时间未变、临时注册/夹具清理完成；退出码只说明探针结束，不代表列恢复通过。产品继续使用 ExplorerBrowser，未接入原型；详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30显式重放自定义列的刷新基线复核)。下一步需评审能在刷新后重新提供有效派生列值的受支持视图架构；不再运行缺少正确列基线的通知对照。
 
 2026-10-30 目录树图标后台复核：生产 `NativeShellTree` 隐藏宿主读到有效的系统图像列表句柄和普通目录图标索引；默认与显式图像列表的像素、初始化尺寸与最终尺寸 A/B 均一致，前台不变。没有证据支持再改图标选择代码；当前待确认点是 WPF `HwndHost` 的最终可见绘制，保留到集中 GUI 验收。
 
