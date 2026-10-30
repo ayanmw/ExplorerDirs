@@ -342,7 +342,7 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 2026-10-30 F5 与查看方式切换重绘调整：F5 直接调用当前 `IShellView.Refresh()` 刷新现有 Shell 文件视图的目录项目，不重建 ExplorerBrowser、标签、导航历史或整个窗格；移除调用前后的 `IFolderView2.SetRedraw` 切换，让 DefView 自己决定重枚举时的绘制时机。查看方式只调用当前视图的 `SetViewModeAndIconSize`，本来就不重刷新目录；移除模式切换的重绘租约，并把完整 Shell 状态读回排到 Dispatcher 后台阶段，先缓存 setter 已接受的模式/图标尺寸，避免同步读取排序、分组、列配置占住绘制前的 UI 调用栈。读回按浏览器/导航代际复核，只针对仍可见视图执行。App Release 构建通过；未运行测试或打开 GUI，视觉效果仍待集中 UI 验收。后续分别记录 F5 与查看方式切换的空白间隔、框架稳定性、选择/焦点和滚动条效果。
 
-2026-10-31 当前源码复核：F5 菜单/工具栏入口实际调用 `RefreshPreservingLastFrame()`，仅显式用户刷新会在 `IShellView.Refresh()` 期间短暂使用 `IFolderView2.SetRedraw` 租约，待 Shell 行数稳定或达到 1.5 秒上限后释放；自动目录变化、筛选和其它内部刷新不使用该租约。查看方式只调用当前 `IFolderView2.SetViewModeAndIconSize`，没有刷新目录或重建视图；完整视图状态读回延后到 Dispatcher `ContextIdle`。因此上文“F5 已移除 `SetRedraw`”已被后续改动取代。Q-Dir 语言表另列“不重新枚举视图”和“重命名或复制时禁用自动排序”两个选项；这两项不能作为解决 F5 空白的同一功能。[Q-Dir 官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK) 此处仅核实调用链，未能据此确认两种操作的空白帧是否改善；可见闪烁仍待集中 UI 验收。
+2026-10-31 当前源码复核：F5 菜单/工具栏入口调用 `RefreshPreservingLastFrame()`。普通文件系统位置先发 `SHCNE_UPDATEDIR`；搜索、虚拟位置或当前目录 PIDL 读取失败时回退 `IShellView.Refresh()`。显式 F5 在更新期间短暂使用 `IFolderView2.SetRedraw` 租约，行数稳定或到达 1.5 秒上限后释放；自动目录变化、筛选及其它内部刷新不使用该租约。查看方式只调用当前 `IFolderView2.SetViewModeAndIconSize`，不刷新目录或重建视图；完整状态读回延后到 Dispatcher `ContextIdle`。早期“F5 已移除 `SetRedraw`”记录对应中间版本，后续又加入了有界租约。Q-Dir 语言表另列“不重新枚举视图”和“重命名或复制时禁用自动排序”两个选项；两者不能作为解决 F5 空白的同一功能。[Q-Dir 官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK) 源码与隐藏探针不能确认实际像素空白时长或租约内输入命中；可见闪烁仍待集中 UI 验收。
 
 2026-10-31 诊断补充：当 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE=1` 时，F5 和实际模式变更会各自记录随后 2 秒内原生视图子窗口的 `WM_PAINT` / `WM_ERASEBKGND` 时间线、Shell 处理耗时和返回值，最多 256 条；其余运行不采集这组消息，也不改绘制或输入。该数据用于后续区分 Shell 背景擦除与列表绘制时序，不能单独证明画面颜色、空白持续时间或命中目标安全。
 

@@ -4963,7 +4963,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：F5 与查看方式切换调用链复核
 
-- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshPreservingLastFrame → IShellView.Refresh`。仅显式用户刷新持有短时 `IFolderView2.SetRedraw` 租约，行数连续稳定后释放，最多等待 1.5 秒；目录 watcher、筛选等内部刷新不使用该租约。它更新当前 Shell 视图内容，不重建 ExplorerBrowser、标签、导航历史或窗格。
+- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshPreservingLastFrame`。普通文件系统目录通过当前绝对 PIDL 发 `SHCNE_UPDATEDIR`；搜索/虚拟位置或无法取得目录 PIDL 时回退 `IShellView.Refresh`。仅显式用户刷新持有短时 `IFolderView2.SetRedraw` 租约，行数连续稳定后释放，最多等待 1.5 秒；目录 watcher、筛选等内部刷新不使用该租约。两条路径都作用于当前 Shell 视图，不重建 ExplorerBrowser、标签、导航历史或窗格。
 - 查看方式切换只调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，随后在 Dispatcher `ContextIdle` 读取其余配置，不重枚举目录。Shell 仍需重排/重绘列表项目，因此这不是只改一个模式标志就能避免列表重绘的操作。
 - 源码复核发现先前“已移除 F5 SetRedraw”的记录已被后续仅针对手动 F5 的有限租约取代，已同步修正 shell-parity 说明。没有可见像素证据证明当前租约消除了黑屏；本轮不添加新的重绘拦截或整窗格失效。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否保留租约或改用更窄的呈现路径。
 
@@ -4999,7 +4999,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：F5 空白区间的源码边界复核
 
-- 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
+- 显式 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；普通文件系统目录先通过 `SHCNE_UPDATEDIR` 更新，搜索/虚拟位置或 PIDL 读取失败则调用 `IShellView.Refresh()`。租约释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
 - 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
 - Q-Dir 官方 FAQ 将 Soft-Refresh 定义为复制/拖放/重命名等导致项目变化时禁止自动重排列表，并非“不重新枚举”的 F5 替代方案；因此它不能解释或直接修复当前的刷新空白。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)
 - 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
