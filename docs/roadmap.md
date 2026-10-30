@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 Q-Dir 官方功能差距补查：当前官网版本 12.82（2026-10-24）；FAQ 112 还列出 Soft-Refresh，可在复制/重命名、拖放、粘贴、刷新等期间避免文件自动重排。当前 Explorer Dirs 无对应偏好。微软 `FWF_AUTOARRANGE` 是自动排列视图项，`FWF_NOENUMREFRESH` 会跳过刷新枚举，两者都不能直接视为该功能的等价开关；暂列 P2 待评估，先确认逐标签/全局语义及操作后的排序/内容新鲜度，不擅自改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
+2026-10-31 Q-Dir 官方功能差距补查：官方语言表分别列出 `Soft-Refresh, not re-enumerate the view` 与 `Disable auto sorting when rename or copy items`；FAQ 112/139 对后者的文案和用途有补充，但没有说明两个开关如何交互。Explorer Dirs 当前没有这两项偏好。不能把 `FWF_AUTOARRANGE` 或 `FWF_NOENUMREFRESH` 直接当作完整等价实现；暂列 P2，先验证外部变化/F5 的内容新鲜度与复制/重命名/拖放时的排序行为，再确定两个功能各自的持久化范围，不改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
 
 2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
