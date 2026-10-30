@@ -4749,8 +4749,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：克隆视图的逐历史位置选区
 
 - 每个历史停靠点现在维护最近一次稳定 Shell 选区的解析名快照；选区回调后在 Dispatcher 安全时段读取，并在 COM 读取后复核视图代次和位置，避免用过期视图覆盖新状态。后退/前进成功后，普通 Shell 文件夹位置会通过现有批量 PIDL 选择恢复目标停靠点的选区。创建克隆时同步当前选择快照，避免只复制上次导航留下的旧状态。历史位置上限仍为 100；原“复制标签”行为不变。
-- SettingsSmoke 扩展了选区快照的 RED/GREEN 覆盖：逐站保存、后退后读回目标选区、前进分支截断时保留既有站点选择、独立克隆快照、搜索位置选择身份和历史上限。未运行 ExplorerBrowser 或 GUI。
-- 搜索结果的解析名选区会随历史记录保存，但现有 `QueueShellItemSelections` 不支持搜索视图内的 child PIDL 恢复；需要另行建立搜索结果稳定身份到新搜索视图相对 PIDL 的映射。虚拟 Shell direct-child、用户选择变化后的历史选区捕获和可见 Back/Forward 验收仍待集中验证。
+- SettingsSmoke 覆盖逐站快照、后退/前进、前进分支截断、独立克隆快照、搜索位置选择身份和历史上限。新增隐藏 PaneTabTransferProbe：真实 ExplorerBrowser 搜索结果选中后调用生产“克隆视图”，确认克隆 URI、历史停靠点和启动选区解析名一致；克隆结果视图枚举后，通过对应行 PIDL 进行原生复选，并检查搜索 Back/Forward 保留同一选区身份。隐藏父窗口不满足自动恢复所需的窗口激活和焦点门控，故未把手动复选冒充自动异步恢复验收。完整 UI 与真实前台焦点路径待集中验收。
+- `--search-navigation` HostProbe 原先通过反射少传了 `Search` 的可选 `scopePath` 参数，第一阶段后即抛 `TargetParameterCountException`；显式传入每窗格临时范围后，四个隐藏生产 Shell 宿主的双查询、后退/前进、父目录返回及连续请求替换全部通过。
 
 ## 2026-10-30：`.qdr` 区段边界修正
 

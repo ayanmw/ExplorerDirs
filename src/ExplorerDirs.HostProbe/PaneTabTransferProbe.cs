@@ -182,12 +182,11 @@ internal static class PaneTabTransferProbe
             var copiedBrowser = browserProperty.GetValue(copiedState)!;
             Ensure(!ReferenceEquals(copiedState, state) && !ReferenceEquals(copiedBrowser, browser),
                 "copy creates an independent tab and Shell host");
+            WaitForShellItemCount(browserType, copiedBrowser, 2, "the copied Shell view finished enumerating before selection");
             ApplyCopiedShellSelections(browserType, copiedBrowser, sourceA, ["probe.txt", "probe-2.txt"]);
-            var copiedSelectedPaths = (IReadOnlyList<string>)browserType
-                .GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!.Invoke(copiedBrowser, null)!;
-            Ensure(copiedSelectedPaths.Select(Path.GetFileName).Order(StringComparer.OrdinalIgnoreCase)
-                    .SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
-                "the copied Shell view applies and reports the original multi-selection");
+            PumpUntil(() => TryReadSelectedNames(browserType, copiedBrowser, out var copiedSelectedPaths) &&
+                copiedSelectedPaths.SequenceEqual(["probe-2.txt", "probe.txt"], StringComparer.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(5), "the copied Shell selection became readable after view readiness");
             var queueSelections = browserType.GetMethods(InstanceMembers).Single(method =>
                 method.Name == "QueueFileSystemSelections" && method.GetParameters().Length == 1 &&
                 method.GetParameters()[0].ParameterType == typeof(IReadOnlyList<string>));
@@ -273,6 +272,58 @@ internal static class PaneTabTransferProbe
             targetPane.GetType().GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [clonedState]);
             Ensure(targetTabsControl.Items.Count == 2, "the cloned view can be closed independently");
 
+            browserType.GetMethod("Search", InstanceMembers)!.Invoke(browser, ["probe", sourceB]);
+            PumpUntil(() => browserType.GetProperty("CurrentSearchUri", InstanceMembers)!.GetValue(browser) is string,
+                TimeSpan.FromSeconds(15), "the source tab entered a scoped Shell search");
+            WaitForShellItemCountAtLeast(browserType, browser, 1, "the source Shell search populated");
+            SelectShellViewIndex(browserType, browser, 0);
+            var searchSelection = ReadSelectedShellNames(browserType, browser);
+            Ensure(searchSelection.Length == 1, "a concrete Shell search result was selected before cloning");
+            var searchHistorySelection = navigationHistoryType.GetProperty("CurrentSelection", InstanceMembers)!;
+            PumpUntil(() => ((IReadOnlyList<string>)searchHistorySelection.GetValue(navigationHistory)!)
+                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(5), "the source history captured its Shell search result selection");
+            var sourceSearchUri = (string)browserType.GetProperty("CurrentSearchUri", InstanceMembers)!.GetValue(browser)!;
+
+            paneType.GetMethod("CloneView", InstanceMembers)!.Invoke(targetPane, [state]);
+            PumpUntil(() => targetTabsControl.Items.Count == 3 &&
+                string.Equals(browserType.GetProperty("CurrentSearchUri", InstanceMembers)!.GetValue(
+                    browserProperty.GetValue(((TabItem)targetTabsControl.SelectedItem!).Tag!)) as string,
+                    sourceSearchUri, StringComparison.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(15), "the cloned view reopened the same scoped Shell search");
+            var searchCloneTab = (TabItem)targetTabsControl.SelectedItem!;
+            var searchCloneState = searchCloneTab.Tag!;
+            var searchCloneBrowser = browserProperty.GetValue(searchCloneState)!;
+            var searchCloneHistory = searchCloneState.GetType().GetProperty("NavigationHistory", InstanceMembers)!.GetValue(searchCloneState)!;
+            var searchCloneSelection = searchCloneHistory.GetType().GetProperty("CurrentSelection", InstanceMembers)!;
+            Ensure(((IReadOnlyList<string>)searchCloneSelection.GetValue(searchCloneHistory)!)
+                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                "the cloned search history retained the selected Shell parsing name");
+            Ensure(((IReadOnlyList<string>)searchCloneState.GetType().GetProperty("StartupSelectItems", InstanceMembers)!
+                    .GetValue(searchCloneState)!).SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                "the cloned search queued the saved Shell selection for asynchronous restoration");
+            WaitForShellItemCountAtLeast(browserType, searchCloneBrowser, 1, "the cloned Shell search populated");
+            SelectShellViewIndex(browserType, searchCloneBrowser, 0);
+            Ensure(ReadSelectedShellNames(browserType, searchCloneBrowser)
+                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                "the cloned Shell search resolves the saved result to the same native view item");
+            targetPane.GetType().GetMethod("GoBack", InstanceMembers)!.Invoke(targetPane, null);
+            PumpUntil(() => string.Equals(ReadBrowserPath(searchCloneTab), sourceB, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(searchCloneState), TimeSpan.FromSeconds(15),
+                "the cloned search history navigated Back to its filesystem scope");
+            targetPane.GetType().GetMethod("GoForward", InstanceMembers)!.Invoke(targetPane, null);
+            PumpUntil(() => string.Equals(browserType.GetProperty("CurrentSearchUri", InstanceMembers)!
+                    .GetValue(searchCloneBrowser) as string, sourceSearchUri, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(searchCloneState) &&
+                ((IReadOnlyList<string>)searchCloneSelection.GetValue(searchCloneHistory)!)
+                    .SequenceEqual(searchSelection, StringComparer.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(15), "the cloned search history replayed Forward with its selection snapshot");
+            targetPane.GetType().GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [searchCloneState]);
+            Ensure(targetTabsControl.Items.Count == 2, "the cloned search view closes independently");
+            navigate.Invoke(browser, [sourceB]);
+            PumpUntil(() => string.Equals(ReadBrowserPath(movedTab), sourceB, StringComparison.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(15), "the source returned to its filesystem path after the search clone check");
+
             var thisPc = "shell:MyComputerFolder";
             var systemDrive = Path.GetPathRoot(Environment.SystemDirectory)!;
             navigate.Invoke(browser, [thisPc]);
@@ -325,7 +376,7 @@ internal static class PaneTabTransferProbe
                 "closing the transferred tab destroys the original HWND and releases the browser");
 
             EnsureForegroundUnchanged(foregroundBefore, "moving and navigating a tab");
-            Console.WriteLine("Pane tab transfer and clone host probe: PASS (move retains TabState/HWND/history; copy is independent; filesystem and This PC clone history/selection contracts pass; close releases hosts)");
+            Console.WriteLine("Pane tab transfer and clone host probe: PASS (move retains TabState/HWND/history; copy is independent; filesystem, This PC, and search-folder clone history/selection identity pass; close releases hosts)");
             return 0;
         }
         catch (Exception ex)
@@ -843,6 +894,41 @@ internal static class PaneTabTransferProbe
         ((IReadOnlyList<string>)hostType.GetMethod("CaptureSelectedShellParsingNames", InstanceMembers)!
             .Invoke(browser, null)!).ToArray();
 
+    private static void SelectShellViewIndex(Type hostType, object browser, int index)
+    {
+        var shellBrowser = hostType.GetField("_browser", InstanceMembers)!.GetValue(browser)!;
+        var browserInterface = hostType.GetNestedType("IExplorerBrowser", BindingFlags.NonPublic)!;
+        var shellViewId = new Guid("000214E3-0000-0000-C000-000000000046");
+        var shellViewArgs = new object?[] { shellViewId, null };
+        Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!
+            .Invoke(shellBrowser, shellViewArgs)!);
+        var shellView = shellViewArgs[1]!;
+        var folderViewId = new Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
+        var folderViewArgs = new object?[] { folderViewId, null };
+        object? childPidl = null;
+        object? folderView = null;
+        try
+        {
+            Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!
+                .Invoke(shellBrowser, folderViewArgs)!);
+            folderView = folderViewArgs[1]!;
+            var itemArgs = new object?[] { index, IntPtr.Zero };
+            Marshal.ThrowExceptionForHR((int)hostType.GetNestedType("IFolderView", BindingFlags.NonPublic)!
+                .GetMethod("Item")!.Invoke(folderView, itemArgs)!);
+            childPidl = itemArgs[1];
+            Ensure(childPidl is IntPtr pointer && pointer != IntPtr.Zero,
+                "the Shell search result row exposed its current child PIDL");
+            Marshal.ThrowExceptionForHR((int)hostType.GetNestedType("IShellView", BindingFlags.NonPublic)!
+                .GetMethod("SelectItem")!.Invoke(shellView, [childPidl, 0x15u])!);
+        }
+        finally
+        {
+            if (childPidl is IntPtr pointer && pointer != IntPtr.Zero) Marshal.FreeCoTaskMem(pointer);
+            if (folderView is not null && Marshal.IsComObject(folderView)) Marshal.ReleaseComObject(folderView);
+            if (Marshal.IsComObject(shellView)) Marshal.ReleaseComObject(shellView);
+        }
+    }
+
     private static bool IsSameDriveName(string parsingName, string drivePath)
     {
         var drive = drivePath.TrimEnd('\\');
@@ -1030,8 +1116,14 @@ internal static class PaneTabTransferProbe
             "repeated inactive notifications preserve the existing resource reference");
         Console.WriteLine("PASS unhosted pane activation preserves content geometry and duplicate highlight references");
     }
-    private static void EnsureForegroundUnchanged(IntPtr expected, string action) =>
-        Ensure(GetForegroundWindow() == expected, $"foreground changed while {action}");
+    private static void EnsureForegroundUnchanged(IntPtr expected, string action)
+    {
+        var actual = GetForegroundWindow();
+        if (actual == expected) return;
+        GetWindowThreadProcessId(expected, out var expectedProcessId);
+        GetWindowThreadProcessId(actual, out var actualProcessId);
+        throw new InvalidOperationException($"foreground changed while {action}: expected=0x{expected:X} pid={expectedProcessId}, actual=0x{actual:X} pid={actualProcessId}");
+    }
 
     private static void Ensure(bool condition, string message)
     {
@@ -1040,6 +1132,8 @@ internal static class PaneTabTransferProbe
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint requested, out uint attributes);
     [DllImport("shell32.dll")] private static extern nint ILFindLastID(nint pidl);

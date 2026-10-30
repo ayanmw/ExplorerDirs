@@ -121,9 +121,9 @@ internal static class SearchHostProbe
                     clock.Restart();
                     for (var i = 0; i < hosts.Count; i++)
                     {
-                        Call(hosts[i], "Search", "initial");
+                        Call(hosts[i], "Search", "initial", folders[i]);
                         if (returnToDirectory) Call(hosts[i], "Navigate", folders[i]);
-                        else Call(hosts[i], "Search", "second");
+                        else Call(hosts[i], "Search", "second", folders[i]);
                     }
                     return;
                 }
@@ -132,7 +132,10 @@ internal static class SearchHostProbe
                 clock.Restart();
                 foreach (var host in hosts)
                 {
-                    var result = action == "Search" ? Call(host, action, stage == 1 ? "initial" : "second") : Call(host, action);
+                    var index = hosts.IndexOf(host);
+                    var result = action == "Search"
+                        ? Call(host, action, stage == 1 ? "initial" : "second", folders[index])
+                        : Call(host, action);
                     if (result is false) throw new Exception(action + " was rejected.");
                 }
             }
