@@ -14,6 +14,8 @@
 
 2026-10-31 主线集中验收候选更新：最新副本基于干净提交 `c4ff10034d0934168d3a3e6a6523b4004cb2650c`，目录树延时配置档已随验收夹具纳入，四窗格副本位于 `src/.state/gui-smoke/20261030-232629-182-304e58`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `08943F2DEB9A687E0D45365C1968B0544EBCC137258BE8768A6C5D16F99EC6D2` / `D70E2125A2B979AC812AEDB302A5A97DF293F27791E82BAED106AB43FF28DB9`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。刷新空白、命中目标、选区/焦点/滚动已列入集中验收。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
+2026-10-31 当前主线后台回归复核（源码提交 `c4ff10034d0934168d3a3e6a6523b4004cb2650c`；随后仅有候选记录文档提交）：完整 Release `SettingsSmoke` 通过；App 与 NativeProbe Release build 均为 0 警告、0 错误；`--synthetic-shell-folder-tree-smoke` 通过嵌套枚举、递归大小/列值、PIDL、项目菜单/数据对象、多选 Copy/Move/Delete、同名冲突保留及重命名合同，结果明确为 `shell-view-created=False`。这些结果复核已实现后端与隔离 adapter，不证明 DefView/IShellView 可见逐行大小列、排序、真实 OLE 拖放或产品迁移；Explorer Dirs 产品仍使用 ExplorerBrowser，可见验收仍按上述候选集中进行。
+
 2026-10-31 递归目录树扫描取消边界：可见文件夹大小原型在进入递归扫描前会先物化需要返回的路径集合；现在集合构建逐项检查 CancellationToken，取消后不再继续枚举剩余目标。SettingsSmoke 先验证旧行为会在预取消时仍消费路径，再覆盖枚举中途取消；定向扫描 smoke、完整 Release SettingsSmoke、App 与 NativeProbe Release build 均通过（0 警告/错误）。此项仅减少隔离逐行大小原型在刷新/关闭后的无效准备工作，不接入产品 ExplorerBrowser，也未测量大型/网络目标的实际取消延迟。
 
 2026-10-31 隔离逐行大小列复用单位格式：`CommonListViewColorBaseline` 的大小单元格不再固定输出字节数，而调用应用已有 `ByteSizeFormatter`，支持传入自动/固定单位、精度和千位分隔设置；尚未扫描的行保留空白，不显示虚假的零值。接线合同先在旧代码上失败，定向 smoke 覆盖自动 MB、字节千分位及未扫描状态通过。此项仅验证隔离 ListView 原型可复用格式策略；未连入用户配置或产品 ExplorerBrowser，Shell 列和可见 UI 仍未实现。
