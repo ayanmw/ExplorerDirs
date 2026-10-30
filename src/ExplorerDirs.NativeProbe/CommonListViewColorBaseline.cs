@@ -434,7 +434,7 @@ internal static class CommonListViewColorBaseline
         var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(row.AbsolutePidl, ref itemId, out var sourceItem));
         nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0,
-            renameItem = 0, renameOperation = 0;
+            renameItem = 0, renameOperation = 0, deleteItem = 0, deleteOperation = 0;
         try
         {
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
@@ -491,16 +491,30 @@ internal static class CommonListViewColorBaseline
                 File.Exists(renamedPayload) && new FileInfo(renamedPayload).Length == sourceLength &&
                 File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(renamedPayload));
             var foregroundAfterRename = GetForegroundWindow();
+            if (!renamed) return false;
+
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(renamedFolder, 0, ref itemId, out deleteItem));
+            var deleteClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var deleteInterfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref deleteClassId, 0, 1, ref deleteInterfaceId, out deleteOperation));
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(deleteOperation, 5)(deleteOperation, flags));
+            Marshal.ThrowExceptionForHR(At<DeleteItem>(deleteOperation, 18)(deleteOperation, deleteItem, 0));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(deleteOperation, 21)(deleteOperation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(deleteOperation, 22)(deleteOperation, out var deleteAborted));
+            var deleted = deleteAborted == 0 && !Directory.Exists(renamedFolder) && !File.Exists(renamedPayload);
+            var foregroundAfterDelete = GetForegroundWindow();
             Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};copy-aborted={aborted};" +
-                $"move-aborted={moveAborted};rename-aborted={renameAborted};copy-payload-matches-source={copied};" +
+                $"move-aborted={moveAborted};rename-aborted={renameAborted};delete-aborted={deleteAborted};copy-payload-matches-source={copied};" +
                 $"move-payload-matches-source={moved};rename-payload-matches-source={renamed};" +
-                $"source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};move-source-renamed={renamed};" +
+                $"delete-removed={deleted};source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};move-source-renamed={renamed};" +
                 $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/" +
-                $"0x{foregroundAfterMove.ToInt64():X}/0x{foregroundAfterRename.ToInt64():X}");
-            return renamed;
+                $"0x{foregroundAfterMove.ToInt64():X}/0x{foregroundAfterRename.ToInt64():X}/0x{foregroundAfterDelete.ToInt64():X}");
+            return renamed && deleted;
         }
         finally
         {
+            if (deleteOperation != 0) Marshal.Release(deleteOperation);
+            if (deleteItem != 0) Marshal.Release(deleteItem);
             if (renameOperation != 0) Marshal.Release(renameOperation);
             if (renameItem != 0) Marshal.Release(renameItem);
             if (moveOperation != 0) Marshal.Release(moveOperation);
@@ -798,6 +812,7 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
