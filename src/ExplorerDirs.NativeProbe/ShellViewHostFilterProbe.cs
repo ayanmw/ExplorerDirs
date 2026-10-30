@@ -79,6 +79,8 @@ internal static class ShellViewHostFilterProbe
         {
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             File.WriteAllText(Path.Combine(fixture, "child", "inside.txt"), "inside");
+            if (menuCommandsOnly)
+                Directory.CreateDirectory(Path.Combine(fixture, "aardvark"));
             Check(SHParseDisplayName(Path.Combine(fixture, "child"), 0, out childFolderPidl, 0, out _));
             File.WriteAllText(Path.Combine(fixture, "keep.txt"), "keep");
             Check(SHParseDisplayName(Path.Combine(fixture, "keep.txt"), 0, out filePidl, 0, out _));
@@ -118,18 +120,19 @@ internal static class ShellViewHostFilterProbe
             Check(Marshal.QueryInterface(view, in folderViewId, out folderView));
 
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            var expectedVisibleCount = menuCommandsOnly ? 3 : 2;
             int count;
             do
             {
                 Application.DoEvents();
                 Check(At<ItemCount>(folderView, 7)(folderView, 2, out count)); // SVGIO_ALLVIEW
-                if (count == 2 && host.IncludeObjectCalls >= 3) break;
+                if (count == expectedVisibleCount && host.IncludeObjectCalls >= 3) break;
                 Thread.Sleep(10);
             } while (DateTime.UtcNow < deadline);
 
             Check(At<ItemCount>(folderView, 7)(folderView, 2, out count));
             Console.WriteLine($"ishellview-host-filter: includecalls={host.IncludeObjectCalls}; filtercalls={host.Filter.ShouldShowCalls}; visible-items={count}; parent-visible={IsWindowVisible(parent)}; foreground-unchanged={GetForegroundWindow() == foreground}");
-            var passed = host.IncludeObjectCalls >= 3 && host.Filter.ShouldShowCalls >= 3 && count == 2 &&
+            var passed = host.IncludeObjectCalls >= 3 && host.Filter.ShouldShowCalls >= 3 && count == expectedVisibleCount &&
                 !IsWindowVisible(parent) && GetForegroundWindow() == foreground;
             if (!passed)
                 throw new Exception("Direct IShellView did not apply the ICommDlgBrowser3 filter to the isolated fixture.");
@@ -992,6 +995,7 @@ internal static class ShellViewHostFilterProbe
         Check(At<GetItem>(folderView, 6)(folderView, 0, out var expectedFocusedPidl));
         var expectedFocusedName = ReadVisibleItemNames(folderView, initialCount)[0];
         List<string> menuCommandFocusRecovery = [];
+        List<string> nativeSortOrders = [];
         uint modeAfterMenu;
         int iconSizeAfterMenu, visibleCount;
         // Sort/group can briefly expose the old item count and PIDL before a second Shell rebuild; require settled focus state before measuring or restoring.
@@ -1041,6 +1045,26 @@ internal static class ShellViewHostFilterProbe
             if (GetFocus() != listView || !FocusedItemNameMatches(folderView, expectedFocusedName) || selectedCount != 1)
                 throw new Exception($"The host could not restore list/item focus after Shell {command}: list-focus={GetFocus() == listView}, selection={selectedCount}.");
             menuCommandFocusRecovery.Add($"{command}:raw={rawPreserved}(hwnd={hwndFocusPreserved},item={itemPreserved},selection={rawSelectedCount}),samples=[{string.Join(';', focusSamples)}],restored=True");
+        }
+        void VerifyFolderSortOrder(bool ascending, string command)
+        {
+            var orderDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            var stableSamples = 0;
+            string[] names = [];
+            while (DateTime.UtcNow < orderDeadline && stableSamples < 3)
+            {
+                Application.DoEvents();
+                names = ReadVisibleItemNames(folderView, initialCount);
+                var aardvarkIndex = Array.FindIndex(names, name => string.Equals(name, "aardvark", StringComparison.OrdinalIgnoreCase));
+                var childIndex = Array.FindIndex(names, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+                var orderMatches = aardvarkIndex >= 0 && childIndex >= 0 &&
+                    (aardvarkIndex < childIndex) == ascending;
+                stableSamples = orderMatches ? stableSamples + 1 : 0;
+                if (stableSamples < 3) Thread.Sleep(50);
+            }
+            if (stableSamples < 3)
+                throw new Exception($"The Shell {command} menu did not produce the expected folder order: [{string.Join(",", names)}].");
+            nativeSortOrders.Add($"{command}:[{string.Join(",", names)}]");
         }
         try
         {
@@ -1114,10 +1138,12 @@ internal static class ShellViewHostFilterProbe
             Check(At<GetSortColumns>(view2, 28)(view2, sorts, sortCount));
             if (sorts[0].Key.FormatId != nameKey.FormatId || sorts[0].Key.PropertyId != nameKey.PropertyId || sorts[0].Direction != -1)
                 throw new Exception($"The Shell Sort Descending command did not update the active sort state: key={sorts[0].Key.FormatId:B}/{sorts[0].Key.PropertyId}, direction={sorts[0].Direction}.");
+            VerifyFolderSortOrder(ascending: false, "sortdescending");
             InvokeBackgroundVerb(view, owner, "sortascending");
             RestoreFocusedSelectionAfterMenuCommand("sortascending");
             Check(At<GetSortColumns>(view2, 28)(view2, sorts, sortCount));
             if (sorts[0].Direction != 1) throw new Exception($"The Shell Sort Ascending command did not restore ascending order: direction={sorts[0].Direction}.");
+            VerifyFolderSortOrder(ascending: true, "sortascending");
 
             var typeKey = new ShellColumnManager.NativeKey { FormatId = PropertyFormatId, PropertyId = 4 };
             Check(At<SetGroupBy>(view2, 17)(view2, ref typeKey, 1));
@@ -1143,7 +1169,7 @@ internal static class ShellViewHostFilterProbe
             Marshal.Release(view2);
         }
 
-        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
+        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
     }
 
     private static bool FocusedItemMatches(nint folderView, nint expectedPidl)
