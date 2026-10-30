@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 主线后台回归与验收副本刷新：当前 `main` 上 Release SettingsSmoke、App Release build（0 警告/错误）及无 Shell view 的 NativeProbe 文件树 smoke 均通过；后者核对合成 Shell 文件夹的多选 Copy/Move/Delete、冲突改名与 PIDL/绑定合同。随后用 `GuiSmoke/run.ps1 -PrepareOnly` 基于干净提交 `103d15c6c94044834bc47323c07a43993ec91a44` 准备 `src/.state/gui-smoke/20261030-022742-972-3c2dad/`：39 项、`prepared-not-run`；EXE、App DLL、颜色/容量/程序启动器夹具哈希均与 manifest 一致。未启动窗口、创建 ExplorerBrowser 或操作共享桌面。克隆视图仍需可见验收搜索选区、焦点与逐站导航；当前候选身份及完整清单见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
+
 2026-10-30 克隆视图“此电脑”选区隐藏 HostProbe：从真实 ExplorerBrowser 的 `shell:MyComputerFolder` 视图选择系统盘，克隆并执行应用级 Back/Forward，核对克隆每站保留系统盘绝对解析名；用生产 `ShellSelectionPidl.TryGetDirectChild` 获取相对 PIDL 并在克隆 `IShellView` 选择盘符。Release HostProbe 0 警告/错误，完整 PaneTabTransferProbe 连续两轮通过、前台未变。自动延迟恢复因隐藏宿主焦点门控未执行，其他虚拟 provider 与可见 UI 仍待验收；详见[核心操作对照](shell-parity.md)。
 
 2026-10-30 克隆视图真实 Shell 历史复验：隐藏生产 HostProbe 通过真实 `PaneControl` / ExplorerBrowser 在 A/B 两目录间捕获不同选区，独立克隆后后退/前进并核对各站位置/选区快照；逐站用生产 Shell selection batch 应用于克隆 view，源标签历史和状态保持独立。Release HostProbe 通过、前台未变。宿主无活动 WPF `Window`，焦点保护按设计拦截自动选区恢复；本轮不能证明可见窗口的延迟恢复/焦点，搜索异步与虚拟 provider 未覆盖，留待集中验收。详细见[核心操作对照](shell-parity.md)。
