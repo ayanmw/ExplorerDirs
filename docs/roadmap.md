@@ -4816,3 +4816,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 新增 `--common-listview-navigation-contract`，在隐藏 NativeProbe 中用临时目录树调用 Shell 文件夹枚举，核对四个位置的直接子项和父子 PIDL 关系，并复用产品 `ShellTabNavigationHistory` 验证后退、前进以及分支导航清空前向历史。首轮发现既有枚举辅助函数按整份夹具计数，逐目录调用失败；改为传入当前目录直接子项后通过。NativeProbe Release、导航合同、既有数据/文件操作合同、完整 Release SettingsSmoke 与 App Release build 均通过，前台句柄保持不变。
 - 这只验证 Shell PIDL/行数据和产品历史状态模型的组合边界；没有创建 `IShellView`、ExplorerBrowser 或实际 ListView 窗口，也没有真实按键、焦点、导航提交/取消或产品 UI 接线证据。迁移门槛保持开放，产品继续使用 ExplorerBrowser。
+
+## 2026-10-30：Q-Dir 同目录相对大小比例隔离计算
+
+- Q-Dir 官方 FAQ 82 说明大小列下划线百分比是当前目录中项目的相对大小；显示精度和舍入规则未公开。隔离 helper 以同级项目所在目录的递归总可访问字节数作分母，返回 `decimal` 百分比，未规定显示精度或格式舍入，零分母为空值。
+- SettingsSmoke 覆盖 10/14、4/14，及小目录变化后 10/12、2/12 与零分母；完整 SettingsSmoke、NativeProbe Release build、App Release build 均通过。NativeProbe 仅完成列接线并构建，未运行完整 Shell/窗口合同；产品 UI、配置、可见格式与排序仍未接入，产品继续使用 ExplorerBrowser 和 F9 显式扫描策略。细节见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30-同目录递归大小比例隔离原型)。来源：[Q-Dir FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR)。

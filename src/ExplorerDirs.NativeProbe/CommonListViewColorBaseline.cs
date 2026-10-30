@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Globalization;
 using ExplorerDirs.App;
 
 // Control-only baseline used to separate common-control custom draw behavior from Shell DefView.
@@ -205,13 +206,17 @@ internal static class CommonListViewColorBaseline
             var attachedImageList = SendMessageW(listView, LvmGetImageList, LvsilSmall, 0);
             AddColumn(listView, "Name", 240);
             AddColumn(listView, "Recursive size", 100);
+            AddColumn(listView, "Relative %", 160);
             InsertItem(listView, 0, shellRows[0].DisplayName, shellRows[0].Id, shellRows[0].SystemImageIndex, "10 B");
             InsertItem(listView, 1, shellRows[1].DisplayName, shellRows[1].Id, shellRows[1].SystemImageIndex, "4 B");
+            SetRelativeSizeText(listView, 0, shellRows[0].RecursiveBytes, fixtureScan.Bytes);
+            SetRelativeSizeText(listView, 1, shellRows[1].RecursiveBytes, fixtureScan.Bytes);
             var rowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
             var initialSizeRows = $"{GetItemText(listView, 0, 1)},{GetItemText(listView, 1, 1)}";
+            var initialRelativeSizeRows = $"{GetItemText(listView, 0, 2)},{GetItemText(listView, 1, 2)}";
             var initialShellPaths = string.Join('|', Enumerable.Range(0, 2).Select(index =>
                 _shellRowsById[GetItemParam(listView, index)].ParsingName));
             var recursiveScanBacked = largeScan.Bytes == 10 && smallScan.Bytes == 4 &&
@@ -220,6 +225,8 @@ internal static class CommonListViewColorBaseline
                 largeScan.Unreadable == 0 && smallScan.Unreadable == 0 && initialSizeRows == "10 B,4 B";
             var onePassTreeSummaries = initialScans.Count == 3 && fixtureScan.Bytes == 14 &&
                 fixtureScan.Files == 2 && fixtureScan.Directories == 2 && fixtureScan.Unreadable == 0;
+            var initialRelativeSizes = ParseRelativeSize(GetItemText(listView, 0, 2)) == RecursiveSizePercentage.Calculate(10, 14) &&
+                ParseRelativeSize(GetItemText(listView, 1, 2)) == RecursiveSizePercentage.Calculate(4, 14);
             SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
             SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[2]);
@@ -228,7 +235,12 @@ internal static class CommonListViewColorBaseline
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
             SetItemText(listView, 1, 1, $"{updatedSmallScan.Bytes} B");
+            SetRelativeSizeText(listView, 0, updatedScans[Path.GetFullPath(largeFolder)].Bytes, updatedFixtureScan.Bytes);
+            SetRelativeSizeText(listView, 1, updatedSmallScan.Bytes, updatedFixtureScan.Bytes);
             var liveValue = GetItemText(listView, 1, 1);
+            var updatedRelativeSizeRows = $"{GetItemText(listView, 0, 2)},{GetItemText(listView, 1, 2)}";
+            var updatedRelativeSizes = ParseRelativeSize(GetItemText(listView, 0, 2)) == RecursiveSizePercentage.Calculate(10, 12) &&
+                ParseRelativeSize(GetItemText(listView, 1, 2)) == RecursiveSizePercentage.Calculate(2, 12);
             var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
                 Marshal.GetFunctionPointerForDelegate(SizeCompare));
             var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
@@ -265,7 +277,7 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
             var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, shellFolder, selectedId, fixture);
-            var passed = recursiveScanBacked && onePassTreeSummaries && updatedFixtureScan.Bytes == 12 &&
+            var passed = recursiveScanBacked && onePassTreeSummaries && initialRelativeSizes && updatedRelativeSizes && updatedFixtureScan.Bytes == 12 &&
                 updatedSmallScan.Bytes == 2 && updatedSmallScan.Files == 1 &&
                 updatedSmallScan.Directories == 0 && updatedSmallScan.Unreadable == 0 &&
                 initialRows == "large-folder:1,small-folder:2" &&
@@ -280,6 +292,8 @@ internal static class CommonListViewColorBaseline
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};" +
                 $"initial-scanned-sizes={initialSizeRows};shell-paths={initialShellPaths};" +
+                $"initial-relative-size-rows={initialRelativeSizeRows};updated-relative-size-rows={updatedRelativeSizeRows};" +
+                $"relative-sizes-recalculated={initialRelativeSizes && updatedRelativeSizes};" +
                 $"recursive-scan-backed={recursiveScanBacked};updated-scanned-bytes={updatedSmallScan.Bytes};" +
                 $"single-pass-folder-summaries={onePassTreeSummaries};updated-parent-bytes={updatedFixtureScan.Bytes};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
@@ -800,6 +814,16 @@ internal static class CommonListViewColorBaseline
         }
         SetItemText(listView, index, 1, sizeText);
     }
+
+    private static void SetRelativeSizeText(nint listView, int index, ulong itemBytes, ulong directoryBytes)
+    {
+        var percentage = RecursiveSizePercentage.Calculate(itemBytes, directoryBytes);
+        var text = percentage?.ToString("G", CultureInfo.InvariantCulture);
+        SetItemText(listView, index, 2, text is null ? string.Empty : text + "%");
+    }
+
+    private static decimal? ParseRelativeSize(string text) =>
+        decimal.TryParse(text.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
 
     private static void SetItemText(nint listView, int index, int subItem, string text)
     {

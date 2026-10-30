@@ -40,6 +40,14 @@ internal static class RecursiveDirectoryScannerSmoke
                   treeGrandchild.Bytes == 2 && treeGrandchild.Files == 1 && treeGrandchild.Directories == 0,
                 "single-pass directory tree scan returns recursive totals for root, child, and grandchild folders");
 
+            Check(RecursiveSizePercentage.Calculate(10, 14) == 100m * 10 / 14 &&
+                  RecursiveSizePercentage.Calculate(4, 14) == 100m * 4 / 14 &&
+                  RecursiveSizePercentage.Calculate(10, 12) == 100m * 10 / 12 &&
+                  RecursiveSizePercentage.Calculate(2, 12) == 100m * 2 / 12,
+                "relative size percentages use the current directory total and recalculate after a sibling changes");
+            Check(RecursiveSizePercentage.Calculate(0, 0) is null,
+                "relative size percentage is unavailable when the current directory has no bytes");
+
             File.WriteAllBytes(standalone, new byte[7]);
             var selectionResult = RecursiveDirectoryScanner.ScanSelection(
                 [root, child, root, standalone], CancellationToken.None);
