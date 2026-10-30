@@ -27,7 +27,6 @@ else {
     }
 }
 
-$processes = @(Get-Process -Name 'ExplorerDirs.App' -ErrorAction SilentlyContinue)
 if ($PSBoundParameters.ContainsKey('ProcessId')) {
     $target = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($null -eq $target -or $target.ProcessName -ne 'ExplorerDirs.App') {
@@ -37,9 +36,13 @@ if ($PSBoundParameters.ContainsKey('ProcessId')) {
     $targetStartTicks = $target.StartTime.ToUniversalTime().Ticks
     $target.Dispose()
 }
-elseif ($processes.Count -eq 0) {
-    [Console]::Error.WriteLine('No running ExplorerDirs.App process was found. The sampler never launches the application.')
-    exit 2
+else {
+    # Fixed-PID sampling must not enumerate unrelated app instances.
+    $processes = @(Get-Process -Name 'ExplorerDirs.App' -ErrorAction SilentlyContinue)
+    if ($processes.Count -eq 0) {
+        [Console]::Error.WriteLine('No running ExplorerDirs.App process was found. The sampler never launches the application.')
+        exit 2
+    }
 }
 
 Add-Type -TypeDefinition @'
