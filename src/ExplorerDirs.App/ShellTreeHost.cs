@@ -23,6 +23,7 @@ internal sealed class ShellTreeHost : HwndHost
     private long _revision;
     private long _generation;
     private bool _insideSynchronization;
+    private int _dragHoverExpandDelayMilliseconds = NavigationTreeDragHoverDelay.DefaultMilliseconds;
     private readonly SubclassProc _subclass;
     public event Action<string>? DirectorySelected;
     public event Action<string>? FolderMiddleClicked;
@@ -45,6 +46,14 @@ internal sealed class ShellTreeHost : HwndHost
 
     internal bool ContainsNativeWindow(nint hwnd) => hwnd != 0 && _tree is { WindowHandle: not 0 } tree &&
         (hwnd == tree.WindowHandle || IsChild(tree.WindowHandle, hwnd));
+
+    internal void SetDragHoverExpandDelay(int milliseconds)
+    {
+        if (!NavigationTreeDragHoverDelay.IsAllowed(milliseconds))
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        _dragHoverExpandDelayMilliseconds = milliseconds;
+        _tree?.SetDragHoverExpandDelay(milliseconds);
+    }
 
     internal void RefreshTheme()
     {
@@ -162,6 +171,7 @@ internal sealed class ShellTreeHost : HwndHost
         {
             NativeShellTheme.Apply(_parent);
             _tree = new NativeShellTree(_parent, 1, 1);
+            _tree.SetDragHoverExpandDelay(_dragHoverExpandDelayMilliseconds);
             RefreshTheme();
             if (_addressTreeMode)
             {

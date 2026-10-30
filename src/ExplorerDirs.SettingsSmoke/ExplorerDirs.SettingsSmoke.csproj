@@ -157,6 +157,7 @@
     <Compile Include="../ExplorerDirs.App/PaneLayoutGrid.cs" Link="PaneLayoutGrid.cs" />
     <Compile Include="../ExplorerDirs.App/LayoutProportionsStore.cs" Link="LayoutProportionsStore.cs" />
     <Compile Include="../ExplorerDirs.App/NavigationTreeWidthsStore.cs" Link="NavigationTreeWidthsStore.cs" />
+    <Compile Include="../ExplorerDirs.App/NavigationTreeDragHoverDelayStore.cs" Link="NavigationTreeDragHoverDelayStore.cs" />
     <Compile Include="../ExplorerDirs.App/WindowSessionRegistry.cs" Link="WindowSessionRegistry.cs" />
     <Compile Include="../ExplorerDirs.App/LayoutPreset.cs" Link="LayoutPreset.cs" />
     <Compile Include="../ExplorerDirs.App/FolderCreationObservation.cs" Link="FolderCreationObservation.cs" />

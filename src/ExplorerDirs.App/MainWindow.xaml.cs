@@ -82,6 +82,9 @@ public partial class MainWindow : Window
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
     private readonly PortableBooleanPreference _treeSelectionAutoExpandPreferenceStore;
+    private readonly NavigationTreeDragHoverDelayStore _treeDragHoverDelayStore;
+    private MenuItem[] _treeDragHoverDelayMenus = [];
+    private int _treeDragHoverExpandDelayMilliseconds = NavigationTreeDragHoverDelay.DefaultMilliseconds;
     private readonly NavigationTreeWidthsStore _treeWidthsStore;
     private NavigationTreeWidths _treeWidths;
     private QdrTreeSplitState? _qdrTreeSplits;
@@ -140,6 +143,11 @@ public partial class MainWindow : Window
     {
         _themeController = themeController;
         InitializeComponent();
+        _treeDragHoverDelayMenus =
+        [
+            TreeDragHoverDelay200Menu, TreeDragHoverDelay500Menu, TreeDragHoverDelay1000Menu,
+            TreeDragHoverDelay1500Menu, TreeDragHoverDelay2000Menu, TreeDragHoverDelay3000Menu
+        ];
         NewTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewTab));
         NewWindowToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.NewWindow));
         DuplicateTabToolbarButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.DuplicateTab));
@@ -307,6 +315,9 @@ public partial class MainWindow : Window
             _profileDirectory, "NavigationTreeSelection.ini"), "NavigationTree", "SelectFromListAndExpand",
             "目录树自动展开", defaultValue: true);
         _treeSelectionAutoExpand = _treeSelectionAutoExpandPreferenceStore.Load();
+        _treeDragHoverDelayStore = new NavigationTreeDragHoverDelayStore(Path.Combine(
+            _profileDirectory, "NavigationTreeDragHoverDelay.ini"));
+        _treeDragHoverExpandDelayMilliseconds = _treeDragHoverDelayStore.Load();
         _treeWidthsStore = new NavigationTreeWidthsStore(Path.Combine(
             _profileDirectory, "NavigationTreeWidths.ini"));
         _treeWidths = _treeWidthsStore.Load();
@@ -324,6 +335,9 @@ public partial class MainWindow : Window
         if (_treeSelectionAutoExpandPreferenceStore.LoadWarning is { } treeSelectionWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeSelectionWarning : $"{EnvironmentStatus.Text} {treeSelectionWarning}";
+        if (_treeDragHoverDelayStore.LoadWarning is { } treeDragHoverDelayWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? treeDragHoverDelayWarning : $"{EnvironmentStatus.Text} {treeDragHoverDelayWarning}";
         if (_treeWidthsStore.LoadWarning is { } treeWidthsWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? treeWidthsWarning : $"{EnvironmentStatus.Text} {treeWidthsWarning}";
@@ -446,6 +460,7 @@ public partial class MainWindow : Window
         UpdatePreviewPaneToggle();
         for (var index = 0; index < _panes.Length; index++)
         {
+            _panes[index].SetTreeDragHoverExpandDelay(_treeDragHoverExpandDelayMilliseconds);
             _panes[index].SetAutoExpandTreeSelection(_treeSelectionAutoExpand);
             _panes[index].SetTreeVisible(_treeDisplayMode == TreeDisplayMode.PerPane && _paneTreeVisibility[index]);
             _panes[index].SetPaneTreeButtonVisible(_treeDisplayMode == TreeDisplayMode.PerPane);
@@ -1194,6 +1209,30 @@ public partial class MainWindow : Window
         TreeModePerPaneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.PerPane;
         TreeModeNoneMenu.IsChecked = _treeDisplayMode == TreeDisplayMode.None;
         TreeSelectionAutoExpandMenu.IsChecked = _treeSelectionAutoExpand;
+        foreach (var menu in _treeDragHoverDelayMenus)
+            menu.IsChecked = int.TryParse(menu.Tag as string, out var delay) &&
+                delay == _treeDragHoverExpandDelayMilliseconds;
+    }
+
+    private void TreeDragHoverDelay_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value } ||
+            !int.TryParse(value, out var milliseconds) ||
+            !NavigationTreeDragHoverDelay.IsAllowed(milliseconds)) return;
+        try
+        {
+            _treeDragHoverDelayStore.Save(milliseconds);
+            _treeDragHoverExpandDelayMilliseconds = milliseconds;
+            foreach (var pane in _panes) pane.SetTreeDragHoverExpandDelay(milliseconds);
+            _sharedTreeHost?.SetDragHoverExpandDelay(milliseconds);
+            UpdateTreeModeMenu();
+            EnvironmentStatus.Text = $"目录树拖入悬停展开延时已设为 {milliseconds / 1000d:0.#} 秒。";
+        }
+        catch (Exception ex)
+        {
+            UpdateTreeModeMenu();
+            EnvironmentStatus.Text = $"目录树拖入展开延时保存失败：{ex.Message}";
+        }
     }
 
     private void TreeSelectionAutoExpand_Click(object sender, RoutedEventArgs e)
@@ -1238,6 +1277,7 @@ public partial class MainWindow : Window
             if (_sharedTreeHost is null)
             {
                 _sharedTreeHost = new ShellTreeHost();
+                _sharedTreeHost.SetDragHoverExpandDelay(_treeDragHoverExpandDelayMilliseconds);
                 _sharedTreeHost.Activated += () => SetActivePane(ActivePane);
                 _sharedTreeHost.ShortcutHandler = shortcut => ExecuteShortcut(ActivePane, shortcut);
                 _sharedTreeHost.Error += message => EnvironmentStatus.Text = message;

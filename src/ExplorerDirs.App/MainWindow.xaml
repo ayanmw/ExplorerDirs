@@ -125,6 +125,14 @@
                     <Separator/>
                     <MenuItem x:Name="TreeSelectionAutoExpandMenu" Header="从文件列表选择并展开" IsCheckable="True"
                               Click="TreeSelectionAutoExpand_Click"/>
+                    <MenuItem Header="拖入时悬停展开延时">
+                        <MenuItem x:Name="TreeDragHoverDelay200Menu" Header="0.2 秒" Tag="200" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                        <MenuItem x:Name="TreeDragHoverDelay500Menu" Header="0.5 秒" Tag="500" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                        <MenuItem x:Name="TreeDragHoverDelay1000Menu" Header="1 秒" Tag="1000" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                        <MenuItem x:Name="TreeDragHoverDelay1500Menu" Header="1.5 秒" Tag="1500" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                        <MenuItem x:Name="TreeDragHoverDelay2000Menu" Header="2 秒" Tag="2000" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                        <MenuItem x:Name="TreeDragHoverDelay3000Menu" Header="3 秒" Tag="3000" IsCheckable="True" Click="TreeDragHoverDelay_Click"/>
+                    </MenuItem>
                 </MenuItem>
                 <MenuItem x:Name="PreviewPaneMenu" Header="预览窗格" InputGestureText="Alt+P" IsCheckable="True" Click="PreviewPaneMenu_Click"/>
                 <MenuItem x:Name="DetailsPaneMenu" Header="详情窗格" InputGestureText="Alt+Shift+P" IsCheckable="True" Click="DetailsPaneMenu_Click"/>

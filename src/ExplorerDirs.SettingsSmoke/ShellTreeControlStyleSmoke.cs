@@ -28,5 +28,6 @@ internal static class ShellTreeControlStyleSmoke
         if (drop.OnDragLeave(456) != 0 || leaves != 2)
             throw new InvalidOperationException("Leaving the tree must cancel pending hover expansion.");
         Console.WriteLine("Shell tree drag-hover callback smoke: PASS (hover item routed, effect preserved, native drop not handled)");
+        NavigationTreeDragHoverDelaySmoke.Run();
     }
 }

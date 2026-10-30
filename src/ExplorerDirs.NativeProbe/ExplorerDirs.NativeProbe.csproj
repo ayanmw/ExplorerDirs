@@ -45,6 +45,7 @@
     <!-- NativeShellTree now validates selected locations through this shared identity decision. -->
     <Compile Include="../ExplorerDirs.App/ShellTreeFolderLocation.cs" Link="ShellTreeFolderLocation.cs" />
     <Compile Include="../ExplorerDirs.App/NativeShellTree.cs" Link="NativeShellTree.cs" />
+    <Compile Include="../ExplorerDirs.App/NavigationTreeDragHoverDelayStore.cs" Link="NavigationTreeDragHoverDelayStore.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTreeIconIndexResolver.cs" Link="ShellTreeIconIndexResolver.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
     <Compile Include="../ExplorerDirs.App/SessionStore.cs" Link="SessionStore.cs" />

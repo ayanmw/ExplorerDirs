@@ -52,6 +52,7 @@ public partial class PaneControl : UserControl
     private bool _autoExpandTreeSelection = true;
     private long _treeSelectionSyncRequestVersion;
     private ShellTreeHost? _treeHost;
+    private int _treeDragHoverExpandDelayMilliseconds = NavigationTreeDragHoverDelay.DefaultMilliseconds;
     private double _treeWidth = 160;
     private Func<TreeFocusTarget>? _treeFocusTarget;
     private Func<bool>? _sharedTreeHasFocus;
@@ -107,6 +108,14 @@ public partial class PaneControl : UserControl
     {
         _autoExpandTreeSelection = enabled;
         _treeSelectionSyncRequestVersion++;
+    }
+
+    internal void SetTreeDragHoverExpandDelay(int milliseconds)
+    {
+        if (!NavigationTreeDragHoverDelay.IsAllowed(milliseconds))
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        _treeDragHoverExpandDelayMilliseconds = milliseconds;
+        _treeHost?.SetDragHoverExpandDelay(milliseconds);
     }
 
     internal void SetTabStripVisibilityMode(TabStripVisibilityMode mode)
@@ -1396,6 +1405,7 @@ public partial class PaneControl : UserControl
         if (visible && _treeHost is null)
         {
             _treeHost = new ShellTreeHost();
+            _treeHost.SetDragHoverExpandDelay(_treeDragHoverExpandDelayMilliseconds);
             _treeHost.Activated += () => Activated?.Invoke(this, EventArgs.Empty);
             _treeHost.ShortcutHandler = shortcut => ShortcutRequested?.Invoke(this, shortcut) == true;
             _treeHost.Error += message => Status.Text = message;

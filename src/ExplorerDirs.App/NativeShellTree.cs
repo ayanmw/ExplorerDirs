@@ -14,7 +14,6 @@ internal sealed class NativeShellTree : IDisposable
     private const uint NstcsDisableDragDrop = 0x00001000;
     private const uint NstcsNoOrderStream = 0x00002000;
     private const uint NstcsNoEditLabels = 0x00010000;
-    private static readonly TimeSpan DragHoverExpandDelay = TimeSpan.FromSeconds(1);
     private static readonly Guid ItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly NativeTreeEvents _events;
@@ -25,6 +24,7 @@ internal sealed class NativeShellTree : IDisposable
     private nint _root;
     private int _synchronizing;
     private nint _dragHoverItem;
+    private int _dragHoverDelayMilliseconds = NavigationTreeDragHoverDelay.DefaultMilliseconds;
 
     internal static uint BuildControlStyles() =>
         NstcsHasExpandos | NstcsRootHasExpando | NstcsShowSelectionAlways |
@@ -35,6 +35,19 @@ internal sealed class NativeShellTree : IDisposable
     internal event Action<string?>? SelectionChanged;
     internal event Action? UserInput;
     internal event Action<string>? FolderMiddleClicked;
+
+    internal void SetDragHoverExpandDelay(int milliseconds)
+    {
+        VerifyThread();
+        if (!NavigationTreeDragHoverDelay.IsAllowed(milliseconds))
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        if (_dragHoverDelayMilliseconds == milliseconds) return;
+        _dragHoverDelayMilliseconds = milliseconds;
+        var restart = _dragHoverTimer.IsEnabled;
+        if (restart) _dragHoverTimer.Stop();
+        _dragHoverTimer.Interval = TimeSpan.FromMilliseconds(milliseconds);
+        if (restart) _dragHoverTimer.Start();
+    }
 
     // The host keeps this scope across its bounded, cancellable dispatcher retries.
     // Native expansion/selection notifications can arrive after a COM call returns.
@@ -63,7 +76,7 @@ internal sealed class NativeShellTree : IDisposable
             throw new InvalidOperationException("目录树必须在 STA 线程创建。");
         _dragHoverTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            Interval = DragHoverExpandDelay
+            Interval = TimeSpan.FromMilliseconds(_dragHoverDelayMilliseconds)
         };
         _dragHoverTimer.Tick += OnDragHoverTimer;
         _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick,
