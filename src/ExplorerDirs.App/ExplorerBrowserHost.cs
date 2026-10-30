@@ -2550,7 +2550,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         _viewStyleCaptureOperation?.Abort();
         DispatcherOperation? operation = null;
-        operation = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        // Let the native Shell list finish its pending paint before synchronously reading
+        // the full view state; this readback is bookkeeping, not part of the mode change.
+        operation = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
         {
             if (ReferenceEquals(_viewStyleCaptureOperation, operation)) _viewStyleCaptureOperation = null;
             if (!ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation ||
@@ -3144,7 +3146,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             DispatcherOperation restore;
             try
             {
-                restore = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                // Refresh completion may read the full row count and restore selection through
+                // synchronous Shell calls. Give the refreshed list a chance to paint first.
+                restore = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
                 {
                     try
                     {
