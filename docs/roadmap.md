@@ -5057,6 +5057,12 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 用户触发 F5 对普通文件系统位置现在优先通过 `ShellCurrentLocation` 读取当前绝对 PIDL 并发送目录更新通知；搜索、虚拟位置或当前 PIDL 读取失败继续使用原生 `IShellView.Refresh()` 回退。原有选区/焦点恢复流程保留。App Release build、完整 Release SettingsSmoke 和 NativeProbe Release build 通过；Private Desktop 探针前台及输入 tick 未变。
 - 此改动没有在 ExplorerBrowser 产品宿主或可见 UI 中验收。当前只证明了直接 stock `IShellView` 的非空行/HWND 行为；没有像素数据，不能宣称用户看到的黑屏已解决。查看方式切换虽未清空行，Shell 仍可能在布局重排中重绘；后续独立调查其绘制时间线，并将 F5 的可见验收加入集中批次。
 
+### 当前源码路径更正（2026-10-31）
+
+- 上述“F5 改走目录更新通知”已被后续提交 `b93a9e7` 撤回：当前显式 F5 对当前 `IShellView` 调用 `Refresh()`，而不是发送广播 `SHCNE_UPDATEDIR`。原因是隐藏 ExplorerBrowser 宿主中目录通知比 `IShellView.Refresh()` 慢，且没有证明能改善可见画面；广播通知也不能限定在当前 Explorer Dirs 视图。
+- 当前 F5 没有重建 ExplorerBrowser、标签或导航历史；选区/焦点恢复仅在刷新后异步结算。查看方式切换仍只对现有 `IFolderView2` 调用 `SetViewModeAndIconSize`，随后延迟读取视图状态。
+- 这两条路径都只作用于当前文件视图，但 Shell 自己仍会清空并重绘列表行，或在视图模式变化时重新排版。先前短暂暂停原生重绘的尝试已撤回；没有像素证据表明它能让画面更平滑。当前黑屏/闪动仍需可见验收，未经该验收不宣称解决。
+
 ### 刷新诊断补充：跟踪 DefView 与 DirectUI 消息
 
 - 产品文件视图是 Shell `SHELLDLL_DefView`/`DirectUIHWND` 路径；普通 `SysListView32` 的 LVM 行消息不能作为产品证据。诊断现对实际 view 类记录 `WM_SHOWWINDOW`、`WM_SIZE`、`WM_WINDOWPOSCHANGED`、`WM_NCDESTROY` 以及 DefView/DirectUI 私有消息处理耗时，并记录所有挂钩窗口的 `WM_SETREDRAW`；绘制与输入时间线仍保留。每次转换最多 256 条、两秒窗口，不记录文件名/文本，默认关闭。
