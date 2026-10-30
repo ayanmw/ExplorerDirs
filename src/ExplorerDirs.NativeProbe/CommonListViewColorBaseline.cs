@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Windows.Threading;
 using ExplorerDirs.App;
+using ExplorerDirs.NativeProbe;
 
 // Control-only baseline used to separate common-control custom draw behavior from Shell DefView.
 internal static class CommonListViewColorBaseline
@@ -170,12 +171,14 @@ internal static class CommonListViewColorBaseline
         => RunDataContract(relativeSizesOnly: true);
 
     private static (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int OwnerThreadId, int WorkerThreadId)
-        ScanDirectoryTreeOffOwnerThread(string root, IReadOnlyCollection<string> requestedPaths)
+        ScanDirectoryTreeOffOwnerThread(DirectoryTreeScanCoordinator scans, string root,
+            IReadOnlyCollection<string> requestedPaths)
     {
         var ownerThreadId = Environment.CurrentManagedThreadId;
         var dispatcher = Dispatcher.CurrentDispatcher;
+        var ticket = scans.Begin();
         var scan = Task.Run(() => (
-            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, CancellationToken.None),
+            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, ticket.CancellationToken),
             WorkerThreadId: Environment.CurrentManagedThreadId));
         var frame = new DispatcherFrame();
         var poll = new DispatcherTimer(DispatcherPriority.Background)
@@ -191,6 +194,7 @@ internal static class CommonListViewColorBaseline
         poll.Start();
         try { Dispatcher.PushFrame(frame); }
         finally { poll.Stop(); }
+        if (!scans.IsCurrent(ticket)) throw new OperationCanceledException(ticket.CancellationToken);
         var result = scan.GetAwaiter().GetResult();
         return (result.Results, ownerThreadId, result.WorkerThreadId);
     }
@@ -213,7 +217,8 @@ internal static class CommonListViewColorBaseline
             {
                 Path.GetFullPath(fixture), Path.GetFullPath(largeFolder), Path.GetFullPath(smallFolder)
             };
-            var initialScan = ScanDirectoryTreeOffOwnerThread(fixture, requestedScanPaths);
+            using var scanCoordinator = new DirectoryTreeScanCoordinator();
+            var initialScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
             var initialScans = initialScan.Results;
             var initialScanRanOffOwnerThread = initialScan.WorkerThreadId != initialScan.OwnerThreadId;
             var initialScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == initialScan.OwnerThreadId;
@@ -318,7 +323,7 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallNestedFolder);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-2.bin"), []);
-            var updateScan = ScanDirectoryTreeOffOwnerThread(fixture, requestedScanPaths);
+            var updateScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
             var updatedScans = updateScan.Results;
             var updateScanRanOffOwnerThread = updateScan.WorkerThreadId != updateScan.OwnerThreadId;
             var updateScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == updateScan.OwnerThreadId;

@@ -86,6 +86,7 @@ internal static class RecursiveDirectoryScannerSmoke
 
     internal static void Run()
     {
+        DirectoryTreeScanCoordinatorSmoke.Run();
         var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));
         Check(progressThrottle.ShouldReport(1000), "recursive scan progress reports immediately");
         Check(!progressThrottle.ShouldReport(1000 + Stopwatch.Frequency / 8),

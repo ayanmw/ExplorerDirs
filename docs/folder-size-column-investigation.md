@@ -593,3 +593,9 @@ API 静态核对（Microsoft `IColumnManager` 文档，2026-10-30）：`CM_ENUM_
 2026-10-31 共享 Shell 行身份辅助：文件系统行和虚拟 Shell 行探针现复用 `ShellListViewRowIdentity` 获取显示名、绝对解析名、Shell 属性、PIDL 系统图标索引，以及仅对 filesystem 项目读取的文件系统路径。递归大小夹具继续只接受真实路径；虚拟项目不会伪造路径。NativeProbe Release 构建 0 警告/错误；虚拟 Control Panel 行合同（9 个虚拟子项）、文件系统数据/文件操作合同和导航合同均通过，前台窗口未变化。此项只消除探针重复代码并验证两类 Shell 身份读取，不增加产品支持或改变 ExplorerBrowser 架构。
 
 2026-10-31 自有 ListView 扫描移出 STA：相对大小隔离合同的初始和变更后 `ScanDirectoryTreeForPaths` 现在在 `Task.Run` worker 执行；STA 使用 WPF `DispatcherFrame` 等待并继续泵消息，扫描完成后由原 owner thread 更新隐藏 ListView。新增线程断言先在旧实现上按预期失败（两次扫描均运行于 owner thread），接入后 `--common-listview-relative-size-contract` 通过：worker 与 owner 不同，返回 owner 后行值/百分比、文件/子目录计数、升降序、选区/焦点均正确，控件不可见且前台未变。该项验证线程边界与原型数据链，不证明扫描耗时、UI 响应收益、Shell DefView 通知、产品逐行列或 ExplorerBrowser 迁移。
+
+## 2026-10-31：隔离扫描代际与过期结果门控
+
+NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 generation 和独立取消令牌；新请求先使旧 ticket 失效并取消其 worker，导航/视图退休或扫描 owner 释放时也会取消当前请求。隐藏 ListView 的初始与变更后扫描共用同一协调器；只有任务完成且 ticket 仍是当前代际时才把结果交回 owner thread 更新行。SettingsSmoke 新增可控异步 worker 回归，核对新请求确实取消运行中的旧任务、旧 ticket 不能再发布、取消后新请求取得较新代际以及 owner 销毁能终止当前任务。定向扫描 smoke 和 `--common-listview-relative-size-contract` 通过；完整 Release SettingsSmoke、构建及 diff 检查结果以本提交验证记录为准。
+
+这是隔离原型的取消与过期结果生命周期合同，不接入产品 `ExplorerBrowser`、用户配置、watcher 或递归大小列；不证明取消时限、真实 UI 响应、Shell provider 的异步通知或产品刷新排序一致性。后续需要把请求代际与行数据更新/目录变化重算联成完整自有视图模型，再进入已授权的隔离 Shell 门槛，不代表产品迁移获批。
