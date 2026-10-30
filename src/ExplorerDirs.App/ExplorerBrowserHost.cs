@@ -140,6 +140,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ShellDeleteNotificationBatch? _directoryChangeDeleteNotificationBatch;
     private ShellChangedItemNotificationBatch? _directoryChangeChangedItemNotificationBatch;
     private bool _directoryRefreshInProgress;
+    private readonly ShellViewRedrawLeaseCoordinator _refreshRedrawLeases = new();
     private bool _directorySelectionRestorePending;
     private DispatcherTimer? _deferredRefreshSelectionRestoreTimer;
     private ShellViewSelectionSnapshot? _deferredRefreshSelectionSnapshot;
@@ -2714,7 +2715,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
-    private ShellViewRedrawLease? TrySuppressCurrentViewRedraw()
+    private IDisposable? TrySuppressCurrentViewRedraw()
     {
         var view = IntPtr.Zero;
         try
@@ -2723,7 +2724,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (view == IntPtr.Zero) return null;
             // Keep the last painted rows visible while DefView repopulates after F5.
             // A bounded lease is always released by refresh completion or its timeout.
-            return ShellViewRedrawLease.TrySuppress(view);
+            return _refreshRedrawLeases.Acquire(_viewReadiness.NavigationVersion,
+                () => ShellViewRedrawLease.TrySuppress(view));
         }
         catch (Exception ex) when (ex is COMException or InvalidComObjectException)
         {
@@ -3155,7 +3157,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
-            ShellViewRedrawLease? refreshRedraw = null;
+            IDisposable? refreshRedraw = null;
             var refreshStartedAt = Stopwatch.GetTimestamp();
             if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try

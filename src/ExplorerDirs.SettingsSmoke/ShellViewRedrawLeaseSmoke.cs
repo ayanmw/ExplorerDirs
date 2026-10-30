@@ -43,6 +43,38 @@ internal static class ShellViewRedrawLeaseSmoke
             });
         Check(order.SequenceEqual(["redraw-off", "refresh", "redraw-on"]),
             "refresh suppression ends as soon as the synchronous Shell call returns");
+
+        var coordinator = new ExplorerDirs.App.ShellViewRedrawLeaseCoordinator();
+        calls.Clear();
+        var first = coordinator.Acquire(7, () => ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(redraw =>
+        {
+            calls.Add(redraw);
+            return 0;
+        })) ?? throw new InvalidOperationException("The first refresh should acquire redraw suppression.");
+        var second = coordinator.Acquire(7, () => throw new InvalidOperationException(
+            "A matching view generation must reuse its existing redraw suppression."))
+            ?? throw new InvalidOperationException("The overlapping refresh should share redraw suppression.");
+        Check(calls.SequenceEqual([false]), "overlapping refreshes disable redraw only once for the same view");
+        first.Dispose();
+        Check(calls.SequenceEqual([false]), "one completed refresh cannot release another refresh's redraw hold");
+        second.Dispose();
+        Check(calls.SequenceEqual([false, true]), "the last completed refresh restores redraw");
+
+        calls.Clear();
+        var oldGeneration = coordinator.Acquire(8, () => ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(redraw =>
+        {
+            calls.Add(redraw);
+            return 0;
+        })) ?? throw new InvalidOperationException("A new view generation should acquire its own redraw hold.");
+        var newGeneration = coordinator.Acquire(9, () => ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(redraw =>
+        {
+            calls.Add(redraw);
+            return 0;
+        })) ?? throw new InvalidOperationException("A second view generation should acquire its own redraw hold.");
+        oldGeneration.Dispose();
+        Check(calls.SequenceEqual([false, false, true]),
+            "releasing an older view does not release the current view's independent redraw hold");
+        newGeneration.Dispose();
         Console.WriteLine("Shell view redraw lease smoke: PASS");
     }
 

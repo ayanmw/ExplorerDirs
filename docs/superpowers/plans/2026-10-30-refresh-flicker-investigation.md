@@ -114,6 +114,12 @@ Source and prior isolated timing showed the ordinary filesystem F5 path broadcas
 
 The full Release SettingsSmoke and App Release build passed with 0 warnings/errors. No ExplorerBrowser or UI was launched. Visible F5 black-frame duration and click/keyboard hit-target correctness while drawing is suppressed remain unverified; check populated, slow and virtual locations during the next bundled GUI acceptance. If the old frame is clickable against a different row state, remove the redraw lease and keep the direct native refresh route.
 
+### 2026-10-31: Keep overlapping explicit refreshes under one view redraw hold
+
+Multiple F5 calls can start separate row-stabilization timers for the same view generation. Independent `SetRedraw(FALSE)` calls are not reference counted by Shell, so the first timer to finish could call `SetRedraw(TRUE)` while a later refresh is still repopulating rows. `ShellViewRedrawLeaseCoordinator` now shares the native lease per host navigation generation and releases it only after every overlapping refresh completion/cancellation releases its token. A separate navigation generation has an independent hold, so an obsolete view's cleanup cannot release a newer view's redraw state.
+
+The focused contract first failed to compile because the coordinator was missing, then passed after implementation; full Release SettingsSmoke and App Release build passed. No Shell window was created. This verifies lease lifetime only, not visible pixels, hit testing or the Shell's handling of rapid repeated F5; those remain in the bundled UI acceptance.
+
 ### Task 7: Capture the product F5 paint timeline in HostProbe
 
 - [x] Make the existing `--live-shell-refresh` HostProbe call `RefreshPreservingLastFrame`, the same product entry used by F5, Ctrl+R and the refresh buttons.

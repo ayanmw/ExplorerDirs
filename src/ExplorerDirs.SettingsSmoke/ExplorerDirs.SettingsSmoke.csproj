@@ -58,6 +58,7 @@
     <Compile Include="../ExplorerDirs.App/ShellRefreshRequest.cs" Link="ShellRefreshRequest.cs" />
     <Compile Include="../ExplorerDirs.App/ShellRefreshCompletion.cs" Link="ShellRefreshCompletion.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewRedrawLease.cs" Link="ShellViewRedrawLease.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewRedrawLeaseCoordinator.cs" Link="ShellViewRedrawLeaseCoordinator.cs" />
     <Compile Include="../ExplorerDirs.App/ShellDirectoryMonitorStartup.cs" Link="ShellDirectoryMonitorStartup.cs" />
     <Compile Include="../ExplorerDirs.App/ShellDirectoryMonitorRequest.cs" Link="ShellDirectoryMonitorRequest.cs" />
     <Compile Include="../ExplorerDirs.App/ShellDirectoryWatcherStartup.cs" Link="ShellDirectoryWatcherStartup.cs" />
