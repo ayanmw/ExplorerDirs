@@ -232,7 +232,7 @@ internal static class CommonListViewColorBaseline
                 [Path.GetFullPath(largeFolder)] = largeScan.Bytes,
                 [Path.GetFullPath(smallFolder)] = smallScan.Bytes
             });
-            shellRows.AddRange(enumeration.Rows);
+            shellRows.AddRange(ShellListViewRowModel.ApplyRecursiveScanResults(enumeration.Rows, initialScans));
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
 
             var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
@@ -258,12 +258,16 @@ internal static class CommonListViewColorBaseline
             AddColumn(listView, "Recursive size", 100);
             AddColumn(listView, "Contents", 150);
             AddColumn(listView, "Relative %", 160);
-            InsertItem(listView, 0, shellRows[0].DisplayName, shellRows[0].Id, shellRows[0].SystemImageIndex, "10 B");
-            InsertItem(listView, 1, shellRows[1].DisplayName, shellRows[1].Id, shellRows[1].SystemImageIndex, "4 B");
-            SetContentsText(listView, 0, largeScan.Files, largeScan.Directories);
-            SetContentsText(listView, 1, smallScan.Files, smallScan.Directories);
-            SetRelativeSizeText(listView, 0, shellRows[0].RecursiveBytes!.Value, fixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, 1, shellRows[1].RecursiveBytes!.Value, fixtureScan.Bytes, 3);
+            var initialLargeRow = _shellRowsById[1];
+            var initialSmallRow = _shellRowsById[2];
+            InsertItem(listView, 0, initialLargeRow.DisplayName, initialLargeRow.Id, initialLargeRow.SystemImageIndex,
+                $"{initialLargeRow.RecursiveBytes} B");
+            InsertItem(listView, 1, initialSmallRow.DisplayName, initialSmallRow.Id, initialSmallRow.SystemImageIndex,
+                $"{initialSmallRow.RecursiveBytes} B");
+            SetContentsText(listView, 0, initialLargeRow.RecursiveSummary!.Files, initialLargeRow.RecursiveSummary.Directories);
+            SetContentsText(listView, 1, initialSmallRow.RecursiveSummary!.Files, initialSmallRow.RecursiveSummary.Directories);
+            SetRelativeSizeText(listView, 0, initialLargeRow.RecursiveBytes!.Value, fixtureScan.Bytes, 3);
+            SetRelativeSizeText(listView, 1, initialSmallRow.RecursiveBytes!.Value, fixtureScan.Bytes, 3);
             var rowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
@@ -355,17 +359,22 @@ internal static class CommonListViewColorBaseline
             var updateScanRanOffOwnerThread = updateScan?.WorkerThreadId != updateScan?.OwnerThreadId;
             var updateScanReturnedToOwnerThread = updateScan?.OwnerThreadId == updateOwnerThreadId &&
                 Environment.CurrentManagedThreadId == updateOwnerThreadId;
+            var updatedRows = ShellListViewRowModel.ApplyRecursiveScanResults(shellRows, updatedScans);
+            for (var index = 0; index < shellRows.Count; index++) shellRows[index] = updatedRows[index];
+            _shellRowsById = shellRows.ToDictionary(row => row.Id);
+            var updatedSmallRow = _shellRowsById[2];
             var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
-            _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
             var smallRowIndex = FindItemIndexByParam(listView, 2);
             var largeRowIndex = FindItemIndexByParam(listView, 1);
-            SetItemText(listView, smallRowIndex, 1, $"{updatedSmallScan.Bytes} B");
-            var updatedLargeScan = updatedScans[Path.GetFullPath(largeFolder)];
-            SetContentsText(listView, largeRowIndex, updatedLargeScan.Files, updatedLargeScan.Directories);
-            SetContentsText(listView, smallRowIndex, updatedSmallScan.Files, updatedSmallScan.Directories);
-            SetRelativeSizeText(listView, largeRowIndex, updatedLargeScan.Bytes, updatedFixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, smallRowIndex, updatedSmallScan.Bytes, updatedFixtureScan.Bytes, 3);
+            SetItemText(listView, smallRowIndex, 1, $"{updatedSmallRow.RecursiveBytes} B");
+            var updatedLargeRow = _shellRowsById[1];
+            SetContentsText(listView, largeRowIndex, updatedLargeRow.RecursiveSummary!.Files,
+                updatedLargeRow.RecursiveSummary.Directories);
+            SetContentsText(listView, smallRowIndex, updatedSmallRow.RecursiveSummary!.Files,
+                updatedSmallRow.RecursiveSummary.Directories);
+            SetRelativeSizeText(listView, largeRowIndex, updatedLargeRow.RecursiveBytes!.Value, updatedFixtureScan.Bytes, 3);
+            SetRelativeSizeText(listView, smallRowIndex, updatedSmallRow.RecursiveBytes!.Value, updatedFixtureScan.Bytes, 3);
             var liveValue = GetItemText(listView, smallRowIndex, 1);
             var updatedContentsRows = $"{GetItemText(listView, smallRowIndex, 2)},{GetItemText(listView, largeRowIndex, 2)}";
             var updatedRelativeSizeRows = $"{GetItemText(listView, largeRowIndex, 3)},{GetItemText(listView, smallRowIndex, 3)}";

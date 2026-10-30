@@ -38,6 +38,8 @@
     <Compile Include="../ExplorerDirs.App/AddressPathMenu.cs" Link="AddressPathMenu.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.NativeProbe/DirectoryTreeScanCoordinator.cs" Link="DirectoryTreeScanCoordinator.cs" />
+    <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRow.cs" Link="ShellListViewRow.cs" />
+    <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRowModel.cs" Link="ShellListViewRowModel.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveSizePercentage.cs" Link="RecursiveSizePercentage.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyle.cs" Link="ViewStyle.cs" />
     <Compile Include="../ExplorerDirs.App/ViewStyleIconSet.cs" Link="ViewStyleIconSet.cs" />

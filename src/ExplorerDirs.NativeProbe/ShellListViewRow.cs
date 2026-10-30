@@ -1,3 +1,5 @@
+using ExplorerDirs.App;
+
 namespace ExplorerDirs.NativeProbe;
 
 // Shared prototype row identity for filesystem and virtual Shell namespace items.
@@ -11,4 +13,7 @@ internal sealed record ShellListViewRow(
     uint Attributes,
     ulong? RecursiveBytes,
     bool FromShellEnumeration,
-    int SystemImageIndex);
+    int SystemImageIndex)
+{
+    internal RecursiveDirectoryScanResult? RecursiveSummary { get; init; }
+}

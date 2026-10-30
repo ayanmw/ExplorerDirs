@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：扫描结果进入稳定 Shell 行模型
+
+隔离 `ShellListViewRowModel` 现把递归扫描结果按规范化文件系统路径映射回现有 Shell 行，并为行保存大小、文件/目录/不可读计数快照。更新返回新的行集合，但保留行顺序、稳定 ID、绝对/相对 PIDL 和系统图标索引；没有扫描结果的行与没有文件系统路径的虚拟 Shell 行保持原值。定向 SettingsSmoke 先因模型不存在而构建失败，增加实现后通过，并覆盖旧快照不被修改。
+
+`CommonListViewColorBaseline` 的隐藏相对大小合同现在从该行模型读取初始及更新后的大小/计数，再发布到 `SysListView32`。后台扫描、owner-thread 发布、FileSystemWatcher 触发、比例重算、升降序和选区/焦点身份的既有合同继续通过。完整 Release SettingsSmoke、NativeProbe 和 App Release 构建均通过，均为 0 警告/错误；隐藏列表不可见，前台 HWND 不变。
+
+该项把扫描 ticket 的有效结果与行数据发布连起来，但仍仅覆盖两个临时文件夹的隔离 ListView；触发源仍是原型自己的 FileSystemWatcher，不是 `SHChangeNotify` 或 Shell provider 通知。产品 ExplorerBrowser、Shell 菜单/拖放/虚拟项目行操作、可见绘制和 Q-Dir 互操作均未改变或验证。下一门槛是在隔离原型中用 Shell 通知更新、新增和移除行，同时维持 PIDL 生命周期、排序、选区/焦点，再重新审视真实 Shell 操作覆盖；不据此批准产品迁移。
+
 ## 2026-10-31：虚拟 Shell 行项目接口探测
 
 扩展隐藏的 `--common-listview-virtual-folder-contract`：从 Control Panel 虚拟根枚举出的 9 个项目，逐项通过父 `IShellFolder::GetUIObjectOf` 请求 `IContextMenu` 与 `IDataObject`。本机结果为 `virtual-item-context-menus=9`、`virtual-item-data-objects=9`；9/9 个项目的 `IDataObject.GetData("Shell IDList Array")` 均返回单项 CIDA，且父子 PIDL 组合后的 Shell parsing name 与原行身份一致。9 个虚拟文件夹均可绑定，合计枚举 72 个下一层项目。
