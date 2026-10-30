@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-30 14:22 北京时间：temp.78 当前运行实例一分钟只读复采
+
+- UTC 06:22:12–06:23:12，对 PID `19580` 每 5 秒采样，共 13 点；进程启动时间 `2026-10-30T02:32:39.616Z`，路径 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.78\app\ExplorerDirs.App.exe`。未启动、重启、聚焦或操作应用。
+- Working Set 范围 `361.69–367.72 MiB`，首末 `361.71→367.72 MiB`；Private Bytes 范围 `178.79–183.09 MiB`，首末 `178.83→183.09 MiB`。句柄 `1,375–1,456`，线程 `71–91`，GDI `1,205–1,240`，USER `157–179`。
+- 期间没有控制用户操作负载，首末上涨不能归因为持续泄漏，也不能与先前被动样本直接做负载比较。它只记录该 PID 一分钟的计数波动；要定位来源仍需固定操作阶段，并采集托管堆/GC 数据。原始 CSV 在忽略目录 `src/.state/memory-samples/goal-20261030-142211.csv`，SHA-256 `75F04A3204E72CECE8A5E9701B61438FDA59E65EC18B8FE4F41FA23303B670FF`。
+
 ## 2026-10-30 14:08 北京时间：temp.78 同 PID 一分钟只读复采
 
 - UTC 06:08:10–06:09:10，对 PID `19580` 每 5 秒采样，共 13 点。进程启动时间为 `2026-10-30T02:32:39.616Z`，路径为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.78\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.78+cdcd2665394a7f632bd85e1f2122d6d622d2a33e`。未启动、重启、聚焦或操作应用。
