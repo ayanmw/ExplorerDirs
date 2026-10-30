@@ -120,6 +120,7 @@ if ($IsolatedProfile) {
     foreach ($name in @(
         'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
         'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
+        'NavigationTreeDragHoverDelay.ini',
         'NavigationTreeWidths.ini', 'LayoutProportions.ini', 'QuickFilterFavorites.ini', 'QuickFilterHistory.ini',
         'ViewPresets.ini', 'Theme.ini', 'SizeDisplay.ini', 'ProgramStarter.ini', 'HiddenItems.ini',
         'MouseWheelFocus.ini', 'TabStripVisibility.ini', 'MultilineTabHeaders.ini', 'TabHeaderMaximumWidth.ini', 'TabCloseButton.ini', 'TabHoverActivation.ini', 'WindowTitle.ini',
