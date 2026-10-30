@@ -4892,3 +4892,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - NativeProbe 增加 opt-in `single-item-reapply-column` 策略：发送单项 `SHCNE_UPDATEITEM` 后，通过 `IColumnManager` 显式重设 Name 与递归大小两列，并记录 HRESULT、列和值、排序、选区及 provider 读取计数。每轮现使用 GUID CLSID 和夹具，避免覆盖既有注册/文件。
 - Release build 与无窗口 smoke 通过。正确 Private Desktop 入口测得重设 `S_OK`，但视图未重新读出列值；该轮输入 tick 变化，并在 `STATIC` 根窗口销毁时超时，故只记为无效诊断线索。唯一本轮 CLSID/夹具遗留及清理命令被策略拒绝的情况已记入调查记录。后续需先处理该遗留边界，再选 WPF 根宿主和稳定桌面条件复验；产品继续使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
+
+## 2026-10-30：减少 F5 与查看方式切换的列表重绘空窗
+
+- F5 仍使用 `IShellView::Refresh`，这是 Explorer 对 F5 的标准 Shell 操作；查看方式切换只调用 `IFolderView2::SetViewModeAndIconSize`，此前并未重新导航或完整刷新。
+- 文件列表现在在原生刷新期间暂缓重绘，并在本轮异步刷新完成回调清理时恢复；查看方式切换只在同步设置视图模式期间暂缓重绘。若 Shell 不支持 `IFolderView2::SetRedraw`，操作按原路径继续。
+- ExplorerDirs.App Release 构建通过（0 警告/错误），本次可见 UI 闪烁尚未验收；实际空窗、刷新耗时及慢速/虚拟 Shell 位置的行为留待集中 UI 验收。没有重建 ExplorerBrowser，也未改导航/刷新语义。

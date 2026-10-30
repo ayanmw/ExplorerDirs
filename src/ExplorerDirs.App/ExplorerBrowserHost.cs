@@ -2518,6 +2518,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 // Let the native view paint a real mode transition. This changes presentation only;
                 // it must not refresh or navigate the folder.
+                using var redraw = ShellViewRedrawLease.TrySuppress(view);
                 if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
                         new NativeViewStateTarget(view, Current),
                         result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
@@ -2682,6 +2683,23 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.Release(unknown); }
         }
         finally { Marshal.ReleaseComObject(viewObject); }
+    }
+
+    private ShellViewRedrawLease? TrySuppressCurrentViewRedraw()
+    {
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return null;
+        try
+        {
+            // Redraw suppression is only a visual optimization. Keep the Shell operation
+            // usable when a provider does not support IFolderView2::SetRedraw.
+            return ShellViewRedrawLease.TrySuppress(view);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
+        {
+            return null;
+        }
+        finally { Marshal.Release(view); }
     }
 
     private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
@@ -3100,6 +3118,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
+            var refreshRedraw = TrySuppressCurrentViewRedraw();
+            if (!IsCurrentRefreshRequest())
+            {
+                refreshRedraw?.Dispose();
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                return;
+            }
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
@@ -3108,12 +3134,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch when (!IsCurrentRefreshRequest())
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3121,6 +3149,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3128,6 +3157,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
@@ -3140,6 +3170,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             void FinishRefreshCompletion()
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
