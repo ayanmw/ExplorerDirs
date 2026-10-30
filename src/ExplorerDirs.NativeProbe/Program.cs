@@ -209,6 +209,8 @@ internal static class Program
             return ShellViewSelectionEnumerationProbe.RunRestoreDuringRefresh();
         if (args.Length == 1 && args[0] == "--ishellview-selection-enumeration-restore-stale")
             return ShellViewSelectionEnumerationProbe.RunRestoreDuringRefresh(omitLastTarget: true);
+        if (args.Length == 1 && args[0] == "--ishellview-selection-enumeration-restore-stale-unselected-focus")
+            return ShellViewSelectionEnumerationProbe.RunRestoreDuringRefresh(omitLastTarget: true, unselectedFocus: true);
         if (args.Length == 1 && args[0] == "--file-operation-collision")
             return ShellFileOperationConflictProbe.Run();
         if (args.Length == 1 && args[0] == "--folder-view-options-unhosted")
@@ -288,7 +290,7 @@ internal static class Program
             Console.WriteLine("       --folder-view-options-unhosted (uninitialized ExplorerBrowser COM object; tests FVO setter without a parent window)");
             Console.WriteLine("       --folder-header-options-hosted (OPT-IN hidden ExplorerBrowser: sets FVO_CUSTOMPOSITION before Initialize and records OnViewCreated folder flags)");
             Console.WriteLine("       --ishellview-selection-batch-spike (isolated native selection restore, direct and stale-PIDL fallback; no ExplorerBrowser or input)");
-        Console.WriteLine("       --ishellview-selection-enumeration-restore[-stale] (hidden stock IShellView fresh-view multi-selection recovery)");
+            Console.WriteLine("       --ishellview-selection-enumeration-restore[-stale[-unselected-focus]] (hidden stock IShellView selection/focus recovery)");
             Console.WriteLine("       --ishellview-color-spike-visible --AllowInteractiveDesktopControl (show only the isolated test view; foreground is guarded)");
             Console.WriteLine("       --search-virtual-scopes (read-only Shell parsing and search-folder scope creation; no result enumeration)");
             Console.WriteLine("       --selection-properties (read-only Shell properties of isolated fixture files)");

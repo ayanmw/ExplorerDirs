@@ -10,7 +10,7 @@
 
 2026-10-31 02:15 CST：同一 PID 的 .NET Runtime counters 6 点采样显示最近一次 GC 报告堆约 `11.41–12.09 MiB`、GC committed `28.07 MiB`，同期进程 Private Bytes 约 `115.93 MiB`；只观察到一次 Gen 0。此数据说明 GC 堆不是进程提交量的全部，不能把余量直接归为 Shell/native 分配；分配速率仍需固定工作负载后再归因。详见[采样记录](memory-sampling.md#2026-10-31-0215-csttemp80-net-runtime-计数附加采样)。
 
-2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，产品没有逐行派生列。纯行模型快照对账覆盖重新枚举后的重排、元数据更新、新增/移除、稳定 ID 与 PIDL 退休集合；NativeProbe 隐藏窗口的真实 Shell 通知合同通过 create/update-directory/rename/delete 通知及重新枚举。行状态映射合同覆盖多选/焦点身份，新的隐藏 `SysListView32` 投影合同进一步完成新增/删除后列表重建及状态写回、读回；三项隐藏合同重复通过，前台不变。尚缺真实 IShellView 选区/焦点恢复、Shell 原生排序及长跑 PIDL 资源验证；保持产品 ExplorerBrowser，直到迁移硬门槛逐项得到证据。详见[架构调查](folder-size-column-investigation.md#2026-10-31-隐藏-syslistview32-写回重枚举后的选区焦点)。
+2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，产品没有逐行派生列。纯行模型快照对账覆盖重新枚举后的重排、元数据更新、新增/移除、稳定 ID 与 PIDL 退休集合；NativeProbe 隐藏窗口的真实 Shell 通知合同通过 create/update-directory/rename/delete 通知及重新枚举。行状态映射合同覆盖多选/焦点身份，隐藏 `SysListView32` 投影合同完成新增/删除后列表重建及状态写回、读回；随后真实 stock `IShellView` fresh-view 探针通过完整多选恢复、一个过期选中 PIDL 的幸存焦点恢复，以及焦点本身未选中时保留幸存多选并恢复同一未选中焦点 PIDL。上述隐藏合同前台不变。尚缺 Shell 原生排序及长跑 PIDL 资源验证；产品仍使用 ExplorerBrowser，且产品宿主/可见焦点与输入未验证。详见[架构调查](folder-size-column-investigation.md#2026-10-31-隐藏-syslistview32-写回重枚举后的选区焦点)与[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。
 
 2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
@@ -5013,4 +5013,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 真实隐藏 stock `IShellView` 中，`SelectItem` 对未激活 view 返回 `S_OK` 仍不足以读回 focused item；探针改为 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 后，4 项选区和焦点 PIDL 均恢复，父窗口隐藏且前台 HWND 不变。
 - 修复快照恢复中的状态耦合：某个旧选中 PIDL 已删除时，仍独立尝试恢复存在的焦点 PIDL。混合 readiness `1110` 读回 3 个幸存选中项和原焦点 PIDL，明确报告 `selection=False/focus=True`。
+- 补充 `110` readiness 的未选中焦点场景：缺少一个已选 PIDL 后，2 个幸存项仍被选中，原未选中焦点 PIDL 精确恢复且继续未选中。
 - 结果仅限隐藏 `IShellView` 与生产快照恢复函数；未验证产品 ExplorerBrowser 刷新、用户可见焦点/键盘/滚动或整套 Shell 操作。产品架构仍为 ExplorerBrowser，IShellView 迁移继续保留兼容门槛。细节见[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。

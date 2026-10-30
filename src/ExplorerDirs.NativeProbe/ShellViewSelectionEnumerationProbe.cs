@@ -184,15 +184,16 @@ internal static class ShellViewSelectionEnumerationProbe
         }
     }
 
-    internal static int RunRestoreDuringRefresh(bool omitLastTarget = false)
+    internal static int RunRestoreDuringRefresh(bool omitLastTarget = false, bool unselectedFocus = false)
     {
         var foreground = GetForegroundWindow();
         var fixturesRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
         var fixture = Path.Combine(fixturesRoot, Guid.NewGuid().ToString("N"));
         var targetFixture = fixture + "-target";
         var expectedTargetCount = FixtureCount - (omitLastTarget ? 1 : 0);
-        var expectedSelectionCount = TargetIndexes.Length - (omitLastTarget ? 1 : 0);
-        var expectedReadiness = new string('1', TargetIndexes.Length - (omitLastTarget ? 1 : 0)) +
+        var selectedTargetCount = TargetIndexes.Length - (unselectedFocus ? 1 : 0);
+        var expectedSelectionCount = selectedTargetCount - (omitLastTarget ? 1 : 0);
+        var expectedReadiness = new string('1', selectedTargetCount - (omitLastTarget ? 1 : 0)) +
             (omitLastTarget ? "0" : string.Empty);
         nint parent = 0, absolutePidl = 0, folder = 0, view = 0, hostPointer = 0, viewWindow = 0, folderView = 0;
         nint targetAbsolutePidl = 0, targetFolder = 0, targetView = 0, targetHostPointer = 0, targetViewWindow = 0, targetFolderView = 0;
@@ -244,14 +245,18 @@ internal static class ShellViewSelectionEnumerationProbe
                 finally { Marshal.FreeCoTaskMem(itemPidl); }
             }
 
-            Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x1u | 0x4u | 0x10u | 0x40000000u));
-            for (var index = 1; index < TargetIndexes.Length; index++)
+            var firstSelectedIndex = unselectedFocus ? 1 : 0;
+            Check(At<SelectItem>(folderView, 15)(folderView, firstSelectedIndex, 0x1u | 0x4u | 0x10u | 0x40000000u));
+            if (unselectedFocus)
+                Check(At<SelectItem>(folderView, 15)(folderView, 0, 0x10u | 0x40000000u));
+            for (var index = firstSelectedIndex + 1; index < TargetIndexes.Length; index++)
                 Check(At<SelectItem>(folderView, 15)(folderView, index, 0x1u | 0x40000000u));
             Pump();
             snapshot = ShellViewSelectionSnapshot.Capture(folderView)
-                ?? throw new Exception("Could not capture the four-item selection snapshot.");
-            if (snapshot.SelectedCount != TargetIndexes.Length || !snapshot.HasFocusedItem)
-                throw new Exception($"Expected four selected items and a focused item, got selected={snapshot.SelectedCount},focused={snapshot.HasFocusedItem}.");
+                ?? throw new Exception("Could not capture the selection/focus snapshot.");
+            if (snapshot.SelectedCount != selectedTargetCount || !snapshot.HasFocusedItem ||
+                snapshot.FocusedItemWasSelected == unselectedFocus)
+                throw new Exception($"Unexpected source selection/focus snapshot: selected={snapshot.SelectedCount},focused={snapshot.HasFocusedItem},focused-selected={snapshot.FocusedItemWasSelected}.");
 
             Check(SHParseDisplayName(targetFixture, 0, out targetAbsolutePidl, 0, out _));
             Check(SHBindToObject(0, targetAbsolutePidl, 0, in ShellFolderId, out targetFolder));
@@ -372,21 +377,22 @@ internal static class ShellViewSelectionEnumerationProbe
             using var readback = ShellViewSelectionSnapshot.Capture(targetFolderView)
                 ?? throw new Exception("Could not capture the final Shell selection.");
             var focusedTargetRestored = IsFocusedItem(targetFolderView, childPidls[0]);
+            var focusedTargetSelectionRestored = readback.FocusedItemWasSelected != unselectedFocus;
             if (GetItemCount(targetFolderView, 2) != expectedTargetCount ||
                 (omitLastTarget
                     ? readback.SelectedCount != expectedSelectionCount || finalReadbackSelectedCount != expectedSelectionCount ||
                         !readinessHistory.Contains(expectedReadiness, StringComparer.Ordinal) || !focusRestored
                     : !selectionRestored || readback.SelectedCount != expectedSelectionCount || !focusRestored) ||
-                !focusedTargetRestored)
-                throw new Exception($"Fresh-view restore did not recover the expected selection/focus: immediate-count={immediateCount}, final-count={GetItemCount(targetFolderView, 2)}, restored={selectionRestored}/{focusRestored}, selected={readback.SelectedCount}, focused-target={focusedTargetRestored}, attempts={restoreAttempts}, readiness={string.Join(',', readinessHistory)}.");
+                !focusedTargetRestored || !focusedTargetSelectionRestored)
+                throw new Exception($"Fresh-view restore did not recover the expected selection/focus: immediate-count={immediateCount}, final-count={GetItemCount(targetFolderView, 2)}, restored={selectionRestored}/{focusRestored}, selected={readback.SelectedCount}, focused-target={focusedTargetRestored}, focused-selected={readback.FocusedItemWasSelected}, attempts={restoreAttempts}, readiness={string.Join(',', readinessHistory)}.");
             if (IsWindowVisible(parent) || GetForegroundWindow() != foreground)
                 throw new Exception("Hidden/foreground boundary changed.");
 
             Console.WriteLine("ishellview-selection-enumeration-restore: " +
-                $"scenario={(omitLastTarget ? "stale-target" : "all-present")}; items={expectedTargetCount}; targets={TargetIndexes.Length}; expected-selected={expectedSelectionCount}; readiness={string.Join(',', readinessHistory)}; " +
+                $"scenario={(unselectedFocus ? "stale-unselected-focus" : omitLastTarget ? "stale-target" : "all-present")}; items={expectedTargetCount}; targets={TargetIndexes.Length}; expected-selected={expectedSelectionCount}; readiness={string.Join(',', readinessHistory)}; " +
                 $"restore-attempts={restoreAttempts}; readiness-queries={readinessQueryTotal}; outcomes={string.Join(',', restoreOutcomes)}; " +
                 $"focus-trace={string.Join(',', focusTrace.Where(line => line.StartsWith("focused-item-", StringComparison.Ordinal) || line.StartsWith("restore-result", StringComparison.Ordinal)).TakeLast(12))}; " +
-                $"immediate-count={immediateCount}; elapsed-ms={elapsedMs:F1}; restored={selectionRestored}/{focusRestored}; selected={readback.SelectedCount}; focused-target={focusedTargetRestored}; shell-state={targetBrowserSite.NotificationSnapshot}; " +
+                $"immediate-count={immediateCount}; elapsed-ms={elapsedMs:F1}; restored={selectionRestored}/{focusRestored}; selected={readback.SelectedCount}; focused-target={focusedTargetRestored}; focused-selected={readback.FocusedItemWasSelected}; shell-state={targetBrowserSite.NotificationSnapshot}; " +
                 $"activate-no-focus=0x{activationResult:X8}; parent-visible=False; foreground-unchanged=True");
             return 0;
         }
