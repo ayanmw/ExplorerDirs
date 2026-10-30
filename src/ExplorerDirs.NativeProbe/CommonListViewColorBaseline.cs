@@ -247,7 +247,7 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsSort = MenuContainsAny(backgroundMenuLabels, "排序方式", "Sort by");
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
-            var selectedShellCopy = CopySelectedShellRow(listView, selectedId, fixture);
+            var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, selectedId, fixture);
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
@@ -256,7 +256,7 @@ internal static class CommonListViewColorBaseline
                 shellImageListAttached && rowIconsBound && sortedRowIconsBound &&
                 itemShellMenuAvailable && backgroundShellMenuAvailable &&
                 itemMenuForegroundUnchanged && backgroundMenuForegroundUnchanged &&
-                selectedShellCopy &&
+                selectedShellOperations &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
@@ -274,7 +274,7 @@ internal static class CommonListViewColorBaseline
                 $"group:{backgroundMenuContainsGroup},refresh:{backgroundMenuContainsRefresh};" +
                 $"folder-background-root-items={string.Join('|', backgroundMenu.RootLabels)};" +
                 $"folder-background-all-items={string.Join('|', backgroundMenu.AllLabels)};" +
-                $"selected-row-shell-copy={selectedShellCopy};" +
+                $"selected-row-shell-operations={selectedShellOperations};" +
                 $"item-menu-foreground-unchanged={itemMenuForegroundUnchanged};" +
                 $"background-menu-foreground-unchanged={backgroundMenuForegroundUnchanged};" +
                 $"foreground-handles=0x{foregroundBefore.ToInt64():X}/0x{foregroundAfterItemMenu.ToInt64():X}/0x{foregroundAfterBackgroundMenu.ToInt64():X};" +
@@ -417,7 +417,7 @@ internal static class CommonListViewColorBaseline
         }
     }
 
-    private static bool CopySelectedShellRow(nint listView, long selectedRowId, string fixture)
+    private static bool ExerciseSelectedShellRowOperations(nint listView, long selectedRowId, string fixture)
     {
         var selectedIndex = SendMessageW(listView, LvmGetNextItem, -1, (nint)LvisSelected).ToInt32();
         if (selectedIndex < 0 || GetItemParam(listView, selectedIndex) != selectedRowId)
@@ -427,10 +427,13 @@ internal static class CommonListViewColorBaseline
             throw new InvalidOperationException("The selected ListView row has no retained Shell absolute PIDL.");
 
         var destinationPath = Path.Combine(fixture, "copy-destination");
+        var moveDestinationPath = Path.Combine(fixture, "move-destination");
         Directory.CreateDirectory(destinationPath);
+        Directory.CreateDirectory(moveDestinationPath);
+        var foregroundBeforeOperations = GetForegroundWindow();
         var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(row.AbsolutePidl, ref itemId, out var sourceItem));
-        nint destinationItem = 0, operation = 0;
+        nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0;
         try
         {
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
@@ -448,14 +451,38 @@ internal static class CommonListViewColorBaseline
             var sourceLength = File.Exists(sourcePayload) ? new FileInfo(sourcePayload).Length : -1;
             var copiedLength = File.Exists(copiedPayload) ? new FileInfo(copiedPayload).Length : -1;
             // RecursiveBytes was deliberately changed above for the sort check; compare the Shell copy with its disk source instead.
-            var passed = aborted == 0 && sourceLength >= 0 && copiedLength == sourceLength &&
+            var copied = aborted == 0 && sourceLength >= 0 && copiedLength == sourceLength &&
                 File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(copiedPayload));
-            Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};aborted={aborted};" +
-                $"payload-matches-source={passed};source-preserved={File.Exists(sourcePayload)}");
-            return passed;
+            var foregroundAfterCopy = GetForegroundWindow();
+            if (!copied || !File.Exists(sourcePayload)) return false;
+
+            var copiedFolder = Path.Combine(destinationPath, "selected-folder-copy");
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(copiedFolder, 0, ref itemId, out moveSourceItem));
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(moveDestinationPath, 0, ref itemId, out moveDestinationItem));
+            var moveClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var moveInterfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref moveClassId, 0, 1, ref moveInterfaceId, out moveOperation));
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(moveOperation, 5)(moveOperation, flags));
+            Marshal.ThrowExceptionForHR(At<MoveItem>(moveOperation, 14)(moveOperation, moveSourceItem,
+                moveDestinationItem, "moved-selected-folder", 0));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(moveOperation, 21)(moveOperation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(moveOperation, 22)(moveOperation, out var moveAborted));
+            var movedPayload = Path.Combine(moveDestinationPath, "moved-selected-folder", "payload.bin");
+            var moved = moveAborted == 0 && File.Exists(sourcePayload) && !Directory.Exists(copiedFolder) && File.Exists(movedPayload) &&
+                new FileInfo(movedPayload).Length == sourceLength &&
+                File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(movedPayload));
+            var foregroundAfterMove = GetForegroundWindow();
+            Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};copy-aborted={aborted};" +
+                $"move-aborted={moveAborted};copy-payload-matches-source={copied};move-payload-matches-source={moved};" +
+                $"source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};" +
+                $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/0x{foregroundAfterMove.ToInt64():X}");
+            return moved;
         }
         finally
         {
+            if (moveOperation != 0) Marshal.Release(moveOperation);
+            if (moveDestinationItem != 0) Marshal.Release(moveDestinationItem);
+            if (moveSourceItem != 0) Marshal.Release(moveSourceItem);
             if (operation != 0) Marshal.Release(operation);
             if (destinationItem != 0) Marshal.Release(destinationItem);
             Marshal.Release(sourceItem);
@@ -746,6 +773,7 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint buffer, uint maxLength);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
