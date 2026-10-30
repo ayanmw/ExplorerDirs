@@ -5100,3 +5100,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 在干净主线提交 `ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f` 上执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-200808-091-e70fbb/`。候选为 `prepared-not-run`、初始四窗格、41 项待验收；BuildIdentity 为 `0.6.0-preview.20261030-200808-091-e70fbb+ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f`。
 - EXE SHA-256 `5C306940EBCEFFB35C922300E87EEC3039C4D588F5E14C614B88C71BF5F730F9`、App DLL SHA-256 `62E0B8024DA2414D9B7E721837DEDF3D5E566006B25DD7D3FD1DA07BA9FD48B2` 均与 manifest 内哈希经独立计算一致。没有启动应用、创建 ExplorerBrowser、发送输入或触碰正式 profile；此候选不是发布包，也没有可见通过结论。
 - 该候选准备时 F5 仍按普通文件夹发 `SHCNE_UPDATEDIR`、搜索/虚拟位置回退 `IShellView.Refresh()`。这项记录由 2026-10-31 后续提交 `b93a9e7` 的直接 `IShellView.Refresh()` 路径调整取代；最新候选、源码事实和验收说明见本文顶部及[集中验收说明](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+
+## 2026-10-31：递归大小隔离 Shell 列合同复核
+
+- 无窗口 NativeProbe 使用同一真实临时目录分别核对生产递归扫描器与合成 `IShellFolder2` 原型：扫描结果为 10 B、2 files、1 folder；Shell 原型的 `PKEY_Size`、大小文本和数值排序合同通过，嵌套枚举/文件操作合同也通过。
+- 普通文件系统适配器对目录递归 `PKEY_Size` 请求返回 `E_FAIL`，此路径不可用于提供派生列；单次结果不外推到所有 Shell provider。当前仅证明同一夹具值一致，扫描器结果尚未动态注入 provider；产品 ExplorerBrowser 未改。完整范围见[派生大小列调查](folder-size-column-investigation.md#2026-10-31生产扫描结果与-shell-递归大小列合同对照)。

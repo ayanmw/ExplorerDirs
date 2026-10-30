@@ -296,6 +296,8 @@ internal static class StaticShellFolderAdapterProbe
                 Marshal.FreeCoTaskMem(sizeDetails);
             }
 
+            VerifyRecursiveFolderSizeProjection(fixture, nativeLibrary);
+
             var documentColumn = columnIndex + 2;
             var documentByteCountKey = new ShellColumnManager.NativeKey { FormatId = DocumentSummaryFormat, PropertyId = 4 };
             var documentKeyPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<ShellColumnManager.NativeKey>());
@@ -1924,6 +1926,34 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.Release(contextMenu); }
     }
 
+    private static void VerifyRecursiveFolderSizeProjection(string fixture, nint nativeLibrary)
+    {
+        var shellFixture = Path.Combine(Path.GetDirectoryName(fixture)!, "recursive-size-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(shellFixture);
+        Directory.CreateDirectory(Path.Combine(shellFixture, "child", "nested-folder"));
+        File.WriteAllBytes(Path.Combine(shellFixture, "root.txt"), "root"u8.ToArray());
+        File.WriteAllBytes(Path.Combine(shellFixture, "second.txt"), "second"u8.ToArray());
+        var hiddenFile = Path.Combine(shellFixture, "hidden.txt");
+        File.WriteAllBytes(hiddenFile, "hidden"u8.ToArray());
+        File.SetAttributes(hiddenFile, File.GetAttributes(hiddenFile) | FileAttributes.Hidden);
+        File.WriteAllBytes(Path.Combine(shellFixture, "child", "nested.txt"), "nested"u8.ToArray());
+        File.WriteAllBytes(Path.Combine(shellFixture, "child", "nested-folder", "deep.txt"), "deep"u8.ToArray());
+
+        var childPath = Path.Combine(shellFixture, "child");
+        try
+        {
+            var scan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(shellFixture, [childPath], CancellationToken.None);
+            if (!scan.TryGetValue(Path.GetFullPath(childPath), out var recursive) || recursive.Bytes != 10 ||
+                recursive.Files != 2 || recursive.Directories != 1 || recursive.Unreadable != 0)
+                throw new InvalidOperationException("The recursive-size fixture did not scan to 10 bytes, 2 files, and 1 nested folder.");
+
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderTreeContractSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderTreeContractSmoke"))(shellFixture));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={recursive.Bytes}; files={recursive.Files}; directories={recursive.Directories}; synthetic-shell-column=PKEY_Size/text/numeric-sort; window-created=False");
+        }
+        finally { Directory.Delete(shellFixture, recursive: true); }
+    }
+
     private static void VerifyWrappedShellItemDataObject(nint dataObject)
     {
         var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
@@ -2254,6 +2284,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFactoryPropertyStore(nint self, uint flags, nint factory, in Guid iid, out nint store);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

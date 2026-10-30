@@ -729,3 +729,9 @@ Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 r
 在同一隐藏 `--common-listview-data-contract` 中重新通过行 PIDL 向父 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 查询项目菜单，并向父 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询背景菜单。项目菜单取得 154 个菜单项/扩展命令，canonical verb 包含 `delete`、`rename`、`properties`、`cut`、`copy`、`paste`、`copyaspath`；背景菜单包含 115 项/扩展命令，但它的菜单树不含查看、排序、分组或刷新。两次查询都没有显示菜单或执行菜单命令，前台 HWND 保持不变。
 
 这确认自有 `SysListView32` 可按当前行 PIDL 取得 Windows Shell 项目菜单对象，但不能通过父文件夹菜单得到与产品 ExplorerBrowser 相同的文件区背景菜单。该差异与 Explorer Dirs 的原始要求一致：文件区右键行为需要保留 Explorer 视图上下文；若继续自有视图原型，必须先证明背景查看/排序/分组/刷新命令有可靠的当前视图路由，不能把普通 `IShellFolder` 菜单称为 Explorer 等价菜单。此次仅查询菜单对象和 canonical verb，没有验证可见 Popup、物理命中、命令执行、第三方扩展或产品迁移。
+
+### 2026-10-31：生产扫描结果与 Shell 递归大小列合同对照
+
+NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临时目录构造 6 B 直接文件和 4 B 嵌套文件。生产 `RecursiveDirectoryScanner` 汇总为 10 B、2 files、1 folder；同一夹具交给隔离合成 `IShellFolder2` 合同，验证 `PKEY_Size` 的 `VT_UI8`、详细信息文本、数值排序，以及嵌套枚举/文件操作合同。完整合同退出码 0，`window-created=False`。
+
+这确认生产扫描器与原生 Shell 列原型对该夹具的数值一致，但两者仍是分别计算，没有把扫描结果接入原生 provider 的运行时数据管线。尝试让普通文件系统适配器为目录返回递归 `PKEY_Size` 得到 `E_FAIL`，说明不能依赖该适配器路径提供此派生列；也不应将这个单次 HRESULT 泛化为所有 Shell provider 的行为。产品未改，列显示、后台扫描生命周期和排序仍未接入产品；IShellView/自有视图迁移仍需菜单、拖放、通知、焦点、虚拟位置及可见行为评估。
