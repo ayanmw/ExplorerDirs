@@ -868,7 +868,7 @@ public partial class MainWindow : Window
         string columnName, MenuItem loading)
     {
         if (!menu.IsOpen) return;
-        IReadOnlyCollection<string> values;
+        HashSet<string>? capturedValues;
         ShellFileViewExportCapture.ColumnValueCapture capture;
         try
         {
@@ -881,7 +881,7 @@ public partial class MainWindow : Window
                     if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
                 }
                 if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
-                values = capture.Values;
+                capturedValues = capture.TakeValues();
             }
         }
         catch (Exception ex)
@@ -893,11 +893,10 @@ public partial class MainWindow : Window
         var currentFilter = pane.CurrentQuickFilter.ColumnFilters.FirstOrDefault(filter => filter.Key == key);
         var selectedValues = currentFilter?.Values.ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var allValues = await Task.Run(() => values.Concat(selectedValues)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(value => value, StringComparer.Ordinal)
-            .ToArray());
+        HashSet<string>? valuesToSort = capturedValues;
+        capturedValues = null;
+        var allValues = await Task.Run(() => ShellColumnValueMenuValues.SortForMenu(valuesToSort!, selectedValues));
+        valuesToSort = null;
         if (!menu.IsOpen || !pane.IsCurrentColumnValueCapture(capture)) return;
 
         menu.Items.Remove(loading);

@@ -104,7 +104,7 @@ internal static class ShellFileViewExportCapture
         private readonly nint _folder;
         private readonly ShellExportColumn _column;
         private readonly int _count;
-        private readonly HashSet<string> _values = new(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string>? _values = new(StringComparer.OrdinalIgnoreCase);
         private int _index;
         private bool _disposed;
 
@@ -120,15 +120,21 @@ internal static class ShellFileViewExportCapture
 
         internal IColumnValueCaptureSource? Source { get; set; }
         internal long Generation { get; set; }
-        // Keep the collected set unsorted here; the UI combines it with stale selected
-        // values and sorts the final menu once after the capture releases its COM handles.
-        internal IReadOnlyCollection<string> Values => _values;
+        // Keep incremental Shell reads in one unsorted set. The UI detaches it before
+        // sorting so this capture object does not retain the full set during menu creation.
+        internal HashSet<string> TakeValues()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return Interlocked.Exchange(ref _values, null) ??
+                throw new InvalidOperationException("列值已从捕获对象移出。");
+        }
 
         // Process a bounded number of Shell items per Dispatcher turn so a large
         // checklist does not monopolize the window's input and paint loop.
         internal bool ReadBatch(int maximumItems)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            var values = _values ?? throw new InvalidOperationException("列值已从捕获对象移出。");
             var end = Math.Min(_count, _index + Math.Max(1, maximumItems));
             var oneColumn = new[] { _column };
             while (_index < end)
@@ -136,7 +142,7 @@ internal static class ShellFileViewExportCapture
                 if (_items != 0)
                 {
                     Marshal.ThrowExceptionForHR(At<GetItemAt>(_items, 8)(_items, (uint)_index, out var shellItem));
-                    try { _values.Add(ReadRow(shellItem, oneColumn)[0]); }
+                    try { values.Add(ReadRow(shellItem, oneColumn)[0]); }
                     finally { Marshal.Release(shellItem); }
                 }
                 else
@@ -149,7 +155,7 @@ internal static class ShellFileViewExportCapture
                         Marshal.ThrowExceptionForHR(SHCreateItemWithParent(IntPtr.Zero, _folder, childPidl,
                             ref itemId, out var shellItem));
                         if (shellItem == 0) throw new COMException("Shell returned no item for the current view index.");
-                        try { _values.Add(ReadRow(shellItem, oneColumn)[0]); }
+                        try { values.Add(ReadRow(shellItem, oneColumn)[0]); }
                         finally { Marshal.Release(shellItem); }
                     }
                     finally { Marshal.FreeCoTaskMem(childPidl); }
@@ -163,6 +169,7 @@ internal static class ShellFileViewExportCapture
         {
             if (_disposed) return;
             _disposed = true;
+            _values = null;
             if (_folder != 0) Marshal.Release(_folder);
             if (_items != 0) Marshal.Release(_items);
             Marshal.Release(_folderView);

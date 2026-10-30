@@ -14,6 +14,7 @@
     <Compile Include="../ExplorerDirs.App/ShellLocationIdentity.cs" Link="ShellLocationIdentity.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionPidl.cs" Link="ShellSelectionPidl.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionMatch.cs" Link="ShellSelectionMatch.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellColumnValueMenuValues.cs" Link="ShellColumnValueMenuValues.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionFolderResolver.cs" Link="ShellSelectionFolderResolver.cs" />
     <Compile Include="../ExplorerDirs.App/SelectedPathsClipboardText.cs" Link="SelectedPathsClipboardText.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />

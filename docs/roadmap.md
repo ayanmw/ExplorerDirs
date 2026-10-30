@@ -6,6 +6,8 @@
 
 2026-10-30 克隆视图快照一致性保护：克隆时 Shell 视图设置和选区分两次读取，COM 重入期间可能导航到另一位置。现捕获目录/搜索 URI、导航与视图代次、选区代次，并验证导航历史仍指向同一位置；任一值变化就拒绝生成不一致的克隆。定向 SettingsSmoke 覆盖保护接线与历史位置匹配；App Release build、完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，COM 重入时序仍待隔离 HostProbe/集中验收。
 
+2026-10-30 列值筛选菜单临时内存：捕获完成后把唯一列值集合从仍需保留的 Shell 捕获对象中移出；菜单排序直接合并当前已选值并生成最终数组，避免旧 HashSet、LINQ 去重链和菜单项在构建期间共同保留。列表语义（大小写不敏感去重、保留已选但当前不可见的值、区域排序）由 Release SettingsSmoke 覆盖，App Release build 0 警告/错误、完整 SettingsSmoke 退出码 0。没有创建 ExplorerBrowser/GUI，也未测量极大列值清单的实际 MB；菜单视觉项仍与唯一值数量线性增长，保留后续优化空间。
+
 2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果并匹配保存的绝对解析名；选中前重新取得当前行 PIDL、核对其解析名，再通过 `IShellView.SelectItem(PIDL, …)` 按项目身份选中，避免异步插入结果后旧行号选中另一项目。等待所有快照项出现后再批量恢复；匹配采用流式枚举，全部命中即停止，条目数不变时最多每 5 次轮询重扫。解析名匹配、PIDL 身份校验、流式早停和请求门控 SettingsSmoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
 
 2026-10-30 集中验收候选同步：从干净主线 `8c3c0b51203afae9f300e6f1aee9544261beba7b` 执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-003501-952-100cc4/`，包含 39 项待验收清单，克隆视图普通目录/搜索结果选区、逐站导航和快照一致性列入可见检查；异步搜索结果行身份复核由 SettingsSmoke 覆盖。manifest 中 `SourceWorkingTreeDirty=false`；EXE/DLL/颜色夹具哈希与候选身份见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。准备过程未启动窗口、创建 ExplorerBrowser 或发送输入；候选状态为 `prepared-not-run`，等待后续集中验收。

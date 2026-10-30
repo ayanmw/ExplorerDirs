@@ -461,7 +461,7 @@ Ctrl+N 已按 Q-Dir 的 Duplicate Window 语义复制当前四窗格/标签/布�
 
 ### Q-Dir 列头过滤差距（2026-10-28）
 
-Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说明每个视图有独立设置。Explorer Dirs 已接入按标签保存的列值条件：文件名通配符与列条件按 AND 组合，同一属性多选值按 OR 匹配，不同属性条件按 AND 匹配；属性不可读取时保留项目可见。列头 DirectUI SplitButton 的可见边界与 Shell `IColumnManager` 列顺序对应，箭头区域打开列值清单，标题文字仍由 Shell 处理排序；不依赖不存在的 `SysHeader32`、`HDF_SPLITBUTTON` 或 `HDN_DROPDOWN`。清单读取分批让出 Dispatcher，单列值与会话载荷都有上限校验。当前差距是实际 ExplorerBrowser 中的列头命中、值清单样式/定位、筛选结果、慢速及虚拟 Shell provider、复制标签与跨重启表现尚未可见验收；后台接线证据见下文。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)（[官方示例图](https://www.softwareok.com/img/faq/Q-DIR/Dateien_filtern_ueber_den_Spaltenkopf_2021-03-03-08-34-51.png)）、[IShellFolder2::GetDetailsEx](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdetailsex)。
+Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说明每个视图有独立设置。Explorer Dirs 已接入按标签保存的列值条件：文件名通配符与列条件按 AND 组合，同一属性多选值按 OR 匹配，不同属性条件按 AND 匹配；属性不可读取时保留项目可见。列头 DirectUI SplitButton 的可见边界与 Shell `IColumnManager` 列顺序对应，箭头区域打开列值清单，标题文字仍由 Shell 处理排序；不依赖不存在的 `SysHeader32`、`HDF_SPLITBUTTON` 或 `HDN_DROPDOWN`。清单读取分批让出 Dispatcher，单列值与会话载荷都有上限校验。生成菜单前现将收集到的 HashSet 从 Shell 捕获对象移交给排序步骤，合并已选旧值并原地排序，避免捕获对象在菜单项建立期间继续持有一份完整去重集；菜单元素数量仍与唯一列值数量成正比，未量化极大目录下的最终 UI 内存。当前差距是实际 ExplorerBrowser 中的列头命中、值清单样式/定位、筛选结果、慢速及虚拟 Shell provider、复制标签与跨重启表现尚未可见验收；后台接线证据见下文。来源：[Q-Dir FAQ 38](https://www.softwareok.com/?faq=38&seite=faq-Q-DIR)（[官方示例图](https://www.softwareok.com/img/faq/Q-DIR/Dateien_filtern_ueber_den_Spaltenkopf_2021-03-03-08-34-51.png)）、[IShellFolder2::GetDetailsEx](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdetailsex)。
 
 #### 2026-10-28 Private Desktop 探针结果
 
