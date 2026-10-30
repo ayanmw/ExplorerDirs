@@ -62,6 +62,13 @@ foreach ($pane in 1..4) {
     }
     New-Item -ItemType Directory -Path (Join-Path $paneDirectory 'empty-folder') -Force | Out-Null
 }
+$cloneHistoryDirectory = Join-Path $testDirectory 'clone-history'
+foreach ($stop in 'history-stop-1', 'history-stop-2') {
+    $stopDirectory = Join-Path $cloneHistoryDirectory $stop
+    New-Item -ItemType Directory -Path $stopDirectory -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stopDirectory "$stop.txt"), "Disposable $stop selection fixture.",
+        [Text.UTF8Encoding]::new($false))
+}
 # Keep the recursive-size stress fixture separate from normal pane operations so
 # it can exercise status progress without making startup or other tests heavy.
 foreach ($index in 1..10000) {
@@ -196,6 +203,7 @@ $manifest = [ordered]@{
     Profile = 'app/profile/ExplorerDirs.ini'
     ManualFixtures = 'acceptance-files'
     ParentDirectoryItem = $parentDirectoryItem
+    CloneHistoryFixture = 'acceptance-files/pane-1/clone-history'
     RecursiveSizeFixture = 'acceptance-files/recursive-size-progress'
     QdrColorBaseline = 'qdr-color-baseline.qdr'
     QdrColorMetadataFixture = 'qdr-color-metadata.qdr'
@@ -235,6 +243,7 @@ $manifest = [ordered]@{
         'Tab and Shift+Tab traverse every enabled stop of each visible pane in reversible order, including the Details column header. From a file use Shift+Tab to enter Name, Right to move to the next column, then Tab to return to the same selected file; Up/Down must work. F6 and Shift+F6 traverse major regions, including the last-pane to first-pane wrap',
         'The address-history button shows current-tab recent paths and selecting one navigates only that tab; Tab/Shift+Tab include the button and address-edit right-click retains its text context menu. In Modern style F4 opens the directory tree and a second F4 edits the full path; clicking breadcrumb blank space also edits, while clicking an ancestor navigates. Classic style keeps directly editable paths',
         'Visit two fixture folders, close and reopen the tab, and verify its address dropdown keeps those entries. Duplicate it, visit another folder in the copy, and verify the original dropdown is unchanged; this does not assert restoration of the disposed Shell Travel Log',
+        'In pane 1, navigate through clone-history/history-stop-1, select its text file, then navigate through clone-history/history-stop-2 and select its file. Use the tab context menu → Clone Current View. Verify the clone opens at stop 2 with the same selection; move Back and Forward in the clone and verify each stop restores its own selection. Navigate the clone to a different folder and verify the source tab path, history and selections remain unchanged; then independently navigate the source and confirm the clone is unchanged',
         'Immediately after directory navigation, duplicate the tab, create a current-folder tab, close/reopen it, open its address editor and close a pending search; verify every operation uses the confirmed directory. Save/restart and check both the path and pinned metadata, without replacing a newer address/search draft',
         'Move and resize each window on a secondary monitor, including a negative-coordinate monitor where available, restart the isolated app, and verify normal bounds and maximized state. Minimize a maximized window and relaunch the same isolated executable; verify it restores maximized. Ctrl+N and a new QDR workspace must appear on the source monitor; also cover F11 and mixed DPI without altering the daily-use profile',
         'Per-tab history survives tab and layout switches',
