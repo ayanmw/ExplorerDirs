@@ -40,6 +40,8 @@
 
 源码对照确认，产品从 `ExplorerBrowser.GetCurrentView` 取得当前 `IShellView`，再通过 `IShellView::GetItemObject(SVGIO_BACKGROUND/SVGIO_SELECTION, IID_IContextMenu)` 获取以当前视图为上下文的菜单对象；这与直接从 `IShellFolder` 查询的对象不同。故本探针只证明项目/文件夹 context menu 可按 PIDL 查询，不证明自有 ListView 能复用完整 Explorer 文件区菜单。若继续实验自有视图，必须单独证明视图级菜单命令能正确作用于它自己的查看、排序、分组状态；否则保留 ExplorerBrowser 是维持该项体验的已知路径。未修改产品或 GUI。
 
+在同一隐藏 ListView 合同中，按排序后仍选中的 row ID 取回真实 Shell 绝对 PIDL，创建 `IShellItem` 并将该目录交给 `IFileOperation::CopyItem`，目标内容与源文件逐字节相同，源保持不变；临时夹具由探针清理，操作未显示 UI，最终前台句柄不变。这只验证从自有行身份发起一项原生 Shell 复制，不证明剪切/删除/重命名、Shell 通知后视图刷新、剪贴板、拖放或完整菜单操作合同。
+
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 
 此前更新 A/B 用 `IColumnManager.Capture` 的返回值重放刷新前列集合；该集合从未包含合成 namespace 的递归大小键，因此通知后的“无列值”不能单独证明通知本身没有刷新能力。本轮改用固定的 Name / Recursive Size / Type 三列，经 `SetColumns` 与 `SetColumnInfo` 显式重放自定义键，并在通知前检查基线。

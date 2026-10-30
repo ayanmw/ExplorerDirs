@@ -16,6 +16,7 @@ internal static class CommonListViewColorBaseline
     private const int LvmGetItemW = 0x104B;
     private const int LvmSetItemW = 0x104C;
     private const int LvmGetItemTextW = 0x1073;
+    private const int LvmGetNextItem = 0x100C;
     private const int LvmSortItemsEx = 0x1051;
     private const int LvmSetItemState = 0x102B;
     private const int LvmGetItemState = 0x102C;
@@ -246,6 +247,7 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsSort = MenuContainsAny(backgroundMenuLabels, "排序方式", "Sort by");
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
+            var selectedShellCopy = CopySelectedShellRow(listView, selectedId, fixture);
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
@@ -254,6 +256,7 @@ internal static class CommonListViewColorBaseline
                 shellImageListAttached && rowIconsBound && sortedRowIconsBound &&
                 itemShellMenuAvailable && backgroundShellMenuAvailable &&
                 itemMenuForegroundUnchanged && backgroundMenuForegroundUnchanged &&
+                selectedShellCopy &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
@@ -271,6 +274,7 @@ internal static class CommonListViewColorBaseline
                 $"group:{backgroundMenuContainsGroup},refresh:{backgroundMenuContainsRefresh};" +
                 $"folder-background-root-items={string.Join('|', backgroundMenu.RootLabels)};" +
                 $"folder-background-all-items={string.Join('|', backgroundMenu.AllLabels)};" +
+                $"selected-row-shell-copy={selectedShellCopy};" +
                 $"item-menu-foreground-unchanged={itemMenuForegroundUnchanged};" +
                 $"background-menu-foreground-unchanged={backgroundMenuForegroundUnchanged};" +
                 $"foreground-handles=0x{foregroundBefore.ToInt64():X}/0x{foregroundAfterItemMenu.ToInt64():X}/0x{foregroundAfterBackgroundMenu.ToInt64():X};" +
@@ -410,6 +414,51 @@ internal static class CommonListViewColorBaseline
         {
             if (menu != 0) DestroyMenu(menu);
             if (contextMenu != 0) Marshal.Release(contextMenu);
+        }
+    }
+
+    private static bool CopySelectedShellRow(nint listView, long selectedRowId, string fixture)
+    {
+        var selectedIndex = SendMessageW(listView, LvmGetNextItem, -1, (nint)LvisSelected).ToInt32();
+        if (selectedIndex < 0 || GetItemParam(listView, selectedIndex) != selectedRowId)
+            throw new InvalidOperationException("The selected ListView row no longer maps to the expected Shell identity.");
+        if (selectedRowId <= 0 || _shellRowsById is null ||
+            !_shellRowsById.TryGetValue(selectedRowId, out var row) || row.AbsolutePidl == 0)
+            throw new InvalidOperationException("The selected ListView row has no retained Shell absolute PIDL.");
+
+        var destinationPath = Path.Combine(fixture, "copy-destination");
+        Directory.CreateDirectory(destinationPath);
+        var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+        Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(row.AbsolutePidl, ref itemId, out var sourceItem));
+        nint destinationItem = 0, operation = 0;
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
+            var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out operation));
+            const uint flags = 0x0004 | 0x0010 | 0x0400 | 0x00800000; // Silent, no confirmation/error UI, no copy hooks.
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation, flags));
+            Marshal.ThrowExceptionForHR(At<CopyItem>(operation, 16)(operation, sourceItem, destinationItem,
+                "selected-folder-copy", 0));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            var copiedPayload = Path.Combine(destinationPath, "selected-folder-copy", "payload.bin");
+            var sourcePayload = Path.Combine(row.ParsingName, "payload.bin");
+            var sourceLength = File.Exists(sourcePayload) ? new FileInfo(sourcePayload).Length : -1;
+            var copiedLength = File.Exists(copiedPayload) ? new FileInfo(copiedPayload).Length : -1;
+            // RecursiveBytes was deliberately changed above for the sort check; compare the Shell copy with its disk source instead.
+            var passed = aborted == 0 && sourceLength >= 0 && copiedLength == sourceLength &&
+                File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(copiedPayload));
+            Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};aborted={aborted};" +
+                $"payload-matches-source={passed};source-preserved={File.Exists(sourcePayload)}");
+            return passed;
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destinationItem != 0) Marshal.Release(destinationItem);
+            Marshal.Release(sourceItem);
         }
     }
 
@@ -695,6 +744,10 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObject(nint self, nint owner, in Guid iid, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenuNative(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint buffer, uint maxLength);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
@@ -737,6 +790,9 @@ internal static class CommonListViewColorBaseline
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool InvalidateRect(nint window, nint rect, bool erase);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHCreateItemFromIDList(nint pidl, ref Guid interfaceId, out nint item);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, ref Guid interfaceId, out nint item);
+    [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern nint SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
