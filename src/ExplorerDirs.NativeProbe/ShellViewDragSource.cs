@@ -50,10 +50,16 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("OLE drag-and-drop must run on an STA thread.");
 
-        var source = new ShellViewDragSource(initiatingButton);
-        // DoDragDrop owns target discovery and input tracking; callers must run this on an OLE-initialized STA.
-        // This probe entry point deliberately does not move the cursor or synthesize input.
-        return DoDragDrop(dataObject, source, allowedEffects, out performedEffect);
+        var oleResult = OleInitialize(0);
+        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
+        try
+        {
+            var source = new ShellViewDragSource(initiatingButton);
+            // DoDragDrop owns target discovery and input tracking. This entry point deliberately
+            // does not move the cursor or synthesize input; it balances its own OLE apartment init.
+            return DoDragDrop(dataObject, source, allowedEffects, out performedEffect);
+        }
+        finally { OleUninitialize(); }
     }
 
     internal static void VerifyContract(Action<bool, string> check)
@@ -107,4 +113,10 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
         [MarshalAs(UnmanagedType.Interface)] IShellViewDragSource dragSource,
         uint allowedEffects,
         out uint performedEffect);
+
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern int OleInitialize(nint reserved);
+
+    [DllImport("ole32.dll", ExactSpelling = true)]
+    private static extern void OleUninitialize();
 }

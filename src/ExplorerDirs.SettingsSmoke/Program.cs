@@ -53,6 +53,12 @@ if (args is ["--shell-refresh-presentation-smoke"])
     return;
 }
 
+if (args is ["--shell-view-drag-source-ole-smoke"])
+{
+    ExplorerDirs.SettingsSmoke.ShellViewDragSourceOleSmoke.Run();
+    return;
+}
+
 if (args is ["--view-state-restore-smoke"])
 {
     ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();

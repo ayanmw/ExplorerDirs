@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-31 隔离 `IShellView` OLE 拖放入口自管 COM apartment：`RunOleLoop` 之前只检查 STA，没有保证当前 STA 已执行 `OleInitialize`；目标注册调用刚好先初始化 OLE，令拖放源入口依赖隐式调用顺序。现由拖放循环入口初始化并在 `finally` 配平，初始化失败时不进入 `DoDragDrop`。新增 Release 源码合同 smoke；NativeProbe Release 构建、完整 SettingsSmoke、App Release 构建均通过，0 警告/错误，`git diff --check` 通过。没有创建 Shell view、显示窗口或启动拖放循环。真实 OLE Copy/Move、取消、视图通知与前台隔离仍未验收；产品继续使用 ExplorerBrowser。
+
 2026-10-31 F5/查看方式空白帧复核：两条操作都没有重建 ExplorerBrowser、窗格、标签或导航历史；F5 直接调用当前 `IShellView.Refresh()`，查看方式调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，后者让 Shell 原地重排项目。移除 F5 期间额外的 `SetRedraw(FALSE)`，让 Shell 在重新枚举行项目时持续绘制；原有行数等待只用于安全恢复选区/焦点，不再冻结画面。查看方式路径保持原生切换并延后读取状态。Release 源码合同 smoke 和 App Release build 通过（0 警告/错误）；未打开 GUI，真实像素空白时长、慢目录和虚拟位置仍待集中验收。隔离计时的 48 ms/544 ms 仅为行数出现时间，不能代表画面效果。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 集中验收候选已更新至提交 `6257656eb107b1b96dcec76c5bd1965327ad361b` 的四窗格隔离副本 `src/.state/gui-smoke/20261030-214436-370-cda2af`，45 项待可见验收，状态 `prepared-not-run`。它用于之后集中检查刷新、查看方式及其余待验收功能；准备过程未启动窗口，未触碰正式 profile。刷新验收现在确认 F5 原生绘制、不冻结旧帧，并检查重复刷新、搜索/虚拟位置和模式切换时的空白、焦点、选区、滚动与命中结果。身份、校验值和验收重点见[集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。

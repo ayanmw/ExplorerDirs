@@ -141,6 +141,8 @@
 
 > **隔离拖放原型接线（2026-10-27）：**NativeProbe 的 `ShellViewDragSource.RunOleLoop` 已将真实 Shell `IDataObject` 与 `IDropSource` 接到 `ole32!DoDragDrop` 调用入口，NativeProbe Release build 通过；本轮没有执行调用，也没有移动光标或注入输入。真实 OLE 拖放、操作效果、视图收敛和可见交互仍为 P0 未验收，产品继续使用 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-10-27-ole-dodragdrop-调用入口接线)。
 
+> **OLE 拖放入口 apartment 初始化（2026-10-31）：**`RunOleLoop` 现在自行执行 `OleInitialize`，并在 `finally` 配平；之前虽然要求 STA，却依赖目标 `RegisterDragDrop` 恰好先初始化 OLE。源码合同 smoke、NativeProbe Release build、完整 Release SettingsSmoke 和 App Release build 通过；没有启动 `DoDragDrop`、Shell view 或窗口。它只消除隔离探针入口的隐式初始化前提，真实 OLE Copy/Move、取消和可见交互仍为 P0 未验收，产品仍使用 ExplorerBrowser。
+
 > **Private Desktop 拖放目标诊断（2026-10-30）：**`--shell-view-drop-target-private-desktop` 的命令退出码为 0，直接调用 Shell `IDropTarget` 的 `DragEnter/DragOver/Drop`，所选 Shell `IDataObject` 在 folder target 上通过同卷 Copy、同卷默认 Move、跨卷默认 Copy 和 Shift+Move 的文件状态核对。该合同没有调用真实 `DoDragDrop`，目标来自 `IShellView.GetItemObject` 或 `IShellFolder.CreateViewObject`，不是普通 ListView；`IShellView.GetItemObject` Copy 候选结果为 false，当前探针未将其设为硬门槛。运行中监视到前台短暂变化且输入 tick 改变，虽然退出时前台恢复，故本轮不作桌面隔离通过，也不能宣称真实拖放验收。为避免重复触发前台变化，不重跑此探针；产品仍使用 ExplorerBrowser。
 
 > **虚拟 Shell 标签和快捷链接图标（2026-10-27）：**标签标题与快捷链接现在按 Shell 位置 PIDL 读取虚拟文件夹图标；普通文件夹和文件扩展名图标维持原逻辑。定向 Windows Shell smoke 确认文件夹、“此电脑”和“回收站”图像不同。当前没有 GUI 验收，实际控件绘制仍待检查。详见[路线图](roadmap.md#2026-10-27虚拟-shell-标签和快捷链接使用位置图标)。

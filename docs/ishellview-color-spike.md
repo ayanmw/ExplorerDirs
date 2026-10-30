@@ -1,5 +1,9 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-31：OLE 拖放循环自行初始化 STA 上的 OLE
+
+源码复核发现 `ShellViewDragSource.RunOleLoop` 只检查当前线程是 STA，却没有保证 OLE 已在该线程初始化。现有交互探针由目标窗格 `RegisterDragDrop` 顺带调用 `OleInitialize`，因此掩盖了拖放入口对初始化顺序的依赖。现在循环入口执行 `OleInitialize`，失败即停止；`DoDragDrop` 返回或抛错都经 `finally` 调用 `OleUninitialize`，正确平衡 `S_OK` 与 `S_FALSE`。无窗口源码合同 smoke 先因缺少入口初始化而失败，接线后通过；NativeProbe Release build、完整 Release SettingsSmoke 和 App Release build 均通过，0 警告/错误。没有创建 Shell view、可见窗口或运行交互拖放。该改动只完善 OLE apartment 生命周期，不证明真实 Copy/Move、取消、跨窗格命中、通知收敛、前台隔离或产品宿主可迁移；这些仍待单独可见验收。
+
 ## 2026-10-30：当前主线复跑四窗格 WPF consumer
 
 使用当前 Release NativeProbe 重跑 `scripts/native-probe-watchdog.ps1 -Probe private-desktop-four-pane-wpf-host-keyboard-consumer -TimeoutSeconds 40`，退出码 0。四个 pane 的 Ctrl+A、八种视图反向选择矩阵、F2 四方向键与错误 pane 路由隔离、真实 `IFileOperation` 复制/重命名/删除后的四窗格通知收敛、原生 Details/排序/分组选单和同步清理均通过；WPF 根窗收到 `WM_NCDESTROY`。Private Desktop 前后台 HWND 与最后输入时间保持不变，探针进程退出且无遗留 NativeProbe 进程。日志：`src/.state/native-probe-watchdog/20261030-051503-3379c5f6.stdout.log`；stderr 为空。此复跑确认隔离 consumer 组合仍可工作，不验证产品 ExplorerBrowser、物理输入、可见 OLE 拖放或迁移完整性。
