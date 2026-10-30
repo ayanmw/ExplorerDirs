@@ -4972,8 +4972,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：虚拟 Shell 行项目菜单与数据对象接口
 
-- 扩展隐藏虚拟文件夹合同，对 9 个 Control Panel 项目逐项请求 `IContextMenu` 与 `IDataObject`；本机两类接口均为 9/9 可用，9 个虚拟文件夹可绑定并枚举 72 个下一层项目。
-- NativeProbe Release build 与合同通过，窗口隐藏且前台未变化。只证明接口可取得并已释放；没有显示菜单、调用 Shell 命令或验证拖放/剪贴板行为。产品未改变，仍使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
+- 扩展隐藏合同：9 个 Control Panel 项目均可取到 `IContextMenu`、`IDataObject`，并成功读取 `Shell IDList Array` CIDA，将单项 PIDL 往返到原 Shell parsing name；9 个虚拟文件夹绑定成功，共枚举 72 个下一层项目。
+- Control Panel 根 `IShellFolder::CreateViewObject(IContextMenu)` 可查询，但 `QueryContextMenu` 返回 0 项。这与视图级菜单是不同接口；不能拿文件夹背景菜单替代 `IShellView` 的查看、排序、刷新命令。
+- NativeProbe Release build 与合同通过，窗口隐藏且前台未变化。未显示菜单、执行命令或验证真实拖放/剪贴板。产品未改变，仍使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
 
 ## 2026-10-31：F5 空白区间的源码边界复核
 

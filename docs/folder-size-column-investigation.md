@@ -2,9 +2,11 @@
 
 ## 2026-10-31：虚拟 Shell 行项目接口探测
 
-扩展隐藏的 `--common-listview-virtual-folder-contract`：从 Control Panel 虚拟根枚举出的 9 个项目，逐项通过父 `IShellFolder::GetUIObjectOf` 请求 `IContextMenu` 与 `IDataObject`。本机结果为 `virtual-item-context-menus=9`、`virtual-item-data-objects=9`；9 个虚拟文件夹均可绑定，合计枚举 72 个下一层项目。探针只获取并立即释放接口，不显示菜单、不调用命令，也不执行拖放。
+扩展隐藏的 `--common-listview-virtual-folder-contract`：从 Control Panel 虚拟根枚举出的 9 个项目，逐项通过父 `IShellFolder::GetUIObjectOf` 请求 `IContextMenu` 与 `IDataObject`。本机结果为 `virtual-item-context-menus=9`、`virtual-item-data-objects=9`；9/9 个项目的 `IDataObject.GetData("Shell IDList Array")` 均返回单项 CIDA，且父子 PIDL 组合后的 Shell parsing name 与原行身份一致。9 个虚拟文件夹均可绑定，合计枚举 72 个下一层项目。
 
-NativeProbe Release build 0 警告/错误，虚拟文件夹合同通过；窗口保持隐藏且前台未变化。该证据说明这些 Control Panel 项目提供了项目级菜单与数据对象接口，不证明原生菜单可见、命令可执行或拖放/剪贴板往返正确，也不代表所有 Shell namespace 均提供这些接口。产品仍使用 ExplorerBrowser。
+同一虚拟根的 `IShellFolder::CreateViewObject(IContextMenu)` 查询成功，但 `QueryContextMenu` 返回 0 个菜单项。它不能提供该位置的 Explorer 视图级查看/排序/刷新菜单；视图级菜单仍须由 `IShellView` 提供。探针只查询并销毁内存菜单，不显示菜单或调用命令。
+
+NativeProbe Release build 0 警告/错误，虚拟文件夹合同通过；窗口保持隐藏且前台未变化。结果证明这些 Control Panel 项目提供了项目级菜单与可往返的 CIDA 数据对象；不证明原生菜单可见、命令可执行或真实拖放/剪贴板体验正确，也不代表所有 Shell namespace 均提供这些接口。产品仍使用 ExplorerBrowser。
 
 ## 2026-10-31：隔离扫描的异步发布与文件变化触发
 
