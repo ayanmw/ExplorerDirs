@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：隐藏 SysListView32 写回重枚举后的选区/焦点
+
+NativeProbe 新增 `--shell-listview-selection-restore`：用真实 `SHParseDisplayName`/`IShellFolder` 枚举普通目录项目，将行投影到不可见的 Windows `SysListView32`，设置两个选中项和一个 focused item。夹具新增 `delta` 并以新的行顺序重建列表，再从控件读回选区/焦点；随后删除已选中的 `beta`，重新枚举/对账/重建，再读回控件状态。
+
+合同通过：新增项未选中，`beta`/`gamma` 的选中状态和 `gamma` 焦点在新顺序下保留；删除 `beta` 后，剩下的 `gamma` 仍选中并聚焦，焦点没有落到其它行。父窗口不可见且前台 HWND 未变。此合同真实写入并读取了 Win32 ListView 状态，但行顺序是由夹具排序后投影的；没有创建 Shell DefView、调用 `IShellView` 或证明 Shell 自身重排/命令的选区行为。
+
+仍需把相同状态恢复方式放到真实隔离 `IShellView` 测试中，验证原生菜单、排序、键盘、通知、PIDL 长跑和滚动语义。产品 ExplorerBrowser 保持不变。
+
 ## 2026-10-31：变更后的选区与焦点按行身份映射
 
 隔离 `ShellListViewSelectionSnapshot` 保存选中行 ID 集合和 focused row ID，并在新枚举顺序中解析为每行的选中/焦点状态。NativeProbe 的 Shell 通知夹具现跨 create、update-directory、重命名后的逆序行快照及 delete，对未变化的 `stable.txt` 选中/焦点身份做映射；行消失时不把焦点转移给另一行。SettingsSmoke 覆盖新增、删除、重排、多选、焦点消失及旧快照隔离；隐藏 Shell 通知合同连续通过 3 轮，前台不变。
