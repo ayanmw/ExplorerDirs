@@ -12,6 +12,12 @@
 
 **结论：**逐行派生值的技术控制权要求应用持有行数据模型；继续调整 DefView 通知不是有证据的路线。隔离原型已从真实 Shell 文件夹枚举子 PIDL 并放入普通 `SysListView32` 行模型；下一阶段仍需验证可见详细视图/图标、视图级原生菜单、复制/移动/删除、重命名、拖放、外部变更刷新、焦点/选区及目录导航。成功门槛应同时包括真实文件 Shell 行能更新派生值并保持排序/焦点，以及 Shell 操作合同不退化；在此之前不迁移产品，不以合成控件的内存或绘制结果推断实际收益。
 
+### 2026-10-30：Microsoft 列接口契约复核
+
+`IShellFolder2::GetDetailsOf` 以当前文件夹自己的零起始列号返回标题或单项显示文本；传入空 PIDL 时取标题，文件系统文件夹前四列有标准约定，其它列集合和索引仍由文件夹决定。`MapColumnToSCID` 只负责把列号映射到属性集 ID/属性 ID，`GetDetailsEx` 则允许按该属性键取值。参考 [GetDetailsOf](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdetailsof)、[MapColumnToSCID](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-mapcolumntoscid) 和 [IShellFolder2](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-ishellfolder2)。
+
+当前隔离适配器已让列标题、列号、`MapColumnToSCID` 与初始 `GetDetailsEx` 数值保持一致，列头排序时 `CompareIDs` 也读取递归值。有效 `SHChangeNotify` 运行中 DefView 会重枚举，却没有再次请求该自定义列，IColumnManager 捕获列表也不含该属性键。Microsoft 的这些接口页面没有承诺 DefView 会在刷新后保留任意自定义列或重读派生值。因此尚不能把问题归因于单纯的属性键映射错误，也不能据此推断所有 Shell namespace 都不支持自定义列；现阶段缺的是可验证的视图列状态/刷新模型。产品继续使用 ExplorerBrowser，后续若继续实验，需先围绕新建视图恢复列状态做单变量验证，再决定是否停止 DefView 路线并转向完整自有行模型。
+
 **资源判断：**现有证据不足以声称自有 ListView 能降低内存。ExplorerBrowser 仍会在应用中运行，若只替换控件但继续并行保留旧 Shell hosts，短期反而可能增加常驻对象。内存必须在同机、同目录集、同查看模式、同窗格数与相同操作序列下测量，并分别比较启动稳定态和长时间刷新后的 private bytes/working set；测量之前不把迁移收益列为理由。
 
 ## 2026-10-30：Shell 项目身份与自有 ListView 行模型合同

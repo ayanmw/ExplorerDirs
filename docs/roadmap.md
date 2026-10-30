@@ -8,6 +8,8 @@
 
 2026-10-30 06:08 UTC：对仍在运行的正式预览 temp.78 PID `19580` 做 60 秒被动采样，未启动、重启或操作窗口。13 个样本的 Working Set 为 `361.21–363.20 MiB`，Private Bytes 为 `178.31–180.67 MiB`（首末下降约 `2.36 MiB`）；句柄/线程只有小幅波动。负载未固定，不能据此判断泄漏或增长来源。原始 CSV 与完整身份见[内存采样记录](memory-sampling.md)；后续需配合固定操作阶段和托管堆计数。
 
+2026-10-30：复核 Microsoft `IShellFolder2` 公共列接口定义，并与隔离适配器及有效通知 A/B 对照。当前 provider 的 `GetDetailsOf` 列文本、`MapColumnToSCID` 属性键、`GetDetailsEx` 初始数值和 `CompareIDs` 排序路径已匹配；有效刷新后 DefView 重枚举但不再请求递归大小列，IColumnManager 捕获也不含其属性键。公开接口没有承诺任意派生列在刷新后保留或重读，故不把问题归结为单一映射错误；产品列仍未实现，ExplorerBrowser 保持不变。下一步若继续该 P2 原型，先以单变量方式验证新视图的自定义列恢复合同；若无法成立，保留缺口评审并推进其它可落地差距。细节和 Microsoft 原文链接见[逐行大小调查](folder-size-column-investigation.md)。
+
 2026-10-30 05:59 UTC：在提交 `6e9de3c4548e75b741398decb0cc29517a4dd1a0` 后，从干净主线刷新集中验收副本，路径 `src/.state/gui-smoke/20261030-055901-649-45914e/`，状态 `prepared-not-run`，40 项待可见验收。新增独立克隆视图的两站历史/选区夹具；候选哈希及完整清单见[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)。准备仅构建并复制隔离副本，未启动 GUI、创建 ExplorerBrowser 或操作桌面。
 
 2026-10-30 逐行大小更新探针校正：复核私有桌面保留日志时发现，`20261030-093242-358ea2af` 虽然进程正常返回，但通知前的整视图刷新与通用 `IColumnManager.Apply` 已移除递归大小列，实际通知步骤被跳过。因此该运行不算通知 A/B。更早两次 WPF 根运行重复确认初始递归大小显示与标题数值排序；下一项是让各通知策略从独立的新视图基线执行，并将列不可见判为前置条件失败。没有启动新视图或改变产品代码；细节见[逐行大小调查](folder-size-column-investigation.md)。
