@@ -701,3 +701,9 @@ NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 gen
 普通 `SysListView32` 逐行大小原型此前在初始绑定与变更回写时都硬编码 `N B`，没有复用应用已有的自动/固定单位、精度和千位分隔格式器。现在抽出 `ShellListViewRowPresentation.FormatRecursiveSize`，原型两处写入都使用 `ByteSizeFormatter`；尚未计算的 `RecursiveBytes=null` 行显示为空白。定向 SettingsSmoke 先因 ListView 接线缺少共享格式器而失败，完成接线后覆盖 `1.5 MB`、`1,572,864 B` 和未扫描空白值并通过。
 
 该原型接收显式 `SizeDisplayOptions`；当前 NativeProbe 仅使用格式器默认值，没有读取用户 profile，也未将大小列接入产品 ExplorerBrowser。它验证了 Q-Dir 单位/精度行为可由现有设置模型驱动，不验证 Shell DefView 列、排序或可见效果。
+
+### 2026-10-31：Shell 重枚举时防止目录大小残留到替换文件
+
+源码复核发现行模型按 Shell 解析名保留稳定 row ID 时，也无条件复制上一快照的递归大小。若同一路径的目录在两次枚举间被替换为文件，文件行会继承旧目录的大小和计数。现在只有前后两行都仍是带文件系统路径的 Shell 文件夹、且路径相同时才复用递归扫描结果；类型改变、虚拟项或路径改变时使用新枚举的扫描状态。NativeProbe Release build 通过（0 警告、0 错误）；本轮未运行 UI、Shell view 或行模型 smoke，因此该构建只证明源码接线和编译。
+
+该修正只保护隔离逐行大小原型的重枚举数据，不接入产品 ExplorerBrowser，也不改变产品刷新路径。

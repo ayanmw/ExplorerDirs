@@ -12,6 +12,8 @@
 
 2026-10-31 隔离逐行大小列复用单位格式：`CommonListViewColorBaseline` 的大小单元格不再固定输出字节数，而调用应用已有 `ByteSizeFormatter`，支持传入自动/固定单位、精度和千位分隔设置；尚未扫描的行保留空白，不显示虚假的零值。接线合同先在旧代码上失败，定向 smoke 覆盖自动 MB、字节千分位及未扫描状态通过。此项仅验证隔离 ListView 原型可复用格式策略；未连入用户配置或产品 ExplorerBrowser，Shell 列和可见 UI 仍未实现。
 
+2026-10-31 Shell 行重枚举缓存校验：逐行大小原型不再把旧目录的递归字节数/计数带到同解析名的新文件、虚拟项或路径变化项；只有仍为同一路径的文件系统文件夹才复用旧扫描值，等待后台新扫描回写。NativeProbe Release build 通过（0 警告、0 错误）；未运行行模型 smoke 或创建 Shell view。此修正仍仅用于隔离原型。
+
 2026-10-31 隔离 `IShellView` OLE 拖放入口自管 COM apartment：`RunOleLoop` 之前只检查 STA，没有保证当前 STA 已执行 `OleInitialize`；目标注册调用刚好先初始化 OLE，令拖放源入口依赖隐式调用顺序。现由拖放循环入口初始化并在 `finally` 配平，初始化失败时不进入 `DoDragDrop`。无窗口行为合同覆盖 `S_OK`、`S_FALSE`、初始化失败不执行/不反初始化，以及拖放抛错仍清理；NativeProbe Release build、完整 SettingsSmoke 通过，0 警告/错误，`git diff --check` 通过。没有创建 `IShellView`、显示窗口或启动拖放循环。真实 OLE Copy/Move、取消、视图通知与前台隔离仍未验收；产品继续使用 ExplorerBrowser。
 
 2026-10-31 F5/查看方式空白帧复核：两条操作都没有重建 ExplorerBrowser、窗格、标签或导航历史；F5 直接调用当前 `IShellView.Refresh()`，查看方式调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，后者让 Shell 原地重排项目。移除 F5 期间额外的 `SetRedraw(FALSE)`，让 Shell 在重新枚举行项目时持续绘制；原有行数等待只用于安全恢复选区/焦点，不再冻结画面。查看方式路径保持原生切换并延后读取状态。Release 源码合同 smoke 和 App Release build 通过（0 警告/错误）；未打开 GUI，真实像素空白时长、慢目录和虚拟位置仍待集中验收。隔离计时的 48 ms/544 ms 仅为行数出现时间，不能代表画面效果。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。

@@ -6,6 +6,8 @@ namespace ExplorerDirs.NativeProbe;
 // Apply asynchronous filesystem scans without replacing Shell row identities or virtual items.
 internal static class ShellListViewRowModel
 {
+    private const uint SfgaoFolder = 0x20000000;
+
     internal static ShellListViewRowReconciliation Reconcile(
         IReadOnlyList<ShellListViewRow> previousRows,
         IReadOnlyList<ShellListViewRow> enumeratedRows,
@@ -29,11 +31,15 @@ internal static class ShellListViewRowModel
             var enumerated = enumeratedRows[index];
             if (previousByParsingName.TryGetValue(enumerated.ParsingName, out var matches) && matches.TryDequeue(out var previous))
             {
+                // A parsing name can survive a file/folder replacement at the same path.
+                // Reuse the recursive scan only while both snapshots still identify that folder.
+                var preserveRecursiveScan = IsFilesystemFolder(previous) && IsFilesystemFolder(enumerated) &&
+                    string.Equals(previous.FileSystemPath, enumerated.FileSystemPath, StringComparison.OrdinalIgnoreCase);
                 rows[index] = enumerated with
                 {
                     Id = previous.Id,
-                    RecursiveBytes = previous.RecursiveBytes,
-                    RecursiveSummary = previous.RecursiveSummary
+                    RecursiveBytes = preserveRecursiveScan ? previous.RecursiveBytes : enumerated.RecursiveBytes,
+                    RecursiveSummary = preserveRecursiveScan ? previous.RecursiveSummary : enumerated.RecursiveSummary
                 };
             }
             else
@@ -46,6 +52,9 @@ internal static class ShellListViewRowModel
         // so the caller can release them after it has transferred the new snapshot.
         return new ShellListViewRowReconciliation(rows, previousRows.ToArray(), nextId);
     }
+
+    private static bool IsFilesystemFolder(ShellListViewRow row) =>
+        row.FileSystemPath is not null && (row.Attributes & SfgaoFolder) != 0;
 
     internal static IReadOnlyList<ShellListViewRow> ApplyRecursiveScanResults(
         IReadOnlyList<ShellListViewRow> rows,
