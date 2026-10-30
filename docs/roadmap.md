@@ -4932,3 +4932,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshPreservingLastFrame → IShellView.Refresh`。仅显式用户刷新持有短时 `IFolderView2.SetRedraw` 租约，行数连续稳定后释放，最多等待 1.5 秒；目录 watcher、筛选等内部刷新不使用该租约。它更新当前 Shell 视图内容，不重建 ExplorerBrowser、标签、导航历史或窗格。
 - 查看方式切换只调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，随后在 Dispatcher `ContextIdle` 读取其余配置，不重枚举目录。Shell 仍需重排/重绘列表项目，因此这不是只改一个模式标志就能避免列表重绘的操作。
 - 源码复核发现先前“已移除 F5 SetRedraw”的记录已被后续仅针对手动 F5 的有限租约取代，已同步修正 shell-parity 说明。没有可见像素证据证明当前租约消除了黑屏；本轮不添加新的重绘拦截或整窗格失效。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否保留租约或改用更窄的呈现路径。
+
+## 2026-10-31：加入按需的原生绘制时序诊断
+
+- 现有 Shell callback trace 开启时，F5 与实际查看方式变更分别记录 2 秒内子窗口 `WM_PAINT` / `WM_ERASEBKGND` 的相对时间、消息和窗口类名，最多 256 条。未开启 trace 时不采集这组消息；记录逻辑不改变 Shell 绘制或输入。
+- App Release build 通过，0 警告/错误；没有启动窗口或运行测试。该诊断仅能判断消息时序，不能看到像素、测量肉眼空白时长或证明鼠标命中一致；需在集中验收时结合画面记录读取，之后再决定绘制策略。

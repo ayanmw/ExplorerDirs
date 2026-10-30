@@ -75,10 +75,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private readonly DiagnosticStageTiming _directoryCreateNotificationTiming = new(sampleStride: 1);
     private readonly DiagnosticStageTiming _directoryDeleteNotificationTiming = new(sampleStride: 1);
     private readonly List<string> _nativeUserMessageSamples = new();
+    private readonly List<string> _nativePaintTransitionSamples = new();
     private readonly List<string> _shellSelectionCallbackSamples = new();
     private readonly List<string> _shellSelectionRestoreSamples = new();
     private readonly bool _traceNativeUserMessages = Environment.GetEnvironmentVariable("EXPLORER_DIRS_SHELL_CALLBACK_TRACE") == "1";
     private long _nativeUserMessageTraceStart = Stopwatch.GetTimestamp();
+    private long _nativePaintTransitionStartedAt;
+    private string _nativePaintTransitionName = "none";
     private readonly SubclassProc _subclassProc;
     private readonly DirectoryNavigationGate _navigationGate = new();
     // Shell parsing can pump STA messages. Invalidate preparation before any
@@ -370,7 +373,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
     internal string NativeUserMessageSnapshot => string.Join(',', _nativeUserMessages
         .OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")) +
-        "; samples=" + string.Join('|', _nativeUserMessageSamples);
+        "; samples=" + string.Join('|', _nativeUserMessageSamples) +
+        $"; paint-transition={_nativePaintTransitionName}[" + string.Join('|', _nativePaintTransitionSamples) + "]";
     internal string LastShellRefreshStatus { get; private set; } = "not-started";
     internal string LastDirectoryChangeWatcherError { get; private set; } = "none";
     internal string LastQuickFilterStatus { get; private set; } = "not-started";
@@ -404,6 +408,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _nativeViewMessageSlowTimeline.Clear();
         _nativeViewWindowClasses.Clear();
         _nativeUserMessageSamples.Clear();
+        _nativePaintTransitionSamples.Clear();
         _shellSelectionCallbackSamples.Clear();
         _shellSelectionRestoreSamples.Clear();
         _directoryQueueTiming.Reset();
@@ -421,6 +426,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _directoryDeleteNotificationTiming.Reset();
         _browserSite.ResetCallbackTimings();
         _nativeUserMessageTraceStart = Stopwatch.GetTimestamp();
+        _nativePaintTransitionStartedAt = 0;
+        _nativePaintTransitionName = "none";
         _directoryChangeFallbackStartedAt = 0;
         _directoryChangeFallbackCompletedAt = 0;
         _directoryChangeNativeCreateNotificationStartedAt = 0;
@@ -2518,6 +2525,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 // Let the native view paint a real mode transition. This changes presentation only;
                 // it must not refresh or navigate the folder.
+                BeginNativePaintTransitionTrace("view-mode");
                 if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
                         new NativeViewStateTarget(view, Current),
                         result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
@@ -3146,6 +3154,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var refreshStartedAt = Stopwatch.GetTimestamp();
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
+            if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try
             {
                 refreshResult = shellView.Refresh();
@@ -5273,6 +5282,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (_nativeUserMessageSamples.Count < 64)
                     _nativeUserMessageSamples.Add($"{Stopwatch.GetElapsedTime(_nativeUserMessageTraceStart).TotalMilliseconds:F1}ms/{message:X}/{WindowClass(hwnd)}/{wParam.ToInt64():X}/{lParam.ToInt64():X}");
             }
+            if (_traceNativeUserMessages && message is 0x000F or 0x0014 && _nativePaintTransitionStartedAt != 0)
+            {
+                var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
+                if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
+                    _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{WindowClass(hwnd)}/{hwnd:X}");
+            }
             if (message == 0x0100 && IsTraceKey(wParam.ToInt64()))
                 Trace($"native key={wParam.ToInt64():X} hwnd={hwnd} class={WindowClass(hwnd)} focus={FocusClass()}");
             if (message is 0x0007 or 0x0008)
@@ -5705,6 +5720,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         if (string.IsNullOrEmpty(FocusTracePath)) return;
         try { File.AppendAllText(FocusTracePath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}"); }
         catch { /* Diagnostic output must not affect file operations. */ }
+    }
+
+    private void BeginNativePaintTransitionTrace(string operation)
+    {
+        if (!_traceNativeUserMessages) return;
+        _nativePaintTransitionName = operation;
+        _nativePaintTransitionStartedAt = Stopwatch.GetTimestamp();
+        _nativePaintTransitionSamples.Clear();
     }
 
     private bool _wheelTraceQueued;
