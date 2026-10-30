@@ -12,6 +12,8 @@
 
 2026-10-31 预览发布 `preview-0.6.0-temp.82`：从干净主线提交 `c1694164d5f94afb8bc3d3027025b10381ee76d6` 发布，提交时间 `2026-10-31T00:03:39+08:00`，`BuildTags=none`，包内独立 profile。EXE/DLL SHA-256 为 `716028B545A5354C4E617C95B89B6B00E74836AE11DC3CE48562428639164680` / `683FD107F88430AD648E0EA0EE33BB42BC22E7A963BEDF32F8D8BE09A68433B0`，与 `app/SHA256.txt` 一致；程序集元数据确认源码状态为 clean。未启动 GUI；F5 保帧候选的可见改善、点击/键盘命中一致性和查看方式切换空白仍待集中验收。版本说明见[preview-0.6.0-temp.82](releases/preview-0.6.0-temp.82.md)。
 
+2026-10-31 预览发布 `preview-0.6.0-temp.83`：从干净主线提交 `63bc718313b764762c093c3a41b1b158a959ac6c` 发布，`BuildTags=none`，使用独立 profile。EXE/DLL SHA-256 为 `398F89C764A16A7C56CE3328DE9D1C9F386EAEC0717D78FA1C72EB98F1E379D0` / `1AB654E54E39C72DFF5C41D5146367AF83B697B47E41AAF3773987752BFD4254`，与 `app/SHA256.txt` 一致；程序集元数据确认源码状态为 clean。未启动 GUI；F5 视觉与交互、查看方式切换空白仍待集中验收。版本说明见[preview-0.6.0-temp.83](releases/preview-0.6.0-temp.83.md)。
+
 2026-10-31 F5 保帧范围收紧：源码追踪发现 `ExplorerBrowserHost.Refresh` 同时服务用户手动刷新、目录监视通知、筛选/分组及搜索返回；此前保帧租约套在公共刷新执行体，可能把自动更新的旧画面也冻结。现改为仅 F5、工具栏和窗格刷新按钮显式请求保帧，其余内部刷新继续由 Shell 即时绘制。App Release build 通过（0 警告/错误）；未运行 GUI，F5 的视觉改善及冻结期间输入命中仍待集中验收。
 
 2026-10-30 文件列表刷新重绘（新候选，待可见验收）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。F5 在 Shell 重新填充列表期间暂缓原生列表重绘，待行数连续稳定或 Dispatcher 首次检查到 1.5 秒阈值后恢复；主线程被同步 Shell 调用阻塞时，该阈值不是墙钟硬上限。此 API 只控制绘制，不保证禁用输入，旧画面与当前命中项可能短暂错位，因此验收必须检查点击/键盘的目标正确性；不通过则撤回此候选。不会对子控件调用 `RedrawWindow(...ALLCHILDREN)`。查看方式切换继续让 Shell 自行重排，完整状态读取延后执行。黑屏和交互安全均未可见验证；候选与证据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
