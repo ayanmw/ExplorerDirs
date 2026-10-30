@@ -91,3 +91,12 @@ Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 
 The latest source build validates compilation only. Neither hidden-host row-count probes nor this plan's source review measures rendered pixels; visual acceptance remains open.
 
 The earlier product-host F5 probe confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. In the latest run, the hidden native view-style probe reported supported modes and preserved selection/sort/group state, then exited with its foreground-boundary guard because the foreground changed; do not treat that run as a clean end-to-end pass. Neither probe renders visible pixels.
+
+### Task 6: Keep the last F5 frame while Shell refills the list
+
+- [x] Reintroduce a bounded `IFolderView2::SetRedraw(FALSE)` lease for F5 only, using the existing native row-count stabilization wait and its 1.5-second fallback.
+- [x] Do not force-invalidate the view or all child windows after releasing the lease; Shell's queued invalidations remain responsible for the final paint.
+- [x] Leave view-mode changes on the direct native setter path; a synchronous redraw lease there ends before Shell's asynchronous layout repaint and did not solve the visible gap.
+- [ ] Build and prepare a current isolated candidate, then visually compare F5 on populated/slow directories and a virtual location; confirm selection, focus, and scroll position.
+
+This candidate intentionally holds the last painted F5 frame while the list repopulates. It may reduce the blank interval, but if Shell does not invalidate its list after redraw is re-enabled it could leave a stale frame; only visible acceptance can distinguish those outcomes. No whole-view reconstruction or pixel snapshot is used. A failed candidate should be removed rather than expanded with broad forced redraw flags.

@@ -2684,6 +2684,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
+    private ShellViewRedrawLease? TrySuppressCurrentViewRedraw()
+    {
+        var view = IntPtr.Zero;
+        try
+        {
+            view = GetFolderView2Pointer();
+            if (view == IntPtr.Zero) return null;
+            // Keep the last painted rows visible while DefView repopulates after F5.
+            // A bounded lease is always released by refresh completion or its timeout.
+            return ShellViewRedrawLease.TrySuppress(view);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
+        {
+            return null;
+        }
+        finally { Marshal.Release(view); }
+    }
+
     private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -3055,6 +3073,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var path = request.Path;
             var navigationVersion = request.NavigationVersion;
             var inputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+            var requireRepublishedRows = (ReadDirectoryMonitorItemCount() ?? 0) > 0;
             ShellViewSelectionSnapshot? selection;
             var hasCachedSelection = _lastNativeSelection is not null;
             var cachedSelectionIsCurrent = ShellSelectionRestoreGate.ShouldUseRefreshSnapshot(
@@ -3100,6 +3119,22 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
+            ShellViewRedrawLease? refreshRedraw = null;
+            try { refreshRedraw = TrySuppressCurrentViewRedraw(); }
+            catch
+            {
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                throw;
+            }
+            if (!IsCurrentRefreshRequest())
+            {
+                refreshRedraw?.Dispose();
+                selectionRecoverySuppression.Dispose();
+                selection?.Dispose();
+                return;
+            }
+            var refreshStartedAt = Stopwatch.GetTimestamp();
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
@@ -3108,12 +3143,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch when (!IsCurrentRefreshRequest())
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3121,6 +3158,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3128,14 +3166,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
             }
 
-            // Shell refills the current native list asynchronously. Keep the completion wait
-            // for selection restoration only; freezing and invalidating the whole view here
-            // replaces Shell's incremental paint with a visibly blank full repaint.
+            // Shell refills the current native list asynchronously. Keep the last frame only
+            // until the list count settles; do not force-invalidate the view or its children.
             var selectionOwnershipTransferred = false;
             var completionCleaned = 0;
             DispatcherTimer? refreshPaintWait = null;
@@ -3143,6 +3181,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
                 refreshPaintWait?.Stop();
+                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
@@ -3151,6 +3190,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 try
                 {
+                    // Release before reading/restoring selection. The UI thread will paint after
+                    // this callback returns, so that work can finish without extending the lease.
+                    refreshRedraw?.Dispose();
                     ShellRefreshCompletion.Run(() =>
                     {
                         if (!IsCurrentRefreshRequest()) return;
@@ -3192,7 +3234,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
             try
             {
-                var refreshStartedAt = Stopwatch.GetTimestamp();
                 var lastObservedCount = -1;
                 var stableCountSamples = 0;
                 refreshPaintWait = new DispatcherTimer(DispatcherPriority.Background)
@@ -3226,7 +3267,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
                     // Wait for three identical samples, but never keep a Shell provider's list
                     // frozen indefinitely if it cannot report a stable count.
-                    if ((stableCountSamples >= 2 && count is not null) ||
+                    if ((stableCountSamples >= 2 && count is not null &&
+                            (!requireRepublishedRows || count > 0)) ||
                         Stopwatch.GetElapsedTime(refreshStartedAt) >= TimeSpan.FromMilliseconds(1500))
                         CompleteRefresh();
                 };
