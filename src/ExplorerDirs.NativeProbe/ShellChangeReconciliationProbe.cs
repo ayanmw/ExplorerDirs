@@ -134,7 +134,12 @@ internal static class ShellChangeReconciliationProbe
             {
                 Rows = renamedEnumeration.Rows.OrderByDescending(row => row.DisplayName, StringComparer.OrdinalIgnoreCase).ToList()
             };
-            var renamed = ShellListViewRowModel.Reconcile(current.Rows, renamedEnumeration.Rows, updated.NextId);
+            var renameIdentities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Path.GetFullPath(renamedPath)] = Path.GetFullPath(createdPath)
+            };
+            var renamed = ShellListViewRowModel.Reconcile(current.Rows, renamedEnumeration.Rows, updated.NextId,
+                renameIdentities);
             ShellListViewEnumerator.FreeRows(renamed.RetiredRows);
             current = renamedEnumeration with { Rows = renamed.Rows.ToList() };
             ProjectRows(listView, current.Rows);
@@ -157,9 +162,10 @@ internal static class ShellChangeReconciliationProbe
             var stableIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
             var sizeFolderIdentityPreserved = current.Rows.Single(row => row.DisplayName == "size-folder").Id == sizeFolderId;
             var selectionAfterDeletePreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
-            var addedNewIdentity = createdId != stableId && renamedId != createdId && renamedId != stableId;
+            var renameIdentityPreserved = renamedId == createdId;
+            var addedNewIdentity = createdId != stableId && renamedId != stableId;
             Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; delete-notified={deleteEvent}; " +
-                $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-got-new-id={addedNewIdentity}; deleted-id-retired={retiredRenamedId}; " +
+                $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-id-preserved={renameIdentityPreserved}; deleted-id-retired={retiredRenamedId}; " +
                 $"recursive-bytes-initial/after-update={initialRecursiveBytes}/{recursiveBytesAfterReconciliation};recursive-value-updated={recursiveValueUpdated};size-folder-id-preserved={sizeFolderIdentityPreserved};" +
                 $"recursive-files-initial/after-update={initialRecursiveSummary.Files}/{recursiveSummaryAfterReconciliation.Files};" +
                 $"recursive-directories-initial/after-update={initialRecursiveSummary.Directories}/{recursiveSummaryAfterReconciliation.Directories};recursive-counts-updated={recursiveCountsUpdated};" +
@@ -169,7 +175,8 @@ internal static class ShellChangeReconciliationProbe
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"listview-row-count={SendMessageW(listView, LvmGetItemCount, 0, 0)};selection-focused-row-preserved={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved};" +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false && !IsWindowVisible(listParent)}");
-            if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved || !addedNewIdentity ||
+            if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
+                !renameIdentityPreserved || !addedNewIdentity ||
                 !retiredRenamedId || !recursiveValueUpdated || !recursiveCountsUpdated || !projectedDerivedValuesUpdated || !sizeFolderIdentityPreserved ||
                 initialScanWorker == Environment.CurrentManagedThreadId || updateScanWorker == Environment.CurrentManagedThreadId ||
                 !initialScanPublishedOnOwner || !updateScanPublishedOnOwner ||

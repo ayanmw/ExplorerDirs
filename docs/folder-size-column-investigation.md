@@ -709,3 +709,5 @@ NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 gen
 该修正只保护隔离逐行大小原型的重枚举数据，不接入产品 ExplorerBrowser，也不改变产品刷新路径。
 
 同一回写路径还发现：完整扫描未返回某个仍在 Shell 行集中的文件夹时，旧逻辑会保留该行先前的大小/计数。各调用点传入的是本轮要求扫描的可见文件系统目录集合；因此缺少结果表示本轮没有有效值。现在清除该文件夹的递归大小与摘要，保持空白而不显示旧数据。NativeProbe Release build 通过（0 警告、0 错误）；未运行行模型 smoke 或 Shell view。
+
+Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 row ID，使自有视图无法按稳定身份恢复选区/焦点。现在仅当 `SHCNE_RENAMEITEM` 路径提供明确的新解析名→旧解析名映射时，才将新行关联到原 row ID；路径已变化，因此旧递归扫描值不会沿用。现有隐藏 `ShellChangeReconciliationProbe` 已接入该映射并改为报告 ID 保留；NativeProbe Release build 通过（0 警告、0 错误），本轮未运行该 probe，Shell 通知到可见行及实际焦点恢复仍未验证。

@@ -11,7 +11,8 @@ internal static class ShellListViewRowModel
     internal static ShellListViewRowReconciliation Reconcile(
         IReadOnlyList<ShellListViewRow> previousRows,
         IReadOnlyList<ShellListViewRow> enumeratedRows,
-        long nextId)
+        long nextId,
+        IReadOnlyDictionary<string, string>? previousParsingNameByRenamedParsingName = null)
     {
         ArgumentNullException.ThrowIfNull(previousRows);
         ArgumentNullException.ThrowIfNull(enumeratedRows);
@@ -29,7 +30,13 @@ internal static class ShellListViewRowModel
         for (var index = 0; index < enumeratedRows.Count; index++)
         {
             var enumerated = enumeratedRows[index];
-            if (previousByParsingName.TryGetValue(enumerated.ParsingName, out var matches) && matches.TryDequeue(out var previous))
+            ShellListViewRow? previous = null;
+            var matchedPrevious = TryTakePrevious(enumerated.ParsingName, out previous);
+            if (!matchedPrevious && previousParsingNameByRenamedParsingName is not null &&
+                previousParsingNameByRenamedParsingName.TryGetValue(enumerated.ParsingName, out var previousParsingName))
+                matchedPrevious = TryTakePrevious(previousParsingName, out previous);
+
+            if (matchedPrevious && previous is not null)
             {
                 // A parsing name can survive a file/folder replacement at the same path.
                 // Reuse the recursive scan only while both snapshots still identify that folder.
@@ -51,6 +58,15 @@ internal static class ShellListViewRowModel
         // Every previous PIDL belongs to the previous snapshot; return all of them
         // so the caller can release them after it has transferred the new snapshot.
         return new ShellListViewRowReconciliation(rows, previousRows.ToArray(), nextId);
+
+        bool TryTakePrevious(string parsingName, out ShellListViewRow? row)
+        {
+            row = null;
+            if (!previousByParsingName.TryGetValue(parsingName, out var matches) || !matches.TryDequeue(out var found))
+                return false;
+            row = found;
+            return true;
+        }
     }
 
     private static bool IsFilesystemFolder(ShellListViewRow row) =>
