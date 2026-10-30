@@ -1,3 +1,4 @@
+using ExplorerDirs.NativeProbe;
 using System.Runtime.InteropServices;
 
 // Isolated architecture probe: determine whether virtual Shell children can be
@@ -28,7 +29,7 @@ internal static class CommonListViewVirtualFolderContract
         var foregroundBefore = GetForegroundWindow();
         var rootText = $"::{{{ControlPanelId:D}}}";
         nint parent = 0, listView = 0, rootPidl = 0, shellFolder = 0, enumerator = 0, systemImageList = 0;
-        var rows = new List<ShellRow>();
+        var rows = new List<ShellListViewRow>();
         try
         {
             Marshal.ThrowExceptionForHR(SHParseDisplayName(rootText, 0, out rootPidl,
@@ -66,8 +67,10 @@ internal static class CommonListViewVirtualFolderContract
                         if (retainedRelative != 0) ILFree(retainedRelative);
                         throw new InvalidOperationException("Could not retain Shell row PIDLs.");
                     }
-                    rows.Add(new ShellRow(rows.Count + 1, retainedAbsolute, retainedRelative,
-                        identity.DisplayName, identity.ParsingName, identity.Attributes, identity.SystemImageIndex));
+                    rows.Add(new ShellListViewRow(rows.Count + 1, retainedAbsolute, retainedRelative,
+                        identity.DisplayName, identity.ParsingName, identity.FileSystemPath, identity.Attributes,
+                        RecursiveBytes: null, FromShellEnumeration: true,
+                        SystemImageIndex: identity.SystemImageIndex));
                 }
                 finally
                 {
@@ -101,7 +104,7 @@ internal static class CommonListViewVirtualFolderContract
             for (var index = 0; index < rows.Count && identityAndRowsMatch; index++)
             {
                 var item = ReadRow(listView, index);
-                identityAndRowsMatch = item.RowId == rows[index].Id && item.Image == rows[index].ImageIndex &&
+                identityAndRowsMatch = item.RowId == rows[index].Id && item.Image == rows[index].SystemImageIndex &&
                     item.DisplayName == rows[index].DisplayName && item.ParsingName == rows[index].ParsingName &&
                     rows[index].AbsolutePidl != 0 && rows[index].RelativePidl != 0;
             }
@@ -111,12 +114,16 @@ internal static class CommonListViewVirtualFolderContract
             var hasVirtualRootIdentity = (rootAttributes & ShellFileSystem) == 0 || rootParsingName.StartsWith("::{", StringComparison.Ordinal);
             var virtualChildRows = rows.Count(row => (row.Attributes & ShellFileSystem) == 0);
             var imageListAttached = attachedImageList == systemImageList;
+            var sharedRowModelCorrect = rows.All(row => row.FromShellEnumeration &&
+                row.ParsingName.Length > 0 && row.SystemImageIndex >= 0 &&
+                (((row.Attributes & ShellFileSystem) != 0) == (row.FileSystemPath is not null)) &&
+                row.RecursiveBytes is null);
             var success = identityAndRowsMatch && imageListAttached && foregroundUnchanged && hidden &&
-                hasVirtualRootIdentity && virtualChildRows > 0;
+                hasVirtualRootIdentity && virtualChildRows > 0 && sharedRowModelCorrect;
             Console.WriteLine($"common-listview-virtual-folder-contract: root-is-virtual={hasVirtualRootIdentity};" +
                 $"children={rows.Count};filesystem-children={rows.Count(row => (row.Attributes & ShellFileSystem) != 0)};" +
                 $"virtual-children={virtualChildRows};shell-image-list-attached={imageListAttached};" +
-                $"pidl-row-identity={identityAndRowsMatch};" +
+                $"pidl-row-identity={identityAndRowsMatch};shared-row-model={sharedRowModelCorrect};" +
                 $"hidden={hidden};foreground-unchanged={foregroundUnchanged};passed={success}");
             return success ? 0 : 1;
         }
@@ -159,12 +166,12 @@ internal static class CommonListViewVirtualFolderContract
         }
     }
 
-    private static void InsertRow(nint listView, ShellRow row)
+    private static void InsertRow(nint listView, ShellListViewRow row)
     {
         var displayPointer = Marshal.StringToHGlobalUni(row.DisplayName);
         var item = new ListViewItem { Mask = 0x0001 | 0x0002 | 0x0004,
             Item = (int)SendMessageW(listView, LvmGetItemCount, 0, 0),
-            Text = displayPointer, TextMax = row.DisplayName.Length, Image = row.ImageIndex, Param = (nint)row.Id };
+            Text = displayPointer, TextMax = row.DisplayName.Length, Image = row.SystemImageIndex, Param = (nint)row.Id };
         var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
         try
         {
@@ -246,9 +253,6 @@ internal static class CommonListViewVirtualFolderContract
         public int TextMax, Image; public nint Param; public int Indent, GroupId, Columns;
         public nint ColumnIndices, ColumnFormat, Group;
     }
-    private sealed record ShellRow(long Id, nint AbsolutePidl, nint RelativePidl, string DisplayName,
-        string ParsingName, uint Attributes, int ImageIndex);
-
     [DllImport("comctl32.dll", SetLastError = true)] private static extern bool InitCommonControlsEx(ref InitCommonControls init);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);

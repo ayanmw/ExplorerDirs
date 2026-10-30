@@ -37,7 +37,7 @@ internal static class CommonListViewColorBaseline
     private static readonly PropertyKeyState RelativeSizeSortKey = new(
         Guid.Parse("4FE4D115-D9D4-4F88-9A1D-9F5CB4E6B355"), 1);
     private static int _sortDirection = 1;
-    private static Dictionary<long, ShellRow>? _shellRowsById;
+    private static Dictionary<long, ShellListViewRow>? _shellRowsById;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
@@ -203,7 +203,7 @@ internal static class CommonListViewColorBaseline
     {
         var foregroundBefore = GetForegroundWindow();
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs.ListViewShellRows", Guid.NewGuid().ToString("N"));
-        var shellRows = new List<ShellRow>();
+        var shellRows = new List<ShellListViewRow>();
         nint parent = 0, listView = 0, fixturePidl = 0, shellFolder = 0;
         try
         {
@@ -262,8 +262,8 @@ internal static class CommonListViewColorBaseline
             InsertItem(listView, 1, shellRows[1].DisplayName, shellRows[1].Id, shellRows[1].SystemImageIndex, "4 B");
             SetContentsText(listView, 0, largeScan.Files, largeScan.Directories);
             SetContentsText(listView, 1, smallScan.Files, smallScan.Directories);
-            SetRelativeSizeText(listView, 0, shellRows[0].RecursiveBytes, fixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, 1, shellRows[1].RecursiveBytes, fixtureScan.Bytes, 3);
+            SetRelativeSizeText(listView, 0, shellRows[0].RecursiveBytes!.Value, fixtureScan.Bytes, 3);
+            SetRelativeSizeText(listView, 1, shellRows[1].RecursiveBytes!.Value, fixtureScan.Bytes, 3);
             var rowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
@@ -437,6 +437,9 @@ internal static class CommonListViewColorBaseline
             var shellIdentityPreserved = shellRows.All(row => row.AbsolutePidl != 0 &&
                 _shellRowsById.TryGetValue(row.Id, out var current) && current.AbsolutePidl == row.AbsolutePidl);
             var shellEnumerationBacked = shellRows.Count == 2 && shellRows.All(row => row.FromShellEnumeration);
+            var sharedRowModelCorrect = shellRows.All(row => row.ParsingName.Length > 0 &&
+                row.FileSystemPath is not null && (row.Attributes & 0x40000000) != 0 &&
+                row.RecursiveBytes is not null && row.SystemImageIndex >= 0);
             var shellIconsAvailable = shellRows.All(row => row.SystemImageIndex >= 0);
             var shellImageListAttached = enumeration.SystemImageList != 0 && attachedImageList == enumeration.SystemImageList;
             var sortedRowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
@@ -463,7 +466,7 @@ internal static class CommonListViewColorBaseline
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
                 selectedName == "small-folder" && selectedFocusedCount == 1 &&
-                selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked && shellIconsAvailable &&
+                selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked && sharedRowModelCorrect && shellIconsAvailable &&
                 shellImageListAttached && rowIconsBound && sortedRowIconsBound &&
                 itemShellMenuAvailable && backgroundShellMenuAvailable &&
                 itemMenuForegroundUnchanged && backgroundMenuForegroundUnchanged &&
@@ -479,7 +482,7 @@ internal static class CommonListViewColorBaseline
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
                 $"selected-focused-after-sort={selectedName};selected-shell-row-id={selectedId};" +
                 $"shell-pidl-identities-preserved={shellIdentityPreserved};" +
-                $"shell-enumeration-backed={shellEnumerationBacked};" +
+                $"shell-enumeration-backed={shellEnumerationBacked};shared-row-model={sharedRowModelCorrect};" +
                 $"shell-icons-available={shellIconsAvailable};" +
                 $"system-image-list-attached={shellImageListAttached};row-icons-bound={rowIconsBound};" +
                 $"sorted-row-icons-bound={sortedRowIconsBound};" +
@@ -528,7 +531,7 @@ internal static class CommonListViewColorBaseline
         var foregroundBefore = GetForegroundWindow();
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs.ListViewNavigation", Guid.NewGuid().ToString("N"));
         var folderPidls = new List<nint>();
-        var enumeratedRows = new List<ShellRow>();
+        var enumeratedRows = new List<ShellListViewRow>();
         var boundFolders = new List<nint>();
         try
         {
@@ -647,7 +650,7 @@ internal static class CommonListViewColorBaseline
         IReadOnlyDictionary<string, ulong> recursiveSizes)
     {
         Marshal.ThrowExceptionForHR(At<EnumObjects>(shellFolder, 4)(shellFolder, 0, 0x60, out var enumerator));
-        var rows = new List<ShellRow>();
+        var rows = new List<ShellListViewRow>();
         nint systemImageList = 0;
         try
         {
@@ -672,8 +675,9 @@ internal static class CommonListViewColorBaseline
                         throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
                     relativePidlClone = ILClone(relativePidl);
                     if (relativePidlClone == 0) throw new InvalidOperationException("Could not retain the enumerated relative PIDL for native Shell commands.");
-                    rows.Add(new ShellRow(0, absolutePidl, relativePidlClone, identity.DisplayName, fileSystemPath,
-                        recursiveBytes, FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex));
+                    rows.Add(new ShellListViewRow(0, absolutePidl, relativePidlClone, identity.DisplayName,
+                        identity.ParsingName, fileSystemPath, identity.Attributes, recursiveBytes,
+                        FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex));
                     absolutePidl = 0;
                     relativePidlClone = 0;
                 }
@@ -1136,8 +1140,8 @@ internal static class CommonListViewColorBaseline
         var second = GetItemParam(_listView, checked((int)secondIndex.ToInt64()));
         if (_shellRowsById is not null)
         {
-            first = checked((long)_shellRowsById[first].RecursiveBytes);
-            second = checked((long)_shellRowsById[second].RecursiveBytes);
+            first = checked((long)_shellRowsById[first].RecursiveBytes!.Value);
+            second = checked((long)_shellRowsById[second].RecursiveBytes!.Value);
         }
         return _sortDirection * first.CompareTo(second);
     }
@@ -1246,9 +1250,7 @@ internal static class CommonListViewColorBaseline
         public nint Window; public uint Id; public nuint WParam; public nint LParam; public uint Time; public int X, Y;
         public uint Private;
     }
-    private sealed record ShellRow(long Id, nint AbsolutePidl, nint RelativePidl, string DisplayName, string ParsingName,
-        ulong RecursiveBytes, bool FromShellEnumeration = false, int SystemImageIndex = -1);
-    private sealed record ListShellRows(List<ShellRow> Rows, nint SystemImageList);
+    private sealed record ListShellRows(List<ShellListViewRow> Rows, nint SystemImageList);
     private sealed record ContextMenuQuery(uint CommandCount, string[] Verbs, string[] RootLabels, string[] AllLabels);
     [DllImport("comctl32.dll", SetLastError = true)] private static extern bool InitCommonControlsEx(ref InitCommonControls init);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, DrawProc callback, nuint id, nuint data);

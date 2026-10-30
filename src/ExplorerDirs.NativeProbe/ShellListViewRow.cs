@@ -1,0 +1,14 @@
+namespace ExplorerDirs.NativeProbe;
+
+// Shared prototype row identity for filesystem and virtual Shell namespace items.
+internal sealed record ShellListViewRow(
+    long Id,
+    nint AbsolutePidl,
+    nint RelativePidl,
+    string DisplayName,
+    string ParsingName,
+    string? FileSystemPath,
+    uint Attributes,
+    ulong? RecursiveBytes,
+    bool FromShellEnumeration,
+    int SystemImageIndex);

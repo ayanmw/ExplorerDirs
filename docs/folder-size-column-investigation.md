@@ -60,7 +60,13 @@ Microsoft 文档将 `IShellFolder2::GetDefaultColumnState` 的 `SHCOLSTATE_ONBYD
 
 新增 `--common-listview-virtual-folder-contract`，从控制面板的绝对 Shell 解析名绑定父 `IShellFolder`，枚举其 9 个虚拟子项并读取每项的 normal display name、desktop-absolute parsing name、`SFGAO_FOLDER`/`SFGAO_FILESYSTEM` 属性及 `SHGFI_PIDL` 系统图标索引。每项以绝对/相对 PIDL 保持身份，并写入隐藏标准 `SysListView32`；逐行读回名称、解析名、row ID 与图标索引。Release NativeProbe build 0 警告/错误，合同通过：`root-is-virtual=True`、`children=9`、`filesystem-children=0`、`pidl-row-identity=True`、`hidden=True`、`foreground-unchanged=True`。诊断只输出计数，不输出控制面板项目名称或解析路径。
 
-普通文件系统合同仍证明扫描值和 `IFileOperation`，本合同补充了纯虚拟 Shell 命名空间的行身份、名称及图标索引映射。两者尚未合并到统一异步行模型，也没有验证虚拟项目操作/拖放、菜单命令、属性列、键盘焦点、可见绘制或真实 ExplorerBrowser；没有改产品视图，继续使用 ExplorerBrowser。此前在“此电脑”下只观察到 3 个文件系统驱动器项目，不能作为虚拟行支持证据；控制面板夹具才提供了 9 个 `SFGAO_FILESYSTEM` 未设置的子项。
+普通文件系统合同证明了扫描值和 `IFileOperation`，该合同补充了纯虚拟 Shell 命名空间的行身份、名称及图标索引映射；在 2026-10-31 统一行模型前，两类合同使用不同记录。仍没有验证虚拟项目操作/拖放、菜单命令、属性列、键盘焦点、可见绘制或真实 ExplorerBrowser；没有改产品视图，继续使用 ExplorerBrowser。此前在“此电脑”下只观察到 3 个文件系统驱动器项目，不能作为虚拟行支持证据；控制面板夹具才提供了 9 个 `SFGAO_FILESYSTEM` 未设置的子项。
+
+## 2026-10-31：文件系统与虚拟 Shell 共用行数据模型
+
+新增 NativeProbe 内部 `ShellListViewRow`，让普通文件系统和虚拟 Shell 两个合同使用相同的行字段：稳定 row ID、绝对/相对 PIDL、显示名、绝对解析名、可空文件系统路径、Shell 属性、可空递归字节数、系统图标索引及枚举来源。文件系统合同确认真实枚举行有路径、`SFGAO_FILESYSTEM` 和递归大小；控制面板虚拟合同逐项核对属性与路径是否一致，并要求递归大小为空。两种合同分别读回 PIDL/row ID、解析名和系统图标映射。
+
+NativeProbe Release build 为 0 警告/错误；`--common-listview-data-contract`、`--common-listview-virtual-folder-contract` 和 `--common-listview-relative-size-contract` 均通过，窗口不可见且前台未变。相对大小合同仍通过异步更新、排序和选区/焦点断言。该步把两类数据形状合并到同一原型模型，但没有统一两种枚举、属性读取或操作管线；没有验证系统图标实际绘制、虚拟项目操作/拖放/菜单/键盘、产品 Shell 通知或 GUI。Explorer Dirs 产品仍使用 ExplorerBrowser。
 
 ## 2026-10-30：Shell 系统图标索引接入 ListView 合同
 
