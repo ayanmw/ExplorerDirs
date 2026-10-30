@@ -187,6 +187,9 @@
                 <MenuItem Header="刷新环境变量" Click="RefreshEnvironment_Click"/>
                 <MenuItem Header="在当前目录打开命令行" Click="OpenTerminal_Click"/>
             </MenuItem>
+            <MenuItem Header="关于(_A)">
+                <MenuItem Header="版本信息…" Click="VersionInfo_Click"/>
+            </MenuItem>
         </Menu>
         <ToolBarTray DockPanel.Dock="Top">
             <ToolBar x:Name="MainToolBar">

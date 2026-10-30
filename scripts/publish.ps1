@@ -2,6 +2,8 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$Version = 'preview-0.5.2',
     [switch]$IsolatedProfile,
+    [ValidatePattern('^[A-Za-z0-9._,-]*$')]
+    [string[]]$BuildTags = @(),
     [string]$ReleaseNotes,
     [string]$ReleaseRoot,
     [string]$ProfileRoot
@@ -61,6 +63,28 @@ $payload = if ($IsolatedProfile) { Join-Path $staging 'app' } else { $staging }
 $publishArguments = @('publish', $project, '--configuration', 'Release', '--self-contained', 'false',
     '--output', $payload, "-p:OutputPath=$buildOutput")
 if ($productVersion) { $publishArguments += "-p:Version=$productVersion" }
+$sourceCommit = (& git -C $projectRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'Cannot capture the source Git commit for build identity.'
+}
+$commitTimeText = (& git -C $projectRoot log -1 --format=%cI).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitTimeText)) {
+    throw 'Cannot capture the source Git committer time for build identity.'
+}
+$commitTimeUtc = [DateTimeOffset]::Parse($commitTimeText, [Globalization.CultureInfo]::InvariantCulture).ToUniversalTime().ToString(
+    "yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+$sourceStatus = & git -C $projectRoot status --porcelain --untracked-files=all
+if ($LASTEXITCODE -ne 0) { throw 'Cannot capture the source Git working-tree state for build identity.' }
+$sourceTreeState = if ([string]::IsNullOrEmpty([string]$sourceStatus)) { 'clean' } else { 'dirty' }
+$buildTagsText = if ($BuildTags.Count -eq 0) { 'none' } else { $BuildTags -join ',' }
+$publishArguments += @(
+    '-p:IncludeSourceRevisionInInformationalVersion=false',
+    "-p:GitCommit=$sourceCommit",
+    "-p:GitCommitTimeUtc=$commitTimeUtc",
+    "-p:SourceTreeState=$sourceTreeState",
+    "-p:BuildTags=$buildTagsText"
+)
+if ($productVersion) { $publishArguments += "-p:InformationalVersion=$productVersion+$sourceCommit" }
 dotnet @publishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Publish failed. Staging files were left at $staging for inspection."

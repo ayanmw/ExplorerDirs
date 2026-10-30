@@ -24,6 +24,16 @@ function dotnet {
     $global:LASTEXITCODE = 0
 }
 
+$global:fakeGitStatus = ''
+function git {
+    $joined = $args -join ' '
+    $global:LASTEXITCODE = 0
+    if ($joined -match 'rev-parse HEAD') { return ('a' * 40) }
+    if ($joined -match 'log -1 --format=%cI') { return '2026-10-30T12:30:00+08:00' }
+    if ($joined -match 'status --porcelain') { return $global:fakeGitStatus }
+    throw "Unexpected Git metadata query: $joined"
+}
+
 $settings = @(
     'ExplorerDirs.ini', 'ExplorerDirs.WindowPlacement.ini', 'Favorites.ini', 'PinnedTabs.ini',
     'UiPreferences.ini', 'AddressBar.ini', 'NavigationTree.ini', 'NavigationTreeSelection.ini',
@@ -172,10 +182,28 @@ if (-not $normalFolderPreviewJson.DirectoryArgumentDeclared -or
     $normalFolderPreviewJson.CurrentState.Count -ne 2) {
     throw 'Normal folder-entry manager emitted incomplete machine-readable status.'
 }
-$preview = & $script -Version 'preview-0.6.0-temp.4'
+$preview = & $script -Version 'preview-0.6.0-temp.4' -BuildTags @('shell-probe', 'dark-ui')
 if ($global:lastPublishArguments -notcontains '-p:Version=0.6.0-preview.temp.4') {
     throw 'A temporary preview directory version was not applied to the published product version.'
 }
+foreach ($expectedArgument in @(
+    ('-p:GitCommit=' + ('a' * 40)),
+    '-p:GitCommitTimeUtc=2026-10-30T04:30:00Z',
+    '-p:SourceTreeState=clean',
+    '-p:BuildTags=shell-probe,dark-ui',
+    ('-p:InformationalVersion=0.6.0-preview.temp.4+' + ('a' * 40)),
+    '-p:IncludeSourceRevisionInInformationalVersion=false'
+)) {
+    if ($global:lastPublishArguments -notcontains $expectedArgument) {
+        throw "Published build identity omitted $expectedArgument."
+    }
+}
+$global:fakeGitStatus = ' M src/ExplorerDirs.App/MainWindow.xaml.cs'
+$dirtyPreview = & $script -Version 'fixture-dirty-source'
+if ($global:lastPublishArguments -notcontains '-p:SourceTreeState=dirty') {
+    throw 'A dirty source tree was not marked in the published build identity.'
+}
+$global:fakeGitStatus = ''
 $redirectedReleaseRoot = Join-Path $fixture 'redirected-releases'
 $redirected = & $script -Version 'fixture-redirected' -ReleaseRoot $redirectedReleaseRoot
 if ([IO.Path]::GetFullPath($redirected) -ne [IO.Path]::GetFullPath((Join-Path $redirectedReleaseRoot 'fixture-redirected'))) {

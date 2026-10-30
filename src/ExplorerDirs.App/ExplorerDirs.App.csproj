@@ -7,7 +7,51 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <Version>0.6.0-preview.temp.3</Version>
+    <BuildTags Condition="'$(BuildTags)' == ''">none</BuildTags>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+  <Target Name="GenerateExplorerDirsBuildIdentity" BeforeTargets="GetAssemblyAttributes">
+    <PropertyGroup>
+      <_ExplorerDirsRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</_ExplorerDirsRepositoryRoot>
+    </PropertyGroup>
+    <Exec Command="git -C &quot;$(_ExplorerDirsRepositoryRoot)&quot; rev-parse HEAD" ConsoleToMSBuild="true" StandardOutputImportance="Low" IgnoreExitCode="true"
+          Condition="'$(GitCommit)' == '' and Exists('$(_ExplorerDirsRepositoryRoot)\.git')">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_ExplorerDirsGitCommitOutput" />
+    </Exec>
+    <Exec Command="git -C &quot;$(_ExplorerDirsRepositoryRoot)&quot; log -1 --format=%25%25cI" ConsoleToMSBuild="true" StandardOutputImportance="Low" IgnoreExitCode="true"
+          Condition="'$(GitCommitTimeUtc)' == '' and Exists('$(_ExplorerDirsRepositoryRoot)\.git')">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_ExplorerDirsGitCommitTimeOutput" />
+    </Exec>
+    <Exec Command="git -C &quot;$(_ExplorerDirsRepositoryRoot)&quot; status --porcelain --untracked-files=all" ConsoleToMSBuild="true" StandardOutputImportance="Low" IgnoreExitCode="true"
+          Condition="'$(SourceTreeState)' == '' and Exists('$(_ExplorerDirsRepositoryRoot)\.git')">
+      <Output TaskParameter="ConsoleOutput" ItemName="_ExplorerDirsGitStatusOutput" />
+    </Exec>
+    <PropertyGroup>
+      <GitCommit Condition="'$(GitCommit)' == '' and '$(_ExplorerDirsGitCommitOutput)' != ''">$([System.String]::Copy('$(_ExplorerDirsGitCommitOutput)').Trim())</GitCommit>
+      <GitCommitTimeUtc Condition="'$(GitCommitTimeUtc)' == '' and '$(_ExplorerDirsGitCommitTimeOutput)' != ''">$([System.DateTimeOffset]::Parse('$(_ExplorerDirsGitCommitTimeOutput)').ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))</GitCommitTimeUtc>
+      <SourceTreeState Condition="'$(SourceTreeState)' == '' and '$(GitCommit)' != '' and '@(_ExplorerDirsGitStatusOutput)' == ''">clean</SourceTreeState>
+      <SourceTreeState Condition="'$(SourceTreeState)' == '' and '$(GitCommit)' != '' and '@(_ExplorerDirsGitStatusOutput)' != ''">dirty</SourceTreeState>
+      <GitCommit Condition="'$(GitCommit)' == ''">unknown</GitCommit>
+      <GitCommitTimeUtc Condition="'$(GitCommitTimeUtc)' == ''">unknown</GitCommitTimeUtc>
+      <SourceTreeState Condition="'$(SourceTreeState)' == ''">unknown</SourceTreeState>
+      <InformationalVersion>$(Version)+$(GitCommit)</InformationalVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="GitCommit" Value="$(GitCommit)" />
+      <AssemblyMetadata Include="GitCommitTimeUtc" Value="$(GitCommitTimeUtc)" />
+      <AssemblyMetadata Include="SourceTreeState" Value="$(SourceTreeState)" />
+      <AssemblyMetadata Include="BuildConfiguration" Value="$(Configuration)" />
+      <AssemblyMetadata Include="BuildTargetFramework" Value="$(TargetFramework)" />
+      <AssemblyMetadata Include="BuildRuntimeIdentifier" Value="$(RuntimeIdentifier)" />
+      <AssemblyMetadata Include="BuildSelfContained" Value="$(SelfContained)" />
+      <AssemblyMetadata Include="BuildDefineConstants" Value="$(DefineConstants)" />
+      <AssemblyMetadata Include="BuildPublishAot" Value="$(PublishAot)" />
+      <AssemblyMetadata Include="BuildPublishSingleFile" Value="$(PublishSingleFile)" />
+      <AssemblyMetadata Include="BuildPublishTrimmed" Value="$(PublishTrimmed)" />
+      <AssemblyMetadata Include="BuildPublishReadyToRun" Value="$(PublishReadyToRun)" />
+      <AssemblyMetadata Include="BuildTags" Value="$(BuildTags)" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
   </ItemGroup>

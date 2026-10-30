@@ -65,6 +65,7 @@ public partial class MainWindow : Window
     private WindowTitleMode _windowTitleMode;
     private string? _recentFavoritePath;
     private string _applicationTitle = "Explorer Dirs";
+    private readonly BuildIdentity _buildIdentity = BuildIdentity.Read();
     private bool _windowTitleRefreshQueued;
     private bool _showTabCloseButtons;
     private int _tabHoverActivationDelayMilliseconds = TabHoverActivationPreference.DefaultDelayMilliseconds;
@@ -181,9 +182,9 @@ public partial class MainWindow : Window
         _createWindow = createWindow;
         _restartApplication = restartApplication;
 #if DEBUG
-        _applicationTitle = "Explorer Dirs · 开发调试";
+        _applicationTitle = $"Explorer Dirs · 开发调试 · {_buildIdentity.ShortCommit}";
 #else
-        _applicationTitle = $"Explorer Dirs · Preview {GetType().Assembly.GetName().Version?.ToString(3)}";
+        _applicationTitle = $"Explorer Dirs · {_buildIdentity.ProductVersion} · {_buildIdentity.ShortCommit}";
 #endif
         Title = _applicationTitle;
         _windowTitlePreferenceStore = new WindowTitlePreferenceStore(Path.Combine(
@@ -521,6 +522,12 @@ public partial class MainWindow : Window
         if (startupWarning is not null)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? startupWarning : $"{EnvironmentStatus.Text} {startupWarning}";
+    }
+
+    private void VersionInfo_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new VersionInfoWindow(_buildIdentity, _themeController) { Owner = this };
+        window.ShowDialog();
     }
 
     private PaneControl ActivePane { get; set; }

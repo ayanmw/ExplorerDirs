@@ -41,6 +41,12 @@ if (args is ["--window-title-preference-smoke"])
     return;
 }
 
+if (args is ["--build-identity-smoke", var applicationAssemblyPath])
+{
+    ExplorerDirs.SettingsSmoke.BuildIdentitySmoke.Run(applicationAssemblyPath);
+    return;
+}
+
 if (args is ["--view-state-restore-smoke"])
 {
     ExplorerDirs.SettingsSmoke.ViewStateRestoreSmoke.Run();
