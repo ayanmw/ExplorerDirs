@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-31 04:12 北京时间内存观察：对仍运行的 temp.80 PID `47460` 做 60 秒只读复采（13 点），Working Set `223.19→223.15 MiB`、Private Bytes `114.84→114.75 MiB`，句柄 `1,112–1,114`、线程 `35–37`、GDI `95`、USER `105–107`；本窗口没有单调增长。未操作应用且没有固定负载，因此此样本只反映短时静置计数，不能排除用户操作期间或长期运行的增长，也不能归因来源；身份、哈希和完整限制见[内存采样记录](memory-sampling.md#2026-10-31-0412-北京时间temp80-当前运行实例一分钟被动复采)。
+
 2026-10-31 后台回归复核：App Release 构建（0 警告/错误）、完整 Release SettingsSmoke 和 `--static-shell-column-folder-smoke` 均通过。原生适配器无窗口合同再次确认列标题、`UInt64` 值及 `2/10/10/100` 数值比较正确；输出明确 `window-created=False`。这不改变 DefView 未读取自定义派生列的结论，也不代表产品列、Shell view 或可见交互通过。
 
 2026-10-31 原生 `IShellView` 菜单排序合同：Private Desktop 隔离探针现验证背景菜单的名称升/降序确实重排三条原生 Shell 行（`aardvark,child,keep.txt` ↔ `keep.txt,child,aardvark`），而不只检查 `GetSortColumns` 状态；同轮查看方式、刷新、分组菜单、列标题菜单和排序后焦点恢复通过，前台及输入状态未变。该合同补足原生菜单命令与行序证据，不代表 ExplorerBrowser 产品接线、可见体验或 Q-Dir 验收。
