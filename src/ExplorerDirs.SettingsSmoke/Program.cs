@@ -162,6 +162,7 @@ if (args.Length == 1 && args[0] == "--full-row-selection-smoke")
         ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();
         ExplorerDirs.SettingsSmoke.StatusBarVisibilitySmoke.Run(smokeRoot);
         ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
+        ExplorerDirs.SettingsSmoke.SoftRefreshRoutingSmoke.Run();
     }
     finally { Directory.Delete(smokeRoot, recursive: true); }
     Console.WriteLine("Full-row selection smoke: PASS");
@@ -543,6 +544,7 @@ ExplorerDirs.SettingsSmoke.ViewStyleWheelRoutingSmoke.Run();
 ExplorerDirs.SettingsSmoke.WindowTitlePreferenceSmoke.Run(
     Path.Combine(AppContext.BaseDirectory, "window-title-preference-smoke"));
 ExplorerDirs.SettingsSmoke.FullRowSelectionRoutingSmoke.Run();
+ExplorerDirs.SettingsSmoke.SoftRefreshRoutingSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellRenameWindowGateSmoke.Run();
 HiddenItemsPreferenceSmoke.Run();
 ExplorerDirs.SettingsSmoke.FolderHeaderFlagsSmoke.Run();

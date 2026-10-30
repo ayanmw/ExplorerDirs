@@ -72,6 +72,19 @@ internal static class FolderHeaderFlagsSmoke
                 throw new InvalidOperationException($"No-grouping flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (disabled={disabled}).");
         }
 
+        var softRefreshCases = new (uint Input, bool Enabled, uint Expected)[]
+        {
+            (0x40240008, true, 0x402C0008),
+            (0x402C0008, false, 0x40240008),
+            (0xFFFFFFFF, false, 0xFFF7FFFF)
+        };
+        foreach (var (input, enabled, expected) in softRefreshCases)
+        {
+            var actual = ShellFolderViewOptions.SetNoEnumRefresh(input, enabled);
+            if (actual != expected)
+                throw new InvalidOperationException($"Soft-refresh flag update expected 0x{expected:X8}, got 0x{actual:X8} from 0x{input:X8} (enabled={enabled}).");
+        }
+
         Console.WriteLine("Folder header flags smoke: PASS");
     }
 }

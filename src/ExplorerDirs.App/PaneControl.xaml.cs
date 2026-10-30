@@ -32,6 +32,7 @@ public partial class PaneControl : UserControl
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
     private bool _disableGrouping;
+    private bool _softRefresh;
     private bool _showSelectionSizeInStatusBar = true;
     private bool _showFolderSizeWhenEmpty;
     private bool _updatingFilterPresets;
@@ -191,7 +192,8 @@ public partial class PaneControl : UserControl
         QuickFilterFavoritesStore quickFilterFavoritesStore,
         QuickFilterHistoryStore quickFilterHistoryStore,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
-        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false)
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false,
+        bool softRefresh = false)
     {
         InitializeComponent();
         BackButton.Content = ExplorerChromeIcons.CreatePath(ExplorerChromeIcons.For(ExplorerChromeIcon.Back), 14);
@@ -246,6 +248,7 @@ public partial class PaneControl : UserControl
         _selectionCheckBoxes = selectionCheckBoxes;
         _fullRowSelection = fullRowSelection;
         _disableGrouping = disableGrouping;
+        _softRefresh = softRefresh;
         QuickFilterPresetCombo.DropDownOpened += (_, _) => RefreshQuickFilterPresets(QuickFilterPresetCombo.Text);
         var tabIndex = 0;
         foreach (var tab in tabs)
@@ -746,6 +749,22 @@ public partial class PaneControl : UserControl
             try
             {
                 var result = state.Browser.SetGroupingDisabled(disabled);
+                if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
+            }
+            catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
+        }
+        return failures;
+    }
+
+    internal IReadOnlyList<string> SetSoftRefresh(bool enabled)
+    {
+        _softRefresh = enabled;
+        List<string> failures = [];
+        foreach (var state in _tabOrder.Select(tab => (TabState)tab.Tag))
+        {
+            try
+            {
+                var result = state.Browser.SetSoftRefresh(enabled);
                 if (result < 0) failures.Add($"{state.Path}: Shell 错误 0x{result:X8}");
             }
             catch (Exception ex) { failures.Add($"{state.Path}: {ex.Message}"); }
@@ -1715,7 +1734,7 @@ public partial class PaneControl : UserControl
         if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
             previewPaneVisible, detailsPaneVisible, _hiddenItemsPreference, _selectionCheckBoxes, _fullRowSelection,
-            _disableGrouping);
+            _disableGrouping, _softRefresh);
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,

@@ -115,6 +115,9 @@
                 <MenuItem x:Name="DisableGroupingMenu" Header="停用所有视图分组" IsCheckable="True"
                           ToolTip="暂时关闭所有文件视图的分组；每个标签原有的分组设置会在重新启用时恢复。"
                           Click="DisableGrouping_Click"/>
+                <MenuItem x:Name="SoftRefreshMenu" Header="Soft-Refresh（刷新时不重新枚举）" IsCheckable="True"
+                          ToolTip="启用后，Shell 刷新不会重新读取文件列表；新建或更改的项目可能暂时不可见。关闭后按 F5 可完整重新读取。"
+                          Click="SoftRefresh_Click"/>
                 <MenuItem x:Name="TreeModeMenu" Header="目录树">
                     <MenuItem x:Name="TreeModeSharedMenu" Header="共享一棵树" IsCheckable="True" Tag="Shared" Click="TreeMode_Click"/>
                     <MenuItem x:Name="TreeModePerPaneMenu" Header="每窗格各一棵树" IsCheckable="True" Tag="PerPane" Click="TreeMode_Click"/>

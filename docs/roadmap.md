@@ -22,7 +22,9 @@
 
 2026-10-31 ETW 句柄追踪权限检查：本机 WPR `Handle` 配置存在，但普通权限执行 `wpr -start Handle -filemode` 返回 `0x80070005 Access is denied`；记录未启动，没有 ETL，也没有更改 WPR 状态。仅在可用的授权管理环境下再考虑该系统级追踪，不把权限拒绝当成 ETW 能力结论。
 
-2026-10-31 Q-Dir 官方功能差距补查：官方语言表分别列出 `Soft-Refresh, not re-enumerate the view` 与 `Disable auto sorting when rename or copy items`；FAQ 112/139 对后者的文案和用途有补充，但没有说明两个开关如何交互。Explorer Dirs 当前没有这两项偏好。不能把 `FWF_AUTOARRANGE` 或 `FWF_NOENUMREFRESH` 直接当作完整等价实现；暂列 P2，先验证外部变化/F5 的内容新鲜度与复制/重命名/拖放时的排序行为，再确定两个功能各自的持久化范围，不改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
+2026-10-31 Q-Dir 官方功能差距补查：官方语言表分别列出 `Soft-Refresh, not re-enumerate the view` 与 `Disable auto sorting when rename or copy items`；FAQ 112 则称后者是 Soft-Refresh 的新名称。文案证据存在版本/功能命名歧义，需在 Q-Dir GUI 验收时确认是否为改名或并存选项。不能把 `FWF_AUTOARRANGE` 或 `FWF_NOENUMREFRESH` 直接当作完整等价实现；暂列 P2，先验证外部变化/F5 的内容新鲜度与复制/重命名/拖放时的排序行为，不改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
+
+2026-10-31 Soft-Refresh 原生开关实验：新增默认关闭的全局便携选项，只设置 `FWF_NOENUMREFRESH`，并将该设置路由至当前及新建 ExplorerBrowser Shell 视图。此标志只表达刷新时不重新枚举；Q-Dir FAQ 将“重命名/复制时禁用自动排序”称为 Soft-Refresh 新名称，但公开字符串表并列两种说法，因此本实现不宣称覆盖排序行为或完整 Q-Dir 等价。菜单提示说明新建/更改项目可能暂时不显示，关闭后需按 F5 刷新。标志位、INI 持久化和源代码路由由 Release SettingsSmoke/构建检查；实际 F5、外部变化、文件操作可见结果及与 Q-Dir 的等价程度留待集中 GUI 验收，默认保持关闭。
 
 2026-10-31 02:07 CST：只读采样仍在运行的 `preview-0.6.0-temp.80` PID `47460` 5 分钟（61 点）。Working Set `220.61–220.70 MiB`，Private Bytes `115.30–115.48 MiB`，首末均轻微回落；GDI 全程 95。负载未固定，不能据此排除操作期间增长或定位来源。完整身份、哈希及边界见[内存采样记录](memory-sampling.md#2026-10-31-0207-北京时间temp80-当前运行实例五分钟只读采样)。
 

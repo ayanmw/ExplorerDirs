@@ -31,7 +31,7 @@ internal static class FullRowSelectionRoutingSmoke
         Check(window.Contains("\"DisableGrouping.ini\"", StringComparison.Ordinal) &&
               window.Contains("pane.SetGroupingDisabled(next)", StringComparison.Ordinal),
             "the profile preference is saved and routed across existing panes");
-        Check(pane.Contains("_disableGrouping);", StringComparison.Ordinal) &&
+        Check(pane.Contains("_disableGrouping, _softRefresh);", StringComparison.Ordinal) &&
               host.Contains("ShellFolderViewOptions.SetNoGrouping(view, _disableGrouping)", StringComparison.Ordinal),
             "new tabs apply the grouping override when their Shell view is created");
 

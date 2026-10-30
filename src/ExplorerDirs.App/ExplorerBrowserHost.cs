@@ -45,6 +45,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
     private bool _disableGrouping;
+    private bool _softRefresh;
     private DispatcherTimer? _quickFilterGroupRestoreTimer;
     private PendingQuickFilterGroupRestore? _pendingQuickFilterGroupRestore;
     private (PropertyKeyState Group, bool Ascending)? _quickFilterGroupToRestore;
@@ -523,7 +524,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     internal ExplorerBrowserHost(string initialPath, ViewState initialView, QuickFilterSettings quickFilter,
         bool showPreviewPane = false, bool showDetailsPane = false,
         HiddenItemsPreference hiddenItemsPreference = HiddenItemsPreference.FollowWindows,
-        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false)
+        bool selectionCheckBoxes = false, bool? fullRowSelection = null, bool disableGrouping = false,
+        bool softRefresh = false)
     {
         if (showPreviewPane && showDetailsPane)
             throw new ArgumentException("预览窗格和详情窗格不能同时开启。", nameof(showDetailsPane));
@@ -534,6 +536,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _selectionCheckBoxes = selectionCheckBoxes;
         _fullRowSelection = fullRowSelection;
         _disableGrouping = disableGrouping;
+        _softRefresh = softRefresh;
         _visibleShellPane = showDetailsPane ? ExplorerShellPane.Details :
             showPreviewPane ? ExplorerShellPane.Preview : ExplorerShellPane.None;
         _browserSite.VisibleShellPane = _visibleShellPane;
@@ -660,6 +663,23 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             return 0;
         }
         finally { Marshal.Release(view); }
+    }
+
+    internal int SetSoftRefresh(bool enabled)
+    {
+        _softRefresh = enabled;
+        if (_browser is null || _viewWindow == IntPtr.Zero) return 0;
+        var viewId = ShellViewId;
+        var viewResult = _browser.GetCurrentView(ref viewId, out var viewObject);
+        if (viewResult < 0 || viewObject is null)
+            return viewResult < 0 ? viewResult : unchecked((int)0x80004005);
+        try
+        {
+            var view = Marshal.GetIUnknownForObject(viewObject);
+            try { return ShellFolderViewOptions.SetNoEnumRefresh(view, enabled); }
+            finally { Marshal.Release(view); }
+        }
+        finally { Marshal.ReleaseComObject(viewObject); }
     }
 
     internal bool SetDetailsPaneVisible(bool visible)
@@ -4983,6 +5003,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 var noGroupingResult = ShellFolderViewOptions.SetNoGrouping(view, _disableGrouping);
                 if (noGroupingResult < 0)
                     MenuError?.Invoke(this, $"Shell 未能应用全局分组设置（0x{noGroupingResult:X8}）。");
+                var noEnumRefreshResult = ShellFolderViewOptions.SetNoEnumRefresh(view, _softRefresh);
+                if (noEnumRefreshResult < 0)
+                    MenuError?.Invoke(this, $"Shell 未能应用列表软刷新设置（0x{noEnumRefreshResult:X8}）。");
                 if (shellView.GetWindow(out var hwnd) >= 0 && hwnd != IntPtr.Zero)
                 {
                     AttachViewWindow(hwnd);

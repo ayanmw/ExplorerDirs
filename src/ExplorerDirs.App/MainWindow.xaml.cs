@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     private readonly SelectionCheckBoxesStore _selectionCheckBoxesStore;
     private readonly FullRowSelectionStore _fullRowSelectionStore;
     private readonly PortableBooleanPreference _disableGroupingStore;
+    private readonly SoftRefreshStore _softRefreshStore;
     private readonly PortableBooleanPreference _mouseWheelFocusPreferenceStore;
     private TabStripVisibilityMode _tabStripVisibilityMode = TabStripVisibilityMode.Always;
     private bool _multilineTabHeaders;
@@ -76,6 +77,7 @@ public partial class MainWindow : Window
     private bool _selectionCheckBoxes;
     private bool? _fullRowSelection;
     private bool _disableGrouping;
+    private bool _softRefresh;
     private readonly HiddenItemsPreferenceStore _hiddenItemsPreferenceStore;
     private readonly SizeDisplayPreferenceStore _sizeDisplayPreferenceStore;
     private readonly PortableBooleanPreference _treePreferences;
@@ -280,6 +282,12 @@ public partial class MainWindow : Window
         if (_disableGroupingStore.LoadWarning is { } disableGroupingWarning)
             EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
                 ? disableGroupingWarning : $"{EnvironmentStatus.Text} {disableGroupingWarning}";
+        _softRefreshStore = new SoftRefreshStore(Path.Combine(_profileDirectory, "SoftRefresh.ini"));
+        _softRefresh = _softRefreshStore.Load();
+        SoftRefreshMenu.IsChecked = _softRefresh;
+        if (_softRefreshStore.LoadWarning is { } softRefreshWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? softRefreshWarning : $"{EnvironmentStatus.Text} {softRefreshWarning}";
         _hiddenItemsPreferenceStore = new HiddenItemsPreferenceStore(Path.Combine(
             _profileDirectory, "HiddenItems.ini"));
         _hiddenItemsPreference = _hiddenItemsPreferenceStore.Load();
@@ -368,7 +376,7 @@ public partial class MainWindow : Window
                 PinnedTabsStore.MatchPane(initialTabs, pinnedTabs, index),
                 state?.ActiveTabIndices?.ElementAtOrDefault(index) ?? 0,
                 _quickFilterFavoritesStore, _quickFilterHistoryStore, _hiddenItemsPreference,
-                _selectionCheckBoxes, _fullRowSelection, _disableGrouping);
+                _selectionCheckBoxes, _fullRowSelection, _disableGrouping, _softRefresh);
             _panes[index] = pane;
             pane.SetClassicAddressBar(_classicAddressBar);
             pane.SetStatusBarVisible(_showStatusBar);
@@ -1537,6 +1545,27 @@ public partial class MainWindow : Window
         {
             DisableGroupingMenu.IsChecked = _disableGrouping;
             EnvironmentStatus.Text = $"全局分组设置保存失败：{ex.Message}";
+        }
+    }
+
+    private void SoftRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        var next = SoftRefreshMenu.IsChecked == true;
+        try
+        {
+            _softRefreshStore.Save(next);
+            _softRefresh = next;
+            var failures = _panes.SelectMany(pane => pane.SetSoftRefresh(next)).ToArray();
+            EnvironmentStatus.Text = failures.Length == 0
+                ? next
+                    ? "已启用列表软刷新；新建或更改的项目可能需关闭此选项并按 F5 后才显示。"
+                    : "已关闭列表软刷新；按 F5 可完整重新读取当前目录。"
+                : $"设置已保存，但有 {failures.Length} 个标签未能立即应用：{string.Join("；", failures.Take(3))}";
+        }
+        catch (Exception ex)
+        {
+            SoftRefreshMenu.IsChecked = _softRefresh;
+            EnvironmentStatus.Text = $"列表软刷新设置保存失败：{ex.Message}";
         }
     }
 
