@@ -12,7 +12,7 @@
 
 集中验收清单补充：在 10,000 个不同名称的目录中从 Name 列筛选菜单翻到后续页，勾选值后翻页并返回，确认勾选状态/计数保持，再清除并核对全量回归。该项针对分页交互，不将 SettingsSmoke 的纯分页逻辑覆盖当作可见验收。
 
-集中验收候选已刷新：从干净提交 `6e68fc2cd8ac1bcf9c9c12f38a41a4e278bc7de6` 执行 `run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-005057-879-32911a/`，39 项，manifest 为 `prepared-not-run` 且 `SourceWorkingTreeDirty=false`。EXE、App DLL 和颜色夹具的实际 SHA-256 与 manifest 完全匹配；10,000 个唯一名称的列筛选分页步骤已进入验收清单。仅准备隔离副本，未启动窗口或创建 ExplorerBrowser；清单、构建身份与哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
+集中验收候选已刷新：从干净提交 `db5c8daf54e3106f31023760f92f61d6708ddd74` 执行 `run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-005620-783-418f8b/`，39 项，manifest 为 `prepared-not-run` 且 `SourceWorkingTreeDirty=false`。EXE、App DLL 和颜色夹具的实际 SHA-256 与 manifest 完全匹配；10,000 个唯一名称的列筛选分页及最近收藏标题双窗口恢复均进入验收清单。仅准备隔离副本，未启动窗口或创建 ExplorerBrowser；清单、构建身份与哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
 2026-10-30 克隆视图快照一致性保护：克隆时 Shell 视图设置和选区分两次读取，COM 重入期间可能导航到另一位置。现捕获目录/搜索 URI、导航与视图代次、选区代次，并验证导航历史仍指向同一位置；任一值变化就拒绝生成不一致的克隆。定向 SettingsSmoke 覆盖保护接线与历史位置匹配；App Release build、完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，COM 重入时序仍待隔离 HostProbe/集中验收。
 
