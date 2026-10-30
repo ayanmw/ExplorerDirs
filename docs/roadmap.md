@@ -5008,3 +5008,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 主线提交 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 重新执行 `run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-170859-050-e4c757/`。manifest 为 `prepared-not-run`，四窗格、41 项待验收；EXE 与 App DLL 哈希独立复核匹配。
 - 未启动应用或 ExplorerBrowser；候选仍是集中 UI 验收副本，不是 release。最新身份已更新到[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+
+## 2026-10-31：隔离 IShellView 刷新后的幸存焦点
+
+- 真实隐藏 stock `IShellView` 中，`SelectItem` 对未激活 view 返回 `S_OK` 仍不足以读回 focused item；探针改为 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 后，4 项选区和焦点 PIDL 均恢复，父窗口隐藏且前台 HWND 不变。
+- 修复快照恢复中的状态耦合：某个旧选中 PIDL 已删除时，仍独立尝试恢复存在的焦点 PIDL。混合 readiness `1110` 读回 3 个幸存选中项和原焦点 PIDL，明确报告 `selection=False/focus=True`。
+- 结果仅限隐藏 `IShellView` 与生产快照恢复函数；未验证产品 ExplorerBrowser 刷新、用户可见焦点/键盘/滚动或整套 Shell 操作。产品架构仍为 ExplorerBrowser，IShellView 迁移继续保留兼容门槛。细节见[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。

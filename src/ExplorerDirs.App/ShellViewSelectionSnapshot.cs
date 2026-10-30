@@ -203,7 +203,8 @@ internal sealed class ShellViewSelectionSnapshot : IDisposable
             }
 
             var focusRestored = _focused == 0;
-            if (_focused != 0 && restoreFocus && hasSelection)
+            // A stale selection member must not prevent restoring a different, surviving focused item.
+            if (_focused != 0 && restoreFocus)
             {
                 // Refresh can preserve item focus even when it rebuilds selection state.
                 // Avoid sending a redundant native focus command during that repaint.

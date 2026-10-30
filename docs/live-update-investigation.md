@@ -1683,6 +1683,14 @@ Microsoft 的 `IFolderView::GetItemPosition` 文档只承诺返回项目在视�
 
 两种场景都使用隐藏默认 `IShellView`、隐藏父窗口和真实生产快照恢复函数；前台句柄保持不变。探针宿主没有收到 CDB3 状态回调（`SelectionVersion=0`），因此此证据验证的是恢复函数和重试 gate 在这两种 PIDL 集合上的状态语义，不等同产品 ExplorerBrowser 的 deferred Dispatcher timer；也未测出产品 STA 成本或真实焦点。未启动可见 GUI、未发送输入、未发布。下一步改用隐藏产品 HostProbe 复验刷新和选区/焦点。
 
+### 2026-10-31 混合 readiness 的焦点恢复复核
+
+首次为 fresh view 恢复焦点增加调用 trace 后发现：`IShellView::SelectItem` 返回 `S_OK`，但未激活的隐藏目标 view 仍从 `IFolderView2::GetFocusedItem` 读不到焦点。只在隔离目标 view 上调用 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 后，完整 `1111` readiness 场景一次恢复即读回 4 个选中项和正确焦点 PIDL；父窗口仍不可见，前台 HWND 未改变。该调用只用于隐藏探针初始化，不是产品刷新时新增的激活行为。
+
+混合 `1110` 场景又显示另一处状态耦合：一个旧选中 PIDL 已不存在时，原实现因“整组选区未完全恢复”而跳过焦点设置，即使原焦点项目仍在目标视图。现让焦点 PIDL 独立于整组选择结果恢复；重新运行后，3 个幸存项目仍选中、缺失项不被伪造，原焦点 PIDL 精确读回，结果为 `selection=False/focus=True`。这里 `selection=False` 表示快照中的第四项已删除，并非幸存三项未恢复。
+
+目前通过的是隐藏 stock `IShellView` 的选区/焦点状态合同，以及生产快照恢复函数的 stale PIDL 路径；尚未在产品 ExplorerBrowser HostProbe 或可见界面复验刷新后的实体焦点、滚动位置、键盘输入和 Shell 操作。产品未切换到自有 `IShellView`；它仍需单独通过菜单、视图、拖放、通知、历史、焦点及虚拟位置兼容门槛。
+
 ### 2026-10-26 最新恢复策略下的 10,000 / 50,000 项产品宿主复核
 
 使用当前源码的隐藏生产 HostProbe `--live-shell-directory-stress-large`，先运行 10,000 项并开启 `EXPLORER_DIRS_DISPATCHER_QUEUE_LATENCY_TRACE=1`。退出码 0；产品 watcher 和独立 observer 创建/删除均 `10,000/10,000`，目标 pane 视图计数在创建后/最终删除后为 `10003/3`，创建/删除两轮均恢复 `second.txt`、`third.txt` 两项选择及未选中的 `initial.txt` 焦点。产品 watcher 各触发一次创建 fallback、两次删除 fallback；Normal/Input/ContextIdle 最大排队延迟为 10.2/10.8/11.6 ms，最大 Dispatcher 观察间隔 107 ms，专用线程心跳最大间隔 24 ms。

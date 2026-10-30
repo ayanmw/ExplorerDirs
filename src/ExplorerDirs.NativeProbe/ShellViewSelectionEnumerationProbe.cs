@@ -264,6 +264,7 @@ internal static class ShellViewSelectionEnumerationProbe
             Check(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
             targetCreated = true;
             Check(Marshal.QueryInterface(targetView, in FolderViewId, out targetFolderView));
+            var activationResult = At<ActivateView>(targetView, 7)(targetView, 1); // SVUIA_ACTIVATE_NOFOCUS; hidden probe only.
             var startedAt = Stopwatch.GetTimestamp();
             var deadline = Environment.TickCount64 + 30_000;
             string? previousReadiness = null;
@@ -279,6 +280,7 @@ internal static class ShellViewSelectionEnumerationProbe
             var lastSelectionVersion = targetBrowserSite.SelectionVersion;
             var retrySelectionForShellChange = false;
             var finalReadbackSelectedCount = -1;
+            var focusTrace = new List<string>();
             var immediateCount = GetItemCount(targetFolderView, 2);
             while (Environment.TickCount64 < deadline)
             {
@@ -327,7 +329,7 @@ internal static class ShellViewSelectionEnumerationProbe
                 {
                     retrySelectionForShellChange = false;
                     restoreAttempts++;
-                    var result = snapshot.Restore(targetView, allowSelectedFocusFallback: false);
+                    var result = snapshot.Restore(targetView, focusTrace.Add, allowSelectedFocusFallback: false);
                     selectionRestored = result.SelectionRestored;
                     focusRestored = result.FocusRestored;
                     lastSelectionAttempt = Stopwatch.GetTimestamp();
@@ -339,7 +341,7 @@ internal static class ShellViewSelectionEnumerationProbe
                 {
                     restoreAttempts++;
                     lastFocusAttempt = Stopwatch.GetTimestamp();
-                    var result = snapshot.Restore(targetView, allowSelectedFocusFallback: false,
+                    var result = snapshot.Restore(targetView, focusTrace.Add, allowSelectedFocusFallback: false,
                         restoreSelection: false, restoreFocus: true);
                     focusRestored = result.FocusRestored;
                     restoreOutcomes.Add($"focus:{result.SelectionRestored}/{result.FocusRestored}@{Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds:F1}ms");
@@ -354,7 +356,7 @@ internal static class ShellViewSelectionEnumerationProbe
                 {
                     finalAttempt = true;
                     restoreAttempts++;
-                    var result = snapshot.Restore(targetView, allowSelectedFocusFallback: true);
+                    var result = snapshot.Restore(targetView, focusTrace.Add, allowSelectedFocusFallback: true);
                     selectionRestored = result.SelectionRestored;
                     focusRestored = result.FocusRestored;
                     using var attemptReadback = ShellViewSelectionSnapshot.Capture(targetFolderView);
@@ -369,20 +371,23 @@ internal static class ShellViewSelectionEnumerationProbe
             var elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
             using var readback = ShellViewSelectionSnapshot.Capture(targetFolderView)
                 ?? throw new Exception("Could not capture the final Shell selection.");
+            var focusedTargetRestored = IsFocusedItem(targetFolderView, childPidls[0]);
             if (GetItemCount(targetFolderView, 2) != expectedTargetCount ||
                 (omitLastTarget
                     ? readback.SelectedCount != expectedSelectionCount || finalReadbackSelectedCount != expectedSelectionCount ||
-                        !readinessHistory.Contains(expectedReadiness, StringComparer.Ordinal)
-                    : !selectionRestored || readback.SelectedCount != expectedSelectionCount))
-                throw new Exception($"Fresh-view restore did not recover the full selection: immediate-count={immediateCount}, final-count={GetItemCount(targetFolderView, 2)}, restored={selectionRestored}/{focusRestored}, selected={readback.SelectedCount}, attempts={restoreAttempts}, readiness={string.Join(',', readinessHistory)}.");
+                        !readinessHistory.Contains(expectedReadiness, StringComparer.Ordinal) || !focusRestored
+                    : !selectionRestored || readback.SelectedCount != expectedSelectionCount || !focusRestored) ||
+                !focusedTargetRestored)
+                throw new Exception($"Fresh-view restore did not recover the expected selection/focus: immediate-count={immediateCount}, final-count={GetItemCount(targetFolderView, 2)}, restored={selectionRestored}/{focusRestored}, selected={readback.SelectedCount}, focused-target={focusedTargetRestored}, attempts={restoreAttempts}, readiness={string.Join(',', readinessHistory)}.");
             if (IsWindowVisible(parent) || GetForegroundWindow() != foreground)
                 throw new Exception("Hidden/foreground boundary changed.");
 
             Console.WriteLine("ishellview-selection-enumeration-restore: " +
                 $"scenario={(omitLastTarget ? "stale-target" : "all-present")}; items={expectedTargetCount}; targets={TargetIndexes.Length}; expected-selected={expectedSelectionCount}; readiness={string.Join(',', readinessHistory)}; " +
                 $"restore-attempts={restoreAttempts}; readiness-queries={readinessQueryTotal}; outcomes={string.Join(',', restoreOutcomes)}; " +
-                $"immediate-count={immediateCount}; elapsed-ms={elapsedMs:F1}; restored={selectionRestored}/{focusRestored}; selected={readback.SelectedCount}; shell-state={targetBrowserSite.NotificationSnapshot}; " +
-                "parent-visible=False; foreground-unchanged=True");
+                $"focus-trace={string.Join(',', focusTrace.Where(line => line.StartsWith("focused-item-", StringComparison.Ordinal) || line.StartsWith("restore-result", StringComparison.Ordinal)).TakeLast(12))}; " +
+                $"immediate-count={immediateCount}; elapsed-ms={elapsedMs:F1}; restored={selectionRestored}/{focusRestored}; selected={readback.SelectedCount}; focused-target={focusedTargetRestored}; shell-state={targetBrowserSite.NotificationSnapshot}; " +
+                $"activate-no-focus=0x{activationResult:X8}; parent-visible=False; foreground-unchanged=True");
             return 0;
         }
         catch (Exception ex)
@@ -443,6 +448,19 @@ internal static class ShellViewSelectionEnumerationProbe
 
     private static int GetItemPosition(nint folderView, nint childPidl, out Point point) =>
         At<GetItemPositionCall>(folderView, 11)(folderView, childPidl, out point);
+
+    private static bool IsFocusedItem(nint folderView, nint expectedChildPidl)
+    {
+        if (At<FocusedItem>(folderView, 10)(folderView, out var index) < 0 || index < 0) return false;
+        var result = At<GetViewItem>(folderView, 6)(folderView, index, out var item);
+        if (result < 0 || item == 0)
+        {
+            if (item != 0) Marshal.FreeCoTaskMem(item);
+            return false;
+        }
+        try { return ILIsEqual(item, expectedChildPidl); }
+        finally { Marshal.FreeCoTaskMem(item); }
+    }
 
     private static (int HResult, uint Flags) GetValidatedAttributes(nint shellFolder, nint childPidl)
     {
@@ -509,6 +527,9 @@ internal static class ShellViewSelectionEnumerationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemPositionCall(nint self, nint item, out Point point);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int FocusedItem(nint self, out int index);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewItem(nint self, int index, out nint item);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDisplayNameOf(nint self, nint item, uint flags, out StrRet name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
@@ -516,6 +537,7 @@ internal static class ShellViewSelectionEnumerationProbe
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string path, nint bind, out nint pidl, uint attributes, out uint result);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint folder, nint pidl, nint bind, in Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern nint ILClone(nint pidl);
+    [DllImport("shell32.dll")] private static extern bool ILIsEqual(nint pidl1, nint pidl2);
     [DllImport("shell32.dll")] private static extern nint ILFindLastID(nint pidl);
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)] private static extern int StrRetToBufW(ref StrRet name, nint item, System.Text.StringBuilder buffer, int capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex, string cls, string name, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
