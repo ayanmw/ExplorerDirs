@@ -22,6 +22,8 @@ internal static class Program
             return SearchFolderProbe.EnumerateVirtualSearch(args[1]);
         if (args.Length == 1 && args[0] == "--live-updates")
             return LiveUpdateProbe.Run();
+        if (args.Length == 1 && args[0] == "--refresh-comparison")
+            return RefreshComparisonProbe.Run();
         if (args.Length == 1 && args[0] == "--live-updates-wpf")
             return LiveUpdateProbe.Run(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--live-updates-view-flags")
