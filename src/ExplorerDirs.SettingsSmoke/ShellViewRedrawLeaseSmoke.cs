@@ -4,10 +4,9 @@ internal static class ShellViewRedrawLeaseSmoke
 {
     internal static void Run()
     {
-        Check(ExplorerDirs.App.ShellViewRedrawLease.ShouldSuppressForRefresh(false, false) == false &&
-            ExplorerDirs.App.ShellViewRedrawLease.ShouldSuppressForRefresh(true, true) == false &&
-            ExplorerDirs.App.ShellViewRedrawLease.ShouldSuppressForRefresh(true, false),
-            "only an explicit refresh that falls back to IShellView.Refresh needs a redraw lease");
+        Check(ExplorerDirs.App.ShellViewRedrawLease.ShouldSuppressForRefresh(false) == false &&
+            ExplorerDirs.App.ShellViewRedrawLease.ShouldSuppressForRefresh(true),
+            "only an explicit user refresh needs a redraw lease");
 
         var calls = new List<bool>();
         var lease = ExplorerDirs.App.ShellViewRedrawLease.TrySuppress(redraw =>

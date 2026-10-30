@@ -108,6 +108,12 @@ Task 5 records the first experiment. Its removal was later superseded by Task 6 
 
 The current candidate keeps redraw enabled on the preferred filesystem-notification path and only holds the prior painted frame during direct-refresh fallback. The API contract does not establish that input is disabled while painting is paused; stale visuals could therefore mislead clicks or keyboard input on that fallback. The 1.5-second threshold is checked by a background-priority DispatcherTimer and is not a hard wall-clock cap while the UI thread is blocked. It may reduce the blank interval, but if Shell does not invalidate its list after redraw is re-enabled it could leave a stale frame. No whole-view reconstruction or pixel snapshot is used. A failed candidate should be removed rather than expanded with broad forced redraw flags.
 
+### 2026-10-31: Return explicit F5 to the native Shell refresh route
+
+Source and prior isolated timing showed the ordinary filesystem F5 path broadcasting `SHCNE_UPDATEDIR` (about 544 ms until the new row was observable), while direct `IShellView.Refresh()` exposed the row in about 48 ms. The timings measure row availability, not pixels. Windows Explorer's documented F5 contract is also `IShellView::Refresh`. Explicit F5 now uses the current view's `Refresh()` for filesystem, search, and virtual locations; it no longer broadcasts a directory update to other Shell windows. When the user explicitly asks to preserve the last frame, the redraw lease now applies to that current view for the duration of row stabilization, then releases before selection restoration. Internal refreshes and view-mode changes do not acquire the lease.
+
+The full Release SettingsSmoke and App Release build passed with 0 warnings/errors. No ExplorerBrowser or UI was launched. Visible F5 black-frame duration and click/keyboard hit-target correctness while drawing is suppressed remain unverified; check populated, slow and virtual locations during the next bundled GUI acceptance. If the old frame is clickable against a different row state, remove the redraw lease and keep the direct native refresh route.
+
 ### Task 7: Capture the product F5 paint timeline in HostProbe
 
 - [x] Make the existing `--live-shell-refresh` HostProbe call `RefreshPreservingLastFrame`, the same product entry used by F5, Ctrl+R and the refresh buttons.

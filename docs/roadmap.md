@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-31 F5 刷新路径调整：普通文件夹手动刷新不再广播 `SHCNE_UPDATEDIR`，改为直接调用当前 `IShellView.Refresh()`，并在明确的用户刷新期间短暂抑制当前视图重绘，行数稳定或达到现有超时后释放；这与 Windows 文件夹视图的 F5 路径一致，也避免通知其它 Explorer 窗口。既有隔离计时中 `IShellView.Refresh()` 约 48 ms 出现新行，`SHCNE_UPDATEDIR` 约 544 ms；这是行数观察，不是屏幕绘制时长。查看方式切换仍只对当前 `IFolderView2` 调用原生模式 setter，不重建 ExplorerBrowser、不重新导航。完整 Release SettingsSmoke 与 App Release build 通过（0 警告/错误）；未开 GUI，保帧期间输入命中、黑屏时长以及慢/虚拟目录体验待集中验收。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+
 2026-10-31 集中验收候选已更新至提交 `dc6c69bb82f7ed7302ae54e998bb0d4c6ec09e16` 的四窗格隔离副本 `src/.state/gui-smoke/20261030-211638-141-3a0096`，44 项待可见验收，状态 `prepared-not-run`。它用于之后集中检查刷新、查看方式及其余待验收功能；准备过程未启动窗口，未触碰正式 profile。刷新验收将普通目录 `SHCNE_UPDATEDIR`、搜索/虚拟位置 `IShellView.Refresh` 回退、查看方式切换分为三个独立条目。身份、校验值和验收重点见[集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 05:10 北京时间内存观察：当前仍运行的 temp.80 PID `47460` 进行 60.226 秒只读复采（13 点）；Working Set `223.4→223.4 MiB`、Private Bytes `115.2→115.1 MiB`，句柄 `1,114→1,109`、线程 `36→34`、GDI `95` 不变。该一分钟内进程级计数没有单调上升；未记录固定操作负载，不能据此排除浏览操作期间或长期运行的增长。身份、哈希和限制见[内存采样记录](memory-sampling.md#2026-10-31-0510-北京时间temp80-当前运行实例一分钟被动复采)。

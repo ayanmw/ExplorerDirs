@@ -3156,17 +3156,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
             ShellViewRedrawLease? refreshRedraw = null;
-            var directoryNotificationUsed = false;
             var refreshStartedAt = Stopwatch.GetTimestamp();
             if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try
             {
-                if (preserveLastFrame)
-                {
-                    directoryNotificationUsed = TryNotifyCurrentFileSystemDirectory(browser);
-                    if (ShellViewRedrawLease.ShouldSuppressForRefresh(preserveLastFrame, directoryNotificationUsed))
-                        refreshRedraw = TrySuppressCurrentViewRedraw();
-                }
+                if (ShellViewRedrawLease.ShouldSuppressForRefresh(preserveLastFrame))
+                    refreshRedraw = TrySuppressCurrentViewRedraw();
             }
             catch
             {
@@ -3185,14 +3180,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
             {
-                if (directoryNotificationUsed)
-                {
-                    // A directory-change notification reconciles filesystem rows in place;
-                    // freezing redraw on this path would hold an obsolete frame unnecessarily.
-                    refreshResult = 0;
-                    LastShellRefreshStatus = "updatedir-notification";
-                }
-                else refreshResult = shellView.Refresh();
+                refreshResult = shellView.Refresh();
             }
             catch when (!IsCurrentRefreshRequest())
             {
@@ -3387,27 +3375,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.ReleaseComObject(viewObject); }
         }
         catch (COMException) { return (false, false); }
-    }
-
-    private bool TryNotifyCurrentFileSystemDirectory(IExplorerBrowser browser)
-    {
-        if (!_location.IsFileSystemLocation || _location.IsSearchActive) return false;
-        nint browserUnknown = 0, folderPidl = 0;
-        try
-        {
-            browserUnknown = Marshal.GetIUnknownForObject(browser);
-            folderPidl = ShellCurrentLocation.ReadPidl(browserUnknown);
-            if (folderPidl == IntPtr.Zero) return false;
-            ShellChangedItemNotification.NotifyChangedDirectory(folderPidl);
-            return true;
-        }
-        catch (COMException) { return false; }
-        catch (InvalidComObjectException) { return false; }
-        finally
-        {
-            if (folderPidl != IntPtr.Zero) Marshal.FreeCoTaskMem(folderPidl);
-            if (browserUnknown != IntPtr.Zero) Marshal.Release(browserUnknown);
-        }
     }
 
     private string? ReadSelectionTargetReadiness(ShellViewSelectionSnapshot selection, string path,
