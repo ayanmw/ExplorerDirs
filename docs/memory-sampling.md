@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-30：temp.78 当前运行实例一分钟快照
+
+- 北京时间 13:21:12–13:22:12，只读采样 PID `19580`；进程路径为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.78\app\ExplorerDirs.App.exe`，启动于 10:32:39。未启动、重启、聚焦或操作应用；采样来自 PowerShell `Get-Process`，共约 10 秒间隔 7 点。
+- Working Set 从 `362.0` 到 `364.1 MiB`；Private Bytes 从 `179.7` 到 `181.6 MiB`。句柄在约 `1407–1443` 间变化，线程从 `77–79` 到末点 `90`。
+- 这是非受控使用时段，操作负载未知，且没有采 GDI/USER、CPU、托管堆或分配栈。数据只说明该 PID 在一分钟内有小幅波动，不能归因、判断泄漏或与先前启动截图直接比较；后续应在固定标签/窗格/目录和操作序列下用 `sample-memory.ps1 -ProcessId` 采集纵向 CSV，再选用运行时指标定位来源。
+
 ## 2026-10-30：固定 PID 采样不枚举其他实例
 
 - 固定 PID 模式此前在验证目标前先按进程名枚举所有 `ExplorerDirs.App`，随后又覆盖成指定 PID；这会无谓查询其他实例，也让采样器执行的进程查询范围偏离单实例测量目标。
