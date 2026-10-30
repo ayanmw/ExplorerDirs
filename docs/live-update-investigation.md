@@ -1,5 +1,15 @@
 # 文件视图自动更新调查（2026-10-21）
 
+## 2026-10-31：用户 F5 使用 Shell 目录通知保留当前行
+
+用户报告 F5 刷新期间文件区明显黑屏。新增 Private Desktop stock `IShellView` 生命周期探针，以 300 个临时文件观察同一 view 的查看方式切换、原生 Refresh 与 Shell 目录通知：List/Small Icons/Details 过程的行数保持 300，view 与 `SysListView32` HWND 不变；`IShellView.Refresh()` 会短暂将行数清空到 0，再恢复到 301。1 秒采样里有 3 个零行样本、首末间隔 11 ms，采样约每 5 ms 一次，只是行数观察窗口，不能当作像素空白时长。
+
+同一夹具改为对当前目录绝对 PIDL 发送 `SHCNE_UPDATEDIR`（`SHCNF_IDLIST | SHCNF_FLUSHNOWAIT`）后，行数从 301 增到 302，最小仍为 301，view/list HWND 不变。设置 `FWF_NOENUMREFRESH` 后，新增文件没有被自动反映（仍为 302）；显式 Shell 目录通知后更新为 303，过程中没有观察到零行。这是隔离 stock Shell 文件夹的直接证据，尚非 ExplorerBrowser 产品宿主或可见 UI 证据，也不能外推所有虚拟 Shell provider。
+
+基于该结果，手动 F5 对普通文件系统位置现读取当前浏览器文件夹 PIDL 并发送 `SHCNE_UPDATEDIR`，避免调用会先清空行的 `IShellView.Refresh()`；搜索、虚拟位置或 PIDL 不可用时保留旧刷新回退。选区/焦点快照和完成恢复流程继续使用。App Release build 和完整 Release SettingsSmoke 通过；NativeProbe Release build 和 Private Desktop 刷新/模式探针通过，前台窗口与输入时间戳未变化。
+
+仍需在集中 GUI 验收中核对可见画面、选区、焦点、滚动位置、慢速目录、网络路径和大目录行为。由于本轮没读取像素，不能断言黑屏已经消失。查看方式切换期间行数保持，但原生 Shell 仍会重排和绘制项目，闪烁问题仍单独开放。
+
 ## 2026-10-26 当前 Release 的 10,000 项创建/删除回归
 
 运行 `dotnet build src/ExplorerDirs.HostProbe/ExplorerDirs.HostProbe.csproj -c Release` 后，Release `--live-shell-directory-stress-large 10000` 隐藏生产宿主探针退出码 0。创建后 1,031 ms 视图可见，创建操作约 1,816 ms；删除后 784 ms 视图最终可见并收敛。观察器与生产 watcher 分别记录创建/删除 10,000/10,000 和 10,001/10,001，无 observer 错误，Shell 创建通知 1 次；创建阶段无 fallback，删除阶段发生 2 次 fallback，其中一次在删除操作完成时触发。

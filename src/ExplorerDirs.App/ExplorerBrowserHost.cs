@@ -3159,7 +3159,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try
             {
-                refreshResult = shellView.Refresh();
+                if (preserveLastFrame && TryNotifyCurrentFileSystemDirectory(browser))
+                {
+                    // A directory-change notification reconciles filesystem rows in place;
+                    // IShellView.Refresh clears the native list before re-enumerating it.
+                    refreshResult = 0;
+                    LastShellRefreshStatus = "updatedir-notification";
+                }
+                else refreshResult = shellView.Refresh();
             }
             catch when (!IsCurrentRefreshRequest())
             {
@@ -3354,6 +3361,27 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { Marshal.ReleaseComObject(viewObject); }
         }
         catch (COMException) { return (false, false); }
+    }
+
+    private bool TryNotifyCurrentFileSystemDirectory(IExplorerBrowser browser)
+    {
+        if (!_location.IsFileSystemLocation || _location.IsSearchActive) return false;
+        nint browserUnknown = 0, folderPidl = 0;
+        try
+        {
+            browserUnknown = Marshal.GetIUnknownForObject(browser);
+            folderPidl = ShellCurrentLocation.ReadPidl(browserUnknown);
+            if (folderPidl == IntPtr.Zero) return false;
+            ShellChangedItemNotification.NotifyChangedDirectory(folderPidl);
+            return true;
+        }
+        catch (COMException) { return false; }
+        catch (InvalidComObjectException) { return false; }
+        finally
+        {
+            if (folderPidl != IntPtr.Zero) Marshal.FreeCoTaskMem(folderPidl);
+            if (browserUnknown != IntPtr.Zero) Marshal.Release(browserUnknown);
+        }
     }
 
     private string? ReadSelectionTargetReadiness(ShellViewSelectionSnapshot selection, string path,

@@ -62,6 +62,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunNativeViewStageTrace() => Run("native-view-stage-trace",
         ShellViewNativeLifetimeProbe.RunViewStageTrace, TimeSpan.FromMinutes(1));
 
+    internal static int RunNativeViewRefreshLifecycle() => Run("native-view-refresh-lifecycle",
+        ShellViewRefreshLifecycleProbe.Run, TimeSpan.FromMinutes(1));
+
     internal static int RunHostFilterVirtualScope(string scope) =>
         Run($"host-filter-{scope}", () => ShellViewHostFilterProbe.RunVirtualScopeForPrivateDesktop(scope));
 

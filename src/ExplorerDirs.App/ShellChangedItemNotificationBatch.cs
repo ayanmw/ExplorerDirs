@@ -71,6 +71,7 @@ internal static class ShellChangedItemNotification
     private const uint ShellItemUpdated = 0x00002000;
     private const uint ShellDirectoryUpdated = 0x00001000;
     private const uint PathAndFlushNoWait = 0x00002005;
+    private const uint PidlAndFlushNoWait = 0x00002000;
     private static readonly Guid BasicPropertyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
 
     internal static bool ShouldNotifyPath(string path) =>
@@ -86,9 +87,15 @@ internal static class ShellChangedItemNotification
     internal static void NotifyChangedDirectory(string path) =>
         SHChangeNotify(ShellDirectoryUpdated, PathAndFlushNoWait, path, IntPtr.Zero);
 
+    internal static void NotifyChangedDirectory(IntPtr absolutePidl) =>
+        SHChangeNotifyPidl(ShellDirectoryUpdated, PidlAndFlushNoWait, absolutePidl, IntPtr.Zero);
+
     private static bool IsChangedMetadataKey(PropertyKeyState key) =>
         key.FormatId == BasicPropertyFormat && key.PropertyId is 12 or 13 or 14 or 15;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern void SHChangeNotify(uint eventId, uint flags, string item1, IntPtr item2);
+
+    [DllImport("shell32.dll", EntryPoint = "SHChangeNotify")]
+    private static extern void SHChangeNotifyPidl(uint eventId, uint flags, IntPtr item1, IntPtr item2);
 }

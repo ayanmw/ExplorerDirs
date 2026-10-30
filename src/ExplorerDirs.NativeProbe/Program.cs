@@ -117,6 +117,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunNativeViewObjectOnly();
         if (args.Length == 1 && args[0] == "--ishellview-native-view-stage-trace-private-desktop")
             return PrivateDesktopShellProbe.RunNativeViewStageTrace();
+        if (args.Length == 1 && args[0] == "--ishellview-refresh-lifecycle-private-desktop")
+            return PrivateDesktopShellProbe.RunNativeViewRefreshLifecycle();
         if (args.Length == 1 && args[0] == "--private-desktop-owner-smoke")
             return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 2 && args[0] == "--native-minidump-smoke")
@@ -274,6 +276,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-native-view-lifetime-reuse-host-private-desktop (same test reusing one IShellBrowser host)");
             Console.WriteLine("       --ishellview-native-view-object-only-private-desktop (repeated CreateViewObject/Release without a view window)");
             Console.WriteLine("       --ishellview-native-view-stage-trace-private-desktop (measure process handles across one stock IShellView lifecycle)");
+            Console.WriteLine("       --ishellview-refresh-lifecycle-private-desktop (trace stock view/list HWND and row count across refresh and mode changes)");
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --private-desktop-isolation-policy-smoke (test the isolation result policy without creating windows)");
             Console.WriteLine("       --native-minidump-smoke <absolute-path> (write and inspect an opt-in diagnostic minidump; no Shell window)");
