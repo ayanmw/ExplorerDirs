@@ -5034,3 +5034,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 修复快照恢复中的状态耦合：某个旧选中 PIDL 已删除时，仍独立尝试恢复存在的焦点 PIDL。混合 readiness `1110` 读回 3 个幸存选中项和原焦点 PIDL，明确报告 `selection=False/focus=True`。
 - 补充 `110` readiness 的未选中焦点场景：缺少一个已选 PIDL 后，2 个幸存项仍被选中，原未选中焦点 PIDL 精确恢复且继续未选中。
 - 结果仅限隐藏 `IShellView` 与生产快照恢复函数；未验证产品 ExplorerBrowser 刷新、用户可见焦点/键盘/滚动或整套 Shell 操作。产品架构仍为 ExplorerBrowser，IShellView 迁移继续保留兼容门槛。细节见[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。
+
+## 2026-10-31：刷新集中验收候选更新到当前主线
+
+- 在干净主线提交 `ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f` 上执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-200808-091-e70fbb/`。候选为 `prepared-not-run`、初始四窗格、41 项待验收；BuildIdentity 为 `0.6.0-preview.20261030-200808-091-e70fbb+ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f`。
+- EXE SHA-256 `5C306940EBCEFFB35C922300E87EEC3039C4D588F5E14C614B88C71BF5F730F9`、App DLL SHA-256 `62E0B8024DA2414D9B7E721837DEDF3D5E566006B25DD7D3FD1DA07BA9FD48B2` 均与 manifest 内哈希经独立计算一致。没有启动应用、创建 ExplorerBrowser、发送输入或触碰正式 profile；此候选不是发布包，也没有可见通过结论。
+- 同步整理刷新调查计划中被前后尝试覆盖的说明：当前普通文件系统 F5 优先发 `SHCNE_UPDATEDIR`，必要时回退 `IShellView.Refresh()`；显式 F5 使用有界重绘租约，视图模式切换不重枚举。实际空白像素、租约期间输入命中和滚动位置仍需这份候选集中验收。

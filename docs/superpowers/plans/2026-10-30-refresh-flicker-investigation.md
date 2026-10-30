@@ -78,15 +78,15 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Product F5 calls `IShellView.Refresh()` directly on the current view; mode changes call `SetViewModeAndIconSize` on that same view and do not call `Refresh`. Current source leaves redraw timing to DefView. The mode setter's full state readback runs later at dispatcher background priority; the accepted mode and normalized icon size are cached first, while browser/navigation generations prevent a delayed read from updating a retired view. Neither hidden-host evidence nor the refresh comparison renders pixels. F5 and mode-switch visuals therefore remain unverified until a visible UI acceptance pass.
+These probes measure row enumeration and message timing, not rendered pixels. The current product path differs from the initial comparison: ordinary filesystem F5 sends `SHCNE_UPDATEDIR`; search/virtual locations and PIDL-read failure fall back to `IShellView.Refresh()`. Explicit F5 holds redraw under the bounded lease in Task 6, while internal refreshes do not. View-mode changes call `SetViewModeAndIconSize` on the existing view and do not refresh or re-navigate the folder; the full state readback is deferred to Dispatcher `ContextIdle`. Neither hidden-host evidence nor the refresh comparison establishes visible blank duration, displayed pixels, or correct hit testing during the held-frame interval. F5 and mode-switch visuals remain open for consolidated UI acceptance.
 
 Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 
-### 2026-10-31: Confirm the product uses Explorer's F5 refresh contract
+### 2026-10-31: Confirm the native fallback matches Explorer's F5 refresh contract
 
-Microsoft's folder-view guidance states that Windows Explorer calls `IShellView::Refresh` when the user presses F5, and the method contract says the view revalidates its contents and refills from underlying storage. Explorer Dirs already uses this same API on the current view, so routing F5 through another Shell command interface has no documented basis for reducing the blank interval. The next investigation should remain at the native view's redraw/presentation boundary; do not recreate the browser or navigate away and back. This contract still says nothing about retaining the previously painted frame or about input hit testing while redraw is suppressed. [Windows Explorer folder-view guidance](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview#refresh) · [IShellView::Refresh](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-refresh).
+Microsoft's folder-view guidance states that Windows Explorer calls `IShellView::Refresh` for F5. Explorer Dirs uses it as the fallback for search/virtual locations and when it cannot obtain the current filesystem folder PIDL; ordinary filesystem folders use `SHCNE_UPDATEDIR` to preserve the current row list during reconciliation. Neither contract guarantees retention of previously painted pixels or safe input targeting while redraw is suppressed. Do not recreate the browser or navigate away and back for this issue. [Windows Explorer folder-view guidance](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview#refresh) · [IShellView::Refresh](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-refresh).
 
-### Task 5: Bounded redraw lease experiment and rollback
+### Task 5: Initial redraw experiment and rollback (historical)
 
 - [x] Add a bounded asynchronous redraw lease and prepare a clean isolated GUI candidate. The candidate was not launched, so the experiment never established a visual benefit.
 - [x] Remove the F5 redraw lease and forced whole-view invalidation after source review showed that the app was freezing painting and then explicitly repainting the full native view. The refresh completion wait remains for selection/focus recovery only.
@@ -96,15 +96,17 @@ The latest source build validates compilation only. Neither hidden-host row-coun
 
 The earlier product-host F5 probe confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. In the latest run, the hidden native view-style probe reported supported modes and preserved selection/sort/group state, then exited with its foreground-boundary guard because the foreground changed; do not treat that run as a clean end-to-end pass. Neither probe renders visible pixels.
 
-### Task 6: Keep the last F5 frame while Shell refills the list
+Task 5 records the first experiment. Its removal was later superseded by Task 6 below; it does not describe current product behavior.
 
-- [x] Reintroduce a bounded `IFolderView2::SetRedraw(FALSE)` lease for F5 only, using the existing native row-count stabilization wait and its 1.5-second fallback.
-- [x] Do not force-invalidate the view or all child windows after releasing the lease; Shell's queued invalidations remain responsible for the final paint.
+### Task 6: Bounded F5 redraw lease and filesystem directory notification
+
+- [x] Use `SHCNE_UPDATEDIR` for ordinary filesystem F5 refreshes; retain `IShellView::Refresh` for search/virtual locations or when the current folder PIDL cannot be read.
+- [x] Use a bounded `IFolderView2::SetRedraw(FALSE)` lease for explicit F5 only, with the existing row-count stabilization wait and 1.5-second fallback. Do not force-invalidate the view or all child windows; Shell's queued invalidations own the final paint.
 - [x] Leave view-mode changes on the direct native setter path; a synchronous redraw lease there ends before Shell's asynchronous layout repaint and did not solve the visible gap.
 - [ ] Build and prepare a current isolated candidate, then visually compare F5 on populated/slow directories and a virtual location; confirm selection, focus, and scroll position.
 - [ ] While the previous frame is held, click and keyboard-navigate rows; confirm the visible item and Shell hit target do not diverge. `IFolderView2::SetRedraw` only promises redraw on/off, not input suppression ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setredraw)). If a click or key targets an item different from the visible row, remove the redraw lease.
 
-This candidate intentionally holds the last painted F5 frame while the list repopulates. The API contract does not establish that input is disabled while painting is paused; stale visuals could therefore mislead clicks or keyboard input. The 1.5-second threshold is checked by a background-priority DispatcherTimer and is not a hard wall-clock cap while the UI thread is blocked. It may reduce the blank interval, but if Shell does not invalidate its list after redraw is re-enabled it could leave a stale frame. No whole-view reconstruction or pixel snapshot is used. A failed candidate should be removed rather than expanded with broad forced redraw flags.
+The current candidate can keep the last painted F5 frame while the Shell updates the list. The API contract does not establish that input is disabled while painting is paused; stale visuals could therefore mislead clicks or keyboard input. The 1.5-second threshold is checked by a background-priority DispatcherTimer and is not a hard wall-clock cap while the UI thread is blocked. It may reduce the blank interval, but if Shell does not invalidate its list after redraw is re-enabled it could leave a stale frame. No whole-view reconstruction or pixel snapshot is used. A failed candidate should be removed rather than expanded with broad forced redraw flags.
 
 ### Task 7: Capture the product F5 paint timeline in HostProbe
 
