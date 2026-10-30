@@ -140,7 +140,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ShellDeleteNotificationBatch? _directoryChangeDeleteNotificationBatch;
     private ShellChangedItemNotificationBatch? _directoryChangeChangedItemNotificationBatch;
     private bool _directoryRefreshInProgress;
-    private readonly ShellViewRedrawLeaseCoordinator _refreshRedrawLeases = new();
     private bool _directorySelectionRestorePending;
     private DispatcherTimer? _deferredRefreshSelectionRestoreTimer;
     private ShellViewSelectionSnapshot? _deferredRefreshSelectionSnapshot;
@@ -2715,25 +2714,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.ReleaseComObject(viewObject); }
     }
 
-    private IDisposable? TrySuppressCurrentViewRedraw()
-    {
-        var view = IntPtr.Zero;
-        try
-        {
-            view = GetFolderView2Pointer();
-            if (view == IntPtr.Zero) return null;
-            // Keep the last painted rows visible while DefView repopulates after F5.
-            // A bounded lease is always released by refresh completion or its timeout.
-            return _refreshRedrawLeases.Acquire(_viewReadiness.NavigationVersion,
-                () => ShellViewRedrawLease.TrySuppress(view));
-        }
-        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
-        {
-            return null;
-        }
-        finally { Marshal.Release(view); }
-    }
-
     private static T GetMethod<T>(IntPtr instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -2767,15 +2747,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
     }
 
-    public void Refresh() => RefreshWithPresentation(preserveLastFrame: false);
+    public void Refresh() => RefreshWithPresentation(traceAsUserRefresh: false);
 
-    internal void RefreshPreservingLastFrame() => RefreshWithPresentation(preserveLastFrame: true);
+    internal void RefreshFromUser() => RefreshWithPresentation(traceAsUserRefresh: true);
 
-    private void RefreshWithPresentation(bool preserveLastFrame)
+    private void RefreshWithPresentation(bool traceAsUserRefresh)
     {
-        // Keep the redraw experiment limited to an explicit user refresh. Directory
-        // notifications, filters and other internal refreshes must paint changes promptly.
-        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, preserveLastFrame), error =>
+        ShellDirectoryRefreshRecovery.TryInvoke(() => Refresh(afterRefresh: null, traceAsUserRefresh), error =>
         {
             LastShellRefreshStatus = $"refresh-exception={error.GetType().Name},hr=0x{error.HResult:X8}";
             MenuError?.Invoke(this, $"Shell 文件视图刷新失败（0x{error.HResult:X8}）。请稍后重试。");
@@ -3073,7 +3051,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         finally { Marshal.Release(browserUnknown); }
     }
 
-    private void Refresh(Action? afterRefresh, bool preserveLastFrame = false)
+    private void Refresh(Action? afterRefresh, bool traceAsUserRefresh = false)
     {
         if (_browser is null)
         {
@@ -3157,23 +3135,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
-            IDisposable? refreshRedraw = null;
             var refreshStartedAt = Stopwatch.GetTimestamp();
-            if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
-            try
-            {
-                if (ShellViewRedrawLease.ShouldSuppressForRefresh(preserveLastFrame))
-                    refreshRedraw = TrySuppressCurrentViewRedraw();
-            }
-            catch
-            {
-                selectionRecoverySuppression.Dispose();
-                selection?.Dispose();
-                throw;
-            }
+            if (traceAsUserRefresh) BeginNativePaintTransitionTrace("f5");
             if (!IsCurrentRefreshRequest())
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3186,14 +3151,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             catch when (!IsCurrentRefreshRequest())
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3201,7 +3164,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3209,14 +3171,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
             }
 
-            // Shell refills the current native list asynchronously. Keep the last frame only
-            // until the list count settles; do not force-invalidate the view or its children.
+            // Shell refills and paints the current native list; wait only to restore selection safely.
             var selectionOwnershipTransferred = false;
             var completionCleaned = 0;
             DispatcherTimer? refreshPaintWait = null;
@@ -3224,7 +3184,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
                 refreshPaintWait?.Stop();
-                refreshRedraw?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
@@ -3233,9 +3192,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 try
                 {
-                    // Release before reading/restoring selection. The UI thread will paint after
-                    // this callback returns, so that work can finish without extending the lease.
-                    refreshRedraw?.Dispose();
+                    // Finish selection recovery after the Shell has had time to repopulate and paint.
                     ShellRefreshCompletion.Run(() =>
                     {
                         if (!IsCurrentRefreshRequest()) return;

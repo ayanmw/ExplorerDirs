@@ -47,9 +47,9 @@ if (args is ["--build-identity-smoke", var applicationAssemblyPath])
     return;
 }
 
-if (args is ["--shell-view-redraw-lease-smoke"])
+if (args is ["--shell-refresh-presentation-smoke"])
 {
-    ExplorerDirs.SettingsSmoke.ShellViewRedrawLeaseSmoke.Run();
+    ExplorerDirs.SettingsSmoke.ShellRefreshPresentationSmoke.Run();
     return;
 }
 

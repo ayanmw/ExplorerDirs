@@ -692,7 +692,7 @@ public partial class PaneControl : UserControl
             Status.Text = $"复制标签失败：{ex.Message}";
         }
     }
-    public void RefreshCurrent() => Current?.Browser.RefreshPreservingLastFrame();
+    public void RefreshCurrent() => Current?.Browser.RefreshFromUser();
 
     internal IReadOnlyList<string> SetHiddenItemsPreference(HiddenItemsPreference preference)
     {

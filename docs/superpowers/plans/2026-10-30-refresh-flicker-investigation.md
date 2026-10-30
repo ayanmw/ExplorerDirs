@@ -118,6 +118,10 @@ The full Release SettingsSmoke and App Release build passed with 0 warnings/erro
 
 Multiple F5 calls can start separate row-stabilization timers for the same view generation. Independent `SetRedraw(FALSE)` calls are not reference counted by Shell, so the first timer to finish could call `SetRedraw(TRUE)` while a later refresh is still repopulating rows. `ShellViewRedrawLeaseCoordinator` now shares the native lease per host navigation generation and releases it only after every overlapping refresh completion/cancellation releases its token. A separate navigation generation has an independent hold, so an obsolete view's cleanup cannot release a newer view's redraw state.
 
+### 2026-10-31: Remove the product F5 redraw hold
+
+The user still observed a clear blank frame during F5 and view-style changes. Source review confirmed view-style changes already use the active Shell view in place; the product F5 path additionally held `IFolderView2.SetRedraw(FALSE)` while rows stabilized. Remove that product lease and coordinator so `IShellView.Refresh()` can paint as Shell repopulates rows. Keep the row-stabilization callback only for safe selection/focus recovery. `ShellViewRedrawLease` remains in NativeProbe solely for its isolated A/B experiment. View-style handling remains on `SetViewModeAndIconSize` with deferred state capture. A source-contract smoke and App Release build verify wiring; visible pixel behavior remains unverified and must be checked in the later GUI batch.
+
 The focused contract first failed to compile because the coordinator was missing, then passed after implementation; full Release SettingsSmoke and App Release build passed. No Shell window was created. This verifies lease lifetime only, not visible pixels, hit testing or the Shell's handling of rapid repeated F5; those remain in the bundled UI acceptance.
 
 ### Task 7: Capture the product F5 paint timeline in HostProbe

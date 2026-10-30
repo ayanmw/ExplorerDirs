@@ -4,9 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 F5 刷新路径调整：普通文件夹手动刷新不再广播 `SHCNE_UPDATEDIR`，改为直接调用当前 `IShellView.Refresh()`，并在明确的用户刷新期间短暂抑制当前视图重绘，行数稳定或达到现有超时后释放；这与 Windows 文件夹视图的 F5 路径一致，也避免通知其它 Explorer 窗口。既有隔离计时中 `IShellView.Refresh()` 约 48 ms 出现新行，`SHCNE_UPDATEDIR` 约 544 ms；这是行数观察，不是屏幕绘制时长。查看方式切换仍只对当前 `IFolderView2` 调用原生模式 setter，不重建 ExplorerBrowser、不重新导航。完整 Release SettingsSmoke 与 App Release build 通过（0 警告/错误）；未开 GUI，保帧期间输入命中、黑屏时长以及慢/虚拟目录体验待集中验收。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
-
-2026-10-31 F5 重叠租约修复：源码追踪确认同一窗格连续触发刷新时，多个完成计时器可以同时持有绘制暂停；较早刷新结束会提前恢复绘制，绕过较晚刷新。现由每个 Shell 视图代次共享一份原生暂停，只有最后一个刷新完成/取消才恢复。新增合同先因协调器缺失编译失败，接线后定向合同和完整 Release SettingsSmoke 通过；App Release build 通过（0 警告/错误）。未启动 ExplorerBrowser/GUI；该合同证明重叠租约生命周期，不证明肉眼闪烁或点击目标，仍待集中验收。
+2026-10-31 F5/查看方式空白帧复核：两条操作都没有重建 ExplorerBrowser、窗格、标签或导航历史；F5 直接调用当前 `IShellView.Refresh()`，查看方式调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，后者让 Shell 原地重排项目。移除 F5 期间额外的 `SetRedraw(FALSE)`，让 Shell 在重新枚举行项目时持续绘制；原有行数等待只用于安全恢复选区/焦点，不再冻结画面。查看方式路径保持原生切换并延后读取状态。Release 源码合同 smoke 和 App Release build 通过（0 警告/错误）；未打开 GUI，真实像素空白时长、慢目录和虚拟位置仍待集中验收。隔离计时的 48 ms/544 ms 仅为行数出现时间，不能代表画面效果。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 集中验收候选已更新至提交 `4b03dba0a2b553517fee4df90a666abf93269030` 的四窗格隔离副本 `src/.state/gui-smoke/20261030-213454-265-5a7032`，45 项待可见验收，状态 `prepared-not-run`。它用于之后集中检查刷新、查看方式及其余待验收功能；准备过程未启动窗口，未触碰正式 profile。刷新验收分别检查普通目录、搜索/虚拟位置、重复按 F5 和查看方式切换；F5 均走当前 Shell 视图的 `IShellView.Refresh()`。身份、校验值和验收重点见[集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 

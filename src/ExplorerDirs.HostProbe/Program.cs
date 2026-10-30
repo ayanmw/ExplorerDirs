@@ -2800,7 +2800,7 @@ internal static class Program
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
                 var manualRefresh = args[0] == "--live-shell-refresh"
-                    ? hostType.GetMethod("RefreshPreservingLastFrame", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    ? hostType.GetMethod("RefreshFromUser", BindingFlags.Instance | BindingFlags.NonPublic)!
                     : hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!;
                 manualRefresh.Invoke(hosts[pane], null);
                 var expectedItems = Directory.GetFiles(folders[pane]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
