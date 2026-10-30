@@ -248,7 +248,24 @@ internal static class CommonListViewColorBaseline
             var initialRelativeSortFocusPreserved =
                 GetItemParam(listView, 0) == 2 && GetItemState(listView, 0) == (LvisSelected | LvisFocused);
             var updatedPayloadBytes = relativeSizesOnly ? 20UL : 2UL;
-            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[checked((int)updatedPayloadBytes)]);
+            var payloadPath = Path.Combine(smallFolder, "payload.bin");
+            var fileChangeObserved = true;
+            if (relativeSizesOnly)
+            {
+                using var fileChangeSignal = new ManualResetEventSlim();
+                using var watcher = new FileSystemWatcher(smallFolder, Path.GetFileName(payloadPath))
+                {
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size
+                };
+                watcher.Changed += (_, _) => fileChangeSignal.Set();
+                watcher.EnableRaisingEvents = true;
+                File.WriteAllBytes(payloadPath, new byte[checked((int)updatedPayloadBytes)]);
+                fileChangeObserved = fileChangeSignal.Wait(TimeSpan.FromSeconds(5));
+            }
+            else
+            {
+                File.WriteAllBytes(payloadPath, new byte[checked((int)updatedPayloadBytes)]);
+            }
             var smallNestedFolder = Path.Combine(smallFolder, "nested");
             Directory.CreateDirectory(smallNestedFolder);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
@@ -291,6 +308,7 @@ internal static class CommonListViewColorBaseline
                     initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 30 &&
                     updatedSmallScan.Bytes == 20 && updatedSmallScan.Files == 3 && updatedSmallScan.Directories == 1 &&
                     initialRelativeSortResult != 0 && updatedRelativeSortResult != 0 &&
+                    fileChangeObserved &&
                     initialRelativeSortFocusPreserved && updatedRelativeSortFocusPreserved &&
                     relativeSizeSorted && !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
                     GetForegroundWindow() == foregroundBefore;
@@ -300,7 +318,8 @@ internal static class CommonListViewColorBaseline
                     $"updated-contents={updatedContentsRows};contents-counts-correct={contentsCountsCorrect};" +
                     $"parent-bytes={updatedFixtureScan.Bytes};" +
                     $"initial-relative-sort={initialRelativeSortRows};updated-relative-sort={relativeSizeSortedRows};" +
-                    $"relative-sort-correct={relativeSizeSorted};focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
+                    $"relative-sort-correct={relativeSizeSorted};file-change-observed={fileChangeObserved};" +
+                    $"focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
                     $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
                 return relativeContractPassed ? 0 : 1;
             }
