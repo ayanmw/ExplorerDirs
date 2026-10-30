@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Windows.Threading;
+using ExplorerDirs.App;
 
 namespace ExplorerDirs.NativeProbe;
 
@@ -23,17 +25,30 @@ internal static class ShellChangeReconciliationProbe
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-shell-change-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);
         File.WriteAllText(Path.Combine(fixture, "stable.txt"), "stable");
+        var sizeDirectory = Path.Combine(fixture, "size-folder");
+        Directory.CreateDirectory(sizeDirectory);
+        var sizePayloadPath = Path.Combine(sizeDirectory, "payload.bin");
+        File.WriteAllBytes(sizePayloadPath, new byte[4]);
         nint folderPidl = 0;
         nint shellFolder = 0;
         uint registration = 0;
         ShellListViewEnumeration? current = null;
+        using var scanCoordinator = new DirectoryTreeScanCoordinator();
         using var window = new ChangeWindow();
         try
         {
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out shellFolder));
             current = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+            var initialScans = ScanLatestPaths(scanCoordinator, fixture, [sizeDirectory], out var initialScanWorker,
+                out var initialScanPublishedOnOwner);
+            current = current with
+            {
+                Rows = ShellListViewRowModel.ApplyRecursiveScanResults(current.Rows, initialScans).ToList()
+            };
             var stableId = current.Rows.Single(row => row.DisplayName == "stable.txt").Id;
+            var sizeFolderId = current.Rows.Single(row => row.DisplayName == "size-folder").Id;
+            var initialRecursiveBytes = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
             var selection = ShellListViewSelectionSnapshot.Capture(current.Rows, [stableId], focusedRowId: stableId);
             var watch = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
             registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
@@ -51,12 +66,21 @@ internal static class ShellChangeReconciliationProbe
             var createdId = current.Rows.Single(row => row.DisplayName == "created.txt").Id;
 
             File.AppendAllText(Path.Combine(fixture, "stable.txt"), " updated");
+            File.WriteAllBytes(sizePayloadPath, new byte[10]);
             SHChangeNotify(UpdatedDirectory, PathUnicode, fixture, null);
             var updateEvent = window.WaitFor([UpdatedDirectory], TimeSpan.FromSeconds(5));
             var updatedEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
             var updated = ShellListViewRowModel.Reconcile(current.Rows, updatedEnumeration.Rows, added.NextId);
             ShellListViewEnumerator.FreeRows(updated.RetiredRows);
-            current = updatedEnumeration with { Rows = updated.Rows.ToList() };
+            var updatedScans = ScanLatestPaths(scanCoordinator, fixture, [sizeDirectory], out var updateScanWorker,
+                out var updateScanPublishedOnOwner);
+            current = updatedEnumeration with
+            {
+                Rows = ShellListViewRowModel.ApplyRecursiveScanResults(updated.Rows,
+                    updatedScans).ToList()
+            };
+            var recursiveBytesAfterReconciliation = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
+            var recursiveValueUpdated = initialRecursiveBytes == 4 && recursiveBytesAfterReconciliation == 10;
             var updateIdPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
             var selectionAfterUpdatePreserved = HasStableSelection(current.Rows);
 
@@ -86,15 +110,22 @@ internal static class ShellChangeReconciliationProbe
             current = deletedEnumeration with { Rows = deleted.Rows.ToList() };
 
             var stableIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
+            var sizeFolderIdentityPreserved = current.Rows.Single(row => row.DisplayName == "size-folder").Id == sizeFolderId;
             var selectionAfterDeletePreserved = HasStableSelection(current.Rows);
             var addedNewIdentity = createdId != stableId && renamedId != createdId && renamedId != stableId;
             Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; delete-notified={deleteEvent}; " +
                 $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-got-new-id={addedNewIdentity}; deleted-id-retired={retiredRenamedId}; " +
+                $"recursive-bytes-initial/after-update={initialRecursiveBytes}/{recursiveBytesAfterReconciliation};recursive-value-updated={recursiveValueUpdated};size-folder-id-preserved={sizeFolderIdentityPreserved};" +
+                $"scan-workers={initialScanWorker}/{updateScanWorker};scan-on-worker={initialScanWorker != Environment.CurrentManagedThreadId}/{updateScanWorker != Environment.CurrentManagedThreadId};" +
+                $"scan-published-on-owner={initialScanPublishedOnOwner}/{updateScanPublishedOnOwner};" +
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false}");
             if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved || !addedNewIdentity ||
-                !retiredRenamedId || !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
-                current.Rows.Count != 1 || GetForegroundWindow() != foreground || IsWindowVisible(window.Handle))
+                !retiredRenamedId || !recursiveValueUpdated || !sizeFolderIdentityPreserved ||
+                initialScanWorker == Environment.CurrentManagedThreadId || updateScanWorker == Environment.CurrentManagedThreadId ||
+                !initialScanPublishedOnOwner || !updateScanPublishedOnOwner ||
+                !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
+                current.Rows.Count != 2 || GetForegroundWindow() != foreground || IsWindowVisible(window.Handle))
                 throw new InvalidOperationException("Shell change notification reconciliation contract failed.");
             return 0;
 
@@ -126,6 +157,38 @@ internal static class ShellChangeReconciliationProbe
             Thread.Sleep(30);
         } while (Environment.TickCount64 < until);
         throw new TimeoutException("The Shell folder enumeration did not reflect the notified filesystem change.");
+    }
+
+    private static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanLatestPaths(
+        DirectoryTreeScanCoordinator coordinator, string root, IReadOnlyList<string> paths,
+        out int workerThreadId, out bool publishedOnOwnerThread)
+    {
+        var ownerThreadId = Environment.CurrentManagedThreadId;
+        var observedWorkerThreadId = 0;
+        var publishedOnOwner = false;
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var ownerContext = new DispatcherSynchronizationContext(dispatcher);
+        IReadOnlyDictionary<string, RecursiveDirectoryScanResult>? result = null;
+        var scan = coordinator.RunLatestAsync(
+            cancellationToken =>
+            {
+                observedWorkerThreadId = Environment.CurrentManagedThreadId;
+                return RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, paths, cancellationToken);
+            },
+            ownerContext, value =>
+            {
+                result = value;
+                publishedOnOwner = Environment.CurrentManagedThreadId == ownerThreadId;
+            });
+        var frame = new DispatcherFrame();
+        _ = scan.ContinueWith(_ => dispatcher.BeginInvoke(DispatcherPriority.Background,
+            new Action(() => frame.Continue = false)), TaskScheduler.Default);
+        if (!scan.IsCompleted) Dispatcher.PushFrame(frame);
+        if (!scan.GetAwaiter().GetResult() || result is null)
+            throw new InvalidOperationException("The latest recursive row scan was canceled before publication.");
+        workerThreadId = observedWorkerThreadId;
+        publishedOnOwnerThread = publishedOnOwner;
+        return result;
     }
 
     private static long NextId(IReadOnlyList<ShellListViewRow> rows) => rows.Count == 0 ? 1 : rows.Max(row => row.Id) + 1;

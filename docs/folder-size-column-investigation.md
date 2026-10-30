@@ -677,3 +677,9 @@ API 静态核对（Microsoft `IColumnManager` 文档，2026-10-30）：`CM_ENUM_
 NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 generation 和独立取消令牌；新请求先使旧 ticket 失效并取消其 worker，导航/视图退休或扫描 owner 释放时也会取消当前请求。隐藏 ListView 的初始与变更后扫描共用同一协调器；只有任务完成且 ticket 仍是当前代际时才把结果交回 owner thread 更新行。SettingsSmoke 新增可控异步 worker 回归，核对新请求确实取消运行中的旧任务、旧 ticket 不能再发布、取消后新请求取得较新代际以及 owner 销毁能终止当前任务。定向扫描 smoke 和 `--common-listview-relative-size-contract` 通过；完整 Release SettingsSmoke、构建及 diff 检查结果以本提交验证记录为准。
 
 这是隔离原型的取消与过期结果生命周期合同，不接入产品 `ExplorerBrowser`、用户配置、watcher 或递归大小列；不证明取消时限、真实 UI 响应、Shell provider 的异步通知或产品刷新排序一致性。后续需要把请求代际与行数据更新/目录变化重算联成完整自有视图模型，再进入已授权的隔离 Shell 门槛，不代表产品迁移获批。
+
+## 2026-10-31：Shell 目录通知后重算派生行值
+
+`--shell-change-reconciliation` 隐藏探针现把真实 Shell 目录变更通知与前述异步扫描协调器接通：先接收 `SHCNE_UPDATEDIR`，再由 Shell 重新枚举目录；对受影响的 `size-folder` 通过 worker 递归重算，并以稳定 row ID 将新大小合入新枚举行。夹具把目录内 `payload.bin` 从 4 B 改为 10 B，更新后行值读回 10 B、目录 row ID 保持；扫描 worker 与 owner thread 不同，结果在 owner Dispatcher 发布；既有文件选择/焦点身份在更新、重排和删除检查中保持。NativeProbe Release、此隐藏合同、完整 Release SettingsSmoke、App/NativeProbe Release 构建通过；探针 HWND 隐藏且前台未变。
+
+这只证明隔离行模型的数据链和线程边界。探针不创建文件视图窗口，不接入产品 ExplorerBrowser 或产品刷新路径，也不证明扫描带来的交互收益、Q-Dir 逐行列行为、行绘制/排序，或产品 F5/查看方式切换不黑屏。后续仍需在隔离自有视图原型中验证通知到行呈现的完整链路，再评估产品架构门槛。
