@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 文件列表刷新重绘：F5 保留 `IShellView.Refresh()`，`IFolderView2.SetRedraw` 在异步重枚举和选区恢复阶段暂时关闭绘制；切换查看方式只调用 `SetViewModeAndIconSize`，不做目录重刷新，并在模式切换期间抑制中间重绘。App、SettingsSmoke、NativeProbe Release 构建通过；完整 SettingsSmoke 退出码 0，重绘租约 smoke、隐藏刷新 A/B、生产 HostProbe F5 选区/焦点恢复和八种查看模式状态探针通过。可见黑屏是否消失仍待用户集中 UI 验收，详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+
 2026-10-30 逐行派生列接口复核：Microsoft 文档只承诺 `SHCOLSTATE_ONBYDEFAULT` 是 Explorer Details view 的默认展示提示；`IColumnManager.SetColumns` 设置当前视图列序且会清除列状态。隔离探针的通知后 `Apply` 虽返回 `S_OK`，自定义大小列仍不可见且 provider 未收到值请求，故不把 HRESULT 当成恢复成功。当前读数不能解释为单一缺陷；停止重复通用列重放/行重绘尝试。下一步若继续需在新视图记录 `GetDetailsOf`、默认列状态、SCID 映射及 `CM_ENUM_ALL` 列键的完整接口链，否则先保持产品未接线。只读复核发现两个已知测试 CLSID 及 Desktop NameSpace 项仍存在，因此不启动会添加注册项的 Private Desktop 实验。详情见[派生列接口复核](folder-size-column-investigation.md#2026-10-30自定义列可见性合同复核)。
 
 2026-10-30 克隆历史容量调整：用户确认保留每标签最多 100 个导航位置，以控制长期会话的历史/选区快照内存；超出时淘汰最旧位置，克隆只复制当前保留窗口。源码与既有 smoke 预期已同步修改；App 与 SettingsSmoke Release 构建均通过（0 警告/错误），未运行 smoke；100 项上限行为待运行时验证，可见回退行为待集中验收。
