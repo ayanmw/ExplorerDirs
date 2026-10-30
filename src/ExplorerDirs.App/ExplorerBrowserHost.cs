@@ -112,6 +112,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private DispatcherTimer? _createdFileSelectionTimer;
     private List<IntPtr>? _createdFileSelectionPidls;
     private IReadOnlyList<string>? _createdSearchSelectionNames;
+    private int _createdSearchSelectionLastItemCount = -1;
     private CreatedFileSelectionRequest? _createdFileSelectionRequest;
     private int _createdFileSelectionAttempts;
     private FolderCreationObservation? _newFolderObservation;
@@ -1789,31 +1790,21 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             if (viewObject is not IFolderView view) return (false, false);
+            if (view.ItemCount(2, out var itemCount) < 0 || itemCount < 0) return (false, false);
+            if (itemCount == _createdSearchSelectionLastItemCount &&
+                _createdFileSelectionAttempts % 5 != 1) return (false, false);
+            _createdSearchSelectionLastItemCount = itemCount;
+
             var arrayId = ShellItemArrayId;
             const uint allItemsInViewOrder = 0x80000002;
             if (view.Items(allItemsInViewOrder, ref arrayId, out var arrayObject) < 0 ||
                 arrayObject is not IShellItemArray items) return (false, false);
             try
             {
-                if (items.GetCount(out var count) < 0 || count > int.MaxValue) return (false, false);
-                List<string> viewNames = new((int)count);
-                for (uint index = 0; index < count; index++)
-                {
-                    if (!IsCreatedFileSelectionLocationCurrent(request) ||
-                        request.InputVersion != _nativeUserInputVersion ||
-                        items.GetItemAt(index, out var item) < 0 || item is null) return (false, false);
-                    try
-                    {
-                        viewNames.Add(GetShellItemPath(item, 0x80058000) ??
-                            GetShellItemPath(item, 0x80028000) ?? string.Empty);
-                    }
-                    finally
-                    {
-                        if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item);
-                    }
-                }
-
-                var selectedIndexes = ShellSelectionMatch.FindViewIndexes(viewNames, selectedParsingNames);
+                var selectedIndexes = ShellSelectionMatch.FindViewIndexes(
+                    EnumerateSearchViewParsingNames(items, itemCount, request), selectedParsingNames);
+                if (!IsCreatedFileSelectionLocationCurrent(request) ||
+                    request.InputVersion != _nativeUserInputVersion) return (false, false);
                 // Search results can arrive over multiple Shell callbacks. Retry until
                 // every saved item is present so a partial selection is never restored.
                 if (selectedIndexes.Length != selectedParsingNames.Count) return (false, false);
@@ -1835,9 +1826,30 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Marshal.IsComObject(items)) Marshal.ReleaseComObject(items);
             }
         }
+
         finally
         {
             if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+        }
+    }
+
+    private IEnumerable<string> EnumerateSearchViewParsingNames(IShellItemArray items, int count,
+        CreatedFileSelectionRequest request)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            if (!IsCreatedFileSelectionLocationCurrent(request) ||
+                request.InputVersion != _nativeUserInputVersion ||
+                items.GetItemAt((uint)index, out var item) < 0 || item is null) yield break;
+            try
+            {
+                yield return GetShellItemPath(item, 0x80058000) ??
+                    GetShellItemPath(item, 0x80028000) ?? string.Empty;
+            }
+            finally
+            {
+                if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item);
+            }
         }
     }
 
@@ -1865,6 +1877,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _createdFileSelectionPidls = null;
         }
         _createdSearchSelectionNames = null;
+        _createdSearchSelectionLastItemCount = -1;
         _createdFileSelectionRequest = null;
         _createdFileSelectionAttempts = 0;
     }

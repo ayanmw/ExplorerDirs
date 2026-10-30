@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果，并用原生 `IFolderView.SelectItem(index, …)` 恢复匹配的绝对解析名；等待搜索结果完整出现后再一次性恢复，避免只选中部分结果。解析名匹配、搜索请求位置/代次保护及代码接线 smoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
+2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果，并用原生 `IFolderView.SelectItem(index, …)` 恢复匹配的绝对解析名；等待所有快照项出现后再批量恢复，避免只选中部分结果。匹配采用流式枚举，全部命中即停止；条目数不变时最多每 5 次轮询重扫，避免每 100 ms 扫描整份搜索结果。解析名匹配、流式早停、搜索请求位置/代次保护及代码接线 smoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
 
 2026-10-30 集中验收候选同步：此前候选落后于复制标签的文件选区恢复修复。本轮从干净主线 `83bf7e6f03b759b610f6be4013be3f6bce62cf87` 重新执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261029-234737-419-12d50d/`，保留 37 项集中验收步骤并更新可执行文件、程序集及 Q-Dir 颜色配置夹具哈希。BuildIdentity 与固定哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。过程未启动窗口或创建 ExplorerBrowser；候选仍为 `prepared-not-run`，待后续用户集中可见验收。
 

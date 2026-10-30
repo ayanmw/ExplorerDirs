@@ -34,11 +34,14 @@ internal static class ShellTabNavigationHistorySmoke
               cloned.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
             "a cloned view keeps independent locations and per-stop selections");
 
-        var searchSelectionIndexes = ShellSelectionMatch.FindViewIndexes(
-            [@"C:\results\match-b.txt", @"C:\results\match-a.txt", @"C:\results\other.txt"],
-            [@"c:\RESULTS\match-a.txt", @"C:\results\match-b.txt", @"C:\missing.txt"]);
-        Check(searchSelectionIndexes.SequenceEqual([1, 0]),
-            "search result selections map by parsing name while preserving the saved selection order");
+        var namesRead = 0;
+        var searchSelectionIndexes = ShellSelectionMatch.FindViewIndexes(EnumerateNames(),
+            [@"c:\RESULTS\match-a.txt", @"C:\results\match-b.txt"]);
+        Check(searchSelectionIndexes.SequenceEqual([1, 0]) && namesRead == 2,
+            "search result selections map by name, keep saved order and stop reading once all items match");
+        Check(ShellSelectionMatch.FindViewIndexes(
+                  [@"C:\results\match-a.txt"], [@"C:\results\match-a.txt", @"C:\results\late.txt"]).Length == 0,
+            "search selection matching refuses a partial result set so the caller can retry safely");
 
         var search = new ShellTabNavigationHistory(@"C:\scope");
         search.UpdateCurrentSelection([@"C:\scope\before.txt"]);
@@ -80,8 +83,18 @@ internal static class ShellTabNavigationHistorySmoke
         var browserSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
         Check(browserSource.Contains("const uint allItemsInViewOrder = 0x80000002", StringComparison.Ordinal) &&
               browserSource.Contains("view.SelectItem(selectedIndexes[index]", StringComparison.Ordinal) &&
+              browserSource.Contains("_createdFileSelectionAttempts % 5 != 1", StringComparison.Ordinal) &&
               browserSource.Contains("SupportsSearchLocation: _location.IsSearchActive", StringComparison.Ordinal),
             "search result selections resolve against current Shell view order and use native index selection");
+
+        IEnumerable<string> EnumerateNames()
+        {
+            foreach (var name in new[] { @"C:\results\match-b.txt", @"C:\results\match-a.txt", @"C:\results\other.txt" })
+            {
+                namesRead++;
+                yield return name;
+            }
+        }
 
         static void Check(bool condition, string message)
         {
