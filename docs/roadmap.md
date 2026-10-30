@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 集中验收候选已刷新：干净主线 `15913f902fb4978a000a5e99c56427ac7903d84a` 构建出 `src/.state/gui-smoke/20261030-164304-812-e981d9/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `C2005702E5121ADF5C38AB6AA76FC1188376C8445780037C5E1220B5C4D5E962` / `E18F878E30CC026E25615D1FB297477FBB2DA64FAE459DD2DE92095BB76237D1`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 自有 ListView 虚拟 Shell 行合同：NativeProbe Release build 后运行 `--common-listview-virtual-folder-contract`，从虚拟控制面板枚举 9 个非文件系统 Shell 子项，将 PIDL、解析名和系统图标索引映射到隐藏 `SysListView32` 行并逐项读回；退出码 0，前台不变且窗口不可见。该结果只补强自有行模型的虚拟位置身份/显示接入，不覆盖项目操作、菜单、拖放、通知、导航输入、性能/内存或产品集成；Explorer Dirs 仍使用 ExplorerBrowser。详见[逐行大小列架构调查](folder-size-column-investigation.md#2026-10-31虚拟-shell-项目进入自有-listview-行模型)。
 
@@ -4960,6 +4960,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
 - 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
+- Q-Dir 官方 FAQ 将 Soft-Refresh 定义为复制/拖放/重命名等导致项目变化时禁止自动重排列表，并非“不重新枚举”的 F5 替代方案；因此它不能解释或直接修复当前的刷新空白。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)
 - 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
 
 ### 刷新诊断补充：跟踪 DefView 与 DirectUI 消息
@@ -4972,7 +4973,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 由当前干净主线 `7366323386e6f0d12d3c23c34b9fa355b8c022a3` 执行 `run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-170136-670-23c890/`。manifest 为 `prepared-not-run`，初始四窗格、41 项待验收；EXE 与 App DLL 的 SHA-256 均独立复核匹配 manifest。
 - 候选包含 F5 刷新及查看方式切换的可见验收场景，未启动应用或创建 ExplorerBrowser，不是 `releases/` 日常预览包。当前最新身份见[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
-### 候选更新：修正 DefView/DirectUI 诊断目标后重建
+### 候选更新：刷新到最新主线
 
-- 主线提交 `d8bba8fdc4457896ce89aee957089be69687d8d0` 重新执行 `run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-170453-968-58fecc/`。manifest 为 `prepared-not-run`，四窗格、41 项待验收；EXE 与 App DLL 哈希独立复核匹配。
+- 主线提交 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 重新执行 `run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-170859-050-e4c757/`。manifest 为 `prepared-not-run`，四窗格、41 项待验收；EXE 与 App DLL 哈希独立复核匹配。
 - 未启动应用或 ExplorerBrowser；候选仍是集中 UI 验收副本，不是 release。最新身份已更新到[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
