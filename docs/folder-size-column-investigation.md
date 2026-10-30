@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：虚拟 Shell 行项目接口探测
+
+扩展隐藏的 `--common-listview-virtual-folder-contract`：从 Control Panel 虚拟根枚举出的 9 个项目，逐项通过父 `IShellFolder::GetUIObjectOf` 请求 `IContextMenu` 与 `IDataObject`。本机结果为 `virtual-item-context-menus=9`、`virtual-item-data-objects=9`；9 个虚拟文件夹均可绑定，合计枚举 72 个下一层项目。探针只获取并立即释放接口，不显示菜单、不调用命令，也不执行拖放。
+
+NativeProbe Release build 0 警告/错误，虚拟文件夹合同通过；窗口保持隐藏且前台未变化。该证据说明这些 Control Panel 项目提供了项目级菜单与数据对象接口，不证明原生菜单可见、命令可执行或拖放/剪贴板往返正确，也不代表所有 Shell namespace 均提供这些接口。产品仍使用 ExplorerBrowser。
+
 ## 2026-10-31：隔离扫描的异步发布与文件变化触发
 
 目录树扫描协调器新增 `RunLatestAsync`：扫描在后台线程运行，完成后通过 owner `SynchronizationContext` 发布；发布前再次核对 ticket，避免旧扫描结果覆盖新访问或更新。隐藏 ListView 合同将递归数据扫描迁出 STA，并通过真实临时目录中的 `FileSystemWatcher` 修改文件来触发下一轮扫描和结果发布，不再由测试代码手动重扫。合同断言事件已观察、结果已应用、扫描线程与 owner 分离、更新在原 owner 线程发布，同时检查递归文件/子目录数、相对大小和升降序、行身份、焦点/选区及前台窗口不变。`DirectoryTreeScanCoordinatorSmoke` 的最新结果优先发布、旧结果不发布合同、递归扫描 smoke、NativeProbe/App Release build 与隐藏 `--common-listview-relative-size-contract` 均通过；探针输出 `file-change-observed=True`、`update-applied=True`、`visible=False`、`foreground-unchanged=True`。

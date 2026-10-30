@@ -20,6 +20,8 @@ internal static class CommonListViewVirtualFolderContract
     private const int LvmGetImageList = 0x1002;
     private const int LvsilSmall = 1;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid ControlPanelId = new("26EE0668-A00A-44D7-9371-BEB064C98683");
 
     internal static int Run()
@@ -82,6 +84,19 @@ internal static class CommonListViewVirtualFolderContract
                 (row.Attributes & ShellFolder) != 0 && (row.Attributes & ShellFileSystem) == 0).ToArray();
             var boundVirtualFolders = 0;
             var nestedVirtualRows = 0;
+            var virtualItemMenus = 0;
+            var virtualItemDataObjects = 0;
+            foreach (var row in rows.Where(row => (row.Attributes & ShellFileSystem) == 0))
+            {
+                var childArray = Marshal.AllocHGlobal(IntPtr.Size);
+                try
+                {
+                    Marshal.WriteIntPtr(childArray, row.RelativePidl);
+                    if (TryGetShellObject(shellFolder, childArray, in ContextMenuId)) virtualItemMenus++;
+                    if (TryGetShellObject(shellFolder, childArray, in DataObjectId)) virtualItemDataObjects++;
+                }
+                finally { Marshal.FreeHGlobal(childArray); }
+            }
             foreach (var row in virtualFolderRows)
             {
                 Marshal.ThrowExceptionForHR(SHBindToObject(0, row.AbsolutePidl, 0,
@@ -103,11 +118,12 @@ internal static class CommonListViewVirtualFolderContract
                 row.RecursiveBytes is null);
             var success = identityAndRowsMatch && imageListAttached && foregroundUnchanged && hidden &&
                 hasVirtualRootIdentity && virtualChildRows > 0 && virtualFolderRows.Length > 0 &&
-                boundVirtualFolders == virtualFolderRows.Length && sharedRowModelCorrect;
+                boundVirtualFolders == virtualFolderRows.Length && virtualItemMenus > 0 && sharedRowModelCorrect;
             Console.WriteLine($"common-listview-virtual-folder-contract: root-is-virtual={hasVirtualRootIdentity};" +
                 $"children={rows.Count};filesystem-children={rows.Count(row => (row.Attributes & ShellFileSystem) != 0)};" +
                 $"virtual-children={virtualChildRows};virtual-folders={virtualFolderRows.Length};" +
                 $"bound-virtual-folders={boundVirtualFolders};nested-virtual-children={nestedVirtualRows};" +
+                $"virtual-item-context-menus={virtualItemMenus};virtual-item-data-objects={virtualItemDataObjects};" +
                 $"shell-image-list-attached={imageListAttached};" +
                 $"pidl-row-identity={identityAndRowsMatch};shared-row-model={sharedRowModelCorrect};" +
                 $"hidden={hidden};foreground-unchanged={foregroundUnchanged};passed={success}");
@@ -187,6 +203,18 @@ internal static class CommonListViewVirtualFolderContract
         }
     }
 
+    private static bool TryGetShellObject(nint shellFolder, nint childArray, in Guid iid)
+    {
+        var result = At<GetUiObjectOf>(shellFolder, 10)(shellFolder, 0, 1, childArray, in iid, 0, out var shellObject);
+        if (result < 0 || shellObject == 0)
+        {
+            if (shellObject != 0) Marshal.Release(shellObject);
+            return false;
+        }
+        Marshal.Release(shellObject);
+        return true;
+    }
+
     private static (long RowId, string DisplayName, string ParsingName, int Image) ReadRow(nint listView, int index)
     {
         var displayBuffer = Marshal.AllocHGlobal(4096);
@@ -220,6 +248,7 @@ internal static class CommonListViewVirtualFolderContract
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid iid, nint reserved, out nint result);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct ListViewColumn
     {
