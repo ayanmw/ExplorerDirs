@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-31 02:15 CST：temp.80 .NET Runtime 计数附加采样
+
+- 对同一个 `temp.80` PID `47460` 使用本机 .NET SDK 10.0.400 的 `dnx dotnet-counters@10.0.750501` 附加采集；应用仍为启动于 `2026-10-30T16:13:34.219Z` 的 `preview-0.6.0-temp.80`，没有重启或操作窗口。CSV 包含 6 个 5 秒快照，UTC `2026-10-30T18:15:58Z`–`18:16:23Z`（约 25 秒有效指标区间）。
+- `dotnet.gc.last_collection.heap.size` 各代合计 `11.41–12.09 MiB`；GC committed size 全程 `28.07 MiB`；GC fragmentation `3.07–3.08 MiB`。同期 `dotnet.process.memory.working_set` `222.82–222.86 MiB`，结束后进程采样 Private Bytes 为 `115.93 MiB`。GC committed size 大约是 Private Bytes 的四分之一，但这只是尺度比较，不能把差值精确归给 native Shell、WPF 或第三方扩展。`last_collection.heap.size` 是最近一次 GC 报告值，不是连续的实时存活对象量。
+- 五个 5 秒区间的 `dotnet.gc.heap.total_allocated` 增量合计 `11,640,912 B`，窗口内观察到 1 次 Gen 0、0 次 Gen 1/2，GC 暂停增量合计约 `1.26 ms`。分配流量不等于保留量；本轮没有固定用户操作，无法判断这些分配来自导航、Shell 回调还是后台活动，也不能据此判为泄漏。
+- 原始 CSV `src/.state/memory-samples/managed-live-47460-20261031-0219.csv`，SHA-256 `0C07377600FD61B95FDFFF0D8A4B901ABB90E0B4DBBB71A266A9A604CE83F29C`，保留在忽略目录，不入 Git。之前一次 60 秒采集因缺少输出目录没有生成 CSV；随后首次修正尝试因 counter 参数缺右括号而立即失败，最终成功采集使用了校正参数。失败轮不作为测量数据。
+
 ## 2026-10-31 02:07 北京时间：temp.80 当前运行实例五分钟只读采样
 
 - UTC `2026-10-30T18:07:22Z`–`18:12:22Z`，对 PID `47460` 每 5 秒采样，共 61 点；进程启动时间 `2026-10-30T16:13:34.219Z`，路径 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。没有启动、重启、聚焦或操作应用。

@@ -8,6 +8,8 @@
 
 2026-10-31 02:07 CST：只读采样仍在运行的 `preview-0.6.0-temp.80` PID `47460` 5 分钟（61 点）。Working Set `220.61–220.70 MiB`，Private Bytes `115.30–115.48 MiB`，首末均轻微回落；GDI 全程 95。负载未固定，不能据此排除操作期间增长或定位来源。完整身份、哈希及边界见[内存采样记录](memory-sampling.md#2026-10-31-0207-北京时间temp80-当前运行实例五分钟只读采样)。
 
+2026-10-31 02:15 CST：同一 PID 的 .NET Runtime counters 6 点采样显示最近一次 GC 报告堆约 `11.41–12.09 MiB`、GC committed `28.07 MiB`，同期进程 Private Bytes 约 `115.93 MiB`；只观察到一次 Gen 0。此数据说明 GC 堆不是进程提交量的全部，不能把余量直接归为 Shell/native 分配；分配速率仍需固定工作负载后再归因。详见[采样记录](memory-sampling.md#2026-10-31-0215-csttemp80-net-runtime-计数附加采样)。
+
 2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 逐行大小列隔离原型：`--common-listview-relative-size-contract` 的两次生产目录树扫描现在线程池执行；STA 的 WPF Dispatcher 在等待期间继续泵消息，结果返回 owner thread 后再更新隐藏 ListView。原合同曾确认同步扫描运行在 owner STA，新增断言后先失败；实现后合同通过，扫描 worker/owner 分离，行数值、相对百分比、递归文件/子目录数、排序、项目身份/选区/焦点及前台不变均符合夹具。此结果只验证隔离行模型线程边界，不代表性能提升或产品逐行列；Explorer Dirs 仍使用 ExplorerBrowser。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31-自有-listview-扫描移出-sta)。
