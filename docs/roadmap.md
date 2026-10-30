@@ -4773,3 +4773,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 隐藏合同用真实临时文件夹构造 Shell 绝对 PIDL，并验证 Shell 显示名及文件系统解析名可往返到原路径；普通 `SysListView32` 的行 `lParam` 保存稳定 row ID，映射到 PIDL、路径和派生大小。更新大小后按新值重排，选中/焦点仍落在相同 row ID，PIDL 未替换。Release build 与隐藏合同通过，窗口不可见、前台未变，夹具清理完成。
 - 这证明可将真实文件系统 Shell 身份映射进自有 ListView 数据模型；行数据仍由探针显式创建，未接 Shell 枚举、图标/菜单/操作、拖放、通知、导航、键盘、虚拟位置、性能/内存或产品。迁移门槛继续开放，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：Shell 枚举驱动行模型
+
+- `--common-listview-data-contract` 现在绑定真实临时父目录并调用 `IShellFolder::EnumObjects` / `IEnumIDList::Next`，将返回的相对 PIDL 组合成每行的绝对 PIDL；ListView 名称和 row ID 映射来自 Shell 枚举，而不是按路径手工创建。新断言先按预期红灯 `shell-enumeration-backed=False`，接线后 Release build 与隐藏合同通过；派生大小重排后选中/焦点仍跟随相同 row ID，PIDL 身份稳定，窗口不可见、前台未变，临时资源清理。
+- 该步只证明本地临时文件夹的 Shell 枚举可驱动普通 `SysListView32` 行；系统图标、Shell 列生产、菜单/操作、拖放、通知、导航、键盘、虚拟位置、性能/内存和产品集成仍未验证。未创建 `IShellView`，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。

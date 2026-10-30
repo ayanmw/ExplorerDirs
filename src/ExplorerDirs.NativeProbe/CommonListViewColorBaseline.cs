@@ -25,6 +25,7 @@ internal static class CommonListViewColorBaseline
     private static readonly DrawProc Callback = OnDraw;
     private static readonly ListViewCompareProc SizeCompare = CompareBySize;
     private static Dictionary<long, ShellRow>? _shellRowsById;
+    private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Dictionary<nuint, uint> Colors = new() { [0] = 0x00F0E0D0, [1] = 0x00D0F0E0 };
     private static readonly Dictionary<nuint, uint> Samples = [];
     private static readonly Dictionary<nuint, string> Writes = [];
@@ -153,7 +154,7 @@ internal static class CommonListViewColorBaseline
         var foregroundBefore = GetForegroundWindow();
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs.ListViewShellRows", Guid.NewGuid().ToString("N"));
         var shellRows = new List<ShellRow>();
-        nint parent = 0, listView = 0;
+        nint parent = 0, listView = 0, fixturePidl = 0, shellFolder = 0;
         try
         {
             var largeFolder = Path.Combine(fixture, "large-folder");
@@ -162,8 +163,13 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallFolder);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[10]);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[4]);
-            shellRows.Add(CreateShellRow(1, largeFolder, 10));
-            shellRows.Add(CreateShellRow(2, smallFolder, 4));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHBindToObject(0, fixturePidl, 0, in ShellFolderId, out shellFolder));
+            shellRows.AddRange(EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Path.GetFullPath(largeFolder)] = 10,
+                [Path.GetFullPath(smallFolder)] = 4
+            }));
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
 
             var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
@@ -212,16 +218,18 @@ internal static class CommonListViewColorBaseline
                 : 0;
             var shellIdentityPreserved = shellRows.All(row => row.AbsolutePidl != 0 &&
                 _shellRowsById.TryGetValue(row.Id, out var current) && current.AbsolutePidl == row.AbsolutePidl);
+            var shellEnumerationBacked = shellRows.Count == 2 && shellRows.All(row => row.FromShellEnumeration);
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
                 selectedName == "small-folder" && selectedFocusedCount == 1 &&
-                selectedId == 2 && shellIdentityPreserved &&
+                selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
                 $"selected-focused-after-sort={selectedName};selected-shell-row-id={selectedId};" +
                 $"shell-pidl-identities-preserved={shellIdentityPreserved};" +
+                $"shell-enumeration-backed={shellEnumerationBacked};" +
                 $"selected-focused-count={selectedFocusedCount};visible=False;" +
                 $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
             return passed ? 0 : 1;
@@ -237,39 +245,73 @@ internal static class CommonListViewColorBaseline
             _listView = 0;
             _shellRowsById = null;
             foreach (var row in shellRows)
-                if (row.AbsolutePidl != 0) Marshal.FreeCoTaskMem(row.AbsolutePidl);
+                if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
+            if (shellFolder != 0) Marshal.Release(shellFolder);
+            if (fixturePidl != 0) Marshal.FreeCoTaskMem(fixturePidl);
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            var fixtureRoot = Path.GetDirectoryName(fixture)!;
+            if (Directory.Exists(fixtureRoot) && !Directory.EnumerateFileSystemEntries(fixtureRoot).Any())
+                Directory.Delete(fixtureRoot);
         }
     }
 
-    private static ShellRow CreateShellRow(long id, string path, ulong recursiveBytes)
+    private static List<ShellRow> EnumerateShellRows(nint folderPidl, nint shellFolder,
+        IReadOnlyDictionary<string, ulong> recursiveSizes)
     {
-        Marshal.ThrowExceptionForHR(SHParseDisplayName(path, 0, out var pidl, 0, out _));
+        Marshal.ThrowExceptionForHR(At<EnumObjects>(shellFolder, 4)(shellFolder, 0, 0x60, out var enumerator));
+        var rows = new List<ShellRow>();
         try
         {
-            Marshal.ThrowExceptionForHR(SHGetNameFromIDList(pidl, 0, out var displayName));
-            try
+            while (true)
             {
-                var display = Marshal.PtrToStringUni(displayName);
-                if (string.IsNullOrWhiteSpace(display)) throw new InvalidOperationException("Shell returned an empty normal display name.");
-                Marshal.ThrowExceptionForHR(SHGetNameFromIDList(pidl, 0x80058000, out var parsingName));
+                var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var relativePidl, out var fetched);
+                if (nextHr < 0) Marshal.ThrowExceptionForHR(nextHr);
+                if (fetched == 0) break;
+                if (relativePidl == 0) throw new InvalidOperationException("Shell enumeration returned a null child PIDL.");
+                nint absolutePidl = 0;
                 try
                 {
-                    var parsing = Marshal.PtrToStringUni(parsingName);
-                    if (!string.Equals(Path.GetFullPath(parsing ?? string.Empty), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException("Shell PIDL parsing identity did not round-trip to its fixture path.");
-                    return new ShellRow(id, pidl, display, parsing!, recursiveBytes);
+                    absolutePidl = ILCombine(folderPidl, relativePidl);
+                    if (absolutePidl == 0) throw new InvalidOperationException("Could not combine the Shell parent and enumerated child PIDLs.");
+                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl, 0, out var displayName));
+                    string? display;
+                    try { display = Marshal.PtrToStringUni(displayName); }
+                    finally { Marshal.FreeCoTaskMem(displayName); }
+                    if (string.IsNullOrWhiteSpace(display)) throw new InvalidOperationException("Shell returned an empty normal display name.");
+                    Marshal.ThrowExceptionForHR(SHGetNameFromIDList(absolutePidl, 0x80058000, out var parsingName));
+                    string? parsing;
+                    try { parsing = Marshal.PtrToStringUni(parsingName); }
+                    finally { Marshal.FreeCoTaskMem(parsingName); }
+                    var fullPath = Path.GetFullPath(parsing ?? string.Empty);
+                    if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
+                        throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
+                    rows.Add(new ShellRow(0, absolutePidl, display, parsing!, recursiveBytes, FromShellEnumeration: true));
+                    absolutePidl = 0;
                 }
-                finally { Marshal.FreeCoTaskMem(parsingName); }
+                finally
+                {
+                    if (absolutePidl != 0) ILFree(absolutePidl);
+                    ILFree(relativePidl);
+                }
             }
-            finally { Marshal.FreeCoTaskMem(displayName); }
+            rows.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.DisplayName, right.DisplayName));
+            if (rows.Count != recursiveSizes.Count)
+                throw new InvalidOperationException($"Shell enumeration returned {rows.Count} rows; expected {recursiveSizes.Count}.");
+            for (var index = 0; index < rows.Count; index++)
+                rows[index] = rows[index] with { Id = index + 1 };
+            return rows;
         }
         catch
         {
-            Marshal.FreeCoTaskMem(pidl);
+            foreach (var row in rows)
+                if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
             throw;
         }
+        finally { Marshal.Release(enumerator); }
     }
+
+    private static T At<T>(nint instance, int slot) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
     private static void InsertItem(nint listView, int index, string text, long size, string sizeText)
     {
@@ -451,6 +493,8 @@ internal static class CommonListViewColorBaseline
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint DrawProc(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ListViewCompareProc(nint first, nint second, nint sortParameter);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
@@ -474,7 +518,8 @@ internal static class CommonListViewColorBaseline
         public nint Window; public uint Id; public nuint WParam; public nint LParam; public uint Time; public int X, Y;
         public uint Private;
     }
-    private sealed record ShellRow(long Id, nint AbsolutePidl, string DisplayName, string ParsingName, ulong RecursiveBytes);
+    private sealed record ShellRow(long Id, nint AbsolutePidl, string DisplayName, string ParsingName,
+        ulong RecursiveBytes, bool FromShellEnumeration = false);
     [DllImport("comctl32.dll", SetLastError = true)] private static extern bool InitCommonControlsEx(ref InitCommonControls init);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, DrawProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, DrawProc callback, nuint id);
@@ -483,6 +528,9 @@ internal static class CommonListViewColorBaseline
     [DllImport("user32.dll")] private static extern bool InvalidateRect(nint window, nint rect, bool erase);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll")] private static extern bool UpdateWindow(nint window);
     [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
     [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nuint wParam, nint lParam);
