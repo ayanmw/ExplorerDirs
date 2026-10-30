@@ -3136,9 +3136,17 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
             ShellViewRedrawLease? refreshRedraw = null;
+            var directoryNotificationUsed = false;
+            var refreshStartedAt = Stopwatch.GetTimestamp();
+            if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try
             {
-                if (preserveLastFrame) refreshRedraw = TrySuppressCurrentViewRedraw();
+                if (preserveLastFrame)
+                {
+                    directoryNotificationUsed = TryNotifyCurrentFileSystemDirectory(browser);
+                    if (ShellViewRedrawLease.ShouldSuppressForRefresh(preserveLastFrame, directoryNotificationUsed))
+                        refreshRedraw = TrySuppressCurrentViewRedraw();
+                }
             }
             catch
             {
@@ -3153,16 +3161,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 selection?.Dispose();
                 return;
             }
-            var refreshStartedAt = Stopwatch.GetTimestamp();
             int refreshResult;
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
-            if (preserveLastFrame) BeginNativePaintTransitionTrace("f5");
             try
             {
-                if (preserveLastFrame && TryNotifyCurrentFileSystemDirectory(browser))
+                if (directoryNotificationUsed)
                 {
                     // A directory-change notification reconciles filesystem rows in place;
-                    // IShellView.Refresh clears the native list before re-enumerating it.
+                    // freezing redraw on this path would hold an obsolete frame unnecessarily.
                     refreshResult = 0;
                     LastShellRefreshStatus = "updatedir-notification";
                 }
