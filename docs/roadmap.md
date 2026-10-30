@@ -14,6 +14,8 @@
 
 2026-10-31 预览发布 `preview-0.6.0-temp.83`：从干净主线提交 `63bc718313b764762c093c3a41b1b158a959ac6c` 发布，`BuildTags=none`，使用独立 profile。EXE/DLL SHA-256 为 `398F89C764A16A7C56CE3328DE9D1C9F386EAEC0717D78FA1C72EB98F1E379D0` / `1AB654E54E39C72DFF5C41D5146367AF83B697B47E41AAF3773987752BFD4254`，与 `app/SHA256.txt` 一致；程序集元数据确认源码状态为 clean。未启动 GUI；F5 视觉与交互、查看方式切换空白仍待集中验收。版本说明见[preview-0.6.0-temp.83](releases/preview-0.6.0-temp.83.md)。
 
+2026-10-31 预览发布 `preview-0.6.0-temp.84`：从干净主线提交 `fc8d5e4cfd03086e88d37d568dc1835f6ad8cd52` 发布，提交时间 `2026-10-31T00:14:58+08:00`，`BuildTags=none`，使用独立 profile。EXE/DLL SHA-256 为 `393EB05C1317FD504A923E1690AB9883C0A269656BA47449BADD2DB0C16AB80B` / `EAEB6758B41089C287F0D6B319B2E6371E5A010A0F601EDCECDFF77D3EFFF37F`，与 `app/SHA256.txt` 一致；程序集元数据确认源码状态为 clean。未启动 GUI；F5 可见效果和输入命中、查看方式切换后的重绘/焦点仍待集中验收。版本说明见[preview-0.6.0-temp.84](releases/preview-0.6.0-temp.84.md)。
+
 2026-10-31 F5 保帧范围收紧：源码追踪发现 `ExplorerBrowserHost.Refresh` 同时服务用户手动刷新、目录监视通知、筛选/分组及搜索返回；此前保帧租约套在公共刷新执行体，可能把自动更新的旧画面也冻结。现改为仅 F5、工具栏和窗格刷新按钮显式请求保帧，其余内部刷新继续由 Shell 即时绘制。App Release build 通过（0 警告/错误）；未运行 GUI，F5 的视觉改善及冻结期间输入命中仍待集中验收。
 
 2026-10-31 查看方式切换后的焦点恢复减少重复选择：源码追踪发现工具栏/菜单切换模式后若焦点需回到文件视图，`FocusView` 会调用 `RestoreFocusedItem`，该方法即使 Shell 已报告目标项为焦点仍无条件再次 `SelectItem`。现在只有焦点缺失或落在其它项时才重设，保留真实焦点/选区状态并避免重复 Shell 选择写入。App Release build 通过（0 警告/错误）；未运行测试或 GUI，实际重绘减少量与焦点体验待集中验收。
