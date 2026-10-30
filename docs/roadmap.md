@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-31 递归目录树扫描取消边界：可见文件夹大小原型在进入递归扫描前会先物化需要返回的路径集合；现在集合构建逐项检查 CancellationToken，取消后不再继续枚举剩余目标。SettingsSmoke 先验证旧行为会在预取消时仍消费路径，再覆盖枚举中途取消；定向扫描 smoke、完整 Release SettingsSmoke、App 与 NativeProbe Release build 均通过（0 警告/错误）。此项仅减少隔离逐行大小原型在刷新/关闭后的无效准备工作，不接入产品 ExplorerBrowser，也未测量大型/网络目标的实际取消延迟。
+
 2026-10-31 隔离 `IShellView` OLE 拖放入口自管 COM apartment：`RunOleLoop` 之前只检查 STA，没有保证当前 STA 已执行 `OleInitialize`；目标注册调用刚好先初始化 OLE，令拖放源入口依赖隐式调用顺序。现由拖放循环入口初始化并在 `finally` 配平，初始化失败时不进入 `DoDragDrop`。无窗口行为合同覆盖 `S_OK`、`S_FALSE`、初始化失败不执行/不反初始化，以及拖放抛错仍清理；NativeProbe Release build、完整 SettingsSmoke 通过，0 警告/错误，`git diff --check` 通过。没有创建 `IShellView`、显示窗口或启动拖放循环。真实 OLE Copy/Move、取消、视图通知与前台隔离仍未验收；产品继续使用 ExplorerBrowser。
 
 2026-10-31 F5/查看方式空白帧复核：两条操作都没有重建 ExplorerBrowser、窗格、标签或导航历史；F5 直接调用当前 `IShellView.Refresh()`，查看方式调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，后者让 Shell 原地重排项目。移除 F5 期间额外的 `SetRedraw(FALSE)`，让 Shell 在重新枚举行项目时持续绘制；原有行数等待只用于安全恢复选区/焦点，不再冻结画面。查看方式路径保持原生切换并延后读取状态。Release 源码合同 smoke 和 App Release build 通过（0 警告/错误）；未打开 GUI，真实像素空白时长、慢目录和虚拟位置仍待集中验收。隔离计时的 48 ms/544 ms 仅为行数出现时间，不能代表画面效果。详见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。

@@ -214,8 +214,13 @@ internal static class RecursiveDirectoryScanner
         Action<long>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(resultPaths);
-        var requested = resultPaths.Select(Path.GetFullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        cancellationToken.ThrowIfCancellationRequested();
+        var requested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in resultPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            requested.Add(Path.GetFullPath(path));
+        }
         return ScanDirectoryTreeCore(root, cancellationToken, progress, requested);
     }
 

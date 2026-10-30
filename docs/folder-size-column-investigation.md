@@ -683,3 +683,9 @@ NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 gen
 `--shell-change-reconciliation` 隐藏探针现把真实 Shell 目录变更通知与前述异步扫描协调器接通：先接收 `SHCNE_UPDATEDIR`，再由 Shell 重新枚举目录；对受影响的 `size-folder` 通过 worker 递归重算，并以稳定 row ID 将新派生值合入新枚举行。夹具初始有 1 个文件、0 个子目录、4 B；通知后加入一个 2 B 文件和一个子目录，更新读回 2 个文件、1 个子目录、12 B，目录 row ID 保持；真实隐藏 `SysListView32` 读回 `12 B` 与 `files: 2, folders: 1`。每次整表重建后按稳定 ID 恢复原选中/焦点行，变更、重排、删除路径均读回通过。扫描 worker 与 owner thread 不同，结果在 owner Dispatcher 发布。NativeProbe Release 构建及此隐藏合同通过，探针窗口不可见且前台未变；完整 Release SettingsSmoke 和 App Release 构建未因这次 NativeProbe-only 修改重跑。
 
 这只证明隔离行模型和隐藏标准 ListView 的数据投影链与线程边界。探针不创建文件视图窗口，不接入产品 ExplorerBrowser 或产品刷新路径，也不证明扫描带来的交互收益、Q-Dir 原生列行为、可见行绘制/列排序，或产品 F5/查看方式切换不黑屏。下一步应验证自有 Shell 视图实际消费该行模型及文件操作/导航/菜单兼容性，再评估产品架构门槛。
+
+### 2026-10-31：可见目标清单物化阶段响应取消
+
+`ScanDirectoryTreeForPaths` 在递归遍历前需要将调用方的可见目录路径转成完整路径集合。此前取消只在 `ScanDirectoryTreeCore` 开始后才检查，所以已取消任务仍会消费完整目标枚举。现在在目标集合物化前及每个目标路径转换前检查 token；回归先确认预取消仍会枚举输入而失败，再覆盖枚举期间触发取消后不继续消费后续项。定向递归扫描 smoke 与完整 Release SettingsSmoke 通过；App/NativeProbe Release build 均为 0 警告、0 错误。
+
+这仅让扫描取消覆盖“目标集合准备”和后续递归工作之间的完整生命周期；不能中断正在执行的单次同步文件系统 API（如枚举器 `MoveNext`、属性/长度读取），也不证明大目录或网络路径的取消时延。代码仍仅由隔离 NativeProbe 行模型使用，产品没有接入逐行目录大小列。

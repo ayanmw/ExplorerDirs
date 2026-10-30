@@ -128,6 +128,48 @@ internal static class RecursiveDirectoryScannerSmoke
                   !visibleFolderResults.ContainsKey(Path.GetFullPath(root)),
                 "visible-folder scan returns requested recursive rows without retaining unrequested directory results");
 
+            using var canceledPathSelection = new CancellationTokenSource();
+            canceledPathSelection.Cancel();
+            var requestedPathsEnumerated = false;
+            try
+            {
+                _ = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, EnumerateRequestedPaths(),
+                    canceledPathSelection.Token);
+                throw new Exception("a canceled visible-folder scan enumerated its requested paths");
+            }
+            catch (OperationCanceledException) { }
+            Check(!requestedPathsEnumerated,
+                "visible-folder scan honors cancellation before materializing requested paths");
+
+            using var cancellationDuringPathSelection = new CancellationTokenSource();
+            var requestedPathCount = 0;
+            try
+            {
+                _ = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, EnumerateThenCancel(),
+                    cancellationDuringPathSelection.Token);
+                throw new Exception("a visible-folder scan continued after path selection was canceled");
+            }
+            catch (OperationCanceledException) { }
+            Check(requestedPathCount == 2,
+                "visible-folder scan stops materializing paths as soon as cancellation is requested");
+
+            IEnumerable<string> EnumerateRequestedPaths()
+            {
+                requestedPathsEnumerated = true;
+                yield return child;
+            }
+
+            IEnumerable<string> EnumerateThenCancel()
+            {
+                requestedPathCount++;
+                yield return child;
+                cancellationDuringPathSelection.Cancel();
+                requestedPathCount++;
+                yield return grandchild;
+                requestedPathCount++;
+                yield return root;
+            }
+
             Check(RecursiveSizePercentage.Calculate(10, 14) == 100m * 10 / 14 &&
                   RecursiveSizePercentage.Calculate(4, 14) == 100m * 4 / 14 &&
                   RecursiveSizePercentage.Calculate(10, 12) == 100m * 10 / 12 &&
