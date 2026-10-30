@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Threading;
 
 namespace ExplorerDirs.App;
 
@@ -13,14 +14,17 @@ internal sealed class NativeShellTree : IDisposable
     private const uint NstcsDisableDragDrop = 0x00001000;
     private const uint NstcsNoOrderStream = 0x00002000;
     private const uint NstcsNoEditLabels = 0x00010000;
+    private static readonly TimeSpan DragHoverExpandDelay = TimeSpan.FromSeconds(1);
     private static readonly Guid ItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly NativeTreeEvents _events;
+    private readonly DispatcherTimer _dragHoverTimer;
     private nint _tree;
     private uint _cookie;
     private bool _advised;
     private nint _root;
     private int _synchronizing;
+    private nint _dragHoverItem;
 
     internal static uint BuildControlStyles() =>
         NstcsHasExpandos | NstcsRootHasExpando | NstcsShowSelectionAlways |
@@ -57,8 +61,13 @@ internal sealed class NativeShellTree : IDisposable
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("目录树必须在 STA 线程创建。");
+        _dragHoverTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = DragHoverExpandDelay
+        };
+        _dragHoverTimer.Tick += OnDragHoverTimer;
         _events = new NativeTreeEvents(OnSelectionChanged, () => UserInput?.Invoke(), OnItemClick,
-            useExplicitShellIcons);
+            OnDragHover, CancelDragHover, useExplicitShellIcons);
         var clsid = new Guid("AE054212-3535-4430-83ED-D501AA6680E6");
         var iid = new Guid("028212A3-B627-47E9-8856-C14265554E4F");
         try
@@ -94,6 +103,7 @@ internal sealed class NativeShellTree : IDisposable
     internal void SetRoot(string parsingName, Func<bool>? isCurrent = null)
     {
         VerifyThread();
+        CancelDragHover();
         var item = CreateItem(parsingName);
         _synchronizing++;
         try
@@ -130,6 +140,7 @@ internal sealed class NativeShellTree : IDisposable
     internal bool SelectLocation(string identity, Func<bool>? isCurrent = null)
     {
         VerifyThread();
+        CancelDragHover();
         if (!ShellLocationIdentity.TryGetFolderPidl(identity, out var pidl)) return false;
         Marshal.FreeCoTaskMem(pidl);
         var item = CreateItem(identity);
@@ -273,6 +284,57 @@ internal sealed class NativeShellTree : IDisposable
         catch { return false; } // A stale Shell item must not unwind through the COM event callback.
         finally { if (name != 0) Marshal.FreeCoTaskMem(name); }
     }
+    private void OnDragHover(nint item)
+    {
+        if (_tree == 0 || item == 0) { CancelDragHover(); return; }
+        try
+        {
+            if (At<GetAttributes>(item, 6)(item, 0x20000000, out var attributes) < 0 ||
+                (attributes & 0x20000000) == 0)
+            {
+                CancelDragHover();
+                return;
+            }
+            if (Method<GetState>(12)(_tree, item, 2, out var state) == 0 && (state & 2) != 0)
+            {
+                CancelDragHover();
+                return;
+            }
+
+            if (_dragHoverItem != 0 &&
+                At<Compare>(item, 7)(item, _dragHoverItem, 0, out var order) == 0 && order == 0) return;
+
+            if (_dragHoverItem != 0) Marshal.Release(_dragHoverItem);
+            Marshal.AddRef(item);
+            _dragHoverItem = item;
+            _dragHoverTimer.Stop();
+            _dragHoverTimer.Start();
+        }
+        catch { CancelDragHover(); } // A stale Shell item must not unwind through the COM callback.
+    }
+    private void OnDragHoverTimer(object? sender, EventArgs args)
+    {
+        _dragHoverTimer.Stop();
+        var item = _dragHoverItem;
+        _dragHoverItem = 0;
+        if (_tree == 0 || item == 0) { if (item != 0) Marshal.Release(item); return; }
+        try
+        {
+            if (At<GetAttributes>(item, 6)(item, 0x20000000, out var attributes) < 0 ||
+                (attributes & 0x20000000) == 0 ||
+                Method<GetState>(12)(_tree, item, 2, out var state) != 0 || (state & 2) != 0) return;
+            _ = Method<SetState>(11)(_tree, item, 2, 2);
+        }
+        catch { /* A folder may disappear or become unavailable during the drag. */ }
+        finally { Marshal.Release(item); }
+    }
+    private void CancelDragHover()
+    {
+        _dragHoverTimer.Stop();
+        var item = _dragHoverItem;
+        _dragHoverItem = 0;
+        if (item != 0) Marshal.Release(item);
+    }
     private void VerifyThread()
     {
         if (_thread != Environment.CurrentManagedThreadId)
@@ -285,6 +347,8 @@ internal sealed class NativeShellTree : IDisposable
             throw new InvalidOperationException("目录树必须由创建它的线程释放。");
         var tree = _tree;
         if (tree == 0) return;
+        CancelDragHover();
+        _dragHoverTimer.Tick -= OnDragHoverTimer;
         _tree = 0; // Suppress callbacks during teardown.
         WindowHandle = 0;
         try { if (_advised) At<Unadvise>(tree, 5)(tree, _cookie); }
@@ -313,6 +377,7 @@ internal sealed class NativeShellTree : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int AppendRoot(nint self, nint root, uint enumFlags, uint rootFlags, nint filter);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetState(nint self, nint item, uint mask, uint state);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetState(nint self, nint item, uint mask, out uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int OneItem(nint self, nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetObject(nint self, out nint item);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Count(nint self, out uint count);
@@ -332,7 +397,8 @@ internal sealed class NativeShellTree : IDisposable
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
 internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput,
-    Func<nint, uint, uint, bool> itemClick, bool useExplicitShellIcons = true) : INativeTreeEvents
+    Func<nint, uint, uint, bool> itemClick, Action<nint>? dragHover = null, Action? dragLeave = null,
+    bool useExplicitShellIcons = true) : INativeTreeEvents, INativeTreeDropHandler
 {
     public int OnItemClick(nint item, uint hit, uint click)
     {
@@ -377,6 +443,38 @@ internal sealed class NativeTreeEvents(Action selectionChanged, Action userInput
         return ShellTreeIconIndexResolver.TryResolveShellItem(item, out normal, out open)
             ? 0 : unchecked((int)0x80004001);
     }
+    public int OnDragEnter(nint item, nint data, int outsideSource, uint keyState, ref uint effect)
+    {
+        NotifyDragHover(item);
+        return 0;
+    }
+    public int OnDragOver(nint item, nint data, uint keyState, ref uint effect)
+    {
+        NotifyDragHover(item);
+        return 0;
+    }
+    public int OnDragPosition(nint item, nint data, int newPosition, int oldPosition) => unchecked((int)0x80004001);
+    public int OnDrop(nint item, nint data, int position, uint keyState, ref uint effect)
+    {
+        NotifyDragLeave();
+        return unchecked((int)0x80004001); // The Shell control retains responsibility for the drop operation.
+    }
+    public int OnDropPosition(nint item, nint data, int newPosition, int oldPosition) => unchecked((int)0x80004001);
+    public int OnDragLeave(nint item)
+    {
+        NotifyDragLeave();
+        return 0;
+    }
+    private void NotifyDragHover(nint item)
+    {
+        try { dragHover?.Invoke(item); }
+        catch { /* Hover expansion is optional; preserve the Shell control's drop processing. */ }
+    }
+    private void NotifyDragLeave()
+    {
+        try { dragLeave?.Invoke(); }
+        catch { /* Drag cleanup must not affect the Shell control's drop processing. */ }
+    }
 
     private static T At<T>(nint value, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(value), slot * nint.Size));
@@ -404,4 +502,15 @@ public interface INativeTreeEvents
     [PreserveSig] int OnAfterContextMenu(nint item, nint input, ref Guid iid, out nint menu);
     [PreserveSig] int OnBeforeStateImageChange(nint item);
     [PreserveSig] int OnGetDefaultIconIndex(nint item, out int normal, out int open);
+}
+
+[ComVisible(true), Guid("F9C665D6-C2F2-4C19-BF33-8322D7352F51"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface INativeTreeDropHandler
+{
+    [PreserveSig] int OnDragEnter(nint item, nint data, int outsideSource, uint keyState, ref uint effect);
+    [PreserveSig] int OnDragOver(nint item, nint data, uint keyState, ref uint effect);
+    [PreserveSig] int OnDragPosition(nint item, nint data, int newPosition, int oldPosition);
+    [PreserveSig] int OnDrop(nint item, nint data, int position, uint keyState, ref uint effect);
+    [PreserveSig] int OnDropPosition(nint item, nint data, int newPosition, int oldPosition);
+    [PreserveSig] int OnDragLeave(nint item);
 }

@@ -28,6 +28,8 @@
 
 2026-10-31 目录树悬停展开更正：复核 Windows SDK 的 `_NSTCSTYLE` 文档后发现，`NSTCS_SPRINGEXPAND` 表示切换所选节点时自动折叠先前展开的节点，与拖放悬停计时无关；上方旧记录及功能矩阵把它误判成拖入展开。已从 `NativeShellTree` 样式中移除，并将回归改为拒绝该标志。Q-Dir 官方 FAQ 74 和选项清单确认其独立“Auto-Expand Drag over Time”选项，提供 0.2、0.5、1、1.5、2、3 秒；本项目真实拖入悬停展开与延时设置仍未实现。下一步需评估如何在不丢失 Namespace Tree Shell drop target 的情况下拦截拖入并延迟展开，再实现可取消、按控件生命周期清理的定时行为；不修改系统级鼠标设置。源码级验证通过不代表真实拖放已验收。
 
+2026-10-31 目录树拖入悬停展开接入：Windows SDK 提供的 `INameSpaceTreeControlDropHandler` 可由现有 `TreeAdvise` 事件宿主实现；拖入/悬停回调直接给出鼠标下 Shell 项，无需替换 `IDropTarget`。当前实现对文件夹启动 1 秒 STA Dispatcher 计时；悬停换项、离开、放置、树导航或释放会取消，计时到期后使用原 `IShellItem` 引用调用 `SetItemState(EXPANDED)`，避免重新解析导致虚拟 Shell 位置丢失；Drop 回调返回 `E_NOTIMPL` 且不改写效果，表达本回调未接管文件操作。Release SettingsSmoke 覆盖回调项传递、效果不变、离开/放置清理和不接管 Drop；App 与 NativeProbe Release build 通过（均 0 警告/错误）。仍需在真实 Windows Shell 拖入场景确认 `TreeAdvise` 回调、默认文件操作、目标目录和延时视觉行为；目前延时固定 1 秒，Q-Dir 的 0.2/0.5/1/1.5/2/3 秒选项未实现。路线图及[竞品调研](competitive-research.md#2026-10-31-官方功能清单细化)已同步该边界。
+
 2026-10-31 F5 绘制租约收窄：普通文件系统目录优先用 `SHCNE_UPDATEDIR` 原地同步，现仅在该通知不可用、退回 `IShellView.Refresh()` 时申请短期 `IFolderView2.SetRedraw(FALSE)`；此前成功通知路径也被冻结，可能让旧画面停留在更新期间。门控合同在 Release `SettingsSmoke` 中覆盖通知成功/失败与普通刷新，完整 smoke 和 App Release build 通过（0 警告/错误）。这只修正冻结范围；F5 的像素闪烁、冻结时输入命中、慢目录和虚拟 Shell 路径仍待集中 GUI 验收。实现依据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 04:12 北京时间内存观察：对仍运行的 temp.80 PID `47460` 做 60 秒只读复采（13 点），Working Set `223.19→223.15 MiB`、Private Bytes `114.84→114.75 MiB`，句柄 `1,112–1,114`、线程 `35–37`、GDI `95`、USER `105–107`；本窗口没有单调增长。未操作应用且没有固定负载，因此此样本只反映短时静置计数，不能排除用户操作期间或长期运行的增长，也不能归因来源；身份、哈希和完整限制见[内存采样记录](memory-sampling.md#2026-10-31-0412-北京时间temp80-当前运行实例一分钟被动复采)。
