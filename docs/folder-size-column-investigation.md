@@ -36,7 +36,7 @@
 
 ## 2026-10-30：Shell 项目菜单与视图菜单边界
 
-用枚举得到的子 PIDL 经 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 查询项目菜单，并经父 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询文件夹背景菜单；两者都返回菜单命令，查询期间没有显示菜单、执行命令或改变前台窗口。当前系统上菜单命令数分别为 154 和 115，数量包含已安装的扩展，不能按数量推断 Windows 自带命令数。背景菜单根项包含扩展项、新建、属性；没有查看、排序、分组、刷新。
+用枚举得到的子 PIDL 经 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 查询项目菜单，并经父 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询文件夹背景菜单；两者都返回菜单命令，查询期间没有显示菜单、执行命令或改变前台窗口。探针递归读取全部 `HMENU` 子菜单，确认确实遍历了 TortoiseGit/SVN 子菜单；当前机器的 folder 背景菜单根项包含扩展项、新建、属性，完整菜单树仍没有查看、排序、分组、刷新。菜单命令数分别为 154 和 115，数量包含已安装的扩展，不能按数量推断 Windows 自带命令数。
 
 源码对照确认，产品从 `ExplorerBrowser.GetCurrentView` 取得当前 `IShellView`，再通过 `IShellView::GetItemObject(SVGIO_BACKGROUND/SVGIO_SELECTION, IID_IContextMenu)` 获取以当前视图为上下文的菜单对象；这与直接从 `IShellFolder` 查询的对象不同。故本探针只证明项目/文件夹 context menu 可按 PIDL 查询，不证明自有 ListView 能复用完整 Explorer 文件区菜单。若继续实验自有视图，必须单独证明视图级菜单命令能正确作用于它自己的查看、排序、分组状态；否则保留 ExplorerBrowser 是维持该项体验的已知路径。未修改产品或 GUI。
 
