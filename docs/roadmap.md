@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 克隆搜索选区探针复核：当前 `main` 的 `dotnet run --project src/ExplorerDirs.HostProbe -c Release -- --pane-tab-transfer` 在 18.8 秒后以 exit code 1 超时，等待源搜索标签记录选区。该用例通过直接 `IShellView.SelectItem` 选中搜索结果，未模拟真实用户输入；产品选区历史快照依赖 Shell `SelectionContextChanged` 回调，因此这次结果既不能判为产品缺陷，也不能计作搜索选区恢复通过。没有观察到 GUI/前台窗口变化。保持产品代码不变，停止重复运行同一隐藏视图探针；搜索选区自动捕获与克隆恢复留待集中可见验收确认。
+
 2026-10-30 Private Desktop 隔离判定修正：上一轮拖放探针曾报告运行中前台短暂变化、输入 tick 变化，但因结束时前台句柄恢复仍退出 0。探针监视现在逐轮采样全局输入 tick，并将任何已观察前台变化、结束前台不一致或输入变化统一判为隔离失败；纯策略 smoke 覆盖稳定通过、瞬时前台切换失败、输入重叠失败及结束前台不同失败。首轮 smoke 在策略缺失时按预期编译失败，补实现后 smoke 通过；NativeProbe Release build 0 警告/错误。没有重跑 Private Desktop/Shell view，因此不对桌面环境做新断言；先前拖放样本依旧不算通过隔离门槛。
 
 2026-10-30 Private Desktop 拖放目标诊断：`--shell-view-drop-target-private-desktop` 退出码 0；真实 Shell `IDataObject` 通过直接 `IDropTarget` 调用完成目标窗格/文件夹的复制和移动场景，并核对源/目标文件状态，跨卷默认复制及 Shift+Move 也通过。该命令没有调用 `DoDragDrop`，且比较的是 `IShellView.GetItemObject`/`IShellFolder.CreateViewObject` 目标，不是自有 `SysListView32`。`IShellView.GetItemObject` 目标的 Copy 候选为 false；探针当前未把该候选列入失败条件。运行监视还观察到前台短暂由 Feishu 切换到 ChatGPT，输入 tick 同期变化，结束时前台句柄恢复原值；因此本轮不是通过前台隔离门槛的完整运行，后续不重跑 Private Desktop 拖放，直到明确解决前台/输入变动来源。真实 OLE 拖动和自有 ListView 接入仍未验证。
