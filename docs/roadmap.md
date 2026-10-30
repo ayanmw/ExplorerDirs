@@ -4926,3 +4926,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 用户反馈 F5 与切换查看方式仍会出现明显列表黑屏。检查发现查看方式的重绘抑制包住 `SetViewModeAndIconSize`，现移除这层抑制，让 Shell 控件自行完成模式重排。
 - F5 的 `IShellView::Refresh` 仍只刷新当前 Shell 文件视图内容。重绘恢复不再仅凭 WPF `ContextIdle` 判定，而是等待原生行数连续三次相同（50 ms 采样），最多等待 1.5 秒；恢复绘制后只使当前 Shell 视图 HWND 失效一次，补上重绘请求。不会重新创建 ExplorerBrowser 或导航到同一路径。
 - App Release 构建通过（0 警告/错误）。当前未打开可见 UI；黑屏持续时间、慢速/虚拟 Shell 位置的体验需后续集中验收，本次不宣称视觉问题已解决。
+
+## 2026-10-31：F5 与查看方式切换调用链复核
+
+- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshPreservingLastFrame → IShellView.Refresh`。仅显式用户刷新持有短时 `IFolderView2.SetRedraw` 租约，行数连续稳定后释放，最多等待 1.5 秒；目录 watcher、筛选等内部刷新不使用该租约。它更新当前 Shell 视图内容，不重建 ExplorerBrowser、标签、导航历史或窗格。
+- 查看方式切换只调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，随后在 Dispatcher `ContextIdle` 读取其余配置，不重枚举目录。Shell 仍需重排/重绘列表项目，因此这不是只改一个模式标志就能避免列表重绘的操作。
+- 源码复核发现先前“已移除 F5 SetRedraw”的记录已被后续仅针对手动 F5 的有限租约取代，已同步修正 shell-parity 说明。没有可见像素证据证明当前租约消除了黑屏；本轮不添加新的重绘拦截或整窗格失效。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否保留租约或改用更窄的呈现路径。
