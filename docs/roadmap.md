@@ -4971,3 +4971,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 由当前干净主线 `7366323386e6f0d12d3c23c34b9fa355b8c022a3` 执行 `run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-170136-670-23c890/`。manifest 为 `prepared-not-run`，初始四窗格、41 项待验收；EXE 与 App DLL 的 SHA-256 均独立复核匹配 manifest。
 - 候选包含 F5 刷新及查看方式切换的可见验收场景，未启动应用或创建 ExplorerBrowser，不是 `releases/` 日常预览包。当前最新身份见[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+
+### 候选更新：修正 DefView/DirectUI 诊断目标后重建
+
+- 主线提交 `d8bba8fdc4457896ce89aee957089be69687d8d0` 重新执行 `run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-170453-968-58fecc/`。manifest 为 `prepared-not-run`，四窗格、41 项待验收；EXE 与 App DLL 哈希独立复核匹配。
+- 未启动应用或 ExplorerBrowser；候选仍是集中 UI 验收副本，不是 release。最新身份已更新到[候选索引](gui-acceptance-2026-10-31-main-prepared-latest.md)。
