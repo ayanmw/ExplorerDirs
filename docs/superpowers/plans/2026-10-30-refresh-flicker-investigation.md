@@ -105,3 +105,11 @@ The earlier product-host F5 probe confirmed the four-pane counts, 3-item selecti
 - [ ] While the previous frame is held, click and keyboard-navigate rows; confirm the visible item and Shell hit target do not diverge. `IFolderView2::SetRedraw` only promises redraw on/off, not input suppression ([Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifolderview2-setredraw)). If a click or key targets an item different from the visible row, remove the redraw lease.
 
 This candidate intentionally holds the last painted F5 frame while the list repopulates. The API contract does not establish that input is disabled while painting is paused; stale visuals could therefore mislead clicks or keyboard input. The 1.5-second threshold is checked by a background-priority DispatcherTimer and is not a hard wall-clock cap while the UI thread is blocked. It may reduce the blank interval, but if Shell does not invalidate its list after redraw is re-enabled it could leave a stale frame. No whole-view reconstruction or pixel snapshot is used. A failed candidate should be removed rather than expanded with broad forced redraw flags.
+
+### Task 7: Capture the product F5 paint timeline in HostProbe
+
+- [x] Make the existing `--live-shell-refresh` HostProbe call `RefreshPreservingLastFrame`, the same product entry used by F5, Ctrl+R and the refresh buttons.
+- [x] Include the native `WM_PAINT` / `WM_ERASEBKGND` timeline in the probe result, alongside its existing row-count, selection and focus assertions.
+- [x] Build `ExplorerDirs.HostProbe` Release successfully with 0 warnings and 0 errors; commit as `1177988` on `main`.
+- [ ] Run the hidden host only after a current idle-desktop handoff and explicit test authorization. Project rules note that even a hidden ExplorerBrowser host can change the system foreground.
+- [ ] Use the timeline to distinguish time spent inside Shell paint handling from gaps between paint messages. It cannot establish displayed pixels or stale hit-target correctness; those still require the planned visible acceptance pass.

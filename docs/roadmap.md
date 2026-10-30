@@ -4938,6 +4938,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 现有 Shell callback trace 开启时，F5 与实际查看方式变更分别记录 2 秒内子窗口 `WM_PAINT` / `WM_ERASEBKGND` 的相对时间、窗口类名、Shell 处理耗时和返回值，最多 256 条。未开启 trace 时不采集这组消息；记录逻辑不改变 Shell 绘制或输入。
 - App Release build 通过，0 警告/错误；没有启动窗口或运行测试。该诊断仅能判断消息时序，不能看到像素、测量肉眼空白时长或证明鼠标命中一致；需在集中验收时结合画面记录读取，之后再决定绘制策略。
 
+2026-10-31 F5 绘制时间线接入实际手动刷新入口：Release HostProbe 的 `--live-shell-refresh` 现在调用产品的 `RefreshPreservingLastFrame`，并在原有行数、选区、焦点结果中输出该视图的 `WM_PAINT` / `WM_ERASEBKGND` 时间线。HostProbe/App Release build 通过（0 警告、0 错误），提交 `1177988`。本轮没有运行 ExplorerBrowser 宿主：项目规则要求隐藏宿主实验前确认桌面空闲和当前授权，且其可能改变系统前台。该探针可以补充 Shell 绘制消息顺序与处理耗时，不能读取像素或验证冻结画面期间的鼠标命中；F5 黑屏改善仍待隐藏诊断和集中可见验收分别确认。
+
 ## 2026-10-31：预览格式过滤等待 Q-Dir 可见确认
 
 - 用户决定先等集中 Q-Dir 验收后再决定：扩展名不匹配的文件是否留在文件列表。Q-Dir FAQ 34 同时提到预览扩展名列表与“过滤后减少文件视图项目”，单靠公开页不能确认实际语义；FAQ 38 的每视图文件过滤是另一项功能。
