@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -89,6 +90,7 @@ public partial class PaneControl : UserControl
         public string? StartupSearchUri { get; set; }
         public bool ReplayClonedHistory { get; set; }
         public bool HistoryReplayReady { get; set; }
+        public DispatcherOperation? HistorySelectionCaptureOperation { get; set; }
         public required ShellTabNavigationHistory NavigationHistory { get; init; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
@@ -528,6 +530,39 @@ public partial class PaneControl : UserControl
             ? state.HistoryReplayReady && state.NavigationHistory.CanGoForward : state.Browser.CanGoForward);
     }
 
+    private void QueueHistorySelectionCapture(TabState state)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished ||
+            state.ReplayClonedHistory && !state.HistoryReplayReady) return;
+        var browser = state.Browser;
+        var location = browser.CurrentSearchUri ?? browser.CurrentPath;
+        if (!string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
+        var viewGeneration = browser.ViewGeneration;
+        state.HistorySelectionCaptureOperation?.Abort();
+        DispatcherOperation? operation = null;
+        operation = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
+        {
+            if (ReferenceEquals(state.HistorySelectionCaptureOperation, operation))
+                state.HistorySelectionCaptureOperation = null;
+            if (!ReferenceEquals(state.Owner, this) || state.Browser.ViewGeneration != viewGeneration ||
+                !string.Equals(location, state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
+            try
+            {
+                var selectedItems = browser.CaptureSelectedShellParsingNames();
+                if (state.Browser.ViewGeneration != viewGeneration ||
+                    !string.Equals(location, state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
+                state.NavigationHistory.UpdateCurrentSelection(selectedItems);
+            }
+            catch (InvalidOperationException) { }
+            catch (COMException ex) { Trace.WriteLine($"Tab history selection capture: 0x{ex.HResult:X8}"); }
+        }));
+        state.HistorySelectionCaptureOperation = operation;
+    }
+
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CurrentPath => Current?.Path ?? Home;
     private string AddressTextPath => ClassicAddressBarPath.Format(CurrentPath,
@@ -905,6 +940,7 @@ public partial class PaneControl : UserControl
             if (state.Browser.ViewCaptureFailed)
                 throw new InvalidOperationException("Shell 视图状态暂时不可读取；未克隆视图。");
             var selectedItems = state.Browser.CaptureSelectedShellParsingNames();
+            state.NavigationHistory.UpdateCurrentSelection(selectedItems);
             AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
@@ -1680,6 +1716,7 @@ public partial class PaneControl : UserControl
         browser.SelectionContextChanged += (_, _) =>
         {
             var owner = state.Owner;
+            owner.QueueHistorySelectionCapture(state);
             if (owner.Current == state)
             {
                 if (owner._recursiveSizeIsSelection && ReferenceEquals(owner._recursiveSizeOwner, state))
@@ -1713,6 +1750,11 @@ public partial class PaneControl : UserControl
         browser.NavigationStarting += (_, _) =>
         {
             var owner = state.Owner;
+            if (state.ReplayClonedHistory)
+            {
+                state.HistoryReplayReady = false;
+                if (owner.Current == state) owner.RefreshNavigationAvailability();
+            }
             if (!state.SearchRequestPending && state.Browser.SearchQuery is null)
                 owner.SetSearchScope(state, null);
             if (ReferenceEquals(owner._recursiveSizeOwner, state) || ReferenceEquals(owner._lastRecursiveSizeOwner, state))
@@ -1733,10 +1775,13 @@ public partial class PaneControl : UserControl
             var navigatedPath = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
             var restoringStartupSearch = completesInput && state.StartupSearchUri is not null;
+            var restoringStartupSelection = completesInput && state.StartupSelectItems is not null;
+            var completingHistoryMove = state.NavigationHistory.HasPendingMove;
+            IReadOnlyList<string>? selectionToRestore = null;
             if (completesInput && !restoringStartupSearch && state.StartupSelectItems is { } startupSelectItems)
             {
                 state.StartupSelectItems = null;
-                browser.QueueShellItemSelections(startupSelectItems);
+                selectionToRestore = startupSelectItems;
             }
             if (completesInput)
             {
@@ -1747,6 +1792,11 @@ public partial class PaneControl : UserControl
             if (restoreSearchCloseFocus) owner._searchCloseFocusPending = null;
             if (!restoringStartupSearch) state.NavigationHistory.Record(navigatedPath);
             if (state.ReplayClonedHistory && !restoringStartupSearch) state.HistoryReplayReady = true;
+            if (completesInput && !restoringStartupSearch && selectionToRestore is null && state.ReplayClonedHistory)
+                selectionToRestore = state.NavigationHistory.CurrentSelection;
+            if (selectionToRestore is { Count: > 0 }) browser.QueueShellItemSelections(selectionToRestore);
+            if (!restoringStartupSearch && !restoringStartupSelection && !completingHistoryMove)
+                owner.QueueHistorySelectionCapture(state);
             state.AddressHistory.Record(navigatedPath);
             owner.UpdateTabHeader(state);
             if (owner.Current == state)
@@ -1795,15 +1845,22 @@ public partial class PaneControl : UserControl
             var owner = state.Owner;
             var query = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
+            var restoringStartupSelection = completesInput && state.StartupSelectItems is not null;
+            var completingHistoryMove = state.NavigationHistory.HasPendingMove;
             if (completesInput) state.SearchRequestPending = false;
             if (browser.CurrentSearchUri is { } searchUri) state.NavigationHistory.Record(searchUri);
             if (state.ReplayClonedHistory) state.HistoryReplayReady = true;
             if (owner.Current == state) owner.RefreshNavigationAvailability();
+            IReadOnlyList<string>? selectionToRestore = null;
             if (completesInput && state.StartupSelectItems is { } startupSelectItems)
             {
                 state.StartupSelectItems = null;
-                browser.QueueShellItemSelections(startupSelectItems);
+                selectionToRestore = startupSelectItems;
             }
+            else if (completesInput && state.ReplayClonedHistory)
+                selectionToRestore = state.NavigationHistory.CurrentSelection;
+            if (selectionToRestore is { Count: > 0 }) browser.QueueShellItemSelections(selectionToRestore);
+            if (!restoringStartupSelection && !completingHistoryMove) owner.QueueHistorySelectionCapture(state);
             if (ReferenceEquals(owner._searchCloseFocusPending, state)) return;
             owner.UpdateTabHeader(state);
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
@@ -1832,6 +1889,11 @@ public partial class PaneControl : UserControl
             state.StartupSearchUri = null;
             state.StartupSelectItems = null;
             state.SearchRequestPending = false;
+            if (state.ReplayClonedHistory)
+            {
+                state.HistoryReplayReady = true;
+                if (owner.Current == state) owner.RefreshNavigationAvailability();
+            }
             if (ReferenceEquals(owner._searchCloseFocusPending, state))
                 owner._searchCloseFocusPending = null;
             if (owner.Current == state)
@@ -1898,7 +1960,12 @@ public partial class PaneControl : UserControl
         // Window closure does not dispose HwndHost children: WPF can park them
         // under its hidden window. Release every tab, including inactive ones.
         foreach (var tab in Tabs.Items.Cast<TabItem>())
-            DisposeHost(((TabState)tab.Tag).Browser);
+        {
+            var state = (TabState)tab.Tag;
+            state.HistorySelectionCaptureOperation?.Abort();
+            state.HistorySelectionCaptureOperation = null;
+            DisposeHost(state.Browser);
+        }
         DisposeHost(_treeHost);
         DisposeHost(AddressTreeHost);
 
@@ -2061,6 +2128,8 @@ public partial class PaneControl : UserControl
             _closedTabs.Clear();
             foreach (var tab in recent) _closedTabs.Push(tab);
         }
+        state.HistorySelectionCaptureOperation?.Abort();
+        state.HistorySelectionCaptureOperation = null;
         Tabs.Items.Remove(state.Tab);
         _tabOrder.Remove(state.Tab);
         UpdateTabOrders();

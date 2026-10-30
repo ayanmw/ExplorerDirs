@@ -7,36 +7,48 @@ namespace ExplorerDirs.App;
 internal sealed class ShellTabNavigationHistory
 {
     private const int MaximumLocations = 100;
-    private readonly List<string> _locations;
+    internal sealed record Stop(string Location, IReadOnlyList<string> SelectedItems);
+
+    private readonly List<Stop> _locations;
     private int _index;
     private int? _pendingIndex;
 
     internal ShellTabNavigationHistory(string initialLocation)
     {
-        _locations = [initialLocation];
+        _locations = [new(initialLocation, [])];
     }
 
-    private ShellTabNavigationHistory(IReadOnlyList<string> locations, int index)
+    private ShellTabNavigationHistory(IReadOnlyList<Stop> locations, int index)
     {
         if (locations.Count == 0) throw new ArgumentException("Navigation history cannot be empty.", nameof(locations));
         if ((uint)index >= (uint)locations.Count) throw new ArgumentOutOfRangeException(nameof(index));
-        _locations = locations.ToList();
+        _locations = locations.Select(stop => new Stop(stop.Location, stop.SelectedItems.ToArray())).ToList();
         _index = index;
     }
 
-    internal string Current => _locations[_index];
+    internal string Current => _locations[_index].Location;
+    internal IReadOnlyList<string> CurrentSelection => _locations[_index].SelectedItems;
     internal int Index => _index;
+    internal bool HasPendingMove => _pendingIndex is not null;
     internal bool CanGoBack => _pendingIndex is null && _index > 0;
     internal bool CanGoForward => _pendingIndex is null && _index < _locations.Count - 1;
 
-    internal static ShellTabNavigationHistory FromSnapshot(IReadOnlyList<string> locations, int index) =>
+    internal static ShellTabNavigationHistory FromSnapshot(IReadOnlyList<Stop> locations, int index) =>
         new(locations, index);
 
-    internal IReadOnlyList<string> Snapshot() => _locations.ToArray();
+    internal IReadOnlyList<Stop> Snapshot() =>
+        _locations.Select(stop => new Stop(stop.Location, stop.SelectedItems.ToArray())).ToArray();
+
+    internal void UpdateCurrentSelection(IEnumerable<string> selectedItems)
+    {
+        var selected = selectedItems.Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        _locations[_index] = _locations[_index] with { SelectedItems = selected };
+    }
 
     internal void Record(string location)
     {
-        if (_pendingIndex is { } pending && SameLocation(_locations[pending], location))
+        if (_pendingIndex is { } pending && SameLocation(_locations[pending].Location, location))
         {
             _index = pending;
             _pendingIndex = null;
@@ -46,7 +58,7 @@ internal sealed class ShellTabNavigationHistory
         if (SameLocation(Current, location)) return;
         if (_index < _locations.Count - 1)
             _locations.RemoveRange(_index + 1, _locations.Count - _index - 1);
-        _locations.Add(location);
+        _locations.Add(new(location, []));
         _index = _locations.Count - 1;
         if (_locations.Count > MaximumLocations)
         {
@@ -64,13 +76,13 @@ internal sealed class ShellTabNavigationHistory
             return false;
         }
         _pendingIndex = target;
-        location = _locations[target];
+        location = _locations[target].Location;
         return true;
     }
 
     internal bool CommitLocation(string location)
     {
-        if (_pendingIndex is not { } pending || !SameLocation(_locations[pending], location))
+        if (_pendingIndex is not { } pending || !SameLocation(_locations[pending].Location, location))
             return false;
         _index = pending;
         _pendingIndex = null;

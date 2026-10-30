@@ -8,14 +8,21 @@ internal static class ShellTabNavigationHistorySmoke
     public static void Run()
     {
         var history = new ShellTabNavigationHistory(@"C:\start");
+        history.UpdateCurrentSelection([@"C:\start\start.txt"]);
         history.Record(@"C:\middle");
+        history.UpdateCurrentSelection([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]);
         history.Record("search-ms:query=one");
+        history.UpdateCurrentSelection([@"C:\results\match.txt"]);
         Check(history.TryBeginMove(back: true, out var backTarget) && backTarget == @"C:\middle",
             "cloned view history exposes the prior ordinary Shell location");
-        Check(history.CommitLocation(@"C:\middle") && history.Current == @"C:\middle" && history.CanGoForward,
-            "a completed back navigation moves the cloned history cursor");
+        Check(history.CommitLocation(@"C:\middle") && history.Current == @"C:\middle" && history.CanGoForward &&
+              history.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
+            "a completed back navigation restores the target stop and its saved selection");
         history.Record(@"C:\branch");
-        Check(!history.CanGoForward && history.Snapshot().SequenceEqual([@"C:\start", @"C:\middle", @"C:\branch"]),
+        Check(!history.CanGoForward && history.Snapshot().Select(stop => stop.Location)
+                  .SequenceEqual([@"C:\start", @"C:\middle", @"C:\branch"]) &&
+              history.Snapshot()[0].SelectedItems.SequenceEqual([@"C:\start\start.txt"]) &&
+              history.Snapshot()[1].SelectedItems.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
             "a new navigation truncates the cloned forward branch");
         Check(history.TryBeginMove(back: true, out var pending) && pending == @"C:\middle" &&
               !history.TryBeginMove(back: true, out _) && history.CancelPendingMove(),
@@ -23,20 +30,24 @@ internal static class ShellTabNavigationHistorySmoke
 
         var cloned = ShellTabNavigationHistory.FromSnapshot(history.Snapshot(), history.Index);
         Check(cloned.Current == history.Current && cloned.TryBeginMove(back: true, out var cloneTarget) &&
-              cloneTarget == @"C:\middle",
-            "a cloned view keeps an independent copy of its location history");
+              cloneTarget == @"C:\middle" && cloned.CommitLocation(@"C:\middle") &&
+              cloned.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
+            "a cloned view keeps independent locations and per-stop selections");
 
         var search = new ShellTabNavigationHistory(@"C:\scope");
+        search.UpdateCurrentSelection([@"C:\scope\before.txt"]);
         const string searchUri = "search-ms:query=report&crumb=location:C%3A%5Cscope";
         search.Record(searchUri);
+        search.UpdateCurrentSelection([@"C:\scope\report.txt"]);
         Check(search.TryBeginMove(back: true, out var searchBack) && searchBack == @"C:\scope" &&
               search.CommitLocation(@"C:\scope") && search.TryBeginMove(back: false, out var searchForward) &&
-              searchForward == searchUri && search.CommitLocation(searchUri),
-            "search result URIs remain distinct history locations and can be replayed in both directions");
+              searchForward == searchUri && search.CommitLocation(searchUri) &&
+              search.CurrentSelection.SequenceEqual([@"C:\scope\report.txt"]),
+            "search result URIs and their selection snapshot remain distinct history stops");
 
         var bounded = new ShellTabNavigationHistory(@"C:\0");
         for (var index = 1; index <= 120; index++) bounded.Record($@"C:\{index}");
-        Check(bounded.Snapshot().Count == 100 && bounded.Snapshot()[0] == @"C:\21" &&
+        Check(bounded.Snapshot().Count == 100 && bounded.Snapshot()[0].Location == @"C:\21" &&
               bounded.Current == @"C:\120" && bounded.Index == 99,
             "cloned view history keeps a bounded set of recent locations");
 
@@ -51,8 +62,13 @@ internal static class ShellTabNavigationHistorySmoke
         Check(paneSource.Contains("\"克隆当前视图\", () => CloneView(state)", StringComparison.Ordinal) &&
               !duplicateCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
               cloneCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
-              cloneCode.Contains("CaptureSelectedShellParsingNames", StringComparison.Ordinal),
-            "the tab menu separates existing duplicate behavior from history-and-selection cloning");
+              cloneCode.Contains("CaptureSelectedShellParsingNames", StringComparison.Ordinal) &&
+              paneSource.Contains("var selectedItems = browser.CaptureSelectedShellParsingNames();", StringComparison.Ordinal) &&
+              paneSource.Contains("state.Browser.ViewGeneration != viewGeneration", StringComparison.Ordinal) &&
+              paneSource.Contains("state.NavigationHistory.CurrentSelection", StringComparison.Ordinal) &&
+              paneSource.Contains("state.HistoryReplayReady = false", StringComparison.Ordinal) &&
+              paneSource.Contains("state.HistoryReplayReady = true", StringComparison.Ordinal),
+            "the tab menu separates duplicate behavior while clone history captures and restores each stop's selection");
 
         static void Check(bool condition, string message)
         {
