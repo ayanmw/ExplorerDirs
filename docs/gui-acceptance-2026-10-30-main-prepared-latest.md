@@ -1,28 +1,25 @@
 # 2026-10-30 主线集中验收候选（最新）
 
-这是后续集中可见验收用的隔离副本，不是发布版本，也没有启动窗口。候选基于当前主线，包含克隆视图历史/选区、Q-Dir 颜色配置会话保真、复制标签选区恢复、最近收藏标题按窗口 session 跨重启保存及隔离文件夹夹具。
+此候选用于之后集中做可见验收，不是 `releases/` 日常预览版；状态为 `prepared-not-run`。准备过程只构建并生成隔离副本与夹具，没有启动程序、创建 ExplorerBrowser、发送输入、修改真实注册表或剪贴板。
 
 ## 固定身份
 
-- 源提交：`103d15c6c94044834bc47323c07a43993ec91a44`，准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261030-022742-972-3c2dad/`。
-- BuildIdentity：`gui-acceptance.20261030-022742-972-3c2dad+103d15c6c94044834bc47323c07a43993ec91a44`。
-- 状态：`prepared-not-run`，39 项待验收。
-- EXE SHA-256：`33BD4494E39F30F628A94EA186F9FF7E23D5F1ED1871B0E39D19FA72D7CCF51A`。
-- App DLL SHA-256：`0A23E2E568B168E513D9E0AA0CA20DFB8F6F598430A86F029D272F45C6AD5E73`。
-- `qdr-color-metadata.qdr` SHA-256：`D9452C2B460C95BC05A8D0D2179B199AAFD9EF17F7A577CD2E383649C93CD200`。
-- `qdr-tab-capacity-99.qdr` SHA-256：`08E49B117BEE4D3443A47635896B7E1C2A033EB8354DAD9137E51A2501402265`。
+- 源提交：`86fe9d383c9492860d2ad0465a607a09af03f8b2`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261030-025641-143-4d9f9d/`。
+- BuildIdentity：`gui-acceptance.20261030-025641-143-4d9f9d+86fe9d383c9492860d2ad0465a607a09af03f8b2`。
+- 状态：`prepared-not-run`，39 项待验收；四窗格初始布局。
+- EXE SHA-256：`C8ADA05854A24D638B5531F4BCDF4EEFB60F834832F1DCE1C2FC809A808E19B1`。
+- App DLL SHA-256：`5D8A851D68BA4DED6A8358962EE8CF7F23010546C26E2C5B0CFF5275DBDDA098`。
+- `qdr-color-metadata.qdr` SHA-256：`D0B259428553B63FA2A75D172367ED0745CF91A5B9A3194BCE66E780EA04C4E3`。
+- `qdr-tab-capacity-99.qdr` SHA-256：`EEF8DC579CF9B0C0A29F0AB42269D0DA6D51263C10ABC24433339D9A563231CE`。
 - `qdir-program-items.ini` SHA-256：`ED433EA6803E47D30CC85B117A839C2049BDA0C3F3D6A390A457641EDE4D99BC`。
-- 初始布局为四窗格，使用副本自己的 profile 和隔离文件夹；包含 10,000 个递归大小测试文件及跨窗格复制/移动样本。
+- `acceptance-files/recursive-size-progress` 有 10,000 个测试文件，并包含跨窗格复制/移动样本；Profile 与真实 Explorer 注册表分离。
 
-## 本次更新与验证范围
+## 本次可见验收重点
 
-验收清单包含“使用 Explorer 浏览”、最近收藏标题的双窗口独立恢复、地址栏/键盘导航、文件操作和 10,000 个文件的递归大小进度。克隆视图保持独立于“复制当前标签”：检查普通目录与搜索结果选区、逐站 Back/Forward、前进分支截断，以及捕获期间导航/选区变化时拒绝创建混合状态标签。异步搜索结果身份和快照代次由 SettingsSmoke 覆盖，可见窗口中的焦点和自动选区恢复仍待验收。
+- 文件区焦点、Tab/Shift+Tab、复制粘贴和 Shift+Delete 后方向键、F2 编辑；逐窗格查看方式与列值筛选菜单。
+- 标签栏“使用 Explorer 浏览”、空白处右键、独立“克隆视图”的路径/逐站选区/搜索历史行为。
+- Q-Dir `.qdr` 颜色字段导入导出保真、浅深主题及原生菜单边框；文件夹入口只读预览，不启用真实注册表入口。
+- 10,000 项列值筛选分页、F9 递归大小进度与取消、程序启动器导入预览、双窗口位置与 session 恢复。
 
-列值分页菜单纳入大目录验收：在 10,000 个不同名称中翻页、勾选后返回并确认勾选状态，再清除并核对结果恢复；分页纯逻辑由 SettingsSmoke 覆盖，菜单实际观感与响应仍待验收。
-
-颜色元数据步骤导入 `qdr-color-metadata.qdr`，检查预览说明颜色规则被保留但未应用，再导出到新文件并逐行比对 `useColor`、`useTreeColor`、`colorthema` 和 `[Filter2]` 行顺序。此项验证状态文件保真，不代表 ExplorerBrowser 已显示逐项颜色；Q-Dir 打开并重存导出文件仍待验收。浅深主题回归使用独立的 `qdr-color-baseline.qdr`。
-
-准备命令为 `pwsh -NoProfile -File src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，于 2026-10-30 成功。manifest 的源提交与主线 HEAD 一致，`SourceWorkingTreeDirty=false`；EXE、App DLL、颜色夹具、容量夹具和程序启动器夹具的实测哈希均与 manifest 一致。准备过程未启动窗口、创建 ExplorerBrowser、发送输入、改动剪贴板或真实注册表。
-
-候选仅供之后集中可见验收；准备成功不代表可见交互、Shell 菜单或真实 Q-Dir 互操作通过。旧副本保留在各自 `src/.state/gui-smoke/` 目录。
+完整 39 项清单在副本的 `preparation.json` 中。构建后已复核源提交与 `SourceWorkingTreeDirty=false`，并重算 manifest 中 EXE、DLL 和主要导入夹具哈希，全部匹配。该候选包含本次单次目录树扫描实现，但不证明产品逐项大小列已接入；该能力仍停留在隔离架构验证。
