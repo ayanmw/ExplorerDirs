@@ -5413,12 +5413,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
             if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
             {
-                if (timingClass.Equals("SysListView32", StringComparison.OrdinalIgnoreCase) &&
-                    IsNativeListMutationMessage(message))
+                if (message == 0x000B) // WM_SETREDRAW.
                 {
-                    var itemCount = SendMessage(hwnd, 0x1004, IntPtr.Zero, IntPtr.Zero).ToInt64(); // LVM_GETITEMCOUNT.
                     _nativePaintTransitionSamples.Add(
-                        $"{elapsed.TotalMilliseconds:F1}ms/list-{message:X}/{ListMutationName(message)}/count={itemCount}/w={wParam.ToInt64():X}");
+                        $"{elapsed.TotalMilliseconds:F1}ms/{timingClass}/WM_SETREDRAW/on={wParam != IntPtr.Zero}");
                 }
                 else if (message is 0x000F or 0x0014) // WM_PAINT / WM_ERASEBKGND
                 {
@@ -5427,6 +5425,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 }
                 else if (IsNativeTransitionInputMessage(message))
                     _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/input-{message:X}/{timingClass}");
+                else if (IsShellViewLayoutMessage(timingClass, message))
+                {
+                    var shellTicks = Stopwatch.GetTimestamp() - beforeShell;
+                    _nativePaintTransitionSamples.Add(
+                        $"{elapsed.TotalMilliseconds:F1}ms/layout-{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellTicks):F2}");
+                }
+                else if (IsShellViewPrivateMessage(timingClass, message))
+                {
+                    var shellTicks = Stopwatch.GetTimestamp() - beforeShell;
+                    _nativePaintTransitionSamples.Add(
+                        $"{elapsed.TotalMilliseconds:F1}ms/private-{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellTicks):F2}");
+                }
             }
         }
         if (timingSample)
@@ -5457,28 +5467,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0205 or 0x0207 or 0x0208 or // mouse buttons
         0x020A or 0x020E; // vertical/horizontal mouse wheel
 
-    private static bool IsNativeListMutationMessage(uint message) => message is
-        0x000B or // WM_SETREDRAW
-        0x1008 or 0x1009 or // LVM_DELETEITEM / LVM_DELETEALLITEMS
-        0x1015 or 0x1016 or // LVM_REDRAWITEMS / LVM_ARRANGE
-        0x102F or 0x1030 or // LVM_SETITEMCOUNT / LVM_SORTITEMS
-        0x1006 or 0x1007 or 0x104C or 0x104D or // LVM_SETITEM / LVM_INSERTITEM (ANSI and Unicode)
-        0x102E or 0x1074; // LVM_SETITEMTEXT (ANSI and Unicode)
+    private static bool IsShellViewLayoutMessage(string windowClass, uint message) =>
+        IsShellViewWindowClass(windowClass) && message is 0x0018 or 0x0005 or 0x0047 or 0x0082; // WM_SHOWWINDOW, WM_SIZE, WM_WINDOWPOSCHANGED, WM_NCDESTROY.
 
-    private static string ListMutationName(uint message) => message switch
-    {
-        0x000B => "WM_SETREDRAW",
-        0x1006 or 0x104C => "LVM_SETITEM",
-        0x1007 or 0x104D => "LVM_INSERTITEM",
-        0x1008 => "LVM_DELETEITEM",
-        0x1009 => "LVM_DELETEALLITEMS",
-        0x1015 => "LVM_REDRAWITEMS",
-        0x1016 => "LVM_ARRANGE",
-        0x102F => "LVM_SETITEMCOUNT",
-        0x1030 => "LVM_SORTITEMS",
-        0x102E or 0x1074 => "LVM_SETITEMTEXT",
-        _ => "LVM_UNKNOWN"
-    };
+    private static bool IsShellViewPrivateMessage(string windowClass, uint message) =>
+        IsShellViewWindowClass(windowClass) && message >= 0x0400;
+
+    private static bool IsShellViewWindowClass(string windowClass) =>
+        windowClass.Equals("SHELLDLL_DefView", StringComparison.OrdinalIgnoreCase) ||
+        windowClass.Equals("DirectUIHWND", StringComparison.OrdinalIgnoreCase);
 
     private string GetDiagnosticWindowClass(IntPtr hwnd)
     {

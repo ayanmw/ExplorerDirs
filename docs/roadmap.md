@@ -4955,16 +4955,17 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 文件系统与虚拟 Shell 行探针共享显示名、绝对解析名、属性、PIDL 图标索引读取；文件系统路径仅为真实 filesystem 项目提供。
 - NativeProbe Release build、虚拟 Control Panel（9 个虚拟子项）、文件系统数据/操作及导航合同通过，前台窗口未变。仅为隔离探针代码整理，未接入产品。详见[派生大小列调查](folder-size-column-investigation.md)。
+
 ## 2026-10-31：F5 空白区间的源码边界复核
 
 - 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
 - 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
 - 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
 
-### 刷新诊断补充：记录原生列表数据变更
+### 刷新诊断补充：跟踪 DefView 与 DirectUI 消息
 
-- 现有 2 秒绘制时间线在诊断开启时增加 `SysListView32` 的 `WM_SETREDRAW`、删除/插入/更新行、排序和布局消息，并在消息处理后采样行数；不读取文件名/文本，最多 256 条。该记录可区分列表数据被清空/重填与单纯重绘，正常运行不启用。
-- App Release build 与完整 Release SettingsSmoke 通过；没有创建窗口。当前仍无屏幕像素证据，诊断本身不改变刷新/视图切换行为，用户可见改善待集中验收。
+- 产品文件视图是 Shell `SHELLDLL_DefView`/`DirectUIHWND` 路径；普通 `SysListView32` 的 LVM 行消息不能作为产品证据。诊断现对实际 view 类记录 `WM_SHOWWINDOW`、`WM_SIZE`、`WM_WINDOWPOSCHANGED`、`WM_NCDESTROY` 以及 DefView/DirectUI 私有消息处理耗时，并记录所有挂钩窗口的 `WM_SETREDRAW`；绘制与输入时间线仍保留。每次转换最多 256 条、两秒窗口，不记录文件名/文本，默认关闭。
+- App Release build 与完整 Release SettingsSmoke 通过；没有创建窗口。该时间线能定位 Shell 是否隐藏/调整/重建 view 及私有消息耗时，但不直接报告行数变化或屏幕像素；当前行数仍由 F5 的 `ItemCount` 采样观察。用户可见闪烁待集中验收。
 
 ## 2026-10-31：刷新集中 GUI 验收候选
 
