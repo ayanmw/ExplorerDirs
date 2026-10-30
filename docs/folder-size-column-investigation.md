@@ -496,6 +496,14 @@ NativeProbe 的诊断 `IPropertyStoreFactory` 现在同时对三个夹具返回�
 
 2026-10-30 API 适用性复核：Microsoft 将 `IShellFolderView` 标为 Windows 7 起不再可用，建议使用 `IFolderView`/`IFolderView2`；其 `RefreshObject` 说明也标注方法可能改变或不可用。当前 Windows 10 SDK `shobjidl_core.h` 声明 `IFolderView2` 的项目、选择、排序、视图属性及重绘控制接口，但没有逐项 `RefreshObject`。因此即使后续隔离测试在当前 DefView 上能取得旧接口并证明逐项重绘，它也只能解释 legacy view 行为，不能作为 ExplorerBrowser 产品实现依赖。产品决策仍需满足的要求是单项大小更新、活动排序正确、当前焦点/选区稳定；候选实现需另找受支持的 Shell 路径，或者由自有 `IShellView` 宿主承担行刷新。
 
+## 2026-10-30：IShellFolder2 递归 Type 与相对比例列原型
+
+原生隔离文件夹适配器现可为目录行计算递归文件数/子目录数，并提供同级相对大小比例的字符串、`VT_R8` 属性值和列键映射。无视图合同断言覆盖 `GetDefaultColumnState`、`MapColumnToSCID`、`GetDetailsOf`、`GetDetailsEx`，以及现有多级路径解析、Shell 菜单、数据对象、复制/移动/重命名/删除合同。首次重建后新增列断言按预期失败；接入后原生适配器 `/W4 /WX` 构建和 `--synthetic-shell-folder-tree-smoke` 通过。
+
+另尝试了一次隔离 `IShellView`/DefView 实际列消费。DefView 没有显示目录的递归计数；比例列仅文件行出现数值，目录行为空，点击该列没有按计算比例重排。该运行在 `DestroyViewWindow` 清理阶段超出 30 秒 watchdog，且监视到运行期间桌面前台和最后输入发生变化，因此不计为通过，也无法将变化归因于探针。为遵守“尽量不使用窗口”的后续偏好，不继续启动新的视图窗口探针。
+
+该结果证明的是隔离 `IShellFolder2` 直接元数据合同，不证明 DefView 会消费这些扩展字段。要让实际视图显示/排序，仍需进一步研究 Shell 属性存储/列描述和生命周期接口；产品没有接入这些列，当前仍使用 ExplorerBrowser。探针异常退出遗留的本次临时测试注册项和 `ExplorerDirs-SyntheticShellSort` 夹具尚未清理：执行环境策略拒绝了精确路径的递归删除命令；此前存在的 `*-stale-*` 夹具未触碰。不得把本轮状态用于产品验收或发布。
+
 2026-10-30 支持路径候选复核：将下一项隔离验证从 legacy `IShellFolderView::RefreshObject` 改为 Shell 变更通知 `SHCNE_UPDATEITEM`。Microsoft 将其定义为既有 Shell 项目的变更事件，并说明接收端通知可合并；公开合同没有说明 DefView 会因此重取扩展列、重新排序或保留选区。源码审查还发现产品已有文件系统项更新通知，并在排序/分组依赖变更元数据时补发受影响目录通知；这只是虚拟 namespace 通知实验的设计参考，不证明其结果相同。故下一次应比较单项、单项加父目录及整视图刷新，当前没有产品实现或虚拟 view 行为结论。
 
 2026-10-30 清理链源码复核：递归大小分支在断言后直接返回，进入 `finally` 时先释放 `IFolderView2`，再调用 `IShellView::DestroyViewWindow`；这让视图子窗口销毁发生在其 view/browser-site COM 引用部分释放之后。现已把两个 `DestroyViewWindow` 调用移到 `IFolderView2`、view、文件夹和 browser-site 释放之前，并在子窗口回收后再释放合成对象引用、宿主与顶层 parent。该顺序符合“先销毁 Shell view window，再释放宿主依赖”的生命周期要求，但仍只是原型代码的修正假设，不证明此前 COM STA 等待因此消失。NativeProbe Release 编译、原生适配器 `/W4 /WX` 编译、无窗口 DLL unload contract 和 synthetic folder tree smoke 均通过；本轮没有运行 Private Desktop view，也没有卡死现场复测。下一步仍需在桌面边界稳定时运行带外部 watchdog/minidump 的递归大小对照，并检查是否越过 `cleanup-destroy-view-window-1` 阶段。产品和 release 均未改。

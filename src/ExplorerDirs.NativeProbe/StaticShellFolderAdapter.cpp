@@ -1199,6 +1199,9 @@ namespace
         ULONGLONG size;
         DWORD attributes;
         WCHAR name[MAX_PATH];
+        ULONGLONG fileCount;
+        ULONGLONG folderCount;
+        ULONGLONG parentBytes;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -1225,12 +1228,15 @@ namespace
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
     // Exclude synchronous property callbacks caused by the probe's own
     // ListView text reads from notification-strategy counters.
     thread_local BOOL g_syntheticSizeMetricsObservation = FALSE;
     constexpr PROPERTYKEY kSyntheticRecursiveSizeKey =
     { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 1 };
+    constexpr PROPERTYKEY kSyntheticRelativeSizeKey =
+    { { 0x7E1F84B7, 0xC052, 0x4E51, { 0x8A, 0x3C, 0x86, 0x92, 0x54, 0xA6, 0xB9, 0x10 } }, 2 };
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
@@ -1254,10 +1260,31 @@ namespace
         return child ? child->size : 0;
     }
 
-    HRESULT GetSyntheticDirectorySize(const std::wstring& directory, ULONGLONG* size)
+    double SyntheticRelativePercent(const SyntheticChild* child)
     {
-        if (!size) return E_POINTER;
-        *size = 0;
+        return child && child->parentBytes != 0
+            ? 100.0 * static_cast<double>(SyntheticSize(child)) / static_cast<double>(child->parentBytes)
+            : 0.0;
+    }
+
+    std::wstring SyntheticContentsText(const SyntheticChild* child)
+    {
+        if (!child) return {};
+        return std::to_wstring(child->fileCount) + (child->fileCount == 1 ? L" file, " : L" files, ") +
+            std::to_wstring(child->folderCount) + (child->folderCount == 1 ? L" folder" : L" folders");
+    }
+
+    struct SyntheticDirectoryMetrics
+    {
+        ULONGLONG bytes;
+        ULONGLONG files;
+        ULONGLONG folders;
+    };
+
+    HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics)
+    {
+        if (!metrics) return E_POINTER;
+        *metrics = {};
         std::wstring pattern;
         try { pattern = directory + L"\\*"; }
         catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -1272,21 +1299,51 @@ namespace
             if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0)
             {
                 ULONGLONG entrySize = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
-                if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                    !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 {
-                    std::wstring childPath;
-                    try { childPath = directory + L"\\" + entry.cFileName; }
-                    catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
-                    result = GetSyntheticDirectorySize(childPath, &entrySize);
-                    if (FAILED(result)) break;
+                    if (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                    {
+                        if (metrics->folders == ~static_cast<ULONGLONG>(0))
+                        {
+                            result = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                            break;
+                        }
+                        ++metrics->folders;
+                    }
+                    else
+                    {
+                        std::wstring childPath;
+                        try { childPath = directory + L"\\" + entry.cFileName; }
+                        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
+                        SyntheticDirectoryMetrics nested{};
+                        result = GetSyntheticDirectoryMetrics(childPath, &nested);
+                        if (FAILED(result)) break;
+                        entrySize = nested.bytes;
+                        if (~static_cast<ULONGLONG>(0) - metrics->files < nested.files ||
+                            ~static_cast<ULONGLONG>(0) - metrics->folders <= nested.folders)
+                        {
+                            result = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                            break;
+                        }
+                        metrics->files += nested.files;
+                        metrics->folders += nested.folders + 1;
+                    }
                 }
-                if (~static_cast<ULONGLONG>(0) - *size < entrySize)
+                else if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                {
+                    if (metrics->files == ~static_cast<ULONGLONG>(0))
+                    {
+                        result = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+                        break;
+                    }
+                    ++metrics->files;
+                }
+                if (~static_cast<ULONGLONG>(0) - metrics->bytes < entrySize)
                 {
                     result = HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
                     break;
                 }
-                *size += entrySize;
+                metrics->bytes += entrySize;
             }
             hasEntry = FindNextFileW(search, &entry) != FALSE;
             if (!hasEntry)
@@ -1297,7 +1354,7 @@ namespace
             if (FAILED(result)) break;
         }
         FindClose(search);
-        if (FAILED(result)) *size = 0;
+        if (FAILED(result)) *metrics = {};
         return result;
     }
 
@@ -1346,8 +1403,12 @@ namespace
                     std::wstring childPath;
                     try { childPath = backingPath + L"\\" + entry.cFileName; }
                     catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
-                    result = GetSyntheticDirectorySize(childPath, &child.size);
+                    SyntheticDirectoryMetrics metrics{};
+                    result = GetSyntheticDirectoryMetrics(childPath, &metrics);
                     if (FAILED(result)) break;
+                    child.size = metrics.bytes;
+                    child.fileCount = metrics.files;
+                    child.folderCount = metrics.folders;
                 }
                 child.attributes = entry.dwFileAttributes;
                 wcscpy_s(child.name, entry.cFileName);
@@ -1372,6 +1433,17 @@ namespace
             children->clear();
             return result;
         }
+        ULONGLONG parentBytes = 0;
+        for (const auto& child : *children)
+        {
+            if (~static_cast<ULONGLONG>(0) - parentBytes < child.size)
+            {
+                children->clear();
+                return HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW);
+            }
+            parentBytes += child.size;
+        }
+        for (auto& child : *children) child.parentBytes = parentBytes;
         std::sort(children->begin(), children->end(), [](const SyntheticChild& left, const SyntheticChild& right)
         {
             return _wcsicmp(left.name, right.name) < 0;
@@ -1772,6 +1844,9 @@ namespace
             if (!_inner || !name) return E_INVALIDARG;
             IShellFolder2* backingFolder = _inner;
             backingFolder->AddRef();
+            std::wstring currentBackingPath;
+            try { currentBackingPath = _backingPath; }
+            catch (const std::bad_alloc&) { backingFolder->Release(); return E_OUTOFMEMORY; }
             std::vector<SyntheticChild> children;
             PITEMID_CHILD original = nullptr;
             auto result = S_OK;
@@ -1813,7 +1888,7 @@ namespace
                         break;
                     }
                     SyntheticChild child{};
-                    result = DescribeBackingChild(backingFolder,
+                    result = DescribeBackingChild(backingFolder, currentBackingPath,
                         reinterpret_cast<PCUITEMID_CHILD>(original), &child);
                     if (FAILED(result))
                     {
@@ -1850,6 +1925,12 @@ namespace
                             TraceSyntheticSortStage(message);
                             break;
                         }
+                        try
+                        {
+                            currentBackingPath += L"\\";
+                            currentBackingPath += child.name;
+                        }
+                        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; nestedFolder->Release(); break; }
                         backingFolder->Release();
                         backingFolder = nestedFolder;
                     }
@@ -2004,6 +2085,11 @@ namespace
                     SyntheticSize(leftChild) > SyntheticSize(rightChild) ? 1 : 0;
                 break;
             case 2: comparison = 0; break;
+            case 3:
+                if (!InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0)) return E_INVALIDARG;
+                comparison = SyntheticRelativePercent(leftChild) < SyntheticRelativePercent(rightChild) ? -1 :
+                    SyntheticRelativePercent(leftChild) > SyntheticRelativePercent(rightChild) ? 1 : 0;
+                break;
             default: return E_INVALIDARG;
             }
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
@@ -2135,7 +2221,7 @@ namespace
             CoTaskMemFree(original);
             if (FAILED(result)) return result;
             SyntheticChild description{};
-            result = DescribeBackingChild(_inner, rawRenamed, &description);
+            result = DescribeBackingChild(_inner, _backingPath, rawRenamed, &description);
             if (SUCCEEDED(result))
             {
                 *renamed = CloneSyntheticChild(description);
@@ -2156,8 +2242,9 @@ namespace
         HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column, SHCOLSTATEF* state) override
         {
             if (!state) return E_POINTER;
-            if (column > 2) return E_INVALIDARG;
-            *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
+            const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
+            if (column > (extended ? 3u : 2u)) return E_INVALIDARG;
+            *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 || column == 3 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* key, VARIANT* value) override
@@ -2188,12 +2275,22 @@ namespace
                     if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExFileCount);
                 }
             }
-            if (!key || !value || (*key != kSizeKey && *key != kSyntheticRecursiveSizeKey)) return E_INVALIDARG;
+            if (!key || !value) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
             if (!child) return E_INVALIDARG;
             VariantInit(value);
-            value->vt = VT_UI8;
-            value->ullVal = SyntheticSize(child);
+            if (*key == kSyntheticRelativeSizeKey &&
+                InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
+            {
+                value->vt = VT_R8;
+                value->dblVal = SyntheticRelativePercent(child);
+            }
+            else if (*key == kSizeKey || *key == kSyntheticRecursiveSizeKey)
+            {
+                value->vt = VT_UI8;
+                value->ullVal = SyntheticSize(child);
+            }
+            else return E_INVALIDARG;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsOf(PCUITEMID_CHILD item, UINT column, SHELLDETAILS* details) override
@@ -2204,23 +2301,27 @@ namespace
                 if (column == 1 && !g_syntheticSizeMetricsObservation)
                     InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
             }
-            if (!details || column > 2) return E_INVALIDARG;
+            const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
+            if (!details || column > (extended ? 3u : 2u)) return E_INVALIDARG;
             const auto* child = SyntheticData(item);
             std::wstring text;
             if (!item)
             {
                 text = column == 0 ? L"Name" : column == 1 ?
-                    (InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) ? L"Recursive Size" : L"Size") : L"Type";
-                details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
+                    (InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) ? L"Recursive Size" : L"Size") :
+                    column == 2 ? L"Type" : L"Relative %";
+                details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = column == 0 ? 24 : 12;
             }
             else
             {
                 if (!child) return E_INVALIDARG;
-                text = column == 0 ? child->name : column == 1 ?
-                    std::to_wstring(SyntheticSize(child)) :
-                    ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File");
-                details->fmt = column == 1 ? LVCFMT_RIGHT : LVCFMT_LEFT;
+                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SyntheticSize(child)) :
+                    column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
+                        ? SyntheticContentsText(child)
+                        : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
+                    std::to_wstring(SyntheticRelativePercent(child)) + L"%";
+                details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
             }
             details->str.uType = STRRET_WSTR;
@@ -2238,6 +2339,8 @@ namespace
                 *key = kSyntheticRecursiveSizeKey;
             else if (column == 1) *key = PKEY_Size;
             else if (column == 2) *key = PKEY_ItemTypeText;
+            else if (column == 3 && InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
+                *key = kSyntheticRelativeSizeKey;
             else return E_INVALIDARG;
             return S_OK;
         }
@@ -2262,7 +2365,8 @@ namespace
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
-        HRESULT DescribeBackingChild(IShellFolder2* backingFolder, PCUITEMID_CHILD original, SyntheticChild* child)
+        HRESULT DescribeBackingChild(IShellFolder2* backingFolder, const std::wstring& backingPath,
+            PCUITEMID_CHILD original, SyntheticChild* child)
         {
             if (!original || !child || !backingFolder) return E_INVALIDARG;
             *child = {};
@@ -2343,6 +2447,18 @@ namespace
                     TraceSyntheticSortStage(message);
                     return result;
                 }
+            }
+            else if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            {
+                std::wstring childPath;
+                try { childPath = backingPath + L"\\" + child->name; }
+                catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+                SyntheticDirectoryMetrics metrics{};
+                result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                if (FAILED(result)) return result;
+                child->size = metrics.bytes;
+                child->fileCount = metrics.files;
+                child->folderCount = metrics.folders;
             }
             return S_OK;
         }
@@ -2684,8 +2800,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWS
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSmoke(PCWSTR backingPath)
 {
     if (!backingPath || !*backingPath) return E_INVALIDARG;
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     auto result = SetSyntheticSortBackingPath(backingPath);
-    if (FAILED(result)) return result;
+    if (FAILED(result))
+    {
+        InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
+        return result;
+    }
 
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
@@ -2737,6 +2858,33 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         const bool recursiveSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 10;
         VariantClear(&sizeValue);
         if (!recursiveSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        SHELLDETAILS contentDetails{};
+        result = root->GetDetailsOf(item, 2, &contentDetails);
+        const bool recursiveContentsDisplayed = SUCCEEDED(result) && contentDetails.str.uType == STRRET_WSTR &&
+            contentDetails.str.pOleStr && _wcsicmp(contentDetails.str.pOleStr, L"2 files, 1 folder") == 0;
+        if (contentDetails.str.uType == STRRET_WSTR && contentDetails.str.pOleStr) CoTaskMemFree(contentDetails.str.pOleStr);
+        if (!recursiveContentsDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        SHCOLSTATEF relativeColumnState{};
+        result = root->GetDefaultColumnState(3, &relativeColumnState);
+        const bool relativeColumnEnabled = SUCCEEDED(result) &&
+            (relativeColumnState & SHCOLSTATE_ONBYDEFAULT) != 0 &&
+            (relativeColumnState & SHCOLSTATE_TYPEMASK) == SHCOLSTATE_TYPE_INT;
+        if (!relativeColumnEnabled) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        SHCOLUMNID mappedRelativeSizeKey{};
+        result = root->MapColumnToSCID(3, &mappedRelativeSizeKey);
+        const bool relativeSizeKeyMapped = SUCCEEDED(result) && mappedRelativeSizeKey == kSyntheticRelativeSizeKey;
+        if (!relativeSizeKeyMapped) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        VARIANT relativeSizeValue{};
+        result = root->GetDetailsEx(item, &mappedRelativeSizeKey, &relativeSizeValue);
+        const bool relativeSizeProperty = SUCCEEDED(result) && relativeSizeValue.vt == VT_R8 && relativeSizeValue.dblVal == 100.0;
+        VariantClear(&relativeSizeValue);
+        if (!relativeSizeProperty) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        SHELLDETAILS relativeSizeDetails{};
+        result = root->GetDetailsOf(item, 3, &relativeSizeDetails);
+        const bool relativeSizeDisplayed = SUCCEEDED(result) && relativeSizeDetails.str.uType == STRRET_WSTR &&
+            relativeSizeDetails.str.pOleStr && _wcsicmp(relativeSizeDetails.str.pOleStr, L"100.000000%") == 0;
+        if (relativeSizeDetails.str.uType == STRRET_WSTR && relativeSizeDetails.str.pOleStr) CoTaskMemFree(relativeSizeDetails.str.pOleStr);
+        if (!relativeSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
         InterlockedExchange64(&g_syntheticChildSizeOverride, 1);
         SHCOLUMNID mappedRecursiveSizeKey{};
@@ -3133,6 +3281,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
 cleanup:
     InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
     if (nestedRootPidl) CoTaskMemFree(nestedRootPidl);
     if (nestedPersist) nestedPersist->Release();
     if (nestedEnumerator) nestedEnumerator->Release();

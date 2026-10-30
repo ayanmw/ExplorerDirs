@@ -4829,3 +4829,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 
 同日延伸验证：在同一隐藏合同中加入递归文件/文件夹计数列，先观察到空值导致断言失败，再接入扫描结果；小目录变为 3 个文件和 1 个子目录后，该行计数更新，兄弟行计数保持不变，百分比列同时正确，foreground 守卫通过。当前只证明隔离行数据刷新。
+
+## 2026-10-30：IShellFolder2 扩展元数据消费边界
+
+- 隔离原生 folder tree 现在为目录行计算递归文件/子目录数，并通过 `GetDetailsOf`/`GetDetailsEx`、`GetDefaultColumnState` 和列键映射提供相对大小比例。`/W4 /WX` 编译及无窗口 `--synthetic-shell-folder-tree-smoke` 通过，既有多级 PIDL、菜单和文件操作合同也通过。
+- 单次隐藏 DefView 探针没有显示目录计数，比例值只有文件行显示、目录行为空，排序点击未按比例重排；探针在 Shell view 窗口销毁时超过 watchdog，运行期间共享桌面输入/前台发生变化，故不算完整通过。按用户“尽量不使用窗口”的偏好，后续先静态追查属性存储和列描述接入，不继续反复启动视图窗口。
+- 该负向结果说明直接 `IShellFolder2` 元数据合同不能推断 DefView 会显示/排序扩展字段。产品仍不接入，ExplorerBrowser 保持现状；详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-30-ishellfolder2-递归-type-与相对比例列原型)。本轮 NativeProbe 异常清理遗留的精确临时注册项/夹具受执行策略限制未能移除；没有触碰先前 `*-stale-*` 项，需在后续可用的清理路径处理后再把环境视为干净。
