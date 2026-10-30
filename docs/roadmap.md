@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 集中验收候选已更新：基于干净主线提交 `6de2c190874f3bffe11f25cb5a560dccb95438ca` 准备隔离四窗格副本 `src/.state/gui-smoke/20261030-203713-768-1be2b2`，41 项待可见验收；候选未启动。包含目录树原生悬停展开和 F5 绘制租约收窄修改；此前候选 `20261030-200808-091-e70fbb` 与 `20261030-202805-568-f49b65` 保留为历史副本。身份、校验值和验收重点见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+2026-10-31 集中验收候选已更新：基于干净主线提交 `9cecf01d86d8d49a2334ccbff683da466a16c13b` 准备隔离四窗格副本 `src/.state/gui-smoke/20261030-204200-611-449c56`，43 项待可见验收；候选未启动。刷新验收现将普通目录 `SHCNE_UPDATEDIR`、搜索/虚拟位置 `IShellView.Refresh` 回退、查看方式切换分为三个独立条目。此前候选保留为历史副本。身份、校验值和验收重点见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 Q-Dir 目录树拖入悬停展开：`NativeShellTree` 初始化加入 Windows `NSTCS_SPRINGEXPAND`。Release SettingsSmoke 定向样例通过，确认该样式与 `NSTCS_DISABLEDRAGDROP`、`NSTCS_NOEDITLABELS` 同时存在；保持禁用树内重排和标签编辑。微软文档说明 `NSTCS_DISABLEDRAGDROP` 只禁止控件内部拖放，外部项目仍可拖入树控件，因此此次只补上原生悬停展开。当前使用 Windows 默认延时，不提供 Q-Dir 的自定义延时档位；真实文件拖入、目录落点及展开时长仍待集中 UI 验收。[功能矩阵](shell-parity.md#本轮代码与下一轮验收)。
 
