@@ -4768,3 +4768,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 首次可见 Private Desktop 基线因误带 `LVS_OWNERDATA` 虚拟列表样式而使用了不匹配的存储列表 API，第二列更新失败；已修正样式。该轮守卫也发现前台/输入状态改变，所以没有将其作为有效可见结果；修正后只运行隐藏合同，没有重开可见窗口。
 - 后续隐藏合同把已选中并聚焦的 `small-folder` 从 `4` 改为 `2`，强制排序跨过 `large-folder`；排序后唯一 selected+focused 状态仍在 `small-folder`。NativeProbe Release 构建和隐藏数据合同通过，窗口不可见且前台不变。该结果只覆盖普通存储式 `SysListView32`，不能外推到 Shell DefView 或产品。
 - 结论仅限于自有标准 ListView 可由应用更新派生值并按其排序。Shell 文件枚举、图标、菜单与命令、焦点、拖放、文件系统通知、性能/内存和产品集成均未验证；不据此决定迁移 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：真实 Shell 项目身份映射
+
+- 隐藏合同用真实临时文件夹构造 Shell 绝对 PIDL，并验证 Shell 显示名及文件系统解析名可往返到原路径；普通 `SysListView32` 的行 `lParam` 保存稳定 row ID，映射到 PIDL、路径和派生大小。更新大小后按新值重排，选中/焦点仍落在相同 row ID，PIDL 未替换。Release build 与隐藏合同通过，窗口不可见、前台未变，夹具清理完成。
+- 这证明可将真实文件系统 Shell 身份映射进自有 ListView 数据模型；行数据仍由探针显式创建，未接 Shell 枚举、图标/菜单/操作、拖放、通知、导航、键盘、虚拟位置、性能/内存或产品。迁移门槛继续开放，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。

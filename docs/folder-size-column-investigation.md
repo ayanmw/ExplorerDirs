@@ -8,11 +8,17 @@
 | --- | --- | --- | --- |
 | ExplorerBrowser / 系统 DefView | 可使用文件夹已有列；当前没有受支持的任意派生列接入及逐项重取路径 | 最强，继续由 Windows Shell 提供查看、菜单、导航和文件操作 | 改动最小；现有逐行大小探针在刷新后读回错误/缺失的值，不能满足该列 |
 | 自建 Shell namespace + `IShellView` / DefView | 初次可由 `IShellFolder2` 提供值并通过 `CompareIDs` 排序；显式恢复列和通知后，当前 DefView 没有重新请求派生值 | 可复用 DefView 的原生菜单与不少 Shell 命令，但 namespace/PIDL、通知、拖放等仍需适配 | 已有隔离文件夹适配器和操作合同；有效刷新基线仍失败，不能作为产品替代视图 |
-| 自有 `SysListView32` 数据模型 | 已验证单元格可更新、按新值排序，排序后选中/焦点仍跟随项目身份 | 默认不会自动拥有 Shell 视图能力；需自行接入 `IContextMenu`、`IDataObject`、`IFileOperation`、OLE 拖放、Shell 通知、导航及键盘路由 | 更新和排序合同已有隐藏探针；没有真实 Shell 行对象、全视图模式、虚拟位置、性能/内存或完整输入验收，产品化工作量高 |
+| 自有 `SysListView32` 数据模型 | 已验证真实临时文件夹可解析为 Shell PIDL/文件系统解析名；行 ID 与 PIDL 映射稳定，派生值更新、排序及选中/焦点身份保持通过 | 默认不会自动拥有 Shell 视图能力；需自行接入 `IContextMenu`、`IDataObject`、`IFileOperation`、OLE 拖放、Shell 通知、导航及键盘路由 | 隐藏数据探针覆盖真实 Shell 项目身份与标准 ListView 行模型；尚无 Shell 枚举器接线、全视图模式、虚拟位置、性能/内存或完整输入验收，产品化工作量高 |
 
 **结论：**逐行派生值的技术控制权要求应用持有行数据模型；继续调整 DefView 通知不是有证据的路线。若该列成为产品必须项，下一阶段应做一个单窗格、仅隔离的自有 `SysListView32` 原型，直接用真实 Shell 文件夹/PIDL 枚举行项，并以同一组夹具逐一验证详细信息视图、系统图标、原生项目/背景菜单、复制/移动/删除、重命名、拖放、外部变更刷新、焦点/选区与目录导航。成功门槛应同时包括真实文件 Shell 行能更新派生值并保持排序/焦点，以及 Shell 操作合同不退化；在此之前不迁移产品，不以合成控件的内存或绘制结果推断实际收益。
 
 **资源判断：**现有证据不足以声称自有 ListView 能降低内存。ExplorerBrowser 仍会在应用中运行，若只替换控件但继续并行保留旧 Shell hosts，短期反而可能增加常驻对象。内存必须在同机、同目录集、同查看模式、同窗格数与相同操作序列下测量，并分别比较启动稳定态和长时间刷新后的 private bytes/working set；测量之前不把迁移收益列为理由。
+
+## 2026-10-30：Shell 项目身份与自有 ListView 行模型合同
+
+隐藏数据合同使用真实临时文件夹，通过 `SHParseDisplayName` 获取绝对 PIDL，并以 Shell 显示名和 `SIGDN_FILESYSPATH` 解析名核对路径往返。每条 ListView 行以稳定 row ID 关联 Shell PIDL、解析名和递归大小；更新派生值后只改变行数据，不替换 PIDL/行 ID，再按数值排序。探针确认选中且聚焦的 `small-folder` 排至首行后，selected/focused 状态仍跟随 row ID=2，两个 Shell PIDL 身份保持不变。命令 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --common-listview-data-contract` 通过；窗口不可见，前台窗口未变，临时夹具已清理。
+
+此结果把验证推进到“真实文件系统 Shell 项目身份可与自有 ListView 行模型关联”，但行项目是由探针显式构造，而非 Shell 枚举器接入；也没有创建 Shell view 或验证虚拟位置、图标、菜单/命令、文件操作、拖放、通知、导航、键盘、全视图模式及内存/性能。产品仍使用 ExplorerBrowser，迁移门槛不变。
 
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 
