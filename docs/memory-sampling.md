@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-30：temp.78 同 PID 一分钟只读复采
+
+- 北京时间 13:35:25–13:36:25，对仍运行的 PID `19580` 每 5 秒采样，共 13 点。进程为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.78\app\ExplorerDirs.App.exe`，启动于 10:32:39；未启动、重启、聚焦或操作应用。
+- Private Bytes 全程 `189,267,968` 字节（180.5 MiB）；Working Set 从 `378,462,208` 到 `378,576,896` 字节（约 360.93–361.04 MiB）。句柄 `1,371`、线程 `71` 全程不变。
+- 这是一段被动静置采样，期间用户操作负载未知；它只表明该 PID 的这些进程计数一分钟内基本稳定，不能说明启动后的峰值原因、不能与 temp.76 直接归因比较，也不能排除操作期间增长。后续仍需固定标签/窗格/目录和操作序列，并对同一 PID 分阶段采集；当前 CSV 为 `src/.state/memory-samples/passive-19580-20261030-133525.csv`，该目录不入 Git。
+
 ## 2026-10-30：temp.78 当前运行实例一分钟快照
 
 - 北京时间 13:21:12–13:22:12，只读采样 PID `19580`；进程路径为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.78\app\ExplorerDirs.App.exe`，启动于 10:32:39。未启动、重启、聚焦或操作应用；采样来自 PowerShell `Get-Process`，共约 10 秒间隔 7 点。
