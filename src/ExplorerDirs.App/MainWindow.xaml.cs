@@ -920,38 +920,82 @@ public partial class MainWindow : Window
             return;
         }
 
-        foreach (var value in allValues)
+        var pageIndex = 0;
+        void RenderPage()
         {
-            var item = new MenuItem
+            var firstPageItem = menu.Items.IndexOf(selectionCount) + 1;
+            while (menu.Items.Count > firstPageItem) menu.Items.RemoveAt(firstPageItem);
+
+            var pageCount = ShellColumnValueMenuValues.GetPageCount(allValues.Length,
+                ShellColumnValueMenuValues.PageSize);
+            var previous = new MenuItem { Header = "上一页", IsEnabled = pageIndex > 0, StaysOpenOnClick = true };
+            previous.Click += (_, _) =>
             {
-                Header = string.IsNullOrEmpty(value) ? "（空白）" : value,
-                Tag = value,
-                IsCheckable = true,
-                IsChecked = selectedValues.Contains(value),
-                IsEnabled = selectedValues.Contains(value) || selectedValues.Count < QuickFilterSettings.MaximumColumnFilterValues,
+                pageIndex--;
+                RenderPage();
+            };
+            menu.Items.Add(previous);
+            var firstValue = (long)pageIndex * ShellColumnValueMenuValues.PageSize + 1;
+            var lastValue = Math.Min(firstValue + ShellColumnValueMenuValues.PageSize - 1, allValues.Length);
+            menu.Items.Add(new MenuItem
+            {
+                Header = $"第 {pageIndex + 1}/{pageCount} 页（{firstValue}–{lastValue}/{allValues.Length}）",
+                IsEnabled = false
+            });
+            var next = new MenuItem
+            {
+                Header = "下一页",
+                IsEnabled = pageIndex + 1 < pageCount,
                 StaysOpenOnClick = true
             };
-            item.Click += (_, _) =>
+            next.Click += (_, _) =>
             {
-                var selected = menu.Items.OfType<MenuItem>()
-                    .Where(entry => entry.IsCheckable && entry.IsChecked && entry.Tag is string)
-                    .Select(entry => (string)entry.Tag)
-                    .ToArray();
-                if (selected.Length > QuickFilterSettings.MaximumColumnFilterValues)
-                {
-                    item.IsChecked = false;
-                    EnvironmentStatus.Text = $"每列最多可筛选 {QuickFilterSettings.MaximumColumnFilterValues} 个值。";
-                }
-                else if (!pane.ApplyColumnValueFilter(key, selected)) item.IsChecked = !item.IsChecked;
-                var checkedCount = menu.Items.OfType<MenuItem>().Count(entry =>
-                    entry.IsCheckable && entry.IsChecked && entry.Tag is string);
-                selectionCount.Header = $"已选 {checkedCount}/{QuickFilterSettings.MaximumColumnFilterValues} 个值";
-                clear.IsEnabled = checkedCount > 0;
-                foreach (var valueItem in menu.Items.OfType<MenuItem>().Where(entry => entry.IsCheckable))
-                    valueItem.IsEnabled = valueItem.IsChecked || checkedCount < QuickFilterSettings.MaximumColumnFilterValues;
+                pageIndex++;
+                RenderPage();
             };
-            menu.Items.Add(item);
+            menu.Items.Add(next);
+            menu.Items.Add(new Separator());
+
+            var visibleItems = new List<MenuItem>();
+            foreach (var value in ShellColumnValueMenuValues.GetPage(allValues, pageIndex,
+                         ShellColumnValueMenuValues.PageSize))
+            {
+                var item = new MenuItem
+                {
+                    Header = string.IsNullOrEmpty(value) ? "（空白）" : value,
+                    Tag = value,
+                    IsCheckable = true,
+                    IsChecked = selectedValues.Contains(value),
+                    IsEnabled = selectedValues.Contains(value) || selectedValues.Count < QuickFilterSettings.MaximumColumnFilterValues,
+                    StaysOpenOnClick = true
+                };
+                item.Click += (_, _) =>
+                {
+                    var wasSelected = item.IsChecked;
+                    if (wasSelected) selectedValues.Add(value);
+                    else selectedValues.Remove(value);
+
+                    if (selectedValues.Count > QuickFilterSettings.MaximumColumnFilterValues ||
+                        !pane.ApplyColumnValueFilter(key, selectedValues.ToArray()))
+                    {
+                        if (wasSelected) selectedValues.Remove(value);
+                        else selectedValues.Add(value);
+                        item.IsChecked = !item.IsChecked;
+                        if (selectedValues.Count >= QuickFilterSettings.MaximumColumnFilterValues)
+                            EnvironmentStatus.Text = $"每列最多可筛选 {QuickFilterSettings.MaximumColumnFilterValues} 个值。";
+                    }
+
+                    selectionCount.Header = $"已选 {selectedValues.Count}/{QuickFilterSettings.MaximumColumnFilterValues} 个值";
+                    clear.IsEnabled = selectedValues.Count > 0;
+                    foreach (var valueItem in visibleItems)
+                        valueItem.IsEnabled = valueItem.IsChecked || selectedValues.Count < QuickFilterSettings.MaximumColumnFilterValues;
+                };
+                visibleItems.Add(item);
+                menu.Items.Add(item);
+            }
         }
+
+        RenderPage();
     }
 
     private string? PromptViewPresetName()
