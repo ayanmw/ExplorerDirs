@@ -6,11 +6,11 @@
 
 2026-10-30 05:41 UTC：基于干净主线 `6be4ea7a8dc2ecd11652de27252e9fd588fa3471` 刷新集中验收副本，路径 `src/.state/gui-smoke/20261030-054109-636-da4cf7/`，状态 `prepared-not-run`，39 项待可见验收。较早优先级表中的候选提交与哈希已过期；以[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)为准。准备仅构建并复制隔离副本，未启动 GUI、创建 ExplorerBrowser 或操作桌面。
 
-2026-10-30 克隆历史差距复核：Q-Dir 官方称克隆保留完整历史，但未公布容量；当前实现最多 100 站。此上限可能截断较长会话，也限制每站选区快照的内存增长。保留上限，待集中可见验收用超过 100 站比较 Q-Dir 行为；具体记录见[核心操作对照](shell-parity.md)。
+2026-10-30 克隆历史容量：按 Q-Dir 克隆视图保留完整历史的目标，移除应用历史模型的 100 站截断；成功导航会保留所有位置，克隆副本继续与源标签独立。完整 Release SettingsSmoke 通过，包含 120 次导航后克隆并回退到最早位置，源历史游标保持不变；App Release build 为 0 警告/错误。历史及逐站选区快照现在随会话长度增长，长会话内存仍需观测；产品可见的 100+ 站往返待集中验收。当前 GUI 验收副本早于此修改，不代表本次代码。细节见[核心操作对照](shell-parity.md)。
 
 2026-10-30 当前运行内存快照：只读采样正式预览 `temp.78` 的同一 PID 19580 约 1 分钟，Working Set 为 362.0→364.1 MiB、Private Bytes 为 179.7→181.6 MiB，句柄约 1407–1443、线程 77–90。未控制用户操作，不能据此判断泄漏或归因；后续应在固定窗格/标签/目录与操作序列下复采。详情见[内存采样记录](memory-sampling.md#2026-10-30temp78-当前运行实例一分钟快照)。
 
-2026-10-30 集中验收候选更新：用户确认采用独立“克隆视图”命令，保留“复制标签”语义；源码和隐藏 HostProbe 已覆盖该分流、最多 100 站的可重放历史、逐站选区及普通/虚拟/搜索位置。将当前干净主线 `14e6aa5cfc2f6fbc9a230211faf3a0270f8fa0fa` 重新执行 `GuiSmoke/run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-052522-882-ebcdd5/`，39 项 `prepared-not-run`。只构建隔离副本和夹具，未启动窗口或创建 ExplorerBrowser。候选身份、SHA-256 与可见验收清单见[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)；克隆逐站焦点、异步搜索结果和实际菜单操作仍待用户集中验收。
+2026-10-30 集中验收候选更新：用户确认采用独立“克隆视图”命令，保留“复制标签”语义；源码和隐藏 HostProbe 已覆盖该分流、可重放历史、逐站选区及普通/虚拟/搜索位置。将当前干净主线 `14e6aa5cfc2f6fbc9a230211faf3a0270f8fa0fa` 重新执行 `GuiSmoke/run.ps1 -PrepareOnly`，准备 `src/.state/gui-smoke/20261030-052522-882-ebcdd5/`，39 项 `prepared-not-run`。只构建隔离副本和夹具，未启动窗口或创建 ExplorerBrowser。候选身份、SHA-256 与可见验收清单见[最新候选记录](gui-acceptance-2026-10-30-main-prepared-latest.md)；克隆逐站焦点、异步搜索结果和实际菜单操作仍待用户集中验收。
 
 2026-10-30 相对大小比例原型文件变更合同：更新比例列实验，先等待临时目录中目标文件的 `FileSystemWatcher.Changed`，再重扫目录树、更新两个真实 Shell 行对应的数据并重排。10/14、4/14 变为 10/30、20/30 后，顺序从小目录在前改为大目录在前，原选中/项目焦点身份保持；新增通知/排序断言先失败，补齐后 Release NativeProbe 连续两轮通过，窗口不可见且前台未变。此处验证的是文件系统 watcher 与通用 ListView 数据模型，不是 Shell `SHChangeNotify` 或 ExplorerBrowser 的自定义行刷新；列标题输入、真实键盘焦点、菜单/拖放和 Q-Dir 显示精度仍待后续验证。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30-相对大小比例排序选区与文件变更合同)。
 
@@ -30,7 +30,7 @@
 
 2026-10-30 Q-Dir 标签组资料边界：官方英文/英国英文字符串表有“Tab Group / Move to new Tab Group / Copy to new Tab Group / Use Tab Groups”菜单标签；检索官方 FAQ 与版本记录仍未找到组作用域、跨窗格关系或保存规则。按项目规则不分析 Q-Dir 二进制；标签组维持 P2 待评估，在集中可见验收确认交互前不猜测菜单和 INI 模型。详见[核心操作对照](shell-parity.md)。
 
-2026-10-30 克隆视图历史选区存储：导航历史快照中的每站选区只通过只读列表暴露，克隆视图现在复制最多 100 个位置的容器并共享这些不可变选区存储，避免 Snapshot 与 FromSnapshot 对每个位置重复复制文件名引用数组。Release SettingsSmoke 验证共享存储且源视图后续更新不会影响克隆；完整 SettingsSmoke 与 App Release build 通过。没有运行正式 App，且未采集同 PID 前后数据；这减少的是托管引用数组和短期副本，不复制字符串，也没有可报告的 MB 节省。详细边界见[memory sampling 记录](memory-sampling.md)。
+2026-10-30 克隆视图历史选区存储：导航历史快照中的每站选区只通过只读列表暴露，克隆视图复制完整历史的位置容器并共享这些不可变选区存储，避免 Snapshot 与 FromSnapshot 对每个位置重复复制文件名引用数组。Release SettingsSmoke 验证共享存储且源视图后续更新不会影响克隆；完整 SettingsSmoke 与 App Release build 通过。没有运行正式 App，且未采集同 PID 前后数据；这减少的是托管引用数组和短期副本，不复制字符串，也没有可报告的 MB 节省。详细边界见[memory sampling 记录](memory-sampling.md)。
 
 2026-10-30 最近收藏标题跨重启保存：Q-Dir 的“最近打开的收藏夹”标题模式原先只记录当前进程内最后显式打开的收藏路径。现将该路径写入当前窗口 session 旁的 `RecentFavorite.ini`，与 profile 全局标题显示模式分离，多个窗口各自恢复且不会互相覆盖；普通导航仍不更新此值。新增 Release SettingsSmoke 覆盖空状态、每窗口隔离、带等号路径往返。没有启动 GUI；重启后窗口标题实际显示仍待集中验收。
 

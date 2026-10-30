@@ -6,7 +6,6 @@ namespace ExplorerDirs.App;
 /// </summary>
 internal sealed class ShellTabNavigationHistory
 {
-    private const int MaximumLocations = 100;
     internal sealed record Stop(string Location, IReadOnlyList<string> SelectedItems);
 
     private readonly List<Stop> _locations;
@@ -22,8 +21,8 @@ internal sealed class ShellTabNavigationHistory
     {
         if (locations.Count == 0) throw new ArgumentException("Navigation history cannot be empty.", nameof(locations));
         if ((uint)index >= (uint)locations.Count) throw new ArgumentOutOfRangeException(nameof(index));
-        // Stops and their selection lists are immutable snapshots; copy the bounded
-        // history container while sharing selection storage with the cloned view.
+        // Stops and their selection lists are immutable snapshots; copy the history
+        // container while sharing selection storage with the cloned view.
         _locations = locations.ToList();
         _index = index;
     }
@@ -61,11 +60,6 @@ internal sealed class ShellTabNavigationHistory
             _locations.RemoveRange(_index + 1, _locations.Count - _index - 1);
         _locations.Add(new(location, []));
         _index = _locations.Count - 1;
-        if (_locations.Count > MaximumLocations)
-        {
-            _locations.RemoveAt(0);
-            _index--;
-        }
     }
 
     internal bool TryBeginMove(bool back, out string location)

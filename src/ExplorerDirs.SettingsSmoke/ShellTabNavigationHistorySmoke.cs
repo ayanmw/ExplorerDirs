@@ -77,11 +77,21 @@ internal static class ShellTabNavigationHistorySmoke
               search.CurrentSelection.SequenceEqual([@"C:\scope\report.txt"]),
             "search result URIs and their selection snapshot remain distinct history stops");
 
-        var bounded = new ShellTabNavigationHistory(@"C:\0");
-        for (var index = 1; index <= 120; index++) bounded.Record($@"C:\{index}");
-        Check(bounded.Snapshot().Count == 100 && bounded.Snapshot()[0].Location == @"C:\21" &&
-              bounded.Current == @"C:\120" && bounded.Index == 99,
-            "cloned view history keeps a bounded set of recent locations");
+        var complete = new ShellTabNavigationHistory(@"C:\0");
+        for (var index = 1; index <= 120; index++) complete.Record($@"C:\{index}");
+        Check(complete.Snapshot().Count == 121 && complete.Snapshot()[0].Location == @"C:\0" &&
+              complete.Current == @"C:\120" && complete.Index == 120,
+            "cloned view history retains every recorded location beyond 100 stops");
+        var completeClone = ShellTabNavigationHistory.FromSnapshot(complete.Snapshot(), complete.Index);
+        var reachesFirst = true;
+        for (var index = 119; index >= 0; index--)
+        {
+            reachesFirst &= completeClone.TryBeginMove(back: true, out var target) &&
+                            target == $@"C:\{index}" && completeClone.CommitLocation(target);
+        }
+        Check(reachesFirst && completeClone.Current == @"C:\0" && !completeClone.CanGoBack &&
+              complete.Current == @"C:\120" && complete.Index == 120,
+            "a cloned view can reach the oldest stop after 100+ navigations without moving the source history");
 
         var repoRoot = FindRepoRoot();
         var paneSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
