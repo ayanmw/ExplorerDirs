@@ -16,6 +16,8 @@
 
 2026-10-31 F5 保帧范围收紧：源码追踪发现 `ExplorerBrowserHost.Refresh` 同时服务用户手动刷新、目录监视通知、筛选/分组及搜索返回；此前保帧租约套在公共刷新执行体，可能把自动更新的旧画面也冻结。现改为仅 F5、工具栏和窗格刷新按钮显式请求保帧，其余内部刷新继续由 Shell 即时绘制。App Release build 通过（0 警告/错误）；未运行 GUI，F5 的视觉改善及冻结期间输入命中仍待集中验收。
 
+2026-10-31 查看方式切换后的焦点恢复减少重复选择：源码追踪发现工具栏/菜单切换模式后若焦点需回到文件视图，`FocusView` 会调用 `RestoreFocusedItem`，该方法即使 Shell 已报告目标项为焦点仍无条件再次 `SelectItem`。现在只有焦点缺失或落在其它项时才重设，保留真实焦点/选区状态并避免重复 Shell 选择写入。App Release build 通过（0 警告/错误）；未运行测试或 GUI，实际重绘减少量与焦点体验待集中验收。
+
 2026-10-30 文件列表刷新重绘（新候选，待可见验收）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。F5 在 Shell 重新填充列表期间暂缓原生列表重绘，待行数连续稳定或 Dispatcher 首次检查到 1.5 秒阈值后恢复；主线程被同步 Shell 调用阻塞时，该阈值不是墙钟硬上限。此 API 只控制绘制，不保证禁用输入，旧画面与当前命中项可能短暂错位，因此验收必须检查点击/键盘的目标正确性；不通过则撤回此候选。不会对子控件调用 `RedrawWindow(...ALLCHILDREN)`。查看方式切换继续让 Shell 自行重排，完整状态读取延后执行。黑屏和交互安全均未可见验证；候选与证据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 强调色更新避免重复原生主题刷新：`UISettings.ColorValuesChanged` 中即使只变化 Windows 强调色，应用也会重新应用同一 Win32 Preferred App Mode 并刷新原生菜单主题。现在独立跟踪原生深浅模式和高对比度状态；Accent-only 更新仍替换 WPF 语义画刷、通知窗口更新，但跳过原生 `SetProcessTheme`。重复高对比度通知不再清除/重建相同系统资源。浅/深模式或高对比度改变时继续刷新原生主题。App Release build 与可见主题切换尚待验证；未宣称高对比度/Windows 运行时事件通过。

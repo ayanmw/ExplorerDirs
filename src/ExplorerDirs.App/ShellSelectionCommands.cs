@@ -89,9 +89,15 @@ internal static class ShellSelectionCommands
         {
             Check(At<Item>(view, 6)(view, index, out pidl));
             Check(At<SelectionState>(view, 33)(view, pidl, out var state));
-            var id = new Guid("000214E3-0000-0000-C000-000000000046");
-            Check(Marshal.QueryInterface(view, in id, out shell));
-            Check(At<SelectOne>(shell, 14)(shell, pidl, 0x10 | (state & 1) | (takeFocus ? 0u : 0x40000000u)));
+            // A view-mode change normally keeps the focused PIDL. Re-selecting that
+            // same item after UIActivate can emit an unnecessary selection/redraw cycle.
+            if (focusedResult < 0 || focusedIndex != index)
+            {
+                var id = new Guid("000214E3-0000-0000-C000-000000000046");
+                Check(Marshal.QueryInterface(view, in id, out shell));
+                Check(At<SelectOne>(shell, 14)(shell, pidl,
+                    0x10 | (state & 1) | (takeFocus ? 0u : 0x40000000u)));
+            }
             return (state & 1) != 0;
         }
         finally
