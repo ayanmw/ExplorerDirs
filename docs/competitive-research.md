@@ -20,6 +20,12 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 再次核对 [Q-Dir 官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)：当前仍为 12.82，更新日期 2026-10-24；版本说明只具体提到改进地址栏目录树使用，其余为一般 Quad-Explorer 优化和语言文件更新，没有给出可据此实现的新交互规格。Explorer Dirs 已有 Modern 地址栏 F4 两阶段树/路径编辑、祖先导航及“此电脑”驱动器子项。本轮不据笼统的“优化”文字推测新行为；当前实际差距应通过之后的可见 Q-Dir/Explorer Dirs 对照记录，而不是再扩写未经证实的版本功能。
 
+## 2026-10-31 官方 12.82 功能清单细化
+
+重新核对 SoftwareOK 当前的 [Q-Dir 英文命令/字符串表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish) 与[官方功能页](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHelp+file)。除四窗格、标签、收藏、筛选、地址栏、导出和打印外，字符串表还分别列出 `Color-Filter`、`Highlight-Filter`、目录树拖入时自动展开延迟、空格键滚动以及 Alt+L 屏幕放大镜。它证明这些是 Q-Dir 的独立入口/选项，不足以推断颜色规则文件格式、两种颜色过滤器的优先级，或自动展开对任意 Shell provider 的具体实现。
+
+对照本项目现状：Alt+L 已转调 Windows 屏幕放大镜；保存当前工作区到桌面快捷方式及多格式文件视图导出已有源码入口。逐项文件着色仍受 ExplorerBrowser 不提供受支持逐行着色接口的架构限制；隔离 `IShellView` 颜色策略 evaluator 已实现，但没有接入产品绘制或配置导入。后续将“颜色规则/高亮过滤”与浅色、深色、Windows 强调色主题作为不同能力继续评估，不拿主题切换冒充文件类型着色；树拖入展开时机则先确认原生 Shell 树当前行为，再决定是否值得增加应用偏好。无需据此新增低优先级快捷键或重复入口。
+
 ## 2026-10-28 官方大小信息行为复核
 
 Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字可带同一目录中文件与文件夹大小的相对百分比。官方说明没有定义百分比的精确分母、隐藏项/失败扫描的处理及舍入策略，因此这些规则仍需可见行为确认。
