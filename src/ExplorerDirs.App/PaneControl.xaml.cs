@@ -1496,6 +1496,11 @@ public partial class PaneControl : UserControl
             return;
         }
 
+        ShowAddressTree();
+    }
+
+    private void ShowAddressTree()
+    {
         var identity = Current is { } state && ShellLocationIdentity.TryGetFolderPidl(state.Path, out var pidl)
             ? FreeAddressTreePidl(pidl, state.Path) : null;
         AddressTreeHost.SetAddressTreeLocation(identity);
@@ -1563,7 +1568,7 @@ public partial class PaneControl : UserControl
         e.Handled = true;
     }
 
-    private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressMenu();
+    private void AddressMenu_Click(object sender, RoutedEventArgs e) => ShowAddressTree();
     private void AddressComputer_Click(object sender, RoutedEventArgs e) => ShowComputerMenu();
 
     internal void ShowAddressMenu()

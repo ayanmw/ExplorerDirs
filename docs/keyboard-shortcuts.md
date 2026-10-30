@@ -7,13 +7,13 @@
 | Backspace、Alt+↑ | 打开当前目录的上一级 | 已接入 Shell 导航；Backspace 按用户习惯定义，区别于 Windows Explorer 的“后退” |
 | Alt+←、Alt+→、Alt+Backspace、Alt+Shift+Backspace | 当前标签的后退、前进历史 | 四种组合复用 ExplorerBrowser 内置 TravelLog；源码已改为切换标签和布局时保留视图，真实历史保持待复测。Alt+Backspace / Alt+Shift+Backspace 对齐 Q-Dir 官方帮助列出的快捷键 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | Ctrl+Alt+A～Z | 跳转到对应的逻辑盘符根目录 | 仅拦截系统当前列出的盘符；缺失盘符交回 Shell，不探测网络盘就绪状态。Windows 放大镜运行时，`Ctrl+Alt+L` 交回系统以切换镜头模式。源码与无窗口映射 smoke 已接入；实际按键和断开网络盘的体验待 GUI 验收。快捷键依据 Q-Dir 4.51 官方帮助，当前 Q-Dir 版本的行为仍待可见确认 ([Q-Dir 4.51 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
-| Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、地址层级下拉、“此电脑”下拉、地址历史下拉、转到、新建标签、关闭标签、可见时的搜索输入/搜索/关闭控件、快速筛选输入/模式/筛选文件夹/预设/保存/删除/应用/关闭控件、标签标题、目录树（若显示）、详细信息列标题（若有）、文件项、状态栏“查看”入口的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 焦点映射与正反向遍历有无窗口回归；原生列标题/文件项之间及菜单关闭后的真实键盘焦点仍待 GUI 验收 |
+| Tab、Shift+Tab | 当前窗格按后退、前进、上级、刷新、地址、地址目录树、“此电脑”下拉、地址历史下拉、转到、新建标签、关闭标签、可见时的搜索输入/搜索/关闭控件、快速筛选输入/模式/筛选文件夹/预设/保存/删除/应用/关闭控件、标签标题、目录树（若显示）、详细信息列标题（若有）、文件项、状态栏“查看”入口的顺序遍历，再进入下一窗格；Shift+Tab 严格反向。非详细信息视图跳过列标题 | 焦点映射与正反向遍历有无窗口回归；原生列标题/文件项之间及菜单关闭后的真实键盘焦点仍待 GUI 验收 |
 | Ctrl+Tab、Ctrl+Shift+Tab、标签标题聚焦时 Ctrl+←/→ | 按当前窗格标题显示顺序循环标签 | 已接入；Q-Dir 12.56 加入 Ctrl+←/→ 切标签，本项目仅在标签标题聚焦时处理，文件视图中的 Ctrl+方向键继续交给 Shell；`Ctrl+PageUp/PageDown` 保留给文件列表的原生上下翻页，Q-Dir FAQ 64 也建议用 `Ctrl+Tab` 切标签；拖动排序后的顺序待 GUI 验收 ([Q-Dir 版本记录](https://www.softwareok.com/?seite=Freeware/Q-Dir/History)、[FAQ 64](https://www.softwareok.com/?faq=64&seite=faq-Q-DIR)) |
 | Ctrl+1～9 | 跳到当前窗格按标题显示顺序排列的第 1～9 个标签；不存在对应标签时保持当前选择 | 源码映射与无窗口回归通过；重排和多窗格中的实际选择待 GUI 验收 |
 | 标签标题的 ←、→、Home、End | 按标题显示顺序切换标签；文件视图内的方向键仍交给 Shell | 已接入；待 GUI 验收 |
 | Alt+D、Alt+S、Ctrl+L | 从面包屑进入完整地址编辑并全选路径 | 已接入；Alt+S 对齐 Q-Dir 4.51 官方帮助“地址栏聚焦并选中内容”；Ctrl+S 仍启动 Program Starter。真实焦点待 GUI 验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F4 | Modern 地址栏第一次打开当前标签路径所在的 Shell 文件夹树，再按一次进入完整路径编辑；Classic 地址栏直接进入编辑 | 源码已接入每窗格原生 Shell 树、当前目录定位和虚拟文件夹解析名路由；Escape、切标签、窗格隐藏及窗口失焦关闭。历史仍由独立下拉按钮打开。可见位置、F4/Escape 焦点与虚拟命名空间操作待 GUI 验收 |
-| F7 | 打开当前地址路径的层级菜单，快速定位上级目录或常用 Shell 位置 | 复用地址栏下拉按钮已有的祖先目录/常用位置菜单；Shift+F7 仍新建文件夹。源码路由待可见菜单与键盘选择验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
+| F7 | 打开当前地址路径的层级菜单，快速定位上级目录或常用 Shell 位置 | 保留独立的祖先目录/常用位置菜单；地址栏路径下拉按钮打开原生 Shell 目录树。Shift+F7 仍新建文件夹。源码路由待可见菜单与键盘选择验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F8 | 打开“此电脑”菜单，直接选择本机逻辑驱动器 | 地址栏旁有独立“此电脑”按钮；菜单从当前系统动态枚举驱动器，并提供“此电脑”入口。源码路由已接入，按钮外观、Tab 焦点、菜单定位与键盘选择待可见验收 ([Q-Dir 帮助](https://www.softwareok.com/?seite=q-dir-hilfe)) |
 | F5 | 刷新当前文件视图 | 已接入 |
 | F9 | 计算或取消当前文件系统目录的递归总大小、文件数与子目录数 | 已接入后台显式扫描；不自动扫描、不跟随重解析点；导航/切标签/隐藏窗格时取消；实际多窗格状态栏体验待 GUI 验收 |

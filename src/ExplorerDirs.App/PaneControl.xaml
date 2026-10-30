@@ -48,7 +48,7 @@
                              LostKeyboardFocus="Address_LostKeyboardFocus"
                              Visibility="Collapsed" VerticalContentAlignment="Center"/>
                     <Button x:Name="AddressMenuButton" Grid.Column="1" Width="24" Padding="0"
-                            ToolTip="上级目录和常用系统位置" AutomationProperties.Name="路径位置"
+                            ToolTip="打开目录树，定位上级目录和常用系统位置" AutomationProperties.Name="目录树"
                             Click="AddressMenu_Click"/>
                     <Button x:Name="AddressComputerButton" Grid.Column="2" Width="24" Padding="0"
                             ToolTip="此电脑和本机驱动器 (F8)" AutomationProperties.Name="此电脑"
