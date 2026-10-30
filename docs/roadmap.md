@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 克隆视图“此电脑”选区隐藏 HostProbe：从真实 ExplorerBrowser 的 `shell:MyComputerFolder` 视图选择系统盘，克隆并执行应用级 Back/Forward，核对克隆每站保留系统盘绝对解析名；用生产 `ShellSelectionPidl.TryGetDirectChild` 获取相对 PIDL 并在克隆 `IShellView` 选择盘符。Release HostProbe 0 警告/错误，完整 PaneTabTransferProbe 连续两轮通过、前台未变。自动延迟恢复因隐藏宿主焦点门控未执行，其他虚拟 provider 与可见 UI 仍待验收；详见[核心操作对照](shell-parity.md)。
+
 2026-10-30 克隆视图真实 Shell 历史复验：隐藏生产 HostProbe 通过真实 `PaneControl` / ExplorerBrowser 在 A/B 两目录间捕获不同选区，独立克隆后后退/前进并核对各站位置/选区快照；逐站用生产 Shell selection batch 应用于克隆 view，源标签历史和状态保持独立。Release HostProbe 通过、前台未变。宿主无活动 WPF `Window`，焦点保护按设计拦截自动选区恢复；本轮不能证明可见窗口的延迟恢复/焦点，搜索异步与虚拟 provider 未覆盖，留待集中验收。详细见[核心操作对照](shell-parity.md)。
 
 2026-10-30 逐行派生列架构评审：隔离 `IShellView` 初次可提供并排序自定义大小值，但刷新后 DefView 没有重取值；标准 `SysListView32` 隐藏数据合同已证明单元格更新、按新值排序和项目选区/焦点身份保持。若要继续逐行派生列，应先做单窗格隔离自有 ListView 原型，使用真实 Shell 行对象验证菜单、文件操作、拖放、通知、导航及焦点合同；不直接迁移 ExplorerBrowser。内存收益尚无证据，必须在同机同目录集及同操作序列下测量。具体路线和门槛见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30视图架构与派生列可行性复核)。

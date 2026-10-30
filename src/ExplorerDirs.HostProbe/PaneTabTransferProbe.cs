@@ -245,6 +245,7 @@ internal static class PaneTabTransferProbe
                 "the production Shell selection batch applies the cloned B-location snapshot");
             targetPane.GetType().GetMethod("GoBack", InstanceMembers)!.Invoke(targetPane, null);
             PumpUntil(() => string.Equals(ReadBrowserPath(clonedTab), sourceA, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(clonedState) &&
                 ((IReadOnlyList<string>)clonedSelection.GetValue(clonedNavigationHistory)!).Select(Path.GetFileName)
                     .SequenceEqual(["probe-2.txt"], StringComparer.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(15), "the cloned Back selected the A-location history snapshot");
@@ -254,6 +255,7 @@ internal static class PaneTabTransferProbe
                 "the production Shell selection batch applies the cloned A-location snapshot");
             targetPane.GetType().GetMethod("GoForward", InstanceMembers)!.Invoke(targetPane, null);
             PumpUntil(() => string.Equals(ReadBrowserPath(clonedTab), sourceB, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(clonedState) &&
                 ((IReadOnlyList<string>)clonedSelection.GetValue(clonedNavigationHistory)!).Select(Path.GetFileName)
                     .SequenceEqual(["probe.txt"], StringComparer.OrdinalIgnoreCase),
                 TimeSpan.FromSeconds(15), "the cloned Forward selected the B-location history snapshot");
@@ -271,6 +273,51 @@ internal static class PaneTabTransferProbe
             targetPane.GetType().GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [clonedState]);
             Ensure(targetTabsControl.Items.Count == 2, "the cloned view can be closed independently");
 
+            var thisPc = "shell:MyComputerFolder";
+            var systemDrive = Path.GetPathRoot(Environment.SystemDirectory)!;
+            navigate.Invoke(browser, [thisPc]);
+            PumpUntil(() => string.Equals(ReadBrowserPath(movedTab), thisPc, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals((string)navigationHistoryType.GetProperty("Current", InstanceMembers)!.GetValue(navigationHistory)!,
+                    thisPc, StringComparison.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(15), "the source tab navigated to This PC");
+            WaitForShellItemCountAtLeast(browserType, browser, 1, "This PC populated its Shell view");
+            SelectShellParsingName(browserType, browser, thisPc, systemDrive);
+            PumpUntil(() => ReadSelectedShellNames(browserType, browser).Any(name => IsSameDriveName(name, systemDrive)) &&
+                ((IReadOnlyList<string>)historyCurrentSelection.GetValue(navigationHistory)!).Any(name => IsSameDriveName(name, systemDrive)),
+                TimeSpan.FromSeconds(5), "the source history captured the selected This PC drive");
+            paneType.GetMethod("CloneView", InstanceMembers)!.Invoke(targetPane, [state]);
+            PumpUntil(() => targetTabsControl.Items.Count == 3 &&
+                string.Equals(ReadBrowserPath(targetTabsControl.SelectedItem!), thisPc, StringComparison.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(15), "the virtual Shell location cloned at This PC");
+            var virtualCloneTab = (TabItem)targetTabsControl.SelectedItem!;
+            var virtualCloneState = virtualCloneTab.Tag!;
+            var virtualCloneBrowser = browserProperty.GetValue(virtualCloneState)!;
+            var virtualCloneHistory = virtualCloneState.GetType().GetProperty("NavigationHistory", InstanceMembers)!.GetValue(virtualCloneState)!;
+            var virtualCloneSelection = virtualCloneHistory.GetType().GetProperty("CurrentSelection", InstanceMembers)!;
+            WaitForShellItemCountAtLeast(browserType, virtualCloneBrowser, 1, "the cloned This PC view populated");
+            Ensure(((IReadOnlyList<string>)virtualCloneSelection.GetValue(virtualCloneHistory)!)
+                    .Any(name => IsSameDriveName(name, systemDrive)),
+                "the cloned virtual Shell history retains the selected drive identity");
+            SelectShellParsingName(browserType, virtualCloneBrowser, thisPc, systemDrive);
+            Ensure(ReadSelectedShellNames(browserType, virtualCloneBrowser).Any(name => IsSameDriveName(name, systemDrive)),
+                "the production direct-child PIDL route selects the drive in the cloned This PC view");
+            targetPane.GetType().GetMethod("GoBack", InstanceMembers)!.Invoke(targetPane, null);
+            PumpUntil(() => string.Equals(ReadBrowserPath(virtualCloneTab), sourceB, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(virtualCloneState),
+                TimeSpan.FromSeconds(15), "the virtual clone returned to its preceding filesystem location");
+            targetPane.GetType().GetMethod("GoForward", InstanceMembers)!.Invoke(targetPane, null);
+            PumpUntil(() => string.Equals(ReadBrowserPath(virtualCloneTab), thisPc, StringComparison.OrdinalIgnoreCase) &&
+                ReadHistoryReplayReady(virtualCloneState) &&
+                ((IReadOnlyList<string>)virtualCloneSelection.GetValue(virtualCloneHistory)!)
+                    .Any(name => IsSameDriveName(name, systemDrive)),
+                TimeSpan.FromSeconds(15), "the virtual clone returned to This PC with its saved drive selection");
+            WaitForShellItemCountAtLeast(browserType, virtualCloneBrowser, 1, "the forwarded This PC view populated");
+            SelectShellParsingName(browserType, virtualCloneBrowser, thisPc, systemDrive);
+            Ensure(ReadSelectedShellNames(browserType, virtualCloneBrowser).Any(name => IsSameDriveName(name, systemDrive)),
+                "the production direct-child PIDL route reapplies the drive selection after virtual-location Forward");
+            targetPane.GetType().GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [virtualCloneState]);
+            Ensure(targetTabsControl.Items.Count == 2, "the virtual Shell clone closes independently");
+
             paneType.GetMethod("CloseTab", InstanceMembers)!.Invoke(targetPane, [state]);
             Ensure(targetTabsControl.Items.Count == 1 && !targetTabsControl.Items.Contains(movedTab),
                 "the transferred tab can be closed normally");
@@ -278,7 +325,7 @@ internal static class PaneTabTransferProbe
                 "closing the transferred tab destroys the original HWND and releases the browser");
 
             EnsureForegroundUnchanged(foregroundBefore, "moving and navigating a tab");
-            Console.WriteLine("Pane tab transfer and clone host probe: PASS (move retains TabState/HWND/history; copy is independent; clone replays two locations and selections; close releases hosts)");
+            Console.WriteLine("Pane tab transfer and clone host probe: PASS (move retains TabState/HWND/history; copy is independent; filesystem and This PC clone history/selection contracts pass; close releases hosts)");
             return 0;
         }
         catch (Exception ex)
@@ -782,11 +829,53 @@ internal static class PaneTabTransferProbe
         return (string)browser.GetType().GetProperty("CurrentPath", InstanceMembers)!.GetValue(browser)!;
     }
 
+    private static bool ReadHistoryReplayReady(object state) =>
+        (bool)state.GetType().GetProperty("HistoryReplayReady", InstanceMembers)!.GetValue(state)!;
+
     private static string[] ReadSelectedNames(Type hostType, object browser)
     {
         var paths = (IReadOnlyList<string>)hostType.GetMethod("CaptureSelectedFileSystemPaths", InstanceMembers)!
             .Invoke(browser, null)!;
         return paths.Select(path => Path.GetFileName(path) ?? path).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string[] ReadSelectedShellNames(Type hostType, object browser) =>
+        ((IReadOnlyList<string>)hostType.GetMethod("CaptureSelectedShellParsingNames", InstanceMembers)!
+            .Invoke(browser, null)!).ToArray();
+
+    private static bool IsSameDriveName(string parsingName, string drivePath)
+    {
+        var drive = drivePath.TrimEnd('\\');
+        return parsingName.TrimEnd('\\').EndsWith(drive, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void SelectShellParsingName(Type hostType, object browser, string parentIdentity,
+        string itemParsingName)
+    {
+        var app = Assembly.Load("ExplorerDirs.App");
+        var resolver = app.GetType("ExplorerDirs.App.ShellSelectionPidl", throwOnError: true)!;
+        var resolverArgs = new object?[] { parentIdentity, itemParsingName, IntPtr.Zero };
+        Ensure((bool)resolver.GetMethod("TryGetDirectChild", BindingFlags.Static | BindingFlags.NonPublic)!
+                .Invoke(null, resolverArgs)!, "Shell selected item resolves to a direct child PIDL");
+        var childPidl = (IntPtr)resolverArgs[2]!;
+        Ensure(childPidl != IntPtr.Zero, "Shell direct-child resolver returned an owned PIDL");
+        var shellBrowser = hostType.GetField("_browser", InstanceMembers)!.GetValue(browser)!;
+        var shellViewId = new Guid("000214E3-0000-0000-C000-000000000046");
+        var viewObject = new object?[] { shellViewId, null };
+        var browserInterface = hostType.GetNestedType("IExplorerBrowser", BindingFlags.NonPublic)!;
+        Marshal.ThrowExceptionForHR((int)browserInterface.GetMethod("GetCurrentView")!
+            .Invoke(shellBrowser, viewObject)!);
+        var shellView = viewObject[1]!;
+        try
+        {
+            var selectItem = hostType.GetNestedType("IShellView", BindingFlags.NonPublic)!.GetMethod("SelectItem")!;
+            Marshal.ThrowExceptionForHR((int)selectItem.Invoke(shellView, [childPidl, 0x15u])!);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(childPidl);
+            if (Marshal.IsComObject(shellView)) Marshal.ReleaseComObject(shellView);
+        }
     }
 
     private static bool TryReadSelectedNames(Type hostType, object browser, out string[] names)
@@ -803,7 +892,8 @@ internal static class PaneTabTransferProbe
         }
     }
 
-    private static void WaitForShellItemCount(Type hostType, object browser, int expectedCount, string description)
+    private static void WaitForShellItemCount(Type hostType, object browser, int expectedCount, string description,
+        bool atLeast = false)
     {
         var browserObject = hostType.GetField("_browser", InstanceMembers)!.GetValue(browser)!;
         var viewId = new Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
@@ -822,13 +912,17 @@ internal static class PaneTabTransferProbe
                 {
                     var countArgs = new object?[] { 2u, 0 };
                     var countHr = (int)folderViewType.GetMethod("ItemCount")!.Invoke(folderView, countArgs)!;
-                    return countHr >= 0 && (int)countArgs[1]! == expectedCount;
+                    var count = (int)countArgs[1]!;
+                    return countHr >= 0 && (atLeast ? count >= expectedCount : count == expectedCount);
                 }
                 finally { if (Marshal.IsComObject(folderView)) Marshal.ReleaseComObject(folderView); }
             }
             catch (TargetInvocationException ex) when (ex.InnerException is COMException) { return false; }
         }, TimeSpan.FromSeconds(10), description);
     }
+
+    private static void WaitForShellItemCountAtLeast(Type hostType, object browser, int expectedMinimum,
+        string description) => WaitForShellItemCount(hostType, browser, expectedMinimum, description, atLeast: true);
 
     private static void SelectShellItems(Type hostType, object browser, string folder, IReadOnlyList<string> names)
     {
