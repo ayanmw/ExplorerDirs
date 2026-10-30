@@ -139,6 +139,8 @@
 
 > **隔离拖放原型接线（2026-10-27）：**NativeProbe 的 `ShellViewDragSource.RunOleLoop` 已将真实 Shell `IDataObject` 与 `IDropSource` 接到 `ole32!DoDragDrop` 调用入口，NativeProbe Release build 通过；本轮没有执行调用，也没有移动光标或注入输入。真实 OLE 拖放、操作效果、视图收敛和可见交互仍为 P0 未验收，产品继续使用 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-10-27-ole-dodragdrop-调用入口接线)。
 
+> **Private Desktop 拖放目标诊断（2026-10-30）：**`--shell-view-drop-target-private-desktop` 的命令退出码为 0，直接调用 Shell `IDropTarget` 的 `DragEnter/DragOver/Drop`，所选 Shell `IDataObject` 在 folder target 上通过同卷 Copy、同卷默认 Move、跨卷默认 Copy 和 Shift+Move 的文件状态核对。该合同没有调用真实 `DoDragDrop`，目标来自 `IShellView.GetItemObject` 或 `IShellFolder.CreateViewObject`，不是普通 ListView；`IShellView.GetItemObject` Copy 候选结果为 false，当前探针未将其设为硬门槛。运行中监视到前台短暂变化且输入 tick 改变，虽然退出时前台恢复，故本轮不作桌面隔离通过，也不能宣称真实拖放验收。为避免重复触发前台变化，不重跑此探针；产品仍使用 ExplorerBrowser。
+
 > **虚拟 Shell 标签和快捷链接图标（2026-10-27）：**标签标题与快捷链接现在按 Shell 位置 PIDL 读取虚拟文件夹图标；普通文件夹和文件扩展名图标维持原逻辑。定向 Windows Shell smoke 确认文件夹、“此电脑”和“回收站”图像不同。当前没有 GUI 验收，实际控件绘制仍待检查。详见[路线图](roadmap.md#2026-10-27虚拟-shell-标签和快捷链接使用位置图标)。
 
 > **标签栏显示模式（2026-10-29）：**“视图 → 标签栏显示”增加“隐藏标签栏（保留标签）”，与“始终显示 / 仅在多个标签时显示”并列。隐藏只收起标签标题控件，不关闭标签、不丢弃会话；现有标签快捷键仍可用，Tab/Shift+Tab 与 F6 焦点顺序随隐藏栏同步跳过。便携 `TabStripVisibility.ini` 从版本 1 的 `AlwaysShow=true/false` 迁移到版本 2 的 `Mode=Always/Multiple/Hidden`；识别未知更高版本时拒绝覆盖。策略及 INI smoke、完整 Release SettingsSmoke 和 App Release build 通过。真实菜单操作、焦点与跨重启可见效果尚未桌面验收。
