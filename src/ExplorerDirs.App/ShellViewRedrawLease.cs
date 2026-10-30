@@ -7,7 +7,8 @@ internal sealed class ShellViewRedrawLease : IDisposable
     private Func<bool, int>? _setRedraw;
     private Action? _release;
 
-    internal static bool ShouldSuppressForRefresh(bool preserveLastFrame) => preserveLastFrame;
+    internal static bool ShouldSuppressForRefresh(bool preserveLastFrame, bool directoryNotificationUsed) =>
+        preserveLastFrame && !directoryNotificationUsed;
 
     private ShellViewRedrawLease(Func<bool, int> setRedraw, Action? release = null)
     {

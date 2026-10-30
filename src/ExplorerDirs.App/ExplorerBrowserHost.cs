@@ -2545,25 +2545,12 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // an identical layout, which can otherwise trigger an unnecessary list reflow.
             if (currentModeResult < 0 || currentMode != style.Mode || currentIconSize != requestedIconSize)
             {
-                // DefView can clear its client area while rebuilding the icon/list layout.
-                // Keep its last frame until the dispatcher has allowed the native repaint;
-                // changing presentation must not refresh or navigate the folder.
-                var redraw = TrySuppressCurrentViewRedraw();
-                try
-                {
-                    BeginNativePaintTransitionTrace("view-mode");
-                    if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
-                            new NativeViewStateTarget(view, Current),
-                            result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
-
-                    if (redraw is not null)
-                    {
-                        var completedRedraw = redraw;
-                        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(completedRedraw.Dispose));
-                        redraw = null;
-                    }
-                }
-                finally { redraw?.Dispose(); }
+                // Let the native view paint a real mode transition. This changes presentation only;
+                // it must not refresh or navigate the folder.
+                BeginNativePaintTransitionTrace("view-mode");
+                if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
+                        new NativeViewStateTarget(view, Current),
+                        result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
             }
         }
         catch (COMException ex)
@@ -3176,10 +3163,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (preserveLastFrame)
                 {
-                    // Begin suppression before notifying Shell: even the in-place update
-                    // path can temporarily clear rows while it reconciles the directory.
-                    refreshRedraw = TrySuppressCurrentViewRedraw();
                     directoryNotificationUsed = TryNotifyCurrentFileSystemDirectory(browser);
+                    if (ShellViewRedrawLease.ShouldSuppressForRefresh(preserveLastFrame, directoryNotificationUsed))
+                        refreshRedraw = TrySuppressCurrentViewRedraw();
                 }
             }
             catch
@@ -3201,8 +3187,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (directoryNotificationUsed)
                 {
-                    // The notification reconciles filesystem rows in place; the redraw
-                    // lease keeps that reconciliation from exposing an intermediate blank.
+                    // A directory-change notification reconciles filesystem rows in place;
+                    // freezing redraw on this path would hold an obsolete frame unnecessarily.
                     refreshResult = 0;
                     LastShellRefreshStatus = "updatedir-notification";
                 }
