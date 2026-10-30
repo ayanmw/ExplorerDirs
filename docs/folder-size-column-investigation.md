@@ -2,7 +2,7 @@
 
 ## 2026-10-30：目录树扫描器托管内存 A/B
 
-为量化隔离 ListView 逐行派生值扫描的内存开销，增加 `--recursive-directory-scan-allocation-probe`。探针创建 5,000 个空子目录，预热完整/指定路径两条扫描路径，然后测量 `GC.GetAllocatedBytesForCurrentThread`、强制 GC 后的存活堆估算及扫描期间分批强制 GC 采样的最大存活堆。扫描器同时改为惰性深度优先枚举器帧：父目录枚举暂停在当前子目录，子树完成后即累计并关闭；取消时 finally 释放全部活动帧，不再预先把同级所有子目录节点压入待处理栈。待处理枚举器/打开句柄数量因此随当前目录深度增长，而非随一个目录的全部子项数增长。完整扫描返回 5,001 项；指定路径扫描仅返回根目录和 3 个子目录共 4 项。最终托管分配为 4,052,080 B / 3,361,544 B，差 690,536 B（17.0%）；强制 GC 后存活堆估算为 1,755,912 B / 1,288 B；遍历中采样的峰值估算为 1,822,952 B / 69,064 B。单轮耗时为 470 / 532 ms，未证明扫描速度改善。
+为量化隔离 ListView 逐行派生值扫描的内存开销，增加 `--recursive-directory-scan-allocation-probe`。探针创建 5,000 个空子目录，预热完整/指定路径两条扫描路径，然后测量 `GC.GetAllocatedBytesForCurrentThread`、强制 GC 后的存活堆估算及扫描期间分批强制 GC 采样的最大存活堆。扫描器同时改为惰性深度优先枚举器帧：父目录枚举暂停在当前子目录，子树完成后即累计并关闭；取消时 finally 释放全部活动帧，不再预先把同级所有子目录节点压入待处理栈。待处理枚举器/打开句柄数量因此随当前目录深度增长，而非随一个目录的全部子项数增长。完整扫描返回 5,001 项；指定路径扫描仅返回根目录和 3 个子目录共 4 项。最终托管分配为 4,052,080 B / 3,361,544 B，差 690,536 B（17.0%）；强制 GC 后存活堆估算为 1,755,912 B / 1,288 B；遍历中采样的峰值估算为 1,822,952 B / 69,064 B。最新复验单轮耗时为 741 / 491 ms，仍不作扫描速度结论。
 
 `dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release -- --recursive-directory-scan-allocation-probe` 可重跑该诊断。采样值只覆盖托管堆，不包括 Windows Shell、文件系统缓存、COM/原生堆，也不是 Private Bytes/Working Set；夹具主要是空目录且探针不创建 ExplorerBrowser，因此不能外推到实际目录或产品内存节省。递归扫描 smoke 另外核对扫描中取消可及时退出，且取消后 fixture 可立即删除（枚举句柄已释放）。App Release build 为 0 警告/错误；递归扫描 smoke、完整 Release SettingsSmoke 和隐藏 `--common-listview-relative-size-contract` 均通过，前台未变化。产品仍未接入递归逐行列。
 
@@ -573,6 +573,8 @@ API 静态核对（Microsoft `IColumnManager` 文档，2026-10-30）：`CM_ENUM_
 2026-10-30 相对大小比例排序、选区与文件变更合同：扩展 `--common-listview-relative-size-contract`，以真实 Shell 枚举得到的两个目录行和系统图像索引，在隐藏 `SysListView32` 中验证初始 10/14、4/14 排序为小目录在前；先要求监听目标文件的 `FileSystemWatcher.Changed`，收到变更后再把小目录内容从 4 B 更新到 20 B，单次树扫描得到父目录 30 B，比例重算为 10/30、20/30，重新排序后大目录在前。两次重排后相同 Shell 行身份仍为选中/项目焦点项；两轮均收到变更事件、列表不可见且前台 HWND 未变。新增通知/排序断言先按预期失败，接入目标文件监听、按行身份更新及重排后通过。Release NativeProbe 定向合同连续两轮通过。此排序调用是探针中的程序化通用列表排序，且因同级项目共用分母，与递归字节排序等价；这里的 `FileSystemWatcher` 不代表 `SHChangeNotify`/DefView 对虚拟 Shell 行的更新合同，也不验证用户点击列标题、键盘焦点 HWND、Shell 菜单/拖放、ExplorerBrowser 产品列或 Q-Dir 精确显示格式。产品视图未改。
 
 2026-10-30 比例列独立隐藏合同：新增 `--common-listview-relative-size-contract`，复用真实 `IShellFolder::EnumObjects` 行和生产目录树扫描器，在普通隐藏 `SysListView32` 中读回比例列。初始 10/14、4/14 分别读回 `71.428571428571428571428571429%`、`28.571428571428571428571428571%`；将小目录文件从 4 B 改为 2 B 并重扫后，同级行均重算为 `83.33333333333333333333333333%`、`16.666666666666666666666666667%`。合同退出码 0，稳定 row ID 保持，窗口不可见且前台句柄不变；路径不查询菜单、不执行文件操作，因此避开此前整体合同的前台变化位置。Release build 和该专用合同通过。它仍只验证隔离 ListView 数据更新，不代表 ExplorerBrowser 产品逐行列或可见精度/舍入已实现。
+
+2026-10-30 隔离 ListView 自定义排序会话恢复：为继续评估产品列迁移前的数据契约，原型将递归相对大小使用的 app-only `PropertyKeyState` 和升降序写入现有 `SessionStore` 格式，并从 `Render` / `ParseComplete` 读回；排序通过自有 `SysListView32` comparator 执行，不调用 Shell 的 `SetSortColumns`。每次重排前按稳定 Shell row ID 记录 selected/focused 状态，排序后重新定位相同行并还原状态。NativeProbe Release build 0 警告/错误；这次没有运行 `--common-listview-relative-size-contract`，运行行为仍待后台合同复验。此 key 仅适用于自有视图的应用状态；产品 ExplorerBrowser 依旧无法用它恢复原生 Shell 排序，未接入产品。
 
 2026-10-30 同目录子项目计数隔离合同补充：在比例合同的隐藏行模型中增加 `Contents` 数据列，初始扫描读回两行各 `1 file, 0 folders`；小目录内容变化为 3 个文件、1 个子目录（新增文件为零字节，保持大小比例夹具的 12 B 总量）后，重扫使该行读回 `3 files, 1 folder`，兄弟行仍为 `1 file, 0 folders`。合同先因计数列未填充按预期失败，接线后 `--common-listview-relative-size-contract` 通过，前台句柄未变。这里验证的是递归计数驱动隔离行更新，不是 Q-Dir 原生显示格式或产品列实现。
 

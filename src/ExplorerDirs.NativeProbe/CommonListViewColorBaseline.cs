@@ -31,6 +31,10 @@ internal static class CommonListViewColorBaseline
     private const uint CdrfNewFontAndPostPaint = 0x12;
     private static readonly DrawProc Callback = OnDraw;
     private static readonly ListViewCompareProc SizeCompare = CompareBySize;
+    // App-owned ListView sort identity; this key is serialized in the prototype session only.
+    private static readonly PropertyKeyState RelativeSizeSortKey = new(
+        Guid.Parse("4FE4D115-D9D4-4F88-9A1D-9F5CB4E6B355"), 1);
+    private static int _sortDirection = 1;
     private static Dictionary<long, ShellRow>? _shellRowsById;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
@@ -243,15 +247,25 @@ internal static class CommonListViewColorBaseline
                 fixtureScan.Files == 2 && fixtureScan.Directories == 2 && fixtureScan.Unreadable == 0;
             var initialRelativeSizes = ParseRelativeSize(GetItemText(listView, 0, 3)) == RecursiveSizePercentage.Calculate(10, 14) &&
                 ParseRelativeSize(GetItemText(listView, 1, 3)) == RecursiveSizePercentage.Calculate(4, 14);
+            var savedRelativeSort = relativeSizesOnly ? RoundTripRelativeSortState(fixture, 1) : [];
+            var descendingRelativeSort = relativeSizesOnly ? RoundTripRelativeSortState(fixture, -1) : [];
             SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
             SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
             var initialRelativeSortResult = relativeSizesOnly
-                ? SendMessageW(listView, LvmSortItemsEx, 0, Marshal.GetFunctionPointerForDelegate(SizeCompare))
+                ? ApplyRelativeSizeSort(listView, savedRelativeSort)
                 : 0;
             var initialRelativeSortRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
             var initialRelativeSortFocusPreserved =
                 GetItemParam(listView, 0) == 2 && GetItemState(listView, 0) == (LvisSelected | LvisFocused);
+            var descendingRelativeSortResult = relativeSizesOnly
+                ? ApplyRelativeSizeSort(listView, descendingRelativeSort) : 0;
+            var descendingRelativeSortRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            var descendingRelativeSortFocusPreserved =
+                GetItemParam(listView, 1) == 2 && GetItemState(listView, 1) == (LvisSelected | LvisFocused);
+            var ascendingSortRestoredAfterDirectionChange = relativeSizesOnly &&
+                ApplyRelativeSizeSort(listView, savedRelativeSort) != 0 && GetItemParam(listView, 0) == 2;
             var updatedPayloadBytes = relativeSizesOnly ? 20UL : 2UL;
             var payloadPath = Path.Combine(smallFolder, "payload.bin");
             var fileChangeObserved = true;
@@ -296,7 +310,7 @@ internal static class CommonListViewColorBaseline
                 ParseRelativeSize(GetItemText(listView, smallRowIndex, 3)) ==
                     RecursiveSizePercentage.Calculate(updatedSmallScan.Bytes, updatedFixtureScan.Bytes);
             var updatedRelativeSortResult = relativeSizesOnly
-                ? SendMessageW(listView, LvmSortItemsEx, 0, Marshal.GetFunctionPointerForDelegate(SizeCompare))
+                ? ApplyRelativeSizeSort(listView, savedRelativeSort)
                 : 0;
             var contentsCountsCorrect = initialContentsRows == "files: 1, folders: 0,files: 1, folders: 0" &&
                 updatedContentsRows == "files: 3, folders: 1,files: 1, folders: 0" &&
@@ -314,6 +328,9 @@ internal static class CommonListViewColorBaseline
                     initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 30 &&
                     updatedSmallScan.Bytes == 20 && updatedSmallScan.Files == 3 && updatedSmallScan.Directories == 1 &&
                     initialRelativeSortResult != 0 && updatedRelativeSortResult != 0 &&
+                    savedRelativeSort.SequenceEqual([new SortColumnState(RelativeSizeSortKey, 1)]) &&
+                    descendingRelativeSortResult != 0 && descendingRelativeSortRows == "large-folder:1,small-folder:2" &&
+                    descendingRelativeSortFocusPreserved && ascendingSortRestoredAfterDirectionChange &&
                     fileChangeObserved &&
                     initialRelativeSortFocusPreserved && updatedRelativeSortFocusPreserved &&
                     relativeSizeSorted && !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
@@ -324,6 +341,9 @@ internal static class CommonListViewColorBaseline
                     $"updated-contents={updatedContentsRows};contents-counts-correct={contentsCountsCorrect};" +
                     $"parent-bytes={updatedFixtureScan.Bytes};" +
                     $"initial-relative-sort={initialRelativeSortRows};updated-relative-sort={relativeSizeSortedRows};" +
+                    $"session-sort-key={savedRelativeSort.FirstOrDefault()?.Key};session-sort-direction={savedRelativeSort.FirstOrDefault()?.Direction};" +
+                    $"descending-restored={descendingRelativeSortRows};descending-focus-preserved={descendingRelativeSortFocusPreserved};" +
+                    $"ascending-restored-after-direction-change={ascendingSortRestoredAfterDirectionChange};" +
                     $"relative-sort-correct={relativeSizeSorted};file-change-observed={fileChangeObserved};" +
                     $"focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
                     $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
@@ -1020,6 +1040,42 @@ internal static class CommonListViewColorBaseline
         finally { Marshal.FreeHGlobal(memory); }
     }
 
+    private static IReadOnlyList<SortColumnState> RoundTripRelativeSortState(string fixture, int direction)
+    {
+        var sort = new SortColumnState(RelativeSizeSortKey, direction);
+        var tab = new TabSettings(fixture, new ViewState(4, -1, [sort], null, true));
+        var state = new SessionState(4, 4, [[tab], [], [], []], ActiveTabIndices: [0, 0, 0, 0]);
+        var restored = SessionStore.ParseComplete(SessionStore.Render(state))?.Panes
+            .ElementAtOrDefault(0)?.ElementAtOrDefault(0)?.View.SortColumns;
+        return restored is not null && restored.Count == 1 && restored[0] == sort
+            ? restored : Array.Empty<SortColumnState>();
+    }
+
+    private static nint ApplyRelativeSizeSort(nint listView, IReadOnlyList<SortColumnState> sortColumns)
+    {
+        if (listView == 0 || sortColumns.Count != 1 || sortColumns[0].Key != RelativeSizeSortKey ||
+            sortColumns[0].Direction is not (1 or -1)) return 0;
+
+        var statesByRowId = new List<(long Id, uint State)>();
+        var count = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
+        for (var index = 0; index < count; index++)
+        {
+            var state = GetItemState(listView, index) & (LvisSelected | LvisFocused);
+            if (state != 0) statesByRowId.Add((GetItemParam(listView, index), state));
+        }
+
+        var previousDirection = _sortDirection;
+        _sortDirection = sortColumns[0].Direction;
+        var result = SendMessageW(listView, LvmSortItemsEx, 0,
+            Marshal.GetFunctionPointerForDelegate(SizeCompare));
+        if (result == 0) _sortDirection = previousDirection;
+
+        SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
+        foreach (var (rowId, state) in statesByRowId)
+            SetItemState(listView, FindItemIndexByParam(listView, rowId), state, LvisSelected | LvisFocused);
+        return result;
+    }
+
     private static int CompareBySize(nint firstIndex, nint secondIndex, nint sortParameter)
     {
         var first = GetItemParam(_listView, checked((int)firstIndex.ToInt64()));
@@ -1029,7 +1085,7 @@ internal static class CommonListViewColorBaseline
             first = checked((long)_shellRowsById[first].RecursiveBytes);
             second = checked((long)_shellRowsById[second].RecursiveBytes);
         }
-        return first.CompareTo(second);
+        return _sortDirection * first.CompareTo(second);
     }
 
     private static nint OnDraw(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
