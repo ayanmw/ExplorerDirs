@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 逐行派生列架构评审：隔离 `IShellView` 初次可提供并排序自定义大小值，但刷新后 DefView 没有重取值；标准 `SysListView32` 隐藏数据合同已证明单元格更新、按新值排序和项目选区/焦点身份保持。若要继续逐行派生列，应先做单窗格隔离自有 ListView 原型，使用真实 Shell 行对象验证菜单、文件操作、拖放、通知、导航及焦点合同；不直接迁移 ExplorerBrowser。内存收益尚无证据，必须在同机同目录集及同操作序列下测量。具体路线和门槛见[逐行大小列调查](folder-size-column-investigation.md#2026-10-30视图架构与派生列可行性复核)。
+
 2026-10-30 Q-Dir 标签组资料边界：官方英文/英国英文字符串表有“Tab Group / Move to new Tab Group / Copy to new Tab Group / Use Tab Groups”菜单标签；检索官方 FAQ 与版本记录仍未找到组作用域、跨窗格关系或保存规则。按项目规则不分析 Q-Dir 二进制；标签组维持 P2 待评估，在集中可见验收确认交互前不猜测菜单和 INI 模型。详见[核心操作对照](shell-parity.md)。
 
 2026-10-30 克隆视图历史选区存储：导航历史快照中的每站选区只通过只读列表暴露，克隆视图现在复制最多 100 个位置的容器并共享这些不可变选区存储，避免 Snapshot 与 FromSnapshot 对每个位置重复复制文件名引用数组。Release SettingsSmoke 验证共享存储且源视图后续更新不会影响克隆；完整 SettingsSmoke 与 App Release build 通过。没有运行正式 App，且未采集同 PID 前后数据；这减少的是托管引用数组和短期副本，不复制字符串，也没有可报告的 MB 节省。详细边界见[memory sampling 记录](memory-sampling.md)。
