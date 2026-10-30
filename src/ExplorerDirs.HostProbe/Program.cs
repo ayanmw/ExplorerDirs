@@ -2669,6 +2669,7 @@ internal static class Program
                 if (!expectedSelection.SequenceEqual(selectedBefore, StringComparer.OrdinalIgnoreCase))
                     throw new Exception($"Could not establish pane {pane} selection: {selectedBefore}.");
                 var focusMethod = hostType.GetMethod("GetFocusedItemPath", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var paintTransitionSnapshot = hostType.GetProperty("NativePaintTransitionSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var focusBefore = noSelection ? null : (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
                 if (!noSelection && string.IsNullOrWhiteSpace(focusBefore)) throw new Exception("Could not read the focused fixture item.");
                 if (unselectedFocus && !string.Equals(focusBefore, Path.Combine(folders[pane], "initial.txt"), StringComparison.OrdinalIgnoreCase))
@@ -2798,7 +2799,10 @@ internal static class Program
                 var focusBeforeRefresh = (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
-                hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!.Invoke(hosts[pane], null);
+                var manualRefresh = args[0] == "--live-shell-refresh"
+                    ? hostType.GetMethod("RefreshPreservingLastFrame", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    : hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!;
+                manualRefresh.Invoke(hosts[pane], null);
                 var expectedItems = Directory.GetFiles(folders[pane]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 var refreshed = WaitForFolderItems(hostType, hosts[pane], folders[pane], expectedItems, TimeSpan.FromSeconds(10));
                 refreshed &= Count(hosts[pane]) == (deleteSelected ? 2 : 4);
@@ -2810,7 +2814,7 @@ internal static class Program
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)
                     : string.Equals(focusBeforeRefresh, focusAfterRefresh, StringComparison.OrdinalIgnoreCase);
-                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refreshed={refreshed} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
+                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refreshed={refreshed} paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
                 return refreshed && selectionPreserved && focusPreserved ? 0 : 1;
             }

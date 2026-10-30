@@ -375,6 +375,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         .OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")) +
         "; samples=" + string.Join('|', _nativeUserMessageSamples) +
         $"; paint-transition={_nativePaintTransitionName}[" + string.Join('|', _nativePaintTransitionSamples) + "]";
+    internal string NativePaintTransitionSnapshot =>
+        $"{_nativePaintTransitionName}; samples=" + string.Join('|', _nativePaintTransitionSamples);
     internal string LastShellRefreshStatus { get; private set; } = "not-started";
     internal string LastDirectoryChangeWatcherError { get; private set; } = "none";
     internal string LastQuickFilterStatus { get; private set; } = "not-started";
