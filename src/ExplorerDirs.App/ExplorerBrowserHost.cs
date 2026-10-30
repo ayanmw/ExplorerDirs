@@ -5413,7 +5413,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
             if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
             {
-                if (message is 0x000F or 0x0014) // WM_PAINT / WM_ERASEBKGND
+                if (timingClass.Equals("SysListView32", StringComparison.OrdinalIgnoreCase) &&
+                    IsNativeListMutationMessage(message))
+                {
+                    var itemCount = SendMessage(hwnd, 0x1004, IntPtr.Zero, IntPtr.Zero).ToInt64(); // LVM_GETITEMCOUNT.
+                    _nativePaintTransitionSamples.Add(
+                        $"{elapsed.TotalMilliseconds:F1}ms/list-{message:X}/{ListMutationName(message)}/count={itemCount}/w={wParam.ToInt64():X}");
+                }
+                else if (message is 0x000F or 0x0014) // WM_PAINT / WM_ERASEBKGND
                 {
                     var shellPaintTicks = Stopwatch.GetTimestamp() - beforeShell;
                     _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellPaintTicks):F2}/result={result.ToInt64():X}");
@@ -5449,6 +5456,29 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         0x0100 or 0x0101 or 0x0102 or 0x0104 or 0x0105 or // keyboard down/up, character, system key down/up
         0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0205 or 0x0207 or 0x0208 or // mouse buttons
         0x020A or 0x020E; // vertical/horizontal mouse wheel
+
+    private static bool IsNativeListMutationMessage(uint message) => message is
+        0x000B or // WM_SETREDRAW
+        0x1008 or 0x1009 or // LVM_DELETEITEM / LVM_DELETEALLITEMS
+        0x1015 or 0x1016 or // LVM_REDRAWITEMS / LVM_ARRANGE
+        0x102F or 0x1030 or // LVM_SETITEMCOUNT / LVM_SORTITEMS
+        0x1006 or 0x1007 or 0x104C or 0x104D or // LVM_SETITEM / LVM_INSERTITEM (ANSI and Unicode)
+        0x102E or 0x1074; // LVM_SETITEMTEXT (ANSI and Unicode)
+
+    private static string ListMutationName(uint message) => message switch
+    {
+        0x000B => "WM_SETREDRAW",
+        0x1006 or 0x104C => "LVM_SETITEM",
+        0x1007 or 0x104D => "LVM_INSERTITEM",
+        0x1008 => "LVM_DELETEITEM",
+        0x1009 => "LVM_DELETEALLITEMS",
+        0x1015 => "LVM_REDRAWITEMS",
+        0x1016 => "LVM_ARRANGE",
+        0x102F => "LVM_SETITEMCOUNT",
+        0x1030 => "LVM_SORTITEMS",
+        0x102E or 0x1074 => "LVM_SETITEMTEXT",
+        _ => "LVM_UNKNOWN"
+    };
 
     private string GetDiagnosticWindowClass(IntPtr hwnd)
     {

@@ -4960,3 +4960,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
 - 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
 - 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
+
+### 刷新诊断补充：记录原生列表数据变更
+
+- 现有 2 秒绘制时间线在诊断开启时增加 `SysListView32` 的 `WM_SETREDRAW`、删除/插入/更新行、排序和布局消息，并在消息处理后采样行数；不读取文件名/文本，最多 256 条。该记录可区分列表数据被清空/重填与单纯重绘，正常运行不启用。
+- App Release build 与完整 Release SettingsSmoke 通过；没有创建窗口。当前仍无屏幕像素证据，诊断本身不改变刷新/视图切换行为，用户可见改善待集中验收。
