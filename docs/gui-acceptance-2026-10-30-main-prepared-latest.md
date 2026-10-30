@@ -4,18 +4,18 @@
 
 ## 固定身份
 
-- 源提交：`8c3c0b51203afae9f300e6f1aee9544261beba7b`，准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261030-003501-952-100cc4/`。
-- BuildIdentity：`gui-acceptance.20261030-003501-952-100cc4+8c3c0b51203afae9f300e6f1aee9544261beba7b`。
+- 源提交：`08ab2a82102ada97fc277b76095963544dc96193`，准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261030-004055-897-500aed/`。
+- BuildIdentity：`gui-acceptance.20261030-004055-897-500aed+08ab2a82102ada97fc277b76095963544dc96193`。
 - 状态：`prepared-not-run`，39 项待验收。
-- EXE SHA-256：`78BDF7184D16EA59771B86F6943D9142926EBA176FAEBC9425A900B7495B1797`。
-- App DLL SHA-256：`E38A2E3765DE6C21335590A21D4E849293C0DFA947D229ED02FBB310486B1532`。
-- 颜色配置夹具 `qdr-color-metadata.qdr` SHA-256：`3240B070E8AB3EA1184CE86DD9E91B067AF3A0CE96429A9918ECBA3FE76115E3`。
+- EXE SHA-256：`464F0BF88CCCE10B29640C9414EF2A4534C83CD12EC5C5E1170DF2FF4C2F7A88`。
+- App DLL SHA-256：`E959DBBFAD0569CC2B717BF9EEFFD621746595F4313B3251E74376A6D1EC1BFA`。
+- 颜色配置夹具 `qdr-color-metadata.qdr` SHA-256：`6EBC8D9C80ADF2B8A24C88BD60276628FCED240255A9CFCAE3D3BA0B9D724B22`。
 - 初始布局为四窗格，使用副本自己的 profile 和隔离文件夹；包含 10,000 个递归大小测试文件及跨窗格复制/移动样本。
 
 ## 本次更新与验证范围
 
-验收清单覆盖 `Ctrl+Shift+C`、`Alt+K`/`Alt+V`、F7 路径层级、F8/“此电脑”按钮、地址栏 Tab 顺序，以及标签栏“使用 Explorer 浏览”。克隆视图可见场景检查普通目录和搜索结果选区、逐站 Back/Forward、前进分支截断，以及导航/选区在克隆快照期间变化时不建立混合状态标签。异步搜索结果行身份复核由 SettingsSmoke 覆盖；可见验收仍需确认搜索选区结果。Q-Dir 树分隔值仅作不透明字段往返，不代表 DIP 树宽度。
+验收清单覆盖 `Ctrl+Shift+C`、`Alt+K`/`Alt+V`、F7 路径层级、F8/“此电脑”按钮、地址栏 Tab 顺序，以及标签栏“使用 Explorer 浏览”。克隆视图可见场景检查普通目录和搜索结果选区、逐站 Back/Forward、前进分支截断，以及导航/选区在克隆快照期间变化时不建立混合状态标签。异步搜索结果行身份复核由 SettingsSmoke 覆盖；可见验收仍需确认搜索选区结果。列值筛选菜单的候选值/选择语义有 SettingsSmoke，菜单实际外观及大目录性能未做 GUI 测量。Q-Dir 树分隔值仅作不透明字段往返，不代表 DIP 树宽度。
 
 颜色元数据步骤会导入 `qdr-color-metadata.qdr`，检查预览说明“保留但未应用”，再导出到新文件并逐行比对 `useColor`、`useTreeColor`、`colorthema` 和 `[Filter2]` 规则顺序。夹具明确指定 Q-Dir 四窗格布局，包含 `#Hidden`、扩展名、`#BG` 和 `#BG-A` 规则。只读 importer 检查确认其恢复 1 个标签且没有“布局尚未支持”警告。它检查状态文件保真，不表示 ExplorerBrowser 已显示颜色；Q-Dir 实际读取与重存仍待用户集中验收。浅深主题检查使用独立的最小 `qdr-color-baseline.qdr`。
 
