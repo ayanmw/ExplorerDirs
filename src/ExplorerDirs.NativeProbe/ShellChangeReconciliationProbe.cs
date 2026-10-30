@@ -134,10 +134,7 @@ internal static class ShellChangeReconciliationProbe
             {
                 Rows = renamedEnumeration.Rows.OrderByDescending(row => row.DisplayName, StringComparer.OrdinalIgnoreCase).ToList()
             };
-            var renameIdentities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [Path.GetFullPath(renamedPath)] = Path.GetFullPath(createdPath)
-            };
+            var renameIdentities = window.RenamedParsingNames;
             var renamed = ShellListViewRowModel.Reconcile(current.Rows, renamedEnumeration.Rows, updated.NextId,
                 renameIdentities);
             ShellListViewEnumerator.FreeRows(renamed.RetiredRows);
@@ -427,6 +424,8 @@ internal static class ShellChangeReconciliationProbe
     private sealed class ChangeWindow : NativeWindow, IDisposable
     {
         private readonly List<uint> _events = [];
+        private readonly Dictionary<string, string> _renamedParsingNames = new(StringComparer.OrdinalIgnoreCase);
+        internal IReadOnlyDictionary<string, string> RenamedParsingNames => _renamedParsingNames;
 
         internal ChangeWindow()
         {
@@ -450,14 +449,33 @@ internal static class ShellChangeReconciliationProbe
             if (message.Msg == ChangeMessage)
             {
                 var changeLock = SHChangeNotificationLock(message.WParam,
-                    unchecked((uint)message.LParam.ToInt64()), out _, out var eventId);
+                    unchecked((uint)message.LParam.ToInt64()), out var pidls, out var eventId);
                 if (changeLock != 0)
                 {
-                    try { _events.Add(unchecked((uint)eventId)); }
+                    try
+                    {
+                        _events.Add(unchecked((uint)eventId));
+                        if (unchecked((uint)eventId) == RenamedItem && pidls != 0)
+                        {
+                            var oldPidl = Marshal.ReadIntPtr(pidls);
+                            var newPidl = Marshal.ReadIntPtr(pidls, IntPtr.Size);
+                            var oldPath = FileSystemPath(oldPidl);
+                            var newPath = FileSystemPath(newPidl);
+                            if (oldPath is not null && newPath is not null)
+                                _renamedParsingNames[Path.GetFullPath(newPath)] = Path.GetFullPath(oldPath);
+                        }
+                    }
                     finally { _ = SHChangeNotificationUnlock(changeLock); }
                 }
             }
             base.WndProc(ref message);
+        }
+
+        private static string? FileSystemPath(nint pidl)
+        {
+            if (pidl == 0 || SHGetNameFromIDList(pidl, 0x80058000, out var name) < 0) return null;
+            try { return Marshal.PtrToStringUni(name); }
+            finally { Marshal.FreeCoTaskMem(name); }
         }
 
         public void Dispose() => DestroyHandle();
@@ -471,6 +489,7 @@ internal static class ShellChangeReconciliationProbe
     [DllImport("shell32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SHChangeNotifyDeregister(uint registration);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Lock")] private static extern nint SHChangeNotificationLock(nint change, uint processId, out nint pidls, out int eventId);
     [DllImport("shell32.dll", EntryPoint = "SHChangeNotification_Unlock")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SHChangeNotificationUnlock(nint changeLock);
+    [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint sigdnName, out nint name);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern void SHChangeNotify(uint eventId, uint flags, string item1, string? item2);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();

@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 隔离 Shell 重命名映射改用通知 PIDL：`ShellChangeReconciliationProbe` 不再手工构造新路径→旧路径映射；隐藏通知窗在 `SHChangeNotification_Lock` 有效期内读取 `SHCNE_RENAMEITEM` 两个 PIDL，并用 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 提取路径后交给行模型。NativeProbe Release build 通过（0 警告、0 错误）。本轮未运行探针，因此真实通知映射能否命中行模型解析名、以及重命名后实际选区/焦点恢复仍未验证；产品视图未改，仍使用 ExplorerBrowser。
+
 2026-10-31 隔离扫描过期失败门控：目录大小协调器此前只将过期取消视为无结果；若旧 worker 忽略取消后抛出 IO/扫描错误，异常仍会泄漏到调用方，可能被误报为当前扫描失败。现在任意已过期 ticket 的 worker 异常都以 `false` 结果结束，当前 ticket 的异常仍正常传播。新增回归在旧逻辑上复现失败，并分别验证过期异常不影响较新成功发布、当前异常继续传播；定向和完整 Release SettingsSmoke、App/NativeProbe Release build 与 `git diff --check` 通过。仅覆盖隔离原型协调器，不意味着产品逐行大小功能已接入。
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
