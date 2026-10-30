@@ -5054,3 +5054,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 在干净主线提交 `ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f` 上执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-200808-091-e70fbb/`。候选为 `prepared-not-run`、初始四窗格、41 项待验收；BuildIdentity 为 `0.6.0-preview.20261030-200808-091-e70fbb+ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f`。
 - EXE SHA-256 `5C306940EBCEFFB35C922300E87EEC3039C4D588F5E14C614B88C71BF5F730F9`、App DLL SHA-256 `62E0B8024DA2414D9B7E721837DEDF3D5E566006B25DD7D3FD1DA07BA9FD48B2` 均与 manifest 内哈希经独立计算一致。没有启动应用、创建 ExplorerBrowser、发送输入或触碰正式 profile；此候选不是发布包，也没有可见通过结论。
 - 同步整理刷新调查计划中被前后尝试覆盖的说明：当前普通文件系统 F5 优先发 `SHCNE_UPDATEDIR`，必要时回退 `IShellView.Refresh()`；显式 F5 使用有界重绘租约，视图模式切换不重枚举。实际空白像素、租约期间输入命中和滚动位置仍需这份候选集中验收。
+
+## 2026-10-31：减少 F5 与查看方式切换的中间空白
+
+- 代码追踪发现，F5 的重绘租约此前只在回退到 `IShellView.Refresh()` 时启用；通常的 `SHCNE_UPDATEDIR` 分支在 Shell 逐行协调期间没有冻结重绘，和“只更新列表、保留旧画面”的目标不符。现在在发通知之前开始同一有界租约，等现有稳定行数采样完成后恢复重绘。
+- 查看方式切换仍使用当前 `IFolderView2.SetViewModeAndIconSize`，不刷新目录；新增短暂重绘租约并延迟到 WPF `ContextIdle` 释放，避免 DefView 重排列表时先清空客户端区域。
+- `ExplorerDirs.SettingsSmoke` 全量通过，App Release 构建 0 警告/错误，`git diff --check` 通过。未创建窗口或运行 ExplorerBrowser，因此这里只确认代码路径与后台合同；残余像素闪烁、延迟绘制、输入命中与滚动位置要在后续 GUI 集中验收。
