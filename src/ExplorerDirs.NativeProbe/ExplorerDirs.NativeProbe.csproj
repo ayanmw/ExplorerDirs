@@ -22,6 +22,7 @@
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionSize.cs" Link="ShellSelectionSize.cs" />
     <Compile Include="../ExplorerDirs.App/ShellFileCommands.cs" Link="ShellFileCommands.cs" />
+    <Compile Include="../ExplorerDirs.App/KeyboardShortcuts.cs" Link="KeyboardShortcuts.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionCommands.cs" Link="ShellSelectionCommands.cs" />
     <Compile Include="../ExplorerDirs.App/ShellFocusRestoreGate.cs" Link="ShellFocusRestoreGate.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSelectionRestoreGate.cs" Link="ShellSelectionRestoreGate.cs" />

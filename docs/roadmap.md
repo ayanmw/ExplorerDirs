@@ -4749,3 +4749,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：列值筛选菜单分页
 
 列值筛选仍枚举并保留当前视图的完整去重值数组，但 WPF 菜单改为每页最多 20 个可勾选项，并提供上一页/下一页与范围提示。跨页维持已选集合、当前选择计数、清除操作和每列 256 值限制；已选但当前视图不存在的旧值也仍保留在数组中供翻页访问。新增分页纯逻辑 smoke 覆盖总页数、尾页内容及越界页为空。App Release build 0 警告/错误，完整 SettingsSmoke 退出码 0。没有启动 GUI 或 ExplorerBrowser；分页菜单实际操作体验、超长菜单性能与主题样式仍待后续集中验收。完整值数组仍驻留到菜单关闭，本次只限制创建的菜单控件数，没有声称固定总内存上限。
+
+## 2026-10-30：标准 Win32 ListView 派生值更新与排序合同
+
+- NativeProbe 的普通非虚拟 `SysListView32` 基线现在有名称和派生大小两列；隐藏数据合同先把第二行大小从 `4 B` 改为 `16 B`，再同步更新其 `lParam`，调用 `LVM_SORTITEMSEX` 后确认行序按更新后的数值排序。命令 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --common-listview-data-contract` 通过，输出 `updated-cell=16 B`、`sorted=large-folder:10,small-folder:16`、`visible=False`、`foreground-unchanged=True`。
+- 首次可见 Private Desktop 基线因误带 `LVS_OWNERDATA` 虚拟列表样式而使用了不匹配的存储列表 API，第二列更新失败；已修正样式。该轮守卫也发现前台/输入状态改变，所以没有将其作为有效可见结果；修正后只运行隐藏合同，没有重开可见窗口。
+- 结论仅限于自有标准 ListView 可由应用更新派生值并按其排序。Shell 文件枚举、图标、菜单与命令、焦点、拖放、文件系统通知、性能/内存和产品集成均未验证；不据此决定迁移 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。

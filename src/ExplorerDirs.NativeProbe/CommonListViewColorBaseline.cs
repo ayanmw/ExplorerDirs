@@ -10,11 +10,16 @@ internal static class CommonListViewColorBaseline
     private const uint CddsItemPostPaint = 0x00010002;
     private const int LvmInsertItemW = 0x104D;
     private const int LvmInsertColumnW = 0x1061;
+    private const int LvmGetItemW = 0x104B;
+    private const int LvmSetItemW = 0x104C;
+    private const int LvmGetItemTextW = 0x1073;
+    private const int LvmSortItemsEx = 0x1051;
     private const int LvmSetView = 0x108E;
     private const int LvmRedrawItems = 0x1015;
     private const uint CdrfNotifyItemDraw = 0x20;
     private const uint CdrfNewFontAndPostPaint = 0x12;
     private static readonly DrawProc Callback = OnDraw;
+    private static readonly ListViewCompareProc SizeCompare = CompareBySize;
     private static readonly Dictionary<nuint, uint> Colors = new() { [0] = 0x00F0E0D0, [1] = 0x00D0F0E0 };
     private static readonly Dictionary<nuint, uint> Samples = [];
     private static readonly Dictionary<nuint, string> Writes = [];
@@ -41,7 +46,7 @@ internal static class CommonListViewColorBaseline
             if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Baseline parent creation failed.");
             ShowWindow(parent, 4); // SW_SHOWNOACTIVATE, confined to the private Desktop.
             listView = CreateWindowExW(0, "SysListView32", "",
-                0x40000000 | 0x10000000 | 0x00000001 | 0x00000004 | 0x00001000,
+                0x40000000 | 0x10000000 | 0x00000001 | 0x00000004,
                 8, 8, 640, 360, parent, 0, GetModuleHandleW(null), 0);
             if (listView == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Standard ListView creation failed.");
             _listView = listView;
@@ -49,9 +54,10 @@ internal static class CommonListViewColorBaseline
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Baseline custom-draw observer setup failed.");
             parentSubclassed = true;
 
-            AddColumn(listView, "Name", 440);
-            InsertItem(listView, 0, "blue-rule-target.txt");
-            InsertItem(listView, 1, "green-rule-target.txt");
+            AddColumn(listView, "Name", 340);
+            AddColumn(listView, "Recursive size", 140);
+            InsertItem(listView, 0, "large-folder", 10, "10 B");
+            InsertItem(listView, 1, "small-folder", 4, "4 B");
             if (!IsWindowVisible(parent) || !IsWindowVisible(listView))
                 Console.WriteLine($"common-listview-color-baseline: initial-visible-state=parent:{IsWindowVisible(parent)},list:{IsWindowVisible(listView)}");
 
@@ -85,10 +91,26 @@ internal static class CommonListViewColorBaseline
                     $"pixels={pixels};fields={fields};label-rects={rects};visible={IsWindowVisible(listView)}");
             }
 
+            var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            SetItemText(listView, 1, 1, "16 B");
+            SetItemParam(listView, 1, 16);
+            var liveValue = GetItemText(listView, 1, 1);
+            var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
+                Marshal.GetFunctionPointerForDelegate(SizeCompare));
+            var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            var derivedValueUpdatedAndSorted = initialRows == "large-folder:10,small-folder:4" &&
+                liveValue == "16 B" && sortResult != 0 && sortedRows == "large-folder:10,small-folder:16";
+            InvalidateRect(listView, 0, true);
+            UpdateWindow(listView);
+            PumpMessages();
+            report.Add($"derived-value-update=True;live-cell={liveValue};size-sort=True;rows={sortedRows}");
+
             var foregroundUnchanged = GetForegroundWindow() == desktopBefore;
             Console.WriteLine($"common-listview-color-baseline: views={string.Join('|', report)}; " +
                 $"visible-test=True; foreground-unchanged={foregroundUnchanged}; shell-view=False");
-            return foregroundUnchanged ? 0 : 1;
+            return foregroundUnchanged && derivedValueUpdatedAndSorted ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -121,10 +143,67 @@ internal static class CommonListViewColorBaseline
         }
     }
 
-    private static void InsertItem(nint listView, int index, string text)
+    internal static int RunDataContract()
+    {
+        var foregroundBefore = GetForegroundWindow();
+        nint parent = 0, listView = 0;
+        try
+        {
+            var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
+            if (!InitCommonControlsEx(ref init))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "ListView common controls initialization failed.");
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden ListView data contract",
+                0x00CF0000, 0, 0, 400, 200, 0, 0, GetModuleHandleW(null), 0);
+            if (parent == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "Hidden ListView parent creation failed.");
+            listView = CreateWindowExW(0, "SysListView32", "",
+                0x40000000 | 0x00000001 | 0x00000004,
+                0, 0, 380, 180, parent, 0, GetModuleHandleW(null), 0);
+            if (listView == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "Hidden standard ListView creation failed.");
+
+            _listView = listView;
+            AddColumn(listView, "Name", 240);
+            AddColumn(listView, "Recursive size", 100);
+            InsertItem(listView, 0, "large-folder", 10, "10 B");
+            InsertItem(listView, 1, "small-folder", 4, "4 B");
+            var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            SetItemText(listView, 1, 1, "16 B");
+            SetItemParam(listView, 1, 16);
+            var liveValue = GetItemText(listView, 1, 1);
+            var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
+                Marshal.GetFunctionPointerForDelegate(SizeCompare));
+            var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            var passed = initialRows == "large-folder:10,small-folder:4" && liveValue == "16 B" &&
+                sortResult != 0 && sortedRows == "large-folder:10,small-folder:16" &&
+                !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
+            Console.WriteLine($"common-listview-data-contract: initial={initialRows};updated-cell={liveValue};" +
+                $"sort-result={sortResult != 0};sorted={sortedRows};visible=False;" +
+                $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
+            return passed ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("common-listview-data-contract: " + ex);
+            return 1;
+        }
+        finally
+        {
+            if (parent != 0 && IsWindow(parent)) DestroyWindow(parent);
+            _listView = 0;
+        }
+    }
+
+    private static void InsertItem(nint listView, int index, string text, long size, string sizeText)
     {
         var textPointer = Marshal.StringToHGlobalUni(text);
-        var item = new ListViewItem { Mask = 1, Item = index, Text = textPointer, TextMax = text.Length };
+        var item = new ListViewItem { Mask = 0x0001 | 0x0004, Item = index, Text = textPointer,
+            TextMax = text.Length, Param = (nint)size };
         var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
         try
         {
@@ -137,6 +216,79 @@ internal static class CommonListViewColorBaseline
             Marshal.FreeHGlobal(textPointer);
             Marshal.FreeHGlobal(memory);
         }
+        SetItemText(listView, index, 1, sizeText);
+    }
+
+    private static void SetItemText(nint listView, int index, int subItem, string text)
+    {
+        var textPointer = Marshal.StringToHGlobalUni(text);
+        var item = new ListViewItem { Mask = 0x0001, Item = index, SubItem = subItem,
+            Text = textPointer, TextMax = text.Length };
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(item, memory, false);
+            if (SendMessageW(listView, LvmSetItemW, 0, memory) == 0)
+                throw new Exception($"Standard ListView item {index}, subitem {subItem} update failed.");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(textPointer);
+            Marshal.FreeHGlobal(memory);
+        }
+    }
+
+    private static void SetItemParam(nint listView, int index, long value)
+    {
+        var item = new ListViewItem { Mask = 0x0004, Item = index, Param = (nint)value };
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(item, memory, false);
+            if (SendMessageW(listView, LvmSetItemW, 0, memory) == 0)
+                throw new Exception($"Standard ListView item {index} derived-value update failed.");
+        }
+        finally { Marshal.FreeHGlobal(memory); }
+    }
+
+    private static string GetItemText(nint listView, int index, int subItem)
+    {
+        var buffer = Marshal.AllocHGlobal(256 * sizeof(char));
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.WriteInt16(buffer, 0);
+            var item = new ListViewItem { Item = index, SubItem = subItem, Text = buffer, TextMax = 256 };
+            Marshal.StructureToPtr(item, memory, false);
+            SendMessageW(listView, LvmGetItemTextW, index, memory);
+            return Marshal.PtrToStringUni(buffer) ?? string.Empty;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(memory);
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static long GetItemParam(nint listView, int index)
+    {
+        var item = new ListViewItem { Mask = 0x0004, Item = index };
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(item, memory, false);
+            if (SendMessageW(listView, LvmGetItemW, 0, memory) == 0)
+                throw new Exception($"Standard ListView item {index} data read failed.");
+            return Marshal.PtrToStructure<ListViewItem>(memory).Param.ToInt64();
+        }
+        finally { Marshal.FreeHGlobal(memory); }
+    }
+
+    private static int CompareBySize(nint firstIndex, nint secondIndex, nint sortParameter)
+    {
+        var first = GetItemParam(_listView, checked((int)firstIndex.ToInt64()));
+        var second = GetItemParam(_listView, checked((int)secondIndex.ToInt64()));
+        return first.CompareTo(second);
     }
 
     private static nint OnDraw(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
@@ -206,6 +358,7 @@ internal static class CommonListViewColorBaseline
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint DrawProc(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ListViewCompareProc(nint first, nint second, nint sortParameter);
     [StructLayout(LayoutKind.Sequential)] private struct InitCommonControls { public uint Size; public uint Classes; }
     [StructLayout(LayoutKind.Sequential)] private struct NotifyHeader { public nint Window; public nuint Id; public int Code; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }

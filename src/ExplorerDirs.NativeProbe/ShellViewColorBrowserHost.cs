@@ -11,7 +11,7 @@ internal sealed class ShellViewColorBrowserHost : StreamViewHost,
 {
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
-    private readonly ShellBrowserSite _callbacks = new() { QuickFilterActive = true };
+    private readonly ShellBrowserSite _callbacks = new() { ShellFolderFilterActive = true };
     private readonly ShellFolderFilter _filter;
     private int _includeObjectCalls;
 

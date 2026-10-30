@@ -177,6 +177,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")
             return PrivateDesktopShellProbe.RunCommonListViewColorBaseline();
+        if (args.Length == 1 && args[0] == "--common-listview-data-contract")
+            return CommonListViewColorBaseline.RunDataContract();
         if (args.Length == 1 && args[0] == "--ishellview-grouped-filter-export")
             return ShellViewHostFilterProbe.RunGroupedExportOnly();
         if (args.Length == 1 && args[0] == "--ishellview-color-spike-offscreen")
@@ -261,6 +263,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
             Console.WriteLine("       --common-listview-color-baseline-private-desktop (standard ListView custom-draw control comparison)");
+            Console.WriteLine("       --common-listview-data-contract (hidden standard ListView update/sort contract)");
         Console.WriteLine("       --ishellview-color-spike-offscreen (same probe with WS_VISIBLE window outside the virtual desktop; no input)");
             Console.WriteLine("       --auto-column-width (hidden native IShellView Ctrl+NumPad+ column-width probe)");
             Console.WriteLine("       --photo-print-verb (query the canonical Shell Print verb for one isolated temporary PNG; does not display or invoke it)");

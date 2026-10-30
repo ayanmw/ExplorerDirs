@@ -1630,7 +1630,7 @@ internal static class ShellViewHostFilterProbe
     {
         // Keep the isolated host's non-filter browser callbacks aligned with the
         // product site; only IncludeObject remains specialized for this fixture.
-        private readonly ShellBrowserSite _browserCallbacks = new() { QuickFilterActive = true };
+        private readonly ShellBrowserSite _browserCallbacks = new() { ShellFolderFilterActive = true };
         internal ShellFolderFilter Filter { get; }
         private int _includeObjectCalls;
         private int _defaultCommandCalls;
