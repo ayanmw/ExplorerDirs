@@ -72,6 +72,15 @@ internal static class ShellTabNavigationHistorySmoke
               !duplicateCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
               cloneCode.Contains("ShellTabNavigationHistory.FromSnapshot", StringComparison.Ordinal) &&
               cloneCode.Contains("CaptureSelectedShellParsingNames", StringComparison.Ordinal) &&
+              cloneCode.Contains("var viewGeneration = state.Browser.ViewGeneration;", StringComparison.Ordinal) &&
+              cloneCode.Contains("var navigationVersion = state.Browser.NavigationVersion;", StringComparison.Ordinal) &&
+              cloneCode.Contains("var selectionVersion = state.Browser.SelectionVersion;", StringComparison.Ordinal) &&
+              cloneCode.Contains("var cloneSearchUri = state.Browser.CurrentSearchUri;", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.Browser.NavigationVersion != navigationVersion", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.Browser.ViewGeneration != viewGeneration", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.Browser.SelectionVersion != selectionVersion", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.Browser.CurrentPath, clonePath", StringComparison.Ordinal) &&
+              cloneCode.Contains("state.Browser.CurrentSearchUri, cloneSearchUri", StringComparison.Ordinal) &&
               paneSource.Contains("var selectedItems = browser.CaptureSelectedShellParsingNames();", StringComparison.Ordinal) &&
               paneSource.Contains("state.Browser.ViewGeneration != viewGeneration", StringComparison.Ordinal) &&
               paneSource.Contains("state.NavigationHistory.CurrentSelection", StringComparison.Ordinal) &&

@@ -936,17 +936,36 @@ public partial class PaneControl : UserControl
         if (!CanAddTabs(1)) return;
         try
         {
+            var clonePath = state.Browser.CurrentPath;
+            var cloneSearchUri = state.Browser.CurrentSearchUri;
+            var cloneLocation = cloneSearchUri ?? clonePath;
+            var navigationVersion = state.Browser.NavigationVersion;
+            var viewGeneration = state.Browser.ViewGeneration;
+            var selectionVersion = state.Browser.SelectionVersion;
+            if (!string.Equals(cloneLocation, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("导航历史尚未同步到当前 Shell 位置；未克隆视图。");
+
             var view = state.Browser.CaptureViewState();
             if (state.Browser.ViewCaptureFailed)
                 throw new InvalidOperationException("Shell 视图状态暂时不可读取；未克隆视图。");
             var selectedItems = state.Browser.CaptureSelectedShellParsingNames();
+            // Shell COM reads can reenter navigation or selection callbacks; do not
+            // combine settings from one visit with items from a newer view.
+            if (state.Browser.NavigationVersion != navigationVersion ||
+                state.Browser.ViewGeneration != viewGeneration ||
+                state.Browser.SelectionVersion != selectionVersion ||
+                !string.Equals(state.Browser.CurrentPath, clonePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(state.Browser.CurrentSearchUri, cloneSearchUri, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(state.NavigationHistory.Current, cloneLocation, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Shell 视图在克隆快照期间发生变化；请重试。");
+
             state.NavigationHistory.UpdateCurrentSelection(selectedItems);
-            AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+            AddTab(clonePath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
                 previewPaneVisible: state.Browser.PreviewPaneVisible,
                 detailsPaneVisible: state.Browser.DetailsPaneVisible,
                 addressHistory: state.AddressHistory.Copy(), startupSelectItems: selectedItems,
                 navigationHistory: ShellTabNavigationHistory.FromSnapshot(state.NavigationHistory.Snapshot(), state.NavigationHistory.Index),
-                startupSearchUri: state.Browser.CurrentSearchUri, replayClonedHistory: true);
+                startupSearchUri: cloneSearchUri, replayClonedHistory: true);
         }
         catch (Exception ex)
         {
