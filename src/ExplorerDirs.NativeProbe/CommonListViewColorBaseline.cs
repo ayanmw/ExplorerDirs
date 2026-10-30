@@ -14,8 +14,12 @@ internal static class CommonListViewColorBaseline
     private const int LvmSetItemW = 0x104C;
     private const int LvmGetItemTextW = 0x1073;
     private const int LvmSortItemsEx = 0x1051;
+    private const int LvmSetItemState = 0x102B;
+    private const int LvmGetItemState = 0x102C;
     private const int LvmSetView = 0x108E;
     private const int LvmRedrawItems = 0x1015;
+    private const uint LvisFocused = 0x0001;
+    private const uint LvisSelected = 0x0002;
     private const uint CdrfNotifyItemDraw = 0x20;
     private const uint CdrfNewFontAndPostPaint = 0x12;
     private static readonly DrawProc Callback = OnDraw;
@@ -172,18 +176,29 @@ internal static class CommonListViewColorBaseline
             InsertItem(listView, 1, "small-folder", 4, "4 B");
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
-            SetItemText(listView, 1, 1, "16 B");
-            SetItemParam(listView, 1, 16);
+            SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
+            SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
+            SetItemText(listView, 1, 1, "2 B");
+            SetItemParam(listView, 1, 2);
             var liveValue = GetItemText(listView, 1, 1);
             var sortResult = SendMessageW(listView, LvmSortItemsEx, 0,
                 Marshal.GetFunctionPointerForDelegate(SizeCompare));
             var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
-            var passed = initialRows == "large-folder:10,small-folder:4" && liveValue == "16 B" &&
-                sortResult != 0 && sortedRows == "large-folder:10,small-folder:16" &&
+            var firstState = GetItemState(listView, 0);
+            var secondState = GetItemState(listView, 1);
+            var selectedFocusedCount = (firstState == (LvisSelected | LvisFocused) ? 1 : 0) +
+                (secondState == (LvisSelected | LvisFocused) ? 1 : 0);
+            var selectedName = selectedFocusedCount == 1
+                ? GetItemText(listView, firstState == (LvisSelected | LvisFocused) ? 0 : 1, 0)
+                : "none";
+            var passed = initialRows == "large-folder:10,small-folder:4" && liveValue == "2 B" &&
+                sortResult != 0 && sortedRows == "small-folder:2,large-folder:10" &&
+                selectedName == "small-folder" && selectedFocusedCount == 1 &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};updated-cell={liveValue};" +
-                $"sort-result={sortResult != 0};sorted={sortedRows};visible=False;" +
+                $"sort-result={sortResult != 0};sorted={sortedRows};selected-focused-after-sort={selectedName};" +
+                $"selected-focused-count={selectedFocusedCount};visible=False;" +
                 $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
             return passed ? 0 : 1;
         }
@@ -280,6 +295,21 @@ internal static class CommonListViewColorBaseline
             if (SendMessageW(listView, LvmGetItemW, 0, memory) == 0)
                 throw new Exception($"Standard ListView item {index} data read failed.");
             return Marshal.PtrToStructure<ListViewItem>(memory).Param.ToInt64();
+        }
+        finally { Marshal.FreeHGlobal(memory); }
+    }
+
+    private static uint GetItemState(nint listView, int index) =>
+        unchecked((uint)SendMessageW(listView, LvmGetItemState, index, (nint)(LvisSelected | LvisFocused)));
+
+    private static void SetItemState(nint listView, int index, uint state, uint stateMask)
+    {
+        var item = new ListViewItem { State = state, StateMask = stateMask };
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(item, memory, false);
+            SendMessageW(listView, LvmSetItemState, index, memory);
         }
         finally { Marshal.FreeHGlobal(memory); }
     }

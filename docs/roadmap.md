@@ -4758,4 +4758,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - NativeProbe 的普通非虚拟 `SysListView32` 基线现在有名称和派生大小两列；隐藏数据合同先把第二行大小从 `4 B` 改为 `16 B`，再同步更新其 `lParam`，调用 `LVM_SORTITEMSEX` 后确认行序按更新后的数值排序。命令 `dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --common-listview-data-contract` 通过，输出 `updated-cell=16 B`、`sorted=large-folder:10,small-folder:16`、`visible=False`、`foreground-unchanged=True`。
 - 首次可见 Private Desktop 基线因误带 `LVS_OWNERDATA` 虚拟列表样式而使用了不匹配的存储列表 API，第二列更新失败；已修正样式。该轮守卫也发现前台/输入状态改变，所以没有将其作为有效可见结果；修正后只运行隐藏合同，没有重开可见窗口。
+- 后续隐藏合同把已选中并聚焦的 `small-folder` 从 `4` 改为 `2`，强制排序跨过 `large-folder`；排序后唯一 selected+focused 状态仍在 `small-folder`。NativeProbe Release 构建和隐藏数据合同通过，窗口不可见且前台不变。该结果只覆盖普通存储式 `SysListView32`，不能外推到 Shell DefView 或产品。
 - 结论仅限于自有标准 ListView 可由应用更新派生值并按其排序。Shell 文件枚举、图标、菜单与命令、焦点、拖放、文件系统通知、性能/内存和产品集成均未验证；不据此决定迁移 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
