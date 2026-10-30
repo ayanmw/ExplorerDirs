@@ -4955,3 +4955,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 文件系统与虚拟 Shell 行探针共享显示名、绝对解析名、属性、PIDL 图标索引读取；文件系统路径仅为真实 filesystem 项目提供。
 - NativeProbe Release build、虚拟 Control Panel（9 个虚拟子项）、文件系统数据/操作及导航合同通过，前台窗口未变。仅为隔离探针代码整理，未接入产品。详见[派生大小列调查](folder-size-column-investigation.md)。
+## 2026-10-31：F5 空白区间的源码边界复核
+
+- 当前 F5 的 `IFolderView2.SetRedraw(false)` 只暂停原生列表重绘；释放条件使用 `ItemCount` 连续三次稳定或 1.5 秒超时。行数稳定不能证明行内容已绘制，目录刷新前后条数相同时也无法由此推断刷新阶段。因而这套租约只能尽量延后暴露中间帧，不能保证保留 Explorer 式旧画面。
+- 查看方式切换没有调用 `IShellView.Refresh`、重新导航或重建 ExplorerBrowser；它只调用 `SetViewModeAndIconSize`，Shell 对当前行重新排布。Shell 的原生重排本身仍可能短暂重绘列表。
+- 当前尚无可见像素验收或新的 ExplorerBrowser 宿主运行数据。已有按需 paint/input 时间线能补足消息顺序，但不包含屏幕像素；下一次集中验收应分别核对 F5 与视图切换的空白区间及选择/滚动状态，再决定是否改变重绘租约。此处不声称黑屏已解决。
