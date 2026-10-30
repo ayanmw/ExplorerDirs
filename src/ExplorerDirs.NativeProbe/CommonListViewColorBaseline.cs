@@ -31,6 +31,7 @@ internal static class CommonListViewColorBaseline
     private static Dictionary<long, ShellRow>? _shellRowsById;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Dictionary<nuint, uint> Colors = new() { [0] = 0x00F0E0D0, [1] = 0x00D0F0E0 };
     private static readonly Dictionary<nuint, uint> Samples = [];
     private static readonly Dictionary<nuint, string> Writes = [];
@@ -247,7 +248,7 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsSort = MenuContainsAny(backgroundMenuLabels, "排序方式", "Sort by");
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
-            var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, selectedId, fixture);
+            var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, shellFolder, selectedId, fixture);
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
@@ -417,7 +418,7 @@ internal static class CommonListViewColorBaseline
         }
     }
 
-    private static bool ExerciseSelectedShellRowOperations(nint listView, long selectedRowId, string fixture)
+    private static bool ExerciseSelectedShellRowOperations(nint listView, nint shellFolder, long selectedRowId, string fixture)
     {
         var selectedIndex = SendMessageW(listView, LvmGetNextItem, -1, (nint)LvisSelected).ToInt32();
         if (selectedIndex < 0 || GetItemParam(listView, selectedIndex) != selectedRowId)
@@ -432,22 +433,26 @@ internal static class CommonListViewColorBaseline
         Directory.CreateDirectory(moveDestinationPath);
         var foregroundBeforeOperations = GetForegroundWindow();
         var itemId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
-        Marshal.ThrowExceptionForHR(SHCreateItemFromIDList(row.AbsolutePidl, ref itemId, out var sourceItem));
+        var childArray = Marshal.AllocHGlobal(IntPtr.Size);
         nint destinationItem = 0, operation = 0, moveSourceItem = 0, moveDestinationItem = 0, moveOperation = 0,
-            renameItem = 0, renameOperation = 0, deleteItem = 0, deleteOperation = 0;
+            renameItem = 0, renameOperation = 0, deleteItem = 0, deleteOperation = 0, selectedDataObject = 0;
         try
         {
+            Marshal.WriteIntPtr(childArray, row.RelativePidl);
+            Marshal.ThrowExceptionForHR(At<GetUiObjectOf>(shellFolder, 10)(shellFolder, 0, 1,
+                childArray, in DataObjectId, 0, out selectedDataObject));
+            if (selectedDataObject == 0) return false;
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destinationItem));
             var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
             var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
             Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, 0, 1, ref interfaceId, out operation));
             const uint flags = 0x0004 | 0x0010 | 0x0400 | 0x00800000; // Silent, no confirmation/error UI, no copy hooks.
             Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation, flags));
-            Marshal.ThrowExceptionForHR(At<CopyItem>(operation, 16)(operation, sourceItem, destinationItem,
-                "selected-folder-copy", 0));
+            Marshal.ThrowExceptionForHR(At<CopyItems>(operation, 17)(operation, selectedDataObject, destinationItem, 0));
             Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
             Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
-            var copiedPayload = Path.Combine(destinationPath, "selected-folder-copy", "payload.bin");
+            var copiedFolder = Path.Combine(destinationPath, Path.GetFileName(row.ParsingName));
+            var copiedPayload = Path.Combine(copiedFolder, "payload.bin");
             var sourcePayload = Path.Combine(row.ParsingName, "payload.bin");
             var sourceLength = File.Exists(sourcePayload) ? new FileInfo(sourcePayload).Length : -1;
             var copiedLength = File.Exists(copiedPayload) ? new FileInfo(copiedPayload).Length : -1;
@@ -457,7 +462,6 @@ internal static class CommonListViewColorBaseline
             var foregroundAfterCopy = GetForegroundWindow();
             if (!copied || !File.Exists(sourcePayload)) return false;
 
-            var copiedFolder = Path.Combine(destinationPath, "selected-folder-copy");
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(copiedFolder, 0, ref itemId, out moveSourceItem));
             Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(moveDestinationPath, 0, ref itemId, out moveDestinationItem));
             var moveClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
@@ -505,6 +509,7 @@ internal static class CommonListViewColorBaseline
             var foregroundAfterDelete = GetForegroundWindow();
             Console.WriteLine($"common-listview-shell-operation: selected={row.DisplayName};copy-aborted={aborted};" +
                 $"move-aborted={moveAborted};rename-aborted={renameAborted};delete-aborted={deleteAborted};copy-payload-matches-source={copied};" +
+                $"copy-items-source=selected-Shell-IDataObject;" +
                 $"move-payload-matches-source={moved};rename-payload-matches-source={renamed};" +
                 $"delete-removed={deleted};source-preserved={File.Exists(sourcePayload)};copy-source-removed={moved};move-source-renamed={renamed};" +
                 $"foreground=0x{foregroundBeforeOperations.ToInt64():X}/0x{foregroundAfterCopy.ToInt64():X}/" +
@@ -515,6 +520,7 @@ internal static class CommonListViewColorBaseline
         {
             if (deleteOperation != 0) Marshal.Release(deleteOperation);
             if (deleteItem != 0) Marshal.Release(deleteItem);
+            if (selectedDataObject != 0) Marshal.Release(selectedDataObject);
             if (renameOperation != 0) Marshal.Release(renameOperation);
             if (renameItem != 0) Marshal.Release(renameItem);
             if (moveOperation != 0) Marshal.Release(moveOperation);
@@ -522,7 +528,7 @@ internal static class CommonListViewColorBaseline
             if (moveSourceItem != 0) Marshal.Release(moveSourceItem);
             if (operation != 0) Marshal.Release(operation);
             if (destinationItem != 0) Marshal.Release(destinationItem);
-            Marshal.Release(sourceItem);
+            Marshal.FreeHGlobal(childArray);
         }
     }
 
@@ -809,7 +815,7 @@ internal static class CommonListViewColorBaseline
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenuNative(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint buffer, uint maxLength);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint items, nint destination, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
