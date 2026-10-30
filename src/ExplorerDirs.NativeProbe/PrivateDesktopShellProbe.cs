@@ -52,6 +52,13 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunHostNewFolder() => Run("host-newfolder", ShellViewHostFilterProbe.RunNewFolderForPrivateDesktop);
 
+    internal static int RunNativeViewLifetime(bool reuseBrowserHost = false) => Run(
+        reuseBrowserHost ? "native-view-lifetime-reuse-host" : "native-view-lifetime",
+        () => ShellViewNativeLifetimeProbe.Run(reuseBrowserHost), TimeSpan.FromMinutes(2));
+
+    internal static int RunNativeViewObjectOnly() => Run("native-view-object-only",
+        ShellViewNativeLifetimeProbe.RunCreateObjectOnly, TimeSpan.FromMinutes(1));
+
     internal static int RunHostFilterVirtualScope(string scope) =>
         Run($"host-filter-{scope}", () => ShellViewHostFilterProbe.RunVirtualScopeForPrivateDesktop(scope));
 

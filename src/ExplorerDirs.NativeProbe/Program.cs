@@ -109,6 +109,12 @@ internal static class Program
             return PrivateDesktopShellProbe.RunHostFilter();
         if (args.Length == 1 && args[0] == "--ishellview-native-pidl-lifetime")
             return ShellViewNativePidlLifetimeProbe.Run();
+        if (args.Length == 1 && args[0] == "--ishellview-native-view-lifetime-private-desktop")
+            return PrivateDesktopShellProbe.RunNativeViewLifetime();
+        if (args.Length == 1 && args[0] == "--ishellview-native-view-lifetime-reuse-host-private-desktop")
+            return PrivateDesktopShellProbe.RunNativeViewLifetime(reuseBrowserHost: true);
+        if (args.Length == 1 && args[0] == "--ishellview-native-view-object-only-private-desktop")
+            return PrivateDesktopShellProbe.RunNativeViewObjectOnly();
         if (args.Length == 1 && args[0] == "--private-desktop-owner-smoke")
             return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 2 && args[0] == "--native-minidump-smoke")
@@ -262,6 +268,9 @@ internal static class Program
             Console.WriteLine("       --ishellview-host-filter (hidden direct IShellView ICommDlgBrowser3 filtering fixture)");
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-native-pidl-lifetime (real Shell PIDL history stress; no Shell view window)");
+            Console.WriteLine("       --ishellview-native-view-lifetime-private-desktop (repeated stock IShellView HWND/COM create-destroy on an isolated Desktop)");
+            Console.WriteLine("       --ishellview-native-view-lifetime-reuse-host-private-desktop (same test reusing one IShellBrowser host)");
+            Console.WriteLine("       --ishellview-native-view-object-only-private-desktop (repeated CreateViewObject/Release without a view window)");
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --private-desktop-isolation-policy-smoke (test the isolation result policy without creating windows)");
             Console.WriteLine("       --native-minidump-smoke <absolute-path> (write and inspect an opt-in diagnostic minidump; no Shell window)");
