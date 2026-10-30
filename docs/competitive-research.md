@@ -26,6 +26,12 @@ Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size in
 
 Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树到状态栏，和 Q-Dir 的“切换逐行大小信息”不是同一行为；继续保留用户选定的 F9 语义。逐行列仍受 [Shell 视图架构门槛](folder-size-column-investigation.md)限制，本轮没有引入猜测公式或代码实现。
 
+## 2026-10-31 官方 Soft-Refresh 行为补查
+
+Q-Dir FAQ 112 将 Soft-Refresh 的新名称列为“Disable auto sorting when rename or copy items”，说明启用后在拖放、粘贴或刷新等情形下抑制列表自动重排，避免文件位置突然变化；该说明没有定义每种操作结束时的最终排序时机、不同查看方式的范围或失败回退。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)
+
+Windows 的 `FWF_AUTOARRANGE` 公开语义是自动排列视图元素；它不等同于 Q-Dir 所述的“暂缓文件项重排”。`FWF_NOENUMREFRESH` 的公开语义则是刷新时不重新枚举视图，直接常驻使用会让内容变陈旧，不能拿来冒充 Soft-Refresh。[Microsoft FOLDERFLAGS](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags) 因此当前没有证据支持用一个已有 Shell flag 完整复刻该行为。Explorer Dirs 目前遵循 Shell 的正常自动排序与刷新；若要补齐，需先明确它是逐标签偏好还是全局偏好，并以创建/重命名/粘贴/拖放/F5 验证最终排序、选区和内容新鲜度，再选择是否实现。
+
 ## 2026-10-27 Win+E 入口对照
 
 Q-Dir 帮助页概述支持把 Win+E 设为启动 Q-Dir；更具体的 [FAQ 81](https://www.softwareok.com/?faq=81&seite=faq-Q-DIR) 给出的做法是使用 QuickTextPaste，把 `E+L-Win` 绑定到 `run:%PATH%/q-dir.exe`。因此，公开证据确认的是可通过外部快捷键工具转发 Win+E，并未说明 Q-Dir 自身注册全局热键、替换 Explorer 或改写文件夹关联。此处是基于官方操作步骤的判断，不推断 Q-Dir 的内部实现。
