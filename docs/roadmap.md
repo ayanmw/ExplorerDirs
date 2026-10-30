@@ -10,7 +10,7 @@
 
 2026-10-30 逐行派生列接口复核：Microsoft 文档只承诺 `SHCOLSTATE_ONBYDEFAULT` 是 Explorer Details view 的默认展示提示；`IColumnManager.SetColumns` 设置当前视图列序且会清除列状态。隔离探针的通知后 `Apply` 虽返回 `S_OK`，自定义大小列仍不可见且 provider 未收到值请求，故不把 HRESULT 当成恢复成功。当前读数不能解释为单一缺陷；停止重复通用列重放/行重绘尝试。下一步若继续需在新视图记录 `GetDetailsOf`、默认列状态、SCID 映射及 `CM_ENUM_ALL` 列键的完整接口链，否则先保持产品未接线。只读复核发现两个已知测试 CLSID 及 Desktop NameSpace 项仍存在，因此不启动会添加注册项的 Private Desktop 实验。详情见[派生列接口复核](folder-size-column-investigation.md#2026-10-30自定义列可见性合同复核)。
 
-2026-10-30 克隆历史容量调整：用户确认保留每标签最多 100 个导航位置，以控制长期会话的历史/选区快照内存；超出时淘汰最旧位置，克隆只复制当前保留窗口。源码与既有 smoke 预期已同步修改；App 与 SettingsSmoke Release 构建均通过（0 警告/错误），未运行 smoke；100 项上限行为待运行时验证，可见回退行为待集中验收。
+2026-10-30 克隆历史容量调整：用户确认保留每标签最多 100 个导航位置，以控制长期会话的历史/选区快照内存；超出时淘汰最旧位置，克隆只复制当前保留窗口。完整 Release SettingsSmoke 现通过：120 次导航后历史正好保留 `C:\21`～`C:\120`，克隆可独立回退到最旧保留站，源历史仍停在 `C:\120`。这是模型级容量/克隆验证，不创建 ExplorerBrowser，实际连续导航、界面回退体验仍待集中验收。
 
 2026-10-30 逐行大小列隔离复验尝试：运行不注册 CLSID 的 Strict IShellFolder Private Desktop 适配器探针；前台 HWND 未变，但系统输入 tick 改变，守护标记 `isolation-clean=False`。自定义列仍无逐项取值/比较回调并以 exit 1 退出，标准 `PKEY_Size` 排序通过；因隔离条件不完整且未提供新信息，不计为干净复验，不据此调整方向或重跑。未注册 property schema、未接入产品；详见[逐行大小调查](folder-size-column-investigation.md)。
 
