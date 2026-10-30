@@ -16,6 +16,7 @@ internal static class CommonListViewColorBaseline
     private const int LvmGetImageList = 0x1002;
     private const int LvsilSmall = 1;
     private const int LvmGetItemW = 0x104B;
+    private const int LvmGetItemCount = 0x1004;
     private const int LvmSetItemW = 0x104C;
     private const int LvmGetItemTextW = 0x1073;
     private const int LvmGetNextItem = 0x100C;
@@ -239,7 +240,15 @@ internal static class CommonListViewColorBaseline
                 ParseRelativeSize(GetItemText(listView, 1, 3)) == RecursiveSizePercentage.Calculate(4, 14);
             SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
             SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
-            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[2]);
+            var initialRelativeSortResult = relativeSizesOnly
+                ? SendMessageW(listView, LvmSortItemsEx, 0, Marshal.GetFunctionPointerForDelegate(SizeCompare))
+                : 0;
+            var initialRelativeSortRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+            var initialRelativeSortFocusPreserved =
+                GetItemParam(listView, 0) == 2 && GetItemState(listView, 0) == (LvisSelected | LvisFocused);
+            var updatedPayloadBytes = relativeSizesOnly ? 20UL : 2UL;
+            File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[checked((int)updatedPayloadBytes)]);
             var smallNestedFolder = Path.Combine(smallFolder, "nested");
             Directory.CreateDirectory(smallNestedFolder);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
@@ -248,33 +257,50 @@ internal static class CommonListViewColorBaseline
             var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
-            SetItemText(listView, 1, 1, $"{updatedSmallScan.Bytes} B");
+            var smallRowIndex = FindItemIndexByParam(listView, 2);
+            var largeRowIndex = FindItemIndexByParam(listView, 1);
+            SetItemText(listView, smallRowIndex, 1, $"{updatedSmallScan.Bytes} B");
             var updatedLargeScan = updatedScans[Path.GetFullPath(largeFolder)];
-            SetContentsText(listView, 0, updatedLargeScan.Files, updatedLargeScan.Directories);
-            SetContentsText(listView, 1, updatedSmallScan.Files, updatedSmallScan.Directories);
-            SetRelativeSizeText(listView, 0, updatedLargeScan.Bytes, updatedFixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, 1, updatedSmallScan.Bytes, updatedFixtureScan.Bytes, 3);
-            var liveValue = GetItemText(listView, 1, 1);
-            var updatedContentsRows = $"{GetItemText(listView, 0, 2)},{GetItemText(listView, 1, 2)}";
-            var updatedRelativeSizeRows = $"{GetItemText(listView, 0, 3)},{GetItemText(listView, 1, 3)}";
-            var updatedRelativeSizes = ParseRelativeSize(GetItemText(listView, 0, 3)) == RecursiveSizePercentage.Calculate(10, 12) &&
-                ParseRelativeSize(GetItemText(listView, 1, 3)) == RecursiveSizePercentage.Calculate(2, 12);
+            SetContentsText(listView, largeRowIndex, updatedLargeScan.Files, updatedLargeScan.Directories);
+            SetContentsText(listView, smallRowIndex, updatedSmallScan.Files, updatedSmallScan.Directories);
+            SetRelativeSizeText(listView, largeRowIndex, updatedLargeScan.Bytes, updatedFixtureScan.Bytes, 3);
+            SetRelativeSizeText(listView, smallRowIndex, updatedSmallScan.Bytes, updatedFixtureScan.Bytes, 3);
+            var liveValue = GetItemText(listView, smallRowIndex, 1);
+            var updatedContentsRows = $"{GetItemText(listView, smallRowIndex, 2)},{GetItemText(listView, largeRowIndex, 2)}";
+            var updatedRelativeSizeRows = $"{GetItemText(listView, largeRowIndex, 3)},{GetItemText(listView, smallRowIndex, 3)}";
+            var updatedRelativeSizes = ParseRelativeSize(GetItemText(listView, largeRowIndex, 3)) ==
+                    RecursiveSizePercentage.Calculate(largeScan.Bytes, updatedFixtureScan.Bytes) &&
+                ParseRelativeSize(GetItemText(listView, smallRowIndex, 3)) ==
+                    RecursiveSizePercentage.Calculate(updatedSmallScan.Bytes, updatedFixtureScan.Bytes);
+            var updatedRelativeSortResult = relativeSizesOnly
+                ? SendMessageW(listView, LvmSortItemsEx, 0, Marshal.GetFunctionPointerForDelegate(SizeCompare))
+                : 0;
             var contentsCountsCorrect = initialContentsRows == "files: 1, folders: 0,files: 1, folders: 0" &&
-                updatedContentsRows == "files: 1, folders: 0,files: 3, folders: 1" &&
+                updatedContentsRows == "files: 3, folders: 1,files: 1, folders: 0" &&
                 updatedSmallScan.Files == 3 && updatedSmallScan.Directories == 1;
             if (relativeSizesOnly)
             {
+                var relativeSizeSortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
+                    $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
+                var updatedRelativeSortFocusPreserved =
+                    GetItemParam(listView, 1) == 2 && GetItemState(listView, 1) == (LvisSelected | LvisFocused);
+                var relativeSizeSorted = initialRelativeSortRows == "small-folder:2,large-folder:1" &&
+                    relativeSizeSortedRows == "large-folder:1,small-folder:2";
                 var relativeContractPassed = initialRelativeSizes && updatedRelativeSizes &&
                     contentsCountsCorrect &&
-                    initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 12 &&
-                    GetItemParam(listView, 0) == 1 && GetItemParam(listView, 1) == 2 &&
-                    !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
+                    initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 30 &&
+                    updatedSmallScan.Bytes == 20 && updatedSmallScan.Files == 3 && updatedSmallScan.Directories == 1 &&
+                    initialRelativeSortResult != 0 && updatedRelativeSortResult != 0 &&
+                    initialRelativeSortFocusPreserved && updatedRelativeSortFocusPreserved &&
+                    relativeSizeSorted && !IsWindowVisible(parent) && !IsWindowVisible(listView) &&
+                    GetForegroundWindow() == foregroundBefore;
                 Console.WriteLine($"common-listview-relative-size-contract: initial={initialRelativeSizeRows};" +
                     $"updated={updatedRelativeSizeRows};initial-values-correct={initialRelativeSizes};" +
                     $"updated-values-correct={updatedRelativeSizes};initial-contents={initialContentsRows};" +
                     $"updated-contents={updatedContentsRows};contents-counts-correct={contentsCountsCorrect};" +
                     $"parent-bytes={updatedFixtureScan.Bytes};" +
-                    $"row-ids-stable={GetItemParam(listView, 0) == 1 && GetItemParam(listView, 1) == 2};" +
+                    $"initial-relative-sort={initialRelativeSortRows};updated-relative-sort={relativeSizeSortedRows};" +
+                    $"relative-sort-correct={relativeSizeSorted};focus-preserved={initialRelativeSortFocusPreserved}/{updatedRelativeSortFocusPreserved};" +
                     $"visible=False;foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={relativeContractPassed}");
                 return relativeContractPassed ? 0 : 1;
             }
@@ -929,6 +955,15 @@ internal static class CommonListViewColorBaseline
             return Marshal.PtrToStructure<ListViewItem>(memory).Param.ToInt64();
         }
         finally { Marshal.FreeHGlobal(memory); }
+    }
+
+    private static int FindItemIndexByParam(nint listView, long value)
+    {
+        var count = checked((int)SendMessageW(listView, LvmGetItemCount, 0, 0));
+        for (var index = 0; index < count; index++)
+            if (GetItemParam(listView, index) == value)
+                return index;
+        throw new InvalidOperationException($"Standard ListView item with row identity {value} was not found.");
     }
 
     private static int GetItemImage(nint listView, int index)
