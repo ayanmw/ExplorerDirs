@@ -230,7 +230,6 @@ internal static class RecursiveDirectoryScanner
             throw new DirectoryNotFoundException($"不是文件夹：{rootPath}");
 
         var rootNode = new DirectoryScanNode(rootPath);
-        var nodes = new List<DirectoryScanNode> { rootNode };
         if ((rootAttributes & FileAttributes.ReparsePoint) != 0)
         {
             rootNode.Unreadable = 1;

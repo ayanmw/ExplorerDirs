@@ -126,6 +126,12 @@ if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--recursive-directory-scan-allocation-probe")
+{
+    ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.RunAllocationProbe();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--shell-watcher-recovery-smoke")
 {
     ShellDirectoryWatcherRecoverySmoke.Run();

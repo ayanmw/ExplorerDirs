@@ -4,7 +4,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-30 自有 ListView 递归列扫描内存：`ScanDirectoryTree` 改为后序栈式汇总，子目录完成后立即向父目录累计，不再持有整棵目录节点清单；保留默认“返回所有目录汇总”语义，并新增按指定完整路径只返回所需行的 `ScanDirectoryTreeForPaths`。隔离 ListView 仅请求当前行目录及当前父目录总量，避免为不可见子目录创建结果字典项。递归扫描 smoke 和隐藏 `--common-listview-relative-size-contract` 通过，比例、计数、排序及选区/焦点身份仍正确，前台未变。尚未测量大目录内存节省；此扫描路径仍属于隔离普通 ListView 原型，没有接入 ExplorerBrowser 产品列，也未验证 Shell 菜单、拖放、通知或真实 UI。详情见[逐行大小列调查](folder-size-column-investigation.md)。
+2026-10-30 自有 ListView 递归列扫描内存：`ScanDirectoryTree` 改为后序栈式汇总，移除旧的全树节点清单；保留默认“返回所有目录汇总”语义，并新增按指定路径返回结果的 `ScanDirectoryTreeForPaths`。隔离 ListView 只请求当前行目录及父目录总量。5,000 个目录夹具对比中，完整结果与 4 条指定结果的单次托管分配分别为 4,154,296 B / 3,463,760 B，差 690,536 B（16.6%）；强制 GC 后估算存活托管堆分别为 1,755,912 B / 1,288 B，差约 1.67 MiB。该数值只衡量此扫描器返回数据，不代表 Private Bytes、工作集或 ExplorerBrowser 的实际节省。递归扫描 smoke、完整 Release SettingsSmoke 与隐藏 `--common-listview-relative-size-contract` 通过；原型仍未接入产品逐行列，Shell 菜单、拖放、通知及可见 UI 尚未验证。详情见[逐行大小列调查](folder-size-column-investigation.md)。
 
 2026-10-30 集中验收候选（当前代码版）：已在提交 `42cd38375add10718510a03956248e3e5d631d41` 上运行 `GuiSmoke -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-145412-939-23b389/`。preparation manifest 为 `prepared-not-run`、41 项待验收、`SourceWorkingTreeDirty=false`；候选 BuildIdentity 为 `0.6.0-preview.20261030-145412-939-23b389+42cd38375add10718510a03956248e3e5d631d41`，EXE/DLL SHA-256 分别为 `1C01BDF0625012FB0537AA9EBCF571F96EFE9F5021EE17217B07AEDA4301CC2D` / `DBDB0B1D1219BC7D740F6731F3F67C69D5170194DDE55B4A0C5CD1F9742ADCBE`。准备过程没有启动窗口、创建 ExplorerBrowser 或发送输入；可见位置、键盘焦点、F5/查看方式重绘及虚拟 Shell 位置仍待验收，见[候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 

@@ -6,6 +6,78 @@ namespace ExplorerDirs.SettingsSmoke;
 
 internal static class RecursiveDirectoryScannerSmoke
 {
+    internal static void RunAllocationProbe()
+    {
+        const int directoryCount = 5000;
+        var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveScanAllocation-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            for (var index = 0; index < directoryCount; index++)
+                Directory.CreateDirectory(Path.Combine(root, $"folder-{index:D5}"));
+
+            var rootPath = Path.GetFullPath(root);
+            var requestedPaths = new[]
+            {
+                rootPath,
+                Path.Combine(rootPath, "folder-00000"),
+                Path.Combine(rootPath, "folder-02500"),
+                Path.Combine(rootPath, "folder-04999")
+            };
+            // Warm both paths first so the comparison is not dominated by the first metadata-cache pass.
+            _ = RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None);
+            _ = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, CancellationToken.None);
+            var full = Measure(() => RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None), rootPath);
+            var selected = Measure(() => RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                root, requestedPaths, CancellationToken.None), rootPath);
+            var fullRetained = MeasureRetained(() => RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None));
+            var selectedRetained = MeasureRetained(() => RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                root, requestedPaths, CancellationToken.None));
+            if (full.ResultCount != directoryCount + 1 || selected.ResultCount != requestedPaths.Length ||
+                full.Root.Directories != directoryCount || selected.Root != full.Root)
+                throw new InvalidOperationException("The full and requested-path scans returned different root totals or result counts.");
+
+            var saved = full.AllocatedBytes - selected.AllocatedBytes;
+            var savedPercent = full.AllocatedBytes == 0 ? 0 : 100d * saved / full.AllocatedBytes;
+            var retainedDelta = fullRetained - selectedRetained;
+            Console.WriteLine($"recursive-directory-scan-allocation: directories={directoryCount}; " +
+                $"full-results={full.ResultCount}; requested-results={selected.ResultCount}; " +
+                $"full-allocated={full.AllocatedBytes}; requested-allocated={selected.AllocatedBytes}; " +
+                $"delta={saved}; delta-percent={savedPercent:F1}; " +
+                $"full-retained-estimate={fullRetained}; requested-retained-estimate={selectedRetained}; " +
+                $"retained-delta-estimate={retainedDelta}; " +
+                $"full-ms={full.ElapsedMilliseconds}; requested-ms={selected.ElapsedMilliseconds}; " +
+                "scope=managed-allocations-and-approximate-live-heap-only");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+
+        static (long AllocatedBytes, int ResultCount, RecursiveDirectoryScanResult Root, long ElapsedMilliseconds) Measure(
+            Func<IReadOnlyDictionary<string, RecursiveDirectoryScanResult>> scan, string rootPath)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var clock = Stopwatch.StartNew();
+            var results = scan();
+            clock.Stop();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            return (allocated, results.Count, results[rootPath], clock.ElapsedMilliseconds);
+        }
+
+        static long MeasureRetained(Func<IReadOnlyDictionary<string, RecursiveDirectoryScanResult>> scan)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            var before = GC.GetTotalMemory(forceFullCollection: true);
+            var results = scan();
+            var retained = GC.GetTotalMemory(forceFullCollection: true) - before;
+            GC.KeepAlive(results);
+            return retained;
+        }
+    }
+
     internal static void Run()
     {
         var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));

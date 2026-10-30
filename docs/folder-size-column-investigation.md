@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-30：目录树扫描器托管内存 A/B
+
+为量化隔离 ListView 逐行派生值扫描的返回数据开销，增加 `--recursive-directory-scan-allocation-probe`。探针在临时夹具创建 5,000 个空子目录，先预热完整/指定路径两条扫描路径，再分别测量 `GC.GetAllocatedBytesForCurrentThread`、扫描耗时以及结果集合保留期间强制 GC 后的 `GC.GetTotalMemory` 差值。完整扫描返回 5,001 个目录结果；仅请求根目录和 3 个子目录时返回 4 个结果。观测托管分配分别为 4,154,296 B / 3,463,760 B，减少 690,536 B（16.6%）；强制 GC 后存活托管堆估算为 1,755,912 B / 1,288 B，减少约 1.67 MiB。预热后本次耗时为 849 / 492 ms，但仅单轮且目录枚举顺序固定，不用作性能结论。
+
+`dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release -- --recursive-directory-scan-allocation-probe` 可重跑该诊断。分配计数不包括 Windows Shell、文件系统缓存、COM/原生堆，也不是进程 Private Bytes/Working Set；夹具主要是空目录且探针不创建 ExplorerBrowser，因此不能外推到实际目录或产品内存节省。App Release build 为 0 警告/错误；递归扫描 smoke、完整 Release SettingsSmoke 和隐藏 `--common-listview-relative-size-contract` 均通过，前台未变化。产品仍未接入递归逐行列。
+
 ## 2026-10-30：自定义列可见性合同复核
 
 Microsoft 文档将 `IShellFolder2::GetDefaultColumnState` 的 `SHCOLSTATE_ONBYDEFAULT` 定义为 Windows Explorer Details view 默认应显示该列；它没有说明 Shell 通知后必须继续显示，也没有承诺 ExplorerBrowser 或 DefView 会把未注册属性键作为持久可见列。[GetDefaultColumnState](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder2-getdefaultcolumnstate) `GetDetailsOf(nullptr, iColumn)` 提供文件夹列名及同一列索引的数据，但它本身不保存用户当前列集合。[GetDetailsOf](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishelldetails-getdetailsof)
