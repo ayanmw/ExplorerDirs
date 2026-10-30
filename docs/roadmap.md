@@ -4940,7 +4940,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 2026-10-31 F5 绘制时间线接入实际手动刷新入口：Release HostProbe 的 `--live-shell-refresh` 现在调用产品的 `RefreshPreservingLastFrame`，并在原有行数、选区、焦点结果中输出该视图的 `WM_PAINT` / `WM_ERASEBKGND` 时间线。HostProbe/App Release build 通过（0 警告、0 错误），提交 `1177988`。本轮没有运行 ExplorerBrowser 宿主：项目规则要求隐藏宿主实验前确认桌面空闲和当前授权，且其可能改变系统前台。该探针可以补充 Shell 绘制消息顺序与处理耗时，不能读取像素或验证冻结画面期间的鼠标命中；F5 黑屏改善仍待隐藏诊断和集中可见验收分别确认。
 
-2026-10-31 保帧诊断补记交互输入：开启 Shell callback trace 时，F5/查看方式转换时间线现也记录窗口类及鼠标按键、键盘、滚轮消息类型，不记录键值、文本或鼠标坐标；仍受 2 秒和 256 条上限约束，普通运行无采样。HostProbe/App Release build 通过（0 警告、0 错误），本轮未启动宿主。此记录可指出保帧期间是否有输入抵达，但不能确认用户看到的行与 Shell 实际命中行是否一致，需在后续集中可见验收核对。
+2026-10-31 保帧诊断补记交互输入：开启 Shell callback trace 时，F5/查看方式转换时间线现也记录窗口类及鼠标按键、键盘、滚轮消息类型，不记录键值、文本或鼠标坐标；仍受 2 秒和 256 条上限约束，普通运行无采样。HostProbe/App Release build 与完整 Release `SettingsSmoke` 通过（0 警告、0 错误），本轮未启动宿主。此记录可指出保帧期间是否有输入抵达，但不能确认用户看到的行与 Shell 实际命中行是否一致，需在后续集中可见验收核对。
 
 ## 2026-10-31：预览格式过滤等待 Q-Dir 可见确认
 
