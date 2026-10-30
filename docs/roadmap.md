@@ -4791,3 +4791,9 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 使用真实枚举项 PIDL 查询 `IShellFolder::GetUIObjectOf(IID_IContextMenu)` 项目菜单，并用 `IShellFolder::CreateViewObject(IID_IContextMenu)` 查询背景菜单。两者都能取到菜单命令，未显示或执行；递归遍历完整 HMENU（含 TortoiseGit/SVN 子菜单），前台句柄保持不变。当前机器的 folder 背景菜单树含扩展项、新建及属性，没有查看/排序/分组/刷新。
 - 对照产品源码，完整文件区菜单来自当前 `IShellView.GetItemObject`，不是 `IShellFolder` 的背景菜单对象。探针合同只确认两种 folder context menu 可查询，不把它标为完整 Explorer 菜单通过。自有 ListView 如要继续，仍须证明视图级菜单命令作用于自有状态；否则保留 ExplorerBrowser 才能保留当前原生视图菜单路径。详见[派生大小列架构调查](folder-size-column-investigation.md)。
 - 双选区扩展的局部操作断言通过：隐藏列表的两项 Shell `IDataObject` 经 `IFileOperation.CopyItems` 复制后均与源载荷逐字节相同，后续临时副本 Move/Rename/Delete 也通过。整轮前台守卫失败（`0x861542→0x530EDC`）；运行后前台为 TortoiseGit 提交对话框，无法归因于探针或同时的共享桌面活动，故不算完整合同通过，也未重跑。Release 构建通过；产品未改。具体范围见[派生大小列调查](folder-size-column-investigation.md)。
+
+### 本批次追加：Shell 驱动的 ListView 行与文件操作合同
+
+- `--common-listview-data-contract` 在不可见的普通 Win32 ListView 中使用真实 `IShellFolder::EnumObjects` 行；图标来自 Shell 共享系统图像列表。更新派生大小并排序后，稳定行 ID、PIDL 身份以及 `small-folder` 的选中/焦点保持一致。
+- 同一隐藏合同用所选行的 Shell `IDataObject` 和 `IFileOperation` 完成复制、移动、重命名、删除，并核对临时夹具结果；菜单对象可查询，但 folder 背景菜单不含查看/排序/分组/刷新。完整 Explorer 视图菜单所需的 `IShellView.GetItemObject` 尚未接入。
+- 结论：自有 ListView 已验证接入 Shell 枚举、系统图标和常用文件操作的可行性；迁移的核心体验门槛仍包括完整视图菜单、拖放、导航、键盘、通知和虚拟位置。该合同不可外推为 Explorer 等价或产品可迁移结论，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
