@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | ExplorerBrowser / 系统 DefView | 可使用文件夹已有列；当前没有受支持的任意派生列接入及逐项重取路径 | 最强，继续由 Windows Shell 提供查看、菜单、导航和文件操作 | 改动最小；现有逐行大小探针在刷新后读回错误/缺失的值，不能满足该列 |
 | 自建 Shell namespace + `IShellView` / DefView | 初次可由 `IShellFolder2` 提供值并通过 `CompareIDs` 排序；显式恢复列和通知后，当前 DefView 没有重新请求派生值 | 可复用 DefView 的原生菜单与不少 Shell 命令，但 namespace/PIDL、通知、拖放等仍需适配 | 已有隔离文件夹适配器和操作合同；有效刷新基线仍失败，不能作为产品替代视图 |
-| 自有 `SysListView32` 数据模型 | 已验证 `IShellFolder::EnumObjects` 返回的真实子 PIDL 可映射到稳定行 ID；派生值更新、排序及选中/焦点身份保持通过 | 默认不会自动拥有 Shell 视图能力；需自行接入 `IContextMenu`、`IDataObject`、`IFileOperation`、OLE 拖放、Shell 通知、导航及键盘路由 | 隐藏探针覆盖真实 Shell 枚举和标准 ListView 数据行；尚无全视图模式、虚拟位置、系统图标、原生菜单/操作、性能/内存或完整输入验收，产品化工作量高 |
+| 自有 `SysListView32` 数据模型 | 已验证 `IShellFolder::EnumObjects` 子 PIDL、row ID 和系统图标索引可映射；派生值更新、排序及选中/焦点身份保持通过 | 默认不会自动拥有 Shell 视图能力；仍需验证并接入 `IContextMenu`、`IDataObject`、`IFileOperation`、OLE 拖放、Shell 通知、导航及键盘路由 | 隐藏探针已挂载 Shell 共享小图标列表并读回行索引；尚无可见绘制、全视图模式、虚拟位置、原生菜单/操作、性能/内存或完整输入验收，产品化工作量高 |
 
 **结论：**逐行派生值的技术控制权要求应用持有行数据模型；继续调整 DefView 通知不是有证据的路线。隔离原型已从真实 Shell 文件夹枚举子 PIDL 并放入普通 `SysListView32` 行模型；下一阶段仍需验证详细信息视图与系统图标、原生项目/背景菜单、复制/移动/删除、重命名、拖放、外部变更刷新、焦点/选区及目录导航。成功门槛应同时包括真实文件 Shell 行能更新派生值并保持排序/焦点，以及 Shell 操作合同不退化；在此之前不迁移产品，不以合成控件的内存或绘制结果推断实际收益。
 
@@ -26,7 +26,13 @@
 
 `--common-listview-data-contract` 的新断言先以 `shell-enumeration-backed=False` 失败；接入枚举后，NativeProbe Release 构建 0 警告/错误，隐藏合同通过，输出 `shell-enumeration-backed=True`、`shell-pidl-identities-preserved=True`、`selected-focused-after-sort=small-folder`、`visible=False`、`foreground-unchanged=True`。枚举异常路径会释放已构造的行 PIDL 和 enumerator，测试结束清理 parent PIDL、文件夹接口及夹具。
 
-该结果证明 Shell 的真实文件夹枚举输出可驱动自有 ListView 的行身份；它没有验证系统图标、列元数据生产、Shell 菜单/命令、文件操作、拖放、变化通知、导航、键盘、性能/内存或产品行为。未创建 `IShellView`，Explorer Dirs 产品仍使用 ExplorerBrowser。
+该结果证明 Shell 的真实文件夹枚举输出可驱动自有 ListView 的行身份；它没有验证系统图标绘制、列元数据生产、Shell 菜单/命令、文件操作、拖放、变化通知、导航、键盘、性能/内存或产品行为。未创建 `IShellView`，Explorer Dirs 产品仍使用 ExplorerBrowser。
+
+## 2026-10-30：Shell 系统图标索引接入 ListView 合同
+
+在 Shell 枚举行创建期间，对每个实际解析路径调用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)`，记录共享系统图像列表句柄和行图标索引。创建隐藏 `SysListView32` 后通过 `LVM_SETIMAGELIST` 挂载 Shell 返回的共享小图标列表；插入每行时设置 `LVIF_IMAGE`，再以 `LVM_GETITEM` 验证图标索引与 row ID 对应，并在派生值排序后再次核对映射。
+
+新图标合同先因 `shell-icons-available=False` 失败；接线后 Release build 与 `--common-listview-data-contract` 通过，输出 `system-image-list-attached=True`、`row-icons-bound=True`、`sorted-row-icons-bound=True`。测试没有可见窗口或像素采样，因此只证明索引查询、共享列表挂载和控件数据读回，不证明图标实际绘制外观、DPI/主题效果、Shell overlay 或产品体验。Explorer Dirs 产品未改。
 
 ## 2026-10-30：显式重放自定义列的刷新基线复核
 

@@ -10,6 +10,9 @@ internal static class CommonListViewColorBaseline
     private const uint CddsItemPostPaint = 0x00010002;
     private const int LvmInsertItemW = 0x104D;
     private const int LvmInsertColumnW = 0x1061;
+    private const int LvmSetImageList = 0x1003;
+    private const int LvmGetImageList = 0x1002;
+    private const int LvsilSmall = 1;
     private const int LvmGetItemW = 0x104B;
     private const int LvmSetItemW = 0x104C;
     private const int LvmGetItemTextW = 0x1073;
@@ -62,8 +65,8 @@ internal static class CommonListViewColorBaseline
 
             AddColumn(listView, "Name", 340);
             AddColumn(listView, "Recursive size", 140);
-            InsertItem(listView, 0, "large-folder", 10, "10 B");
-            InsertItem(listView, 1, "small-folder", 4, "4 B");
+            InsertItem(listView, 0, "large-folder", 10, -1, "10 B");
+            InsertItem(listView, 1, "small-folder", 4, -1, "4 B");
             if (!IsWindowVisible(parent) || !IsWindowVisible(listView))
                 Console.WriteLine($"common-listview-color-baseline: initial-visible-state=parent:{IsWindowVisible(parent)},list:{IsWindowVisible(listView)}");
 
@@ -165,11 +168,12 @@ internal static class CommonListViewColorBaseline
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[4]);
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, fixturePidl, 0, in ShellFolderId, out shellFolder));
-            shellRows.AddRange(EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
+            var enumeration = EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
             {
                 [Path.GetFullPath(largeFolder)] = 10,
                 [Path.GetFullPath(smallFolder)] = 4
-            }));
+            });
+            shellRows.AddRange(enumeration.Rows);
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
 
             var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
@@ -189,10 +193,14 @@ internal static class CommonListViewColorBaseline
                     "Hidden standard ListView creation failed.");
 
             _listView = listView;
+            SendMessageW(listView, LvmSetImageList, LvsilSmall, enumeration.SystemImageList);
+            var attachedImageList = SendMessageW(listView, LvmGetImageList, LvsilSmall, 0);
             AddColumn(listView, "Name", 240);
             AddColumn(listView, "Recursive size", 100);
-            InsertItem(listView, 0, shellRows[0].DisplayName, shellRows[0].Id, "10 B");
-            InsertItem(listView, 1, shellRows[1].DisplayName, shellRows[1].Id, "4 B");
+            InsertItem(listView, 0, shellRows[0].DisplayName, shellRows[0].Id, shellRows[0].SystemImageIndex, "10 B");
+            InsertItem(listView, 1, shellRows[1].DisplayName, shellRows[1].Id, shellRows[1].SystemImageIndex, "4 B");
+            var rowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
+                GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
             var initialShellPaths = string.Join('|', Enumerable.Range(0, 2).Select(index =>
@@ -219,17 +227,25 @@ internal static class CommonListViewColorBaseline
             var shellIdentityPreserved = shellRows.All(row => row.AbsolutePidl != 0 &&
                 _shellRowsById.TryGetValue(row.Id, out var current) && current.AbsolutePidl == row.AbsolutePidl);
             var shellEnumerationBacked = shellRows.Count == 2 && shellRows.All(row => row.FromShellEnumeration);
+            var shellIconsAvailable = shellRows.All(row => row.SystemImageIndex >= 0);
+            var shellImageListAttached = enumeration.SystemImageList != 0 && attachedImageList == enumeration.SystemImageList;
+            var sortedRowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
+                GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var passed = initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
                 sortResult != 0 && sortedRows == "small-folder:2,large-folder:1" &&
                 selectedName == "small-folder" && selectedFocusedCount == 1 &&
-                selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked &&
+                selectedId == 2 && shellIdentityPreserved && shellEnumerationBacked && shellIconsAvailable &&
+                shellImageListAttached && rowIconsBound && sortedRowIconsBound &&
                 !IsWindowVisible(parent) && !IsWindowVisible(listView) && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};shell-paths={initialShellPaths};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
                 $"selected-focused-after-sort={selectedName};selected-shell-row-id={selectedId};" +
                 $"shell-pidl-identities-preserved={shellIdentityPreserved};" +
                 $"shell-enumeration-backed={shellEnumerationBacked};" +
+                $"shell-icons-available={shellIconsAvailable};" +
+                $"system-image-list-attached={shellImageListAttached};row-icons-bound={rowIconsBound};" +
+                $"sorted-row-icons-bound={sortedRowIconsBound};" +
                 $"selected-focused-count={selectedFocusedCount};visible=False;" +
                 $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
             return passed ? 0 : 1;
@@ -255,11 +271,12 @@ internal static class CommonListViewColorBaseline
         }
     }
 
-    private static List<ShellRow> EnumerateShellRows(nint folderPidl, nint shellFolder,
+    private static ListShellRows EnumerateShellRows(nint folderPidl, nint shellFolder,
         IReadOnlyDictionary<string, ulong> recursiveSizes)
     {
         Marshal.ThrowExceptionForHR(At<EnumObjects>(shellFolder, 4)(shellFolder, 0, 0x60, out var enumerator));
         var rows = new List<ShellRow>();
+        nint systemImageList = 0;
         try
         {
             while (true)
@@ -285,7 +302,9 @@ internal static class CommonListViewColorBaseline
                     var fullPath = Path.GetFullPath(parsing ?? string.Empty);
                     if (!recursiveSizes.TryGetValue(fullPath, out var recursiveBytes))
                         throw new InvalidOperationException($"Shell enumerated an unexpected fixture child: {fullPath}");
-                    rows.Add(new ShellRow(0, absolutePidl, display, parsing!, recursiveBytes, FromShellEnumeration: true));
+                    var systemImageIndex = GetShellSystemImageIndex(fullPath, ref systemImageList);
+                    rows.Add(new ShellRow(0, absolutePidl, display, parsing!, recursiveBytes,
+                        FromShellEnumeration: true, SystemImageIndex: systemImageIndex));
                     absolutePidl = 0;
                 }
                 finally
@@ -299,7 +318,7 @@ internal static class CommonListViewColorBaseline
                 throw new InvalidOperationException($"Shell enumeration returned {rows.Count} rows; expected {recursiveSizes.Count}.");
             for (var index = 0; index < rows.Count; index++)
                 rows[index] = rows[index] with { Id = index + 1 };
-            return rows;
+            return new ListShellRows(rows, systemImageList);
         }
         catch
         {
@@ -310,14 +329,25 @@ internal static class CommonListViewColorBaseline
         finally { Marshal.Release(enumerator); }
     }
 
+    private static int GetShellSystemImageIndex(string path, ref nint imageList)
+    {
+        var result = SHGetFileInfo(path, 0, out var info,
+            (uint)Marshal.SizeOf<ShellFileInfo>(), 0x4000 | 0x1); // SHGFI_SYSICONINDEX | SHGFI_SMALLICON.
+        if (result == 0 || info.ImageIndex < 0)
+            throw new InvalidOperationException($"Shell did not return a system icon for {path}.");
+        if (imageList == 0) imageList = result;
+        else if (imageList != result) throw new InvalidOperationException("Shell returned different shared image lists for one view.");
+        return info.ImageIndex;
+    }
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
-    private static void InsertItem(nint listView, int index, string text, long size, string sizeText)
+    private static void InsertItem(nint listView, int index, string text, long size, int imageIndex, string sizeText)
     {
         var textPointer = Marshal.StringToHGlobalUni(text);
-        var item = new ListViewItem { Mask = 0x0001 | 0x0004, Item = index, Text = textPointer,
-            TextMax = text.Length, Param = (nint)size };
+        var item = new ListViewItem { Mask = 0x0001 | 0x0002 | 0x0004, Item = index, Text = textPointer,
+            TextMax = text.Length, Image = imageIndex, Param = (nint)size };
         var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
         try
         {
@@ -394,6 +424,20 @@ internal static class CommonListViewColorBaseline
             if (SendMessageW(listView, LvmGetItemW, 0, memory) == 0)
                 throw new Exception($"Standard ListView item {index} data read failed.");
             return Marshal.PtrToStructure<ListViewItem>(memory).Param.ToInt64();
+        }
+        finally { Marshal.FreeHGlobal(memory); }
+    }
+
+    private static int GetItemImage(nint listView, int index)
+    {
+        var item = new ListViewItem { Mask = 0x0002, Item = index, Image = -1 };
+        var memory = Marshal.AllocHGlobal(Marshal.SizeOf<ListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(item, memory, false);
+            if (SendMessageW(listView, LvmGetItemW, 0, memory) == 0)
+                throw new Exception($"Standard ListView item {index} image query failed.");
+            return Marshal.PtrToStructure<ListViewItem>(memory).Image;
         }
         finally { Marshal.FreeHGlobal(memory); }
     }
@@ -519,7 +563,16 @@ internal static class CommonListViewColorBaseline
         public uint Private;
     }
     private sealed record ShellRow(long Id, nint AbsolutePidl, string DisplayName, string ParsingName,
-        ulong RecursiveBytes, bool FromShellEnumeration = false);
+        ulong RecursiveBytes, bool FromShellEnumeration = false, int SystemImageIndex = -1);
+    private sealed record ListShellRows(List<ShellRow> Rows, nint SystemImageList);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct ShellFileInfo
+    {
+        public nint Icon;
+        public int ImageIndex;
+        public uint Attributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string? DisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string? TypeName;
+    }
     [DllImport("comctl32.dll", SetLastError = true)] private static extern bool InitCommonControlsEx(ref InitCommonControls init);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, DrawProc callback, nuint id, nuint data);
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, DrawProc callback, nuint id);
@@ -528,6 +581,7 @@ internal static class CommonListViewColorBaseline
     [DllImport("user32.dll")] private static extern bool InvalidateRect(nint window, nint rect, bool erase);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern nint SHGetFileInfo(string path, uint attributes, out ShellFileInfo info, uint size, uint flags);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern void ILFree(nint pidl);

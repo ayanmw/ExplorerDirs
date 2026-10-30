@@ -4778,3 +4778,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - `--common-listview-data-contract` 现在绑定真实临时父目录并调用 `IShellFolder::EnumObjects` / `IEnumIDList::Next`，将返回的相对 PIDL 组合成每行的绝对 PIDL；ListView 名称和 row ID 映射来自 Shell 枚举，而不是按路径手工创建。新断言先按预期红灯 `shell-enumeration-backed=False`，接线后 Release build 与隐藏合同通过；派生大小重排后选中/焦点仍跟随相同 row ID，PIDL 身份稳定，窗口不可见、前台未变，临时资源清理。
 - 该步只证明本地临时文件夹的 Shell 枚举可驱动普通 `SysListView32` 行；系统图标、Shell 列生产、菜单/操作、拖放、通知、导航、键盘、虚拟位置、性能/内存和产品集成仍未验证。未创建 `IShellView`，产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
+
+### 本批次追加：Shell 系统图标索引
+
+- 通过 `SHGetFileInfo` 为枚举行查询 Shell 共享小图标列表和图标索引；隐藏 ListView 挂载共享 image list 并写入每行 `LVIF_IMAGE`，再读回索引与 row ID 映射。排序后映射仍稳定；新增图标索引断言先失败，再通过；NativeProbe Release build 和完整隐藏数据合同通过，窗口不可见、前台未变。
+- 此结果不含可见像素/主题/DPI/overlay 验收，也未验证原生菜单、命令、文件操作、拖放、通知、导航、键盘、性能/内存或产品集成。Explorer Dirs 产品仍使用 ExplorerBrowser。详见[派生大小列架构调查](folder-size-column-investigation.md)。
