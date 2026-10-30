@@ -38,6 +38,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly string? FocusTracePath = Environment.GetEnvironmentVariable("EXPLORER_DIRS_FOCUS_TRACE");
     private IExplorerBrowser? _browser;
     private bool _folderHeaderWarningReported;
+    private DispatcherOperation? _viewStyleCaptureOperation;
     private QuickFilterSettings _quickFilterSettings = QuickFilterSettings.Empty;
     private ShellFolderFilter? _quickFilter;
     private HiddenItemsPreference _hiddenItemsPreference = HiddenItemsPreference.FollowWindows;
@@ -2495,8 +2496,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     public bool SetViewStyle(ViewStyle style)
     {
-        if (!IsVisible || _viewReadiness.Pending) return false;
-        var browser = _browser;
+        if (!IsVisible || _viewReadiness.Pending || _browser is not { } browser) return false;
         var generation = _viewReadiness.Generation;
         bool Current() => ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation;
         var view = IntPtr.Zero;
@@ -2520,14 +2520,39 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         finally { if (view != IntPtr.Zero) Marshal.Release(view); }
 
-        // Read back what Shell actually accepted. Search views remain runtime-only.
+        // The successful setter is authoritative for this change. Update the cache now so
+        // a session save cannot persist the previous mode, then read the full native state
+        // after the dispatcher has had a chance to paint the mode transition.
         if (!Current()) return false;
-        try { CaptureViewState(); }
-        catch (Exception)
+        if (!_location.IsSearchActive)
         {
-            if (Current()) MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
+            _viewState = _viewState with
+            {
+                Mode = style.Mode,
+                IconSize = ViewStyle.NativeIconSize(style.Mode, style.IconSize)
+            };
+            QueueViewStyleCapture(browser, generation);
         }
         return Current();
+    }
+
+    private void QueueViewStyleCapture(IExplorerBrowser browser, long generation)
+    {
+        _viewStyleCaptureOperation?.Abort();
+        DispatcherOperation? operation = null;
+        operation = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            if (ReferenceEquals(_viewStyleCaptureOperation, operation)) _viewStyleCaptureOperation = null;
+            if (!ReferenceEquals(browser, _browser) || generation != _viewReadiness.Generation ||
+                _viewReadiness.Pending || !IsVisible) return;
+            try { CaptureViewState(); }
+            catch (Exception)
+            {
+                if (ReferenceEquals(browser, _browser) && generation == _viewReadiness.Generation)
+                    MenuError?.Invoke(this, "查看方式已切换，但暂时无法读取完整视图配置；会话保存将等待重试。");
+            }
+        }));
+        _viewStyleCaptureOperation = operation;
     }
 
     public bool ApplyViewPreset(ViewPreset preset)
@@ -4718,6 +4743,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void DisposeBrowser()
     {
+        _viewStyleCaptureOperation?.Abort();
+        _viewStyleCaptureOperation = null;
         _quickFilterRequestVersion++;
         CancelPendingQuickFilterGroupRestore();
         _quickFilterGroupToRestore = null;

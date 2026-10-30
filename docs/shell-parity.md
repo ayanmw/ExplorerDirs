@@ -339,7 +339,7 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 ## 本轮代码与下一轮验收
 
-2026-10-30 F5 与查看方式切换重绘调整：F5 直接调用当前 `IShellView.Refresh()` 刷新现有 Shell 文件视图的目录项目，不重建 ExplorerBrowser、标签、导航历史或整个窗格；移除调用前后的 `IFolderView2.SetRedraw` 切换，让 DefView 自己决定重枚举时的绘制时机。查看方式只调用当前视图的 `SetViewModeAndIconSize`，本来就不重刷新目录；移除模式切换的重绘租约，让 DefView 自行绘制过渡。App Release 构建通过；未运行测试或打开 GUI，视觉效果仍待集中 UI 验收。后续分别记录 F5 与查看方式切换的空白间隔、框架稳定性、选择/焦点和滚动条效果。
+2026-10-30 F5 与查看方式切换重绘调整：F5 直接调用当前 `IShellView.Refresh()` 刷新现有 Shell 文件视图的目录项目，不重建 ExplorerBrowser、标签、导航历史或整个窗格；移除调用前后的 `IFolderView2.SetRedraw` 切换，让 DefView 自己决定重枚举时的绘制时机。查看方式只调用当前视图的 `SetViewModeAndIconSize`，本来就不重刷新目录；移除模式切换的重绘租约，并把完整 Shell 状态读回排到 Dispatcher 后台阶段，先缓存 setter 已接受的模式/图标尺寸，避免同步读取排序、分组、列配置占住绘制前的 UI 调用栈。读回按浏览器/导航代际复核，只针对仍可见视图执行。App Release 构建通过；未运行测试或打开 GUI，视觉效果仍待集中 UI 验收。后续分别记录 F5 与查看方式切换的空白间隔、框架稳定性、选择/焦点和滚动条效果。
 
 2026-10-19 桌面实测：隔离构建粘贴后方向键可用；Shift+Delete 确认后却切到另一窗格。焦点日志证明另一窗格的 Static 容器收到 WM_SETFOCUS 后误更新了活动窗格。候选修复只认可文件内容窗口及其子窗口的焦点；修复后 GUI 未复测（用户 Esc 停止）。此修复收入用户要求的临时预览包，不能标记验收通过。
 
