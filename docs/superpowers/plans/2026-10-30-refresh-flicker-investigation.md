@@ -82,6 +82,10 @@ The initial comparison probes Shell enumeration and message timing only. It does
 
 Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 
+### 2026-10-31: Confirm the product uses Explorer's F5 refresh contract
+
+Microsoft's folder-view guidance states that Windows Explorer calls `IShellView::Refresh` when the user presses F5, and the method contract says the view revalidates its contents and refills from underlying storage. Explorer Dirs already uses this same API on the current view, so routing F5 through another Shell command interface has no documented basis for reducing the blank interval. The next investigation should remain at the native view's redraw/presentation boundary; do not recreate the browser or navigate away and back. This contract still says nothing about retaining the previously painted frame or about input hit testing while redraw is suppressed. [Windows Explorer folder-view guidance](https://learn.microsoft.com/en-us/windows/win32/lwef/nse-folderview#refresh) · [IShellView::Refresh](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-refresh).
+
 ### Task 5: Bounded redraw lease experiment and rollback
 
 - [x] Add a bounded asynchronous redraw lease and prepare a clean isolated GUI candidate. The candidate was not launched, so the experiment never established a visual benefit.
