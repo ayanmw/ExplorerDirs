@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：扫描快照注入原生 Shell 列合同
+
+NativeProbe 新增无窗口合同，直接把生产 `RecursiveDirectoryScanner` 的目录扫描值传入合成 `IShellFolder2`。夹具扫描时目标目录为 10 B，随后将磁盘文件改动到实际目录总量 7 B；注入 10 B 后，原生 provider 的列文本仍为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将目录排在 8 B 的根文件之后。该断言区分了“消费扫描快照”与“重新读取当前目录大小”。原有 folder-tree Shell 合同仍独立运行。
+
+验证：`build-static-shell-folder-adapter.ps1` 原生 Release DLL 构建成功；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --static-shell-column-folder-smoke` 退出码 0，输出 `scanner-bytes=10; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; window-created=False`。探针没有创建 Shell view 窗口，前台窗口未被用于交互验证。
+
+边界：这是扫描器值穿过 managed/native 边界并驱动合成 provider 文本、属性和比较器的合同，不是产品列接线，也没有验证 DefView 是否会重取/保留该属性、刷新通知、异步结果更新、文件操作/菜单/焦点/拖放或 Q-Dir 可见显示。Explorer Dirs 产品仍使用 ExplorerBrowser；逐行大小列仍是未实现的 P2 产品功能。
+
 ## 2026-10-31：隐藏 SysListView32 写回重枚举后的选区/焦点
 
 NativeProbe 新增 `--shell-listview-selection-restore`：用真实 `SHParseDisplayName`/`IShellFolder` 枚举普通目录项目，将行投影到不可见的 Windows `SysListView32`，设置两个选中项和一个 focused item。夹具新增 `delta` 并以新的行顺序重建列表，再从控件读回选区/焦点；随后删除已选中的 `beta`，重新枚举/对账/重建，再读回控件状态。

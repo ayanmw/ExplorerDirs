@@ -1940,6 +1940,7 @@ internal static class StaticShellFolderAdapterProbe
         File.WriteAllBytes(Path.Combine(shellFixture, "child", "nested-folder", "deep.txt"), "deep"u8.ToArray());
 
         var childPath = Path.Combine(shellFixture, "child");
+        var projectionFixture = Path.Combine(Path.GetDirectoryName(fixture)!, "recursive-size-projection-" + Guid.NewGuid().ToString("N"));
         try
         {
             var scan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(shellFixture, [childPath], CancellationToken.None);
@@ -1949,9 +1950,30 @@ internal static class StaticShellFolderAdapterProbe
 
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderTreeContractSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderTreeContractSmoke"))(shellFixture));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={recursive.Bytes}; files={recursive.Files}; directories={recursive.Directories}; synthetic-shell-column=PKEY_Size/text/numeric-sort; window-created=False");
+
+            Directory.CreateDirectory(Path.Combine(projectionFixture, "child", "nested-folder"));
+            var nestedFile = Path.Combine(projectionFixture, "child", "nested-folder", "deep.txt");
+            File.WriteAllBytes(Path.Combine(projectionFixture, "child", "direct.txt"), "direct"u8.ToArray());
+            File.WriteAllBytes(nestedFile, "deep"u8.ToArray());
+            File.WriteAllBytes(Path.Combine(projectionFixture, "root.txt"), "12345678"u8.ToArray());
+            var projectionChildPath = Path.Combine(projectionFixture, "child");
+            var projectionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                projectionFixture, [projectionChildPath], CancellationToken.None);
+            if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) || snapshot.Bytes != 10)
+                throw new InvalidOperationException("The injected recursive-size snapshot did not scan to 10 bytes.");
+
+            // Make the on-disk size differ after scanning so the native assertion proves the scan snapshot was passed in.
+            File.WriteAllBytes(nestedFile, "x"u8.ToArray());
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeProjectionSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeProjectionSmoke"))(
+                    projectionFixture, checked((long)snapshot.Bytes)));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; window-created=False");
         }
-        finally { Directory.Delete(shellFixture, recursive: true); }
+        finally
+        {
+            if (Directory.Exists(projectionFixture)) Directory.Delete(projectionFixture, recursive: true);
+            Directory.Delete(shellFixture, recursive: true);
+        }
     }
 
     private static void VerifyWrappedShellItemDataObject(nint dataObject)
@@ -2285,6 +2307,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long scannedBytes);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

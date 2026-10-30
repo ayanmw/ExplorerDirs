@@ -4,6 +4,8 @@
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
 
+2026-10-31 逐行文件夹大小原生值注入合同：NativeProbe 把生产目录扫描器得到的 10 B 注入合成 `IShellFolder2`，扫描后再修改磁盘使实际目录变为 7 B；原生列文本、`VT_UI8` 属性仍为 10，比较器也按注入值正确排在 8 B 文件后。原生 DLL Release 构建及 `--static-shell-column-folder-smoke` 通过，不创建窗口。该证据补齐扫描器到 native provider 的数据传递门槛；没有证明 DefView 列恢复/通知合同、可见交互或产品接线。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。
+
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
 
 2026-10-31 隔离 Shell 重命名映射扩展到绝对解析名：收集 `SHCNE_RENAMEITEM` / `SHCNE_RENAMEFOLDER` 通知时改用 `SIGDN_DESKTOPABSOLUTEPARSING`，匹配行模型的 Shell 身份，而非只支持文件系统路径；目录重命名 row ID 丢失回归仍通过。目录路径变化后旧递归大小/计数清空，后台重扫回写新值；创建/更新/重命名/删除、选择焦点恢复均通过，窗口隐藏且前台未变。NativeProbe Release build 0 警告、0 错误。证据限于隐藏 `SysListView32` 探针；虚拟 Shell、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。

@@ -3307,6 +3307,77 @@ cleanup:
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeProjectionSmoke(
+    PCWSTR backingPath, LONGLONG scannedBytes)
+{
+    if (!backingPath || !*backingPath || scannedBytes < 0) return E_INVALIDARG;
+    auto result = SetSyntheticSortBackingPath(backingPath);
+    if (FAILED(result)) return result;
+
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    SyntheticSortFolder* root = nullptr;
+    PITEMID_CHILD childFolder = nullptr;
+    PITEMID_CHILD rootFile = nullptr;
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+    InterlockedExchange64(&g_syntheticChildSizeOverride, scannedBytes);
+
+    result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_projection;
+    root = new (std::nothrow) SyntheticSortFolder();
+    if (!root) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_projection; }
+    result = root->Initialize(rootPidl);
+    if (FAILED(result)) goto cleanup_recursive_size_projection;
+    result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_projection;
+    result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_projection;
+
+    {
+        SHCOLUMNID mappedKey{};
+        result = root->MapColumnToSCID(1, &mappedKey);
+        if (FAILED(result) || mappedKey != kSyntheticRecursiveSizeKey)
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_projection;
+        }
+
+        SHELLDETAILS details{};
+        result = root->GetDetailsOf(childFolder, 1, &details);
+        const auto expectedText = std::to_wstring(static_cast<ULONGLONG>(scannedBytes));
+        const bool textMatches = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && expectedText == details.str.pOleStr;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        if (!textMatches) { result = E_FAIL; goto cleanup_recursive_size_projection; }
+
+        VARIANT value{};
+        VariantInit(&value);
+        result = root->GetDetailsEx(childFolder, &mappedKey, &value);
+        const bool propertyMatches = SUCCEEDED(result) && value.vt == VT_UI8 &&
+            value.ullVal == static_cast<ULONGLONG>(scannedBytes);
+        VariantClear(&value);
+        if (!propertyMatches) { result = E_FAIL; goto cleanup_recursive_size_projection; }
+
+        result = root->CompareIDs(1, childFolder, rootFile);
+        if (FAILED(result) || static_cast<SHORT>(HRESULT_CODE(result)) <= 0)
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_projection;
+        }
+    }
+    result = S_OK;
+
+cleanup_recursive_size_projection:
+    InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
+    if (rootFile) CoTaskMemFree(rootFile);
+    if (childFolder) CoTaskMemFree(childFolder);
+    if (root) root->Release();
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    return result;
+}
+
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
