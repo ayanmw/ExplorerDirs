@@ -55,9 +55,9 @@ internal static class PaneTabTransferProbe
             var targetTabs = Array.CreateInstance(tabSettingsType, 1);
             targetTabs.SetValue(Activator.CreateInstance(tabSettingsType, [targetPath, view, emptyFilter, false, false]), 0);
             sourcePane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false], null)!;
+                [sourceTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false], null)!;
             targetPane = (UIElement)Activator.CreateInstance(paneType, InstanceMembers, null,
-                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false], null)!;
+                [targetTabs, viewFactory, null, 0, favoriteStore, historyStore, followWindows, false, null, false, false], null)!;
 
             if (unhostedCopyOrder)
             {

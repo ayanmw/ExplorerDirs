@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
+
 2026-10-31 隔离 Shell 重命名映射扩展到绝对解析名：收集 `SHCNE_RENAMEITEM` / `SHCNE_RENAMEFOLDER` 通知时改用 `SIGDN_DESKTOPABSOLUTEPARSING`，匹配行模型的 Shell 身份，而非只支持文件系统路径；目录重命名 row ID 丢失回归仍通过。目录路径变化后旧递归大小/计数清空，后台重扫回写新值；创建/更新/重命名/删除、选择焦点恢复均通过，窗口隐藏且前台未变。NativeProbe Release build 0 警告、0 错误。证据限于隐藏 `SysListView32` 探针；虚拟 Shell、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
 
 2026-10-31 隔离扫描过期失败门控：目录大小协调器此前只将过期取消视为无结果；若旧 worker 忽略取消后抛出 IO/扫描错误，异常仍会泄漏到调用方，可能被误报为当前扫描失败。现在任意已过期 ticket 的 worker 异常都以 `false` 结果结束，当前 ticket 的异常仍正常传播。新增回归在旧逻辑上复现失败，并分别验证过期异常不影响较新成功发布、当前异常继续传播；定向和完整 Release SettingsSmoke、App/NativeProbe Release build 与 `git diff --check` 通过。仅覆盖隔离原型协调器，不意味着产品逐行大小功能已接入。

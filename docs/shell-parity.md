@@ -1,3 +1,5 @@
+2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
+
 2026-10-30 克隆历史容量：用户确认每标签最多保留 100 个导航位置；超过时移除最旧位置，克隆视图复制这 100 个以内的历史及逐站选区。克隆时直接复制列表容器且共享不可变选区快照，避免中间完整数组副本。完整 Release SettingsSmoke 通过 120 站容量淘汰及克隆独立回退检查；实际 ExplorerBrowser/GUI 历史操作仍待集中验收。来源：[Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)、[Q-Dir 历史](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory)。
 
 2026-10-30 Q-Dir 地址栏 F8 入口：F8 与新增的“此电脑”按钮打开相同的动态驱动器菜单；菜单锚定各自入口，按钮也加入窗格 Tab/Shift+Tab 焦点序列。焦点矩阵与菜单/按钮接线 smoke、Release SettingsSmoke 和 App Release build 通过；按钮实际呈现、屏幕位置、菜单弹出边界及真实键盘路径待集中 GUI 验收。
