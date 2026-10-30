@@ -2,6 +2,9 @@ namespace ExplorerDirs.App;
 
 internal static class ShellSelectionMatch
 {
+    internal static bool IsSameItem(string expectedParsingName, string? currentParsingName) =>
+        string.Equals(expectedParsingName, currentParsingName, StringComparison.OrdinalIgnoreCase);
+
     internal static int[] FindViewIndexes(IEnumerable<string> viewParsingNames,
         IReadOnlyList<string> selectedParsingNames)
     {

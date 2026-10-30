@@ -42,6 +42,10 @@ internal static class ShellTabNavigationHistorySmoke
         Check(ShellSelectionMatch.FindViewIndexes(
                   [@"C:\results\match-a.txt"], [@"C:\results\match-a.txt", @"C:\results\late.txt"]).Length == 0,
             "search selection matching refuses a partial result set so the caller can retry safely");
+        Check(ShellSelectionMatch.IsSameItem(@"C:\results\match-a.txt", @"c:\RESULTS\MATCH-A.TXT") &&
+              !ShellSelectionMatch.IsSameItem(@"C:\results\match-a.txt", @"C:\results\new-first.txt") &&
+              !ShellSelectionMatch.IsSameItem(@"C:\results\match-a.txt", null),
+            "search selection identity validation rejects a row replaced by a newly arrived result");
 
         var search = new ShellTabNavigationHistory(@"C:\scope");
         search.UpdateCurrentSelection([@"C:\scope\before.txt"]);
@@ -91,10 +95,11 @@ internal static class ShellTabNavigationHistorySmoke
 
         var browserSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
         Check(browserSource.Contains("const uint allItemsInViewOrder = 0x80000002", StringComparison.Ordinal) &&
-              browserSource.Contains("view.SelectItem(selectedIndexes[index]", StringComparison.Ordinal) &&
+              browserSource.Contains("ShellSelectionMatch.IsSameItem(selectedParsingNames[index], currentParsingName)", StringComparison.Ordinal) &&
+              browserSource.Contains("shellView.SelectItem(childPidl", StringComparison.Ordinal) &&
               browserSource.Contains("_createdFileSelectionAttempts % 5 != 1", StringComparison.Ordinal) &&
               browserSource.Contains("SupportsSearchLocation: _location.IsSearchActive", StringComparison.Ordinal),
-            "search result selections resolve against current Shell view order and use native index selection");
+            "search result selections validate the live Shell item and select it by PIDL instead of a shifting row index");
 
         IEnumerable<string> EnumerateNames()
         {

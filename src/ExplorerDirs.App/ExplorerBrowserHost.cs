@@ -22,6 +22,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid ShellItemArrayId = new("B63EA76D-1F85-456F-A19C-48159EFA858B");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private const uint WmCommand = 0x0111;
     private const uint BrowseParent = 0x2000;
     private const uint BrowseBack = 0x4000;
@@ -1811,17 +1812,58 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 // every saved item is present so a partial selection is never restored.
                 if (selectedIndexes.Length != selectedParsingNames.Count) return (false, false);
 
+                var folderId = ShellFolderId;
+                if (view.GetFolder(ref folderId, out var folderObject) < 0 || folderObject is null)
+                    return (false, false);
+                var folderPointer = Marshal.GetIUnknownForObject(folderObject);
                 var appliedAny = false;
-                for (var index = 0; index < selectedIndexes.Length; index++)
+                try
                 {
-                    if (!IsCreatedFileSelectionLocationCurrent(request) ||
-                        request.InputVersion != _nativeUserInputVersion || MayRestoreFocus?.Invoke() != true ||
-                        Window.GetWindow(this)?.IsActive != true) return (false, appliedAny);
-                    var result = view.SelectItem(selectedIndexes[index], index == 0 ? 0x1du : 0x9u);
-                    if (result < 0) return (false, appliedAny);
-                    appliedAny = true;
+                    var shellView = (IShellView)viewObject;
+                    for (var index = 0; index < selectedIndexes.Length; index++)
+                    {
+                        if (!IsCreatedFileSelectionLocationCurrent(request) ||
+                            request.InputVersion != _nativeUserInputVersion || MayRestoreFocus?.Invoke() != true ||
+                            Window.GetWindow(this)?.IsActive != true) return (false, appliedAny);
+                        if (view.Item(selectedIndexes[index], out var childPidl) < 0 || childPidl == IntPtr.Zero)
+                            return (false, appliedAny);
+                        try
+                        {
+                            var shellItemId = ShellItemId;
+                            var itemResult = SHCreateItemWithParent(IntPtr.Zero, folderPointer, childPidl,
+                                ref shellItemId, out var currentItem);
+                            if (itemResult < 0 || currentItem is null)
+                            {
+                                if (currentItem is not null && Marshal.IsComObject(currentItem))
+                                    Marshal.ReleaseComObject(currentItem);
+                                return (false, appliedAny);
+                            }
+                            try
+                            {
+                                var currentParsingName = GetShellItemPath(currentItem, 0x80058000) ??
+                                    GetShellItemPath(currentItem, 0x80028000);
+                                // Search results may reorder between the array snapshot and native selection.
+                                // Select the revalidated PIDL so an inserted result cannot shift the target row.
+                                if (!ShellSelectionMatch.IsSameItem(selectedParsingNames[index], currentParsingName))
+                                    return (false, appliedAny);
+                                var result = shellView.SelectItem(childPidl, index == 0 ? 0x1du : 0x9u);
+                                if (result < 0) return (false, appliedAny);
+                                appliedAny = true;
+                            }
+                            finally
+                            {
+                                if (Marshal.IsComObject(currentItem)) Marshal.ReleaseComObject(currentItem);
+                            }
+                        }
+                        finally { Marshal.FreeCoTaskMem(childPidl); }
+                    }
+                    return (true, appliedAny);
                 }
-                return (true, appliedAny);
+                finally
+                {
+                    Marshal.Release(folderPointer);
+                    if (Marshal.IsComObject(folderObject)) Marshal.ReleaseComObject(folderObject);
+                }
             }
             finally
             {
@@ -5781,4 +5823,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private static extern IntPtr ILCombine(IntPtr parent, IntPtr child);
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHGetNameFromIDList(IntPtr pidl, uint displayNameType, out IntPtr name);
+    [DllImport("shell32.dll", PreserveSig = true)]
+    private static extern int SHCreateItemWithParent(IntPtr parentPidl, IntPtr parentFolder, IntPtr childPidl,
+        ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem item);
 }
