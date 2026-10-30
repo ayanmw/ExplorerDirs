@@ -5408,13 +5408,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         IntPtr result;
         try { result = DefSubclassProc(hwnd, message, wParam, lParam); }
         finally { if (contextDispatch) NativeShellTheme.EndMenu(); }
-        if (_traceNativeUserMessages && message is 0x000F or 0x0014 && _nativePaintTransitionStartedAt != 0)
+        if (_traceNativeUserMessages && _nativePaintTransitionStartedAt != 0)
         {
             var elapsed = Stopwatch.GetElapsedTime(_nativePaintTransitionStartedAt);
             if (elapsed <= TimeSpan.FromSeconds(2) && _nativePaintTransitionSamples.Count < 256)
             {
-                var shellPaintTicks = Stopwatch.GetTimestamp() - beforeShell;
-                _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellPaintTicks):F2}/result={result.ToInt64():X}");
+                if (message is 0x000F or 0x0014) // WM_PAINT / WM_ERASEBKGND
+                {
+                    var shellPaintTicks = Stopwatch.GetTimestamp() - beforeShell;
+                    _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/{message:X}/{timingClass}/shell-ms={TicksToMilliseconds(shellPaintTicks):F2}/result={result.ToInt64():X}");
+                }
+                else if (IsNativeTransitionInputMessage(message))
+                    _nativePaintTransitionSamples.Add($"{elapsed.TotalMilliseconds:F1}ms/input-{message:X}/{timingClass}");
             }
         }
         if (timingSample)
@@ -5439,6 +5444,11 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     }
 
     private static double TicksToMilliseconds(long ticks) => ticks * 1000d / Stopwatch.Frequency;
+
+    private static bool IsNativeTransitionInputMessage(uint message) => message is
+        0x0100 or 0x0101 or 0x0102 or 0x0104 or 0x0105 or // keyboard down/up, character, system key down/up
+        0x0201 or 0x0202 or 0x0203 or 0x0204 or 0x0205 or 0x0207 or 0x0208 or // mouse buttons
+        0x020A or 0x020E; // vertical/horizontal mouse wheel
 
     private string GetDiagnosticWindowClass(IntPtr hwnd)
     {

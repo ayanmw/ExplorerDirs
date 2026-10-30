@@ -111,5 +111,6 @@ This candidate intentionally holds the last painted F5 frame while the list repo
 - [x] Make the existing `--live-shell-refresh` HostProbe call `RefreshPreservingLastFrame`, the same product entry used by F5, Ctrl+R and the refresh buttons.
 - [x] Include the native `WM_PAINT` / `WM_ERASEBKGND` timeline in the probe result, alongside its existing row-count, selection and focus assertions.
 - [x] Build `ExplorerDirs.HostProbe` Release successfully with 0 warnings and 0 errors; commit as `1177988` on `main`.
+- [x] Extend the opt-in transition timeline with keyboard, mouse-button and wheel message timestamps, recording only message type and HWND class (no key payload or pointer coordinates); App/HostProbe Release build passes with 0 warnings and 0 errors.
 - [ ] Run the hidden host only after a current idle-desktop handoff and explicit test authorization. Project rules note that even a hidden ExplorerBrowser host can change the system foreground.
-- [ ] Use the timeline to distinguish time spent inside Shell paint handling from gaps between paint messages. It cannot establish displayed pixels or stale hit-target correctness; those still require the planned visible acceptance pass.
+- [ ] Use the timeline to distinguish time spent inside Shell paint handling from gaps between paint messages and identify input delivered during the held-frame interval. It cannot establish displayed pixels or whether an input hit the row shown on screen; those still require the planned visible acceptance pass.
