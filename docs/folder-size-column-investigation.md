@@ -48,6 +48,12 @@ Microsoft 文档将 `IShellFolder2::GetDefaultColumnState` 的 `SHCOLSTATE_ONBYD
 
 该结果证明 Shell 的真实文件夹枚举输出可驱动自有 ListView 的行身份；它没有验证系统图标绘制、列元数据生产、Shell 菜单/命令、文件操作、拖放、变化通知、导航、键盘、性能/内存或产品行为。未创建 `IShellView`，Explorer Dirs 产品仍使用 ExplorerBrowser。
 
+## 2026-10-31：虚拟 Shell 项目进入自有 ListView 行模型
+
+新增 `--common-listview-virtual-folder-contract`，从控制面板的绝对 Shell 解析名绑定父 `IShellFolder`，枚举其 9 个虚拟子项并读取每项的 normal display name、desktop-absolute parsing name、`SFGAO_FOLDER`/`SFGAO_FILESYSTEM` 属性及 `SHGFI_PIDL` 系统图标索引。每项以绝对/相对 PIDL 保持身份，并写入隐藏标准 `SysListView32`；逐行读回名称、解析名、row ID 与图标索引。Release NativeProbe build 0 警告/错误，合同通过：`root-is-virtual=True`、`children=9`、`filesystem-children=0`、`pidl-row-identity=True`、`hidden=True`、`foreground-unchanged=True`。诊断只输出计数，不输出控制面板项目名称或解析路径。
+
+普通文件系统合同仍证明扫描值和 `IFileOperation`，本合同补充了纯虚拟 Shell 命名空间的行身份、名称及图标索引映射。两者尚未合并到统一异步行模型，也没有验证虚拟项目操作/拖放、菜单命令、属性列、键盘焦点、可见绘制或真实 ExplorerBrowser；没有改产品视图，继续使用 ExplorerBrowser。此前在“此电脑”下只观察到 3 个文件系统驱动器项目，不能作为虚拟行支持证据；控制面板夹具才提供了 9 个 `SFGAO_FILESYSTEM` 未设置的子项。
+
 ## 2026-10-30：Shell 系统图标索引接入 ListView 合同
 
 在 Shell 枚举行创建期间，对每个实际解析路径调用 `SHGetFileInfo(SHGFI_SYSICONINDEX | SHGFI_SMALLICON)`，记录共享系统图像列表句柄和行图标索引。创建隐藏 `SysListView32` 后通过 `LVM_SETIMAGELIST` 挂载 Shell 返回的共享小图标列表；插入每行时设置 `LVIF_IMAGE`，再以 `LVM_GETITEM` 验证图标索引与 row ID 对应，并在派生值排序后再次核对映射。
