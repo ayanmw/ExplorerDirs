@@ -8,6 +8,8 @@
 
 2026-10-30 克隆历史容量调整：用户确认保留每标签最多 100 个导航位置，以控制长期会话的历史/选区快照内存；超出时淘汰最旧位置，克隆只复制当前保留窗口。源码与既有 smoke 预期已同步修改；App 与 SettingsSmoke Release 构建均通过（0 警告/错误），未运行 smoke；100 项上限行为待运行时验证，可见回退行为待集中验收。
 
+2026-10-30 逐行大小列隔离复验尝试：运行不注册 CLSID 的 Strict IShellFolder Private Desktop 适配器探针；前台 HWND 未变，但系统输入 tick 改变，守护标记 `isolation-clean=False`。自定义列仍无逐项取值/比较回调并以 exit 1 退出，标准 `PKEY_Size` 排序通过；因隔离条件不完整且未提供新信息，不计为干净复验，不据此调整方向或重跑。未注册 property schema、未接入产品；详见[逐行大小调查](folder-size-column-investigation.md)。
+
 2026-10-30 14:22 UTC：再次对仍运行的正式预览 temp.78 PID `19580` 做同一 PID 60 秒被动采样，未启动、重启或操作窗口。13 个样本的 Working Set 为 `361.69–367.72 MiB`，Private Bytes 为 `178.79–183.09 MiB`；句柄 `1,375–1,456`、线程 `71–91`、GDI `1,205–1,240`、USER `157–179`。操作负载未固定，首末变化不能作为泄漏证据或来源归因；原始 CSV 与限制说明见[内存采样记录](memory-sampling.md#2026-10-30-1422-北京时间temp78-当前运行实例一分钟只读复采)。
 
 2026-10-30 06:06 UTC：从干净主线提交 `290d05a0a455618abcf15dd57a70d21e0d8a7412` 重新准备四窗格集中验收副本 `src/.state/gui-smoke/20261030-060610-762-f18303/`。manifest 标记 `prepared-not-run`、40 项待验收、`SourceWorkingTreeDirty=false`；EXE/DLL 哈希已记录。仅构建并准备隔离副本，没有启动窗口、创建 ExplorerBrowser 或操作桌面。用户已确认克隆视图为独立于复制标签的命令；此副本验收清单覆盖其历史与选区路径。候选详情见[最新验收候选](gui-acceptance-2026-10-30-main-prepared-latest.md)。
