@@ -23,6 +23,7 @@
     <Compile Include="../ExplorerDirs.App/ShellTabNavigationHistory.cs" Link="ShellTabNavigationHistory.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveDirectoryScanner.cs" Link="RecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveSizePercentage.cs" Link="RecursiveSizePercentage.cs" />
+    <Compile Include="../ExplorerDirs.App/ByteSizeFormatter.cs" Link="ByteSizeFormatter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellBrowserCommandSink.cs" Link="ShellBrowserCommandSink.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />

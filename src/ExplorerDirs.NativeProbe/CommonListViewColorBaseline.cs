@@ -261,9 +261,9 @@ internal static class CommonListViewColorBaseline
             var initialLargeRow = _shellRowsById[1];
             var initialSmallRow = _shellRowsById[2];
             InsertItem(listView, 0, initialLargeRow.DisplayName, initialLargeRow.Id, initialLargeRow.SystemImageIndex,
-                $"{initialLargeRow.RecursiveBytes} B");
+                ShellListViewRowPresentation.FormatRecursiveSize(initialLargeRow, ByteSizeFormatter.Options));
             InsertItem(listView, 1, initialSmallRow.DisplayName, initialSmallRow.Id, initialSmallRow.SystemImageIndex,
-                $"{initialSmallRow.RecursiveBytes} B");
+                ShellListViewRowPresentation.FormatRecursiveSize(initialSmallRow, ByteSizeFormatter.Options));
             SetContentsText(listView, 0, initialLargeRow.RecursiveSummary!.Files, initialLargeRow.RecursiveSummary.Directories);
             SetContentsText(listView, 1, initialSmallRow.RecursiveSummary!.Files, initialSmallRow.RecursiveSummary.Directories);
             SetRelativeSizeText(listView, 0, initialLargeRow.RecursiveBytes!.Value, fixtureScan.Bytes, 3);
@@ -367,7 +367,8 @@ internal static class CommonListViewColorBaseline
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             var smallRowIndex = FindItemIndexByParam(listView, 2);
             var largeRowIndex = FindItemIndexByParam(listView, 1);
-            SetItemText(listView, smallRowIndex, 1, $"{updatedSmallRow.RecursiveBytes} B");
+            SetItemText(listView, smallRowIndex, 1,
+                ShellListViewRowPresentation.FormatRecursiveSize(updatedSmallRow, ByteSizeFormatter.Options));
             var updatedLargeRow = _shellRowsById[1];
             SetContentsText(listView, largeRowIndex, updatedLargeRow.RecursiveSummary!.Files,
                 updatedLargeRow.RecursiveSummary.Directories);

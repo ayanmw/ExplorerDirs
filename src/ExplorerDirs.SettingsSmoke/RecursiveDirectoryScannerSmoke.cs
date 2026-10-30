@@ -86,6 +86,7 @@ internal static class RecursiveDirectoryScannerSmoke
 
     internal static void Run()
     {
+        ShellListViewRowPresentationSmoke.Run();
         DirectoryTreeScanCoordinatorSmoke.Run();
         ShellListViewRowModelSmoke.Run();
         var progressThrottle = new RecursiveScanProgressThrottle(TimeSpan.FromMilliseconds(250));

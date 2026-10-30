@@ -689,3 +689,9 @@ NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 gen
 `ScanDirectoryTreeForPaths` 在递归遍历前需要将调用方的可见目录路径转成完整路径集合。此前取消只在 `ScanDirectoryTreeCore` 开始后才检查，所以已取消任务仍会消费完整目标枚举。现在在目标集合物化前及每个目标路径转换前检查 token；回归先确认预取消仍会枚举输入而失败，再覆盖枚举期间触发取消后不继续消费后续项。定向递归扫描 smoke 与完整 Release SettingsSmoke 通过；App/NativeProbe Release build 均为 0 警告、0 错误。
 
 这仅让扫描取消覆盖“目标集合准备”和后续递归工作之间的完整生命周期；不能中断正在执行的单次同步文件系统 API（如枚举器 `MoveNext`、属性/长度读取），也不证明大目录或网络路径的取消时延。代码仍仅由隔离 NativeProbe 行模型使用，产品没有接入逐行目录大小列。
+
+### 2026-10-31：隔离行大小值复用应用格式设置
+
+普通 `SysListView32` 逐行大小原型此前在初始绑定与变更回写时都硬编码 `N B`，没有复用应用已有的自动/固定单位、精度和千位分隔格式器。现在抽出 `ShellListViewRowPresentation.FormatRecursiveSize`，原型两处写入都使用 `ByteSizeFormatter`；尚未计算的 `RecursiveBytes=null` 行显示为空白。定向 SettingsSmoke 先因 ListView 接线缺少共享格式器而失败，完成接线后覆盖 `1.5 MB`、`1,572,864 B` 和未扫描空白值并通过。
+
+该原型接收显式 `SizeDisplayOptions`；当前 NativeProbe 仅使用格式器默认值，没有读取用户 profile，也未将大小列接入产品 ExplorerBrowser。它验证了 Q-Dir 单位/精度行为可由现有设置模型驱动，不验证 Shell DefView 列、排序或可见效果。
