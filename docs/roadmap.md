@@ -10,6 +10,8 @@
 
 2026-10-30 预览发布 `preview-0.6.0-temp.81`：从干净主线提交 `52358ace42d9008022a1f4858568101aab81ec98` 发布，提交时间 `2026-10-30T23:43:30+08:00`，`BuildTags=none`，包内独立 profile。EXE/DLL SHA-256 为 `516E09919543B5EC06D65E1339C8BC5EF97893B09C16066E385F0176FDDE8694` / `29C3EE4719F2444C7F62C7BEE7A262C8161D019056E710D51E86119F7B491532`，与 `app/SHA256.txt` 一致；PowerShell 7 发布隔离 smoke 通过。未启动 GUI；F5/查看方式的可见空白、选区、焦点和滚动位置仍待集中验收。版本说明见[preview-0.6.0-temp.81](releases/preview-0.6.0-temp.81.md)。
 
+2026-10-31 预览发布 `preview-0.6.0-temp.82`：从干净主线提交 `c1694164d5f94afb8bc3d3027025b10381ee76d6` 发布，提交时间 `2026-10-31T00:03:39+08:00`，`BuildTags=none`，包内独立 profile。EXE/DLL SHA-256 为 `716028B545A5354C4E617C95B89B6B00E74836AE11DC3CE48562428639164680` / `683FD107F88430AD648E0EA0EE33BB42BC22E7A963BEDF32F8D8BE09A68433B0`，与 `app/SHA256.txt` 一致；程序集元数据确认源码状态为 clean。未启动 GUI；F5 保帧候选的可见改善、点击/键盘命中一致性和查看方式切换空白仍待集中验收。版本说明见[preview-0.6.0-temp.82](releases/preview-0.6.0-temp.82.md)。
+
 2026-10-30 文件列表刷新重绘（新候选，待可见验收）：F5 仍只调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；查看方式切换只对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 Refresh 或重新导航。F5 在 Shell 重新填充列表期间暂缓原生列表重绘，待行数连续稳定或 Dispatcher 首次检查到 1.5 秒阈值后恢复；主线程被同步 Shell 调用阻塞时，该阈值不是墙钟硬上限。此 API 只控制绘制，不保证禁用输入，旧画面与当前命中项可能短暂错位，因此验收必须检查点击/键盘的目标正确性；不通过则撤回此候选。不会对子控件调用 `RedrawWindow(...ALLCHILDREN)`。查看方式切换继续让 Shell 自行重排，完整状态读取延后执行。黑屏和交互安全均未可见验证；候选与证据见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 强调色更新避免重复原生主题刷新：`UISettings.ColorValuesChanged` 中即使只变化 Windows 强调色，应用也会重新应用同一 Win32 Preferred App Mode 并刷新原生菜单主题。现在独立跟踪原生深浅模式和高对比度状态；Accent-only 更新仍替换 WPF 语义画刷、通知窗口更新，但跳过原生 `SetProcessTheme`。重复高对比度通知不再清除/重建相同系统资源。浅/深模式或高对比度改变时继续刷新原生主题。App Release build 与可见主题切换尚待验证；未宣称高对比度/Windows 运行时事件通过。
