@@ -12,7 +12,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 主线集中验收候选更新：最新副本基于干净提交 `682cb7c`，目录树延时配置档已随验收夹具纳入，四窗格副本位于 `src/.state/gui-smoke/20261030-223919-122-5040e1`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `AA21558CA35E0042AF582EFA0756B2AB806611F1F0FE022EB0B9E5944715A54` / `5BBFA017B282C7ED19AE0DC0BEC00E2533902E4E40EAA4D2E2F8955F8A093DA4`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+2026-10-31 主线集中验收候选更新：最新副本基于干净提交 `c4ff10034d0934168d3a3e6a6523b4004cb2650c`，目录树延时配置档已随验收夹具纳入，四窗格副本位于 `src/.state/gui-smoke/20261030-232629-182-304e58`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `08943F2DEB9A687E0D45365C1968B0544EBCC137258BE8768A6C5D16F99EC6D2` / `D70E2125A2B979AC812AEDB302A5A97DF293F27791E82BAED106AB43FF28DB9`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。刷新空白、命中目标、选区/焦点/滚动已列入集中验收。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 递归目录树扫描取消边界：可见文件夹大小原型在进入递归扫描前会先物化需要返回的路径集合；现在集合构建逐项检查 CancellationToken，取消后不再继续枚举剩余目标。SettingsSmoke 先验证旧行为会在预取消时仍消费路径，再覆盖枚举中途取消；定向扫描 smoke、完整 Release SettingsSmoke、App 与 NativeProbe Release build 均通过（0 警告/错误）。此项仅减少隔离逐行大小原型在刷新/关闭后的无效准备工作，不接入产品 ExplorerBrowser，也未测量大型/网络目标的实际取消延迟。
 
