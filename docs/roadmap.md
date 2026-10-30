@@ -5057,4 +5057,4 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 在干净主线提交 `ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f` 上执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，得到 `src/.state/gui-smoke/20261030-200808-091-e70fbb/`。候选为 `prepared-not-run`、初始四窗格、41 项待验收；BuildIdentity 为 `0.6.0-preview.20261030-200808-091-e70fbb+ccd3b3c23f75f9b0b5e588f20a8c603c192f3b6f`。
 - EXE SHA-256 `5C306940EBCEFFB35C922300E87EEC3039C4D588F5E14C614B88C71BF5F730F9`、App DLL SHA-256 `62E0B8024DA2414D9B7E721837DEDF3D5E566006B25DD7D3FD1DA07BA9FD48B2` 均与 manifest 内哈希经独立计算一致。没有启动应用、创建 ExplorerBrowser、发送输入或触碰正式 profile；此候选不是发布包，也没有可见通过结论。
-- 同步整理刷新调查计划中被前后尝试覆盖的说明：当前普通文件系统 F5 优先发 `SHCNE_UPDATEDIR`，必要时回退 `IShellView.Refresh()`；显式 F5 使用有界重绘租约，视图模式切换不重枚举。实际空白像素、租约期间输入命中和滚动位置仍需这份候选集中验收。
+- 该候选准备时 F5 仍按普通文件夹发 `SHCNE_UPDATEDIR`、搜索/虚拟位置回退 `IShellView.Refresh()`。这项记录由 2026-10-31 后续提交 `b93a9e7` 的直接 `IShellView.Refresh()` 路径调整取代；最新候选、源码事实和验收说明见本文顶部及[集中验收说明](gui-acceptance-2026-10-31-main-prepared-latest.md)。
