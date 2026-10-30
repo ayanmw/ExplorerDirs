@@ -39,6 +39,14 @@ internal static class RecursiveDirectoryScannerSmoke
                   treeResults.TryGetValue(Path.GetFullPath(grandchild), out var treeGrandchild) &&
                   treeGrandchild.Bytes == 2 && treeGrandchild.Files == 1 && treeGrandchild.Directories == 0,
                 "single-pass directory tree scan returns recursive totals for root, child, and grandchild folders");
+            var visibleFolderPaths = new[] { Path.GetFullPath(child), Path.GetFullPath(grandchild) };
+            var visibleFolderResults = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                root, visibleFolderPaths, CancellationToken.None);
+            Check(visibleFolderResults.Count == 2 &&
+                  visibleFolderResults[visibleFolderPaths[0]].Bytes == 7 &&
+                  visibleFolderResults[visibleFolderPaths[1]].Bytes == 2 &&
+                  !visibleFolderResults.ContainsKey(Path.GetFullPath(root)),
+                "visible-folder scan returns requested recursive rows without retaining unrequested directory results");
 
             Check(RecursiveSizePercentage.Calculate(10, 14) == 100m * 10 / 14 &&
                   RecursiveSizePercentage.Calculate(4, 14) == 100m * 4 / 14 &&

@@ -207,6 +207,21 @@ internal static class RecursiveDirectoryScanner
 
     internal static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanDirectoryTree(
         string root, CancellationToken cancellationToken, Action<long>? progress = null)
+        => ScanDirectoryTreeCore(root, cancellationToken, progress, resultPaths: null);
+
+    internal static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanDirectoryTreeForPaths(
+        string root, IEnumerable<string> resultPaths, CancellationToken cancellationToken,
+        Action<long>? progress = null)
+    {
+        ArgumentNullException.ThrowIfNull(resultPaths);
+        var requested = resultPaths.Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return ScanDirectoryTreeCore(root, cancellationToken, progress, requested);
+    }
+
+    private static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanDirectoryTreeCore(
+        string root, CancellationToken cancellationToken, Action<long>? progress,
+        HashSet<string>? resultPaths)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var rootPath = Path.GetFullPath(root);
@@ -219,18 +234,37 @@ internal static class RecursiveDirectoryScanner
         if ((rootAttributes & FileAttributes.ReparsePoint) != 0)
         {
             rootNode.Unreadable = 1;
-            return new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
-            {
-                [rootPath] = rootNode.ToResult()
-            };
+            return IncludeResult(rootNode, resultPaths)
+                ? new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                    { [rootPath] = rootNode.ToResult() }
+                : new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var pending = new Stack<DirectoryScanNode>();
-        pending.Push(rootNode);
+        var results = new Dictionary<string, RecursiveDirectoryScanResult>(
+            resultPaths?.Count ?? 0, StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<(DirectoryScanNode Node, bool Complete)>();
+        pending.Push((rootNode, Complete: false));
         long entriesChecked = 0;
-        while (pending.TryPop(out var node))
+        while (pending.TryPop(out var work))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var node = work.Node;
+            if (work.Complete)
+            {
+                if (IncludeResult(node, resultPaths)) results.Add(node.Path, node.ToResult());
+                if (node.Parent is { } parent)
+                {
+                    parent.Bytes = checked(parent.Bytes + node.Bytes);
+                    parent.Files = checked(parent.Files + node.Files);
+                    parent.Directories = checked(parent.Directories + 1 + node.Directories);
+                    parent.Unreadable = checked(parent.Unreadable + node.Unreadable);
+                }
+                continue;
+            }
+
+            // Post-order completion keeps only pending sibling/subtree nodes alive;
+            // the former all-directory node list duplicated the traversal's peak memory.
+            pending.Push((node, Complete: true));
             try
             {
                 foreach (var path in Directory.EnumerateFileSystemEntries(node.Path))
@@ -248,8 +282,7 @@ internal static class RecursiveDirectoryScanner
                         if (!ShouldDescend(attributes))
                         { node.Unreadable = checked(node.Unreadable + 1); continue; }
                         var child = new DirectoryScanNode(Path.GetFullPath(path), node);
-                        nodes.Add(child);
-                        pending.Push(child);
+                        pending.Push((child, Complete: false));
                         continue;
                     }
                     if ((attributes & FileAttributes.ReparsePoint) != 0)
@@ -271,21 +304,11 @@ internal static class RecursiveDirectoryScanner
         if (entriesChecked > 0 && entriesChecked % ProgressEntryInterval != 0)
             progress?.Invoke(entriesChecked);
 
-        var results = new Dictionary<string, RecursiveDirectoryScanResult>(nodes.Count,
-            StringComparer.OrdinalIgnoreCase);
-        for (var index = nodes.Count - 1; index >= 0; index--)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var node = nodes[index];
-            results.Add(node.Path, node.ToResult());
-            if (node.Parent is not { } parent) continue;
-            parent.Bytes = checked(parent.Bytes + node.Bytes);
-            parent.Files = checked(parent.Files + node.Files);
-            parent.Directories = checked(parent.Directories + 1 + node.Directories);
-            parent.Unreadable = checked(parent.Unreadable + node.Unreadable);
-        }
         return results;
     }
+
+    private static bool IncludeResult(DirectoryScanNode node, HashSet<string>? resultPaths) =>
+        resultPaths is null || resultPaths.Contains(node.Path);
 
     private sealed class DirectoryScanNode(string path, DirectoryScanNode? parent = null)
     {

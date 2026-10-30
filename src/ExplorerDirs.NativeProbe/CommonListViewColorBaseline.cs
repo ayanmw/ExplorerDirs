@@ -178,7 +178,12 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallFolder);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[10]);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[4]);
-            var initialScans = RecursiveDirectoryScanner.ScanDirectoryTree(fixture, CancellationToken.None);
+            var requestedScanPaths = new[]
+            {
+                Path.GetFullPath(fixture), Path.GetFullPath(largeFolder), Path.GetFullPath(smallFolder)
+            };
+            var initialScans = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                fixture, requestedScanPaths, CancellationToken.None);
             var largeScan = initialScans[Path.GetFullPath(largeFolder)];
             var smallScan = initialScans[Path.GetFullPath(smallFolder)];
             var fixtureScan = initialScans[Path.GetFullPath(fixture)];
@@ -270,7 +275,8 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallNestedFolder);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-2.bin"), []);
-            var updatedScans = RecursiveDirectoryScanner.ScanDirectoryTree(fixture, CancellationToken.None);
+            var updatedScans = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                fixture, requestedScanPaths, CancellationToken.None);
             var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };

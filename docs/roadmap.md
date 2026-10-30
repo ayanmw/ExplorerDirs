@@ -4,6 +4,8 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 自有 ListView 递归列扫描内存：`ScanDirectoryTree` 改为后序栈式汇总，子目录完成后立即向父目录累计，不再持有整棵目录节点清单；保留默认“返回所有目录汇总”语义，并新增按指定完整路径只返回所需行的 `ScanDirectoryTreeForPaths`。隔离 ListView 仅请求当前行目录及当前父目录总量，避免为不可见子目录创建结果字典项。递归扫描 smoke 和隐藏 `--common-listview-relative-size-contract` 通过，比例、计数、排序及选区/焦点身份仍正确，前台未变。尚未测量大目录内存节省；此扫描路径仍属于隔离普通 ListView 原型，没有接入 ExplorerBrowser 产品列，也未验证 Shell 菜单、拖放、通知或真实 UI。详情见[逐行大小列调查](folder-size-column-investigation.md)。
+
 2026-10-30 集中验收候选（当前代码版）：已在提交 `a13c96a53fba9a7afaa1a2df7221444b91b1f400` 上运行 `GuiSmoke -PrepareOnly`，生成 `src/.state/gui-smoke/20261030-144637-678-72c1e2/`。preparation manifest 为 `prepared-not-run`、41 项待验收、`SourceWorkingTreeDirty=false`；候选 BuildIdentity 为 `0.6.0-preview.20261030-144637-678-72c1e2+a13c96a53fba9a7afaa1a2df7221444b91b1f400`，EXE/DLL SHA-256 分别为 `F1D1218A5B846493EEAEE2245BC06E8F2052170C4BF1F586EC07A5C5439B9110` / `F30153303341FDA23443EEAF0D4D0F54D83C8DD2AC8B22FDE07E2DAAF0D5609F`。准备过程没有启动窗口、创建 ExplorerBrowser 或发送输入；可见位置、键盘焦点、F5/查看方式重绘及虚拟 Shell 位置仍待验收，见[候选清单](gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
 2026-10-30 文件列表刷新重绘（当前源码复核）：F5 仅调用当前 `IShellView.Refresh()`，没有重建 ExplorerBrowser、窗格或标签；该 Shell API 按设计重新核对并填充当前视图内容。切换查看方式仅对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，不调用 `Refresh` 或重新导航；完整排序/分组/列状态读取延后到 Dispatcher Background。当前主线不持有同步或异步 `SetRedraw` 租约，由 DefView 控制列表绘制。源码没有发现额外的整视图刷新调用；用户仍报告 F5 与模式切换期间列表明显变黑/消失。现有隐藏计时只测调用/行数，不能确定空白像素由 Shell 内部重填、模式重排还是调用后的焦点/选择绘制造成。之前的“同步模式切换重绘租约”候选结论已由当前实现取代，不应按该方案继续。下一步应在集中可见验收中分别记录列表空白时段与文件重新出现时段；在没有像素证据前不再叠加重绘抑制或额外刷新。见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
