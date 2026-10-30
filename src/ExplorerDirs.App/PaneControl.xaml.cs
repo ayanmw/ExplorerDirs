@@ -86,6 +86,10 @@ public partial class PaneControl : UserControl
         public Button? CloseButton { get; set; }
         public bool SearchRequestPending { get; set; }
         public IReadOnlyList<string>? StartupSelectItems { get; set; }
+        public string? StartupSearchUri { get; set; }
+        public bool ReplayClonedHistory { get; set; }
+        public bool HistoryReplayReady { get; set; }
+        public required ShellTabNavigationHistory NavigationHistory { get; init; }
         public string? SearchScopePath { get; set; }
         public AddressPathHistory AddressHistory { get; init; } = new();
     }
@@ -517,8 +521,11 @@ public partial class PaneControl : UserControl
 
     private void RefreshNavigationAvailability()
     {
-        BackButton.IsEnabled = Current?.Browser.CanGoBack == true;
-        ForwardButton.IsEnabled = Current?.Browser.CanGoForward == true;
+        var state = Current;
+        BackButton.IsEnabled = state is not null && (state.ReplayClonedHistory
+            ? state.HistoryReplayReady && state.NavigationHistory.CanGoBack : state.Browser.CanGoBack);
+        ForwardButton.IsEnabled = state is not null && (state.ReplayClonedHistory
+            ? state.HistoryReplayReady && state.NavigationHistory.CanGoForward : state.Browser.CanGoForward);
     }
 
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -869,8 +876,58 @@ public partial class PaneControl : UserControl
         return Current == state && queued;
     }
     public void GoParent() => Current?.Browser.GoParent();
-    public void GoBack() => Current?.Browser.GoBack();
-    public void GoForward() => Current?.Browser.GoForward();
+    public void GoBack() => NavigateTabHistory(back: true);
+    public void GoForward() => NavigateTabHistory(back: false);
+
+    private void NavigateTabHistory(bool back)
+    {
+        if (Current is not { } state) return;
+        if (state.ReplayClonedHistory)
+        {
+            if (!state.HistoryReplayReady || !state.NavigationHistory.TryBeginMove(back, out var target)) return;
+            if (!NavigateHistoryLocation(state.Browser, target)) state.NavigationHistory.CancelPendingMove();
+            RefreshNavigationAvailability();
+            return;
+        }
+
+        state.NavigationHistory.TryBeginMove(back, out _);
+        var accepted = back ? state.Browser.GoBack() : state.Browser.GoForward();
+        if (!accepted) state.NavigationHistory.CancelPendingMove();
+        RefreshNavigationAvailability();
+    }
+
+    private void CloneView(TabState state)
+    {
+        if (!CanAddTabs(1)) return;
+        try
+        {
+            var view = state.Browser.CaptureViewState();
+            if (state.Browser.ViewCaptureFailed)
+                throw new InvalidOperationException("Shell 视图状态暂时不可读取；未克隆视图。");
+            var selectedItems = state.Browser.CaptureSelectedShellParsingNames();
+            AddTab(state.Browser.CurrentPath, view, pinned: state.IsPinned, quickFilter: state.Browser.QuickFilter,
+                previewPaneVisible: state.Browser.PreviewPaneVisible,
+                detailsPaneVisible: state.Browser.DetailsPaneVisible,
+                addressHistory: state.AddressHistory.Copy(), startupSelectItems: selectedItems,
+                navigationHistory: ShellTabNavigationHistory.FromSnapshot(state.NavigationHistory.Snapshot(), state.NavigationHistory.Index),
+                startupSearchUri: state.Browser.CurrentSearchUri, replayClonedHistory: true);
+        }
+        catch (Exception ex)
+        {
+            Status.Text = $"克隆视图失败：{ex.Message}";
+        }
+    }
+
+    private static bool NavigateHistoryLocation(ExplorerBrowserHost browser, string location)
+    {
+        if (ShellSearchLocation.TryReadScopeAndQuery(location, out var scope, out var query))
+        {
+            browser.Search(query, scope);
+            return true;
+        }
+        browser.Navigate(location);
+        return true;
+    }
     public bool FocusCurrentView() => Current?.Browser.FocusView() == true;
     internal bool ExpandTreeToCurrent()
     {
@@ -1587,7 +1644,9 @@ public partial class PaneControl : UserControl
 
     private TabItem AddTab(string path, ViewState? view = null, bool select = true, bool pinned = false,
         QuickFilterSettings? quickFilter = null, bool previewPaneVisible = false, bool detailsPaneVisible = false,
-        AddressPathHistory? addressHistory = null, IReadOnlyList<string>? startupSelectItems = null)
+        AddressPathHistory? addressHistory = null, IReadOnlyList<string>? startupSelectItems = null,
+        ShellTabNavigationHistory? navigationHistory = null, string? startupSearchUri = null,
+        bool replayClonedHistory = false)
     {
         if (!CanAddTabs(1)) throw new InvalidOperationException(Status.Text);
         var browser = new ExplorerBrowserHost(path, view ?? _newTabView(), quickFilter ?? QuickFilterSettings.Empty,
@@ -1596,7 +1655,9 @@ public partial class PaneControl : UserControl
         var tab = new TabItem();
         if (_compactMode) tab.Padding = new Thickness(4, 1, 4, 1);
         var state = new TabState { Owner = this, Tab = tab, Browser = browser, IsPinned = pinned,
-            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectItems = startupSelectItems };
+            AddressHistory = addressHistory ?? new AddressPathHistory(), StartupSelectItems = startupSelectItems,
+            NavigationHistory = navigationHistory ?? new ShellTabNavigationHistory(path),
+            StartupSearchUri = startupSearchUri, ReplayClonedHistory = replayClonedHistory };
         state.AddressHistory.Record(path);
         tab.Tag = state;
         browser.QuickFilterChanged += settings =>
@@ -1671,7 +1732,8 @@ public partial class PaneControl : UserControl
             var owner = state.Owner;
             var navigatedPath = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
-            if (completesInput && state.StartupSelectItems is { } startupSelectItems)
+            var restoringStartupSearch = completesInput && state.StartupSearchUri is not null;
+            if (completesInput && !restoringStartupSearch && state.StartupSelectItems is { } startupSelectItems)
             {
                 state.StartupSelectItems = null;
                 browser.QueueShellItemSelections(startupSelectItems);
@@ -1683,6 +1745,8 @@ public partial class PaneControl : UserControl
             }
             var restoreSearchCloseFocus = completesInput && ReferenceEquals(owner._searchCloseFocusPending, state);
             if (restoreSearchCloseFocus) owner._searchCloseFocusPending = null;
+            if (!restoringStartupSearch) state.NavigationHistory.Record(navigatedPath);
+            if (state.ReplayClonedHistory && !restoringStartupSearch) state.HistoryReplayReady = true;
             state.AddressHistory.Record(navigatedPath);
             owner.UpdateTabHeader(state);
             if (owner.Current == state)
@@ -1714,7 +1778,17 @@ public partial class PaneControl : UserControl
                     owner.RestoreFileFocusWhenActive();
             }
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
-            if (owner.Current == state) owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
+            if (owner.Current == state)
+            {
+                owner.RefreshNavigationAvailability();
+                owner.CommandContextChanged?.Invoke(owner, EventArgs.Empty);
+            }
+            if (restoringStartupSearch && state.StartupSearchUri is { } startupSearchUri &&
+                ShellSearchLocation.TryReadScopeAndQuery(startupSearchUri, out var scope, out var query))
+            {
+                state.StartupSearchUri = null;
+                browser.Search(query, scope);
+            }
         };
         browser.SearchNavigated += (_, notice) =>
         {
@@ -1722,6 +1796,14 @@ public partial class PaneControl : UserControl
             var query = notice.Value;
             var completesInput = browser.CanCompleteNavigationRequest(notice.RequestVersion);
             if (completesInput) state.SearchRequestPending = false;
+            if (browser.CurrentSearchUri is { } searchUri) state.NavigationHistory.Record(searchUri);
+            if (state.ReplayClonedHistory) state.HistoryReplayReady = true;
+            if (owner.Current == state) owner.RefreshNavigationAvailability();
+            if (completesInput && state.StartupSelectItems is { } startupSelectItems)
+            {
+                state.StartupSelectItems = null;
+                browser.QueueShellItemSelections(startupSelectItems);
+            }
             if (ReferenceEquals(owner._searchCloseFocusPending, state)) return;
             owner.UpdateTabHeader(state);
             owner.StateChanged?.Invoke(owner, EventArgs.Empty);
@@ -1746,6 +1828,8 @@ public partial class PaneControl : UserControl
         {
             if (!browser.IsCurrentNavigationRequest(notice.RequestVersion)) return;
             var owner = state.Owner;
+            state.NavigationHistory.CancelPendingMove();
+            state.StartupSearchUri = null;
             state.StartupSelectItems = null;
             state.SearchRequestPending = false;
             if (ReferenceEquals(owner._searchCloseFocusPending, state))
@@ -1922,6 +2006,7 @@ public partial class PaneControl : UserControl
         menu.Items.Add(new Separator());
         AddMenuItem(menu, "新建标签页", NewTab, "Ctrl+T");
         AddMenuItem(menu, "复制当前标签", () => DuplicateTab(state), "Ctrl+K");
+        AddMenuItem(menu, "克隆当前视图", () => CloneView(state));
         AddMenuItem(menu, "恢复关闭的标签", ReopenClosedTab, "Ctrl+Shift+T");
         menu.Items.Add(new Separator());
         var pinItem = new MenuItem { Header = "固定标签", IsCheckable = true };

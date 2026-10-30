@@ -4708,9 +4708,15 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-30：Q-Dir 克隆视图的标签差距复核
 
-依据 [Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)，Q-Dir 克隆视图包含当前路径、查看设置、选中对象及浏览历史。源码核对确认 Explorer Dirs 跨窗格移动标签会保留原 Browser 和 Shell Travel Log；复制标签则新建 Browser，并复制当前路径、视图设置、快速筛选、预览/详情状态及地址下拉历史，但没有复制当前文件选区或 Shell Back/Forward 历史。因此不能把复制标签描述为 Q-Dir 完整克隆。后续若追齐该功能，应先决定扩展现有“复制标签”语义，还是增加独立“克隆视图”动作；完整历史若无法由 Shell 宿主安全转移，还需定义兼容的应用级历史模型。仅做了官方资料与源码静态核对，未改产品代码、未启动 GUI。
+依据 [Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)，Q-Dir 克隆视图包含当前路径、查看设置、选中对象及浏览历史。源码核对确认 Explorer Dirs 跨窗格移动标签会保留原 Browser 和 Shell Travel Log；复制标签则新建 Browser，不能迁移原生 Travel Log。原差距和可行性判断为本轮实现前的基线；应用级可重放历史现已接入独立“克隆视图”动作，当前边界见下节。完整 Q-Dir 克隆仍需各历史停靠点的选区状态和可见验收。
 
 补充可行性依据：项目既有 [`native-navigation-probe.md`](native-navigation-probe.md#问题与结论) 记录了 ExplorerBrowser 直接查询 `ITravelLogStg` 返回 `E_NOINTERFACE`，通过 `IServiceProvider` 查询 TravelLog 服务返回 `E_NOTIMPL`；公开 ExplorerBrowser 接口没有宿主间复制 TravelLog 的入口。忠实克隆历史因此不能靠共享/复制现有 COM 对象完成，需要应用级导航序列及每个历史停靠点的选区模型，并验证虚拟目录、搜索位置、被取消/失败导航和分支截断。这个范围超出安全的复制标签小修，需在明确用户交互语义后再设计。
+
+## 2026-10-30：独立“克隆视图”命令与应用级导航历史
+
+- 为满足“克隆视图”与“复制标签”语义分开，标签右键菜单新增独立克隆命令；复制标签和跨窗格复制仍保持原行为。克隆会带上最多 100 个最近位置的轻量历史快照及当前选区；原标签继续走自身 Shell Back/Forward，克隆标签通过应用历史重放普通 Shell 位置与 `search-ms:` 搜索位置。成功的后退/前进移动游标，新位置会截断前进分支；启动中的克隆等首个位置恢复完成后才启用历史按钮。
+- SettingsSmoke 先以缺失历史模型得到预期编译失败，再覆盖游标移动、前进分支截断、失败导航取消、独立快照、搜索位置往返、上限及克隆/复制命令分流；完整 smoke 与 App Release build 通过。没有运行 ExplorerBrowser HostProbe 或 GUI。
+- 当前只恢复克隆时所在位置的选区；每个历史停靠点的选区尚未随历史保存/恢复，搜索结果的当前选区恢复仍受现有 Shell direct-child 选择接口限制。真实 Shell Back/Forward TravelLog 与应用模型同步、失败/取消导航和虚拟 provider 行为待集中 GUI 验收；本轮未生成预览包。
 
 ## 2026-10-30：`.qdr` 区段边界修正
 

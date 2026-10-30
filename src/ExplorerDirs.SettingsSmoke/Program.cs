@@ -561,6 +561,7 @@ ExplorerDirs.SettingsSmoke.ShellSelectionBatchRestoreSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFocusRestoreGateSmoke.Run();
 ShellDirectoryRefreshRecoverySmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellLocationIdentitySmoke.Run();
+ExplorerDirs.SettingsSmoke.ShellTabNavigationHistorySmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellSelectionSizeRefreshGateSmoke.Run();
 PaneTreeSessionSmoke.Run(root);
 FocusTraversalSmoke.Run();

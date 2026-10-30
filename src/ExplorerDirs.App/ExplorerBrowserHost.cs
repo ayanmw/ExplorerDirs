@@ -181,6 +181,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private ExplorerShellPane _visibleShellPane;
 
     public string CurrentPath => _location.DirectoryPath;
+    internal string? CurrentSearchUri => _location.SearchUri;
     internal long ViewGeneration => _viewReadiness.Generation;
     internal int AccumulateCtrlWheel(int delta) => _ctrlWheelAccumulator.Add(delta, _viewReadiness.Generation);
     internal bool IsFileSystemLocation => _location.IsFileSystemLocation;
