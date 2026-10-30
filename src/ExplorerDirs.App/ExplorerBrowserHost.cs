@@ -111,6 +111,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private DispatcherTimer? _newFolderRenameTimer;
     private DispatcherTimer? _createdFileSelectionTimer;
     private List<IntPtr>? _createdFileSelectionPidls;
+    private IReadOnlyList<string>? _createdSearchSelectionNames;
     private CreatedFileSelectionRequest? _createdFileSelectionRequest;
     private int _createdFileSelectionAttempts;
     private FolderCreationObservation? _newFolderObservation;
@@ -1587,8 +1588,22 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     internal bool QueueShellItemSelections(IReadOnlyList<string> parsingNames)
     {
-        if (_browser is null || _location.IsSearchActive || parsingNames.Count == 0) return false;
+        if (_browser is null || parsingNames.Count == 0) return false;
         var request = CaptureShellSelectionRequest();
+        if (_location.IsSearchActive)
+        {
+            CancelCreatedFileSelection();
+            _createdSearchSelectionNames = parsingNames.Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (_createdSearchSelectionNames.Count == 0)
+            {
+                _createdSearchSelectionNames = null;
+                return false;
+            }
+            StartCreatedFileSelectionTimer(request);
+            return true;
+        }
+
         List<IntPtr> childPidls = [];
         foreach (var name in parsingNames.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -1616,7 +1631,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     private CreatedFileSelectionRequest CaptureShellSelectionRequest() =>
         new(_browser!, CurrentPath, _viewReadiness.NavigationVersion,
             _viewReadiness.Generation, _browserSite.SelectionVersion, _nativeUserInputVersion,
-            SupportsVirtualLocation: true);
+            SupportsVirtualLocation: true, SupportsSearchLocation: _location.IsSearchActive);
 
     private bool QueueFileSystemSelection(IntPtr absolutePidl, CreatedFileSelectionRequest request)
         => QueueFileSystemSelections([absolutePidl], request);
@@ -1638,6 +1653,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             clones.Add(clone);
         }
         _createdFileSelectionPidls = clones;
+        _createdSearchSelectionNames = null;
+        _createdFileSelectionRequest = request;
+        StartCreatedFileSelectionTimer(request);
+        return true;
+    }
+
+    private void StartCreatedFileSelectionTimer(CreatedFileSelectionRequest request)
+    {
         _createdFileSelectionRequest = request;
         _createdFileSelectionAttempts = 0;
         _createdFileSelectionTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -1646,14 +1669,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         };
         _createdFileSelectionTimer.Tick += CreatedFileSelectionTimer_Tick;
         _createdFileSelectionTimer.Start();
-        return true;
     }
 
     private void CreatedFileSelectionTimer_Tick(object? sender, EventArgs e)
     {
         var request = _createdFileSelectionRequest;
         var pidls = _createdFileSelectionPidls;
-        if (request is null || pidls is not { Count: > 0 } ||
+        var searchSelectionNames = _createdSearchSelectionNames;
+        if (request is null || (pidls is not { Count: > 0 } && searchSelectionNames is not { Count: > 0 }) ||
             !IsCreatedFileSelectionRequestCurrent(request) || !IsVisible ||
             Window.GetWindow(this)?.IsActive != true || MayRestoreFocus?.Invoke() != true ||
             IsRenameEditorFocused())
@@ -1665,6 +1688,34 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         _createdFileSelectionAttempts++;
         if (!_viewReadiness.Pending)
         {
+            if (searchSelectionNames is { Count: > 0 })
+            {
+                var batch = TryRestoreSearchSelection(request, searchSelectionNames);
+                if (batch.Complete)
+                {
+                    var stillOwnsRequest = ReferenceEquals(_createdFileSelectionRequest, request);
+                    CancelCreatedFileSelection(request);
+                    if (stillOwnsRequest && IsCreatedFileSelectionLocationCurrent(request) &&
+                        request.InputVersion == _nativeUserInputVersion && MayRestoreFocus?.Invoke() == true &&
+                        Window.GetWindow(this)?.IsActive == true)
+                        FocusView();
+                    return;
+                }
+                if (!ReferenceEquals(_createdFileSelectionRequest, request)) return;
+                if (batch.AppliedAny)
+                {
+                    CancelCreatedFileSelection(request);
+                    return;
+                }
+                if (_createdFileSelectionAttempts >= 20) CancelCreatedFileSelection(request);
+                return;
+            }
+
+            if (pidls is not { Count: > 0 })
+            {
+                CancelCreatedFileSelection(request);
+                return;
+            }
             var iid = ShellViewId;
             if (_browser!.GetCurrentView(ref iid, out var viewObject) >= 0)
             {
@@ -1726,6 +1777,70 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         return (true, appliedAny);
     }
 
+    private (bool Complete, bool AppliedAny) TryRestoreSearchSelection(CreatedFileSelectionRequest request,
+        IReadOnlyList<string> selectedParsingNames)
+    {
+        if (!IsCreatedFileSelectionLocationCurrent(request) ||
+            request.InputVersion != _nativeUserInputVersion) return (false, false);
+
+        var viewId = FolderViewId;
+        if (_browser is null || _browser.GetCurrentView(ref viewId, out var viewObject) < 0)
+            return (false, false);
+        try
+        {
+            if (viewObject is not IFolderView view) return (false, false);
+            var arrayId = ShellItemArrayId;
+            const uint allItemsInViewOrder = 0x80000002;
+            if (view.Items(allItemsInViewOrder, ref arrayId, out var arrayObject) < 0 ||
+                arrayObject is not IShellItemArray items) return (false, false);
+            try
+            {
+                if (items.GetCount(out var count) < 0 || count > int.MaxValue) return (false, false);
+                List<string> viewNames = new((int)count);
+                for (uint index = 0; index < count; index++)
+                {
+                    if (!IsCreatedFileSelectionLocationCurrent(request) ||
+                        request.InputVersion != _nativeUserInputVersion ||
+                        items.GetItemAt(index, out var item) < 0 || item is null) return (false, false);
+                    try
+                    {
+                        viewNames.Add(GetShellItemPath(item, 0x80058000) ??
+                            GetShellItemPath(item, 0x80028000) ?? string.Empty);
+                    }
+                    finally
+                    {
+                        if (Marshal.IsComObject(item)) Marshal.ReleaseComObject(item);
+                    }
+                }
+
+                var selectedIndexes = ShellSelectionMatch.FindViewIndexes(viewNames, selectedParsingNames);
+                // Search results can arrive over multiple Shell callbacks. Retry until
+                // every saved item is present so a partial selection is never restored.
+                if (selectedIndexes.Length != selectedParsingNames.Count) return (false, false);
+
+                var appliedAny = false;
+                for (var index = 0; index < selectedIndexes.Length; index++)
+                {
+                    if (!IsCreatedFileSelectionLocationCurrent(request) ||
+                        request.InputVersion != _nativeUserInputVersion || MayRestoreFocus?.Invoke() != true ||
+                        Window.GetWindow(this)?.IsActive != true) return (false, appliedAny);
+                    var result = view.SelectItem(selectedIndexes[index], index == 0 ? 0x1du : 0x9u);
+                    if (result < 0) return (false, appliedAny);
+                    appliedAny = true;
+                }
+                return (true, appliedAny);
+            }
+            finally
+            {
+                if (Marshal.IsComObject(items)) Marshal.ReleaseComObject(items);
+            }
+        }
+        finally
+        {
+            if (Marshal.IsComObject(viewObject)) Marshal.ReleaseComObject(viewObject);
+        }
+    }
+
     private bool IsCreatedFileSelectionRequestCurrent(CreatedFileSelectionRequest request) =>
         request.IsCurrent(_browser, CurrentPath, _location.IsFileSystemLocation, _location.IsSearchActive,
             _viewReadiness.Pending, _viewReadiness.NavigationVersion, _viewReadiness.Generation,
@@ -1749,6 +1864,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             foreach (var pidl in pidls) Marshal.FreeCoTaskMem(pidl);
             _createdFileSelectionPidls = null;
         }
+        _createdSearchSelectionNames = null;
         _createdFileSelectionRequest = null;
         _createdFileSelectionAttempts = 0;
     }

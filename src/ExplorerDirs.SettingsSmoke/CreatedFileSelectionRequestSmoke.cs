@@ -21,7 +21,13 @@ internal static class CreatedFileSelectionRequestSmoke
         Check(shellRequest.IsCurrent(browser, "shell:MyComputerFolder", false, false, false, 4, 8, 12, 16),
             "a cloned selection request may target a virtual Shell folder");
         Check(!shellRequest.IsCurrent(browser, "shell:MyComputerFolder", false, true, false, 4, 8, 12, 16),
-            "virtual Shell selection restoration still rejects search results");
+            "virtual-folder selection restoration rejects search locations without search support");
+        var searchRequest = new CreatedFileSelectionRequest(browser,
+            "search-ms:query=report", 4, 8, 12, 16, SupportsSearchLocation: true);
+        Check(searchRequest.IsCurrent(browser, "search-ms:query=report", false, true, false, 4, 8, 12, 16),
+            "a cloned search-result selection remains current for its search view");
+        Check(!searchRequest.IsCurrent(browser, "search-ms:query=other", false, true, false, 4, 8, 12, 16),
+            "a different search cancels saved result selection restoration");
         Check(!request.IsCurrent(browser, @"C:\work", true, true, false, 4, 8, 12, 16),
             "search results cancel filesystem-file selection");
         Check(!request.IsCurrent(browser, @"C:\work", true, false, true, 4, 8, 12, 16),

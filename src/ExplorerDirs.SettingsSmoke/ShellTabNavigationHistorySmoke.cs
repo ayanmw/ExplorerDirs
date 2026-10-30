@@ -34,6 +34,12 @@ internal static class ShellTabNavigationHistorySmoke
               cloned.CurrentSelection.SequenceEqual([@"C:\middle\middle-a.txt", @"C:\middle\middle-b.txt"]),
             "a cloned view keeps independent locations and per-stop selections");
 
+        var searchSelectionIndexes = ShellSelectionMatch.FindViewIndexes(
+            [@"C:\results\match-b.txt", @"C:\results\match-a.txt", @"C:\results\other.txt"],
+            [@"c:\RESULTS\match-a.txt", @"C:\results\match-b.txt", @"C:\missing.txt"]);
+        Check(searchSelectionIndexes.SequenceEqual([1, 0]),
+            "search result selections map by parsing name while preserving the saved selection order");
+
         var search = new ShellTabNavigationHistory(@"C:\scope");
         search.UpdateCurrentSelection([@"C:\scope\before.txt"]);
         const string searchUri = "search-ms:query=report&crumb=location:C%3A%5Cscope";
@@ -66,9 +72,16 @@ internal static class ShellTabNavigationHistorySmoke
               paneSource.Contains("var selectedItems = browser.CaptureSelectedShellParsingNames();", StringComparison.Ordinal) &&
               paneSource.Contains("state.Browser.ViewGeneration != viewGeneration", StringComparison.Ordinal) &&
               paneSource.Contains("state.NavigationHistory.CurrentSelection", StringComparison.Ordinal) &&
+              paneSource.Contains("browser.QueueShellItemSelections(selectionToRestore)", StringComparison.Ordinal) &&
               paneSource.Contains("state.HistoryReplayReady = false", StringComparison.Ordinal) &&
               paneSource.Contains("state.HistoryReplayReady = true", StringComparison.Ordinal),
             "the tab menu separates duplicate behavior while clone history captures and restores each stop's selection");
+
+        var browserSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
+        Check(browserSource.Contains("const uint allItemsInViewOrder = 0x80000002", StringComparison.Ordinal) &&
+              browserSource.Contains("view.SelectItem(selectedIndexes[index]", StringComparison.Ordinal) &&
+              browserSource.Contains("SupportsSearchLocation: _location.IsSearchActive", StringComparison.Ordinal),
+            "search result selections resolve against current Shell view order and use native index selection");
 
         static void Check(bool condition, string message)
         {

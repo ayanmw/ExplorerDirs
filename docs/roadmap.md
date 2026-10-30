@@ -4,11 +4,13 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
+2026-10-30 克隆视图恢复搜索结果选区：克隆历史位置为 Shell 搜索时，按 `SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER` 读取当前结果，并用原生 `IFolderView.SelectItem(index, …)` 恢复匹配的绝对解析名；等待搜索结果完整出现后再一次性恢复，避免只选中部分结果。解析名匹配、搜索请求位置/代次保护及代码接线 smoke 通过；App Release build（0 警告/错误）与完整 SettingsSmoke 通过。没有启动 ExplorerBrowser/GUI，搜索 provider 的实际排序、结果加载时序和选区可见效果仍待集中验收。
+
 2026-10-30 集中验收候选同步：此前候选落后于复制标签的文件选区恢复修复。本轮从干净主线 `83bf7e6f03b759b610f6be4013be3f6bce62cf87` 重新执行 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly`，生成 `src/.state/gui-smoke/20261029-234737-419-12d50d/`，保留 37 项集中验收步骤并更新可执行文件、程序集及 Q-Dir 颜色配置夹具哈希。BuildIdentity 与固定哈希见[最新候选身份](gui-acceptance-2026-10-30-main-prepared-latest.md)。过程未启动窗口或创建 ExplorerBrowser；候选仍为 `prepared-not-run`，待后续用户集中可见验收。
 
 2026-10-30 复制标签选区遇到已删除项目：复核复制标签恢复队列发现，选中项中任一路径在副本导航完成前失效，会使整批选区都不恢复。现跳过无法由 Shell 解析的失效项，仅在同目录内为仍存在的文件排队；所有项均失效时不启动空请求。隐藏生产 ExplorerBrowser HostProbe 先复现失败，再验证保留项被排队、失效项被排除及全失效不创建请求；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）和 `git diff --check` 通过。没有启动 GUI 或触碰用户文件，实际删除竞态和可见多选仍待集中验收。
 
-2026-10-30 复制标签差距表复核：前两批已将可寻址的文件系统选区随复制标签恢复，并跳过导航完成前已删除/不可解析的项目。现更新功能对照表，避免继续把选区恢复列为未实现。剩余明确差距是 Shell Back/Forward 历史不能跨 ExplorerBrowser 宿主转移；下一阶段按现有复制标签语义设计应用级历史重放，覆盖虚拟位置、搜索、分支截断和每站选区。
+2026-10-30 复制标签差距表复核：前几批为克隆视图加入独立于“复制标签”的命令、可重放的逐位置导航历史、分支截断和每站选区；普通目录与虚拟直接子项使用相对 PIDL，搜索结果改用当前 Shell view 的索引恢复。该对照更新记录了实现边界与仍待真实 GUI 验收的 Shell travel log、虚拟 provider 和搜索结果加载时序；克隆过程不迁移原 ExplorerBrowser 宿主对象或其私有 Travel Log。
 
 2026-10-30 复制标签恢复虚拟 Shell 选区：选区快照现在保留 Shell 项目的绝对解析名；克隆视图就绪后，只有能解析为当前 Shell 文件夹直接子 PIDL 的项目才交给现有批量选择与焦点保护流程，已删除、不可解析或非直接子项会跳过。SettingsSmoke 直接验证从“此电脑”解析系统盘的相对 PIDL，并拒绝非子项；完整 Release SettingsSmoke、App/HostProbe Release build（0 警告/错误）通过。没有启动 ExplorerBrowser 或 GUI，因此复制“此电脑”驱动器等虚拟项的实际选择仍待后续集中验收；Shell Back/Forward 历史差距仍开放。
 
