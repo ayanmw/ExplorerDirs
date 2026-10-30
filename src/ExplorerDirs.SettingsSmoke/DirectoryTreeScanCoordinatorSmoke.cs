@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Windows.Threading;
 
 namespace ExplorerDirs.SettingsSmoke;
@@ -44,6 +45,7 @@ internal static class DirectoryTreeScanCoordinatorSmoke
 
         VerifyLatestAsyncPublication();
         VerifyQueuedStalePublication();
+        VerifyRetiredWorkerFailure();
 
         Console.WriteLine("Directory tree scan coordinator smoke: PASS");
     }
@@ -106,18 +108,72 @@ internal static class DirectoryTreeScanCoordinatorSmoke
             "a result retired after queueing is rejected when the owner context finally dispatches it");
     }
 
+    private static void VerifyRetiredWorkerFailure()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                var context = new DispatcherSynchronizationContext(dispatcher);
+                var retiredStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var releaseRetired = new ManualResetEventSlim();
+                var retiredPublished = false;
+                var latestValue = 0;
+                var retiredRequest = owner.RunLatestAsync<int>(_ =>
+                {
+                    retiredStarted.SetResult();
+                    releaseRetired.Wait();
+                    throw new IOException("retired scan failure");
+                }, context, _ => retiredPublished = true);
+                retiredStarted.Task.GetAwaiter().GetResult();
+                var latestRequest = owner.RunLatestAsync(_ => 42, context, value => latestValue = value);
+                releaseRetired.Set();
+                PumpDispatcherUntil(() => retiredRequest.IsCompleted && latestRequest.IsCompleted);
+
+                var retiredFailurePropagated = false;
+                try { _ = retiredRequest.GetAwaiter().GetResult(); }
+                catch (IOException ex) when (ex.Message == "retired scan failure")
+                { retiredFailurePropagated = true; }
+                Check(!retiredFailurePropagated && !retiredPublished && latestRequest.GetAwaiter().GetResult() &&
+                      latestValue == 42,
+                    "a retired scan failure is suppressed without interfering with the newer published result");
+
+                var currentRequest = owner.RunLatestAsync<int>(_ => throw new IOException("current scan failure"),
+                    context, _ => throw new Exception("failed current scan must not publish"));
+                PumpDispatcherUntil(() => currentRequest.IsCompleted);
+                var currentFailurePropagated = false;
+                try { _ = currentRequest.GetAwaiter().GetResult(); }
+                catch (IOException ex) when (ex.Message == "current scan failure")
+                { currentFailurePropagated = true; }
+                Check(currentFailurePropagated,
+                    "a current scan failure still propagates for owner-thread error handling");
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw new InvalidOperationException("Retired worker failure smoke failed.", failure);
+    }
+
     private static void PumpDispatcherUntil(Task task)
+        => PumpDispatcherUntil(() => task.IsCompleted, task);
+
+    private static void PumpDispatcherUntil(Func<bool> isComplete, Task? task = null)
     {
         var frame = new DispatcherFrame();
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(10)
         };
-        timer.Tick += (_, _) => { if (task.IsCompleted) frame.Continue = false; };
+        timer.Tick += (_, _) => { if (isComplete()) frame.Continue = false; };
         timer.Start();
         try { Dispatcher.PushFrame(frame); }
         finally { timer.Stop(); }
-        task.GetAwaiter().GetResult();
+        task?.GetAwaiter().GetResult();
     }
 
     private static void Check(bool condition, string message)

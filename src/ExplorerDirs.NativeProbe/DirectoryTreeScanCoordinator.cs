@@ -42,8 +42,9 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
             result = await Task.Run(() => scan(ticket.CancellationToken), ticket.CancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!IsCurrent(ticket))
+        catch (Exception) when (!IsCurrent(ticket))
         {
+            // Retired work must not report a failure after a newer scan has taken ownership.
             return false;
         }
 
