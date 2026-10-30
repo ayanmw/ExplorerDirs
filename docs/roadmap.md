@@ -4826,3 +4826,6 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-30：独立验证同目录递归大小比例列更新
 
 - 为比例列加独立 `--common-listview-relative-size-contract` 入口，仅执行真实 Shell 枚举、递归扫描及隐藏普通 ListView 行更新，跳过菜单和文件操作。10/14、4/14 更新为 10/12、2/12 后，同级比例均重算正确；稳定行 ID、不可见窗口及 foreground 守卫通过。NativeProbe Release build 与专用合同退出码 0。产品界面和 Q-Dir 精确格式仍未接入；详见[逐行大小调查](folder-size-column-investigation.md#2026-10-30-比例列独立隐藏合同)。
+
+
+同日延伸验证：在同一隐藏合同中加入递归文件/文件夹计数列，先观察到空值导致断言失败，再接入扫描结果；小目录变为 3 个文件和 1 个子目录后，该行计数更新，兄弟行计数保持不变，百分比列同时正确，foreground 守卫通过。当前只证明隔离行数据刷新。
