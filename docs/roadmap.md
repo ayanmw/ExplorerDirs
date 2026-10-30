@@ -2,7 +2,7 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
-2026-10-31 隔离 Shell 重命名映射改用通知 PIDL：`ShellChangeReconciliationProbe` 不再手工构造新路径→旧路径映射；隐藏通知窗在 `SHChangeNotification_Lock` 有效期内读取 `SHCNE_RENAMEITEM` 两个 PIDL，并用 `SHGetNameFromIDList(SIGDN_FILESYSPATH)` 提取路径后交给行模型。NativeProbe Release build 通过（0 警告、0 错误）。随后运行 `--shell-change-reconciliation` 后，真实通知映射命中行模型并保留重命名 row ID；创建/更新/重命名/删除通知、目录大小与计数回写、稳定行选择/焦点均通过，窗口隐藏且前台未变。证据仍限于隐藏 `SysListView32` 探针，不代表产品视图或可见 IShellView 已验收；产品视图未改，仍使用 ExplorerBrowser。
+2026-10-31 隔离 Shell 重命名映射扩展到文件和目录：探针先复现目录重命名后 row ID 丢失；加入 `SHCNE_RENAMEFOLDER` PIDL 映射后，文件和目录重命名均保留 row ID。目录路径变化后旧递归大小/计数清空，后台重扫回写新值；创建/更新/重命名/删除、选择焦点恢复均通过，窗口隐藏且前台未变。NativeProbe Release build 0 警告、0 错误。证据限于隐藏 `SysListView32` 探针；虚拟 Shell、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
 
 2026-10-31 隔离扫描过期失败门控：目录大小协调器此前只将过期取消视为无结果；若旧 worker 忽略取消后抛出 IO/扫描错误，异常仍会泄漏到调用方，可能被误报为当前扫描失败。现在任意已过期 ticket 的 worker 异常都以 `false` 结果结束，当前 ticket 的异常仍正常传播。新增回归在旧逻辑上复现失败，并分别验证过期异常不影响较新成功发布、当前异常继续传播；定向和完整 Release SettingsSmoke、App/NativeProbe Release build 与 `git diff --check` 通过。仅覆盖隔离原型协调器，不意味着产品逐行大小功能已接入。
 

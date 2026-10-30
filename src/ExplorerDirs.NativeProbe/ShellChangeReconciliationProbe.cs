@@ -16,6 +16,7 @@ internal static class ShellChangeReconciliationProbe
     private const uint Created = 0x00000002;
     private const uint Deleted = 0x00000004;
     private const uint RenamedItem = 0x00000001;
+    private const uint RenamedFolder = 0x00002000;
     private const uint UpdatedDirectory = 0x00001000;
     private const int LvmInsertItemW = 0x104D;
     private const int LvmSetItemTextW = 0x1074;
@@ -156,27 +157,62 @@ internal static class ShellChangeReconciliationProbe
             ProjectRows(listView, current.Rows);
             ApplySelection(listView, current.Rows, selection);
 
+            var renamedSizeDirectory = Path.Combine(fixture, "renamed-size-folder");
+            Directory.Move(sizeDirectory, renamedSizeDirectory);
+            SHChangeNotify(RenamedFolder, PathUnicode, sizeDirectory, renamedSizeDirectory);
+            var renameFolderEvent = window.WaitFor([RenamedFolder], TimeSpan.FromSeconds(5));
+            var renamedFolderEnumeration = WaitForRow(folderPidl, shellFolder,
+                row => row.DisplayName == "renamed-size-folder");
+            var renamedFolderReconciliation = ShellListViewRowModel.Reconcile(current.Rows,
+                renamedFolderEnumeration.Rows, deleted.NextId, window.RenamedParsingNames);
+            ShellListViewEnumerator.FreeRows(renamedFolderReconciliation.RetiredRows);
+            current = renamedFolderEnumeration with { Rows = renamedFolderReconciliation.Rows.ToList() };
+            ProjectRows(listView, current.Rows);
+            ApplySelection(listView, current.Rows, selection);
+            var renamedSizeFolder = current.Rows.Single(row => row.DisplayName == "renamed-size-folder");
+            var renamedSizeFolderRowIndex = FindIndexById(listView, renamedSizeFolder.Id);
+            var folderRenameIdPreserved = renamedSizeFolder.Id == sizeFolderId;
+            var staleFolderScanCleared = renamedSizeFolder.RecursiveBytes is null &&
+                renamedSizeFolder.RecursiveSummary is null &&
+                renamedSizeFolderRowIndex >= 0 && GetItemText(listView, renamedSizeFolderRowIndex, 1) == "";
+
+            var renamedFolderScans = ScanLatestPaths(scanCoordinator, fixture, [renamedSizeDirectory],
+                out var folderRenameScanWorker, out var folderRenameScanPublishedOnOwner);
+            current = current with
+            {
+                Rows = ShellListViewRowModel.ApplyRecursiveScanResults(current.Rows, renamedFolderScans).ToList()
+            };
+            ProjectRows(listView, current.Rows);
+            ApplySelection(listView, current.Rows, selection);
+            renamedSizeFolder = current.Rows.Single(row => row.DisplayName == "renamed-size-folder");
+            var folderRenameRescanFresh = renamedSizeFolder.RecursiveBytes == 12 &&
+                renamedSizeFolder.RecursiveSummary?.Files == 2 && renamedSizeFolder.RecursiveSummary.Directories == 1 &&
+                GetItemText(listView, FindIndexById(listView, renamedSizeFolder.Id), 1) == "12 B";
+
             var stableIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
-            var sizeFolderIdentityPreserved = current.Rows.Single(row => row.DisplayName == "size-folder").Id == sizeFolderId;
+            var sizeFolderIdentityPreserved = current.Rows.Single(row => row.DisplayName == "renamed-size-folder").Id == sizeFolderId;
             var selectionAfterDeletePreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
             var renameIdentityPreserved = renamedId == createdId;
             var addedNewIdentity = createdId != stableId && renamedId != stableId;
-            Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; delete-notified={deleteEvent}; " +
+            Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; rename-folder-notified={renameFolderEvent}; delete-notified={deleteEvent}; " +
                 $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-id-preserved={renameIdentityPreserved}; deleted-id-retired={retiredRenamedId}; " +
+                $"folder-rename-id-preserved={folderRenameIdPreserved};folder-rename-stale-cache-cleared={staleFolderScanCleared};folder-rename-rescan-fresh={folderRenameRescanFresh};" +
                 $"recursive-bytes-initial/after-update={initialRecursiveBytes}/{recursiveBytesAfterReconciliation};recursive-value-updated={recursiveValueUpdated};size-folder-id-preserved={sizeFolderIdentityPreserved};" +
                 $"recursive-files-initial/after-update={initialRecursiveSummary.Files}/{recursiveSummaryAfterReconciliation.Files};" +
                 $"recursive-directories-initial/after-update={initialRecursiveSummary.Directories}/{recursiveSummaryAfterReconciliation.Directories};recursive-counts-updated={recursiveCountsUpdated};" +
                 $"projected-size/contents={projectedSize}/{projectedContents};projected-derived-values-updated={projectedDerivedValuesUpdated};" +
-                $"scan-workers={initialScanWorker}/{updateScanWorker};scan-on-worker={initialScanWorker != Environment.CurrentManagedThreadId}/{updateScanWorker != Environment.CurrentManagedThreadId};" +
-                $"scan-published-on-owner={initialScanPublishedOnOwner}/{updateScanPublishedOnOwner};" +
+                $"scan-workers={initialScanWorker}/{updateScanWorker}/{folderRenameScanWorker};scan-on-worker={initialScanWorker != Environment.CurrentManagedThreadId}/{updateScanWorker != Environment.CurrentManagedThreadId}/{folderRenameScanWorker != Environment.CurrentManagedThreadId};" +
+                $"scan-published-on-owner={initialScanPublishedOnOwner}/{updateScanPublishedOnOwner}/{folderRenameScanPublishedOnOwner};" +
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"listview-row-count={SendMessageW(listView, LvmGetItemCount, 0, 0)};selection-focused-row-preserved={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved};" +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false && !IsWindowVisible(listParent)}");
-            if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
+            if (!createEvent || !updateEvent || !renameEvent || !renameFolderEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
                 !renameIdentityPreserved || !addedNewIdentity ||
+                !folderRenameIdPreserved || !staleFolderScanCleared || !folderRenameRescanFresh ||
                 !retiredRenamedId || !recursiveValueUpdated || !recursiveCountsUpdated || !projectedDerivedValuesUpdated || !sizeFolderIdentityPreserved ||
                 initialScanWorker == Environment.CurrentManagedThreadId || updateScanWorker == Environment.CurrentManagedThreadId ||
-                !initialScanPublishedOnOwner || !updateScanPublishedOnOwner ||
+                folderRenameScanWorker == Environment.CurrentManagedThreadId ||
+                !initialScanPublishedOnOwner || !updateScanPublishedOnOwner || !folderRenameScanPublishedOnOwner ||
                 !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
                 current.Rows.Count != 2 || SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() != current.Rows.Count ||
                 GetForegroundWindow() != foreground || IsWindowVisible(window.Handle) || IsWindowVisible(listParent))
@@ -455,7 +491,8 @@ internal static class ShellChangeReconciliationProbe
                     try
                     {
                         _events.Add(unchecked((uint)eventId));
-                        if (unchecked((uint)eventId) == RenamedItem && pidls != 0)
+                        if ((unchecked((uint)eventId) == RenamedItem || unchecked((uint)eventId) == RenamedFolder) &&
+                            pidls != 0)
                         {
                             var oldPidl = Marshal.ReadIntPtr(pidls);
                             var newPidl = Marshal.ReadIntPtr(pidls, IntPtr.Size);
