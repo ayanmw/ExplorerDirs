@@ -127,6 +127,7 @@
     <Compile Include="../ExplorerDirs.App/ShellSearchLocation.cs" Link="ShellSearchLocation.cs" />
     <Compile Include="../ExplorerDirs.App/ShellNavigationState.cs" Link="ShellNavigationState.cs" />
     <Compile Include="../ExplorerDirs.App/ShellTabNavigationHistory.cs" Link="ShellTabNavigationHistory.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellTabSelectionCaptureToken.cs" Link="ShellTabSelectionCaptureToken.cs" />
     <Compile Include="../ExplorerDirs.App/ShellViewReadiness.cs" Link="ShellViewReadiness.cs" />
     <Compile Include="../ExplorerDirs.App/ShellQuickFilter.cs" Link="ShellQuickFilter.cs" />
     <Compile Include="../ExplorerDirs.App/ShellFolderFilter.cs" Link="ShellFolderFilter.cs" />

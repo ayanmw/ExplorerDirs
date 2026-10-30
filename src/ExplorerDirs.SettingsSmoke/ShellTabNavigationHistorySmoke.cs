@@ -7,6 +7,16 @@ internal static class ShellTabNavigationHistorySmoke
 {
     public static void Run()
     {
+        var captureToken = new ShellTabSelectionCaptureToken(@"C:\capture", 4, 7, 11);
+        Check(captureToken.Matches(@"c:\CAPTURE", @"C:\capture", 4, 7, 11),
+            "history selection capture accepts the same case-insensitive location and view generations");
+        Check(!captureToken.Matches(@"C:\capture", @"C:\capture", 4, 7, 12),
+            "history selection capture rejects a selection changed during the Shell read");
+        Check(!captureToken.Matches(@"C:\capture", @"C:\capture", 4, 8, 11),
+            "history selection capture rejects a replaced Shell view");
+        Check(!captureToken.Matches(@"C:\capture", @"C:\other", 4, 7, 11),
+            "history selection capture rejects a history location that moved during the Shell read");
+
         var history = new ShellTabNavigationHistory(@"C:\start");
         history.UpdateCurrentSelection([@"C:\start\start.txt"]);
         history.Record(@"C:\middle");
@@ -66,6 +76,13 @@ internal static class ShellTabNavigationHistorySmoke
 
         var repoRoot = FindRepoRoot();
         var paneSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        var selectionCaptureStart = paneSource.IndexOf("private void QueueHistorySelectionCapture(TabState state)",
+            StringComparison.Ordinal);
+        var selectionCaptureEnd = selectionCaptureStart < 0 ? -1 :
+            paneSource.IndexOf("private static string Home", selectionCaptureStart, StringComparison.Ordinal);
+        var selectionCaptureCode = selectionCaptureStart >= 0 && selectionCaptureEnd > selectionCaptureStart
+            ? paneSource[selectionCaptureStart..selectionCaptureEnd]
+            : string.Empty;
         var duplicateStart = paneSource.IndexOf("private void DuplicateTab(TabState state)", StringComparison.Ordinal);
         var duplicateEnd = paneSource.IndexOf("public void RefreshCurrent()", duplicateStart, StringComparison.Ordinal);
         var duplicateCode = paneSource[duplicateStart..duplicateEnd];
@@ -92,6 +109,11 @@ internal static class ShellTabNavigationHistorySmoke
               paneSource.Contains("state.HistoryReplayReady = false", StringComparison.Ordinal) &&
               paneSource.Contains("state.HistoryReplayReady = true", StringComparison.Ordinal),
             "the tab menu separates duplicate behavior while clone history captures and restores each stop's selection");
+        Check(selectionCaptureStart >= 0 && selectionCaptureEnd > selectionCaptureStart &&
+              selectionCaptureCode.Contains("new ShellTabSelectionCaptureToken", StringComparison.Ordinal) &&
+              selectionCaptureCode.Split("captureToken.Matches(", StringSplitOptions.None).Length == 3 &&
+              selectionCaptureCode.Contains("UpdateCurrentSelection(selectedItems)", StringComparison.Ordinal),
+            "queued history selection snapshots are committed only if location, navigation, view, and selection remain unchanged");
 
         var browserSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
         Check(browserSource.Contains("const uint allItemsInViewOrder = 0x80000002", StringComparison.Ordinal) &&

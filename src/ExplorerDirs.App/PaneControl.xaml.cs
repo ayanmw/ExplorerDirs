@@ -537,24 +537,23 @@ public partial class PaneControl : UserControl
         var browser = state.Browser;
         var location = browser.CurrentSearchUri ?? browser.CurrentPath;
         if (!string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
-        var viewGeneration = browser.ViewGeneration;
+        var captureToken = new ShellTabSelectionCaptureToken(location, browser.NavigationVersion,
+            browser.ViewGeneration, browser.SelectionVersion);
         state.HistorySelectionCaptureOperation?.Abort();
         DispatcherOperation? operation = null;
         operation = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(() =>
         {
             if (ReferenceEquals(state.HistorySelectionCaptureOperation, operation))
                 state.HistorySelectionCaptureOperation = null;
-            if (!ReferenceEquals(state.Owner, this) || state.Browser.ViewGeneration != viewGeneration ||
-                !string.Equals(location, state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath,
-                    StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
+            if (!ReferenceEquals(state.Owner, this) || !captureToken.Matches(
+                    state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath, state.NavigationHistory.Current,
+                    state.Browser.NavigationVersion, state.Browser.ViewGeneration, state.Browser.SelectionVersion)) return;
             try
             {
                 var selectedItems = browser.CaptureSelectedShellParsingNames();
-                if (state.Browser.ViewGeneration != viewGeneration ||
-                    !string.Equals(location, state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath,
-                        StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(location, state.NavigationHistory.Current, StringComparison.OrdinalIgnoreCase)) return;
+                if (!captureToken.Matches(state.Browser.CurrentSearchUri ?? state.Browser.CurrentPath,
+                        state.NavigationHistory.Current, state.Browser.NavigationVersion,
+                        state.Browser.ViewGeneration, state.Browser.SelectionVersion)) return;
                 state.NavigationHistory.UpdateCurrentSelection(selectedItems);
             }
             catch (InvalidOperationException) { }
