@@ -1,5 +1,12 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-31 02:07 北京时间：temp.80 当前运行实例五分钟只读采样
+
+- UTC `2026-10-30T18:07:22Z`–`18:12:22Z`，对 PID `47460` 每 5 秒采样，共 61 点；进程启动时间 `2026-10-30T16:13:34.219Z`，路径 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。没有启动、重启、聚焦或操作应用。
+- Working Set 范围 `220.61–220.70 MiB`，首末 `220.70→220.62 MiB`；Private Bytes 范围 `115.30–115.48 MiB`，首末 `115.48→115.30 MiB`。句柄 `1,089–1,104`（首末 `1,104→1,089`），线程 `32–36`（首末 `36→32`），GDI 全程 `95`，USER `103–106`（首末 `106→103`）。
+- 这段窗口内进程级计数没有单调上升。没有固定或记录窗格/标签/浏览操作，因此它不能排除操作期间的瞬时增长、解释来源或证明长期稳定；也不是当前源码构建的性能对照。下一步仍需在固定工作负载下采样，并在增长能复现时关联 GC 与原生分配类别。
+- EXE SHA-256 `C146179AAB2686411D4ED66667DB60A1547A9A6A0A2EE53F3C137F36666EF760`；应用 DLL SHA-256 `8E473D1161266B01202AC1B7B196FA48DE00EDD86865FAB118322C894A3E9EBC`。原始 CSV 留在忽略目录 `src/.state/memory-samples/ExplorerDirs-memory-20261031-020721.csv`，SHA-256 `850EA2F8372575AF87197615FF048611A48D1230B8E1C3A990CE7EDE647F0ED9`，不入 Git。
+
 ## 2026-10-31 00:38 北京时间：temp.80 当前运行实例一分钟只读复采
 
 - UTC 2026-10-30 16:38:01–16:39:01，对 PID `47460` 每 5 秒采样，共 13 点；进程启动时间 `2026-10-30T16:13:34.219Z`，路径 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`，ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。未启动、重启、聚焦或操作应用。
