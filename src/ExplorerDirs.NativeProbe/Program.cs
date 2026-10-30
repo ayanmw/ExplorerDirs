@@ -107,6 +107,8 @@ internal static class Program
             return ShellViewHostFilterProbe.Run();
         if (args.Length == 1 && args[0] == "--ishellview-host-filter-private-desktop")
             return PrivateDesktopShellProbe.RunHostFilter();
+        if (args.Length == 1 && args[0] == "--ishellview-native-pidl-lifetime")
+            return ShellViewNativePidlLifetimeProbe.Run();
         if (args.Length == 1 && args[0] == "--private-desktop-owner-smoke")
             return PrivateDesktopShellProbe.RunDesktopOwnershipSmoke();
         if (args.Length == 2 && args[0] == "--native-minidump-smoke")
@@ -259,6 +261,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-command-state-readonly-private-desktop (same read-only query on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-host-filter (hidden direct IShellView ICommDlgBrowser3 filtering fixture)");
             Console.WriteLine("       --ishellview-host-filter-private-desktop (same keyboard/navigation probe on a separate Windows Desktop)");
+            Console.WriteLine("       --ishellview-native-pidl-lifetime (real Shell PIDL history stress; no Shell view window)");
             Console.WriteLine("       --private-desktop-owner-smoke (create and close an isolated Desktop without changing this thread's desktop or foreground)");
             Console.WriteLine("       --private-desktop-isolation-policy-smoke (test the isolation result policy without creating windows)");
             Console.WriteLine("       --native-minidump-smoke <absolute-path> (write and inspect an opt-in diagnostic minidump; no Shell window)");

@@ -4,7 +4,9 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 原生 `IShellView` 菜单排序合同：Private Desktop 隔离探针现验证背景菜单的名称升/降序确实重排三条原生 Shell 行（`aardvark,child,keep.txt` ↔ `keep.txt,child,aardvark`），而不只检查 `GetSortColumns` 状态；同轮查看方式、刷新、分组菜单、列标题菜单和排序后焦点恢复通过，前台及输入状态未变。该合同补足原生菜单命令与行序证据，不代表 ExplorerBrowser 产品接线、可见体验或 Q-Dir 验收。原生 IShellView 长跑 PIDL 资源验证仍待做。
+2026-10-31 原生 `IShellView` 菜单排序合同：Private Desktop 隔离探针现验证背景菜单的名称升/降序确实重排三条原生 Shell 行（`aardvark,child,keep.txt` ↔ `keep.txt,child,aardvark`），而不只检查 `GetSortColumns` 状态；同轮查看方式、刷新、分组菜单、列标题菜单和排序后焦点恢复通过，前台及输入状态未变。该合同补足原生菜单命令与行序证据，不代表 ExplorerBrowser 产品接线、可见体验或 Q-Dir 验收。
+
+2026-10-31 原生导航历史 PIDL 生命周期合同：新增 `--ishellview-native-pidl-lifetime`，使用真实 Windows Shell PIDL 驱动隔离 `ShellViewNavigationHistory`，完成 201 个停靠点、400 次后退/前进、前进分支截断、失败导航临时 PIDL 回收及 `SBSP_CREATENOHISTORY` 原位替换。探针跟踪历史对象拥有的每个 PIDL，结束时 `allocated=204/released=204`、无存活分配；Release 构建及运行通过，不创建 Shell view 窗口，也不改变前台。它只证明历史类的 PIDL 所有权，不覆盖实际 `IShellView` 窗口/COM 资源长跑、ExplorerBrowser 产品宿主或可见交互。
 
 2026-10-31 Q-Dir 官方功能差距补查：官方语言表分别列出 `Soft-Refresh, not re-enumerate the view` 与 `Disable auto sorting when rename or copy items`；FAQ 112/139 对后者的文案和用途有补充，但没有说明两个开关如何交互。Explorer Dirs 当前没有这两项偏好。不能把 `FWF_AUTOARRANGE` 或 `FWF_NOENUMREFRESH` 直接当作完整等价实现；暂列 P2，先验证外部变化/F5 的内容新鲜度与复制/重命名/拖放时的排序行为，再确定两个功能各自的持久化范围，不改变默认行为。详见[竞品调研](competitive-research.md#2026-10-31-官方-soft-refresh-行为补查)与[功能对照](shell-parity.md)。
 
@@ -12,7 +14,7 @@
 
 2026-10-31 02:15 CST：同一 PID 的 .NET Runtime counters 6 点采样显示最近一次 GC 报告堆约 `11.41–12.09 MiB`、GC committed `28.07 MiB`，同期进程 Private Bytes 约 `115.93 MiB`；只观察到一次 Gen 0。此数据说明 GC 堆不是进程提交量的全部，不能把余量直接归为 Shell/native 分配；分配速率仍需固定工作负载后再归因。详见[采样记录](memory-sampling.md#2026-10-31-0215-csttemp80-net-runtime-计数附加采样)。
 
-2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，产品没有逐行派生列。纯行模型快照对账覆盖重新枚举后的重排、元数据更新、新增/移除、稳定 ID 与 PIDL 退休集合；NativeProbe 隐藏窗口的真实 Shell 通知合同通过 create/update-directory/rename/delete 通知及重新枚举。行状态映射合同覆盖多选/焦点身份，隐藏 `SysListView32` 投影合同完成新增/删除后列表重建及状态写回、读回；随后真实 stock `IShellView` fresh-view 探针通过完整多选恢复、一个过期选中 PIDL 的幸存焦点恢复，以及焦点本身未选中时保留幸存多选并恢复同一未选中焦点 PIDL。菜单排序实际行序合同现已补齐，详见上方独立记录；长跑 PIDL 资源验证仍待做。产品仍使用 ExplorerBrowser，且产品宿主/可见焦点与输入未验证。详见[架构调查](folder-size-column-investigation.md#2026-10-31-隐藏-syslistview32-写回重枚举后的选区焦点)与[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。
+2026-10-31 自有行模型接收有效扫描快照：扫描结果现按 filesystem path 更新原有 Shell 行的递归大小和内容计数；ID、PIDL、图标及顺序保持，虚拟 Shell 行和未包含在本轮扫描中的行不变。隐藏相对大小合同由行模型发布初始及变更后值，保留异步扫描、比例排序、选区/焦点身份；专项 smoke、完整 Release SettingsSmoke 和 App/NativeProbe Release 构建通过（0 警告/错误），前台不变。它仍只是隔离 SysListView32 数据合同，产品没有逐行派生列。纯行模型快照对账覆盖重新枚举后的重排、元数据更新、新增/移除、稳定 ID 与 PIDL 退休集合；NativeProbe 隐藏窗口的真实 Shell 通知合同通过 create/update-directory/rename/delete 通知及重新枚举。行状态映射合同覆盖多选/焦点身份，隐藏 `SysListView32` 投影合同完成新增/删除后列表重建及状态写回、读回；随后真实 stock `IShellView` fresh-view 探针通过完整多选恢复、一个过期选中 PIDL 的幸存焦点恢复，以及焦点本身未选中时保留幸存多选并恢复同一未选中焦点 PIDL。菜单排序实际行序与原生导航历史 PIDL 所有权合同现已补齐，详见上方记录；实际 Shell view 窗口/COM 资源长跑仍待做。产品仍使用 ExplorerBrowser，且产品宿主/可见焦点与输入未验证。详见[架构调查](folder-size-column-investigation.md#2026-10-31-隐藏-syslistview32-写回重枚举后的选区焦点)与[自动刷新调查](live-update-investigation.md#2026-10-31-混合-readiness-的焦点恢复复核)。
 
 2026-10-31 集中验收候选已刷新：干净主线 `0f83f3d7a98dfe02e57a447cf493c28cda7f81ce` 构建出 `src/.state/gui-smoke/20261030-170859-050-e4c757/`，manifest 为 `prepared-not-run`、41 项待验收、四窗格布局；EXE/DLL SHA-256 为 `50E39E514F87DFEFD9537FC20238DE12F7DBE7F1DF65FEAABE13BDDCCA3C3307` / `500431B5CF12BFA55DEE8720F16CEFDD333F824AA133758D2A31986BD505FE67`。准备脚本未启动应用、创建 ExplorerBrowser 或操作桌面。F5 保帧、绘制空白、选区/焦点/滚动及查看方式切换列入该批验收。候选说明见[2026-10-31 主线集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
