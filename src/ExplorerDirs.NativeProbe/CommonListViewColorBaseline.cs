@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Globalization;
+using System.Windows.Threading;
 using ExplorerDirs.App;
 
 // Control-only baseline used to separate common-control custom draw behavior from Shell DefView.
@@ -168,6 +169,32 @@ internal static class CommonListViewColorBaseline
     internal static int RunRelativeSizeContract()
         => RunDataContract(relativeSizesOnly: true);
 
+    private static (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int OwnerThreadId, int WorkerThreadId)
+        ScanDirectoryTreeOffOwnerThread(string root, IReadOnlyCollection<string> requestedPaths)
+    {
+        var ownerThreadId = Environment.CurrentManagedThreadId;
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var scan = Task.Run(() => (
+            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, CancellationToken.None),
+            WorkerThreadId: Environment.CurrentManagedThreadId));
+        var frame = new DispatcherFrame();
+        var poll = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        poll.Tick += (_, _) =>
+        {
+            if (!scan.IsCompleted) return;
+            _ = scan.GetAwaiter().GetResult();
+            frame.Continue = false;
+        };
+        poll.Start();
+        try { Dispatcher.PushFrame(frame); }
+        finally { poll.Stop(); }
+        var result = scan.GetAwaiter().GetResult();
+        return (result.Results, ownerThreadId, result.WorkerThreadId);
+    }
+
     private static int RunDataContract(bool relativeSizesOnly)
     {
         var foregroundBefore = GetForegroundWindow();
@@ -186,8 +213,10 @@ internal static class CommonListViewColorBaseline
             {
                 Path.GetFullPath(fixture), Path.GetFullPath(largeFolder), Path.GetFullPath(smallFolder)
             };
-            var initialScans = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                fixture, requestedScanPaths, CancellationToken.None);
+            var initialScan = ScanDirectoryTreeOffOwnerThread(fixture, requestedScanPaths);
+            var initialScans = initialScan.Results;
+            var initialScanRanOffOwnerThread = initialScan.WorkerThreadId != initialScan.OwnerThreadId;
+            var initialScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == initialScan.OwnerThreadId;
             var largeScan = initialScans[Path.GetFullPath(largeFolder)];
             var smallScan = initialScans[Path.GetFullPath(smallFolder)];
             var fixtureScan = initialScans[Path.GetFullPath(fixture)];
@@ -289,8 +318,10 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallNestedFolder);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-1.bin"), []);
             File.WriteAllBytes(Path.Combine(smallNestedFolder, "nested-2.bin"), []);
-            var updatedScans = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                fixture, requestedScanPaths, CancellationToken.None);
+            var updateScan = ScanDirectoryTreeOffOwnerThread(fixture, requestedScanPaths);
+            var updatedScans = updateScan.Results;
+            var updateScanRanOffOwnerThread = updateScan.WorkerThreadId != updateScan.OwnerThreadId;
+            var updateScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == updateScan.OwnerThreadId;
             var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
             var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
@@ -324,6 +355,8 @@ internal static class CommonListViewColorBaseline
                 var relativeSizeSorted = initialRelativeSortRows == "small-folder:2,large-folder:1" &&
                     relativeSizeSortedRows == "large-folder:1,small-folder:2";
                 var relativeContractPassed = initialRelativeSizes && updatedRelativeSizes &&
+                    initialScanRanOffOwnerThread && updateScanRanOffOwnerThread &&
+                    initialScanReturnedToOwnerThread && updateScanReturnedToOwnerThread &&
                     contentsCountsCorrect &&
                     initialRelativeSizeRows != updatedRelativeSizeRows && updatedFixtureScan.Bytes == 30 &&
                     updatedSmallScan.Bytes == 20 && updatedSmallScan.Files == 3 && updatedSmallScan.Directories == 1 &&
@@ -338,6 +371,10 @@ internal static class CommonListViewColorBaseline
                 Console.WriteLine($"common-listview-relative-size-contract: initial={initialRelativeSizeRows};" +
                     $"updated={updatedRelativeSizeRows};initial-values-correct={initialRelativeSizes};" +
                     $"updated-values-correct={updatedRelativeSizes};initial-contents={initialContentsRows};" +
+                    $"scan-worker-threads={initialScan.WorkerThreadId}/{updateScan.WorkerThreadId};" +
+                    $"scan-owner-thread={initialScan.OwnerThreadId};" +
+                    $"scans-off-owner-thread={initialScanRanOffOwnerThread}/{updateScanRanOffOwnerThread};" +
+                    $"returned-to-owner-thread={initialScanReturnedToOwnerThread}/{updateScanReturnedToOwnerThread};" +
                     $"updated-contents={updatedContentsRows};contents-counts-correct={contentsCountsCorrect};" +
                     $"parent-bytes={updatedFixtureScan.Bytes};" +
                     $"initial-relative-sort={initialRelativeSortRows};updated-relative-sort={relativeSizeSortedRows};" +
