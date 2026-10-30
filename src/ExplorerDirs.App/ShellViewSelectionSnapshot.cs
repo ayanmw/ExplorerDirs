@@ -205,17 +205,25 @@ internal sealed class ShellViewSelectionSnapshot : IDisposable
             var focusRestored = _focused == 0;
             if (_focused != 0 && restoreFocus && hasSelection)
             {
-                // SelectItem already validates the PIDL against this view; a separate membership scan
-                // enumerates every Shell item and stalls large directories before focus can be restored.
-                trace?.Invoke("focused-item-lookup=direct-select");
-                var flags = 0x10u | 0x40000000u; // restore the item-level focus, not HWND focus
-                if (_focusedWasSelected) flags |= 0x1;
-                var focusedItemSelectStartedAt = StartTiming(trace);
-                var result = selectItem(shellView, _focused, flags);
-                var selectElapsed = ElapsedMilliseconds(focusedItemSelectStartedAt);
-                var focusedItemVerifyStartedAt = StartTiming(trace);
+                // Refresh can preserve item focus even when it rebuilds selection state.
+                // Avoid sending a redundant native focus command during that repaint.
+                var focusedItemCheckStartedAt = StartTiming(trace);
                 focusRestored = IsFocused(folderView, shellFolder, _focused);
-                trace?.Invoke($"focused-item-select hr=0x{result:X8},select-ms={selectElapsed:F1},verified={focusRestored},verify-ms={ElapsedMilliseconds(focusedItemVerifyStartedAt):F1}");
+                trace?.Invoke($"focused-item-current matched={focusRestored},elapsed-ms={ElapsedMilliseconds(focusedItemCheckStartedAt):F1}");
+                if (!focusRestored)
+                {
+                    // SelectItem validates the PIDL against this view; a separate membership scan
+                    // enumerates every Shell item and stalls large directories before focus restoration.
+                    trace?.Invoke("focused-item-lookup=direct-select");
+                    var flags = 0x10u | 0x40000000u; // restore the item-level focus, not HWND focus
+                    if (_focusedWasSelected) flags |= 0x1;
+                    var focusedItemSelectStartedAt = StartTiming(trace);
+                    var result = selectItem(shellView, _focused, flags);
+                    var selectElapsed = ElapsedMilliseconds(focusedItemSelectStartedAt);
+                    var focusedItemVerifyStartedAt = StartTiming(trace);
+                    focusRestored = IsFocused(folderView, shellFolder, _focused);
+                    trace?.Invoke($"focused-item-select hr=0x{result:X8},select-ms={selectElapsed:F1},verified={focusRestored},verify-ms={ElapsedMilliseconds(focusedItemVerifyStartedAt):F1}");
+                }
             }
             else if (_focused != 0 && !restoreFocus)
             {

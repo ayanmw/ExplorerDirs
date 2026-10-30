@@ -10,6 +10,8 @@
 
 2026-10-30 查看方式切换减少重复焦点激活：检查调用链发现 Ctrl+Shift 及 Ctrl+滚轮从 Shell 文件视图触发后仍立即运行 `FocusCurrentView()`，再次执行 `IShellView.UIActivate`、查询/恢复 focused item 和可能的 UIA focus。现在仅在切换前焦点不属于当前 native 文件视图时执行恢复；工具栏/菜单切换仍恢复到文件区。App Release 构建通过（0 警告/错误）；未运行测试或 GUI，因此这只是移除已确认的重复工作，不代表视觉闪烁已解决。待集中验收核对快捷键/滚轮不丢焦点，菜单操作仍回到文件区，并观察列表重排是否减少闪烁。
 
+2026-10-30 刷新后的焦点恢复避免重复聚焦：`ShellViewSelectionSnapshot.Restore` 已先核对当前选区，但仍会对快照焦点项无条件调用 `IShellView.SelectItem(SVSI_FOCUSED)`。现在先用其相对 PIDL 核对 Shell 当前 focused item；只有焦点未保留时才发送恢复命令，原有失败验证与选中项回退不变。App Release 构建通过（0 警告/错误）；未运行测试或 GUI。该改动减少刷新完成后的重复焦点命令，不代表 Shell 初始重枚举黑屏已解决，需集中验收选区/焦点和重绘。
+
 2026-10-30 F5/查看方式验收准备：GuiSmoke 清单新增已填充目录 F5、外部文件创建、行区空白/黑屏、列表框架稳定、查看方式重排及选择/焦点/滚动位置检查。准备时发现脚本把自定义身份传给 `InformationalVersion`，但项目构建目标会依据 `Version + GitCommit` 重设该值，导致产物身份校验失败；改为只为隔离候选覆写合法 SemVer `Version`，并保留真实 Git commit 后，已在干净提交 `da0eff3` 上成功生成 `src/.state/gui-smoke/20261030-135148-367-fa7b4a/`。manifest 为 `prepared-not-run`、`SourceWorkingTreeDirty=false`、41 项待验收；EXE SHA-256=`CF13B170C0F3DFC4733C3C2EBE62C731F189ED9A1A02F34034DBD58F28AD51F5`。准备过程未启动窗口。视觉效果仍须后续集中 GUI 验收。
 
 2026-10-30 逐行派生列接口复核：Microsoft 文档只承诺 `SHCOLSTATE_ONBYDEFAULT` 是 Explorer Details view 的默认展示提示；`IColumnManager.SetColumns` 设置当前视图列序且会清除列状态。隔离探针的通知后 `Apply` 虽返回 `S_OK`，自定义大小列仍不可见且 provider 未收到值请求，故不把 HRESULT 当成恢复成功。当前读数不能解释为单一缺陷；停止重复通用列重放/行重绘尝试。下一步若继续需在新视图记录 `GetDetailsOf`、默认列状态、SCID 映射及 `CM_ENUM_ALL` 列键的完整接口链，否则先保持产品未接线。只读复核发现两个已知测试 CLSID 及 Desktop NameSpace 项仍存在，因此不启动会添加注册项的 Private Desktop 实验。详情见[派生列接口复核](folder-size-column-investigation.md#2026-10-30自定义列可见性合同复核)。
