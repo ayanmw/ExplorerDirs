@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：隐藏窗口 Shell 变更通知驱动对账
+
+NativeProbe 新增 `--shell-change-reconciliation`：用不可见的 message-only HWND 注册 `SHChangeNotifyRegister`（Shell/interrupt 来源及 `SHCNRF_NewDelivery`），并通过 `SHChangeNotification_Lock/Unlock` 读取事件。夹具在注册后依次新建文件、更新目录、重命名和删除文件，各操作调用 `SHChangeNotify`；收到通知后再重新枚举并运行行模型对账。
+
+本机合同通过：create、update-directory、rename、delete 通知均到达；未变更项目在新增/更新/重命名后保持稳定 ID；重命名项目获得新 ID；删除项目的旧 ID/PIDL 被退休；最终只剩稳定夹具行。消息窗口始终不可见，前台窗口未改变。执行覆盖事件发布与订阅、Shell 再枚举和模型 PIDL 所有权交接；没有进行 Private Bytes/句柄泄漏剖析，也没有验证交互式 Shell 操作触发的复杂事件合并/洪泛。
+
+此探针只运行于 NativeProbe，不接入正式视图；仍需验证真实视图选区/焦点在模型重排后的恢复、排序状态及 PIDL 长跑生命周期。Explorer Dirs 产品继续使用 ExplorerBrowser。
+
 ## 2026-10-31：重新枚举后的行身份对账
 
 隔离 `ShellListViewRowModel.Reconcile` 现在可把一次新的 Shell 枚举结果与旧快照对账：按 Shell 绝对解析名匹配身份，保留匹配行的稳定 ID 与递归扫描摘要，同时采用新枚举的显示名、PIDL、图标索引和顺序；新增行分配递增 ID。旧快照中的 PIDL 都作为 `RetiredRows` 返回，由调用者在新快照接管后释放。

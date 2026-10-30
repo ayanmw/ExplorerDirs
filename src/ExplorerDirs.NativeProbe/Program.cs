@@ -32,6 +32,8 @@ internal static class Program
             return LiveUpdateProbe.RunViewFlagMatrix(useWpfPump: true);
         if (args.Length == 1 && args[0] == "--qdr-native-stream")
             return QdrNativeViewProbe.Run();
+        if (args.Length == 1 && args[0] == "--shell-change-reconciliation")
+            return ShellChangeReconciliationProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")
             return ShellViewStateStreamSmoke.Run();
         if (args.Length == 4 && args[0] is "--shell-view-state-store-child-write" or "--shell-view-state-store-child-read" or
