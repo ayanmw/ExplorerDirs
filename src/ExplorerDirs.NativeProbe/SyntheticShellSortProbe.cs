@@ -85,7 +85,7 @@ public static class SyntheticShellSortProbe
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
@@ -761,6 +761,10 @@ public static class SyntheticShellSortProbe
                 RunSizeUpdateStrategy("single-item", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder);
+            if (strategyFilter == "single-item-reapply-column")
+                RunSizeUpdateStrategy("single-item-reapply-column", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, reapplyCustomSizeColumn: true);
             if (strategyFilter == "item-plus-parent")
                 RunSizeUpdateStrategy("item-plus-parent", 1, () =>
                 {
@@ -784,7 +788,7 @@ public static class SyntheticShellSortProbe
     }
 
     private static void RunSizeUpdateStrategy(string name, long updatedSize, Action notify,
-        nint module, nint folderView, nint view, string backingFolder)
+        nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -808,6 +812,23 @@ public static class SyntheticShellSortProbe
         var notificationStarted = Environment.TickCount64;
         notify();
 
+        var reapplyResult = 0;
+        if (reapplyCustomSizeColumn)
+        {
+            // The notification path drops the provider-defined column. Reintroduce
+            // only Name and its mapped recursive-size key to test whether DefView
+            // will request that column's values again after an explicit column set.
+            var columns = new[]
+            {
+                new DisplayColumnState(new PropertyKeyState(SizeFormatId, 10), 240),
+                new DisplayColumnState(new PropertyKeyState(RecursiveSizeFormatId, 1), 140)
+            };
+            reapplyResult = ShellColumnManager.Apply(folderView, columns);
+            Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}");
+            if (reapplyResult != 0)
+                throw new COMException($"Could not explicitly restore the recursive-size column after '{name}'.", reapplyResult);
+        }
+
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
@@ -822,7 +843,7 @@ public static class SyntheticShellSortProbe
         var detailsAfter = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
-        Console.WriteLine($"synthetic-size-update: strategy={name}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
     }
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)
