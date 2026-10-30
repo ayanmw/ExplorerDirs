@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Windows.Threading;
 
 namespace ExplorerDirs.SettingsSmoke;
@@ -42,6 +43,7 @@ internal static class DirectoryTreeScanCoordinatorSmoke
             "disposing a scan owner cancels outstanding work and blocks stale publication");
 
         VerifyLatestAsyncPublication();
+        VerifyQueuedStalePublication();
 
         Console.WriteLine("Directory tree scan coordinator smoke: PASS");
     }
@@ -89,6 +91,21 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         if (failure is not null) throw new InvalidOperationException("Latest asynchronous publication smoke failed.", failure);
     }
 
+    private static void VerifyQueuedStalePublication()
+    {
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var published = false;
+        var request = owner.RunLatestAsync(_ => 42, context, _ => published = true);
+        if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The completed scan did not reach its owner context.");
+
+        var newerRequest = owner.Begin();
+        context.RunPostedCallback();
+        Check(!request.GetAwaiter().GetResult() && !published && owner.IsCurrent(newerRequest),
+            "a result retired after queueing is rejected when the owner context finally dispatches it");
+    }
+
     private static void PumpDispatcherUntil(Task task)
     {
         var frame = new DispatcherFrame();
@@ -106,5 +123,28 @@ internal static class DirectoryTreeScanCoordinatorSmoke
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private sealed class QueuedSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _callbacks = new();
+        private readonly ManualResetEventSlim _posted = new();
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            _callbacks.Enqueue((callback, state));
+            _posted.Set();
+        }
+
+        internal bool WaitForPost(TimeSpan timeout) => _posted.Wait(timeout);
+
+        internal void RunPostedCallback()
+        {
+            if (!_callbacks.TryDequeue(out var work))
+                throw new InvalidOperationException("No owner callback is queued.");
+            work.Callback(work.State);
+        }
+
+        public void Dispose() => _posted.Dispose();
     }
 }
