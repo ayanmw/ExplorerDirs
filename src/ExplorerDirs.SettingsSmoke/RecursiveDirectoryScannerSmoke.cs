@@ -17,23 +17,33 @@ internal static class RecursiveDirectoryScannerSmoke
 
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveSize-" + Guid.NewGuid().ToString("N"));
         var child = Path.Combine(root, "child");
+        var grandchild = Path.Combine(child, "grandchild");
         var linkTarget = root + "-link-target";
         var directoryLink = Path.Combine(root, "linked-target");
         var standalone = Path.Combine(root + "-standalone.bin");
         Directory.CreateDirectory(child);
+        Directory.CreateDirectory(grandchild);
         Directory.CreateDirectory(linkTarget);
         try
         {
             File.WriteAllBytes(Path.Combine(root, "root.bin"), [1, 2, 3]);
             File.WriteAllBytes(Path.Combine(child, "nested.bin"), [1, 2, 3, 4, 5]);
+            File.WriteAllBytes(Path.Combine(grandchild, "deep.bin"), [1, 2]);
             var result = RecursiveDirectoryScanner.Scan(root, CancellationToken.None);
-            Check(result.Bytes == 8 && result.Files == 2 && result.Directories == 1 && result.Unreadable == 0,
+            Check(result.Bytes == 10 && result.Files == 3 && result.Directories == 2 && result.Unreadable == 0,
                 "recursive scan totals nested file sizes and counts");
+            var treeResults = RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None);
+            Check(treeResults.TryGetValue(Path.GetFullPath(root), out var treeRoot) && treeRoot == result &&
+                  treeResults.TryGetValue(Path.GetFullPath(child), out var treeChild) &&
+                  treeChild.Bytes == 7 && treeChild.Files == 2 && treeChild.Directories == 1 && treeChild.Unreadable == 0 &&
+                  treeResults.TryGetValue(Path.GetFullPath(grandchild), out var treeGrandchild) &&
+                  treeGrandchild.Bytes == 2 && treeGrandchild.Files == 1 && treeGrandchild.Directories == 0,
+                "single-pass directory tree scan returns recursive totals for root, child, and grandchild folders");
 
             File.WriteAllBytes(standalone, new byte[7]);
             var selectionResult = RecursiveDirectoryScanner.ScanSelection(
                 [root, child, root, standalone], CancellationToken.None);
-            Check(selectionResult.Bytes == 15 && selectionResult.Files == 3 && selectionResult.Directories == 1 &&
+            Check(selectionResult.Bytes == 17 && selectionResult.Files == 4 && selectionResult.Directories == 2 &&
                   selectionResult.Unreadable == 0,
                 "recursive selection scan counts files and folders while deduplicating nested and repeated selections");
 
@@ -98,10 +108,14 @@ internal static class RecursiveDirectoryScannerSmoke
                   selectedLinkChildResult.Directories == 0 && selectedLinkChildResult.Unreadable == 1,
                 "recursive selection scan does not follow a selected path through a reparse-point ancestor");
             var linkedResult = RecursiveDirectoryScanner.Scan(root, CancellationToken.None);
-            Check(linkedResult.Bytes == 8 && linkedResult.Files == 602 && linkedResult.Directories == 3 &&
+            Check(linkedResult.Bytes == 10 && linkedResult.Files == 603 && linkedResult.Directories == 4 &&
                   linkedResult.Unreadable == 1,
                 $"recursive scan skips a real directory reparse point without counting its target contents " +
                 $"(attributes={File.GetAttributes(directoryLink)}, result={linkedResult})");
+            var linkedTreeResults = RecursiveDirectoryScanner.ScanDirectoryTree(root, CancellationToken.None);
+            Check(linkedTreeResults[Path.GetFullPath(root)] == linkedResult &&
+                  !linkedTreeResults.ContainsKey(Path.GetFullPath(directoryLink)),
+                "single-pass directory tree scan matches reparse-point totals without descending into the link");
         }
         finally
         {

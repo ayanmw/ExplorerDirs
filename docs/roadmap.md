@@ -4807,6 +4807,11 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - `--common-listview-data-contract` 不再手工注入目录大小：先对临时 `large-folder` / `small-folder` 调用产品 `RecursiveDirectoryScanner`，把实际扫描字节数交给 Shell 枚举行；随后将小目录的载荷从 4 字节改成 2 字节，重新扫描并更新同一 Shell row ID，按新值排序，验证选中和焦点仍随 `small-folder` 保持。首轮以未链接扫描器的预期编译错误确认探针缺少生产扫描路径，接入后 NativeProbe Release、数据/文件操作合同、完整 Release SettingsSmoke 与 App Release build 通过。
 - 这是递归大小计算到自有行模型的数据合同，不是产品列实现或可见 ListView 绘制；未验证扫描异步/UI 生命周期、实际 Shell DefView 列、拖放/菜单/通知/键盘或可见排序。产品仍使用 ExplorerBrowser。
 
+### 本批次追加：单次树扫描生成各目录汇总
+
+- `RecursiveDirectoryScanner.ScanDirectoryTree` 一次遍历普通目录树并汇总每一级目录的递归大小/计数。SettingsSmoke 核对根及嵌套目录结果、与原扫描结果一致，并确认真实 junction 不跟随。NativeProbe 用一次扫描填充两个 Shell 行；改动小目录内容后重扫一次，同步得到更新行值和根汇总。
+- 该方式避免逐行对嵌套目录重复遍历，但当前探针仍直接同步调用扫描器；尚无后台取消、UI 生命周期、列消费或产品接线证据。该次更新后的完整 ListView 合同因运行中前台 HWND 变化而未通过整体守卫，不作整体通过声明；具体通过的字段及限制见调查记录。产品继续保留 F9 显式扫描，仍使用 ExplorerBrowser。详见[逐行大小列调查](folder-size-column-investigation.md)。
+
 ### 本批次追加：Shell 子目录与导航历史合同
 
 - 新增 `--common-listview-navigation-contract`，在隐藏 NativeProbe 中用临时目录树调用 Shell 文件夹枚举，核对四个位置的直接子项和父子 PIDL 关系，并复用产品 `ShellTabNavigationHistory` 验证后退、前进以及分支导航清空前向历史。首轮发现既有枚举辅助函数按整份夹具计数，逐目录调用失败；改为传入当前目录直接子项后通过。NativeProbe Release、导航合同、既有数据/文件操作合同、完整 Release SettingsSmoke 与 App Release build 均通过，前台句柄保持不变。

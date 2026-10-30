@@ -205,6 +205,100 @@ internal static class RecursiveDirectoryScanner
         return new(bytes, files, directories, unreadable);
     }
 
+    internal static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanDirectoryTree(
+        string root, CancellationToken cancellationToken, Action<long>? progress = null)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var rootPath = Path.GetFullPath(root);
+        var rootAttributes = File.GetAttributes(rootPath);
+        if ((rootAttributes & FileAttributes.Directory) == 0)
+            throw new DirectoryNotFoundException($"不是文件夹：{rootPath}");
+
+        var rootNode = new DirectoryScanNode(rootPath);
+        var nodes = new List<DirectoryScanNode> { rootNode };
+        if ((rootAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            rootNode.Unreadable = 1;
+            return new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                [rootPath] = rootNode.ToResult()
+            };
+        }
+
+        var pending = new Stack<DirectoryScanNode>();
+        pending.Push(rootNode);
+        long entriesChecked = 0;
+        while (pending.TryPop(out var node))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                foreach (var path in Directory.EnumerateFileSystemEntries(node.Path))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    entriesChecked++;
+                    if (entriesChecked % ProgressEntryInterval == 0) progress?.Invoke(entriesChecked);
+                    FileAttributes attributes;
+                    try { attributes = File.GetAttributes(path); }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    { node.Unreadable = checked(node.Unreadable + 1); continue; }
+
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (!ShouldDescend(attributes))
+                        { node.Unreadable = checked(node.Unreadable + 1); continue; }
+                        var child = new DirectoryScanNode(Path.GetFullPath(path), node);
+                        nodes.Add(child);
+                        pending.Push(child);
+                        continue;
+                    }
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    { node.Unreadable = checked(node.Unreadable + 1); continue; }
+
+                    try
+                    {
+                        node.Bytes = checked(node.Bytes + (ulong)new FileInfo(path).Length);
+                        node.Files = checked(node.Files + 1);
+                    }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or OverflowException)
+                    { node.Unreadable = checked(node.Unreadable + 1); }
+                }
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            { node.Unreadable = checked(node.Unreadable + 1); }
+        }
+
+        if (entriesChecked > 0 && entriesChecked % ProgressEntryInterval != 0)
+            progress?.Invoke(entriesChecked);
+
+        var results = new Dictionary<string, RecursiveDirectoryScanResult>(nodes.Count,
+            StringComparer.OrdinalIgnoreCase);
+        for (var index = nodes.Count - 1; index >= 0; index--)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var node = nodes[index];
+            results.Add(node.Path, node.ToResult());
+            if (node.Parent is not { } parent) continue;
+            parent.Bytes = checked(parent.Bytes + node.Bytes);
+            parent.Files = checked(parent.Files + node.Files);
+            parent.Directories = checked(parent.Directories + 1 + node.Directories);
+            parent.Unreadable = checked(parent.Unreadable + node.Unreadable);
+        }
+        return results;
+    }
+
+    private sealed class DirectoryScanNode(string path, DirectoryScanNode? parent = null)
+    {
+        internal string Path { get; } = path;
+        internal DirectoryScanNode? Parent { get; } = parent;
+        internal ulong Bytes;
+        internal long Files;
+        internal long Directories;
+        internal long Unreadable;
+
+        internal RecursiveDirectoryScanResult ToResult() => new(Bytes, Files, Directories, Unreadable);
+    }
+
     internal static bool ShouldDescend(FileAttributes attributes) =>
         (attributes & FileAttributes.Directory) != 0 && (attributes & FileAttributes.ReparsePoint) == 0;
 }

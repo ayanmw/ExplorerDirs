@@ -170,8 +170,10 @@ internal static class CommonListViewColorBaseline
             Directory.CreateDirectory(smallFolder);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[10]);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[4]);
-            var largeScan = RecursiveDirectoryScanner.Scan(largeFolder, CancellationToken.None);
-            var smallScan = RecursiveDirectoryScanner.Scan(smallFolder, CancellationToken.None);
+            var initialScans = RecursiveDirectoryScanner.ScanDirectoryTree(fixture, CancellationToken.None);
+            var largeScan = initialScans[Path.GetFullPath(largeFolder)];
+            var smallScan = initialScans[Path.GetFullPath(smallFolder)];
+            var fixtureScan = initialScans[Path.GetFullPath(fixture)];
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, fixturePidl, 0, in ShellFolderId, out shellFolder));
             var enumeration = EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
@@ -216,10 +218,14 @@ internal static class CommonListViewColorBaseline
                 largeScan.Files == 1 && smallScan.Files == 1 &&
                 largeScan.Directories == 0 && smallScan.Directories == 0 &&
                 largeScan.Unreadable == 0 && smallScan.Unreadable == 0 && initialSizeRows == "10 B,4 B";
+            var onePassTreeSummaries = initialScans.Count == 3 && fixtureScan.Bytes == 14 &&
+                fixtureScan.Files == 2 && fixtureScan.Directories == 2 && fixtureScan.Unreadable == 0;
             SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
             SetItemState(listView, 1, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[2]);
-            var updatedSmallScan = RecursiveDirectoryScanner.Scan(smallFolder, CancellationToken.None);
+            var updatedScans = RecursiveDirectoryScanner.ScanDirectoryTree(fixture, CancellationToken.None);
+            var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
+            var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
             _shellRowsById[2] = _shellRowsById[2] with { RecursiveBytes = updatedSmallScan.Bytes };
             SetItemText(listView, 1, 1, $"{updatedSmallScan.Bytes} B");
             var liveValue = GetItemText(listView, 1, 1);
@@ -259,7 +265,8 @@ internal static class CommonListViewColorBaseline
             var backgroundMenuContainsGroup = MenuContainsAny(backgroundMenuLabels, "分组依据", "分组", "Group by");
             var backgroundMenuContainsRefresh = MenuContainsAny(backgroundMenuLabels, "刷新", "Refresh");
             var selectedShellOperations = ExerciseSelectedShellRowOperations(listView, shellFolder, selectedId, fixture);
-            var passed = recursiveScanBacked && updatedSmallScan.Bytes == 2 && updatedSmallScan.Files == 1 &&
+            var passed = recursiveScanBacked && onePassTreeSummaries && updatedFixtureScan.Bytes == 12 &&
+                updatedSmallScan.Bytes == 2 && updatedSmallScan.Files == 1 &&
                 updatedSmallScan.Directories == 0 && updatedSmallScan.Unreadable == 0 &&
                 initialRows == "large-folder:1,small-folder:2" &&
                 initialShellPaths == $"{largeFolder}|{smallFolder}" && liveValue == "2 B" &&
@@ -274,6 +281,7 @@ internal static class CommonListViewColorBaseline
             Console.WriteLine($"common-listview-data-contract: initial={initialRows};" +
                 $"initial-scanned-sizes={initialSizeRows};shell-paths={initialShellPaths};" +
                 $"recursive-scan-backed={recursiveScanBacked};updated-scanned-bytes={updatedSmallScan.Bytes};" +
+                $"single-pass-folder-summaries={onePassTreeSummaries};updated-parent-bytes={updatedFixtureScan.Bytes};" +
                 $"updated-cell={liveValue};sort-result={sortResult != 0};sorted={sortedRows};" +
                 $"selected-focused-after-sort={selectedName};selected-shell-row-id={selectedId};" +
                 $"shell-pidl-identities-preserved={shellIdentityPreserved};" +
