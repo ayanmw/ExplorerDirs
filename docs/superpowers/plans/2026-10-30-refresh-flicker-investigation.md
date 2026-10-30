@@ -58,9 +58,10 @@
 - Probe: `src/ExplorerDirs.NativeProbe/RefreshComparisonProbe.cs`
 - Smoke: `src/ExplorerDirs.SettingsSmoke/ShellViewRedrawLeaseSmoke.cs`
 
-- [x] Keep F5 on `IShellView.Refresh()`, but restore `IFolderView2` redraw as soon as the synchronous call returns. The previous lease lasted through asynchronous enumeration and selection recovery, potentially leaving an emptied native list unable to paint while it repopulated.
+- [x] Keep F5 on the existing `IShellView.Refresh()` call; do not recreate ExplorerBrowser or navigate away and back.
 - [x] Initial implementation left redraw enabled around `SetViewModeAndIconSize`, because mode changes do not call `IShellView.Refresh()`.
-- [x] After the user still observed visible mode-switch flicker, restore a redraw lease only around the synchronous mode/size setter. Release it before reading back the resulting view state; this is a visual coalescing candidate, not evidence that flicker is fixed.
+- [x] Remove the mode-change redraw lease after the user reported obvious blanking. The view-mode setter changes the existing Shell view in place; allowing DefView to paint its transition avoids hiding the item list while still not calling `IShellView.Refresh()` or navigating.
+- [x] Remove the F5 redraw lease as well. It toggled native redraw immediately around `Refresh()` without visual evidence that this improved painting; the Shell now owns paint timing for both actions.
 - [x] Add lease-scope smoke coverage proving redraw is restored immediately after the synchronous Shell call.
 - [x] Run the hidden production-host `--live-shell-refresh` probe: all four panes stayed at the expected row counts; the refreshed pane preserved 3 selected items and the focused item.
 - [x] Run native `--view-style-capability`; the latest run preserved selection/sort/group state across the modes but tripped its foreground-boundary guard, so it is not a clean end-to-end pass.
@@ -76,7 +77,7 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. The product restores `IFolderView2::SetRedraw` immediately after the synchronous `IShellView.Refresh()` call; async enumeration and selection recovery are allowed to paint. The latest product candidate also suppresses redraw only for the synchronous `SetViewModeAndIconSize` call. Existing hidden-host evidence predates that mode-change lease, and neither it nor the refresh comparison renders pixels. F5 and mode-switch visuals therefore remain unverified until a visible UI acceptance pass.
+The initial comparison probes Shell enumeration and message timing only. It does not render pixels, so it cannot confirm whether the old rows remain visible or whether the refresh looks less blank. Sorting, grouping, filtering, selection/focus restoration, and cross-process notification impact were not measured. Product F5 calls `IShellView.Refresh()` directly on the current view; mode changes call `SetViewModeAndIconSize` on that same view and do not call `Refresh`. Both now leave redraw timing to DefView. Neither hidden-host evidence nor the refresh comparison renders pixels. F5 and mode-switch visuals therefore remain unverified until a visible UI acceptance pass.
 
 Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 

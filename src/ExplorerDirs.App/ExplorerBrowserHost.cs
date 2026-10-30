@@ -2508,13 +2508,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 if (Current()) MenuError?.Invoke(this, "文件视图尚未就绪，未切换查看方式。");
                 return false;
             }
-            // Coalesce the synchronous view-mode reflow into one Shell-owned repaint.
-            // This changes presentation only; it does not refresh or navigate the folder.
-            using (ShellViewRedrawLease.TrySuppress(view))
-            {
-                if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
-                        result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
-            }
+            // Let the native view paint its mode transition. This changes presentation only;
+            // it must not refresh or navigate the folder.
+            if (!ShellViewStateRestore.ApplyMode(style.Mode, style.IconSize, new NativeViewStateTarget(view, Current),
+                    result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
         }
         catch (COMException ex)
         {
@@ -3060,26 +3057,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
             var selectionRecoverySuppression = _selectionRecoverySuppression.Acquire(navigationVersion);
-            ShellViewRedrawLease? redrawLease = null;
-            try
-            {
-                var redrawView = GetFolderView2Pointer();
-                if (redrawView != IntPtr.Zero)
-                {
-                    try { redrawLease = ShellViewRedrawLease.TrySuppress(redrawView); }
-                    finally { Marshal.Release(redrawView); }
-                }
-            }
-            catch
-            {
-                redrawLease?.Dispose();
-                selectionRecoverySuppression.Dispose();
-                selection?.Dispose();
-                throw;
-            }
             if (!IsCurrentRefreshRequest())
             {
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3088,19 +3067,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
             {
-                refreshResult = ShellViewRedrawLease.RunSuppressed(redrawLease, shellView.Refresh);
-                redrawLease = null;
+                refreshResult = shellView.Refresh();
             }
             catch when (!IsCurrentRefreshRequest())
             {
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
             }
             catch
             {
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw;
@@ -3108,7 +3084,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             finally { _directoryNativeRefreshTiming.Stop(nativeRefreshStartedAt); }
             if (!IsCurrentRefreshRequest())
             {
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 return;
@@ -3116,7 +3091,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (refreshResult < 0)
             {
                 LastShellRefreshStatus = $"IShellView.Refresh=0x{refreshResult:X8}";
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 selection?.Dispose();
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
@@ -3129,7 +3103,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             void FinishRefreshCompletion()
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
-                redrawLease?.Dispose();
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
