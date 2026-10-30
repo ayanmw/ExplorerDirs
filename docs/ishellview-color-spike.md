@@ -2,7 +2,7 @@
 
 ## 2026-10-31：OLE 拖放循环自行初始化 STA 上的 OLE
 
-源码复核发现 `ShellViewDragSource.RunOleLoop` 只检查当前线程是 STA，却没有保证 OLE 已在该线程初始化。现有交互探针由目标窗格 `RegisterDragDrop` 顺带调用 `OleInitialize`，因此掩盖了拖放入口对初始化顺序的依赖。现在循环入口执行 `OleInitialize`，失败即停止；`DoDragDrop` 返回或抛错都经 `finally` 调用 `OleUninitialize`，正确平衡 `S_OK` 与 `S_FALSE`。无窗口源码合同 smoke 先因缺少入口初始化而失败，接线后通过；NativeProbe Release build、完整 Release SettingsSmoke 和 App Release build 均通过，0 警告/错误。没有创建 Shell view、可见窗口或运行交互拖放。该改动只完善 OLE apartment 生命周期，不证明真实 Copy/Move、取消、跨窗格命中、通知收敛、前台隔离或产品宿主可迁移；这些仍待单独可见验收。
+源码复核发现 `ShellViewDragSource.RunOleLoop` 只检查当前线程是 STA，却没有保证 OLE 已在该线程初始化。现有交互探针由目标窗格 `RegisterDragDrop` 顺带调用 `OleInitialize`，因此掩盖了拖放入口对初始化顺序的依赖。现在循环入口执行 `OleInitialize`，失败即停止；`DoDragDrop` 返回或抛错都经 `finally` 调用 `OleUninitialize`，正确平衡 `S_OK` 与 `S_FALSE`。NativeProbe 行为合同验证 S_OK/S_FALSE 均执行并配平、初始化失败不进入操作且不反初始化、操作抛错仍执行一次清理；Release NativeProbe build 与完整 Release SettingsSmoke 均通过，0 警告/错误。没有创建 Shell view、可见窗口或运行交互拖放。该改动只完善 OLE apartment 生命周期，不证明真实 Copy/Move、取消、跨窗格命中、通知收敛、前台隔离或产品宿主可迁移；这些仍待单独可见验收。
 
 ## 2026-10-30：当前主线复跑四窗格 WPF consumer
 

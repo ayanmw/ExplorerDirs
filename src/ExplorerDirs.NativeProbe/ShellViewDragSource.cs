@@ -50,16 +50,16 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("OLE drag-and-drop must run on an STA thread.");
 
-        var oleResult = OleInitialize(0);
-        if (oleResult < 0) Marshal.ThrowExceptionForHR(oleResult);
-        try
+        var source = new ShellViewDragSource(initiatingButton);
+        // DoDragDrop owns target discovery and input tracking. This entry point deliberately
+        // does not move the cursor or synthesize input; it balances its own OLE apartment init.
+        var (result, effect) = RunWithOleInitialization(() => OleInitialize(0), OleUninitialize, () =>
         {
-            var source = new ShellViewDragSource(initiatingButton);
-            // DoDragDrop owns target discovery and input tracking. This entry point deliberately
-            // does not move the cursor or synthesize input; it balances its own OLE apartment init.
-            return DoDragDrop(dataObject, source, allowedEffects, out performedEffect);
-        }
-        finally { OleUninitialize(); }
+            var dragResult = DoDragDrop(dataObject, source, allowedEffects, out var performed);
+            return (dragResult, performed);
+        });
+        performedEffect = effect;
+        return result;
     }
 
     internal static void VerifyContract(Action<bool, string> check)
@@ -99,6 +99,68 @@ internal sealed class ShellViewDragSource : IShellViewDragSource
                 "the isolated OLE COM source completes right-button drags only after the initiating button is released");
         }
         finally { Marshal.Release(rightDragSource); }
+
+        VerifyOleInitializationContract(check);
+    }
+
+    private static void VerifyOleInitializationContract(Action<bool, string> check)
+    {
+        var cleanupCount = 0;
+        var actionCount = 0;
+        var result = RunWithOleInitialization(() => 0, () => cleanupCount++, () =>
+        {
+            actionCount++;
+            return 17;
+        });
+        check(result == 17 && actionCount == 1 && cleanupCount == 1,
+            "OLE initialization success runs the drag operation and balances once");
+
+        cleanupCount = 0;
+        actionCount = 0;
+        result = RunWithOleInitialization(() => 1, () => cleanupCount++, () =>
+        {
+            actionCount++;
+            return 23;
+        });
+        check(result == 23 && actionCount == 1 && cleanupCount == 1,
+            "S_FALSE is a successful existing OLE initialization and is balanced once");
+
+        cleanupCount = 0;
+        actionCount = 0;
+        try
+        {
+            _ = RunWithOleInitialization(() => unchecked((int)0x80004005), () => cleanupCount++, () =>
+            {
+                actionCount++;
+                return 0;
+            });
+            check(false, "OLE initialization failure stops before drag and does not uninitialize");
+        }
+        catch (COMException ex)
+        {
+            check(ex.HResult == unchecked((int)0x80004005) && actionCount == 0 && cleanupCount == 0,
+                "OLE initialization failure stops before drag and does not uninitialize");
+        }
+
+        cleanupCount = 0;
+        try
+        {
+            _ = RunWithOleInitialization<int>(() => 0, () => cleanupCount++, () => throw new InvalidOperationException("fixture"));
+            check(false, "the OLE apartment is balanced when DoDragDrop throws");
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "fixture")
+        {
+            check(cleanupCount == 1, "the OLE apartment is balanced when DoDragDrop throws");
+        }
+    }
+
+    private static TResult RunWithOleInitialization<TResult>(Func<int> initialize, Action uninitialize,
+        Func<TResult> operation)
+    {
+        var result = initialize();
+        if (result < 0) Marshal.ThrowExceptionForHR(result);
+        try { return operation(); }
+        finally { uninitialize(); }
     }
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
