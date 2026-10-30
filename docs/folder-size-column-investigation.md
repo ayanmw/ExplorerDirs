@@ -680,6 +680,6 @@ NativeProbe 增加 `DirectoryTreeScanCoordinator`：每轮扫描拥有递增 gen
 
 ## 2026-10-31：Shell 目录通知后重算派生行值
 
-`--shell-change-reconciliation` 隐藏探针现把真实 Shell 目录变更通知与前述异步扫描协调器接通：先接收 `SHCNE_UPDATEDIR`，再由 Shell 重新枚举目录；对受影响的 `size-folder` 通过 worker 递归重算，并以稳定 row ID 将新派生值合入新枚举行。夹具初始有 1 个文件、0 个子目录、4 B；通知后加入一个 2 B 文件和一个子目录，更新读回 2 个文件、1 个子目录、12 B，目录 row ID 保持；扫描 worker 与 owner thread 不同，结果在 owner Dispatcher 发布；既有文件选择/焦点身份在更新、重排和删除检查中保持。NativeProbe Release、此隐藏合同通过，探针 HWND 隐藏且前台未变。完整 Release SettingsSmoke 和 App/NativeProbe Release 构建已在前一批通过；本次仅扩展计数断言并重跑 NativeProbe。
+`--shell-change-reconciliation` 隐藏探针现把真实 Shell 目录变更通知与前述异步扫描协调器接通：先接收 `SHCNE_UPDATEDIR`，再由 Shell 重新枚举目录；对受影响的 `size-folder` 通过 worker 递归重算，并以稳定 row ID 将新派生值合入新枚举行。夹具初始有 1 个文件、0 个子目录、4 B；通知后加入一个 2 B 文件和一个子目录，更新读回 2 个文件、1 个子目录、12 B，目录 row ID 保持；真实隐藏 `SysListView32` 读回 `12 B` 与 `files: 2, folders: 1`。每次整表重建后按稳定 ID 恢复原选中/焦点行，变更、重排、删除路径均读回通过。扫描 worker 与 owner thread 不同，结果在 owner Dispatcher 发布。NativeProbe Release 构建及此隐藏合同通过，探针窗口不可见且前台未变；完整 Release SettingsSmoke 和 App Release 构建未因这次 NativeProbe-only 修改重跑。
 
-这只证明隔离行模型的数据链和线程边界。探针不创建文件视图窗口，不接入产品 ExplorerBrowser 或产品刷新路径，也不证明扫描带来的交互收益、Q-Dir 逐行列行为、行绘制/排序，或产品 F5/查看方式切换不黑屏。后续仍需在隔离自有视图原型中验证通知到行呈现的完整链路，再评估产品架构门槛。
+这只证明隔离行模型和隐藏标准 ListView 的数据投影链与线程边界。探针不创建文件视图窗口，不接入产品 ExplorerBrowser 或产品刷新路径，也不证明扫描带来的交互收益、Q-Dir 原生列行为、可见行绘制/列排序，或产品 F5/查看方式切换不黑屏。下一步应验证自有 Shell 视图实际消费该行模型及文件操作/导航/菜单兼容性，再评估产品架构门槛。
