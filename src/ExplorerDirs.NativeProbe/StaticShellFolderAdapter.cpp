@@ -53,7 +53,7 @@ namespace
     volatile LONG g_syntheticDeferredRefreshCount = 0;
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
-    const CLSID kSyntheticFolderClassId =
+    CLSID g_syntheticFolderClassId =
     { 0xA17D2A61, 0x4C0B, 0x4B22, { 0x8E, 0x36, 0x35, 0xD9, 0x2C, 0xBC, 0x11, 0x70 } };
     // This adapter is loaded only by the opt-in NativeProbe. It forwards normal
     // filesystem PIDLs and Shell operations while adding deterministic test columns.
@@ -1765,7 +1765,7 @@ namespace
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
             if (!value) return E_POINTER;
-            *value = kSyntheticFolderClassId;
+            *value = g_syntheticFolderClassId;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE value) override
@@ -2731,7 +2731,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
 
 STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
 {
-    if (classId != kSyntheticFolderClassId) return CLASS_E_CLASSNOTAVAILABLE;
+    if (classId != g_syntheticFolderClassId) return CLASS_E_CLASSNOTAVAILABLE;
     auto* factory = new (std::nothrow) SyntheticFolderClassFactory();
     if (!factory) return E_OUTOFMEMORY;
     const auto result = factory->QueryInterface(iid, value);
@@ -2794,6 +2794,16 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWS
     if (!path || !*path) return E_INVALIDARG;
     try { g_syntheticSortBackingPath.assign(path); }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticFolderClassIdForProbe(const CLSID* classId)
+{
+    if (!classId) return E_POINTER;
+    if (InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) != 0 ||
+        InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) != 0)
+        return E_UNEXPECTED;
+    g_syntheticFolderClassId = *classId;
     return S_OK;
 }
 

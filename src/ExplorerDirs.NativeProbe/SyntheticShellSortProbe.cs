@@ -11,7 +11,6 @@ public static class SyntheticShellSortProbe
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
-    private static readonly Guid SyntheticFolderClassId = new("A17D2A61-4C0B-4B22-8E36-35D92CBC1170");
     private static readonly Guid SizeFormatId = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid RecursiveSizeFormatId = new("7E1F84B7-C052-4E51-8A3C-869254A6B910");
     private const int LvmFirst = 0x1000;
@@ -88,8 +87,12 @@ public static class SyntheticShellSortProbe
         if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
-        var backingFolder = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort");
-        var copyDestination = Path.Combine(Path.GetTempPath(), "ExplorerDirs-SyntheticShellSort-Copy");
+        var syntheticFolderClassId = Guid.NewGuid();
+        // A prior interrupted probe may leave its fixture behind; each run owns a fresh path
+        // so it can proceed without reusing or deleting another run's artifacts.
+        var fixtureId = Guid.NewGuid().ToString("N");
+        var backingFolder = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-{fixtureId}");
+        var copyDestination = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-Copy-{fixtureId}");
         if (Directory.Exists(backingFolder))
             throw new InvalidOperationException($"Refusing to reuse an existing synthetic Shell sort fixture directory: {backingFolder}");
         if (Directory.Exists(copyDestination))
@@ -157,8 +160,9 @@ public static class SyntheticShellSortProbe
 
         nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
         nint parent2 = 0, folder2 = 0, view2 = 0, folderView2 = 0, hostPointer2 = 0, listView2 = 0;
-        var classKeyPath = $@"Software\Classes\CLSID\{{{SyntheticFolderClassId:D}}}";
-        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{SyntheticFolderClassId:D}}}";
+        var classKeyPath = $@"Software\Classes\CLSID\{{{syntheticFolderClassId:D}}}";
+        var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{syntheticFolderClassId:D}}}";
+        Console.WriteLine($"synthetic-shell-size-sort: run-id={fixtureId}; clsid={syntheticFolderClassId:B}; backing-fixture={Path.GetFileName(backingFolder)}; copy-fixture={Path.GetFileName(copyDestination)}");
         StreamViewHost? host = null;
         StreamViewHost? host2 = null;
         var viewWindowCreated = false;
@@ -171,6 +175,8 @@ public static class SyntheticShellSortProbe
         try
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
+            Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticFolderClassId>(NativeLibrary.GetExport(module,
+                "SetSyntheticFolderClassIdForProbe"))(ref syntheticFolderClassId));
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticMaskFilesystemAttributesForProbe"))(maskFilesystemAttributes ? 1 : 0));
@@ -179,11 +185,11 @@ public static class SyntheticShellSortProbe
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticCustomSizeColumnForProbe"))(customSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
-            RegisterSyntheticFolder(classKeyPath);
+            RegisterSyntheticFolder(classKeyPath, syntheticFolderClassId);
             classRegistrationCreated = true;
             RegisterSyntheticNamespace(namespaceKeyPath);
             namespaceRegistrationCreated = true;
-            Check(SHParseDisplayName($"::{SyntheticFolderClassId:B}", 0, out rootPidl, 0, out _));
+            Check(SHParseDisplayName($"::{syntheticFolderClassId:B}", 0, out rootPidl, 0, out _));
             if (rootPidl == 0) throw new InvalidOperationException("Shell resolved the synthetic namespace without returning an absolute PIDL.");
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
@@ -1209,11 +1215,11 @@ public static class SyntheticShellSortProbe
         throw new FileNotFoundException("Run build-static-shell-folder-adapter.ps1 before the synthetic Shell sort probe.");
     }
 
-    private static void RegisterSyntheticFolder(string classKeyPath)
+    private static void RegisterSyntheticFolder(string classKeyPath, Guid classId)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
-        using var existing = classes.OpenSubKey($"CLSID\\{{{SyntheticFolderClassId:D}}}");
+        using var existing = classes.OpenSubKey($"CLSID\\{{{classId:D}}}");
         if (existing is not null)
             throw new InvalidOperationException("The reserved synthetic folder CLSID already has a per-user registration; refusing to overwrite it.");
 
@@ -1469,6 +1475,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);

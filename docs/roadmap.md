@@ -4862,5 +4862,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-30：通知后显式重设 IShellView 派生列探针
 
-- NativeProbe 增加 opt-in `single-item-reapply-column` 策略：发送单项 `SHCNE_UPDATEITEM` 后，通过 `IColumnManager` 显式重设 Name 与递归大小两列，并记录 HRESULT、列和值、排序、选区及 provider 读取计数。
-- 本轮 Release build 成功（0 警告/错误），无窗口 folder-tree smoke 通过（`shell-view-created=False`）；没有启动 Private Desktop 视图分支，因此尚不能判断派生值是否恢复。后续需要用独立新进程运行该策略，并按实际列值/排序/Provider 读取结果判定；产品不变，继续使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
+- NativeProbe 增加 opt-in `single-item-reapply-column` 策略：发送单项 `SHCNE_UPDATEITEM` 后，通过 `IColumnManager` 显式重设 Name 与递归大小两列，并记录 HRESULT、列和值、排序、选区及 provider 读取计数。每轮现使用 GUID CLSID 和夹具，避免覆盖既有注册/文件。
+- Release build 与无窗口 smoke 通过。正确 Private Desktop 入口测得重设 `S_OK`，但视图未重新读出列值；该轮输入 tick 变化，并在 `STATIC` 根窗口销毁时超时，故只记为无效诊断线索。唯一本轮 CLSID/夹具遗留及清理命令被策略拒绝的情况已记入调查记录。后续需先处理该遗留边界，再选 WPF 根宿主和稳定桌面条件复验；产品继续使用 ExplorerBrowser。详见[派生大小列调查](folder-size-column-investigation.md)。
