@@ -8,6 +8,8 @@
 
 2026-10-31 隔离扫描过期失败门控：目录大小协调器此前只将过期取消视为无结果；若旧 worker 忽略取消后抛出 IO/扫描错误，异常仍会泄漏到调用方，可能被误报为当前扫描失败。现在任意已过期 ticket 的 worker 异常都以 `false` 结果结束，当前 ticket 的异常仍正常传播。新增回归在旧逻辑上复现失败，并分别验证过期异常不影响较新成功发布、当前异常继续传播；定向和完整 Release SettingsSmoke、App/NativeProbe Release build 与 `git diff --check` 通过。仅覆盖隔离原型协调器，不意味着产品逐行大小功能已接入。
 
+2026-10-31 Q-Dir 颜色规则纯策略复核：重新核对官方 FAQ 6/47，确认公开语法覆盖分号分隔通配符、隐藏项 `#`、目录 `#DIR`、只读 `#RO`、背景 `#BG`/活动视图背景 `#BG-A`，以及逐属性 `-1/0/1` 规则优先级；这些说明仍未给出 `.qdr` `[Filter2]` 六个数值字段的列顺序。Release NativeProbe `--shell-view-color-policy-smoke` 退出码 0，覆盖原始行保真、公开匹配/优先级、背景与字体策略、选择态保留及隔离宿主 COM 合同；该 smoke 未创建 Shell view，也未显示 UI。未把字段猜测接入 `.qdr` 导入器，产品仍使用 ExplorerBrowser。详情见[隔离颜色原型记录](ishellview-color-spike.md#2026-10-26读取-q-dir-filter2-原始规则行)。
+
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
 2026-10-31 主线集中验收候选更新：最新副本基于干净提交 `682cb7c`，目录树延时配置档已随验收夹具纳入，四窗格副本位于 `src/.state/gui-smoke/20261030-223919-122-5040e1`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `AA21558CA35E0042AF582EFA0756B2AB806611F1F0FE022EB0B9E5944715A54` / `5BBFA017B282C7ED19AE0DC0BEC00E2533902E4E40EAA4D2E2F8955F8A093DA4`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
