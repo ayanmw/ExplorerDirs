@@ -19,6 +19,9 @@ internal sealed class ApplicationThemeController : IDisposable
     private int _systemRefreshQueued;
     private bool _hasAppliedTheme;
     private ThemePreference _appliedPreference;
+    private bool _hasAppliedNativeTheme;
+    private bool _appliedNativeDarkMode;
+    private bool _appliedHighContrast;
 
     public ThemePreference Preference { get; private set; }
     public ResolvedTheme Resolved { get; private set; }
@@ -105,15 +108,28 @@ internal sealed class ApplicationThemeController : IDisposable
         var resolved = ThemePalette.Resolve(Preference, _systemIsDark);
         var highContrast = SystemParameters.HighContrast;
         ThemeColors? colors = highContrast ? null : ThemePalette.For(resolved, _customAccentColor ?? _systemAccent);
-        var visualChanged = !_hasAppliedTheme || colors != CurrentColors || highContrast;
+        var nativeDarkMode = resolved == ResolvedTheme.Dark && !highContrast;
+        var nativeThemeChanged = !_hasAppliedNativeTheme || nativeDarkMode != _appliedNativeDarkMode ||
+            highContrast != _appliedHighContrast;
+        // A repeated high-contrast notification does not require clearing and
+        // rebuilding the same Windows-backed semantic resources.
+        var visualChanged = !_hasAppliedTheme || colors != CurrentColors || highContrast != _appliedHighContrast;
         var preferenceChanged = !_hasAppliedTheme || Preference != _appliedPreference;
         Resolved = resolved;
-        if (!visualChanged && !preferenceChanged) return;
+        if (!visualChanged && !preferenceChanged && !nativeThemeChanged) return;
         _hasAppliedTheme = true;
         _appliedPreference = Preference;
+        if (nativeThemeChanged)
+        {
+            // Accent-only updates should replace WPF semantic brushes without flushing
+            // native Shell menu themes or reapplying the same preferred app mode.
+            NativeShellTheme.SetProcessTheme(nativeDarkMode);
+            _hasAppliedNativeTheme = true;
+            _appliedNativeDarkMode = nativeDarkMode;
+            _appliedHighContrast = highContrast;
+        }
         if (visualChanged)
         {
-            NativeShellTheme.SetProcessTheme(resolved == ResolvedTheme.Dark && !highContrast);
             CurrentColors = colors;
             if (colors is { } palette) SetThemeResources(palette);
             else ClearThemeResources();
