@@ -25,7 +25,8 @@ $sourceChanges = & git -C $projectRoot status --porcelain
 if ($LASTEXITCODE -ne 0) { throw 'Cannot record acceptance source cleanliness.' }
 $stateRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src\.state\gui-smoke'))
 $runName = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6)
-$buildIdentity = "gui-acceptance.$runName+$($sourceCommit.Trim())"
+$buildVersion = "0.6.0-preview.$runName"
+$buildIdentity = "$buildVersion+$($sourceCommit.Trim())"
 $runRoot = [IO.Path]::GetFullPath((Join-Path $stateRoot $runName))
 if (-not $runRoot.StartsWith($stateRoot + [IO.Path]::DirectorySeparatorChar,
     [StringComparison]::OrdinalIgnoreCase)) {
@@ -131,7 +132,7 @@ foreach ($tabIndex in 1..98) {
 
 dotnet publish (Join-Path $projectRoot 'src\ExplorerDirs.App\ExplorerDirs.App.csproj') `
     --configuration Release --self-contained false --output $appDirectory `
-    "-p:InformationalVersion=$buildIdentity" -p:IncludeSourceRevisionInInformationalVersion=false
+    "-p:Version=$buildVersion" -p:IncludeSourceRevisionInInformationalVersion=false
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 $exe = Join-Path $appDirectory 'ExplorerDirs.App.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Missing test executable: $exe" }
@@ -248,6 +249,7 @@ $manifest = [ordered]@{
         'Move and resize each window on a secondary monitor, including a negative-coordinate monitor where available, restart the isolated app, and verify normal bounds and maximized state. Minimize a maximized window and relaunch the same isolated executable; verify it restores maximized. Ctrl+N and a new QDR workspace must appear on the source monitor; also cover F11 and mixed DPI without altering the daily-use profile',
         'Per-tab history survives tab and layout switches',
         'Ctrl+wheel, toolbar and menu view changes preserve per-tab sorting/grouping and save independently. While switching styles or applying a column preset, navigate or switch tabs; no retired operation may change the replacement tab, publish an old error or forward old wheel input. Retain evidence separately from the controlled backend callback tests',
+        'In a populated fixture folder, select and focus a file, press F5, and observe whether existing rows remain visible until Shell enumeration completes; verify one externally added item appears without a whole-pane blank/black interval and selection/focus recover. Then switch Details/List/Icon/Tile/Content modes and confirm the path, tabs, pane chrome and status remain stable while only file rows reflow; record any blank interval and whether scroll position/selection/focus survive',
         'Close address editing or search, or clear a filter, then switch tabs before delayed focus restoration executes. The old request must not move focus in the replacement tab; the same-tab normal path must still return to files. This timing-sensitive case is pending if it cannot be observed reliably',
         'Set a group and direction, apply and clear a quick filter, then duplicate and restart; temporary ungrouping must not become saved no-group. While enumeration/restoration is pending, explicitly choose a different native group and direction; the new choice must persist. Test explicit native no-group separately and record it as unresolved if old grouping returns',
         'With several tabs in a pane, start file-drag hover activation over an inactive tab, then hide that pane by changing layout; a delayed callback must not switch the hidden tab or make its pane active. Repeat normal visible hover to confirm switching still works, and cancel the drag without moving fixture files',
