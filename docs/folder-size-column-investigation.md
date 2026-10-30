@@ -715,3 +715,11 @@ Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 r
 ### 2026-10-31：真实 Shell 文件和目录重命名身份映射
 
 重命名通知窗口在 `SHChangeNotification_Lock` 有效期内读取 `SHCNE_RENAMEITEM` 与 `SHCNE_RENAMEFOLDER` 的旧/新 PIDL，并用 `SIGDN_DESKTOPABSOLUTEPARSING` 提取与行模型相同的 Shell 绝对解析名，避免映射仅适用于文件系统项目。探针先复现目录重命名后 row ID 丢失；接入目录事件后通过。隐藏行模型合同现确认文件/目录重命名均保留稳定 row ID；目录路径变化时旧递归大小和计数立即清空，异步重扫后回写新的 12 B、2 files、1 folder，稳定选择/焦点保持。Release NativeProbe 构建及 `--shell-change-reconciliation` 通过，窗口隐藏且前台 HWND 未变。`SHCNE_RENAMEFOLDER` 当前以文件系统目录路径验证；虚拟 Shell 项、可见 IShellView 和产品 ExplorerBrowser 未覆盖，产品仍未接入此行模型。
+
+### 2026-10-31：当前主线重复运行行模型后台合同
+
+在 `76baf11` 后重新运行两个 NativeProbe Release 合同。`--common-listview-relative-size-contract` 再次通过：夹具初始大小 `10/4 B` 和比例 `71.43%/28.57%` 正确；更新后 `10/20 B` 和 `33.33%/66.67%` 正确，按新比例重新排序；目录子项摘要更新，扫描 worker 与 owner STA 分离，结果回到 owner 发布，选中/焦点身份保持。输出为 `passed=True`、`visible=False`、`foreground-unchanged=True`。
+
+`--shell-change-reconciliation` 再次通过真实 Shell create/update/file-rename/folder-rename/delete 通知：行 ID 保持/退休符合预期，目录重命名后旧递归缓存被清除并重扫，大小与内容计数更新为 `12 B`、2 files、1 folder；每次扫描在 worker 执行并由 owner 发布，列表重排及删除后的选中/焦点仍保持。输出为 `foreground-unchanged=True`、`hidden-window=True`。
+
+重复结果确认隔离数据模型和标准 `SysListView32` 投影在当前主线上可复现；它没有创建 ExplorerBrowser 或 `IShellView`，没有测试列标题输入、原生背景菜单、拖放和用户键盘，因此仍不构成产品文件视图迁移或 Q-Dir 逐行列验收。
