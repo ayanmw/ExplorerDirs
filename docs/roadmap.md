@@ -6,7 +6,7 @@
 
 2026-10-31 集中验收候选仍为基于提交 `31ce3482dfecfbb22f810a377cac79f0cad23850` 的四窗格隔离副本 `src/.state/gui-smoke/20261030-205517-797-1805c8`，44 项待可见验收，状态 `prepared-not-run`。它适用于检查该提交中的刷新与查看方式交互；本轮只修改 NativeProbe，不改变候选对应的产品代码。刷新验收把普通目录 `SHCNE_UPDATEDIR`、搜索/虚拟位置 `IShellView.Refresh` 回退、查看方式切换分为三个独立条目。身份、校验值和验收重点见[集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
-2026-10-31 NativeProbe 目录通知与派生行值联动：隐藏 Shell change probe 收到真实 `SHCNE_UPDATEDIR` 后重新枚举，再由 worker 重算该视图中受影响文件夹的递归大小，并将值合并到稳定 Shell row ID；选中项和焦点快照仍可恢复。夹具将子文件从 4 B 改为 10 B，读回值 `4→10`，目录行 ID 保持；初始/变更扫描均在线程池运行并回 owner Dispatcher 发布。探针 Release、完整 Release SettingsSmoke、App/NativeProbe Release build 通过。探针窗口不可见，前台未改变。此为隔离数据与通知合同，未接入产品 ExplorerBrowser/IShellView，也未验证真实 UI 的 F5 无黑屏、局部刷新像素或 Q-Dir 等价行为。
+2026-10-31 NativeProbe 目录通知与派生行值联动：隐藏 Shell change probe 收到真实 `SHCNE_UPDATEDIR` 后重新枚举，再由 worker 重算该视图中受影响文件夹的递归大小和内容计数，并将值合并到稳定 Shell row ID；选中项和焦点快照仍可恢复。夹具从 1 个文件、0 个子目录、4 B 变为 2 个文件、1 个子目录、12 B，目录行 ID 保持；初始/变更扫描均在线程池运行并回 owner Dispatcher 发布。探针 Release、完整 Release SettingsSmoke、App/NativeProbe Release build 通过。探针窗口不可见，前台未改变。此为隔离数据与通知合同，未接入产品 ExplorerBrowser/IShellView，也未验证真实 UI 的 F5 无黑屏、局部刷新像素或 Q-Dir 等价行为。
 
 2026-10-31 Q-Dir 目录树拖入悬停展开：`NativeShellTree` 初始化加入 Windows `NSTCS_SPRINGEXPAND`。Release SettingsSmoke 定向样例通过，确认该样式与 `NSTCS_DISABLEDRAGDROP`、`NSTCS_NOEDITLABELS` 同时存在；保持禁用树内重排和标签编辑。微软文档说明 `NSTCS_DISABLEDRAGDROP` 只禁止控件内部拖放，外部项目仍可拖入树控件，因此此次只补上原生悬停展开。当前使用 Windows 默认延时，不提供 Q-Dir 的自定义延时档位；真实文件拖入、目录落点及展开时长仍待集中 UI 验收。[功能矩阵](shell-parity.md#本轮代码与下一轮验收)。
 

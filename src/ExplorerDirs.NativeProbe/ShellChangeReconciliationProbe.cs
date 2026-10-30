@@ -49,6 +49,7 @@ internal static class ShellChangeReconciliationProbe
             var stableId = current.Rows.Single(row => row.DisplayName == "stable.txt").Id;
             var sizeFolderId = current.Rows.Single(row => row.DisplayName == "size-folder").Id;
             var initialRecursiveBytes = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
+            var initialRecursiveSummary = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveSummary!;
             var selection = ShellListViewSelectionSnapshot.Capture(current.Rows, [stableId], focusedRowId: stableId);
             var watch = new ShellChangeEntry { Pidl = folderPidl, Recursive = true };
             registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
@@ -67,6 +68,9 @@ internal static class ShellChangeReconciliationProbe
 
             File.AppendAllText(Path.Combine(fixture, "stable.txt"), " updated");
             File.WriteAllBytes(sizePayloadPath, new byte[10]);
+            var nestedDirectory = Path.Combine(sizeDirectory, "nested");
+            Directory.CreateDirectory(nestedDirectory);
+            File.WriteAllBytes(Path.Combine(nestedDirectory, "nested.bin"), new byte[2]);
             SHChangeNotify(UpdatedDirectory, PathUnicode, fixture, null);
             var updateEvent = window.WaitFor([UpdatedDirectory], TimeSpan.FromSeconds(5));
             var updatedEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
@@ -80,7 +84,10 @@ internal static class ShellChangeReconciliationProbe
                     updatedScans).ToList()
             };
             var recursiveBytesAfterReconciliation = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
-            var recursiveValueUpdated = initialRecursiveBytes == 4 && recursiveBytesAfterReconciliation == 10;
+            var recursiveSummaryAfterReconciliation = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveSummary!;
+            var recursiveValueUpdated = initialRecursiveBytes == 4 && recursiveBytesAfterReconciliation == 12;
+            var recursiveCountsUpdated = initialRecursiveSummary.Files == 1 && initialRecursiveSummary.Directories == 0 &&
+                recursiveSummaryAfterReconciliation.Files == 2 && recursiveSummaryAfterReconciliation.Directories == 1;
             var updateIdPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId;
             var selectionAfterUpdatePreserved = HasStableSelection(current.Rows);
 
@@ -116,12 +123,14 @@ internal static class ShellChangeReconciliationProbe
             Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; delete-notified={deleteEvent}; " +
                 $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-got-new-id={addedNewIdentity}; deleted-id-retired={retiredRenamedId}; " +
                 $"recursive-bytes-initial/after-update={initialRecursiveBytes}/{recursiveBytesAfterReconciliation};recursive-value-updated={recursiveValueUpdated};size-folder-id-preserved={sizeFolderIdentityPreserved};" +
+                $"recursive-files-initial/after-update={initialRecursiveSummary.Files}/{recursiveSummaryAfterReconciliation.Files};" +
+                $"recursive-directories-initial/after-update={initialRecursiveSummary.Directories}/{recursiveSummaryAfterReconciliation.Directories};recursive-counts-updated={recursiveCountsUpdated};" +
                 $"scan-workers={initialScanWorker}/{updateScanWorker};scan-on-worker={initialScanWorker != Environment.CurrentManagedThreadId}/{updateScanWorker != Environment.CurrentManagedThreadId};" +
                 $"scan-published-on-owner={initialScanPublishedOnOwner}/{updateScanPublishedOnOwner};" +
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false}");
             if (!createEvent || !updateEvent || !renameEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved || !addedNewIdentity ||
-                !retiredRenamedId || !recursiveValueUpdated || !sizeFolderIdentityPreserved ||
+                !retiredRenamedId || !recursiveValueUpdated || !recursiveCountsUpdated || !sizeFolderIdentityPreserved ||
                 initialScanWorker == Environment.CurrentManagedThreadId || updateScanWorker == Environment.CurrentManagedThreadId ||
                 !initialScanPublishedOnOwner || !updateScanPublishedOnOwner ||
                 !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
