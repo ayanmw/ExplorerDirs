@@ -1450,3 +1450,7 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 ### 2026-11-01 原生排序/分组命令后的颜色重绘
 
 在同一真实合并 View 菜单路由执行 Sort descending/ascending 和 Group descending/ascending。排序状态与 item 顺序正确，但原生排序命令之后的首次 ListView 采样为 0 条 `NM_CUSTOMDRAW`；降序场景的颜色像素也不再匹配当前排序后的文件身份。A/B 在 Shell 完成重排后对当前 `LV_VIEW_*` 发送同值 `LVM_SETVIEW`，两种排序方向均恢复 2 条回调与正确的文件身份颜色像素。隔离路由现依据菜单路径对 sort/group 命令执行相同同步；复测排序升降序及分组升降序均恢复颜色，八种视图模式也继续通过。Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过。该实验直接以 `IFolderView2` 设置 Size 分组作为方向菜单的夹具前置，尚未验证原生“按 Size 分组”菜单项、其它属性键、第三方 provider、产品 ExplorerBrowser 或可见 UI。日志：`src/.state/native-probe-watchdog/20261101-010227-7ff9109a.stdout.log`。
+
+### 2026-11-01 原生菜单 Size 分组入口核查
+
+隔离探针枚举真实合并 View 菜单的全部叶命令路径，并按本地化菜单标签检测“分组依据 > 大小 / Group by > Size”。结果为 `native-view-menu-size-group-command=False`；该菜单提供分组方向和“更多信息”项，但没有直接的 Size 分组属性命令。因此之前以 `IFolderView2::SetGroupBy(Size)` 预置分组键、再通过真实合并菜单切换方向的实验，仍只验证方向同步和颜色恢复，并未验证从原生菜单选定 Size。NativeProbe Release build 0 警告/错误；Private Desktop watchdog exit 0，前台、输入及隔离清理守卫通过。下一步应从真实 view 背景 `IContextMenu` 的 `GroupBy` 子菜单追踪属性选择命令及路由，再验证其对 Shell 分组状态和颜色的影响；产品未改。日志：`src/.state/native-probe-watchdog/20261101-010533-344ade73.stdout.log`。

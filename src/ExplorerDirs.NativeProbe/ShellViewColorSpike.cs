@@ -1108,6 +1108,27 @@ internal static class ShellViewColorSpike
         }
     }
 
+    private static string[] DescribeMenuCommandPaths(nint menu)
+    {
+        var paths = new List<string>();
+        Visit(menu, []);
+        return paths.ToArray();
+
+        void Visit(nint currentMenu, IReadOnlyList<string> parents)
+        {
+            for (var index = 0; currentMenu != 0 && index < GetMenuItemCount(currentMenu); index++)
+            {
+                var text = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(currentMenu, (uint)index, text, text.Capacity, 0x400);
+                var label = NormalizeMenuLabel(text.ToString());
+                var path = string.IsNullOrEmpty(label) ? parents : parents.Append(label).ToArray();
+                var submenu = GetSubMenu(currentMenu, index);
+                if (submenu != 0) Visit(submenu, path);
+                else if (GetMenuItemID(currentMenu, index) >= 0) paths.Add(string.Join(" > ", path));
+            }
+        }
+    }
+
     private static void AssertFourPaneSortGroupDirections(IReadOnlyList<nint> folderViews,
         int activeIndex, int sortDirection, int groupAscending,
         PropertyKey nameKey, PropertyKey typeKey, string phase)
@@ -3964,6 +3985,12 @@ internal static class ShellViewColorSpike
         var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
         var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
         var sizeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 12 };
+        var nativeViewMenu = GetSubMenu(GetMenu(menuOwner), 2);
+        var nativeViewMenuPaths = DescribeMenuCommandPaths(nativeViewMenu);
+        var nativeSizeGroupAvailable = nativeViewMenuPaths.Any(path =>
+            (path.Contains("分组依据", StringComparison.OrdinalIgnoreCase) || path.Contains("Group by", StringComparison.OrdinalIgnoreCase)) &&
+            (path.EndsWith("大小", StringComparison.OrdinalIgnoreCase) || path.EndsWith("Size", StringComparison.OrdinalIgnoreCase)));
+        Console.WriteLine($"native-view-menu-size-group-command={nativeSizeGroupAvailable}");
         var noGroup = default(PropertyKey);
         Check(At<SetGroupBy>(folderView, 17)(folderView, ref noGroup, 0));
         Check(At<SetSortColumns>(folderView, 27)(folderView, [new SortColumn { Key = nameKey, Direction = 1 }], 1));
