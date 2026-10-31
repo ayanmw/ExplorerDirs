@@ -64,7 +64,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 | 筛选、搜索和 Shell 回调 | `ShellBrowserSite` 的 CDB/CDB2/CDB3；`ShellFolderFilter`、Search Folder 路由 | `FilteredHost` 的 `IncludeObject` 使用临时筛选夹具；隔离颜色宿主通过 CDB2/CDB3 全部继承/新增槽转发到产品回调，CDB3 `IncludeObject` 也通过真实 CCW vtable 覆盖匹配、排除及 `GetFolder`/属性/显示名失败开放 | SettingsSmoke quick-filter/search 与 CDB3 状态；`ShellViewHostFilterProbe` 隐藏导航/筛选集成；`ShellViewColorBrowserHostSmoke` vtable 与故障注入回归 | 完整 DefView 枚举与回调时序、隐藏项/筛选结果读回、搜索往返、多窗格隔离、真实 provider 失败 |
 | 视图模式、排序、分组、列 | `ViewStyle`、`ShellColumnManager`、每标签视图状态/预设 | 默认 Shell modes 可切换；ListView 同步属于颜色原型局部手段 | View/QDR SettingsSmoke、NativeProbe view-style probes | 八种模式（含 Content/自定义）的真实 Shell 状态、排序分组/列读回、刷新保留 |
 | 会话与 `.qdr` | `SessionStore`、`QdrImporter`、`QdrExporter`、view state stream | NativeProbe 可按 GUID 会话键将原生 stream 原子保存到独立文件，并在新 store/host 实例中读回；仍没有产品会话编排 | QDR/Session SettingsSmoke 与 view-stream NativeProbe | 真实进程重启恢复、产品标签身份接线、导入/导出互操作和配置升级保护 |
-| 文件操作及实时变化 | Shell `IFileOperation` 路由、`ShellDirectoryChangeQueue/Batch`、每窗格 watcher/恢复 | 通过独立 watcher 接入做过少量复制/改名/删除与刷新重叠测试 | SettingsSmoke 的纯逻辑/文件夹具；NativeProbe 临时操作；ExplorerBrowser HostProbe 可复用但当前暂停 | 操作前后视图收敛、大目录/burst/溢出、选区身份、失败对话框与跨窗格状态 |
+| 文件操作及实时变化 | Shell `IFileOperation` 路由、`ShellDirectoryChangeQueue/Batch`、每窗格 watcher/恢复 | NativeProbe 自有行模型已通过真实多项 copy/move、rename/delete/attributes 通知的行身份、选区/焦点协调；WPF 根宿主的 synthetic `IShellView` adapter 现覆盖真实 `IFileOperation` 新建、文件/文件夹移入、复制、改名、删除，并将子项通知合并为一次父级更新/枚举 | SettingsSmoke 纯逻辑与文件夹具；NativeProbe `--shell-change-reconciliation`；`single-item-recreate-shell-window-scroll` Private Desktop 探针 | 新宿主尚未接入产品 watcher queue/batch/recovery；剪贴板粘贴、冲突/失败 UI、Undo/Redo、双 synthetic view 同步、网络/虚拟 provider、真实 OLE 拖放与可见选区焦点仍未覆盖 |
 | 焦点、选择与恢复 | `ShellViewSelectionSnapshot`、`ShellFocusRestoreGate`、`FocusTraversal` | 选择快照复用过；隐藏 focus 结果不具可见意义 | SettingsSmoke focus/selection gates；NativeProbe selection identity | 原生项目/列标题焦点、四窗格 Tab/Shift+Tab、粘贴/删除确认后的方向键 |
 | 拖放与 Shell provider | 产品 `IDropTarget`/WPF tab drop/导航树 Shell | 隔离 view 暴露 `IDropTarget`，未构成真实 OLE 源端 | NativeProbe data object、HostProbe 目标接口/夹具 | 鼠标真实 OLE Copy/Move/Link、虚拟 PIDL、标签重排、网络与 ZIP 行为 |
 | 多窗格/标签及辅助窗格 | `PaneControl`、`PaneLayoutHost`、`SessionStore`、`NativeShellTree`、`ExplorerPaneVisibility` | 无 WPF 窗格或标签 host | SettingsSmoke layout/session/tree gates；HostProbe 隐藏生命周期观察 | 实际布局切换、隐藏 view 保留、树/预览/详情绘制及重启可见体验 |
@@ -128,7 +128,11 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 ## 当前下一步
 
-阶段 0 的可执行能力/证据矩阵已列出；阶段 1 filesystem 原型已验证三层绝对 PIDL 导航、Shell 父级边界、历史往返/分支截断、失败目标保留旧 view。七类虚拟位置现各自通过独立 Private Desktop view 创建/菜单查询探针；核心动词状态按 provider 记录，Search Folder 结果数不稳定，ZIP 命令名查询跳过。默认 filesystem 背景菜单的 Details、Refresh、排序与分组升降序命令均有实际 `InvokeCommand` 和状态读回；扩展复测一次在清理后前台对照失败，原因未定，当前先停用新的 Shell view 运行。手动直调 `IDropTarget::Drop` 不作为拖放行为结论。完整 `DoDragDrop` 会按当前鼠标指针定位目标窗口，需要活动输入桌面；当前 Private Desktop 不活动，不能安全地将输入注入用户桌面。后续在隔离且可接收输入的测试会话，仅对临时 filesystem fixture 验证 OLE source/target；不调用虚拟位置的 Drop，也不启动产品 ExplorerBrowser。此原型授权不代表产品文件视图迁移批准；迁移决策仍待用户审阅本草案。Shift 范围选择的合成 `TranslateAccelerator` 结果不作为失败门槛；完整消息循环或真实输入证据尚缺。
+阶段 0 的能力/证据矩阵已覆盖产品合同，并把产品接线、原型证据和可见验收分开。阶段 1 已有三层绝对 PIDL 导航、父级边界、历史分支及失败目标保留旧 view；七类虚拟位置各有 Private Desktop view 创建/菜单查询探针，Search Folder 结果数不稳定、ZIP 命令名查询跳过。默认 filesystem 背景菜单的 Details、Refresh、排序和分组命令已有实际 `InvokeCommand`/状态读回。
+
+阶段 4 的隔离证据已延伸到真实 `IFileOperation` 新建文件夹、文件/文件夹移入、文件复制、改名和删除；当前 synthetic adapter 对相应子项通知只排队/发送一次父目录更新，并只重新枚举一次。`--shell-change-reconciliation` 还覆盖独立行模型的多项跨窗格 copy/move、rename/delete/attributes 与稳定行身份、选择/焦点保持。它们仍不等于新宿主已接入产品 watcher 或双 `IShellView` 协调；剪贴板、冲突/撤销 UI、网络及虚拟 provider 仍是缺口。
+
+Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径解决；最近的完整 synthetic filesystem view 操作探针均通过前台/输入/清理守卫。真实 `DoDragDrop` 仍需要 OLE 的指针/按键输入，不能用隐藏窗口或直接调用 `IDropTarget` 代替；不在共享桌面注入鼠标输入。下一步先推进阶段 4 的双 synthetic view 目标同步与产品 watcher 语义差异审查，再将 OLE 拖放、物理键盘及可见行为留给集中验收。此授权仍仅限 NativeProbe/临时夹具，不授权替换生产 ExplorerBrowser 或生成迁移 release。
 
 2026-10-26 受用户授权复跑迁移探针：Release 构建成功（0 警告/错误）。Private Desktop 导航/筛选探针重新通过临时 filesystem 的绝对 PIDL 深层导航、父级、历史、加速器单次派发及局部 Shell 菜单检查，但在 Search Folder 检查之后、ZIP 容器输出之前未完成；内部 25 秒等待及外部 45 秒 watchdog 触发。现有日志不能确定挂点是在 ZIP provider 导航、视图销毁还是随后资源清理。Private Desktop 菜单命令探针完成列头菜单映射、视图/刷新/排序/分组和局部焦点恢复后，探针内多个阶段仍报告前台未变，但外层在调用返回后检测到全局前台句柄不同。由于没有逐个 teardown 阶段采样，本次不能确定变化来源。按安全边界暂停后续 Shell 宿主运行；此结果不作完整迁移通过证据。
 
@@ -136,7 +140,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 修复后 ZIP-only watchdog 退出码 0，前台 HWND 前后同为 `0x550EC2`。完整 host-filter 现在能跑到结束，但外层前台 HWND 从 `0x10EA8` 变成 `0x550EC2` 并失败；只读窗口查询将其分别识别为 ChatGPT 主窗口和 `dnplayer` 的 `EvertaleMockPreview`。由于无法判断是 Shell 激活调用还是测试期间外部活动导致，停止继续运行 Shell 宿主或尝试恢复窗口。根因修复解决了主线程意外留在新 Desktop 的问题，但未达成完整 foreground 隔离门槛。
 
-用户随后明确授权继续推进隔离迁移原型。该授权允许 NativeProbe/临时夹具范围内的原型开发和验证，不代表产品 `ExplorerBrowserHost` 可以替换，也不代表可发布迁移版本。由于完整 Private Desktop 探针曾观察到前台句柄变化且原因未能归因，本机共享交互桌面上暂不启动任何新的 `IShellView` 宿主或 GUI 探针；需先准备独立 Windows 会话、VM 或其他不共享输入桌面的环境。期间可继续进行不启动 Shell view 的源码契约审查、纯逻辑 smoke 和构建验证。
+用户随后明确授权继续推进隔离迁移原型。该授权允许 NativeProbe/临时夹具范围内的原型开发和验证，不代表产品 `ExplorerBrowserHost` 可以替换，也不代表可发布迁移版本。旧的前台偏差已定位为 Private Desktop 创建线程归属问题，WPF 根宿主上的完整 filesystem view 探针现有通过守卫的运行路径；该修复不代表任意 Shell/GUI 探针都天然无副作用，每轮仍须检查 watchdog 前台、输入及清理输出。真实 OLE 鼠标拖放仍须等待用户安排的可见验收会话。
 
 2026-10-26：NativeProbe 的 `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的内存流作为同宿主后续读请求来源；首次读取使用构造时复制的初始字节。两个 host 共用调用方数组的回归证明外部变更不会污染已建 host，也验证一方更新不影响另一方。无 Shell view 的 COM IStream smoke 对旧值回读和共享数组污染先按预期失败，修复后通过。随后新增仅供 NativeProbe 的 `ShellViewStateStore`，以 GUID 会话键单独保存不透明 Shell stream，使用临时文件写入、flush 后原子替换；写入在 host 释放时提交，缺少状态时回退到导入初始字节。smoke 通过两个独立键、重新创建 store/host、无记录回退及 64 KiB 限制验证；三个独立 NativeProbe 进程依次写入两代状态、退出并验证新进程读到最新一代。没有创建 `IShellView`，不证明真实 Shell 何时请求写入、关闭期间错误恢复或产品 session/profile 接线。SettingsSmoke、NativeProbe/App Release build 与 `git diff --check` 通过。
 
