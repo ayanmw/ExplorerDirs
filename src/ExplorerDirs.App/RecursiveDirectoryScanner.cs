@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.IO.Enumeration;
 
 namespace ExplorerDirs.App;
 
@@ -29,6 +30,13 @@ internal sealed class RecursiveScanProgressThrottle
 internal static class RecursiveDirectoryScanner
 {
     private const int ProgressEntryInterval = 256;
+    private static readonly EnumerationOptions TreeScanEnumerationOptions = new()
+    {
+        AttributesToSkip = 0,
+        IgnoreInaccessible = false,
+        RecurseSubdirectories = false,
+        ReturnSpecialDirectories = false
+    };
 
     internal static RecursiveDirectoryScanResult ScanSelection(IEnumerable<string> selectedPaths,
         CancellationToken cancellationToken, Action<long>? progress = null)
@@ -277,17 +285,15 @@ internal static class RecursiveDirectoryScanner
                 cancellationToken.ThrowIfCancellationRequested();
                 entriesChecked++;
                 if (entriesChecked % ProgressEntryInterval == 0) progress?.Invoke(entriesChecked);
-                var path = frame.Entries.Current;
-                FileAttributes attributes;
-                try { attributes = File.GetAttributes(path); }
-                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-                { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
+                var entry = frame.Entries.Current;
+                var attributes = entry.Attributes;
 
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
                     if (!ShouldDescend(attributes))
                     { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
-                    var child = new DirectoryScanNode(Path.GetFullPath(path), frame.Node);
+                    var childPath = Path.GetFullPath(Path.Combine(frame.Node.Path, entry.Name));
+                    var child = new DirectoryScanNode(childPath, frame.Node);
                     try { frames.Push(OpenDirectory(child)); }
                     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
                     {
@@ -299,12 +305,14 @@ internal static class RecursiveDirectoryScanner
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                 { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
 
+                if (entry.Length < 0)
+                { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); continue; }
                 try
                 {
-                    frame.Node.Bytes = checked(frame.Node.Bytes + (ulong)new FileInfo(path).Length);
+                    frame.Node.Bytes = checked(frame.Node.Bytes + (ulong)entry.Length);
                     frame.Node.Files = checked(frame.Node.Files + 1);
                 }
-                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or OverflowException)
+                catch (OverflowException)
                 { frame.Node.Unreadable = checked(frame.Node.Unreadable + 1); }
             }
         }
@@ -318,8 +326,15 @@ internal static class RecursiveDirectoryScanner
 
         return results;
 
-        DirectoryScanFrame OpenDirectory(DirectoryScanNode node) =>
-            new(node, Directory.EnumerateFileSystemEntries(node.Path).GetEnumerator());
+        DirectoryScanFrame OpenDirectory(DirectoryScanNode node)
+        {
+            // The find entry already carries attributes and file length, avoiding separate path-stat calls.
+            var entries = new FileSystemEnumerable<DirectoryScanEntry>(node.Path,
+                static (ref FileSystemEntry entry) => new(
+                    entry.FileName.ToString(), entry.Attributes, entry.Length),
+                TreeScanEnumerationOptions);
+            return new(node, entries.GetEnumerator());
+        }
 
         void CompleteCurrentDirectory()
         {
@@ -354,10 +369,12 @@ internal static class RecursiveDirectoryScanner
         internal RecursiveDirectoryScanResult ToResult() => new(Bytes, Files, Directories, Unreadable);
     }
 
-    private sealed class DirectoryScanFrame(DirectoryScanNode node, IEnumerator<string> entries) : IDisposable
+    private readonly record struct DirectoryScanEntry(string Name, FileAttributes Attributes, long Length);
+
+    private sealed class DirectoryScanFrame(DirectoryScanNode node, IEnumerator<DirectoryScanEntry> entries) : IDisposable
     {
         internal DirectoryScanNode Node { get; } = node;
-        internal IEnumerator<string> Entries { get; } = entries;
+        internal IEnumerator<DirectoryScanEntry> Entries { get; } = entries;
 
         public void Dispose() => Entries.Dispose();
     }

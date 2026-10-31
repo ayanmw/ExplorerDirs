@@ -52,8 +52,50 @@ internal static class RecursiveDirectoryScannerSmoke
                 $"full-peak-live-estimate={full.PeakLiveBytes}; requested-peak-live-estimate={selected.PeakLiveBytes}; " +
                 $"full-ms={full.ElapsedMilliseconds}; requested-ms={selected.ElapsedMilliseconds}; " +
                 "scope=managed-allocations-and-approximate-live-heap-only");
+            RunFileEntryAllocationProbe();
         }
         finally { Directory.Delete(root, recursive: true); }
+
+        static void RunFileEntryAllocationProbe()
+        {
+            const int directoryCount = 120;
+            const int filesPerDirectory = 25;
+            const long maxAllocatedBytes = 1_175_000;
+            var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-FileEntryAllocation-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                for (var directoryIndex = 0; directoryIndex < directoryCount; directoryIndex++)
+                {
+                    var directory = Path.Combine(root, $"folder-{directoryIndex:D3}");
+                    Directory.CreateDirectory(directory);
+                    for (var fileIndex = 0; fileIndex < filesPerDirectory; fileIndex++)
+                        File.WriteAllBytes(Path.Combine(directory, $"payload-{fileIndex:D2}.bin"),
+                            new byte[32 + fileIndex]);
+                }
+
+                var requestedPaths = Directory.GetDirectories(root);
+                _ = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, CancellationToken.None);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var results = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                    root, requestedPaths, CancellationToken.None);
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                const ulong expectedBytesPerDirectory = 1100;
+                if (results.Count != directoryCount || results.Values.Any(result =>
+                        result.Bytes != expectedBytesPerDirectory || result.Files != filesPerDirectory ||
+                        result.Directories != 0 || result.Unreadable != 0))
+                    throw new InvalidOperationException("File-entry allocation fixture produced different recursive summaries.");
+                if (allocatedBytes >= maxAllocatedBytes)
+                    throw new InvalidOperationException(
+                        $"File-entry allocation budget exceeded: {allocatedBytes} >= {maxAllocatedBytes}.");
+                Console.WriteLine($"file-entry-scan-allocation: folders={results.Count}; allocated={allocatedBytes}; " +
+                    $"budget={maxAllocatedBytes}; bytes-per-folder={expectedBytesPerDirectory}; status=PASS");
+            }
+            finally { Directory.Delete(root, recursive: true); }
+        }
 
         static (long AllocatedBytes, int ResultCount, RecursiveDirectoryScanResult Root,
             long ElapsedMilliseconds, long PeakLiveBytes) Measure(
@@ -130,6 +172,54 @@ internal static class RecursiveDirectoryScannerSmoke
                   !visibleFolderResults.ContainsKey(Path.GetFullPath(root)),
                 "visible-folder scan returns requested recursive rows without retaining unrequested directory results");
 
+            var longPathRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveLongPath-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(longPathRoot);
+            try
+            {
+                var current = longPathRoot;
+                string? firstChild = null;
+                const int depth = 28;
+                for (var index = 0; index < depth; index++)
+                {
+                    current = Path.Combine(current, $"depth-{index:D2}-long");
+                    firstChild ??= current;
+                    Directory.CreateDirectory(current);
+                    File.WriteAllBytes(Path.Combine(current, "payload.bin"), [1]);
+                }
+                var longPathResults = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                    longPathRoot, [firstChild!], CancellationToken.None);
+                Check(longPathResults.TryGetValue(firstChild!, out var longPathResult) &&
+                      longPathResult.Bytes == depth && longPathResult.Files == depth &&
+                      longPathResult.Directories == depth - 1 && longPathResult.Unreadable == 0,
+                    "file-entry scanning preserves recursive totals beyond the legacy MAX_PATH boundary");
+            }
+            finally { Directory.Delete(longPathRoot, recursive: true); }
+
+            var hiddenRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RecursiveHidden-" + Guid.NewGuid().ToString("N"));
+            var hiddenFile = Path.Combine(hiddenRoot, "hidden.bin");
+            var hiddenDirectory = Path.Combine(hiddenRoot, "hidden-dir");
+            var hiddenChildFile = Path.Combine(hiddenDirectory, "hidden-child.bin");
+            Directory.CreateDirectory(hiddenDirectory);
+            try
+            {
+                File.WriteAllBytes(hiddenFile, new byte[13]);
+                File.SetAttributes(hiddenFile, FileAttributes.Hidden | FileAttributes.System);
+                File.WriteAllBytes(hiddenChildFile, new byte[17]);
+                File.SetAttributes(hiddenDirectory, FileAttributes.Directory | FileAttributes.Hidden | FileAttributes.System);
+                var hiddenResult = RecursiveDirectoryScanner.ScanDirectoryTree(hiddenRoot, CancellationToken.None)
+                    [Path.GetFullPath(hiddenRoot)];
+                Check(hiddenResult.Bytes == 30 && hiddenResult.Files == 2 && hiddenResult.Directories == 1 &&
+                      hiddenResult.Unreadable == 0,
+                    "file-entry scanning includes hidden and system entries like Explorer's full folder enumeration");
+            }
+            finally
+            {
+                if (File.Exists(hiddenFile)) File.SetAttributes(hiddenFile, FileAttributes.Normal);
+                if (File.Exists(hiddenChildFile)) File.SetAttributes(hiddenChildFile, FileAttributes.Normal);
+                if (Directory.Exists(hiddenDirectory)) File.SetAttributes(hiddenDirectory, FileAttributes.Directory);
+                if (Directory.Exists(hiddenRoot)) Directory.Delete(hiddenRoot, recursive: true);
+            }
+
             using var canceledPathSelection = new CancellationTokenSource();
             canceledPathSelection.Cancel();
             var requestedPathsEnumerated = false;
@@ -202,6 +292,12 @@ internal static class RecursiveDirectoryScannerSmoke
                 progressReports.Add);
             Check(progressResult.Files == 600 && progressReports.SequenceEqual([256L, 512L, 600L]),
                 "recursive scan reports monotonic checked-entry progress in batches and on completion");
+            var treeProgressReports = new List<long>();
+            var progressTreeResults = RecursiveDirectoryScanner.ScanDirectoryTree(progressDirectory,
+                CancellationToken.None, treeProgressReports.Add);
+            Check(progressTreeResults[Path.GetFullPath(progressDirectory)].Files == 600 &&
+                  treeProgressReports.SequenceEqual([256L, 512L, 600L]),
+                "single-pass directory-tree entry scanning preserves batched progress callbacks");
 
             using var canceled = new CancellationTokenSource();
             canceled.Cancel();

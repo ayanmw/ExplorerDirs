@@ -5160,4 +5160,4 @@ WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `
 
 ### 2026-10-31：BCL 文件系统条目枚举候选
 
-临时 harness 以 `FileSystemEnumerable<T>` 直接消费 `FileSystemEntry` 的名称、属性、长度；三类 NTFS 夹具与路径/句柄扫描摘要一致。两轮多文件夹具中 BCL 用时 11–19 ms、托管分配约 1.10 MB；当前路径扫描为 593–700 ms / 1.23 MB，句柄单遍为 16–24 ms / 0.49 MB。宽目录仅采一轮、主机负载使绝对时延大幅波动，故只将 BCL 视为值得进入合同回归的候选；它尚未验证取消、重解析点、超长路径、访问拒绝、并发替换与枚举后文件变化，也未接入产品。详见[递归大小扫描调查](folder-size-column-investigation.md#2026-10-31-net-低层文件系统枚举器对照)。
+临时 harness 以 `FileSystemEnumerable<T>` 直接消费 `FileSystemEntry` 的名称、属性、长度；三类 NTFS 夹具与路径/句柄扫描摘要一致。两轮多文件夹具中 BCL 用时 11–19 ms、托管分配约 1.10 MB；当前路径扫描为 593–700 ms / 1.23 MB，句柄单遍为 16–24 ms / 0.49 MB。宽目录仅采一轮、主机负载使绝对时延大幅波动，因此先接入现有递归目录树扫描，而不替换 F9 选择扫描。接入后 `120 × 25` 文件夹具的托管分配为 261,232 B，旧实现基线为 1,225,152 B，减少约 78.7%；隐藏/系统项、超过 MAX_PATH、进度、取消、junction 和原有递归摘要定向 smoke 通过。条目元数据是枚举快照，并发路径替换、UNC/provider 兼容及可见 Shell 列行为仍待验证。详见[递归大小扫描调查](folder-size-column-investigation.md#2026-10-31-net-低层文件系统枚举器对照)及其后“BCL 条目元数据接入产品递归目录树扫描”记录。
