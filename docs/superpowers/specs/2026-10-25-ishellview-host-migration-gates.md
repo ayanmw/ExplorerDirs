@@ -150,4 +150,6 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 
 2026-11-01：从当前 Release NativeProbe 复跑 `--ishellview-session-restore-private-desktop`。四个默认 filesystem `IShellView` 逐一激活并安装 Shell 生成的 File/Edit/View 合并菜单；通过活动 frame 的 `WM_COMMAND` 路由 Details、排序/分组升降序，分别读回当前 pane 状态且兄弟 pane 不变；Edit→Select All 选中当前 pane 的两项，另三个 pane 不变。最后停用后 frame 恢复原菜单，后续应用菜单命令被忽略。四窗格菜单命令与会话状态 consumer 完成，进程退出码 0，Private Desktop 守卫确认前台未变、无输入变化且隔离清理通过。此为向 frame 直接发送命令消息，不是用户真实打开/选择菜单的输入证据；不证明产品 UI 菜单、ExplorerBrowser 或其它 provider 的等价行为。
 
+2026-11-01：尝试把 `ShellViewSelectionSnapshot` 扩展到 Details、排序和分组菜单后的强制选区/焦点恢复。NativeProbe 中直接用 `IFolderView::SelectItem` 清除选择并转移焦点后，样本有时能由快照恢复，有时对已排序项返回 `E_INVALIDARG`，另有一次 NativeProbe 以堆损坏退出；同一 probe 的其他轮次通过。此人工篡改 Shell 视图状态的刺激并不等价于产品消息或用户操作，无法把失败归因于生产快照或 Shell 正常菜单命令。相关未提交 probe 改动已撤回；不记录为产品缺陷，也不将该强制刺激作为迁移通过门槛。可靠证据仍是 F5 刷新后等待行模型稳定，再复用快照恢复 PIDL 选区/焦点的现有验证。后续若要覆盖排序/分组焦点，应改用有效的 Shell 输入/消息路径，并先满足稳定夹具与退出守卫。
+
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。
