@@ -5215,4 +5215,4 @@ WPF Private Desktop 宿主上的单项通知、追加父目录更新、重放 `I
 
 ## 2026-10-31：包装子 PIDL 枚举器克隆
 
-NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，隔离验证 `Clone`、`Reset`、`Skip` 及 `Next(count)` 的完整和部分读取语义，覆盖底层枚举器不支持克隆的情况。无窗口 wrapped-folder、parent-item 和 PIDL 合同均通过。包装父项绑定成功，但普通文件系统根 PIDL 与包装子 PIDL 的直接绝对组合仍未解析；该结果不代表 parent-bound Shell item 路径失效，也未证明通用 PIDL 往返。产品仍使用 ExplorerBrowser，未做 IShellView 迁移。证据与边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的枚举器克隆合同)。
+NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，隔离验证 `Clone`、`Reset`、`Skip` 及 `Next(count)` 的完整和部分读取语义，覆盖底层枚举器不支持克隆的情况。无窗口 wrapped-folder、parent-item 和 PIDL 合同均通过。父项绑定能返回正确绝对文件系统路径和 parsing name；转成 Shell item array 后普通目标路径保留，但 adapter parent/PIDL 身份不再保留。普通文件系统根 PIDL 与包装子 PIDL 的直接绝对组合仍未解析。产品仍使用 ExplorerBrowser，未做 IShellView 迁移。证据与边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的枚举器克隆合同)。

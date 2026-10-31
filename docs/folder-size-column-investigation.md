@@ -4,9 +4,9 @@
 
 NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL 状态支持；每个包装枚举器保留独立游标，因此 `Clone`、`Reset` 和 `Skip` 不依赖底层文件系统枚举器实现 `Clone`。合同从非零游标克隆后逐项比较 PIDL 身份，并检查 `Reset`、克隆后 `Skip` 与 `Next(count)` 的批量及末尾部分读取语义。夹具同时包含文件和子目录，Shell data object/CIDA 检查都接受两类真实文件系统项目。
 
-验证：原生 Release DLL 与 NativeProbe Release 构建通过；`--static-shell-column-wrapped-folder-smoke`、`--static-shell-column-parent-item-smoke` 和 `--wrapped-pidl-contract-smoke` 均退出码 0，输出包含 `enum-clone=supported`、相同 parent/child PIDL 身份以及 `window-created=False`。这些均为无窗口隔离合同。
+验证：原生 Release DLL 与 NativeProbe Release 构建通过；`--static-shell-column-wrapped-folder-smoke`、`--static-shell-column-parent-item-smoke` 和 `--wrapped-pidl-contract-smoke` 均退出码 0，输出包含 `enum-clone=supported`、相同 parent/child PIDL 身份以及 `window-created=False`。父项绑定合同还断言 `SHCreateItemWithParent` 同时返回预期 `SIGDN_FILESYSPATH` 和 `SIGDN_DESKTOPABSOLUTEPARSING`。转为 `IDataObject` 后再建 Shell item array，普通文件路径仍相同，但 adapter 的 parent `IUnknown` 和包装 child PIDL 身份不再相同；这说明文件系统目标保留，不能据此声称 adapter 身份能穿过 Shell data object 往返。这些均为无窗口隔离合同。
 
-边界：`SHCreateItemWithParent` 使用包装父项和子 PIDL 可取得预期项目；但把包装子 PIDL 直接与普通文件系统根 PIDL 做原生绝对组合，仍报告 `0x80070057` 未解析。这不否定 parent-bound Shell item 路径，也不证明任意绝对 Shell 名称可往返。没有注册 synthetic namespace root、创建 IShellView 或修改产品 ExplorerBrowser；迁移资格与完整 Shell 兼容性仍未验证。
+边界：`SHCreateItemWithParent` 使用包装父项和子 PIDL 可取得预期项目及绝对名称；但把包装子 PIDL 直接与普通文件系统根 PIDL 做原生绝对组合，仍报告 `0x80070057` 未解析。Shell 从底层文件系统 `IDataObject` 构建 item array 会保留普通文件系统路径，但不会保留 adapter 的 COM/PIDL 身份。这些结果彼此不矛盾：前者是显式 parent-bound item，后者是 Shell 标准序列化路径。没有注册 synthetic namespace root、创建 IShellView 或修改产品 ExplorerBrowser；迁移资格与完整 Shell 兼容性仍未验证。
 
 ## 2026-10-31：扫描快照跨 provider 重建
 

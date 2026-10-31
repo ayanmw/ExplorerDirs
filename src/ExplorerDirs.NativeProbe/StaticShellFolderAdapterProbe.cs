@@ -259,7 +259,7 @@ internal static class StaticShellFolderAdapterProbe
                 if (shellItemParentProbe)
                 {
                     stage = "shell-item-parent-identity";
-                    VerifyShellItemParentIdentity(adapter, items["two.bin"]);
+                    VerifyShellItemParentIdentity(adapter, items["two.bin"], Path.Combine(fixture, "two.bin"));
                     stage = "shell-item-folder-handlers";
                     VerifyShellItemFolderHandlers(adapter, shellDetailsSize);
                 }
@@ -1237,9 +1237,9 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    private static void VerifyShellItemParentIdentity(nint adapter, nint childPidl)
+    private static void VerifyShellItemParentIdentity(nint adapter, nint childPidl, string expectedPath)
     {
-        nint item = 0, displayName = 0, parentAndItem = 0, returnedParent = 0;
+        nint item = 0, displayName = 0, parsingName = 0, parentAndItem = 0, returnedParent = 0;
         nint parentPidl = 0, returnedChild = 0, adapterUnknown = 0, parentUnknown = 0;
         var unknownId = new Guid("00000000-0000-0000-C000-000000000046");
         try
@@ -1249,6 +1249,13 @@ internal static class StaticShellFolderAdapterProbe
             var displayNameHr = At<GetShellItemDisplayName>(item, 5)(item, 0x80058000, out displayName);
             var fileSystemPath = displayNameHr >= 0 && displayName != 0 ? Marshal.PtrToStringUni(displayName) : null;
             if (displayName != 0) { Marshal.FreeCoTaskMem(displayName); displayName = 0; }
+            var parsingNameHr = At<GetShellItemDisplayName>(item, 5)(item, 0x80028000, out parsingName);
+            var absoluteParsingName = parsingNameHr >= 0 && parsingName != 0 ? Marshal.PtrToStringUni(parsingName) : null;
+            if (parsingName != 0) { Marshal.FreeCoTaskMem(parsingName); parsingName = 0; }
+            var expectedFullPath = Path.GetFullPath(expectedPath);
+            if (!string.Equals(expectedFullPath, fileSystemPath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(expectedFullPath, absoluteParsingName, StringComparison.OrdinalIgnoreCase))
+                throw new Exception($"Parent-bound Shell item did not expose both absolute filesystem and parsing names: path='{fileSystemPath}', parsing='{absoluteParsingName}', expected='{expectedFullPath}', HRESULTs=0x{displayNameHr:X8}/0x{parsingNameHr:X8}.");
 
             Check(Marshal.QueryInterface(item, in ParentAndItemId, out parentAndItem));
             Check(At<GetParentAndItem>(parentAndItem, 4)(parentAndItem, out parentPidl, out returnedParent, out returnedChild));
@@ -1259,12 +1266,12 @@ internal static class StaticShellFolderAdapterProbe
             Check(Marshal.QueryInterface(returnedParent, in unknownId, out parentUnknown));
             var sameParentIdentity = adapterUnknown == parentUnknown;
             var sameChildIdentity = ILIsEqual(childPidl, returnedChild);
-            Console.WriteLine($"native-shell-item-parent-probe: create=SHCreateItemWithParent; display-path={fileSystemPath ?? $"hr-0x{displayNameHr:X8}"}; same-parent-IUnknown={sameParentIdentity}; same-child-PIDL={sameChildIdentity}; window-created=False");
+            Console.WriteLine($"native-shell-item-parent-probe: create=SHCreateItemWithParent; filesystem-path={fileSystemPath}; absolute-parsing-name={absoluteParsingName}; same-parent-IUnknown={sameParentIdentity}; same-child-PIDL={sameChildIdentity}; window-created=False");
             if (!sameParentIdentity || !sameChildIdentity)
                 throw new Exception("The Shell item did not preserve both the wrapped parent adapter identity and child PIDL.");
 
             VerifyShellItemArrayIdentity(item, adapter, childPidl);
-            VerifyDataObjectShellItemArrayRoundTrip(adapter, childPidl);
+            VerifyDataObjectShellItemArrayRoundTrip(adapter, childPidl, expectedPath);
         }
         finally
         {
@@ -1275,6 +1282,7 @@ internal static class StaticShellFolderAdapterProbe
             if (returnedParent != 0) Marshal.Release(returnedParent);
             if (parentAndItem != 0) Marshal.Release(parentAndItem);
             if (displayName != 0) Marshal.FreeCoTaskMem(displayName);
+            if (parsingName != 0) Marshal.FreeCoTaskMem(parsingName);
             if (item != 0) Marshal.Release(item);
         }
     }
@@ -1370,7 +1378,7 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    private static void VerifyDataObjectShellItemArrayRoundTrip(nint adapter, nint childPidl)
+    private static void VerifyDataObjectShellItemArrayRoundTrip(nint adapter, nint childPidl, string expectedPath)
     {
         nint childArray = 0, dataObject = 0, itemArray = 0, selectedItem = 0;
         nint parentAndItem = 0, parentFolder = 0, parentPidl = 0, selectedChild = 0;
@@ -1389,6 +1397,11 @@ internal static class StaticShellFolderAdapterProbe
             if (At<GetShellItemArrayCount>(itemArray, 7)(itemArray, out var count) < 0 || count != 1)
                 throw new Exception($"IDataObject conversion did not contain exactly one item: {count}.");
             Check(At<GetShellItemArrayItemAt>(itemArray, 8)(itemArray, 0, out selectedItem));
+            var displayNameHr = At<GetShellItemDisplayName>(selectedItem, 5)(selectedItem, 0x80058000, out var selectedPathPointer);
+            var selectedPath = displayNameHr >= 0 && selectedPathPointer != 0 ? Marshal.PtrToStringUni(selectedPathPointer) : null;
+            if (selectedPathPointer != 0) Marshal.FreeCoTaskMem(selectedPathPointer);
+            if (!string.Equals(Path.GetFullPath(expectedPath), selectedPath, StringComparison.OrdinalIgnoreCase))
+                throw new Exception($"IDataObject-to-Shell-item-array conversion did not preserve the filesystem target: path='{selectedPath}', expected='{Path.GetFullPath(expectedPath)}', HRESULT=0x{displayNameHr:X8}.");
             Check(Marshal.QueryInterface(selectedItem, in ParentAndItemId, out parentAndItem));
             Check(At<GetParentAndItem>(parentAndItem, 4)(parentAndItem, out parentPidl, out parentFolder, out selectedChild));
             Check(Marshal.QueryInterface(parentFolder, in unknownId, out parentUnknown));
@@ -1401,7 +1414,7 @@ internal static class StaticShellFolderAdapterProbe
             Check(At<BindShellItemArrayHandler>(itemArray, 3)(itemArray, 0, in handlerId, in dataObjectId, out returnedDataObject));
             if (returnedDataObject == 0) throw new Exception("Supported IDataObject-created array returned a null IDataObject.");
             VerifyWrappedShellItemDataObject(returnedDataObject);
-            Console.WriteLine($"native-shell-item-array-dataobject-roundtrip: count=1; same-parent-IUnknown={sameParent}; same-child-PIDL={sameChild}; roundtrip-data-object=valid; window-created=False");
+            Console.WriteLine($"native-shell-item-array-dataobject-roundtrip: count=1; filesystem-path-preserved=True; same-parent-IUnknown={sameParent}; same-child-PIDL={sameChild}; roundtrip-data-object=valid; window-created=False");
         }
         finally
         {
