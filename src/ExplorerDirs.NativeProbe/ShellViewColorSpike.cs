@@ -1316,7 +1316,12 @@ internal static class ShellViewColorSpike
         {
             var text = new System.Text.StringBuilder(128);
             _ = GetMenuStringW(viewMenu, (uint)index, text, text.Capacity, 0x400);
-            if (labels.Any(label => text.ToString().Contains(label, StringComparison.OrdinalIgnoreCase)))
+            var visibleLabel = text.ToString().Split('\t')[0].Replace("&", string.Empty, StringComparison.Ordinal).Trim();
+            if (labels.Any(label => string.Equals(visibleLabel, label, StringComparison.OrdinalIgnoreCase) ||
+                visibleLabel.StartsWith(label + "(", StringComparison.OrdinalIgnoreCase) ||
+                visibleLabel.StartsWith(label + " ", StringComparison.OrdinalIgnoreCase) ||
+                visibleLabel.StartsWith(label + "…", StringComparison.OrdinalIgnoreCase) ||
+                visibleLabel.StartsWith(label + "...", StringComparison.OrdinalIgnoreCase)))
                 return GetMenuItemID(viewMenu, index);
         }
         throw new InvalidOperationException($"The merged Shell View menu did not contain a command matching [{string.Join(',', labels)}].");
@@ -3905,13 +3910,16 @@ internal static class ShellViewColorSpike
             throw new InvalidOperationException($"The native view menu transition has no live Shell view window: hr=0x{shellViewWindowHr:X8}; hwnd=0x{shellViewWindow:X}.");
 
         var transitions = new List<string>();
-        foreach (var mode in new (string[] Labels, uint ShellMode, int ListMode)[]
+        foreach (var mode in new (string[] Labels, uint ShellMode, int IconSize, int ListMode)[]
         {
-            (["详细信息", "Details"], 4, 1),
-            (["列表", "List"], 3, 3),
-            (["小图标", "Small icons", "SmallIcon"], 2, 2),
-            (["平铺", "Tiles", "Tile"], 6, 4),
-            (["内容", "Content"], 8, 4)
+            (["超大图标", "Extra large icons"], 1, 256, 0),
+            (["大图标", "Large icons"], 1, 96, 0),
+            (["中等图标", "Medium icons"], 1, 48, 0),
+            (["详细信息", "Details"], 4, 16, 1),
+            (["列表", "List"], 3, 16, 3),
+            (["小图标", "Small icons", "SmallIcon"], 2, 16, 2),
+            (["平铺", "Tiles", "Tile"], 6, 48, 4),
+            (["内容", "Content"], 8, 32, 4)
         })
         {
             uint commandId;
@@ -3932,7 +3940,7 @@ internal static class ShellViewColorSpike
             var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
             var pixels = string.Join('/', capture.RowHits);
             var colorVerified = capture.CustomDrawItems >= fixturePaths.Length && capture.RowHits.All(hit => hit > 0);
-            var modeVerified = shellMode == mode.ShellMode && listMode == mode.ListMode;
+            var modeVerified = shellMode == mode.ShellMode && shellSize == mode.IconSize && listMode == mode.ListMode;
             var commandTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
                 line.Contains("shell-view-mode-sync", StringComparison.Ordinal) ||
                 line.Contains($"id=0x{commandId:X4}", StringComparison.Ordinal)));
