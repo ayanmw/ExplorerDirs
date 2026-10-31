@@ -1556,3 +1556,5 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 
 这证明当前 Windows ZIP provider 的多个虚拟 Shell 项（文件与含嵌套文件的目录）可以经自有 `IShellView` 暴露的 Shell 数据对象完成原生 CopyItems；它不是 `extract` 菜单命令成功，也未覆盖实际菜单选取、可见提示、进度/冲突 UI、目标视图通知或其他压缩/虚拟 provider。产品 ExplorerBrowser 未改。
 同一隔离探针随后对单个 ZIP 虚拟文件调用真实 IFileOperation.MoveItems。MoveItems 与 PerformOperations 均返回 S_OK，GetAnyOperationsAborted=0；目标文件内容为 0x41，该文件从归档移除，目录内 nested.txt 保留。立即读取源 view 时曾得到失效行 PIDL（0x80070002）；泵送 Private Desktop 消息约 1 秒后，源 view 从 2 项收敛到仅 virtual-folder，行身份读取正常。该结果说明当前 Windows ZIP provider 支持此虚拟文件的原生 MoveItems，且源视图会异步收敛；没有测定实际通知延迟，也未验证剪切/粘贴菜单、OLE 拖放、可见进度/确认 UI、其它 provider 或 ExplorerBrowser 产品接线。中间即时读取失败样本：src/.state/native-probe-watchdog/20261101-051850-4f7d3f19.stdout.log；消息泵送后复验：src/.state/native-probe-watchdog/20261101-051913-7d0d2ee4.stdout.log。
+
+同一探针进一步移动 ZIP 虚拟目录 virtual-folder。MoveItems 与 PerformOperations 均返回 S_OK、未取消；目录内 nested.txt 的目标内容为 0x42，归档源项被移除，消息泵送后源 view 收敛为空，Private Desktop 前台/输入及清理守卫通过。该证据覆盖当前 Windows ZIP provider 的含嵌套文件目录 MoveItems，不代表 ExplorerBrowser 产品接线、可见确认/进度 UI、其它压缩 provider 或 OLE 拖放。复验日志：src/.state/native-probe-watchdog/20261101-052213-e479eee6.stdout.log。

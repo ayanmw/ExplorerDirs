@@ -2644,6 +2644,51 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"ishellview-zip-iFileOperation-move: operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!nestedSourceRetained || GetForegroundWindow() != foreground)
                 throw new IOException("ZIP MoveItems changed the nested source entry or foreground boundary.");
+
+            var folderChildIndex = selectedNames.FindIndex(name =>
+                name.Equals("virtual-folder", StringComparison.OrdinalIgnoreCase));
+            nint folderChildArray = 0, folderDataObject = 0, folderDestination = 0, folderOperation = 0;
+            try
+            {
+                folderChildArray = Marshal.AllocHGlobal(IntPtr.Size);
+                Marshal.WriteIntPtr(folderChildArray, selectedChildren[folderChildIndex]);
+                Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, folderChildArray,
+                    in dataObjectId, 0, out folderDataObject));
+                if (folderDataObject == 0) throw new InvalidOperationException("The ZIP folder entry did not provide an IDataObject for MoveItems.");
+
+                var folderDestinationPath = Path.Combine(fixture, "shell-move-folder-target");
+                Directory.CreateDirectory(folderDestinationPath);
+                Check(SHCreateItemFromParsingName(folderDestinationPath, 0, ref shellItemId, out folderDestination));
+                Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out folderOperation));
+                Check(At<SetOperationFlags>(folderOperation, 5)(folderOperation, 0x0004 | 0x0010 | 0x0400));
+                var folderMoveResult = At<MoveItems>(folderOperation, 15)(folderOperation, folderDataObject, folderDestination);
+                var folderPerformResult = folderMoveResult < 0 ? folderMoveResult : At<PerformOperations>(folderOperation, 21)(folderOperation);
+                var folderMoveAborted = folderPerformResult < 0 ? -1 : At<GetAnyOperationsAborted>(folderOperation, 22)(folderOperation, out var folderWasAborted) < 0
+                    ? -1 : folderWasAborted;
+                var nestedMovedPath = Path.Combine(folderDestinationPath, "virtual-folder", "nested.txt");
+                var nestedMovedBytes = File.Exists(nestedMovedPath) ? File.ReadAllBytes(nestedMovedPath) : [];
+                var nestedFolderSourceRetained = false;
+                using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
+                    nestedFolderSourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
+
+                Pump(1000, "zip-folder-move-settle");
+                var sourceRowsAfterFolderMove = GetShellViewItemCount(folderView);
+                var folderMoveMeaning = nestedMovedBytes.Length == 1 && nestedMovedBytes[0] == 0x42
+                    ? nestedFolderSourceRetained ? "copy-source-retained" : "move-source-removed"
+                    : folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
+                Console.WriteLine($"ishellview-zip-iFileOperation-folder-move: operation=MoveItems;hresult=0x{folderMoveResult:X8};perform-hresult=0x{folderPerformResult:X8};aborted={folderMoveAborted};semantics={folderMoveMeaning};nested-destination-bytes=[{Convert.ToHexString(nestedMovedBytes)}];nested-source-retained={nestedFolderSourceRetained};source-view-count={sourceRowsAfterFolderMove};foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ||
+                    nestedMovedBytes.Length != 1 || nestedMovedBytes[0] != 0x42 || nestedFolderSourceRetained ||
+                    sourceRowsAfterFolderMove != 0 || GetForegroundWindow() != foreground)
+                    throw new IOException("ZIP folder MoveItems did not move the nested virtual file and reconcile the source view.");
+            }
+            finally
+            {
+                if (folderOperation != 0) Marshal.Release(folderOperation);
+                if (folderDestination != 0) Marshal.Release(folderDestination);
+                if (folderDataObject != 0) Marshal.Release(folderDataObject);
+                if (folderChildArray != 0) Marshal.FreeHGlobal(folderChildArray);
+            }
             return 0;
         }
         finally
