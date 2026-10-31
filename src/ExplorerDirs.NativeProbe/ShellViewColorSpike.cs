@@ -3061,7 +3061,9 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    if (!probeMenuActivation && !probeSessionRestore && !probeWindowDestroyWithShellView &&
+                    // Read-only branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !probeMenuActivation &&
+                        !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
                     GC.KeepAlive(host);

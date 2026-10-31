@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-31 Shell Undo/Redo 原生命令实验（停止）
+
+先前只读命令状态探针在只读分支提前返回时仍落入 session stream 写回断言，修正为该分支不要求写入/回读；`command-state-readonly-private-desktop` 随后退出码 0。新尝试通过 `IFileOperation::CopyItem` 建立临时副本，再从隐藏 `IShellView` 背景 `IContextMenu` 调用 canonical `undo` / `redo`：一轮中 Undo 使临时副本消失，但 Redo 返回 `S_OK` 后副本没有恢复；另一次运行在复制后未观察到 Undo 可用。现有证据说明该命令状态和调用不构成可靠闭环，不能证明产品 Ctrl+Z/Ctrl+Y 路由可迁移。
+
+该操作探针已移除，不再重复执行。Microsoft 文档明确指出 Vista 及以后 `FOF_ALLOWUNDO` 撤销范围是整个用户 session，状态由 `Explorer.exe` 协调；Private Desktop 并不隔离这份状态，因此此实验存在影响同一登录 session 撤销历史的可能。两轮临时 fixture 已由 watchdog 检查清理，但无法恢复或核验全局 Shell undo history。后续需在用户可控、明确授权的可见验收流程中评估；产品仍使用 ExplorerBrowser。[FOF_ALLOWUNDO 文档](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shfileopstructa)
+
 ## 2026-10-31：UPDATEITEM 派生值重算与目录重命名事件合同
 
 扩展隐藏 Shell change reconciliation probe：真实 `SHCNE_UPDATEITEM` 通知一个已枚举的子目录后，重新枚举父视图并在 worker 重扫递归大小，隐藏 `SysListView32` 从 4 B 更新到 7 B；稳定行 ID、其它行及当前选区/焦点保持。随后真实 `SHCNE_RENAMEFOLDER` 通知验证同一目录改名时保留已验证身份对应的 12 B 摘要，刷新投影不出现暂时空值，worker 重扫后值仍正确。
