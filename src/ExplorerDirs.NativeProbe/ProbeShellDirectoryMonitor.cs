@@ -69,7 +69,14 @@ internal sealed class ProbeShellDirectoryMonitor : IDisposable
 
             var refreshRequested = _batch.Complete(actualCount);
             RecordBatch($"tick-complete,refresh-requested={refreshRequested},actual={actualCount},expected={_batch.ExpectedCountAfterChanges},state={_batch.DiagnosticSnapshot}");
-            if (!refreshRequested) return expectedItemsVisible();
+            if (!refreshRequested)
+            {
+                if (expectedItemsVisible()) return true;
+                // Shell can publish the expected count before the matching item name is readable.
+                // Keep this probe waiting for the native view instead of reporting a false mismatch.
+                RecordBatch("count-settled-waiting-for-items");
+                continue;
+            }
             expectedCount = _batch.ExpectedCountAfterChanges;
             RefreshCount++;
             RecordBatch($"refresh-{RefreshCount}-start,actual={actualCount},expected={expectedCount},force={_batch.ForceRefresh}");

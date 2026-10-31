@@ -433,6 +433,37 @@ public static class SyntheticShellSortProbe
                     File.Exists(sourceItemPath) || !File.Exists(targetItemPath) || File.ReadAllText(targetItemPath) != "pane 1")
                     throw new IOException($"The two-pane move did not reconcile both watcher queues: source={sourceMoveReconciled}/{sourceWatcher.RefreshCount}/{sourceDeleteObserved}; target={targetMoveReconciled}/{targetWatcher.RefreshCount}/{targetCreateObserved}; source-exists={File.Exists(sourceItemPath)}; target-exists={File.Exists(targetItemPath)}; source-diagnostics={sourceWatcher.Diagnostics}; target-diagnostics={targetWatcher.Diagnostics}.");
                 Console.WriteLine($"synthetic-shell-two-view-cross-pane-move: source-delta={sourceWatcher.Diagnostics}; target-delta={targetWatcher.Diagnostics}; refreshes={sourceWatcher.RefreshCount}/{targetWatcher.RefreshCount}; source-absent={!File.Exists(sourceItemPath)}; target-visible={TargetMoveSettled()}");
+
+                sourceWatcher.Dispose();
+                targetWatcher.Dispose();
+                var copyItemName = "pane-2-original.txt";
+                var copySourcePath = Path.Combine(secondPaneFolder, copyItemName);
+                var copyTargetPath = Path.Combine(firstPaneFolder, copyItemName);
+                var copyTargetInitialCount = ReadNames(FindListView(view), module, expectedCount: -1).Length;
+                var copySourceInitialCount = ReadNames(FindListView(view2), module, expectedCount: -1).Length;
+                using var copyTargetWatcher = new ProbeShellDirectoryMonitor(firstPaneFolder, copyTargetInitialCount)
+                {
+                    Operation = "synthetic-cross-pane-copy-target"
+                };
+                CopySelectedShellItemToFilesystemFolder(view2, FindListView(view2), module,
+                    copyItemName, copyItemName, firstPaneFolder);
+                bool CopyTargetSettled()
+                {
+                    var names = ReadNames(FindListView(view), module, expectedCount: -1);
+                    return names.Length == copyTargetInitialCount + 1 && names.Contains(copyItemName, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var copyTargetReconciled = copyTargetWatcher.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)), CopyTargetSettled, () => Pump(25));
+                var copyCreateObserved = copyTargetWatcher.Diagnostics.Contains("event:synthetic-cross-pane-copy-target:created:delta=1:force=False", StringComparison.Ordinal);
+                var copySourceNames = ReadNames(FindListView(view2), module, expectedCount: -1);
+                if (!copyTargetReconciled || !copyCreateObserved || copyTargetWatcher.RefreshCount > 2 ||
+                    copySourceNames.Length != copySourceInitialCount || !copySourceNames.Contains(copyItemName, StringComparer.OrdinalIgnoreCase) ||
+                    !File.Exists(copySourcePath) || !File.Exists(copyTargetPath) ||
+                    File.ReadAllText(copySourcePath) != File.ReadAllText(copyTargetPath) || File.ReadAllText(copyTargetPath) != "pane 2")
+                    throw new IOException($"The two-pane copy did not update only its target: target={copyTargetReconciled}/{copyTargetWatcher.RefreshCount}/{copyCreateObserved}; source-count={copySourceNames.Length}/{copySourceInitialCount}; source-exists={File.Exists(copySourcePath)}; target-exists={File.Exists(copyTargetPath)}; target-diagnostics={copyTargetWatcher.Diagnostics}.");
+                Console.WriteLine($"synthetic-shell-two-view-cross-pane-copy: target-delta={copyTargetWatcher.Diagnostics}; target-refreshes={copyTargetWatcher.RefreshCount}; source-preserved=True; target-visible={CopyTargetSettled()}");
                 return 0;
             }
             var contextMenuId = ContextMenuId;
@@ -2077,6 +2108,32 @@ public static class SyntheticShellSortProbe
             Check(At<PerformOperations>(operation, 21)(operation));
             Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
             if (aborted != 0) throw new IOException("The isolated synthetic-view Shell move was aborted.");
+        }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(dataObject);
+        }
+    }
+
+    private static void CopySelectedShellItemToFilesystemFolder(nint view, nint listView, nint module,
+        string itemName, string restoreFocusName, string destinationFolder)
+    {
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(dataObject); Check(createOperationHr); }
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            try { Check(At<CopyItems>(operation, 17)(operation, dataObject, destinationItem)); }
+            finally { Marshal.Release(destinationItem); }
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The isolated synthetic-view Shell copy was aborted.");
         }
         finally
         {
