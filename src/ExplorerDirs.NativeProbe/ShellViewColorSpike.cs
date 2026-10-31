@@ -1394,6 +1394,8 @@ internal static class ShellViewColorSpike
         bool IsCurrent() => IsCurrentShellMenuOwner(owner, shellView, isStillActive);
         if (!IsCurrent()) return true;
 
+        var previousViewMode = groupIndex == 2 ? TryReadShellViewMode(shellView) : null;
+
         // FCIDM_SHVIEWFIRST..LAST commands belong to the active folder view's
         // window procedure. Forward the original Shell command ID instead of
         // translating localized labels into a separate context-menu verb.
@@ -1404,8 +1406,46 @@ internal static class ShellViewColorSpike
         // the pane/view before sending a command to the HWND it returned.
         if (!IsCurrent()) return true;
         _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
+        if (groupIndex == 2 && previousViewMode is { } previousMode && IsCurrent())
+            SynchronizeListViewAfterModeChange(owner, shellView, viewWindow, previousMode);
         owner.MenuTrace.Add($"shell-command group={groupIndex} id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
         return true;
+    }
+
+    private static (uint Mode, int IconSize)? TryReadShellViewMode(nint shellView)
+    {
+        if (shellView == 0 || Marshal.QueryInterface(shellView, in FolderView2Id, out var folderView) < 0 || folderView == 0)
+            return null;
+        try
+        {
+            var hr = At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var mode, out var iconSize);
+            return hr < 0 ? null : (mode, iconSize);
+        }
+        finally { Marshal.Release(folderView); }
+    }
+
+    private static void SynchronizeListViewAfterModeChange(StreamViewHost owner, nint shellView,
+        nint viewWindow, (uint Mode, int IconSize) previousMode)
+    {
+        var currentMode = TryReadShellViewMode(shellView);
+        if (currentMode is null || currentMode.Value == previousMode ||
+            !IsCurrentShellMenuOwner(owner, shellView, null) || !IsWindow(viewWindow)) return;
+
+        // Let the native view command finish its pending mode paint first; the private
+        // baseline showed that nudging ListView before this paint does not arm item callbacks.
+        Pump(100);
+        if (!IsCurrentShellMenuOwner(owner, shellView, null) || !IsWindow(viewWindow)) return;
+        var listView = FindChildByClass(viewWindow, "SysListView32");
+        if (listView == 0) return;
+        const int LvmGetView = 0x108F;
+        const int LvmSetView = 0x108E;
+        var listViewMode = SendMessageW(listView, LvmGetView, 0, 0).ToInt32();
+        // FVM_* and LV_VIEW_* are different enums; only re-notify the native mode
+        // currently owned by the control, and only for the five standard ListView styles.
+        if (listViewMode is < 0 or > 4) return;
+        var syncResult = SendMessageW(listView, LvmSetView, listViewMode, 0).ToInt32();
+        owner.MenuTrace.Add($"shell-view-mode-sync mode={currentMode.Value.Mode}/{currentMode.Value.IconSize};" +
+            $"list-mode={listViewMode};result={syncResult}");
     }
 
     internal static bool IsCurrentShellMenuOwner(StreamViewHost owner, nint expectedView, Func<bool>? isStillActive)
@@ -2849,10 +2889,12 @@ internal static class ShellViewColorSpike
                 VerifyNativeMenuHitTest(folderView, listView);
             var visiblePixelCapture = "not-run";
             var directListViewModeCapture = "not-run";
+            var nativeViewMenuColorTransition = "not-run";
             if (visible && listView != 0)
             {
                 visiblePixelCapture = CaptureVisibleRowColors(folderView, listView, fixturePaths, capturePrintWindowPixels: offscreen);
                 directListViewModeCapture = VerifyDirectListViewModes(view, folderView, listView, fixturePaths);
+                nativeViewMenuColorTransition = VerifyNativeViewMenuColorTransition(host, parent, view, folderView, listView, fixturePaths);
             }
             var printClientSent = false;
             if (listView != 0 && itemCount > 0 && GetDC(listView) is var dc && dc != 0)
@@ -2884,7 +2926,8 @@ internal static class ShellViewColorSpike
                 $"notify-parent={WindowClassName(drawNotifyTarget)}; synthetic-color-contract={syntheticColorContract}; " +
                 $"list-visible-style={((long)GetWindowLongPtrW(listView, -16) & 0x10000000) != 0}; " +
                 $"parent-visible={IsWindowVisible(parent)}; visible-test={visible}; offscreen-test={offscreen}; " +
-                $"visible-row-pixels={visiblePixelCapture}; direct-listview-mode-capture={directListViewModeCapture}");
+                $"visible-row-pixels={visiblePixelCapture}; direct-listview-mode-capture={directListViewModeCapture}; " +
+                $"native-view-menu-color-transition={nativeViewMenuColorTransition}");
             Console.WriteLine($"ishellview-color-spike: native-menu-hit-test={nativeMenuHitTest}");
 
             if (readOnlyRuleProbe)
@@ -3844,6 +3887,50 @@ internal static class ShellViewColorSpike
             Check(At<ItemCount>(folderView, 7)(folderView, 1, out var remaining)); // SVGIO_SELECTION.
             if (remaining != 0)
                 throw new Exception($"Could not clear Shell selection before color sampling: {remaining} items remain selected.");
+        }
+    }
+
+    private static string VerifyNativeViewMenuColorTransition(StreamViewHost menuHost, nint menuOwner, nint view,
+        nint folderView, nint listView, string[] fixturePaths)
+    {
+        const int LvmSetView = 0x108E;
+        const int LvmGetView = 0x108F;
+        Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 2, 16)); // FVM_SMALLICON.
+        _ = SendMessageW(listView, LvmSetView, 2, 0); // Keep the baseline pair aligned before native menu dispatch.
+        Pump(100);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var startMode, out var startSize));
+        if (startMode != 2) throw new InvalidOperationException($"Could not establish the SmallIcon baseline for native menu dispatch: {startMode}/{startSize}.");
+        var commandId = FindShellMenuCommandId(menuOwner, "详细信息", "Details");
+        var shellViewWindowHr = At<GetWindow>(view, 3)(view, out var shellViewWindow);
+        if (shellViewWindowHr < 0 || shellViewWindow == 0 || !IsWindow(shellViewWindow))
+            throw new InvalidOperationException($"The native view menu transition has no live Shell view window: hr=0x{shellViewWindowHr:X8}; hwnd=0x{shellViewWindow:X}.");
+
+        if (!TryInvokeMergedViewMenuCommand(menuHost, commandId))
+            throw new InvalidOperationException($"The isolated merged View menu did not route Details command 0x{commandId:X4}.");
+        Pump(180);
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var shellMode, out var shellSize));
+        var listMode = SendMessageW(listView, LvmGetView, 0, 0).ToInt32();
+        if (shellMode != 4 || listMode != 1)
+            throw new InvalidOperationException($"The native Details command did not synchronize Shell/ListView modes: shell={shellMode}/{shellSize}; list={listMode}; id=0x{commandId:X4}.");
+
+        RefreshFixtureColorMap(folderView, fixturePaths);
+        ClearNativeViewMenuColorSelection();
+        var synchronizedCapture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+        var synchronizedPixels = string.Join('/', synchronizedCapture.RowHits);
+        var syncVerified = synchronizedCapture.CustomDrawItems >= fixturePaths.Length &&
+            synchronizedCapture.RowHits.All(hit => hit > 0);
+        var commandTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
+            line.Contains("shell-view-mode-sync", StringComparison.Ordinal) ||
+            line.Contains($"id=0x{commandId:X4}", StringComparison.Ordinal)));
+        return $"id=0x{commandId:X4};shell={shellMode}/{shellSize};list={listMode};" +
+            $"routed-native-command-sync=callbacks:{synchronizedCapture.CustomDrawItems},pixels:{synchronizedPixels},verified:{syncVerified};" +
+            $"trace={commandTrace}";
+
+        void ClearNativeViewMenuColorSelection()
+        {
+            var selectItem = At<SelectFolderItem>(folderView, 15);
+            Check(selectItem(folderView, 0, 0)); // SVSI_DESELECT.
+            Check(selectItem(folderView, 1, 0)); // SVSI_DESELECT.
         }
     }
 
