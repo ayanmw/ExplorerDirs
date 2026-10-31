@@ -875,3 +875,11 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 同一 Private Desktop 场景连续四轮均通过：rename 与 delete 分别各自只排队 1 次、发送 1 次，provider 每次重枚举恰好 1 次；行数由 302→303→302，名称更新/删除正确。每轮 watchdog exit 0、前台 HWND 与输入 tick 不变、UUID 注册和夹具清理完成。日志：`20261031-122237-3de21bf7.stdout.log`、`20261031-122255-52ee060f.stdout.log`、`20261031-122302-61e77667.stdout.log`、`20261031-122516-4da9373f.stdout.log`（均在 `src/.state/native-probe-watchdog/`）。最终版本 Native adapter `/W4 /WX` 与 NativeProbe Release build 均为 0 警告/错误；DLL unload contract 与无窗口 `--static-shell-column-folder-smoke` 通过。
 
 这只证明在本合成 provider 中，真实文件操作通知可以经延迟父目录失效更新重建后的 DefView，且本覆盖的 rename/delete 不循环、不重复枚举。没有覆盖 create/update/move、多次并发事件合并、剪切/撤销、菜单命令、导航、拖放源端或其他 namespace/provider；产品 ExplorerBrowser 未改，IShellView 架构门槛仍未通过。后续优先在 Private Desktop 补测 create/move 与成组通知合并，再继续 Shell 命令路由、导航和完整拖放闭环；结果只作为迁移门槛证据，不得直接接入产品。
+
+### 2026-10-31：隔离 adapter 的 create/move 通知复核
+
+先在未开启事件转换时，对真实物理新文件发送 `SHCNE_CREATE`。RED 轮确认 `SFVM_FSNOTIFY` 收到 `lParam=0x2`，但 provider 枚举增量为 0、新行不可见；watchdog exit 1，前台/输入守卫未变、夹具和临时注册清理完成。之后把 `SHCNE_CREATE` 纳入同一显式实验开关，并继续用真实 `IFileOperation::MoveItems` 将该行从合成 view backing 根目录移入其 `child` 子目录。Move 的源 view 回调为 `SHCNE_DELETE` (`0x4`)；转换后的父目录更新让源行消失，目标文件内容保留。
+
+包含 create、move-out、rename、delete 的完整 Private Desktop 场景连续三轮通过。四种情况各自只排队并发送 1 次父目录 `SHCNE_UPDATEDIR`，各触发 1 次 provider 重枚举；创建显示、移动/删除行移除、重命名唯一新行可见。每轮 watchdog exit 0、foreground/input 不变、隔离注册与临时夹具清理完成。日志：`20261031-122840-d195bf2e.stdout.log`、`20261031-122913-493391c2.stdout.log`、`20261031-122924-189dbab9.stdout.log`（`src/.state/native-probe-watchdog/`）。Native adapter `/W4 /WX` 和 NativeProbe Release build 无警告/错误；DLL unload contract、无窗口 `--static-shell-column-folder-smoke` 通过。
+
+范围仍是 NativeProbe 的合成 filesystem-backed provider，实验开关默认关闭。这里只验证单个源 view 对 create、move-out、rename、delete 的行同步；未验证移动目标 view、跨卷/第三方 provider、多事件 burst 合并、撤销、跨窗格剪切粘贴或 OLE 拖放闭环。产品 ExplorerBrowser 和 release 未改，IShellView 迁移门槛仍未通过。下一步评估多个变更事件的合并/顺序，并继续命令路由、导航、菜单及真实拖放源端门槛。

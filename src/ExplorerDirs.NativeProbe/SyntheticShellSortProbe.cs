@@ -1151,6 +1151,7 @@ public static class SyntheticShellSortProbe
         var translationEnabled = false;
         const string itemName = "post-recreate-notify.dat";
         const string renamedItemName = "renamed-after-recreate-notify.dat";
+        const string createdItemName = "created-child-notify.dat";
         var itemPath = Path.Combine(backingFolder, itemName);
         var renamedItemPath = Path.Combine(backingFolder, renamedItemName);
         File.WriteAllText(itemPath, "post-recreate-notification");
@@ -1179,7 +1180,60 @@ public static class SyntheticShellSortProbe
 
             Check(translateChildNotifications(1));
             translationEnabled = true;
+            var createdItemPath = Path.Combine(backingFolder, createdItemName);
+            File.WriteAllBytes(createdItemPath, [0x43]);
+            Check(SHParseDisplayName(createdItemPath, 0, out var createdItemPidl, 0, out _));
+            if (createdItemPidl == 0) throw new InvalidOperationException("Could not parse the physical created-item PIDL.");
+            try
+            {
+                var enumBeforeCreate = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+                var queuedBeforeCreate = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+                var sentBeforeCreate = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+                SHChangeNotify(ShcneCreate, 0, createdItemPidl, 0);
+                deadline = Environment.TickCount64 + 3000;
+                do
+                {
+                    Pump(50);
+                    names = ReadNames(listView, module, expectedCount: -1);
+                    if (names.Contains(createdItemName, StringComparer.OrdinalIgnoreCase) &&
+                        ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBeforeCreate) break;
+                } while (Environment.TickCount64 < deadline);
+                var createVisible = names.Contains(createdItemName, StringComparer.OrdinalIgnoreCase);
+                var createEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeCreate;
+                var createQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeCreate;
+                var createSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeCreate;
+                Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_CREATE; create-visible={createVisible}; rows={names.Length}; enum-calls={createEnumCalls}; translated-queued={createQueued}; translated-sent={createSent}");
+                if (!createVisible || createEnumCalls != 1 || createQueued != 1 || createSent != 1)
+                    throw new TimeoutException("The recreated synthetic view did not expose a new child through one translated SHCNE_CREATE notification.");
+            }
+            finally { ILFree(createdItemPidl); }
+
             names = ReadNames(listView, module, expectedCount: -1);
+            SetListViewSelectionAndFocus(listView, createdItemName, names);
+            var childFolder = Path.Combine(backingFolder, "child");
+            var createdDestinationPath = Path.Combine(childFolder, createdItemName);
+            var enumBeforeMove = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var queuedBeforeMove = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeMove = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            MoveSelectedShellItemToFilesystemFolder(view, listView, module, createdItemName, itemName, childFolder);
+            if (File.Exists(createdItemPath) || !File.Exists(createdDestinationPath) || File.ReadAllBytes(createdDestinationPath)[0] != 0x43)
+                throw new IOException("IFileOperation did not move the created notification fixture into the backing child folder.");
+            deadline = Environment.TickCount64 + 3000;
+            do
+            {
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (!names.Contains(createdItemName, StringComparer.OrdinalIgnoreCase) &&
+                    ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBeforeMove) break;
+            } while (Environment.TickCount64 < deadline);
+            var moveVisible = !names.Contains(createdItemName, StringComparer.OrdinalIgnoreCase);
+            var moveEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeMove;
+            var moveQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeMove;
+            var moveSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeMove;
+            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-MoveItems; source-cleared={moveVisible}; rows={names.Length}; enum-calls={moveEnumCalls}; translated-queued={moveQueued}; translated-sent={moveSent}");
+            if (!moveVisible || moveEnumCalls != 1 || moveQueued != 1 || moveSent != 1)
+                throw new TimeoutException("The recreated synthetic view did not clear a moved child through one translated Shell notification.");
+
             SetListViewSelectionAndFocus(listView, itemName, names);
             var enumBeforeRename = ReadCounter(module, "GetSyntheticEnumObjectsCount");
             var queuedBeforeRename = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
@@ -1348,6 +1402,32 @@ public static class SyntheticShellSortProbe
             Check(At<PerformOperations>(operation, 21)(operation));
             Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
             if (aborted != 0) throw new IOException("The isolated virtual-view Shell delete was aborted.");
+        }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(dataObject);
+        }
+    }
+
+    private static void MoveSelectedShellItemToFilesystemFolder(nint view, nint listView, nint module,
+        string itemName, string restoreFocusName, string destinationFolder)
+    {
+        var dataObject = GetSelectionDataObject(view, listView, module, itemName, restoreFocusName);
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(dataObject); Check(createOperationHr); }
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destinationItem));
+            try { Check(At<MoveItems>(operation, 15)(operation, dataObject, destinationItem)); }
+            finally { Marshal.Release(destinationItem); }
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The isolated synthetic-view Shell move was aborted.");
         }
         finally
         {

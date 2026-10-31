@@ -1887,7 +1887,7 @@ namespace
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
-                    (lParam == SHCNE_RENAMEITEM || lParam == SHCNE_DELETE))
+                    (lParam == SHCNE_CREATE || lParam == SHCNE_RENAMEITEM || lParam == SHCNE_DELETE))
                 {
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");

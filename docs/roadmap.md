@@ -5182,3 +5182,7 @@ Private Desktop 探针显示：目录更新后重设列和切换查看方式都�
 ## 2026-10-31：隔离 IShellView rename/delete 通知转发
 
 NativeProbe 的合成 PIDL adapter 在显式开启的实验开关下，把真实 `IFileOperation` 引发的 `SHCNE_RENAMEITEM` / `SHCNE_DELETE` 延迟 1 ms 转为 backing 目录 `SHCNE_UPDATEDIR`，同时由 DefView 默认处理原事件。连续三轮中 rename/delete 各只触发一次队列、一次目录通知和一次 provider 枚举；更新后没有再次排队。RED 轮先复现无转发时的 stale row。产品 ExplorerBrowser 未改；尚缺 create/update/move、多事件合并及完整 Shell 交互门槛。证据和下一步见[隔离派生大小列通知调查](folder-size-column-investigation.md#2026-10-31隔离-adapter-把-renamedelete-转成父目录失效)。
+
+## 2026-10-31：隔离 IShellView 通知覆盖扩至 create/move
+
+经 RED 复现后，NativeProbe 的显式通知转换开关也处理 `SHCNE_CREATE`。真实 `IFileOperation::MoveItems` 将条目移出源 view 时观察到 `SHCNE_DELETE`，父目录失效后源行正确消失。create、move-out、rename、delete 各自一轮只引起一次重枚举；完整 Private Desktop 场景连续三轮通过，前台/输入守卫与 UUID 清理均通过。该逻辑仍仅在合成 adapter 探针中，未进入 ExplorerBrowser。多事件合并、移动目标 view、剪切粘贴、OLE 拖放及其他 namespace 仍是迁移门槛；证据见[通知调查](folder-size-column-investigation.md#2026-10-31隔离-adapter-的-createmove-通知复核)。
