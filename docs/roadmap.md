@@ -2,6 +2,8 @@
 
 2026-10-31 隔离行模型在目录改名后保留递归大小：Shell 重枚举将旧/新解析名映射为同一行时，若二者都仍为文件系统目录且卷序列号/文件 ID 相同，保留该目录已完成的递归摘要；身份变化仍清空。真实临时目录 rename 回归在旧逻辑上失败，修正后完整 Release SettingsSmoke 通过，NativeProbe Release build 0 警告/错误。仅更新 NativeProbe 自有行模型，不接入 ExplorerBrowser 产品，Shell 视图重建/可见排序和真实异步扫描仍待迁移验收。
 
+2026-10-31 隔离行模型拒绝过期重命名身份：如果旧/新解析名映射对应的文件系统目录两侧都有身份、但卷/文件 ID 不同，模型不再把旧行 ID 转给目标路径上的替代目录；同对象改名仍保留 ID/大小摘要，同路径刷新继续沿用原身份策略。真实临时目录改名、删除、同路径重建回归先失败后通过；完整 Release SettingsSmoke 与 NativeProbe Release build 通过，0 警告/错误。仅是隔离行模型合同，不代表真实通知顺序、可见选区或产品 Shell view 已验收。
+
 ## 当前执行入口（2026-10-31 后台复核）
 
 2026-10-31 原生“新建文件夹”子菜单 HRESULT 处理：`IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)` 返回 `S_FALSE` 时，旧逻辑把“成功但未处理”误当成已初始化，未尝试 `IContextMenu2`。现将 `S_OK` 作为唯一已处理结果，`S_FALSE`/`E_NOTIMPL` 回退旧接口，其它失败仍中止。新增 COM 菜单 smoke 先在旧实现上按预期失败，修复后完整 Release SettingsSmoke 通过；未启动 GUI。该修复覆盖懒加载 New 子菜单的状态查询，不代表文件区真实菜单可见验收完成。

@@ -32,9 +32,13 @@ internal static class ShellListViewRowModel
             var enumerated = enumeratedRows[index];
             ShellListViewRow? previous = null;
             var matchedPrevious = TryTakePrevious(enumerated.ParsingName, out previous);
+            var matchedByRenameMapping = false;
             if (!matchedPrevious && previousParsingNameByRenamedParsingName is not null &&
                 previousParsingNameByRenamedParsingName.TryGetValue(enumerated.ParsingName, out var previousParsingName))
+            {
                 matchedPrevious = TryTakePrevious(previousParsingName, out previous);
+                matchedByRenameMapping = matchedPrevious;
+            }
 
             if (matchedPrevious && previous is not null)
             {
@@ -42,21 +46,31 @@ internal static class ShellListViewRowModel
                 var currentFileSystemIdentity = enumerated.FileSystemIdentity;
                 if (filesystemFolder && previous.RecursiveSummary is not null && currentFileSystemIdentity is null)
                     currentFileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(enumerated.FileSystemPath!);
-                // Renaming changes a directory's path, not its identity; keep its measured summary when the file ID still matches.
-                var preserveRecursiveScan = filesystemFolder && previous.FileSystemIdentity is { } previousIdentity &&
-                    currentFileSystemIdentity is { } currentIdentity && previousIdentity == currentIdentity;
-                rows[index] = enumerated with
+                if (matchedByRenameMapping && filesystemFolder && previous.FileSystemIdentity is { } oldIdentity &&
+                    currentFileSystemIdentity is { } newIdentity && oldIdentity != newIdentity)
                 {
-                    Id = previous.Id,
-                    RecursiveBytes = preserveRecursiveScan ? previous.RecursiveBytes : enumerated.RecursiveBytes,
-                    RecursiveSummary = preserveRecursiveScan ? previous.RecursiveSummary : enumerated.RecursiveSummary,
-                    FileSystemIdentity = currentFileSystemIdentity
-                };
+                    // A delayed rename mapping must not transfer selection identity to a replacement at the new path.
+                    enumerated = enumerated with { FileSystemIdentity = currentFileSystemIdentity };
+                    matchedPrevious = false;
+                    previous = null;
+                }
+                if (matchedPrevious && previous is not null)
+                {
+                    // Renaming changes a directory's path, not its identity; keep its measured summary when the file ID still matches.
+                    var preserveRecursiveScan = filesystemFolder && previous.FileSystemIdentity is { } previousIdentity &&
+                        currentFileSystemIdentity is { } currentIdentity && previousIdentity == currentIdentity;
+                    rows[index] = enumerated with
+                    {
+                        Id = previous.Id,
+                        RecursiveBytes = preserveRecursiveScan ? previous.RecursiveBytes : enumerated.RecursiveBytes,
+                        RecursiveSummary = preserveRecursiveScan ? previous.RecursiveSummary : enumerated.RecursiveSummary,
+                        FileSystemIdentity = currentFileSystemIdentity
+                    };
+                    continue;
+                }
             }
-            else
-            {
-                rows[index] = enumerated with { Id = nextId++ };
-            }
+
+            rows[index] = enumerated with { Id = nextId++ };
         }
 
         // Every previous PIDL belongs to the previous snapshot; return all of them

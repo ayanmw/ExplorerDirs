@@ -199,6 +199,47 @@ internal static class ShellListViewRowModelSmoke
                       .SetEquals([renamedSource.AbsolutePidl, renamedSource2.AbsolutePidl]),
                 "a batch of renamed folders retains each row ID and recursive-size snapshot by filesystem identity");
 
+            var staleRenameSourcePath = Path.Combine(identityRoot, "stale-rename-source");
+            var staleRenameTargetPath = Path.Combine(identityRoot, "stale-rename-target");
+            Directory.CreateDirectory(staleRenameSourcePath);
+            File.WriteAllBytes(Path.Combine(staleRenameSourcePath, "original.bin"), new byte[3]);
+            var staleRenameSourceIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(staleRenameSourcePath);
+            Directory.Move(staleRenameSourcePath, staleRenameTargetPath);
+            Directory.Delete(staleRenameTargetPath, recursive: true);
+            Directory.CreateDirectory(staleRenameTargetPath);
+            File.WriteAllBytes(Path.Combine(staleRenameTargetPath, "replacement.bin"), new byte[9]);
+            var staleRenameTargetIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(staleRenameTargetPath);
+            var staleRenameSource = targetWithSummary with
+            {
+                Id = 21,
+                ParsingName = staleRenameSourcePath,
+                FileSystemPath = staleRenameSourcePath,
+                FileSystemIdentity = staleRenameSourceIdentity,
+                RecursiveBytes = 3,
+                RecursiveSummary = new(3, 1, 0, 0)
+            };
+            var staleRenameTarget = staleRenameSource with
+            {
+                ParsingName = staleRenameTargetPath,
+                FileSystemPath = staleRenameTargetPath,
+                FileSystemIdentity = null,
+                RecursiveBytes = null,
+                RecursiveSummary = null
+            };
+            var staleRename = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
+                [staleRenameSource], [staleRenameTarget], nextId: 50,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [staleRenameTargetPath] = staleRenameSourcePath
+                });
+            Check(staleRenameSourceIdentity is not null && staleRenameTargetIdentity is not null &&
+                  staleRenameSourceIdentity != staleRenameTargetIdentity &&
+                  staleRename.Rows[0].Id == 50 && staleRename.Rows[0].Id != staleRenameSource.Id &&
+                  staleRename.Rows[0].FileSystemIdentity == staleRenameTargetIdentity &&
+                  staleRename.Rows[0].RecursiveBytes is null && staleRename.Rows[0].RecursiveSummary is null &&
+                  staleRename.RetiredRows.Single().Id == staleRenameSource.Id,
+                "a stale rename mapping cannot transfer the retired row identity or size to a replacement folder");
+
             var retiredFolder = targetWithSummary with
             {
                 ParsingName = identityPath,
