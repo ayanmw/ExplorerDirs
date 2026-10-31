@@ -655,6 +655,14 @@ public static class SyntheticShellSortProbe
                 throw new IOException("Could not establish independent two.bin selections in both views before testing MoveItems.");
             Console.WriteLine("synthetic-shell-size-sort: move-precondition-selection-view1=True; view2=True");
             var moveDestination = Path.Combine(copyDestination, "Moved");
+            using var moveWatcher1 = focusRecoveryExperiment
+                ? new ProbeShellDirectoryMonitor(backingFolder, preMoveNames1.Length)
+                : null;
+            using var moveWatcher2 = focusRecoveryExperiment
+                ? new ProbeShellDirectoryMonitor(backingFolder, preMoveNames2.Length)
+                : null;
+            if (moveWatcher1 is not null) moveWatcher1.Operation = "synthetic-move-view1";
+            if (moveWatcher2 is not null) moveWatcher2.Operation = "synthetic-move-view2";
             using var view2SelectionBeforeMove = focusRecoveryExperiment ? ShellViewSelectionSnapshot.Capture(folderView2) : null;
             if (focusRecoveryExperiment && (movedSelectionIndex2 < 0 || view2SelectionBeforeMove is null ||
                 view2SelectionBeforeMove.SelectedCount != 2 || !view2SelectionBeforeMove.HasFocusedItem ||
@@ -683,6 +691,29 @@ public static class SyntheticShellSortProbe
                 moveState2 = StateForName(listView2, afterMove2, "two.bin");
                 moveSelectionRetained = (moveState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
                 moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+            }
+            var watcherReconciled1 = false;
+            var watcherReconciled2 = false;
+            if (focusRecoveryExperiment)
+            {
+                bool MoveResultVisible(nint targetView)
+                {
+                    var names = ReadNames(FindListView(targetView), module, expectedCount: -1);
+                    return !names.Contains("z-ten.bin", StringComparer.OrdinalIgnoreCase) &&
+                        names.Contains("two.bin", StringComparer.OrdinalIgnoreCase);
+                }
+
+                watcherReconciled1 = moveWatcher1!.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)),
+                    () => MoveResultVisible(view), () => Pump(25));
+                watcherReconciled2 = moveWatcher2!.Reconcile(
+                    () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view2, 8)(view2)),
+                    () => MoveResultVisible(view2), () => Pump(25));
+                Console.WriteLine($"synthetic-shell-watcher-reconciliation: view1={watcherReconciled1},refreshes1={moveWatcher1.RefreshCount}; view2={watcherReconciled2},refreshes2={moveWatcher2.RefreshCount}; diagnostics1={moveWatcher1.Diagnostics}; diagnostics2={moveWatcher2.Diagnostics}");
+                if (!watcherReconciled1 || !watcherReconciled2 || moveWatcher1.RefreshCount != 0 || moveWatcher2.RefreshCount != 0)
+                    throw new IOException("The production watcher queue/batch did not accept the native synthetic-view move update without a redundant full refresh in both views.");
             }
             (bool SelectionRestored, bool FocusRestored)? view2Recovery = null;
             if (focusRecoveryExperiment && (!moveSelectionRetained2 || !moveSelectionRetained))
