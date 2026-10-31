@@ -42,6 +42,14 @@ NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL
 
 Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-column-folder-smoke` 退出码 0，输出 `factory-created-provider-shared-cache=passed`、`same-path-folder-replacement=stale-snapshot-rejected`、`window-created=False`。该结果证明可将快照存储沿 class factory 创建路径显式注入新 provider；`DllGetClassObject` 仍创建独立 store，Shell 的自然 COM 激活、factory 之间共享、活动 view 更新和产品扫描器接线尚未验证。产品仍使用 ExplorerBrowser，不能据此声称逐行大小列可用。
 
+### 2026-11-01：独立 `DllGetClassObject` factory 共享快照并按可卸载周期释放
+
+将同一缓存合同提升为两次独立 `DllGetClassObject` 调用：第一个 factory 创建 provider 并写入快照，旧 provider 和 factory 释放后，第二个独立 factory 创建 provider 并读回与磁盘递归大小不同的哨兵值；相同路径替换仍因文件 ID 变化拒绝旧快照。无共享 store 的红测因列文本读不到快照而失败，加入 DLL 级受锁 store 后通过。`DllCanUnloadNow` 现在在无活动合成 COM 对象、服务器锁或进行中的 class-object 调用时释放 DLL 持有的 store 并返回 `S_OK`；NativeProbe 在释放 fixture COM 对象后显式检查此合同，随后才 `NativeLibrary.Free`。
+
+验证：原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建、`--static-shell-column-folder-smoke` 与 `--synthetic-dll-unload-contract-smoke` 均通过；前者输出 `cross-dllgetclassobject-shared-cache=passed`、`window-created=False`、`DllCanUnloadNow=S_OK; shared-store-released=True`。没有创建 Shell view/window，也没有前台或 UI 验收。
+
+边界：探针直接调用 DLL 导出的 `DllGetClassObject`，没有经由 COM loader/Shell namespace 执行自然激活；没有验证真实 Shell 是否在 view 重建过程中创建新 provider、活动 DefView 的更新、进程重启缓存或产品扫描器接线。store 在 DLL 可卸载前按绝对解析名累计快照，目前没有容量上限/逐目录淘汰策略，因此这不是产品缓存设计或内存安全结论。ExplorerBrowser 产品未变更，逐行大小列仍未实现。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。

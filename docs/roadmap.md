@@ -3,6 +3,8 @@
 
 2026-11-01 递归大小快照经 class factory 重建：NativeProbe 以预期失败证明默认 factory 创建的 provider 读不到旧 provider 的扫描快照；让 factory 显式持有并传递同一 store 后，重建 provider 可读回与磁盘值不同的哨兵值并按数值排序，同路径目录替换仍因文件 ID 不同而拒绝旧值。Native adapter `/W4 /WX`、NativeProbe Release 与无窗口合同通过。此证据仍是手动给原型 factory 注入 store；`DllGetClassObject` 跨 factory 共享、Shell 自然激活、产品扫描器与活动 view 接线未解决，ExplorerBrowser 产品未改。详见[逐行大小列调查](folder-size-column-investigation.md#2026-11-01通过-class-factory-创建共享快照-provider)。
 
+2026-11-01 递归大小缓存通过独立 `DllGetClassObject` factory 复用：无共享 store 红测失败；增加 DLL 级锁保护的 store 后，两个独立 factory 创建的 provider 可跨旧对象销毁读回哨兵快照，文件 ID 仍阻止同路径目录替换继承旧值。Native adapter `/W4 /WX`、NativeProbe Release、无窗口列合同及 DLL unload 合同通过；`DllCanUnloadNow` 无活动对象时释放共享 store 并返回 `S_OK`。该探针直接调用导出函数，不是 COM loader/Shell 自然激活或产品接线；共享 map 暂无容量上限，真实活动 view 更新、产品扫描器、内存增长和可见交互仍未验证。ExplorerBrowser 产品未改。详见[逐行大小列调查](folder-size-column-investigation.md#2026-11-01独立-dllgetclassobject-factory-共享快照并按可卸载周期释放)。
+
 2026-11-01 F5 刷新呈现候选（修订）：提交 `be89325` / `cc34dbd` 曾为用户手动 F5 加入有界重绘租约；提交 `5fcc460` 已移除该租约，避免 Shell 异步枚举期间列表长期冻结。当前普通文件系统 F5 发送 `SHCNE_UPDATEDIR`，Soft-Refresh 开启或虚拟位置走 `IShellView.Refresh()`；刷新计时仅用于之后恢复选区/焦点。查看方式切换仍在现有 view 的同步模式 setter 周围暂缓绘制。`bd91452` 的隐藏状态探针在 stock view 观察到直接 `Refresh()` 短暂归零约 10 ms，而目录通知路径保留行数；没有采集像素。故当前源码仍需 F5/查看方式的集中可见验收，不宣称空白或闪动已解决。此前验收指针 `7abb3a5` 的隔离副本现已由当前候选替换；新候选从干净提交 `166033e` 生成，身份见[候选记录](gui-acceptance-2026-10-31-main-prepared-latest.md)。`.qdr` 预览格式不匹配的列表处置继续等待 Q-Dir 验收。
 
 2026-11-01 隔离派生列重建对照：同一 synthetic `IShellView` 窗口重建策略连续两轮恢复 `Name | Recursive Size | Type`、更新值 `1`、排序及选区/焦点；显式 `IColumnManager.SetColumns` 重放则产生空白列，即使先调 `IShellView.SaveViewState` 也未恢复。只证明 NativeProbe synthetic filesystem provider/DefView，不改 ExplorerBrowser 产品；详见[派生列调查](folder-size-column-investigation.md#2026-11-01shell-view-窗口重建与列重放对照)。

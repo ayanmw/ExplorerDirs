@@ -2012,11 +2012,6 @@ namespace
             if (!references) delete this;
             return references;
         }
-        SyntheticRecursiveSizeSnapshotStore* GetRecursiveSizeSnapshotStoreForProbe()
-        {
-            if (_recursiveSizeStore) _recursiveSizeStore->AddRef();
-            return _recursiveSizeStore;
-        }
         HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName,
             const SyntheticFileIdentity& expectedIdentity, ULONGLONG bytes)
         {
@@ -3171,6 +3166,23 @@ namespace
         volatile LONG _references = 1;
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
     };
+
+    // Keep scan snapshots across transient Shell folder/factory lifetimes, then release
+    // the DLL-owned reference only after COM reports that the adapter is idle.
+    SRWLOCK g_sharedRecursiveSizeStoreLock = SRWLOCK_INIT;
+    SyntheticRecursiveSizeSnapshotStore* g_sharedRecursiveSizeStore = nullptr;
+    volatile LONG g_syntheticClassObjectCalls = 0;
+
+    SyntheticRecursiveSizeSnapshotStore* AcquireSharedRecursiveSizeStore()
+    {
+        AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+        if (!g_sharedRecursiveSizeStore)
+            g_sharedRecursiveSizeStore = new (std::nothrow) SyntheticRecursiveSizeSnapshotStore();
+        auto* store = g_sharedRecursiveSizeStore;
+        if (store) store->AddRef();
+        ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+        return store;
+    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
@@ -3184,18 +3196,53 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
 
 STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
 {
-    if (classId != g_syntheticFolderClassId) return CLASS_E_CLASSNOTAVAILABLE;
-    auto* factory = new (std::nothrow) SyntheticFolderClassFactory();
-    if (!factory) return E_OUTOFMEMORY;
-    const auto result = factory->QueryInterface(iid, value);
-    factory->Release();
+    // Serialize the in-flight marker with DllCanUnloadNow's final locked check so
+    // unload cannot race a class-object request that is about to enter this DLL.
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    InterlockedIncrement(&g_syntheticClassObjectCalls);
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    HRESULT result = CLASS_E_CLASSNOTAVAILABLE;
+    if (value) *value = nullptr;
+    if (!value) result = E_POINTER;
+    else if (classId == g_syntheticFolderClassId)
+    {
+        auto* store = AcquireSharedRecursiveSizeStore();
+        if (!store) result = E_OUTOFMEMORY;
+        else
+        {
+            auto* factory = new (std::nothrow) SyntheticFolderClassFactory(store);
+            store->Release();
+            if (!factory) result = E_OUTOFMEMORY;
+            else
+            {
+                result = factory->QueryInterface(iid, value);
+                factory->Release();
+            }
+        }
+    }
+    InterlockedDecrement(&g_syntheticClassObjectCalls);
     return result;
 }
 
 STDAPI DllCanUnloadNow()
 {
-    return InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) == 0 &&
-        InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) == 0 ? S_OK : S_FALSE;
+    if (InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) != 0 ||
+        InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) != 0 ||
+        InterlockedCompareExchange(&g_syntheticClassObjectCalls, 0, 0) != 0) return S_FALSE;
+
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    HRESULT result = S_OK;
+    if (InterlockedCompareExchange(&g_syntheticLiveObjects, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_syntheticServerLocks, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_syntheticClassObjectCalls, 0, 0) == 0)
+    {
+        auto* store = g_sharedRecursiveSizeStore;
+        g_sharedRecursiveSizeStore = nullptr;
+        if (store) store->Release();
+    }
+    else result = S_FALSE;
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    return result;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticDllUnloadContractSmoke()
@@ -3862,7 +3909,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
 
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
-    SyntheticRecursiveSizeSnapshotStore* snapshotStoreForRecreation = nullptr;
+    IClassFactory* initialFactory = nullptr;
+    IShellFolder2* initialFactoryFolder = nullptr;
+    IClassFactory* recreationFactory = nullptr;
     IShellFolder2* factoryRecreatedFolder = nullptr;
     IPersistFolder2* factoryRecreatedPersist = nullptr;
     const auto factoryRecreatedBytes = updatedBytes == 0
@@ -3889,8 +3938,16 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
 
     result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_update;
-    root = new (std::nothrow) SyntheticSortFolder();
-    if (!root) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+    result = DllGetClassObject(g_syntheticFolderClassId, IID_IClassFactory,
+        reinterpret_cast<void**>(&initialFactory));
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = initialFactory->CreateInstance(nullptr, IID_IShellFolder2,
+        reinterpret_cast<void**>(&initialFactoryFolder));
+    initialFactory->Release();
+    initialFactory = nullptr;
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    root = static_cast<SyntheticSortFolder*>(initialFactoryFolder);
+    initialFactoryFolder = nullptr;
     result = root->Initialize(rootPidl);
     if (FAILED(result)) goto cleanup_recursive_size_update;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
@@ -3999,8 +4056,6 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
         result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName,
             expectedChildIdentity, factoryRecreatedBytes);
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        snapshotStoreForRecreation = root->GetRecursiveSizeSnapshotStoreForProbe();
-        if (!snapshotStoreForRecreation) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
         refreshedEnumerator->Release();
         refreshedEnumerator = nullptr;
         CoTaskMemFree(refreshedOther);
@@ -4017,14 +4072,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
         childFolder = nullptr;
 
         // Recreating the provider must not lose scan snapshots keyed by absolute Shell identity.
-        auto* recreationFactory = new (std::nothrow) SyntheticFolderClassFactory(snapshotStoreForRecreation);
-        if (!recreationFactory) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+        result = DllGetClassObject(g_syntheticFolderClassId, IID_IClassFactory,
+            reinterpret_cast<void**>(&recreationFactory));
+        if (FAILED(result)) goto cleanup_recursive_size_update;
         result = recreationFactory->CreateInstance(nullptr, IID_IShellFolder2,
             reinterpret_cast<void**>(&factoryRecreatedFolder));
         recreationFactory->Release();
+        recreationFactory = nullptr;
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        snapshotStoreForRecreation->Release();
-        snapshotStoreForRecreation = nullptr;
         result = factoryRecreatedFolder->QueryInterface(IID_PPV_ARGS(&factoryRecreatedPersist));
         if (FAILED(result)) goto cleanup_recursive_size_update;
         result = factoryRecreatedPersist->Initialize(rootPidl);
@@ -4111,9 +4166,11 @@ cleanup_recursive_size_update:
     if (otherFolder) CoTaskMemFree(otherFolder);
     if (childFolder) CoTaskMemFree(childFolder);
     if (root) root->Release();
+    if (initialFactoryFolder) initialFactoryFolder->Release();
+    if (initialFactory) initialFactory->Release();
+    if (recreationFactory) recreationFactory->Release();
     if (factoryRecreatedPersist) factoryRecreatedPersist->Release();
     if (factoryRecreatedFolder) factoryRecreatedFolder->Release();
-    if (snapshotStoreForRecreation) snapshotStoreForRecreation->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);
     return result;
 }

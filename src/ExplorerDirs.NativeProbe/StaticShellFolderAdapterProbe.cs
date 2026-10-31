@@ -626,7 +626,15 @@ internal static class StaticShellFolderAdapterProbe
             if (adapter != 0) Marshal.Release(adapter);
             if (folder != 0) Marshal.Release(folder);
             if (folderPidl != 0) Marshal.FreeCoTaskMem(folderPidl);
-            if (nativeLibrary != 0) NativeLibrary.Free(nativeLibrary);
+            if (nativeLibrary != 0)
+            {
+                var canUnload = Marshal.GetDelegateForFunctionPointer<DllCanUnloadNow>(
+                    NativeLibrary.GetExport(nativeLibrary, "DllCanUnloadNow"))();
+                if (canUnload != 0)
+                    throw new InvalidOperationException($"The native adapter retained live COM objects after contract cleanup: 0x{canUnload:X8}.");
+                Console.WriteLine("synthetic-recursive-size-store: DllCanUnloadNow=S_OK; shared-store-released=True");
+                NativeLibrary.Free(nativeLibrary);
+            }
             var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (Path.GetFullPath(fixture).StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fixture))
                 Directory.Delete(fixture, recursive: true);
@@ -2399,7 +2407,7 @@ internal static class StaticShellFolderAdapterProbe
                 $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; disk-child-bytes=7; " +
                 "native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; " +
                 "same-pidl-update=rescan-value/text/property/sort-passed; re-enumerated-pidl-retained=passed; " +
-                "factory-created-provider-shared-cache=passed; same-path-folder-replacement=stale-snapshot-rejected; window-created=False");
+                "cross-dllgetclassobject-shared-cache=passed; same-path-folder-replacement=stale-snapshot-rejected; window-created=False");
         }
         finally
         {
@@ -2848,6 +2856,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadMapColumnTrace(uint index, out uint column, out ShellColumnManager.NativeKey key, out int result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string parsingName, ulong volumeSerial, ulong fileIdLow, ulong fileIdHigh, long scannedBytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityCacheSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string childParsingName, [MarshalAs(UnmanagedType.LPWStr)] string otherParsingName, ulong childVolumeSerial, ulong childFileIdLow, ulong childFileIdHigh, ulong otherVolumeSerial, ulong otherFileIdLow, ulong otherFileIdHigh, long initialBytes, long otherRowBytes, long updatedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DllCanUnloadNow();
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
