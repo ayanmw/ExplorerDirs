@@ -34,9 +34,9 @@ Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树�
 
 ## 2026-10-31 官方 Soft-Refresh 行为补查
 
-Q-Dir 的公开资料实际列出两个不同选项，不能合并解释：语言表 ID 53016 是“Soft-Refresh, not re-enumerate the view (drop, copy, refreshed)”；ID 53033 是“Disable auto sorting when rename or copy items”。FAQ 112 把后一个新名称称为 Soft-Refresh，并描述其在新增项目时避免自动重排；FAQ 139 将该开关放在“Tools → List View”中。由此可确认“不重枚举”和“禁用自动排序”是不同的 Q-Dir 行为入口，但公开资料没有说清二者内部交互、逐操作刷新时机及失败回退。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)、[FAQ 139](https://www.softwareok.com/?faq=139&seite=faq-Q-DIR)、[官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK)
+Q-Dir FAQ 112 将 Soft-Refresh 的新名称写作“Disable auto sorting when rename or copy items”，并描述同一选项在新增项目时避免视图重排；FAQ 139 也把这个名称放在“Tools → List View”的单个开关中。官方语言表仍同时保留 ID 53016（“Soft-Refresh, not re-enumerate the view”）和 ID 53033（“Disable auto sorting…”），但仅凭两个字符串无法证明当前界面同时提供两个开关。当前最可信的解释是同一功能在不同版本/文案中的旧名和新名；逐操作时机与失败回退仍待 Q-Dir 可见验收。[Q-Dir FAQ 112](https://www.softwareok.com/?faq=112&seite=faq-Q-DIR)、[FAQ 139](https://www.softwareok.com/?faq=139&seite=faq-Q-DIR)、[官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK)
 
-Windows 的 `FWF_AUTOARRANGE` 公开语义是自动排列视图元素；`FWF_NOENUMREFRESH` 的语义是不在刷新时重新枚举视图或丢弃现有内容。[Microsoft FOLDERFLAGS 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags) Explorer Dirs 后续已加入默认关闭的全局 Soft-Refresh 实验开关，使用独立 `SoftRefresh.ini` 并将 `FWF_NOENUMREFRESH` 应用于当前和新建的 Shell 视图。这只实现了不重枚举语义，不能据此宣称实现 Q-Dir 的“复制/重命名时禁用自动排序”；独立排序开关仍未实现。应用中开启后，用户按 F5 也不会触发重新枚举，关闭后再按 F5 才会完整读取当前目录。实际内容更新和排序效果仍待集中 UI 验收。
+Windows 的 `FWF_AUTOARRANGE` 公开语义是自动排列视图元素；`FWF_NOENUMREFRESH` 则明确表示刷新时不重新枚举视图（也不丢弃当前内容）。[Microsoft FOLDERFLAGS 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-folderflags) Explorer Dirs 的默认关闭全局开关使用独立 `SoftRefresh.ini`，并把 `FWF_NOENUMREFRESH` 应用于现有和新建的 Shell 视图；其语义与 Q-Dir 公开描述相符，但当前没有可见证据确认复制、拖放、重命名各自如何更新/重排。开启后按 F5 也不会重新枚举；关闭后再按 F5 才完整读取当前目录。实际操作时的内容更新与排序效果仍待集中 UI 验收。
 
 ## 2026-10-27 Win+E 入口对照
 
