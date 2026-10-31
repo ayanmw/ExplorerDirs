@@ -290,7 +290,7 @@ public static class SyntheticShellSortProbe
                     (!shellWindowScrollProbe && (ascendingComparisons == 0 || descendingComparisons == 0)) || GetForegroundWindow() != foreground)
                     return 1;
                 if (exerciseUpdateNotifications)
-                    ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder,
+                    ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder, copyDestination,
                         sizeUpdateStrategy, customSizeColumn, host, hostPointer);
                 var savedViewState = host?.ReadSavedBytes() ?? [];
                 Console.WriteLine($"synthetic-view-state-stream: reads={host?.Reads ?? 0}; writes={host?.Writes ?? 0}; trace=[{string.Join(" || ", host?.ViewStateStreamTrace ?? [])}]; saved-bytes={savedViewState.Length}; saved-sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(savedViewState))}");
@@ -766,8 +766,8 @@ public static class SyntheticShellSortProbe
     }
 
     private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint folderView, nint view,
-        nint rootPidl, string backingFolder, string strategyFilter, bool customSizeColumn, StreamViewHost host,
-        nint hostPointer)
+        nint rootPidl, string backingFolder, string copyDestination, string strategyFilter, bool customSizeColumn,
+        StreamViewHost host, nint hostPointer)
     {
         if (!customSizeColumn)
             throw new InvalidOperationException("Recursive-size notifications require the synthetic custom size column.");
@@ -807,7 +807,8 @@ public static class SyntheticShellSortProbe
                 RunSizeUpdateStrategy("single-item-recreate-shell-window-scroll", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, recreateShellWindow: true,
-                    preserveScrollAnchor: true, host: host, hostPointer: hostPointer);
+                    preserveScrollAnchor: true, host: host, hostPointer: hostPointer,
+                    copyDestination: copyDestination);
             if (strategyFilter == "item-plus-parent")
                 RunSizeUpdateStrategy("item-plus-parent", 1, () =>
                 {
@@ -833,7 +834,8 @@ public static class SyntheticShellSortProbe
     private static void RunSizeUpdateStrategy(string name, long updatedSize, Action notify,
         nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
-        nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false)
+        nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
+        string? copyDestination = null)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -970,6 +972,9 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update-focus: list-focused={focusRestoredToList}; before={restoredAnchor}; arrow-down-target={expectedNextName}; moved={arrowMovedFocus}; hwnd=0x{listView:X}");
             if (!focusRestoredToList || !arrowMovedFocus)
                 throw new InvalidOperationException("After restoring focus to the recreated native file list, Arrow Down did not move selection and focus to the next item.");
+            VerifyRecreatedViewSelectionCopy(view, backingFolder,
+                copyDestination ?? throw new InvalidOperationException("The recreated-view copy destination was not provided."),
+                expectedNextName);
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
@@ -1098,6 +1103,40 @@ public static class SyntheticShellSortProbe
             DestroyMenu(menu);
             Marshal.Release(contextMenu);
         }
+    }
+
+    private static void VerifyRecreatedViewSelectionCopy(nint view, string backingFolder, string copyDestination, string selectedName)
+    {
+        var dataObjectId = DataObjectId;
+        Check(At<GetItemObject>(view, 15)(view, 1, ref dataObjectId, out var selectionDataObject)); // SVGIO_SELECTION.
+        if (selectionDataObject == 0) throw new InvalidOperationException("The recreated Shell view returned no selected-item IDataObject.");
+        var destinationPath = Path.Combine(copyDestination, "after-recreate");
+        Directory.CreateDirectory(destinationPath);
+        try
+        {
+            var fileOperationClass = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var fileOperationInterface = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref fileOperationClass, 0, 1, ref fileOperationInterface, out var operation));
+            try
+            {
+                Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                var shellItemInterface = ShellItemId;
+                Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemInterface, out var destinationItem));
+                try { Check(At<CopyItems>(operation, 17)(operation, selectionDataObject, destinationItem)); }
+                finally { Marshal.Release(destinationItem); }
+                Check(At<PerformOperations>(operation, 21)(operation));
+                Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                var sourcePath = Path.Combine(backingFolder, selectedName);
+                var copiedPath = Path.Combine(destinationPath, selectedName);
+                var copied = aborted == 0 && File.Exists(sourcePath) && File.Exists(copiedPath) &&
+                    new FileInfo(sourcePath).Length == new FileInfo(copiedPath).Length;
+                Console.WriteLine($"synthetic-size-update-file-operation: selected={selectedName}; copy-items=True; aborted={aborted}; source-preserved={File.Exists(sourcePath)}; destination-matches={copied}");
+                if (!copied)
+                    throw new IOException("IFileOperation did not copy the selected item from the recreated Shell view with matching content length.");
+            }
+            finally { Marshal.Release(operation); }
+        }
+        finally { Marshal.Release(selectionDataObject); }
     }
 
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null

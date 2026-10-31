@@ -800,7 +800,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 排序条件已通过补充探针：重建前后 `IFolderView2.GetSortColumns` 都返回同一递归大小列及方向 `{B725F130-47EF-101A-A5F1-02608C9EEBAC}:10/1`。随后将焦点显式交给重建后的 `SysListView32`，模拟 `VK_DOWN` 后选中项和 focused item 都移动到下一行。两项均在 Private Desktop 中通过，前台 HWND 与输入 tick 未变。
 
-在同一重建场景中，`IShellView.GetItemObject(SVGIO_BACKGROUND)` 仍返回 `IContextMenu`，内存 `HMENU` 的 `QueryContextMenu` 成功并生成 7 项；没有显示 popup 或执行命令。该结果证明宿主可以把焦点重新交给新的文件列表并继续使用方向键，也证明 Shell 背景菜单对象在重建后仍可构造；它不证明 Shell 会自动迁移旧 HWND 焦点，也不证明菜单可见交互或命令路由正常。仍需覆盖标签/导航命令路由、重建后的文件操作、拖放和通知合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针没有可见 UI 验收。
+在同一重建场景中，`IShellView.GetItemObject(SVGIO_BACKGROUND)` 仍返回 `IContextMenu`，内存 `HMENU` 的 `QueryContextMenu` 成功并生成 7 项；没有显示 popup 或执行命令。重建后的 `SVGIO_SELECTION` `IDataObject` 也通过 `IFileOperation.CopyItems` 把 `scroll-250.dat` 复制到本次运行独立临时目标，操作未取消、源文件保留且目标长度匹配。
+
+该结果证明宿主可以把焦点重新交给新的文件列表并继续使用方向键，Shell 背景菜单对象可重建，选中项数据对象可用于原生复制；它不证明 Shell 会自动迁移旧 HWND 焦点，也不证明菜单可见交互、菜单命令路由、剪切/删除/重命名、拖放或通知都正常。仍需覆盖标签/导航命令路由及这些剩余合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针没有可见 UI 验收。
 
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
