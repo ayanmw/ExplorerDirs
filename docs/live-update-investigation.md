@@ -1,12 +1,12 @@
 # 文件视图自动更新调查（2026-10-21）
 
-## 2026-10-31：用户 F5 使用 Shell 目录通知保留当前行
+## 2026-10-31：Shell 目录通知刷新候选（已撤回）
 
 用户报告 F5 刷新期间文件区明显黑屏。新增 Private Desktop stock `IShellView` 生命周期探针，以 300 个临时文件观察同一 view 的查看方式切换、原生 Refresh 与 Shell 目录通知：List/Small Icons/Details 过程的行数保持 300，view 与 `SysListView32` HWND 不变；`IShellView.Refresh()` 会短暂将行数清空到 0，再恢复到 301。1 秒采样里有 3 个零行样本、首末间隔 11 ms，采样约每 5 ms 一次，只是行数观察窗口，不能当作像素空白时长。
 
 同一夹具改为对当前目录绝对 PIDL 发送 `SHCNE_UPDATEDIR`（`SHCNF_IDLIST | SHCNF_FLUSHNOWAIT`）后，行数从 301 增到 302，最小仍为 301，view/list HWND 不变。设置 `FWF_NOENUMREFRESH` 后，新增文件没有被自动反映（仍为 302）；显式 Shell 目录通知后更新为 303，过程中没有观察到零行。这是隔离 stock Shell 文件夹的直接证据，尚非 ExplorerBrowser 产品宿主或可见 UI 证据，也不能外推所有虚拟 Shell provider。
 
-基于该结果，手动 F5 对普通文件系统位置现读取当前浏览器文件夹 PIDL 并发送 `SHCNE_UPDATEDIR`，避免调用会先清空行的 `IShellView.Refresh()`；搜索、虚拟位置或 PIDL 不可用时保留旧刷新回退。选区/焦点快照和完成恢复流程继续使用。App Release build 和完整 Release SettingsSmoke 通过；NativeProbe Release build 和 Private Desktop 刷新/模式探针通过，前台窗口与输入时间戳未变化。
+基于该结果，曾短暂尝试让手动 F5 对普通文件系统位置读取当前浏览器文件夹 PIDL 并发送 `SHCNE_UPDATEDIR`，搜索、虚拟位置或 PIDL 不可用时回退 `IShellView.Refresh()`。后续隐藏 ExplorerBrowser 宿主对照显示目录通知更慢，且不能证明改善可见画面，因此生产接线已由提交 `b93a9e7` 撤回；**当前 F5 直接调用当前视图的 `IShellView.Refresh()`**。本节的行数实验仍是 stock Shell 隔离夹具证据，不是当前产品路径的描述。
 
 仍需在集中 GUI 验收中核对可见画面、选区、焦点、滚动位置、慢速目录、网络路径和大目录行为。由于本轮没读取像素，不能断言黑屏已经消失。查看方式切换期间行数保持，但原生 Shell 仍会重排和绘制项目，闪烁问题仍单独开放。
 
