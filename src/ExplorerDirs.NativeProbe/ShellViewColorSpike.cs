@@ -6010,6 +6010,7 @@ internal static class ShellViewColorSpike
         var shellItemInterfaceId = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
         nint source = 0, destination = 0;
         ProbeShellDirectoryMonitor? directoryMonitor = null;
+        ShellViewSelectionSnapshot? overflowSelectionSnapshot = null;
         ShellViewSelectionSnapshot? overlapSelectionSnapshot = null;
         try
         {
@@ -6077,6 +6078,42 @@ internal static class ShellViewColorSpike
             if (!deleteAutoUpdated && !deleteRecoveredByNotification && !deleteWatcherReconciled && !deleteRecoveredByRefresh)
                 throw new IOException("The Shell view could not remove the deleted item after Refresh.");
 
+            var overflowRecoveryPath = Path.Combine(fixture, "overflow-recovery-visible.txt");
+            Check(At<SelectFolderItem>(folderView, 15)(folderView, 0, 0x1u | 0x4u));
+            Pump(50);
+            overflowSelectionSnapshot = ShellViewSelectionSnapshot.Capture(folderView)
+                ?? throw new IOException("Could not capture the selection before watcher-overflow recovery.");
+            if (overflowSelectionSnapshot.SelectedCount == 0)
+                throw new IOException("No stable Shell selection was available before watcher-overflow recovery.");
+            var overflowSelectionTrace = new List<string>();
+            (bool SelectionRestored, bool FocusRestored)? overflowSelectionResult = null;
+            var watcherGenerationBeforeOverflow = directoryMonitor.WatcherGeneration;
+            var acceptedEventsBeforeOverflow = directoryMonitor.AcceptedEventCount;
+            var refreshesBeforeOverflow = directoryMonitor.RefreshCount;
+            directoryMonitor.Operation = "overflow-recovery";
+            directoryMonitor.InjectWatcherErrorForProbe(
+                new InternalBufferOverflowException("isolated IShellView refresh contract"));
+            if (!directoryMonitor.WaitForWatcherGeneration(watcherGenerationBeforeOverflow + 1,
+                    TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The watcher was not replaced after the injected overflow.");
+            File.WriteAllText(overflowRecoveryPath, "visible after watcher recovery");
+            if (!directoryMonitor.WaitForAcceptedEvents(acceptedEventsBeforeOverflow + 1,
+                    TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The replacement watcher did not observe the new Shell-view fixture item.");
+            var overflowRecoveryReconciled = directoryMonitor.Reconcile(
+                () => ReadShellViewCount(folderView), () => Check(At<RefreshView>(view, 8)(view)),
+                () => ShellViewContainsPath(folderView, overflowRecoveryPath), () => Pump(25),
+                afterRefreshSettled: () =>
+                {
+                    overflowSelectionResult = overflowSelectionSnapshot.Restore(view, overflowSelectionTrace.Add,
+                        allowSelectedFocusFallback: false);
+                });
+            var overflowRecoveryRefreshes = directoryMonitor.RefreshCount - refreshesBeforeOverflow;
+            if (!overflowRecoveryReconciled || overflowRecoveryRefreshes < 1 ||
+                !ShellViewContainsPath(folderView, overflowRecoveryPath) ||
+                overflowSelectionResult is not { SelectionRestored: true, FocusRestored: true })
+                throw new IOException($"Watcher overflow recovery did not reconcile the new item and restore Shell selection/focus: reconciled={overflowRecoveryReconciled},refreshes={overflowRecoveryRefreshes},selection={overflowSelectionResult?.SelectionRestored.ToString() ?? "null"},focus={overflowSelectionResult?.FocusRestored.ToString() ?? "null"},trace={string.Join(";", overflowSelectionTrace)}.");
+
             var inFlightSeedPath = Path.Combine(fixture, "refresh-overlap-seed.txt");
             File.WriteAllText(inFlightSeedPath, "seed");
             directoryMonitor.Operation = "refresh-seed";
@@ -6135,12 +6172,14 @@ internal static class ShellViewColorSpike
             return $"copy=created,auto-update:{copyAutoUpdated},change-notify-recovered:{copyRecoveredByNotification},watcher-reconciled:{copyWatcherReconciled},watcher-refreshes:{copyWatcherRefreshes},refresh-recovered:{copyRecoveredByRefresh};" +
                 $"rename=created,auto-update:{renameAutoUpdated},change-notify-recovered:{renameRecoveredByNotification},watcher-reconciled:{renameWatcherReconciled},watcher-refreshes:{renameWatcherRefreshes},refresh-recovered:{renameRecoveredByRefresh};" +
                 $"delete=created,auto-update:{deleteAutoUpdated},change-notify-recovered:{deleteRecoveredByNotification},watcher-reconciled:{deleteWatcherReconciled},watcher-refreshes:{deleteWatcherRefreshes},refresh-recovered:{deleteRecoveredByRefresh};" +
+                $"watcher-overflow-recovery=generation:{watcherGenerationBeforeOverflow}->{directoryMonitor.WatcherGeneration},native-refreshes:{overflowRecoveryRefreshes},item-visible:{ShellViewContainsPath(folderView, overflowRecoveryPath)},selection-restored:{overflowSelectionResult.Value.SelectionRestored},focus-restored:{overflowSelectionResult.Value.FocusRestored};" +
                 $"view-count={beforeCount}->{beforeCount + 1}->{beforeCount + 1}->{beforeCount};" +
                 $"refresh-overlap=reconciled:{overlapReconciled},created-during-refresh:{createdDuringRefresh},refreshes:{refreshesForOverlap},followup-refreshes-after-create:{followupRefreshesAfterOverlapCreate},selection-restored:{overlapSelectionResult.Value.SelectionRestored},selection-already-present:{selectionMatchedBeforeRestore},hidden-focus-restored:{overlapSelectionResult.Value.FocusRestored};" +
                 $"ui-shown=False;watcher-trace={directoryMonitor.Diagnostics}";
         }
         finally
         {
+            overflowSelectionSnapshot?.Dispose();
             overlapSelectionSnapshot?.Dispose();
             directoryMonitor?.Dispose();
             if (destination != 0) Marshal.Release(destination);

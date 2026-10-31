@@ -5509,3 +5509,9 @@ Private Desktop NativeProbe 将源夹具放在 D:、目标放在 C: 系统临时
 ## 2026-11-01：派生目录大小列的单行刷新边界
 
 NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归扫描器取得的 `1 B` 目录摘要发布到活动合成 provider 缓存，再对对应 `SysListView32` 行发送 `LVM_UPDATE`。Private Desktop watchdog exit 0，前台 HWND/last-input tick 未变且隔离清理通过；消息返回 0，但 2.5 秒内无 `EnumObjects`、属性读取或比较，列值/排序仍旧、选区焦点保留。相同 WPF 根宿主的整视图 Refresh 对照重新枚举 2 行、大小值读回 `[4|1]` 并排序为 `small.bin|child`；首次读回选择/焦点暂时缺失，随后 `ShellViewSelectionSnapshot` 恢复且读回成功。补充 `WM_SETREDRAW(FALSE)` 包住刷新及快照恢复的对照也刷新成功，但没有采集到可比较的像素，`SysSetRedraw` HWND 属性未出现，无法确认控件绘制是否真正暂停。NativeProbe Release build 0 警告/错误。结果仅限合成 provider 的隔离 DefView，不代表 ExplorerBrowser 产品刷新或可见闪烁；局部 ListView 更新不能替代派生列重取，绘制抑制也尚未证明减少过渡帧。Private Desktop 的 `GetPixel` 采样含有随阶段变化的 `0xFFFFFFFF` 无效值，离屏结果不能用于判断像素变化；用户可见过渡帧仍待集中验收。后续同宿主的独立探针中，未抑制刷新收到 2 次 `WM_PAINT`，`WM_SETREDRAW(FALSE)` 期间也收到 2 次、解除后强制重绘另有 1 次；窗口过程消息数不表示帧内容，但当前没有支持将该机制接入产品的证据。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-listview-单行更新不能刷新派生目录大小)。
+
+## 2026-11-01：IShellView watcher 溢出到行更新与选区焦点恢复
+
+将 NativeProbe 的受控 watcher overflow 场景接入真实 stock filesystem `IShellView`：替换 watcher generation 1→2 后新建文件，队列记录强制对账；刷新前 view 仍为旧行数，调用 `IShellView.Refresh()` 后新条目可见，原选区和 focused item 均恢复。`color-private-desktop` watchdog exit 0，前台与输入未变、隔离清理通过；NativeProbe Release build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-072603-e7caffb5.stdout.log`。
+
+此项覆盖 NativeProbe 的 watcher、队列、stock `IShellView` 重枚举和行身份选择恢复链路；错误仍是注入的，不是真实 OS buffer overflow，且未接入产品 ExplorerBrowser、可见 GUI、Shell 菜单/拖放或第三方 provider。产品宿主迁移门槛仍未关闭。

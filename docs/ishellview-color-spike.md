@@ -1603,3 +1603,7 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 扩展 NativeProbe 的 `ProbeShellDirectoryMonitor`，让隔离宿主复用产品 `ShellDirectoryWatcherRecovery` 与 `ShellDirectoryWatcherEventGate<T>`：收到 watcher Error 后将目录状态标为需强制对账，按恢复退避创建并启用新 watcher，再隔离和释放旧 watcher。新增 `--shell-watcher-recovery-contract`，对唯一临时目录注入 `InternalBufferOverflowException`，断言 watcher generation 从 1 到 2、队列要求强制刷新，并由替换 watcher 收到新建文件事件。NativeProbe Release build 0 警告/错误；该合同退出码 0。既有 `--shell-change-reconciliation` 复跑退出码 0，跨窗格 Shell 复制/移动/重命名/删除与行身份、选区/焦点回归均通过，隐藏窗口且前台未变。
 
 该合同是受控错误注入，不是操作系统真实缓冲区溢出；也没有把替换 watcher 接入真实 `IShellView` 的重枚举/刷新，未验证 Shell 菜单、拖放、通知对账或可见 UI。它只补充迁移阶段对 watcher 生命周期恢复的隔离证据，不表示 ExplorerBrowser 产品宿主已迁移或颜色功能可进入产品。下一门槛仍是把 watcher 的重新枚举结果安全发布到隔离 `IShellView` 行模型，并联合验证 PIDL 生命周期、排序、选择/焦点、Shell 通知以及真实菜单/操作；全部通过前不迁移产品宿主。
+
+随后将溢出场景接入真实 stock `IShellView` 夹具：选择并聚焦一条原有行，注入 watcher 错误，等待替换 watcher generation 1→2，再创建新文件。隔离队列观察到 `force=True` 与新建 delta；刷新前 view 仍读到 2 行而预期 3 行，调用真实 `IShellView.Refresh()` 后收敛到 3 行，新项目解析名可见；原有选区和 focused item 均经 `ShellViewSelectionSnapshot` 恢复。输出 `native-refreshes=1,item-visible=True,selection-restored=True,focus-restored=True`。`--ishellview-color-spike-private-desktop` watchdog exit 0，前台 HWND 与输入 tick 未变，隔离清理通过；NativeProbe Release build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-072603-e7caffb5.stdout.log`。
+
+这将受控 watcher 恢复推进到真实 filesystem `IShellView` 的重新枚举、行可见与选择/焦点恢复，但 Error 仍为探针注入，不是 OS 自然溢出；使用的也是探针 watcher/行协调器，不是产品 ExplorerBrowser watcher 的可见 GUI 路径。没有验证像素闪烁、第三方 Shell provider、菜单或拖放。它通过的是迁移原型内部的刷新与状态门槛，不等于批准产品宿主迁移。
