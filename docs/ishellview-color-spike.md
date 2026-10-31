@@ -1552,6 +1552,6 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 
 ### 2026-11-01：ZIP 虚拟项目真实 `IFileOperation.CopyItems`
 
-新增单独的 Private Desktop 探针，从 ZIP `IShellView` 取得虚拟文件 `blue-rule-target.txt` 的原生 `IDataObject`，传给真实 Shell `IFileOperation.CopyItems`，目标为同一临时夹具下的物理目录。复制没有 abort；目标文件内容为单字节 `0x41`，ZIP 视图仍有两项，归档内源项仍存在且归档可再次读取。NativeProbe Release build 0 警告/错误，watchdog exit 0，前台 HWND/last-input 未变，夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-051046-e94f1536.stdout.log`。
+新增单独的 Private Desktop 探针，从 ZIP `IShellView` 取得虚拟文件 `blue-rule-target.txt` 与虚拟目录 `virtual-folder` 的原生多项 `IDataObject`，传给真实 Shell `IFileOperation.CopyItems`，目标为同一临时夹具下的物理目录。复制没有 abort；普通文件内容为单字节 `0x41`，目录中的 `nested.txt` 内容为 `0x42`，ZIP 视图仍有两项，归档内两个源项仍存在且归档可再次读取。NativeProbe Release build 0 警告/错误，watchdog exit 0，前台 HWND/last-input 未变，夹具清理通过。单项基线日志：`src/.state/native-probe-watchdog/20261101-051046-e94f1536.stdout.log`；多项复验日志：`src/.state/native-probe-watchdog/20261101-051253-08abdc52.stdout.log`。
 
-这证明当前 Windows ZIP provider 的虚拟文件项可以经自有 `IShellView` 暴露的 Shell 数据对象完成原生 CopyItems；它不是 `extract` 菜单命令成功，也未覆盖实际菜单选取、可见提示、进度/冲突 UI、目标视图通知或其他压缩/虚拟 provider。产品 ExplorerBrowser 未改。
+这证明当前 Windows ZIP provider 的多个虚拟 Shell 项（文件与含嵌套文件的目录）可以经自有 `IShellView` 暴露的 Shell 数据对象完成原生 CopyItems；它不是 `extract` 菜单命令成功，也未覆盖实际菜单选取、可见提示、进度/冲突 UI、目标视图通知或其他压缩/虚拟 provider。产品 ExplorerBrowser 未改。

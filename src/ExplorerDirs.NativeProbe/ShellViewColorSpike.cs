@@ -2509,7 +2509,9 @@ internal static class ShellViewColorSpike
         nint folderPidl, string fixture, nint foreground)
     {
         var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
-        nint selectedChild = 0, childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        nint childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        var selectedChildren = new List<nint>(itemCount);
+        var selectedNames = new List<string>(itemCount);
         nint systemImageList = 0;
         try
         {
@@ -2522,8 +2524,14 @@ internal static class ShellViewColorSpike
                     absolute = ILCombine(folderPidl, child);
                     if (absolute == 0) throw new InvalidOperationException("Could not combine a ZIP entry PIDL.");
                     var row = ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList);
-                    if (row.DisplayName.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase))
-                        selectedChild = ILClone(child);
+                    if (row.DisplayName.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase) ||
+                        row.DisplayName.Equals("virtual-folder", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var retainedChild = ILClone(child);
+                        if (retainedChild == 0) throw new InvalidOperationException($"Could not retain ZIP entry PIDL [{row.DisplayName}].");
+                        selectedChildren.Add(retainedChild);
+                        selectedNames.Add(row.DisplayName);
+                    }
                 }
                 finally
                 {
@@ -2531,14 +2539,19 @@ internal static class ShellViewColorSpike
                     Marshal.FreeCoTaskMem(child);
                 }
             }
-            if (selectedChild == 0)
-                throw new InvalidOperationException("The ZIP Shell view did not enumerate the expected virtual file entry.");
+            var orderedNames = selectedNames.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (selectedChildren.Count != itemCount || selectedNames.Count != 2 ||
+                !selectedNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase) ||
+                !selectedNames.Contains("virtual-folder", StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The ZIP Shell view did not enumerate the expected two virtual items for multi-item copy.");
 
-            childArray = Marshal.AllocHGlobal(IntPtr.Size);
-            Marshal.WriteIntPtr(childArray, selectedChild);
+            childArray = Marshal.AllocHGlobal(IntPtr.Size * selectedChildren.Count);
+            for (var index = 0; index < selectedChildren.Count; index++)
+                Marshal.WriteIntPtr(childArray, index * IntPtr.Size, selectedChildren[index]);
             var dataObjectId = new Guid("0000010E-0000-0000-C000-000000000046");
-            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, childArray, in dataObjectId, 0, out dataObject));
-            if (dataObject == 0) throw new InvalidOperationException("The ZIP entry did not provide a Shell IDataObject.");
+            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, (uint)selectedChildren.Count,
+                childArray, in dataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new InvalidOperationException("The selected ZIP entries did not provide a Shell IDataObject.");
 
             var destinationPath = Path.Combine(fixture, "shell-copy-target");
             Directory.CreateDirectory(destinationPath);
@@ -2554,17 +2567,22 @@ internal static class ShellViewColorSpike
 
             var copiedPath = Path.Combine(destinationPath, "blue-rule-target.txt");
             var copiedBytes = File.Exists(copiedPath) ? File.ReadAllBytes(copiedPath) : [];
+            var nestedCopiedPath = Path.Combine(destinationPath, "virtual-folder", "nested.txt");
+            var nestedCopiedBytes = File.Exists(nestedCopiedPath) ? File.ReadAllBytes(nestedCopiedPath) : [];
             var sourceStillPresent = GetShellViewItemCount(folderView) == itemCount;
             var archiveIntact = false;
             using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
             {
                 var sourceEntry = archive.GetEntry("blue-rule-target.txt");
-                archiveIntact = sourceEntry is { Length: 1 };
+                var nestedSourceEntry = archive.GetEntry("virtual-folder/nested.txt");
+                archiveIntact = sourceEntry is { Length: 1 } && nestedSourceEntry is { Length: 1 };
             }
             var foregroundUnchanged = GetForegroundWindow() == foreground;
-            Console.WriteLine($"ishellview-zip-iFileOperation-copy: operation=CopyItems;aborted={aborted};destination-file={File.Exists(copiedPath)};bytes=[{Convert.ToHexString(copiedBytes)}];source-view-count={GetShellViewItemCount(folderView)};source-still-present={sourceStillPresent};archive-intact={archiveIntact};foreground-unchanged={foregroundUnchanged}");
-            if (aborted != 0 || copiedBytes.Length != 1 || copiedBytes[0] != 0x41 || !sourceStillPresent || !archiveIntact || !foregroundUnchanged)
-                throw new IOException("IFileOperation.CopyItems did not copy the virtual ZIP entry into the isolated destination while preserving the source view.");
+            Console.WriteLine($"ishellview-zip-iFileOperation-copy: operation=CopyItems;selected=[{string.Join('|', orderedNames)}];aborted={aborted};file-bytes=[{Convert.ToHexString(copiedBytes)}];nested-file-bytes=[{Convert.ToHexString(nestedCopiedBytes)}];source-view-count={GetShellViewItemCount(folderView)};source-still-present={sourceStillPresent};archive-intact={archiveIntact};foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || copiedBytes.Length != 1 || copiedBytes[0] != 0x41 ||
+                nestedCopiedBytes.Length != 1 || nestedCopiedBytes[0] != 0x42 ||
+                !sourceStillPresent || !archiveIntact || !foregroundUnchanged)
+                throw new IOException("IFileOperation.CopyItems did not copy both selected ZIP entries and the nested file while preserving the source view.");
             return 0;
         }
         finally
@@ -2573,7 +2591,7 @@ internal static class ShellViewColorSpike
             if (destination != 0) Marshal.Release(destination);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (childArray != 0) Marshal.FreeHGlobal(childArray);
-            if (selectedChild != 0) Marshal.FreeCoTaskMem(selectedChild);
+            foreach (var child in selectedChildren) Marshal.FreeCoTaskMem(child);
         }
     }
 
