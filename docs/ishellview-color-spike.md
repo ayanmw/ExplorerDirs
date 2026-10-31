@@ -1446,3 +1446,7 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 对真实合并 View 菜单执行 Details `0x704B`、List `0x7051`、Small icons `0x7050`、Tiles `0x704C`、Content `0x7052` 五个入口。每次命令后 `IFolderView2` 与 ListView 均读到对应模式；在 Shell 完成模式绘制后同步当前 `LV_VIEW_*`，每种样式都恢复 2/2 个逐项回调，两条合成颜色规则的目标像素均命中。同步前后的 A/B 显示，立即同步不会恢复回调。完整 Private Desktop watchdog exit 0、foreground/input 未变化、隔离清理通过；NativeProbe Release 构建 0 警告/错误。100 ms 消息泵仅用于隔离原型时序验证，尚未证明适合产品 UI 调度；超大/大/中图标命令、排序/分组切换、第三方 provider 和 ExplorerBrowser 产品行为仍待验证。日志：`src/.state/native-probe-watchdog/20261101-005217-904583cd.stdout.log`。
 
 后续扩展到八种菜单项：超大图标 `0x704D`/256、大图标 `0x704F`/96、中等图标 `0x704E`/48、Details/List/Small icons/Tiles/Content。每种均读到预期 Shell 模式、图标尺寸和 ListView 样式，逐项回调 2/2、颜色像素双命中。探针查找器也由任意子串匹配改为可见标签边界匹配；前一轮将“大图标”误命中“超大图标”后已由日志发现并修正。NativeProbe Release build 0 警告/错误，Private Desktop exit 0 且前台、输入与清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-005405-38e68c10.stdout.log`。排序/分组菜单切换、第三方 provider、产品 ExplorerBrowser 与可见 UI 仍未覆盖。
+
+### 2026-11-01 原生排序/分组命令后的颜色重绘
+
+在同一真实合并 View 菜单路由执行 Sort descending/ascending 和 Group descending/ascending。排序状态与 item 顺序正确，但原生排序命令之后的首次 ListView 采样为 0 条 `NM_CUSTOMDRAW`；降序场景的颜色像素也不再匹配当前排序后的文件身份。A/B 在 Shell 完成重排后对当前 `LV_VIEW_*` 发送同值 `LVM_SETVIEW`，两种排序方向均恢复 2 条回调与正确的文件身份颜色像素。隔离路由现依据菜单路径对 sort/group 命令执行相同同步；复测排序升降序及分组升降序均恢复颜色，八种视图模式也继续通过。Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过。该实验直接以 `IFolderView2` 设置 Size 分组作为方向菜单的夹具前置，尚未验证原生“按 Size 分组”菜单项、其它属性键、第三方 provider、产品 ExplorerBrowser 或可见 UI。日志：`src/.state/native-probe-watchdog/20261101-010227-7ff9109a.stdout.log`。

@@ -6,6 +6,8 @@
 
 随后在同一隔离命令路由中调用真实合并 View 菜单的八种模式命令：超大/大/中图标、Details、List、Small icons、Tiles、Content。先让 Shell 完成模式切换绘制，再将 ListView 当前模式原值同步一次；每种逐项绘制通知均恢复为 2 条，两个规则色像素均通过。立即同步在 A/B 中未恢复通知，因此保留了“先完成 Shell 绘制、再同步”的时序约束。排序/分组变化、provider、ExplorerBrowser 产品接线仍未验证。
 
+原生 Sort ascending/descending 命令后，隔离 Details ListView 的逐项通知暂时为 0，降序时行颜色与已排序文件身份不匹配；Shell 完成重排后将 ListView 当前模式原值同步，两个方向均恢复颜色回调和身份像素。隔离路由把同步扩展到 Sort/Group 菜单命令，排序及分组方向样本通过。Size 分组属性通过 `IFolderView2` 设为夹具前置；真实分组列菜单、第三方 provider 和 ExplorerBrowser 产品行为仍待验证。
+
 2026-10-31 隔离自有行模型 Shell 操作续验：真实文件系统 Shell `IDataObject` 依次经 `IFileOperation.MoveItems`、`CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`；shell change 通知驱动两 pane 重枚举，重命名保持原行 ID，删除正确退休行，锚点选择/焦点及未操作源 pane 保持。`--shell-change-reconciliation` Release 连续三轮通过，窗口隐藏、前台不变。仅为 NativeProbe 自有行投影证据，不表示产品 Shell view 可迁移；可见菜单、剪贴板、Undo/Redo、OLE 拖放和 ExplorerBrowser 接线仍未验证。[调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)
 
 2026-10-31 Shell 新建菜单的懒加载兼容：原生命令状态查询初始化“新建文件夹”子菜单时，现先转发 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；仅 `S_OK` 表示已处理，`S_FALSE`/`E_NOTIMPL` 才回退 `IContextMenu2.HandleMenuMsg`，其它错误停止。真实 COM 回归在旧逻辑上按预期失败，修复后 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。没有显示菜单；第三方 Shell 扩展的可见菜单及命令交互仍需集中 UI 验收。

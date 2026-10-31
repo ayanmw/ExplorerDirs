@@ -1411,11 +1411,21 @@ internal static class ShellViewColorSpike
         // the pane/view before sending a command to the HWND it returned.
         if (!IsCurrent()) return true;
         _ = SendMessageW(viewWindow, 0x0111, (nint)commandId, 0); // WM_COMMAND.
-        if (groupIndex == 2 && previousViewMode is { } previousMode && IsCurrent())
-            SynchronizeListViewAfterModeChange(owner, shellView, viewWindow, previousMode);
+        var sortOrGroupCommand = groupIndex == 2 && mergedPath.Any(IsSortOrGroupMenuLabel);
+        if (groupIndex == 2 && previousViewMode is { } previousMode && IsCurrent() &&
+            (sortOrGroupCommand || TryReadShellViewMode(shellView) is { } currentMode && currentMode != previousMode))
+            SynchronizeListViewAfterNativeViewCommand(owner, shellView, viewWindow, previousMode,
+                force: sortOrGroupCommand);
         owner.MenuTrace.Add($"shell-command group={groupIndex} id=0x{commandId:X4} path='{string.Join(" > ", mergedPath)}' target=0x{viewWindow:X}");
         return true;
     }
+
+    private static bool IsSortOrGroupMenuLabel(string label) =>
+        label.Contains("排序方式", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("Sort by", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("Arrange by", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("分组依据", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("Group by", StringComparison.OrdinalIgnoreCase);
 
     private static (uint Mode, int IconSize)? TryReadShellViewMode(nint shellView)
     {
@@ -1429,11 +1439,11 @@ internal static class ShellViewColorSpike
         finally { Marshal.Release(folderView); }
     }
 
-    private static void SynchronizeListViewAfterModeChange(StreamViewHost owner, nint shellView,
-        nint viewWindow, (uint Mode, int IconSize) previousMode)
+    private static void SynchronizeListViewAfterNativeViewCommand(StreamViewHost owner, nint shellView,
+        nint viewWindow, (uint Mode, int IconSize) previousMode, bool force)
     {
         var currentMode = TryReadShellViewMode(shellView);
-        if (currentMode is null || currentMode.Value == previousMode ||
+        if (currentMode is null || (!force && currentMode.Value == previousMode) ||
             !IsCurrentShellMenuOwner(owner, shellView, null) || !IsWindow(viewWindow)) return;
 
         // Let the native view command finish its pending mode paint first; the private
@@ -1449,7 +1459,8 @@ internal static class ShellViewColorSpike
         // currently owned by the control, and only for the five standard ListView styles.
         if (listViewMode is < 0 or > 4) return;
         var syncResult = SendMessageW(listView, LvmSetView, listViewMode, 0).ToInt32();
-        owner.MenuTrace.Add($"shell-view-mode-sync mode={currentMode.Value.Mode}/{currentMode.Value.IconSize};" +
+        owner.MenuTrace.Add($"shell-view-mode-sync reason={(force ? "sort-group" : "mode-change")};" +
+            $"mode={currentMode.Value.Mode}/{currentMode.Value.IconSize};" +
             $"list-mode={listViewMode};result={syncResult}");
     }
 
@@ -3941,11 +3952,82 @@ internal static class ShellViewColorSpike
             var pixels = string.Join('/', capture.RowHits);
             var colorVerified = capture.CustomDrawItems >= fixturePaths.Length && capture.RowHits.All(hit => hit > 0);
             var modeVerified = shellMode == mode.ShellMode && shellSize == mode.IconSize && listMode == mode.ListMode;
+            if (!modeVerified || !colorVerified)
+                throw new InvalidOperationException($"Native View menu mode/color contract failed for [{string.Join('/', mode.Labels)}]: shell={shellMode}/{shellSize}; list={listMode}; callbacks={capture.CustomDrawItems}; pixels={pixels}.");
             var commandTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
                 line.Contains("shell-view-mode-sync", StringComparison.Ordinal) ||
                 line.Contains($"id=0x{commandId:X4}", StringComparison.Ordinal)));
             transitions.Add($"{string.Join('/', mode.Labels)}:id=0x{commandId:X4};shell={shellMode}/{shellSize};list={listMode};" +
                 $"callbacks={capture.CustomDrawItems};pixels={pixels};mode-ok={modeVerified};color-ok={colorVerified};trace={commandTrace}");
+        }
+
+        var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
+        var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
+        var sizeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 12 };
+        var noGroup = default(PropertyKey);
+        Check(At<SetGroupBy>(folderView, 17)(folderView, ref noGroup, 0));
+        Check(At<SetSortColumns>(folderView, 27)(folderView, [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+        var tilesCommand = FindShellMenuCommandId(menuOwner, "平铺", "Tiles", "Tile");
+        if (!TryInvokeMergedViewMenuCommand(menuHost, tilesCommand))
+            throw new InvalidOperationException($"The isolated merged View menu did not route Tiles command 0x{tilesCommand:X4} before sort/group color checks.");
+        Pump(180);
+        var sortDescending = FindMenuCommandIdByPathSuffix(GetSubMenu(GetMenu(menuOwner), 2), "排序方式", "递减");
+        var sortAscending = FindMenuCommandIdByPathSuffix(GetSubMenu(GetMenu(menuOwner), 2), "排序方式", "递增");
+        var groupDescending = FindMenuCommandIdByPathSuffix(GetSubMenu(GetMenu(menuOwner), 2), "分组依据", "递减");
+        var groupAscending = FindMenuCommandIdByPathSuffix(GetSubMenu(GetMenu(menuOwner), 2), "分组依据", "递增");
+        foreach (var transition in new (string Name, uint CommandId, bool Grouped, int Direction)[]
+        {
+            ("sort-desc", sortDescending, false, -1),
+            ("sort-asc", sortAscending, false, 1),
+            ("group-desc", groupDescending, true, -1),
+            ("group-asc", groupAscending, true, 1)
+        })
+        {
+            if (transition.Name == "group-desc")
+            {
+                var sizeGroup = sizeKey;
+                Check(At<SetGroupBy>(folderView, 17)(folderView, ref sizeGroup, 1));
+                Pump(180);
+            }
+            if (!TryInvokeMergedViewMenuCommand(menuHost, transition.CommandId))
+                throw new InvalidOperationException($"The isolated merged View menu did not route {transition.Name} command 0x{transition.CommandId:X4}.");
+            Pump(180);
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            var sortColumns = new SortColumn[sortCount];
+            if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
+            var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var currentGroup, out var currentGroupAscending);
+            var stateVerified = sortCount == 1 && sortColumns[0].Key.FormatId == nameKey.FormatId &&
+                sortColumns[0].Key.PropertyId == nameKey.PropertyId &&
+                sortColumns[0].Direction == (transition.Name == "sort-desc" ? -1 : 1) &&
+                (transition.Grouped
+                    ? groupResult == 0 && currentGroup.FormatId == sizeKey.FormatId && currentGroup.PropertyId == sizeKey.PropertyId &&
+                        currentGroupAscending == (transition.Direction > 0 ? 1 : 0)
+                    : groupResult == 1);
+            if (!stateVerified)
+                throw new InvalidOperationException($"Native {transition.Name} menu command did not produce its expected sort/group state: {sortCount}/{(sortCount > 0 ? sortColumns[0].Direction : 0)}; group=0x{groupResult:X8}/{currentGroup.PropertyId}/{currentGroupAscending}.");
+            var order = MapCurrentFolderItems(folderView, fixturePaths);
+            var transitionState = $"{transition.Name}:id=0x{transition.CommandId:X4};sort={sortCount}/{(sortCount > 0 ? sortColumns[0].Direction : 0)};" +
+                $"group=0x{groupResult:X8}/{currentGroup.PropertyId}/{currentGroupAscending};state-ok={stateVerified};order={order}";
+            if (transition.Name is not ("sort-desc" or "sort-asc" or "group-asc"))
+            {
+                transitions.Add(transitionState + ";color-sample=deferred-to-end-of-category");
+                continue;
+            }
+
+            RefreshFixtureColorMap(folderView, fixturePaths);
+            ClearNativeViewMenuColorSelection();
+            var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            var pixels = string.Join('/', capture.RowHits);
+            var colorVerified = capture.CustomDrawItems >= fixturePaths.Length && capture.RowHits.All(hit => hit > 0);
+            if (!colorVerified)
+                throw new InvalidOperationException($"Native {transition.Name} sorting/grouping did not restore identity-mapped colors: callbacks={capture.CustomDrawItems}; pixels={pixels}.");
+            var drawIdentity = capture.DrawItems.Length == 0 ? "none" :
+                MapCustomDrawItemsToFixtureFiles(folderView, fixturePaths, capture.DrawItems);
+            var nativeSyncTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
+                line.Contains("reason=sort-group", StringComparison.Ordinal) &&
+                line.Contains($"list-mode=", StringComparison.Ordinal)));
+            transitions.Add(transitionState + $";draw={drawIdentity};callbacks={capture.CustomDrawItems};pixels={pixels};" +
+                $"color-ok={colorVerified};native-sync={nativeSyncTrace}");
         }
         return string.Join("||", transitions);
 

@@ -69,7 +69,7 @@ internal static class PrivateDesktopShellProbe
         Run($"host-filter-{scope}", () => ShellViewHostFilterProbe.RunVirtualScopeForPrivateDesktop(scope));
 
     internal static int RunColor() => Run("color", () => ShellViewColorSpike.Run(visible: true,
-        deferParentCleanup: true));
+        deferParentCleanup: true), TimeSpan.FromSeconds(60));
 
     internal static int RunExplorerBrowserColorNotifications() =>
         Run("explorerbrowser-color-notifications", ExplorerBrowserNotifyProbe.Run, TimeSpan.FromSeconds(25));
