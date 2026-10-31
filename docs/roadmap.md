@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 F5/查看方式闪烁复核：当前 F5 仅调用当前 Shell view 的 `IShellView.Refresh()`，不重建 ExplorerBrowser、标签或导航；查看方式仅对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，并只在同步 setter 周围短暂抑制重绘。既有隐藏 HostProbe 的行可用时序约为直接 Refresh 48 ms、抑制重绘 43 ms；两者均不是屏幕像素测量。`SetRedraw` 不阻止鼠标/键盘命中，延长租约会让保留画面与实际行模型暂时不一致，因此本轮不接入旧帧租约，也不宣称视觉闪烁已改善。完整 Release `SettingsSmoke` 本轮通过，包含刷新/查看方式源码合同。下一步需在集中可见验收中分别观察 F5 和模式切换；若仍明显，再用真实像素及输入行为评估更高层缓冲方案。详见[刷新闪烁调查计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+
 2026-10-31 隔离 Shell 属性变更通知分类：NativeProbe 合成 folder adapter 现将 `SHCNE_ATTRIBUTES` 与 CREATE/RENAMEITEM/DELETE/UPDATEITEM 一样转换为父目录更新，使只读属性等行展示规则变化可以触发重枚举；`SHCNE_UPDATEDIR` 与未知事件仍不转换，以避免递归通知。定向合同先在旧实现上按预期因 ATTRIBUTES 失败，修正后通过；原生 adapter `/W4 /WX` 和 NativeProbe Release build 均通过（0 警告/错误），未创建 Shell view。微软文档确认该事件表示项目或文件夹属性已改变；本次只验证分类接线，不代表真实通知传递/属性变更后视图更新，也没有产品 ExplorerBrowser 接线。详见[隔离逐行大小调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。来源：[Microsoft SHChangeNotify](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify)。
 
 2026-10-31 属性通知 view 级复验未得结论：在 Private Desktop 合成 view 中尝试 Hidden 属性变化，两次均于父窗口销毁阶段超时，外层前台为 `LockApp` 且保持不变；由于 watchdog 在清理阶段终止进程，现有输出无法确认属性断言结果。探针改动已撤回。恢复后的事件分类与 wrapped-folder 无窗口合同通过；属性变化后 Shell view 实际重枚举仍未验证。两个异常运行遗留的 fixture/临时 HKCU 注册项因自动命令审核拒绝递归清理而保留，运行 ID 与诊断见[调查记录](folder-size-column-investigation.md#后续-private-desktop-验证尝试未通过)。
