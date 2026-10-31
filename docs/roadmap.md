@@ -5415,3 +5415,7 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 后续新增 Network Places 像素探针，以 PIDL 显示名对 DefView 标签唯一映射，首轮两行像素命中；复测包含一行通过、`Shell=2 / DefView=3` 在映射后变化并以行数不等断言失败、再一行通过。失败轮没有足够证据判定是否短暂错色，不计为颜色通过。该 provider 的列表行仍会在枚举与绘制期间变化，故颜色采样门槛保持关闭；详细记录见[隔离原型](ishellview-color-spike.md#2026-11-01network-places-行数瞬态差异诊断)。
 
 补充拖放接口边界：Network Places 根 view 三轮分别枚举 3/1/1 个 pathless 文件夹；逐项 `IShellFolder::GetUIObjectOf(IID_IDropTarget)` 均为 `E_NOINTERFACE`，父文件夹 `CreateViewObject(IID_IDropTarget)` 也不可用。未调用 Drop。该结果仅说明当前 Network Places 根列表没有已确认的父级/项目 drop target；更深层共享目录及其它网络 provider 仍未测，阶段 5 的网络拖放门槛开放。
+
+## 2026-11-01：DefView 派生列重建路径的限定性进展
+
+在此前停止扩展单项通知、父目录通知、模式切换等变体后，隔离验证了“单项通知 → 显式应用列 → 重建同一 IShellView 的 view window”路径。当前合成文件系统 provider 中，重建触发 2 行重新枚举、派生值读取及一次大小比较，升序恢复为 `small.bin|child`，焦点/选区保持；默认不重建的单项通知仍没有重新取值。此结果只部分打开 IShellView 原型架构门槛，不改变产品当前 ExplorerBrowser，也不代表用户功能或迁移通过。精确 GUID 检查仍存在 adapter/provider key 映射差异，需先查明。完整证据及失败样本见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01显式重新应用列后的-view-window-重建复验)。

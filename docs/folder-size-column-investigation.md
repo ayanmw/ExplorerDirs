@@ -1056,3 +1056,11 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 反向对照中，收到通知后调用 `IColumnManager::SetColumns` 重放 `Name` 与递归大小键，再重建窗口，表头变为 `Name | 空白列`，派生值未显示；在该路径前先显式调用 `IShellView::SaveViewState` 得到 `S_OK` 并使状态流写入一次，结果仍为 `Name | 空白列`，读取次数为 0。两次对照均保留选区/焦点；保存状态的样本也保留更新后的排序。此结果说明当前 synthetic provider 中，DefView 自行重建能恢复原生列和值，而手工列键重放覆盖了正确的列布局；不能推断所有 Shell provider 或 ExplorerBrowser 均有相同行为。
 
 探针只验证孤立 `IShellView`/DefView，不接入产品、不改变用户目录或发布包。创建视图时用 `IShellBrowser::GetViewStateStream` 读回、在 `IShellView::SaveViewState` 时写出是 Windows 文档描述的常规生命周期；本次实测表明单独写出后仍不能替代 DefView 自身的列恢复。参考：[IShellView::CreateViewWindow](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-createviewwindow)、[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)、[IColumnManager](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-icolumnmanager)。
+
+### 2026-11-01：显式重新应用列后的 view-window 重建复验
+
+为对照上面的“仅重建窗口”，本轮使用 `single-item-recreate-shell-window` 策略，在通知后先显式重新应用列，再销毁并重建同一个隔离 `IShellView` 的 view window。初始目录/文件值为 `10`/`4`；重建后 DefView 重新枚举行（2 行）、读取派生值（`[4|1]`）、执行一次大小比较，并按升序显示 `small.bin|child`。`IColumnManager.Apply` 返回 `S_OK`，选区和焦点保持。WPF Private Desktop watchdog exit 0，前台 HWND、输入 tick 未变，隔离注册、夹具和 NativeProbe 进程均清理完成；日志：`src/.state/native-probe-watchdog/20261101-042722-7542daff.stdout.log`。作为对照，默认 `single-item` 策略未触发重枚举或派生值读取；native `STATIC` 根宿主样本在清理时超时，不采纳其行为结论。
+
+本轮原型结果与前述“无需显式重放即可恢复列”的窗口重建样本不同，表明列恢复行为依赖具体的列状态路径，尚不能收敛为通用步骤。另有探针诊断字段按 adapter 声明 GUID `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1` 精确比较时报告列不存在；但实际 `IColumnManager.GetColumns` 返回 GUID `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，且可见表头、值、排序与 provider 读取计数均证明该轮派生列已被消费。GUID 规范化/映射尚未解释，因此只认可行值和排序观测，不认可该精确 key 检查。
+
+此证据仍限于当前合成文件系统 provider 下的隔离 `IShellView`/DefView；没有验证产品 ExplorerBrowser、真实用户可见刷新、Shell 菜单/文件操作/拖放完整兼容，也没有批准产品迁移或发布。下一步查清 provider 列 GUID 映射，并把窗口重建与列恢复放回完整通知/导航生命周期门槛中评估。产品仍使用 ExplorerBrowser。
