@@ -62,4 +62,4 @@
 - Modify: `docs/roadmap.md`
 
 - [x] Record the exact native flag and verification boundary; keep visible Q-Dir comparison open.
-- [ ] Review the full diff and commit the implementation batch.
+- [x] Review the full diff and commit the implementation batch (`a17cf1a Add experimental soft refresh option`); subsequent parity wording was reconciled in `f8eb06c` and `cd5dfa0`.
