@@ -5346,6 +5346,8 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 该测量仍是隐藏视图的行数/HWND，不是可见像素或真实用户输入；产品改动尚未通过可见 UI 验收。实际 SHChangeNotify 没有返回刷新 HRESULT，且本实现使用 `SHCNF_FLUSHNOWAIT`，仅等待通知投递开始，不等待 DefView 完成枚举。`ICommDlgBrowser.OnStateChange` 也没有枚举完成事件；三次稳定行数采样只是选区/焦点恢复启发式，列表数量未变化时甚至可能仍代表旧行。因此不能据此声称新内容已显示或绘制完成，通知处理与选区恢复的竞态及可见像素行为仍需集中验收。非本地文件系统位置保留原刷新行为。
 
+补充产品宿主 `HostProbe --live-shell-refresh`：在隐藏四窗格 ExplorerBrowser 中执行当前 F5 入口后，各 pane 行数保持 `4/4/4/4`，活动 pane 的三项选区和 `initial.txt` 焦点均恢复，产品恢复流程结算成功，探针退出码 0。刷新过渡日志无 paint 样本；本轮只验证行数/选区/焦点，不证明显示像素或真实键鼠操作。
+
 ## 2026-11-01：ZIP 虚拟 Shell 项颜色规则输入复核
 
 新增 NativeProbe ZIP 虚拟文件夹夹具，Shell 枚举出的虚拟文件与虚拟目录均没有文件系统路径，但其显示名及 `SFGAO_FOLDER` 属性可匹配名称/`#DIR` 背景和文本色规则；文件粗体样式也能由同一元数据解析。基于 Shell 元数据的文本色和字形 resolver smoke、NativeProbe Release 构建 0 警告/错误及 ZIP 探针均通过，前台与夹具清理检查通过。此前独立 ZIP Shell view 探针另验证了枚举及原生背景菜单查询。
