@@ -883,3 +883,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 包含 create、move-out、rename、delete 的完整 Private Desktop 场景连续三轮通过。四种情况各自只排队并发送 1 次父目录 `SHCNE_UPDATEDIR`，各触发 1 次 provider 重枚举；创建显示、移动/删除行移除、重命名唯一新行可见。每轮 watchdog exit 0、foreground/input 不变、隔离注册与临时夹具清理完成。日志：`20261031-122840-d195bf2e.stdout.log`、`20261031-122913-493391c2.stdout.log`、`20261031-122924-189dbab9.stdout.log`（`src/.state/native-probe-watchdog/`）。Native adapter `/W4 /WX` 和 NativeProbe Release build 无警告/错误；DLL unload contract、无窗口 `--static-shell-column-folder-smoke` 通过。
 
 范围仍是 NativeProbe 的合成 filesystem-backed provider，实验开关默认关闭。这里只验证单个源 view 对 create、move-out、rename、delete 的行同步；未验证移动目标 view、跨卷/第三方 provider、多事件 burst 合并、撤销、跨窗格剪切粘贴或 OLE 拖放闭环。产品 ExplorerBrowser 和 release 未改，IShellView 迁移门槛仍未通过。下一步评估多个变更事件的合并/顺序，并继续命令路由、导航、菜单及真实拖放源端门槛。
+
+### 2026-10-31：三项 create burst 的通知合并
+
+在真实 Private Desktop `IShellView` 中，先写入三个 backing 文件，再连续发送三次物理子项 `SHCNE_CREATE`，中间不泵消息。DefView 随后还向 view callback 发出若干 `SHCNE_UPDATEITEM`，但合成 adapter 的 1 ms 队列将该 burst 合并为一次父目录 `SHCNE_UPDATEDIR`；provider 只重枚举一次，三个新行均出现。完整场景连续三轮通过，队列/发送/枚举计数均为 `1/1/1`，Private Desktop 前台、输入 tick 和隔离清理守卫通过；日志：`20261031-123047-758558ac.stdout.log`、`20261031-123115-f2d20944.stdout.log`、`20261031-123128-6528e808.stdout.log`。
+
+这是同一 STA 上连续发出的三个 CREATE 事件，不代表并发 provider 事件、慢网络目录、不同窗格或任意长 burst。当前逻辑仍只在 NativeProbe 合成 adapter 中且默认关闭。没有产品接线，也没有用户可见的刷新/闪烁结论。下一步继续核对父目录更新通知数组/事件字段和 timer 生命周期在关闭 view 时的取消路径，然后进入完整命令路由与拖放源端验证。

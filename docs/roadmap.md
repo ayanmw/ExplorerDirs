@@ -5186,3 +5186,7 @@ NativeProbe 的合成 PIDL adapter 在显式开启的实验开关下，把真实
 ## 2026-10-31：隔离 IShellView 通知覆盖扩至 create/move
 
 经 RED 复现后，NativeProbe 的显式通知转换开关也处理 `SHCNE_CREATE`。真实 `IFileOperation::MoveItems` 将条目移出源 view 时观察到 `SHCNE_DELETE`，父目录失效后源行正确消失。create、move-out、rename、delete 各自一轮只引起一次重枚举；完整 Private Desktop 场景连续三轮通过，前台/输入守卫与 UUID 清理均通过。该逻辑仍仅在合成 adapter 探针中，未进入 ExplorerBrowser。多事件合并、移动目标 view、剪切粘贴、OLE 拖放及其他 namespace 仍是迁移门槛；证据见[通知调查](folder-size-column-investigation.md#2026-10-31隔离-adapter-的-createmove-通知复核)。
+
+## 2026-10-31：隔离 IShellView 三项 create burst 合并
+
+三次连续 `SHCNE_CREATE` 连同 DefView 随后的 `SHCNE_UPDATEITEM` 在本机 Private Desktop 单 STA 场景中合并为一次父目录 `SHCNE_UPDATEDIR`，provider 仅枚举一次且三行均可见；连续三轮通过，前台/输入/临时资源守卫通过。证据边界仅为三项连续事件，不外推成并发、网络目录或多视图 burst 性能保证。逻辑仍只在 NativeProbe 合成 adapter 中，产品未改。后续检查通知数组和 timer 关闭生命周期，并继续 Shell 路由与完整拖放门槛；见[通知调查](folder-size-column-investigation.md#2026-10-31三项-create-burst-的通知合并)。

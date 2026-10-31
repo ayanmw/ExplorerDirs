@@ -1208,6 +1208,35 @@ public static class SyntheticShellSortProbe
             }
             finally { ILFree(createdItemPidl); }
 
+            var burstNames = new[] { "burst-create-1.dat", "burst-create-2.dat", "burst-create-3.dat" };
+            var enumBeforeBurst = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var queuedBeforeBurst = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeBurst = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            foreach (var burstName in burstNames)
+            {
+                var burstPath = Path.Combine(backingFolder, burstName);
+                File.WriteAllBytes(burstPath, [0x42]);
+                Check(SHParseDisplayName(burstPath, 0, out var burstItemPidl, 0, out _));
+                if (burstItemPidl == 0) throw new InvalidOperationException($"Could not parse the physical PIDL for '{burstName}'.");
+                try { SHChangeNotify(ShcneCreate, 0, burstItemPidl, 0); }
+                finally { ILFree(burstItemPidl); }
+            }
+            deadline = Environment.TickCount64 + 3000;
+            do
+            {
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (burstNames.All(name => names.Contains(name, StringComparer.OrdinalIgnoreCase)) &&
+                    ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBeforeBurst) break;
+            } while (Environment.TickCount64 < deadline);
+            var burstVisibleCount = burstNames.Count(name => names.Contains(name, StringComparer.OrdinalIgnoreCase));
+            var burstEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeBurst;
+            var burstQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeBurst;
+            var burstSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeBurst;
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_CREATE-burst; visible={burstVisibleCount}/{burstNames.Length}; rows={names.Length}; enum-calls={burstEnumCalls}; translated-queued={burstQueued}; translated-sent={burstSent}");
+            if (burstVisibleCount != burstNames.Length || burstEnumCalls != 1 || burstQueued != 1 || burstSent != 1)
+                throw new TimeoutException("The recreated synthetic view did not coalesce a three-item create burst into one parent update and enumeration.");
+
             names = ReadNames(listView, module, expectedCount: -1);
             SetListViewSelectionAndFocus(listView, createdItemName, names);
             var childFolder = Path.Combine(backingFolder, "child");
