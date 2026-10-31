@@ -2513,7 +2513,7 @@ internal static class ShellViewColorSpike
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
-        bool zipBackgroundMenuProbe = false,
+        bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
         bool virtualDesktopColorProbe = false)
     {
@@ -2615,7 +2615,7 @@ internal static class ShellViewColorSpike
             Directory.CreateDirectory(fixture);
             string[] fixturePaths;
             var shellLocation = fixture;
-            if (virtualZipProviderProbe || zipBackgroundMenuProbe)
+            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe)
             {
                 shellLocation = Path.Combine(fixture, "virtual-items.zip");
                 using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
@@ -2780,13 +2780,78 @@ internal static class ShellViewColorSpike
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
-            if (zipBackgroundMenuProbe)
+            if (zipBackgroundMenuProbe || zipExtractInvokeProbe)
             {
                 if (contextMenuHr < 0 || contextMenu == 0)
                     throw new COMException("ZIP IShellView.GetItemObject(SVGIO_BACKGROUND) did not provide a context menu.", contextMenuHr);
                 var viewCommands = QueryMenuCommands(contextMenu, out backgroundMenuHandle, out var queryMilliseconds);
                 var verbs = viewCommands.Select(command => command.Verb).ToArray();
-                Console.WriteLine($"ishellview-zip-background-menu: commands={viewCommands.Length}; verbs=[{string.Join('|', verbs)}]; extract-present={verbs.Contains("extract", StringComparer.OrdinalIgnoreCase)}; query-ms={queryMilliseconds:F2}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                var extractCommand = viewCommands.FirstOrDefault(command =>
+                    command.Verb.Equals("extract", StringComparison.OrdinalIgnoreCase));
+                Console.WriteLine($"ishellview-zip-background-menu: commands={viewCommands.Length}; verbs=[{string.Join('|', verbs)}]; extract-present={extractCommand is not null}; extract-state={(extractCommand is null || extractCommand.State == uint.MaxValue ? "unknown" : (extractCommand.State & 3) == 0 ? "enabled" : "disabled")}; query-ms={queryMilliseconds:F2}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                if (zipExtractInvokeProbe)
+                {
+                    if (extractCommand is null)
+                        throw new InvalidOperationException("The ZIP view-owned background menu did not expose the extract command.");
+                    var extractVerb = Marshal.StringToHGlobalAnsi("extract");
+                    int invokeResult;
+                    try
+                    {
+                        Console.WriteLine($"ishellview-zip-extract: invoke-start; canonical-verb=extract; encoding=ANSI; command-offset={extractCommand.Offset}; show=SW_SHOWNORMAL");
+                        var invoke = new NativeInvokeInfo
+                        {
+                            Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                            Window = parent,
+                            Verb = extractVerb,
+                            Show = 1
+                        };
+                        invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                    }
+                    finally { Marshal.FreeHGlobal(extractVerb); }
+                    Console.WriteLine($"ishellview-zip-extract: invoke-returned; hr=0x{invokeResult:X8}");
+                    Pump(3000);
+                    Check(invokeResult);
+                    var viewExtractedFiles = ReadExtractedFixtureFiles();
+                    if (viewExtractedFiles.Length == 0)
+                    {
+                        var extractFolderContextMenuId = ContextMenuId;
+                        Check(At<CreateViewObject>(folder, 8)(folder, parent, ref extractFolderContextMenuId, out folderContextMenu));
+                        var folderCommands = QueryMenuCommands(folderContextMenu, out folderMenuHandle, out var extractFolderMenuQueryMilliseconds);
+                        var folderExtract = folderCommands.FirstOrDefault(command =>
+                            command.Verb.Equals("extract", StringComparison.OrdinalIgnoreCase));
+                        Console.WriteLine($"ishellview-zip-extract: folder-menu-commands={folderCommands.Length}; extract-present={folderExtract is not null}; query-ms={extractFolderMenuQueryMilliseconds:F2}");
+                        if (folderExtract is not null)
+                        {
+                            var folderExtractVerb = Marshal.StringToHGlobalAnsi("extract");
+                            try
+                            {
+                                var folderInvoke = new NativeInvokeInfo
+                                {
+                                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                                    Window = parent,
+                                    Verb = folderExtractVerb,
+                                    Show = 1
+                                };
+                                var folderInvokeResult = At<InvokeCommand>(folderContextMenu, 4)(folderContextMenu, ref folderInvoke);
+                                Console.WriteLine($"ishellview-zip-extract: folder-menu-invoke-hr=0x{folderInvokeResult:X8}");
+                                Check(folderInvokeResult);
+                            }
+                            finally { Marshal.FreeHGlobal(folderExtractVerb); }
+                            Pump(3000);
+                        }
+                    }
+                    var extractedFiles = ReadExtractedFixtureFiles();
+                    var visibleWindows = DescribeVisibleTopLevelWindows();
+                    Console.WriteLine($"ishellview-zip-extract: view-menu-files=[{string.Join('|', viewExtractedFiles)}]; physical-files=[{string.Join('|', extractedFiles)}]; visible-windows=[{string.Join('|', visibleWindows)}]; operation-observed={extractedFiles.Length > 0}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    // This is a dispatch diagnostic: S_OK alone must not be treated as an extraction result.
+                    return GetForegroundWindow() == foreground ? 0 : 1;
+
+                    string[] ReadExtractedFixtureFiles() => Directory.GetFiles(fixture, "*", SearchOption.AllDirectories)
+                        .Where(path => !string.Equals(path, shellLocation, StringComparison.OrdinalIgnoreCase))
+                        .Select(path => Path.GetRelativePath(fixture, path))
+                        .Order(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                }
                 return GetForegroundWindow() == foreground ? 0 : 1;
             }
             var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe
@@ -3220,7 +3285,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3406,6 +3471,21 @@ internal static class ShellViewColorSpike
         if (window == 0) return "<none>";
         var name = new System.Text.StringBuilder(128);
         return GetClassNameW(window, name, name.Capacity) > 0 ? name.ToString() : "<unknown>";
+    }
+
+    private static string[] DescribeVisibleTopLevelWindows()
+    {
+        var windows = new List<string>();
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window)) return true;
+            var title = new System.Text.StringBuilder(256);
+            _ = GetWindowTextW(window, title, title.Capacity);
+            var thread = GetWindowThreadProcessId(window, out var process);
+            windows.Add($"0x{window:X}:{WindowClassName(window)}:pid={process}:tid={thread}:title={title}");
+            return true;
+        }, 0);
+        return windows.ToArray();
     }
 
     private static nint ObserveCleanupWindowMessages(nint window, uint message, nuint wParam,
@@ -5351,6 +5431,7 @@ internal static class ShellViewColorSpike
     private sealed record MenuCommand(string Verb, uint Offset, uint State);
     private delegate nint SubclassProc(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data);
     private delegate bool EnumChildProc(nint window, nint parameter);
+    private delegate bool EnumWindowsProc(nint window, nint parameter);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string path,
         nint bind, out nint pidl, uint attributes, out uint result);
@@ -5416,8 +5497,10 @@ internal static class ShellViewColorSpike
     [DllImport("user32.dll")] private static extern nint GetWindowLongPtrW(nint window, int index);
     [DllImport("user32.dll")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextW(nint window, System.Text.StringBuilder text, int capacity);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, nint parameter);
     [DllImport("imm32.dll")] private static extern nint ImmGetContext(nint window);
     [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(nint window, nint context);
     [DllImport("imm32.dll")] private static extern nint ImmAssociateContext(nint window, nint context);

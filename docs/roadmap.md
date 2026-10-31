@@ -5385,3 +5385,9 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 增加 `--ishellview-zip-background-menu-private-desktop`，创建临时 ZIP 的真实隔离 `IShellView`，从 view-owned `GetItemObject(SVGIO_BACKGROUND)` 取得 `IContextMenu` 并查询菜单命令。当前 Windows 返回 20 个 canonical verbs，包含 `extract`、`refresh`、`groupby`、`view` 与排序/排列命令；菜单查询约 8 ms。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/夹具清理守卫通过。首轮查询结果已成功，但通用 session-state 检查错误要求诊断早退分支写回；调整为跳过后复跑通过。
 
 只证明 ZIP view-owned 背景菜单及动词可查询；未显示/执行菜单、未测试解压后文件通知和行更新，也未验证其它 provider 或 ExplorerBrowser 产品接线。ZIP 命令的可执行性与 Shell view 操作更新继续列为迁移门槛。
+
+## 2026-11-01：ZIP `extract` 调用路径诊断
+
+当前隔离探针确认 view-owned ZIP 背景菜单的 `extract` 动词处于 enabled。对该 view 菜单和 ZIP 文件夹 `IShellFolder.CreateViewObject(IContextMenu)` 菜单分别执行 ANSI canonical verb，`InvokeCommand` 均返回 `S_OK`，等待 3 秒后临时夹具仍无解压文件，隔离 Desktop 也没有除宿主外的可见顶层窗口。Unicode `VerbW` + `CMIC_MASK_UNICODE` 返回 `E_INVALIDARG`。Release NativeProbe build 0 警告/错误；最终诊断 watchdog exit 0，前台/输入/清理守卫通过。
+
+`S_OK` 未转化为可观察的解压结果，因此不视为命令功能通过；还未验证真实 `TrackPopupMenu` 交互初始化/选择是否改变结果，也未验证操作后的 Shell 通知与行更新。该操作只指向临时 ZIP fixture，未改用户数据、产品 ExplorerBrowser 或发布包。

@@ -77,6 +77,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunZipViewBackgroundMenu() => Run("zip-view-background-menu", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, zipBackgroundMenuProbe: true), TimeSpan.FromSeconds(60));
 
+    internal static int RunZipViewExtractCommand() => Run("zip-view-extract-command", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, zipExtractInvokeProbe: true), TimeSpan.FromSeconds(20));
+
     internal static int RunThisPcColorPixels() => Run("this-pc-color-pixels", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, virtualThisPcColorProbe: true), TimeSpan.FromSeconds(60));
 

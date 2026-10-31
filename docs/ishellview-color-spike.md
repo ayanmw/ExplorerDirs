@@ -1529,4 +1529,6 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 
 新增 `--ishellview-zip-background-menu-private-desktop`：临时 ZIP fixture 经真实 `IShellView` 创建后，调用 `IShellView.GetItemObject(SVGIO_BACKGROUND)`、`IContextMenu::QueryContextMenu` 与 canonical verb 查询。当前 Windows provider 返回 20 个命令，包含 `paste`、`refresh`、`groupby`、`view`、排序/排列命令以及 `extract`；菜单对象查询约 8 ms。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，foreground/input 与隔离清理守卫通过。首轮探针的菜单查询已成功，但随后通用 view-state round-trip 检查因诊断分支提前返回而失败；将该模式加入已有跳过名单后，复跑完整 exit 0。
 
-这补齐的是 ZIP provider 的 view-owned 背景菜单接口及命令名可查询性；没有显示/调用 `extract`，没有验证解压后的文件变化、通知与 view 更新，也没有验证菜单可见呈现、其它 ZIP handler、ExplorerBrowser 产品行为或迁移兼容。命令实现复用 `ShellViewColorSpike` 隔离宿主，不改变产品视图。
+这补齐的是 ZIP provider 的 view-owned 背景菜单接口及命令名可查询性；菜单没有被显示，首次记录时没有调用 `extract`，也没有验证解压后的文件变化、通知与 view 更新或 ExplorerBrowser 产品行为。命令实现复用 `ShellViewColorSpike` 隔离宿主，不改变产品视图。
+
+随后尝试执行该菜单的命令：view-owned 背景菜单与 folder-created `IContextMenu` 各自都有 enabled 的 `extract`；ANSI canonical verb 调用均返回 `S_OK`，等待 3 秒后夹具中没有解压文件，隔离 Desktop 上也没有除宿主外的可见顶层窗口。Unicode `VerbW` 加 `CMIC_MASK_UNICODE` 返回 `E_INVALIDARG`。当前 watchdog exit 0 只表示诊断过程和前台/输入/清理守卫完成；`operation-observed=False`，不能说解压成功或菜单执行已兼容。该结果缩小了问题范围，但仍需真实初始化/显示 Shell 菜单的交互路径才能判断命令是否依赖当前菜单循环或宿主状态；产品和用户文件未改。
