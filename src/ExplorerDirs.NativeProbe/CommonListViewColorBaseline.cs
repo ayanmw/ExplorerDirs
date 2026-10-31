@@ -267,10 +267,10 @@ internal static class CommonListViewColorBaseline
                 ShellListViewRowPresentation.FormatRecursiveSize(initialLargeRow, ByteSizeFormatter.Options));
             InsertItem(listView, 1, initialSmallRow.DisplayName, initialSmallRow.Id, initialSmallRow.SystemImageIndex,
                 ShellListViewRowPresentation.FormatRecursiveSize(initialSmallRow, ByteSizeFormatter.Options));
-            SetContentsText(listView, 0, initialLargeRow.RecursiveSummary!.Files, initialLargeRow.RecursiveSummary.Directories);
-            SetContentsText(listView, 1, initialSmallRow.RecursiveSummary!.Files, initialSmallRow.RecursiveSummary.Directories);
-            SetRelativeSizeText(listView, 0, initialLargeRow.RecursiveBytes!.Value, fixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, 1, initialSmallRow.RecursiveBytes!.Value, fixtureScan.Bytes, 3);
+            SetItemText(listView, 0, 2, ShellListViewRowPresentation.FormatRecursiveContents(initialLargeRow));
+            SetItemText(listView, 1, 2, ShellListViewRowPresentation.FormatRecursiveContents(initialSmallRow));
+            SetItemText(listView, 0, 3, ShellListViewRowPresentation.FormatRelativeSize(initialLargeRow, fixtureScan.Bytes));
+            SetItemText(listView, 1, 3, ShellListViewRowPresentation.FormatRelativeSize(initialSmallRow, fixtureScan.Bytes));
             var rowIconsBound = shellRows.All(row => Enumerable.Range(0, 2).Any(index =>
                 GetItemParam(listView, index) == row.Id && GetItemImage(listView, index) == row.SystemImageIndex));
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
@@ -375,12 +375,10 @@ internal static class CommonListViewColorBaseline
             SetItemText(listView, smallRowIndex, 1,
                 ShellListViewRowPresentation.FormatRecursiveSize(updatedSmallRow, ByteSizeFormatter.Options));
             var updatedLargeRow = _shellRowsById[1];
-            SetContentsText(listView, largeRowIndex, updatedLargeRow.RecursiveSummary!.Files,
-                updatedLargeRow.RecursiveSummary.Directories);
-            SetContentsText(listView, smallRowIndex, updatedSmallRow.RecursiveSummary!.Files,
-                updatedSmallRow.RecursiveSummary.Directories);
-            SetRelativeSizeText(listView, largeRowIndex, updatedLargeRow.RecursiveBytes!.Value, updatedFixtureScan.Bytes, 3);
-            SetRelativeSizeText(listView, smallRowIndex, updatedSmallRow.RecursiveBytes!.Value, updatedFixtureScan.Bytes, 3);
+            SetItemText(listView, largeRowIndex, 2, ShellListViewRowPresentation.FormatRecursiveContents(updatedLargeRow));
+            SetItemText(listView, smallRowIndex, 2, ShellListViewRowPresentation.FormatRecursiveContents(updatedSmallRow));
+            SetItemText(listView, largeRowIndex, 3, ShellListViewRowPresentation.FormatRelativeSize(updatedLargeRow, updatedFixtureScan.Bytes));
+            SetItemText(listView, smallRowIndex, 3, ShellListViewRowPresentation.FormatRelativeSize(updatedSmallRow, updatedFixtureScan.Bytes));
             var liveValue = GetItemText(listView, smallRowIndex, 1);
             var updatedContentsRows = $"{GetItemText(listView, smallRowIndex, 2)},{GetItemText(listView, largeRowIndex, 2)}";
             var updatedRelativeSizeRows = $"{GetItemText(listView, largeRowIndex, 3)},{GetItemText(listView, smallRowIndex, 3)}";
@@ -964,16 +962,6 @@ internal static class CommonListViewColorBaseline
         }
         SetItemText(listView, index, 1, sizeText);
     }
-
-    private static void SetRelativeSizeText(nint listView, int index, ulong itemBytes, ulong directoryBytes, int subItem)
-    {
-        var percentage = RecursiveSizePercentage.Calculate(itemBytes, directoryBytes);
-        var text = percentage?.ToString("G", CultureInfo.InvariantCulture);
-        SetItemText(listView, index, subItem, text is null ? string.Empty : text + "%");
-    }
-
-    private static void SetContentsText(nint listView, int index, long files, long folders) =>
-        SetItemText(listView, index, 2, $"files: {files}, folders: {folders}");
 
     private static decimal? ParseRelativeSize(string text) =>
         decimal.TryParse(text.TrimEnd('%'), NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
