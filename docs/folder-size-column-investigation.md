@@ -897,3 +897,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 首轮取消尝试在立即读取队列计数前调用外部 `SHChangeNotify`，Shell 回调尚未同步到达，故队列为 0；该轮没有触及取消断言，不作为生命周期失败或通过证据。当前三轮使用同步探针接口精确验证已排队计时器的取消，真实 IFileOperation 的 create/move/rename/delete 映射仍由前述独立场景覆盖。adapter 与探针都仅在 NativeProbe；产品没有新增计时器或 Shell 视图行为。下一步检查 view hold 释放与窗口销毁的 owner 调用顺序，再继续完整命令/菜单/导航/OLE 拖放迁移门槛。
 
 随后将 timer 验证移到真正的 view-window teardown：RED 轮先排队、不取消、销毁窗口并泵消息，稳定复现一次迟到的 `SHCNE_UPDATEDIR`（`directory-updates-after-destroy=1`）。加入销毁前按 view 取消后，连续三轮均为 `0`，Private Desktop 前台/输入/清理守卫通过；日志：`20261031-124311-d534ae63.stdout.log`、`20261031-124323-615655c0.stdout.log`、`20261031-124335-9fbfaed6.stdout.log`。这证明隔离 host 的关闭顺序必须先撤销 backing-directory timer，再调用 `DestroyViewWindow`；它不验证跨线程竞态，也不提供产品 host 的接线证据。
+
+### 2026-10-31：慢速派生列状态的 DefView A/B 探针准备
+
+为验证 `IShellFolder2::GetDefaultColumnState` 上的 `SHCOLSTATE_SLOW` 是否影响 DefView 的派生目录大小列更新，NativeProbe 增加了一个仅供 Private Desktop 使用的 A/B 入口。基线入口（未设置 slow flag）在初始视图中由 `GetDetailsOf` 读取目录/文件值 `10/4`，并按自定义大小列完成升序/降序；同一运行的后续单项目录更新后，自定义列从 DefView 列集合中消失，列索引变为 `-1`，未再请求行值。基线日志为 `src/.state/native-probe-watchdog/20261031-125438-a4c0a827.stdout.log`。
+
+该基线运行随后在销毁父窗口阶段超过 watchdog 时限，且期间系统输入 tick 变化；watchdog 失败关闭并清理了本次 UUID 夹具和注册项。因此初始显示/排序只是阶段性观察，整轮不是通过，不能据此下结论说更新丢列根因已确认。`SHCOLSTATE_SLOW` 变体已接线并通过 NativeProbe Release 构建，但本轮没有运行该变体；在获得隔离桌面及显式运行授权前，不启动同类 Private Desktop view 探针。产品 ExplorerBrowser 未改，派生列也未进入产品。

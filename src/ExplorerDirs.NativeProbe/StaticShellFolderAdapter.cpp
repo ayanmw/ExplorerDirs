@@ -1278,6 +1278,7 @@ namespace
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
     // Exclude synchronous property callbacks caused by the probe's own
@@ -2325,6 +2326,9 @@ namespace
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
             if (column > (extended ? 3u : 2u)) return E_INVALIDARG;
             *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 || column == 3 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
+            if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
+                InterlockedCompareExchange(&g_syntheticSlowCustomSizeColumnForProbe, 0, 0))
+                *state |= SHCOLSTATE_SLOW;
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* key, VARIANT* value) override
@@ -3905,6 +3909,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProb
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSlowCustomSizeColumnForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticSlowCustomSizeColumnForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 

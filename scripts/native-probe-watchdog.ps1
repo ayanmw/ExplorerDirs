@@ -3,7 +3,7 @@ param(
     [int]$TimeoutSeconds = 30,
     [ValidateSet('Desktop', 'ThisPC', 'RecycleBin', 'ControlPanel', 'Libraries', 'NetworkPlaces', 'SearchFolder', 'ZipContainer')]
     [string]$VirtualScope,
-    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'session-restore-sync-cleanup-private-desktop', 'private-desktop-window-destroy-control', 'private-desktop-window-visibility-control', 'private-desktop-shared-window-destroy-control', 'private-desktop-shell-view-window-destroy-control', 'private-desktop-single-pane-sync-cleanup', 'private-desktop-2pane-sync-cleanup', 'private-desktop-3pane-sync-cleanup', 'private-desktop-4pane-sync-cleanup', 'private-desktop-4pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-nofocus-sync-cleanup', 'private-desktop-single-pane-menu-active-sync-cleanup', 'private-desktop-single-pane-menu-detached-ime-sync-cleanup', 'private-desktop-single-pane-menu-disabled-ime-sync-cleanup', 'private-desktop-single-pane-menu-ole-init-sync-cleanup', 'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup', 'private-desktop-single-pane-menu-wpf-ole-sync-cleanup', 'private-desktop-single-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-wpf-host-keyboard-consumer', 'private-desktop-four-pane-wpf-host-directory-isolation', 'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup', 'private-desktop-single-pane-menu-late-coordinator-dispose', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop', 'static-shell-item-bound-view-private-desktop', 'synthetic-shell-size-sort-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')]
+    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'session-restore-sync-cleanup-private-desktop', 'private-desktop-window-destroy-control', 'private-desktop-window-visibility-control', 'private-desktop-shared-window-destroy-control', 'private-desktop-shell-view-window-destroy-control', 'private-desktop-single-pane-sync-cleanup', 'private-desktop-2pane-sync-cleanup', 'private-desktop-3pane-sync-cleanup', 'private-desktop-4pane-sync-cleanup', 'private-desktop-4pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-nofocus-sync-cleanup', 'private-desktop-single-pane-menu-active-sync-cleanup', 'private-desktop-single-pane-menu-detached-ime-sync-cleanup', 'private-desktop-single-pane-menu-disabled-ime-sync-cleanup', 'private-desktop-single-pane-menu-ole-init-sync-cleanup', 'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup', 'private-desktop-single-pane-menu-wpf-ole-sync-cleanup', 'private-desktop-single-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-wpf-host-keyboard-consumer', 'private-desktop-four-pane-wpf-host-directory-isolation', 'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup', 'private-desktop-single-pane-menu-late-coordinator-dispose', 'drop-target-private-desktop', 'color-private-desktop', 'color-readonly-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop', 'static-shell-item-bound-view-private-desktop', 'synthetic-shell-size-sort-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')]
     [string]$Probe = 'color',
     [switch]$TestTimeoutPath,
     [string]$TimeoutDumpPath
@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runTimeoutSeconds = $TimeoutSeconds
-$syntheticShellProbe = $Probe -in @('synthetic-shell-size-sort-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')
+$syntheticShellProbe = $Probe -in @('synthetic-shell-size-sort-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')
 $timeoutTreeScriptPath = $null
 $timeoutTreePidPath = $null
 if ($TestTimeoutPath) {
@@ -44,6 +44,7 @@ else {
         'static-shell-item-bound-view-private-desktop' { '--static-shell-item-bound-view-private-desktop' }
         'synthetic-shell-size-sort-private-desktop' { '--synthetic-shell-size-sort-private-desktop' }
         'synthetic-recursive-directory-size-private-desktop' { '--synthetic-recursive-directory-size-private-desktop' }
+        'synthetic-recursive-directory-size-slow-column-private-desktop' { '--synthetic-recursive-directory-size-slow-column-private-desktop' }
         'synthetic-recursive-directory-size-wpf-host-private-desktop' { '--synthetic-recursive-directory-size-wpf-host-private-desktop' }
         'auto-column-width' { '--auto-column-width' }
         'photo-print-verb' { '--photo-print-verb' }
@@ -98,7 +99,7 @@ if (-not [string]::IsNullOrWhiteSpace($timeoutDumpPath) -and -not [IO.Path]::IsP
     throw 'TimeoutDumpPath must be an absolute path.'
 }
 if (-not $TestTimeoutPath -and -not [string]::IsNullOrWhiteSpace($timeoutDumpPath)) {
-    if ($Probe -in @('synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')) {
+    if ($Probe -in @('synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')) {
         # This view probe has an internal 30-second deadline; capture first so the outer watchdog owns the dump.
         $runTimeoutSeconds = [Math]::Min($runTimeoutSeconds, 25)
     }

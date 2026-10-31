@@ -64,6 +64,10 @@ public static class SyntheticShellSortProbe
     internal static int RunRecursiveDirectorySizeSort() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, exerciseUpdateNotifications: true);
 
+    internal static int RunRecursiveDirectorySizeSortWithSlowColumn() =>
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            slowCustomSizeColumn: true, exerciseUpdateNotifications: true);
+
     internal static int RunRecursiveDirectorySizeSortWithWpfHost() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, exerciseUpdateNotifications: true);
@@ -84,7 +88,7 @@ public static class SyntheticShellSortProbe
 
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
-        bool exerciseUpdateNotifications = false)
+        bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false)
     {
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
@@ -196,6 +200,8 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticOwnAttributesForProbe"))(selfOwnedAttributes ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticCustomSizeColumnForProbe"))(customSizeColumn ? 1 : 0));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticSlowCustomSizeColumnForProbe"))(slowCustomSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module, "SetSyntheticSortBackingPath"))(backingFolder));
             RegisterSyntheticFolder(classKeyPath, syntheticFolderClassId);
             classRegistrationCreated = true;
@@ -261,7 +267,7 @@ public static class SyntheticShellSortProbe
                 var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
                 var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
                 string[] ascendingNames;
                 if (shellWindowScrollProbe)
                 {
@@ -283,7 +289,7 @@ public static class SyntheticShellSortProbe
                     ? SortByHeader(module, sizeListView, columnIndex: 1, expectedCount: expectedInitialCount, stage: "header-sort-descending")
                     : SortAndRead(module, folderView, view, sizeListView, direction: -1, expectedCount: expectedInitialCount);
                 var descendingComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
                 var displayedDirectorySize = childIndex >= 0 && string.Equals(initialSizes[childIndex], "10", StringComparison.Ordinal);
