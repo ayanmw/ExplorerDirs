@@ -4010,10 +4010,10 @@ internal static class ShellViewColorSpike
             ("group-asc", groupAscending, true, 1)
         })
         {
+            var groupSelection = "not-applicable";
             if (transition.Name == "group-desc")
             {
-                var sizeGroup = sizeKey;
-                Check(At<SetGroupBy>(folderView, 17)(folderView, ref sizeGroup, 1));
+                groupSelection = InvokeBackgroundGroupBySize(view, shellViewWindow, folderView, sizeKey);
                 Pump(180);
             }
             if (!TryInvokeMergedViewMenuCommand(menuHost, transition.CommandId))
@@ -4023,9 +4023,11 @@ internal static class ShellViewColorSpike
             var sortColumns = new SortColumn[sortCount];
             if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
             var groupResult = At<GetGroupBy>(folderView, 18)(folderView, out var currentGroup, out var currentGroupAscending);
-            var stateVerified = sortCount == 1 && sortColumns[0].Key.FormatId == nameKey.FormatId &&
-                sortColumns[0].Key.PropertyId == nameKey.PropertyId &&
-                sortColumns[0].Direction == (transition.Name == "sort-desc" ? -1 : 1) &&
+            var expectedSortKey = transition.Grouped ? sizeKey : nameKey;
+            var expectedSortDirection = transition.Grouped ? transition.Direction : transition.Name == "sort-desc" ? -1 : 1;
+            var stateVerified = sortCount == 1 && sortColumns[0].Key.FormatId == expectedSortKey.FormatId &&
+                sortColumns[0].Key.PropertyId == expectedSortKey.PropertyId &&
+                sortColumns[0].Direction == expectedSortDirection &&
                 (transition.Grouped
                     ? groupResult == 0 && currentGroup.FormatId == sizeKey.FormatId && currentGroup.PropertyId == sizeKey.PropertyId &&
                         currentGroupAscending == (transition.Direction > 0 ? 1 : 0)
@@ -4034,12 +4036,7 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Native {transition.Name} menu command did not produce its expected sort/group state: {sortCount}/{(sortCount > 0 ? sortColumns[0].Direction : 0)}; group=0x{groupResult:X8}/{currentGroup.PropertyId}/{currentGroupAscending}.");
             var order = MapCurrentFolderItems(folderView, fixturePaths);
             var transitionState = $"{transition.Name}:id=0x{transition.CommandId:X4};sort={sortCount}/{(sortCount > 0 ? sortColumns[0].Direction : 0)};" +
-                $"group=0x{groupResult:X8}/{currentGroup.PropertyId}/{currentGroupAscending};state-ok={stateVerified};order={order}";
-            if (transition.Name is not ("sort-desc" or "sort-asc" or "group-asc"))
-            {
-                transitions.Add(transitionState + ";color-sample=deferred-to-end-of-category");
-                continue;
-            }
+                $"group-selection={groupSelection};group=0x{groupResult:X8}/{currentGroup.PropertyId}/{currentGroupAscending};state-ok={stateVerified};order={order}";
 
             RefreshFixtureColorMap(folderView, fixturePaths);
             ClearNativeViewMenuColorSelection();
@@ -4063,6 +4060,83 @@ internal static class ShellViewColorSpike
             var selectItem = At<SelectFolderItem>(folderView, 15);
             Check(selectItem(folderView, 0, 0)); // SVSI_DESELECT.
             Check(selectItem(folderView, 1, 0)); // SVSI_DESELECT.
+        }
+    }
+
+    private static string InvokeBackgroundGroupBySize(nint view, nint owner, nint folderView, PropertyKey expectedSizeKey)
+    {
+        const uint firstCommandId = 1;
+        const uint WmInitMenuPopup = 0x0117;
+        var contextMenuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        nint contextMenu3 = 0, menu = 0;
+        try
+        {
+            var contextMenu3Id = new Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
+            Check(Marshal.QueryInterface(contextMenu, in contextMenu3Id, out contextMenu3));
+            menu = CreatePopupMenu();
+            if (menu == 0) throw new InvalidOperationException("Could not create the native Group by menu probe.");
+            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0,
+                firstCommandId, 0x7fff, 0x10 | 0x800);
+            Check(queryResult);
+
+            nint groupMenu = 0;
+            for (var index = 0; index < GetMenuItemCount(menu); index++)
+            {
+                var caption = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(menu, (uint)index, caption, caption.Capacity, 0x400);
+                var normalized = NormalizeMenuLabel(caption.ToString());
+                if (normalized is "分组依据" or "Group by")
+                {
+                    groupMenu = GetSubMenu(menu, index);
+                    if (groupMenu != 0)
+                    {
+                        var handleMenuMessage = At<HandleContextMenuMessage2>(contextMenu3, 7);
+                        var initializeResult = handleMenuMessage(contextMenu3, WmInitMenuPopup, groupMenu, index, out _);
+                        if (initializeResult < 0 && initializeResult != unchecked((int)0x80004001))
+                            Check(initializeResult);
+                    }
+                    break;
+                }
+            }
+            if (groupMenu == 0)
+                throw new InvalidOperationException("The native background context menu did not expose an initialized Group by submenu.");
+
+            for (var index = 0; index < GetMenuItemCount(groupMenu); index++)
+            {
+                var caption = new System.Text.StringBuilder(256);
+                _ = GetMenuStringW(groupMenu, (uint)index, caption, caption.Capacity, 0x400);
+                var normalized = NormalizeMenuLabel(caption.ToString());
+                if (normalized is not ("大小" or "Size")) continue;
+                var commandId = GetMenuItemID(groupMenu, index);
+                if (commandId < firstCommandId)
+                    throw new InvalidOperationException($"The native Group by Size item has no direct command ID: {caption}.");
+                var invoke = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Window = owner,
+                    Verb = (nint)(commandId - firstCommandId),
+                    Show = 0
+                };
+                Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
+                Check(At<GetGroupBy>(folderView, 18)(folderView, out var actualGroup, out var ascending));
+                if (actualGroup.FormatId != expectedSizeKey.FormatId || actualGroup.PropertyId != expectedSizeKey.PropertyId)
+                    throw new InvalidOperationException($"Invoking native Group by Size selected property {actualGroup.PropertyId}, expected {expectedSizeKey.PropertyId}.");
+                Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+                var sortColumns = new SortColumn[sortCount];
+                if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
+                var sortState = string.Join(',', sortColumns.Select(column => $"{column.Key.PropertyId}/{column.Direction}"));
+                var result = $"native-context-menu:{caption};command-id={commandId};offset={commandId - firstCommandId};ascending={ascending};sort={sortState}";
+                Console.WriteLine($"native-background-group-by-size={result}");
+                return result;
+            }
+            throw new InvalidOperationException("The native background Group by submenu did not expose a Size command.");
+        }
+        finally
+        {
+            if (menu != 0) DestroyMenu(menu);
+            if (contextMenu3 != 0) Marshal.Release(contextMenu3);
+            Marshal.Release(contextMenu);
         }
     }
 
@@ -4781,6 +4855,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, nuint commandId, uint flags, nint reserved, nint name, uint length);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int HandleContextMenuMessage2(nint self, uint message, nint wParam, nint lParam, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TranslateAccelerator(nint self, ref NativeMessage message);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectFolderItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
