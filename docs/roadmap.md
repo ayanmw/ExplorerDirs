@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 temp.80 同一 PID 内存复采：仍运行的 PID `47460`（ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`）进行 60.16 秒只读采样 13 点，Working Set `198.00→197.96 MiB`、Private Bytes `119.08→119.00 MiB`，句柄/线程小幅下降。EXE/DLL 哈希与既有 temp.80 记录相符。未记录固定浏览负载，因此仅说明本分钟没有进程级计数增长，不解释运行期间或长期增长，也没有做优化。原始点位、哈希和边界见[内存采样记录](memory-sampling.md#2026-10-31-1529-北京时间temp80-同一-pid-第三次一分钟只读采样)。
+
 2026-10-31 句柄扫描器 ABA 路径复核：补充真实时序“打开原目录句柄 → 将原目录移走并在原路径放入 10 B 替代目录 → 扫描期间把替代目录移开并恢复原目录 → 发布扫描结果”。Release `ShellListViewRowModelSmoke` 中的该场景通过：扫描结果身份及 6 B 摘要来自原目录句柄；路径恢复为同一原目录后结果可安全发布。完整 Release `SettingsSmoke` 通过。由此收窄此前调查中的 ABA 未知点：它只适用于路径返回汇总的旧接口；当前隔离句柄扫描把结果绑定到实际打开对象。仍不接入产品 ExplorerBrowser/F9，也不替代 Shell view 的可见列/操作验收。
 
 2026-10-31 隔离递归大小快照拒绝同路径替换目录：NativeProbe provider 仍以 Shell 绝对解析名保存每路径一份快照，但每个文件夹 PIDL 同时携带卷序列号与 128 位文件 ID；读取缓存时两者必须匹配。真实临时目录在缓存后被改名、同路径创建 17 B 新目录，旧实现回归失败，身份校验后新行读回 17 B 而非旧缓存；provider 重建、重枚举及大小列文本/数值/排序合同继续通过。原生 adapter `/W4 /WX` 构建、`--static-shell-column-folder-smoke` 和 Release `SettingsSmoke` 通过。该快照仍只存在 NativeProbe 隔离 provider，不接产品 ExplorerBrowser；文件系统不提供 `FILE_ID_INFO` 时不应用缓存，产品逐行大小列和可见 Shell 行为仍开放。
