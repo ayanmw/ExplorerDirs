@@ -1281,7 +1281,13 @@ public static class SyntheticShellSortProbe
         var streamTraceBefore = host?.ViewStateStreamTrace.Count ?? 0;
         var mapCallsBeforeNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
         var redrawBaselinePixels = holdListViewRedrawUntilSettled ? CaptureListViewPixelSamples(listView) : null;
+        using var paintObserver = holdListViewRedrawUntilSettled || name == "full-view-refresh-live-cache-publish"
+            ? new NativeListViewPaintObserver(listView)
+            : null;
         using var redrawLease = holdListViewRedrawUntilSettled ? new NativeListViewRedrawLease(listView) : null;
+        paintObserver?.SetStage(holdListViewRedrawUntilSettled
+            ? NativeListViewPaintObserver.RedrawDisabled
+            : NativeListViewPaintObserver.RefreshUnfrozen);
         var notificationStarted = Environment.TickCount64;
         notify();
         var mapCallsAfterNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
@@ -1461,11 +1467,17 @@ public static class SyntheticShellSortProbe
         if (redrawLease is not null && redrawBaselinePixels is not null)
         {
             var frozenPixels = CaptureListViewPixelSamples(listView);
+            paintObserver!.SetStage(NativeListViewPaintObserver.RedrawReenabled);
             redrawLease.Dispose();
             var repaintedPixels = CaptureListViewPixelSamples(listView);
             var pixelComparisonAvailable = redrawBaselinePixels.All(pixel => pixel != uint.MaxValue) &&
                 frozenPixels.All(pixel => pixel != uint.MaxValue) && repaintedPixels.All(pixel => pixel != uint.MaxValue);
             Console.WriteLine($"synthetic-size-update-pixels: comparison-available={pixelComparisonAvailable}; before=[{SummarizePixelSamples(redrawBaselinePixels)}]; frozen=[{SummarizePixelSamples(frozenPixels)}]; repainted=[{SummarizePixelSamples(repaintedPixels)}]");
+            Console.WriteLine($"synthetic-size-update-paint-messages: {paintObserver.FormatCounts()}");
+        }
+        else if (paintObserver is not null)
+        {
+            Console.WriteLine($"synthetic-size-update-paint-messages: strategy={name}; {paintObserver.FormatCounts()}");
         }
     }
 
@@ -3236,6 +3248,69 @@ public static class SyntheticShellSortProbe
             _ = SendMessageW(listView, WmSetRedraw, 1, 0);
             _ = RedrawWindow(listView, 0, 0, RdwErase | RdwFrame | RdwInvalidate | RdwAllChildren | RdwUpdateNow);
             Console.WriteLine($"synthetic-size-update-redraw: disabled=False; syssetredraw={GetPropW(listView, "SysSetRedraw") != 0}; forced-redraw=True");
+        }
+    }
+
+    private sealed class NativeListViewPaintObserver : IDisposable
+    {
+        internal const int RedrawDisabled = 1;
+        internal const int RedrawReenabled = 2;
+        internal const int RefreshUnfrozen = 3;
+        private const uint WmPaint = 0x000F;
+        private const nuint SubclassId = 0xAE53;
+        private static readonly SubclassProcedure Procedure = WindowProcedure;
+        private readonly nint _listView;
+        private readonly GCHandle _self;
+        private long _disabledPaintCount;
+        private long _reenabledPaintCount;
+        private long _unfrozenPaintCount;
+        private int _stage;
+
+        internal NativeListViewPaintObserver(nint listView)
+        {
+            if (listView == 0) throw new ArgumentException("The DefView ListView HWND is required.", nameof(listView));
+            _listView = listView;
+            _self = GCHandle.Alloc(this);
+            if (!SetWindowSubclass(_listView, Procedure, SubclassId, GCHandle.ToIntPtr(_self)))
+            {
+                _self.Free();
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                    "Could not observe DefView ListView paint messages.");
+            }
+        }
+
+        internal void SetStage(int stage) => Volatile.Write(ref _stage, stage);
+
+        private static nint WindowProcedure(nint window, uint message, nuint wParam, nint lParam,
+            nuint subclassId, nint referenceData)
+        {
+            if (message == WmPaint)
+            {
+                try
+                {
+                    if (GCHandle.FromIntPtr(referenceData).Target is NativeListViewPaintObserver observer)
+                    {
+                        var stage = Volatile.Read(ref observer._stage);
+                        if (stage == RedrawDisabled) Interlocked.Increment(ref observer._disabledPaintCount);
+                        else if (stage == RedrawReenabled) Interlocked.Increment(ref observer._reenabledPaintCount);
+                        else if (stage == RefreshUnfrozen) Interlocked.Increment(ref observer._unfrozenPaintCount);
+                    }
+                }
+                catch { /* Never allow a diagnostic callback exception across the native window procedure. */ }
+            }
+            return DefSubclassProc(window, message, wParam, lParam);
+        }
+
+        internal string FormatCounts() =>
+            $"redraw-disabled={Interlocked.Read(ref _disabledPaintCount)}; redraw-reenabled={Interlocked.Read(ref _reenabledPaintCount)}; refresh-unfrozen={Interlocked.Read(ref _unfrozenPaintCount)}";
+
+        public void Dispose()
+        {
+            if (_self.IsAllocated)
+            {
+                if (IsWindow(_listView)) _ = RemoveWindowSubclass(_listView, Procedure, SubclassId);
+                _self.Free();
+            }
         }
     }
 
