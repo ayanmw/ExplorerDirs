@@ -1,4 +1,5 @@
 # 路线图
+2026-11-01 隔离 Shell 行模型通知覆盖补齐文件夹生命周期事件：synthetic adapter 现在将 SHCNE_MKDIR/RMDIR/RENAMEFOLDER（并剥除 SHCNE_INTERRUPT 修饰位）与既有文件项/属性事件统一排入延迟父目录更新，避免自有行投影漏掉文件夹新建、删除及改名。Windows SDK 原生 adapter /W4 /WX 编译通过；本批未运行 smoke/view 探针，实际通知合并与 DefView 重枚举仍待隔离复核。产品 ExplorerBrowser 未改。详见[调查记录](folder-size-column-investigation.md#2026-11-01隔离-adapter-覆盖文件夹生命周期通知)。
 
 2026-10-31 隔离 IShellView 派生列数据合同：NativeProbe 现将身份复核后的生产扫描结果经 Shell 行模型投影，连同卷序列号和 128 位文件 ID 传入原生 provider；provider 拒绝不匹配的 Shell 行身份。Release SettingsSmoke、NativeProbe Release build、原生 adapter /W4 /WX 与 --static-shell-column-folder-smoke 均通过，window-created=False。该合同仍只在隔离 provider 内验证，尚未接产品 ExplorerBrowser 或可见 IShellView 列；详见[派生大小列调查](folder-size-column-investigation.md)。
 

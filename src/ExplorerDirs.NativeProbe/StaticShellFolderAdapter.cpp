@@ -62,8 +62,12 @@ namespace
         // UPDATEITEM carries property changes for an existing child; the custom
         // row model must re-enumerate its parent to observe updated derived values.
         // ATTRIBUTES can also change row presentation (for example, read-only rules).
-        return event == SHCNE_CREATE || event == SHCNE_RENAMEITEM ||
-            event == SHCNE_DELETE || event == SHCNE_UPDATEITEM || event == SHCNE_ATTRIBUTES;
+        // Shell uses separate lifecycle events for folders and nonfolder items.
+        const auto eventType = event & ~SHCNE_INTERRUPT;
+        return eventType == SHCNE_CREATE || eventType == SHCNE_RENAMEITEM ||
+            eventType == SHCNE_DELETE || eventType == SHCNE_UPDATEITEM ||
+            eventType == SHCNE_MKDIR || eventType == SHCNE_RMDIR ||
+            eventType == SHCNE_RENAMEFOLDER || eventType == SHCNE_ATTRIBUTES;
     }
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};

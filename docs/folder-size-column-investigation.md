@@ -1023,3 +1023,9 @@ NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELE
 此前静态父窗口宿主在 teardown 阶段超时；本轮使用已能稳定销毁的 WPF `HwndSource` 根宿主和 Private Desktop 重跑隔离 view。先临时移除 adapter 对 `SHCNE_ATTRIBUTES` 的分类：事件专属命中数保持 0，后续 Shell 单独投递的 `SHCNE_UPDATEITEM` 不能冒充属性事件。恢复分类后，隐藏属性变化的 `SHCNE_ATTRIBUTES` 命中数为 1，adapter 延迟父目录更新队列/发送各增加 1；隐藏项仍留在行中，DefView 的 `EnumObjects` 增量为 0。view 包含隐藏项且 DefView 可直接更新项目，因此本轮只证明属性事件通过 adapter 转发，不证明重枚举行或隐藏项过滤行为。
 
 完整 `single-item-recreate-shell-window-scroll` Private Desktop 探针 exit 0：此前已有的 move、rename、delete、取消待处理计时器检查继续通过；前台 HWND 与输入 tick 不变，UUID 注册和临时夹具清理通过。Native adapter `/W4 /WX`、NativeProbe Release build 及 `--synthetic-child-notification-routing-smoke` 通过，0 警告/错误。日志：`src/.state/native-probe-watchdog/20261031-234029-1a879d22.stdout.log`。这没有修改产品 ExplorerBrowser，也没有证明只读属性文字/颜色更新、DefView 视图重枚举或可见 UI 体验。先前的 Private Desktop teardown 超时限制已由 WPF 根宿主路线解决，静态父窗口路径仍不作为此类探针的首选。
+
+### 2026-11-01：隔离 adapter 覆盖文件夹生命周期通知
+
+按 Windows `SHChangeNotify` 的事件定义，文件夹新建、删除和重命名分别使用 `SHCNE_MKDIR`、`SHCNE_RMDIR`、`SHCNE_RENAMEFOLDER`，而 `SHCNE_CREATE`、`SHCNE_DELETE`、`SHCNE_RENAMEITEM` 对应非文件夹项目。隔离 synthetic adapter 的父目录更新分类此前只包含后者，因此创建/删除/重命名文件夹可能让自有行投影保留旧项目。现在分类补入三种文件夹事件，并忽略可选的 `SHCNE_INTERRUPT` 修饰位后再判断基础事件；更新仍延迟到父目录，`SHCNE_UPDATEDIR` 仍排除以避免递归通知。
+
+Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未运行 smoke 或 Shell view 探针，因此只确认头文件常量和代码可编译；具体文件夹操作通知是否通过 synthetic adapter、是否只触发一次父目录重枚举，仍待后续隔离运行确认。产品 ExplorerBrowser 未改，也没有可见 GUI 验收。
