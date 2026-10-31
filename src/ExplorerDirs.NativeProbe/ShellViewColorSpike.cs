@@ -2585,8 +2585,108 @@ internal static class ShellViewColorSpike
                 !sourceStillPresent || !archiveIntact || !foregroundUnchanged)
                 throw new IOException("IFileOperation.CopyItems did not copy both selected ZIP entries and the nested file while preserving the source view.");
 
-            var fileChildIndex = selectedNames.FindIndex(name =>
+            var originalFileChildIndex = selectedNames.FindIndex(name =>
                 name.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
+            var renameAbsolute = ILCombine(folderPidl, selectedChildren[originalFileChildIndex]);
+            if (renameAbsolute == 0) throw new InvalidOperationException("Could not combine the ZIP file PIDL for RenameItem.");
+            nint renameItem = 0, renameOperation = 0;
+            var renamedFileName = "blue-rule-renamed.txt";
+            var renameAborted = -1;
+            var renameResult = int.MinValue;
+            var renamePerformResult = int.MinValue;
+            uint renameAttributes = 0x10; // SFGAO_CANRENAME.
+            try
+            {
+                var renameChildArray = Marshal.AllocHGlobal(IntPtr.Size);
+                try
+                {
+                    Marshal.WriteIntPtr(renameChildArray, selectedChildren[originalFileChildIndex]);
+                    Check(At<GetAttributesOf>(folder, 9)(folder, 1, renameChildArray, ref renameAttributes));
+                }
+                finally { Marshal.FreeHGlobal(renameChildArray); }
+                var shellItemInterfaceId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+                Check(SHCreateItemFromIDList(renameAbsolute, ref shellItemInterfaceId, out renameItem));
+                Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out renameOperation));
+                Check(At<SetOperationFlags>(renameOperation, 5)(renameOperation, 0x0004 | 0x0010 | 0x0400));
+                renameResult = At<RenameItem>(renameOperation, 12)(renameOperation, renameItem, renamedFileName, 0);
+                if (renameResult >= 0)
+                {
+                    renamePerformResult = At<PerformOperations>(renameOperation, 21)(renameOperation);
+                    if (renamePerformResult >= 0)
+                        Check(At<GetAnyOperationsAborted>(renameOperation, 22)(renameOperation, out renameAborted));
+                }
+            }
+            finally
+            {
+                if (renameOperation != 0) Marshal.Release(renameOperation);
+                if (renameItem != 0) Marshal.Release(renameItem);
+                Marshal.FreeCoTaskMem(renameAbsolute);
+            }
+            var originalArchiveItemRetained = false;
+            var renamedArchiveBytes = Array.Empty<byte>();
+            using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
+            {
+                originalArchiveItemRetained = archive.GetEntry("blue-rule-target.txt") is { Length: 1 };
+                using var renamedEntry = archive.GetEntry(renamedFileName)?.Open();
+                if (renamedEntry is not null)
+                {
+                    using var renamedContent = new MemoryStream();
+                    renamedEntry.CopyTo(renamedContent);
+                    renamedArchiveBytes = renamedContent.ToArray();
+                }
+            }
+            Pump(1000, "zip-file-rename-settle");
+            nint renamedChild = 0;
+            var renamedRowFound = false;
+            var renamedViewCount = GetShellViewItemCount(folderView);
+            for (var index = 0; index < renamedViewCount; index++)
+            {
+                Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var child));
+                nint absolute = 0;
+                try
+                {
+                    absolute = ILCombine(folderPidl, child);
+                    if (absolute == 0) throw new InvalidOperationException("Could not combine a ZIP row PIDL after RenameItem.");
+                    var row = ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList);
+                    if (row.DisplayName.Equals(renamedFileName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        renamedChild = ILClone(child);
+                        if (renamedChild == 0) throw new InvalidOperationException("Could not retain the renamed ZIP file PIDL.");
+                        renamedRowFound = true;
+                    }
+                }
+                finally
+                {
+                    if (absolute != 0) Marshal.FreeCoTaskMem(absolute);
+                    Marshal.FreeCoTaskMem(child);
+                }
+            }
+            var renameApplied = renameAborted == 0 && !originalArchiveItemRetained &&
+                renamedArchiveBytes.Length == 1 && renamedArchiveBytes[0] == 0x41 && renamedChild != 0;
+            var canRename = (renameAttributes & 0x10) != 0;
+            Console.WriteLine($"ishellview-zip-iFileOperation-rename: operation=RenameItem;attributes=0x{renameAttributes:X8};can-rename={canRename};rename-hresult=0x{renameResult:X8};perform-hresult=0x{renamePerformResult:X8};aborted={renameAborted};applied={renameApplied};old-source-retained={originalArchiveItemRetained};renamed-bytes=[{Convert.ToHexString(renamedArchiveBytes)}];view-count={renamedViewCount};renamed-row-found={renamedRowFound};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (renameApplied && GetForegroundWindow() != foreground)
+            {
+                if (renamedChild != 0) Marshal.FreeCoTaskMem(renamedChild);
+                throw new IOException("ZIP RenameItem changed the foreground window outside the Private Desktop probe.");
+            }
+            if (!renameApplied && renamedChild != 0)
+            {
+                Marshal.FreeCoTaskMem(renamedChild);
+                throw new IOException("ZIP RenameItem produced a renamed Shell row without completing the matching archive operation.");
+            }
+            if (renameApplied)
+            {
+                Marshal.FreeCoTaskMem(selectedChildren[originalFileChildIndex]);
+                selectedChildren[originalFileChildIndex] = renamedChild;
+                selectedNames[originalFileChildIndex] = renamedFileName;
+            }
+            else if (canRename || !originalArchiveItemRetained || renamedArchiveBytes.Length != 0 || renamedRowFound ||
+                renamedViewCount != itemCount || renameAborted != 1)
+                throw new IOException("ZIP RenameItem did not apply, but also did not preserve the original archive item cleanly.");
+
+            var fileChildIndex = selectedNames.FindIndex(name =>
+                name.Equals(renameApplied ? renamedFileName : "blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
             moveChildArray = Marshal.AllocHGlobal(IntPtr.Size);
             Marshal.WriteIntPtr(moveChildArray, selectedChildren[fileChildIndex]);
             Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, moveChildArray,
@@ -2602,13 +2702,14 @@ internal static class ShellViewColorSpike
             var performMoveResult = moveItemsResult < 0 ? moveItemsResult : At<PerformOperations>(moveOperation, 21)(moveOperation);
             var moveAborted = performMoveResult < 0 ? -1 : At<GetAnyOperationsAborted>(moveOperation, 22)(moveOperation, out var moveWasAborted) < 0
                 ? -1 : moveWasAborted;
-            var movedPath = Path.Combine(moveDestinationPath, "blue-rule-target.txt");
+            var movedFileName = renameApplied ? renamedFileName : "blue-rule-target.txt";
+            var movedPath = Path.Combine(moveDestinationPath, movedFileName);
             var movedBytes = File.Exists(movedPath) ? File.ReadAllBytes(movedPath) : [];
             var sourceFileRetained = false;
             var nestedSourceRetained = false;
             using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
             {
-                sourceFileRetained = archive.GetEntry("blue-rule-target.txt") is { Length: 1 };
+                sourceFileRetained = archive.GetEntry(movedFileName) is { Length: 1 };
                 nestedSourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
             }
             Pump(1000, "zip-move-settle");
@@ -5815,6 +5916,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolderViewOptions(nint self, out uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderViewOptions(nint self, uint mask, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint childPidls, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
@@ -5933,6 +6035,7 @@ internal static class ShellViewColorSpike
         in Guid iid, out nint value);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(
         string path, nint bindContext, ref Guid interfaceId, out nint item);
+    [DllImport("shell32.dll")] private static extern int SHCreateItemFromIDList(nint pidl, ref Guid interfaceId, out nint item);
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid classId, nint outer,
         uint context, ref Guid interfaceId, out nint instance);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateWindowExW(uint ex,
