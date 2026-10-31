@@ -895,3 +895,5 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 给隔离 adapter 加入仅供 NativeProbe 使用的按 view 排队/取消接口。同步排队一次 backing-directory update 后，在泵 STA 消息前立即取消，再泵 400 ms；三次连续 Private Desktop watchdog 均观察到队列 `1`、发送 `0`、provider 枚举 `0`，取消返回 `S_OK`。这证明当前 STA 计时器在 owner 关闭 view 前显式取消时不会迟到发送更新，且计时器持有的 folder 引用会由取消路径释放。完整日志：`20261031-123706-16b139a2.stdout.log`、`20261031-123730-3aff15f5.stdout.log`、`20261031-123741-8079b46c.stdout.log`；前台与输入守卫均通过。
 
 首轮取消尝试在立即读取队列计数前调用外部 `SHChangeNotify`，Shell 回调尚未同步到达，故队列为 0；该轮没有触及取消断言，不作为生命周期失败或通过证据。当前三轮使用同步探针接口精确验证已排队计时器的取消，真实 IFileOperation 的 create/move/rename/delete 映射仍由前述独立场景覆盖。adapter 与探针都仅在 NativeProbe；产品没有新增计时器或 Shell 视图行为。下一步检查 view hold 释放与窗口销毁的 owner 调用顺序，再继续完整命令/菜单/导航/OLE 拖放迁移门槛。
+
+随后将 timer 验证移到真正的 view-window teardown：RED 轮先排队、不取消、销毁窗口并泵消息，稳定复现一次迟到的 `SHCNE_UPDATEDIR`（`directory-updates-after-destroy=1`）。加入销毁前按 view 取消后，连续三轮均为 `0`，Private Desktop 前台/输入/清理守卫通过；日志：`20261031-124311-d534ae63.stdout.log`、`20261031-124323-615655c0.stdout.log`、`20261031-124335-9fbfaed6.stdout.log`。这证明隔离 host 的关闭顺序必须先撤销 backing-directory timer，再调用 `DestroyViewWindow`；它不验证跨线程竞态，也不提供产品 host 的接线证据。

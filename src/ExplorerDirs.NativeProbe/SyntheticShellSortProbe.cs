@@ -296,6 +296,25 @@ public static class SyntheticShellSortProbe
                 if (exerciseUpdateNotifications)
                     ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder, copyDestination,
                         sizeUpdateStrategy, customSizeColumn, host, hostPointer);
+                if (recursiveDirectorySizeSortOnly && exerciseUpdateNotifications)
+                {
+                    var sentBeforeViewDestroy = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+                    var schedulePendingDirectoryUpdate = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module,
+                        "ScheduleSyntheticBackingDirectoryUpdateForProbe"));
+                    Check(schedulePendingDirectoryUpdate(view));
+                    var cancelPendingDirectoryUpdate = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module,
+                        "CancelSyntheticBackingDirectoryUpdateForProbe"));
+                    var cancelDirectoryUpdateResult = cancelPendingDirectoryUpdate(view);
+                    if (cancelDirectoryUpdateResult != 0)
+                        throw new InvalidOperationException($"Expected the pending directory-update timer to cancel before view destruction, got 0x{cancelDirectoryUpdateResult:X8}.");
+                    Check(At<DestroyViewWindow>(view, 10)(view));
+                    viewWindowCreated = false;
+                    Pump(400);
+                    var sentAfterViewDestroy = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+                    Console.WriteLine($"synthetic-recursive-directory-size-view: directory-updates-after-destroy={sentAfterViewDestroy - sentBeforeViewDestroy}");
+                    if (sentAfterViewDestroy != sentBeforeViewDestroy)
+                        throw new InvalidOperationException("A delayed parent-directory update ran after its Shell view window was destroyed.");
+                }
                 var savedViewState = host?.ReadSavedBytes() ?? [];
                 Console.WriteLine($"synthetic-view-state-stream: reads={host?.Reads ?? 0}; writes={host?.Writes ?? 0}; trace=[{string.Join(" || ", host?.ViewStateStreamTrace ?? [])}]; saved-bytes={savedViewState.Length}; saved-sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(savedViewState))}");
                 ReportProbeStage("assertions-complete");
