@@ -227,6 +227,10 @@ internal static class Program
             return CommonListViewVirtualFolderContract.Run();
         if (args.Length == 1 && args[0] == "--filesystem-folder-background-menu")
             return FileSystemFolderBackgroundMenuProbe.Run();
+        if (args.Length == 1 && args[0] == "--zip-background-menu-commands")
+            return ZipBackgroundMenuCommandProbe.Run();
+        if (args.Length == 3 && args[0] == "--zip-background-menu-verb-child")
+            return ZipBackgroundMenuCommandProbe.RunVerbChild(args[1], args[2]);
         if (args.Length == 1 && args[0] == "--common-listview-relative-size-contract")
             return CommonListViewColorBaseline.RunRelativeSizeContract();
         if (args.Length == 1 && args[0] == "--common-listview-navigation-contract")

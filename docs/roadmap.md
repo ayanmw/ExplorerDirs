@@ -5361,3 +5361,9 @@ Network Places 试探中，Shell 与 DefView 行数不一致，且 parent `IDrop
 增加 Desktop provider 逐行像素 probe。当前 24 行的 Desktop namespace 里混有 pathless 与 filesystem 项；探针通过 `LVM_ENSUREVISIBLE` 逐项滚入视口，24/24 行均触发自绘并命中预期背景/文本像素，文件行的字体也按规则选入 DC。首次首屏采样把离屏行误报未绘制，改为逐行滚动后全量复验通过。Release 构建通过；Desktop、ZIP、This PC、Libraries 隔离 probe 均退出码 0，桌面前台/输入保持不变。
 
 这扩展了混合 namespace 的 Shell 身份和逐行滚动像素证据；Network Places 与 Control Panel 仍不满足当前统一 row identity 采样合同。产品仍使用 ExplorerBrowser，未发布版本。详见[Desktop 混合项目采样](ishellview-color-spike.md#2026-11-01-desktop-混合-shell-项目与视口裁剪采样)。
+
+## 2026-11-01：ZIP 文件夹背景菜单命令名隔离查询
+
+NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture 查询 `IShellFolder.CreateViewObject(IContextMenu)` 返回的文件夹背景菜单，并将每个 canonical verb 查询隔离到带 6 秒单命令 / 45 秒总预算的子进程。Release build 0 警告/错误；输出唯一命令“全部解压缩(T)...”及 `extract` verb，exit 0；前台 HWND、最后输入时间未变，临时 fixture 清理完成。
+
+这不是 `IShellView.GetItemObject(SVGIO_BACKGROUND)` 菜单，原 ZIP view-owned 命令名查询仍是阶段 1 未完成项。没有创建或显示 Shell view，也未改产品宿主/发布包。详见[迁移门槛](superpowers/specs/2026-10-25-ishellview-host-migration-gates.md)与[IShellView 原型记录](ishellview-color-spike.md)。

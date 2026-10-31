@@ -1520,3 +1520,7 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 后续一次复跑在原生排序后的首次像素采样中只收到一行颜色回调（`sort-desc`，另一行像素为 0），随后正常退出；失败发生在最终消息泵之前。为容纳 Shell 排序后的异步重绘，排序/分组回归现在会对未命中的颜色最多再采样 7 次，每次先泵消息 80 ms，并刷新 PIDL→颜色映射。此改动后两次复跑均完整 exit 0，且都是首次采样命中，因此重试分支尚未被实际触发，不能据此认定那次漏绘已被修复。最新日志：失败 `013449-24af22fe`，通过 `013606-f18dfdbd`、`013636-355b2a08`。
 
 随后再连续运行三次完整隐藏项探针，均 Private Desktop watchdog exit 0、前台与输入未变、隔离清理通过；八种视图、颜色像素、原生排序与 Size/Type/Date modified 分组均通过，排序/分组颜色每次都在第一次采样命中。没有复现此前的 sort-desc 漏绘，有限重采样仍未被触发。日志：`013741-427d3ffa`、`013806-62975b5f`、`013831-cb8261c4`。因此本轮连续通过增强了正常路径证据，但间歇性漏绘仍未被反复触发或解释。
+
+2026-11-01：新增无 Shell view 的 ZIP 文件夹背景菜单查询。NativeProbe 在临时 ZIP fixture 上经 `IShellFolder.CreateViewObject(IContextMenu)` 查询菜单标签，并把每个 `GetCommandString(GCS_VERBW)` 放到独立子进程执行，单命令 6 秒、总预算 45 秒，避免 ZIP provider 阻塞主探针。Release 构建 0 警告/错误；输出 `labels=[全部解压缩(T)...]`、`commands=1`、`verbs=[0:extract]`，退出码 0，前台 HWND 和最后输入时间未变，临时夹具清理完成。
+
+此项只确认 ZIP `IShellFolder` 文件夹背景菜单命令名可安全查询。它没有创建/显示 `IShellView`，没有调用 `IShellView.GetItemObject(SVGIO_BACKGROUND)`，因此原先 ZIP view-owned 菜单命令名称查询仍未解决，也不代表完整 Explorer 菜单兼容性。
