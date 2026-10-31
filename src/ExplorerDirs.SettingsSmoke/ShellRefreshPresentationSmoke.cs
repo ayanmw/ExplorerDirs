@@ -8,6 +8,7 @@ internal static class ShellRefreshPresentationSmoke
     {
         var root = FindRepoRoot();
         var host = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "ExplorerBrowserHost.cs"));
+        var redrawLease = File.ReadAllText(Path.Combine(root, "src", "ExplorerDirs.App", "ShellViewRedrawLease.cs"));
         var modeStart = host.IndexOf("public bool SetViewStyle(ViewStyle style)", StringComparison.Ordinal);
         var modeEnd = host.IndexOf("private void QueueViewStyleCapture", modeStart, StringComparison.Ordinal);
         var modePath = modeStart >= 0 && modeEnd > modeStart ? host[modeStart..modeEnd] : string.Empty;
@@ -26,6 +27,9 @@ internal static class ShellRefreshPresentationSmoke
             refreshPath.Contains("refreshRedrawLease?.Dispose()", StringComparison.Ordinal) &&
             refreshPath.Contains("TimeSpan.FromMilliseconds(1500)", StringComparison.Ordinal),
             "F5 keeps the existing Shell rows painted under a bounded redraw lease until refresh completion");
+        Check(redrawLease.Contains("activeLease.Count++", StringComparison.Ordinal) &&
+            redrawLease.Contains("--activeLease.Count == 0", StringComparison.Ordinal),
+            "overlapping redraw leases for the same native Shell view restore painting only after the last owner releases");
         Console.WriteLine("Shell refresh presentation smoke: PASS (source contract; no Shell view created)");
     }
 
