@@ -26,6 +26,12 @@ Q-Dir 官方版本记录现列出 12.82（2026-10-24），更新说明包括“�
 
 对照本项目现状：Alt+L 已转调 Windows 屏幕放大镜；保存当前工作区到桌面快捷方式及多格式文件视图导出已有源码入口。逐项文件着色仍受 ExplorerBrowser 不提供受支持逐行着色接口的架构限制；隔离 `IShellView` 颜色策略 evaluator 已实现，但没有接入产品绘制。`.qdr` 导入器会在安全范围内保留 `Filter2` 原始行并提示“当前未应用”，不会猜测六个字段含义；这不等于已经解析、导入或显示颜色规则。后续将“颜色规则/高亮过滤”与浅色、深色、Windows 强调色主题作为不同能力继续评估，不拿主题切换冒充文件类型着色。目录树已改用 `INameSpaceTreeControlDropHandler` 拖入回调和可配置的 0.2、0.5、1、1.5、2、3 秒悬停展开延时，配置独立保存在便携 INI；真实外部拖放时序和默认放置行为仍待可见验收。此前把 `NSTCS_SPRINGEXPAND` 误认为拖入展开已于 2026-10-31 更正，该标志现已移除。[Namespace tree drop handler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl/nn-shobjidl-inamespacetreecontroldrophandler)；[Q-Dir FAQ 74](https://www.softwareok.com/?faq=74&seite=faq-Q-DIR)。
 
+## 2026-11-01 Q-Dir 高亮与颜色功能术语复核
+
+当前 Q-Dir 12.82 官方功能页与英文命令表把 `Color-Filter` 和 `Highlight-Filter` 分别列出；但官方 FAQ 6 与 Tips 9 对“按文件类型高亮”的示例实际描述为扩展名通配规则加颜色，FAQ 2 也称其为文件颜色筛选。现有公开材料能确认“按类型着色”存在，不能确认 `Highlight-Filter` 是否是另一种独立效果、独立规则集或仅为旧/并列入口名称。[官方功能页](https://www.softwareok.com/?seite=Freeware/Q-Dir/Help+file)、[英文命令表](https://www.softwareok.com/?seite=Freeware/Q-Dir/language/English)、[FAQ 6](https://softwareok.com/?faq=6&seite=faq-Q-DIR)、[Tips 9](https://www.softwareok.com/?page=Windows%2FQ-Dir%2FTips%2F9)、[FAQ 2](https://www.softwareok.com/?faq=2&seite=faq-Q-DIR)
+
+Explorer Dirs 已有独立颜色规则隔离原型，但未接入产品 ExplorerBrowser。暂不增加一个语义不明的第二种“高亮”开关，也不把颜色规则等同于 `Highlight-Filter`；待集中 Q-Dir 可见对照确认两者是否有行为差异后再决定实现。预览格式不匹配时列表项是否保留也继续按用户决定等待 Q-Dir 验收，不在本次对照中代为定案。
+
 ## 2026-10-28 官方大小信息行为复核
 
 Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字可带同一目录中文件与文件夹大小的相对百分比。官方说明没有定义百分比的精确分母、隐藏项/失败扫描的处理及舍入策略，因此这些规则仍需可见行为确认。
