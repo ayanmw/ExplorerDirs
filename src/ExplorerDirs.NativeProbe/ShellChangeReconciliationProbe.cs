@@ -493,6 +493,74 @@ internal static class ShellChangeReconciliationProbe
                 !sourceAnchorPreservedAfterCopy || !targetAnchorPreservedAfterCopy || !targetCopiedRowsUnchanged ||
                 !sourceSelectionPreservedAfterCopy || !targetSelectionPreservedAfterCopy || !copyIsolated)
                 throw new InvalidOperationException("Cross-pane copy did not reconcile the receiving row model while preserving the source and pane selection/focus.");
+
+            foreach (var row in targetCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)))
+                SetRowState(targetList, FindIndexById(targetList, row.Id), LvisSelected, LvisSelected);
+            var deleteSelection = CaptureSelection(targetList, targetCurrent.Rows);
+            var deleteEventBaseline = window.Events.Count;
+            var deleteRows = targetCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
+            var deleteChildArray = Marshal.AllocCoTaskMem(IntPtr.Size * deleteRows.Length);
+            nint deleteDataObject = 0, deleteOperation = 0;
+            try
+            {
+                for (var index = 0; index < deleteRows.Length; index++)
+                    Marshal.WriteIntPtr(deleteChildArray, index * IntPtr.Size, deleteRows[index].RelativePidl);
+                var deleteDataObjectId = DataObjectId;
+                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(targetFolder, 10)(targetFolder, 0,
+                    (uint)deleteRows.Length, deleteChildArray, in deleteDataObjectId, 0, out deleteDataObject));
+                if (deleteDataObject == 0) throw new IOException("The target Shell folder returned no IDataObject for the selected delete rows.");
+
+                var deleteOperationClassId = FileOperationClassId;
+                var deleteOperationId = FileOperationId;
+                Marshal.ThrowExceptionForHR(CoCreateInstance(ref deleteOperationClassId, 0, 1,
+                    ref deleteOperationId, out deleteOperation));
+                Marshal.ThrowExceptionForHR(At<SetOperationFlags>(deleteOperation, 5)(deleteOperation,
+                    0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                Marshal.ThrowExceptionForHR(At<DeleteItems>(deleteOperation, 19)(deleteOperation, deleteDataObject));
+                Marshal.ThrowExceptionForHR(At<PerformOperations>(deleteOperation, 21)(deleteOperation));
+                Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(deleteOperation, 22)(deleteOperation, out var deleteAborted));
+                if (deleteAborted != 0) throw new IOException("The isolated cross-pane Shell delete was aborted.");
+            }
+            finally
+            {
+                if (deleteOperation != 0) Marshal.Release(deleteOperation);
+                if (deleteDataObject != 0) Marshal.Release(deleteDataObject);
+                Marshal.FreeCoTaskMem(deleteChildArray);
+            }
+
+            if (deleteRows.Any(row => File.Exists(Path.Combine(targetPath, row.DisplayName))))
+                throw new IOException("IFileOperation.DeleteItems did not remove every copied fixture row.");
+            var deleteNotificationObserved = window.WaitForAnySince(deleteEventBaseline,
+                [Deleted, UpdatedDirectory], TimeSpan.FromSeconds(5));
+            pendingTarget = WaitForRows(targetPidl, targetFolder,
+                rows => movedNames.All(name => rows.All(row => row.DisplayName != name)));
+            var deletedReconciliation = ShellListViewRowModel.Reconcile(targetCurrent.Rows,
+                pendingTarget.Rows, NextId(targetCurrent.Rows));
+            var deletedCopiedRowIdsRetired = movedNames.All(name =>
+                deletedReconciliation.RetiredRows.Any(row => row.Id == targetCopiedRowIds[name]));
+            ShellListViewEnumerator.FreeRows(deletedReconciliation.RetiredRows);
+            targetCurrent = pendingTarget with { Rows = deletedReconciliation.Rows.ToList() };
+            pendingTarget = null;
+            ProjectRows(targetList, targetCurrent.Rows);
+            ApplySelection(targetList, targetCurrent.Rows, deleteSelection);
+            var targetAnchorPreservedAfterDelete = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id == targetAnchorId;
+            var targetSelectionPreservedAfterDelete = deleteSelection.Resolve(targetCurrent.Rows)
+                    .Any(state => state.RowId == targetAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(targetList, targetAnchorId);
+            var sourceUnaffectedByTargetDelete = sourceCurrent.Rows.Count == 3 &&
+                movedNames.All(name => File.Exists(Path.Combine(sourcePath, name)) &&
+                    sourceCurrent.Rows.Any(row => row.DisplayName == name));
+            var deleteIsolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
+                !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
+            Console.WriteLine($"shell-change-cross-pane-delete: operation=IFileOperation.DeleteItems;delete-notification={deleteNotificationObserved};" +
+                $"events=[{string.Join(',', window.Events.Skip(deleteEventBaseline).Select(value => $"0x{value:X8}"))}];" +
+                $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
+                $"copied-rows-retired={deletedCopiedRowIdsRetired};target-anchor-id-preserved={targetAnchorPreservedAfterDelete};" +
+                $"target-selection-focus-preserved={targetSelectionPreservedAfterDelete};source-unchanged={sourceUnaffectedByTargetDelete};" +
+                $"hidden-windows={deleteIsolated};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (!deleteNotificationObserved || targetCurrent.Rows.Count != 1 || !deletedCopiedRowIdsRetired ||
+                !targetAnchorPreservedAfterDelete || !targetSelectionPreservedAfterDelete || !sourceUnaffectedByTargetDelete || !deleteIsolated)
+                throw new InvalidOperationException("Cross-pane DeleteItems did not reconcile the receiving row model after Shell deletion notifications.");
         }
         finally
         {
@@ -846,6 +914,7 @@ internal static class ShellChangeReconciliationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
 

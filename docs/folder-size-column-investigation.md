@@ -991,3 +991,9 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 在同一隔离合同中，先完成上述多项跨窗格移动，再从接收窗格以真实 Shell `IDataObject` 调用 `IFileOperation.CopyItems` 回复制到原窗格。`SHCNE_CREATE`/目录更新通知后，原窗格重新枚举并新增两行；已复制窗格的两行身份未变，两个窗格原有锚点行的 ID、选择和焦点均保持。完整 NativeProbe Release build 与 `--shell-change-reconciliation` 连续三轮退出码 0，隐藏窗口/前台守卫均通过。
 
 该结果仅验证文件系统 Shell 通知与两份 NativeProbe 自有行快照的复制/移动协调；没有验证真实 OLE 拖放、剪贴板粘贴、进度/撤销界面、ExplorerBrowser 产品宿主或可见用户交互。产品文件视图仍使用 ExplorerBrowser，迁移门槛未关闭。
+
+### 2026-10-31：自有行模型跨窗格删除协调
+
+在上述跨窗格移动与复制后，从接收 pane 的真实 `IShellFolder` 获取两条复制行的 `IDataObject`，调用 `IFileOperation.DeleteItems` 删除临时目标文件。探针没有手动发送 `SHChangeNotify`；递归 Shell watcher 收到两条 `SHCNE_DELETE`，重新枚举目标 pane 后执行行快照 reconcile。测试先在“只重新枚举、尚未更新行快照”的 RED 门失败；加入 reconcile 后，目标 pane 从 3 行收敛为锚点 1 行，两条复制行身份退休，锚点行 ID、选择和焦点保留；源 pane 的原文件和行身份未受影响。定向 NativeProbe Release 运行连续三轮通过，父/list 窗口隐藏且前台 HWND 未变化。
+
+这补上的是本地文件系统、同 STA、隐藏自有行投影下的真实 Shell 多选删除通知闭环。未覆盖回收站语义、undo/redo、可见确认/进度 UI、剪贴板、OLE 拖放、其它 namespace/provider 或 ExplorerBrowser 产品接线；不能据此认定文件区自有视图已可替换产品 Shell view。
