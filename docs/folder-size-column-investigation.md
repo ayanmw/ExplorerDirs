@@ -979,3 +979,9 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 此前“路径短暂指向替代目录后再恢复”的未闭合记录针对只有路径/汇总的旧结果形状。当前 `HandleBoundRecursiveDirectoryScanner` 已返回它实际打开的根目录文件 ID；补充的 Release 行模型回归验证：扫描打开 6 B 原目录后，将它改名，在原路径建立 10 B 替代目录；当扫描进入原目录的子目录前，再把替代目录移开并将原目录移回原路径。扫描仍从原根句柄读取 6 B，结果携带原对象身份；发布时 Shell 行身份与当前路径身份均再次匹配原对象，因此正确接受 6 B。`--shell-listview-row-model-smoke` 与完整 Release `SettingsSmoke` 通过。
 
 这关闭的是 NativeProbe 句柄绑定扫描对该根目录 ABA 时序的数据归属问题；不将结论扩大到旧的路径扫描器、未绑定身份的汇总结果或所有文件系统/provider。隔离行模型和扫描器仍未接入产品 ExplorerBrowser/F9，产品逐行列、异步 UI 接线及 Shell 视图兼容门槛仍开放。
+
+## 2026-10-31：自有行模型跨窗格移动协调
+
+`ShellChangeReconciliationProbe` 新增两个独立文件夹 pane 与两份隐藏 `SysListView32` 投影。临时文件从源目录移到目标目录后，探针等待递归 Shell 监听收到 `SHCNE_DELETE` / `SHCNE_CREATE`，分别重新枚举两侧并独立执行 `ShellListViewRowModel.Reconcile`。结果确认源 pane 退休移出行、目标 pane 新增行；两侧未移动的锚点都保留稳定行 ID、选中状态和焦点。Release NativeProbe build 0 警告/错误，`--shell-change-reconciliation` 通过，前台句柄不变且两组列表/宿主窗口均隐藏。
+
+这覆盖了两份自有行快照对跨窗格移动结果的协调，不覆盖 `IFileOperation` 实际 Shell 进度/Undo、真实 `DoDragDrop`、产品 ExplorerBrowser 或用户可见输入；当前文件移动由隔离 fixture 执行，通知由探针明确发送。产品视图迁移仍未完成。

@@ -245,6 +245,7 @@ internal static class ShellChangeReconciliationProbe
                 current.Rows.Count != 2 || SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() != current.Rows.Count ||
                 GetForegroundWindow() != foreground || IsWindowVisible(window.Handle) || IsWindowVisible(listParent))
                 throw new InvalidOperationException("Shell change notification reconciliation contract failed.");
+            VerifyCrossPaneMove(foreground);
             return 0;
 
             bool HasStableSelection(IReadOnlyList<ShellListViewRow> rows) => selection.Resolve(rows)
@@ -257,6 +258,139 @@ internal static class ShellChangeReconciliationProbe
             if (current is not null) ShellListViewEnumerator.FreeRows(current.Rows);
             if (shellFolder != 0) Marshal.Release(shellFolder);
             if (folderPidl != 0) ILFree(folderPidl);
+            try { Directory.Delete(fixture, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void VerifyCrossPaneMove(nint foreground)
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-cross-pane-change-" + Guid.NewGuid().ToString("N"));
+        var sourcePath = Path.Combine(fixture, "pane-source");
+        var targetPath = Path.Combine(fixture, "pane-target");
+        Directory.CreateDirectory(sourcePath);
+        Directory.CreateDirectory(targetPath);
+        File.WriteAllText(Path.Combine(sourcePath, "anchor-source.txt"), "source anchor");
+        File.WriteAllText(Path.Combine(sourcePath, "moving.txt"), "move me");
+        File.WriteAllText(Path.Combine(targetPath, "anchor-target.txt"), "target anchor");
+
+        nint fixturePidl = 0, sourcePidl = 0, targetPidl = 0, sourceFolder = 0, targetFolder = 0;
+        nint sourceParent = 0, targetParent = 0, sourceList = 0, targetList = 0;
+        uint registration = 0;
+        ShellListViewEnumeration? sourceCurrent = null, targetCurrent = null;
+        ShellListViewEnumeration? pendingSource = null, pendingTarget = null;
+        using var window = new ChangeWindow();
+        try
+        {
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(sourcePath, 0, out sourcePidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(targetPath, 0, out targetPidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHBindToObject(0, sourcePidl, 0, in ShellFolderId, out sourceFolder));
+            Marshal.ThrowExceptionForHR(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out targetFolder));
+            sourceCurrent = ShellListViewEnumerator.Enumerate(sourcePidl, sourceFolder);
+            targetCurrent = ShellListViewEnumerator.Enumerate(targetPidl, targetFolder);
+
+            sourceParent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden source pane row projection",
+                unchecked((int)0x80000000), 0, 0, 320, 180, 0, 0, GetModuleHandleW(null), 0);
+            targetParent = CreateWindowExW(0, "STATIC", "ExplorerDirs hidden target pane row projection",
+                unchecked((int)0x80000000), 0, 0, 320, 180, 0, 0, GetModuleHandleW(null), 0);
+            if (sourceParent == 0 || targetParent == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create hidden pane row hosts.");
+            sourceList = CreateWindowExW(0, "SysListView32", "", 0x40000000 | 0x00000001,
+                0, 0, 300, 160, sourceParent, 0, GetModuleHandleW(null), 0);
+            targetList = CreateWindowExW(0, "SysListView32", "", 0x40000000 | 0x00000001,
+                0, 0, 300, 160, targetParent, 0, GetModuleHandleW(null), 0);
+            if (sourceList == 0 || targetList == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create hidden pane ListViews.");
+            AddColumn(sourceList, "Name", 220, 0);
+            AddColumn(targetList, "Name", 220, 0);
+            ProjectRows(sourceList, sourceCurrent.Rows);
+            ProjectRows(targetList, targetCurrent.Rows);
+
+            var sourceAnchorId = sourceCurrent.Rows.Single(row => row.DisplayName == "anchor-source.txt").Id;
+            var movingId = sourceCurrent.Rows.Single(row => row.DisplayName == "moving.txt").Id;
+            var targetAnchorId = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id;
+            SetRowState(sourceList, FindIndexById(sourceList, sourceAnchorId), LvisSelected | LvisFocused,
+                LvisSelected | LvisFocused);
+            SetRowState(targetList, FindIndexById(targetList, targetAnchorId), LvisSelected | LvisFocused,
+                LvisSelected | LvisFocused);
+            var sourceSelection = CaptureSelection(sourceList, sourceCurrent.Rows);
+            var targetSelection = CaptureSelection(targetList, targetCurrent.Rows);
+
+            var watch = new ShellChangeEntry { Pidl = fixturePidl, Recursive = true };
+            registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
+                ChangeMessage, 1, ref watch);
+            if (registration == 0)
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-pane Shell change registration failed.");
+
+            var sourceItem = Path.Combine(sourcePath, "moving.txt");
+            var targetItem = Path.Combine(targetPath, "moving.txt");
+            File.Move(sourceItem, targetItem);
+            SHChangeNotify(Deleted, PathUnicode, sourceItem, null);
+            SHChangeNotify(Created, PathUnicode, targetItem, null);
+            var deleteNotified = window.WaitFor([Deleted], TimeSpan.FromSeconds(5));
+            var createNotified = window.WaitFor([Created], TimeSpan.FromSeconds(5));
+
+            pendingSource = WaitForRow(sourcePidl, sourceFolder,
+                row => row.DisplayName == "moving.txt", expectMatch: false);
+            pendingTarget = WaitForRow(targetPidl, targetFolder,
+                row => row.DisplayName == "moving.txt");
+            var sourceReconciliation = ShellListViewRowModel.Reconcile(sourceCurrent.Rows,
+                pendingSource.Rows, NextId(sourceCurrent.Rows));
+            var targetReconciliation = ShellListViewRowModel.Reconcile(targetCurrent.Rows,
+                pendingTarget.Rows, NextId(targetCurrent.Rows));
+            ShellListViewEnumerator.FreeRows(sourceReconciliation.RetiredRows);
+            ShellListViewEnumerator.FreeRows(targetReconciliation.RetiredRows);
+            sourceCurrent = pendingSource with { Rows = sourceReconciliation.Rows.ToList() };
+            pendingSource = null;
+            targetCurrent = pendingTarget with { Rows = targetReconciliation.Rows.ToList() };
+            pendingTarget = null;
+            ProjectRows(sourceList, sourceCurrent.Rows);
+            ProjectRows(targetList, targetCurrent.Rows);
+            ApplySelection(sourceList, sourceCurrent.Rows, sourceSelection);
+            ApplySelection(targetList, targetCurrent.Rows, targetSelection);
+
+            var sourceAnchorPreserved = sourceCurrent.Rows.Single(row => row.DisplayName == "anchor-source.txt").Id == sourceAnchorId;
+            var targetAnchorPreserved = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id == targetAnchorId;
+            var movedSourceRowRetired = sourceReconciliation.RetiredRows.Any(row => row.Id == movingId) &&
+                sourceCurrent.Rows.All(row => row.Id != movingId);
+            var movedTargetRowAdded = targetCurrent.Rows.Single(row => row.DisplayName == "moving.txt") is { } movedTarget &&
+                movedTarget.Id != targetAnchorId &&
+                !targetReconciliation.RetiredRows.Any(row => row.Id == movedTarget.Id);
+            var sourceSelectionPreserved = sourceSelection.Resolve(sourceCurrent.Rows)
+                    .Any(state => state.RowId == sourceAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(sourceList, sourceAnchorId);
+            var targetSelectionPreserved = targetSelection.Resolve(targetCurrent.Rows)
+                    .Any(state => state.RowId == targetAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(targetList, targetAnchorId);
+            var isolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
+                !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
+            Console.WriteLine($"shell-change-cross-pane-move: delete-notified={deleteNotified};create-notified={createNotified};" +
+                $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
+                $"source-anchor-id-preserved={sourceAnchorPreserved};target-anchor-id-preserved={targetAnchorPreserved};" +
+                $"moved-source-row-retired={movedSourceRowRetired};moved-target-row-added={movedTargetRowAdded};" +
+                $"source-selection-focus-preserved={sourceSelectionPreserved};target-selection-focus-preserved={targetSelectionPreserved};" +
+                $"hidden-windows={isolated};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (!deleteNotified || !createNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 2 ||
+                !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowRetired || !movedTargetRowAdded ||
+                !sourceSelectionPreserved || !targetSelectionPreserved || !isolated)
+                throw new InvalidOperationException("Cross-pane move did not reconcile both Shell row models while retaining unaffected selection/focus.");
+        }
+        finally
+        {
+            if (registration != 0) _ = SHChangeNotifyDeregister(registration);
+            if (sourceParent != 0) _ = DestroyWindow(sourceParent);
+            if (targetParent != 0) _ = DestroyWindow(targetParent);
+            if (pendingSource is not null) ShellListViewEnumerator.FreeRows(pendingSource.Rows);
+            if (pendingTarget is not null) ShellListViewEnumerator.FreeRows(pendingTarget.Rows);
+            if (sourceCurrent is not null) ShellListViewEnumerator.FreeRows(sourceCurrent.Rows);
+            if (targetCurrent is not null) ShellListViewEnumerator.FreeRows(targetCurrent.Rows);
+            if (sourceFolder != 0) Marshal.Release(sourceFolder);
+            if (targetFolder != 0) Marshal.Release(targetFolder);
+            if (fixturePidl != 0) ILFree(fixturePidl);
+            if (sourcePidl != 0) ILFree(sourcePidl);
+            if (targetPidl != 0) ILFree(targetPidl);
             try { Directory.Delete(fixture, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
