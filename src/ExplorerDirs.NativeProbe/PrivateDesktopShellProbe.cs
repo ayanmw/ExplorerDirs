@@ -83,6 +83,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunZipViewCopyItems() => Run("zip-view-copy-items", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, zipCopyItemsProbe: true), TimeSpan.FromSeconds(30));
 
+    internal static int RunZipCrossVolumeMove() => Run("zip-cross-volume-move", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, zipCrossVolumeMoveProbe: true), TimeSpan.FromSeconds(60));
+
     internal static int RunZipViewDeleteItems() => Run("zip-view-delete-items", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, zipDeleteItemsProbe: true), TimeSpan.FromSeconds(30));
 

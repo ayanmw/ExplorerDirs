@@ -97,6 +97,7 @@ else {
         'zip-background-menu-private-desktop' { '--ishellview-zip-background-menu-private-desktop' }
         'zip-extract-private-desktop' { '--ishellview-zip-extract-private-desktop' }
         'zip-copy-items-private-desktop' { '--ishellview-zip-copy-items-private-desktop' }
+        'zip-move-cross-volume-private-desktop' { '--ishellview-zip-move-cross-volume-private-desktop' }
         'zip-delete-items-private-desktop' { '--ishellview-zip-delete-items-private-desktop' }
         'view-refresh-lifecycle-private-desktop' { '--ishellview-refresh-lifecycle-private-desktop' }
         'network-places-row-map-private-desktop' { '--ishellview-network-places-row-map-private-desktop' }

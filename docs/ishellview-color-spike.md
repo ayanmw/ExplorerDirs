@@ -1584,3 +1584,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 将 NativeProbe 夹具保留在 D:，并把唯一目标目录放到系统临时目录 C:，探针逐次确认源/目标盘符根不同。普通文件系统数据对象与 ZIP `IShellView` 数据对象分别执行真实 `IFileOperation.CopyItems`：两者均 `PerformOperations=S_OK`、未 abort，目标 `blue-rule-target.txt` 字节为 `0x41`；普通文件源路径和 ZIP view 项数均保留。普通文件系统数据对象再执行跨卷 `MoveItems`，同样未 abort、目标字节匹配且 D: 源路径消失。日志：`src/.state/native-probe-watchdog/20261101-055626-be1b14db.stdout.log`。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入和临时目录清理守卫通过。
 
 这只证明本机 D:→C:、当前 Windows filesystem/ZIP provider 的程序化单项 CopyItems 与 filesystem MoveItems；未测 ZIP MoveItems 跨卷、交互确认/进度、失败回滚、真实拖放、产品 ExplorerBrowser 或其它 provider。没有据此推断底层是否具体采用复制后删除。
+
+### 2026-11-01：ZIP 文件与目录跨卷 MoveItems
+
+新增 `--ishellview-zip-move-cross-volume-private-desktop` 独立入口，沿用 ZIP `IShellView` 的虚拟项目数据对象，将归档所在 D: 的文件与目录分别移动至唯一 C: 临时目录。文件移动 `MoveItems/PerformOperations=S_OK`、未取消，目标字节为 `0x41`，归档源文件被移除，源 view 从 2 项收敛到仅含 `virtual-folder`；随后目录移动同样成功，嵌套文件目标字节为 `0x42`，归档目录源项移除，源 view 收敛为空。Private Desktop watchdog exit 0，前台 HWND 和 last-input tick 未变，隔离清理通过；NativeProbe Release build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-060302-2c2ea5c7.stdout.log`。
+
+这只证明当前 Windows ZIP provider 中程序化跨卷文件/目录 MoveItems 与源 view 最终收敛；没有记录每个源/目标 `SHChangeNotify` 的 PIDL 事件，也没有测量通知或收敛延迟。真实剪切/粘贴菜单、OLE 拖放、进度/冲突提示、失败回滚、产品 ExplorerBrowser 与其他 provider 仍未验证。

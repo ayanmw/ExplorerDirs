@@ -173,3 +173,5 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 2026-11-01 跨卷文件操作增补：实际确认夹具源 D:、目标 C: 后，filesystem 与 ZIP 数据对象各自 CopyItems 成功，目标内容正确且两种源均保留；filesystem MoveItems 成功并移除 D: 源项。只覆盖本机单项程序化操作，不证明 ZIP MoveItems 跨卷、shell OLE 拖放、交互 UI 或产品接线。复验日志 `src/.state/native-probe-watchdog/20261101-055626-be1b14db.stdout.log`。因此阶段 4 的跨卷 Copy/Move 子项有 filesystem 证据，ZIP 仅有跨卷 Copy 证据，完整阶段仍未通过。
 
 2026-11-01 跨卷双视图续验：隐藏 `--shell-change-reconciliation` 将真实 filesystem source/target 分置 D:/C:，分别监听两目录；MoveItems 后收到 Deleted/Created，源/目标行数从 3/1 收敛为 1/3，内容、稳定锚点 ID、选区/焦点与隐藏窗前台守卫通过；随后 Copy/Rename/Delete 对账也通过。Release build 和探针通过。只补足 NativeProbe 自有行模型的 filesystem 跨卷通知收敛；产品 ExplorerBrowser、可见菜单/操作、OLE 拖放、ZIP 跨卷 MoveItems 仍未验证，阶段 4/5 与迁移决策保持开放。
+
+2026-11-01 ZIP 跨卷 MoveItems 续验：隔离 `IShellView` 从 D: ZIP provider 将虚拟文件与含嵌套文件的目录分别移动到 C:；两项操作均 S_OK、未取消、内容正确且归档源移除，源 view 分别由 2→1 项、再收敛至 0。Private Desktop 前台/输入/清理守卫及 Release build 通过。当前 Windows ZIP provider 的程序化跨卷 MoveItems 子门槛有证据；通知 PIDL 与延迟、交互 UI、真实拖放、ExplorerBrowser 产品接线和其它 provider 仍开放，不关闭完整阶段 4/5。

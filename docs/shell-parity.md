@@ -562,3 +562,5 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 2026-10-30 文件夹入口安装回滚补强：若当前用户注册表写入在中途失败，回滚现在识别本次写入顺序允许的部分值前缀及空/完整 `command` 子项，只删除与本次目标完全匹配的部分键；额外或修改过的值会被保留为冲突。隔离注册表 smoke 验证部分键删除与外部改值保护；没有在真实 Explorer 菜单中验收，也没有改动用户常用注册表路径。
 
 首次值写入失败时创建的空叶键也由本次尝试路径清单约束后清理；隔离 smoke 覆盖空键回滚。该边界不是对真实 Windows 注册表权限失败的端到端注入验证。
+
+2026-11-01 隔离 ZIP 跨卷操作：真实 ZIP `IShellView` 对 D: 归档中的文件与目录调用 `IFileOperation.MoveItems` 移至 C:；目标内容匹配、源条目移除，源 view 分别收敛至 1 项和 0 项。Private Desktop 前台、输入、隔离清理与 Release build 通过。仅 NativeProbe 当前 Windows ZIP provider 的程序化证据，未验证产品 ExplorerBrowser、Shell 事件 PIDL/时延、菜单、拖放及其他 provider。[隔离探针记录](ishellview-color-spike.md#2026-11-01zip-文件与目录跨卷-moveitems)

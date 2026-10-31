@@ -2506,9 +2506,22 @@ internal static class ShellViewColorSpike
     }
 
     private static int CopyZipEntryThroughShellOperation(nint parent, nint folder, nint folderView,
-        nint folderPidl, string fixture, nint foreground)
+        nint folderPidl, string fixture, nint foreground, bool crossVolumeMove = false)
     {
         var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        string? crossVolumeDestinationRoot = null;
+        if (crossVolumeMove)
+        {
+            var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+            if (string.Equals(Path.GetPathRoot(fixture), Path.GetPathRoot(temporaryRoot), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("The ZIP cross-volume move probe requires the NativeProbe fixture and temporary directory to be on different volumes.");
+            crossVolumeDestinationRoot = Path.Combine(temporaryRoot, "ExplorerDirs-ZipCrossVolume-" + Guid.NewGuid().ToString("N"));
+            var temporaryPrefix = temporaryRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!crossVolumeDestinationRoot.StartsWith(temporaryPrefix, StringComparison.OrdinalIgnoreCase) ||
+                Directory.Exists(crossVolumeDestinationRoot) || File.Exists(crossVolumeDestinationRoot))
+                throw new IOException("The ZIP cross-volume destination is not a fresh child of the system temporary directory.");
+            Directory.CreateDirectory(crossVolumeDestinationRoot);
+        }
         nint childArray = 0, dataObject = 0, destination = 0, operation = 0;
         nint cancelDestination = 0, cancelOperation = 0, cancelSinkPointer = 0;
         uint cancelCookie = 0;
@@ -2739,7 +2752,7 @@ internal static class ShellViewColorSpike
                 in dataObjectId, 0, out moveDataObject));
             if (moveDataObject == 0) throw new InvalidOperationException("The ZIP file entry did not provide an IDataObject for MoveItems.");
 
-            var moveDestinationPath = Path.Combine(fixture, "shell-move-target");
+            var moveDestinationPath = Path.Combine(crossVolumeDestinationRoot ?? fixture, "shell-move-target");
             Directory.CreateDirectory(moveDestinationPath);
             Check(SHCreateItemFromParsingName(moveDestinationPath, 0, ref shellItemId, out moveDestination));
             Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out moveOperation));
@@ -2788,9 +2801,23 @@ internal static class ShellViewColorSpike
             var moveSemantics = movedBytes.Length == 1
                 ? sourceFileRetained ? "copy-source-retained" : "move-source-removed"
                 : moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-            Console.WriteLine($"ishellview-zip-iFileOperation-move: operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];foreground-unchanged={GetForegroundWindow() == foreground}");
+            Console.WriteLine($"ishellview-zip-iFileOperation-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(moveDestinationPath)};operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!nestedSourceRetained || GetForegroundWindow() != foreground)
                 throw new IOException("ZIP MoveItems changed the nested source entry or foreground boundary.");
+            if (crossVolumeMove)
+            {
+                var moveSucceeded = moveItemsResult >= 0 && performMoveResult >= 0 && moveAborted == 0 &&
+                    movedBytes.Length == 1 && movedBytes[0] == 0x41 && !sourceFileRetained &&
+                    sourceViewCountAfterMove == itemCount - 1 &&
+                    !sourceViewNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase);
+                var refusalPreservedSource = (moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0) &&
+                    movedBytes.Length == 0 && sourceFileRetained && sourceViewCountAfterMove == itemCount &&
+                    sourceViewNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase);
+                Console.WriteLine($"ishellview-zip-iFileOperation-move-cross-volume-result: moved={moveSucceeded};safely-refused={refusalPreservedSource};destination-empty-on-refusal={movedBytes.Length == 0};archive-source-preserved-on-refusal={sourceFileRetained};source-view-converged={sourceViewCountAfterMove == itemCount - 1 || refusalPreservedSource};");
+                if (!moveSucceeded && !refusalPreservedSource)
+                    throw new IOException("Cross-volume ZIP MoveItems neither completed with a converged source view nor refused without altering its source/target.");
+                if (refusalPreservedSource) return 0;
+            }
 
             var folderChildIndex = selectedNames.FindIndex(name =>
                 name.Equals("virtual-folder", StringComparison.OrdinalIgnoreCase));
@@ -2803,7 +2830,7 @@ internal static class ShellViewColorSpike
                     in dataObjectId, 0, out folderDataObject));
                 if (folderDataObject == 0) throw new InvalidOperationException("The ZIP folder entry did not provide an IDataObject for MoveItems.");
 
-                var folderDestinationPath = Path.Combine(fixture, "shell-move-folder-target");
+                var folderDestinationPath = Path.Combine(crossVolumeDestinationRoot ?? fixture, "shell-move-folder-target");
                 Directory.CreateDirectory(folderDestinationPath);
                 Check(SHCreateItemFromParsingName(folderDestinationPath, 0, ref shellItemId, out folderDestination));
                 Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out folderOperation));
@@ -2823,7 +2850,7 @@ internal static class ShellViewColorSpike
                 var folderMoveMeaning = nestedMovedBytes.Length == 1 && nestedMovedBytes[0] == 0x42
                     ? nestedFolderSourceRetained ? "copy-source-retained" : "move-source-removed"
                     : folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-                Console.WriteLine($"ishellview-zip-iFileOperation-folder-move: operation=MoveItems;hresult=0x{folderMoveResult:X8};perform-hresult=0x{folderPerformResult:X8};aborted={folderMoveAborted};semantics={folderMoveMeaning};nested-destination-bytes=[{Convert.ToHexString(nestedMovedBytes)}];nested-source-retained={nestedFolderSourceRetained};source-view-count={sourceRowsAfterFolderMove};foreground-unchanged={GetForegroundWindow() == foreground}");
+                Console.WriteLine($"ishellview-zip-iFileOperation-folder-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(folderDestinationPath)};operation=MoveItems;hresult=0x{folderMoveResult:X8};perform-hresult=0x{folderPerformResult:X8};aborted={folderMoveAborted};semantics={folderMoveMeaning};nested-destination-bytes=[{Convert.ToHexString(nestedMovedBytes)}];nested-source-retained={nestedFolderSourceRetained};source-view-count={sourceRowsAfterFolderMove};foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ||
                     nestedMovedBytes.Length != 1 || nestedMovedBytes[0] != 0x42 || nestedFolderSourceRetained ||
                     sourceRowsAfterFolderMove != 0 || GetForegroundWindow() != foreground)
@@ -2854,6 +2881,8 @@ internal static class ShellViewColorSpike
             if (moveDataObject != 0) Marshal.Release(moveDataObject);
             if (moveChildArray != 0) Marshal.FreeHGlobal(moveChildArray);
             foreach (var child in selectedChildren) Marshal.FreeCoTaskMem(child);
+            if (crossVolumeDestinationRoot is not null && Directory.Exists(crossVolumeDestinationRoot))
+                Directory.Delete(crossVolumeDestinationRoot, recursive: true);
         }
     }
 
@@ -3177,6 +3206,7 @@ internal static class ShellViewColorSpike
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
         bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false, bool zipCopyItemsProbe = false,
+        bool zipCrossVolumeMoveProbe = false,
         bool zipDeleteItemsProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
         bool virtualDesktopColorProbe = false, bool networkPlacesRowMapProbe = false,
@@ -3281,7 +3311,7 @@ internal static class ShellViewColorSpike
             Directory.CreateDirectory(fixture);
             string[] fixturePaths;
             var shellLocation = fixture;
-            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe || zipCopyItemsProbe || zipDeleteItemsProbe)
+            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe || zipCopyItemsProbe || zipCrossVolumeMoveProbe || zipDeleteItemsProbe)
             {
                 shellLocation = Path.Combine(fixture, "virtual-items.zip");
                 using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
@@ -3472,6 +3502,12 @@ internal static class ShellViewColorSpike
             {
                 Check(folderViewHr);
                 return CopyZipEntryThroughShellOperation(parent, folder, folderView, pidl, fixture, foreground);
+            }
+            if (zipCrossVolumeMoveProbe)
+            {
+                Check(folderViewHr);
+                return CopyZipEntryThroughShellOperation(parent, folder, folderView, pidl, fixture, foreground,
+                    crossVolumeMove: true);
             }
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
@@ -4045,7 +4081,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Early diagnostic/operation branches return before view-state writes by design; do not require a round-trip they intentionally skip.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !zipDeleteItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !zipCrossVolumeMoveProbe && !zipDeleteItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
