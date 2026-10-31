@@ -36,6 +36,9 @@ public static class SyntheticShellSortProbe
     private const uint LvifText = 0x0001;
     private const uint DvaspectContent = 1;
     private const uint TymedHGlobal = 1;
+    private const int HdmGetItemCount = 0x1200;
+    private const int HdmGetItemW = 0x120B;
+    private const uint HdiText = 0x0002;
 
     internal static int RunFolderTreeContractSmoke()
     {
@@ -1120,7 +1123,8 @@ public static class SyntheticShellSortProbe
         // would erase the baseline before the notification under investigation.
         var listView = FindListView(view);
         var before = WaitForSizeState(listView, module, "10", expectedFirstName: preserveScrollAnchor ? null : "child", expectedSelection: null);
-        Console.WriteLine($"synthetic-size-update: strategy={name}; baseline=initial-custom-view; value-visible={before.ValueUpdated}; column-1=[{string.Join('|', before.Sizes)}]");
+        var beforeHeaderColumns = ReadHeaderColumnTitles(listView);
+        Console.WriteLine($"synthetic-size-update: strategy={name}; baseline=initial-custom-view; value-visible={before.ValueUpdated}; column-1=[{string.Join('|', before.Sizes)}]; header-columns=[{string.Join('|', beforeHeaderColumns)}]");
         if (!before.OrderUpdated)
             throw new TimeoutException($"The new view did not retain the recursive-size baseline order before '{name}': {FormatSizeState(before)}");
         if (!before.ValueUpdated)
@@ -1256,6 +1260,7 @@ public static class SyntheticShellSortProbe
             VerifyRecreatedViewDirectoryNotification(view, backingFolder, copyDestination, listView, module);
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
+        var afterHeaderColumns = ReadHeaderColumnTitles(listView);
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
         var sortColumnsAfter = preserveScrollAnchor ? CaptureNativeSortColumns(folderView) : null;
         var sortPreserved = !preserveScrollAnchor || baselineSortColumns!.SequenceEqual(sortColumnsAfter!);
@@ -1277,7 +1282,7 @@ public static class SyntheticShellSortProbe
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
         var streamTraceAfter = host?.ViewStateStreamTrace.Skip(streamTraceBefore).ToArray() ?? [];
-        Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; header-columns=[{string.Join('|', afterHeaderColumns)}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
         Console.WriteLine($"synthetic-size-update-columns: phase=after; layout-preserved={columnLayoutPreserved}; hr=0x{columnsResult:X8}; columns=[{FormatColumns(columnsAfter)}]");
         Console.WriteLine($"synthetic-size-update-stream: strategy={name}; reads-delta={(host?.Reads ?? 0) - streamReadsBefore}; writes-delta={(host?.Writes ?? 0) - streamWritesBefore}; calls=[{string.Join(" || ", streamTraceAfter)}]");
     }
@@ -2320,6 +2325,30 @@ public static class SyntheticShellSortProbe
     private static int GetListViewTopIndex(nint listView) =>
         checked((int)SendMessageW(listView, LvmGetTopIndex, 0, 0));
 
+    private static string[] ReadHeaderColumnTitles(nint listView)
+    {
+        var header = SendMessageW(listView, LvmGetHeader, 0, 0);
+        if (header == 0) return [];
+        var count = checked((int)SendMessageW(header, HdmGetItemCount, 0, 0));
+        if (count < 0 || count > 64)
+            throw new InvalidOperationException($"The native Shell header returned an invalid column count: {count}.");
+        var text = Marshal.AllocHGlobal(512);
+        try
+        {
+            var titles = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(text, 0);
+                var item = new NativeHeaderItem { Mask = HdiText, Text = text, TextCapacity = 256 };
+                if (SendMessageW(header, HdmGetItemW, index, ref item) == 0)
+                    throw new InvalidOperationException($"Could not read native Shell header column {index}.");
+                titles[index] = Marshal.PtrToStringUni(text) ?? string.Empty;
+            }
+            return titles;
+        }
+        finally { Marshal.FreeHGlobal(text); }
+    }
+
     private static int GetListViewItemTop(nint listView, int itemIndex)
     {
         var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
@@ -2611,6 +2640,20 @@ public static class SyntheticShellSortProbe
 
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn { public ShellColumnManager.NativeKey Key; public int Direction; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeHeaderItem
+    {
+        public uint Mask;
+        public int Width;
+        public nint Text;
+        public nint Bitmap;
+        public int TextCapacity;
+        public int Format;
+        public nint Param;
+        public int Image;
+        public int Order;
+        public uint Type;
+        public nint Filter;
+    }
     [StructLayout(LayoutKind.Sequential)] private struct FormatEtc
     {
         public short Format; public nint TargetDevice; public uint Aspect; public int Index; public uint Tymed;
@@ -2802,6 +2845,7 @@ public static class SyntheticShellSortProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProcedure callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, ref NativeHeaderItem item);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetClientRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
