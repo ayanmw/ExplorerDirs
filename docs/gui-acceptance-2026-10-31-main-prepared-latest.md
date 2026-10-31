@@ -4,12 +4,12 @@
 
 ## 固定身份
 
-- 源提交：`cd5dfa05dcd291e2a6d9367f5ce458a1740993d0`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261031-014610-875-4d3ab6/`。
-- BuildIdentity：`0.6.0-preview.20261031-014610-875-4d3ab6+cd5dfa05dcd291e2a6d9367f5ce458a1740993d0`。
+- 源提交：`0f5c4369a102ec2d790fad7e36c6783db2d80db8`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261031-025555-734-3415b2/`。
+- BuildIdentity：`0.6.0-preview.20261031-025555-734-3415b2+0f5c4369a102ec2d790fad7e36c6783db2d80db8`。
 - 状态：`prepared-not-run`，46 项待验收，初始四窗格布局。
-- EXE SHA-256：`C9E3B653163A339BB29905FB0BD181D0653A72E6C2E1C05F605D630EB0535B05`。
-- App DLL SHA-256：`579B73E312F492824C7000BE1E3BC45E2C0CC6A686FD501D86F5A5B9662B5C8F`。
+- EXE SHA-256：`7C7FF0604F6C664ED56090D3F354462BEA0FBD2B7F5F7EC5A5E057E2D067EB14`。
+- App DLL SHA-256：`7193C48BE7083A1260BEE3AE7F8C68BCE1E53E74570A87556687FDBEB203C6DB`。
 - profile 预置 1.5 秒目录树悬停展开延时。
 - 哈希、隔离 profile、手动操作夹具和待验收清单见副本 `preparation.json`；启动身份由唯一 BuildIdentity 区分。
 
@@ -23,4 +23,4 @@
 - 列值筛选箭头、多条件与逐标签持久化，F9 递归大小摘要，以及 Soft-Refresh 默认关闭后的新旧行和排序行为。
 - 其余项目以 `preparation.json` 的 `PendingAcceptance` 为准。发现不匹配时先记录 BuildIdentity、操作和结果，再决定路线变更；`.qdr` 预览格式不匹配时文件的列表处置待 Q-Dir 验收后决定。
 
-候选准备成功，EXE/DLL 哈希与 `preparation.json` 一致。候选尚未运行，没有可见 UI 通过结论；后续集中验收应从此隔离副本启动，不使用 `src` 调试程序或日常 profile。之前的候选仍保留在 `src/.state/gui-smoke/` 作为历史记录。
+候选由当前主线 `-PrepareOnly` 重建，准备成功，EXE/DLL 哈希与 `preparation.json` 一致。清单明确包含 F5 当前视图刷新、连续 F5、搜索/虚拟位置和 Soft-Refresh 对照；候选尚未运行，没有可见 UI 通过结论。后续集中验收应从此隔离副本启动，不使用 `src` 调试程序或日常 profile。旧副本仍保留在 `src/.state/gui-smoke/` 作为历史记录。

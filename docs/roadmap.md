@@ -2,6 +2,7 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 当前主线集中验收副本已重建：基于干净提交 `0f5c4369a102ec2d790fad7e36c6783db2d80db8`，四窗格副本位于 `src/.state/gui-smoke/20261031-025555-734-3415b2`，状态 `prepared-not-run`，46 项待验收。包含 F5 刷新、连按 F5、搜索/虚拟位置及 Soft-Refresh 对照；构建和副本准备成功，EXE/DLL SHA-256 已与 `preparation.json` 核对。没有启动应用窗口、创建 ExplorerBrowser 或操作文件。BuildIdentity、哈希和验收边界见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 2026-10-31 Q-Dir 筛选期间多选跳转：快速名称筛选或列值筛选启用时，文件内容区的未修饰 Up/Down 会在多选项目间按 Shell 视图顺序移动焦点，并确保目标可见；不修改其它选中位。仅当当前焦点本身属于多选集合且存在相邻已选项目时接管；单选、首尾边界、搜索、修饰键、非文件内容焦点及过期视图请求都回到/拒绝原生 Shell 路由。方向键门控、相邻序号及当前访问路由有 Release SettingsSmoke；完整 SettingsSmoke 和 App Release build 通过。没有创建 Shell view 或 GUI；实际 Shell 选择回调、像素/焦点、分组/各视图模式及 Q-Dir 可见对照仍待集中验收。
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
