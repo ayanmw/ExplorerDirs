@@ -2908,7 +2908,8 @@ internal static class ShellViewColorSpike
             var moveSemantics = movedBytes.Length == 1
                 ? sourceFileRetained ? "copy-source-retained" : "move-source-removed"
                 : moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-            var moveChangeEvents = changeObserver?.Observations ?? [];
+            // Freeze the first operation's count; the observer list continues to grow during the next move.
+            var moveChangeEvents = changeObserver?.Observations.ToArray() ?? [];
             var archivePath = Path.Combine(fixture, "virtual-items.zip");
             var sourceDeleteObserved = moveChangeEvents.Any(change => change.EventId == ShellDelete &&
                 string.Equals(change.FirstParsingName, Path.Combine(archivePath, movedFileName), StringComparison.OrdinalIgnoreCase));
@@ -2967,7 +2968,7 @@ internal static class ShellViewColorSpike
                 var folderMoveMeaning = nestedMovedBytes.Length == 1 && nestedMovedBytes[0] == 0x42
                     ? nestedFolderSourceRetained ? "copy-source-retained" : "move-source-removed"
                     : folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-                var folderChangeEvents = changeObserver?.Observations.Skip(moveChangeEvents.Count).ToArray() ?? [];
+                var folderChangeEvents = changeObserver?.Observations.Skip(moveChangeEvents.Length).ToArray() ?? [];
                 var sourceFolderDeleteObserved = folderChangeEvents.Any(change => change.EventId == ShellDelete &&
                     string.Equals(change.FirstParsingName, Path.Combine(archivePath, "virtual-folder"), StringComparison.OrdinalIgnoreCase));
                 var destinationFolderCreateObserved = folderChangeEvents.Any(change => change.EventId == ShellCreate &&
