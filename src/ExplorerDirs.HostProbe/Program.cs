@@ -2647,6 +2647,8 @@ internal static class Program
             }
             if (args[0] is "--live-shell-refresh" or "--live-shell-refresh-unselected-focus" or "--live-shell-refresh-unselected" or "--live-shell-refresh-one-pane" or "--live-shell-refresh-one-pane-unselected" or "--live-shell-refresh-one-pane-3" or "--live-shell-refresh-one-pane-3-dual" or "--live-shell-refresh-one-pane-3-single" or "--live-shell-refresh-one-pane-3-single-dual" or "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-refresh-one-pane-unselected-3" or "--live-shell-refresh-one-pane-unselected-3-singleobserver" or "--live-shell-refresh-one-pane-unselected-3-filesystem-control" or "--live-shell-refresh-pane-0" or "--live-shell-refresh-pane-1" or "--live-shell-refresh-pane-2" or "--live-shell-refresh-pane-3" or "--live-shell-delete-selected-pane-0" or "--live-shell-delete-selected-pane-1" or "--live-shell-delete-selected-pane-2" or "--live-shell-delete-selected-pane-3" or "--live-shell-delete-selected-pane-3-fallback")
             {
+                var deferredNotificationProbe = args[0] == "--live-shell-refresh" &&
+                    Environment.GetEnvironmentVariable("EXPLORER_DIRS_PROBE_F5_DEFERRED_UPDATE") == "1";
                 var deleteSelected = args[0].StartsWith("--live-shell-delete-selected", StringComparison.Ordinal);
                 var filesystemControl = args[0] == "--live-shell-refresh-one-pane-unselected-3-filesystem-control";
                 var fallbackRefresh = args[0] is "--live-shell-refresh-one-pane-3-single-fallback" or "--live-shell-refresh-one-pane-3-multiselect-fallback" or "--live-shell-delete-selected-pane-3-fallback";
@@ -2659,6 +2661,15 @@ internal static class Program
                     int.Parse(args[0][(deleteSelected ? "--live-shell-delete-selected-pane-".Length : "--live-shell-refresh-pane-".Length)..]);
                 if (!WaitForCounts(hosts, expected: 3, TimeSpan.FromSeconds(10)))
                     throw new Exception($"Initial fixture counts were not ready: {string.Join(',', hosts.Select(Count))}.");
+                if (deferredNotificationProbe)
+                {
+                    var setSoftRefresh = hostType.GetMethod("SetSoftRefresh", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var softRefreshResult = (int)setSoftRefresh.Invoke(hosts[pane], [true])!;
+                    if (softRefreshResult < 0)
+                        throw new Exception($"Could not disable automatic Shell enumeration for the target pane: 0x{softRefreshResult:X8}.");
+                    var stopMonitor = hostType.GetMethod("StopDirectoryChangeMonitor", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    stopMonitor.Invoke(hosts[pane], null);
+                }
                 if (singleSelection) SelectOnlyItem(hostType, hosts[pane], folders[pane], "initial.txt");
                 else if (!noSelection) SelectAll(hostType, hosts[pane]);
                 if (unselectedFocus) SetUnselectedFocus(hostType, hosts[pane], folders[pane], "initial.txt");
@@ -2747,12 +2758,14 @@ internal static class Program
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
                 IReadOnlyList<string> operationFolders = onePaneOperation ? new[] { folders[pane] } : folders;
-                if (filesystemControl) File.Copy(Path.Combine(folders[pane], "initial.txt"), Path.Combine(folders[pane], "created.txt"));
+                if (deferredNotificationProbe || filesystemControl)
+                    File.Copy(Path.Combine(folders[pane], "initial.txt"), Path.Combine(folders[pane], "created.txt"));
                 else ShellFixtureOperations.Run(root, operationFolders, copy: !deleteSelected);
                 var expectedAfterShellOperation = Enumerable.Repeat(3, hosts.Count).ToArray();
                 foreach (var operationFolder in operationFolders)
                     expectedAfterShellOperation[folders.IndexOf(operationFolder)] = deleteSelected ? 2 : 4;
-                var automaticallyUpdated = WaitForExpectedCounts(hosts, expectedAfterShellOperation, TimeSpan.FromSeconds(3));
+                var automaticallyUpdated = !deferredNotificationProbe &&
+                    WaitForExpectedCounts(hosts, expectedAfterShellOperation, TimeSpan.FromSeconds(3));
                 if (fallbackRefresh) WaitForPredicate(() => fallbackRefreshChecks > 0, TimeSpan.FromSeconds(2));
                 var fallbackSelectedAfter = fallbackRefreshCount == 0 ? [] : SelectedPaths(hostType, hosts[pane], folders[pane]);
                 var fallbackFocusAfter = fallbackRefreshCount == 0 ? null : (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
@@ -2764,7 +2777,7 @@ internal static class Program
                 Console.WriteLine($"shell-auto-update pane={pane} counts={string.Join(',', hosts.Select(Count))} observed={automaticallyUpdated} fallback-checks={fallbackRefreshChecks} fallback-refresh-count={fallbackRefreshCount} fallback-refresh-pre-count={fallbackRefreshPreCount} fallback-refresh-errors={fallbackRefreshErrors} fallback-selection-restored={fallbackSelectionRestored} fallback-focus-restored={fallbackFocusRestored} parent-shell-notifications={refreshShellObserver.Summary} independent-shell-notifications={independentRefreshObserver?.Summary ?? "disabled"} filesystem-created={Volatile.Read(ref refreshCreatedEvents)} browser-sites={BrowserSiteNotifications()} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 var syntheticUpdateObserved = false;
                 var syntheticCreateObserved = false;
-                if ((!automaticallyUpdated || filesystemControl) && !deleteSelected)
+                if ((!automaticallyUpdated || filesystemControl) && !deleteSelected && !deferredNotificationProbe)
                 {
                     // Diagnostic only: publish one directory update for this generated fixture
                     // after the real operation timed out, then measure whether the native view
@@ -2802,6 +2815,14 @@ internal static class Program
                 var selectionRestorePendingField = hostType.GetField("_directorySelectionRestorePending", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var refreshStatusBefore = (string?)refreshStatusProperty.GetValue(hosts[pane]);
                 var refreshRestoreMillisecondsBefore = (long)refreshRestoreMillisecondsProperty.GetValue(hosts[pane])!;
+                if (deferredNotificationProbe)
+                {
+                    // Keep the fixture change hidden, then let the real F5 route perform its normal Shell update.
+                    var setSoftRefresh = hostType.GetMethod("SetSoftRefresh", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var softRefreshResult = (int)setSoftRefresh.Invoke(hosts[pane], [false])!;
+                    if (softRefreshResult < 0)
+                        throw new Exception($"Could not restore normal Shell enumeration before F5: 0x{softRefreshResult:X8}.");
+                }
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
                 var manualRefresh = args[0] == "--live-shell-refresh"
@@ -2809,7 +2830,43 @@ internal static class Program
                     : hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!;
                 manualRefresh.Invoke(hosts[pane], null);
                 var expectedItems = Directory.GetFiles(folders[pane]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-                var refreshed = WaitForFolderItems(hostType, hosts[pane], folders[pane], expectedItems, TimeSpan.FromSeconds(10));
+                var deferredRefreshTimeline = new List<string>();
+                var deferredRefreshClock = Stopwatch.StartNew();
+                var completionCountAtRefresh = -1;
+                var completionAtRefreshMilliseconds = -1L;
+                var newRowsAtMilliseconds = -1L;
+                bool refreshed;
+                if (deferredNotificationProbe)
+                {
+                    var sawRefreshCompletion = false;
+                    var previousSampleCount = -1;
+                    var previousSampleStatus = string.Empty;
+                    refreshed = WaitForPredicate(() =>
+                    {
+                        var count = Count(hosts[pane]);
+                        var status = (string?)refreshStatusProperty.GetValue(hosts[pane]) ?? string.Empty;
+                        if (status.StartsWith("refreshed;", StringComparison.Ordinal) && !sawRefreshCompletion)
+                        {
+                            sawRefreshCompletion = true;
+                            completionCountAtRefresh = count;
+                            completionAtRefreshMilliseconds = deferredRefreshClock.ElapsedMilliseconds;
+                        }
+                        if (count == 4 && newRowsAtMilliseconds < 0)
+                            newRowsAtMilliseconds = deferredRefreshClock.ElapsedMilliseconds;
+                        if (count != previousSampleCount || !string.Equals(status, previousSampleStatus, StringComparison.Ordinal))
+                        {
+                            var sample = $"{deferredRefreshClock.ElapsedMilliseconds}ms/count={count}/status={status}";
+                            deferredRefreshTimeline.Add(sample);
+                            previousSampleCount = count;
+                            previousSampleStatus = status;
+                        }
+                        return expectedItems.All(File.Exists) && count == expectedItems.Length;
+                    }, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(10));
+                }
+                else
+                {
+                    refreshed = WaitForFolderItems(hostType, hosts[pane], folders[pane], expectedItems, TimeSpan.FromSeconds(10));
+                }
                 // Shell rows can match the directory before the asynchronous selection/focus restore finishes.
                 var restorationSettled = WaitForPredicate(() =>
                 {
@@ -2830,7 +2887,7 @@ internal static class Program
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)
                     : string.Equals(focusBeforeRefresh, focusAfterRefresh, StringComparison.OrdinalIgnoreCase);
-                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
+                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} deferred-notification-probe={deferredNotificationProbe} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} completion-count={completionCountAtRefresh} completion-ms={completionAtRefreshMilliseconds} new-rows-ms={newRowsAtMilliseconds} refresh-timeline=[{string.Join(';', deferredRefreshTimeline)}] paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
                 return refreshed && restorationSettled && selectionRestoredByRefresh && focusRestoredByRefresh && selectionPreserved && focusPreserved ? 0 : 1;
             }
