@@ -3470,6 +3470,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     PITEMID_CHILD childFolder = nullptr;
     PITEMID_CHILD otherFolder = nullptr;
     PITEMID_CHILD rootFile = nullptr;
+    PITEMID_CHILD refreshedChild = nullptr;
+    PITEMID_CHILD refreshedOther = nullptr;
+    IEnumIDList* refreshedEnumerator = nullptr;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
     InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
@@ -3533,6 +3536,39 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
+
+        result = root->EnumObjects(nullptr, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &refreshedEnumerator);
+        if (FAILED(result) || !refreshedEnumerator)
+        {
+            if (SUCCEEDED(result)) result = E_UNEXPECTED;
+            goto cleanup_recursive_size_update;
+        }
+        for (;;)
+        {
+            PITEMID_CHILD item = nullptr;
+            ULONG fetched = 0;
+            result = refreshedEnumerator->Next(1, &item, &fetched);
+            if (result == S_FALSE) { result = S_OK; break; }
+            if (FAILED(result) || fetched != 1 || !item)
+            {
+                if (item) CoTaskMemFree(item);
+                if (SUCCEEDED(result)) result = E_UNEXPECTED;
+                goto cleanup_recursive_size_update;
+            }
+
+            const auto* child = SyntheticData(item);
+            if (child && _wcsicmp(child->name, L"child") == 0) refreshedChild = item;
+            else if (child && _wcsicmp(child->name, L"other-child") == 0) refreshedOther = item;
+            else CoTaskMemFree(item);
+            if (refreshedChild && refreshedOther) break;
+        }
+        if (!refreshedChild || !refreshedOther ||
+            !rowMatchesSnapshot(refreshedChild, static_cast<ULONGLONG>(updatedBytes), false) ||
+            !rowMatchesSnapshot(refreshedOther, static_cast<ULONGLONG>(otherRowBytes), true))
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_update;
+        }
     }
     result = S_OK;
 
@@ -3540,6 +3576,9 @@ cleanup_recursive_size_update:
     InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
+    if (refreshedEnumerator) refreshedEnumerator->Release();
+    if (refreshedOther) CoTaskMemFree(refreshedOther);
+    if (refreshedChild) CoTaskMemFree(refreshedChild);
     if (rootFile) CoTaskMemFree(rootFile);
     if (otherFolder) CoTaskMemFree(otherFolder);
     if (childFolder) CoTaskMemFree(childFolder);
