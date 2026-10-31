@@ -22,7 +22,7 @@ internal static class ShellViewColorSpike
     private const uint ShellRenameItem = 0x00000001;
     private const uint ShellCreate = 0x00000002;
     private const uint ShellDelete = 0x00000004;
-    private const uint ShellRenameFolder = 0x00000008;
+    private const uint ShellMakeDirectory = 0x00000008;
     private const uint ShellUpdatedItem = 0x00002000;
     private const uint PathAndFlushNoWait = 0x00002005;
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
@@ -2572,17 +2572,17 @@ internal static class ShellViewColorSpike
                 string.Equals(change.FirstParsingName, archivePath, StringComparison.OrdinalIgnoreCase));
             var nestedDeleteObserved = events.Any(change => change.EventId == ShellDelete &&
                 string.Equals(change.FirstParsingName, Path.Combine(archivePath, "virtual-folder", "nested.txt"), StringComparison.OrdinalIgnoreCase));
-            var destinationFolderRenameObserved = events.Any(change => change.EventId == ShellRenameFolder &&
+            var destinationFolderCreatedObserved = events.Any(change => change.EventId == ShellMakeDirectory &&
                 string.Equals(change.FirstParsingName, Path.Combine(destinationPath, "virtual-folder"), StringComparison.OrdinalIgnoreCase));
             var nestedCreateObserved = events.Any(change => change.EventId == ShellCreate &&
                 string.Equals(change.FirstParsingName, Path.Combine(destinationPath, "virtual-folder", "nested.txt"), StringComparison.OrdinalIgnoreCase));
             var sourceRetained = false;
             using (var archive = ZipFile.OpenRead(archivePath))
                 sourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
-            Console.WriteLine($"ishellview-zip-iFileOperation-folder-first-move: source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(destinationPath)};operation=MoveItems;hresult=0x{moveResult:X8};perform-hresult=0x{performResult:X8};aborted={aborted};nested-destination-bytes=[{Convert.ToHexString(movedBytes)}];nested-source-retained={sourceRetained};source-view-count={sourceCount};archive-update-notified={archiveUpdateObserved};nested-source-delete-notified={nestedDeleteObserved};destination-folder-rename-notified={destinationFolderRenameObserved};nested-destination-create-notified={nestedCreateObserved};shell-change-events=[{string.Join('|', events.Select(change => $"0x{change.EventId:X8}:{change.FirstParsingName}->{change.SecondParsingName}"))}];foreground-unchanged={GetForegroundWindow() == foreground}");
+            Console.WriteLine($"ishellview-zip-iFileOperation-folder-first-move: source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(destinationPath)};operation=MoveItems;hresult=0x{moveResult:X8};perform-hresult=0x{performResult:X8};aborted={aborted};nested-destination-bytes=[{Convert.ToHexString(movedBytes)}];nested-source-retained={sourceRetained};source-view-count={sourceCount};archive-update-notified={archiveUpdateObserved};nested-source-delete-notified={nestedDeleteObserved};destination-folder-created-notified={destinationFolderCreatedObserved};nested-destination-create-notified={nestedCreateObserved};shell-change-events=[{string.Join('|', events.Select(change => $"0x{change.EventId:X8}:{change.FirstParsingName}->{change.SecondParsingName}"))}];foreground-unchanged={GetForegroundWindow() == foreground}");
             if (moveResult < 0 || performResult < 0 || aborted != 0 || movedBytes.Length != 1 || movedBytes[0] != 0x42 ||
                 sourceRetained || sourceCount != 1 || !archiveUpdateObserved || !nestedDeleteObserved ||
-                !destinationFolderRenameObserved || !nestedCreateObserved || GetForegroundWindow() != foreground)
+                !destinationFolderCreatedObserved || !nestedCreateObserved || GetForegroundWindow() != foreground)
                 throw new IOException("The folder-first ZIP MoveItems probe did not complete and reconcile its source view.");
             return 0;
         }
