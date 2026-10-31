@@ -3971,6 +3971,9 @@ internal static class ShellViewColorSpike
             if (listView != 0) RefreshFixtureColorMap(folderView, fixturePaths);
             Console.WriteLine($"ishellview-color-spike: view-background-color={(listView == 0 ? "unsupported" : $"0x{unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)):X6}")}");
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
+            var readOnlyAttributeTransition = visible && readOnlyRuleProbe && listView != 0
+                ? VerifyReadOnlyAttributeColorTransition(folderView, listView, fixturePaths[0])
+                : "not-run";
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
             if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-start");
@@ -4030,7 +4033,8 @@ internal static class ShellViewColorSpike
                 $"list-visible-style={((long)GetWindowLongPtrW(listView, -16) & 0x10000000) != 0}; " +
                 $"parent-visible={IsWindowVisible(parent)}; visible-test={visible}; offscreen-test={offscreen}; " +
                 $"visible-row-pixels={visiblePixelCapture}; direct-listview-mode-capture={directListViewModeCapture}; " +
-                $"native-view-menu-color-transition={nativeViewMenuColorTransition}");
+                $"native-view-menu-color-transition={nativeViewMenuColorTransition}; " +
+                $"readonly-attribute-color-transition={readOnlyAttributeTransition}");
             Console.WriteLine($"ishellview-color-spike: native-menu-hit-test={nativeMenuHitTest}");
 
             if (readOnlyRuleProbe || directoryRuleProbe || hiddenRuleProbe)
@@ -4722,6 +4726,64 @@ internal static class ShellViewColorSpike
         return string.Join(',', names);
     }
 
+    private static string VerifyReadOnlyAttributeColorTransition(nint folderView, nint listView,
+        string readOnlyPath)
+    {
+        var originalAttributes = File.GetAttributes(readOnlyPath);
+        var transitions = new List<string>(2);
+        try
+        {
+            // The main prototype begins with item 0 selected; clear it so the native selection paint does not mask #RO colors.
+            var selectItem = At<SelectFolderItem>(folderView, 15);
+            Check(selectItem(folderView, 0, 0));
+            Check(selectItem(folderView, 1, 0));
+            Check(At<ItemCount>(folderView, 7)(folderView, 1, out var selectedCount)); // SVGIO_SELECTION.
+            if (selectedCount != 0)
+                throw new InvalidOperationException($"Could not clear selection before read-only color transition: {selectedCount} items remain selected.");
+            foreach (var readOnly in new[] { false, true })
+            {
+                var current = File.GetAttributes(readOnlyPath);
+                File.SetAttributes(readOnlyPath, readOnly
+                    ? current | FileAttributes.ReadOnly
+                    : current & ~FileAttributes.ReadOnly);
+
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // Details.
+                Pump(150);
+                _ = SendMessageW(listView, 0x108E, 1, 0); // LV_VIEW_DETAILS; keep DefView's ListView mode aligned.
+                Pump(100);
+                if (SendMessageW(listView, 0x108F, 0, 0).ToInt32() != 1) // LVM_GETVIEW.
+                    throw new InvalidOperationException("The isolated ListView did not enter Details mode for attribute-transition sampling.");
+                var fixturePaths = new[] { readOnlyPath,
+                    Path.Combine(Path.GetDirectoryName(readOnlyPath)!, "green-rule-target.txt") };
+                var rowCount = WaitForStableMatchingListViewItemCount(folderView, listView);
+                if (rowCount != fixturePaths.Length)
+                    throw new InvalidOperationException($"Shell item notification changed the color fixture row count: {rowCount}.");
+                RefreshFixtureColorMap(folderView, fixturePaths);
+                var currentNames = MapCurrentFolderItems(folderView, fixturePaths).Split(',');
+                var rowIndex = Array.FindIndex(currentNames, name => name.Equals(Path.GetFileName(readOnlyPath), StringComparison.OrdinalIgnoreCase));
+                if (rowIndex < 0 || !CustomDrawBackgrounds.TryGetValue((nuint)rowIndex, out var expectedBackground))
+                    throw new InvalidOperationException("The read-only color fixture could not be mapped to its current Shell row.");
+
+                InvalidateRect(listView, 0, true);
+                UpdateWindow(listView);
+                Pump(150);
+                var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+                var actual = capture.RowHits.ElementAtOrDefault(rowIndex);
+                var expected = unchecked((int)ColorrefToDib(expectedBackground));
+                if (actual == 0 || (!readOnly && expectedBackground != 0x00F0D0E0u) ||
+                    (readOnly && expectedBackground != 0x00C0E0F0u))
+                    throw new InvalidOperationException($"Read-only attribute transition resolved the wrong row color: readonly={readOnly}; row={rowIndex}; color=0x{expectedBackground:X6}; pixel-hits={actual}; expected-dib=0x{expected:X6}; callbacks={capture.CustomDrawItems}; prepaint={capture.Prepaint}; all-pixels={string.Join('/', capture.RowHits)}; events={string.Join('|', CustomDrawEventDetails.TakeLast(4))}.");
+                transitions.Add($"readonly={readOnly}:row={rowIndex}:color=0x{expectedBackground:X6}:pixel-hits={actual}");
+            }
+        }
+        finally
+        {
+            File.SetAttributes(readOnlyPath, originalAttributes & ~FileAttributes.ReadOnly);
+        }
+
+        return string.Join('|', transitions);
+    }
+
     private static void RefreshFixtureColorMap(nint folderView, string[] fixturePaths)
     {
         // Resolve item identity before painting. Do not call IFolderView from inside NM_CUSTOMDRAW.
@@ -4735,6 +4797,7 @@ internal static class ShellViewColorSpike
             : _readOnlyRuleProbe
             ? [WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("#RO", ShellColorRuleDecision.Set, 0x00C0E0F0u), 0x000000C0u),
                     new ShellItemDrawFontStyle(true, null, true, null)),
+                WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-target.txt", ShellColorRuleDecision.Set, 0x00F0D0E0u), 0x00C00000u),
                 WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("green-rule-*.txt", ShellColorRuleDecision.Set, 0x00D0F0E0u), 0x0000C000u),
                     new ShellItemDrawFontStyle(null, true, null, true))]
             : [WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u), 0x00C00000u),

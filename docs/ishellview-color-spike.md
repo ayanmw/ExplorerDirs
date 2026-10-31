@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：只读属性变化后的颜色规则重算与重绘
+
+扩展隔离 `#RO` 像素探针：在同一默认 `IShellView` 中，对临时文件交替设置/清除只读属性；每次从当前磁盘属性重建 Shell 行索引颜色映射，清除选区、保持 Details/ListView 模式一致并重绘。`#RO` 颜色 `0xC0E0F0` 与文件名回退颜色 `0xF0D0E0` 各自通过行像素断言，第二个文件的名称规则也保持命中。Release NativeProbe build 0 警告/错误，`color-readonly-rule-private-desktop` watchdog exit 0；前台、输入及隔离清理守卫通过，日志 `20261101-074504-a1f817e1.stdout.log`。
+
+该结果证明颜色 evaluator/逐项绘制缓存可在宿主重算并请求重绘后反映属性变化；探针没有证明 Shell 通知到颜色缓存的生产连接，也没有改产品或接入 `.qdr`。曾在两次属性变化后发送 `SHCNE_UPDATEITEM` 的诊断变体，像素断言全部到达，但 Private Desktop STA 未在 60 秒内返回；移除通知后相同像素合同与清理通过。超时只限定在该探针的通知/退出组合，原因未定位，不归因于产品或 Shell 通知本身。下一步需另行隔离通知交付与宿主销毁时序，再决定是否存在可复用的产品级更新路径。
+
 ### 2026-11-01：Desktop 混合 Shell 项目与视口裁剪采样
 
 新增 `color-desktop-private-desktop`，在 Shell Desktop provider 采样 24 项混合清单：包含 pathless 命名空间项目、filesystem 目录以及一个文件。当前 640×420 视口同屏显示 16 行；探针逐项发送 `LVM_ENSUREVISIBLE` 并采样，最终 24/24 行的背景和文本像素均命中，文件行粗体字体也确实选入绘制 DC。首次探针仅采首屏，因此把滚出视口的行误报为未绘制；现通过逐行滚入视口覆盖完整清单，同时保留动态行数及 Shell/ListView 行数一致门槛。Release 构建 0 警告/错误；Desktop、ZIP、This PC、Libraries Private Desktop watchdog 全部 exit 0，前台/输入与隔离清理守卫通过。
