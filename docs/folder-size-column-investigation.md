@@ -855,3 +855,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 `RecursiveDirectoryScanner.ScanDirectoryTreeCore` 已改用 `FileSystemEnumerable<T>` 读取条目名、属性和长度，移除每个条目额外调用 `File.GetAttributes`、每个文件额外构造 `FileInfo` 取长度的路径。普通 `Scan()` 与 F9 使用的 `ScanSelection()` 未变。`RecursiveDirectoryScannerSmoke` 增加隐藏/系统条目、超过 MAX_PATH 的深层目录、目录树进度以及 120 个目录 × 每目录 25 个文件的分配预算回归；最终实现实测分配 261,232 B，低于预算 1,175,000 B；同一夹具旧路径实现曾测得 1,225,152 B，减少约 78.7%。该分配差异来自同进程托管分配测量，不代表进程工作集或 Private Bytes 会同比下降。
 
 BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除或改变时，本次汇总仍可能使用已枚举的旧元数据。这不提供原子文件系统快照，也没有句柄扫描器的文件 ID 竞态保护。真实目录并发替换、UNC/网络文件系统、第三方 provider 和可见 Shell 列行为未在本批次验收；若要求严格对象身份，仍需使用隔离句柄扫描方案并完成其兼容性评审。此次只接入递归目录树扫描，不能据此声称 Q-Dir 逐行大小列已进入产品视图。
+
+### 2026-10-31：重建后的合成视图对子项变更通知
+
+在“重建 Shell 窗口并保留滚动锚点”的 Private Desktop 场景中，先创建物理 backing 文件并向目录发送 `SHCNE_UPDATEDIR`：新文件显示，provider 重枚举 1 次，host 延迟刷新计数为 0。随后将文件改名并对物理旧/新绝对子 PIDL 发送 `SHCNE_RENAMEITEM`：3 秒内没有替换旧行，列表短暂达到 305 行，provider 重枚举 0 次。对删除后的物理子项 PIDL 发送 `SHCNE_DELETE` 也没有移除旧行，重枚举 0 次。紧接着向合成视图 backing 目录 PIDL 补发 `SHCNE_UPDATEDIR` 后，重命名收敛为唯一的新名称（303 行，枚举 1 次），删除收敛为 302 行（枚举 1 次）。
+
+探针 exit code 0，`foreground-unchanged=True`、`input-change-observed=False`、`isolation-clean=True`；NativeProbe Release 构建 0 警告/错误，`git diff --check` 通过。证据支持的结论仅限当前合成 provider：物理子项 PIDL 的 rename/delete 通知没有对应到已有合成行；父目录更新触发重枚举并归一结果。没有证明真实文件操作后 Shell 是否会自动发出所需父目录通知，也不能外推到普通 ExplorerBrowser。该探针不构成产品功能或 IShellView 迁移准入证据。日志：`src/.state/native-probe-watchdog/20261031-120852-6807f5c2.stdout.log`。此前错误使用默认通知策略的一轮卡在销毁父窗口的 COM 清理阶段，未到新断言，不能算通知结果；其前台/输入未变且本轮 UUID 资源已清理，日志 `src/.state/native-probe-watchdog/20261031-120738-35165b47.stderr.log`。
