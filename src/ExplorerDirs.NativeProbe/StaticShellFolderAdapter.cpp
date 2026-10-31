@@ -3120,8 +3120,17 @@ namespace
     class SyntheticFolderClassFactory final : public IClassFactory
     {
     public:
-        SyntheticFolderClassFactory() { InterlockedIncrement(&g_syntheticLiveObjects); }
-        ~SyntheticFolderClassFactory() { InterlockedDecrement(&g_syntheticLiveObjects); }
+        explicit SyntheticFolderClassFactory(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr)
+            : _recursiveSizeStore(recursiveSizeStore)
+        {
+            if (_recursiveSizeStore) _recursiveSizeStore->AddRef();
+            InterlockedIncrement(&g_syntheticLiveObjects);
+        }
+        ~SyntheticFolderClassFactory()
+        {
+            if (_recursiveSizeStore) _recursiveSizeStore->Release();
+            InterlockedDecrement(&g_syntheticLiveObjects);
+        }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -3142,7 +3151,7 @@ namespace
         {
             if (outer) return CLASS_E_NOAGGREGATION;
             InterlockedIncrement(&g_syntheticClassFactoryCreateCount);
-            auto* folder = new (std::nothrow) SyntheticSortFolder();
+            auto* folder = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore);
             if (!folder) return E_OUTOFMEMORY;
             const auto result = folder->QueryInterface(iid, value);
             folder->Release();
@@ -3160,6 +3169,7 @@ namespace
         }
     private:
         volatile LONG _references = 1;
+        SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
     };
 }
 
@@ -3853,6 +3863,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
     SyntheticRecursiveSizeSnapshotStore* snapshotStoreForRecreation = nullptr;
+    IShellFolder2* factoryRecreatedFolder = nullptr;
+    IPersistFolder2* factoryRecreatedPersist = nullptr;
+    const auto factoryRecreatedBytes = updatedBytes == 0
+        ? 1ULL : static_cast<ULONGLONG>(updatedBytes) - 1;
     PITEMID_CHILD childFolder = nullptr;
     PITEMID_CHILD otherFolder = nullptr;
     PITEMID_CHILD rootFile = nullptr;
@@ -3891,43 +3905,57 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     if (FAILED(result)) goto cleanup_recursive_size_update;
 
     {
-        const auto rowMatchesSnapshot = [&](PCUITEMID_CHILD row, ULONGLONG expected, bool folderAfterFile)
+        const auto rowMatchesSnapshot = [&](IShellFolder2* folder, PCUITEMID_CHILD row, ULONGLONG expected, bool folderAfterFile)
         {
             SHCOLUMNID mappedKey{};
-            if (FAILED(root->MapColumnToSCID(1, &mappedKey)) || mappedKey != kSyntheticRecursiveSizeKey) return false;
+            if (FAILED(folder->MapColumnToSCID(1, &mappedKey)) || mappedKey != kSyntheticRecursiveSizeKey)
+            {
+                TraceSyntheticSortStage("recursive-size: snapshot-check-map-failed");
+                return false;
+            }
 
             SHELLDETAILS details{};
-            const auto detailsResult = root->GetDetailsOf(row, 1, &details);
+            const auto detailsResult = folder->GetDetailsOf(row, 1, &details);
             const auto expectedText = std::to_wstring(expected);
             const bool textMatches = SUCCEEDED(detailsResult) && details.str.uType == STRRET_WSTR &&
                 details.str.pOleStr && expectedText == details.str.pOleStr;
             if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
-            if (!textMatches) return false;
+            if (!textMatches)
+            {
+                TraceSyntheticSortStage("recursive-size: snapshot-check-text-failed");
+                return false;
+            }
 
             VARIANT value{};
             VariantInit(&value);
-            const auto propertyResult = root->GetDetailsEx(row, &mappedKey, &value);
+            const auto propertyResult = folder->GetDetailsEx(row, &mappedKey, &value);
             const bool propertyMatches = SUCCEEDED(propertyResult) && value.vt == VT_UI8 && value.ullVal == expected;
             VariantClear(&value);
-            if (!propertyMatches) return false;
+            if (!propertyMatches)
+            {
+                TraceSyntheticSortStage("recursive-size: snapshot-check-property-failed");
+                return false;
+            }
 
             const auto compareResult = folderAfterFile
-                ? root->CompareIDs(1, row, rootFile)
-                : root->CompareIDs(1, rootFile, row);
-            return SUCCEEDED(compareResult) && static_cast<SHORT>(HRESULT_CODE(compareResult)) > 0;
+                ? folder->CompareIDs(1, row, rootFile)
+                : folder->CompareIDs(1, rootFile, row);
+            const auto matches = SUCCEEDED(compareResult) && static_cast<SHORT>(HRESULT_CODE(compareResult)) > 0;
+            if (!matches) TraceSyntheticSortStage("recursive-size: snapshot-check-order-failed");
+            return matches;
         };
 
         // Sibling rows own independent snapshots; updating one must not replace the other's value.
-        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(initialBytes), true) ||
-            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
+        if (!rowMatchesSnapshot(root, childFolder, static_cast<ULONGLONG>(initialBytes), true) ||
+            !rowMatchesSnapshot(root, otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
         result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, expectedChildIdentity, static_cast<ULONGLONG>(updatedBytes));
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
-            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
+        if (!rowMatchesSnapshot(root, childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
+            !rowMatchesSnapshot(root, otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
@@ -3959,13 +3987,18 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
             if (refreshedChild && refreshedOther) break;
         }
         if (!refreshedChild || !refreshedOther ||
-            !rowMatchesSnapshot(refreshedChild, static_cast<ULONGLONG>(updatedBytes), false) ||
-            !rowMatchesSnapshot(refreshedOther, static_cast<ULONGLONG>(otherRowBytes), true))
+            !rowMatchesSnapshot(root, refreshedChild, static_cast<ULONGLONG>(updatedBytes), false) ||
+            !rowMatchesSnapshot(root, refreshedOther, static_cast<ULONGLONG>(otherRowBytes), true))
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
 
+        // Use a value that differs from the backing directory's actual recursive total so
+        // provider recreation can only pass by reusing the published snapshot.
+        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName,
+            expectedChildIdentity, factoryRecreatedBytes);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
         snapshotStoreForRecreation = root->GetRecursiveSizeSnapshotStoreForProbe();
         if (!snapshotStoreForRecreation) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
         refreshedEnumerator->Release();
@@ -3984,24 +4017,32 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
         childFolder = nullptr;
 
         // Recreating the provider must not lose scan snapshots keyed by absolute Shell identity.
-        root = new (std::nothrow) SyntheticSortFolder(snapshotStoreForRecreation);
+        auto* recreationFactory = new (std::nothrow) SyntheticFolderClassFactory(snapshotStoreForRecreation);
+        if (!recreationFactory) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+        result = recreationFactory->CreateInstance(nullptr, IID_IShellFolder2,
+            reinterpret_cast<void**>(&factoryRecreatedFolder));
+        recreationFactory->Release();
+        if (FAILED(result)) goto cleanup_recursive_size_update;
         snapshotStoreForRecreation->Release();
         snapshotStoreForRecreation = nullptr;
-        if (!root) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
-        result = root->Initialize(rootPidl);
+        result = factoryRecreatedFolder->QueryInterface(IID_PPV_ARGS(&factoryRecreatedPersist));
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+        result = factoryRecreatedPersist->Initialize(rootPidl);
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"other-child"), nullptr, &otherFolder, nullptr);
+        result = factoryRecreatedFolder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+        result = factoryRecreatedFolder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"other-child"), nullptr, &otherFolder, nullptr);
         if (FAILED(result)) goto cleanup_recursive_size_update;
-        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
-            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
+        result = factoryRecreatedFolder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        if (!rowMatchesSnapshot(factoryRecreatedFolder, childFolder, factoryRecreatedBytes, false) ||
+            !rowMatchesSnapshot(factoryRecreatedFolder, otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
         {
+            TraceSyntheticSortStage("recursive-size: factory-recreated-snapshot-failed");
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
+        TraceSyntheticSortStage("recursive-size: factory-recreated-snapshot-passed");
 
         // A replacement directory at the same path must not inherit the retired folder's scan snapshot.
         CoTaskMemFree(childFolder);
@@ -4045,16 +4086,17 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
                 goto cleanup_recursive_size_update;
             }
         }
-        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+        result = factoryRecreatedFolder->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
         if (FAILED(result)) goto cleanup_recursive_size_update;
         {
             SHELLDETAILS details{};
-            result = root->GetDetailsOf(childFolder, 1, &details);
+            result = factoryRecreatedFolder->GetDetailsOf(childFolder, 1, &details);
             const bool textMatches = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
                 details.str.pOleStr && wcscmp(details.str.pOleStr, L"17") == 0;
             if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
-            if (!textMatches) { result = E_FAIL; goto cleanup_recursive_size_update; }
+            if (!textMatches) { TraceSyntheticSortStage("recursive-size: replacement-cache-invalidation-failed"); result = E_FAIL; goto cleanup_recursive_size_update; }
         }
+        TraceSyntheticSortStage("recursive-size: replacement-cache-invalidation-passed");
     }
     result = S_OK;
 
@@ -4069,6 +4111,8 @@ cleanup_recursive_size_update:
     if (otherFolder) CoTaskMemFree(otherFolder);
     if (childFolder) CoTaskMemFree(childFolder);
     if (root) root->Release();
+    if (factoryRecreatedPersist) factoryRecreatedPersist->Release();
+    if (factoryRecreatedFolder) factoryRecreatedFolder->Release();
     if (snapshotStoreForRecreation) snapshotStoreForRecreation->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);
     return result;

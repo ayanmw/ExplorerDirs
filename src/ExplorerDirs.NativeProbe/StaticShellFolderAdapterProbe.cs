@@ -2399,7 +2399,7 @@ internal static class StaticShellFolderAdapterProbe
                 $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; disk-child-bytes=7; " +
                 "native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; " +
                 "same-pidl-update=rescan-value/text/property/sort-passed; re-enumerated-pidl-retained=passed; " +
-                "provider-recreation=retained; same-path-folder-replacement=stale-snapshot-rejected; window-created=False");
+                "factory-created-provider-shared-cache=passed; same-path-folder-replacement=stale-snapshot-rejected; window-created=False");
         }
         finally
         {

@@ -36,6 +36,12 @@ NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL
 
 边界：扫描结果如何由产品 owner 持有并注入重建后的 provider 尚未接线；静态 class factory 创建独立 provider 时仍会产生独立 store。该 probe 不建 Shell view 窗口，不验证 DefView 的列刷新、可见排序、菜单/焦点/拖放、通知或 Q-Dir 互操作。产品仍用 ExplorerBrowser，逐行大小列仍为 P2 原型。
 
+## 2026-11-01：通过 class factory 创建共享快照 provider
+
+递归大小身份缓存合同现在让旧 provider 退出后，由 `SyntheticFolderClassFactory::CreateInstance` 创建新 provider，再读取快照。为避免新 provider 从 backing 目录的真实大小碰巧得到相同值，探针在重建前把缓存设为与磁盘递归总量不同的哨兵值。默认独立 factory 的红测因读不到快照而按预期失败；factory 显式持有并传递同一 snapshot store 后，列文本、`VT_UI8` 值与数值排序通过。相同路径目录替换后，新文件 ID 仍拒绝旧快照。
+
+Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-column-folder-smoke` 退出码 0，输出 `factory-created-provider-shared-cache=passed`、`same-path-folder-replacement=stale-snapshot-rejected`、`window-created=False`。该结果证明可将快照存储沿 class factory 创建路径显式注入新 provider；`DllGetClassObject` 仍创建独立 store，Shell 的自然 COM 激活、factory 之间共享、活动 view 更新和产品扫描器接线尚未验证。产品仍使用 ExplorerBrowser，不能据此声称逐行大小列可用。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。
