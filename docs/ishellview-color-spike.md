@@ -1575,6 +1575,6 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 
 ### 2026-11-01：ZIP `CopyItems` 同名目标与静默标志
 
-在同一隔离 ZIP `IShellView` 中，将现有物理目标 `blue-rule-target.txt` 预置为字节 `0x7A`，再复制 ZIP 内同名虚拟文件（内容 `0x41`）。使用 `FOF_RENAMEONCOLLISION` (`0x0008`) 与静默组合 `FOF_SILENT | FOF_NOCONFIRMATION | FOFX_NOCOPYHOOKS` 执行 `IFileOperation.CopyItems` 后，`PerformOperations=S_OK`、未 abort，但原目标变为 `0x41`，没有改名副本；归档源和 Shell view 保持，前台/输入/清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-055142-12521e94.stdout.log`。
+同一 `--ishellview-zip-copy-items-private-desktop` 探针现先从普通文件系统 Shell 项创建数据对象，再与 ZIP Shell 数据对象使用相同的 `IFileOperation.CopyItems` 目标及标志组合对照。普通文件系统源在目标预置 `0x7A` 时保留旧文件，并生成内容 `0x41` 的 `blue-rule-target - 副本.txt`；ZIP 虚拟源则覆盖同名目标为 `0x41`，没有改名副本。两轮均 `PerformOperations=S_OK`、未 abort，前台/输入/隔离守卫通过。对照日志：`src/.state/native-probe-watchdog/20261101-055407-30632907.stdout.log`；此前仅 ZIP 的复现：`src/.state/native-probe-watchdog/20261101-055142-12521e94.stdout.log`。
 
-尝试省略 `FOF_NOCONFIRMATION` 后，Private Desktop 探针在冲突确认阶段等待并被 watchdog 超时终止；这不能证明交互确认时的最终选择或 ZIP provider 是否自动改名。Microsoft 文档定义 `FOF_NOCONFIRMATION` 为对操作确认提示回答 Yes，并定义 `FOF_RENAMEONCOLLISION` 为目标重名时改名；本地观察说明两者组合下不能假设原目标会被保留。后续迁移必须明确冲突策略，不能把此静默标志组合当作保留目标的证据。产品 ExplorerBrowser 未改；没有触碰用户文件或 Shell Undo 栈。
+尝试省略 `FOF_NOCONFIRMATION` 后，Private Desktop 探针在冲突确认阶段等待并被 watchdog 超时终止；这不能证明交互确认时的最终选择或 ZIP provider 是否自动改名。Microsoft 文档定义 `FOF_NOCONFIRMATION` 为对操作确认提示回答 Yes，并定义 `FOF_RENAMEONCOLLISION` 为目标重名时改名；普通文件系统与 ZIP provider 对同一静默标志组合表现不同，故迁移时必须明确 provider 的冲突策略，不能把一个 provider 的结果套用到另一个，也不能仅凭 `S_OK` 判定已有目标安全。产品 ExplorerBrowser 未改；没有触碰用户文件或 Shell Undo 栈。

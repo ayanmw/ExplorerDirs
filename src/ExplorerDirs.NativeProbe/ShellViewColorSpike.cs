@@ -2597,6 +2597,8 @@ internal static class ShellViewColorSpike
             Marshal.Release(cancelSinkPointer);
             cancelSinkPointer = 0;
 
+            ObserveFilesystemCopyCollisionUnderSilentFlags(fixture, foreground);
+
             var collisionFileIndex = selectedNames.FindIndex(name =>
                 name.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
             if (collisionFileIndex < 0)
@@ -2905,6 +2907,71 @@ internal static class ShellViewColorSpike
             if (destination != 0) Marshal.Release(destination);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (childArray != 0) Marshal.FreeHGlobal(childArray);
+        }
+    }
+
+    private static void ObserveFilesystemCopyCollisionUnderSilentFlags(string fixture, nint foreground)
+    {
+        nint parentPidl = 0, sourcePidl = 0, sourceFolder = 0, childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        try
+        {
+            var sourcePath = Path.Combine(fixture, "filesystem-copy-collision-source", "blue-rule-target.txt");
+            var destinationPath = Path.Combine(fixture, "filesystem-copy-collision-target");
+            Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+            Directory.CreateDirectory(destinationPath);
+            File.WriteAllBytes(sourcePath, [0x41]);
+            var originalTargetPath = Path.Combine(destinationPath, "blue-rule-target.txt");
+            File.WriteAllBytes(originalTargetPath, [0x7A]);
+
+            var sourceParentPath = Path.GetDirectoryName(sourcePath)!;
+            Check(SHParseDisplayName(sourceParentPath, 0, out parentPidl, 0, out _));
+            Check(SHParseDisplayName(sourcePath, 0, out sourcePidl, 0, out _));
+            Check(SHBindToObject(0, parentPidl, 0, in ShellFolderId, out sourceFolder));
+            var sourceChild = ILFindChild(parentPidl, sourcePidl);
+            if (sourceChild == 0)
+                throw new InvalidOperationException("The filesystem collision source PIDL was not a direct child of its parent.");
+            childArray = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, sourceChild);
+            var dataObjectId = new Guid("0000010E-0000-0000-C000-000000000046");
+            Check(At<GetUIObjectOf>(sourceFolder, 10)(sourceFolder, parentPidl, 1, childArray,
+                in dataObjectId, 0, out dataObject));
+            if (dataObject == 0)
+                throw new InvalidOperationException("The filesystem collision source did not provide an IDataObject.");
+
+            var shellItemId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400));
+            Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
+            var performResult = At<PerformOperations>(operation, 21)(operation);
+            Check(performResult);
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var originalTargetBytes = File.Exists(originalTargetPath) ? File.ReadAllBytes(originalTargetPath) : [];
+            var originalPreserved = originalTargetBytes.SequenceEqual(new byte[] { 0x7A });
+            var copiedFiles = Directory.GetFiles(destinationPath)
+                .Where(path => !string.Equals(path, originalTargetPath, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var collisionCopyValid = copiedFiles.Length == 1 &&
+                File.ReadAllBytes(copiedFiles[0]).SequenceEqual(new byte[] { 0x41 });
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            var destinationSnapshot = string.Join('|', Directory.GetFiles(destinationPath)
+                .Select(path => $"{Path.GetFileName(path)}:{Convert.ToHexString(File.ReadAllBytes(path))}"));
+            Console.WriteLine($"ishellview-filesystem-iFileOperation-copy-collision-silent-flags: perform-hresult=0x{performResult:X8};aborted={aborted};existing-target-bytes=[{Convert.ToHexString(originalTargetBytes)}];existing-target-preserved={originalPreserved};generated-copy={Path.GetFileName(copiedFiles.FirstOrDefault() ?? string.Empty)};generated-copy-valid={collisionCopyValid};destination=[{destinationSnapshot}];foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || !originalPreserved || !collisionCopyValid || !foregroundUnchanged)
+                throw new IOException("Filesystem CopyItems did not preserve the existing target and create a valid collision-renamed copy under the silent flags.");
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destination != 0) Marshal.Release(destination);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (sourceFolder != 0) Marshal.Release(sourceFolder);
+            if (childArray != 0) Marshal.FreeHGlobal(childArray);
+            if (parentPidl != 0) Marshal.FreeCoTaskMem(parentPidl);
+            if (sourcePidl != 0) Marshal.FreeCoTaskMem(sourcePidl);
         }
     }
 
@@ -6227,6 +6294,7 @@ internal static class ShellViewColorSpike
     [DllImport("shell32.dll", EntryPoint = "ILFindLastID")] private static extern nint ILFindLastID(nint pidl);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint folder, nint pidl, nint bind,
         in Guid iid, out nint value);
+    [DllImport("shell32.dll")] private static extern nint ILFindChild(nint parent, nint child);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(
         string path, nint bindContext, ref Guid interfaceId, out nint item);
     [DllImport("shell32.dll")] private static extern int SHCreateItemFromIDList(nint pidl, ref Guid interfaceId, out nint item);
