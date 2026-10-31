@@ -33,6 +33,32 @@ internal static class ShellTreeControlStyleSmoke
         NavigationTreeDragHoverDelaySmoke.Run();
 
         var repoRoot = FindRepoRoot();
+        var windowMarkup = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml"));
+        foreach (var delay in ExplorerDirs.App.NavigationTreeDragHoverDelay.AllowedMilliseconds)
+            if (!windowMarkup.Contains($"Tag=\"{delay}\"", StringComparison.Ordinal) ||
+                !windowMarkup.Contains("Click=\"TreeDragHoverDelay_Click\"", StringComparison.Ordinal))
+                throw new InvalidOperationException("The navigation menu must expose every supported drag-hover expansion delay.");
+
+        var mainWindowSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "MainWindow.xaml.cs"));
+        var delayHandlerStart = mainWindowSource.IndexOf("private void TreeDragHoverDelay_Click(", StringComparison.Ordinal);
+        var delayHandlerEnd = delayHandlerStart < 0 ? -1 :
+            mainWindowSource.IndexOf("private void TreeSelectionAutoExpand_Click(", delayHandlerStart, StringComparison.Ordinal);
+        var delayHandler = delayHandlerStart >= 0 && delayHandlerEnd > delayHandlerStart
+            ? mainWindowSource[delayHandlerStart..delayHandlerEnd]
+            : string.Empty;
+        if (!mainWindowSource.Contains("_treeDragHoverExpandDelayMilliseconds = _treeDragHoverDelayStore.Load()", StringComparison.Ordinal) ||
+            !delayHandler.Contains("_treeDragHoverDelayStore.Save(milliseconds)", StringComparison.Ordinal) ||
+            !delayHandler.Contains("foreach (var pane in _panes) pane.SetTreeDragHoverExpandDelay(milliseconds)", StringComparison.Ordinal) ||
+            !delayHandler.Contains("_sharedTreeHost?.SetDragHoverExpandDelay(milliseconds)", StringComparison.Ordinal) ||
+            !mainWindowSource.Contains("_sharedTreeHost.SetDragHoverExpandDelay(_treeDragHoverExpandDelayMilliseconds)", StringComparison.Ordinal))
+            throw new InvalidOperationException("The selected portable delay must load, persist, and reach existing and new shared trees.");
+
+        var paneSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "PaneControl.xaml.cs"));
+        if (!paneSource.Contains("_treeHost?.SetDragHoverExpandDelay(milliseconds)", StringComparison.Ordinal) ||
+            !paneSource.Contains("_treeHost.SetDragHoverExpandDelay(_treeDragHoverExpandDelayMilliseconds)", StringComparison.Ordinal))
+            throw new InvalidOperationException("The selected portable delay must reach existing and newly created per-pane trees.");
+        Console.WriteLine("Shell tree drag-hover preference smoke: PASS (six menu delays route to shared and per-pane trees)");
+
         var hostSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ShellTreeHost.cs"));
         var hideHandlerStart = hostSource.IndexOf("IsVisibleChanged += (_, _) =>", StringComparison.Ordinal);
         var hideHandlerEnd = hostSource.IndexOf("};", hideHandlerStart, StringComparison.Ordinal);
