@@ -84,7 +84,7 @@ public static class SyntheticShellSortProbe
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-recreate-shell-window" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var syntheticFolderClassId = Guid.NewGuid();
@@ -784,6 +784,11 @@ public static class SyntheticShellSortProbe
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, recreateShellWindow: true,
                     host: host, hostPointer: hostPointer);
+            if (strategyFilter == "single-item-recreate-shell-window-multiselect")
+                RunSizeUpdateStrategy("single-item-recreate-shell-window-multiselect", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, recreateShellWindow: true,
+                    multiSelect: true, host: host, hostPointer: hostPointer);
             if (strategyFilter == "item-plus-parent")
                 RunSizeUpdateStrategy("item-plus-parent", 1, () =>
                 {
@@ -809,7 +814,7 @@ public static class SyntheticShellSortProbe
     private static void RunSizeUpdateStrategy(string name, long updatedSize, Action notify,
         nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
-        nint hostPointer = 0)
+        nint hostPointer = 0, bool multiSelect = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -823,9 +828,17 @@ public static class SyntheticShellSortProbe
             throw new InvalidOperationException($"The new view did not expose the recursive-size column before '{name}'; notification strategy was not run: {FormatSizeState(before)}");
 
         SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
+        if (multiSelect)
+        {
+            var childIndex = Array.FindIndex(before.Names, item => string.Equals(item, "child", StringComparison.OrdinalIgnoreCase));
+            if (childIndex < 0) throw new InvalidOperationException("Could not find the second item for the multiselection probe.");
+            SetListViewState(listView, childIndex, state: LvisSelected, stateMask: LvisSelected);
+        }
         using var shellWindowSelection = recreateShellWindow ? ShellViewSelectionSnapshot.Capture(folderView) : null;
         if (recreateShellWindow && shellWindowSelection is null)
             throw new InvalidOperationException("Could not capture the synthetic Shell view selection before recreating its window.");
+        if (multiSelect && shellWindowSelection?.SelectedCount != 2)
+            throw new InvalidOperationException($"Could not capture both selected Shell items; captured={shellWindowSelection?.SelectedCount ?? -1}.");
         SetBackingChildSize(backingFolder, updatedSize);
         SetSyntheticSizeOverride(module, updatedSize);
         var enumsBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
@@ -872,6 +885,13 @@ public static class SyntheticShellSortProbe
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
             var restored = shellWindowSelection!.Restore(view, trace: message => Console.WriteLine($"synthetic-size-update-selection: {message}"));
             Console.WriteLine($"synthetic-size-update-selection: selected={restored.SelectionRestored}; focused={restored.FocusRestored}; saved-selected={shellWindowSelection.SelectedCount}; saved-focus={shellWindowSelection.HasFocusedItem}");
+            if (multiSelect)
+            {
+                using var readback = ShellViewSelectionSnapshot.Capture(folderView);
+                Console.WriteLine($"synthetic-size-update-selection: multiselect-readback={readback?.SelectedCount ?? -1}; expected=2");
+                if (!restored.SelectionRestored || readback?.SelectedCount != 2)
+                    throw new InvalidOperationException("The Shell selection snapshot did not restore the multiselection after view-window recreation.");
+            }
         }
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
