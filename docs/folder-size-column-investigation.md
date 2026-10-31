@@ -1029,3 +1029,9 @@ NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELE
 按 Windows `SHChangeNotify` 的事件定义，文件夹新建、删除和重命名分别使用 `SHCNE_MKDIR`、`SHCNE_RMDIR`、`SHCNE_RENAMEFOLDER`，而 `SHCNE_CREATE`、`SHCNE_DELETE`、`SHCNE_RENAMEITEM` 对应非文件夹项目。隔离 synthetic adapter 的父目录更新分类此前只包含后者，因此创建/删除/重命名文件夹可能让自有行投影保留旧项目。现在分类补入三种文件夹事件，并忽略可选的 `SHCNE_INTERRUPT` 修饰位后再判断基础事件；更新仍延迟到父目录，`SHCNE_UPDATEDIR` 仍排除以避免递归通知。
 
 Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未运行 smoke 或 Shell view 探针，因此只确认头文件常量和代码可编译；具体文件夹操作通知是否通过 synthetic adapter、是否只触发一次父目录重枚举，仍待后续隔离运行确认。产品 ExplorerBrowser 未改，也没有可见 GUI 验收。
+
+### 2026-11-01：synthetic IShellView 文件夹生命周期通知闭环
+
+在前一批仅完成事件分类和编译后，本批补齐了静态分类合同与真实隔离 view 操作。无 Shell view 的 `--synthetic-child-notification-routing-smoke` 确认 `SHCNE_MKDIR`、`SHCNE_RMDIR`、`SHCNE_RENAMEFOLDER` 均转为父目录更新，带 `SHCNE_INTERRUPT` 的 MKDIR 也能识别，`SHCNE_UPDATEDIR` 和卷空闲空间事件不被递归翻译。WPF 根 Private Desktop 的 `single-item-recreate-shell-window-scroll` 原型中，真实 `IFileOperation::NewItem`、`RenameItems`、`DeleteItems` 依次创建、改名和删除临时文件夹；Shell 分别投递 MKDIR/RENAMEFOLDER/RMDIR，适配器每种操作只排队一次并发送一次父目录更新，DefView 每次只重新枚举一次，行列表准确新增/改名/移除。完整探针退出码 0，Private Desktop 前台 HWND 与输入时间戳不变，isolated cleanup 通过。
+
+该结果证明此 synthetic adapter 的文件夹生命周期通知在当前 Windows 文件系统 provider 和 WPF 根 Shell view 中可闭环。它不覆盖其它 provider、真实产品 ExplorerBrowser、可见 UI、Undo/Redo 或 OLE 拖放；没有产品迁移或 release 变更。

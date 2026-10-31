@@ -27,7 +27,10 @@ public static class SyntheticShellSortProbe
     private const uint ShcneCreate = 0x00000002;
     private const uint ShcneDelete = 0x00000004;
     private const uint ShcneRenameItem = 0x00000001;
+    private const uint ShcneMakeDirectory = 0x00000008;
+    private const uint ShcneRemoveDirectory = 0x00000010;
     private const uint ShcneAttributes = 0x00000800;
+    private const uint ShcneRenameFolder = 0x00020000;
     private const uint LvisFocused = 0x0001;
     private const uint LvisSelected = 0x0002;
     private const uint LvifText = 0x0001;
@@ -1337,6 +1340,8 @@ public static class SyntheticShellSortProbe
             if (!shellDeleteVisible || deleteEnumCalls != 1 || deleteQueued != 1 || deleteSent != 1)
                 throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete without a manually supplied parent update.");
 
+            VerifyFolderLifecycleNotifications(view, listView, module, backingFolder);
+
             // A real view owner must cancel the adapter's delayed parent update before destroying the view.
             var queuedBeforeCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
             var sentBeforeCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
@@ -1379,6 +1384,79 @@ public static class SyntheticShellSortProbe
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}/{column.Direction}"));
+
+    private static void VerifyFolderLifecycleNotifications(nint view, nint listView, nint module, string backingFolder)
+    {
+        var folderName = "notify-folder";
+        var renamedFolderName = "notify-renamed-folder";
+        var folderPath = Path.Combine(backingFolder, folderName);
+        var renamedFolderPath = Path.Combine(backingFolder, renamedFolderName);
+        var names = ReadNames(listView, module, expectedCount: -1);
+        var deadline = Environment.TickCount64 + 3000;
+        var enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        var queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        var sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        CreateFolderInFilesystemFolder(backingFolder, folderName);
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (names.Contains(folderName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var mkdirEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var mkdirQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var mkdirSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var mkdirVisible = Directory.Exists(folderPath) && names.Contains(folderName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: event=IFileOperation-NewItem-folder(SHCNE_MKDIR=0x{ShcneMakeDirectory:X}); visible={mkdirVisible}; enum-calls={mkdirEnumCalls}; translated-queued={mkdirQueued}; translated-sent={mkdirSent}");
+        if (!mkdirVisible || mkdirQueued < 1 || mkdirSent < 1)
+            throw new TimeoutException("A Shell-created folder did not reach the synthetic view through its translated lifecycle notification.");
+
+        SetListViewSelectionAndFocus(listView, folderName, names);
+        enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        RenameSelectedShellItem(view, listView, module, folderName, "child", renamedFolderName);
+        deadline = Environment.TickCount64 + 3000;
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (!names.Contains(folderName, StringComparer.OrdinalIgnoreCase) &&
+                names.Contains(renamedFolderName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var renameEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var renameQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var renameSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var renameVisible = !Directory.Exists(folderPath) && Directory.Exists(renamedFolderPath) &&
+            !names.Contains(folderName, StringComparer.OrdinalIgnoreCase) &&
+            names.Contains(renamedFolderName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: event=IFileOperation-RenameItems-folder(SHCNE_RENAMEFOLDER=0x{ShcneRenameFolder:X}); visible={renameVisible}; enum-calls={renameEnumCalls}; translated-queued={renameQueued}; translated-sent={renameSent}");
+        if (!renameVisible || renameQueued < 1 || renameSent < 1)
+            throw new TimeoutException("A Shell-renamed folder did not reach the synthetic view through its translated lifecycle notification.");
+
+        SetListViewSelectionAndFocus(listView, renamedFolderName, names);
+        enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        DeleteSelectedShellItem(view, listView, module, renamedFolderName, "child");
+        deadline = Environment.TickCount64 + 3000;
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (!names.Contains(renamedFolderName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var rmdirEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var rmdirQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var rmdirSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var rmdirVisible = !Directory.Exists(renamedFolderPath) && !names.Contains(renamedFolderName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: event=IFileOperation-DeleteItems-folder(SHCNE_RMDIR=0x{ShcneRemoveDirectory:X}); visible={rmdirVisible}; enum-calls={rmdirEnumCalls}; translated-queued={rmdirQueued}; translated-sent={rmdirSent}");
+        if (!rmdirVisible || rmdirQueued < 1 || rmdirSent < 1)
+            throw new TimeoutException("A Shell-deleted folder did not disappear from the synthetic view through its translated lifecycle notification.");
+    }
 
     private static void VerifyAttributeChangeNotification(string itemPath, string itemName, nint itemPidl, nint listView, nint module)
     {
@@ -1559,6 +1637,29 @@ public static class SyntheticShellSortProbe
         {
             Marshal.Release(operation);
             Marshal.Release(dataObject);
+        }
+    }
+
+    private static void CreateFolderInFilesystemFolder(string parentPath, string name)
+    {
+        var shellItemInterface = ShellItemId;
+        Check(SHCreateItemFromParsingName(parentPath, 0, ref shellItemInterface, out var destination));
+        var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+        var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+        var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+        if (createOperationHr < 0) { Marshal.Release(destination); Check(createOperationHr); }
+        try
+        {
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            Check(At<NewItem>(operation, 20)(operation, destination, 0x10, name, 0, 0));
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The isolated Shell folder-creation operation was aborted.");
+        }
+        finally
+        {
+            Marshal.Release(operation);
+            Marshal.Release(destination);
         }
     }
 
@@ -2079,6 +2180,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int NewItem(nint self, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string name, nint template, nint progressSink);
     [StructLayout(LayoutKind.Sequential)] private struct NativeListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask; public nint Text;

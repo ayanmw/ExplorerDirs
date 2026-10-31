@@ -28,7 +28,12 @@ internal static class StaticShellFolderAdapterProbe
     private const uint ShcneRenameItem = 0x00000001;
     private const uint ShcneUpdateItem = 0x00002000;
     private const uint ShcneAttributes = 0x00000800;
+    private const uint ShcneMakeDirectory = 0x00000008;
+    private const uint ShcneRemoveDirectory = 0x00000010;
+    private const uint ShcneRenameFolder = 0x00020000;
+    private const uint ShcneInterrupt = 0x80000000;
     private const uint ShcneUpdateDir = 0x00001000;
+    private const uint ShcneFreeSpace = 0x00004000;
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -45,8 +50,13 @@ internal static class StaticShellFolderAdapterProbe
             Expect(classify(ShcneRenameItem) != 0, "RENAMEITEM translates to a parent directory update");
             Expect(classify(ShcneUpdateItem) != 0, "UPDATEITEM translates to a parent directory update");
             Expect(classify(ShcneAttributes) != 0, "ATTRIBUTES translates to a parent directory update");
+            Expect(classify(ShcneMakeDirectory) != 0, "MKDIR translates to a parent directory update");
+            Expect(classify(ShcneRemoveDirectory) != 0, "RMDIR translates to a parent directory update");
+            Expect(classify(ShcneRenameFolder) != 0, "RENAMEFOLDER translates to a parent directory update");
+            Expect(classify(ShcneMakeDirectory | ShcneInterrupt) != 0,
+                "INTERRUPT modifier does not hide a folder-creation event");
             Expect(classify(ShcneUpdateDir) == 0, "UPDATEDIR is not recursively translated");
-            Expect(classify(0x00000008) == 0, "unknown child events are not translated");
+            Expect(classify(ShcneFreeSpace) == 0, "volume free-space events are not translated as child changes");
         }
         finally { NativeLibrary.Free(module); }
         Console.WriteLine("synthetic child notification routing contract smoke: PASS (no Shell view created)");
