@@ -92,6 +92,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunNetworkPlacesRowMap() => Run("network-places-row-map", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, networkPlacesRowMapProbe: true), TimeSpan.FromSeconds(60));
 
+    internal static int RunNetworkPlacesColorPixels() => Run("network-places-color-pixels", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, virtualNetworkPlacesColorProbe: true), TimeSpan.FromSeconds(60));
+
     internal static int RunExplorerBrowserColorNotifications() =>
         Run("explorerbrowser-color-notifications", ExplorerBrowserNotifyProbe.Run, TimeSpan.FromSeconds(25));
 
