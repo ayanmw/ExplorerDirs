@@ -5344,7 +5344,7 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 依据上述同一隔离 lifecycle probe 的结果，产品本地文件系统位置现在通过 `SHCNE_UPDATEDIR` 请求当前 ExplorerBrowser 内的 DefView 原位协调目录，而不直接调用会清空行列表的 `IShellView.Refresh()`；虚拟 Shell 位置或路径无法由 Shell 路径通知表示时，仍走原 `Refresh()` 及现有选区/焦点恢复流程。实现位于 `ExplorerBrowserHost.RefreshWithPresentation` 和 `ShellChangedItemNotification.TryNotifyDirectoryRefresh`。产品 Release build 通过，0 警告/错误。隔离 probe 复跑 exit 0：300 行视图的 Refresh 采样出现 2 个零行样本、同一 view/list HWND；目录更新通知新增一行后始终保持 301 行、view/list HWND 不变。此前完整 synthetic sort probe 在其较早的 rename 双视图断言失败退出，未用于本结论；随后独立 refresh lifecycle probe 正常完成，Private Desktop 前台/输入和隔离清理守卫通过。
 
-该测量仍是隐藏视图的行数/HWND，不是可见像素或真实用户输入；产品改动尚未通过可见 UI 验收。实际 SHChangeNotify 没有返回刷新 HRESULT，现有流程继续用 Shell 行数稳定检测及选区恢复收尾。非本地文件系统位置保留原刷新行为。
+该测量仍是隐藏视图的行数/HWND，不是可见像素或真实用户输入；产品改动尚未通过可见 UI 验收。实际 SHChangeNotify 没有返回刷新 HRESULT，且本实现使用 `SHCNF_FLUSHNOWAIT`，仅等待通知投递开始，不等待 DefView 完成枚举。`ICommDlgBrowser.OnStateChange` 也没有枚举完成事件；三次稳定行数采样只是选区/焦点恢复启发式，列表数量未变化时甚至可能仍代表旧行。因此不能据此声称新内容已显示或绘制完成，通知处理与选区恢复的竞态及可见像素行为仍需集中验收。非本地文件系统位置保留原刷新行为。
 
 ## 2026-11-01：ZIP 虚拟 Shell 项颜色规则输入复核
 

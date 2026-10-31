@@ -3204,7 +3204,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 throw ShellDirectoryRefreshRecovery.FailureForHResult(refreshResult, "IShellView.Refresh")!;
             }
 
-            // Shell refills and paints the current native list; wait only to restore selection safely.
+            // Refresh may finish asynchronously, especially after SHCNE_UPDATEDIR. Stable row counts
+            // only guide selection recovery; they do not prove enumeration or painting has completed.
             var selectionOwnershipTransferred = false;
             var completionCleaned = 0;
             DispatcherTimer? refreshPaintWait = null;
@@ -3294,7 +3295,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                     }
 
                     // Wait for three identical samples, but never keep a Shell provider's list
-                    // frozen indefinitely if it cannot report a stable count.
+                    // frozen indefinitely if it cannot report a stable count. The count can still
+                    // describe the old rows when a directory notification has not been processed yet.
                     if ((stableCountSamples >= 2 && count is not null &&
                             (!requireRepublishedRows || count > 0)) ||
                         Stopwatch.GetElapsedTime(refreshStartedAt) >= TimeSpan.FromMilliseconds(1500))
