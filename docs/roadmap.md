@@ -5118,3 +5118,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 行模型此前只按 Shell 绝对解析名、文件夹标志和文件系统路径复用递归扫描值；同路径目录替换无法与原对象区分。现在扫描值带有卷序列号和 Windows 128 位文件 ID；重枚举仅在同路径且文件 ID 相同时保留旧值，身份不同或无法读取时清除旧值，等待重扫。打开目录时不跟随 reparse point。
 - `--shell-listview-row-model-smoke` 覆盖同路径移动/重建后文件 ID 变化、旧扫描值清除，并检查同身份行数据仍可复用；定向 smoke 通过，NativeProbe Release build 为 0 警告/错误。该身份只接入隔离行模型，不是产品 ExplorerBrowser 功能；当前未测大量可见目录下的身份读取成本、Shell view 列消费或用户可见行为。详情见[递归大小列调查](folder-size-column-investigation.md#2026-10-31同路径文件夹替换时拒绝旧扫描快照)。
+
+## 2026-10-31：扫描完成时拒绝已替换目录的迟到值
+
+- 真实文件系统夹具先证明旧逻辑会把同路径新目录的扫描汇总回写到旧行身份；现在发布前重新读取文件 ID，若路径当前身份与行快照不同则丢弃迟到值、清空缓存并记录新身份，等待下一轮扫描。定向 row-model smoke 在旧逻辑上失败、修复后通过；完整 Release SettingsSmoke 与 NativeProbe Release build 通过，0 警告/错误。
+- 仅补强隔离 NativeProbe 行模型的路径键扫描竞态，没有接入产品 ExplorerBrowser/IShellView；后台结果仍由路径索引，且回写检查后至更新之间的文件系统竞争无法通过该检查消除。详情见[调查记录](folder-size-column-investigation.md#2026-10-31扫描完成时拒绝已替换目录的迟到值)。

@@ -130,6 +130,16 @@ internal static class ShellListViewRowModelSmoke
                 RecursiveBytes = null,
                 RecursiveSummary = null
             };
+            var staleScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
+                [retiredFolder],
+                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [identityPath] = new(777, 1, 0, 0)
+                });
+            Check(staleScan[0].RecursiveBytes is null && staleScan[0].RecursiveSummary is null &&
+                  staleScan[0].FileSystemIdentity == replacementIdentity,
+                "a scan result for a retired row is rejected after its path now identifies another folder");
+
             var identityReconciled = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
                 [retiredFolder], [replacementFolder], nextId: 10);
             Check(identityReconciled.Rows[0].RecursiveBytes is null && identityReconciled.Rows[0].RecursiveSummary is null,

@@ -89,13 +89,29 @@ internal static class ShellListViewRowModel
             if (IsFilesystemFolder(row))
             {
                 if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var summary))
-                    row = row with
+                {
+                    var currentIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!);
+                    if (row.FileSystemIdentity is { } previousIdentity && currentIdentity is { } scannedIdentity &&
+                        previousIdentity != scannedIdentity)
                     {
-                        RecursiveBytes = summary.Bytes,
-                        RecursiveSummary = summary,
-                        FileSystemIdentity = row.FileSystemIdentity ??
-                            ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!)
-                    };
+                        // A path-only scan can finish after its folder was replaced; never attach that result to the retired row.
+                        row = row with
+                        {
+                            RecursiveBytes = null,
+                            RecursiveSummary = null,
+                            FileSystemIdentity = currentIdentity
+                        };
+                    }
+                    else
+                    {
+                        row = row with
+                        {
+                            RecursiveBytes = summary.Bytes,
+                            RecursiveSummary = summary,
+                            FileSystemIdentity = currentIdentity ?? row.FileSystemIdentity
+                        };
+                    }
+                }
                 else
                     // A completed scan without this folder must not leave an older value looking current.
                     row = row with { RecursiveBytes = null, RecursiveSummary = null, FileSystemIdentity = null };

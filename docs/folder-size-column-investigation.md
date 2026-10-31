@@ -757,3 +757,7 @@ NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临
 ### 2026-10-31：同路径文件夹替换时拒绝旧扫描快照
 
 隔离 `ShellListViewRowModel.Reconcile` 之前只按绝对解析名、文件夹属性和路径复用递归值；删除后在同一路径重建的另一个文件夹可能继承旧大小。现在已扫描行携带卷序列号与 128 位文件 ID；重枚举时只有同路径、同文件系统身份才保留扫描值。目录 ID 读取使用 `FILE_FLAG_OPEN_REPARSE_POINT`，标识 junction 本身而不跟随目标；无法取得新身份时清除旧值，等后续扫描再发布。定向 `--shell-listview-row-model-smoke` 覆盖真实目录移动后同路径重建、文件 ID 变化及旧大小清除，并通过；NativeProbe Release build 0 警告、0 错误。此身份目前只用于隔离行模型，未接入产品 ExplorerBrowser，也未测量数千目录下的句柄打开成本。
+
+### 2026-10-31：扫描完成时拒绝已替换目录的迟到值
+
+补充复核发现另一条同路径竞态：扫描结果按路径回写时，如果扫描发起后目录被替换，旧行仍可能接收已替换路径的汇总。新增的真实文件系统回归先在旧逻辑上失败；行模型现于发布扫描值前重新读取当前文件 ID，若与行快照不符就丢弃该次结果、清空大小并更新当前身份，等待新一轮扫描。定向 row-model smoke 和完整 Release SettingsSmoke 通过，NativeProbe Release build 0 警告、0 错误。这里只能检测回写时已可见的身份变化；后台扫描结果仍按路径键控，且该模型未接入产品 ExplorerBrowser/IShellView。
