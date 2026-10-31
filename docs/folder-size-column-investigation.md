@@ -819,3 +819,11 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 深链夹具还先暴露了旧句柄原型的 MAX_PATH 缺口：超过约 260 字符后，句柄打开子目录失败，导致 unreadable 增加、结果少算。现在 `CreateFileW` 对本地盘和 UNC 文件系统路径使用扩展路径前缀，句柄内部保留该前缀，结果字典再归一化为普通解析路径。新增超过 MAX_PATH 的 28 层临时目录回归在旧逻辑上失败，修正后通过。另一回归在扫描回调中移动打开中的父目录，确认扫描会在旧路径失效/身份不符后重新解析句柄路径，继续绑定到原目录对象。定向 `--shell-listview-row-model-smoke` 与递归扫描 smoke 均通过；递归 smoke 还确认列表中的 junction 结果计为 unreadable、不会跟随目标，junction 自身作为扫描根时同样不下钻。
 
 结论：句柄数据通道对本机 NTFS 的逐行汇总有性能潜力，长路径与 junction 边界已在隔离扫描器覆盖；但访问拒绝、UNC 与第三方 Shell provider 仍未实测。Microsoft 文档把 SMB 3.0/TFO/Scale-out、CsvFS 与 ReFS 列入 `GetFileInformationByHandleEx` 的支持技术范围，实际 `FileIdExtdDirectoryInfo` 行为仍需在对应环境验证：[GetFileInformationByHandleEx](https://learn.microsoft.com/en-us/windows/desktop/api/winbase/nf-winbase-getfileinformationbyhandleex)、[FILE_ID_EXTD_DIR_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_extd_dir_info)。NativeProbe 原型没有接入 ExplorerBrowser、IShellView 产品视图或 F9；列展示、排序、焦点、菜单、拖放及逐项后台刷新仍未通过架构验收。
+
+### 2026-10-31：.NET 低层文件系统枚举器对照
+
+在忽略目录的临时 A/B harness 中增加 `FileSystemEnumerable<T>` 原型：枚举转换器只保留 `FileName`、`Attributes`、`Length`，递归扫描直接消费条目长度，不再为每个文件另调 `File.GetAttributes` 与 `FileInfo.Length`。三类本机 NTFS 夹具都与产品路径扫描及句柄扫描的请求行字节数、文件/目录/unreadable 摘要一致。Microsoft API 文档说明 `FileSystemEntry` 提供 attributes 与 length，适用于当前 .NET 10 项目：[FileSystemEntry](https://learn.microsoft.com/en-us/dotnet/api/system.io.enumeration.filesystementry?view=net-10.0)、[FileSystemEntry.Length](https://learn.microsoft.com/en-us/dotnet/api/system.io.enumeration.filesystementry.length?view=net-10.0)。
+
+在高负载/缓存不稳定的一轮宽目录数据中，产品路径 / 句柄 / BCL 的时延分别为 1438 / 236 / 192 ms，托管分配为 2.17 / 3.79 / 1.97 MB。深链一轮分别为 108 / 67 / 62 ms、分配为 0.052 / 0.082 / 0.037 MB。多文件目录单独复测两轮分别为：产品路径 593–700 ms、句柄单遍 16–24 ms、BCL 11–19 ms；分配为 1.23 / 0.49 / 1.10 MB。BCL 原型在这些样本中比当前路径扫描少分配约 9%–28%，多文件目录用时远低于当前路径扫描，宽目录用时也略低于句柄原型；但机器绝对耗时在各轮之间波动很大，宽目录仅一轮，这些不是可发布性能保证。
+
+这提供了一条不依赖 `FileIdExtdDirectoryInfo` 的候选路径，可能减少对特定 NTFS 扩展枚举接口的依赖；网络/provider 兼容尚未实测。原型还未覆盖完整生产合同：取消/进度回调、重解析点、超过 MAX_PATH、访问拒绝、目录被并发替换及文件在枚举后变化都需与现有扫描器逐项验证；BCL 条目长度是枚举时快照，不能替代句柄文件 ID 的竞态保护。临时原型没有进入 App 或 NativeProbe 产品源码，尚未改变 F9 与 ExplorerBrowser 行为。
