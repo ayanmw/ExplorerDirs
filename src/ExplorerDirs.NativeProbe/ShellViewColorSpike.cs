@@ -2510,6 +2510,7 @@ internal static class ShellViewColorSpike
     {
         var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
         nint childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        nint moveChildArray = 0, moveDataObject = 0, moveDestination = 0, moveOperation = 0;
         var selectedChildren = new List<nint>(itemCount);
         var selectedNames = new List<string>(itemCount);
         nint systemImageList = 0;
@@ -2583,6 +2584,66 @@ internal static class ShellViewColorSpike
                 nestedCopiedBytes.Length != 1 || nestedCopiedBytes[0] != 0x42 ||
                 !sourceStillPresent || !archiveIntact || !foregroundUnchanged)
                 throw new IOException("IFileOperation.CopyItems did not copy both selected ZIP entries and the nested file while preserving the source view.");
+
+            var fileChildIndex = selectedNames.FindIndex(name =>
+                name.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
+            moveChildArray = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(moveChildArray, selectedChildren[fileChildIndex]);
+            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, moveChildArray,
+                in dataObjectId, 0, out moveDataObject));
+            if (moveDataObject == 0) throw new InvalidOperationException("The ZIP file entry did not provide an IDataObject for MoveItems.");
+
+            var moveDestinationPath = Path.Combine(fixture, "shell-move-target");
+            Directory.CreateDirectory(moveDestinationPath);
+            Check(SHCreateItemFromParsingName(moveDestinationPath, 0, ref shellItemId, out moveDestination));
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out moveOperation));
+            Check(At<SetOperationFlags>(moveOperation, 5)(moveOperation, 0x0004 | 0x0010 | 0x0400));
+            var moveItemsResult = At<MoveItems>(moveOperation, 15)(moveOperation, moveDataObject, moveDestination);
+            var performMoveResult = moveItemsResult < 0 ? moveItemsResult : At<PerformOperations>(moveOperation, 21)(moveOperation);
+            var moveAborted = performMoveResult < 0 ? -1 : At<GetAnyOperationsAborted>(moveOperation, 22)(moveOperation, out var moveWasAborted) < 0
+                ? -1 : moveWasAborted;
+            var movedPath = Path.Combine(moveDestinationPath, "blue-rule-target.txt");
+            var movedBytes = File.Exists(movedPath) ? File.ReadAllBytes(movedPath) : [];
+            var sourceFileRetained = false;
+            var nestedSourceRetained = false;
+            using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
+            {
+                sourceFileRetained = archive.GetEntry("blue-rule-target.txt") is { Length: 1 };
+                nestedSourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
+            }
+            Pump(1000, "zip-move-settle");
+            var sourceViewNames = new List<string>();
+            var sourceViewErrors = new List<string>();
+            var sourceViewCountAfterMove = GetShellViewItemCount(folderView);
+            for (var index = 0; index < sourceViewCountAfterMove; index++)
+            {
+                Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var child));
+                nint absolute = 0;
+                try
+                {
+                    absolute = ILCombine(folderPidl, child);
+                    if (absolute == 0) throw new InvalidOperationException("Could not combine a ZIP row PIDL after MoveItems.");
+                    sourceViewNames.Add(ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList).DisplayName);
+                }
+                catch (COMException ex)
+                {
+                    sourceViewErrors.Add($"row-{index}:0x{ex.HResult:X8}");
+                }
+                finally
+                {
+                    if (absolute != 0) Marshal.FreeCoTaskMem(absolute);
+                    Marshal.FreeCoTaskMem(child);
+                }
+            }
+            var moveDataIntact = movedBytes.Length == 0 || movedBytes.Length == 1 && movedBytes[0] == 0x41;
+            if (!moveDataIntact || !sourceFileRetained && movedBytes.Length != 1)
+                throw new IOException("ZIP MoveItems removed or corrupted the virtual file without producing an intact destination copy.");
+            var moveSemantics = movedBytes.Length == 1
+                ? sourceFileRetained ? "copy-source-retained" : "move-source-removed"
+                : moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
+            Console.WriteLine($"ishellview-zip-iFileOperation-move: operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (!nestedSourceRetained || GetForegroundWindow() != foreground)
+                throw new IOException("ZIP MoveItems changed the nested source entry or foreground boundary.");
             return 0;
         }
         finally
@@ -2591,6 +2652,10 @@ internal static class ShellViewColorSpike
             if (destination != 0) Marshal.Release(destination);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (childArray != 0) Marshal.FreeHGlobal(childArray);
+            if (moveOperation != 0) Marshal.Release(moveOperation);
+            if (moveDestination != 0) Marshal.Release(moveDestination);
+            if (moveDataObject != 0) Marshal.Release(moveDataObject);
+            if (moveChildArray != 0) Marshal.FreeHGlobal(moveChildArray);
             foreach (var child in selectedChildren) Marshal.FreeCoTaskMem(child);
         }
     }
@@ -5707,6 +5772,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int CopyItem(nint self, nint item, nint destination,
         [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
