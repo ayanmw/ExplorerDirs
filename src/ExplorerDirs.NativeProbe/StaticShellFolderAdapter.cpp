@@ -1466,7 +1466,32 @@ namespace
     };
     SyntheticMapColumnTraceEntry g_syntheticMapColumnTrace[kSyntheticMapColumnTraceCapacity]{};
     volatile LONG g_syntheticMapColumnTraceCount = 0;
+    constexpr LONG kSyntheticColumnMetadataTraceCapacity = 128;
+    struct SyntheticColumnMetadataTraceEntry
+    {
+        volatile LONG sequence = 0;
+        UINT kind = 0; // 1 = header detail, 2 = default column state.
+        UINT column = 0;
+        SHCOLSTATEF state{};
+        HRESULT result = E_PENDING;
+        WCHAR text[64]{};
+    };
+    SyntheticColumnMetadataTraceEntry g_syntheticColumnMetadataTrace[kSyntheticColumnMetadataTraceCapacity]{};
+    volatile LONG g_syntheticColumnMetadataTraceCount = 0;
     std::wstring g_syntheticSortBackingPath;
+
+    void RecordSyntheticColumnMetadata(UINT kind, UINT column, SHCOLSTATEF state, HRESULT result, const WCHAR* text)
+    {
+        const auto traceIndex = InterlockedIncrement(&g_syntheticColumnMetadataTraceCount) - 1;
+        if (traceIndex >= kSyntheticColumnMetadataTraceCapacity) return;
+        auto& trace = g_syntheticColumnMetadataTrace[traceIndex];
+        trace.kind = kind;
+        trace.column = column;
+        trace.state = state;
+        trace.result = result;
+        if (text) StringCchCopyW(trace.text, ARRAYSIZE(trace.text), text);
+        InterlockedExchange(&trace.sequence, traceIndex + 1);
+    }
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
     {
@@ -2504,13 +2529,22 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetDefaultColumnState(UINT column, SHCOLSTATEF* state) override
         {
-            if (!state) return E_POINTER;
+            if (!state)
+            {
+                RecordSyntheticColumnMetadata(2, column, {}, E_POINTER, nullptr);
+                return E_POINTER;
+            }
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
-            if (column > (extended ? 3u : 2u)) return E_INVALIDARG;
+            if (column > (extended ? 3u : 2u))
+            {
+                RecordSyntheticColumnMetadata(2, column, {}, E_INVALIDARG, nullptr);
+                return E_INVALIDARG;
+            }
             *state = SHCOLSTATE_ONBYDEFAULT | (column == 1 || column == 3 ? SHCOLSTATE_TYPE_INT : SHCOLSTATE_TYPE_STR);
             if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
                 InterlockedCompareExchange(&g_syntheticSlowCustomSizeColumnForProbe, 0, 0))
                 *state |= SHCOLSTATE_SLOW;
+            RecordSyntheticColumnMetadata(2, column, *state, S_OK, nullptr);
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE GetDetailsEx(PCUITEMID_CHILD item, const SHCOLUMNID* key, VARIANT* value) override
@@ -2568,7 +2602,11 @@ namespace
                     InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
             }
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
-            if (!details || column > (extended ? 3u : 2u)) return E_INVALIDARG;
+            if (!details || column > (extended ? 3u : 2u))
+            {
+                if (!item) RecordSyntheticColumnMetadata(1, column, {}, E_INVALIDARG, nullptr);
+                return E_INVALIDARG;
+            }
             const auto* child = SyntheticData(item);
             std::wstring text;
             if (!item)
@@ -2593,8 +2631,13 @@ namespace
             details->str.uType = STRRET_WSTR;
             const auto bytes = (text.size() + 1) * sizeof(WCHAR);
             details->str.pOleStr = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
-            if (!details->str.pOleStr) return E_OUTOFMEMORY;
+            if (!details->str.pOleStr)
+            {
+                if (!item) RecordSyntheticColumnMetadata(1, column, {}, E_OUTOFMEMORY, nullptr);
+                return E_OUTOFMEMORY;
+            }
             CopyMemory(details->str.pOleStr, text.c_str(), bytes);
+            if (!item) RecordSyntheticColumnMetadata(1, column, {}, S_OK, text.c_str());
             return S_OK;
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* key) override
@@ -4043,6 +4086,9 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticMapColumnTraceCount, 0);
     for (auto& entry : g_syntheticMapColumnTrace)
         InterlockedExchange(&entry.sequence, 0);
+    InterlockedExchange(&g_syntheticColumnMetadataTraceCount, 0);
+    for (auto& entry : g_syntheticColumnMetadataTrace)
+        InterlockedExchange(&entry.sequence, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidCount()
@@ -4060,6 +4106,17 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticMapColumnTrace()
 {
     InterlockedExchange(&g_syntheticMapColumnTraceCount, 0);
     for (auto& entry : g_syntheticMapColumnTrace)
+        InterlockedExchange(&entry.sequence, 0);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ResetSyntheticColumnDiagnostics()
+{
+    InterlockedExchange(&g_syntheticMapColumnToScidCount, 0);
+    for (size_t column = 0; column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn); ++column)
+        InterlockedExchange(&g_syntheticMapColumnToScidByColumn[column], 0);
+    ResetSyntheticMapColumnTrace();
+    InterlockedExchange(&g_syntheticColumnMetadataTraceCount, 0);
+    for (auto& entry : g_syntheticColumnMetadataTrace)
         InterlockedExchange(&entry.sequence, 0);
 }
 
@@ -4081,6 +4138,27 @@ extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticMapColumnTrace(
     *key = entry.key;
     *result = entry.result;
     return S_OK;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticColumnMetadataTraceCount()
+{
+    const auto count = InterlockedCompareExchange(&g_syntheticColumnMetadataTraceCount, 0, 0);
+    return count < kSyntheticColumnMetadataTraceCapacity ? count : kSyntheticColumnMetadataTraceCapacity;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticColumnMetadataTrace(
+    UINT index, UINT* kind, UINT* column, SHCOLSTATEF* state, HRESULT* result, WCHAR* text, UINT textCapacity)
+{
+    if (!kind || !column || !state || !result || !text || textCapacity == 0) return E_POINTER;
+    if (index >= kSyntheticColumnMetadataTraceCapacity ||
+        InterlockedCompareExchange(&g_syntheticColumnMetadataTrace[index].sequence, 0, 0) != static_cast<LONG>(index + 1))
+        return E_INVALIDARG;
+    const auto& entry = g_syntheticColumnMetadataTrace[index];
+    *kind = entry.kind;
+    *column = entry.column;
+    *state = entry.state;
+    *result = entry.result;
+    return StringCchCopyW(text, textCapacity, entry.text);
 }
 
 extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()

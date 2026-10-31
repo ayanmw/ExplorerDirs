@@ -1081,3 +1081,8 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 为区分 Shell 是否在窗口重建时继续询问 provider、以及回调实际返回了什么，NativeProbe 新增有界线程安全映射轨迹，记录列号、完整 SHCOLUMNID 和 HRESULT。静态合同先因新导出尚不存在而失败，接线后通过；Private Desktop WPF 根宿主复跑 exit 0，隔离清理通过。窗口重建时列 0–3 各映射两次；列 1 两次均返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`，名称与类型列分别返回标准键，列 3 返回 `E_INVALIDARG`。同一轮 `IColumnManager.GetColumns` 前后仍读到 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。这确认 provider 在重建中持续返回其声明键，但没有解释 Shell 为何捕获到不同键；不能据此判定任一 GUID 错误。
 
 诊断同时发现 `ResetSyntheticSortCounters()` 会重置 provider 语义选项。排序探针在分阶段重置计数器后，窗口重建因此可能走到不同映射分支。现已将计数重置与语义选项分开，并加入静态回归合同，避免诊断辅助函数改变 provider 行为。Native adapter `/W4 /WX`、NativeProbe Release 构建及无窗口静态合同通过；WPF Private Desktop 日志：`src/.state/native-probe-watchdog/20261101-045224-c4d69d7e.stdout.log`。仅为隔离原型探针和文档修改，产品仍使用 ExplorerBrowser，未做 UI 验收或发布。
+### 2026-11-01：列 GUID 分歧定位到首次 view-window 创建阶段
+
+把列元数据回调也纳入有界轨迹后，Private Desktop WPF 根宿主完整复跑成功（watchdog exit 0，前台 HWND/输入 tick 不变，`isolation-clean=True`）。首次 `IShellView::CreateViewWindow` 中，Shell 读取了 `Name`、`Recursive Size`、`Type` 三个标题；列状态分别为字符串 `0x11`、整数 `0x12`、字符串 `0x11`，并调用 `MapColumnToSCID` 三次，依次得到 `PKEY_ItemNameDisplay`、原型自定义 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`、`PKEY_ItemTypeText`。随后同一 view 的 `IColumnManager.Capture` 仍读到 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 作为第二列键。
+
+在重建前清空轨迹后，重建阶段再次调用列映射 8 次（0–3 各两次），但没有再调用 `GetDetailsOf(NULL, i)` 或 `GetDefaultColumnState`。因此已知列标题/状态和 provider 的列键在首次创建时均正确送达，键分歧在首次创建后即可观察；重建不是元数据读取来源。内部身份转换仍未定位，不能判定 Shell 缓存、列管理器转换或其它状态来源，也不据此修改列 GUID。日志：`src/.state/native-probe-watchdog/20261101-045626-ce26270d.stdout.log`。构建通过；仅隔离原型，不涉及产品 ExplorerBrowser、UI 验收或发布。

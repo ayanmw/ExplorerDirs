@@ -5434,3 +5434,6 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 ## 2026-11-01：provider 列映射返回值追踪
 
 NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数器重置误改 provider 语义选项的问题。静态合同与 Private Desktop WPF 探针通过；列 1 每次都返回 adapter 声明键 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`，而 `IColumnManager.GetColumns` 仍返回 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。Shell 内部列身份转换层尚未查明，避免猜测修 GUID；下一步需继续限定列发现、应用和读回各阶段。无产品宿主变更、无 UI 验收、无发布。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01记录-provider-的列映射返回值)。
+## 2026-11-01：列身份差异的阶段继续收窄
+
+同一 `IShellView` 的首次窗口创建中，Shell 读取了预期的 `Name / Recursive Size / Type` 标题和列类型，并对列 0–2 调用 provider 映射，列 1 收到原型自定义 GUID；随后的 `IColumnManager.Capture` 第二列却返回 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。重建阶段只再询问映射，没有重读表头或默认列状态。差异已收窄到首次创建后列身份的形成/暴露阶段，转换层仍未知；下一步追踪首次 `GetColumns`/`GetColumnInfo` 与 view-state stream 中的初始列状态，不猜 GUID。NativeProbe 与 adapter 构建、Private Desktop WPF watchdog 均通过；产品与发布包未变。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01列-guid-分歧定位到首次-view-window-创建阶段)。
