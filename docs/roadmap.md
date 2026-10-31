@@ -4,7 +4,7 @@
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
 
-2026-10-31 逐行文件夹大小原生快照与更新合同：NativeProbe 把生产目录扫描器得到的 10 B 注入合成 `IShellFolder2` 的实例级逐行快照表；扫描后实际目录变为 7 B，列文本/`VT_UI8` 仍为 10，且排序在 8 B 文件之后。两个兄弟目录分别保存 10 B 与 12 B，只更新第一项为 6 B 后，两个值及排序分别正确。原生 DLL/NativeProbe Release 构建及 `--static-shell-column-folder-smoke` 通过，不创建窗口。key 目前是该合成文件夹内的 PIDL 显示名，尚未接入生产行模型的绝对 Shell 解析身份、异步扫描回写或 Shell 通知；没有证明 DefView 列恢复/通知合同、可见交互或产品接线。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。
+2026-10-31 逐行文件夹大小绝对身份合同：NativeProbe 从真实 Shell PIDL 获取 `SIGDN_DESKTOPABSOLUTEPARSING`，传入合成 `IShellFolder2` 实例级行快照表；provider 再从 backing folder/行 PIDL 解析并校验同一 identity。夹具扫描时 10 B、磁盘后改为 7 B；列仍读回 10 并排在 8 B 文件后。两个兄弟行独立保存 10 B/12 B，只更新一行为 6 B 后，两行值与排序分别正确。原生 DLL/NativeProbe Release 构建及 `--static-shell-column-folder-smoke` 通过，不创建窗口。解析名已作为隔离缓存 key，但没有把生产 `ShellListViewRowModel` 生命周期/异步扫描发布接入 provider，也没有 Shell 通知；未证明 DefView 列恢复/通知合同、可见交互或产品接线。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。
 
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
 

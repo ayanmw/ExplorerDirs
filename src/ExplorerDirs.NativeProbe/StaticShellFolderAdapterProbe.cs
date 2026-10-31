@@ -1963,16 +1963,18 @@ internal static class StaticShellFolderAdapterProbe
                 projectionFixture, [projectionChildPath], CancellationToken.None);
             if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) || snapshot.Bytes != 10)
                 throw new InvalidOperationException("The injected recursive-size snapshot did not scan to 10 bytes.");
+            var childParsingName = GetAbsoluteParsingName(projectionChildPath);
+            var otherChildParsingName = GetAbsoluteParsingName(Path.Combine(projectionFixture, "other-child"));
 
             // Make the on-disk size differ after scanning so the native assertion proves the scan snapshot was passed in.
             File.WriteAllBytes(nestedFile, "x"u8.ToArray());
-            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeProjectionSmoke>(
-                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeProjectionSmoke"))(
-                    projectionFixture, checked((long)snapshot.Bytes)));
-            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeByRowSmoke>(
-                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeByRowSmoke"))(
-                    projectionFixture, checked((long)snapshot.Bytes), 12, 6));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; per-row-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False");
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke"))(
+                    projectionFixture, childParsingName, checked((long)snapshot.Bytes)));
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityCacheSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityCacheSmoke"))(
+                    projectionFixture, childParsingName, otherChildParsingName, checked((long)snapshot.Bytes), 12, 6));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False");
         }
         finally
         {
@@ -2035,6 +2037,13 @@ internal static class StaticShellFolderAdapterProbe
             finally { GlobalUnlock(shellIdListMedium.Value); }
         }
         finally { ReleaseStgMedium(ref shellIdListMedium); }
+    }
+
+    private static string GetAbsoluteParsingName(string path)
+    {
+        Check(SHParseDisplayName(Path.GetFullPath(path), 0, out var pidl, 0, out _));
+        try { return ShellListViewRowIdentity.GetAbsoluteParsingName(pidl); }
+        finally { Marshal.FreeCoTaskMem(pidl); }
     }
 
     private static string ReadDetailsText(nint details)
@@ -2312,8 +2321,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long scannedBytes);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeByRowSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long initialBytes, long otherRowBytes, long updatedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string parsingName, long scannedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityCacheSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string childParsingName, [MarshalAs(UnmanagedType.LPWStr)] string otherParsingName, long initialBytes, long otherRowBytes, long updatedBytes);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

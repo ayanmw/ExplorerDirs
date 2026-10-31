@@ -8,10 +8,10 @@
 #include <propkey.h>
 #include <strsafe.h>
 #include <algorithm>
+#include <map>
 #include <new>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <cstdio>
 
@@ -1206,6 +1206,15 @@ namespace
         ULONGLONG parentBytes;
     };
 
+    struct ShellParsingNameLess
+    {
+        bool operator()(const std::wstring& left, const std::wstring& right) const noexcept
+        {
+            return CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
+                right.data(), static_cast<int>(right.size()), TRUE) == CSTR_LESS_THAN;
+        }
+    };
+
     constexpr SyntheticChild kSyntheticChildren[] =
     {
         { sizeof(SyntheticChild), 1, 100, 0, L"a-large.bin" },
@@ -1757,14 +1766,18 @@ namespace
             if (!references) delete this;
             return references;
         }
-        HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, ULONGLONG bytes)
+        HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName, ULONGLONG bytes)
         {
             const auto* child = SyntheticData(item);
-            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
+            if (!child || !parsingName || !*parsingName || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
+            std::wstring shellParsingName;
+            auto result = GetAbsoluteParsingName(child, &shellParsingName);
+            if (FAILED(result)) return result;
+            if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
             try
             {
                 std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
-                _recursiveSizeByRowName[child->name] = bytes;
+                _recursiveSizeByParsingName[parsingName] = bytes;
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
@@ -2088,15 +2101,21 @@ namespace
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
                 if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeCompareCount);
-                comparison = SizeForChild(leftChild) < SizeForChild(rightChild) ? -1 :
-                    SizeForChild(leftChild) > SizeForChild(rightChild) ? 1 : 0;
+            {
+                const auto leftSize = SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(left));
+                const auto rightSize = SizeForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
+                comparison = leftSize < rightSize ? -1 : leftSize > rightSize ? 1 : 0;
                 break;
+            }
             case 2: comparison = 0; break;
             case 3:
                 if (!InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0)) return E_INVALIDARG;
-                comparison = RelativePercentForChild(leftChild) < RelativePercentForChild(rightChild) ? -1 :
-                    RelativePercentForChild(leftChild) > RelativePercentForChild(rightChild) ? 1 : 0;
+            {
+                const auto leftPercent = RelativePercentForItem(reinterpret_cast<PCUITEMID_CHILD>(left));
+                const auto rightPercent = RelativePercentForItem(reinterpret_cast<PCUITEMID_CHILD>(right));
+                comparison = leftPercent < rightPercent ? -1 : leftPercent > rightPercent ? 1 : 0;
                 break;
+            }
             default: return E_INVALIDARG;
             }
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
@@ -2290,12 +2309,12 @@ namespace
                 InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
             {
                 value->vt = VT_R8;
-                value->dblVal = RelativePercentForChild(child);
+                value->dblVal = RelativePercentForItem(item);
             }
             else if (*key == kSizeKey || *key == kSyntheticRecursiveSizeKey)
             {
                 value->vt = VT_UI8;
-                value->ullVal = SizeForChild(child);
+                value->ullVal = SizeForItem(item);
             }
             else return E_INVALIDARG;
             return S_OK;
@@ -2323,11 +2342,11 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
-                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SizeForChild(child)) :
+                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SizeForItem(item)) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                         ? SyntheticContentsText(child)
                         : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
-                    std::to_wstring(RelativePercentForChild(child)) + L"%";
+                    std::to_wstring(RelativePercentForItem(item)) + L"%";
                 details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
             }
@@ -2372,21 +2391,53 @@ namespace
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
-        ULONGLONG SizeForChild(const SyntheticChild* child) const
+        HRESULT GetAbsoluteParsingName(const SyntheticChild* child, std::wstring* parsingName) const
         {
+            if (!child || !parsingName || !_inner || !_backingRoot) return E_INVALIDARG;
+            PITEMID_CHILD backingChild = nullptr;
+            auto result = _inner->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(child->name),
+                nullptr, &backingChild, nullptr);
+            if (FAILED(result))
+            {
+                if (backingChild) CoTaskMemFree(backingChild);
+                return result;
+            }
+            auto* absolutePidl = ILCombine(_backingRoot, reinterpret_cast<PCUIDLIST_RELATIVE>(backingChild));
+            CoTaskMemFree(backingChild);
+            if (!absolutePidl) return E_OUTOFMEMORY;
+            LPWSTR name = nullptr;
+            result = SHGetNameFromIDList(absolutePidl, static_cast<SIGDN>(0x80028000), &name);
+            CoTaskMemFree(absolutePidl);
+            if (FAILED(result))
+            {
+                if (name) CoTaskMemFree(name);
+                return result;
+            }
+            try { parsingName->assign(name); }
+            catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; }
+            CoTaskMemFree(name);
+            return result;
+        }
+        ULONGLONG SizeForItem(PCUITEMID_CHILD item) const
+        {
+            const auto* child = SyntheticData(item);
             if (!child) return 0;
+            std::wstring parsingName;
+            if (SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
             {
                 std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
-                const auto found = _recursiveSizeByRowName.find(child->name);
-                if (found != _recursiveSizeByRowName.end()) return found->second;
+                const auto found = _recursiveSizeByParsingName.find(parsingName);
+                if (found != _recursiveSizeByParsingName.end()) return found->second;
             }
             return SyntheticSize(child);
         }
-        double RelativePercentForChild(const SyntheticChild* child) const
+        double RelativePercentForItem(PCUITEMID_CHILD item) const
         {
-            return child && child->parentBytes != 0
-                ? 100.0 * static_cast<double>(SizeForChild(child)) / static_cast<double>(child->parentBytes)
-                : 0.0;
+            const auto* child = SyntheticData(item);
+            if (!child) return 0.0;
+            const auto parentBytes = child->parentBytes;
+            const auto bytes = SizeForItem(item);
+            return parentBytes != 0 ? 100.0 * static_cast<double>(bytes) / static_cast<double>(parentBytes) : 0.0;
         }
         HRESULT DescribeBackingChild(IShellFolder2* backingFolder, const std::wstring& backingPath,
             PCUITEMID_CHILD original, SyntheticChild* child)
@@ -2690,7 +2741,7 @@ namespace
         std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
         mutable std::mutex _recursiveSizeMutex;
-        std::unordered_map<std::wstring, ULONGLONG> _recursiveSizeByRowName;
+        std::map<std::wstring, ULONGLONG, ShellParsingNameLess> _recursiveSizeByParsingName;
         std::vector<SyntheticChild> _pendingSelected;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
@@ -3332,10 +3383,10 @@ cleanup:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeProjectionSmoke(
-    PCWSTR backingPath, LONGLONG scannedBytes)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke(
+    PCWSTR backingPath, PCWSTR parsingName, LONGLONG scannedBytes)
 {
-    if (!backingPath || !*backingPath || scannedBytes < 0) return E_INVALIDARG;
+    if (!backingPath || !*backingPath || !parsingName || !*parsingName || scannedBytes < 0) return E_INVALIDARG;
     auto result = SetSyntheticSortBackingPath(backingPath);
     if (FAILED(result)) return result;
 
@@ -3357,7 +3408,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeP
     if (FAILED(result)) goto cleanup_recursive_size_projection;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_projection;
-    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(scannedBytes));
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, parsingName, static_cast<ULONGLONG>(scannedBytes));
     if (FAILED(result)) goto cleanup_recursive_size_projection;
 
     {
@@ -3405,10 +3456,12 @@ cleanup_recursive_size_projection:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeByRowSmoke(
-    PCWSTR backingPath, LONGLONG initialBytes, LONGLONG otherRowBytes, LONGLONG updatedBytes)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityCacheSmoke(
+    PCWSTR backingPath, PCWSTR childParsingName, PCWSTR otherParsingName,
+    LONGLONG initialBytes, LONGLONG otherRowBytes, LONGLONG updatedBytes)
 {
-    if (!backingPath || !*backingPath || initialBytes < 0 || otherRowBytes < 0 || updatedBytes < 0) return E_INVALIDARG;
+    if (!backingPath || !*backingPath || !childParsingName || !*childParsingName ||
+        !otherParsingName || !*otherParsingName || initialBytes < 0 || otherRowBytes < 0 || updatedBytes < 0) return E_INVALIDARG;
     auto result = SetSyntheticSortBackingPath(backingPath);
     if (FAILED(result)) return result;
 
@@ -3433,9 +3486,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeB
     if (FAILED(result)) goto cleanup_recursive_size_update;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_update;
-    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(initialBytes));
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, static_cast<ULONGLONG>(initialBytes));
     if (FAILED(result)) goto cleanup_recursive_size_update;
-    result = root->SetRecursiveSizeSnapshotForProbe(otherFolder, static_cast<ULONGLONG>(otherRowBytes));
+    result = root->SetRecursiveSizeSnapshotForProbe(otherFolder, otherParsingName, static_cast<ULONGLONG>(otherRowBytes));
     if (FAILED(result)) goto cleanup_recursive_size_update;
 
     {
@@ -3472,7 +3525,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeB
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
-        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(updatedBytes));
+        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, static_cast<ULONGLONG>(updatedBytes));
         if (FAILED(result)) goto cleanup_recursive_size_update;
         if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
             !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))

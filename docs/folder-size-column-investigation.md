@@ -1,12 +1,12 @@
 # 逐行文件夹大小与子项计数列调查
 
-## 2026-10-31：扫描快照按行注入原生 Shell 列
+## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
-NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的目标目录扫描值传入合成 `IShellFolder2` 实例的逐行快照表。夹具扫描时目标目录为 10 B，随后将磁盘内容改成 7 B；传入 10 B 后，原生 provider 的列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。另一个合同给两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 读回的文本、属性及排序均更新，第二行仍保持 12 B 和独立排序。按文件夹实例隔离的逐行缓存已替代这两个合同的全局大小覆盖值。
+NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。
 
-验证：`build-static-shell-folder-adapter.ps1` 原生 Release DLL 构建成功，NativeProbe Release 构建 0 警告/错误；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --static-shell-column-folder-smoke` 退出码 0，输出 `scanner-bytes=10; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; per-row-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False`。探针没有创建 Shell view 窗口。
+验证：`build-static-shell-folder-adapter.ps1` 原生 Release DLL 构建成功，NativeProbe Release 构建 0 警告/错误；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --static-shell-column-folder-smoke` 退出码 0，输出 `scanner-bytes=10; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False`。探针没有创建 Shell view 窗口。
 
-边界：缓存仅存在于探针的合成 provider 实例，并以当前文件夹内 PIDL 的显示名作为 key；没有接入真实行模型的绝对 Shell 解析身份、跨 provider 实例缓存、扫描调度/异步回写或 `SHChangeNotify`。因此这只验证快照映射与更新逻辑，不是产品列接线，也没有验证 DefView 是否重取/保留列值、菜单/焦点/拖放或 Q-Dir 可见显示。Explorer Dirs 产品仍使用 ExplorerBrowser；逐行大小列仍是未实现的 P2 产品功能。
+边界：key 已改为绝对 parsing name，但快照仍只存在于 NativeProbe 合成 provider 实例；provider 每次取值时都会重新调用 backing Shell 解析行 identity，因此这里不提供生产性能结论。没有把 `ShellListViewRowModel` 的扫描结果/生命周期直接接入 provider，也没有跨 provider 实例缓存、扫描调度/异步回写或 `SHChangeNotify`。因此这只验证 identity 对齐与快照映射/更新，不是产品列接线，也没有验证 DefView 是否重取/保留列值、菜单/焦点/拖放或 Q-Dir 可见显示。Explorer Dirs 产品仍使用 ExplorerBrowser；逐行大小列仍是未实现的 P2 产品功能。
 
 ## 2026-10-31：隐藏 SysListView32 写回重枚举后的选区/焦点
 
