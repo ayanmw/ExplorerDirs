@@ -2,7 +2,7 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
-2026-10-31 当前主线集中验收副本已重建：基于干净提交 `0f5c4369a102ec2d790fad7e36c6783db2d80db8`，四窗格副本位于 `src/.state/gui-smoke/20261031-025555-734-3415b2`，状态 `prepared-not-run`，46 项待验收。包含 F5 刷新、连按 F5、搜索/虚拟位置及 Soft-Refresh 对照；构建和副本准备成功，EXE/DLL SHA-256 已与 `preparation.json` 核对。没有启动应用窗口、创建 ExplorerBrowser 或操作文件。BuildIdentity、哈希和验收边界见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+2026-10-31 当前主线集中验收副本已重建：基于干净提交 `5b3dbb583a18bfd465b074762352f8c2821f3a3c`，四窗格副本位于 `src/.state/gui-smoke/20261031-030146-548-62ca97`，状态 `prepared-not-run`，47 项待验收。包含 F5 刷新、连按 F5、搜索/虚拟位置、Soft-Refresh 对照及 Q-Dir Tab Group 语义观察；构建和副本准备成功，EXE/DLL SHA-256 已与 `preparation.json` 核对。没有启动应用窗口、创建 ExplorerBrowser 或操作文件。BuildIdentity、哈希和验收边界见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 2026-10-31 Q-Dir 筛选期间多选跳转：快速名称筛选或列值筛选启用时，文件内容区的未修饰 Up/Down 会在多选项目间按 Shell 视图顺序移动焦点，并确保目标可见；不修改其它选中位。仅当当前焦点本身属于多选集合且存在相邻已选项目时接管；单选、首尾边界、搜索、修饰键、非文件内容焦点及过期视图请求都回到/拒绝原生 Shell 路由。方向键门控、相邻序号及当前访问路由有 Release SettingsSmoke；完整 SettingsSmoke 和 App Release build 通过。没有创建 Shell view 或 GUI；实际 Shell 选择回调、像素/焦点、分组/各视图模式及 Q-Dir 可见对照仍待集中验收。
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
@@ -25,7 +25,7 @@
 
 本文件同时保留历史批次，较早段落的“当时未实现”不能作为当前缺口清单。当前优先级如下；后台通过与可见交互通过分开记录。
 
-2026-10-31 主线集中验收候选更新：最新副本基于干净提交 `cd5dfa05dcd291e2a6d9367f5ce458a1740993d0`，四窗格副本位于 `src/.state/gui-smoke/20261031-014610-875-4d3ab6`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `C9E3B653163A339BB29905FB0BD181D0653A72E6C2E1C05F605D630EB0535B05` / `579B73E312F492824C7000BE1E3BC45E2C0CC6A686FD501D86F5A5B9662B5C8F`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。刷新空白、命中目标、选区/焦点/滚动已列入集中验收。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+2026-10-31 主线集中验收候选更新：当时副本基于干净提交 `cd5dfa05dcd291e2a6d9367f5ce458a1740993d0`，四窗格副本位于 `src/.state/gui-smoke/20261031-014610-875-4d3ab6`；清单 `prepared-not-run`、46 项待验收，EXE/DLL SHA-256 分别为 `C9E3B653163A339BB29905FB0BD181D0653A72E6C2E1C05F605D630EB0535B05` / `579B73E312F492824C7000BE1E3BC45E2C0CC6A686FD501D86F5A5B9662B5C8F`。profile 预置 1.5 秒悬停展开延时。准备只构建并写隔离夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile；不能据此宣称任何可见交互通过。刷新空白、命中目标、选区/焦点/滚动已列入集中验收。身份和清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 当前主线后台回归复核（源码提交 `c4ff10034d0934168d3a3e6a6523b4004cb2650c`；随后仅有候选记录文档提交）：完整 Release `SettingsSmoke` 通过；App 与 NativeProbe Release build 均为 0 警告、0 错误；`--synthetic-shell-folder-tree-smoke` 通过嵌套枚举、递归大小/列值、PIDL、项目菜单/数据对象、多选 Copy/Move/Delete、同名冲突保留及重命名合同，结果明确为 `shell-view-created=False`。这些结果复核已实现后端与隔离 adapter，不证明 DefView/IShellView 可见逐行大小列、排序、真实 OLE 拖放或产品迁移；Explorer Dirs 产品仍使用 ExplorerBrowser，可见验收仍按上述候选集中进行。
 
