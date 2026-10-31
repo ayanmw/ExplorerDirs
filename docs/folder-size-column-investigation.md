@@ -795,3 +795,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 新增无窗口 `--filesystem-folder-background-menu` 探针，在带一个文件和一个子目录的临时 filesystem 位置上绑定真实 `IShellFolder`，直接调用 `CreateViewObject(IContextMenu)` 并将菜单构造到内存 `HMENU`。本机返回 `S_OK`，`QueryContextMenu` 也成功，顶层有 21 个菜单项；标签包含第三方扩展、“新建”和“属性”，没有视图级“查看、排序方式、分组依据、刷新”。没有创建 `IShellView`、窗口或可见 popup，也没有执行命令。
 
 这说明普通文件夹父对象提供的 `IContextMenu` 不能作为自有行列表的 Explorer 背景菜单替代品；虚拟 Control Panel 的相同接口曾返回 0 项。若自有行视图要保留 Windows 原生视图命令，必须继续通过真实 Shell view 的视图级菜单路径或找到受支持的同等宿主接口；不能仅凭 `CreateViewObject` 成功宣称菜单兼容。该单机 filesystem 夹具没有证明所有 namespace/provider 的菜单内容。
+
+### 2026-10-31：路径扫描器与句柄绑定扫描器微基准
+
+为评估句柄绑定扫描能否改善扫描时延，使用临时本机文件夹在同一 .NET 进程中对照产品 `RecursiveDirectoryScanner` 与 NativeProbe 的 `HandleBoundRecursiveDirectoryScanner`。夹具为 350 个分支、700 个目录、2450 个文件、483700 B；每种扫描各运行 5 次，前 2 次不计，取后 3 次平均。两种扫描对字节数、文件/目录数和 unreadable 计数给出相同结果。暖缓存样本中，路径扫描平均 289.63 ms、托管分配约 1,349,224 B；句柄扫描平均 68.97 ms、托管分配约 2,449,645 B（约 4.2 倍速度、约 82% 更多托管分配）。
+
+这是单机、浅层、暖缓存夹具的微基准，不是稳定性能承诺：执行顺序固定，样本少，没有测峰值/保留内存、Private Bytes、真实 F9 取消体验、UNC/网络文件系统或第三方 namespace provider。更快的结果值得进入下一轮跨夹具验证，但更高的托管分配和逐目录打开句柄也需要观察；当前没有证据证明它降低产品运行内存或适合取代 F9 路径。句柄扫描器仍留在 NativeProbe，产品 ExplorerBrowser/F9 行为未改变。临时基准程序位于忽略目录 `src/.state/scanner-ab-probe`，未加入版本控制。

@@ -5149,3 +5149,7 @@ WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `
 ### 2026-10-31：filesystem `IShellFolder` 背景菜单能力边界
 
 无窗口 probe 在真实临时文件夹上通过 `IShellFolder::CreateViewObject(IContextMenu)` 取得并构造 21 项内存菜单，包含第三方扩展、“新建”和“属性”，未包含“查看、排序、分组、刷新”；没有创建 Shell view 或显示菜单。此接口不能替代 Explorer 视图级背景菜单，自有行列表仍缺受支持的原生 View 菜单/命令来源。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-31普通文件夹的-shell-背景菜单来源)。
+
+### 2026-10-31：递归目录扫描 A/B 微基准
+
+本机暖缓存小型夹具对照产品路径扫描与 NativeProbe 句柄绑定扫描：350 个分支、700 个目录、2450 个文件、483700 B；两者结果一致。路径扫描 289.63 ms / 1.35 MB 托管分配，句柄扫描 68.97 ms / 2.45 MB 托管分配，后者本样本约快 4.2 倍但多分配约 82%。样本固定顺序且仅取 3 次平均，不代表网络共享、峰值/保留内存、长期 F9 行为或用户体验；足以支持继续跨夹具隔离验证，不足以替换产品 F9 扫描器。详见[递归扫描调查](folder-size-column-investigation.md#2026-10-31路径扫描器与句柄绑定扫描器微基准)。
