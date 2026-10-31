@@ -4,13 +4,13 @@
 
 ## 固定身份
 
-- 源提交：`661c61e6e49ced35e08be11724c324bafb5b0a7a`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261031-161150-379-a166ce/`。
-- BuildIdentity：`0.6.0-preview.20261031-161150-379-a166ce+661c61e6e49ced35e08be11724c324bafb5b0a7a`。
+- 源提交：`9889ef8669e2b7bf5383e456f177fb4680398285`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261031-181127-303-14b182/`。
+- BuildIdentity：`0.6.0-preview.20261031-181127-303-14b182+9889ef8669e2b7bf5383e456f177fb4680398285`。
 - 状态：`prepared-not-run`，47 项待验收，初始四窗格布局。
-- EXE SHA-256：`377DE223E8D789B71912C14B27F9201DF3853977EA869A468F216F31DD1514F3`。
-- App DLL SHA-256：`9C946FE97BEAA0B13A3B87B0D978AA2443C22B1E89706EAF846D760C7A5A1514`。
-- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-161150-379-a166ce\`；操作夹具、profile 与待验收清单均位于副本内。
+- EXE SHA-256：`6D7F85FBE606D641276C813181E6B9C4BA4FC0237DC0FCB6A7740A7D348463FA`。
+- App DLL SHA-256：`06A1464EBABCAA78A6AEC73EA2A5CCDC9001ACB3CDA26ED946750AFBAFBF4B9D`。
+- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-181127-303-14b182\`；操作夹具、profile 与待验收清单均位于副本内。
 
 ## 集中验收重点
 
