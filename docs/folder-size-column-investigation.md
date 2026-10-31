@@ -50,6 +50,14 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-
 
 边界：探针直接调用 DLL 导出的 `DllGetClassObject`，没有经由 COM loader/Shell namespace 执行自然激活；没有验证真实 Shell 是否在 view 重建过程中创建新 provider、活动 DefView 的更新、进程重启缓存或产品扫描器接线。store 在 DLL 可卸载前按绝对解析名累计快照，目前没有容量上限/逐目录淘汰策略，因此这不是产品缓存设计或内存安全结论。ExplorerBrowser 产品未变更，逐行大小列仍未实现。
 
+### 2026-11-01：已确认 Shell 自然激活入口，跨 provider 快照仍未验证
+
+复跑现有 `synthetic-recursive-directory-size-private-desktop` 时，NativeProbe 为唯一临时 CLSID 写入用户级 `InprocServer32` 和 Desktop `NameSpace` 项，再用 `SHParseDisplayName`/`SHBindToParent` 创建合成文件夹及 view。输出 `registered-class-factory-creates=1`，初始 Details 列读取到递归大小 `10`，升/降序比较也通过；这确认 Shell 经过 COM 注册调用了 adapter 的 class factory，自然激活入口不再是未知项。
+
+该轮后续更新通知没有促使活动 DefView 重读/更新列值，且探针最终卡在 `cleanup-destroy-parent-window-1`。watchdog 的等待链为线程等待 COM、`svchost` 的 COM activation 与 `ChsIME`，没有观察到等待环；进程结束后 watchdog 确认移除了本轮临时注册和夹具。故 teardown 未通过，也不能将卡顿归因于本轮 store。此轮没有调用 `DllCanUnloadNow` 的自然 Shell 版本合同。
+
+证据边界：自然激活仅创建并观察到一个 Shell provider（计数为 1）；没有在 Shell 创建的两个不同 provider 之间写入并读回同一哨兵快照，因此 DLL 级 store 对自然激活的跨 provider 复用仍待验证。下一步应增加无窗口、独立 provider 的 Shell 激活合同，并单独核对 COM 引用归零与 unload；不要重复依赖会卡在父窗口 teardown 的完整 view 探针。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。
