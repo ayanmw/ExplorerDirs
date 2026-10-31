@@ -2806,6 +2806,82 @@ internal static class ShellViewColorSpike
         }
     }
 
+    private static int DeleteZipEntryThroughShellOperation(nint parent, nint folder, nint folderView,
+        nint folderPidl, string fixture, nint foreground)
+    {
+        const string targetName = "delete-target.txt";
+        const uint canDeleteFlag = 0x00000020; // SFGAO_CANDELETE.
+        var initialCount = WaitForShellViewItemCount(folderView, expectedCount: 3);
+        nint targetChild = 0, childArray = 0, dataObject = 0, operation = 0;
+        nint systemImageList = 0;
+        try
+        {
+            for (var index = 0; index < initialCount; index++)
+            {
+                Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var child));
+                nint absolute = 0;
+                try
+                {
+                    absolute = ILCombine(folderPidl, child);
+                    if (absolute == 0) throw new InvalidOperationException("Could not combine a ZIP row PIDL for DeleteItems.");
+                    var row = ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList);
+                    if (row.DisplayName.Equals(targetName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetChild = ILClone(child);
+                        if (targetChild == 0)
+                            throw new InvalidOperationException("Could not retain the ZIP delete target PIDL.");
+                    }
+                }
+                finally
+                {
+                    if (absolute != 0) Marshal.FreeCoTaskMem(absolute);
+                    Marshal.FreeCoTaskMem(child);
+                }
+            }
+            if (targetChild == 0)
+                throw new InvalidOperationException("The ZIP view did not enumerate the expected delete target.");
+
+            var attributes = canDeleteFlag;
+            childArray = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, targetChild);
+            Check(At<GetAttributesOf>(folder, 9)(folder, 1, childArray, ref attributes));
+
+            var dataObjectId = new Guid("0000010E-0000-0000-C000-000000000046");
+            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, childArray, in dataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new InvalidOperationException("The ZIP delete target did not provide an IDataObject.");
+
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
+            var deleteResult = At<DeleteItems>(operation, 19)(operation, dataObject);
+            var performResult = deleteResult < 0 ? deleteResult : At<PerformOperations>(operation, 21)(operation);
+            var aborted = performResult < 0 ? -1 : At<GetAnyOperationsAborted>(operation, 22)(operation, out var wasAborted) < 0
+                ? -1 : wasAborted;
+
+            var archivePath = Path.Combine(fixture, "virtual-items.zip");
+            var sourceRetained = false;
+            using (var archive = ZipFile.OpenRead(archivePath))
+                sourceRetained = archive.GetEntry(targetName) is not null;
+            Pump(750, "zip-delete-settle");
+            var viewCount = GetShellViewItemCount(folderView);
+            var applied = deleteResult >= 0 && performResult >= 0 && aborted == 0 && !sourceRetained && viewCount == initialCount - 1;
+            var capabilityAbsentAndUnchanged = (attributes & canDeleteFlag) == 0 && sourceRetained && viewCount == initialCount;
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            Console.WriteLine($"ishellview-zip-iFileOperation-delete: operation=DeleteItems;attributes=0x{attributes:X8};can-delete={(attributes & canDeleteFlag) != 0};delete-hresult=0x{deleteResult:X8};perform-hresult=0x{performResult:X8};aborted={aborted};archive-source-retained={sourceRetained};view-count={viewCount};applied={applied};unsupported-and-unchanged={capabilityAbsentAndUnchanged};foreground-unchanged={foregroundUnchanged}");
+            if (!foregroundUnchanged || !(applied || capabilityAbsentAndUnchanged))
+                throw new IOException("ZIP DeleteItems did not either delete the advertised item and converge the view, or reject an item whose Shell attributes deny deletion.");
+            return 0;
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeHGlobal(childArray);
+            if (targetChild != 0) Marshal.FreeCoTaskMem(targetChild);
+        }
+    }
+
     private readonly record struct LivePaneView(nint Pane, nint View, nint ViewWindow, nint Folder, nint Pidl,
         nint HostPointer, ShellViewColorBrowserHost Host, nint FolderView, Guid SessionId);
 
@@ -2815,6 +2891,7 @@ internal static class ShellViewColorSpike
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
         bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false, bool zipCopyItemsProbe = false,
+        bool zipDeleteItemsProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
         bool virtualDesktopColorProbe = false, bool networkPlacesRowMapProbe = false,
         bool virtualNetworkPlacesColorProbe = false, bool networkPlacesChildDropTargetProbe = false)
@@ -2918,15 +2995,22 @@ internal static class ShellViewColorSpike
             Directory.CreateDirectory(fixture);
             string[] fixturePaths;
             var shellLocation = fixture;
-            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe || zipCopyItemsProbe)
+            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe || zipCopyItemsProbe || zipDeleteItemsProbe)
             {
                 shellLocation = Path.Combine(fixture, "virtual-items.zip");
                 using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
                 {
                     using (var file = archive.CreateEntry("blue-rule-target.txt").Open()) file.WriteByte(0x41);
                     using (var nestedFile = archive.CreateEntry("virtual-folder/nested.txt").Open()) nestedFile.WriteByte(0x42);
+                    if (zipDeleteItemsProbe)
+                    {
+                        using var deleteFile = archive.CreateEntry("delete-target.txt").Open();
+                        deleteFile.Write(new byte[] { 0x44, 0x45, 0x4C });
+                    }
                 }
-                fixturePaths = ["blue-rule-target.txt", "virtual-folder"];
+                fixturePaths = zipDeleteItemsProbe
+                    ? ["blue-rule-target.txt", "virtual-folder", "delete-target.txt"]
+                    : ["blue-rule-target.txt", "virtual-folder"];
             }
             else if (virtualThisPcColorProbe)
             {
@@ -3093,6 +3177,11 @@ internal static class ShellViewColorSpike
             Pump();
 
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
+            if (zipDeleteItemsProbe)
+            {
+                Check(folderViewHr);
+                return DeleteZipEntryThroughShellOperation(parent, folder, folderView, pidl, fixture, foreground);
+            }
             if (zipCopyItemsProbe)
             {
                 Check(folderViewHr);
@@ -3670,7 +3759,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Early diagnostic/operation branches return before view-state writes by design; do not require a round-trip they intentionally skip.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !zipDeleteItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -5931,6 +6020,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [StructLayout(LayoutKind.Sequential)] private struct NativeMessage

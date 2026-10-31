@@ -1560,3 +1560,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 同一探针进一步移动 ZIP 虚拟目录 virtual-folder。MoveItems 与 PerformOperations 均返回 S_OK、未取消；目录内 nested.txt 的目标内容为 0x42，归档源项被移除，消息泵送后源 view 收敛为空，Private Desktop 前台/输入及清理守卫通过。该证据覆盖当前 Windows ZIP provider 的含嵌套文件目录 MoveItems，不代表 ExplorerBrowser 产品接线、可见确认/进度 UI、其它压缩 provider 或 OLE 拖放。复验日志：src/.state/native-probe-watchdog/20261101-052213-e479eee6.stdout.log。
 
 同一 ZIP 探针检查并尝试虚拟文件 RenameItem：GetAttributesOf 返回 0x00400063，不含 SFGAO_CANRENAME；RenameItem 与 PerformOperations 虽返回 S_OK，GetAnyOperationsAborted=1，旧归档项与两行 view 均保留，未产生改名项。故方法 HRESULT 不能代表操作成功；当前 Windows ZIP provider 明确未广告该项可重命名，本结果记录为 provider 能力边界，不推断 Q-Dir 是否提供额外实现。日志：src/.state/native-probe-watchdog/20261101-052451-e4e1ba1b.stdout.log。
+
+### 2026-11-01 ZIP 虚拟文件 `IFileOperation.DeleteItems`
+
+新增 `--ishellview-zip-delete-items-private-desktop`，在仅含临时 ZIP 的真实隔离 `IShellView` 中选择 `delete-target.txt`，检查 `SFGAO_CANDELETE`，再通过 `IDataObject` 调用 `IFileOperation.DeleteItems`。Windows ZIP provider 广告了可删除属性（`0x00400063`），DeleteItems 与 PerformOperations 均返回 `S_OK`，`GetAnyOperationsAborted=False`；归档条目实际移除，Shell view 从 3 项收敛到 2 项。Private Desktop watchdog exit 0，foreground/input 与隔离清理守卫通过；NativeProbe Release build 0 警告/错误。
+
+这只证明当前 Windows ZIP provider 的程序化单项删除路径；没有覆盖回收站/确认 UI、可见菜单操作、剪贴板、取消与失败提示、ExplorerBrowser 产品接线或其他 provider。产品仍使用 ExplorerBrowser，未生成 release。日志：`src/.state/native-probe-watchdog/20261101-054344-a0ec01d2.stdout.log`。

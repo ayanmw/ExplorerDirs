@@ -5459,3 +5459,9 @@ Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `
 2026-11-01 ZIP 虚拟文件 RenameItem 能力检查：Shell 属性 0x00400063 不含 SFGAO_CANRENAME；即使 RenameItem/PerformOperations 返回 S_OK，GetAnyOperationsAborted 仍为 1，源归档与 view 保持未改。此证据说明 ZIP provider 未广告重命名能力；HRESULT 不等同于成功，不据此推断 Q-Dir 自有行为。日志：src/.state/native-probe-watchdog/20261101-052451-e4e1ba1b.stdout.log。
 
 2026-11-01 F5/视图切换后台复验：生产 HostProbe `--live-shell-refresh` 退出码 0，普通文件夹 F5 后四窗格均有 4 项，刷新窗格的 3 项选区与焦点均恢复，隐藏父窗和前台守卫通过；`--shell-selection-invert-modes` 对四窗格 × 八种模式调用生产 `ExplorerBrowserHost.SetViewStyle` 并逐项核对选区/焦点和兄弟窗格隔离，退出码 0。新增 watchdog 入口 `view-refresh-lifecycle-private-desktop` 复跑 stock `IShellView`：300 行在 List/Small Icons/Details 切换期间无零行样本、view/List HWND 不变；原生 `IShellView.Refresh()` 有 3 个 5 ms 的零行采样点（跨度约 10 ms），而 `SHCNE_UPDATEDIR` 保留原行并收敛到新行。所有结果均为后台行数/选择/焦点证据；没有测量像素，不能据此声称用户可见白/黑帧已消失。NativeProbe 日志：src/.state/native-probe-watchdog/20261101-052611-c5d0380b.stdout.log；可见验收仍待集中进行。
+
+## 2026-11-01：ZIP 虚拟项目 DeleteItems
+
+隔离 NativeProbe 检查 ZIP 中的 `delete-target.txt`，Shell 属性包含 `SFGAO_CANDELETE`。`IFileOperation.DeleteItems` 与 `PerformOperations` 均返回 `S_OK`，未取消；归档中目标实际删除，源 view 从 3 项收敛至 2 项。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入及隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-054344-a0ec01d2.stdout.log`。
+
+该结果只覆盖当前 Windows ZIP provider 的程序化单项删除，不代表回收站、确认/撤销 UI、取消与失败流程、ExplorerBrowser 产品接线、可见交互或其它 provider 已验证。产品仍保持 ExplorerBrowser；没有生成 release。该实验补齐了 ZIP Shell 操作矩阵中的删除一项，接下来仍需验证真实 OLE 拖放和产品通知/焦点接线等迁移门槛；`.qdr` 预览过滤行为等 Q-Dir 验收问题继续等待用户实测。
