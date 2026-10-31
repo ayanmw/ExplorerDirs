@@ -465,6 +465,37 @@ internal static class StaticShellFolderAdapterProbe
                     finally { if (renamed != 0) ILFree(renamed); }
                 }
                 finally { Marshal.FreeCoTaskMem(newName); }
+
+                var moveSource = Path.Combine(fixture, "ten.bin");
+                var moveDestinationPath = Path.Combine(fixture, "move-target");
+                Directory.CreateDirectory(moveDestinationPath);
+                var moveDestinationId = ShellItemId;
+                Check(SHCreateItemFromParsingName(moveDestinationPath, 0, ref moveDestinationId, out var moveDestination));
+                try
+                {
+                    stage = "wrapped-data-object-file-operation-move";
+                    var expectedMove = File.ReadAllBytes(moveSource);
+                    PerformWrappedDataObjectOperation(adapter, "ten.bin", "MoveItems",
+                        (operation, dataObject) => Check(At<MoveItems>(operation, 15)(operation, dataObject, moveDestination)),
+                        () => !File.Exists(moveSource) && File.Exists(Path.Combine(moveDestinationPath, "ten.bin")) &&
+                              File.ReadAllBytes(Path.Combine(moveDestinationPath, "ten.bin")).SequenceEqual(expectedMove));
+                }
+                finally { Marshal.Release(moveDestination); }
+
+                stage = "wrapped-data-object-file-operation-rename";
+                var renameSource = Path.Combine(fixture, "hundred.bin");
+                var renameTarget = Path.Combine(fixture, "hundred-renamed.bin");
+                var expectedRename = File.ReadAllBytes(renameSource);
+                PerformWrappedDataObjectOperation(adapter, "hundred.bin", "RenameItems",
+                    (operation, dataObject) => Check(At<RenameItems>(operation, 13)(operation, dataObject, "hundred-renamed.bin")),
+                    () => !File.Exists(renameSource) && File.Exists(renameTarget) &&
+                          File.ReadAllBytes(renameTarget).SequenceEqual(expectedRename));
+
+                stage = "wrapped-data-object-file-operation-delete";
+                var deleteSource = Path.Combine(fixture, "pending-a.bin");
+                PerformWrappedDataObjectOperation(adapter, "pending-a.bin", "DeleteItems",
+                    (operation, dataObject) => Check(At<DeleteItems>(operation, 19)(operation, dataObject)),
+                    () => !File.Exists(deleteSource));
             }
 
             var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
@@ -1934,6 +1965,41 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
+    private static void PerformWrappedDataObjectOperation(nint adapter, string childName, string operationName,
+        Action<nint, nint> queueOperation, Func<bool> verifyResult)
+    {
+        var foreground = GetForegroundWindow();
+        nint child = 0, childArray = 0, dataObject = 0, operation = 0;
+        try
+        {
+            child = ParseChild(adapter, childName);
+            childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, child);
+            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new Exception($"Wrapped selection {childName} did not return IDataObject for {operationName}.");
+
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var fileOperationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref fileOperationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            queueOperation(operation, dataObject);
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0 || !verifyResult())
+                throw new IOException($"IFileOperation.{operationName} did not produce the expected isolated filesystem result.");
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException($"Wrapped IDataObject IFileOperation.{operationName} changed the foreground window.");
+            Console.WriteLine($"wrapped IDataObject IFileOperation.{operationName}: filesystem-result=matched; foreground-unchanged=True");
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeCoTaskMem(childArray);
+            if (child != 0) ILFree(child);
+        }
+    }
+
     private static void VerifyWrappedShellItemObjects(nint adapter, nint child)
     {
         var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
@@ -2540,6 +2606,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurrentViewMode(nint self, out uint mode);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellItemPropertyStore(nint self, uint flags, in Guid iid, out nint store);
