@@ -16,4 +16,10 @@ internal sealed record ShellListViewRow(
     int SystemImageIndex)
 {
     internal RecursiveDirectoryScanResult? RecursiveSummary { get; init; }
+    internal ShellFileSystemIdentity? FileSystemIdentity { get; init; }
 }
+
+internal readonly record struct ShellFileSystemIdentity(
+    ulong VolumeSerialNumber,
+    ulong FileIdLow,
+    ulong FileIdHigh);

@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+using ExplorerDirs.NativeProbe;
 
 // Shared identity capture for the filesystem and virtual Shell ListView probes.
 internal sealed record ShellListViewRowIdentity(
@@ -14,6 +16,12 @@ internal sealed record ShellListViewRowIdentity(
     private const uint ShgfiSysIconIndex = 0x00004000;
     private const uint ShgfiSmallIcon = 0x00000001;
     private const uint ShgfiPidl = 0x00000008;
+    private const uint FileReadAttributes = 0x00000080;
+    private const uint FileShareAll = 0x00000007;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int FileIdInfoClass = 18;
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
 
     internal static ShellListViewRowIdentity Capture(nint parentFolder, nint relativePidl,
@@ -48,6 +56,17 @@ internal sealed record ShellListViewRowIdentity(
 
     internal static string GetAbsoluteParsingName(nint pidl) => ReadName(pidl, SigDnDesktopAbsoluteParsing);
 
+    internal static ShellFileSystemIdentity? GetFileSystemIdentity(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        using var handle = CreateFileW(path, FileReadAttributes, FileShareAll, 0, OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics, 0);
+        if (handle.IsInvalid || !GetFileInformationByHandleEx(handle, FileIdInfoClass,
+                out var fileInfo, (uint)Marshal.SizeOf<FileIdInfo>()))
+            return null;
+        return new ShellFileSystemIdentity(fileInfo.VolumeSerialNumber, fileInfo.FileIdLow, fileInfo.FileIdHigh);
+    }
+
     private static string ReadName(nint pidl, uint kind)
     {
         Marshal.ThrowExceptionForHR(SHGetNameFromIDList(pidl, kind, out var namePointer));
@@ -62,6 +81,14 @@ internal sealed record ShellListViewRowIdentity(
 
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileIdInfo
+    {
+        public ulong VolumeSerialNumber;
+        public ulong FileIdLow;
+        public ulong FileIdHigh;
+    }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetAttributesOf(nint self, uint count, nint children, ref uint attributes);
@@ -78,4 +105,11 @@ internal sealed record ShellListViewRowIdentity(
 
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint SHGetFileInfo(nint item, uint attributes, out ShellFileInfo info, uint size, uint flags);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
+        nint securityAttributes, uint creationDisposition, uint flagsAndAttributes, nint templateFile);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
+        out FileIdInfo fileInformation, uint bufferSize);
 }

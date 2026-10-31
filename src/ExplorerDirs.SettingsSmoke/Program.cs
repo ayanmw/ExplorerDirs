@@ -132,6 +132,12 @@ if (args.Length == 1 && args[0] == "--recursive-directory-scanner-smoke")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--shell-listview-row-model-smoke")
+{
+    ExplorerDirs.SettingsSmoke.ShellListViewRowModelSmoke.Run();
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--recursive-directory-scan-allocation-probe")
 {
     ExplorerDirs.SettingsSmoke.RecursiveDirectoryScannerSmoke.RunAllocationProbe();

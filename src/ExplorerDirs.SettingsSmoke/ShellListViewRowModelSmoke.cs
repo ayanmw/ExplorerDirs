@@ -8,9 +8,13 @@ internal static class ShellListViewRowModelSmoke
     internal static void Run()
     {
         var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-model", "small"));
+        // The model only scans SFGAO_FOLDER rows; keep this fixture on that production branch.
         var target = new ExplorerDirs.NativeProbe.ShellListViewRow(
-            7, 0x101, 0x201, "small", targetPath, targetPath, 0x10, 4,
-            FromShellEnumeration: true, SystemImageIndex: 12);
+            7, 0x101, 0x201, "small", targetPath, targetPath, 0x20000000, 4,
+            FromShellEnumeration: true, SystemImageIndex: 12)
+        {
+            FileSystemIdentity = new(1, 7, 0)
+        };
         var siblingPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-model", "sibling"));
         var sibling = target with
         {
@@ -48,8 +52,11 @@ internal static class ShellListViewRowModelSmoke
               updated[0].AbsolutePidl == target.AbsolutePidl && updated[0].RelativePidl == target.RelativePidl &&
               updated[0].SystemImageIndex == target.SystemImageIndex,
             "filesystem scan values update while PIDLs and system icon identity remain stable");
-        Check(updated[1] == sibling && updated[2] == virtualRow,
-            "rows outside the scan and virtual Shell rows retain their previous values");
+        // A completed scan omitting a filesystem folder must drop stale size data; virtual rows remain untouched.
+        Check(updated[1].RecursiveBytes is null && updated[1].RecursiveSummary is null &&
+              updated[1].FileSystemIdentity is null && updated[1].Id == sibling.Id &&
+              updated[1].RelativePidl == sibling.RelativePidl && updated[2] == virtualRow,
+            "missing filesystem results clear stale values while virtual Shell rows retain their state");
         Check(target.RecursiveBytes == 4 && target.RecursiveSummary is null,
             "publishing a scan snapshot does not mutate the previous row snapshot");
 
@@ -88,6 +95,50 @@ internal static class ShellListViewRowModelSmoke
               reconciled.Rows[1].RecursiveBytes == targetWithSummary.RecursiveBytes &&
               reconciled.Rows[1].RecursiveSummary == targetWithSummary.RecursiveSummary,
             "all old PIDLs are returned for release and matching scan summaries survive metadata refresh");
+
+        var replacement = changedTarget with { FileSystemIdentity = new(1, 99, 0) };
+        var replacedFolder = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
+            [targetWithSummary], [replacement], nextId: 10);
+        Check(replacedFolder.Rows[0].Id == target.Id &&
+              replacedFolder.Rows[0].RecursiveBytes is null && replacedFolder.Rows[0].RecursiveSummary is null,
+            "a same-path replacement folder does not inherit the retired folder's recursive-size snapshot");
+
+        var identityRoot = Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-file-id-" + Guid.NewGuid().ToString("N"));
+        var identityPath = Path.Combine(identityRoot, "same-path");
+        var retiredPath = Path.Combine(identityRoot, "retired");
+        try
+        {
+            Directory.CreateDirectory(identityPath);
+            File.WriteAllText(Path.Combine(identityPath, "payload.txt"), "old");
+            var originalIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(identityPath);
+            Directory.Move(identityPath, retiredPath);
+            Directory.CreateDirectory(identityPath);
+            File.WriteAllText(Path.Combine(identityPath, "payload.txt"), "new");
+            var replacementIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(identityPath);
+            Check(originalIdentity is not null && replacementIdentity is not null && originalIdentity != replacementIdentity,
+                "filesystem identity distinguishes a recreated directory at the same path");
+
+            var retiredFolder = targetWithSummary with
+            {
+                ParsingName = identityPath,
+                FileSystemPath = identityPath,
+                FileSystemIdentity = originalIdentity
+            };
+            var replacementFolder = retiredFolder with
+            {
+                FileSystemIdentity = replacementIdentity,
+                RecursiveBytes = null,
+                RecursiveSummary = null
+            };
+            var identityReconciled = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
+                [retiredFolder], [replacementFolder], nextId: 10);
+            Check(identityReconciled.Rows[0].RecursiveBytes is null && identityReconciled.Rows[0].RecursiveSummary is null,
+                "same-path Shell row reconciliation clears values when Windows file identity changed");
+        }
+        finally
+        {
+            if (Directory.Exists(identityRoot)) Directory.Delete(identityRoot, recursive: true);
+        }
 
         var selection = ExplorerDirs.NativeProbe.ShellListViewSelectionSnapshot.Capture(
             rows, [target.Id, sibling.Id], focusedRowId: sibling.Id);

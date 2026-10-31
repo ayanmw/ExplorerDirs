@@ -38,15 +38,19 @@ internal static class ShellListViewRowModel
 
             if (matchedPrevious && previous is not null)
             {
-                // A parsing name can survive a file/folder replacement at the same path.
-                // Reuse the recursive scan only while both snapshots still identify that folder.
-                var preserveRecursiveScan = IsFilesystemFolder(previous) && IsFilesystemFolder(enumerated) &&
+                var sameFilesystemFolder = IsFilesystemFolder(previous) && IsFilesystemFolder(enumerated) &&
                     string.Equals(previous.FileSystemPath, enumerated.FileSystemPath, StringComparison.OrdinalIgnoreCase);
+                var currentFileSystemIdentity = enumerated.FileSystemIdentity;
+                if (sameFilesystemFolder && previous.RecursiveSummary is not null && currentFileSystemIdentity is null)
+                    currentFileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(enumerated.FileSystemPath!);
+                var preserveRecursiveScan = sameFilesystemFolder && previous.FileSystemIdentity is { } previousIdentity &&
+                    currentFileSystemIdentity is { } currentIdentity && previousIdentity == currentIdentity;
                 rows[index] = enumerated with
                 {
                     Id = previous.Id,
                     RecursiveBytes = preserveRecursiveScan ? previous.RecursiveBytes : enumerated.RecursiveBytes,
-                    RecursiveSummary = preserveRecursiveScan ? previous.RecursiveSummary : enumerated.RecursiveSummary
+                    RecursiveSummary = preserveRecursiveScan ? previous.RecursiveSummary : enumerated.RecursiveSummary,
+                    FileSystemIdentity = currentFileSystemIdentity
                 };
             }
             else
@@ -85,10 +89,16 @@ internal static class ShellListViewRowModel
             if (IsFilesystemFolder(row))
             {
                 if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var summary))
-                    row = row with { RecursiveBytes = summary.Bytes, RecursiveSummary = summary };
+                    row = row with
+                    {
+                        RecursiveBytes = summary.Bytes,
+                        RecursiveSummary = summary,
+                        FileSystemIdentity = row.FileSystemIdentity ??
+                            ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!)
+                    };
                 else
                     // A completed scan without this folder must not leave an older value looking current.
-                    row = row with { RecursiveBytes = null, RecursiveSummary = null };
+                    row = row with { RecursiveBytes = null, RecursiveSummary = null, FileSystemIdentity = null };
             }
             updated[index] = row;
         }

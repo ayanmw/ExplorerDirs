@@ -753,3 +753,7 @@ NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临
 本轮把扫描结果接入了隔离原生 provider 的快照输入：两条兄弟目录的初值 10 B/12 B、磁盘变化后的重扫值 7 B/12 B 均由生产 `RecursiveDirectoryScanner` 生成，再由 NativeProbe 的原生列缓存验证行身份、属性文本、数值排序、PIDL 重枚举及 provider 重建后的读取。输出明确记录 `scanner-bytes=10/12`、`rescanned-bytes=7/12` 和 `provider-recreation=retained`；合同退出码 0，`window-created=False`。这证明扫描值可被隔离 provider 消费，不证明产品视图的异步扫描发布或 Shell 通知接线。
 
 尝试让普通文件系统适配器为目录返回递归 `PKEY_Size` 得到 `E_FAIL`，说明不能依赖该适配器路径提供此派生列；也不应将这个单次 HRESULT 泛化为所有 Shell provider 的行为。产品未改，列显示、后台扫描生命周期和排序仍未接入产品；IShellView/自有视图迁移仍需菜单、拖放、通知、焦点、虚拟位置及可见行为评估。
+
+### 2026-10-31：同路径文件夹替换时拒绝旧扫描快照
+
+隔离 `ShellListViewRowModel.Reconcile` 之前只按绝对解析名、文件夹属性和路径复用递归值；删除后在同一路径重建的另一个文件夹可能继承旧大小。现在已扫描行携带卷序列号与 128 位文件 ID；重枚举时只有同路径、同文件系统身份才保留扫描值。目录 ID 读取使用 `FILE_FLAG_OPEN_REPARSE_POINT`，标识 junction 本身而不跟随目标；无法取得新身份时清除旧值，等后续扫描再发布。定向 `--shell-listview-row-model-smoke` 覆盖真实目录移动后同路径重建、文件 ID 变化及旧大小清除，并通过；NativeProbe Release build 0 警告、0 错误。此身份目前只用于隔离行模型，未接入产品 ExplorerBrowser，也未测量数千目录下的句柄打开成本。

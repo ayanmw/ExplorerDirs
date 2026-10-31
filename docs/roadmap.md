@@ -5113,3 +5113,8 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 - 无窗口 NativeProbe 使用同一真实临时目录分别核对生产递归扫描器与合成 `IShellFolder2` 原型：扫描结果为 10 B、2 files、1 folder；Shell 原型的 `PKEY_Size`、大小文本和数值排序合同通过，嵌套枚举/文件操作合同也通过。
 - 普通文件系统适配器对目录递归 `PKEY_Size` 请求返回 `E_FAIL`，此路径不可用于提供派生列；单次结果不外推到所有 Shell provider。更新后的隔离合同由生产扫描器为两条兄弟目录生成 10/12 B 初值、磁盘变化后重扫为 7/12 B，再交给原生缓存验证属性文本、数值排序、PIDL 重枚举及 provider 重建；Release NativeProbe build 与 `--static-shell-column-folder-smoke` 通过，`window-created=False`。这只验证 scanner → 隔离 provider 的数据消费，不含产品异步扫描发布、Shell 通知或可见列；ExplorerBrowser 产品未改。完整范围见[派生大小列调查](folder-size-column-investigation.md#2026-10-31生产扫描结果与-shell-递归大小列合同对照)。
+
+## 2026-10-31：隔离递归大小行缓存验证真实文件身份
+
+- 行模型此前只按 Shell 绝对解析名、文件夹标志和文件系统路径复用递归扫描值；同路径目录替换无法与原对象区分。现在扫描值带有卷序列号和 Windows 128 位文件 ID；重枚举仅在同路径且文件 ID 相同时保留旧值，身份不同或无法读取时清除旧值，等待重扫。打开目录时不跟随 reparse point。
+- `--shell-listview-row-model-smoke` 覆盖同路径移动/重建后文件 ID 变化、旧扫描值清除，并检查同身份行数据仍可复用；定向 smoke 通过，NativeProbe Release build 为 0 警告/错误。该身份只接入隔离行模型，不是产品 ExplorerBrowser 功能；当前未测大量可见目录下的身份读取成本、Shell view 列消费或用户可见行为。详情见[递归大小列调查](folder-size-column-investigation.md#2026-10-31同路径文件夹替换时拒绝旧扫描快照)。
