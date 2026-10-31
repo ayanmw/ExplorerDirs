@@ -36,6 +36,8 @@ internal static class Program
             return QdrNativeViewProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-change-reconciliation")
             return ShellChangeReconciliationProbe.Run();
+        if (args.Length == 1 && args[0] == "--shell-watcher-recovery-contract")
+            return ShellWatcherRecoveryProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-listview-selection-restore")
             return ShellListViewSelectionRestoreProbe.Run();
         if (args.Length == 1 && args[0] == "--shell-view-state-stream-smoke")

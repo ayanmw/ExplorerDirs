@@ -6,32 +6,50 @@ using ExplorerDirs.App;
 // It never owns or creates a production ExplorerBrowser.
 internal sealed class ProbeShellDirectoryMonitor : IDisposable
 {
-    private readonly FileSystemWatcher _watcher;
+    private readonly string _path;
     private readonly ShellDirectoryChangeQueue _queue = new();
     private readonly ShellDirectoryChangeBatch _batch;
+    private readonly ShellDirectoryWatcherRecovery _recovery = new();
+    private readonly ShellDirectoryWatcherEventGate<FileSystemWatcher> _watcherEventGate = new();
     private readonly ConcurrentQueue<string> _diagnostics = new();
+    private readonly object _watcherGate = new();
+    private FileSystemWatcher? _watcher;
     private long _lastEventAt;
     private int _diagnosticCount;
+    private int _watcherGeneration;
+    private int _acceptedEvents;
+    private bool _disposed;
     internal int RefreshCount { get; private set; }
     internal string Operation { get; set; } = "idle";
     internal string Diagnostics => string.Join('|', _diagnostics);
+    internal int WatcherGeneration => Volatile.Read(ref _watcherGeneration);
+    internal int AcceptedEventCount => Volatile.Read(ref _acceptedEvents);
+    internal string ChangeQueueSnapshot => _queue.DiagnosticSnapshot;
 
     internal ProbeShellDirectoryMonitor(string path, int initialCount)
     {
+        _path = path;
         _batch = new ShellDirectoryChangeBatch(initialCount);
-        _watcher = new FileSystemWatcher(path)
-        {
-            IncludeSubdirectories = false,
-            NotifyFilter = ShellDirectoryChangeMonitorOptions.NotifyFilter,
-            InternalBufferSize = 16 * 1024
-        };
-        _watcher.Created += (_, args) => Record("created", ShellDirectoryChangeMonitorOptions.ForCreated(), args.FullPath);
-        _watcher.Deleted += (_, args) => Record("deleted", ShellDirectoryChangeMonitorOptions.ForDeleted(), args.FullPath);
-        _watcher.Changed += (_, args) => Record("changed", ShellDirectoryChangeMonitorOptions.ForChanged(), args.FullPath);
-        _watcher.Renamed += (_, args) => Record("renamed", ShellDirectoryChangeMonitorOptions.ForRenamed(), args.FullPath);
-        _watcher.Error += (_, _) => Record("error", ShellDirectoryChangeMonitorOptions.ForError(), null);
-        _watcher.EnableRaisingEvents = true;
+        StartWatcher();
     }
+
+    internal void InjectWatcherErrorForProbe(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        FileSystemWatcher watcher;
+        lock (_watcherGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            watcher = _watcher ?? throw new InvalidOperationException("No active watcher is available for the injected error.");
+        }
+        OnWatcherError(watcher, error);
+    }
+
+    internal bool WaitForWatcherGeneration(int generation, TimeSpan timeout) =>
+        SpinWait.SpinUntil(() => WatcherGeneration >= generation, timeout);
+
+    internal bool WaitForAcceptedEvents(int count, TimeSpan timeout) =>
+        SpinWait.SpinUntil(() => AcceptedEventCount >= count, timeout);
 
     internal bool Reconcile(Func<int?> readCount, Action refresh, Func<bool> expectedItemsVisible,
         Action pump, int timeoutMilliseconds = 5000, Action? afterRefreshStarted = null,
@@ -110,9 +128,138 @@ internal sealed class ProbeShellDirectoryMonitor : IDisposable
 
     public void Dispose()
     {
-        _watcher.EnableRaisingEvents = false;
-        _watcher.Dispose();
+        FileSystemWatcher? watcher;
+        lock (_watcherGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _recovery.Retire();
+            _watcherEventGate.SetCurrent(null);
+            watcher = _watcher;
+            _watcher = null;
+        }
+        if (watcher is not null) DisposeWatcher(watcher);
         _queue.Invalidate();
+    }
+
+    private void StartWatcher()
+    {
+        var watcher = CreateWatcher();
+        lock (_watcherGate)
+        {
+            if (_disposed)
+            {
+                watcher.Dispose();
+                throw new ObjectDisposedException(nameof(ProbeShellDirectoryMonitor));
+            }
+            _watcherEventGate.SetCurrent(watcher);
+            try
+            {
+                watcher.EnableRaisingEvents = true;
+                _watcher = watcher;
+                Interlocked.Increment(ref _watcherGeneration);
+            }
+            catch
+            {
+                _watcherEventGate.SetCurrent(null);
+                watcher.Dispose();
+                throw;
+            }
+        }
+    }
+
+    private FileSystemWatcher CreateWatcher()
+    {
+        var watcher = new FileSystemWatcher(_path)
+        {
+            IncludeSubdirectories = false,
+            NotifyFilter = ShellDirectoryChangeMonitorOptions.NotifyFilter,
+            InternalBufferSize = 16 * 1024
+        };
+        watcher.Created += (_, args) => OnWatcherEvent(watcher, "created",
+            ShellDirectoryChangeMonitorOptions.ForCreated(), args.FullPath);
+        watcher.Deleted += (_, args) => OnWatcherEvent(watcher, "deleted",
+            ShellDirectoryChangeMonitorOptions.ForDeleted(), args.FullPath);
+        watcher.Changed += (_, args) => OnWatcherEvent(watcher, "changed",
+            ShellDirectoryChangeMonitorOptions.ForChanged(), args.FullPath);
+        watcher.Renamed += (_, args) => OnWatcherEvent(watcher, "renamed",
+            ShellDirectoryChangeMonitorOptions.ForRenamed(), args.FullPath);
+        watcher.Error += (_, args) => OnWatcherError(watcher, args.GetException());
+        return watcher;
+    }
+
+    private void OnWatcherEvent(FileSystemWatcher watcher, string kind, ShellDirectoryChangeDelta change, string path)
+    {
+        _watcherEventGate.TryInvoke(watcher, () =>
+        {
+            Record(kind, change, path);
+            Interlocked.Increment(ref _acceptedEvents);
+        });
+    }
+
+    private void OnWatcherError(FileSystemWatcher watcher, Exception error)
+    {
+        _watcherEventGate.TryInvoke(watcher, () =>
+        {
+            Record($"error:{error.GetType().Name}:hr=0x{error.HResult:X8}",
+                ShellDirectoryChangeMonitorOptions.ForError(), null);
+            if (_recovery.TryBegin(out var delay)) _ = RecoverWatcherAsync(watcher, delay);
+        });
+    }
+
+    private async Task RecoverWatcherAsync(FileSystemWatcher? failedWatcher, TimeSpan delay)
+    {
+        await Task.Delay(delay).ConfigureAwait(false);
+        FileSystemWatcher? retiredWatcher = null;
+        var recovered = false;
+        var retry = false;
+        var retryDelay = default(TimeSpan);
+        lock (_watcherGate)
+        {
+            if (_disposed)
+            {
+                _recovery.Complete(recovered: false);
+                return;
+            }
+            if (!ReferenceEquals(_watcher, failedWatcher))
+            {
+                _recovery.Complete(recovered: true);
+                return;
+            }
+
+            _watcherEventGate.SetCurrent(null);
+            retiredWatcher = _watcher;
+            _watcher = null;
+            FileSystemWatcher? replacement = null;
+            try
+            {
+                replacement = CreateWatcher();
+                _watcherEventGate.SetCurrent(replacement);
+                replacement.EnableRaisingEvents = true;
+                _watcher = replacement;
+                Interlocked.Increment(ref _watcherGeneration);
+                recovered = true;
+            }
+            catch
+            {
+                _watcherEventGate.SetCurrent(null);
+                if (replacement is not null) DisposeWatcher(replacement);
+                Record("recovery-failed", ShellDirectoryChangeMonitorOptions.ForError(), null);
+            }
+
+            _recovery.Complete(recovered);
+            if (!recovered) retry = _recovery.TryBegin(out retryDelay);
+        }
+
+        if (retiredWatcher is not null) DisposeWatcher(retiredWatcher);
+        if (retry) _ = RecoverWatcherAsync(failedWatcher: null, retryDelay);
+    }
+
+    private static void DisposeWatcher(FileSystemWatcher watcher)
+    {
+        try { watcher.EnableRaisingEvents = false; }
+        catch (ObjectDisposedException) { }
+        finally { watcher.Dispose(); }
     }
 
     private void Record(string kind, ShellDirectoryChangeDelta change, string? path)

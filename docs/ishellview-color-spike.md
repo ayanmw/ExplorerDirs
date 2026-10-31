@@ -1597,3 +1597,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 该复合探针紧接文件移动后再移动同一 ZIP 中的目录，约 3 秒内没有观察到事件。复核发现顺序/共享 provider 状态是未控制变量，不能据此得出目录移动不发通知。新增 `--ishellview-zip-folder-move-cross-volume-private-desktop`，用全新 ZIP view 先单独移动目录；连续两次观察到相同事件：归档 `SHCNE_UPDATEDITEM`、归档内 `virtual-folder\nested.txt` 的 `SHCNE_DELETE`、目标 `virtual-folder` 的 `SHCNE_MKDIR`、目标嵌套文件的 `SHCNE_CREATE`。目标内容为 `0x42`、ZIP 源条目移除、源 view 从 2 项收敛为 1 项。Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过；复验日志：`src/.state/native-probe-watchdog/20261101-folder-first-move.stdout.log`。
 
 因此当前 ZIP provider 对虚拟目录移动发出归档内嵌套子项删除与目标目录创建通知，并非父 ZIP 内的虚拟目录删除事件。结论仅适用于本机 Windows ZIP provider、程序化跨卷 `IFileOperation.MoveItems` 和该次 3 秒观察窗；其他 archive provider、可见 UI/OLE 拖放、ExplorerBrowser 产品接线仍未验证。
+
+### 2026-11-01：IShellView 迁移门槛的 watcher 溢出恢复合同
+
+扩展 NativeProbe 的 `ProbeShellDirectoryMonitor`，让隔离宿主复用产品 `ShellDirectoryWatcherRecovery` 与 `ShellDirectoryWatcherEventGate<T>`：收到 watcher Error 后将目录状态标为需强制对账，按恢复退避创建并启用新 watcher，再隔离和释放旧 watcher。新增 `--shell-watcher-recovery-contract`，对唯一临时目录注入 `InternalBufferOverflowException`，断言 watcher generation 从 1 到 2、队列要求强制刷新，并由替换 watcher 收到新建文件事件。NativeProbe Release build 0 警告/错误；该合同退出码 0。既有 `--shell-change-reconciliation` 复跑退出码 0，跨窗格 Shell 复制/移动/重命名/删除与行身份、选区/焦点回归均通过，隐藏窗口且前台未变。
+
+该合同是受控错误注入，不是操作系统真实缓冲区溢出；也没有把替换 watcher 接入真实 `IShellView` 的重枚举/刷新，未验证 Shell 菜单、拖放、通知对账或可见 UI。它只补充迁移阶段对 watcher 生命周期恢复的隔离证据，不表示 ExplorerBrowser 产品宿主已迁移或颜色功能可进入产品。下一门槛仍是把 watcher 的重新枚举结果安全发布到隔离 `IShellView` 行模型，并联合验证 PIDL 生命周期、排序、选择/焦点、Shell 通知以及真实菜单/操作；全部通过前不迁移产品宿主。

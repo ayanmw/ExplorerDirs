@@ -65,5 +65,6 @@
     <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeQueue.cs" Link="ShellDirectoryChangeQueue.cs" />
     <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeBatch.cs" Link="ShellDirectoryChangeBatch.cs" />
     <Compile Include="../ExplorerDirs.App/ShellDirectoryChangeMonitorOptions.cs" Link="ShellDirectoryChangeMonitorOptions.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellDirectoryWatcherRecovery.cs" Link="ShellDirectoryWatcherRecovery.cs" />
   </ItemGroup>
 </Project>
