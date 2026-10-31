@@ -5068,16 +5068,16 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：F5 与查看方式切换调用链复核
 
-- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshPreservingLastFrame`。普通文件系统目录通过当前绝对 PIDL 发 `SHCNE_UPDATEDIR`；搜索/虚拟位置或无法取得目录 PIDL 时回退 `IShellView.Refresh`。仅显式用户刷新持有短时 `IFolderView2.SetRedraw` 租约，行数连续稳定后释放，最多等待 1.5 秒；目录 watcher、筛选等内部刷新不使用该租约。两条路径都作用于当前 Shell 视图，不重建 ExplorerBrowser、标签、导航历史或窗格。
+- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshFromUser → RefreshWithPresentation → IShellView.Refresh`。它在当前 Shell 视图上刷新内容，不重建 ExplorerBrowser、标签、导航历史或窗格；当前产品保持原生重绘开启，刷新后的行数采样只用于决定何时恢复选区与焦点。普通文件系统目录的 `SHCNE_UPDATEDIR` 曾在隔离对照中读到新行较慢，且没有可见像素收益证据，因此没有接入 F5。搜索/虚拟位置继续使用相同的当前视图刷新路径。
 - 查看方式切换只调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，随后在 Dispatcher `ContextIdle` 读取其余配置，不重枚举目录。Shell 仍需重排/重绘列表项目，因此这不是只改一个模式标志就能避免列表重绘的操作。
-- 源码复核发现先前“已移除 F5 SetRedraw”的记录已被后续仅针对手动 F5 的有限租约取代，已同步修正 shell-parity 说明。没有可见像素证据证明当前租约消除了黑屏；本轮不添加新的重绘拦截或整窗格失效。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否保留租约或改用更窄的呈现路径。
+- 历史上的 F5/查看方式重绘租约已撤回：查看方式由 Shell 自行完成原生重排和绘制；F5 刷新等待不再关闭重绘或强制整窗格失效。当前没有可见像素证据证明黑屏已消失。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否需要新的呈现策略。
 
 ## 2026-10-31：加入按需的原生绘制时序诊断
 
 - 现有 Shell callback trace 开启时，F5 与实际查看方式变更分别记录 2 秒内子窗口 `WM_PAINT` / `WM_ERASEBKGND` 的相对时间、窗口类名、Shell 处理耗时和返回值，最多 256 条。未开启 trace 时不采集这组消息；记录逻辑不改变 Shell 绘制或输入。
 - App Release build 通过，0 警告/错误；没有启动窗口或运行测试。该诊断仅能判断消息时序，不能看到像素、测量肉眼空白时长或证明鼠标命中一致；需在集中验收时结合画面记录读取，之后再决定绘制策略。
 
-2026-10-31 F5 绘制时间线接入实际手动刷新入口：Release HostProbe 的 `--live-shell-refresh` 现在调用产品的 `RefreshPreservingLastFrame`，并在原有行数、选区、焦点结果中输出该视图的 `WM_PAINT` / `WM_ERASEBKGND` 时间线。HostProbe/App Release build 通过（0 警告、0 错误），提交 `1177988`。本轮没有运行 ExplorerBrowser 宿主：项目规则要求隐藏宿主实验前确认桌面空闲和当前授权，且其可能改变系统前台。该探针可以补充 Shell 绘制消息顺序与处理耗时，不能读取像素或验证冻结画面期间的鼠标命中；F5 黑屏改善仍待隐藏诊断和集中可见验收分别确认。
+2026-10-31 F5 绘制时间线接入实际手动刷新入口：Release HostProbe 的 `--live-shell-refresh` 调用产品手动刷新路径，并在原有行数、选区、焦点结果中输出该视图的 `WM_PAINT` / `WM_ERASEBKGND` 时间线。HostProbe/App Release build 通过（0 警告、0 错误），提交 `1177988`。本轮没有运行 ExplorerBrowser 宿主：项目规则要求隐藏宿主实验前确认桌面空闲和当前授权，且其可能改变系统前台。该探针可以补充 Shell 绘制消息顺序与处理耗时，不能读取像素或验证冻结画面期间的鼠标命中；F5 黑屏改善仍待隐藏诊断和集中可见验收分别确认。
 
 2026-10-31 保帧诊断补记交互输入：开启 Shell callback trace 时，F5/查看方式转换时间线现也记录窗口类及鼠标按键、键盘、滚轮消息类型，不记录键值、文本或鼠标坐标；仍受 2 秒和 256 条上限约束，普通运行无采样。HostProbe/App Release build 与完整 Release `SettingsSmoke` 通过（0 警告、0 错误），本轮未启动宿主。此记录可指出保帧期间是否有输入抵达，但不能确认用户看到的行与 Shell 实际命中行是否一致，需在后续集中可见验收核对。
 
