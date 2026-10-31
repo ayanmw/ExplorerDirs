@@ -646,14 +646,20 @@ public static class SyntheticShellSortProbe
             SetListViewSelectionAndFocus(listView2, "two.bin", ReadNames(listView2, module, expectedCount: -1));
             var preMoveNames1 = ReadNames(listView, module, expectedCount: -1);
             var preMoveNames2 = ReadNames(listView2, module, expectedCount: -1);
+            var movedSelectionIndex2 = Array.FindIndex(preMoveNames2,
+                name => string.Equals(name, "z-ten.bin", StringComparison.OrdinalIgnoreCase));
+            if (focusRecoveryExperiment && movedSelectionIndex2 >= 0)
+                SetListViewState(listView2, movedSelectionIndex2, state: LvisSelected, stateMask: LvisSelected);
             if (!HasSelectionAndFocus(listView, preMoveNames1, "two.bin") ||
                 !HasSelectionAndFocus(listView2, preMoveNames2, "two.bin"))
                 throw new IOException("Could not establish independent two.bin selections in both views before testing MoveItems.");
             Console.WriteLine("synthetic-shell-size-sort: move-precondition-selection-view1=True; view2=True");
             var moveDestination = Path.Combine(copyDestination, "Moved");
             using var view2SelectionBeforeMove = focusRecoveryExperiment ? ShellViewSelectionSnapshot.Capture(folderView2) : null;
-            if (focusRecoveryExperiment && (view2SelectionBeforeMove is null || !view2SelectionBeforeMove.HasFocusedItem))
-                throw new IOException("Could not capture the second view's focused Shell item before the cross-folder move.");
+            if (focusRecoveryExperiment && (movedSelectionIndex2 < 0 || view2SelectionBeforeMove is null ||
+                view2SelectionBeforeMove.SelectedCount != 2 || !view2SelectionBeforeMove.HasFocusedItem ||
+                !view2SelectionBeforeMove.FocusedItemWasSelected))
+                throw new IOException($"Could not capture the intended multi-selection with a focused item before the cross-folder move: moved-index={movedSelectionIndex2}; selected={view2SelectionBeforeMove?.SelectedCount ?? -1}; focus={view2SelectionBeforeMove?.HasFocusedItem ?? false}; focus-selected={view2SelectionBeforeMove?.FocusedItemWasSelected ?? false}.");
             MoveSelectedShellItem(view, listView, view2, listView2, module, backingFolder, "z-ten.bin", "two.bin", moveDestination);
             var moveAutoUpdated = false;
             var moveAutoUpdated2 = false;
@@ -689,6 +695,14 @@ public static class SyntheticShellSortProbe
                 moveState2 = StateForName(listView2, afterMove2, "two.bin");
                 moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
                 Console.WriteLine($"synthetic-shell-focus-recovery: restored-selection={view2Recovery.Value.SelectionRestored}; restored-focus={view2Recovery.Value.FocusRestored}; second-view-state=0x{moveState2:X}; selected-and-focused={moveSelectionRetained2}");
+            }
+            if (focusRecoveryExperiment)
+            {
+                Check(At<GetItemCount>(folderView2, 7)(folderView2, 1, out var selectedAfterRecovery));
+                // z-ten.bin was in the saved multi-selection but moved out of both views; only the surviving focused item should remain selected.
+                if (view2Recovery is not { FocusRestored: true } || !moveSelectionRetained2 || selectedAfterRecovery != 1)
+                    throw new IOException($"The stale selected PIDL blocked focused-item recovery after MoveItems: recovery={view2Recovery}; state=0x{moveState2:X}; selected={selectedAfterRecovery}.");
+                Console.WriteLine($"synthetic-shell-focus-recovery: stale-selected-item=discarded; surviving-selection={selectedAfterRecovery}; surviving-focus=True");
             }
             Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; two-state-view1=0x{moveState:X}; two-state-view2=0x{moveState2:X}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
             if (!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2 ||
