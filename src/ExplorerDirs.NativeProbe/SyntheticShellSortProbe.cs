@@ -823,6 +823,9 @@ public static class SyntheticShellSortProbe
             throw new InvalidOperationException($"The new view did not expose the recursive-size column before '{name}'; notification strategy was not run: {FormatSizeState(before)}");
 
         SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
+        using var shellWindowSelection = recreateShellWindow ? ShellViewSelectionSnapshot.Capture(folderView) : null;
+        if (recreateShellWindow && shellWindowSelection is null)
+            throw new InvalidOperationException("Could not capture the synthetic Shell view selection before recreating its window.");
         SetBackingChildSize(backingFolder, updatedSize);
         SetSyntheticSizeOverride(module, updatedSize);
         var enumsBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
@@ -866,6 +869,9 @@ public static class SyntheticShellSortProbe
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             Pump(250);
             listView = FindListView(view);
+            Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
+            var restored = shellWindowSelection!.Restore(view, trace: message => Console.WriteLine($"synthetic-size-update-selection: {message}"));
+            Console.WriteLine($"synthetic-size-update-selection: selected={restored.SelectionRestored}; focused={restored.FocusRestored}; saved-selected={shellWindowSelection.SelectedCount}; saved-focus={shellWindowSelection.HasFocusedItem}");
         }
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");

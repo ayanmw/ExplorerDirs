@@ -794,9 +794,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 在前台窗口和系统输入 tick 均未变化的两次 WPF Private Desktop 运行中，给 `GetViewStateStream` 加入调用计数、mode、初始长度/hash 记录。单项更新前后分别有一次写流和读流；但单项通知后，DefView 仍重新枚举两行并丢失派生列。随后显式 `IColumnManager::SetColumns` 让自定义键重新进入列集合，却没有重建当前 ListView header，也没有触发属性文本请求。再切换 Details → Icons → Details 同样没有恢复列值。
 
-一个隔离对照在同一 `IShellView`/文件夹对象上销毁并重建 `IShellView` 窗口后，列标题和值再次出现（`value-column-index=1`、目录/文件值 `1`/`4`），连续两轮结果一致；该路径重建期间没有额外读写视图状态流，说明恢复来自 view-window 生命周期重新初始化，而不是新序列化状态。代价是本探针的原选区/焦点没有保留，且总稳定时间约 2.8 秒；这不是用户可见刷新时长或性能保证。
+一个隔离对照在同一 `IShellView`/文件夹对象上销毁并重建 `IShellView` 窗口后，列标题和值再次出现（`value-column-index=1`、目录/文件值 `1`/`4`），连续两轮结果一致；该路径重建期间没有额外读写视图状态流，说明恢复来自 view-window 生命周期重新初始化，而不是新序列化状态。首次对照没有恢复选区/焦点，稳定过程约 2.8 秒。随后在销毁前用现有 `ShellViewSelectionSnapshot` 保存一项选中及焦点 PIDL，重建后先 `UIActivate(SVUIA_ACTIVATE_NOFOCUS)` 再恢复；连续两轮均恢复选中和焦点，列和值仍在，稳定过程约 344 ms。后一个数字包含本探针恢复与轮询时间，不是可见用户刷新时长或性能保证。
 
-该实验把问题收敛到“DefView 的窗口重建能重新绑定派生列 provider”，但还没有做可接受实现：必须在销毁前保存并在创建后恢复选区、焦点、滚动位置、列宽/顺序/排序、导航与快捷键焦点，并检查菜单、文件操作、拖放和通知等宿主合同。仅恢复列但丢失交互状态不可进入产品。ExplorerBrowser 产品未改；两轮 Private Desktop 探针都保持前台及输入不变且退出码 0，无可见 UI 验收。
+该实验把问题收敛到“DefView 的窗口重建能重新绑定派生列 provider”，并初步证明既有 PIDL 快照可恢复单项选区与项焦点；仍不是可接受实现。尚需覆盖多选、滚动位置、列宽/顺序/排序、导航与 HWND 键盘焦点，并检查重建后的菜单、文件操作、拖放和通知等宿主合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针保持前台及输入不变且退出码 0，无可见 UI 验收。
 
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
