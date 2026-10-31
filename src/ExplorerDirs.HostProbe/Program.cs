@@ -2863,6 +2863,26 @@ internal static class Program
                 if (deferredNotificationProbe && !deferredShellCopyProbe && rowsImmediatelyBeforeRefresh != beforeRefresh[pane])
                     throw new InvalidOperationException(
                         $"F5 timing probe became inconclusive before the refresh call: rows changed from {beforeRefresh[pane]} to {rowsImmediatelyBeforeRefresh} while normal Shell enumeration was restored.");
+                var flushNotificationObservation = "not-run";
+                if (deferredNotificationProbe &&
+                    Environment.GetEnvironmentVariable("EXPLORER_DIRS_PROBE_F5_FLUSH_NOTIFICATION") == "1")
+                {
+                    // Compare SHCNF_FLUSH delivery with the production F5 SHCNF_FLUSHNOWAIT route.
+                    // The notification is scoped to this probe's unique temporary fixture directory.
+                    var folderPath = Marshal.StringToCoTaskMemUni(folders[pane]);
+                    var flushClock = Stopwatch.StartNew();
+                    try { SHChangeNotify(0x00001000, 0x00001001, folderPath, IntPtr.Zero); }
+                    finally { Marshal.FreeCoTaskMem(folderPath); }
+                    flushClock.Stop();
+                    var rowsOnReturn = Count(hosts[pane]);
+                    var rowsAfter100Milliseconds = rowsOnReturn;
+                    if (rowsAfter100Milliseconds == rowsImmediatelyBeforeRefresh)
+                    {
+                        WaitForDelay(TimeSpan.FromMilliseconds(100));
+                        rowsAfter100Milliseconds = Count(hosts[pane]);
+                    }
+                    flushNotificationObservation = $"before={rowsImmediatelyBeforeRefresh};on-return={rowsOnReturn};after-100ms={rowsAfter100Milliseconds};call-ms={flushClock.ElapsedMilliseconds}";
+                }
                 manualRefresh.Invoke(hosts[pane], null);
                 var expectedItems = Directory.GetFiles(folders[pane]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 var deferredRefreshTimeline = new List<string>();
@@ -2922,7 +2942,7 @@ internal static class Program
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)
                     : string.Equals(focusBeforeRefresh, focusAfterRefresh, StringComparison.OrdinalIgnoreCase);
-                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} deferred-notification-probe={deferredNotificationProbe} deferred-shell-copy={deferredShellCopyProbe} shell-copy-order=[{string.Join('|', orderBeforeDeferredShellCopy)}]->[{string.Join('|', orderAfterDeferredShellCopy)}] soft-refresh-f5={softRefreshF5Rows}/{softRefreshF5Status};order=[{string.Join('|', softRefreshOrderBeforeF5 ?? [])}]->[{string.Join('|', softRefreshOrderAfterF5 ?? [])}] rows-before-refresh-call={rowsImmediatelyBeforeRefresh} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} completion-count={completionCountAtRefresh} completion-ms={completionAtRefreshMilliseconds} new-rows-ms={newRowsAtMilliseconds} refresh-timeline=[{string.Join(';', deferredRefreshTimeline)}] paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
+                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} deferred-notification-probe={deferredNotificationProbe} deferred-shell-copy={deferredShellCopyProbe} shell-copy-order=[{string.Join('|', orderBeforeDeferredShellCopy)}]->[{string.Join('|', orderAfterDeferredShellCopy)}] soft-refresh-f5={softRefreshF5Rows}/{softRefreshF5Status};order=[{string.Join('|', softRefreshOrderBeforeF5 ?? [])}]->[{string.Join('|', softRefreshOrderAfterF5 ?? [])}] rows-before-refresh-call={rowsImmediatelyBeforeRefresh} flush-notification={flushNotificationObservation} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} completion-count={completionCountAtRefresh} completion-ms={completionAtRefreshMilliseconds} new-rows-ms={newRowsAtMilliseconds} refresh-timeline=[{string.Join(';', deferredRefreshTimeline)}] paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
                 return refreshed && restorationSettled && selectionRestoredByRefresh && focusRestoredByRefresh && selectionPreserved && focusPreserved ? 0 : 1;
             }
