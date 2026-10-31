@@ -24,6 +24,12 @@ public static class SyntheticShellSortProbe
     private const int LvmGetItemState = LvmFirst + 44;
     private const int LvmGetTopIndex = LvmFirst + 39;
     private const int LvmGetItemTextW = LvmFirst + 115;
+    private const int WmSetRedraw = 0x000B;
+    private const uint RdwErase = 0x0004;
+    private const uint RdwFrame = 0x0400;
+    private const uint RdwInvalidate = 0x0001;
+    private const uint RdwAllChildren = 0x0080;
+    private const uint RdwUpdateNow = 0x0100;
     private const uint ShcneUpdatedir = 0x00001000;
     private const uint ShcneUpdateitem = 0x00002000;
     private const uint ShcneCreate = 0x00000002;
@@ -108,7 +114,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1159,6 +1165,11 @@ public static class SyntheticShellSortProbe
                     Check(At<RefreshView>(view, 8)(view)),
                     module, folderView, view, backingFolder, publishLiveSnapshot: true,
                     expectLiveRefresh: true, host: host);
+            if (strategyFilter == "full-view-refresh-redraw-live-cache-publish")
+                RunSizeUpdateStrategy("full-view-refresh-redraw-live-cache-publish", 1, () =>
+                    Check(At<RefreshView>(view, 8)(view)),
+                    module, folderView, view, backingFolder, publishLiveSnapshot: true,
+                    expectLiveRefresh: true, holdListViewRedrawUntilSettled: true, host: host);
             if (strategyFilter == "single-item-recreate-shell-window-multiselect")
                 RunSizeUpdateStrategy("single-item-recreate-shell-window-multiselect", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
@@ -1198,7 +1209,7 @@ public static class SyntheticShellSortProbe
         nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
         string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
         bool reapplyCapturedColumns = false, bool publishLiveSnapshot = false,
-        bool expectLiveRefresh = false)
+        bool expectLiveRefresh = false, bool holdListViewRedrawUntilSettled = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -1269,6 +1280,7 @@ public static class SyntheticShellSortProbe
         var streamWritesBefore = host?.Writes ?? 0;
         var streamTraceBefore = host?.ViewStateStreamTrace.Count ?? 0;
         var mapCallsBeforeNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
+        using var redrawLease = holdListViewRedrawUntilSettled ? new NativeListViewRedrawLease(listView) : null;
         var notificationStarted = Environment.TickCount64;
         notify();
         var mapCallsAfterNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
@@ -3172,8 +3184,32 @@ public static class SyntheticShellSortProbe
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, StringBuilder name, int maxCount);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProcedure callback, nint parameter);
+    private sealed class NativeListViewRedrawLease : IDisposable
+    {
+        private nint _listView;
+
+        internal NativeListViewRedrawLease(nint listView)
+        {
+            if (listView == 0) throw new ArgumentException("The DefView ListView HWND is required.", nameof(listView));
+            _listView = listView;
+            _ = SendMessageW(_listView, WmSetRedraw, 0, 0);
+            Console.WriteLine($"synthetic-size-update-redraw: disabled=True; syssetredraw={GetPropW(_listView, "SysSetRedraw") != 0}");
+        }
+
+        public void Dispose()
+        {
+            var listView = Interlocked.Exchange(ref _listView, 0);
+            if (listView == 0) return;
+            _ = SendMessageW(listView, WmSetRedraw, 1, 0);
+            _ = RedrawWindow(listView, 0, 0, RdwErase | RdwFrame | RdwInvalidate | RdwAllChildren | RdwUpdateNow);
+            Console.WriteLine($"synthetic-size-update-redraw: disabled=False; syssetredraw={GetPropW(listView, "SysSetRedraw") != 0}; forced-redraw=True");
+        }
+    }
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetPropW(nint window, string name);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, ref NativeHeaderItem item);
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool RedrawWindow(nint window, nint updateRect, nint updateRegion, uint flags);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetClientRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);

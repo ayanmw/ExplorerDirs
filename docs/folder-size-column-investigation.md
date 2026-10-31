@@ -1163,4 +1163,8 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 
 为寻找比完整 `IShellView::Refresh` 更局部的派生列更新方式，增加隔离 `single-item-lvm-update-live-cache-publish` 对照：先用生产递归扫描器重新统计 `child` 为 `1 B` 并发布到当前 provider 身份缓存，再向对应 DefView `SysListView32` 行发送 `LVM_UPDATE`。WPF `HwndSource` Private Desktop watchdog 退出码 0，前台 HWND 与最后输入 tick 未变，`isolation-clean=True`。`LVM_UPDATE` 返回 0；2.5 秒观察内 `EnumObjects=0`、大小属性读取和比较均为 0、视图仍按旧值排序，递归大小列不可读，选区/焦点仍保留。返回值 0 本身不作成功/失败依据，结论来自视图行、排序和 provider 调用计数。
 
-同一源代码、同一隔离宿主的 `full-view-refresh-live-cache-publish` 对照重新枚举 2 行，列值从 `[10|4]` 更新为 `[4|1]`，排序改为 `small.bin|child`，但 `selection-focus-preserved=False`；Private Desktop 前台/输入/清理守卫与 NativeProbe Release build 通过。此结果说明当前合成 DefView 需要完整刷新才能消费已发布的派生大小值，针对 ListView 单行的重绘消息不足。它不是产品 ExplorerBrowser 的刷新表现或可见闪烁测量；下一步应在隔离原型中继续找能让 DefView 重取该 provider 列值且保留视图状态的受支持路径，不把 `LVM_UPDATE` 接入产品，也不据此批准宿主迁移。
+同一源代码、同一隔离宿主的 `full-view-refresh-live-cache-publish` 对照重新枚举 2 行，列值从 `[10|4]` 更新为 `[4|1]`，排序改为 `small.bin|child`。刷新后的首次读回中选择/焦点暂时缺失；随后现有 `ShellViewSelectionSnapshot` 恢复并读回 `refresh-restore-selection=True`、`refresh-restore-focus=True`。先前记录中把首次读回状态误写成最终状态，现更正：完整刷新加快照恢复在该隔离样本中保留了选择和焦点。Private Desktop 前台/输入/清理守卫与 NativeProbe Release build 通过。此结果说明当前合成 DefView 需要完整刷新才能消费已发布的派生大小值，针对 ListView 单行的重绘消息不足。它不是产品 ExplorerBrowser 的刷新表现或可见闪烁测量；下一步应在隔离原型中检查绘制抑制是否能减少过渡帧，并继续验证其它 provider，不把实验接入产品或据此批准宿主迁移。
+
+### 2026-11-01：完整刷新期间暂缓 ListView 绘制
+
+在上述完整刷新策略上增加 `full-view-refresh-redraw-live-cache-publish` 对照：发送 ListView `WM_SETREDRAW(FALSE)`，执行 `IShellView.Refresh()`，等待新大小及排序读回，再恢复绘制并按 Microsoft 文档使用 `RedrawWindow(RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW)`。本机 Private Desktop WPF probe exit 0；刷新后列值 `[4|1]`、排序 `small.bin|child`，快照恢复选择/焦点读回成功。单项绘制属性 `SysSetRedraw` 没有出现在 HWND 属性表中，因此不能由该属性确认控件是否实际暂停绘制；目前也没有采集刷新过程像素。该实验只证明消息调用顺序与刷新/状态恢复可共存，不证明白/黑过渡帧已消失或用户可见体验改善，需另做隔离像素/可见验收。[Microsoft WM_SETREDRAW 文档](https://learn.microsoft.com/windows/win32/gdi/wm-setredraw)
