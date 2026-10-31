@@ -1,4 +1,6 @@
 # 路线图
+2026-11-01 Q-Dir 官方能力清单复核：官方帮助页分别列出 Color Filter、Highlight-Filter 与 File-Filter；其中 Highlight-Filter 只说明“按扩展名高亮文件”，未公开具体视觉、作用域和 `.qdr` 存储语义。已在[功能差距表](shell-parity.md)单列该项，等待集中 Q-Dir 可见验收后再定实现，不以现有快速筛选或颜色规则冒充完成。[Q-Dir Help](https://www.softwareok.com/?seite=Freeware/Q-Dir/Help+file)
+
 2026-11-01 全量 SettingsSmoke 复核：之前递归扫描记录中提到的 Soft-Refresh 文案断言不再是当前失败；现有断言匹配菜单名称与“不重枚举/防止自动重排”提示。完整 `dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release` 本轮退出码 0，包含 Soft-refresh routing smoke；没有启动 Shell view 或 GUI。旧记录保留为当时观察，不代表当前套件仍失败。
 
 2026-11-01 主线集中验收候选已重新准备至当前干净提交 `8c5c0b817c360559aa6fc6eaf9aa03e31d25f8a8`：隔离副本 `src/.state/gui-smoke/20261031-185116-405-bf7d5e/` 状态为 `prepared-not-run`，四窗格布局，47 项待验收。EXE 与 App DLL 哈希和 `preparation.json` 一致；准备时未启动窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile。候选涵盖 F5/查看方式、键盘与文件操作焦点、克隆/标签、Q-Dir 标签组与 `.qdr`、主题、筛选、Soft-Refresh 及系统入口；`.qdr` 预览格式不匹配时文件处置仍等 Q-Dir 验收后决定。固定身份见[当前集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
