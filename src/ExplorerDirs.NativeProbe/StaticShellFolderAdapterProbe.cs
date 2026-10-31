@@ -126,6 +126,7 @@ internal static class StaticShellFolderAdapterProbe
                 finally { Marshal.Release(rawEnumerator); }
 
                 var enumerate = At<EnumObjects>(adapter, 4);
+                VerifyWrappedEnumeratorCacheRetry(enumerate, adapter, nativeLibrary);
                 var enumHr = enumerate(adapter, 0, 0x60, out var enumerator);
                 if (enumHr < 0) throw new Exception($"Wrapped EnumObjects failed: 0x{enumHr:X8}.");
                 try
@@ -1853,6 +1854,38 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
+    private static void VerifyWrappedEnumeratorCacheRetry(EnumObjects enumerate, nint adapter, nint nativeLibrary)
+    {
+        nint baselineEnumerator = 0, retryEnumerator = 0, baselineChild = 0, retryChild = 0;
+        try
+        {
+            Check(enumerate(adapter, 0, 0x60, out baselineEnumerator));
+            var baselineHr = At<EnumNext>(baselineEnumerator, 3)(baselineEnumerator, 1, out baselineChild, out var baselineFetched);
+            if (baselineHr < 0 || baselineFetched != 1 || baselineChild == 0)
+                throw new Exception($"Could not capture baseline wrapped PIDL before cache failure injection: hr=0x{baselineHr:X8}, fetched={baselineFetched}.");
+
+            Check(enumerate(adapter, 0, 0x60, out retryEnumerator));
+            Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+                NativeLibrary.GetExport(nativeLibrary, "FailNextWrappedEnumeratorCacheInsertForProbe"))();
+            var injectedHr = At<EnumNext>(retryEnumerator, 3)(retryEnumerator, 1, out var injectedChild, out var injectedFetched);
+            if (injectedChild != 0) ILFree(injectedChild);
+            if (injectedHr != unchecked((int)0x8007000E) || injectedFetched != 0)
+                throw new Exception($"Wrapped enumerator cache failure injection did not fail before delivering an item: hr=0x{injectedHr:X8}, fetched={injectedFetched}.");
+
+            var retryHr = At<EnumNext>(retryEnumerator, 3)(retryEnumerator, 1, out retryChild, out var retryFetched);
+            if (retryHr < 0 || retryFetched != 1 || retryChild == 0 || !ILIsEqual(baselineChild, retryChild))
+                throw new Exception($"Wrapped enumerator lost or changed the child after a cache insertion failure: hr=0x{retryHr:X8}, fetched={retryFetched}.");
+            Console.WriteLine("wrapped enumerator allocation retry: first child preserved after injected cache insertion failure");
+        }
+        finally
+        {
+            if (retryChild != 0) ILFree(retryChild);
+            if (baselineChild != 0) ILFree(baselineChild);
+            if (retryEnumerator != 0) Marshal.Release(retryEnumerator);
+            if (baselineEnumerator != 0) Marshal.Release(baselineEnumerator);
+        }
+    }
+
     private static void VerifyWrappedShellItemObjects(nint adapter, nint child)
     {
         var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
@@ -2407,6 +2440,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumSkip(nint self, uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumReset(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProbeFlag();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref NativeFormatEtc format, out NativeStorageMedium medium);

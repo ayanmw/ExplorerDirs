@@ -108,6 +108,7 @@ namespace
     volatile LONG g_propertyStoreFactoryCreateRequests = 0;
     volatile LONG g_propertyStoreValueRequests = 0;
     volatile LONG g_propertyStoreFactoryProbeEnabled = 0;
+    volatile LONG g_failNextWrappedEnumeratorCacheInsert = 0;
 
     // Diagnostic-only property path: DefView ignored GetDetailsEx for extra
     // columns, so this probe can expose a known-schema test value through the
@@ -359,6 +360,14 @@ namespace
             std::lock_guard<std::mutex> lock(_gate);
             while (index >= _items.size() && !_exhausted)
             {
+                if (_pending)
+                {
+                    try { _items.push_back(_pending); }
+                    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+                    _pending = nullptr;
+                    continue;
+                }
+
                 PITEMID_CHILD next = nullptr;
                 ULONG fetched = 0;
                 const auto result = _inner->Next(1, &next, &fetched);
@@ -375,19 +384,16 @@ namespace
                 }
                 if (!next) return E_UNEXPECTED;
 
-                const auto size = ILGetSize(next);
-                auto* copy = size ? static_cast<PIDLIST_RELATIVE>(CoTaskMemAlloc(size)) : nullptr;
-                if (!copy)
+                if (InterlockedExchange(&g_failNextWrappedEnumeratorCacheInsert, 0) != 0)
                 {
-                    CoTaskMemFree(next);
+                    // The inner enumerator already advanced; keep its PIDL for the caller's retry.
+                    _pending = next;
                     return E_OUTOFMEMORY;
                 }
-                CopyMemory(copy, next, size);
-                CoTaskMemFree(next);
-                try { _items.push_back(copy); }
+                try { _items.push_back(next); }
                 catch (const std::bad_alloc&)
                 {
-                    CoTaskMemFree(copy);
+                    _pending = next;
                     return E_OUTOFMEMORY;
                 }
             }
@@ -404,12 +410,14 @@ namespace
         ~WrappedEnumIdListState()
         {
             for (auto* item : _items) CoTaskMemFree(item);
+            if (_pending) CoTaskMemFree(_pending);
             if (_inner) _inner->Release();
         }
         volatile LONG _refs = 1;
         IEnumIDList* _inner = nullptr;
         std::mutex _gate;
         std::vector<PIDLIST_RELATIVE> _items;
+        PIDLIST_RELATIVE _pending = nullptr;
         bool _exhausted = false;
     };
 
@@ -1265,6 +1273,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateWrappedPidlShellFolderAdap
     if (!instance) return E_OUTOFMEMORY;
     *adapter = instance;
     return S_OK;
+}
+extern "C" __declspec(dllexport) void WINAPI FailNextWrappedEnumeratorCacheInsertForProbe()
+{
+    InterlockedExchange(&g_failNextWrappedEnumeratorCacheInsert, 1);
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
     IShellView* view, IShellFolder2* adapter, BOOL* matches)
