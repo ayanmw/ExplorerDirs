@@ -750,4 +750,6 @@ Shell 行模型的解析名在重命名时变化，普通重枚举会分配新 r
 
 NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临时目录构造 6 B 直接文件和 4 B 嵌套文件。生产 `RecursiveDirectoryScanner` 汇总为 10 B、2 files、1 folder；同一夹具交给隔离合成 `IShellFolder2` 合同，验证 `PKEY_Size` 的 `VT_UI8`、详细信息文本、数值排序，以及嵌套枚举/文件操作合同。完整合同退出码 0，`window-created=False`。
 
-这确认生产扫描器与原生 Shell 列原型对该夹具的数值一致，但两者仍是分别计算，没有把扫描结果接入原生 provider 的运行时数据管线。尝试让普通文件系统适配器为目录返回递归 `PKEY_Size` 得到 `E_FAIL`，说明不能依赖该适配器路径提供此派生列；也不应将这个单次 HRESULT 泛化为所有 Shell provider 的行为。产品未改，列显示、后台扫描生命周期和排序仍未接入产品；IShellView/自有视图迁移仍需菜单、拖放、通知、焦点、虚拟位置及可见行为评估。
+本轮把扫描结果接入了隔离原生 provider 的快照输入：两条兄弟目录的初值 10 B/12 B、磁盘变化后的重扫值 7 B/12 B 均由生产 `RecursiveDirectoryScanner` 生成，再由 NativeProbe 的原生列缓存验证行身份、属性文本、数值排序、PIDL 重枚举及 provider 重建后的读取。输出明确记录 `scanner-bytes=10/12`、`rescanned-bytes=7/12` 和 `provider-recreation=retained`；合同退出码 0，`window-created=False`。这证明扫描值可被隔离 provider 消费，不证明产品视图的异步扫描发布或 Shell 通知接线。
+
+尝试让普通文件系统适配器为目录返回递归 `PKEY_Size` 得到 `E_FAIL`，说明不能依赖该适配器路径提供此派生列；也不应将这个单次 HRESULT 泛化为所有 Shell provider 的行为。产品未改，列显示、后台扫描生命周期和排序仍未接入产品；IShellView/自有视图迁移仍需菜单、拖放、通知、焦点、虚拟位置及可见行为评估。

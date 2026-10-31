@@ -4,7 +4,7 @@
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
 
-2026-10-31 逐行文件夹大小快照跨 provider 重建合同：NativeProbe 的扫描快照表现为可共享、引用计数的 store；provider 嵌套绑定复用同一 store，probe 则保留 store、销毁 provider 后用同一 store 构造新 provider。新 provider 重新解析 sibling PIDL 后仍读到独立的 6 B/12 B 值和正确数值排序。原生 DLL 构建及 `--static-shell-column-folder-smoke` 通过，输出 `provider-recreation=retained`，没有创建 Shell view 窗口。证据只证明外部 owner 可以跨 provider 生命周期保留并复用 store；产品 owner 注入、Shell class factory 生命周期、生产 `ShellListViewRowModel`/异步扫描发布、DefView 列更新和可见交互仍未验证。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31扫描快照跨-provider-重建)。
+2026-10-31 逐行文件夹大小快照跨 provider 重建合同：NativeProbe 的扫描快照表现为可共享、引用计数的 store；provider 嵌套绑定复用同一 store，probe 则保留 store、销毁 provider 后用同一 store 构造新 provider。当前合同的初始值和变更后值均由生产扫描器生成：两条 sibling PIDL 的缓存为 10/12 B，重扫后为 7/12 B；新 provider 重新解析 PIDL 后仍读回更新值及正确数值排序。原生 DLL 构建及 `--static-shell-column-folder-smoke` 通过，输出 `provider-recreation=retained`，没有创建 Shell view 窗口。证据只证明隔离 probe 可把扫描结果跨 provider 生命周期保留并复用；产品 owner 注入、Shell class factory 生命周期、生产 `ShellListViewRowModel`/异步扫描发布、DefView 列更新和可见交互仍未验证。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31扫描快照跨-provider-重建)。
 
 2026-10-31 temp.80 同 PID 被动内存复采：PID `47460` 持续存活，13 点覆盖 60.20 秒，Working Set 固定 `234,713,088 B`、Private Bytes 固定 `121,180,160 B`，句柄/线程/GDI/USER 计数也不变。没有固定文件浏览负载或托管堆/原生分配采样，因此只说明此分钟无进程计数变化，不能排除操作期间或长期增长。完整身份、原始 CSV 哈希与限制见[内存采样记录](memory-sampling.md#2026-10-31-0821-北京时间temp80-同一-pid-一分钟只读采样)。
 
@@ -5112,4 +5112,4 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ## 2026-10-31：递归大小隔离 Shell 列合同复核
 
 - 无窗口 NativeProbe 使用同一真实临时目录分别核对生产递归扫描器与合成 `IShellFolder2` 原型：扫描结果为 10 B、2 files、1 folder；Shell 原型的 `PKEY_Size`、大小文本和数值排序合同通过，嵌套枚举/文件操作合同也通过。
-- 普通文件系统适配器对目录递归 `PKEY_Size` 请求返回 `E_FAIL`，此路径不可用于提供派生列；单次结果不外推到所有 Shell provider。当前仅证明同一夹具值一致，扫描器结果尚未动态注入 provider；产品 ExplorerBrowser 未改。完整范围见[派生大小列调查](folder-size-column-investigation.md#2026-10-31生产扫描结果与-shell-递归大小列合同对照)。
+- 普通文件系统适配器对目录递归 `PKEY_Size` 请求返回 `E_FAIL`，此路径不可用于提供派生列；单次结果不外推到所有 Shell provider。更新后的隔离合同由生产扫描器为两条兄弟目录生成 10/12 B 初值、磁盘变化后重扫为 7/12 B，再交给原生缓存验证属性文本、数值排序、PIDL 重枚举及 provider 重建；Release NativeProbe build 与 `--static-shell-column-folder-smoke` 通过，`window-created=False`。这只验证 scanner → 隔离 provider 的数据消费，不含产品异步扫描发布、Shell 通知或可见列；ExplorerBrowser 产品未改。完整范围见[派生大小列调查](folder-size-column-investigation.md#2026-10-31生产扫描结果与-shell-递归大小列合同对照)。

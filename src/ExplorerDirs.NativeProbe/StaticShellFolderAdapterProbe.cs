@@ -1959,22 +1959,34 @@ internal static class StaticShellFolderAdapterProbe
             File.WriteAllBytes(Path.Combine(projectionFixture, "other-child", "other.txt"), "other-value!"u8.ToArray());
             File.WriteAllBytes(Path.Combine(projectionFixture, "root.txt"), "12345678"u8.ToArray());
             var projectionChildPath = Path.Combine(projectionFixture, "child");
+            var projectionOtherChildPath = Path.Combine(projectionFixture, "other-child");
             var projectionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                projectionFixture, [projectionChildPath], CancellationToken.None);
-            if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) || snapshot.Bytes != 10)
-                throw new InvalidOperationException("The injected recursive-size snapshot did not scan to 10 bytes.");
+                projectionFixture, [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
+            if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) || snapshot.Bytes != 10 ||
+                !projectionScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var otherSnapshot) || otherSnapshot.Bytes != 12)
+                throw new InvalidOperationException("The injected recursive-size snapshots did not scan to 10 and 12 bytes.");
             var childParsingName = GetAbsoluteParsingName(projectionChildPath);
-            var otherChildParsingName = GetAbsoluteParsingName(Path.Combine(projectionFixture, "other-child"));
+            var otherChildParsingName = GetAbsoluteParsingName(projectionOtherChildPath);
 
-            // Make the on-disk size differ after scanning so the native assertion proves the scan snapshot was passed in.
+            // Re-scan after the file change so the updated native values come from the production scanner too.
             File.WriteAllBytes(nestedFile, "x"u8.ToArray());
+            var updatedScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                projectionFixture, [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
+            if (!updatedScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var updatedSnapshot) || updatedSnapshot.Bytes != 7 ||
+                !updatedScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var updatedOtherSnapshot) || updatedOtherSnapshot.Bytes != 12)
+                throw new InvalidOperationException("The changed recursive-size snapshots did not scan to 7 and 12 bytes.");
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke"))(
                     projectionFixture, childParsingName, checked((long)snapshot.Bytes)));
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityCacheSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityCacheSmoke"))(
-                    projectionFixture, childParsingName, otherChildParsingName, checked((long)snapshot.Bytes), 12, 6));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; same-pidl-update=6B/text/property/sort-passed; re-enumerated-pidl-retained=passed; provider-recreation=retained; window-created=False");
+                    projectionFixture, childParsingName, otherChildParsingName, checked((long)snapshot.Bytes),
+                    checked((long)otherSnapshot.Bytes), checked((long)updatedSnapshot.Bytes)));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}/{otherSnapshot.Bytes}; " +
+                $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; disk-child-bytes=7; " +
+                "native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; " +
+                "same-pidl-update=rescan-value/text/property/sort-passed; re-enumerated-pidl-retained=passed; " +
+                "provider-recreation=retained; window-created=False");
         }
         finally
         {
