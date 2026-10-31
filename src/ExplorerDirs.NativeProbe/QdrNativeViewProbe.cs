@@ -263,6 +263,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
     }
     internal int Reads;
     internal int Writes;
+    internal List<string> ViewStateStreamTrace { get; } = [];
     private nint _savedStream;
     private bool _disposed;
     internal byte[] ReadSavedBytes()
@@ -514,6 +515,7 @@ public class StreamViewHost : IStreamProbeBrowser, IStreamProbeOleInPlaceFrame, 
         if (write) Writes++;
         // Read-write callers need the latest snapshot as their initial stream contents, then may replace it in place.
         var bytes = read ? GetReadStateBytes() : [];
+        ViewStateStreamTrace.Add($"mode={mode}; access={access}; initial-bytes={bytes.Length}; initial-sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))}");
         stream = SHCreateMemStream(bytes, (uint)bytes.Length);
         if (write && stream != 0)
         {

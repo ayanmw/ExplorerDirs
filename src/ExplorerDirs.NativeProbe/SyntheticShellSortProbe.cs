@@ -84,7 +84,7 @@ public static class SyntheticShellSortProbe
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-recreate-shell-window" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var syntheticFolderClassId = Guid.NewGuid();
@@ -277,7 +277,9 @@ public static class SyntheticShellSortProbe
                     return 1;
                 if (exerciseUpdateNotifications)
                     ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder,
-                        sizeUpdateStrategy, customSizeColumn);
+                        sizeUpdateStrategy, customSizeColumn, host, hostPointer);
+                var savedViewState = host?.ReadSavedBytes() ?? [];
+                Console.WriteLine($"synthetic-view-state-stream: reads={host?.Reads ?? 0}; writes={host?.Writes ?? 0}; trace=[{string.Join(" || ", host?.ViewStateStreamTrace ?? [])}]; saved-bytes={savedViewState.Length}; saved-sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(savedViewState))}");
                 ReportProbeStage("assertions-complete");
                 return 0;
             }
@@ -750,7 +752,8 @@ public static class SyntheticShellSortProbe
     }
 
     private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint folderView, nint view,
-        nint rootPidl, string backingFolder, string strategyFilter, bool customSizeColumn)
+        nint rootPidl, string backingFolder, string strategyFilter, bool customSizeColumn, StreamViewHost host,
+        nint hostPointer)
     {
         if (!customSizeColumn)
             throw new InvalidOperationException("Recursive-size notifications require the synthetic custom size column.");
@@ -766,26 +769,36 @@ public static class SyntheticShellSortProbe
             if (strategyFilter == "single-item")
                 RunSizeUpdateStrategy("single-item", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
-                    module, folderView, view, backingFolder);
+                    module, folderView, view, backingFolder, host: host);
             if (strategyFilter == "single-item-reapply-column")
                 RunSizeUpdateStrategy("single-item-reapply-column", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
-                    module, folderView, view, backingFolder, reapplyCustomSizeColumn: true);
+                    module, folderView, view, backingFolder, reapplyCustomSizeColumn: true, host: host);
+            if (strategyFilter == "single-item-reapply-column-recreate-view")
+                RunSizeUpdateStrategy("single-item-reapply-column-recreate-view", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, reapplyCustomSizeColumn: true,
+                    recreateDetailsView: true, host: host);
+            if (strategyFilter == "single-item-recreate-shell-window")
+                RunSizeUpdateStrategy("single-item-recreate-shell-window", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, recreateShellWindow: true,
+                    host: host, hostPointer: hostPointer);
             if (strategyFilter == "item-plus-parent")
                 RunSizeUpdateStrategy("item-plus-parent", 1, () =>
                 {
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
                     SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
-                }, module, folderView, view, backingFolder);
+                }, module, folderView, view, backingFolder, host: host);
             if (strategyFilter == "delete-create")
                 RunSizeUpdateStrategy("delete-create", 1, () =>
                 {
                     SHChangeNotify(ShcneDelete, 0, absoluteChildPidl, 0);
                     SHChangeNotify(ShcneCreate, 0, absoluteChildPidl, 0);
-                }, module, folderView, view, backingFolder);
+                }, module, folderView, view, backingFolder, host: host);
             if (strategyFilter == "full-view-refresh")
                 RunSizeUpdateStrategy("full-view-refresh", 1, () =>
-                    Check(At<RefreshView>(view, 8)(view)), module, folderView, view, backingFolder);
+                    Check(At<RefreshView>(view, 8)(view)), module, folderView, view, backingFolder, host: host);
         }
         finally
         {
@@ -794,7 +807,9 @@ public static class SyntheticShellSortProbe
     }
 
     private static void RunSizeUpdateStrategy(string name, long updatedSize, Action notify,
-        nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false)
+        nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
+        bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
+        nint hostPointer = 0)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -815,6 +830,9 @@ public static class SyntheticShellSortProbe
         var detailsBefore = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesBefore = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesBefore = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
+        var streamReadsBefore = host?.Reads ?? 0;
+        var streamWritesBefore = host?.Writes ?? 0;
+        var streamTraceBefore = host?.ViewStateStreamTrace.Count ?? 0;
         var notificationStarted = Environment.TickCount64;
         notify();
 
@@ -833,6 +851,21 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}");
             if (reapplyResult != 0)
                 throw new COMException($"Could not explicitly restore the recursive-size column after '{name}'.", reapplyResult);
+            if (recreateDetailsView)
+            {
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 1, 16)); // FVM_ICON.
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // FVM_DETAILS.
+                Pump(250);
+            }
+        }
+        if (recreateShellWindow)
+        {
+            Check(At<DestroyViewWindow>(view, 10)(view));
+            var settings = new StreamProbeSettings { Mode = 4 };
+            var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
+            Pump(250);
+            listView = FindListView(view);
         }
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: "small.bin", expectedSelection: "small.bin");
@@ -849,7 +882,9 @@ public static class SyntheticShellSortProbe
         var detailsAfter = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
+        var streamTraceAfter = host?.ViewStateStreamTrace.Skip(streamTraceBefore).ToArray() ?? [];
         Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{string.Join('|', after.Names)}]; sizes=[{string.Join('|', after.Sizes)}]");
+        Console.WriteLine($"synthetic-size-update-stream: strategy={name}; reads-delta={(host?.Reads ?? 0) - streamReadsBefore}; writes-delta={(host?.Writes ?? 0) - streamWritesBefore}; calls=[{string.Join(" || ", streamTraceAfter)}]");
     }
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)

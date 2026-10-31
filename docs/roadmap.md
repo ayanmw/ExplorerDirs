@@ -5153,6 +5153,10 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `10`/文件 `4`；通知后 DefView 重新枚举，却丢失自定义列且没有再次请求行值。前台 HWND 未变，但系统输入 tick 变化，故该轮 exit 1，只作为诊断线索；本轮临时注册和夹具已清理。此前干净探针与 API 核对已指出 DefView 缺少受支持的逐项派生值失效入口，不再增加通知或 ListView 消息变体。该功能仍未接入产品；后续需转向评审自有视图模型及其完整 Shell 兼容门槛。
 
+### 2026-10-31：IShellView 派生列恢复原型的新证据
+
+两轮干净 Private Desktop 探针显示：目录更新后重设列和切换查看方式都不能让 DefView 刷新派生列；销毁并重建同一 `IShellView` 的窗口可恢复列和值，但当前会丢失选区/焦点，稳定时间约 2.8 秒。该原型仍不能进产品；下一步评估能否恢复选区、焦点、滚动位置、列与焦点导航，并覆盖窗口重挂载后的菜单、操作、拖放和通知合同。详见[派生大小列调查](folder-size-column-investigation.md#2026-10-31隔离复查视图状态流与-defview-窗口重建)。
+
 ### 2026-10-31：filesystem `IShellFolder` 背景菜单能力边界
 
 无窗口 probe 在真实临时文件夹上通过 `IShellFolder::CreateViewObject(IContextMenu)` 取得并构造 21 项内存菜单，包含第三方扩展、“新建”和“属性”，未包含“查看、排序、分组、刷新”；没有创建 Shell view 或显示菜单。此接口不能替代 Explorer 视图级背景菜单，自有行列表仍缺受支持的原生 View 菜单/命令来源。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-31普通文件夹的-shell-背景菜单来源)。
