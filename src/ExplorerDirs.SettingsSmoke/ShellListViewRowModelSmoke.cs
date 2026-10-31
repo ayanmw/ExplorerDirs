@@ -142,6 +142,18 @@ internal static class ShellListViewRowModelSmoke
                   staleScan[0].FileSystemIdentity == replacementIdentity,
                 "a scan result for a retired row is rejected after its path now identifies another folder");
 
+            var unverifiedFolder = retiredFolder with { FileSystemIdentity = null };
+            var unverifiedReplacementScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
+                [unverifiedFolder],
+                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [identityPath] = new(666, 1, 0, 0)
+                });
+            Check(unverifiedReplacementScan[0].RecursiveBytes is null &&
+                  unverifiedReplacementScan[0].RecursiveSummary is null &&
+                  unverifiedReplacementScan[0].FileSystemIdentity == replacementIdentity,
+                "a path-only result is rejected when the row identity was unavailable at enumeration time");
+
             var missingIdentityPath = Path.Combine(identityRoot, "missing-after-scan");
             var movedAwayPath = Path.Combine(identityRoot, "moved-away");
             Directory.CreateDirectory(missingIdentityPath);
