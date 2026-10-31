@@ -2900,6 +2900,8 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"ishellview-zip-iFileOperation-copy-collision-silent-flags: perform-hresult=0x{performResult:X8};aborted={aborted};existing-target-bytes=[{Convert.ToHexString(originalTargetBytes)}];existing-target-preserved={originalPreserved};target-overwritten={targetOverwritten};generated-copy={Path.GetFileName(copiedFiles.FirstOrDefault() ?? string.Empty)};destination=[{destinationSnapshot}];source-view-preserved={sourcePreserved};foreground-unchanged={foregroundUnchanged}");
             if (aborted != 0 || !targetOverwritten || !sourcePreserved || !foregroundUnchanged)
                 throw new IOException("The silent ZIP CopyItems collision observation did not match the recorded overwrite behavior or disturbed its source/foreground guards.");
+            ObserveCrossVolumeCopy(dataObject, fixture, "blue-rule-target.txt", [0x41], null,
+                folderView, sourceCount, foreground, "zip");
         }
         finally
         {
@@ -2962,6 +2964,9 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"ishellview-filesystem-iFileOperation-copy-collision-silent-flags: perform-hresult=0x{performResult:X8};aborted={aborted};existing-target-bytes=[{Convert.ToHexString(originalTargetBytes)}];existing-target-preserved={originalPreserved};generated-copy={Path.GetFileName(copiedFiles.FirstOrDefault() ?? string.Empty)};generated-copy-valid={collisionCopyValid};destination=[{destinationSnapshot}];foreground-unchanged={foregroundUnchanged}");
             if (aborted != 0 || !originalPreserved || !collisionCopyValid || !foregroundUnchanged)
                 throw new IOException("Filesystem CopyItems did not preserve the existing target and create a valid collision-renamed copy under the silent flags.");
+            ObserveCrossVolumeCopy(dataObject, fixture, "blue-rule-target.txt", [0x41], sourcePath,
+                0, 0, foreground, "filesystem");
+            ObserveFilesystemCrossVolumeMove(dataObject, fixture, sourcePath, foreground);
         }
         finally
         {
@@ -2972,6 +2977,118 @@ internal static class ShellViewColorSpike
             if (childArray != 0) Marshal.FreeHGlobal(childArray);
             if (parentPidl != 0) Marshal.FreeCoTaskMem(parentPidl);
             if (sourcePidl != 0) Marshal.FreeCoTaskMem(sourcePidl);
+        }
+    }
+
+    private static void ObserveCrossVolumeCopy(nint dataObject, string sourceFixture, string itemName,
+        byte[] expectedBytes, string? filesystemSourcePath, nint sourceView, int sourceCount,
+        nint foreground, string provider)
+    {
+        var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourceFixture));
+        var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+        var destinationRoot = Path.GetPathRoot(temporaryRoot);
+        if (string.Equals(sourceRoot, destinationRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"ishellview-{provider}-iFileOperation-copy-cross-volume: available=False;reason=same-volume-roots;source-root={sourceRoot};destination-root={destinationRoot}");
+            return;
+        }
+
+        nint destination = 0, operation = 0;
+        var destinationPath = Path.GetFullPath(Path.Combine(temporaryRoot,
+            $".cross-volume-copy-probe-{Guid.NewGuid():N}"));
+        var fixtureRoot = temporaryRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!destinationPath.StartsWith(fixtureRoot, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(destinationPath, fixtureRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The cross-volume fixture path escaped the system temporary directory.");
+
+        try
+        {
+            Directory.CreateDirectory(destinationPath);
+            var shellItemId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
+            Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
+            var performResult = At<PerformOperations>(operation, 21)(operation);
+            Check(performResult);
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var copiedPath = Path.Combine(destinationPath, itemName);
+            var copiedBytes = File.Exists(copiedPath) ? File.ReadAllBytes(copiedPath) : [];
+            var targetValid = copiedBytes.SequenceEqual(expectedBytes);
+            var sourcePreserved = filesystemSourcePath is not null
+                ? File.Exists(filesystemSourcePath) && File.ReadAllBytes(filesystemSourcePath).SequenceEqual(expectedBytes)
+                : GetShellViewItemCount(sourceView) == sourceCount;
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            var destinationEntries = string.Join('|', Directory.GetFileSystemEntries(destinationPath)
+                .Select(Path.GetFileName));
+            Console.WriteLine($"ishellview-{provider}-iFileOperation-copy-cross-volume: source-root={sourceRoot};destination-root={destinationRoot};perform-hresult=0x{performResult:X8};aborted={aborted};target-valid={targetValid};source-preserved={sourcePreserved};destination-entries=[{destinationEntries}];foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || !targetValid || !sourcePreserved || !foregroundUnchanged ||
+                Directory.GetFileSystemEntries(destinationPath).Length != 1)
+                throw new IOException($"Cross-volume {provider} CopyItems did not copy the expected item while preserving the source and foreground guards.");
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destination != 0) Marshal.Release(destination);
+            if (Directory.Exists(destinationPath)) Directory.Delete(destinationPath, recursive: true);
+        }
+    }
+
+    private static void ObserveFilesystemCrossVolumeMove(nint dataObject, string sourceFixture,
+        string sourcePath, nint foreground)
+    {
+        var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourceFixture));
+        var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+        var destinationRoot = Path.GetPathRoot(temporaryRoot);
+        if (string.Equals(sourceRoot, destinationRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"ishellview-filesystem-iFileOperation-move-cross-volume: available=False;reason=same-volume-roots;source-root={sourceRoot};destination-root={destinationRoot}");
+            return;
+        }
+
+        nint destination = 0, operation = 0;
+        var destinationPath = Path.GetFullPath(Path.Combine(temporaryRoot,
+            $".cross-volume-move-probe-{Guid.NewGuid():N}"));
+        var fixtureRoot = temporaryRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!destinationPath.StartsWith(fixtureRoot, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(destinationPath, fixtureRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The cross-volume move fixture path escaped the system temporary directory.");
+
+        var expectedBytes = File.ReadAllBytes(sourcePath);
+        try
+        {
+            Directory.CreateDirectory(destinationPath);
+            var shellItemId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
+            Check(At<MoveItems>(operation, 15)(operation, dataObject, destination));
+            var performResult = At<PerformOperations>(operation, 21)(operation);
+            Check(performResult);
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var targetPath = Path.Combine(destinationPath, Path.GetFileName(sourcePath));
+            var targetBytes = File.Exists(targetPath) ? File.ReadAllBytes(targetPath) : [];
+            var movedBytesCorrect = targetBytes.AsSpan().SequenceEqual(expectedBytes);
+            var sourceRemoved = !File.Exists(sourcePath);
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            var destinationEntries = string.Join('|', Directory.GetFileSystemEntries(destinationPath)
+                .Select(Path.GetFileName));
+            Console.WriteLine($"ishellview-filesystem-iFileOperation-move-cross-volume: source-root={sourceRoot};destination-root={destinationRoot};perform-hresult=0x{performResult:X8};aborted={aborted};target-valid={movedBytesCorrect};source-removed={sourceRemoved};destination-entries=[{destinationEntries}];foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || !movedBytesCorrect || !sourceRemoved || !foregroundUnchanged ||
+                Directory.GetFileSystemEntries(destinationPath).Length != 1)
+                throw new IOException("Cross-volume filesystem MoveItems did not transfer the expected item and remove its source.");
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destination != 0) Marshal.Release(destination);
+            if (Directory.Exists(destinationPath)) Directory.Delete(destinationPath, recursive: true);
         }
     }
 

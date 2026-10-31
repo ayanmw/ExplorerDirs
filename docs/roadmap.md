@@ -5475,3 +5475,7 @@ Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `
 ## 2026-11-01：ZIP `CopyItems` 同名目标策略
 
 隔离 ZIP `IShellView` 中，目标目录预置同名文件（哨兵字节 `0x7A`），再复制 ZIP 内同名虚拟文件（内容 `0x41`）。组合 `FOF_RENAMEONCOLLISION | FOF_SILENT | FOF_NOCONFIRMATION | FOFX_NOCOPYHOOKS` 后，`PerformOperations=S_OK`、未 abort，但原目标被覆盖为 `0x41`，没有生成改名副本。追加普通文件系统 Shell 数据对象对照后，同一标志组合保留 `0x7A` 原目标，并生成内容 `0x41` 的“副本”文件；差异说明冲突语义依赖 provider。移除 `FOF_NOCONFIRMATION` 的 ZIP 自动化尝试等待冲突提示并超时，交互确认结果未验证。迁移时必须逐 provider 核对冲突/覆盖策略，不能只据 `S_OK` 判定目标安全。NativeProbe Release build 0 警告/错误，复验 watchdog exit 0；日志 `src/.state/native-probe-watchdog/20261101-055407-30632907.stdout.log`。详情见 [IShellView 原型记录](ishellview-color-spike.md#2026-11-01zip-copyitems-同名目标与静默标志)。
+
+## 2026-11-01：跨卷 filesystem / ZIP Shell 复制与移动
+
+Private Desktop NativeProbe 将源夹具放在 D:、目标放在 C: 系统临时目录，逐轮确认盘符根不同。普通 filesystem 与 ZIP `IShellView` 数据对象各执行跨卷 `IFileOperation.CopyItems`：均 `S_OK`、未 abort、目标字节 `0x41` 正确，源保持；filesystem 源另经跨卷 `MoveItems` 成功，目标内容匹配且原源消失。NativeProbe Release build 0 警告/错误，watchdog exit 0，前台/输入与唯一目标目录清理守卫通过。当前未测 ZIP 跨卷 MoveItems、实际 OLE 拖放、交互提示、回滚/失败路径、产品 ExplorerBrowser 或其它 provider；不推断底层 copy/delete 实现。日志 `src/.state/native-probe-watchdog/20261101-055626-be1b14db.stdout.log`。详情见 [IShellView 原型记录](ishellview-color-spike.md#2026-11-01filesystem--zip-跨卷-ifileoperation)。
