@@ -128,7 +128,7 @@ Explorer Dirs 的首要目标是稳定地承载 Windows Shell 文件管理，并
 
 ## 当前下一步
 
-阶段 0 的能力/证据矩阵已覆盖产品合同，并把产品接线、原型证据和可见验收分开。阶段 1 已有三层绝对 PIDL 导航、父级边界、历史分支及失败目标保留旧 view；七类虚拟位置各有 Private Desktop view 创建/菜单查询探针，Search Folder 结果数不稳定。ZIP 的 `IShellView` 命令名查询仍未通过：后续单独测得 ZIP `IShellFolder.CreateViewObject(IContextMenu)` 的背景菜单 canonical verb 为 `extract`，但它不是 `IShellView.GetItemObject(SVGIO_BACKGROUND)` 返回的视图菜单，不能替代该门槛。默认 filesystem 背景菜单的 Details、Refresh、排序和分组命令已有实际 `InvokeCommand`/状态读回。
+阶段 0 的能力/证据矩阵已覆盖产品合同，并把产品接线、原型证据和可见验收分开。阶段 1 已有三层绝对 PIDL 导航、父级边界、历史分支及失败目标保留旧 view；七类虚拟位置各有 Private Desktop view 创建/菜单查询探针，Search Folder 结果数不稳定。ZIP 的 view-owned 背景菜单命令门槛现已通过隐藏 probe：`IShellView.GetItemObject(SVGIO_BACKGROUND)` 返回 20 个 canonical verbs，其中含 `extract`；这与此前只查询 `IShellFolder.CreateViewObject(IContextMenu)` 的结果分开记录。该结果只证明菜单对象可查询，不证明 ZIP 菜单可见呈现、命令可执行或操作后 view 能正确更新。默认 filesystem 背景菜单的 Details、Refresh、排序和分组命令已有实际 `InvokeCommand`/状态读回。
 
 阶段 4 的隔离证据已延伸到真实 `IFileOperation` 新建文件夹、文件/文件夹移入、文件复制、改名和删除；当前 synthetic adapter 对相应子项通知只排队/发送一次父目录更新，并只重新枚举一次。新增双 synthetic view 探针把两个视图分别绑定到两个不同子目录，Shell 新建操作在每个目标中都只更新对应视图并只枚举一次。`--shell-change-reconciliation` 还覆盖独立行模型的多项跨窗格 copy/move、rename/delete/attributes 与稳定行身份、选择/焦点保持。这些证据仍不等于新宿主已接入产品 watcher queue/batch/recovery；剪贴板、冲突/撤销 UI、网络及虚拟 provider 仍是缺口。
 

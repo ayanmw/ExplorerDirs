@@ -5379,3 +5379,9 @@ Network Places 试探中，Shell 与 DefView 行数不一致，且 parent `IDrop
 NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture 查询 `IShellFolder.CreateViewObject(IContextMenu)` 返回的文件夹背景菜单，并将每个 canonical verb 查询隔离到带 6 秒单命令 / 45 秒总预算的子进程。Release build 0 警告/错误；输出唯一命令“全部解压缩(T)...”及 `extract` verb，exit 0；前台 HWND、最后输入时间未变，临时 fixture 清理完成。
 
 这不是 `IShellView.GetItemObject(SVGIO_BACKGROUND)` 菜单，原 ZIP view-owned 命令名查询仍是阶段 1 未完成项。没有创建或显示 Shell view，也未改产品宿主/发布包。详见[迁移门槛](superpowers/specs/2026-10-25-ishellview-host-migration-gates.md)与[IShellView 原型记录](ishellview-color-spike.md)。
+
+## 2026-11-01：ZIP `IShellView` 背景菜单命令隔离查询
+
+增加 `--ishellview-zip-background-menu-private-desktop`，创建临时 ZIP 的真实隔离 `IShellView`，从 view-owned `GetItemObject(SVGIO_BACKGROUND)` 取得 `IContextMenu` 并查询菜单命令。当前 Windows 返回 20 个 canonical verbs，包含 `extract`、`refresh`、`groupby`、`view` 与排序/排列命令；菜单查询约 8 ms。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/夹具清理守卫通过。首轮查询结果已成功，但通用 session-state 检查错误要求诊断早退分支写回；调整为跳过后复跑通过。
+
+只证明 ZIP view-owned 背景菜单及动词可查询；未显示/执行菜单、未测试解压后文件通知和行更新，也未验证其它 provider 或 ExplorerBrowser 产品接线。ZIP 命令的可执行性与 Shell view 操作更新继续列为迁移门槛。

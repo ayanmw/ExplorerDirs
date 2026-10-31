@@ -1524,3 +1524,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 2026-11-01：新增无 Shell view 的 ZIP 文件夹背景菜单查询。NativeProbe 在临时 ZIP fixture 上经 `IShellFolder.CreateViewObject(IContextMenu)` 查询菜单标签，并把每个 `GetCommandString(GCS_VERBW)` 放到独立子进程执行，单命令 6 秒、总预算 45 秒，避免 ZIP provider 阻塞主探针。Release 构建 0 警告/错误；输出 `labels=[全部解压缩(T)...]`、`commands=1`、`verbs=[0:extract]`，退出码 0，前台 HWND 和最后输入时间未变，临时夹具清理完成。
 
 此项只确认 ZIP `IShellFolder` 文件夹背景菜单命令名可安全查询。它没有创建/显示 `IShellView`，没有调用 `IShellView.GetItemObject(SVGIO_BACKGROUND)`，因此原先 ZIP view-owned 菜单命令名称查询仍未解决，也不代表完整 Explorer 菜单兼容性。
+
+### 2026-11-01 ZIP `IShellView` 背景菜单命令查询
+
+新增 `--ishellview-zip-background-menu-private-desktop`：临时 ZIP fixture 经真实 `IShellView` 创建后，调用 `IShellView.GetItemObject(SVGIO_BACKGROUND)`、`IContextMenu::QueryContextMenu` 与 canonical verb 查询。当前 Windows provider 返回 20 个命令，包含 `paste`、`refresh`、`groupby`、`view`、排序/排列命令以及 `extract`；菜单对象查询约 8 ms。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，foreground/input 与隔离清理守卫通过。首轮探针的菜单查询已成功，但随后通用 view-state round-trip 检查因诊断分支提前返回而失败；将该模式加入已有跳过名单后，复跑完整 exit 0。
+
+这补齐的是 ZIP provider 的 view-owned 背景菜单接口及命令名可查询性；没有显示/调用 `extract`，没有验证解压后的文件变化、通知与 view 更新，也没有验证菜单可见呈现、其它 ZIP handler、ExplorerBrowser 产品行为或迁移兼容。命令实现复用 `ShellViewColorSpike` 隔离宿主，不改变产品视图。

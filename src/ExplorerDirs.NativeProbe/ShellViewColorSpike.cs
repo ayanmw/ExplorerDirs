@@ -2513,6 +2513,7 @@ internal static class ShellViewColorSpike
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
+        bool zipBackgroundMenuProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
         bool virtualDesktopColorProbe = false)
     {
@@ -2614,7 +2615,7 @@ internal static class ShellViewColorSpike
             Directory.CreateDirectory(fixture);
             string[] fixturePaths;
             var shellLocation = fixture;
-            if (virtualZipProviderProbe)
+            if (virtualZipProviderProbe || zipBackgroundMenuProbe)
             {
                 shellLocation = Path.Combine(fixture, "virtual-items.zip");
                 using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
@@ -2779,6 +2780,15 @@ internal static class ShellViewColorSpike
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
+            if (zipBackgroundMenuProbe)
+            {
+                if (contextMenuHr < 0 || contextMenu == 0)
+                    throw new COMException("ZIP IShellView.GetItemObject(SVGIO_BACKGROUND) did not provide a context menu.", contextMenuHr);
+                var viewCommands = QueryMenuCommands(contextMenu, out backgroundMenuHandle, out var queryMilliseconds);
+                var verbs = viewCommands.Select(command => command.Verb).ToArray();
+                Console.WriteLine($"ishellview-zip-background-menu: commands={viewCommands.Length}; verbs=[{string.Join('|', verbs)}]; extract-present={verbs.Contains("extract", StringComparer.OrdinalIgnoreCase)}; query-ms={queryMilliseconds:F2}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                return GetForegroundWindow() == foreground ? 0 : 1;
+            }
             var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe
                 ? WaitForStableShellViewItemCount(folderView)
                 : WaitForShellViewItemCount(folderView, expectedCount: 2);
@@ -3210,7 +3220,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
