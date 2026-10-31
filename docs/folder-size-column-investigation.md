@@ -967,3 +967,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 另一处时序缺口位于隔离相对大小原型的 `FileSystemWatcher.Changed`：旧扫描完成结果若已排入 owner Dispatcher，watcher 后续排入的重扫动作可能排在它之后。现在首个变更回调先从 watcher 线程调用 `DirectoryTreeScanCoordinator.InvalidateCurrent`，再通知 owner 排入新扫描。SettingsSmoke 覆盖已排队结果的取消与拒绝发布；`--common-listview-relative-size-contract` 和 `--shell-change-reconciliation` 均通过，前台未变。
 
 逐目录文件 ID 读取增加了行枚举开销，本轮没有测量大量目录下的成本。以上仍是 NativeProbe/隔离行模型工作，不接入 ExplorerBrowser/产品 Shell view；对可见列、第三方 namespace 或产品迁移不作结论。
+
+### 2026-10-31：同路径替换目录拒绝旧 provider 快照
+
+NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即使新目录与旧目录占用相同路径，旧快照仍会命中。现在 `SyntheticChild` PIDL 保存目录的卷序列号和 128 位文件 ID；快照仍按解析路径限为一项，但读取时还要求 PIDL 身份匹配。`FILE_ID_INFO` 不可用或打开目录身份失败时不使用递归快照，回退当前行枚举大小。这样避免为每次排序比较重复打开目录句柄，也避免删除目录后仅按文件 ID 留下不断累积的快照。
+
+回归在临时 fixture 中先给 `child` 行缓存 7 B 快照，再把目录移到旁路名称、在原路径新建含 17 B 文件的新目录；旧实现把 7 B 读给新目录，修正后列文本读回 17 B。Native adapter `/W4 /WX` 构建、无窗口 `--static-shell-column-folder-smoke` 和 Release `SettingsSmoke` 通过；全量 smoke 覆盖初始扫描、更新、重新枚举、provider 重建及新对象拒绝旧缓存。探针没有创建 Shell view 或可见窗口。该方案只校正隔离 provider 的缓存身份，不是产品行模型/ExplorerBrowser 接线证据；不支持 `FILE_ID_INFO` 的文件系统无法复用该递归快照，网络/provider 与产品 UI 仍待另外验证。

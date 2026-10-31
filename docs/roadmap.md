@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 隔离递归大小快照拒绝同路径替换目录：NativeProbe provider 仍以 Shell 绝对解析名保存每路径一份快照，但每个文件夹 PIDL 同时携带卷序列号与 128 位文件 ID；读取缓存时两者必须匹配。真实临时目录在缓存后被改名、同路径创建 17 B 新目录，旧实现回归失败，身份校验后新行读回 17 B 而非旧缓存；provider 重建、重枚举及大小列文本/数值/排序合同继续通过。原生 adapter `/W4 /WX` 构建、`--static-shell-column-folder-smoke` 和 Release `SettingsSmoke` 通过。该快照仍只存在 NativeProbe 隔离 provider，不接产品 ExplorerBrowser；文件系统不提供 `FILE_ID_INFO` 时不应用缓存，产品逐行大小列和可见 Shell 行为仍开放。
+
 2026-10-31 隔离行模型在目录改名后保留递归大小：Shell 重枚举将旧/新解析名映射为同一行时，若二者都仍为文件系统目录且卷序列号/文件 ID 相同，保留该目录已完成的递归摘要；身份变化仍清空。真实临时目录 rename 回归在旧逻辑上失败，修正后完整 Release SettingsSmoke 通过，NativeProbe Release build 0 警告/错误。仅更新 NativeProbe 自有行模型，不接入 ExplorerBrowser 产品，Shell 视图重建/可见排序和真实异步扫描仍待迁移验收。
 
 2026-10-31 隔离行模型拒绝过期重命名身份：如果旧/新解析名映射对应的文件系统目录两侧都有身份、但卷/文件 ID 不同，模型不再把旧行 ID 转给目标路径上的替代目录；同对象改名仍保留 ID/大小摘要，同路径刷新继续沿用原身份策略。真实临时目录改名、删除、同路径重建回归先失败后通过；完整 Release SettingsSmoke 与 NativeProbe Release build 通过，0 警告/错误。仅是隔离行模型合同，不代表真实通知顺序、可见选区或产品 Shell view 已验收。
