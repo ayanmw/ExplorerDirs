@@ -1472,3 +1472,5 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 这证明默认文件系统 `IShellView` 原型里“Shell 纳入隐藏行 → 读取真实隐藏属性 → `#Hidden` 规则 → 行像素”链路可行；不表示产品当前的隐藏项选项默认显示隐藏项，也未接 ExplorerBrowser 产品视图、Q-Dir 导入规则或可见 UI。
 
 随后复跑同一 Private Desktop 命令，两次都在输出颜色像素、视图、排序和分组结果后未于 90 秒 watchdog 时限内退出；wait-chain 未见环，工作线程报告 `ExecutionDelay`。早先 `012905` 日志为完整 exit 0，但这两次复跑说明退出/清理可重复性尚不稳定。隐藏着色结果有日志证据，探针完整成功标准仍需排查后重跑。
+
+为缩小等待位置，隐藏探针新增阶段日志。下一次复跑在 90 秒内 exit 0，标记显示 `native-view-menu-finished` 后进入 `final-pump-start`，再正常到达 `final-pump-finished` 和 `probe-returned`；前两次超时的最后阶段均为 `final-pump-start`。因此目前只可将偶发等待定位到最终消息泵阶段，不能断言具体被哪个窗口消息或 Shell 回调阻塞。成功日志：`src/.state/native-probe-watchdog/20261101-013345-ba9bbbbf.stdout.log`；对应超时日志见 `013025` 与 `013109`。

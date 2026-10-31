@@ -2931,9 +2931,13 @@ internal static class ShellViewColorSpike
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-start");
             var drawByViewMode = listView == 0 ? "<no-list-view>" : ObserveCustomDrawByViewMode(folderView, listView, fixturePaths);
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-finished");
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: sort-group-contract-start");
             var mappingAfterSortAndGroup = listView == 0 ? "<no-list-view>" :
                 VerifyItemMappingAfterSortAndGroup(folderView, listView, drawNotifyTarget, fixturePaths);
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: sort-group-contract-finished");
             var nativeMenuHitTest = listView == 0 ? "<no-list-view>" : visible ? "<skipped-visible>" :
                 VerifyNativeMenuHitTest(folderView, listView);
             var visiblePixelCapture = "not-run";
@@ -2941,9 +2945,15 @@ internal static class ShellViewColorSpike
             var nativeViewMenuColorTransition = "not-run";
             if (visible && listView != 0)
             {
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: visible-pixel-capture-start");
                 visiblePixelCapture = CaptureVisibleRowColors(folderView, listView, fixturePaths, capturePrintWindowPixels: offscreen);
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: visible-pixel-capture-finished");
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: direct-view-modes-start");
                 directListViewModeCapture = VerifyDirectListViewModes(view, folderView, listView, fixturePaths);
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: direct-view-modes-finished");
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: native-view-menu-start");
                 nativeViewMenuColorTransition = VerifyNativeViewMenuColorTransition(host, parent, view, folderView, listView, fixturePaths);
+                if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: native-view-menu-finished");
             }
             var printClientSent = false;
             if (listView != 0 && itemCount > 0 && GetDC(listView) is var dc && dc != 0)
@@ -2962,7 +2972,9 @@ internal static class ShellViewColorSpike
                 SendMessageW(listView, 0x1015, 0, itemCount - 1); // LVM_REDRAWITEMS, fixture row only.
             UpdateWindow(listView);
             SendMessageW(listView, 0x000F, 0, 0); // WM_PAINT, confined to the hidden fixture view.
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: final-pump-start");
             Pump(visible ? 5000 : 350);
+            if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: final-pump-finished");
             var callbackLifetimeSamples = string.Join('|', CustomDrawDeviceContexts.Keys.Order()
                 .Select(index => $"{index}:dc-type={CustomDrawDeviceContextTypes.GetValueOrDefault(index)}," +
                     $"colors={CustomDrawColors.GetValueOrDefault(index, "none")}," +
