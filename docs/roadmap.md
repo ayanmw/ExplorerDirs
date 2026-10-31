@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 Q-Dir 筛选期间多选跳转：快速名称筛选或列值筛选启用时，文件内容区的未修饰 Up/Down 会在多选项目间按 Shell 视图顺序移动焦点，并确保目标可见；不修改其它选中位。仅当当前焦点本身属于多选集合且存在相邻已选项目时接管；单选、首尾边界、搜索、修饰键、非文件内容焦点及过期视图请求都回到/拒绝原生 Shell 路由。方向键门控、相邻序号及当前访问路由有 Release SettingsSmoke；完整 SettingsSmoke 和 App Release build 通过。没有创建 Shell view 或 GUI；实际 Shell 选择回调、像素/焦点、分组/各视图模式及 Q-Dir 可见对照仍待集中验收。
+
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
 
 2026-10-31 目录树拖入展开生命周期修正：树宿主变为不可见时，取消尚未触发的悬停展开计时和 Shell 项引用，避免隐藏窗格在后台被意外展开、重现时改变树状态。回归先在旧代码上失败，加入隐藏事件清理后通过；定向 SettingsSmoke 和 App Release build 通过。该检查验证生命周期接线，不验证真实 Shell 拖入回调和放置结果；两者仍留待集中 UI 验收。

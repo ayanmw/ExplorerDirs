@@ -811,9 +811,15 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var inputBrowser = _browser;
         var inputView = _viewWindow;
         var inputVersion = _viewReadiness.NavigationVersion;
+        var nativeInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        var filterRequestVersion = _quickFilterRequestVersion;
         bool SameVisit() => ReferenceEquals(inputBrowser, _browser) && inputView != 0 &&
             inputView == _viewWindow && inputVersion == _viewReadiness.NavigationVersion;
         bool SameInputTarget() => SameVisit() && GetFocus() == focused;
+        bool SameFilteredJumpRequest() => SameInputTarget() &&
+            nativeInputVersion == Interlocked.Read(ref _nativeUserInputVersion) &&
+            filterRequestVersion == _quickFilterRequestVersion &&
+            _quickFilterSettings.HasAnyFilter && !_location.IsSearchActive;
 
         if (msg.message == 0x0100 || msg.message == 0x0104)
         {
@@ -830,6 +836,13 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         try
         {
             if (!SameInputTarget()) return true;
+            if (ShellFilteredSelectionNavigation.ShouldJump(msg.message,
+                    unchecked((int)msg.wParam.ToInt64()), (int)modifiers,
+                    _quickFilterSettings.HasAnyFilter, _location.IsSearchActive,
+                    IsFileContentInputWindow(focused) && !IsColumnHeaderInputWindow(focused)) &&
+                ShellFilteredSelectionNavigation.TryFocusAdjacentSelectedItem(viewObject,
+                    unchecked((int)msg.wParam.ToInt64()) == 0x28, SameFilteredJumpRequest))
+                return true;
             var nativeMessage = new NativeMessage
             {
                 Hwnd = msg.hwnd,

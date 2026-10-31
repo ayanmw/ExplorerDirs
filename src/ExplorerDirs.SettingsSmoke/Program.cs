@@ -596,6 +596,7 @@ if (args.Length == 1 && args[0] == "--qdr-location-roundtrip-only")
 }
 ExplorerDirs.SettingsSmoke.ShellSelectionRestoreGateSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellSelectionBatchRestoreSmoke.Run();
+ExplorerDirs.SettingsSmoke.ShellFilteredSelectionNavigationSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellColumnValueMenuValuesSmoke.Run();
 ExplorerDirs.SettingsSmoke.ShellFocusRestoreGateSmoke.Run();
 ShellDirectoryRefreshRecoverySmoke.Run();
