@@ -475,7 +475,7 @@ internal static class StaticShellFolderAdapterProbe
                 {
                     stage = "wrapped-data-object-file-operation-move";
                     var expectedMove = File.ReadAllBytes(moveSource);
-                    PerformWrappedDataObjectOperation(adapter, "ten.bin", "MoveItems",
+                    PerformWrappedDataObjectOperation(adapter, fixture, "ten.bin", "MoveItems",
                         (operation, dataObject) => Check(At<MoveItems>(operation, 15)(operation, dataObject, moveDestination)),
                         () => !File.Exists(moveSource) && File.Exists(Path.Combine(moveDestinationPath, "ten.bin")) &&
                               File.ReadAllBytes(Path.Combine(moveDestinationPath, "ten.bin")).SequenceEqual(expectedMove));
@@ -486,14 +486,14 @@ internal static class StaticShellFolderAdapterProbe
                 var renameSource = Path.Combine(fixture, "hundred.bin");
                 var renameTarget = Path.Combine(fixture, "hundred-renamed.bin");
                 var expectedRename = File.ReadAllBytes(renameSource);
-                PerformWrappedDataObjectOperation(adapter, "hundred.bin", "RenameItems",
+                PerformWrappedDataObjectOperation(adapter, fixture, "hundred.bin", "RenameItems",
                     (operation, dataObject) => Check(At<RenameItems>(operation, 13)(operation, dataObject, "hundred-renamed.bin")),
                     () => !File.Exists(renameSource) && File.Exists(renameTarget) &&
                           File.ReadAllBytes(renameTarget).SequenceEqual(expectedRename));
 
                 stage = "wrapped-data-object-file-operation-delete";
                 var deleteSource = Path.Combine(fixture, "pending-a.bin");
-                PerformWrappedDataObjectOperation(adapter, "pending-a.bin", "DeleteItems",
+                PerformWrappedDataObjectOperation(adapter, fixture, "pending-a.bin", "DeleteItems",
                     (operation, dataObject) => Check(At<DeleteItems>(operation, 19)(operation, dataObject)),
                     () => !File.Exists(deleteSource));
 
@@ -506,7 +506,7 @@ internal static class StaticShellFolderAdapterProbe
                 Check(SHCreateItemFromParsingName(multiCopyTargetPath, 0, ref multiCopyTargetId, out var multiCopyTarget));
                 try
                 {
-                    PerformWrappedDataObjectOperation(adapter, multiCopyNames, "CopyItems",
+                    PerformWrappedDataObjectOperation(adapter, fixture, multiCopyNames, "CopyItems",
                         (operation, dataObject) => Check(At<CopyItems>(operation, 17)(operation, dataObject, multiCopyTarget)),
                         () => multiCopyNames.All(name => File.Exists(Path.Combine(fixture, name)) &&
                             File.Exists(Path.Combine(multiCopyTargetPath, name)) &&
@@ -522,7 +522,7 @@ internal static class StaticShellFolderAdapterProbe
                 try
                 {
                     stage = "wrapped-data-object-multiselect-move";
-                    PerformWrappedDataObjectOperation(adapter, multiMoveNames, "MoveItems",
+                    PerformWrappedDataObjectOperation(adapter, fixture, multiMoveNames, "MoveItems",
                         (operation, dataObject) => Check(At<MoveItems>(operation, 15)(operation, dataObject, multiMoveDestination)),
                         () => multiMoveNames.All(name => !File.Exists(Path.Combine(fixture, name)) &&
                             File.Exists(Path.Combine(multiMoveDestinationPath, name)) &&
@@ -532,7 +532,7 @@ internal static class StaticShellFolderAdapterProbe
 
                 var multiDeleteNames = multiCopyNames;
                 stage = "wrapped-data-object-multiselect-delete";
-                PerformWrappedDataObjectOperation(adapter, multiDeleteNames, "DeleteItems",
+                PerformWrappedDataObjectOperation(adapter, fixture, multiDeleteNames, "DeleteItems",
                     (operation, dataObject) => Check(At<DeleteItems>(operation, 19)(operation, dataObject)),
                     () => multiDeleteNames.All(name => !File.Exists(Path.Combine(fixture, name))));
             }
@@ -2004,11 +2004,11 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    private static void PerformWrappedDataObjectOperation(nint adapter, string childName, string operationName,
+    private static void PerformWrappedDataObjectOperation(nint adapter, string fixturePath, string childName, string operationName,
         Action<nint, nint> queueOperation, Func<bool> verifyResult)
-        => PerformWrappedDataObjectOperation(adapter, new[] { childName }, operationName, queueOperation, verifyResult);
+        => PerformWrappedDataObjectOperation(adapter, fixturePath, new[] { childName }, operationName, queueOperation, verifyResult);
 
-    private static void PerformWrappedDataObjectOperation(nint adapter, IReadOnlyList<string> childNames, string operationName,
+    private static void PerformWrappedDataObjectOperation(nint adapter, string fixturePath, IReadOnlyList<string> childNames, string operationName,
         Action<nint, nint> queueOperation, Func<bool> verifyResult)
     {
         var foreground = GetForegroundWindow();
@@ -2022,6 +2022,7 @@ internal static class StaticShellFolderAdapterProbe
             for (var index = 0; index < children.Count; index++) Marshal.WriteIntPtr(childArray, index * IntPtr.Size, children[index]);
             Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, (uint)children.Count, childArray, in DataObjectId, 0, out dataObject));
             if (dataObject == 0) throw new Exception($"Wrapped selection [{string.Join(", ", childNames)}] did not return IDataObject for {operationName}.");
+            VerifyWrappedShellItemDataObject(dataObject, childNames.Select(name => Path.Combine(fixturePath, name)).ToArray());
 
             var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
             var fileOperationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
@@ -2314,8 +2315,9 @@ internal static class StaticShellFolderAdapterProbe
         }
     }
 
-    private static void VerifyWrappedShellItemDataObject(nint dataObject)
+    private static void VerifyWrappedShellItemDataObject(nint dataObject, IReadOnlyList<string>? expectedPaths = null)
     {
+        var expectedCount = expectedPaths?.Count ?? 1;
         var format = new NativeFormatEtc { Format = 15, Aspect = 1, Index = -1, Tymed = 1 };
         var getDataHr = At<GetData>(dataObject, 3)(dataObject, ref format, out var medium);
         if (getDataHr < 0) throw new Exception($"Wrapped IDataObject.GetData(CF_HDROP) failed: 0x{getDataHr:X8}.");
@@ -2329,10 +2331,21 @@ internal static class StaticShellFolderAdapterProbe
                 var pathOffset = Marshal.ReadInt32(dropFiles);
                 var isWide = Marshal.ReadInt32(dropFiles, 16);
                 if (pathOffset < 20 || isWide != 1) throw new Exception("Wrapped CF_HDROP did not contain a valid Unicode DROPFILES block.");
-                var path = Marshal.PtrToStringUni(dropFiles + pathOffset);
-                // The wrapped enumeration fixture includes a subfolder before some files.
-                if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)))
-                    throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path.");
+                var bytes = GlobalSize(medium.Value).ToUInt64();
+                if ((ulong)pathOffset >= bytes) throw new Exception("Wrapped CF_HDROP path offset was outside its storage medium.");
+                var paths = new List<string>();
+                var cursor = dropFiles + pathOffset;
+                while ((ulong)(cursor - dropFiles) + sizeof(char) <= bytes)
+                {
+                    var path = Marshal.PtrToStringUni(cursor);
+                    if (string.IsNullOrEmpty(path)) break;
+                    if (!File.Exists(path) && !Directory.Exists(path))
+                        throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path: " + path);
+                    paths.Add(path);
+                    cursor += checked((path.Length + 1) * sizeof(char));
+                }
+                if (paths.Count != expectedCount || !MatchesExpectedPaths(paths, expectedPaths))
+                    throw new Exception($"Wrapped CF_HDROP contained {paths.Count} paths, expected {expectedCount} matching paths.");
             }
             finally { GlobalUnlock(medium.Value); }
         }
@@ -2351,26 +2364,43 @@ internal static class StaticShellFolderAdapterProbe
             {
                 var cidaBytes = GlobalSize(shellIdListMedium.Value).ToUInt64();
                 var childCount = unchecked((uint)Marshal.ReadInt32(cida));
-                if (childCount != 1 || cidaBytes < 12) throw new Exception($"Expected one CIDA child, got {childCount} in {cidaBytes} bytes.");
+                var minimumCidaBytes = checked(((ulong)childCount + 2) * sizeof(uint));
+                if (childCount != expectedCount || cidaBytes < minimumCidaBytes)
+                    throw new Exception($"Expected {expectedCount} CIDA children, got {childCount} in {cidaBytes} bytes.");
                 var parentOffset = unchecked((uint)Marshal.ReadInt32(cida, 4));
-                var childOffset = unchecked((uint)Marshal.ReadInt32(cida, 8));
-                if (parentOffset >= cidaBytes || childOffset >= cidaBytes)
-                    throw new Exception("CIDA item offsets were outside the storage medium.");
-                var absolute = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
-                if (absolute == 0) throw new Exception("Could not combine CIDA parent and child PIDLs.");
-                try
+                if (parentOffset >= cidaBytes) throw new Exception("CIDA parent offset was outside the storage medium.");
+                var paths = new List<string>(checked((int)childCount));
+                for (var index = 0; index < childCount; index++)
                 {
-                    var path = DescribeFileSystemPath(absolute);
-                    // CIDA enumeration may return the nested-folder fixture as its first child.
-                    if (path.StartsWith("unresolved-", StringComparison.Ordinal) ||
-                        (!File.Exists(path) && !Directory.Exists(path)))
-                        throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
+                    var offsetPosition = checked(4 + ((int)index + 1) * sizeof(uint));
+                    var childOffset = unchecked((uint)Marshal.ReadInt32(cida, offsetPosition));
+                    if (childOffset >= cidaBytes) throw new Exception("CIDA child offset was outside the storage medium.");
+                    var absolute = ILCombine(cida + checked((int)parentOffset), cida + checked((int)childOffset));
+                    if (absolute == 0) throw new Exception("Could not combine CIDA parent and child PIDLs.");
+                    try
+                    {
+                        var path = DescribeFileSystemPath(absolute);
+                        if (path.StartsWith("unresolved-", StringComparison.Ordinal) ||
+                            (!File.Exists(path) && !Directory.Exists(path)))
+                            throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
+                        paths.Add(path);
+                    }
+                    finally { ILFree(absolute); }
                 }
-                finally { ILFree(absolute); }
+                if (!MatchesExpectedPaths(paths, expectedPaths))
+                    throw new Exception("CIDA did not preserve the expected filesystem item paths.");
             }
             finally { GlobalUnlock(shellIdListMedium.Value); }
         }
         finally { ReleaseStgMedium(ref shellIdListMedium); }
+        Console.WriteLine($"wrapped IDataObject clipboard formats: items={expectedCount}; CF_HDROP-paths=matched; CIDA-paths=matched");
+    }
+
+    private static bool MatchesExpectedPaths(IReadOnlyList<string> actualPaths, IReadOnlyList<string>? expectedPaths)
+    {
+        if (expectedPaths is null) return true;
+        var expected = expectedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return expected.Count == actualPaths.Count && actualPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(expected);
     }
 
     private static string GetAbsoluteParsingName(string path)

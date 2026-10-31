@@ -5217,4 +5217,4 @@ WPF Private Desktop 宿主上的单项通知、追加父目录更新、重放 `I
 
 NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，隔离验证 `Clone`、`Reset`、`Skip`、`Next(count)` 完整/部分读取，以及缓存插入失败后保留首个 PIDL 并可重试；缓存直接接管 inner 返回的 PIDL，避免额外复制分配。无窗口 wrapped-folder、parent-item 和 PIDL 合同均通过。父项绑定能返回正确绝对文件系统路径和 parsing name；转成 Shell item array 后普通目标路径保留，但 adapter parent/PIDL 身份不再保留。普通文件系统根 PIDL 与包装子 PIDL 的直接绝对组合仍未解析。产品仍使用 ExplorerBrowser，未做 IShellView 迁移。证据与边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的枚举器克隆合同)。
 
-同日补充：包装 adapter 返回的单项文件选择 `IDataObject` 经真实 `IFileOperation::CopyItems`、`MoveItems`、`RenameItems`、`DeleteItems` 执行后，四项隔离夹具文件系统结果均符合预期；此外，多项 `IDataObject` 的 Copy/Move/Delete 各覆盖两项并逐项核对路径与内容。调用前后前台 HWND 不变；操作静默执行并禁用 copy hooks，未创建/激活 Shell 视图窗口。仍未覆盖 undo/redo、Shell 命令菜单、通知、OLE 拖放源端、虚拟项目身份往返或产品 ExplorerBrowser 行为。
+同日补充：包装 adapter 返回的单项文件选择 `IDataObject` 经真实 `IFileOperation::CopyItems`、`MoveItems`、`RenameItems`、`DeleteItems` 执行后，四项隔离夹具文件系统结果均符合预期；此外，多项 `IDataObject` 的 `CF_HDROP` 与 CIDA 均包含两条匹配路径，多选 Copy/Move/Delete 各逐项核对路径与内容。调用前后前台 HWND 不变；操作静默执行并禁用 copy hooks，未创建/激活 Shell 视图窗口。仍未覆盖 undo/redo、Shell 命令菜单、通知、OLE 拖放源端、虚拟项目身份往返或产品 ExplorerBrowser 行为。
