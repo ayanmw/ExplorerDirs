@@ -78,7 +78,7 @@
 | `SHCNE_UPDATEDIR` | 3 | 567–584 ms |
 | `IShellView.Refresh()` | 3 | 94–117 ms |
 
-These probes measure row enumeration and message timing, not rendered pixels. They are historical comparisons, not the current product route. At the current source state, every explicit F5 calls `IShellView.Refresh()` on the existing view with native redraw enabled; the row-count timer is used only to time selection/focus recovery. `SHCNE_UPDATEDIR` remains an observed alternative, but its slower row-availability sample and broadcast scope made it unsuitable as the F5 route. View-mode changes call `SetViewModeAndIconSize` on the existing view and do not refresh or re-navigate the folder; full state readback is deferred to Dispatcher `ContextIdle`. No hidden-host evidence establishes visible blank duration or displayed pixels. F5 and mode-switch visuals remain open for consolidated UI acceptance.
+These probes measure row enumeration and message timing, not rendered pixels. They are historical comparisons. Following commit `d0e8f5f`, ordinary filesystem F5 sends `SHCNE_UPDATEDIR`; search/virtual locations and paths that cannot use that notification retain `IShellView.Refresh()` on the existing view, with native redraw enabled. This product route was chosen from the stock-view row-retention evidence, despite slower row availability in an older hidden-host comparison; it has not yet been checked for visible ExplorerBrowser flicker or updates to other same-directory Shell windows. The row-count timer is used only to time selection/focus recovery. View-mode changes call `SetViewModeAndIconSize` on the existing view and do not refresh or re-navigate the folder; full state readback is deferred to Dispatcher `ContextIdle`. No hidden-host evidence establishes visible blank duration or displayed pixels. F5 and mode-switch visuals remain open for consolidated UI acceptance.
 
 Latest hidden-host pass: `baseline=1037 ms`, `updatedir=544 ms`, `ishellview=48 ms`, `ishellview-redraw-suppressed=43 ms`; all routes observed three rows and the parent HWND stayed hidden. The refresh-comparison process reported unchanged foreground. This is not evidence about perceived flicker.
 
@@ -93,6 +93,10 @@ Microsoft's folder-view guidance states that Windows Explorer calls `IShellView:
 - [ ] Visually confirm the updated F5 behavior and view-style transitions; check a slow directory, selection/focus, scrolling, and a virtual Shell location.
 
 The latest source build validates compilation only. Neither hidden-host row-count probes nor this plan's source review measures rendered pixels; visual acceptance remains open.
+
+### 2026-11-01 source status
+
+Commit `d0e8f5f` reintroduced the filesystem directory-notification route based on stock-view row retention. This supersedes the later `IShellView.Refresh()` source descriptions in historical sections above. The notification is process-wide to Shell listeners, so verify same-directory external views as part of acceptance; no product UI result is claimed.
 
 The earlier product-host F5 probe confirmed the four-pane counts, 3-item selection and focused `initial.txt` remained intact. In the latest run, the hidden native view-style probe reported supported modes and preserved selection/sort/group state, then exited with its foreground-boundary guard because the foreground changed; do not treat that run as a clean end-to-end pass. Neither probe renders visible pixels.
 

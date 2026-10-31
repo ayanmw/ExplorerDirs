@@ -5123,9 +5123,15 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：F5 与查看方式切换调用链复核
 
-- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshFromUser → RefreshWithPresentation → IShellView.Refresh`。它在当前 Shell 视图上刷新内容，不重建 ExplorerBrowser、标签、导航历史或窗格；当前产品保持原生重绘开启，刷新后的行数采样只用于决定何时恢复选区与焦点。普通文件系统目录的 `SHCNE_UPDATEDIR` 曾在隔离对照中读到新行较慢，且没有可见像素收益证据，因此没有接入 F5。搜索/虚拟位置继续使用相同的当前视图刷新路径。
+- 当前 F5 用户入口为 `PaneControl.RefreshCurrent → ExplorerBrowserHost.RefreshFromUser → RefreshWithPresentation`。普通文件系统路径长度可用时向 Shell 发送 `SHCNE_UPDATEDIR`；搜索、虚拟位置及不适用的路径回退到当前 `IShellView.Refresh()`。两条路径都作用于现有视图，不重建 ExplorerBrowser、标签、导航历史或窗格；原生重绘保持开启，行数采样只决定何时恢复选区与焦点。
 - 查看方式切换只调用当前视图的 `IFolderView2.SetViewModeAndIconSize`，随后在 Dispatcher `ContextIdle` 读取其余配置，不重枚举目录。Shell 仍需重排/重绘列表项目，因此这不是只改一个模式标志就能避免列表重绘的操作。
-- 历史上的 F5/查看方式重绘租约已撤回：查看方式由 Shell 自行完成原生重排和绘制；F5 刷新等待不再关闭重绘或强制整窗格失效。当前没有可见像素证据证明黑屏已消失。后续集中 UI 验收分别记录两种操作的空白区间、选择/焦点、滚动位置和慢速目录表现，再决定是否需要新的呈现策略。
+- 历史上的 F5/查看方式重绘租约已撤回。F5 的 `SHCNE_UPDATEDIR` 是 Shell 全局变更通知，可能使其他打开同一路径的 Shell 视图也收到更新；它没有返回可供本程序确认完成的 HRESULT。隔离 stock view 保留了行数，但没有证明 ExplorerBrowser 产品中的像素、选区、滚动或同目录其他窗口行为。后续集中 UI 验收需分别检查 F5 与模式切换的空白区间、其他同目录 Shell 视图、选择/焦点、滚动位置及慢速/虚拟目录，再决定该路线是否保留。
+
+### 2026-11-01：文件系统 F5 改用 Shell 目录更新通知
+
+提交 `d0e8f5f` 将普通文件系统位置的显式 F5 改为 `SHCNE_UPDATEDIR`，路径不适用时仍调用当前 view 的 `IShellView.Refresh()`；没有关闭原生重绘，也没有重建/重导航宿主。依据是隔离 stock `IShellView` 中目录通知期间行数未归零，而直接 `Refresh()` 曾短暂归零。App Release build（0 警告/错误）及完整 Release `SettingsSmoke` 通过。
+
+证据只涉及隔离 stock view 行数，不是 ExplorerBrowser 的可见像素。通知会被其他 Shell listener 接收，且不能确认当前 view 的呈现是否无闪烁；产品视觉与同目录外部视图影响均待集中验收。查看方式切换仍使用原位 `SetViewModeAndIconSize`。
 
 ## 2026-10-31：加入按需的原生绘制时序诊断
 

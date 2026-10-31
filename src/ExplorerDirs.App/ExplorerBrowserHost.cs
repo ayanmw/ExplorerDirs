@@ -3166,9 +3166,9 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (_location.IsFileSystemLocation && ShellChangedItemNotification.TryNotifyDirectoryRefresh(path))
                 {
-                    // Refreshing a filesystem Shell view clears its native rows before repopulating them.
-                    // A directory change notification asks DefView to reconcile in place and keeps the
-                    // existing ExplorerBrowser view and its current presentation alive.
+                    // A directory notification lets DefView reconcile filesystem rows without calling
+                    // IShellView.Refresh. It is broadcast to Shell listeners and does not guarantee that
+                    // every view retains its current pixels; visible behavior still needs acceptance.
                     refreshResult = 0;
                     LastShellRefreshStatus = "SHCNE_UPDATEDIR";
                 }
