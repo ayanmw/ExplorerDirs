@@ -22,9 +22,10 @@ internal static class ShellRefreshPresentationSmoke
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
             "view-style changes suppress native redraw only around the existing-view mode setter");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
-            !refreshPath.Contains("SetRedraw", StringComparison.Ordinal) &&
-            !refreshPath.Contains("TrySuppressCurrentViewRedraw", StringComparison.Ordinal),
-            "F5 refreshes the existing Shell view while leaving native redraw enabled");
+            refreshPath.Contains("ShellViewRedrawLease.TrySuppress(folderView)", StringComparison.Ordinal) &&
+            refreshPath.Contains("refreshRedrawLease?.Dispose()", StringComparison.Ordinal) &&
+            refreshPath.Contains("TimeSpan.FromMilliseconds(1500)", StringComparison.Ordinal),
+            "F5 keeps the existing Shell rows painted under a bounded redraw lease until refresh completion");
         Console.WriteLine("Shell refresh presentation smoke: PASS (source contract; no Shell view created)");
     }
 
