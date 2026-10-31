@@ -3,7 +3,6 @@ param(
     [int]$TimeoutSeconds = 30,
     [ValidateSet('Desktop', 'ThisPC', 'RecycleBin', 'ControlPanel', 'Libraries', 'NetworkPlaces', 'SearchFolder', 'ZipContainer')]
     [string]$VirtualScope,
-    [ValidateSet('color', 'color-offscreen', 'command-state-readonly', 'command-state-readonly-private-desktop', 'auto-column-width', 'photo-print-verb', 'host-filter-private-desktop', 'host-filter-virtual-private-desktop', 'host-menu-commands-private-desktop', 'host-newfolder-private-desktop', 'menu-activation-private-desktop', 'session-restore-private-desktop', 'session-restore-sync-cleanup-private-desktop', 'private-desktop-window-destroy-control', 'private-desktop-window-visibility-control', 'private-desktop-shared-window-destroy-control', 'private-desktop-shell-view-window-destroy-control', 'private-desktop-single-pane-sync-cleanup', 'private-desktop-2pane-sync-cleanup', 'private-desktop-3pane-sync-cleanup', 'private-desktop-4pane-sync-cleanup', 'private-desktop-4pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-sync-cleanup', 'private-desktop-single-pane-menu-nofocus-sync-cleanup', 'private-desktop-single-pane-menu-active-sync-cleanup', 'private-desktop-single-pane-menu-detached-ime-sync-cleanup', 'private-desktop-single-pane-menu-disabled-ime-sync-cleanup', 'private-desktop-single-pane-menu-ole-init-sync-cleanup', 'private-desktop-single-pane-menu-wpf-dispatcher-sync-cleanup', 'private-desktop-single-pane-menu-wpf-ole-sync-cleanup', 'private-desktop-single-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-menu-wpf-host-sync-cleanup', 'private-desktop-four-pane-wpf-host-keyboard-consumer', 'private-desktop-four-pane-wpf-host-directory-isolation', 'private-desktop-single-pane-menu-detached-view-ime-sync-cleanup', 'private-desktop-single-pane-menu-late-coordinator-dispose', 'drop-target-private-desktop', 'color-private-desktop', 'color-zip-private-desktop', 'color-this-pc-private-desktop', 'color-libraries-private-desktop', 'color-desktop-private-desktop', 'color-readonly-rule-private-desktop', 'color-directory-rule-private-desktop', 'color-hidden-rule-private-desktop', 'common-listview-color-baseline-private-desktop', 'static-shell-column-adapter-private-desktop', 'static-shell-column-adapter-activated-strict-private-desktop', 'static-shell-column-adapter-strict-private-desktop', 'static-shell-column-classid-private-desktop', 'static-shell-item-bound-view-private-desktop', 'synthetic-shell-size-sort-private-desktop', 'synthetic-shell-two-view-target-sync-private-desktop', 'synthetic-shell-focus-recovery-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')]
     [string]$Probe = 'color',
     [switch]$TestTimeoutPath,
     [string]$TimeoutDumpPath
@@ -37,6 +36,8 @@ else {
 
     $executable = (Get-Command dotnet -ErrorAction Stop).Source
     $probeArgument = switch ($Probe) {
+        'color' { '--ishellview-color-spike' }
+        'color-offscreen' { '--ishellview-color-spike-offscreen' }
         'static-shell-column-adapter-private-desktop' { '--static-shell-column-adapter-private-desktop' }
         'static-shell-column-adapter-activated-strict-private-desktop' { '--static-shell-column-adapter-activated-strict-private-desktop' }
         'static-shell-column-adapter-strict-private-desktop' { '--static-shell-column-adapter-strict-private-desktop' }
@@ -93,10 +94,14 @@ else {
         'color-readonly-rule-private-desktop' { '--ishellview-color-readonly-private-desktop' }
         'color-directory-rule-private-desktop' { '--ishellview-color-directory-private-desktop' }
         'color-hidden-rule-private-desktop' { '--ishellview-color-hidden-private-desktop' }
+        'zip-background-menu-private-desktop' { '--ishellview-zip-background-menu-private-desktop' }
+        'zip-extract-private-desktop' { '--ishellview-zip-extract-private-desktop' }
+        'network-places-row-map-private-desktop' { '--ishellview-network-places-row-map-private-desktop' }
+        'network-places-color-pixels-private-desktop' { '--ishellview-network-places-color-pixels-private-desktop' }
+        'network-places-child-drop-targets-private-desktop' { '--ishellview-network-places-child-drop-targets-private-desktop' }
         'command-state-readonly' { '--ishellview-command-state-readonly' }
         'common-listview-color-baseline-private-desktop' { '--common-listview-color-baseline-private-desktop' }
-        'color-offscreen' { '--ishellview-color-spike-offscreen' }
-        default { '--ishellview-color-spike' }
+        default { throw "Unsupported NativeProbe watchdog probe: $Probe" }
     }
     $arguments = '"{0}" {1}' -f $probeAssembly, $probeArgument
 }
