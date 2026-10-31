@@ -56,7 +56,7 @@
 
 2026-10-31 目录树拖入悬停展开接入：Windows SDK 提供的 `INameSpaceTreeControlDropHandler` 可由现有 `TreeAdvise` 事件宿主实现；拖入/悬停回调直接给出鼠标下 Shell 项，无需替换 `IDropTarget`。当前实现对文件夹启动 1 秒 STA Dispatcher 计时；悬停换项、离开、放置、树导航或释放会取消，计时到期后使用原 `IShellItem` 引用调用 `SetItemState(EXPANDED)`，避免重新解析导致虚拟 Shell 位置丢失；Drop 回调返回 `E_NOTIMPL` 且不改写效果，表达本回调未接管文件操作。Release SettingsSmoke 覆盖回调项传递、效果不变、离开/放置清理和不接管 Drop；App 与 NativeProbe Release build 通过（均 0 警告/错误）。仍需在真实 Windows Shell 拖入场景确认 `TreeAdvise` 回调、默认文件操作、目标目录和延时视觉行为；目前延时固定 1 秒，Q-Dir 的 0.2/0.5/1/1.5/2/3 秒选项未实现。路线图及[竞品调研](competitive-research.md#2026-10-31-官方功能清单细化)已同步该边界。
 
-2026-10-31 目录树拖入展开延时档位：目录树菜单新增 0.2、0.5、1、1.5、2、3 秒选项，默认维持原来的 1 秒；设置保存到独立 `NavigationTreeDragHoverDelay.ini`，已有共享树/逐窗格树立即更新，正在计时的悬停重新开始计时。配置支持外部修改冲突保护、格式损坏备份及未来版本不覆盖。Release 定向 SettingsSmoke 覆盖六档往返、非法档拒绝和未来格式保护；完整 SettingsSmoke/App Release/NativeProbe Release build 待本批次收尾。真实 `DoDragDrop`、可见菜单和默认放置行为仍待集中 UI 验收；未据配置冒烟宣称 Shell 拖放已通过。
+2026-10-31 目录树拖入展开延时档位：目录树菜单新增 0.2、0.5、1、1.5、2、3 秒选项，默认维持原来的 1 秒；设置保存到独立 `NavigationTreeDragHoverDelay.ini`，已有共享树/逐窗格树立即更新，正在计时的悬停重新开始计时。配置支持外部修改冲突保护、格式损坏备份及未来版本不覆盖。Release 定向 `--shell-tree-control-style-smoke` 覆盖回调效果不变、延时六档往返、非法档拒绝和未来版本不覆盖；App 与 NativeProbe Release build 均为 0 警告/错误。完整 Release SettingsSmoke 本轮未通过：既有 `EnvironmentChangeMessageSmoke` 的隐藏消息目标前台不变断言失败；保留失败结果，不放宽断言。真实 `DoDragDrop`、可见菜单和默认放置行为仍待集中 UI 验收；专项配置 smoke 不代表 Shell 拖放已通过。
 
 2026-10-31 F5 绘制租约收窄（中间方案，已撤回）：当时曾让普通文件系统目录优先用 `SHCNE_UPDATEDIR`，并在退回 `IShellView.Refresh()` 时短暂调用 `IFolderView2.SetRedraw(FALSE)`。后续比较发现普通目录广播通知的行数可见时间更长；用户仍观察到明显空白后，产品最终回到所有位置直接调用当前 `IShellView.Refresh()`，移除产品绘制租约。此前关于通知成功/失败门控及租约范围的记录是历史试验，不应作为当前行为。详情见[刷新闪烁计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
