@@ -116,6 +116,11 @@ internal static class ShellViewColorRuleEvaluator
         rule => ShellViewColorRuleMatcher.Matches(rule.Pattern, displayName, attributes),
         static rule => rule.BackgroundColor);
 
+    internal static uint? ResolveBackground(IReadOnlyList<ShellViewColorRule> rules, string displayName,
+        bool isDirectory, bool isHidden, bool isReadOnly) => Resolve(rules,
+        rule => ShellViewColorRuleMatcher.Matches(rule.Pattern, displayName, isDirectory, isHidden, isReadOnly),
+        static rule => rule.BackgroundColor);
+
     internal static uint? ResolveTextColor(IReadOnlyList<ShellViewColorRule> rules, string displayName,
         FileAttributes attributes) => Resolve(rules,
         rule => ShellViewColorRuleMatcher.Matches(rule.Pattern, displayName, attributes),

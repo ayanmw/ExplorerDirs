@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-11-01：ZIP 虚拟 Shell 项的颜色规则输入验证
+
+新增 `--virtual-zip-color-rules` 隔离探针：建立临时 ZIP Shell 文件夹并通过 `ShellListViewEnumerator` 取出一个虚拟文件和一个虚拟子目录。两项均没有 `FileSystemPath`；Shell 返回的显示名及 `SFGAO_FOLDER` 属性仍可驱动现有名称通配符和 `#DIR` 背景规则，输出分别为 `0xF0E0D0` 与 `0xD0F0E0`。前台窗口保持不变，夹具清理完成。NativeProbe Release 构建 0 警告/错误，探针退出码 0。
+
+本轮先因 ZIP entry stream 未在创建下一项前关闭而失败；缩小 stream 生命周期后复跑通过。另有 `host-filter-virtual-private-desktop` 探针证明 ZIP Shell view 能枚举并查询原生背景菜单，但它不是颜色绘制证据。当前结果只验证虚拟 Shell 元数据可作为规则匹配输入，不创建/绘制自有 `IShellView`，不读取 Q-Dir `.qdr` 颜色配置，不覆盖实际 DefView 像素、其他虚拟 provider 或产品接线，也不代表 `ExplorerBrowser` 产品已支持逐项颜色。
+
 ## 2026-10-31 Shell Undo/Redo 原生命令实验（停止）
 
 先前只读命令状态探针在只读分支提前返回时仍落入 session stream 写回断言，修正为该分支不要求写入/回读；`command-state-readonly-private-desktop` 随后退出码 0。新尝试通过 `IFileOperation::CopyItem` 建立临时副本，再从隐藏 `IShellView` 背景 `IContextMenu` 调用 canonical `undo` / `redo`：一轮中 Undo 使临时副本消失，但 Redo 返回 `S_OK` 后副本没有恢复；另一次运行在复制后未观察到 Undo 可用。现有证据说明该命令状态和调用不构成可靠闭环，不能证明产品 Ctrl+Z/Ctrl+Y 路由可迁移。

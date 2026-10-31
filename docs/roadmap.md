@@ -5311,3 +5311,9 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 - 重建 NativeProbe Release 后运行现有 Private Desktop 生命周期探针，exit 0，前台 HWND、输入时间戳与隔离清理守卫均通过。普通 `IShellView.Refresh()` 期间 view/ListView HWND 保持不变，但 300 行列表短暂归零 5 个采样点（约 28 ms）；完成后回到 301 行。原生 `SHCNE_UPDATEDIR` 和关闭自动枚举后的显式目录通知均未观察到归零，视图模式切换也未观察到空行或 HWND 重建。
 - 该探针采集的是行数与 HWND，不是呈现像素；不能据此断言 28 ms 就是用户看到的黑屏时长。当前产品 F5 调用现有 Shell view 的 `Refresh()`，没有重建 ExplorerBrowser、标签或导航历史；视图切换只更改现有 `IFolderView2` 的模式。
 - 结论：完整视图宿主并未重建。`Refresh()` 的行清空发生在 Shell 原生刷新中；抑制重绘可暂时留住旧画面，但 Shell 行可能已更新，用户点击旧画面时有命中错位风险。此前试过延长重绘租约的实现已回退；本次不重复接入。若再评估该方案，需集中 UI 验收同时检查旧帧、输入命中、选择/焦点和滚动位置，并确认真实收益后再改产品。
+
+## 2026-11-01：ZIP 虚拟 Shell 项颜色规则输入复核
+
+新增 NativeProbe ZIP 虚拟文件夹夹具，Shell 枚举出的虚拟文件与虚拟目录均没有文件系统路径，但其显示名及 `SFGAO_FOLDER` 属性可匹配现有名称/`#DIR` 规则并返回预期背景色。NativeProbe Release 构建 0 警告/错误，探针通过，前台与夹具清理检查通过。此前独立 ZIP Shell view 探针另验证了枚举及原生背景菜单查询。
+
+这说明逐项颜色规则计算不必依赖磁盘路径，可扩展到 ZIP 一类虚拟 Shell 项；尚未在自有 `IShellView` 中绘制这些行，也未验证其他 provider、Q-Dir `.qdr` 颜色导入或产品 UI。产品架构决策仍须等可见宿主兼容门槛和集中验收，当前不接入 ExplorerBrowser 产品。完整证据与范围见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项的颜色规则输入验证)。

@@ -14,6 +14,8 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--virtual-zip-color-rules")
+            return VirtualZipColorRuleProbe.Run();
         if (args.Length == 1 && args[0] == "--search-identity")
             return SearchFolderProbe.Run();
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")
@@ -330,6 +332,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-selection-batch-spike (isolated native selection restore, direct and stale-PIDL fallback; no ExplorerBrowser or input)");
             Console.WriteLine("       --ishellview-selection-enumeration-restore[-stale[-unselected-focus]] (hidden stock IShellView selection/focus recovery)");
             Console.WriteLine("       --ishellview-color-spike-visible --AllowInteractiveDesktopControl (show only the isolated test view; foreground is guarded)");
+            Console.WriteLine("       --virtual-zip-color-rules (evaluate Q-Dir color rules from virtual ZIP Shell rows without filesystem paths)");
             Console.WriteLine("       --search-virtual-scopes (read-only Shell parsing and search-folder scope creation; no result enumeration)");
             Console.WriteLine("       --selection-properties (read-only Shell properties of isolated fixture files)");
             Console.WriteLine("       --selection-properties-scale (timed direct Shell aggregation for 25/250/1000 isolated files; no ExplorerBrowser)");
