@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace ExplorerDirs.SettingsSmoke;
 
 internal static class ShellTreeControlStyleSmoke
@@ -29,5 +31,23 @@ internal static class ShellTreeControlStyleSmoke
             throw new InvalidOperationException("Leaving the tree must cancel pending hover expansion.");
         Console.WriteLine("Shell tree drag-hover callback smoke: PASS (hover item routed, effect preserved, native drop not handled)");
         NavigationTreeDragHoverDelaySmoke.Run();
+
+        var repoRoot = FindRepoRoot();
+        var hostSource = File.ReadAllText(Path.Combine(repoRoot, "src", "ExplorerDirs.App", "ShellTreeHost.cs"));
+        var hideHandlerStart = hostSource.IndexOf("IsVisibleChanged += (_, _) =>", StringComparison.Ordinal);
+        var hideHandlerEnd = hostSource.IndexOf("};", hideHandlerStart, StringComparison.Ordinal);
+        var hideHandler = hideHandlerStart >= 0 && hideHandlerEnd > hideHandlerStart
+            ? hostSource[hideHandlerStart..hideHandlerEnd]
+            : string.Empty;
+        if (!hideHandler.Contains("CancelDragHoverExpansion()", StringComparison.Ordinal))
+            throw new InvalidOperationException("Hiding the namespace tree must cancel its pending drag-hover expansion.");
+        Console.WriteLine("Shell tree drag-hover lifecycle smoke: PASS (pending expansion canceled when hidden)");
+    }
+
+    private static string FindRepoRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "docs", "roadmap.md"))) return directory.FullName;
+        throw new DirectoryNotFoundException("Could not locate the Explorer Dirs repository root.");
     }
 }

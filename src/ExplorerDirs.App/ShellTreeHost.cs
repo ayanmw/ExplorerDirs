@@ -40,7 +40,11 @@ internal sealed class ShellTreeHost : HwndHost
         IsVisibleChanged += (_, _) =>
         {
             if (IsVisible) StartSynchronization();
-            else CancelSynchronization();
+            else
+            {
+                _tree?.CancelDragHoverExpansion();
+                CancelSynchronization();
+            }
         };
     }
 

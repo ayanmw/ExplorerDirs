@@ -49,6 +49,12 @@ internal sealed class NativeShellTree : IDisposable
         if (restart) _dragHoverTimer.Start();
     }
 
+    internal void CancelDragHoverExpansion()
+    {
+        VerifyThread();
+        CancelDragHover();
+    }
+
     // The host keeps this scope across its bounded, cancellable dispatcher retries.
     // Native expansion/selection notifications can arrive after a COM call returns.
     internal IDisposable BeginSynchronization()
