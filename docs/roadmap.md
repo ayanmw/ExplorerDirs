@@ -5419,3 +5419,7 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 ## 2026-11-01：DefView 派生列重建路径的限定性进展
 
 在此前停止扩展单项通知、父目录通知、模式切换等变体后，隔离验证了“单项通知 → 显式应用列 → 重建同一 IShellView 的 view window”路径。当前合成文件系统 provider 中，重建触发 2 行重新枚举、派生值读取及一次大小比较，升序恢复为 `small.bin|child`，焦点/选区保持；默认不重建的单项通知仍没有重新取值。此结果只部分打开 IShellView 原型架构门槛，不改变产品当前 ExplorerBrowser，也不代表用户功能或迁移通过。精确 GUID 检查仍存在 adapter/provider key 映射差异，需先查明。完整证据及失败样本见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01显式重新应用列后的-view-window-重建复验)。
+
+## 2026-11-01：Shell 列键差异不由重建路径引入
+
+复核隔离运行日志与 adapter 源码后确认，`IColumnManager.GetColumns` 在通知/重放/重建之前已返回 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`；`MapColumnToSCID(1)` 返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此列键差异早于该次重放与窗口重建，原因仍未定位到具体 Shell 层。继续做同 view 分阶段键值跟踪，再据证据判断；不改产品视图。详情见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01列-guid-差异的时序范围收窄)。

@@ -1061,6 +1061,10 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 
 为对照上面的“仅重建窗口”，本轮使用 `single-item-recreate-shell-window` 策略，在通知后先显式重新应用列，再销毁并重建同一个隔离 `IShellView` 的 view window。初始目录/文件值为 `10`/`4`；重建后 DefView 重新枚举行（2 行）、读取派生值（`[4|1]`）、执行一次大小比较，并按升序显示 `small.bin|child`。`IColumnManager.Apply` 返回 `S_OK`，选区和焦点保持。WPF Private Desktop watchdog exit 0，前台 HWND、输入 tick 未变，隔离注册、夹具和 NativeProbe 进程均清理完成；日志：`src/.state/native-probe-watchdog/20261101-042722-7542daff.stdout.log`。作为对照，默认 `single-item` 策略未触发重枚举或派生值读取；native `STATIC` 根宿主样本在清理时超时，不采纳其行为结论。
 
-本轮原型结果与前述“无需显式重放即可恢复列”的窗口重建样本不同，表明列恢复行为依赖具体的列状态路径，尚不能收敛为通用步骤。另有探针诊断字段按 adapter 声明 GUID `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1` 精确比较时报告列不存在；但实际 `IColumnManager.GetColumns` 返回 GUID `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，且可见表头、值、排序与 provider 读取计数均证明该轮派生列已被消费。GUID 规范化/映射尚未解释，因此只认可行值和排序观测，不认可该精确 key 检查。
+本轮原型结果与前述“无需显式重放即可恢复列”的窗口重建样本不同，表明列恢复行为依赖具体的列状态路径，尚不能收敛为通用步骤。另有探针诊断字段按 adapter 声明 GUID `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1` 精确比较时报告列不存在；而且原始日志显示，通知、显式列重放和窗口重建之前的 `IColumnManager.GetColumns` 已返回 GUID `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`；适配器源码中的 `MapColumnToSCID(1)` 明确返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此此差异早于本轮重放，不能归因于重放或窗口重建。可见表头、值、排序与 provider 读取计数均证明该轮派生列已被消费，但是哪一层将列身份转换/替换仍未查明；只认可行值和排序观测，不认可精确 GUID 相等检查。
 
 此证据仍限于当前合成文件系统 provider 下的隔离 `IShellView`/DefView；没有验证产品 ExplorerBrowser、真实用户可见刷新、Shell 菜单/文件操作/拖放完整兼容，也没有批准产品迁移或发布。下一步查清 provider 列 GUID 映射，并把窗口重建与列恢复放回完整通知/导航生命周期门槛中评估。产品仍使用 ExplorerBrowser。
+
+### 2026-11-01：列 GUID 差异的时序范围收窄
+
+日志的 `phase=before` 列快照已包含 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，发生在通知、`IColumnManager.Apply` 和 view-window 重建之前；探针 adapter 的 `MapColumnToSCID(1)` 则返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此差异不是本轮显式重放或重建创建的。当前证据确认 Shell 列管理器呈现的 key 与 provider 映射 key 不同，但尚未定位转换发生于 Shell 的哪一层，也没有证据把任一 key 判为错误。下一步应在同一 view 的列发现和 `SetColumns` 前后分别记录 `MapColumnToSCID`、表头列身份与 `IColumnManager` 读回值，建立逐阶段映射；不通过猜测 GUID 修改产品或原型列实现。
