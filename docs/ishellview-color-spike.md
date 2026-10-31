@@ -1592,6 +1592,8 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 这只证明当前 Windows ZIP provider 中程序化跨卷文件/目录 MoveItems 与源 view 最终收敛；没有记录每个源/目标 `SHChangeNotify` 的 PIDL 事件，也没有测量通知或收敛延迟。真实剪切/粘贴菜单、OLE 拖放、进度/冲突提示、失败回滚、产品 ExplorerBrowser 与其他 provider 仍未验证。
 ### 2026-11-01：ZIP 跨卷移动的 Shell change PIDL
 
-强化 `--ishellview-zip-move-cross-volume-private-desktop`：在 ZIP source folder 和 C: 目标目录上分别注册 `SHChangeNotifyRegister`，锁定通知并解析 PIDL。文件 MoveItems 后实际收到归档 `SHCNE_UPDATEDITEM`、虚拟文件 `SHCNE_DELETE`（解析名 `virtual-items.zip\blue-rule-target.txt`）和目标 `SHCNE_CREATE`（解析名指向 C: 目标文件）；三项事件均纳入探针断言。Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-060639-dd4ae973.stdout.log`。
+`--ishellview-zip-move-cross-volume-private-desktop` 在 ZIP source folder 和 C: 目标目录分别注册 `SHChangeNotifyRegister`。文件 MoveItems 后收到归档 `SHCNE_UPDATEDITEM`、虚拟文件 `SHCNE_DELETE`（解析名 `virtual-items.zip\blue-rule-target.txt`）和目标 `SHCNE_CREATE`；三项均纳入探针断言。日志：`src/.state/native-probe-watchdog/20261101-060639-dd4ae973.stdout.log`。
 
-同一轮虚拟目录跨卷 MoveItems 成功且嵌套目标内容为 `0x42`、源 view 收敛为空，但监听器在操作后的约 3 秒消息泵期间没有观察到 Shell change 事件。该结果说明文件与目录的通知行为在当前 ZIP provider 上不同；没有测得通知到达延迟，也未验证其他 archive provider 或产品 ExplorerBrowser。
+该复合探针紧接文件移动后再移动同一 ZIP 中的目录，约 3 秒内没有观察到事件。复核发现顺序/共享 provider 状态是未控制变量，不能据此得出目录移动不发通知。新增 `--ishellview-zip-folder-move-cross-volume-private-desktop`，用全新 ZIP view 先单独移动目录；连续两次观察到相同事件：归档 `SHCNE_UPDATEDITEM`、归档内 `virtual-folder\nested.txt` 的 `SHCNE_DELETE`、目标 `virtual-folder` 的 `SHCNE_RENAMEFOLDER`、目标嵌套文件的 `SHCNE_CREATE`。目标内容为 `0x42`、ZIP 源条目移除、源 view 从 2 项收敛为 1 项。Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过；复验日志：`src/.state/native-probe-watchdog/20261101-folder-first-move.stdout.log`。
+
+因此当前 ZIP provider 对虚拟目录移动使用嵌套子项删除加目标目录重命名通知，并非父 ZIP 内的虚拟目录删除事件。结论仅适用于本机 Windows ZIP provider、程序化跨卷 `IFileOperation.MoveItems` 和该次 3 秒观察窗；其他 archive provider、可见 UI/OLE 拖放、ExplorerBrowser 产品接线仍未验证。

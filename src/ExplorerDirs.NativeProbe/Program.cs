@@ -198,6 +198,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunZipViewCopyItems();
         if (args.Length == 1 && args[0] == "--ishellview-zip-move-cross-volume-private-desktop")
             return PrivateDesktopShellProbe.RunZipCrossVolumeMove();
+        if (args.Length == 1 && args[0] == "--ishellview-zip-folder-move-cross-volume-private-desktop")
+            return PrivateDesktopShellProbe.RunZipFolderCrossVolumeMove();
         if (args.Length == 1 && args[0] == "--ishellview-zip-delete-items-private-desktop")
             return PrivateDesktopShellProbe.RunZipViewDeleteItems();
         if (args.Length == 1 && args[0] == "--ishellview-this-pc-color-pixels-private-desktop")
@@ -348,6 +350,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-zip-extract-private-desktop (diagnose ZIP extract verb dispatch against an isolated fixture)");
             Console.WriteLine("       --ishellview-zip-copy-items-private-desktop (copy a virtual ZIP entry through IFileOperation on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-zip-move-cross-volume-private-desktop (move a virtual ZIP entry to another volume and verify source-view convergence)");
+        Console.WriteLine("       --ishellview-zip-folder-move-cross-volume-private-desktop (move a virtual ZIP folder first to another volume and observe Shell change notifications)");
             Console.WriteLine("       --ishellview-zip-delete-items-private-desktop (probe deleting a virtual ZIP entry through IFileOperation on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-this-pc-color-pixels-private-desktop (This PC virtual-item color pixels on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-libraries-color-pixels-private-desktop (Libraries virtual-item color pixels on a separate Windows Desktop)");

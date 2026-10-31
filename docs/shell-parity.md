@@ -564,4 +564,4 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 首次值写入失败时创建的空叶键也由本次尝试路径清单约束后清理；隔离 smoke 覆盖空键回滚。该边界不是对真实 Windows 注册表权限失败的端到端注入验证。
 
 2026-11-01 隔离 ZIP 跨卷操作：真实 ZIP `IShellView` 对 D: 归档中的文件与目录调用 `IFileOperation.MoveItems` 移至 C:；目标内容匹配、源条目移除，源 view 分别收敛至 1 项和 0 项。Private Desktop 前台、输入、隔离清理与 Release build 通过。仅 NativeProbe 当前 Windows ZIP provider 的程序化证据，未验证产品 ExplorerBrowser、Shell 事件 PIDL/时延、菜单、拖放及其他 provider。[隔离探针记录](ishellview-color-spike.md#2026-11-01zip-文件与目录跨卷-moveitems)
-2026-11-01 ZIP 跨卷 Shell 通知复验：虚拟文件移动的归档 UPDATEITEM、ZIP 项 DELETE 和 C: 目标 CREATE 事件均被接收，PIDL 解析名与实际源/目标路径一致；ZIP 虚拟目录 MoveItems 约 3 秒未观测到相应通知，虽然后端数据和源 view 已收敛。说明当前 ZIP provider 文件与目录通知表现不同；仍需查明目录通知及其他 provider，不能据此宣称 ZIP 通知完整。[探针记录](ishellview-color-spike.md#2026-11-01zip-跨卷移动的-shell-change-pidl)
+2026-11-01 ZIP 跨卷 Shell 通知复验：文件移动收到归档 UPDATEITEM、ZIP 项 DELETE 和 C: 目标 CREATE；全新归档中目录优先移动的对照则收到归档 UPDATEITEM、源嵌套文件 DELETE、目标目录 RENAMEFOLDER、目标嵌套文件 CREATE，路径 PIDL 与实际源/目标一致。此前复合探针目录阶段无事件是顺序相关、未控制 provider 状态的观察，已由新鲜归档对照收窄，不再视为目录无通知。当前 ZIP provider 的程序化跨卷路径通过；其他 provider、可见 UI/OLE 拖放及 ExplorerBrowser 产品接线未验证。[探针记录](ishellview-color-spike.md#2026-11-01zip-跨卷移动的-shell-change-pidl)
