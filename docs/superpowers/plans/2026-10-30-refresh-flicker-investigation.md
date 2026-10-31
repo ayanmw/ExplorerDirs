@@ -167,11 +167,13 @@ The production HostProbe's deferred-notification fixture isolates one filesystem
 
 Microsoft documents `SHCNF_FLUSH` as waiting for notification delivery to affected components, not completion of view enumeration or painting ([SHChangeNotify](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify)). Synchronous delivery therefore does not provide a refresh-completion boundary and did not improve this measured row-update latency. Production F5 behavior is unchanged. The diagnostic path only sampled row counts and does not establish displayed pixels or user-visible blank duration.
 
-### 2026-11-01: Compare item-level create/update notifications
+### 2026-11-01: Compare item-level notifications with matched delivery modes
 
-The same isolated deferred-update fixture was used to compare item-specific Shell notifications against the directory-wide refresh:
+The initial item-notification comparison was confounded: its single `SHCNE_CREATE` used synchronous `SHCNF_FLUSH`, while the multi-item sequence used asynchronous `SHCNF_FLUSHNOWAIT`. HostProbe now selects one delivery mode for both branches through `EXPLORER_DIRS_PROBE_F5_NOTIFICATION_DELIVERY=flush|nowait` (default `nowait`).
 
-- Sending `SHCNE_CREATE` for only the known new file left the row count at 3 on API return, then reached 4 within 100 ms in three runs (one initial run and two repeats). The following normal F5 status sample saw 4 rows after 14–28 ms.
-- Sending `SHCNE_UPDATEITEM` for the three existing files, followed by `SHCNE_CREATE` for the new file, left the row count at 3 for 100 ms; the subsequent directory-wide refresh exposed the row at about 512 ms.
+Using the same deferred-update fixture and delivery mode for both notification shapes:
 
-This suggests a targeted `SHCNE_CREATE` can update a single new filesystem item sooner than `SHCNE_UPDATEDIR` in this fixture. The multi-item update/create sequence did not reproduce that improvement. It does not yet establish a safe F5 algorithm: deletion, rename, changed metadata, hidden/filter state, sort/group, large directories, long paths, multiple simultaneous changes, and other Shell providers are untested. No production behavior was changed. Release HostProbe build passed with 0 warnings/errors and all isolated fixtures were cleaned. Row-count timings do not verify visible pixels or flicker.
+- With `SHCNF_FLUSHNOWAIT`, a single `SHCNE_CREATE` and the sequence of three `SHCNE_UPDATEITEM` plus one `SHCNE_CREATE` both remained at 3 rows on return and after 100 ms. The subsequent product F5 path exposed the fourth row at 514 ms and 511 ms respectively.
+- With `SHCNF_FLUSH`, the single create and the four-event sequence both remained at 3 rows on return, then reached 4 within 100 ms. The notification calls took about 8 ms and 24 ms; after the following product F5 path began, the row was already visible at 30 ms and 26 ms respectively.
+
+The earlier result must not be attributed to event count: in this fixture, delivery mode is the variable that tracks with the faster row-model update. This still does not establish a safe product F5 algorithm. `SHCNF_FLUSH` delivery does not promise completed enumeration or paint, as noted above; deletions, renames, changed metadata, hidden/filter state, sort/group, large directories, long paths, multiple simultaneous changes and other Shell providers remain untested. No production behavior was changed. HostProbe Release build passed with 0 warnings/0 errors and all isolated fixtures were cleaned. Row-count timings do not verify visible pixels or flicker.
