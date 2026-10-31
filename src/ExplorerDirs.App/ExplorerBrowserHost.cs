@@ -3101,8 +3101,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             LastShellRefreshStatus = $"GetCurrentView=0x{currentViewResult:X8}";
             throw ShellDirectoryRefreshRecovery.FailureForHResult(currentViewResult, "GetCurrentView")!;
         }
-        ShellViewRedrawLease? refreshRedrawLease = null;
-        var redrawLeaseTransferredToCompletion = false;
         try
         {
             var path = request.Path;
@@ -3158,16 +3156,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             if (traceAsUserRefresh)
             {
                 BeginNativePaintTransitionTrace("f5");
-                var folderView = GetFolderView2Pointer();
-                if (folderView != IntPtr.Zero)
-                {
-                    try
-                    {
-                        if (IsCurrentRefreshRequest())
-                            refreshRedrawLease = ShellViewRedrawLease.TrySuppress(folderView);
-                    }
-                    finally { Marshal.Release(folderView); }
-                }
             }
             if (!IsCurrentRefreshRequest())
             {
@@ -3235,8 +3223,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             {
                 if (Interlocked.Exchange(ref completionCleaned, 1) != 0) return;
                 refreshPaintWait?.Stop();
-                refreshRedrawLease?.Dispose();
-                refreshRedrawLease = null;
                 selectionRecoverySuppression.Dispose();
                 if (!selectionOwnershipTransferred) selection?.Dispose();
             }
@@ -3287,9 +3273,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
             try
             {
-                // Keep the existing Shell rows visible while F5's asynchronous enumeration settles.
-                // This is bounded below and must be checked for stale visual hit targets in GUI acceptance.
-                redrawLeaseTransferredToCompletion = true;
                 var lastObservedCount = -1;
                 var stableCountSamples = 0;
                 refreshPaintWait = new DispatcherTimer(DispatcherPriority.Background)
@@ -3321,9 +3304,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                         stableCountSamples = 0;
                     }
 
-                    // Wait for three identical samples, but never keep a Shell provider's list
-                    // frozen indefinitely if it cannot report a stable count. The count can still
-                    // describe the old rows when a directory notification has not been processed yet.
+                    // Wait for three identical samples before recovering selection/focus. The count
+                    // can still describe old rows when a directory notification has not been processed.
                     if ((stableCountSamples >= 2 && count is not null &&
                             (!requireRepublishedRows || count > 0)) ||
                         Stopwatch.GetElapsedTime(refreshStartedAt) >= TimeSpan.FromMilliseconds(1500))
@@ -3339,7 +3321,6 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         }
         finally
         {
-            if (!redrawLeaseTransferredToCompletion) refreshRedrawLease?.Dispose();
             Marshal.ReleaseComObject(viewObject);
         }
     }
