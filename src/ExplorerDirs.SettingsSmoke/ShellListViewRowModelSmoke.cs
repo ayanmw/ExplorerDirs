@@ -326,6 +326,47 @@ internal static class ShellListViewRowModelSmoke
                   handleBoundApplied[0].FileSystemIdentity != handleBoundIdentity,
                 "handle enumeration retains the original object's size and row publication rejects the replacement path");
 
+            var abaRootPath = Path.Combine(identityRoot, "aba-root");
+            var abaRetiredPath = Path.Combine(identityRoot, "aba-retired");
+            var abaReplacementPath = Path.Combine(identityRoot, "aba-replacement");
+            Directory.CreateDirectory(Path.Combine(abaRootPath, "nested"));
+            File.WriteAllBytes(Path.Combine(abaRootPath, "root.bin"), new byte[2]);
+            File.WriteAllBytes(Path.Combine(abaRootPath, "nested", "nested.bin"), new byte[4]);
+            var abaIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(abaRootPath);
+            var abaScan = HandleBoundRecursiveDirectoryScanner.Scan(
+                [abaRootPath], CancellationToken.None,
+                (openedPath, openedIdentity) =>
+                {
+                    Check(openedPath == abaRootPath && openedIdentity == abaIdentity,
+                        "the ABA scenario swaps paths only after the scanner opens the original root");
+                    Directory.Move(abaRootPath, abaRetiredPath);
+                    Directory.CreateDirectory(abaRootPath);
+                    File.WriteAllBytes(Path.Combine(abaRootPath, "replacement.bin"), new byte[10]);
+                },
+                (parentPath, childPath) =>
+                {
+                    if (!string.Equals(parentPath, abaRetiredPath, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(childPath, Path.Combine(abaRetiredPath, "nested"), StringComparison.OrdinalIgnoreCase))
+                        return;
+                    Directory.Move(abaRootPath, abaReplacementPath);
+                    Directory.Move(abaRetiredPath, abaRootPath);
+                });
+            var abaResult = abaScan[abaRootPath];
+            var abaRow = target with
+            {
+                ParsingName = abaRootPath,
+                FileSystemPath = abaRootPath,
+                FileSystemIdentity = abaIdentity,
+                RecursiveBytes = null,
+                RecursiveSummary = null
+            };
+            var abaApplied = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
+                [abaRow], abaScan);
+            Check(abaIdentity is not null && abaResult.Identity == abaIdentity &&
+                  abaResult.Summary.Bytes == 6 && abaApplied[0].RecursiveBytes == 6 &&
+                  abaApplied[0].FileSystemIdentity == abaIdentity,
+                "an ABA path restoration publishes the summary read from the original directory handle");
+
             var nestedScanRoot = Path.Combine(identityRoot, "nested-scan-root");
             var nestedScanChild = Path.Combine(nestedScanRoot, "child");
             Directory.CreateDirectory(nestedScanChild);

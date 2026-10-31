@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 句柄扫描器 ABA 路径复核：补充真实时序“打开原目录句柄 → 将原目录移走并在原路径放入 10 B 替代目录 → 扫描期间把替代目录移开并恢复原目录 → 发布扫描结果”。Release `ShellListViewRowModelSmoke` 中的该场景通过：扫描结果身份及 6 B 摘要来自原目录句柄；路径恢复为同一原目录后结果可安全发布。完整 Release `SettingsSmoke` 通过。由此收窄此前调查中的 ABA 未知点：它只适用于路径返回汇总的旧接口；当前隔离句柄扫描把结果绑定到实际打开对象。仍不接入产品 ExplorerBrowser/F9，也不替代 Shell view 的可见列/操作验收。
+
 2026-10-31 隔离递归大小快照拒绝同路径替换目录：NativeProbe provider 仍以 Shell 绝对解析名保存每路径一份快照，但每个文件夹 PIDL 同时携带卷序列号与 128 位文件 ID；读取缓存时两者必须匹配。真实临时目录在缓存后被改名、同路径创建 17 B 新目录，旧实现回归失败，身份校验后新行读回 17 B 而非旧缓存；provider 重建、重枚举及大小列文本/数值/排序合同继续通过。原生 adapter `/W4 /WX` 构建、`--static-shell-column-folder-smoke` 和 Release `SettingsSmoke` 通过。该快照仍只存在 NativeProbe 隔离 provider，不接产品 ExplorerBrowser；文件系统不提供 `FILE_ID_INFO` 时不应用缓存，产品逐行大小列和可见 Shell 行为仍开放。
 
 2026-10-31 隔离行模型在目录改名后保留递归大小：Shell 重枚举将旧/新解析名映射为同一行时，若二者都仍为文件系统目录且卷序列号/文件 ID 相同，保留该目录已完成的递归摘要；身份变化仍清空。真实临时目录 rename 回归在旧逻辑上失败，修正后完整 Release SettingsSmoke 通过，NativeProbe Release build 0 警告/错误。仅更新 NativeProbe 自有行模型，不接入 ExplorerBrowser 产品，Shell 视图重建/可见排序和真实异步扫描仍待迁移验收。
