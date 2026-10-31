@@ -1,3 +1,5 @@
+2026-10-31 Shell 新建菜单的懒加载兼容：原生命令状态查询初始化“新建文件夹”子菜单时，现先转发 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；仅 `S_OK` 表示已处理，`S_FALSE`/`E_NOTIMPL` 才回退 `IContextMenu2.HandleMenuMsg`，其它错误停止。真实 COM 回归在旧逻辑上按预期失败，修复后 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。没有显示菜单；第三方 Shell 扩展的可见菜单及命令交互仍需集中 UI 验收。
+
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
 
 2026-10-30 克隆历史容量：用户确认每标签最多保留 100 个导航位置；超过时移除最旧位置，克隆视图复制这 100 个以内的历史及逐站选区。克隆时直接复制列表容器且共享不可变选区快照，避免中间完整数组副本。完整 Release SettingsSmoke 通过 120 站容量淘汰及克隆独立回退检查；实际 ExplorerBrowser/GUI 历史操作仍待集中验收。来源：[Q-Dir FAQ 16](https://www.softwareok.com/?faq=16&seite=faq-Q-DIR)、[Q-Dir 历史](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory)。
