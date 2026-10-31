@@ -661,8 +661,8 @@ public static class SyntheticShellSortProbe
             using var moveWatcher2 = focusRecoveryExperiment
                 ? new ProbeShellDirectoryMonitor(backingFolder, preMoveNames2.Length)
                 : null;
-            if (moveWatcher1 is not null) moveWatcher1.Operation = "synthetic-move-view1";
-            if (moveWatcher2 is not null) moveWatcher2.Operation = "synthetic-move-view2";
+            if (moveWatcher1 is not null) moveWatcher1!.Operation = "synthetic-move-view1";
+            if (moveWatcher2 is not null) moveWatcher2!.Operation = "synthetic-move-view2";
             using var view2SelectionBeforeMove = focusRecoveryExperiment ? ShellViewSelectionSnapshot.Capture(folderView2) : null;
             if (focusRecoveryExperiment && (movedSelectionIndex2 < 0 || view2SelectionBeforeMove is null ||
                 view2SelectionBeforeMove.SelectedCount != 2 || !view2SelectionBeforeMove.HasFocusedItem ||
@@ -711,8 +711,8 @@ public static class SyntheticShellSortProbe
                     () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
                     () => Check(At<RefreshView>(view2, 8)(view2)),
                     () => MoveResultVisible(view2), () => Pump(25));
-                Console.WriteLine($"synthetic-shell-watcher-reconciliation: view1={watcherReconciled1},refreshes1={moveWatcher1.RefreshCount}; view2={watcherReconciled2},refreshes2={moveWatcher2.RefreshCount}; diagnostics1={moveWatcher1.Diagnostics}; diagnostics2={moveWatcher2.Diagnostics}");
-                if (!watcherReconciled1 || !watcherReconciled2 || moveWatcher1.RefreshCount != 0 || moveWatcher2.RefreshCount != 0)
+                Console.WriteLine($"synthetic-shell-watcher-reconciliation: view1={watcherReconciled1},refreshes1={moveWatcher1!.RefreshCount}; view2={watcherReconciled2},refreshes2={moveWatcher2!.RefreshCount}; diagnostics1={moveWatcher1!.Diagnostics}; diagnostics2={moveWatcher2!.Diagnostics}");
+                if (!watcherReconciled1 || !watcherReconciled2 || moveWatcher1!.RefreshCount != 0 || moveWatcher2!.RefreshCount != 0)
                     throw new IOException("The production watcher queue/batch did not accept the native synthetic-view move update without a redundant full refresh in both views.");
             }
             (bool SelectionRestored, bool FocusRestored)? view2Recovery = null;
@@ -734,6 +734,77 @@ public static class SyntheticShellSortProbe
                 if (view2Recovery is not { FocusRestored: true } || !moveSelectionRetained2 || selectedAfterRecovery != 1)
                     throw new IOException($"The stale selected PIDL blocked focused-item recovery after MoveItems: recovery={view2Recovery}; state=0x{moveState2:X}; selected={selectedAfterRecovery}.");
                 Console.WriteLine($"synthetic-shell-focus-recovery: stale-selected-item=discarded; surviving-selection={selectedAfterRecovery}; surviving-focus=True");
+
+                var lifecycleItem = "watcher-lifecycle-probe";
+                var lifecycleRename = lifecycleItem + "-renamed";
+                var lifecycleCount = ReadNames(FindListView(view), module, expectedCount: -1).Length;
+                var refreshesBeforeCreate1 = moveWatcher1!.RefreshCount;
+                var refreshesBeforeCreate2 = moveWatcher2!.RefreshCount;
+                moveWatcher1!.Operation = "synthetic-create-view1";
+                moveWatcher2!.Operation = "synthetic-create-view2";
+                CreateFolderInFilesystemFolder(backingFolder, lifecycleItem);
+                bool CreatedItemVisible(nint targetView)
+                {
+                    var names = ReadNames(FindListView(targetView), module, expectedCount: -1);
+                    return names.Length == lifecycleCount + 1 && names.Contains(lifecycleItem, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var createReconciled1 = moveWatcher1!.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)), () => CreatedItemVisible(view), () => Pump(25));
+                var createReconciled2 = moveWatcher2!.Reconcile(
+                    () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view2, 8)(view2)), () => CreatedItemVisible(view2), () => Pump(25));
+                var createRefreshes1 = moveWatcher1!.RefreshCount - refreshesBeforeCreate1;
+                var createRefreshes2 = moveWatcher2!.RefreshCount - refreshesBeforeCreate2;
+                if (!createReconciled1 || !createReconciled2 || createRefreshes1 > 2 || createRefreshes2 > 2)
+                    throw new IOException($"Native create notification did not converge within two mismatch refreshes per view: view1={createReconciled1}/{createRefreshes1}; view2={createReconciled2}/{createRefreshes2}; diagnostics1={moveWatcher1.Diagnostics}; diagnostics2={moveWatcher2.Diagnostics}.");
+
+                var refreshesBeforeRename1 = moveWatcher1!.RefreshCount;
+                var refreshesBeforeRename2 = moveWatcher2!.RefreshCount;
+                moveWatcher1!.Operation = "synthetic-rename-view1";
+                moveWatcher2!.Operation = "synthetic-rename-view2";
+                RenameSelectedShellItem(view, FindListView(view), module, lifecycleItem, "two.bin", lifecycleRename);
+                bool RenamedItemVisible(nint targetView)
+                {
+                    var names = ReadNames(FindListView(targetView), module, expectedCount: -1);
+                    return names.Length == lifecycleCount + 1 && names.Contains(lifecycleRename, StringComparer.OrdinalIgnoreCase) &&
+                        !names.Contains(lifecycleItem, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var renameReconciled1 = moveWatcher1!.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)), () => RenamedItemVisible(view), () => Pump(25));
+                var renameReconciled2 = moveWatcher2!.Reconcile(
+                    () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view2, 8)(view2)), () => RenamedItemVisible(view2), () => Pump(25));
+                var renameRefreshes1 = moveWatcher1!.RefreshCount - refreshesBeforeRename1;
+                var renameRefreshes2 = moveWatcher2!.RefreshCount - refreshesBeforeRename2;
+                if (!renameReconciled1 || !renameReconciled2 || renameRefreshes1 != 1 || renameRefreshes2 != 1)
+                    throw new IOException($"Native rename notification did not converge through one required refresh per view: view1={renameReconciled1}/{renameRefreshes1}; view2={renameReconciled2}/{renameRefreshes2}.");
+
+                var refreshesBeforeDelete1 = moveWatcher1!.RefreshCount;
+                var refreshesBeforeDelete2 = moveWatcher2!.RefreshCount;
+                moveWatcher1!.Operation = "synthetic-delete-view1";
+                moveWatcher2!.Operation = "synthetic-delete-view2";
+                DeleteSelectedShellItem(view, FindListView(view), module, lifecycleRename, "two.bin");
+                bool DeletedItemAbsent(nint targetView)
+                {
+                    var names = ReadNames(FindListView(targetView), module, expectedCount: -1);
+                    return names.Length == lifecycleCount && !names.Contains(lifecycleRename, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var deleteReconciled1 = moveWatcher1!.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)), () => DeletedItemAbsent(view), () => Pump(25));
+                var deleteReconciled2 = moveWatcher2!.Reconcile(
+                    () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view2, 8)(view2)), () => DeletedItemAbsent(view2), () => Pump(25));
+                var deleteRefreshes1 = moveWatcher1!.RefreshCount - refreshesBeforeDelete1;
+                var deleteRefreshes2 = moveWatcher2!.RefreshCount - refreshesBeforeDelete2;
+                if (!deleteReconciled1 || !deleteReconciled2 || deleteRefreshes1 > 2 || deleteRefreshes2 > 2)
+                    throw new IOException($"Native delete notification did not converge within two mismatch refreshes per view: view1={deleteReconciled1}/{deleteRefreshes1}; view2={deleteReconciled2}/{deleteRefreshes2}; diagnostics1={moveWatcher1!.Diagnostics}; diagnostics2={moveWatcher2!.Diagnostics}.");
+                Console.WriteLine($"synthetic-shell-watcher-lifecycle: create-refreshes={createRefreshes1}/{createRefreshes2}; rename-refreshes={renameRefreshes1}/{renameRefreshes2}; delete-refreshes={deleteRefreshes1}/{deleteRefreshes2}; diagnostics1={moveWatcher1.Diagnostics}; diagnostics2={moveWatcher2.Diagnostics}");
             }
             Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; two-state-view1=0x{moveState:X}; two-state-view2=0x{moveState2:X}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
             if (!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2 ||
