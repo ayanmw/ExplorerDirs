@@ -146,4 +146,6 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 
 2026-11-01：增加独立的 `--synthetic-shell-focus-recovery-private-desktop` 对照探针，保留原同目录双视图探针默认行为不变。启用 synthetic 子项通知翻译后，真实 `IFileOperation.MoveItems` 更新两个同目录 view；移动前用产品 `ShellViewSelectionSnapshot` 保存第二视图的选区与焦点 PIDL。移动后，第二视图 `two.bin` 状态为 `0x1`（Selected、无 `LVIS_FOCUSED`）；通过产品快照恢复后变为 `0x3`，读回确认 `SelectionRestored=True`、`FocusRestored=True`。Private Desktop 前台、输入与隔离清理守卫均通过。探针只验证此 synthetic filesystem provider 与当前 Windows 环境的一条移动路径，不能证明所有 Shell provider、刷新时序或产品接线都已解决焦点恢复；它在目标断言后结束，跳过无关的后续递归尺寸刷新实验。
 
+2026-11-01：将默认 Shell 菜单命令探针的刷新焦点检查改为复用产品 `ShellViewSelectionSnapshot`，不再用手写 `SelectItem` 逻辑代替产品恢复路径。隔离 view 执行原生 Refresh 时，项目行模型短暂从 3 项变为 0，再恢复为 3 项；原选中/焦点项目在刷新后丢失。列表 HWND 焦点一直保留，待行模型稳定后，产品快照恢复成功并读回 `SelectionRestored=True`、`FocusRestored=True`、选中数为 1。Details、排序、分组及列头菜单检查也完成。Private Desktop 守卫确认前台 HWND 未变、无输入变化、夹具清理完成。该结果只证明当前默认 filesystem Shell view 的刷新路径可复用此恢复 helper，不证明产品 ExplorerBrowser 重绘、所有 provider、快速筛选或用户可见体验；刷新造成的行模型清空仍是该迁移原型需要处理的可见风险。
+
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。

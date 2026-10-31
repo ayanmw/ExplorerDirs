@@ -1072,6 +1072,9 @@ internal static class ShellViewHostFilterProbe
             _ = SetFocus(listView);
             if (GetFocus() != listView || !FocusedItemMatches(folderView, expectedFocusedPidl))
                 throw new Exception("The menu-command fixture could not establish its initial list and item focus.");
+            using var refreshSelection = ShellViewSelectionSnapshot.Capture(folderView);
+            if (refreshSelection is null || refreshSelection.SelectedCount != 1 || !refreshSelection.HasFocusedItem)
+                throw new Exception("The production selection snapshot did not capture the focused refresh fixture item.");
 
             InvokeBackgroundVerb(view, owner, "viewlogicaldetails");
             Check(getMode(folderView, out modeAfterMenu, out iconSizeAfterMenu));
@@ -1096,7 +1099,9 @@ internal static class ShellViewHostFilterProbe
                 Check(At<ItemCount>(folderView, 7)(folderView, 1, out selectedCount));
                 listFocusPreserved = GetFocus() == listView;
                 rawRefreshPreservedItem = FocusedItemMatches(folderView, expectedFocusedPidl) && selectedCount == 1;
-                var stable = visibleCount == initialCount && listFocusPreserved && rawRefreshPreservedItem;
+                // Wait for Shell's item model to settle; selection recovery is performed below
+                // with the same production snapshot helper used by ExplorerBrowser refresh.
+                var stable = visibleCount == initialCount;
                 stableRefreshSamples = stable ? stableRefreshSamples + 1 : 0;
                 refreshSamples.Add($"+{refreshSampleNumber++ * 50}ms:items={visibleCount},hwnd={listFocusPreserved},item={FocusedItemMatches(folderView, expectedFocusedPidl)},selection={selectedCount}");
                 if (stableRefreshSamples < 3) Thread.Sleep(50);
@@ -1104,22 +1109,24 @@ internal static class ShellViewHostFilterProbe
             if (visibleCount != initialCount || IsWindowVisible(owner) || GetForegroundWindow() != foreground)
                 throw new Exception($"The Shell background Refresh command changed the fixture or desktop boundary: items={visibleCount}, parent-visible={IsWindowVisible(owner)}, foreground-unchanged={GetForegroundWindow() == foreground}.");
             rawRefreshPreservedItem &= stableRefreshSamples == 3;
-            if (!rawRefreshPreservedItem)
+            (bool SelectionRestored, bool FocusRestored) recovery = default;
+            var recoveryDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            do
             {
-                // The raw Shell Refresh verb can clear the focused row even though the HWND retains focus.
-                // Model the host's post-refresh recovery using the captured relative PIDL identity.
-                var restoredIndex = FindItemIndex(folderView, expectedFocusedPidl);
-                if (restoredIndex < 0)
-                    throw new Exception("The focused fixture item disappeared from the view after Refresh and could not be restored.");
-                Check(At<SelectItem>(folderView, 15)(folderView, restoredIndex,
-                    1u | 0x10u | 0x40000000u)); // SVSI_SELECT | SVSI_FOCUSED | SVSI_NOTAKEFOCUS
-            }
-            if (!listFocusPreserved || GetFocus() != listView || !FocusedItemMatches(folderView, expectedFocusedPidl))
-                throw new Exception($"The host could not restore the Shell focused item after Refresh: list={listFocusPreserved}, item={FocusedItemMatches(folderView, expectedFocusedPidl)}, focus-hwnd=0x{GetFocus():X}, list-hwnd=0x{listView:X}.");
+                Application.DoEvents();
+                recovery = refreshSelection.Restore(view, allowSelectedFocusFallback: false);
+                Check(At<ItemCount>(folderView, 7)(folderView, 1, out selectedCount));
+                if (recovery.SelectionRestored && recovery.FocusRestored && selectedCount == 1 &&
+                    FocusedItemMatches(folderView, expectedFocusedPidl)) break;
+                Thread.Sleep(50);
+            } while (DateTime.UtcNow < recoveryDeadline);
+            if (GetFocus() != listView || !recovery.SelectionRestored || !recovery.FocusRestored ||
+                !FocusedItemMatches(folderView, expectedFocusedPidl))
+                throw new Exception($"The production snapshot could not restore Shell selection/focus after Refresh: result={recovery}, item={FocusedItemMatches(folderView, expectedFocusedPidl)}, selection={selectedCount}, focus-hwnd=0x{GetFocus():X}, list-hwnd=0x{listView:X}.");
             Check(At<ItemCount>(folderView, 7)(folderView, 1, out selectedCount));
             if (selectedCount != 1)
                 throw new Exception($"The host could not restore the selected focused item after Refresh: {selectedCount}.");
-            Console.WriteLine($"ishellview-menu-command-focus: raw-refresh-preserved-item={rawRefreshPreservedItem}; host-pidl-restore=True; hwnd-focus-preserved={listFocusPreserved}; samples=[{string.Join(';', refreshSamples)}]");
+            Console.WriteLine($"ishellview-menu-command-focus: raw-refresh-preserved-item={rawRefreshPreservedItem}; production-snapshot-restore={recovery.SelectionRestored && recovery.FocusRestored}; hwnd-focus-preserved={GetFocus() == listView}; samples=[{string.Join(';', refreshSamples)}]");
         }
         finally { Marshal.FreeCoTaskMem(expectedFocusedPidl); }
 
