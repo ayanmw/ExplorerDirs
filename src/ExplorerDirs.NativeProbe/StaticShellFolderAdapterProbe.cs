@@ -23,9 +23,42 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenu3Id = new("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
     private const uint WmInitMenuPopup = 0x0117;
+    private const uint ShcneCreate = 0x00000002;
+    private const uint ShcneDelete = 0x00000004;
+    private const uint ShcneRenameItem = 0x00000001;
+    private const uint ShcneUpdateItem = 0x00002000;
+    private const uint ShcneUpdateDir = 0x00001000;
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
+
+    internal static int RunChildNotificationRoutingContractSmoke()
+    {
+        var module = NativeLibrary.Load(FindAdapterLibrary());
+        try
+        {
+            var classify = Marshal.GetDelegateForFunctionPointer<ClassifyChildNotification>(
+                NativeLibrary.GetExport(module, "ShouldTranslateSyntheticChildNotificationForProbe"));
+            Expect(classify(ShcneCreate) != 0, "CREATE translates to a parent directory update");
+            Expect(classify(ShcneDelete) != 0, "DELETE translates to a parent directory update");
+            Expect(classify(ShcneRenameItem) != 0, "RENAMEITEM translates to a parent directory update");
+            Expect(classify(ShcneUpdateItem) != 0, "UPDATEITEM translates to a parent directory update");
+            Expect(classify(ShcneUpdateDir) == 0, "UPDATEDIR is not recursively translated");
+            Expect(classify(0x00000008) == 0, "unknown child events are not translated");
+        }
+        finally { NativeLibrary.Free(module); }
+        Console.WriteLine("synthetic child notification routing contract smoke: PASS (no Shell view created)");
+        return 0;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ClassifyChildNotification(uint eventId);
+
+    private static void Expect(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException("Child notification routing contract failed: " + message);
+        Console.WriteLine("PASS " + message);
+    }
 
     internal static int RunFolderContract(bool requireIdentity = false, bool strictInterfaces = false, bool prototypeClass = false, bool wrappedPidls = false, bool shellItemParentProbe = false)
     {

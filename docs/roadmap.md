@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 隔离 Shell `UPDATEITEM` 通知路由：NativeProbe 合成文件系统 adapter 现在将子项 `SHCNE_UPDATEITEM` 与 CREATE/RENAMEITEM/DELETE 一样纳入延迟父目录更新队列，供自有派生行模型重新枚举属性；`SHCNE_UPDATEDIR` 与未知事件明确不再递归翻译。无窗口路由 smoke 通过，NativeProbe Release 构建 0 警告/错误，wrapped-folder 合同 smoke 通过。没有创建 Shell view 或运行 Private Desktop，因此仅验证事件分类接线和既有 wrapped-folder 合同，不证明真实文件属性变更后的可见列更新、事件 burst 合并或产品集成；ExplorerBrowser 产品未改。
+
 2026-10-31 Shell 延迟子菜单接口路由：工具栏/编辑命令查询 Shell canonical verb 时，初始化懒加载的“新建文件夹”子菜单现优先调用 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；返回 `E_NOTIMPL` 时回退 `IContextMenu2.HandleMenuMsg`。旧实现只查 `IContextMenu2`，无法使用只由现代 handler 正确处理的扩展菜单。SettingsSmoke 先在旧实现上按预期失败，后覆盖现代 handler 优先及 `E_NOTIMPL` 旧接口回退；完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。未显示菜单；文件区右键仍由 ExplorerBrowser 原生生成，实际第三方菜单展示仍待集中 GUI 验收。
 
 2026-10-31 包装子 PIDL 的绝对身份日志澄清：常规 wrapped-folder smoke 现同时检查 standalone 绝对组合被拒绝，以及 `SHCreateItemWithParent(adapter, wrappedChild)` 后文件系统路径、绝对 parsing name 和 parent/child 身份都正确；Release NativeProbe build 0 警告/错误，完整 wrapped-folder smoke 通过，未创建窗口。原 `E_INVALIDARG` 是缺少解释包装子项的父 adapter 时的预期结果，不是目标文件路径失效。详见[包装 PIDL 调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的父绑定身份复核)。

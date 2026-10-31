@@ -56,6 +56,13 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationQueued = 0;
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
+    bool ShouldTranslateSyntheticChildNotification(LONG event)
+    {
+        // UPDATEITEM carries property changes for an existing child; the custom
+        // row model must re-enumerate its parent to observe updated derived values.
+        return event == SHCNE_CREATE || event == SHCNE_RENAMEITEM ||
+            event == SHCNE_DELETE || event == SHCNE_UPDATEITEM;
+    }
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     CLSID g_syntheticFolderClassId =
@@ -1994,7 +2001,7 @@ namespace
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
-                    (lParam == SHCNE_CREATE || lParam == SHCNE_RENAMEITEM || lParam == SHCNE_DELETE))
+                    ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
                 {
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
@@ -3900,6 +3907,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticBackingDirectoryU
         return folder->CancelPendingBackingDirectoryUpdateForProbe();
     }
     return E_INVALIDARG;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI ShouldTranslateSyntheticChildNotificationForProbe(UINT event)
+{
+    return ShouldTranslateSyntheticChildNotification(static_cast<LONG>(event)) ? TRUE : FALSE;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticBackingDirectoryUpdateForProbe(IShellView* view)

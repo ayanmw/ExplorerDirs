@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+## 2026-10-31：子项 UPDATEITEM 纳入延迟父目录更新路由
+
+源码检查确认 adapter 仅在显式探针开关打开时把 CREATE、RENAMEITEM、DELETE 转为 backing 父目录更新；已有行的属性更新会被 DefView 默认处理，但自有派生值缓存需要父目录重枚举才能重新取值。现在将 `SHCNE_UPDATEITEM` 加入相同分类器，并用无窗口 NativeProbe smoke 确认四种子项事件被接收、`SHCNE_UPDATEDIR` 与未知事件被排除。新增测试在旧 native adapter 上先因缺少分类器导出而失败，改动后通过；NativeProbe Release build 及既有 wrapped-folder contract smoke 通过。
+
+这只证明事件路由的分类条件接入已有延迟/去重队列；本轮没有创建 Shell view 或运行 Private Desktop，也未实测真实更新事件到达、队列去重、派生缓存刷新、排序重排、第三方 provider 或用户可见列。该路由仍只在 NativeProbe 合成 adapter，产品继续使用 ExplorerBrowser。
+
 ## 2026-10-31：OLE 拖放循环自行初始化 STA 上的 OLE
 
 源码复核发现 `ShellViewDragSource.RunOleLoop` 只检查当前线程是 STA，却没有保证 OLE 已在该线程初始化。现有交互探针由目标窗格 `RegisterDragDrop` 顺带调用 `OleInitialize`，因此掩盖了拖放入口对初始化顺序的依赖。现在循环入口执行 `OleInitialize`，失败即停止；`DoDragDrop` 返回或抛错都经 `finally` 调用 `OleUninitialize`，正确平衡 `S_OK` 与 `S_FALSE`。NativeProbe 行为合同验证 S_OK/S_FALSE 均执行并配平、初始化失败不进入操作且不反初始化、操作抛错仍执行一次清理；Release NativeProbe build 与完整 Release SettingsSmoke 均通过，0 警告/错误。没有创建 Shell view、可见窗口或运行交互拖放。该改动只完善 OLE apartment 生命周期，不证明真实 Copy/Move、取消、跨窗格命中、通知收敛、前台隔离或产品宿主可迁移；这些仍待单独可见验收。
