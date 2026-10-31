@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 集中 GUI 验收候选已刷新到当前主线 `db639e0e1681ab5dd1054f358189880c61b12953`：四窗格隔离副本 `src/.state/gui-smoke/20261031-053306-917-58e879/`，状态 `prepared-not-run`，47 项待验收。EXE/DLL SHA-256 与 preparation manifest 一致；准备过程只生成隔离应用、profile 和临时夹具，没有启动窗口、创建 ExplorerBrowser 或触碰正式 profile。候选包含 `temp.85` 的查看方式切换重绘租约；实际像素改善仍待可见验收。固定身份与清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
+
 2026-10-31 预览发布 `preview-0.6.0-temp.85`：来自干净主线提交 `a17639b69a9fd143c6f862cc5821bea73073c1f7`，隔离 profile 包位于 `releases/preview-0.6.0-temp.85/`。BuildIdentity smoke 通过；EXE/DLL SHA-256 已与包内 `app/SHA256.txt` 核对。未启动 GUI；查看方式切换期间是否减少可见闪烁仍待验收，F5 行为未改变。详情见[预览发布记录](releases/preview-0.6.0-temp.85.md)。
 
 2026-10-31 查看方式切换局部重绘租约：真实视图模式变更现在只在同步 `IFolderView2.SetViewModeAndIconSize` 周围短暂关闭 DefView 重绘，租约在返回或异常时立即释放；F5 刷新仍让 Shell 自行绘制，避免异步枚举期间旧帧与实际命中目标不一致。针对性源码合同先按预期失败，再通过；完整 Release SettingsSmoke 与 App Release 构建通过（0 警告、0 错误）。没有创建 Shell view 或启动 GUI；此项只证明代码接线，实际黑帧/闪烁是否减少仍待集中验收。
