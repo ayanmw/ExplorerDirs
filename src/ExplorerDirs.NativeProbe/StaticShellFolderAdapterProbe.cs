@@ -130,25 +130,86 @@ internal static class StaticShellFolderAdapterProbe
                 if (enumHr < 0) throw new Exception($"Wrapped EnumObjects failed: 0x{enumHr:X8}.");
                 try
                 {
+                    var firstHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var firstChild, out var firstFetched);
+                    if (firstHr < 0 || firstFetched != 1 || firstChild == 0)
+                        throw new Exception($"Wrapped enumerator did not produce its first cursor item: hr=0x{firstHr:X8}, fetched={firstFetched}.");
+                    VerifyWrappedShellItemObjects(adapter, firstChild);
+
                     var cloneHr = At<EnumClone>(enumerator, 6)(enumerator, out var clone);
-                    if (cloneHr < 0)
+                    if (cloneHr < 0 || clone == 0)
+                        throw new Exception($"Wrapped enumerator must provide an independent clone even when the filesystem enumerator Clone returns 0x{rawCloneHr:X8}; got 0x{cloneHr:X8}.");
+                    cloneBehavior = "supported";
+                    try
                     {
-                        if (cloneHr != rawCloneHr) throw new Exception($"Wrapped enumerator changed the underlying Clone result: raw=0x{rawCloneHr:X8}, wrapped=0x{cloneHr:X8}.");
-                        cloneBehavior = $"inner-result-preserved-0x{cloneHr:X8}";
+                        for (var index = 0; index < 2; index++)
+                        {
+                            var sourceNextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var sourceChild, out var sourceFetched);
+                            var cloneNextHr = At<EnumNext>(clone, 3)(clone, 1, out var clonedChild, out var cloneFetched);
+                            if (sourceNextHr < 0 || sourceFetched != 1 || sourceChild == 0 ||
+                                cloneNextHr < 0 || cloneFetched != 1 || clonedChild == 0)
+                                throw new Exception($"Wrapped enumerator clone lost cursor item {index + 1}: source=0x{sourceNextHr:X8}/{sourceFetched}, clone=0x{cloneNextHr:X8}/{cloneFetched}.");
+                            try
+                            {
+                                if (!ILIsEqual(sourceChild, clonedChild))
+                                    throw new Exception($"Wrapped enumerator clone did not preserve independent cursor position {index + 1}.");
+                                VerifyWrappedShellItemObjects(adapter, clonedChild);
+                            }
+                            finally
+                            {
+                                ILFree(clonedChild);
+                                ILFree(sourceChild);
+                            }
+                        }
                     }
-                    else
+                    finally { Marshal.Release(clone); }
+
+                    var resetHr = At<EnumReset>(enumerator, 5)(enumerator);
+                    if (resetHr < 0) throw new Exception($"Wrapped enumerator Reset failed: 0x{resetHr:X8}.");
+                    var resetNextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var resetChild, out var resetFetched);
+                    if (resetNextHr < 0 || resetFetched != 1 || resetChild == 0)
+                        throw new Exception($"Wrapped enumerator did not return to its first cursor item: hr=0x{resetNextHr:X8}, fetched={resetFetched}.");
+                    try
                     {
-                        cloneBehavior = "supported";
+                        if (!ILIsEqual(firstChild, resetChild))
+                            throw new Exception("Wrapped enumerator Reset changed the first child identity.");
+                    }
+                    finally
+                    {
+                        ILFree(resetChild);
+                        ILFree(firstChild);
+                    }
+
+                    var skipCloneHr = At<EnumClone>(enumerator, 6)(enumerator, out var skipClone);
+                    if (skipCloneHr < 0 || skipClone == 0)
+                        throw new Exception($"Wrapped enumerator could not clone before Skip: 0x{skipCloneHr:X8}.");
+                    try
+                    {
+                        var sourceSkipHr = At<EnumSkip>(enumerator, 4)(enumerator, 1);
+                        var cloneSkipHr = At<EnumSkip>(skipClone, 4)(skipClone, 1);
+                        if (sourceSkipHr < 0 || cloneSkipHr < 0)
+                            throw new Exception($"Wrapped enumerator Skip failed: source=0x{sourceSkipHr:X8}, clone=0x{cloneSkipHr:X8}.");
+
+                        var sourceAfterSkipHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var sourceAfterSkip, out var sourceAfterSkipFetched);
+                        var cloneAfterSkipHr = At<EnumNext>(skipClone, 3)(skipClone, 1, out var cloneAfterSkip, out var cloneAfterSkipFetched);
+                        if (sourceAfterSkipHr < 0 || sourceAfterSkipFetched != 1 || sourceAfterSkip == 0 ||
+                            cloneAfterSkipHr < 0 || cloneAfterSkipFetched != 1 || cloneAfterSkip == 0)
+                        {
+                            if (sourceAfterSkip != 0) ILFree(sourceAfterSkip);
+                            if (cloneAfterSkip != 0) ILFree(cloneAfterSkip);
+                            throw new Exception($"Wrapped enumerator lost its cursor after Skip: source=0x{sourceAfterSkipHr:X8}/{sourceAfterSkipFetched}, clone=0x{cloneAfterSkipHr:X8}/{cloneAfterSkipFetched}.");
+                        }
                         try
                         {
-                            var cloneNextHr = At<EnumNext>(clone, 3)(clone, 1, out var clonedChild, out var cloneFetched);
-                            if (cloneNextHr < 0 || cloneFetched != 1 || clonedChild == 0)
-                                throw new Exception($"Wrapped enumerator clone did not preserve its cursor: hr=0x{cloneNextHr:X8}, fetched={cloneFetched}.");
-                            try { VerifyWrappedShellItemObjects(adapter, clonedChild); }
-                            finally { ILFree(clonedChild); }
+                            if (!ILIsEqual(sourceAfterSkip, cloneAfterSkip))
+                                throw new Exception("Wrapped enumerator Skip changed independent cursor positions.");
                         }
-                        finally { Marshal.Release(clone); }
+                        finally
+                        {
+                            ILFree(sourceAfterSkip);
+                            ILFree(cloneAfterSkip);
+                        }
                     }
+                    finally { Marshal.Release(skipClone); }
 
                     stage = "wrapped-enumerator-next";
                     var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var child, out var fetched);
@@ -2028,7 +2089,8 @@ internal static class StaticShellFolderAdapterProbe
                 var isWide = Marshal.ReadInt32(dropFiles, 16);
                 if (pathOffset < 20 || isWide != 1) throw new Exception("Wrapped CF_HDROP did not contain a valid Unicode DROPFILES block.");
                 var path = Marshal.PtrToStringUni(dropFiles + pathOffset);
-                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                // The wrapped enumeration fixture includes a subfolder before some files.
+                if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)))
                     throw new Exception("Wrapped CF_HDROP did not preserve an existing filesystem source path.");
             }
             finally { GlobalUnlock(medium.Value); }
@@ -2058,7 +2120,9 @@ internal static class StaticShellFolderAdapterProbe
                 try
                 {
                     var path = DescribeFileSystemPath(absolute);
-                    if (path.StartsWith("unresolved-", StringComparison.Ordinal) || !File.Exists(path))
+                    // CIDA enumeration may return the nested-folder fixture as its first child.
+                    if (path.StartsWith("unresolved-", StringComparison.Ordinal) ||
+                        (!File.Exists(path) && !Directory.Exists(path)))
                         throw new Exception("CIDA did not resolve to an existing filesystem item: " + path);
                 }
                 finally { ILFree(absolute); }
@@ -2290,7 +2354,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindToObject(nint self, nint item, nint bind, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumSkip(nint self, uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumReset(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetData(nint self, ref NativeFormatEtc format, out NativeStorageMedium medium);

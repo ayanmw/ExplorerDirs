@@ -5212,3 +5212,7 @@ NativeProbe 新增按 view 同步排队/取消 delayed backing-directory update 
 ### 2026-10-31：DefView 派生列更新策略停止扩展
 
 WPF Private Desktop 宿主上的单项通知、追加父目录更新、重放 `IColumnManager` 列、切换 Icon→Details，以及 DELETE+CREATE 均未恢复自定义派生列索引或触发取值/排序/重枚举。最新 DELETE+CREATE 轮前台/输入守卫与清理通过，列索引仍为 `-1`；`IShellView::Refresh` 样本因前台/输入变化不采纳。停止继续堆叠 DefView 通知变体。逐行目录大小仍是隔离原型，产品仍使用 ExplorerBrowser。下一阶段应评审自有行模型/绘制所需的 Explorer 兼容合同，重点为视图级菜单、排序/分组、键盘焦点、导航、Shell 文件操作、变更通知及 OLE 拖放；通过完整门槛前不迁移产品。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31wpf-根宿主下的通知列重放策略收敛)。
+
+## 2026-10-31：包装子 PIDL 枚举器克隆
+
+NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，隔离验证 `Clone`、`Reset` 与 `Skip`，覆盖底层枚举器不支持克隆的情况。无窗口 wrapped-folder、parent-item 和 PIDL 合同均通过。包装父项绑定成功，但普通文件系统根 PIDL 与包装子 PIDL 的直接绝对组合仍未解析；该结果不代表 parent-bound Shell item 路径失效，也未证明通用 PIDL 往返。产品仍使用 ExplorerBrowser，未做 IShellView 迁移。证据与边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的枚举器克隆合同)。

@@ -341,10 +341,93 @@ namespace
         return false;
     }
 
+    class WrappedEnumIdListState final
+    {
+    public:
+        explicit WrappedEnumIdListState(IEnumIDList* inner) : _inner(inner) { if (_inner) _inner->AddRef(); }
+        ULONG AddRef() { return InterlockedIncrement(&_refs); }
+        ULONG Release()
+        {
+            const auto refs = InterlockedDecrement(&_refs);
+            if (!refs) delete this;
+            return refs;
+        }
+        HRESULT GetItem(ULONG index, PIDLIST_RELATIVE* item)
+        {
+            if (!item) return E_POINTER;
+            *item = nullptr;
+            std::lock_guard<std::mutex> lock(_gate);
+            while (index >= _items.size() && !_exhausted)
+            {
+                PITEMID_CHILD next = nullptr;
+                ULONG fetched = 0;
+                const auto result = _inner->Next(1, &next, &fetched);
+                if (FAILED(result))
+                {
+                    if (next) CoTaskMemFree(next);
+                    return result;
+                }
+                if (!fetched)
+                {
+                    if (next) CoTaskMemFree(next);
+                    _exhausted = true;
+                    break;
+                }
+                if (!next) return E_UNEXPECTED;
+
+                const auto size = ILGetSize(next);
+                auto* copy = size ? static_cast<PIDLIST_RELATIVE>(CoTaskMemAlloc(size)) : nullptr;
+                if (!copy)
+                {
+                    CoTaskMemFree(next);
+                    return E_OUTOFMEMORY;
+                }
+                CopyMemory(copy, next, size);
+                CoTaskMemFree(next);
+                try { _items.push_back(copy); }
+                catch (const std::bad_alloc&)
+                {
+                    CoTaskMemFree(copy);
+                    return E_OUTOFMEMORY;
+                }
+            }
+            if (index >= _items.size()) return S_FALSE;
+
+            const auto size = ILGetSize(_items[index]);
+            auto* copy = size ? static_cast<PIDLIST_RELATIVE>(CoTaskMemAlloc(size)) : nullptr;
+            if (!copy) return E_OUTOFMEMORY;
+            CopyMemory(copy, _items[index], size);
+            *item = copy;
+            return S_OK;
+        }
+    private:
+        ~WrappedEnumIdListState()
+        {
+            for (auto* item : _items) CoTaskMemFree(item);
+            if (_inner) _inner->Release();
+        }
+        volatile LONG _refs = 1;
+        IEnumIDList* _inner = nullptr;
+        std::mutex _gate;
+        std::vector<PIDLIST_RELATIVE> _items;
+        bool _exhausted = false;
+    };
+
     class WrappedEnumIdList final : public IEnumIDList
     {
     public:
-        explicit WrappedEnumIdList(IEnumIDList* inner) : _inner(inner) { if (_inner) _inner->AddRef(); }
+        static HRESULT Create(IEnumIDList* inner, WrappedEnumIdList** value)
+        {
+            if (!value) return E_POINTER;
+            *value = nullptr;
+            auto* state = new (std::nothrow) WrappedEnumIdListState(inner);
+            if (!state) return E_OUTOFMEMORY;
+            auto* wrapped = new (std::nothrow) WrappedEnumIdList(state, 0);
+            state->Release();
+            if (!wrapped) return E_OUTOFMEMORY;
+            *value = wrapped;
+            return S_OK;
+        }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
         {
             if (!object) return E_POINTER;
@@ -366,50 +449,60 @@ namespace
             if (!items || (count != 1 && !fetched)) return E_POINTER;
             if (fetched) *fetched = 0;
             for (ULONG index = 0; index < count; ++index) items[index] = nullptr;
-            std::vector<PITEMID_CHILD> raw;
-            try { raw.assign(count, nullptr); }
-            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
-            ULONG rawFetched = 0;
-            auto result = _inner->Next(count, raw.data(), &rawFetched);
-            if (FAILED(result))
+            ULONG completed = 0;
+            for (; completed < count; ++completed)
             {
-                for (auto* item : raw) if (item) CoTaskMemFree(item);
-                return result;
-            }
-            for (ULONG index = 0; index < rawFetched; ++index)
-            {
-                const auto wrapResult = WrapChildPidl(raw[index], &items[index]);
-                CoTaskMemFree(raw[index]);
-                raw[index] = nullptr;
+                PIDLIST_RELATIVE raw = nullptr;
+                const auto itemResult = _state->GetItem(_cursor, &raw);
+                if (itemResult == S_FALSE) break;
+                if (FAILED(itemResult))
+                {
+                    if (raw) CoTaskMemFree(raw);
+                    if (fetched) *fetched = completed;
+                    return itemResult;
+                }
+                const auto wrapResult = WrapChildPidl(raw, &items[completed]);
+                CoTaskMemFree(raw);
                 if (FAILED(wrapResult))
                 {
-                    for (ULONG rest = index + 1; rest < rawFetched; ++rest) CoTaskMemFree(raw[rest]);
-                    for (ULONG made = 0; made < index; ++made) CoTaskMemFree(items[made]);
+                    if (fetched) *fetched = completed;
                     return wrapResult;
                 }
+                ++_cursor;
             }
-            if (fetched) *fetched = rawFetched;
-            return result;
+            if (fetched) *fetched = completed;
+            return completed == count ? S_OK : S_FALSE;
         }
-        HRESULT STDMETHODCALLTYPE Skip(ULONG count) override { return _inner->Skip(count); }
-        HRESULT STDMETHODCALLTYPE Reset() override { return _inner->Reset(); }
+        HRESULT STDMETHODCALLTYPE Skip(ULONG count) override
+        {
+            ULONG skipped = 0;
+            for (; skipped < count; ++skipped)
+            {
+                PIDLIST_RELATIVE item = nullptr;
+                const auto result = _state->GetItem(_cursor, &item);
+                if (item) CoTaskMemFree(item);
+                if (result == S_FALSE) break;
+                if (FAILED(result)) return result;
+                ++_cursor;
+            }
+            return skipped == count ? S_OK : S_FALSE;
+        }
+        HRESULT STDMETHODCALLTYPE Reset() override { _cursor = 0; return S_OK; }
         HRESULT STDMETHODCALLTYPE Clone(IEnumIDList** value) override
         {
             if (!value) return E_POINTER;
             *value = nullptr;
-            IEnumIDList* clone = nullptr;
-            auto result = _inner->Clone(&clone);
-            if (FAILED(result)) return result;
-            auto* wrapped = new (std::nothrow) WrappedEnumIdList(clone);
-            clone->Release();
+            auto* wrapped = new (std::nothrow) WrappedEnumIdList(_state, _cursor);
             if (!wrapped) return E_OUTOFMEMORY;
             *value = wrapped;
             return S_OK;
         }
     private:
-        ~WrappedEnumIdList() { if (_inner) _inner->Release(); }
+        WrappedEnumIdList(WrappedEnumIdListState* state, ULONG cursor) : _state(state), _cursor(cursor) { _state->AddRef(); }
+        ~WrappedEnumIdList() { _state->Release(); }
         volatile LONG _refs = 1;
-        IEnumIDList* _inner = nullptr;
+        WrappedEnumIdListState* _state = nullptr;
+        ULONG _cursor = 0;
     };
 
     HRESULT WrapChildPidl(PCUIDLIST_RELATIVE source, PIDLIST_RELATIVE* wrapped)
@@ -589,11 +682,12 @@ namespace
             if (FAILED(result)) { if (raw) raw->Release(); return result; }
             if (!_wrappedPidls) { *enumerator = raw; return result; }
             if (!raw) return E_UNEXPECTED;
-            auto* wrapped = new (std::nothrow) WrappedEnumIdList(raw);
+            WrappedEnumIdList* wrapped = nullptr;
+            result = WrappedEnumIdList::Create(raw, &wrapped);
             raw->Release();
-            if (!wrapped) return E_OUTOFMEMORY;
+            if (FAILED(result)) return result;
             *enumerator = wrapped;
-            return result;
+            return S_OK;
         }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {

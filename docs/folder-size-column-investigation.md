@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：包装子 PIDL 的枚举器克隆合同
+
+NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL 状态支持；每个包装枚举器保留独立游标，因此 `Clone`、`Reset` 和 `Skip` 不依赖底层文件系统枚举器实现 `Clone`。合同从非零游标克隆后，逐项比较原枚举器与克隆的 PIDL 身份，并检查 `Reset` 回到首项。夹具同时包含文件和子目录，Shell data object/CIDA 检查都接受两类真实文件系统项目。
+
+验证：原生 Release DLL 与 NativeProbe Release 构建通过；`--static-shell-column-wrapped-folder-smoke`、`--static-shell-column-parent-item-smoke` 和 `--wrapped-pidl-contract-smoke` 均退出码 0，输出包含 `enum-clone=supported`、相同 parent/child PIDL 身份以及 `window-created=False`。这些均为无窗口隔离合同。
+
+边界：`SHCreateItemWithParent` 使用包装父项和子 PIDL 可取得预期项目；但把包装子 PIDL 直接与普通文件系统根 PIDL 做原生绝对组合，仍报告 `0x80070057` 未解析。这不否定 parent-bound Shell item 路径，也不证明任意绝对 Shell 名称可往返。没有注册 synthetic namespace root、创建 IShellView 或修改产品 ExplorerBrowser；迁移资格与完整 Shell 兼容性仍未验证。
+
 ## 2026-10-31：扫描快照跨 provider 重建
 
 将递归大小表从 `SyntheticSortFolder` 单实例字段提取为可引用共享的 `SyntheticRecursiveSizeSnapshotStore`。同一 provider 创建的嵌套 folder provider 共享该 store；NativeProbe 则保留 store 所有权、释放旧 provider，再构造新 provider 并复用 store。新 provider 对重新解析出来的 sibling PIDL 继续按绝对 Shell parsing name 读取各自的 6 B/12 B 快照，列文本、`VT_UI8` 属性和相对 8 B 文件的数值排序均通过。
