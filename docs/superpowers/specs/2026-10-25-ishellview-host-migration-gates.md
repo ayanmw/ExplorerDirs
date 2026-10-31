@@ -144,4 +144,6 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 
 2026-10-26：NativeProbe 的 `StreamViewHost.GetViewStateStream` 现将最近一次 Shell 写入的内存流作为同宿主后续读请求来源；首次读取使用构造时复制的初始字节。两个 host 共用调用方数组的回归证明外部变更不会污染已建 host，也验证一方更新不影响另一方。无 Shell view 的 COM IStream smoke 对旧值回读和共享数组污染先按预期失败，修复后通过。随后新增仅供 NativeProbe 的 `ShellViewStateStore`，以 GUID 会话键单独保存不透明 Shell stream，使用临时文件写入、flush 后原子替换；写入在 host 释放时提交，缺少状态时回退到导入初始字节。smoke 通过两个独立键、重新创建 store/host、无记录回退及 64 KiB 限制验证；三个独立 NativeProbe 进程依次写入两代状态、退出并验证新进程读到最新一代。没有创建 `IShellView`，不证明真实 Shell 何时请求写入、关闭期间错误恢复或产品 session/profile 接线。SettingsSmoke、NativeProbe/App Release build 与 `git diff --check` 通过。
 
+2026-11-01：增加独立的 `--synthetic-shell-focus-recovery-private-desktop` 对照探针，保留原同目录双视图探针默认行为不变。启用 synthetic 子项通知翻译后，真实 `IFileOperation.MoveItems` 更新两个同目录 view；移动前用产品 `ShellViewSelectionSnapshot` 保存第二视图的选区与焦点 PIDL。移动后，第二视图 `two.bin` 状态为 `0x1`（Selected、无 `LVIS_FOCUSED`）；通过产品快照恢复后变为 `0x3`，读回确认 `SelectionRestored=True`、`FocusRestored=True`。Private Desktop 前台、输入与隔离清理守卫均通过。探针只验证此 synthetic filesystem provider 与当前 Windows 环境的一条移动路径，不能证明所有 Shell provider、刷新时序或产品接线都已解决焦点恢复；它在目标断言后结束，跳过无关的后续递归尺寸刷新实验。
+
 下一步必须换用独立 Windows 会话/VM 或其他不共享当前交互桌面的安全环境，再继续完整 filesystem/virtual 序列、OLE 拖放和真实物理键盘/可见焦点验证。当前会继续推进不启动原生 Shell view 的 Q-Dir parity 源码工作；用户已授权隔离原型，但未授权替换生产 ExplorerBrowser 或生成 release。

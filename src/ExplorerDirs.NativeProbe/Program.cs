@@ -75,6 +75,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticShellSizeSort();
         if (args.Length == 1 && args[0] == "--synthetic-shell-two-view-target-sync-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticShellTwoViewTargetSync();
+        if (args.Length == 1 && args[0] == "--synthetic-shell-focus-recovery-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticShellFocusRecoveryExperiment();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSort();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-slow-column-private-desktop")

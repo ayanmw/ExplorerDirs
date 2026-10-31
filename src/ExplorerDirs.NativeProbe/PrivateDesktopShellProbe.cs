@@ -191,6 +191,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunSyntheticShellTwoViewTargetSync() =>
         Run("synthetic-shell-two-view-target-sync", () => SyntheticShellSortProbe.Run(twoViewDistinctLocations: true), TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunSyntheticShellFocusRecoveryExperiment() =>
+        Run("synthetic-shell-focus-recovery", () => SyntheticShellSortProbe.Run(focusRecoveryExperiment: true), TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunSyntheticRecursiveDirectorySizeSort() =>
         Run("synthetic-recursive-directory-size-sort", () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSort(),
             TimeSpan.FromSeconds(30), initializeOle: true);

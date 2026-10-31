@@ -92,7 +92,8 @@ public static class SyntheticShellSortProbe
 
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
-        bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false)
+        bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false,
+        bool focusRecoveryExperiment = false)
     {
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
@@ -346,6 +347,12 @@ public static class SyntheticShellSortProbe
                 Console.WriteLine($"synthetic-view-state-stream: reads={host?.Reads ?? 0}; writes={host?.Writes ?? 0}; trace=[{string.Join(" || ", host?.ViewStateStreamTrace ?? [])}]; saved-bytes={savedViewState.Length}; saved-sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(savedViewState))}");
                 ReportProbeStage("assertions-complete");
                 return 0;
+            }
+            if (focusRecoveryExperiment)
+            {
+                Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticChildNotificationTranslationForProbe"))(1));
+                Console.WriteLine("synthetic-shell-focus-recovery: child-notification-translation=True; mode=isolated-experiment");
             }
             parent2 = CreateWindowExW(0, "STATIC", "ExplorerDirs synthetic namespace second view",
                 0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
@@ -644,6 +651,9 @@ public static class SyntheticShellSortProbe
                 throw new IOException("Could not establish independent two.bin selections in both views before testing MoveItems.");
             Console.WriteLine("synthetic-shell-size-sort: move-precondition-selection-view1=True; view2=True");
             var moveDestination = Path.Combine(copyDestination, "Moved");
+            using var view2SelectionBeforeMove = focusRecoveryExperiment ? ShellViewSelectionSnapshot.Capture(folderView2) : null;
+            if (focusRecoveryExperiment && (view2SelectionBeforeMove is null || !view2SelectionBeforeMove.HasFocusedItem))
+                throw new IOException("Could not capture the second view's focused Shell item before the cross-folder move.");
             MoveSelectedShellItem(view, listView, view2, listView2, module, backingFolder, "z-ten.bin", "two.bin", moveDestination);
             var moveAutoUpdated = false;
             var moveAutoUpdated2 = false;
@@ -668,10 +678,27 @@ public static class SyntheticShellSortProbe
                 moveSelectionRetained = (moveState & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
                 moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
             }
+            (bool SelectionRestored, bool FocusRestored)? view2Recovery = null;
+            if (focusRecoveryExperiment && (!moveSelectionRetained2 || !moveSelectionRetained))
+            {
+                Console.WriteLine($"synthetic-shell-focus-recovery: before-restore-view2-state=0x{moveState2:X}; selected-and-focused={moveSelectionRetained2}");
+                view2Recovery = view2SelectionBeforeMove!.Restore(view2,
+                    trace: message => Console.WriteLine($"synthetic-shell-focus-recovery: {message}"));
+                listView2 = FindListView(view2);
+                afterMove2 = ReadNames(listView2, module, expectedCount: -1);
+                moveState2 = StateForName(listView2, afterMove2, "two.bin");
+                moveSelectionRetained2 = (moveState2 & (LvisSelected | LvisFocused)) == (LvisSelected | LvisFocused);
+                Console.WriteLine($"synthetic-shell-focus-recovery: restored-selection={view2Recovery.Value.SelectionRestored}; restored-focus={view2Recovery.Value.FocusRestored}; second-view-state=0x{moveState2:X}; selected-and-focused={moveSelectionRetained2}");
+            }
             Console.WriteLine($"synthetic-shell-size-sort: move-auto-updated-view1={moveAutoUpdated}; move-auto-updated-view2={moveAutoUpdated2}; selection-view1={moveSelectionRetained}; selection-view2={moveSelectionRetained2}; two-state-view1=0x{moveState:X}; two-state-view2=0x{moveState2:X}; destination-item={File.Exists(Path.Combine(moveDestination, "z-ten.bin"))}");
             if (!moveAutoUpdated || !moveAutoUpdated2 || !moveSelectionRetained || !moveSelectionRetained2 ||
                 !File.Exists(Path.Combine(moveDestination, "z-ten.bin")) || File.Exists(Path.Combine(backingFolder, "z-ten.bin")))
                 throw new IOException("The Shell move did not update both views and preserve the unaffected item focus.");
+            if (focusRecoveryExperiment)
+            {
+                Console.WriteLine("synthetic-shell-focus-recovery: result=restored; unrelated post-move refresh experiments=skipped");
+                return 0;
+            }
 
             Console.WriteLine($"synthetic-shell-size-sort: initial=[{string.Join('|', initial)}]; ascending=[{string.Join('|', ascending)}]; descending=[{string.Join('|', descending)}]; size-CompareIDs-ascending={ascendingCompareCount}; size-CompareIDs-descending={descendingCompareCount}; total-CompareIDs={totalCompareCount}; foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!initial.SequenceEqual(new[] { "a-large.bin", "two.bin", "z-ten.bin" }) ||
