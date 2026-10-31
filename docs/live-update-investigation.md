@@ -6,7 +6,13 @@
 
 同一夹具改为对当前目录绝对 PIDL 发送 `SHCNE_UPDATEDIR`（`SHCNF_IDLIST | SHCNF_FLUSHNOWAIT`）后，行数从 301 增到 302，最小仍为 301，view/list HWND 不变。设置 `FWF_NOENUMREFRESH` 后，新增文件没有被自动反映（仍为 302）；显式 Shell 目录通知后更新为 303，过程中没有观察到零行。这是隔离 stock Shell 文件夹的直接证据，尚非 ExplorerBrowser 产品宿主或可见 UI 证据，也不能外推所有虚拟 Shell provider。
 
-基于该结果，曾短暂尝试让手动 F5 对普通文件系统位置读取当前浏览器文件夹 PIDL 并发送 `SHCNE_UPDATEDIR`，搜索、虚拟位置或 PIDL 不可用时回退 `IShellView.Refresh()`。后续隐藏 ExplorerBrowser 宿主对照显示目录通知更慢，且不能证明改善可见画面，因此生产接线已由提交 `b93a9e7` 撤回；**当前 F5 直接调用当前视图的 `IShellView.Refresh()`**。本节的行数实验仍是 stock Shell 隔离夹具证据，不是当前产品路径的描述。
+基于该结果，曾短暂尝试让手动 F5 对普通文件系统位置读取当前浏览器文件夹 PIDL 并发送 `SHCNE_UPDATEDIR`，搜索、虚拟位置或 PIDL 不可用时回退 `IShellView.Refresh()`。后续在 2026-10-31 隐藏 ExplorerBrowser 宿主对照中，目录通知更慢且未证明改善可见画面，因此该接线曾由提交 `b93a9e7` 撤回；该结论只描述当时的实现。
+
+### 2026-11-01 当前源码状态：文件系统 F5 重新采用目录通知
+
+依据隐藏 stock Shell 生命周期对照，当前产品对可表示为文件系统路径的位置发送 `SHCNE_UPDATEDIR | SHCNF_PATH | SHCNF_FLUSHNOWAIT`；虚拟位置或路径不可表示时回退当前 `IShellView.Refresh()`。普通文件系统路径可走目录通知的接线位于 `ExplorerBrowserHost.Refresh` 与 `ShellChangedItemNotification.TryNotifyDirectoryRefresh`。通知路线能够避免 stock Shell 刷新时的零行区间，但它会异步协调视图并广播给其他 Shell 监听者。
+
+当前流程以连续稳定行数采样决定何时恢复选区/焦点。`SHCNF_FLUSHNOWAIT` 不等待 DefView 完成枚举，行数稳定也可能仍是旧列表，因此该采样不是刷新完成信号。隐藏产品 HostProbe 已确认四窗格行数、三项选择和焦点保持；它没有渲染屏幕像素或验证可见输入。F5 的可见闪烁、其他同目录 Shell 窗口受通知影响以及异步重枚举期间的输入仍待集中验收。
 
 仍需在集中 GUI 验收中核对可见画面、选区、焦点、滚动位置、慢速目录、网络路径和大目录行为。由于本轮没读取像素，不能断言黑屏已经消失。查看方式切换期间行数保持，但原生 Shell 仍会重排和绘制项目，闪烁问题仍单独开放。
 

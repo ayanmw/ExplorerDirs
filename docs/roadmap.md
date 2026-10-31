@@ -29,7 +29,7 @@
 
 2026-10-31 隔离 IShellView 派生列数据合同：NativeProbe 现将身份复核后的生产扫描结果经 Shell 行模型投影，连同卷序列号和 128 位文件 ID 传入原生 provider；provider 拒绝不匹配的 Shell 行身份。Release SettingsSmoke、NativeProbe Release build、原生 adapter /W4 /WX 与 --static-shell-column-folder-smoke 均通过，window-created=False。该合同仍只在隔离 provider 内验证，尚未接产品 ExplorerBrowser 或可见 IShellView 列；详见[派生大小列调查](folder-size-column-investigation.md)。
 
-2026-10-31 F5/查看方式闪烁复核：当前 F5 仅调用当前 Shell view 的 `IShellView.Refresh()`，不重建 ExplorerBrowser、标签或导航；查看方式仅对当前 `IFolderView2` 调用 `SetViewModeAndIconSize`，并只在同步 setter 周围短暂抑制重绘。既有隐藏 HostProbe 的行可用时序约为直接 Refresh 48 ms、抑制重绘 43 ms；两者均不是屏幕像素测量。`SetRedraw` 不阻止鼠标/键盘命中，延长租约会让保留画面与实际行模型暂时不一致，因此本轮不接入旧帧租约，也不宣称视觉闪烁已改善。完整 Release `SettingsSmoke` 本轮通过，包含刷新/查看方式源码合同。下一步需在集中可见验收中分别观察 F5 和模式切换；若仍明显，再用真实像素及输入行为评估更高层缓冲方案。详见[刷新闪烁调查计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
+2026-10-31 F5/查看方式闪烁复核（历史实现）：当时 F5 调用当前 Shell view 的 `IShellView.Refresh()`，不重建 ExplorerBrowser、标签或导航；查看方式调用当前 `IFolderView2.SetViewModeAndIconSize`。此前尝试的 F5 重绘租约已移除，因为 `SetRedraw` 不阻止鼠标/键盘命中，延长租约会让保留画面与实际行模型暂时不一致。2026-11-01 后普通文件系统 F5 改为发送 `SHCNE_UPDATEDIR`，虚拟/不可表示路径仍回退 `IShellView.Refresh()`；该新路径的隐藏 HostProbe 保留行数、选区和焦点，但不包含像素。F5 与模式切换的可见效果仍待集中验收。详见[刷新闪烁调查计划](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 
 2026-10-31 隔离 Shell 属性变更通知分类：NativeProbe 合成 folder adapter 现将 `SHCNE_ATTRIBUTES` 与 CREATE/RENAMEITEM/DELETE/UPDATEITEM 一样转换为父目录更新，使只读属性等行展示规则变化可以触发重枚举；`SHCNE_UPDATEDIR` 与未知事件仍不转换，以避免递归通知。定向合同先在旧实现上按预期因 ATTRIBUTES 失败，修正后通过；原生 adapter `/W4 /WX` 和 NativeProbe Release build 均通过（0 警告/错误），未创建 Shell view。微软文档确认该事件表示项目或文件夹属性已改变；本次只验证分类接线，不代表真实通知传递/属性变更后视图更新，也没有产品 ExplorerBrowser 接线。详见[隔离逐行大小调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。来源：[Microsoft SHChangeNotify](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify)。
 
@@ -5179,11 +5179,13 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 - 用户触发 F5 对普通文件系统位置现在优先通过 `ShellCurrentLocation` 读取当前绝对 PIDL 并发送目录更新通知；搜索、虚拟位置或当前 PIDL 读取失败继续使用原生 `IShellView.Refresh()` 回退。原有选区/焦点恢复流程保留。App Release build、完整 Release SettingsSmoke 和 NativeProbe Release build 通过；Private Desktop 探针前台及输入 tick 未变。
 - 此改动没有在 ExplorerBrowser 产品宿主或可见 UI 中验收。当前只证明了直接 stock `IShellView` 的非空行/HWND 行为；没有像素数据，不能宣称用户看到的黑屏已解决。查看方式切换虽未清空行，Shell 仍可能在布局重排中重绘；后续独立调查其绘制时间线，并将 F5 的可见验收加入集中批次。
 
-### 当前源码路径更正（2026-10-31）
+### 历史源码路径更正（2026-10-31）
 
-- 上述“F5 改走目录更新通知”已被后续提交 `b93a9e7` 撤回：当前显式 F5 对当前 `IShellView` 调用 `Refresh()`，而不是发送广播 `SHCNE_UPDATEDIR`。原因是隐藏 ExplorerBrowser 宿主中目录通知比 `IShellView.Refresh()` 慢，且没有证明能改善可见画面；广播通知也不能限定在当前 Explorer Dirs 视图。
-- 当前 F5 没有重建 ExplorerBrowser、标签或导航历史；选区/焦点恢复仅在刷新后异步结算。查看方式切换仍只对现有 `IFolderView2` 调用 `SetViewModeAndIconSize`，随后延迟读取视图状态。
-- 这两条路径都只作用于当前文件视图，但 Shell 自己仍会清空并重绘列表行，或在视图模式变化时重新排版。先前短暂暂停原生重绘的尝试已撤回；没有像素证据表明它能让画面更平滑。当前黑屏/闪动仍需可见验收，未经该验收不宣称解决。
+- 提交 `b93a9e7` 撤回目录通知候选后，当时的显式 F5 改为对当前 `IShellView` 调用 `Refresh()`，不广播 `SHCNE_UPDATEDIR`。原因是隐藏 ExplorerBrowser 宿主中目录通知比 `IShellView.Refresh()` 慢，且没有证明能改善可见画面；广播通知也不能限定在当前 Explorer Dirs 视图。
+- 当时的 F5 没有重建 ExplorerBrowser、标签或导航历史；选区/焦点恢复在刷新后异步结算。查看方式切换只对现有 `IFolderView2` 调用 `SetViewModeAndIconSize`，随后延迟读取视图状态。
+- 当时两条路径都只作用于当前文件视图，但 Shell 自己仍会清空并重绘列表行，或在视图模式变化时重新排版。先前短暂暂停原生重绘的尝试已撤回；没有像素证据表明它能让画面更平滑。该阶段的黑屏/闪动仍待可见验收，不据此宣称解决。
+
+2026-11-01 后续源码状态：普通文件系统位置的 F5 已再次改用 `SHCNE_UPDATEDIR | SHCNF_PATH | SHCNF_FLUSHNOWAIT`；搜索/虚拟位置或路径通知不可用时仍调用 `IShellView.Refresh()`。该通知会广播给 Shell 监听者并异步协调当前视图。详见本页上方“F5 本地目录刷新改为 Shell 目录更新通知”及[当前 Shell 刷新证据](../shell-parity.md)。
 
 ### 刷新诊断补充：跟踪 DefView 与 DirectUI 消息
 
