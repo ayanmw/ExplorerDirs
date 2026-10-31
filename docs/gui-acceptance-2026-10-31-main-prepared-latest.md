@@ -1,16 +1,16 @@
-# 2026-10-31 主线集中验收候选（当前指针）
+# 2026-11-01 主线集中验收候选（当前指针）
 
 此候选供后续集中可见验收使用，不是 `releases/` 日常预览版。由 `src/ExplorerDirs.GuiSmoke/run.ps1 -PrepareOnly` 生成；只构建并准备隔离副本与夹具，没有启动应用窗口、创建 ExplorerBrowser、发送输入或触碰正式 profile。
 
 ## 固定身份
 
-- 源提交：`a59b5a7fd3d6a5807dc85acb2ef6b12fb5e6732b`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261031-070157-492-f98617/`。
-- BuildIdentity：`0.6.0-preview.20261031-070157-492-f98617+a59b5a7fd3d6a5807dc85acb2ef6b12fb5e6732b`。
+- 源提交：`661c61e6e49ced35e08be11724c324bafb5b0a7a`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261031-161150-379-a166ce/`。
+- BuildIdentity：`0.6.0-preview.20261031-161150-379-a166ce+661c61e6e49ced35e08be11724c324bafb5b0a7a`。
 - 状态：`prepared-not-run`，47 项待验收，初始四窗格布局。
-- EXE SHA-256：`75E475208292974AF7D9D183F155F5258DD0E826CA2D7D83674604553F875407`。
-- App DLL SHA-256：`BF9158C32303CAA441444FE8E97EEDD93A6399790E9E2C5996B44D80B125C474`。
-- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-070157-492-f98617\`；操作夹具、profile 与待验收清单均位于副本内。
+- EXE SHA-256：`377DE223E8D789B71912C14B27F9201DF3853977EA869A468F216F31DD1514F3`。
+- App DLL SHA-256：`9C946FE97BEAA0B13A3B87B0D978AA2443C22B1E89706EAF846D760C7A5A1514`。
+- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-161150-379-a166ce\`；操作夹具、profile 与待验收清单均位于副本内。
 
 ## 集中验收重点
 
