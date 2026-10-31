@@ -2513,7 +2513,8 @@ internal static class ShellViewColorSpike
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
-        bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false)
+        bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
+        bool virtualDesktopColorProbe = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -2631,6 +2632,11 @@ internal static class ShellViewColorSpike
             else if (virtualLibrariesColorProbe)
             {
                 shellLocation = "shell:Libraries";
+                fixturePaths = [];
+            }
+            else if (virtualDesktopColorProbe)
+            {
+                shellLocation = "shell:Desktop";
                 fixturePaths = [];
             }
             else
@@ -2773,18 +2779,18 @@ internal static class ShellViewColorSpike
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
-            var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe
+            var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe
                 ? WaitForStableShellViewItemCount(folderView)
                 : WaitForShellViewItemCount(folderView, expectedCount: 2);
-            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe ? allItems : 3;
+            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe ? allItems : 3;
             if (host.IncludeObjectCalls < minimumFilterCalls || itemFilter.ShouldShowCalls < minimumFilterCalls)
                 throw new Exception($"The color host did not route all fixture items through its Shell filter: " +
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
-            if (virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe)
+            if (virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe)
             {
-                var providerName = virtualZipProviderProbe ? "ZIP" : virtualThisPcColorProbe ? "ThisPC" : "Libraries";
+                var providerName = virtualZipProviderProbe ? "ZIP" : virtualThisPcColorProbe ? "ThisPC" : virtualLibrariesColorProbe ? "Libraries" : "Desktop";
                 return CaptureVirtualProviderColorPixels(view, folderView, folder, pidl, foreground, providerName);
             }
             if (probeSessionRestore)
@@ -3204,7 +3210,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3822,21 +3828,41 @@ internal static class ShellViewColorSpike
             InvalidateRect(listView, 0, true);
             UpdateWindow(listView);
             Pump(300);
-            var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
             var expected = CustomDrawBackgrounds.OrderBy(pair => pair.Key).Select(pair => ColorrefToDib(pair.Value)).ToArray();
-            var sampled = CustomDrawPostPaintPixels.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToArray();
-            if (capture.RowHits.Length != expected.Length || expected.Length != rowCount || expected.Length == 0 ||
-                capture.RowHits.Any(hitCount => hitCount == 0) || capture.CustomDrawItems < expected.Length ||
-                CustomDrawTextColors.Keys.Any(index => CustomDrawTextColorPixelHits.GetValueOrDefault(index) == 0) ||
-                CustomDrawFontStyles.Keys.Any(index => !CustomDrawStyledItems.Contains(index)))
+            var pixelHits = new int[expected.Length];
+            var textHits = new int[expected.Length];
+            var centerSamples = new uint[expected.Length];
+            var styledItems = new HashSet<nuint>();
+            var visibleRows = new HashSet<int>();
+            var callbacks = 0;
+            const uint LvmEnsureVisible = 0x1013;
+            // DefView only sends row paint notifications for items currently inside its viewport.
+            for (var index = 0; index < rowCount; index++)
+            {
+                SendMessageW(listView, LvmEnsureVisible, (nint)index, 0);
+                Pump(50);
+                var rowCapture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+                if (!CustomDrawDeviceContexts.ContainsKey((nuint)index)) continue;
+                visibleRows.Add(index);
+                callbacks += rowCapture.CustomDrawItems;
+                pixelHits[index] = rowCapture.RowHits[index];
+                textHits[index] = CustomDrawTextColorPixelHits.GetValueOrDefault((nuint)index);
+                centerSamples[index] = CustomDrawPostPaintPixels.GetValueOrDefault((nuint)index);
+                if (CustomDrawStyledItems.Contains((nuint)index)) styledItems.Add((nuint)index);
+            }
+            var visibleRowList = visibleRows.Order().ToArray();
+            if (visibleRows.Count == 0 || visibleRows.Count != rowCount || pixelHits.Length != expected.Length || expected.Length != rowCount || expected.Length == 0 ||
+                visibleRowList.Any(index => pixelHits[index] == 0) || callbacks < visibleRows.Count ||
+                CustomDrawTextColors.Keys.Intersect(visibleRows.Select(index => (nuint)index)).Any(index => textHits[(int)index] == 0) ||
+                CustomDrawFontStyles.Keys.Intersect(visibleRows.Select(index => (nuint)index)).Any(index => !styledItems.Contains(index)))
                 throw new Exception($"{providerName} DefView row colors did not match Shell identities: rows={rows}; " +
-                    $"callbacks={capture.CustomDrawItems}; expected={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; " +
-                    $"pixel-hits={string.Join(',', capture.RowHits)}; text-hits={string.Join(',', CustomDrawTextColorPixelHits.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; " +
-                    $"styled={string.Join(',', CustomDrawStyledItems.Order())}; details={capture.CustomDrawDetails}.");
-            Console.WriteLine($"ishellview-provider-color-pixels: provider={providerName}; rows={rows}; callbacks={capture.CustomDrawItems}; " +
-                $"expected-backgrounds={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; per-row-pixel-hits={string.Join(',', capture.RowHits)}; " +
-                $"text-color-pixel-hits={string.Join(',', CustomDrawTextColorPixelHits.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; " +
-                $"bold-selected-into-dc={string.Join(',', CustomDrawStyledItems.Order())}; label-center-samples={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; " +
+                    $"visible-rows={string.Join(',', visibleRowList)}; callbacks={callbacks}; expected={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; " +
+                    $"pixel-hits={string.Join(',', pixelHits)}; text-hits={string.Join(',', textHits.Select((value, index) => $"{index}:{value}"))}; " +
+                    $"styled={string.Join(',', styledItems.Order())}.");
+            Console.WriteLine($"ishellview-provider-color-pixels: provider={providerName}; rows={rows}; sampled-rows={string.Join(',', visibleRowList)}; callbacks={callbacks}; " +
+                $"expected-backgrounds={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; per-row-pixel-hits={string.Join(',', pixelHits)}; " +
+                $"text-color-pixel-hits={string.Join(',', textHits.Select((value, index) => $"{index}:{value}"))}; " +
+                $"bold-selected-into-dc={string.Join(',', styledItems.Order())}; label-center-samples={string.Join(',', centerSamples.Select(value => $"0x{value:X6}"))}; " +
                 $"foreground-unchanged={GetForegroundWindow() == foreground}");
             return GetForegroundWindow() == foreground ? 0 : 1;
         }

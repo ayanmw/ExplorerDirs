@@ -5341,3 +5341,9 @@ NativeProbe 增加 `color-this-pc-private-desktop`，并将虚拟 Shell 颜色�
 ## 2026-11-01：虚拟 provider 颜色映射索引保护
 
 Network Places 试探中，Shell 与 DefView 行数不一致，且 parent `IDropTarget` 不可用，不能安全地按列表索引套用 Shell 项身份。为 ZIP/This PC/Libraries 等逐行映射流程加入 Shell 与 ListView 行数一致且连续稳定的前置条件；三个既有 provider 在该门槛下复跑通过。Network Places 不声明颜色绘制成功，后续需独立建立其 row identity 与拖放行为合同。详见[provider 行数调查](ishellview-color-spike.md#2026-11-01-颜色采样要求-shell-与-defview-行数一致)。
+
+## 2026-11-01：Desktop 混合 Shell 项颜色采样
+
+增加 Desktop provider 逐行像素 probe。当前 24 行的 Desktop namespace 里混有 pathless 与 filesystem 项；探针通过 `LVM_ENSUREVISIBLE` 逐项滚入视口，24/24 行均触发自绘并命中预期背景/文本像素，文件行的字体也按规则选入 DC。首次首屏采样把离屏行误报未绘制，改为逐行滚动后全量复验通过。Release 构建通过；Desktop、ZIP、This PC、Libraries 隔离 probe 均退出码 0，桌面前台/输入保持不变。
+
+这扩展了混合 namespace 的 Shell 身份和逐行滚动像素证据；Network Places 与 Control Panel 仍不满足当前统一 row identity 采样合同。产品仍使用 ExplorerBrowser，未发布版本。详见[Desktop 混合项目采样](ishellview-color-spike.md#2026-11-01-desktop-混合-shell-项目与视口裁剪采样)。

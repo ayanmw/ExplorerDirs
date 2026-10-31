@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：Desktop 混合 Shell 项目与视口裁剪采样
+
+新增 `color-desktop-private-desktop`，在 Shell Desktop provider 采样 24 项混合清单：包含 pathless 命名空间项目、filesystem 目录以及一个文件。当前 640×420 视口同屏显示 16 行；探针逐项发送 `LVM_ENSUREVISIBLE` 并采样，最终 24/24 行的背景和文本像素均命中，文件行粗体字体也确实选入绘制 DC。首次探针仅采首屏，因此把滚出视口的行误报为未绘制；现通过逐行滚入视口覆盖完整清单，同时保留动态行数及 Shell/ListView 行数一致门槛。Release 构建 0 警告/错误；Desktop、ZIP、This PC、Libraries Private Desktop watchdog 全部 exit 0，前台/输入与隔离清理守卫通过。
+
+这证明同一 Desktop Shell view 可混合处理 pathless 与 filesystem 项，并在逐项滚动采样时覆盖全部当前枚举行；不验证产品 ExplorerBrowser/可见 UI。
+
 ### 2026-11-01：颜色采样要求 Shell 与 DefView 行数一致
 
 Network Places 试探中，`IFolderView.ItemCount` 和 `SysListView32` 的行数无法维持一致；其中一次采样得到 Shell 1 行、DefView 2 行、仅 1 个 Shell 身份映射。该 provider 的父文件夹也不支持通过 `IShellFolder.CreateViewObject(IID_IDropTarget)` 注册 drop target。为避免把颜色映射到错误行，通用虚拟 provider 像素采样现在先等待 Shell 与 DefView 返回相同且稳定的非零行数；ZIP、This PC、Libraries 均通过。Network Places 专用探针未保留为可通过命令，需单独分析其行集合与拖放合同。失败日志：`20261101-020204-98f901b2.stdout.log`；对应原生 host-filter 探针另记录 Network Places `drop-target=0x00000000`。
