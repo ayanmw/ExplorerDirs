@@ -46,6 +46,7 @@ internal static class ShellViewColorSpike
     private static readonly Dictionary<nuint, ShellViewFontSelection> CustomDrawFontSelections = [];
     private static bool _readOnlyRuleProbe;
     private static bool _directoryRuleProbe;
+    private static bool _hiddenRuleProbe;
     private static readonly List<string> CustomDrawEventDetails = [];
     private static nint _observedListView;
     private static int _customDrawPrepaint;
@@ -2506,7 +2507,7 @@ internal static class ShellViewColorSpike
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool directoryRuleProbe = false,
-        bool probeMenuActivation = false,
+        bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false)
     {
@@ -2525,7 +2526,7 @@ internal static class ShellViewColorSpike
         var viewWindowCreateAttempted = false;
         var subclassed = false;
         var listStyleAdjusted = false;
-        string? readOnlyFixturePath = null;
+        string? readOnlyFixturePath = null, hiddenFixturePath = null;
         ShellViewColorBrowserHost? host = null;
         var viewRetirement = new ShellViewReferenceRetirement(
             shellView => At<DestroyViewWindow>(shellView, 10)(shellView),
@@ -2604,16 +2605,22 @@ internal static class ShellViewColorSpike
         {
             _readOnlyRuleProbe = readOnlyRuleProbe;
             _directoryRuleProbe = directoryRuleProbe;
+            _hiddenRuleProbe = hiddenRuleProbe;
             Directory.CreateDirectory(fixture);
             var fixturePaths = new[]
             {
                 Path.Combine(fixture, "blue-rule-target.txt"),
-                Path.Combine(fixture, directoryRuleProbe ? "dir" : "green-rule-target.txt")
+                Path.Combine(fixture, directoryRuleProbe ? "dir" : hiddenRuleProbe ? "hidden-rule-target.txt" : "green-rule-target.txt")
             };
             File.WriteAllText(fixturePaths[0], "blue");
             if (directoryRuleProbe) Directory.CreateDirectory(fixturePaths[1]);
             else File.WriteAllText(fixturePaths[1], new string('g', 128));
             File.WriteAllText(Path.Combine(fixture, "filtered-out-target.bin"), "excluded");
+            if (hiddenRuleProbe)
+            {
+                hiddenFixturePath = fixturePaths[1];
+                File.SetAttributes(hiddenFixturePath, File.GetAttributes(hiddenFixturePath) | FileAttributes.Hidden);
+            }
             if (readOnlyRuleProbe)
             {
                 readOnlyFixturePath = fixturePaths[0];
@@ -2642,7 +2649,8 @@ internal static class ShellViewColorSpike
             Check(SHBindToObject(0, pidl, 0, in shellFolderId, out folder));
             Check(At<CreateViewObject>(folder, 8)(folder, parent, ref shellViewId, out view));
 
-            var itemFilter = new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false));
+            var itemFilter = new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false),
+                hiddenRuleProbe ? HiddenItemsPreference.Show : HiddenItemsPreference.FollowWindows);
             var navigation = new ShellViewNavigationHistory(pidl, ILClone, Marshal.FreeCoTaskMem,
                 ILIsEqual, GetParentPidl, ILCombine, Navigate);
             host = new ShellViewColorBrowserHost(parent, [], itemFilter, navigation,
@@ -2971,10 +2979,10 @@ internal static class ShellViewColorSpike
                 $"native-view-menu-color-transition={nativeViewMenuColorTransition}");
             Console.WriteLine($"ishellview-color-spike: native-menu-hit-test={nativeMenuHitTest}");
 
-            if (readOnlyRuleProbe || directoryRuleProbe)
+            if (readOnlyRuleProbe || directoryRuleProbe || hiddenRuleProbe)
             {
                 // End the color-only fixture before later Shell file-operation checks can mutate its paths.
-                Console.WriteLine($"ishellview-color-spike: readonly-rule-probe={readOnlyRuleProbe}; directory-rule-probe={directoryRuleProbe}; post-capture-file-operations=skipped");
+                Console.WriteLine($"ishellview-color-spike: readonly-rule-probe={readOnlyRuleProbe}; directory-rule-probe={directoryRuleProbe}; hidden-rule-probe={hiddenRuleProbe}; post-capture-file-operations=skipped");
                 return 0;
             }
 
@@ -3146,7 +3154,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3175,6 +3183,7 @@ internal static class ShellViewColorSpike
                 Directory.Delete(fullStateDirectory, recursive: true);
             _readOnlyRuleProbe = false;
             _directoryRuleProbe = false;
+            _hiddenRuleProbe = false;
             if (GetForegroundWindow() != foreground)
                 Console.WriteLine("ishellview-color-spike cleanup: foreground changed.");
         }
@@ -3647,7 +3656,10 @@ internal static class ShellViewColorSpike
     {
         // Resolve item identity before painting. Do not call IFolderView from inside NM_CUSTOMDRAW.
         var orderedNames = MapCurrentFolderItems(folderView, fixturePaths).Split(',');
-        ShellViewColorRule[] rules = _directoryRuleProbe
+        ShellViewColorRule[] rules = _hiddenRuleProbe
+            ? [WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u), 0x00C00000u),
+                ShellViewColorRule.BackgroundOnly("#Hidden", ShellColorRuleDecision.Set, 0x00D0F0E0u)]
+            : _directoryRuleProbe
             ? [WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u), 0x00C00000u),
                 ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0u)]
             : _readOnlyRuleProbe

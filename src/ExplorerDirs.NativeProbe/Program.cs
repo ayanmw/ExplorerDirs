@@ -207,6 +207,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
         if (args.Length == 1 && args[0] == "--ishellview-color-directory-private-desktop")
             return PrivateDesktopShellProbe.RunDirectoryColorRule();
+        if (args.Length == 1 && args[0] == "--ishellview-color-hidden-private-desktop")
+            return PrivateDesktopShellProbe.RunHiddenColorRule();
         if (args.Length == 1 && args[0] == "--common-listview-color-baseline-private-desktop")
             return PrivateDesktopShellProbe.RunCommonListViewColorBaseline();
         if (args.Length == 1 && args[0] == "--common-listview-data-contract")
@@ -313,6 +315,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
             Console.WriteLine("       --ishellview-color-directory-private-desktop (same pixel probe with a #DIR folder fixture)");
+            Console.WriteLine("       --ishellview-color-hidden-private-desktop (same pixel probe with an explicitly included #Hidden fixture)");
             Console.WriteLine("       --common-listview-color-baseline-private-desktop (standard ListView custom-draw control comparison)");
             Console.WriteLine("       --common-listview-data-contract (hidden standard ListView update/sort contract)");
             Console.WriteLine("       --common-listview-virtual-folder-contract (hidden ListView rows from virtual Control Panel Shell items)");

@@ -177,6 +177,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunDirectoryColorRule() => Run("color-directory-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, directoryRuleProbe: true));
 
+    internal static int RunHiddenColorRule() => Run("color-hidden-rule", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, hiddenRuleProbe: true));
+
     internal static int RunCommandStateReadOnly() =>
         Run("command-state-readonly", () => ShellViewColorSpike.Run(queryCommandStatesOnly: true));
 

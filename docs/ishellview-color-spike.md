@@ -1464,3 +1464,11 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 扩展只读颜色探针为两项 fixture：一份普通文件和一个目录；普通文件按文件名着色，目录按 `FileAttributes.Directory` 命中 `#DIR`。真实 Content 视图对两项各得到 2 次 custom-draw 回调，post-paint 样本分别精确读回 `0xD0F0E0` 与 `0xF0E0D0`。完整 Private Desktop 路径中的视图模式、排序、Size/Type/Date modified 分组颜色合同均通过，NativeProbe Release 0 警告/错误，watchdog exit 0、前台/输入/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-012634-0957ca27.stdout.log`。
 
 该次测试只证明默认文件系统 `IShellView` 原型对普通文件和目录行的规则投影；没有测试其他 Shell provider，也没有修改 ExplorerBrowser 产品视图或可见产品入口。目录 fixture 使用短名称以避开中心像素采样点落在文字字形上的干扰；颜色规则本身仍通过实际 custom-draw 后像素验证。
+
+### 2026-11-01 隐藏项 `#Hidden` 逐项颜色
+
+新增仅供探针使用的隐藏文件 fixture：Shell 枚举显式采用 `HiddenItemsPreference.Show`，夹具本身设置 `FileAttributes.Hidden`，通过 `#Hidden` 规则给隐藏项着色；普通文件继续由名称规则着色。没有读取或更改 Windows 的全局“显示隐藏文件”设置，finally 对夹具目录执行递归删除。真实 Content 视图两行 post-paint 颜色分别精确匹配 `0xF0E0D0` 与 `0xD0F0E0`；视图模式、排序和 Size/Type/Date modified 分组颜色回归均通过。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入及隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-012905-b4f10814.stdout.log`。
+
+这证明默认文件系统 `IShellView` 原型里“Shell 纳入隐藏行 → 读取真实隐藏属性 → `#Hidden` 规则 → 行像素”链路可行；不表示产品当前的隐藏项选项默认显示隐藏项，也未接 ExplorerBrowser 产品视图、Q-Dir 导入规则或可见 UI。
+
+随后复跑同一 Private Desktop 命令，两次都在输出颜色像素、视图、排序和分组结果后未于 90 秒 watchdog 时限内退出；wait-chain 未见环，工作线程报告 `ExecutionDelay`。早先 `012905` 日志为完整 exit 0，但这两次复跑说明退出/清理可重复性尚不稳定。隐藏着色结果有日志证据，探针完整成功标准仍需排查后重跑。
