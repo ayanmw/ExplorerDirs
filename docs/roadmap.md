@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 隔离行扫描身份与通知竞态：Shell 文件夹行枚举现在捕获卷序列号及 128 位文件 ID，递归扫描值只有在行快照、实际句柄扫描对象和发布时路径都匹配时才可应用；旧实现因行快照身份始终为空而清空首轮扫描结果，隐藏比例合同会空引用。另在 `FileSystemWatcher` 首个变更回调线程立即废弃当前扫描 ticket，避免已排入 owner dispatcher 的旧结果抢在重扫前发布。新增旧 ticket 已排队时的失效回归、Release SettingsSmoke、NativeProbe/App Release build 通过；`--common-listview-relative-size-contract` 与 `--shell-change-reconciliation` 隐藏探针通过，选区/焦点、后台扫描和 Shell 文件变更结果符合预期。此改动仅在 NativeProbe 行模型原型；未接产品 ExplorerBrowser/IShellView，逐目录身份采集的成本尚未测量。
+
 2026-10-31 隔离 Shell `UPDATEITEM` 通知路由：NativeProbe 合成文件系统 adapter 现在将子项 `SHCNE_UPDATEITEM` 与 CREATE/RENAMEITEM/DELETE 一样纳入延迟父目录更新队列，供自有派生行模型重新枚举属性；`SHCNE_UPDATEDIR` 与未知事件明确不再递归翻译。无窗口路由 smoke 通过，NativeProbe Release 构建 0 警告/错误，wrapped-folder 合同 smoke 通过。没有创建 Shell view 或运行 Private Desktop，因此仅验证事件分类接线和既有 wrapped-folder 合同，不证明真实文件属性变更后的可见列更新、事件 burst 合并或产品集成；ExplorerBrowser 产品未改。
 
 2026-10-31 Shell 延迟子菜单接口路由：工具栏/编辑命令查询 Shell canonical verb 时，初始化懒加载的“新建文件夹”子菜单现优先调用 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；返回 `E_NOTIMPL` 时回退 `IContextMenu2.HandleMenuMsg`。旧实现只查 `IContextMenu2`，无法使用只由现代 handler 正确处理的扩展菜单。SettingsSmoke 先在旧实现上按预期失败，后覆盖现代 handler 优先及 `E_NOTIMPL` 旧接口回退；完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。未显示菜单；文件区右键仍由 ExplorerBrowser 原生生成，实际第三方菜单展示仍待集中 GUI 验收。

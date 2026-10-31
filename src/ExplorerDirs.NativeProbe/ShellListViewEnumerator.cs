@@ -9,6 +9,7 @@ internal static class ShellListViewEnumerator
 {
     private const uint ShcontfFolders = 0x00000020;
     private const uint ShcontfNonFolders = 0x00000040;
+    private const uint SfgaoFolder = 0x20000000;
 
     internal static ShellListViewEnumeration Enumerate(nint folderPidl, nint shellFolder,
         Func<ShellListViewRowIdentity, ulong?>? recursiveBytes = null)
@@ -36,6 +37,10 @@ internal static class ShellListViewEnumerator
                     var identity = ShellListViewRowIdentity.Capture(shellFolder, relativePidl, absolutePidl,
                         ref systemImageList);
                     var recursiveSize = recursiveBytes?.Invoke(identity);
+                    var fileSystemIdentity = identity.FileSystemPath is not null &&
+                        (identity.Attributes & SfgaoFolder) != 0
+                        ? ShellListViewRowIdentity.GetFileSystemIdentity(identity.FileSystemPath)
+                        : null;
 
                     retainedAbsolutePidl = ILClone(absolutePidl);
                     retainedRelativePidl = ILClone(relativePidl);
@@ -44,7 +49,10 @@ internal static class ShellListViewEnumerator
 
                     rows.Add(new ShellListViewRow(rows.Count + 1, retainedAbsolutePidl, retainedRelativePidl,
                         identity.DisplayName, identity.ParsingName, identity.FileSystemPath, identity.Attributes,
-                        recursiveSize, FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex));
+                        recursiveSize, FromShellEnumeration: true, SystemImageIndex: identity.SystemImageIndex)
+                    {
+                        FileSystemIdentity = fileSystemIdentity
+                    });
                     retainedAbsolutePidl = 0;
                     retainedRelativePidl = 0;
                 }

@@ -232,6 +232,9 @@ internal static class CommonListViewColorBaseline
                 [Path.GetFullPath(largeFolder)] = largeScan.Bytes,
                 [Path.GetFullPath(smallFolder)] = smallScan.Bytes
             });
+            if (enumeration.Rows.Any(row => row.FileSystemPath is not null &&
+                    (row.Attributes & 0x20000000) != 0 && row.FileSystemIdentity is null))
+                throw new InvalidOperationException("Shell folder rows must capture filesystem identity before recursive scan values can be applied.");
             shellRows.AddRange(ShellListViewRowModel.ApplyRecursiveScanResults(enumeration.Rows, initialScans));
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
 
@@ -328,6 +331,9 @@ internal static class CommonListViewColorBaseline
                 watcher.Changed += (_, _) =>
                 {
                     if (Interlocked.Exchange(ref updateRequested, 1) != 0) return;
+                    // Invalidate on the watcher thread so a completed result already queued to
+                    // the owner dispatcher cannot publish ahead of the replacement scan.
+                    scanCoordinator.InvalidateCurrent();
                     fileChangeSignal.Set();
                     _ = dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                     {

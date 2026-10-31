@@ -45,6 +45,7 @@ internal static class DirectoryTreeScanCoordinatorSmoke
 
         VerifyLatestAsyncPublication();
         VerifyQueuedStalePublication();
+        VerifyFilesystemChangeInvalidatesQueuedPublication();
         VerifyRetiredWorkerFailure();
 
         Console.WriteLine("Directory tree scan coordinator smoke: PASS");
@@ -106,6 +107,29 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         context.RunPostedCallback();
         Check(!request.GetAwaiter().GetResult() && !published && owner.IsCurrent(newerRequest),
             "a result retired after queueing is rejected when the owner context finally dispatches it");
+    }
+
+    private static void VerifyFilesystemChangeInvalidatesQueuedPublication()
+    {
+        using var owner = new ExplorerDirs.NativeProbe.DirectoryTreeScanCoordinator();
+        using var context = new QueuedSynchronizationContext();
+        var published = false;
+        var workerToken = CancellationToken.None;
+        var request = owner.RunLatestAsync(token =>
+        {
+            workerToken = token;
+            return 10;
+        }, context, _ => published = true);
+        if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("The pre-change scan did not reach the owner context.");
+
+        owner.InvalidateCurrent();
+        context.RunPostedCallback();
+        Check(workerToken.IsCancellationRequested && !request.GetAwaiter().GetResult() && !published,
+            "a filesystem change invalidates a completed scan whose publication is already queued");
+
+        var fresh = owner.Begin();
+        Check(owner.IsCurrent(fresh), "a post-change rescan receives a publishable current ticket");
     }
 
     private static void VerifyRetiredWorkerFailure()

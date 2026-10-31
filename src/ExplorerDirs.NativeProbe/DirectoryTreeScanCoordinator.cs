@@ -79,6 +79,8 @@ internal sealed class DirectoryTreeScanCoordinator : IDisposable
         Retire(retired);
     }
 
+    internal void InvalidateCurrent() => CancelCurrent();
+
     public void Dispose()
     {
         DirectoryTreeScanTicket? retired;

@@ -947,3 +947,11 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 随后对菜单中 5 个子菜单直接调用 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)`：4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，没有其它失败；三轮两项选择（初始、复制后、移动后）结果一致。菜单仍未显示，前台未变。
 
 这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后可查询 `IContextMenu3`，并能处理 4/5 个内存子菜单的初始化消息。第 5 个的 `E_NOTIMPL` 上层如何处理、真实窗口消息转发、`WM_DRAWITEM`、`WM_MEASUREITEM`、菜单边界/视觉尚未验证；第三方扩展与多 provider 也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
+
+### 2026-10-31：初始 Shell 文件夹行缺少扫描身份，通知到达时先废弃旧 ticket
+
+当前隐藏行模型合同复跑在初次读取 `RecursiveSummary` 时抛空引用。定位到原因是 `ShellListViewEnumerator` 构造目录行时没有填 `FileSystemIdentity`，而 `ApplyRecursiveScanResults` 按既定安全合同要求行快照、句柄扫描结果及发布时路径三者身份相同；旧扫描结果因此被清空。现在仅对有文件系统路径且带 `SFGAO_FOLDER` 的行读取卷序列号及 128 位文件 ID，并随行快照保存。隐藏相对大小合同先在该改动前复现失败，修正后初始与更新值、比例排序和焦点/选区均通过。
+
+另一处时序缺口位于隔离相对大小原型的 `FileSystemWatcher.Changed`：旧扫描完成结果若已排入 owner Dispatcher，watcher 后续排入的重扫动作可能排在它之后。现在首个变更回调先从 watcher 线程调用 `DirectoryTreeScanCoordinator.InvalidateCurrent`，再通知 owner 排入新扫描。SettingsSmoke 覆盖已排队结果的取消与拒绝发布；`--common-listview-relative-size-contract` 和 `--shell-change-reconciliation` 均通过，前台未变。
+
+逐目录文件 ID 读取增加了行枚举开销，本轮没有测量大量目录下的成本。以上仍是 NativeProbe/隔离行模型工作，不接入 ExplorerBrowser/产品 Shell view；对可见列、第三方 namespace 或产品迁移不作结论。
