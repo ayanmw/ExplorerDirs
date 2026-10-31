@@ -86,3 +86,7 @@ Q-Dir [FAQ 84](https://www.softwareok.com/?faq=84&seite=faq-Q-DIR) 另说明筛�
 - Alt+L 屏幕放大镜属于辅助工具，不改变文件管理核心范围；本项目现以“工具 → 屏幕放大镜”和 Alt+L 直接启动 Windows Magnifier 对齐入口，不复制另一套放大器，也不注册全局快捷键。实际启动仍待可见验收。
 
 该复核没有发现应立即改映射的核心快捷键缺口，因此没有改快捷键代码。公开字符串/帮助不能证明本机 Q-Dir 12.79 的实际按键运行时行为；Q-Dir 与 Explorer Dirs 的真实键盘比较仍待获准的隔离可见验收。
+
+## 2026-11-01 Q-Dir 官方版本基线再核对
+
+官方版本记录与产品页当前仍列出 Q-Dir 12.82，发布日期为 2026-10-24。12.82 更新说明包括重编译/签名与哈希、地址栏目录树使用改进及一般优化，没有进一步定义可据以复现的新交互。项目已有现代地址栏 F4 树/路径编辑方案；本轮不从笼统优化文字推导额外行为，下一步继续按已列的 Q-Dir 可见差异与迁移门槛推进。[官方版本记录](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2FHistory) · [官方产品页](https://www.softwareok.com/?seite=Freeware/Q-Dir)
