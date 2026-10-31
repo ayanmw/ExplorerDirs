@@ -940,4 +940,4 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 
 随后对菜单中 5 个子菜单直接调用 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)`：4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，没有其它失败；三轮两项选择（初始、复制后、移动后）结果一致。菜单仍未显示，前台未变。
 
-这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后可查询 `IContextMenu3`，并能处理 4/5 个内存子菜单的初始化消息；`E_NOTIMPL` 的那个子菜单需要由实际宿主走未处理消息的默认路径。尚未验证真实窗口消息转发、`WM_DRAWITEM`、`WM_MEASUREITEM`、菜单边界/视觉，第三方扩展与多 provider 也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
+这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后可查询 `IContextMenu3`，并能处理 4/5 个内存子菜单的初始化消息。第 5 个的 `E_NOTIMPL` 上层如何处理、真实窗口消息转发、`WM_DRAWITEM`、`WM_MEASUREITEM`、菜单边界/视觉尚未验证；第三方扩展与多 provider 也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
