@@ -985,3 +985,9 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 `ShellChangeReconciliationProbe` 新增两个独立文件夹 pane 与两份隐藏 `SysListView32` 投影。探针从源 `IShellFolder` 一次取得两个选中项的 `IDataObject`，调用 `IFileOperation.MoveItems` 移到目标 Shell 文件夹；没有手动发送 `SHChangeNotify`。递归 Shell watcher 收到两组 DELETE/CREATE 移动事件后，探针分别重新枚举两侧并独立执行 `ShellListViewRowModel.Reconcile`。结果确认源 pane 退休两条移出行、目标 pane 新增两行；两侧未移动的锚点都保留稳定行 ID、选中状态和焦点。Release NativeProbe build 0 警告/错误，`--shell-change-reconciliation` 通过，前台句柄不变且两组列表/宿主窗口均隐藏。
 
 这覆盖了两项多选 `IDataObject` 的 `IFileOperation.MoveItems` 结果、Shell 通知及两份自有行快照对跨窗格移动的协调，不覆盖实际进度/Undo UI、真实 `DoDragDrop`、产品 ExplorerBrowser 或用户可见输入；文件移动仅作用于隔离 fixture。行 ID 在各 pane 内独立，目标 pane 可以合法复用源 pane 的数值 ID。产品视图迁移仍未完成。
+
+### 2026-10-31：自有行模型跨窗格复制协调
+
+在同一隔离合同中，先完成上述多项跨窗格移动，再从接收窗格以真实 Shell `IDataObject` 调用 `IFileOperation.CopyItems` 回复制到原窗格。`SHCNE_CREATE`/目录更新通知后，原窗格重新枚举并新增两行；已复制窗格的两行身份未变，两个窗格原有锚点行的 ID、选择和焦点均保持。完整 NativeProbe Release build 与 `--shell-change-reconciliation` 连续三轮退出码 0，隐藏窗口/前台守卫均通过。
+
+该结果仅验证文件系统 Shell 通知与两份 NativeProbe 自有行快照的复制/移动协调；没有验证真实 OLE 拖放、剪贴板粘贴、进度/撤销界面、ExplorerBrowser 产品宿主或可见用户交互。产品文件视图仍使用 ExplorerBrowser，迁移门槛未关闭。

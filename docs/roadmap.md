@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 隔离行模型跨窗格复制合同：在多项 `IFileOperation.MoveItems` 后，以真实 Shell `IDataObject` 执行多项 `CopyItems`。CREATE/目录更新通知后接收窗格新增两行，另一窗格行身份稳定，两个 pane 的锚点选择/焦点保持；完整 NativeProbe Release build 与 `--shell-change-reconciliation` 连续三轮通过，隐藏窗口/前台守卫通过。只验证 NativeProbe 行模型，不是可见拖放、剪贴板粘贴或 ExplorerBrowser 产品证据。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格复制协调)。
+
 2026-10-31 F5 隐藏 HostProbe 结算时序修正：目录行先匹配并不代表选区/焦点恢复已完成。旧探针过早读值曾连续报告空选区；现等待生产刷新状态和恢复流程结算后复验，四窗格活动窗格三选项及第 4 窗格单选均通过。仅修正 HostProbe 等待条件，不代表可见刷新黑屏已改善；F5 与查看方式切换仍需集中 UI 验收。详情见[自动刷新调查](live-update-investigation.md#2026-10-31-f5-hostprobe-等待恢复结算)。
 
 2026-10-31 隔离行模型逐项更新通知闭环：`--shell-change-reconciliation` 新增 `SHCNE_UPDATEITEM` 实际通知样例，子目录递归大小从 4 B 更新到 7 B，扫描在线程池运行并回 owner 投影；行身份及选区/焦点保留。复核还修正探针将 `SHCNE_RENAMEFOLDER` 错写为 `0x2000` 的常量及监听掩码（SDK 值为 `0x00020000`）；真实目录重命名事件验证同身份 12 B 摘要在重扫期间持续显示，之后重扫值仍正确。修正前探针按预期因缺少目录重命名事件而失败，修正后定向探针、完整 Release `SettingsSmoke` 与 NativeProbe Release build 通过（0 警告/错误）。这是隔离 `SysListView32` 行模型合同，不是产品 ExplorerBrowser/DefView 逐行列或可见 `IShellView` 迁移证据；详见[隔离原型记录](ishellview-color-spike.md#2026-10-31updateitem-派生值重算与目录重命名事件合同)。

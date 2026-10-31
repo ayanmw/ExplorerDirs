@@ -418,6 +418,81 @@ internal static class ShellChangeReconciliationProbe
                 !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowsRetired || !movedTargetRowsAdded ||
                 !sourceSelectionPreserved || !targetSelectionPreserved || !isolated)
                 throw new InvalidOperationException("Cross-pane move did not reconcile both Shell row models while retaining unaffected selection/focus.");
+
+            var targetCopiedRowIds = movedNames.ToDictionary(name => name,
+                name => targetCurrent.Rows.Single(row => row.DisplayName == name).Id, StringComparer.Ordinal);
+            var copyEventBaseline = window.Events.Count;
+            var copySourceRows = targetCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
+            var copyChildArray = Marshal.AllocCoTaskMem(IntPtr.Size * copySourceRows.Length);
+            nint copyDataObject = 0, copyOperation = 0, copyDestinationItem = 0;
+            try
+            {
+                for (var index = 0; index < copySourceRows.Length; index++)
+                    Marshal.WriteIntPtr(copyChildArray, index * IntPtr.Size, copySourceRows[index].RelativePidl);
+                var copyDataObjectId = DataObjectId;
+                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(targetFolder, 10)(targetFolder, 0,
+                    (uint)copySourceRows.Length, copyChildArray, in copyDataObjectId, 0, out copyDataObject));
+                if (copyDataObject == 0) throw new IOException("The target Shell folder returned no IDataObject for the selected copy rows.");
+
+                var copyOperationClassId = FileOperationClassId;
+                var copyOperationId = FileOperationId;
+                Marshal.ThrowExceptionForHR(CoCreateInstance(ref copyOperationClassId, 0, 1,
+                    ref copyOperationId, out copyOperation));
+                Marshal.ThrowExceptionForHR(At<SetOperationFlags>(copyOperation, 5)(copyOperation,
+                    0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                var copyShellItemId = ShellItemId;
+                Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(sourcePath, 0,
+                    ref copyShellItemId, out copyDestinationItem));
+                Marshal.ThrowExceptionForHR(At<CopyItems>(copyOperation, 17)(copyOperation,
+                    copyDataObject, copyDestinationItem));
+                Marshal.ThrowExceptionForHR(At<PerformOperations>(copyOperation, 21)(copyOperation));
+                Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(copyOperation, 22)(copyOperation, out var copyAborted));
+                if (copyAborted != 0) throw new IOException("The isolated cross-pane Shell copy was aborted.");
+            }
+            finally
+            {
+                if (copyDestinationItem != 0) Marshal.Release(copyDestinationItem);
+                if (copyOperation != 0) Marshal.Release(copyOperation);
+                if (copyDataObject != 0) Marshal.Release(copyDataObject);
+                Marshal.FreeCoTaskMem(copyChildArray);
+            }
+
+            var filesCopied = movedNames.All(name => File.Exists(Path.Combine(sourcePath, name)) &&
+                File.ReadAllText(Path.Combine(sourcePath, name)) == (name == "moving.txt" ? "move me" : "move me too"));
+            if (!filesCopied)
+                throw new IOException("IFileOperation.CopyItems did not produce the expected cross-pane fixture rows.");
+            pendingSource = WaitForRows(sourcePidl, sourceFolder,
+                rows => movedNames.All(name => rows.Any(row => row.DisplayName == name)));
+            var copyNotificationObserved = window.WaitForAnySince(copyEventBaseline,
+                [Created, UpdatedDirectory], TimeSpan.FromSeconds(5));
+            var copyReconciliation = ShellListViewRowModel.Reconcile(sourceCurrent.Rows,
+                pendingSource.Rows, NextId(sourceCurrent.Rows));
+            ShellListViewEnumerator.FreeRows(copyReconciliation.RetiredRows);
+            sourceCurrent = pendingSource with { Rows = copyReconciliation.Rows.ToList() };
+            pendingSource = null;
+            ProjectRows(sourceList, sourceCurrent.Rows);
+            ApplySelection(sourceList, sourceCurrent.Rows, sourceSelection);
+            var sourceAnchorPreservedAfterCopy = sourceCurrent.Rows.Single(row => row.DisplayName == "anchor-source.txt").Id == sourceAnchorId;
+            var targetAnchorPreservedAfterCopy = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id == targetAnchorId;
+            var targetCopiedRowsUnchanged = movedNames.All(name =>
+                targetCurrent.Rows.Single(row => row.DisplayName == name).Id == targetCopiedRowIds[name]);
+            var sourceSelectionPreservedAfterCopy = sourceSelection.Resolve(sourceCurrent.Rows)
+                .Any(state => state.RowId == sourceAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(sourceList, sourceAnchorId);
+            var targetSelectionPreservedAfterCopy = targetSelection.Resolve(targetCurrent.Rows)
+                .Any(state => state.RowId == targetAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(targetList, targetAnchorId);
+            var copyIsolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
+                !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
+            Console.WriteLine($"shell-change-cross-pane-copy: operation=IFileOperation.CopyItems;create-notification={copyNotificationObserved};" +
+                $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
+                $"source-anchor-id-preserved={sourceAnchorPreservedAfterCopy};target-anchor-id-preserved={targetAnchorPreservedAfterCopy};" +
+                $"target-copied-rows-stable={targetCopiedRowsUnchanged};source-selection-focus-preserved={sourceSelectionPreservedAfterCopy};" +
+                $"target-selection-focus-preserved={targetSelectionPreservedAfterCopy};hidden-windows={copyIsolated};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (!copyNotificationObserved || sourceCurrent.Rows.Count != 3 || targetCurrent.Rows.Count != 3 ||
+                !sourceAnchorPreservedAfterCopy || !targetAnchorPreservedAfterCopy || !targetCopiedRowsUnchanged ||
+                !sourceSelectionPreservedAfterCopy || !targetSelectionPreservedAfterCopy || !copyIsolated)
+                throw new InvalidOperationException("Cross-pane copy did not reconcile the receiving row model while preserving the source and pane selection/focus.");
         }
         finally
         {
@@ -715,6 +790,18 @@ internal static class ShellChangeReconciliationProbe
             return _events.Any(expected.Contains);
         }
 
+        internal bool WaitForAnySince(int eventIndex, uint[] expected, TimeSpan timeout)
+        {
+            var until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+            while (Environment.TickCount64 < until)
+            {
+                Application.DoEvents();
+                if (_events.Skip(eventIndex).Any(expected.Contains)) return true;
+                Thread.Sleep(10);
+            }
+            return _events.Skip(eventIndex).Any(expected.Contains);
+        }
+
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == ChangeMessage)
@@ -758,6 +845,7 @@ internal static class ShellChangeReconciliationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
 
