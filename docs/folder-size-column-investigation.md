@@ -1013,3 +1013,7 @@ NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELE
 #### 后续 Private Desktop 验证尝试（未通过）
 
 随后尝试将 `SHCNE_ATTRIBUTES` 从分类推进到真实隔离 Shell view：临时文件由普通项改为 Hidden，发送属性通知，观察合成 view 是否重新枚举并移除该行。旧分类（不含 ATTRIBUTES）和恢复后的分类各运行一次；两次都在 `cleanup-destroy-parent-window-1` 阶段由 watchdog 超时终止，等待链包含 COM/IME 线程，外层前台基线为 `LockApp` 且未变化。由于 watchdog 在父窗口销毁阶段终止进程，现有输出不足以确认属性行断言结果；不能视为通过，也不能据此归因产品 Shell 行为。该临时场景已撤回。无窗口分类合同及 wrapped-folder 合同随后通过，前台未变。探针异常退出留下运行 ID `a8d40fb43d464bd5a749ca388cd0b96d`、`5b210403d73d4f8585c05c3d4087ce2f` 对应的临时 fixture 与 HKCU 注册项；精确清理命令被自动策略拒绝，未尝试绕过。后续需先在允许的运行条件下解决 Private Desktop teardown，再重复视图级验证。
+
+#### 2026-10-31：Shell 属性通知到隔离行模型的闭环
+
+无 `IShellView` 的 `--shell-change-reconciliation` 现监听 `SHCNE_ATTRIBUTES`。真实临时文件从普通属性切为只读后，通知到达，重新枚举取得 `SFGAO_READONLY`（行属性 `0x40440177`）；恢复原属性后第二次通知也到达，标志清除。两轮 reconcile 均保留属性行 ID、稳定锚点的选中/焦点及隐藏 `SysListView32` 投影；完整跨窗格移动/复制/改名/删除合同继续通过，前台未变化。只验证 Windows Shell 通知、`IShellFolder` 重枚举及 NativeProbe 行模型，不验证 synthetic adapter 到 DefView 的消息转发、可见列着色或 ExplorerBrowser 产品接线；上节 Private Desktop teardown 超时仍是独立未解项。

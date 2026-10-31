@@ -4,6 +4,8 @@
 
 2026-10-31 属性通知 view 级复验未得结论：在 Private Desktop 合成 view 中尝试 Hidden 属性变化，两次均于父窗口销毁阶段超时，外层前台为 `LockApp` 且保持不变；由于 watchdog 在清理阶段终止进程，现有输出无法确认属性断言结果。探针改动已撤回。恢复后的事件分类与 wrapped-folder 无窗口合同通过；属性变化后 Shell view 实际重枚举仍未验证。两个异常运行遗留的 fixture/临时 HKCU 注册项因自动命令审核拒绝递归清理而保留，运行 ID 与诊断见[调查记录](folder-size-column-investigation.md#后续-private-desktop-验证尝试未通过)。
 
+2026-10-31 Shell 属性通知行模型闭环：`--shell-change-reconciliation` 现在监听 `SHCNE_ATTRIBUTES`；真实临时文件切换只读/恢复只读时，两次事件均到达，`SFGAO_READONLY` 随重新枚举正确置位/清除，行 ID 与稳定锚点选择/焦点保持。完整跨窗格文件操作合同仍通过，前台不变、窗口隐藏。该证据只覆盖 Windows Shell 通知到 NativeProbe 行模型，不代表 Private Desktop synthetic adapter 转发或产品 Shell view 可见更新；详情见[隔离逐行大小调查](folder-size-column-investigation.md#2026-10-31shell-属性通知到隔离行模型的闭环)。
+
 2026-10-31 Q-Dir 目录树自动展开行为对照复核：Q-Dir FAQ 66 的“从文件列表选择并展开”是独立开关，项目已有默认启用的便携偏好；FAQ 74 的拖入悬停延时也已支持 0.2/0.5/1/1.5/2/3 秒并独立持久化。定向 `--shell-tree-control-style-smoke` 验证两条行为的回调/配置合同、延时六档往返、非法档拒绝、未来格式不覆盖、隐藏时取消等待，以及 Drop 保持由 Shell 默认处理；App Release 构建通过（0 警告/错误）。真实拖动、目标反馈和 Q-Dir 可见差异仍待集中 UI 验收；当前没有待实现的延时配置项。对照来源：[Q-Dir FAQ 66](https://www.softwareok.com/?faq=66&seite=faq-Q-DIR)、[Q-Dir FAQ 74](https://www.softwareok.com/?faq=74&seite=faq-Q-DIR)。
 
 2026-10-31 IShellView Undo/Redo 命令迁移门槛：只读 command-state probe 修正提前返回时不应要求 session stream 写回后通过。临时 `IFileOperation::CopyItem` → Shell `undo` → `redo` 实验没有形成可重复闭环：一轮 Undo 删除了临时副本但 Redo 返回 `S_OK` 后未恢复，另一轮复制后 Undo 状态仍为禁用。由于 `FOF_ALLOWUNDO` 是整个用户登录 session 共享、由 `Explorer.exe` 协调，Private Desktop 不能隔离这类操作；操作 probe 已撤掉，不再后台重跑。两轮临时夹具由 watchdog 清理，但全局 Shell undo history 无法核验/恢复。该结果不是产品快捷键验收；ExplorerBrowser 保持为产品视图。细节及官方依据见[IShellView 原型记录](ishellview-color-spike.md#2026-10-31-shell-undoredo-原生命令实验停止)。

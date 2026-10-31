@@ -11,7 +11,7 @@ internal static class ShellChangeReconciliationProbe
     private const int ChangeMessage = 0x8000 + 0x321;
     // Keep the distinct folder-rename bit; 0x00002000 is UPDATEITEM, not RENAMEFOLDER.
     private const uint WatchEvents = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 |
-                                    0x00000200 | 0x00001000 | 0x00002000 | 0x00020000;
+                                    0x00000200 | 0x00000800 | 0x00001000 | 0x00002000 | 0x00020000;
     private const uint ShellAndInterruptSources = 0x00000003 | 0x00008000;
     private const uint PathUnicode = 0x00000005;
     private const uint Created = 0x00000002;
@@ -20,6 +20,7 @@ internal static class ShellChangeReconciliationProbe
     private const uint RenamedFolder = 0x00020000;
     private const uint UpdatedItem = 0x00002000;
     private const uint UpdatedDirectory = 0x00001000;
+    private const uint Attributes = 0x00000800;
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
     private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
@@ -47,6 +48,8 @@ internal static class ShellChangeReconciliationProbe
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-shell-change-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);
         File.WriteAllText(Path.Combine(fixture, "stable.txt"), "stable");
+        var attributePath = Path.Combine(fixture, "attribute.txt");
+        File.WriteAllText(attributePath, "attributes");
         var sizeDirectory = Path.Combine(fixture, "size-folder");
         Directory.CreateDirectory(sizeDirectory);
         var sizePayloadPath = Path.Combine(sizeDirectory, "payload.bin");
@@ -114,6 +117,47 @@ internal static class ShellChangeReconciliationProbe
                 itemUpdateScanWorker == Environment.CurrentManagedThreadId || !itemUpdateScanPublishedOnOwner)
                 throw new InvalidOperationException("SHCNE_UPDATEITEM did not refresh the derived folder row while preserving row identity and selection.");
             Console.WriteLine($"shell-change-reconciliation: event=UPDATEITEM; event-received=True; recursive-size={itemUpdatedBytes}; displayed={itemUpdatedValue}; stable-id-preserved={itemUpdatedIdentityPreserved}; selection-preserved={itemUpdatedSelectionPreserved}; worker-thread={itemUpdateScanWorker}; owner-thread={Environment.CurrentManagedThreadId}");
+
+            var attributeId = current.Rows.Single(row => row.DisplayName == "attribute.txt").Id;
+            var originalAttributes = File.GetAttributes(attributePath);
+            var attributesEventStart = window.Events.Count;
+            File.SetAttributes(attributePath, originalAttributes | FileAttributes.ReadOnly);
+            SHChangeNotify(Attributes, PathUnicode, attributePath, null);
+            var attributesEvent = window.WaitForAnySince(attributesEventStart, [Attributes], TimeSpan.FromSeconds(5));
+            var attributesEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+            var attributesReconciliation = ShellListViewRowModel.Reconcile(current.Rows,
+                attributesEnumeration.Rows, NextId(current.Rows));
+            ShellListViewEnumerator.FreeRows(attributesReconciliation.RetiredRows);
+            current = attributesEnumeration with { Rows = attributesReconciliation.Rows.ToList() };
+            ProjectRows(listView, current.Rows);
+            ApplySelection(listView, current.Rows, selection);
+            var readonlyRow = current.Rows.Single(row => row.Id == attributeId);
+            var readonlyFlagUpdated = (readonlyRow.Attributes & 0x00040000) != 0; // SFGAO_READONLY
+            var attributeIdentityPreserved = readonlyRow.Id == attributeId;
+            var selectionAfterAttributes = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            Console.WriteLine($"shell-change-reconciliation: event=ATTRIBUTES-check; event-received={attributesEvent}; file-attributes=0x{(uint)File.GetAttributes(attributePath):X8}; shell-attributes=0x{readonlyRow.Attributes:X8}; readonly-flag-updated={readonlyFlagUpdated}; row-id-preserved={attributeIdentityPreserved}; selection-preserved={selectionAfterAttributes}");
+            if (!attributesEvent || !readonlyFlagUpdated || !attributeIdentityPreserved || !selectionAfterAttributes)
+                throw new InvalidOperationException("SHCNE_ATTRIBUTES did not refresh the row attributes while preserving row identity and selection.");
+            Console.WriteLine($"shell-change-reconciliation: event=ATTRIBUTES; event-received={attributesEvent}; readonly-flag-updated={readonlyFlagUpdated}; row-id-preserved={attributeIdentityPreserved}; selection-preserved={selectionAfterAttributes}");
+
+            File.SetAttributes(attributePath, originalAttributes);
+            var restoredAttributesEventStart = window.Events.Count;
+            SHChangeNotify(Attributes, PathUnicode, attributePath, null);
+            var restoredAttributesEvent = window.WaitForAnySince(restoredAttributesEventStart,
+                [Attributes], TimeSpan.FromSeconds(5));
+            var restoredAttributesEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+            var restoredAttributesReconciliation = ShellListViewRowModel.Reconcile(current.Rows,
+                restoredAttributesEnumeration.Rows, NextId(current.Rows));
+            ShellListViewEnumerator.FreeRows(restoredAttributesReconciliation.RetiredRows);
+            current = restoredAttributesEnumeration with { Rows = restoredAttributesReconciliation.Rows.ToList() };
+            ProjectRows(listView, current.Rows);
+            ApplySelection(listView, current.Rows, selection);
+            var restoredAttributeRow = current.Rows.Single(row => row.Id == attributeId);
+            var readonlyFlagCleared = (restoredAttributeRow.Attributes & 0x00040000) == 0;
+            var restoredAttributeSelection = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            if (!restoredAttributesEvent || !readonlyFlagCleared || restoredAttributeRow.Id != attributeId || !restoredAttributeSelection)
+                throw new InvalidOperationException("SHCNE_ATTRIBUTES did not clear the row's read-only attribute while preserving row identity and selection.");
+            Console.WriteLine($"shell-change-reconciliation: event=ATTRIBUTES-restore; event-received={restoredAttributesEvent}; readonly-flag-cleared={readonlyFlagCleared}; row-id-preserved={restoredAttributeRow.Id == attributeId}; selection-preserved={restoredAttributeSelection}");
 
             var createdPath = Path.Combine(fixture, "created.txt");
             File.WriteAllText(createdPath, "created");
@@ -246,7 +290,7 @@ internal static class ShellChangeReconciliationProbe
                 folderRenameScanWorker == Environment.CurrentManagedThreadId ||
                 !initialScanPublishedOnOwner || !updateScanPublishedOnOwner || !folderRenameScanPublishedOnOwner ||
                 !selectionAfterUpdatePreserved || !selectionAfterReorderPreserved || !selectionAfterDeletePreserved ||
-                current.Rows.Count != 2 || SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() != current.Rows.Count ||
+                current.Rows.Count != 3 || SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() != current.Rows.Count ||
                 GetForegroundWindow() != foreground || IsWindowVisible(window.Handle) || IsWindowVisible(listParent))
                 throw new InvalidOperationException("Shell change notification reconciliation contract failed.");
             VerifyCrossPaneMove(foreground);
@@ -262,6 +306,9 @@ internal static class ShellChangeReconciliationProbe
             if (current is not null) ShellListViewEnumerator.FreeRows(current.Rows);
             if (shellFolder != 0) Marshal.Release(shellFolder);
             if (folderPidl != 0) ILFree(folderPidl);
+            try { if (File.Exists(attributePath)) File.SetAttributes(attributePath, FileAttributes.Normal); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
             try { Directory.Delete(fixture, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
