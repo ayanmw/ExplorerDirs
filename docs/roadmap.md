@@ -5142,6 +5142,10 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 2026-10-31 F5 绘制时间线接入实际手动刷新入口：Release HostProbe 的 `--live-shell-refresh` 调用产品手动刷新路径，并在原有行数、选区、焦点结果中输出该视图的 `WM_PAINT` / `WM_ERASEBKGND` 时间线。HostProbe/App Release build 通过（0 警告、0 错误），提交 `1177988`。本轮没有运行 ExplorerBrowser 宿主：项目规则要求隐藏宿主实验前确认桌面空闲和当前授权，且其可能改变系统前台。该探针可以补充 Shell 绘制消息顺序与处理耗时，不能读取像素或验证冻结画面期间的鼠标命中；F5 黑屏改善仍待隐藏诊断和集中可见验收分别确认。
 
+### 2026-11-01：F5 redraw lease 源码状态更正
+
+前述“历史上的 F5 重绘租约已撤回”只描述 `be89325` 之前的状态。`be89325 Preserve Shell rows during manual refresh` 已重新在用户触发的 F5 路径取得 `ShellViewRedrawLease`，异步行数稳定或超时后释放；自动/程序调用的 `Refresh()` 不取得此租约。`d32d102` 的三轮隐藏生产 HostProbe 都记录到 `SysHeader32` 与 `SysListView32` 在约 200 ms 后恢复 `WM_SETREDRAW`，并保留选区/焦点。它只证明消息级租约时序，不证明最终像素效果或暂停期间的输入命中安全；这些仍需集中可见验收。`SHCNE_UPDATEDIR` 仍用于普通文件系统目录，Soft-Refresh 开启时则调用 `IShellView.Refresh()` 以保留该标签的设置语义。
+
 2026-10-31 保帧诊断补记交互输入：开启 Shell callback trace 时，F5/查看方式转换时间线现也记录窗口类及鼠标按键、键盘、滚轮消息类型，不记录键值、文本或鼠标坐标；仍受 2 秒和 256 条上限约束，普通运行无采样。HostProbe/App Release build 与完整 Release `SettingsSmoke` 通过（0 警告、0 错误），本轮未启动宿主。此记录可指出保帧期间是否有输入抵达，但不能确认用户看到的行与 Shell 实际命中行是否一致，需在后续集中可见验收核对。
 
 ## 2026-10-31：预览格式过滤等待 Q-Dir 可见确认
