@@ -496,6 +496,45 @@ internal static class StaticShellFolderAdapterProbe
                 PerformWrappedDataObjectOperation(adapter, "pending-a.bin", "DeleteItems",
                     (operation, dataObject) => Check(At<DeleteItems>(operation, 19)(operation, dataObject)),
                     () => !File.Exists(deleteSource));
+
+                var multiCopyTargetPath = Path.Combine(fixture, "multi-copy-target");
+                Directory.CreateDirectory(multiCopyTargetPath);
+                var multiCopyNames = new[] { "two.bin", "hundred-renamed.bin" };
+                var multiCopyContents = multiCopyNames.ToDictionary(name => name, name => File.ReadAllBytes(Path.Combine(fixture, name)));
+                stage = "wrapped-data-object-multiselect-copy";
+                var multiCopyTargetId = ShellItemId;
+                Check(SHCreateItemFromParsingName(multiCopyTargetPath, 0, ref multiCopyTargetId, out var multiCopyTarget));
+                try
+                {
+                    PerformWrappedDataObjectOperation(adapter, multiCopyNames, "CopyItems",
+                        (operation, dataObject) => Check(At<CopyItems>(operation, 17)(operation, dataObject, multiCopyTarget)),
+                        () => multiCopyNames.All(name => File.Exists(Path.Combine(fixture, name)) &&
+                            File.Exists(Path.Combine(multiCopyTargetPath, name)) &&
+                            File.ReadAllBytes(Path.Combine(multiCopyTargetPath, name)).SequenceEqual(multiCopyContents[name])));
+                }
+                finally { Marshal.Release(multiCopyTarget); }
+
+                var multiMoveNames = new[] { "ten-copy.bin", "pending-renamed-b.bin" };
+                var multiMoveContents = multiMoveNames.ToDictionary(name => name, name => File.ReadAllBytes(Path.Combine(fixture, name)));
+                var multiMoveDestinationPath = Path.Combine(fixture, "move-target");
+                var multiMoveDestinationId = ShellItemId;
+                Check(SHCreateItemFromParsingName(multiMoveDestinationPath, 0, ref multiMoveDestinationId, out var multiMoveDestination));
+                try
+                {
+                    stage = "wrapped-data-object-multiselect-move";
+                    PerformWrappedDataObjectOperation(adapter, multiMoveNames, "MoveItems",
+                        (operation, dataObject) => Check(At<MoveItems>(operation, 15)(operation, dataObject, multiMoveDestination)),
+                        () => multiMoveNames.All(name => !File.Exists(Path.Combine(fixture, name)) &&
+                            File.Exists(Path.Combine(multiMoveDestinationPath, name)) &&
+                            File.ReadAllBytes(Path.Combine(multiMoveDestinationPath, name)).SequenceEqual(multiMoveContents[name])));
+                }
+                finally { Marshal.Release(multiMoveDestination); }
+
+                var multiDeleteNames = multiCopyNames;
+                stage = "wrapped-data-object-multiselect-delete";
+                PerformWrappedDataObjectOperation(adapter, multiDeleteNames, "DeleteItems",
+                    (operation, dataObject) => Check(At<DeleteItems>(operation, 19)(operation, dataObject)),
+                    () => multiDeleteNames.All(name => !File.Exists(Path.Combine(fixture, name))));
             }
 
             var customSchema = GetPropertyDescriptionStatus(new ShellColumnManager.NativeKey
@@ -1967,16 +2006,22 @@ internal static class StaticShellFolderAdapterProbe
 
     private static void PerformWrappedDataObjectOperation(nint adapter, string childName, string operationName,
         Action<nint, nint> queueOperation, Func<bool> verifyResult)
+        => PerformWrappedDataObjectOperation(adapter, new[] { childName }, operationName, queueOperation, verifyResult);
+
+    private static void PerformWrappedDataObjectOperation(nint adapter, IReadOnlyList<string> childNames, string operationName,
+        Action<nint, nint> queueOperation, Func<bool> verifyResult)
     {
         var foreground = GetForegroundWindow();
-        nint child = 0, childArray = 0, dataObject = 0, operation = 0;
+        nint childArray = 0, dataObject = 0, operation = 0;
+        var children = new List<nint>(childNames.Count);
         try
         {
-            child = ParseChild(adapter, childName);
-            childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
-            Marshal.WriteIntPtr(childArray, child);
-            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out dataObject));
-            if (dataObject == 0) throw new Exception($"Wrapped selection {childName} did not return IDataObject for {operationName}.");
+            if (childNames.Count == 0) throw new ArgumentException("At least one wrapped child is required.", nameof(childNames));
+            foreach (var childName in childNames) children.Add(ParseChild(adapter, childName));
+            childArray = Marshal.AllocCoTaskMem(IntPtr.Size * children.Count);
+            for (var index = 0; index < children.Count; index++) Marshal.WriteIntPtr(childArray, index * IntPtr.Size, children[index]);
+            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, (uint)children.Count, childArray, in DataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new Exception($"Wrapped selection [{string.Join(", ", childNames)}] did not return IDataObject for {operationName}.");
 
             var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
             var fileOperationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
@@ -1996,7 +2041,7 @@ internal static class StaticShellFolderAdapterProbe
             if (operation != 0) Marshal.Release(operation);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (childArray != 0) Marshal.FreeCoTaskMem(childArray);
-            if (child != 0) ILFree(child);
+            foreach (var child in children) ILFree(child);
         }
     }
 
