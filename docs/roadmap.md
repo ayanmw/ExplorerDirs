@@ -1,4 +1,6 @@
 # 路线图
+2026-11-01 F5 保留旧行候选：提交 `be89325` 为手动 F5 的当前 `IFolderView2` 加入有界重绘租约；普通文件系统路径仍发送 `SHCNE_UPDATEDIR`，虚拟位置继续使用 `IShellView.Refresh()`。行数连续三次稳定后恢复绘制，最长 1.5 秒；自动 watcher 刷新不使用该租约。查看方式切换仍是当前 view 原位设置模式，且只在同步 setter 调用内暂缓绘制。源码构建通过，但没有运行测试或打开窗口；稳定计数不能证明 Shell 枚举完成，冻结画面期间也可能出现画面/命中行不一致风险。该项仍是可见验收候选，不是已修复结论。当前验收副本见[候选身份](gui-acceptance-2026-10-31-main-prepared-latest.md)，`.qdr` 预览格式不匹配的列表处置继续等待 Q-Dir 验收。
+
 2026-11-01 隔离派生列重建对照：同一 synthetic `IShellView` 窗口重建策略连续两轮恢复 `Name | Recursive Size | Type`、更新值 `1`、排序及选区/焦点；显式 `IColumnManager.SetColumns` 重放则产生空白列，即使先调 `IShellView.SaveViewState` 也未恢复。只证明 NativeProbe synthetic filesystem provider/DefView，不改 ExplorerBrowser 产品；详见[派生列调查](folder-size-column-investigation.md#2026-11-01shell-view-窗口重建与列重放对照)。
 
 2026-11-01 NativeProbe watchdog 路由同步：复核发现近期 ZIP 菜单/解压及 Network Places 探针已加入 NativeProbe 命令入口，却未加入 watchdog 白名单，脚本在启动前拒绝这些探针。移除重复的静态 `ValidateSet`，让单一命令映射负责路由，未知命令明确失败；补齐五个隔离探针入口。Release NativeProbe build 0 警告/错误，静态映射与 CLI 对应检查通过，未知名称在启动子进程前被拒绝。ZIP 解压探针现由 watchdog 运行并通过前台/输入/清理守卫，但仍观测到菜单 `InvokeCommand` 返回 `S_OK` 且 fixture 没有解压文件；产品 ExplorerBrowser 未改。详见 ZIP 解压诊断日志 `src/.state/native-probe-watchdog/20261101-035458-420793fe.stdout.log`。
