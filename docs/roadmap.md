@@ -5320,6 +5320,8 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 ## 2026-11-01：ZIP 虚拟 Shell 项 DefView 背景像素复验
 
-新增 `color-zip-private-desktop` watchdog 路径，使用真实 ZIP 文件夹 provider 创建隔离 `IShellView`。按当前行 PIDL 读取显示名/属性并用行索引建立颜色映射后，DefView 的 `NM_CUSTOMDRAW` 回调覆盖两行；每行矩形内均命中对应预期背景像素（7,123 / 6,981 个像素），两条规则颜色无串行。标签中心采样仍为白色，故验收针对行矩形的精确像素计数；文本色/粗体仅验证回调参数，未做字形像素检查。Private Desktop watchdog exit 0、前台/输入隔离通过，默认 filesystem 颜色探针回归 exit 0，NativeProbe Release build 0 警告/错误。
+新增 `color-zip-private-desktop` watchdog 路径，使用真实 ZIP 文件夹 provider 创建隔离 `IShellView`。按当前行 PIDL 读取显示名/属性并用行索引建立颜色映射后，DefView 的 `NM_CUSTOMDRAW` 回调覆盖两行；每行矩形内均命中对应预期背景像素（7,123 / 6,981 个像素），两条规则颜色无串行。追加标签区精确像素检查后，文件行和目录行分别命中 362 / 57 个文本色像素，带粗体的文件字体被选入绘制 DC；标签中心点仍是白色，不能用它单点判断颜色。ZIP Private Desktop watchdog 连续两次 exit 0，前台/输入隔离通过。
 
-此结果把 ZIP 支持从“元数据可以算规则”推进到“默认 IShellView 的逐项背景实际绘制”。还未验证其他虚拟 Shell provider、Q-Dir `.qdr` 颜色导入或产品 ExplorerBrowser/可见 UI。后续按 provider 矩阵继续检查并补齐字形像素，再评估迁移阶段门槛；产品视图保持 ExplorerBrowser。详细证据见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项-defview-像素绘制)。
+对默认文件系统 `color-private-desktop` 基线的复跑首轮在排序/分组的图标模式漏收逐项回调并提前退出；之后的完整运行日志显示视图颜色、菜单与状态流回环恢复，随后一轮 watchdog 明确 exit 0。作为单轮波动保留记录，不宣称已彻底消除。
+
+此结果把 ZIP 支持从“元数据可以算规则”推进到“默认 IShellView 的逐项背景/文本色实际绘制及字体选择”。尚未验证其它虚拟 Shell provider、Q-Dir `.qdr` 颜色导入、视觉字重跨 DPI/主题效果或产品 ExplorerBrowser/可见 UI。后续按 provider 矩阵继续并评审迁移门槛；产品视图保持 ExplorerBrowser。详细证据见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项-defview-像素绘制)。

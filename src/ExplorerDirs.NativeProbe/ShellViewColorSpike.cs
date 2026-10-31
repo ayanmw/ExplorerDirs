@@ -39,6 +39,8 @@ internal static class ShellViewColorSpike
     private static readonly Dictionary<nuint, uint> CustomDrawItemStates = [];
     private static ShellListSelectionSnapshot _customDrawSelection = ShellListSelectionSnapshot.Empty();
     private static readonly Dictionary<nuint, uint> CustomDrawPostPaintPixels = [];
+    private static readonly Dictionary<nuint, int> CustomDrawTextColorPixelHits = [];
+    private static readonly HashSet<nuint> CustomDrawStyledItems = [];
     private static readonly Dictionary<nuint, string> CustomDrawColors = [];
     private static readonly Dictionary<nuint, Rect> CustomDrawLabelBounds = [];
     private static readonly Dictionary<nuint, uint> CustomDrawBackgrounds = [];
@@ -2971,9 +2973,11 @@ internal static class ShellViewColorSpike
                     .Select(pair => ColorrefToDib(pair.Value)).ToArray();
                 var sampled = CustomDrawPostPaintPixels.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToArray();
                 if (zipItemCount != 2 || capture.CustomDrawItems < 2 || capture.RowHits.Length != 2 ||
-                    capture.RowHits.Any(hitCount => hitCount == 0))
-                    throw new Exception($"ZIP DefView item colors did not match the Shell row identities: items={zipItemCount}; callbacks={capture.CustomDrawItems}; expected={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; sampled={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; row-hits={string.Join(',', capture.RowHits)}; bitmap-hits={string.Join(',', capture.BitmapHits)}; print-window={capture.PrintWindowRendered}; applied={string.Join('|', CustomDrawColors.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; item-state={string.Join('|', CustomDrawItemStates.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:0x{pair.Value:X}"))}; labels={string.Join('|', CustomDrawLabelBounds.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{FormatRect(pair.Value)}"))}; callbacks-detail={capture.CustomDrawDetails}.");
-                Console.WriteLine($"ishellview-zip-color-pixels: provider=ZIP; rows={virtualZipRows}; callbacks={capture.CustomDrawItems}; expected-colors={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; per-row-pixel-hits={string.Join(',', capture.RowHits)}; label-center-samples={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    capture.RowHits.Any(hitCount => hitCount == 0) ||
+                    CustomDrawTextColors.Keys.Any(index => CustomDrawTextColorPixelHits.GetValueOrDefault(index) == 0) ||
+                    CustomDrawFontStyles.Keys.Any(index => !CustomDrawStyledItems.Contains(index)))
+                    throw new Exception($"ZIP DefView item colors did not match the Shell row identities: items={zipItemCount}; callbacks={capture.CustomDrawItems}; expected={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; sampled={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; row-hits={string.Join(',', capture.RowHits)}; text-hits={string.Join(',', CustomDrawTextColorPixelHits.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; styled={string.Join(',', CustomDrawStyledItems.Order())}; bitmap-hits={string.Join(',', capture.BitmapHits)}; print-window={capture.PrintWindowRendered}; applied={string.Join('|', CustomDrawColors.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; item-state={string.Join('|', CustomDrawItemStates.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:0x{pair.Value:X}"))}; labels={string.Join('|', CustomDrawLabelBounds.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{FormatRect(pair.Value)}"))}; callbacks-detail={capture.CustomDrawDetails}.");
+                Console.WriteLine($"ishellview-zip-color-pixels: provider=ZIP; rows={virtualZipRows}; callbacks={capture.CustomDrawItems}; expected-backgrounds={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; per-row-pixel-hits={string.Join(',', capture.RowHits)}; text-color-pixel-hits={string.Join(',', CustomDrawTextColorPixelHits.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; bold-selected-into-dc={string.Join(',', CustomDrawStyledItems.Order())}; label-center-samples={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 return GetForegroundWindow() == foreground ? 0 : 1;
             }
             if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-start");
@@ -4442,6 +4446,8 @@ internal static class ShellViewColorSpike
             CustomDrawDeviceContextTypes.Clear();
             CustomDrawItemStates.Clear();
             CustomDrawPostPaintPixels.Clear();
+            CustomDrawTextColorPixelHits.Clear();
+            CustomDrawStyledItems.Clear();
             CustomDrawColors.Clear();
             CustomDrawLabelBounds.Clear();
             var printWindowRendered = false;
@@ -4522,6 +4528,25 @@ internal static class ShellViewColorSpike
             }
             var bitmapBytes = new byte[checked(width * height * 4)];
             Marshal.Copy(pixels, bitmapBytes, 0, bitmapBytes.Length);
+            foreach (var (index, textColor) in CustomDrawTextColors)
+            {
+                if (!TryGetItemRect(listView, checked((int)index), 2, out var labelBounds))
+                {
+                    CustomDrawTextColorPixelHits[index] = 0;
+                    continue;
+                }
+                var expectedTextPixel = ColorrefToDib(textColor);
+                var left = Math.Clamp(labelBounds.Left, 0, width);
+                var right = Math.Clamp(labelBounds.Right, 0, width);
+                var top = Math.Clamp(labelBounds.Top, 0, height);
+                var bottom = Math.Clamp(labelBounds.Bottom, 0, height);
+                var hits = 0;
+                for (var y = top; y < bottom; y++)
+                for (var x = left; x < right; x++)
+                    if (unchecked((uint)Marshal.ReadInt32(pixels, checked((y * width + x) * 4))) == expectedTextPixel)
+                        hits++;
+                CustomDrawTextColorPixelHits[index] = hits;
+            }
             for (var offset = 0; offset < bitmapBytes.Length; offset += 4)
             {
                 var pixel = (uint)(bitmapBytes[offset] | bitmapBytes[offset + 1] << 8 | bitmapBytes[offset + 2] << 16);
@@ -5050,7 +5075,10 @@ internal static class ShellViewColorSpike
                     if (colors.Background is { } backgroundColor)
                         Marshal.WriteInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextBackground)).ToInt32(), unchecked((int)backgroundColor));
                     if (ShellViewColorFontPolicy.TrySelect(draw.DeviceContext, colors.FontStyle, out var fontSelection))
+                    {
                         CustomDrawFontSelections[draw.Item] = fontSelection;
+                        CustomDrawStyledItems.Add(draw.Item);
+                    }
                     CustomDrawColors[draw.Item] = $"text=0x{unchecked((uint)Marshal.ReadInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextColor)).ToInt32())):X6},background=0x{unchecked((uint)Marshal.ReadInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextBackground)).ToInt32())):X6}";
                     return CdrfNewFont | CdrfNotifyPostPaint;
                 }

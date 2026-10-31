@@ -4,7 +4,11 @@
 
 将先前规则输入探针推进到真实 ZIP `IShellView`/DefView：在独立 Private Desktop 中创建含一个虚拟文件和一个虚拟目录的 ZIP 文件夹，按 `IFolderView2.GetItemAt` 当前行 PIDL 读取 Shell 显示名与属性，给当前行索引投影 `*.txt` 与 `#DIR` 规则，再从 DefView `NM_CUSTOMDRAW` 绘制回调采样行区域。两个条目均为 pathless；两行各自命中预期背景像素（转换到 DIB RGB 后为 `0xE0F0D0`、`0xD0E0F0`，每行命中 7,123 / 6,981 像素），逐项回调 `2/2`。前台 HWND 与最后输入时间未变，隔离策略通过。NativeProbe Release 构建 0 警告/错误，`color-zip-private-desktop` watchdog exit 0；随后默认文件系统颜色探针也 exit 0。
 
-探针的标签中心采样点读回白色，因此没有把它用于成功断言；成功依据是按 Shell 行索引分别检查完整行矩形内的精确背景色像素。文本色和粗体值在规则映射与回调参数中核对，但本轮没有测量字形像素。结果证明 Windows ZIP provider 的 pathless Shell 行在隔离默认 `IShellView` 中可以按逐项背景规则绘制；不证明其它虚拟 provider、Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI，也不构成宿主迁移批准。
+探针的标签中心采样点读回白色，因此没有把它用于成功断言；成功依据是按 Shell 行索引分别检查完整行矩形内的精确背景色像素。随后加上标签区域文字像素计数及选字体记录，ZIP 文件行/目录行分别命中 362/57 个精确文本色像素，带粗体的文件字体确实选入绘制 DC；两次连续 Private Desktop 运行结果一致。此处没有断言字形笔画粗细，也不从单一字体选入结果推断各种 DPI/主题下的视觉粗体效果。
+
+默认文件系统颜色探针在新采样器上的首轮曾于排序/分组的图标模式没有收到逐项回调，且因早退未完成状态流回环；之后的完整运行日志恢复行像素、排序/分组、菜单与视图流回环，随后一轮 watchdog 明确 exit 0。该单轮结果记录为采样时序波动，不能隐去或视为完全消除；后续仍需重复观察。
+
+当前证据证明 Windows ZIP provider 的 pathless Shell 行在隔离默认 `IShellView` 中可绘制逐项背景/文本色，并按规则选择字体；不证明其它虚拟 provider、Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI，也不构成宿主迁移批准。
 
 ## 2026-11-01：ZIP 虚拟 Shell 项的颜色规则输入验证
 
