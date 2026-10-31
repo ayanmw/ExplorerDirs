@@ -7,6 +7,8 @@
 
 2026-10-31 F5 当前源码复核：浏览器可用且没有待重试导航时，产品刷新直接调用当前 `IShellView.Refresh()`；不广播 `SHCNE_UPDATEDIR`，也不通过 `IFolderView2.SetRedraw(FALSE)` 暂停绘制。刷新后的计数稳定等待只用于安全恢复选区/焦点。查看方式切换仍在同一 Shell 视图调用 `IFolderView2.SetViewModeAndIconSize`，不重建 ExplorerBrowser 或重新导航。源码入口 `ExplorerBrowserHost.Refresh` 与 `ShellRefreshPresentationSmoke` 一致；白屏持续时间、刷新期间输入目标与慢速/虚拟目录仍待集中可见验收。下文“F5 绘制租约收窄”是已撤回的中间方案，不代表当前产品行为。
 
+2026-10-31 Private Desktop 原生视图刷新/查看方式行数采样：300 项 stock `IShellView` 中，List/小图标/Details 三次 `IFolderView2.SetViewModeAndIconSize` 切换期间最小行数均为 300，视图和 `SysListView32` HWND 不变。随后调用 `IShellView.Refresh()`，样本短暂读到 0 行（3 个 5 ms 采样点，跨度约 10 ms），最终读到新增后的 301 行；视图/List HWND 仍不变。对照的 `SHCNE_UPDATEDIR` 通知样本最小行数为 301、没有空行样本，通知后读到 302 行。Private Desktop 隔离检查通过，前台和输入 tick 未变化；探针没有测量像素绘制，因此不能把行数恢复时间当成可见闪烁时长。该结果支持“应用没有重建视图、空行来自 Shell 原生刷新阶段”的判断；通知路径不能限定为本应用视图且此前隐藏生产宿主样本更慢，暂不替换 F5。用户可见白/黑帧仍留待集中 GUI 验收。
+
 2026-10-31 目录树拖入展开生命周期修正：树宿主变为不可见时，取消尚未触发的悬停展开计时和 Shell 项引用，避免隐藏窗格在后台被意外展开、重现时改变树状态。回归先在旧代码上失败，加入隐藏事件清理后通过；定向 SettingsSmoke 和 App Release build 通过。该检查验证生命周期接线，不验证真实 Shell 拖入回调和放置结果；两者仍留待集中 UI 验收。
 
 2026-10-31 逐行文件夹大小快照跨 provider 重建合同：NativeProbe 的扫描快照表现为可共享、引用计数的 store；provider 嵌套绑定复用同一 store，probe 则保留 store、销毁 provider 后用同一 store 构造新 provider。当前合同的初始值和变更后值均由生产扫描器生成：两条 sibling PIDL 的缓存为 10/12 B，重扫后为 7/12 B；新 provider 重新解析 PIDL 后仍读回更新值及正确数值排序。原生 DLL 构建及 `--static-shell-column-folder-smoke` 通过，输出 `provider-recreation=retained`，没有创建 Shell view 窗口。证据只证明隔离 probe 可把扫描结果跨 provider 生命周期保留并复用；产品 owner 注入、Shell class factory 生命周期、生产 `ShellListViewRowModel`/异步扫描发布、DefView 列更新和可见交互仍未验证。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31扫描快照跨-provider-重建)。
