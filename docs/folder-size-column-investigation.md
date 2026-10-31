@@ -1048,3 +1048,11 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 ### 2026-11-01：DefView 派生列刷新探针补充表头诊断
 
 此前 `IColumnManager::Apply` 返回成功且列键读回存在，但 `WaitForSizeState` 只能报告派生值子项是否出现，无法判断自定义列是否仍处于实际 `SysHeader32` 表头。隔离 `SyntheticShellSortProbe` 现于通知/重建策略前后记录原生表头列名，与 `IColumnManager` 列键及逐项值读取计数并列输出，用于区分列未激活与已显示列值未重新读取。NativeProbe Release build 和 `git diff --check` 通过；未创建 Shell view、未运行 probe。需要在获准的隔离运行中取得表头/值计数后，才能决定下一步应查列激活还是 DefView 派生值缓存；不涉及产品 ExplorerBrowser。
+
+### 2026-11-01：Shell view 窗口重建与列重放对照
+
+使用同一 WPF 根 Private Desktop synthetic filesystem view 的两种独立新进程策略复验。`single-item-recreate-shell-window` 连续两轮均在单项 `SHCNE_UPDATEITEM` 后销毁并重建同一个 `IShellView` 的窗口；无需显式重放 `IColumnManager` 列时，表头保持 `Name | Recursive Size | Type`，更新后的目录值读回为 `1`，排序成为 `small.bin | child`，选区和焦点恢复，Shell 只枚举一轮。两轮均 exit 0，前台、输入时间戳和隔离清理守卫通过。
+
+反向对照中，收到通知后调用 `IColumnManager::SetColumns` 重放 `Name` 与递归大小键，再重建窗口，表头变为 `Name | 空白列`，派生值未显示；在该路径前先显式调用 `IShellView::SaveViewState` 得到 `S_OK` 并使状态流写入一次，结果仍为 `Name | 空白列`，读取次数为 0。两次对照均保留选区/焦点；保存状态的样本也保留更新后的排序。此结果说明当前 synthetic provider 中，DefView 自行重建能恢复原生列和值，而手工列键重放覆盖了正确的列布局；不能推断所有 Shell provider 或 ExplorerBrowser 均有相同行为。
+
+探针只验证孤立 `IShellView`/DefView，不接入产品、不改变用户目录或发布包。创建视图时用 `IShellBrowser::GetViewStateStream` 读回、在 `IShellView::SaveViewState` 时写出是 Windows 文档描述的常规生命周期；本次实测表明单独写出后仍不能替代 DefView 自身的列恢复。参考：[IShellView::CreateViewWindow](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-createviewwindow)、[IShellBrowser::GetViewStateStream](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellbrowser-getviewstatestream)、[IColumnManager](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-icolumnmanager)。

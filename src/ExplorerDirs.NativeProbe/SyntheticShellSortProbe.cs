@@ -102,7 +102,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1074,6 +1074,12 @@ public static class SyntheticShellSortProbe
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, reapplyCustomSizeColumn: true,
                     recreateDetailsView: true, host: host);
+            if (strategyFilter == "single-item-reapply-column-save-state-recreate-window")
+                RunSizeUpdateStrategy("single-item-reapply-column-save-state-recreate-window", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, reapplyCustomSizeColumn: true,
+                    recreateShellWindow: true, saveViewStateBeforeRecreateWindow: true,
+                    host: host, hostPointer: hostPointer);
             if (strategyFilter == "single-item-recreate-shell-window")
                 RunSizeUpdateStrategy("single-item-recreate-shell-window", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
@@ -1116,7 +1122,7 @@ public static class SyntheticShellSortProbe
         nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
         nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
-        string? copyDestination = null)
+        string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -1182,6 +1188,12 @@ public static class SyntheticShellSortProbe
                 Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 1, 16)); // FVM_ICON.
                 Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // FVM_DETAILS.
                 Pump(250);
+            }
+            if (saveViewStateBeforeRecreateWindow)
+            {
+                var saveResult = At<SaveViewState>(view, 13)(view);
+                Console.WriteLine($"synthetic-size-update: strategy={name}; save-view-state-hr=0x{saveResult:X8}");
+                Check(saveResult);
             }
         }
         string? scrollAnchor = null;
@@ -2696,6 +2708,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SaveViewState(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, in Guid iid, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);

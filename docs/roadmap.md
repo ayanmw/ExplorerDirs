@@ -1,4 +1,6 @@
 # 路线图
+2026-11-01 隔离派生列重建对照：同一 synthetic `IShellView` 窗口重建策略连续两轮恢复 `Name | Recursive Size | Type`、更新值 `1`、排序及选区/焦点；显式 `IColumnManager.SetColumns` 重放则产生空白列，即使先调 `IShellView.SaveViewState` 也未恢复。只证明 NativeProbe synthetic filesystem provider/DefView，不改 ExplorerBrowser 产品；详见[派生列调查](folder-size-column-investigation.md#2026-11-01shell-view-窗口重建与列重放对照)。
+
 2026-11-01 Q-Dir 官方能力清单复核：帮助页分别列出 Color Filter、Highlight-Filter 与 File-Filter；FAQ 6 又把扩展名颜色规则称为 highlighting，FAQ 97 将 colors/highlighting 共用一个关闭入口。故公开资料不能证明 Highlight-Filter 是独立机制。已在[功能差距表](shell-parity.md)记录此歧义；待集中 Q-Dir 可见验收确认后再定是否需要单独实现。[Q-Dir Help](https://www.softwareok.com/?seite=Freeware/Q-Dir/Help+file) · [FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR) · [FAQ 97](https://www.softwareok.com/?faq=97&seite=faq-Q-DIR)
 
 2026-11-01 全量 SettingsSmoke 复核：之前递归扫描记录中提到的 Soft-Refresh 文案断言不再是当前失败；现有断言匹配菜单名称与“不重枚举/防止自动重排”提示。完整 `dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release` 本轮退出码 0，包含 Soft-refresh routing smoke；没有启动 Shell view 或 GUI。旧记录保留为当时观察，不代表当前套件仍失败。
