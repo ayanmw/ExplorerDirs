@@ -1,5 +1,9 @@
 # Explorer Dirs memory sampling
 
+## 2026-11-01：采样器支持工作负载标签
+
+`scripts/perf-sample.ps1` JSON schema 更新到 5，新增可选 `-WorkloadDescription`，将人工记录的窗格/标签数量和操作序列写入采样摘要；未传参数时字段为空。定向 `src/ExplorerDirs.DiagnosticsSmoke/perf.ps1` 先确认带标签调用、再确认未标注调用，两种路径都通过。该字段只记录调用者提供的说明，不会自动读取或控制应用窗口。
+
 ## 2026-10-31 10:50 北京时间：temp.80 同一进程 45 秒自然运行采样
 
 - UTC `2026-10-31T02:50:47Z`–`02:51:32Z`，对 PID `47460` 每 5 秒采样，共 10 点，覆盖 45 秒。进程启动时间仍为 `2026-10-30T16:13:34Z`，路径为 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`。

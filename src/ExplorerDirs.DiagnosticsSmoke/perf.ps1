@@ -18,11 +18,13 @@ $sampledPid = $PID
 $expectedExecutablePath = [IO.Path]::GetFullPath((Get-Process -Id $sampledPid).Path)
 
 $raw = powershell.exe -NoProfile -File $sampler -ProcessId $sampledPid `
-    -AllowOtherProcess -Samples 3 -IntervalMilliseconds 100 -AsJson | Out-String
+    -AllowOtherProcess -Samples 3 -IntervalMilliseconds 100 `
+    -WorkloadDescription '4 panes; 8 tabs; navigate and refresh' -AsJson | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Process sampler failed.' }
 $report = $raw | ConvertFrom-Json
-if ($report.SchemaVersion -ne 4 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
+if ($report.SchemaVersion -ne 5 -or $report.Status -ne 'completed' -or $report.CollectedSamples -ne 3 -or
     $report.Samples.Count -ne 3 -or $report.Origin -ne 'other-process' -or
+    $report.WorkloadDescription -ne '4 panes; 8 tabs; navigate and refresh' -or
     $report.ExecutablePath -ne $expectedExecutablePath -or
     $report.PeakWorkingSetBytes -le 0 -or $report.PeakPrivateBytes -le 0 -or
     $report.Samples[0].WorkingSetDeltaFromFirstBytes -ne 0 -or
@@ -49,8 +51,9 @@ if ($report.BinaryIdentitySource -ne 'on-disk-at-start' -or
 $localRaw = & $sampler -ProcessId $PID -AllowOtherProcess -Samples 2 -IntervalMilliseconds 100 -AsJson
 $localReport = $localRaw | ConvertFrom-Json
 if ($localReport.CollectedSamples -ne 2 -or
+    -not [string]::IsNullOrEmpty($localReport.WorkloadDescription) -or
     $null -ne [ExplorerDirs.Diagnostics.GuiResources]::Read([IntPtr]::Zero, 0)) {
-    throw 'An invalid GUI-resource handle must report unavailable, while normal process sampling still works.'
+    throw 'Unlabelled sampling must keep an empty workload description and invalid GUI resources unavailable.'
 }
 
 $previousErrorAction = $ErrorActionPreference
@@ -71,7 +74,7 @@ if ($ReleaseProcessId -gt 0) {
     $releaseReport = $releaseRaw | ConvertFrom-Json
     $releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'releases')) + [IO.Path]::DirectorySeparatorChar
     $expectedAssembly = Join-Path ([IO.Path]::GetDirectoryName($expectedReleasePath)) 'ExplorerDirs.App.dll'
-    if ($releaseReport.SchemaVersion -ne 4 -or $releaseReport.Origin -ne 'release' -or
+    if ($releaseReport.SchemaVersion -ne 5 -or $releaseReport.Origin -ne 'release' -or
         $releaseReport.ExecutablePath -ne $expectedReleasePath -or
         $releaseReport.ManagedAssemblyPath -ne $expectedAssembly -or
         $releaseReport.ManagedAssemblySha256 -ne (Get-FileHash -LiteralPath $expectedAssembly).Hash -or

@@ -6,6 +6,7 @@ param(
     [int]$Samples = 12,
     [ValidateRange(100, 60000)]
     [int]$IntervalMilliseconds = 5000,
+    [string]$WorkloadDescription,
     [switch]$AllowOtherProcess,
     [switch]$AsJson
 )
@@ -136,9 +137,10 @@ try {
         catch [System.InvalidOperationException] { $status = 'exited'; break }
     }
     $result = [pscustomobject]@{
-        SchemaVersion = 4
+        SchemaVersion = 5
         ProcessId = $ProcessId
         ProcessName = $process.ProcessName
+        WorkloadDescription = $WorkloadDescription
         Origin = $origin
         ExecutablePath = $executablePath
         ExecutableSha256 = $binarySha256
