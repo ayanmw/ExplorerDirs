@@ -96,6 +96,7 @@ else {
         'color-hidden-rule-private-desktop' { '--ishellview-color-hidden-private-desktop' }
         'zip-background-menu-private-desktop' { '--ishellview-zip-background-menu-private-desktop' }
         'zip-extract-private-desktop' { '--ishellview-zip-extract-private-desktop' }
+        'zip-copy-items-private-desktop' { '--ishellview-zip-copy-items-private-desktop' }
         'network-places-row-map-private-desktop' { '--ishellview-network-places-row-map-private-desktop' }
         'network-places-color-pixels-private-desktop' { '--ishellview-network-places-color-pixels-private-desktop' }
         'network-places-child-drop-targets-private-desktop' { '--ishellview-network-places-child-drop-targets-private-desktop' }

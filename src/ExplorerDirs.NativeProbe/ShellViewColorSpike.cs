@@ -2505,6 +2505,78 @@ internal static class ShellViewColorSpike
         return count;
     }
 
+    private static int CopyZipEntryThroughShellOperation(nint parent, nint folder, nint folderView,
+        nint folderPidl, string fixture, nint foreground)
+    {
+        var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
+        nint selectedChild = 0, childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        nint systemImageList = 0;
+        try
+        {
+            for (var index = 0; index < itemCount; index++)
+            {
+                Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var child));
+                nint absolute = 0;
+                try
+                {
+                    absolute = ILCombine(folderPidl, child);
+                    if (absolute == 0) throw new InvalidOperationException("Could not combine a ZIP entry PIDL.");
+                    var row = ShellListViewRowIdentity.Capture(folder, child, absolute, ref systemImageList);
+                    if (row.DisplayName.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase))
+                        selectedChild = ILClone(child);
+                }
+                finally
+                {
+                    if (absolute != 0) Marshal.FreeCoTaskMem(absolute);
+                    Marshal.FreeCoTaskMem(child);
+                }
+            }
+            if (selectedChild == 0)
+                throw new InvalidOperationException("The ZIP Shell view did not enumerate the expected virtual file entry.");
+
+            childArray = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, selectedChild);
+            var dataObjectId = new Guid("0000010E-0000-0000-C000-000000000046");
+            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, childArray, in dataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new InvalidOperationException("The ZIP entry did not provide a Shell IDataObject.");
+
+            var destinationPath = Path.Combine(fixture, "shell-copy-target");
+            Directory.CreateDirectory(destinationPath);
+            var shellItemId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
+            Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var copiedPath = Path.Combine(destinationPath, "blue-rule-target.txt");
+            var copiedBytes = File.Exists(copiedPath) ? File.ReadAllBytes(copiedPath) : [];
+            var sourceStillPresent = GetShellViewItemCount(folderView) == itemCount;
+            var archiveIntact = false;
+            using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
+            {
+                var sourceEntry = archive.GetEntry("blue-rule-target.txt");
+                archiveIntact = sourceEntry is { Length: 1 };
+            }
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            Console.WriteLine($"ishellview-zip-iFileOperation-copy: operation=CopyItems;aborted={aborted};destination-file={File.Exists(copiedPath)};bytes=[{Convert.ToHexString(copiedBytes)}];source-view-count={GetShellViewItemCount(folderView)};source-still-present={sourceStillPresent};archive-intact={archiveIntact};foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || copiedBytes.Length != 1 || copiedBytes[0] != 0x41 || !sourceStillPresent || !archiveIntact || !foregroundUnchanged)
+                throw new IOException("IFileOperation.CopyItems did not copy the virtual ZIP entry into the isolated destination while preserving the source view.");
+            return 0;
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destination != 0) Marshal.Release(destination);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeHGlobal(childArray);
+            if (selectedChild != 0) Marshal.FreeCoTaskMem(selectedChild);
+        }
+    }
+
     private readonly record struct LivePaneView(nint Pane, nint View, nint ViewWindow, nint Folder, nint Pidl,
         nint HostPointer, ShellViewColorBrowserHost Host, nint FolderView, Guid SessionId);
 
@@ -2513,7 +2585,7 @@ internal static class ShellViewColorSpike
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
-        bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false,
+        bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false, bool zipCopyItemsProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
         bool virtualDesktopColorProbe = false, bool networkPlacesRowMapProbe = false,
         bool virtualNetworkPlacesColorProbe = false, bool networkPlacesChildDropTargetProbe = false)
@@ -2617,7 +2689,7 @@ internal static class ShellViewColorSpike
             Directory.CreateDirectory(fixture);
             string[] fixturePaths;
             var shellLocation = fixture;
-            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe)
+            if (virtualZipProviderProbe || zipBackgroundMenuProbe || zipExtractInvokeProbe || zipCopyItemsProbe)
             {
                 shellLocation = Path.Combine(fixture, "virtual-items.zip");
                 using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
@@ -2792,6 +2864,11 @@ internal static class ShellViewColorSpike
             Pump();
 
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
+            if (zipCopyItemsProbe)
+            {
+                Check(folderViewHr);
+                return CopyZipEntryThroughShellOperation(parent, folder, folderView, pidl, fixture, foreground);
+            }
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
             if (zipBackgroundMenuProbe || zipExtractInvokeProbe)
@@ -3363,8 +3440,8 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
+                    // Early diagnostic/operation branches return before view-state writes by design; do not require a round-trip they intentionally skip.
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -5611,6 +5688,7 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderViewOptions(nint self, uint mask, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int CopyItem(nint self, nint item, nint destination,
         [MarshalAs(UnmanagedType.LPWStr)] string name, nint sink);

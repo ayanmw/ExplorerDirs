@@ -1549,3 +1549,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 弹出菜单取消后，分别以菜单偏移 `MAKEINTRESOURCE(38)` 和 canonical ANSI verb `extract` 调用 view-owned `IContextMenu::InvokeCommand`，两者均返回 `S_OK`，但夹具均无解压文件。随后 folder-created 菜单的 canonical `extract` 也返回 `S_OK`，仍无文件或额外顶层窗口。因此，实际进入/初始化/取消菜单循环以及两种命令标识都不能证明解压成功；真实菜单项选择、对话框所属窗口与用户确认仍未覆盖。没有物理输入、用户文件、产品 ExplorerBrowser 或可见 Q-Dir 验收。日志：`src/.state/native-probe-watchdog/20261101-050330-7cd8ca75.stdout.log`。
 
 后续补查 ZIP 归档文件本身的父目录项目菜单：将 `virtual-items.zip` 的相对子 PIDL 交给父 `IShellFolder.GetUIObjectOf(IID_IContextMenu)`，返回 73 个动词，`extract` 已启用，菜单偏移为 118。对该正确文件项上下文菜单按标准显示方式调用仍返回 `S_OK`，夹具没有抽取文件。首轮 `050622` 没有在调用后采样窗口；随后 `050724` 加入调用后窗口采样，仍没有出现额外可见顶层窗口。两次 Private Desktop watchdog 的前台、输入和清理守卫均通过。由此可排除“只因之前用了 ZIP 内部背景菜单”这一单一解释，但仍未定位 Shell 命令为何没有产生可见结果；未尝试第三方 `SevenZipExtract*` 动词，避免把扩展菜单行为混同为 Windows ZIP 原生 `extract`。日志：`src/.state/native-probe-watchdog/20261101-050622-d95c8375.stdout.log`、`20261101-050724-7d0b1aa9.stdout.log`。
+
+### 2026-11-01：ZIP 虚拟项目真实 `IFileOperation.CopyItems`
+
+新增单独的 Private Desktop 探针，从 ZIP `IShellView` 取得虚拟文件 `blue-rule-target.txt` 的原生 `IDataObject`，传给真实 Shell `IFileOperation.CopyItems`，目标为同一临时夹具下的物理目录。复制没有 abort；目标文件内容为单字节 `0x41`，ZIP 视图仍有两项，归档内源项仍存在且归档可再次读取。NativeProbe Release build 0 警告/错误，watchdog exit 0，前台 HWND/last-input 未变，夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-051046-e94f1536.stdout.log`。
+
+这证明当前 Windows ZIP provider 的虚拟文件项可以经自有 `IShellView` 暴露的 Shell 数据对象完成原生 CopyItems；它不是 `extract` 菜单命令成功，也未覆盖实际菜单选取、可见提示、进度/冲突 UI、目标视图通知或其他压缩/虚拟 provider。产品 ExplorerBrowser 未改。
