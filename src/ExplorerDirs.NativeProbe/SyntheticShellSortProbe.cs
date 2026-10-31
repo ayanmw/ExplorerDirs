@@ -394,6 +394,45 @@ public static class SyntheticShellSortProbe
                 Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                     "SetSyntheticChildNotificationTranslationForProbe"))(1));
                 VerifyTwoViewTargetNotifications(view, view2, module, firstPaneFolder, secondPaneFolder);
+                var sourceItemName = "pane-1-original.txt";
+                var sourceItemPath = Path.Combine(firstPaneFolder, sourceItemName);
+                var targetItemPath = Path.Combine(secondPaneFolder, sourceItemName);
+                var sourceInitialCount = ReadNames(FindListView(view), module, expectedCount: -1).Length;
+                var targetInitialCount = ReadNames(FindListView(view2), module, expectedCount: -1).Length;
+                using var sourceWatcher = new ProbeShellDirectoryMonitor(firstPaneFolder, sourceInitialCount)
+                {
+                    Operation = "synthetic-cross-pane-move-source"
+                };
+                using var targetWatcher = new ProbeShellDirectoryMonitor(secondPaneFolder, targetInitialCount)
+                {
+                    Operation = "synthetic-cross-pane-move-target"
+                };
+                MoveSelectedShellItemToFilesystemFolder(view, FindListView(view), module,
+                    sourceItemName, sourceItemName, secondPaneFolder);
+                bool SourceMoveSettled()
+                {
+                    var names = ReadNames(FindListView(view), module, expectedCount: -1);
+                    return names.Length == sourceInitialCount - 1 && !names.Contains(sourceItemName, StringComparer.OrdinalIgnoreCase);
+                }
+                bool TargetMoveSettled()
+                {
+                    var names = ReadNames(FindListView(view2), module, expectedCount: -1);
+                    return names.Length == targetInitialCount + 1 && names.Contains(sourceItemName, StringComparer.OrdinalIgnoreCase);
+                }
+
+                var sourceMoveReconciled = sourceWatcher.Reconcile(
+                    () => ReadNames(FindListView(view), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view, 8)(view)), SourceMoveSettled, () => Pump(25));
+                var targetMoveReconciled = targetWatcher.Reconcile(
+                    () => ReadNames(FindListView(view2), module, expectedCount: -1).Length,
+                    () => Check(At<RefreshView>(view2, 8)(view2)), TargetMoveSettled, () => Pump(25));
+                var sourceDeleteObserved = sourceWatcher.Diagnostics.Contains("event:synthetic-cross-pane-move-source:deleted:delta=-1:force=False", StringComparison.Ordinal);
+                var targetCreateObserved = targetWatcher.Diagnostics.Contains("event:synthetic-cross-pane-move-target:created:delta=1:force=False", StringComparison.Ordinal);
+                if (!sourceMoveReconciled || !targetMoveReconciled || !sourceDeleteObserved || !targetCreateObserved ||
+                    sourceWatcher.RefreshCount > 2 || targetWatcher.RefreshCount > 2 ||
+                    File.Exists(sourceItemPath) || !File.Exists(targetItemPath) || File.ReadAllText(targetItemPath) != "pane 1")
+                    throw new IOException($"The two-pane move did not reconcile both watcher queues: source={sourceMoveReconciled}/{sourceWatcher.RefreshCount}/{sourceDeleteObserved}; target={targetMoveReconciled}/{targetWatcher.RefreshCount}/{targetCreateObserved}; source-exists={File.Exists(sourceItemPath)}; target-exists={File.Exists(targetItemPath)}; source-diagnostics={sourceWatcher.Diagnostics}; target-diagnostics={targetWatcher.Diagnostics}.");
+                Console.WriteLine($"synthetic-shell-two-view-cross-pane-move: source-delta={sourceWatcher.Diagnostics}; target-delta={targetWatcher.Diagnostics}; refreshes={sourceWatcher.RefreshCount}/{targetWatcher.RefreshCount}; source-absent={!File.Exists(sourceItemPath)}; target-visible={TargetMoveSettled()}");
                 return 0;
             }
             var contextMenuId = ContextMenuId;
