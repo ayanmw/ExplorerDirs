@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 预览发布 `preview-0.6.0-temp.85`：来自干净主线提交 `a17639b69a9fd143c6f862cc5821bea73073c1f7`，隔离 profile 包位于 `releases/preview-0.6.0-temp.85/`。BuildIdentity smoke 通过；EXE/DLL SHA-256 已与包内 `app/SHA256.txt` 核对。未启动 GUI；查看方式切换期间是否减少可见闪烁仍待验收，F5 行为未改变。详情见[预览发布记录](releases/preview-0.6.0-temp.85.md)。
+
 2026-10-31 查看方式切换局部重绘租约：真实视图模式变更现在只在同步 `IFolderView2.SetViewModeAndIconSize` 周围短暂关闭 DefView 重绘，租约在返回或异常时立即释放；F5 刷新仍让 Shell 自行绘制，避免异步枚举期间旧帧与实际命中目标不一致。针对性源码合同先按预期失败，再通过；完整 Release SettingsSmoke 与 App Release 构建通过（0 警告、0 错误）。没有创建 Shell view 或启动 GUI；此项只证明代码接线，实际黑帧/闪烁是否减少仍待集中验收。
 
 2026-10-31 当前主线集中验收副本以干净提交 `eff0a65654b44c0a7d8b1de41d967e2071130891` 准备：四窗格副本位于 `src/.state/gui-smoke/20261031-050655-754-4b72da/`，状态 `prepared-not-run`，47 项待验收。包含 F5/查看方式切换、键盘焦点、标签/克隆、主题、Q-Dir Tab Group、`.qdr`、Soft-Refresh 等项目；构建和副本准备成功，EXE/DLL SHA-256 已与 `preparation.json` 核对。后续主线提交仅更新了调查/路线图文档，未改变该候选对应的产品源码。没有启动应用窗口、创建 ExplorerBrowser 或操作文件。BuildIdentity、哈希和验收边界见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
