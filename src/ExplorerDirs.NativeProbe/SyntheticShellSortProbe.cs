@@ -951,6 +951,23 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update-scroll: restored-top-index={finalTopIndex}; top={finalTopName}; anchor-index={finalAnchorIndex}; anchor-y={anchorTop}; anchor={scrollAnchor}");
             if (anchorTop < 0 || anchorTop > 24)
                 throw new InvalidOperationException($"The restored scroll anchor '{scrollAnchor}' is at pixel {anchorTop}, outside the top row.");
+
+            var restoredAnchor = scrollAnchor ?? throw new InvalidOperationException("The scroll anchor was not captured before view recreation.");
+            SetListViewSelectionAndFocus(listView, restoredAnchor, finalNames);
+            var anchorIndex = Array.FindIndex(finalNames, item => string.Equals(item, restoredAnchor, StringComparison.OrdinalIgnoreCase));
+            if (anchorIndex < 0 || anchorIndex + 1 >= finalNames.Length)
+                throw new InvalidOperationException("The restored scroll anchor has no following item for the keyboard-navigation probe.");
+            var expectedNextName = finalNames[anchorIndex + 1];
+            SetFocus(listView);
+            var focusRestoredToList = GetFocus() == listView;
+            SendMessageW(listView, 0x0100, 0x28, 0); // WM_KEYDOWN / VK_DOWN.
+            SendMessageW(listView, 0x0101, 0x28, 0); // WM_KEYUP / VK_DOWN.
+            Pump(100);
+            var namesAfterArrow = ReadNames(listView, module, expectedCount: -1);
+            var arrowMovedFocus = HasSelectionAndFocus(listView, namesAfterArrow, expectedNextName);
+            Console.WriteLine($"synthetic-size-update-focus: list-focused={focusRestoredToList}; before={restoredAnchor}; arrow-down-target={expectedNextName}; moved={arrowMovedFocus}; hwnd=0x{listView:X}");
+            if (!focusRestoredToList || !arrowMovedFocus)
+                throw new InvalidOperationException("After restoring focus to the recreated native file list, Arrow Down did not move selection and focus to the next item.");
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);

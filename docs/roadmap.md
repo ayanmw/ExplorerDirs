@@ -5155,7 +5155,7 @@ WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `
 
 ### 2026-10-31：IShellView 派生列恢复原型的新证据
 
-Private Desktop 探针显示：目录更新后重设列和切换查看方式都不能让 DefView 刷新派生列；销毁并重建同一 `IShellView` 的窗口后列和值恢复。接入现有 `ShellViewSelectionSnapshot` 并以 no-focus 激活后，单选及两行多选场景均可恢复选区和焦点（各重复两轮）。302 行夹具恢复顶部滚动锚点到 y=0，并逐项保持列顺序和宽度；新增读回确认排序列及方向重建前后相同。HWND 键盘焦点、菜单、文件操作和拖放合同仍待验证。该原型仍不能进产品。详见[派生大小列调查](folder-size-column-investigation.md#2026-10-31隔离复查视图状态流与-defview-窗口重建)。
+Private Desktop 探针显示：目录更新后重设列和切换查看方式都不能让 DefView 刷新派生列；销毁并重建同一 `IShellView` 的窗口后列和值恢复。接入现有 `ShellViewSelectionSnapshot` 并以 no-focus 激活后，单选及两行多选场景均可恢复选区和焦点（各重复两轮）。302 行夹具恢复顶部滚动锚点到 y=0，并逐项保持列顺序和宽度；排序列和方向重建前后相同。显式把焦点交给新 `SysListView32` 后，模拟方向下键可移动选中项和 focused item。该结果不表示 Shell 自动迁移 HWND 焦点。导航命令路由、菜单、文件操作和拖放合同仍待验证，原型不能进产品。详见[派生大小列调查](folder-size-column-investigation.md#2026-10-31隔离复查视图状态流与-defview-窗口重建)。
 
 ### 2026-10-31：filesystem `IShellFolder` 背景菜单能力边界
 

@@ -798,9 +798,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 该实验把问题收敛到“DefView 的窗口重建能重新绑定派生列 provider”。另将原来两行均设为选中的多选状态进行两次复测，快照均捕获并恢复 2 项选中和焦点，列和值也恢复。新增 302 行夹具，在第 250 行处设置顶部锚点；窗口重建自然回到第 0 行。等行值、选区和焦点恢复稳定后，以锚点文件身份再次定位，锚点项目矩形回到视口 y=0；两轮均成功。`IColumnManager::Capture` 的列顺序和宽度也逐项完全一致：名称 264、派生大小 132、类型 132。
 
-排序条件已通过补充探针：重建前后 `IFolderView2.GetSortColumns` 都返回同一递归大小列及方向 `{B725F130-47EF-101A-A5F1-02608C9EEBAC}:10/1`，Private Desktop 场景退出码 0，前台 HWND 与输入 tick 未变。
+排序条件已通过补充探针：重建前后 `IFolderView2.GetSortColumns` 都返回同一递归大小列及方向 `{B725F130-47EF-101A-A5F1-02608C9EEBAC}:10/1`。随后将焦点显式交给重建后的 `SysListView32`，模拟 `VK_DOWN` 后选中项和 focused item 都移动到下一行。两项均在 Private Desktop 中通过，前台 HWND 与输入 tick 未变。
 
-仍不是可接受实现：尚需覆盖导航与 HWND 键盘焦点，并检查重建后的菜单、文件操作、拖放和通知等宿主合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针没有可见 UI 验收。
+该结果证明宿主可以把焦点重新交给新的文件列表，并继续使用方向键；它不证明 Shell 会自动把旧 HWND 焦点迁移到新窗口。仍需覆盖标签/导航命令路由，并检查重建后的菜单、文件操作、拖放和通知等宿主合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针没有可见 UI 验收。
 
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
