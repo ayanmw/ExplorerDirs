@@ -806,6 +806,8 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 后续专用 drop-target probe 在同一普通 filesystem `IShellView` 上先销毁再重建 view window，然后用新 HWND 注册的 `IShellFolder::CreateViewObject(IID_IDropTarget)` 接收重建后 source view 的选中项 `IDataObject`。`DragEnter/DragOver/Drop` 均返回 `S_OK`，Copy effect 与 source/target 文件状态均正确，前台/输入不变。`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 返回 `E_NOINTERFACE`，所以本次证明的是宿主在新 HWND 重新注册 filesystem folder drop target 后可处理复制；它不是完整 OLE `DoDragDrop` 源端闭环，也不覆盖跨卷操作。第一次包含跨卷复制/移动的宽探针因 `IFileOperation` 的系统 `OperationStatusWindow` 抢到共享前台而被隔离守卫判失败；测试保持失败证据，没有弱化守卫。收窄为单个同卷复制后通过。具体记录见路线图。
 
+重建后的目录通知探针另发现一项未通过合同：在 backing 文件夹写入新文件并发送 `SHCNE_UPDATEDIR` 后，view host 收到两次 `SFVM_FSNOTIFY` 并执行延迟刷新，但 3 秒后仍为 302 行；再显式调用 `IShellView.Refresh`，新项目仍未显示，provider `EnumObjects` 计数也未变化。用 `SHCNE_CREATE` 的首轮同样没有可见项目。首次尝试通过合成 folder `ParseDisplayName` 构造通知 PIDL 时 45 秒 watchdog 超时，阶段日志停在 Shell `Initialize`/backing parse；改用物理 backing 路径 PIDL 后不再卡住，前台/输入守卫通过，但刷新合同仍失败。由此只能确认通知回调到达，不能确认重建后的 DefView 会重枚举新项目；需继续检查通知到刷新/缓存失效的接口边界。watchdog 中止的一轮未执行 probe `finally`，留下该次 UUID 夹具和对应 HKCU 测试注册，清理动作被自动审批拦截，未尝试绕过。
+
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
 新增无窗口 `--filesystem-folder-background-menu` 探针，在带一个文件和一个子目录的临时 filesystem 位置上绑定真实 `IShellFolder`，直接调用 `CreateViewObject(IContextMenu)` 并将菜单构造到内存 `HMENU`。本机返回 `S_OK`，`QueryContextMenu` 也成功，顶层有 21 个菜单项；标签包含第三方扩展、“新建”和“属性”，没有视图级“查看、排序方式、分组依据、刷新”。没有创建 `IShellView`、窗口或可见 popup，也没有执行命令。

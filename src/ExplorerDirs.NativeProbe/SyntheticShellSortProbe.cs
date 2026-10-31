@@ -975,6 +975,7 @@ public static class SyntheticShellSortProbe
             VerifyRecreatedViewSelectionCopy(view, backingFolder,
                 copyDestination ?? throw new InvalidOperationException("The recreated-view copy destination was not provided."),
                 expectedNextName);
+            VerifyRecreatedViewDirectoryNotification(view, backingFolder, listView, module);
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
@@ -1137,6 +1138,43 @@ public static class SyntheticShellSortProbe
             finally { Marshal.Release(operation); }
         }
         finally { Marshal.Release(selectionDataObject); }
+    }
+
+    private static void VerifyRecreatedViewDirectoryNotification(nint view, string backingFolder, nint listView, nint module)
+    {
+        const string itemName = "post-recreate-notify.dat";
+        var itemPath = Path.Combine(backingFolder, itemName);
+        File.WriteAllText(itemPath, "post-recreate-notification");
+        Check(SHParseDisplayName(backingFolder, 0, out var absolutePidl, 0, out _));
+        if (absolutePidl == 0) throw new InvalidOperationException("Could not parse the physical backing-folder PIDL.");
+        try
+        {
+            var enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var callbackCountBefore = ReadCounter(module, "GetSyntheticDeferredRefreshCount");
+            SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
+            var deadline = Environment.TickCount64 + 3000;
+            string[] names;
+            do
+            {
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (names.Contains(itemName, StringComparer.OrdinalIgnoreCase)) break;
+            } while (Environment.TickCount64 < deadline);
+            var enumCountAfter = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var callbackCountAfter = ReadCounter(module, "GetSyntheticDeferredRefreshCount");
+            var itemVisible = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
+            if (!itemVisible)
+            {
+                Check(At<RefreshView>(view, 8)(view));
+                Pump(400);
+                names = ReadNames(listView, module, expectedCount: -1);
+            }
+            var explicitRefreshVisible = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR; notification-visible={itemVisible}; explicit-refresh-visible={explicitRefreshVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}; deferred-callbacks={callbackCountAfter - callbackCountBefore}");
+            if (callbackCountAfter <= callbackCountBefore || !explicitRefreshVisible)
+                throw new TimeoutException("The recreated Shell view did not run its deferred notification callback or an explicit refresh did not expose the new file.");
+        }
+        finally { ILFree(absolutePidl); }
     }
 
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
