@@ -917,3 +917,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 在该 WPF 根宿主下，`SHCNE_UPDATEITEM` 后追加父目录 `SHCNE_UPDATEDIR` 的一轮也通过前台/输入及清理守卫，但没有恢复列值或触发行枚举/排序；日志：`20261031-131251-10b7f216.stdout.log`。另外两种“通知后重新应用自定义列”与“再切换 Icon→Details”变体中，`IColumnManager.Apply` 返回成功且列集合重新包含递归大小键，但 DefView 仍给出 `value-column-index=-1`，没有重新取值、比较或枚举行；二者均保持选区/焦点且通过隔离守卫。日志：`20261031-131427-c183ea37.stdout.log`、`20261031-131442-a7585e80.stdout.log`。这些结果不支持继续堆叠同类通知、列重放或视图模式切换补丁。
 
 `IShellView.Refresh()` 对照在超时前观察到两行重新枚举和一次比较/行序变化，但同时前台从 `msrdc` 变为 Explorer、输入时间戳变化，守卫将该轮标为无效，且焦点/选区未保持；这不构成刷新策略有效的证据，也不重跑该场景。唯一 CLSID/NameSpace 注册与临时夹具事后均确认不存在，探针进程已退出。日志：`20261031-131258-4a9de183.stdout.log`。WPF 根宿主下六轮被守卫接受的探针均正常清理；前台/输入变化轮次仍不采纳。现有证据把后续研究重点转向合成 namespace/自有视图的数据与绘制路径，并继续验证 Shell 命令、导航、菜单、文件操作和真实 OLE 拖放合同；不接入产品 ExplorerBrowser。任何带前台/输入变化的轮次均不用于行为结论。
+
+### 2026-10-31：WPF 根宿主下的通知/列重放策略收敛
+
+继续在 WPF `HwndSource` Private Desktop 宿主对照 DefView 单项更新策略。新增 `SHCNE_DELETE` 后紧接同一绝对子 PIDL 的 `SHCNE_CREATE` 变体：初始目录/文件大小列 `10/4` 与排序基线成立；通知后自定义列索引为 `-1`，大小列没有更新、排序比较或行枚举。选区/焦点保持，前台 HWND 与系统输入 tick 不变，watchdog 正常退出且 UUID 注册项与夹具清理完成。日志：`src/.state/native-probe-watchdog/20261031-131600-fa387cce.stdout.log`。
+
+结合此前 WPF 根宿主的 `UPDATEITEM`、`UPDATEITEM+UPDATEDIR`、列重放、Icon→Details 模式切换结果，当前受守卫接受的策略矩阵没有找到能让 DefView 保留并重新取值的办法。`IShellView::Refresh` 样本因前台/输入守卫变化而无效，不据此下结论，也不重复该场景。继续堆叠 DefView 通知、重放列或切换模式已没有证据价值；下一步应在隔离自有行模型中评估视图数据/绘制，同时列出并验证视图级菜单、排序/分组、键盘焦点、导航、Shell 文件操作、通知和 OLE 拖放兼容门槛。产品仍使用 ExplorerBrowser，未接入派生大小列，也未进行架构迁移。

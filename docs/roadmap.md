@@ -5202,3 +5202,7 @@ NativeProbe 的合成 PIDL adapter 在显式开启的实验开关下，把真实
 NativeProbe 新增按 view 同步排队/取消 delayed backing-directory update 的测试入口。先排队再立即取消，并继续泵 STA 消息 400 ms，连续三轮分别确认已排队 1 次、已发送 0 次、provider 枚举 0 次；前台与输入守卫通过。首轮用外部 `SHChangeNotify` 立即读队列时回调尚未到达，该刺激时序不作为通过或失败证据。计时器生命周期验证仍只在隔离 adapter，没有 ExplorerBrowser 产品改动；窗口 owner 在销毁前的真实调用集成还未接线。日志 `20261031-123706-16b139a2.stdout.log`、`20261031-123730-3aff15f5.stdout.log`、`20261031-123741-8079b46c.stdout.log`。详见[隔离通知调查](folder-size-column-investigation.md#2026-10-31延迟父目录更新计时器的取消生命周期)。
 
 随后将验证放入 view-window teardown：RED 轮确认不取消时，view HWND 销毁后仍会发送一次迟到的 `SHCNE_UPDATEDIR`；加入销毁前取消后连续三轮均未发送，且前台/输入/清理守卫通过。由此补齐了隔离 host 的 owner 顺序要求，但没有跨线程竞态证据或产品接线。日志 `20261031-124311-d534ae63.stdout.log`、`20261031-124323-615655c0.stdout.log`、`20261031-124335-9fbfaed6.stdout.log`。详见[通知调查](folder-size-column-investigation.md#2026-10-31延迟父目录更新计时器的取消生命周期)。
+
+### 2026-10-31：DefView 派生列更新策略停止扩展
+
+WPF Private Desktop 宿主上的单项通知、追加父目录更新、重放 `IColumnManager` 列、切换 Icon→Details，以及 DELETE+CREATE 均未恢复自定义派生列索引或触发取值/排序/重枚举。最新 DELETE+CREATE 轮前台/输入守卫与清理通过，列索引仍为 `-1`；`IShellView::Refresh` 样本因前台/输入变化不采纳。停止继续堆叠 DefView 通知变体。逐行目录大小仍是隔离原型，产品仍使用 ExplorerBrowser。下一阶段应评审自有行模型/绘制所需的 Explorer 兼容合同，重点为视图级菜单、排序/分组、键盘焦点、导航、Shell 文件操作、变更通知及 OLE 拖放；通过完整门槛前不迁移产品。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31wpf-根宿主下的通知列重放策略收敛)。
