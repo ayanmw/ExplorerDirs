@@ -4746,6 +4746,15 @@ internal static class ShellViewColorSpike
     {
         var originalAttributes = File.GetAttributes(readOnlyPath);
         var transitions = new List<string>(2);
+        using var observer = sendUpdateDiagnostic ? new ShellChangeObserverWindow() : null;
+        nint watchedFolderPidl = 0;
+        if (observer is not null)
+        {
+            Check(SHParseDisplayName(Path.GetDirectoryName(readOnlyPath)!, 0, out watchedFolderPidl, 0, out _));
+            try { observer.Register(watchedFolderPidl); }
+            finally { Marshal.FreeCoTaskMem(watchedFolderPidl); }
+            Console.WriteLine("readonly-notification-probe: shell-observer-registered=True");
+        }
         try
         {
             // The main prototype begins with item 0 selected; clear it so the native selection paint does not mask #RO colors.
@@ -4757,6 +4766,13 @@ internal static class ShellViewColorSpike
                 throw new InvalidOperationException($"Could not clear selection before read-only color transition: {selectedCount} items remain selected.");
             foreach (var readOnly in new[] { false, true })
             {
+                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // Details.
+                Pump(150);
+                _ = SendMessageW(listView, 0x108E, 1, 0); // LV_VIEW_DETAILS; keep DefView's ListView mode aligned.
+                Pump(100);
+                if (SendMessageW(listView, 0x108F, 0, 0).ToInt32() != 1) // LVM_GETVIEW.
+                    throw new InvalidOperationException("The isolated ListView did not enter Details mode for attribute-transition sampling.");
+                var observationStart = observer?.Observations.Count ?? 0;
                 var current = File.GetAttributes(readOnlyPath);
                 File.SetAttributes(readOnlyPath, readOnly
                     ? current | FileAttributes.ReadOnly
@@ -4770,23 +4786,27 @@ internal static class ShellViewColorSpike
                     SHChangeNotify(ShellUpdatedItem, notifyFlags, readOnlyPath, 0);
                     Console.WriteLine($"readonly-notification-probe: updateitem-send-returned; readonly={readOnly}; flags=0x{notifyFlags:X4}");
                     PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: updateitem-send-returned-{readOnly}-0x{notifyFlags:X4}");
-                    Pump(250);
-                    Console.WriteLine($"readonly-notification-probe: notification-pump-returned; readonly={readOnly}");
-                    PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: notification-pump-returned-{readOnly}");
+                    var observation = WaitForColorUpdateObservation(observer!, observationStart, readOnlyPath,
+                        TimeSpan.FromSeconds(5));
+                    if (observation is null)
+                        throw new InvalidOperationException($"SHCNE_UPDATEITEM was not observed for the read-only fixture: readonly={readOnly}; seen={string.Join('|', observer!.Observations.Skip(observationStart).Select(item => $"0x{item.EventId:X8}:{item.FirstParsingName}"))}.");
+                    Console.WriteLine($"readonly-notification-probe: updateitem-observed; readonly={readOnly}; event=0x{observation.EventId:X8}; path={observation.FirstParsingName}");
+                    PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: updateitem-observed-{readOnly}");
                 }
 
-                Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // Details.
-                Pump(150);
-                _ = SendMessageW(listView, 0x108E, 1, 0); // LV_VIEW_DETAILS; keep DefView's ListView mode aligned.
-                Pump(100);
-                if (SendMessageW(listView, 0x108F, 0, 0).ToInt32() != 1) // LVM_GETVIEW.
-                    throw new InvalidOperationException("The isolated ListView did not enter Details mode for attribute-transition sampling.");
                 var fixturePaths = new[] { readOnlyPath,
                     Path.Combine(Path.GetDirectoryName(readOnlyPath)!, "green-rule-target.txt") };
                 var rowCount = WaitForStableMatchingListViewItemCount(folderView, listView);
                 if (rowCount != fixturePaths.Length)
                     throw new InvalidOperationException($"Shell item notification changed the color fixture row count: {rowCount}.");
+                // The Shell update has been observed before the event-driven color-map rebuild and repaint.
                 RefreshFixtureColorMap(folderView, fixturePaths);
+                if (observer is not null)
+                {
+                    InvalidateRect(listView, 0, true);
+                    UpdateWindow(listView);
+                    Pump(150);
+                }
                 var currentNames = MapCurrentFolderItems(folderView, fixturePaths).Split(',');
                 var rowIndex = Array.FindIndex(currentNames, name => name.Equals(Path.GetFileName(readOnlyPath), StringComparison.OrdinalIgnoreCase));
                 if (rowIndex < 0 || !CustomDrawBackgrounds.TryGetValue((nuint)rowIndex, out var expectedBackground))
@@ -4810,6 +4830,22 @@ internal static class ShellViewColorSpike
         }
 
         return string.Join('|', transitions);
+    }
+
+    private static ShellChangeObserverWindow.ShellChangeObservation? WaitForColorUpdateObservation(
+        ShellChangeObserverWindow observer, int startIndex, string expectedPath, TimeSpan timeout)
+    {
+        var normalizedPath = Path.GetFullPath(expectedPath);
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        do
+        {
+            var match = observer.Observations.Skip(startIndex).FirstOrDefault(observation =>
+                observation.EventId == ShellUpdatedItem && observation.FirstParsingName is { } path &&
+                Path.GetFullPath(path).Equals(normalizedPath, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match;
+            observer.Pump(TimeSpan.FromMilliseconds(10));
+        } while (Environment.TickCount64 < deadline);
+        return null;
     }
 
     private static void RefreshFixtureColorMap(nint folderView, string[] fixturePaths)

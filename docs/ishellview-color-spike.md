@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：Shell 更新事件驱动逐行颜色重算
+
+扩展只读属性隔离探针，使其在夹具目录注册 `SHChangeNotifyRegister` observer；每次属性切换发送 `SHCNE_UPDATEITEM` 后，必须先收到同事件且绝对解析路径匹配的 Shell 通知，才重建当前行颜色映射、失效并重绘 ListView。异步 `SHCNF_FLUSHNOWAIT` 与同步 `SHCNF_FLUSH` 两种模式均各自完成“清除只读→回退色 `0xF0D0E0`、设置只读→`#RO` 色 `0xC0E0F0`”闭环；事件、路径及像素断言通过。两轮 watchdog exit 0，前台/输入与夹具清理守卫通过；NativeProbe Release build 0 警告/错误。日志 `20261101-075424-6947840f.stdout.log`、`20261101-075453-1a662ecc.stdout.log`。
+
+此结果证明隔离默认 `IShellView` 宿主可消费真实 Shell 更新通知，并在通知后重建逐行投影与绘制；仍由探针代码显式执行缓存重算和失效，不是产品 ExplorerBrowser 接线、自动缓存监听组件、Q-Dir 配置导入或可见产品验收。先前通知超时仍未找到根因。
+
 ### 2026-11-01：只读属性通知与超时边界复测
 
 新增独立 Private Desktop 诊断入口，并在两次属性切换与清理边界输出阶段。对每次 `#RO` 属性清除/设置分别发送 `SHCNE_UPDATEITEM`，比较 `SHCNF_PATH | SHCNF_FLUSHNOWAIT` 与 `SHCNF_PATH | SHCNF_FLUSH`：两种模式中两次通知调用和随后的 STA 消息泵均返回，回退色 `0xF0D0E0`、`#RO` 色 `0xC0E0F0` 像素断言通过，watchdog exit 0，前台/输入与夹具清理守卫通过。NativeProbe Release build 0 警告/错误；日志 `20261101-075014-95813054.stdout.log`、`20261101-075139-241f9d9b.stdout.log`。

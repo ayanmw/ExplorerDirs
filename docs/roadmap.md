@@ -1,4 +1,5 @@
 # 路线图
+2026-11-01 隔离逐行颜色 Shell 事件闭环：Private Desktop `IShellView` 对只读属性的清除/设置分别收到匹配路径的 `SHCNE_UPDATEITEM` 后，才重算当前行颜色映射并重绘；`FLUSHNOWAIT` 和 `FLUSH` 两路都通过回退色/`#RO` 像素断言。该闭环仍是 NativeProbe 显式代码，未接入产品 ExplorerBrowser 或验证可见 UI。详见[原型记录](ishellview-color-spike.md#2026-11-01shell-更新事件驱动逐行颜色重算)。
 2026-11-01 `SHCNE_UPDATEITEM` 只读属性诊断：隔离探针对清除/设置只读属性各发送一次通知，分别测试 `SHCNF_FLUSHNOWAIT` 与 `SHCNF_FLUSH`；两种模式均正常返回，后续像素断言和隔离清理通过。之前的通知相关超时此次未复现，原因仍未知；因颜色缓存由探针主动重算，不代表通知到产品缓存的连接已验证。详见[IShellView 颜色原型记录](ishellview-color-spike.md#2026-11-01只读属性通知与超时边界复测)。
 2026-11-01 F5 单项通知结论更正：首次对照把单项 `SHCNE_CREATE` 的 `SHCNF_FLUSH` 与多项序列的 `SHCNF_FLUSHNOWAIT` 混为比较变量；以相同投递模式复跑后，nowait 两种通知均在 100 ms 仍为 3 行、F5 后约 511–514 ms 到 4 行；flush 两种通知均在 100 ms 内到 4 行，通知调用约 8/24 ms。较快结果与投递模式相关，不支持归因为单项事件；同步通知仍不保证枚举/绘制完成，生产 F5 未改。Release HostProbe build 0 警告/错误，四个隔离对照运行退出码 0，夹具清理完成。详见[刷新闪动调查](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
 2026-11-01 F5 单项通知初始对照（已由受控复测更正）：早先将同步 `SHCNF_FLUSH` 的单项 `SHCNE_CREATE` 与异步 `SHCNF_FLUSHNOWAIT` 的多项通知直接比较，故不能归因为事件数；复测显示同一投递模式下结果一致性更高，详见上一条更正及[调查记录](superpowers/plans/2026-10-30-refresh-flicker-investigation.md)。
