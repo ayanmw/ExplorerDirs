@@ -1607,3 +1607,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 随后将溢出场景接入真实 stock `IShellView` 夹具：选择并聚焦一条原有行，注入 watcher 错误，等待替换 watcher generation 1→2，再创建新文件。隔离队列观察到 `force=True` 与新建 delta；刷新前 view 仍读到 2 行而预期 3 行，调用真实 `IShellView.Refresh()` 后收敛到 3 行，新项目解析名可见；原有选区和 focused item 均经 `ShellViewSelectionSnapshot` 恢复。输出 `native-refreshes=1,item-visible=True,selection-restored=True,focus-restored=True`。`--ishellview-color-spike-private-desktop` watchdog exit 0，前台 HWND 与输入 tick 未变，隔离清理通过；NativeProbe Release build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-072603-e7caffb5.stdout.log`。
 
 这将受控 watcher 恢复推进到真实 filesystem `IShellView` 的重新枚举、行可见与选择/焦点恢复，但 Error 仍为探针注入，不是 OS 自然溢出；使用的也是探针 watcher/行协调器，不是产品 ExplorerBrowser watcher 的可见 GUI 路径。没有验证像素闪烁、第三方 Shell provider、菜单或拖放。它通过的是迁移原型内部的刷新与状态门槛，不等于批准产品宿主迁移。
+
+### 2026-11-01：watcher 替换暂时失败后的退避重试
+
+将 `--shell-watcher-recovery-contract` 扩展为真实替换失败分支：注入 overflow 后，在首轮退避结束前删除唯一临时目录，使 replacement 无法启动；探针确认 `recovery-failed` 记录后恢复该目录，等待退避重试成功，再创建文件并断言 generation 1→2 且新 watcher 收到变更。此序列连续三轮通过，NativeProbe Release build 0 警告/错误。失败期间的诊断还记录了 watcher 在目标路径被移除时报告的 `Win32Exception`。
+
+这是共享恢复状态机与 NativeProbe watcher 的退避/重试合同，不是产品 WPF Dispatcher timer 的全路径，也不是操作系统自然 overflow；未使用 ExplorerBrowser/IShellView UI。它增强了 watcher 暂时不可用后的稳定性证据，但不证明网络位置或第三方 Shell provider 的重试表现。

@@ -5515,3 +5515,7 @@ NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归
 将 NativeProbe 的受控 watcher overflow 场景接入真实 stock filesystem `IShellView`：替换 watcher generation 1→2 后新建文件，队列记录强制对账；刷新前 view 仍为旧行数，调用 `IShellView.Refresh()` 后新条目可见，原选区和 focused item 均恢复。`color-private-desktop` watchdog exit 0，前台与输入未变、隔离清理通过；NativeProbe Release build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-072603-e7caffb5.stdout.log`。
 
 此项覆盖 NativeProbe 的 watcher、队列、stock `IShellView` 重枚举和行身份选择恢复链路；错误仍是注入的，不是真实 OS buffer overflow，且未接入产品 ExplorerBrowser、可见 GUI、Shell 菜单/拖放或第三方 provider。产品宿主迁移门槛仍未关闭。
+
+## 2026-11-01：watcher 目录暂失后的恢复重试
+
+将 `--shell-watcher-recovery-contract` 扩展为替换失败恢复：注入 overflow 后先删除探针监视目录，确认第一次 watcher 替换失败；重建该目录后，恢复状态机经过退避重试并成功创建新 watcher，随后接收新文件事件。连续三轮通过；NativeProbe Release build 0 警告/错误。该用例隔离验证共享恢复 helper 的退避/重试及 watcher 生命周期，不是产品 WPF Dispatcher 计时器全路径、真实 OS overflow、ExplorerBrowser 或第三方 provider 的证据。
