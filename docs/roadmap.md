@@ -1,6 +1,6 @@
 # 路线图
 
-2026-10-31 隔离行模型跨窗格复制/删除合同：在多项 `IFileOperation.MoveItems` 后，以真实 Shell `IDataObject` 执行多项 `CopyItems`，再从接收 pane 执行多项 `DeleteItems`。移动、复制、删除通知后两 pane 行模型分别收敛；删除行 ID 退休，未删锚点的身份、选择和焦点保留，另一 pane 源文件/行不变。`--shell-change-reconciliation` 定向 NativeProbe Release 运行连续三轮通过，隐藏窗口/前台守卫通过。只验证 NativeProbe 行模型，不是可见拖放、剪贴板粘贴、Undo/Redo 或 ExplorerBrowser 产品证据。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格删除协调)。
+2026-10-31 隔离行模型跨窗格 Shell 操作闭环：在多项 `IFileOperation.MoveItems` 后执行多项 `CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`。通知后两 pane 行模型分别收敛；重命名行保留原 ID，删除行 ID 退休，锚点身份、选择和焦点保持，源 pane 文件/行不变。`--shell-change-reconciliation` NativeProbe Release 连续三轮通过，隐藏窗口/前台守卫通过。只验证 NativeProbe 行模型，不是可见菜单、真实拖放、剪贴板粘贴、Undo/Redo 或 ExplorerBrowser 产品证据。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)。
 
 2026-10-31 F5 隐藏 HostProbe 结算时序修正：目录行先匹配并不代表选区/焦点恢复已完成。旧探针过早读值曾连续报告空选区；现等待生产刷新状态和恢复流程结算后复验，四窗格活动窗格三选项及第 4 窗格单选均通过。仅修正 HostProbe 等待条件，不代表可见刷新黑屏已改善；F5 与查看方式切换仍需集中 UI 验收。详情见[自动刷新调查](live-update-investigation.md#2026-10-31-f5-hostprobe-等待恢复结算)。
 

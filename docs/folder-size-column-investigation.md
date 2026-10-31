@@ -997,3 +997,9 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 在上述跨窗格移动与复制后，从接收 pane 的真实 `IShellFolder` 获取两条复制行的 `IDataObject`，调用 `IFileOperation.DeleteItems` 删除临时目标文件。探针没有手动发送 `SHChangeNotify`；递归 Shell watcher 收到两条 `SHCNE_DELETE`，重新枚举目标 pane 后执行行快照 reconcile。测试先在“只重新枚举、尚未更新行快照”的 RED 门失败；加入 reconcile 后，目标 pane 从 3 行收敛为锚点 1 行，两条复制行身份退休，锚点行 ID、选择和焦点保留；源 pane 的原文件和行身份未受影响。定向 NativeProbe Release 运行连续三轮通过，父/list 窗口隐藏且前台 HWND 未变化。
 
 这补上的是本地文件系统、同 STA、隐藏自有行投影下的真实 Shell 多选删除通知闭环。未覆盖回收站语义、undo/redo、可见确认/进度 UI、剪贴板、OLE 拖放、其它 namespace/provider 或 ExplorerBrowser 产品接线；不能据此认定文件区自有视图已可替换产品 Shell view。
+
+### 2026-10-31：自有行模型跨窗格重命名协调
+
+在跨窗格复制后，对接收 pane 中一条复制行取真实 Shell `IDataObject`，调用 `IFileOperation.RenameItems` 将其改名。没有手动发送通知；递归 watcher 依次观察 `SHCNE_RENAMEITEM` 与 `SHCNE_UPDATEITEM`。重新枚举后通过 Shell 提供的新旧绝对 parsing name 映射调用 `ShellListViewRowModel.Reconcile`，重命名行保留原稳定 ID，目标锚点 ID、选择和焦点保持；之后继续对两条副本执行 `DeleteItems`，整体 move/copy/rename/delete 场景 Release NativeProbe 连续三轮通过，隐藏窗及前台守卫通过。
+
+这验证单项重命名的文件系统通知及自有行身份连续性，不覆盖冲突重名、多选同名规则、undo/redo、可见 Shell 菜单、真实键盘/重命名编辑器、OLE 拖放、虚拟 provider 或 ExplorerBrowser 产品接线。`RetiredRows` 是旧快照 PIDL 的释放集合，不能直接解释成行身份已退役；身份连续性应比较 reconcile 后的稳定 ID。

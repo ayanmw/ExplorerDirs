@@ -1,3 +1,5 @@
+2026-10-31 隔离自有行模型 Shell 操作续验：真实文件系统 Shell `IDataObject` 依次经 `IFileOperation.MoveItems`、`CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`；shell change 通知驱动两 pane 重枚举，重命名保持原行 ID，删除正确退休行，锚点选择/焦点及未操作源 pane 保持。`--shell-change-reconciliation` Release 连续三轮通过，窗口隐藏、前台不变。仅为 NativeProbe 自有行投影证据，不表示产品 Shell view 可迁移；可见菜单、剪贴板、Undo/Redo、OLE 拖放和 ExplorerBrowser 接线仍未验证。[调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)
+
 2026-10-31 Shell 新建菜单的懒加载兼容：原生命令状态查询初始化“新建文件夹”子菜单时，现先转发 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；仅 `S_OK` 表示已处理，`S_FALSE`/`E_NOTIMPL` 才回退 `IContextMenu2.HandleMenuMsg`，其它错误停止。真实 COM 回归在旧逻辑上按预期失败，修复后 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。没有显示菜单；第三方 Shell 扩展的可见菜单及命令交互仍需集中 UI 验收。
 
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。

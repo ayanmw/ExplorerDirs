@@ -494,11 +494,77 @@ internal static class ShellChangeReconciliationProbe
                 !sourceSelectionPreservedAfterCopy || !targetSelectionPreservedAfterCopy || !copyIsolated)
                 throw new InvalidOperationException("Cross-pane copy did not reconcile the receiving row model while preserving the source and pane selection/focus.");
 
-            foreach (var row in targetCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)))
+            var renameSourceRow = targetCurrent.Rows.Single(row => row.DisplayName == movedNames[0]);
+            var renameTargetName = "copy-renamed.txt";
+            var renameEventBaseline = window.Events.Count;
+            var renameChild = Marshal.AllocCoTaskMem(IntPtr.Size);
+            nint renameDataObject = 0, renameOperation = 0;
+            try
+            {
+                Marshal.WriteIntPtr(renameChild, renameSourceRow.RelativePidl);
+                var renameDataObjectId = DataObjectId;
+                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(targetFolder, 10)(targetFolder, 0,
+                    1, renameChild, in renameDataObjectId, 0, out renameDataObject));
+                if (renameDataObject == 0) throw new IOException("The target Shell folder returned no IDataObject for the selected rename row.");
+
+                var renameOperationClassId = FileOperationClassId;
+                var renameOperationId = FileOperationId;
+                Marshal.ThrowExceptionForHR(CoCreateInstance(ref renameOperationClassId, 0, 1,
+                    ref renameOperationId, out renameOperation));
+                Marshal.ThrowExceptionForHR(At<SetOperationFlags>(renameOperation, 5)(renameOperation,
+                    0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                Marshal.ThrowExceptionForHR(At<RenameItems>(renameOperation, 13)(renameOperation,
+                    renameDataObject, renameTargetName));
+                Marshal.ThrowExceptionForHR(At<PerformOperations>(renameOperation, 21)(renameOperation));
+                Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(renameOperation, 22)(renameOperation, out var renameAborted));
+                if (renameAborted != 0) throw new IOException("The isolated cross-pane Shell rename was aborted.");
+            }
+            finally
+            {
+                if (renameOperation != 0) Marshal.Release(renameOperation);
+                if (renameDataObject != 0) Marshal.Release(renameDataObject);
+                Marshal.FreeCoTaskMem(renameChild);
+            }
+
+            if (!File.Exists(Path.Combine(targetPath, renameTargetName)) ||
+                File.Exists(Path.Combine(targetPath, movedNames[0])))
+                throw new IOException("IFileOperation.RenameItems did not rename the isolated copied row as requested.");
+            var renameNotificationObserved = window.WaitForAnySince(renameEventBaseline,
+                [RenamedItem, UpdatedDirectory], TimeSpan.FromSeconds(5));
+            pendingTarget = WaitForRows(targetPidl, targetFolder,
+                rows => rows.Any(row => row.DisplayName == renameTargetName) &&
+                    rows.All(row => row.DisplayName != movedNames[0]));
+            var renameReconciliation = ShellListViewRowModel.Reconcile(targetCurrent.Rows,
+                pendingTarget.Rows, NextId(targetCurrent.Rows), window.RenamedParsingNames);
+            // Reconcile returns the entire old snapshot for PIDL release; row identity is asserted separately.
+            var renamedRowIdPreserved = renameReconciliation.Rows.Single(row => row.DisplayName == renameTargetName).Id == renameSourceRow.Id;
+            ShellListViewEnumerator.FreeRows(renameReconciliation.RetiredRows);
+            targetCurrent = pendingTarget with { Rows = renameReconciliation.Rows.ToList() };
+            pendingTarget = null;
+            ProjectRows(targetList, targetCurrent.Rows);
+            ApplySelection(targetList, targetCurrent.Rows, targetSelection);
+            var targetAnchorPreservedAfterRename = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id == targetAnchorId;
+            var targetSelectionPreservedAfterRename = targetSelection.Resolve(targetCurrent.Rows)
+                    .Any(state => state.RowId == targetAnchorId && state.Selected && state.Focused) &&
+                HasStableListViewSelection(targetList, targetAnchorId);
+            var renameIsolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
+                !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
+            Console.WriteLine($"shell-change-cross-pane-rename: operation=IFileOperation.RenameItems;rename-notification={renameNotificationObserved};" +
+                $"events=[{string.Join(',', window.Events.Skip(renameEventBaseline).Select(value => $"0x{value:X8}"))}];" +
+                $"target-count={targetCurrent.Rows.Count};row-id-preserved={renamedRowIdPreserved};" +
+                $"target-anchor-id-preserved={targetAnchorPreservedAfterRename};target-selection-focus-preserved={targetSelectionPreservedAfterRename};" +
+                $"hidden-windows={renameIsolated};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (!renameNotificationObserved || targetCurrent.Rows.Count != 3 || !renamedRowIdPreserved ||
+                !targetAnchorPreservedAfterRename || !targetSelectionPreservedAfterRename || !renameIsolated)
+                throw new InvalidOperationException("Cross-pane RenameItems did not reconcile the receiving row model after Shell rename notifications.");
+
+            var copiedNamesAfterRename = new[] { renameTargetName, movedNames[1] };
+            foreach (var row in targetCurrent.Rows.Where(row => copiedNamesAfterRename.Contains(row.DisplayName, StringComparer.Ordinal)))
                 SetRowState(targetList, FindIndexById(targetList, row.Id), LvisSelected, LvisSelected);
             var deleteSelection = CaptureSelection(targetList, targetCurrent.Rows);
             var deleteEventBaseline = window.Events.Count;
-            var deleteRows = targetCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
+            var deleteRows = targetCurrent.Rows.Where(row => copiedNamesAfterRename.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
+            var deleteRowIds = deleteRows.Select(row => row.Id).ToArray();
             var deleteChildArray = Marshal.AllocCoTaskMem(IntPtr.Size * deleteRows.Length);
             nint deleteDataObject = 0, deleteOperation = 0;
             try
@@ -533,11 +599,11 @@ internal static class ShellChangeReconciliationProbe
             var deleteNotificationObserved = window.WaitForAnySince(deleteEventBaseline,
                 [Deleted, UpdatedDirectory], TimeSpan.FromSeconds(5));
             pendingTarget = WaitForRows(targetPidl, targetFolder,
-                rows => movedNames.All(name => rows.All(row => row.DisplayName != name)));
+                rows => copiedNamesAfterRename.All(name => rows.All(row => row.DisplayName != name)));
             var deletedReconciliation = ShellListViewRowModel.Reconcile(targetCurrent.Rows,
                 pendingTarget.Rows, NextId(targetCurrent.Rows));
-            var deletedCopiedRowIdsRetired = movedNames.All(name =>
-                deletedReconciliation.RetiredRows.Any(row => row.Id == targetCopiedRowIds[name]));
+            var deletedCopiedRowIdsRetired = deleteRowIds.Length == 2 &&
+                deleteRowIds.All(id => deletedReconciliation.RetiredRows.Any(row => row.Id == id));
             ShellListViewEnumerator.FreeRows(deletedReconciliation.RetiredRows);
             targetCurrent = pendingTarget with { Rows = deletedReconciliation.Rows.ToList() };
             pendingTarget = null;
@@ -913,6 +979,7 @@ internal static class ShellChangeReconciliationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
