@@ -22,6 +22,7 @@ internal static class ShellViewDropTargetProbe
     private const uint KeyStateShift = 0x0004;
     private const uint KeyStateControl = 0x0008;
     private const uint SelectAndFocus = 0x1u | 0x4u | 0x10u | 0x40000000u;
+    private const uint AddSelectionAndFocus = 0x1u | 0x10u;
     private const int DragDropSDrop = 0x00040100;
     private const int DragDropSCancel = 0x00040101;
 
@@ -75,7 +76,7 @@ internal static class ShellViewDropTargetProbe
             crossVolumeMoveSourcePidl = 0, crossVolumeMoveChildPidls = 0;
         nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
         nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, multiSelectedDataObject = 0,
-            childPidls = 0, multiSelectedChildPidls = 0;
+            childPidls = 0;
         StreamViewHost? sourceHost = null, targetHost = null;
         var sourceCreateAttempted = false;
         var targetCreateAttempted = false;
@@ -148,11 +149,6 @@ internal static class ShellViewDropTargetProbe
             var secondMultiSelectedChildPidl = ILFindChild(sourceFolderPidl, secondMultiSelectedSourcePidl);
             if (multiSelectedChildPidl == 0 || secondMultiSelectedChildPidl == 0)
                 throw new InvalidOperationException("A multi-selected source item is not a child of its folder.");
-            multiSelectedChildPidls = Marshal.AllocHGlobal(2 * IntPtr.Size);
-            Marshal.WriteIntPtr(multiSelectedChildPidls, 0, multiSelectedChildPidl);
-            Marshal.WriteIntPtr(multiSelectedChildPidls, IntPtr.Size, secondMultiSelectedChildPidl);
-            Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 2, multiSelectedChildPidls, 0,
-                in DataObjectId, out multiSelectedDataObject));
             var sourceItemCount = 0;
             var enumerationDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
             do
@@ -164,6 +160,8 @@ internal static class ShellViewDropTargetProbe
             } while (DateTime.UtcNow < enumerationDeadline);
             Console.WriteLine($"shell-view-drop-target-stage: source-items={sourceItemCount}");
             var sourceItemIndex = -1;
+            var multiSelectedItemIndex = -1;
+            var secondMultiSelectedItemIndex = -1;
             for (var index = 0; index < sourceItemCount; index++)
             {
                 var getItemHr = At<GetItem>(sourceFolderView, 6)(sourceFolderView, index, out var itemPidl);
@@ -171,10 +169,11 @@ internal static class ShellViewDropTargetProbe
                 try
                 {
                     if (ILIsEqual(selectedChildPidl, itemPidl))
-                    {
                         sourceItemIndex = index;
-                        break;
-                    }
+                    else if (ILIsEqual(multiSelectedChildPidl, itemPidl))
+                        multiSelectedItemIndex = index;
+                    else if (ILIsEqual(secondMultiSelectedChildPidl, itemPidl))
+                        secondMultiSelectedItemIndex = index;
                 }
                 finally { Marshal.FreeCoTaskMem(itemPidl); }
             }
@@ -190,9 +189,26 @@ internal static class ShellViewDropTargetProbe
                 Console.WriteLine($"shell-view-drop-target-candidate: source=selected-view; get-data-object=0x{selectedDataObjectHr:X8}");
             else
                 Console.WriteLine("shell-view-drop-target-stage: selected-data-object-acquired");
+            if (multiSelectedItemIndex < 0 || secondMultiSelectedItemIndex < 0)
+                throw new InvalidOperationException("The Shell view did not enumerate both multi-selected source files.");
+            Marshal.ThrowExceptionForHR(At<SelectItem>(sourceFolderView, 15)(sourceFolderView,
+                multiSelectedItemIndex, SelectAndFocus));
+            Marshal.ThrowExceptionForHR(At<SelectItem>(sourceFolderView, 15)(sourceFolderView,
+                secondMultiSelectedItemIndex, AddSelectionAndFocus));
+            Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 1, out var multiSelectedCount));
+            if (multiSelectedCount != 2)
+                throw new InvalidOperationException($"Expected two selected source files, observed {multiSelectedCount}.");
+            var multiSelectedDataObjectId = DataObjectId;
+            var multiSelectedDataObjectHr = At<GetItemObject>(sourceView, 15)(sourceView, 1,
+                ref multiSelectedDataObjectId, out multiSelectedDataObject);
+            if (multiSelectedDataObjectHr < 0 || multiSelectedDataObject == 0)
+                Marshal.ThrowExceptionForHR(multiSelectedDataObjectHr < 0 ? multiSelectedDataObjectHr : unchecked((int)0x80004005));
+            Console.WriteLine("shell-view-drop-target-stage: multi-selected-data-object-acquired; selected-count=2");
             if (selectedDataObject != 0) LogDataObjectFormats("selected-view", selectedDataObject);
+            LogDataObjectFormats("multi-selected-view", multiSelectedDataObject);
             LogDataObjectFormats("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogDataObjectPayload("selected-view", selectedDataObject);
+            LogDataObjectPayload("multi-selected-view", multiSelectedDataObject);
             LogDataObjectPayload("SHCreateDataObject", dataObject);
             if (selectedDataObject != 0) LogFileContentsPayload("selected-view", selectedDataObject);
             LogFileContentsPayload("SHCreateDataObject", dataObject);
@@ -210,6 +226,7 @@ internal static class ShellViewDropTargetProbe
                 LogOptionalDropFormat("SHCreateDataObject", dataObject, formatName);
             }
             if (selectedDataObject != 0) LogShellIdListPayload("selected-view", selectedDataObject);
+            LogShellIdListPayload("multi-selected-view", multiSelectedDataObject);
             LogShellIdListPayload("SHCreateDataObject", dataObject);
 
             shellViewId = ShellViewId;
@@ -443,7 +460,6 @@ internal static class ShellViewDropTargetProbe
             if (multiSelectedSourcePidl != 0) Marshal.FreeCoTaskMem(multiSelectedSourcePidl);
             if (secondMultiSelectedSourcePidl != 0) Marshal.FreeCoTaskMem(secondMultiSelectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
-            if (multiSelectedChildPidls != 0) Marshal.FreeHGlobal(multiSelectedChildPidls);
             if (crossVolumeChildPidls != 0) Marshal.FreeHGlobal(crossVolumeChildPidls);
             if (crossVolumeMoveChildPidls != 0) Marshal.FreeHGlobal(crossVolumeMoveChildPidls);
             if (interactiveOle)
