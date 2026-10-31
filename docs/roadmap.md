@@ -5437,3 +5437,6 @@ NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数�
 ## 2026-11-01：列身份差异的阶段继续收窄
 
 同一 `IShellView` 的首次窗口创建中，Shell 读取了预期的 `Name / Recursive Size / Type` 标题和列类型，并对列 0–2 调用 provider 映射，列 1 收到原型自定义 GUID；随后的 `IColumnManager.Capture` 第二列却返回 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。重建阶段只再询问映射，没有重读表头或默认列状态。差异已收窄到首次创建后列身份的形成/暴露阶段，转换层仍未知；下一步追踪首次 `GetColumns`/`GetColumnInfo` 与 view-state stream 中的初始列状态，不猜 GUID。NativeProbe 与 adapter 构建、Private Desktop WPF watchdog 均通过；产品与发布包未变。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01列-guid-分歧定位到首次-view-window-创建阶段)。
+## 2026-11-01：确认列管理器身份在首次窗口创建后立即可见
+
+`CreateViewWindow` 刚返回就能捕获 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，`IColumnManager.GetColumnInfo(CM_MASK_NAME)` 将它正确命名为 `Recursive Size`；700 ms 后键/标题不变，而 `MapColumnToSCID(1)` 返回的仍是另一 GUID。view-state stream 此阶段 5 次读取、0 次写入。故差异是列管理器立即暴露的独立列身份，不是重建后才出现，也不能等同于列缺失；其跨新 view 稳定性仍未知。下一项验证第二个新 view 的键/名称，并将捕获键应用到新 view 核对行值和排序。NativeProbe Release 与隔离 WPF Private Desktop watchdog 通过，产品 ExplorerBrowser 未改。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01首次创建返回时列管理器已暴露不同键)。

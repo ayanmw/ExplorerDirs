@@ -1086,3 +1086,8 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 把列元数据回调也纳入有界轨迹后，Private Desktop WPF 根宿主完整复跑成功（watchdog exit 0，前台 HWND/输入 tick 不变，`isolation-clean=True`）。首次 `IShellView::CreateViewWindow` 中，Shell 读取了 `Name`、`Recursive Size`、`Type` 三个标题；列状态分别为字符串 `0x11`、整数 `0x12`、字符串 `0x11`，并调用 `MapColumnToSCID` 三次，依次得到 `PKEY_ItemNameDisplay`、原型自定义 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`、`PKEY_ItemTypeText`。随后同一 view 的 `IColumnManager.Capture` 仍读到 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 作为第二列键。
 
 在重建前清空轨迹后，重建阶段再次调用列映射 8 次（0–3 各两次），但没有再调用 `GetDetailsOf(NULL, i)` 或 `GetDefaultColumnState`。因此已知列标题/状态和 provider 的列键在首次创建时均正确送达，键分歧在首次创建后即可观察；重建不是元数据读取来源。内部身份转换仍未定位，不能判定 Shell 缓存、列管理器转换或其它状态来源，也不据此修改列 GUID。日志：`src/.state/native-probe-watchdog/20261101-045626-ce26270d.stdout.log`。构建通过；仅隔离原型，不涉及产品 ExplorerBrowser、UI 验收或发布。
+### 2026-11-01：首次创建返回时列管理器已暴露不同键
+
+在 `IShellView::CreateViewWindow` 刚返回时立即读取 `IColumnManager`，不等首轮 700 ms settle，已得到三列及宽度；`GetColumnInfo(CM_MASK_NAME)` 将两个标准键命名为 `Name`、`Type`，并将 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 命名为 `Recursive Size`。700 ms 后键和名称不变。对应首次 provider 回调仍将列 1 映射到 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此不同键在窗口创建返回时已形成，但列管理器身份仍保留正确标题；它不是“自定义列未出现”的证据。此时 view-state stream 记录 5 次读取、0 次写入，只能说明该阶段没有写入，不能单独证明 Shell 内部采用了何种默认列状态。
+
+该结果进一步将调查目标从“重建是否覆盖列键”收窄为“列管理器列身份是否为同一 view/相同 provider 下稳定且可跨新 view 重用”。日志：`src/.state/native-probe-watchdog/20261101-045810-68c8bb9a.stdout.log`；Windows SDK `CM_MASK_NAME=0x8` 已核对。Release NativeProbe build 0 警告/错误，Private Desktop WPF watchdog exit 0，前台/输入/清理守卫通过。后续应在第二个新建 view 中读回列键/名称，并单独验证将捕获键应用到新 view 后的列值与排序；不能从同 view 重建结果外推跨 view 持久性。

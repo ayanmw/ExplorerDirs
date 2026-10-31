@@ -6,6 +6,7 @@ using ExplorerDirs.App;
 public static class SyntheticShellSortProbe
 {
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
+    private static readonly Guid ColumnManagerId = new("D8EC27BB-3F3B-4042-B10A-4ACFD924D453");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
@@ -259,11 +260,15 @@ public static class SyntheticShellSortProbe
             var initialMapColumnTrace = CaptureMapColumnTrace(module);
             Console.WriteLine($"synthetic-shell-size-sort-column-metadata: phase=initial-view-window; trace=[{FormatColumnMetadataTrace(initialColumnMetadataTrace)}]");
             Console.WriteLine($"synthetic-shell-size-sort-column-map: phase=initial-view-window; calls={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}; by-column=[{FormatMapColumnCounts(module)}]; trace=[{FormatMapColumnTrace(initialMapColumnTrace)}]");
+            var immediateColumnCaptureResult = ShellColumnManager.Capture(view, out var immediateColumns);
+            Console.WriteLine($"synthetic-shell-size-sort-columns: phase=create-view-window-return; hr=0x{immediateColumnCaptureResult:X8}; columns=[{FormatColumns(immediateColumns)}]; info=[{CaptureColumnNames(view)}]; stream-reads={host.Reads}; stream-writes={host.Writes}");
             viewWindowCreated = true;
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("Creating the synthetic Shell view changed the user's foreground window.");
             _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the Private Desktop only.
             Pump(700);
+            var settledInitialColumnCaptureResult = ShellColumnManager.Capture(view, out var settledInitialColumns);
+            Console.WriteLine($"synthetic-shell-size-sort-columns: phase=initial-view-settled; hr=0x{settledInitialColumnCaptureResult:X8}; columns=[{FormatColumns(settledInitialColumns)}]; info=[{CaptureColumnNames(view)}]; stream-reads={host.Reads}; stream-writes={host.Writes}");
             if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The synthetic Shell view crossed the Private Desktop/foreground boundary.");
 
@@ -1400,6 +1405,32 @@ public static class SyntheticShellSortProbe
     private static string FormatColumns(IReadOnlyList<DisplayColumnState>? columns) => columns is null
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}@{column.Width}"));
+
+    private static string CaptureColumnNames(nint folderView)
+    {
+        var queryResult = Marshal.QueryInterface(folderView, in ColumnManagerId, out var manager);
+        if (queryResult < 0) return $"QI=0x{queryResult:X8}";
+        try
+        {
+            var countResult = At<GetColumnCount>(manager, 5)(manager, 2, out var count);
+            if (countResult < 0) return $"GetColumnCount=0x{countResult:X8}";
+            if (count is 0 or > 128) return $"count-invalid={count}";
+            var keys = new ShellColumnManager.NativeKey[count];
+            var columnsResult = At<GetColumns>(manager, 6)(manager, 2, keys, count);
+            if (columnsResult < 0) return $"GetColumns=0x{columnsResult:X8}";
+            var descriptions = new List<string>((int)count);
+            foreach (var keyValue in keys)
+            {
+                var key = keyValue;
+                var info = ShellColumnManager.ColumnInfo.ForWidth();
+                info.Mask = 8; // Windows SDK ShObjIdl_core.h: CM_MASK_NAME.
+                var infoResult = At<GetColumnInfo>(manager, 4)(manager, ref key, ref info);
+                descriptions.Add($"{key.FormatId:B}:{key.PropertyId}={info.Name}/hr=0x{infoResult:X8}");
+            }
+            return string.Join('|', descriptions);
+        }
+        finally { Marshal.Release(manager); }
+    }
 
     private static string FormatMapColumnCounts(nint module)
     {
@@ -2798,6 +2829,9 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetIndexedCounter(uint index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetMapColumnTraceCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadMapColumnTrace(uint index, out uint column, out ShellColumnManager.NativeKey key, out int result);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetColumnCount(nint self, uint flags, out uint count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetColumns(nint self, uint flags, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 3)] ShellColumnManager.NativeKey[] keys, uint count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetColumnInfo(nint self, ref ShellColumnManager.NativeKey key, ref ShellColumnManager.ColumnInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetColumnDiagnostics();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetColumnMetadataTraceCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ReadColumnMetadataTrace(uint index, out uint kind, out uint column, out uint state, out int result, [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, uint textCapacity);
