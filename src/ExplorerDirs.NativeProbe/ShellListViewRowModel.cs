@@ -38,12 +38,12 @@ internal static class ShellListViewRowModel
 
             if (matchedPrevious && previous is not null)
             {
-                var sameFilesystemFolder = IsFilesystemFolder(previous) && IsFilesystemFolder(enumerated) &&
-                    string.Equals(previous.FileSystemPath, enumerated.FileSystemPath, StringComparison.OrdinalIgnoreCase);
+                var filesystemFolder = IsFilesystemFolder(previous) && IsFilesystemFolder(enumerated);
                 var currentFileSystemIdentity = enumerated.FileSystemIdentity;
-                if (sameFilesystemFolder && previous.RecursiveSummary is not null && currentFileSystemIdentity is null)
+                if (filesystemFolder && previous.RecursiveSummary is not null && currentFileSystemIdentity is null)
                     currentFileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(enumerated.FileSystemPath!);
-                var preserveRecursiveScan = sameFilesystemFolder && previous.FileSystemIdentity is { } previousIdentity &&
+                // Renaming changes a directory's path, not its identity; keep its measured summary when the file ID still matches.
+                var preserveRecursiveScan = filesystemFolder && previous.FileSystemIdentity is { } previousIdentity &&
                     currentFileSystemIdentity is { } currentIdentity && previousIdentity == currentIdentity;
                 rows[index] = enumerated with
                 {

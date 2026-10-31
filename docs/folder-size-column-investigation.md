@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：同一目录改名时沿用递归大小快照
+
+Shell 重枚举可通过旧/新解析名映射识别被改名的行。`ShellListViewRowModel.Reconcile` 现在在前后两行都是文件系统目录且卷序列号/文件 ID 一致时沿用旧递归大小摘要，即使路径已经变化；若类型或身份不一致仍丢弃旧摘要。这样同一目录对象改名时不会先显示空值，而同路径被替换成不同目录的已有保护保持有效。
+
+SettingsSmoke 对两个真实临时目录执行改名，并反序重枚举，验证各自行 ID、目标路径、文件 ID 和摘要没有串线，同时旧 PIDL 都进入退休集合；定向 `--shell-listview-row-model-smoke` 与完整 Release SettingsSmoke 通过，NativeProbe Release build 0 警告/错误。此合同只针对隔离行模型，未创建 Shell view 或接入产品；真实 Shell rename 通知映射、异步扫描竞争及可见排序仍待迁移门槛验收。
+
 ## 2026-10-31：包装子 PIDL 的父绑定身份复核
 
 普通包装-folder smoke 现把两种不同使用方式分别断言：普通 backing 绝对 PIDL 可解析为预期文件；将包装的相对 child PIDL 原样与 backing 文件夹 PIDL 组合后，`SHGetNameFromIDList(SIGDN_FILESYSPATH)` 按预期返回 `E_INVALIDARG`，因为包装 envelope 只由其父 adapter 解释。随后通过 `SHCreateItemWithParent(adapter, wrappedChild)` 取得的 Shell item 必须返回正确的文件系统路径和绝对 parsing name，`IParentAndItem` 还需保留 adapter 的 `IUnknown` 与同一 child PIDL。完整 wrapped-folder smoke 通过，窗口未创建。

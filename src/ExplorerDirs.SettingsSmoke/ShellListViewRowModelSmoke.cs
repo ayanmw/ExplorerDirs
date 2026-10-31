@@ -125,6 +125,80 @@ internal static class ShellListViewRowModelSmoke
             Check(originalIdentity is not null && replacementIdentity is not null && originalIdentity != replacementIdentity,
                 "filesystem identity distinguishes a recreated directory at the same path");
 
+            var renameSourcePath = Path.Combine(identityRoot, "renamed-source");
+            var renameTargetPath = Path.Combine(identityRoot, "renamed-target");
+            var renameSourcePath2 = Path.Combine(identityRoot, "renamed-source-2");
+            var renameTargetPath2 = Path.Combine(identityRoot, "renamed-target-2");
+            Directory.CreateDirectory(renameSourcePath);
+            File.WriteAllBytes(Path.Combine(renameSourcePath, "payload.bin"), new byte[5]);
+            Directory.CreateDirectory(renameSourcePath2);
+            File.WriteAllBytes(Path.Combine(renameSourcePath2, "payload.bin"), new byte[8]);
+            var renameIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(renameSourcePath);
+            var renameIdentity2 = ShellListViewRowIdentity.GetFileSystemIdentity(renameSourcePath2);
+            var renamedSource = targetWithSummary with
+            {
+                ParsingName = renameSourcePath,
+                FileSystemPath = renameSourcePath,
+                FileSystemIdentity = renameIdentity,
+                RecursiveBytes = 5,
+                RecursiveSummary = new(5, 1, 0, 0),
+                AbsolutePidl = 0x501,
+                RelativePidl = 0x601
+            };
+            var renamedSource2 = renamedSource with
+            {
+                Id = sibling.Id,
+                ParsingName = renameSourcePath2,
+                FileSystemPath = renameSourcePath2,
+                FileSystemIdentity = renameIdentity2,
+                RecursiveBytes = 8,
+                RecursiveSummary = new(8, 1, 0, 0),
+                AbsolutePidl = 0x503,
+                RelativePidl = 0x603
+            };
+            Directory.Move(renameSourcePath, renameTargetPath);
+            Directory.Move(renameSourcePath2, renameTargetPath2);
+            var renamedTarget = renamedSource with
+            {
+                ParsingName = renameTargetPath,
+                FileSystemPath = renameTargetPath,
+                AbsolutePidl = 0x502,
+                RelativePidl = 0x602,
+                RecursiveBytes = null,
+                RecursiveSummary = null,
+                FileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(renameTargetPath)
+            };
+            var renamedTarget2 = renamedSource2 with
+            {
+                ParsingName = renameTargetPath2,
+                FileSystemPath = renameTargetPath2,
+                AbsolutePidl = 0x504,
+                RelativePidl = 0x604,
+                RecursiveBytes = null,
+                RecursiveSummary = null,
+                FileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(renameTargetPath2)
+            };
+            var renamed = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
+                [renamedSource, renamedSource2], [renamedTarget2, renamedTarget], nextId: 11,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [renameTargetPath] = renameSourcePath,
+                    [renameTargetPath2] = renameSourcePath2
+                });
+            Check(renameIdentity is not null && renameIdentity2 is not null &&
+                  renamed.Rows.Select(row => row.Id).SequenceEqual([sibling.Id, target.Id]) &&
+                  renamed.Rows[0].FileSystemPath == renameTargetPath2 &&
+                  renamed.Rows[0].FileSystemIdentity == renameIdentity2 &&
+                  renamed.Rows[0].RecursiveBytes == 8 &&
+                  renamed.Rows[0].RecursiveSummary == renamedSource2.RecursiveSummary &&
+                  renamed.Rows[1].FileSystemPath == renameTargetPath &&
+                  renamed.Rows[1].FileSystemIdentity == renameIdentity &&
+                  renamed.Rows[1].RecursiveBytes == 5 &&
+                  renamed.Rows[1].RecursiveSummary == renamedSource.RecursiveSummary &&
+                  renamed.RetiredRows.Select(row => row.AbsolutePidl).ToHashSet()
+                      .SetEquals([renamedSource.AbsolutePidl, renamedSource2.AbsolutePidl]),
+                "a batch of renamed folders retains each row ID and recursive-size snapshot by filesystem identity");
+
             var retiredFolder = targetWithSummary with
             {
                 ParsingName = identityPath,
