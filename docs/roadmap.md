@@ -146,7 +146,7 @@
 
 2026-10-31 NativeProbe 目录通知与派生行值联动：隐藏 Shell change probe 收到真实 `SHCNE_UPDATEDIR` 后重新枚举，再由 worker 重算该视图中受影响文件夹的递归大小和内容计数，并将值合并到稳定 Shell row ID；真实隐藏 `SysListView32` 读回 `12 B` 和 `files: 2, folders: 1`。夹具从 1 个文件、0 个子目录、4 B 变为 2 个文件、1 个子目录、12 B，目录行 ID 保持；初始/变更扫描均在线程池运行并回 owner Dispatcher 发布。Shell 行重排/删除后重建列表仍选中并聚焦原稳定行。探针 Release build/运行通过；前台未改变，列表父窗口不可见。此为隔离数据、通知和列表投影合同，未接入产品 ExplorerBrowser/IShellView，也未验证真实 UI 的 F5 无黑屏、局部刷新像素或 Q-Dir 等价行为。
 
-2026-10-31 Q-Dir 目录树拖入悬停展开：`NativeShellTree` 初始化加入 Windows `NSTCS_SPRINGEXPAND`。Release SettingsSmoke 定向样例通过，确认该样式与 `NSTCS_DISABLEDRAGDROP`、`NSTCS_NOEDITLABELS` 同时存在；保持禁用树内重排和标签编辑。微软文档说明 `NSTCS_DISABLEDRAGDROP` 只禁止控件内部拖放，外部项目仍可拖入树控件，因此此次只补上原生悬停展开。当前使用 Windows 默认延时，不提供 Q-Dir 的自定义延时档位；真实文件拖入、目录落点及展开时长仍待集中 UI 验收。[功能矩阵](shell-parity.md#本轮代码与下一轮验收)。
+2026-10-31 Q-Dir 目录树拖入悬停展开（最初候选，已撤回）：曾误把 `NSTCS_SPRINGEXPAND` 当作拖入悬停展开开关；后续核对 Windows SDK 后已确认该标志实际用于切换所选节点时折叠先前展开的节点，并从 `NativeShellTree` 移除。当前实现是 `INameSpaceTreeControlDropHandler` 延迟展开处理器；延时档位及验证边界见下方更正记录。真实文件拖入、目录落点和可见展开行为仍待集中 UI 验收。[功能矩阵](shell-parity.md#本轮代码与下一轮验收)。
 
 2026-10-31 目录树悬停展开更正：复核 Windows SDK 的 `_NSTCSTYLE` 文档后发现，`NSTCS_SPRINGEXPAND` 表示切换所选节点时自动折叠先前展开的节点，与拖放悬停计时无关；上方旧记录及功能矩阵把它误判成拖入展开。已从 `NativeShellTree` 样式中移除，并将回归改为拒绝该标志。Q-Dir 官方 FAQ 74 和选项清单确认其独立“Auto-Expand Drag over Time”选项，提供 0.2、0.5、1、1.5、2、3 秒；本项目真实拖入悬停展开与延时设置仍未实现。下一步需评估如何在不丢失 Namespace Tree Shell drop target 的情况下拦截拖入并延迟展开，再实现可取消、按控件生命周期清理的定时行为；不修改系统级鼠标设置。源码级验证通过不代表真实拖放已验收。
 
