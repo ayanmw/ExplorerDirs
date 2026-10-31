@@ -5325,3 +5325,9 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 对默认文件系统 `color-private-desktop` 基线的复跑首轮在排序/分组的图标模式漏收逐项回调并提前退出；之后的完整运行日志显示视图颜色、菜单与状态流回环恢复，随后一轮 watchdog 明确 exit 0。作为单轮波动保留记录，不宣称已彻底消除。
 
 此结果把 ZIP 支持从“元数据可以算规则”推进到“默认 IShellView 的逐项背景/文本色实际绘制及字体选择”。尚未验证其它虚拟 Shell provider、Q-Dir `.qdr` 颜色导入、视觉字重跨 DPI/主题效果或产品 ExplorerBrowser/可见 UI。后续按 provider 矩阵继续并评审迁移门槛；产品视图保持 ExplorerBrowser。详细证据见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项-defview-像素绘制)。
+
+## 2026-11-01：This PC 虚拟 provider 逐行颜色采样
+
+NativeProbe 增加 `color-this-pc-private-desktop`，并将虚拟 Shell 颜色采样改为按运行时枚举数构造行映射。This PC 当前环境 3/3 行均收到 DefView 自绘回调，背景及文本精确色像素检查通过；ZIP 探针在相同动态采样器下复跑通过。This PC 项目可取得文件系统路径，pathless PIDL 仍由 ZIP provider 覆盖。Release 构建 0 警告/错误，两个 watchdog 均 exit 0，前台和输入未变，隔离清理通过。
+
+证据仅覆盖当前 Windows provider 的隐藏私有桌面 `IShellView` 绘制；不证明其他 provider、Q-Dir `.qdr` 颜色解析、ExplorerBrowser 产品支持或可见 UI。格式不匹配时是否保留预览列表项待 Q-Dir 验收后再决策。产品宿主仍不迁移。详见[This PC provider 颜色采样](ishellview-color-spike.md#2026-11-01-this-pc-虚拟-provider-逐行像素复验)。

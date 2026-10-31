@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：This PC 虚拟 provider 逐行像素复验
+
+将 ZIP 颜色像素探针泛化为根据 Shell 当前枚举数构造行映射，并对 This PC provider 执行同一采样。当前环境稳定枚举 3 行：C:、D: 与一个自定义位置；3 行均命中背景颜色，逐项回调 `3/3`，区域像素数为 9,403、9,405、9,209；文本色像素分别为 114、93、147。This PC 的这些行可取得文件系统路径，因此本结果覆盖动态行数和系统 provider 绘制，不作为 pathless PIDL 的证据；pathless 仍由 ZIP 结果覆盖。前台与最后输入时间未变化，隔离清理通过。
+
+新探针首次运行暴露了原通用颜色流程要求固定 2 行，并继续跑与颜色采样无关的视图选择/循环断言；按实际虚拟 provider 计数改为等待非空计数稳定，并在专用逐行绘制采样后返回。随后 This PC 与 ZIP 私有桌面探针均 exit 0，NativeProbe Release 构建 0 警告/错误。此项仍只证明隔离默认 `IShellView` 的绘制能力，不证明产品接入或 UI 外观验收。
+
 ### 2026-11-01：ZIP 虚拟 Shell 项 DefView 像素绘制
 
 将先前规则输入探针推进到真实 ZIP `IShellView`/DefView：在独立 Private Desktop 中创建含一个虚拟文件和一个虚拟目录的 ZIP 文件夹，按 `IFolderView2.GetItemAt` 当前行 PIDL 读取 Shell 显示名与属性，给当前行索引投影 `*.txt` 与 `#DIR` 规则，再从 DefView `NM_CUSTOMDRAW` 绘制回调采样行区域。两个条目均为 pathless；两行各自命中预期背景像素（转换到 DIB RGB 后为 `0xE0F0D0`、`0xD0E0F0`，每行命中 7,123 / 6,981 像素），逐项回调 `2/2`。前台 HWND 与最后输入时间未变，隔离策略通过。NativeProbe Release 构建 0 警告/错误，`color-zip-private-desktop` watchdog exit 0；随后默认文件系统颜色探针也 exit 0。
@@ -8,7 +14,7 @@
 
 默认文件系统颜色探针在新采样器上的首轮曾于排序/分组的图标模式没有收到逐项回调，且因早退未完成状态流回环；之后的完整运行日志恢复行像素、排序/分组、菜单与视图流回环，随后一轮 watchdog 明确 exit 0。该单轮结果记录为采样时序波动，不能隐去或视为完全消除；后续仍需重复观察。
 
-当前证据证明 Windows ZIP provider 的 pathless Shell 行在隔离默认 `IShellView` 中可绘制逐项背景/文本色，并按规则选择字体；不证明其它虚拟 provider、Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI，也不构成宿主迁移批准。
+当前证据证明 Windows ZIP provider 的 pathless Shell 行，以及 This PC provider 的动态枚举行，在隔离默认 `IShellView` 中可绘制逐项背景/文本色；ZIP 结果也验证按规则选择字体。仍不证明 Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI，也不构成宿主迁移批准。
 
 ## 2026-11-01：ZIP 虚拟 Shell 项的颜色规则输入验证
 
