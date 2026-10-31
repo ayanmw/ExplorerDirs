@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 Q-Dir 目录树自动展开行为对照复核：Q-Dir FAQ 66 的“从文件列表选择并展开”是独立开关，项目已有默认启用的便携偏好；FAQ 74 的拖入悬停延时也已支持 0.2/0.5/1/1.5/2/3 秒并独立持久化。定向 `--shell-tree-control-style-smoke` 验证两条行为的回调/配置合同、延时六档往返、非法档拒绝、未来格式不覆盖、隐藏时取消等待，以及 Drop 保持由 Shell 默认处理；App Release 构建通过（0 警告/错误）。真实拖动、目标反馈和 Q-Dir 可见差异仍待集中 UI 验收；当前没有待实现的延时配置项。对照来源：[Q-Dir FAQ 66](https://www.softwareok.com/?faq=66&seite=faq-Q-DIR)、[Q-Dir FAQ 74](https://www.softwareok.com/?faq=74&seite=faq-Q-DIR)。
+
 2026-10-31 IShellView Undo/Redo 命令迁移门槛：只读 command-state probe 修正提前返回时不应要求 session stream 写回后通过。临时 `IFileOperation::CopyItem` → Shell `undo` → `redo` 实验没有形成可重复闭环：一轮 Undo 删除了临时副本但 Redo 返回 `S_OK` 后未恢复，另一轮复制后 Undo 状态仍为禁用。由于 `FOF_ALLOWUNDO` 是整个用户登录 session 共享、由 `Explorer.exe` 协调，Private Desktop 不能隔离这类操作；操作 probe 已撤掉，不再后台重跑。两轮临时夹具由 watchdog 清理，但全局 Shell undo history 无法核验/恢复。该结果不是产品快捷键验收；ExplorerBrowser 保持为产品视图。细节及官方依据见[IShellView 原型记录](ishellview-color-spike.md#2026-10-31-shell-undoredo-原生命令实验停止)。
 
 2026-10-31 隔离行模型跨窗格 Shell 操作闭环：在多项 `IFileOperation.MoveItems` 后执行多项 `CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`。通知后两 pane 行模型分别收敛；重命名行保留原 ID，删除行 ID 退休，锚点身份、选择和焦点保持，源 pane 文件/行不变。`--shell-change-reconciliation` NativeProbe Release 连续三轮通过，隐藏窗口/前台守卫通过。只验证 NativeProbe 行模型，不是可见菜单、真实拖放、剪贴板粘贴、Undo/Redo 或 ExplorerBrowser 产品证据。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)。
