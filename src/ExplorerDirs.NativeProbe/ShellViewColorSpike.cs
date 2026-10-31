@@ -22,6 +22,7 @@ internal static class ShellViewColorSpike
     private const uint ShellRenameItem = 0x00000001;
     private const uint ShellCreate = 0x00000002;
     private const uint ShellDelete = 0x00000004;
+    private const uint ShellUpdatedItem = 0x00002000;
     private const uint PathAndFlushNoWait = 0x00002005;
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid FolderViewId = new("CDE725B0-CCC9-4519-917E-325D72FAB4CE");
@@ -2510,6 +2511,7 @@ internal static class ShellViewColorSpike
     {
         var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
         string? crossVolumeDestinationRoot = null;
+        using var changeObserver = crossVolumeMove ? new ShellChangeObserverWindow() : null;
         if (crossVolumeMove)
         {
             var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
@@ -2526,7 +2528,7 @@ internal static class ShellViewColorSpike
         nint cancelDestination = 0, cancelOperation = 0, cancelSinkPointer = 0;
         uint cancelCookie = 0;
         var cancelSinkAdvised = false;
-        nint moveChildArray = 0, moveDataObject = 0, moveDestination = 0, moveOperation = 0;
+        nint moveChildArray = 0, moveDataObject = 0, moveDestination = 0, moveDestinationPidl = 0, moveOperation = 0;
         var selectedChildren = new List<nint>(itemCount);
         var selectedNames = new List<string>(itemCount);
         nint systemImageList = 0;
@@ -2754,6 +2756,12 @@ internal static class ShellViewColorSpike
 
             var moveDestinationPath = Path.Combine(crossVolumeDestinationRoot ?? fixture, "shell-move-target");
             Directory.CreateDirectory(moveDestinationPath);
+            if (changeObserver is not null)
+            {
+                Check(SHParseDisplayName(moveDestinationPath, 0, out moveDestinationPidl, 0, out _));
+                changeObserver.Register(folderPidl);
+                changeObserver.Register(moveDestinationPidl);
+            }
             Check(SHCreateItemFromParsingName(moveDestinationPath, 0, ref shellItemId, out moveDestination));
             Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out moveOperation));
             Check(At<SetOperationFlags>(moveOperation, 5)(moveOperation, 0x0004 | 0x0010 | 0x0400));
@@ -2772,6 +2780,7 @@ internal static class ShellViewColorSpike
                 nestedSourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
             }
             Pump(1000, "zip-move-settle");
+            changeObserver?.Pump(TimeSpan.FromSeconds(2));
             var sourceViewNames = new List<string>();
             var sourceViewErrors = new List<string>();
             var sourceViewCountAfterMove = GetShellViewItemCount(folderView);
@@ -2801,7 +2810,15 @@ internal static class ShellViewColorSpike
             var moveSemantics = movedBytes.Length == 1
                 ? sourceFileRetained ? "copy-source-retained" : "move-source-removed"
                 : moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-            Console.WriteLine($"ishellview-zip-iFileOperation-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(moveDestinationPath)};operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];foreground-unchanged={GetForegroundWindow() == foreground}");
+            var moveChangeEvents = changeObserver?.Observations ?? [];
+            var archivePath = Path.Combine(fixture, "virtual-items.zip");
+            var sourceDeleteObserved = moveChangeEvents.Any(change => change.EventId == ShellDelete &&
+                string.Equals(change.FirstParsingName, Path.Combine(archivePath, movedFileName), StringComparison.OrdinalIgnoreCase));
+            var destinationCreateObserved = moveChangeEvents.Any(change => change.EventId == ShellCreate &&
+                string.Equals(change.FirstParsingName, movedPath, StringComparison.OrdinalIgnoreCase));
+            var archiveUpdateObserved = moveChangeEvents.Any(change => change.EventId == ShellUpdatedItem &&
+                string.Equals(change.FirstParsingName, archivePath, StringComparison.OrdinalIgnoreCase));
+            Console.WriteLine($"ishellview-zip-iFileOperation-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(moveDestinationPath)};operation=MoveItems;hresult=0x{moveItemsResult:X8};perform-hresult=0x{performMoveResult:X8};aborted={moveAborted};semantics={moveSemantics};destination-bytes=[{Convert.ToHexString(movedBytes)}];source-file-retained={sourceFileRetained};nested-source-retained={nestedSourceRetained};source-view-count={sourceViewCountAfterMove};source-view-names=[{string.Join('|', sourceViewNames)}];source-view-errors=[{string.Join('|', sourceViewErrors)}];archive-update-notified={archiveUpdateObserved};source-delete-notified={sourceDeleteObserved};destination-create-notified={destinationCreateObserved};shell-change-events=[{string.Join('|', moveChangeEvents.Select(change => $"0x{change.EventId:X8}:{change.FirstParsingName}->{change.SecondParsingName}"))}];foreground-unchanged={GetForegroundWindow() == foreground}");
             if (!nestedSourceRetained || GetForegroundWindow() != foreground)
                 throw new IOException("ZIP MoveItems changed the nested source entry or foreground boundary.");
             if (crossVolumeMove)
@@ -2809,7 +2826,8 @@ internal static class ShellViewColorSpike
                 var moveSucceeded = moveItemsResult >= 0 && performMoveResult >= 0 && moveAborted == 0 &&
                     movedBytes.Length == 1 && movedBytes[0] == 0x41 && !sourceFileRetained &&
                     sourceViewCountAfterMove == itemCount - 1 &&
-                    !sourceViewNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase);
+                    !sourceViewNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase) &&
+                    (!crossVolumeMove || archiveUpdateObserved && sourceDeleteObserved && destinationCreateObserved);
                 var refusalPreservedSource = (moveItemsResult < 0 || performMoveResult < 0 || moveAborted != 0) &&
                     movedBytes.Length == 0 && sourceFileRetained && sourceViewCountAfterMove == itemCount &&
                     sourceViewNames.Contains("blue-rule-target.txt", StringComparer.OrdinalIgnoreCase);
@@ -2846,11 +2864,17 @@ internal static class ShellViewColorSpike
                     nestedFolderSourceRetained = archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
 
                 Pump(1000, "zip-folder-move-settle");
+                changeObserver?.Pump(TimeSpan.FromSeconds(2));
                 var sourceRowsAfterFolderMove = GetShellViewItemCount(folderView);
                 var folderMoveMeaning = nestedMovedBytes.Length == 1 && nestedMovedBytes[0] == 0x42
                     ? nestedFolderSourceRetained ? "copy-source-retained" : "move-source-removed"
                     : folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ? "rejected-or-aborted" : "no-output-source-retained";
-                Console.WriteLine($"ishellview-zip-iFileOperation-folder-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(folderDestinationPath)};operation=MoveItems;hresult=0x{folderMoveResult:X8};perform-hresult=0x{folderPerformResult:X8};aborted={folderMoveAborted};semantics={folderMoveMeaning};nested-destination-bytes=[{Convert.ToHexString(nestedMovedBytes)}];nested-source-retained={nestedFolderSourceRetained};source-view-count={sourceRowsAfterFolderMove};foreground-unchanged={GetForegroundWindow() == foreground}");
+                var folderChangeEvents = changeObserver?.Observations.Skip(moveChangeEvents.Count).ToArray() ?? [];
+                var sourceFolderDeleteObserved = folderChangeEvents.Any(change => change.EventId == ShellDelete &&
+                    string.Equals(change.FirstParsingName, Path.Combine(archivePath, "virtual-folder"), StringComparison.OrdinalIgnoreCase));
+                var destinationFolderCreateObserved = folderChangeEvents.Any(change => change.EventId == ShellCreate &&
+                    string.Equals(change.FirstParsingName, Path.Combine(folderDestinationPath, "virtual-folder"), StringComparison.OrdinalIgnoreCase));
+                Console.WriteLine($"ishellview-zip-iFileOperation-folder-move: cross-volume={crossVolumeMove};source-volume={Path.GetPathRoot(fixture)};destination-volume={Path.GetPathRoot(folderDestinationPath)};operation=MoveItems;hresult=0x{folderMoveResult:X8};perform-hresult=0x{folderPerformResult:X8};aborted={folderMoveAborted};semantics={folderMoveMeaning};nested-destination-bytes=[{Convert.ToHexString(nestedMovedBytes)}];nested-source-retained={nestedFolderSourceRetained};source-view-count={sourceRowsAfterFolderMove};source-delete-notified={sourceFolderDeleteObserved};destination-create-notified={destinationFolderCreateObserved};shell-change-events=[{string.Join('|', folderChangeEvents.Select(change => $"0x{change.EventId:X8}:{change.FirstParsingName}->{change.SecondParsingName}"))}];foreground-unchanged={GetForegroundWindow() == foreground}");
                 if (folderMoveResult < 0 || folderPerformResult < 0 || folderMoveAborted != 0 ||
                     nestedMovedBytes.Length != 1 || nestedMovedBytes[0] != 0x42 || nestedFolderSourceRetained ||
                     sourceRowsAfterFolderMove != 0 || GetForegroundWindow() != foreground)
@@ -2878,6 +2902,7 @@ internal static class ShellViewColorSpike
             if (childArray != 0) Marshal.FreeHGlobal(childArray);
             if (moveOperation != 0) Marshal.Release(moveOperation);
             if (moveDestination != 0) Marshal.Release(moveDestination);
+            if (moveDestinationPidl != 0) Marshal.FreeCoTaskMem(moveDestinationPidl);
             if (moveDataObject != 0) Marshal.Release(moveDataObject);
             if (moveChildArray != 0) Marshal.FreeHGlobal(moveChildArray);
             foreach (var child in selectedChildren) Marshal.FreeCoTaskMem(child);
