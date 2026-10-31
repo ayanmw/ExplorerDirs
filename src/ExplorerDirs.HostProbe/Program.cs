@@ -2797,6 +2797,11 @@ internal static class Program
                 var beforeRefresh = hosts.Select(Count).ToArray();
                 var selectedBeforeRefresh = SelectedPaths(hostType, hosts[pane], folders[pane]);
                 var focusBeforeRefresh = (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
+                var refreshStatusProperty = hostType.GetProperty("LastShellRefreshStatus", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var refreshRestoreMillisecondsProperty = hostType.GetProperty("DirectoryChangeLastRefreshRestoreMilliseconds", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var selectionRestorePendingField = hostType.GetField("_directorySelectionRestorePending", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var refreshStatusBefore = (string?)refreshStatusProperty.GetValue(hosts[pane]);
+                var refreshRestoreMillisecondsBefore = (long)refreshRestoreMillisecondsProperty.GetValue(hosts[pane])!;
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
                 var manualRefresh = args[0] == "--live-shell-refresh"
@@ -2805,18 +2810,29 @@ internal static class Program
                 manualRefresh.Invoke(hosts[pane], null);
                 var expectedItems = Directory.GetFiles(folders[pane]).Order(StringComparer.OrdinalIgnoreCase).ToArray();
                 var refreshed = WaitForFolderItems(hostType, hosts[pane], folders[pane], expectedItems, TimeSpan.FromSeconds(10));
+                // Shell rows can match the directory before the asynchronous selection/focus restore finishes.
+                var restorationSettled = WaitForPredicate(() =>
+                {
+                    var status = (string?)refreshStatusProperty.GetValue(hosts[pane]);
+                    var restoreMilliseconds = (long)refreshRestoreMillisecondsProperty.GetValue(hosts[pane])!;
+                    var pending = (bool)selectionRestorePendingField.GetValue(hosts[pane])!;
+                    return status is not null && status != refreshStatusBefore && status.StartsWith("refreshed;", StringComparison.Ordinal) &&
+                        restoreMilliseconds != refreshRestoreMillisecondsBefore && !pending;
+                }, TimeSpan.FromSeconds(5));
                 refreshed &= Count(hosts[pane]) == (deleteSelected ? 2 : 4);
                 var selectedAfterRefresh = SelectedPaths(hostType, hosts[pane], folders[pane]);
                 var focusAfterRefresh = (string?)focusMethod.Invoke(hosts[pane], [folders[pane]]);
+                var selectionRestoredByRefresh = (bool)hostType.GetProperty("DirectoryChangeLastRefreshSelectionRestored", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[pane])!;
+                var focusRestoredByRefresh = (bool)hostType.GetProperty("DirectoryChangeLastRefreshFocusRestored", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(hosts[pane])!;
                 // Refresh must return to the user's pre-change selection; Shell may temporarily select the focused row while enumerating the new item.
                 var expectedSelectionAfterRefresh = deleteSelected ? expectedSelection.Where(File.Exists).ToArray() : expectedSelection;
                 var selectionPreserved = expectedSelectionAfterRefresh.SequenceEqual(selectedAfterRefresh, StringComparer.OrdinalIgnoreCase);
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)
                     : string.Equals(focusBeforeRefresh, focusAfterRefresh, StringComparison.OrdinalIgnoreCase);
-                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refreshed={refreshed} paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
+                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
-                return refreshed && selectionPreserved && focusPreserved ? 0 : 1;
+                return refreshed && restorationSettled && selectionRestoredByRefresh && focusRestoredByRefresh && selectionPreserved && focusPreserved ? 0 : 1;
             }
             if (args[0] is "--cross-pane-drop" or "--cross-pane-drop-multi" or "--cross-pane-drop-effects")
             {

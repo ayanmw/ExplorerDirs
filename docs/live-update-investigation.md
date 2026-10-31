@@ -1937,3 +1937,7 @@ Release HostProbe 的 Changed 元数据入口因反射调用未显式传入 `She
 ## 2026-10-30：保留 watcher 错误诊断至恢复完成
 
 为溢出探针增加恢复后的错误状态断言，旧实现按预期失败：真实 watcher 溢出后最终计数与焦点/选区虽正确，`LastShellRefreshStatus` 已被覆盖为 `refreshed; rows=0`。修正后 HostProbe Release build 0 警告/错误；同一 10,000 项并发本地夹具触发 2 次真实 `FileSystemWatcher.Error`，`LastDirectoryChangeWatcherError` 在恢复结束后仍为 `InternalBufferOverflowException,hr=0x80131905`，目录计数为 `2/2/3/10003`、pending delta 为 0、两处选区/焦点恢复，退出码 0。新导航会清除旧错误，避免把前一目录的诊断误认为当前状态。该字段仅供内部诊断，不是 UI 提示；无可见窗口，网络/虚拟 Shell 与长期溢出行为仍未验证。
+
+### 2026-10-31：F5 HostProbe 等待恢复结算
+
+当前隐藏 `--live-shell-refresh` 探针曾在目录行与磁盘匹配后立即读取选区/焦点；Shell 的刷新恢复由 Dispatcher 异步完成，行先匹配时会读到暂时为空的选择并误报失败。连续两轮旧探针均出现“4 行已刷新、选区 3→0、焦点为空”；没有生产代码变更。探针现额外等待当前刷新状态进入 `refreshed`、选择恢复计时变化且 deferred restore 结束，再断言生产恢复结果。修正后四窗格活动窗格的三项选区/焦点场景通过；第 4 窗格单选场景亦通过，计数、选区与焦点均保持。该修正只提升隐藏 HostProbe 的结算时序，不证明可见像素或黑屏时长变化；F5 空白仍待集中 GUI 验收。
