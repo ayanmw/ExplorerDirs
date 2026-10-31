@@ -2875,6 +2875,49 @@ internal static class ShellViewColorSpike
                     var extractedFiles = ReadExtractedFixtureFiles();
                     var visibleWindows = DescribeVisibleTopLevelWindows();
                     Console.WriteLine($"ishellview-zip-extract: view-menu-files=[{string.Join('|', viewExtractedFiles)}]; physical-files=[{string.Join('|', extractedFiles)}]; visible-windows=[{string.Join('|', visibleWindows)}]; operation-observed={extractedFiles.Length > 0}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    nint archiveParentPidl = 0, archivePidl = 0, archiveParentFolder = 0, archiveChildArray = 0;
+                    nint archiveItemContextMenu = 0, archiveItemMenuHandle = 0;
+                    try
+                    {
+                        Check(SHParseDisplayName(fixture, 0, out archiveParentPidl, 0, out _));
+                        Check(SHParseDisplayName(shellLocation, 0, out archivePidl, 0, out _));
+                        Check(SHBindToObject(0, archiveParentPidl, 0, in shellFolderId, out archiveParentFolder));
+                        var archiveChild = ILFindLastID(archivePidl);
+                        archiveChildArray = Marshal.AllocHGlobal(IntPtr.Size);
+                        Marshal.WriteIntPtr(archiveChildArray, archiveChild);
+                        var archiveContextMenuId = ContextMenuId;
+                        var archiveMenuHr = At<GetUIObjectOf>(archiveParentFolder, 10)(archiveParentFolder, parent,
+                            1, archiveChildArray, in archiveContextMenuId, 0, out archiveItemContextMenu);
+                        Check(archiveMenuHr);
+                        var archiveItemCommands = QueryMenuCommands(archiveItemContextMenu, out archiveItemMenuHandle, out var archiveMenuQueryMilliseconds);
+                        var archiveExtract = archiveItemCommands.FirstOrDefault(command =>
+                            command.Verb.Equals("extract", StringComparison.OrdinalIgnoreCase));
+                        Console.WriteLine($"ishellview-zip-archive-item-menu: commands={archiveItemCommands.Length}; verbs=[{string.Join('|', archiveItemCommands.Select(command => command.Verb))}]; extract-present={archiveExtract is not null}; extract-state={(archiveExtract is null || archiveExtract.State == uint.MaxValue ? "unknown" : (archiveExtract.State & 3) == 0 ? "enabled" : "disabled")}; query-ms={archiveMenuQueryMilliseconds:F2}");
+                        if (archiveExtract is not null && archiveExtract.State != uint.MaxValue && (archiveExtract.State & 3) == 0)
+                        {
+                            var archiveInvoke = new NativeInvokeInfo
+                            {
+                                Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                                Window = parent,
+                                Verb = unchecked((nint)archiveExtract.Offset),
+                                Show = 1
+                            };
+                            var archiveInvokeHr = At<InvokeCommand>(archiveItemContextMenu, 4)(archiveItemContextMenu, ref archiveInvoke);
+                            Pump(2500);
+                            var archiveResultFiles = ReadExtractedFixtureFiles();
+                            var archiveVisibleWindows = DescribeVisibleTopLevelWindows();
+                            Console.WriteLine($"ishellview-zip-archive-item-extract: offset={archiveExtract.Offset}; invoke-hr=0x{archiveInvokeHr:X8}; fixture-files=[{string.Join('|', archiveResultFiles)}]; visible-windows=[{string.Join('|', archiveVisibleWindows)}]; operation-observed={archiveResultFiles.Length > 1}");
+                        }
+                    }
+                    finally
+                    {
+                        if (archiveItemMenuHandle != 0) DestroyMenu(archiveItemMenuHandle);
+                        if (archiveItemContextMenu != 0) Marshal.Release(archiveItemContextMenu);
+                        if (archiveChildArray != 0) Marshal.FreeHGlobal(archiveChildArray);
+                        if (archiveParentFolder != 0) Marshal.Release(archiveParentFolder);
+                        if (archivePidl != 0) Marshal.FreeCoTaskMem(archivePidl);
+                        if (archiveParentPidl != 0) Marshal.FreeCoTaskMem(archiveParentPidl);
+                    }
                     // This is a dispatch diagnostic: S_OK alone must not be treated as an extraction result.
                     return GetForegroundWindow() == foreground ? 0 : 1;
 

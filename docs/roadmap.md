@@ -5446,3 +5446,5 @@ NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数�
 ## 2026-11-01：ZIP extract 经真实菜单循环的隔离诊断
 
 Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `TrackPopupMenu(TPM_RETURNCMD)`，owner 窗口子类按顺序转发根 `WM_INITMENUPOPUP`，并在初始化后由线程 hook 取消菜单。探针观测一次初始化；`IContextMenu3::HandleMenuMsg2` 返回 `E_FAIL`。之后分别按命令偏移 `38` 与 canonical `extract` 调用，均 `S_OK` 但 fixture 没有解压文件；folder-created menu 的 canonical 调用结果相同。故菜单循环存在且命令 dispatch 返回不代表操作成功，真实选择/确认仍待隔离输入方式或可见验收。本轮使用临时 ZIP，前台/last-input 与清理守卫通过；NativeProbe Release build 0 警告/错误。产品与发布包未改。详情见[原型记录](ishellview-color-spike.md#2026-11-01zip-extract-实际-trackpopupmenu-初始化与命令偏移对照)。
+
+随后从 ZIP 归档所在父目录取得归档文件项目的 `IContextMenu`，而不是只调用 ZIP 内部视图的背景菜单。该文件项菜单含 73 个动词，`extract` 启用、偏移 118；标准显示方式调用返回 `S_OK`，但夹具无解压文件。首次未采样调用后的窗口；加上该采样后的复验没有出现额外可见顶层窗口。前台、输入和 Private Desktop 清理守卫通过。目标菜单差异不足以解释无操作；未调用第三方 7-Zip 动词，也未声称解压功能通过。NativeProbe Release build 0 警告/错误。详见[原型记录](ishellview-color-spike.md#2026-11-01zip-extract-实际-trackpopupmenu-初始化与命令偏移对照)。
