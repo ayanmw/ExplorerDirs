@@ -1428,3 +1428,9 @@ NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell �
 该自动化策略不能作为隔离安全的闭环验证方式，临时试验代码已移除，不再重跑。真实 `DoDragDrop` 源端循环及鼠标命中仍未验证；产品继续使用 ExplorerBrowser。后续若要验证，需要采用用户可见且明确授权的交互验收窗口，并由用户控制开始或取消拖动；不得把本次卡住解释为产品缺陷或 Shell 已执行目标 Drop。日志：`src/.state/native-probe-watchdog/20261030-000138-46fb9cf9.stdout.log`。
 
 事后静态对照发现，临时测试源未等待发起鼠标键先进入按下状态；现有隔离源则先观察到发起键按下，再等释放后返回 Drop。微软文档说明 `QueryContinueDrag` 由 OLE 拖放循环在输入状态变化时调用，因此“没有真实按键状态变化，回调未被触发”是一个与卡点相符的假设，但日志没有回调计数或线程栈，无法确认它就是原因。当前可执行的可靠路径仍是已有可见交互探针，由用户在隔离窗口完成拖动；暂不再运行自动释放试验。
+
+### 2026-10-31 `CCM_SETNOTIFYWINDOW` 逐项着色通知路由验证（未通过）
+
+为检验“DefView 原通知路径屏蔽了 `NM_CUSTOMDRAW`”这一新假设，临时 Private Desktop 探针把 `SysListView32` 的通知目标改为隔离 sink，并同步将收到的 `WM_NOTIFY` 转发回原 DefView。微软 `WM_NOTIFY` 文档要求消息发往控件的父窗口；Windows SDK 虽定义 `CCM_SETNOTIFYWINDOW`，但没有提供旧目标返回值或 Shell DefView 组合下的兼容保证，因此探针不把其返回值当作合同。
+
+Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sink 收到并同步转发 16 条通知，但图标视图依旧没有 `NM_CUSTOMDRAW`（逐项回调 0，目标行颜色像素 0）；原有逐项颜色门槛失败。该结果说明改路由没有打开新的逐行绘制回调，且这次提前退出没有覆盖转发后所有 Shell 行为，不能据此声称通知转发完整或适合产品使用。临时路由入口和代码已移除；产品 ExplorerBrowser 与正式 `IShellView` 宿主均未修改。相关 API 说明：[WM_NOTIFY](https://learn.microsoft.com/windows/win32/controls/wm-notify)、本机 SDK `CommCtrl.h` 中的 `CCM_SETNOTIFYWINDOW` 定义。
