@@ -54,8 +54,12 @@ internal static class ShellViewDropTargetProbe
         var targetFolderPath = Path.Combine(root, "target");
         var sourcePath = Path.Combine(sourceFolderPath, "view-target.txt");
         var selectedSourcePath = Path.Combine(sourceFolderPath, "selected-view.txt");
+        var multiSelectedSourcePath = Path.Combine(sourceFolderPath, "multi-selected-a.txt");
+        var secondMultiSelectedSourcePath = Path.Combine(sourceFolderPath, "multi-selected-b.txt");
         var registeredSourcePath = Path.Combine(sourceFolderPath, "registered-target.txt");
         var selectedTargetPath = Path.Combine(targetFolderPath, "selected-view.txt");
+        var multiSelectedTargetPath = Path.Combine(targetFolderPath, "multi-selected-a.txt");
+        var secondMultiSelectedTargetPath = Path.Combine(targetFolderPath, "multi-selected-b.txt");
         var registeredTargetPath = Path.Combine(targetFolderPath, "registered-target.txt");
         var viewTargetPath = Path.Combine(targetFolderPath, "view-target.txt");
         var crossVolumeSourcePath = Path.Combine(sourceFolderPath, "cross-volume.txt");
@@ -64,13 +68,14 @@ internal static class ShellViewDropTargetProbe
         var crossVolumeMoveTargetPath = Path.Combine(crossVolumeRoot, "cross-volume-move.txt");
         var crossVolumeAvailable = !string.Equals(Path.GetPathRoot(root), Path.GetPathRoot(crossVolumeRoot), StringComparison.OrdinalIgnoreCase);
         nint parent = 0, sourcePane = 0, targetPane = 0, sourceFolderPidl = 0, sourceItemPidl = 0,
-            selectedSourcePidl = 0, targetFolderPidl = 0;
+            selectedSourcePidl = 0, multiSelectedSourcePidl = 0, secondMultiSelectedSourcePidl = 0, targetFolderPidl = 0;
         nint sourceFolder = 0, targetFolder = 0, sourceView = 0, targetView = 0;
         nint crossVolumeFolderPidl = 0, crossVolumeFolder = 0, crossVolumeDropTarget = 0, crossVolumeDataObject = 0,
             crossVolumeSourcePidl = 0, crossVolumeChildPidls = 0, crossVolumeMoveDataObject = 0,
             crossVolumeMoveSourcePidl = 0, crossVolumeMoveChildPidls = 0;
         nint sourceViewWindow = 0, targetViewWindow = 0, sourceHostPointer = 0, targetHostPointer = 0, sourceFolderView = 0;
-        nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, childPidls = 0;
+        nint folderDropTarget = 0, viewDropTarget = 0, dataObject = 0, selectedDataObject = 0, multiSelectedDataObject = 0,
+            childPidls = 0, multiSelectedChildPidls = 0;
         StreamViewHost? sourceHost = null, targetHost = null;
         var sourceCreateAttempted = false;
         var targetCreateAttempted = false;
@@ -82,10 +87,14 @@ internal static class ShellViewDropTargetProbe
             Directory.CreateDirectory(targetFolderPath);
             File.WriteAllText(sourcePath, "native-shell-drop-fixture");
             File.WriteAllText(selectedSourcePath, "native-shell-selected-view-fixture");
+            File.WriteAllText(multiSelectedSourcePath, "native-shell-multi-selected-a-fixture");
+            File.WriteAllText(secondMultiSelectedSourcePath, "native-shell-multi-selected-b-fixture");
             File.WriteAllText(registeredSourcePath, "native-shell-folder-drop-fixture");
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourceFolderPath, 0, out sourceFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourcePath, 0, out sourceItemPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(selectedSourcePath, 0, out selectedSourcePidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(multiSelectedSourcePath, 0, out multiSelectedSourcePidl, 0, out _));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(secondMultiSelectedSourcePath, 0, out secondMultiSelectedSourcePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(targetFolderPath, 0, out targetFolderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, sourceFolderPidl, 0, in ShellFolderId, out sourceFolder));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, targetFolderPidl, 0, in ShellFolderId, out targetFolder));
@@ -135,13 +144,22 @@ internal static class ShellViewDropTargetProbe
             // Keep the selected PIDL paired with its expected target name; a mismatch once made a successful copy look like a failure.
             var selectedChildPidl = ILFindChild(sourceFolderPidl, selectedSourcePidl);
             if (selectedChildPidl == 0) throw new InvalidOperationException("The selected source item is not a child of its folder.");
+            var multiSelectedChildPidl = ILFindChild(sourceFolderPidl, multiSelectedSourcePidl);
+            var secondMultiSelectedChildPidl = ILFindChild(sourceFolderPidl, secondMultiSelectedSourcePidl);
+            if (multiSelectedChildPidl == 0 || secondMultiSelectedChildPidl == 0)
+                throw new InvalidOperationException("A multi-selected source item is not a child of its folder.");
+            multiSelectedChildPidls = Marshal.AllocHGlobal(2 * IntPtr.Size);
+            Marshal.WriteIntPtr(multiSelectedChildPidls, 0, multiSelectedChildPidl);
+            Marshal.WriteIntPtr(multiSelectedChildPidls, IntPtr.Size, secondMultiSelectedChildPidl);
+            Marshal.ThrowExceptionForHR(SHCreateDataObject(sourceFolderPidl, 2, multiSelectedChildPidls, 0,
+                in DataObjectId, out multiSelectedDataObject));
             var sourceItemCount = 0;
             var enumerationDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
             do
             {
                 System.Windows.Forms.Application.DoEvents();
                 Marshal.ThrowExceptionForHR(At<ItemCount>(sourceFolderView, 7)(sourceFolderView, 2, out sourceItemCount));
-                if (sourceItemCount == 3) break;
+                if (sourceItemCount == 5) break;
                 Thread.Sleep(10);
             } while (DateTime.UtcNow < enumerationDeadline);
             Console.WriteLine($"shell-view-drop-target-stage: source-items={sourceItemCount}");
@@ -281,16 +299,26 @@ internal static class ShellViewDropTargetProbe
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
                 selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture",
                 expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
+            var multiSelectedDataObjectResult = multiSelectedDataObject != 0 && TryTransfer(folderDropTarget,
+                multiSelectedDataObject, point, multiSelectedTargetPath, "two-item selected view IDataObject",
+                "native-shell-multi-selected-a-fixture", expectedEffect: DropEffectCopy,
+                modifierKeyState: KeyStateControl, additionalExpectedContents: new Dictionary<string, string>
+                {
+                    [secondMultiSelectedTargetPath] = "native-shell-multi-selected-b-fixture"
+                });
             if (recreateTargetViewWindow)
             {
                 var sourcePreserved = File.Exists(selectedSourcePath) &&
-                    File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture";
+                    File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
+                    File.Exists(multiSelectedSourcePath) && File.Exists(secondMultiSelectedSourcePath);
                 var destinationValid = File.Exists(selectedTargetPath) &&
-                    File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture";
+                    File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture" &&
+                    File.Exists(multiSelectedTargetPath) && File.ReadAllText(multiSelectedTargetPath) == "native-shell-multi-selected-a-fixture" &&
+                    File.Exists(secondMultiSelectedTargetPath) && File.ReadAllText(secondMultiSelectedTargetPath) == "native-shell-multi-selected-b-fixture";
                 var foregroundUnchanged = GetForegroundWindow() == foreground;
-                Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated=True; selected-view-data-copy={selectedDataObjectResult}; source-preserved={sourcePreserved}; destination-valid={destinationValid}; foreground-unchanged={foregroundUnchanged}; actual-DoDragDrop=False; cross-volume-and-move-cases=not-run");
-                if (!selectedDataObjectResult || !sourcePreserved || !destinationValid || !foregroundUnchanged)
-                    throw new InvalidOperationException("The recreated Shell view drop target did not copy the selected item or preserve the foreground window.");
+                Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated=True; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; source-preserved={sourcePreserved}; destination-valid={destinationValid}; foreground-unchanged={foregroundUnchanged}; actual-DoDragDrop=False; cross-volume-and-move-cases=not-run");
+                if (!selectedDataObjectResult || !multiSelectedDataObjectResult || !sourcePreserved || !destinationValid || !foregroundUnchanged)
+                    throw new InvalidOperationException("The recreated Shell view drop target did not copy the selected items or preserve the foreground window.");
                 PrivateDesktopShellProbe.ReportStage("drop-target: recreated-view-transfer-complete");
                 return 0;
             }
@@ -359,14 +387,20 @@ internal static class ShellViewDropTargetProbe
 
             var sourceStatesValid = !File.Exists(sourcePath) &&
                 File.Exists(selectedSourcePath) && File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture" &&
+                File.Exists(multiSelectedSourcePath) && File.ReadAllText(multiSelectedSourcePath) == "native-shell-multi-selected-a-fixture" &&
+                File.Exists(secondMultiSelectedSourcePath) && File.ReadAllText(secondMultiSelectedSourcePath) == "native-shell-multi-selected-b-fixture" &&
                 (!crossVolumeAvailable || File.Exists(crossVolumeSourcePath) &&
                     File.ReadAllText(crossVolumeSourcePath) == "native-shell-cross-volume-fixture" &&
                     !File.Exists(crossVolumeMoveSourcePath)) &&
                 !File.Exists(secondSourcePath);
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated={recreateTargetViewWindow}; view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
-            if (!folderTargetResult || !selectedDataObjectResult || !defaultMoveResult ||
+            var multiSelectedDestinationValid = File.Exists(multiSelectedTargetPath) &&
+                File.ReadAllText(multiSelectedTargetPath) == "native-shell-multi-selected-a-fixture" &&
+                File.Exists(secondMultiSelectedTargetPath) &&
+                File.ReadAllText(secondMultiSelectedTargetPath) == "native-shell-multi-selected-b-fixture";
+            Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated={recreateTargetViewWindow}; view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; multi-selected-view-data-copy={multiSelectedDataObjectResult}; multi-selected-destination-valid={multiSelectedDestinationValid}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            if (!folderTargetResult || !selectedDataObjectResult || !multiSelectedDataObjectResult || !multiSelectedDestinationValid || !defaultMoveResult ||
                 crossVolumeAvailable && (!crossVolumeCopyResult || !crossVolumeMoveResult) || !sourceStatesValid)
                 throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");
             PrivateDesktopShellProbe.ReportStage("drop-target: transfer-complete");
@@ -391,6 +425,7 @@ internal static class ShellViewDropTargetProbe
             if (crossVolumeDataObject != 0) Marshal.Release(crossVolumeDataObject);
             if (crossVolumeMoveDataObject != 0) Marshal.Release(crossVolumeMoveDataObject);
             if (selectedDataObject != 0) Marshal.Release(selectedDataObject);
+            if (multiSelectedDataObject != 0) Marshal.Release(multiSelectedDataObject);
             if (dataObject != 0) Marshal.Release(dataObject);
             if (sourceFolderView != 0) Marshal.Release(sourceFolderView);
             if (sourceView != 0) Marshal.Release(sourceView);
@@ -405,7 +440,10 @@ internal static class ShellViewDropTargetProbe
             if (crossVolumeSourcePidl != 0) Marshal.FreeCoTaskMem(crossVolumeSourcePidl);
             if (crossVolumeMoveSourcePidl != 0) Marshal.FreeCoTaskMem(crossVolumeMoveSourcePidl);
             if (selectedSourcePidl != 0) Marshal.FreeCoTaskMem(selectedSourcePidl);
+            if (multiSelectedSourcePidl != 0) Marshal.FreeCoTaskMem(multiSelectedSourcePidl);
+            if (secondMultiSelectedSourcePidl != 0) Marshal.FreeCoTaskMem(secondMultiSelectedSourcePidl);
             if (childPidls != 0) Marshal.FreeHGlobal(childPidls);
+            if (multiSelectedChildPidls != 0) Marshal.FreeHGlobal(multiSelectedChildPidls);
             if (crossVolumeChildPidls != 0) Marshal.FreeHGlobal(crossVolumeChildPidls);
             if (crossVolumeMoveChildPidls != 0) Marshal.FreeHGlobal(crossVolumeMoveChildPidls);
             if (interactiveOle)
@@ -438,7 +476,8 @@ internal static class ShellViewDropTargetProbe
     }
 
     private static bool TryTransfer(nint target, nint dataObject, PointL point, string destination, string label,
-        string expectedContents, uint expectedEffect, uint modifierKeyState = 0, string? sourcePath = null)
+        string expectedContents, uint expectedEffect, uint modifierKeyState = 0, string? sourcePath = null,
+        IReadOnlyDictionary<string, string>? additionalExpectedContents = null)
     {
         if (expectedEffect is not (DropEffectCopy or DropEffectMove))
             throw new ArgumentOutOfRangeException(nameof(expectedEffect));
@@ -480,7 +519,9 @@ internal static class ShellViewDropTargetProbe
         if (dropHr < 0) throw new COMException($"{label} Drop failed", dropHr);
         PrivateDesktopShellProbe.ReportStage($"drop-target: {label}: drop-complete");
         LogAsyncOperationState(label, dataObject, "after-drop");
-        var targetHasExpectedContents = File.Exists(destination) && File.ReadAllText(destination) == expectedContents;
+        var targetHasExpectedContents = File.Exists(destination) && File.ReadAllText(destination) == expectedContents &&
+            (additionalExpectedContents is null || additionalExpectedContents.All(item =>
+                File.Exists(item.Key) && File.ReadAllText(item.Key) == item.Value));
         var sourceStateMatchesEffect = sourcePath is null ||
             (expectedEffect == DropEffectCopy && File.Exists(sourcePath) && File.ReadAllText(sourcePath) == expectedContents) ||
             (expectedEffect == DropEffectMove && !File.Exists(sourcePath));
