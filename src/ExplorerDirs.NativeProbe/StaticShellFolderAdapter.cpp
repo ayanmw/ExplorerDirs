@@ -1880,7 +1880,8 @@ namespace
             if (message == SFVM_FSNOTIFY)
             {
                 TraceSyntheticSortStage("synthetic-sort: SFVM_FSNOTIFY");
-                return ScheduleRefresh();
+                // S_OK consumes this notification. Let DefView apply its default filesystem update.
+                return E_NOTIMPL;
             }
             if (message == SFVM_SETISFV)
             {

@@ -808,6 +808,10 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 重建后的目录通知探针另发现一项未通过合同：在 backing 文件夹写入新文件并发送 `SHCNE_UPDATEDIR` 后，view host 收到两次 `SFVM_FSNOTIFY` 并执行延迟刷新，但 3 秒后仍为 302 行；再显式调用 `IShellView.Refresh`，新项目仍未显示，provider `EnumObjects` 计数也未变化。用 `SHCNE_CREATE` 的首轮同样没有可见项目。首次尝试通过合成 folder `ParseDisplayName` 构造通知 PIDL 时 45 秒 watchdog 超时，阶段日志停在 Shell `Initialize`/backing parse；改用物理 backing 路径 PIDL 后不再卡住，前台/输入守卫通过，但刷新合同仍失败。由此只能确认通知回调到达，不能确认重建后的 DefView 会重枚举新项目；需继续检查通知到刷新/缓存失效的接口边界。watchdog 中止的一轮未执行 probe `finally`，留下该次 UUID 夹具和对应 HKCU 测试注册，清理动作被自动审批拦截，未尝试绕过。
 
+随后用普通 filesystem `IShellView` 做对照：`SHCNE_UPDATEDIR` 将 301 行更新到 302 行，过程中列表未变为空，view/list HWND 均保持不变。合成 provider 的差异在 `SFVM_FSNOTIFY` 回调：原实现返回 `S_OK` 并排队 `IShellView::Refresh`，虽然回调到达且刷新函数返回，`EnumObjects` 仍为 0 次。Microsoft 对 `IShellFolderViewCB::MessageSFVCB` 的约定是 `S_OK` 表示回调已经处理消息，`E_NOTIMPL` 表示由系统 folder view 执行默认处理（[MessageSFVCB return values](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolderviewcb-messagesfvcb)）。将隔离 adapter 的 `SFVM_FSNOTIFY` 改为返回 `E_NOTIMPL` 后，滚动锚点/重建场景的通知测试重复一次通过：新文件可见、重新枚举 1 次、host 延迟刷新计数 0，探针 exit code 0，前台与输入守卫未变化。第二次功能断言仍通过，但探针运行期间前台从 WXWork 切到 LDPlayer，整轮按守卫失败保留，不能计作第二次隔离通过。该结论只适用于当前隔离 adapter/DefView 原型；尚未迁入产品 ExplorerBrowser，也没有验证颜色列、排序列或多 pane 通知。
+
+修复探针 watchdog 的资源归属：每轮由 watchdog 生成 UUID，并通过环境变量把同一 UUID 交给 NativeProbe，作为该轮 CLSID 与夹具目录名；watchdog 只删除该 UUID 下、带有本项目归属标记的注册项和路径。它不会清理此前固定/旧 UUID 的遗留测试项；本次复核仍能看到 `{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}` 与 `{67ba5919-8352-4a9b-83a4-9859d280f4fe}` 两组带项目标记的 HKCU 项，以及 `C:\Users\marvin\AppData\Local\Temp\ExplorerDirs-SyntheticShellSort`、`...-Copy` 和 `ExplorerDirs-SyntheticShellSort-8b8d4c6985804e7aaff40d0443230f25`、`...-Copy-8b8d4c6985804e7aaff40d0443230f25` 夹具目录。它们未被本批次触碰，需后续单独审视，不能因新 watchdog 运行通过而视为已清理。
+
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
 新增无窗口 `--filesystem-folder-background-menu` 探针，在带一个文件和一个子目录的临时 filesystem 位置上绑定真实 `IShellFolder`，直接调用 `CreateViewObject(IContextMenu)` 并将菜单构造到内存 `HMENU`。本机返回 `S_OK`，`QueryContextMenu` 也成功，顶层有 21 个菜单项；标签包含第三方扩展、“新建”和“属性”，没有视图级“查看、排序方式、分组依据、刷新”。没有创建 `IShellView`、窗口或可见 popup，也没有执行命令。

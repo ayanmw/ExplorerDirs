@@ -158,13 +158,11 @@ public static class ExplorerDirsTimeoutDumpWriter {
 $runId = '{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), ([Guid]::NewGuid().ToString('N').Substring(0, 8))
 $stdoutPath = Join-Path $logDirectory "$runId.stdout.log"
 $stderrPath = Join-Path $logDirectory "$runId.stderr.log"
-# The synthetic sort probe uses one reserved per-user CLSID and Desktop namespace
-# registration. Refuse to touch either pre-existing key, then remove both even if
-# the child must be killed by this watchdog before its own finally block runs.
-$syntheticClassKey = 'HKCU:\Software\Classes\CLSID\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
-$syntheticNamespaceKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{A17D2A61-4C0B-4B22-8E36-35D92CBC1170}'
-$syntheticBackingFolder = Join-Path ([IO.Path]::GetTempPath()) 'ExplorerDirs-SyntheticShellSort'
-$syntheticCopyDestination = Join-Path ([IO.Path]::GetTempPath()) 'ExplorerDirs-SyntheticShellSort-Copy'
+$syntheticRunId = if ($syntheticShellProbe) { [Guid]::NewGuid().ToString('N') } else { $null }
+$syntheticClassKey = if ($syntheticShellProbe) { "HKCU:\Software\Classes\CLSID\{$([Guid]::ParseExact($syntheticRunId, 'N').ToString('D'))}" } else { $null }
+$syntheticNamespaceKey = if ($syntheticShellProbe) { "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{$([Guid]::ParseExact($syntheticRunId, 'N').ToString('D'))}" } else { $null }
+$syntheticBackingFolder = if ($syntheticShellProbe) { Join-Path ([IO.Path]::GetTempPath()) "ExplorerDirs-SyntheticShellSort-$syntheticRunId" } else { $null }
+$syntheticCopyDestination = if ($syntheticShellProbe) { Join-Path ([IO.Path]::GetTempPath()) "ExplorerDirs-SyntheticShellSort-Copy-$syntheticRunId" } else { $null }
 if ($syntheticShellProbe) {
     if (Test-Path -LiteralPath $syntheticClassKey) {
         throw "Refusing synthetic Shell sort probe because its reserved CLSID key already exists: $syntheticClassKey"
@@ -179,10 +177,36 @@ if ($syntheticShellProbe) {
         throw "Refusing synthetic Shell sort probe because its reserved copy destination already exists: $syntheticCopyDestination"
     }
 }
+function Remove-SyntheticProbeArtifacts {
+    $ownerMarker = 'ExplorerDirs isolated synthetic sort probe'
+    foreach ($keyPath in @($syntheticNamespaceKey, $syntheticClassKey)) {
+        if (-not (Test-Path -LiteralPath $keyPath)) { continue }
+        $registeredOwner = (Get-Item -LiteralPath $keyPath).GetValue('')
+        if ($registeredOwner -cne $ownerMarker) {
+            Write-Warning "Leaving synthetic probe registry key with a different owner marker: $keyPath"
+            continue
+        }
+        Remove-Item -LiteralPath $keyPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($directoryPath in @($syntheticBackingFolder, $syntheticCopyDestination)) {
+        if (Test-Path -LiteralPath $directoryPath -PathType Container) {
+            Remove-Item -LiteralPath $directoryPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 # Keep native Shell probes outside the app process so a probe crash or hang
 # cannot terminate Explorer Dirs itself.
-$process = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $repoRoot `
-    -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+$previousSyntheticRunId = [Environment]::GetEnvironmentVariable('EXPLORER_DIRS_NATIVEPROBE_RUN_ID', 'Process')
+try {
+    if ($syntheticShellProbe) {
+        [Environment]::SetEnvironmentVariable('EXPLORER_DIRS_NATIVEPROBE_RUN_ID', $syntheticRunId, 'Process')
+    }
+    $process = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $repoRoot `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+}
+finally {
+    [Environment]::SetEnvironmentVariable('EXPLORER_DIRS_NATIVEPROBE_RUN_ID', $previousSyntheticRunId, 'Process')
+}
 
 if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     if (-not [string]::IsNullOrWhiteSpace($timeoutDumpPath)) {
@@ -203,10 +227,7 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
     }
     $process.WaitForExit()
     if ($syntheticShellProbe) {
-        Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $syntheticBackingFolder -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $syntheticCopyDestination -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-SyntheticProbeArtifacts
     }
     if ($TestTimeoutPath) {
         $grandchildId = if (Test-Path -LiteralPath $timeoutTreePidPath) {
@@ -242,10 +263,7 @@ if (-not $process.WaitForExit($runTimeoutSeconds * 1000)) {
 $process.WaitForExit() # Drain redirected output after process termination.
 $exitCode = $process.ExitCode
 if ($syntheticShellProbe) {
-    Remove-Item -LiteralPath $syntheticNamespaceKey -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $syntheticClassKey -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $syntheticBackingFolder -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $syntheticCopyDestination -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-SyntheticProbeArtifacts
 }
 Write-Output "status=exited; exitCode=$exitCode; stdout=$stdoutPath; stderr=$stderrPath"
 if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Encoding oem }

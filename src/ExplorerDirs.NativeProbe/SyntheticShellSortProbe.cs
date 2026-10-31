@@ -92,10 +92,13 @@ public static class SyntheticShellSortProbe
         if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
-        var syntheticFolderClassId = Guid.NewGuid();
+        var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
+        if (runIdText is not null && !Guid.TryParseExact(runIdText, "N", out _))
+            throw new ArgumentException("EXPLORER_DIRS_NATIVEPROBE_RUN_ID must be a GUID in N format.");
+        var fixtureId = runIdText ?? Guid.NewGuid().ToString("N");
+        var syntheticFolderClassId = Guid.ParseExact(fixtureId, "N");
         // A prior interrupted probe may leave its fixture behind; each run owns a fresh path
         // so it can proceed without reusing or deleting another run's artifacts.
-        var fixtureId = Guid.NewGuid().ToString("N");
         var backingFolder = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-{fixtureId}");
         var copyDestination = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-Copy-{fixtureId}");
         if (Directory.Exists(backingFolder))
@@ -1163,16 +1166,10 @@ public static class SyntheticShellSortProbe
             var enumCountAfter = ReadCounter(module, "GetSyntheticEnumObjectsCount");
             var callbackCountAfter = ReadCounter(module, "GetSyntheticDeferredRefreshCount");
             var itemVisible = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
-            if (!itemVisible)
-            {
-                Check(At<RefreshView>(view, 8)(view));
-                Pump(400);
-                names = ReadNames(listView, module, expectedCount: -1);
-            }
-            var explicitRefreshVisible = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
-            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR; notification-visible={itemVisible}; explicit-refresh-visible={explicitRefreshVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}; deferred-callbacks={callbackCountAfter - callbackCountBefore}");
-            if (callbackCountAfter <= callbackCountBefore || !explicitRefreshVisible)
-                throw new TimeoutException("The recreated Shell view did not run its deferred notification callback or an explicit refresh did not expose the new file.");
+            var deferredCallbacks = callbackCountAfter - callbackCountBefore;
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR; notification-visible={itemVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}; deferred-callbacks={deferredCallbacks}");
+            if (!itemVisible || deferredCallbacks != 0)
+                throw new TimeoutException("The recreated Shell view did not use default SFVM_FSNOTIFY processing to expose the new file without a host-scheduled refresh.");
         }
         finally { ILFree(absolutePidl); }
     }
