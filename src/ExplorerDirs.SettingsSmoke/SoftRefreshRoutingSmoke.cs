@@ -26,7 +26,8 @@ internal static class SoftRefreshRoutingSmoke
         finally { Directory.Delete(preferenceRoot, recursive: true); }
 
         Check(markup.Contains("x:Name=\"SoftRefreshMenu\"", StringComparison.Ordinal) &&
-              markup.Contains("刷新时不重新枚举", StringComparison.Ordinal),
+              markup.Contains("Header=\"Soft-Refresh（不重枚举/防止自动重排）\"", StringComparison.Ordinal) &&
+              markup.Contains("ToolTip=\"阻止 Shell 刷新时重新枚举当前列表", StringComparison.Ordinal),
             "View menu names Soft-Refresh and explains re-enumeration behavior");
         Check(window.Contains("SoftRefresh.ini", StringComparison.Ordinal) &&
               window.Contains("pane.SetSoftRefresh(next)", StringComparison.Ordinal),
