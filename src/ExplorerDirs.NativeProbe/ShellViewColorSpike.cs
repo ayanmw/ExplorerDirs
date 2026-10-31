@@ -4081,17 +4081,25 @@ internal static class ShellViewColorSpike
             RefreshFixtureColorMap(folderView, fixturePaths);
             ClearNativeViewMenuColorSelection();
             var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            var captureAttempts = 1;
+            while ((capture.CustomDrawItems < fixturePaths.Length || capture.RowHits.Any(hit => hit <= 0)) && captureAttempts < 8)
+            {
+                Pump(80);
+                RefreshFixtureColorMap(folderView, fixturePaths);
+                capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+                captureAttempts++;
+            }
             var pixels = string.Join('/', capture.RowHits);
             var colorVerified = capture.CustomDrawItems >= fixturePaths.Length && capture.RowHits.All(hit => hit > 0);
             if (!colorVerified)
-                throw new InvalidOperationException($"Native {transition.Name} sorting/grouping did not restore identity-mapped colors: callbacks={capture.CustomDrawItems}; pixels={pixels}.");
+                throw new InvalidOperationException($"Native {transition.Name} sorting/grouping did not restore identity-mapped colors after {captureAttempts} captures: callbacks={capture.CustomDrawItems}; pixels={pixels}.");
             var drawIdentity = capture.DrawItems.Length == 0 ? "none" :
                 MapCustomDrawItemsToFixtureFiles(folderView, fixturePaths, capture.DrawItems);
             var nativeSyncTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
                 line.Contains("reason=sort-group", StringComparison.Ordinal) &&
                 line.Contains($"list-mode=", StringComparison.Ordinal)));
             transitions.Add(transitionState + $";draw={drawIdentity};callbacks={capture.CustomDrawItems};pixels={pixels};" +
-                $"color-ok={colorVerified};native-sync={nativeSyncTrace}");
+                $"capture-attempts={captureAttempts};color-ok={colorVerified};native-sync={nativeSyncTrace}");
         }
 
         Check(At<SetGroupBy>(folderView, 17)(folderView, ref noGroup, 0));
