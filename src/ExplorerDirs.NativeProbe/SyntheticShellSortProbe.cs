@@ -1008,7 +1008,7 @@ public static class SyntheticShellSortProbe
             VerifyRecreatedViewSelectionCopy(view, backingFolder,
                 copyDestination ?? throw new InvalidOperationException("The recreated-view copy destination was not provided."),
                 expectedNextName);
-            VerifyRecreatedViewDirectoryNotification(view, backingFolder, listView, module);
+            VerifyRecreatedViewDirectoryNotification(view, backingFolder, copyDestination, listView, module);
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
@@ -1173,7 +1173,8 @@ public static class SyntheticShellSortProbe
         finally { Marshal.Release(selectionDataObject); }
     }
 
-    private static void VerifyRecreatedViewDirectoryNotification(nint view, string backingFolder, nint listView, nint module)
+    private static void VerifyRecreatedViewDirectoryNotification(nint view, string backingFolder, string copyDestination,
+        nint listView, nint module)
     {
         var translateChildNotifications = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
             "SetSyntheticChildNotificationTranslationForProbe"));
@@ -1340,7 +1341,7 @@ public static class SyntheticShellSortProbe
             if (!shellDeleteVisible || deleteEnumCalls != 1 || deleteQueued != 1 || deleteSent != 1)
                 throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete without a manually supplied parent update.");
 
-            VerifyFolderLifecycleNotifications(view, listView, module, backingFolder);
+            VerifyFolderLifecycleNotifications(view, listView, module, backingFolder, copyDestination);
 
             // A real view owner must cancel the adapter's delayed parent update before destroying the view.
             var queuedBeforeCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
@@ -1385,7 +1386,8 @@ public static class SyntheticShellSortProbe
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}/{column.Direction}"));
 
-    private static void VerifyFolderLifecycleNotifications(nint view, nint listView, nint module, string backingFolder)
+    private static void VerifyFolderLifecycleNotifications(nint view, nint listView, nint module, string backingFolder,
+        string copyDestination)
     {
         var folderName = "notify-folder";
         var renamedFolderName = "notify-renamed-folder";
@@ -1411,6 +1413,36 @@ public static class SyntheticShellSortProbe
         Console.WriteLine($"synthetic-size-update-notification: event=IFileOperation-NewItem-folder(SHCNE_MKDIR=0x{ShcneMakeDirectory:X}); visible={mkdirVisible}; enum-calls={mkdirEnumCalls}; translated-queued={mkdirQueued}; translated-sent={mkdirSent}");
         if (!mkdirVisible || mkdirQueued < 1 || mkdirSent < 1)
             throw new TimeoutException("A Shell-created folder did not reach the synthetic view through its translated lifecycle notification.");
+
+        // A folder arriving from a sibling directory is a distinct Shell change path from NewItem.
+        // Keep the source outside the watched backing folder so only the destination view is observed.
+        var incomingFolderName = "notify-moved-in-folder";
+        var incomingSourcePath = Path.Combine(copyDestination, incomingFolderName);
+        var incomingTargetPath = Path.Combine(backingFolder, incomingFolderName);
+        Directory.CreateDirectory(incomingSourcePath);
+        File.WriteAllText(Path.Combine(incomingSourcePath, "child.txt"), "incoming");
+        WaitForChildNotificationTranslationToSettle(module);
+        enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        MoveFilesystemShellItemIntoFolder(incomingSourcePath, backingFolder);
+        deadline = Environment.TickCount64 + 3000;
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (names.Contains(incomingFolderName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var movedInEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var movedInQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var movedInSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var movedInVisible = !Directory.Exists(incomingSourcePath) && Directory.Exists(incomingTargetPath) &&
+            File.ReadAllText(Path.Combine(incomingTargetPath, "child.txt")) == "incoming" &&
+            names.Contains(incomingFolderName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-MoveItem-folder; event=SHCNE_MKDIR(0x{ShcneMakeDirectory:X}); visible={movedInVisible}; enum-calls={movedInEnumCalls}; translated-queued={movedInQueued}; translated-sent={movedInSent}");
+        if (!movedInVisible || movedInEnumCalls != 1 || movedInQueued != 1 || movedInSent != 1)
+            throw new TimeoutException("A Shell-moved-in folder did not reach the synthetic view through its translated lifecycle notification.");
 
         SetListViewSelectionAndFocus(listView, folderName, names);
         enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
@@ -1661,6 +1693,35 @@ public static class SyntheticShellSortProbe
             Marshal.Release(operation);
             Marshal.Release(destination);
         }
+    }
+
+    private static void MoveFilesystemShellItemIntoFolder(string sourcePath, string destinationFolder)
+    {
+        var shellItemInterface = ShellItemId;
+        Check(SHCreateItemFromParsingName(sourcePath, 0, ref shellItemInterface, out var source));
+        try
+        {
+            shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destination));
+            try
+            {
+                var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+                var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+                var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+                Check(createOperationHr);
+                try
+                {
+                    Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                    Check(At<MoveItem>(operation, 14)(operation, source, destination, null));
+                    Check(At<PerformOperations>(operation, 21)(operation));
+                    Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                    if (aborted != 0) throw new IOException("The isolated Shell move-in operation was aborted.");
+                }
+                finally { Marshal.Release(operation); }
+            }
+            finally { Marshal.Release(destination); }
+        }
+        finally { Marshal.Release(source); }
     }
 
     private static void MoveSelectedShellItemToFilesystemFolder(nint view, nint listView, nint module,
@@ -2171,6 +2232,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, string? name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ReleaseViewHold();

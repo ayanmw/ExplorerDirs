@@ -1,4 +1,6 @@
 # 路线图
+2026-11-01 隔离 IShellView 接收移入文件夹通知：扩展 synthetic view 的真实 `IFileOperation::MoveItem` 场景，从旁侧临时目录把含文件的子目录移入当前 backing folder。Shell 实际发出 `SHCNE_MKDIR`，adapter 仅排队/发送一次父目录更新，view 只重枚举一次，目标列表及子文件内容均正确；Private Desktop 前台、输入和清理守卫通过。该测试补齐接收端文件夹移动路径的隔离证据，不是用户可见拖放、跨 pane OLE `DoDragDrop` 或 ExplorerBrowser 产品接线。详情见[隔离通知调查](folder-size-column-investigation.md#2026-11-01隔离-ishellview-接收移入文件夹通知)。
+
 2026-11-01 更新主线集中验收候选：从干净主线 `661c61e6e49ced35e08be11724c324bafb5b0a7a` 执行 GuiSmoke `-PrepareOnly`，生成 `src/.state/gui-smoke/20261031-161150-379-a166ce/`，`prepared-not-run`，47 项待验收。BuildIdentity 与 EXE/App DLL 哈希已和 preparation manifest 独立核对；未启动窗口或创建 ExplorerBrowser。候选特别覆盖 F5 连按/虚拟位置及查看方式切换时的画面与输入命中；这些仍待用户可见验收。详见[当前验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-11-01 隔离 Shell 行模型通知补齐文件夹生命周期：事件分类 smoke 覆盖 SHCNE_MKDIR/RMDIR/RENAMEFOLDER 与 SHCNE_INTERRUPT。WPF 根 Private Desktop 的真实 synthetic IShellView 中，IFileOperation 新建、改名、删除文件夹均到达对应事件；每项只排队一次父目录更新并只重枚举一次，列表与磁盘结果一致。NativeProbe Release build 0 警告/错误，Private Desktop 前台/输入守卫与隔离资源清理通过。仍是 NativeProbe 原型，产品 ExplorerBrowser 未改。详见[调查记录](folder-size-column-investigation.md)。
