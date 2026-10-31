@@ -1974,7 +1974,7 @@ internal static class StaticShellFolderAdapterProbe
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityCacheSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityCacheSmoke"))(
                     projectionFixture, childParsingName, otherChildParsingName, checked((long)snapshot.Bytes), 12, 6));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; same-pidl-update=6B/text/property/sort-passed; re-enumerated-pidl-retained=passed; window-created=False");
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; same-pidl-update=6B/text/property/sort-passed; re-enumerated-pidl-retained=passed; provider-recreation=retained; window-created=False");
         }
         finally
         {

@@ -1,5 +1,13 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：扫描快照跨 provider 重建
+
+将递归大小表从 `SyntheticSortFolder` 单实例字段提取为可引用共享的 `SyntheticRecursiveSizeSnapshotStore`。同一 provider 创建的嵌套 folder provider 共享该 store；NativeProbe 则保留 store 所有权、释放旧 provider，再构造新 provider 并复用 store。新 provider 对重新解析出来的 sibling PIDL 继续按绝对 Shell parsing name 读取各自的 6 B/12 B 快照，列文本、`VT_UI8` 属性和相对 8 B 文件的数值排序均通过。
+
+验证：原生 Release DLL 构建成功；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release -- --static-shell-column-folder-smoke` 退出码 0，输出含 `re-enumerated-pidl-retained=passed`、`provider-recreation=retained` 和 `window-created=False`。probe 显式把共享 store 传给新 provider，证明的是 store 生命周期合同，不证明 Shell class factory 会自动让新对象取得同一 store。
+
+边界：扫描结果如何由产品 owner 持有并注入重建后的 provider 尚未接线；静态 class factory 创建独立 provider 时仍会产生独立 store。该 probe 不建 Shell view 窗口，不验证 DefView 的列刷新、可见排序、菜单/焦点/拖放、通知或 Q-Dir 互操作。产品仍用 ExplorerBrowser，逐行大小列仍为 P2 原型。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。

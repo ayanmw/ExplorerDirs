@@ -1215,6 +1215,42 @@ namespace
         }
     };
 
+    class SyntheticRecursiveSizeSnapshotStore final
+    {
+    public:
+        ULONG AddRef() { return InterlockedIncrement(&_references); }
+        ULONG Release()
+        {
+            const auto references = InterlockedDecrement(&_references);
+            if (!references) delete this;
+            return references;
+        }
+        HRESULT Set(PCWSTR parsingName, ULONGLONG bytes)
+        {
+            if (!parsingName || !*parsingName) return E_INVALIDARG;
+            try
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                _sizes[parsingName] = bytes;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            return S_OK;
+        }
+        bool TryGet(const std::wstring& parsingName, ULONGLONG* bytes) const
+        {
+            if (!bytes) return false;
+            std::lock_guard<std::mutex> lock(_mutex);
+            const auto found = _sizes.find(parsingName);
+            if (found == _sizes.end()) return false;
+            *bytes = found->second;
+            return true;
+        }
+    private:
+        volatile LONG _references = 1;
+        mutable std::mutex _mutex;
+        std::map<std::wstring, ULONGLONG, ShellParsingNameLess> _sizes;
+    };
+
     constexpr SyntheticChild kSyntheticChildren[] =
     {
         { sizeof(SyntheticChild), 1, 100, 0, L"a-large.bin" },
@@ -1744,7 +1780,12 @@ namespace
     class SyntheticSortFolder final : public IShellFolder2, public IPersistFolder2, public IShellFolderViewCB
     {
     public:
-        SyntheticSortFolder() { InterlockedIncrement(&g_syntheticLiveObjects); }
+        explicit SyntheticSortFolder(SyntheticRecursiveSizeSnapshotStore* recursiveSizeStore = nullptr)
+            : _recursiveSizeStore(recursiveSizeStore ? recursiveSizeStore : new (std::nothrow) SyntheticRecursiveSizeSnapshotStore())
+        {
+            if (recursiveSizeStore) _recursiveSizeStore->AddRef();
+            InterlockedIncrement(&g_syntheticLiveObjects);
+        }
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
@@ -1766,21 +1807,20 @@ namespace
             if (!references) delete this;
             return references;
         }
+        SyntheticRecursiveSizeSnapshotStore* GetRecursiveSizeSnapshotStoreForProbe()
+        {
+            if (_recursiveSizeStore) _recursiveSizeStore->AddRef();
+            return _recursiveSizeStore;
+        }
         HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName, ULONGLONG bytes)
         {
             const auto* child = SyntheticData(item);
-            if (!child || !parsingName || !*parsingName || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
+            if (!child || !parsingName || !*parsingName || !_recursiveSizeStore || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
             std::wstring shellParsingName;
             auto result = GetAbsoluteParsingName(child, &shellParsingName);
             if (FAILED(result)) return result;
             if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
-            try
-            {
-                std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
-                _recursiveSizeByParsingName[parsingName] = bytes;
-            }
-            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
-            return S_OK;
+            return _recursiveSizeStore->Set(parsingName, bytes);
         }
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
@@ -1792,6 +1832,7 @@ namespace
         {
             TraceSyntheticSortStage("synthetic-sort: Initialize-enter");
             if (!value) return E_INVALIDARG;
+            if (!_recursiveSizeStore) return E_OUTOFMEMORY;
             auto* copy = ILCloneFull(value);
             if (!copy) return E_OUTOFMEMORY;
             if (g_syntheticSortBackingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
@@ -2044,7 +2085,7 @@ namespace
                 backingChild->Release();
                 return E_OUTOFMEMORY;
             }
-            auto* nested = new (std::nothrow) SyntheticSortFolder();
+            auto* nested = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore);
             if (!nested)
             {
                 CoTaskMemFree(nestedRoot);
@@ -2425,9 +2466,8 @@ namespace
             std::wstring parsingName;
             if (SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
             {
-                std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
-                const auto found = _recursiveSizeByParsingName.find(parsingName);
-                if (found != _recursiveSizeByParsingName.end()) return found->second;
+                ULONGLONG bytes = 0;
+                if (_recursiveSizeStore && _recursiveSizeStore->TryGet(parsingName, &bytes)) return bytes;
             }
             return SyntheticSize(child);
         }
@@ -2732,7 +2772,7 @@ namespace
             TraceSyntheticSortStage(SUCCEEDED(result) ? "synthetic-sort: deferred-selection-restored" : "synthetic-sort: deferred-selection-restore-failed");
             FinishRefreshCycle(folder);
         }
-        ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
+        ~SyntheticSortFolder() { ReleaseViewHold(); if (_root) CoTaskMemFree(_root); if (_backingRoot) CoTaskMemFree(_backingRoot); if (_inner) _inner->Release(); if (_recursiveSizeStore) _recursiveSizeStore->Release(); InterlockedDecrement(&g_syntheticLiveObjects); }
         volatile LONG _references = 1;
         volatile LONG _refreshAgain = 0;
         PIDLIST_ABSOLUTE _root = nullptr;
@@ -2740,8 +2780,7 @@ namespace
         IShellView* _shellView = nullptr;
         std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
-        mutable std::mutex _recursiveSizeMutex;
-        std::map<std::wstring, ULONGLONG, ShellParsingNameLess> _recursiveSizeByParsingName;
+        SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
@@ -3467,6 +3506,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
 
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
+    SyntheticRecursiveSizeSnapshotStore* snapshotStoreForRecreation = nullptr;
     PITEMID_CHILD childFolder = nullptr;
     PITEMID_CHILD otherFolder = nullptr;
     PITEMID_CHILD rootFile = nullptr;
@@ -3569,6 +3609,43 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
+
+        snapshotStoreForRecreation = root->GetRecursiveSizeSnapshotStoreForProbe();
+        if (!snapshotStoreForRecreation) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+        refreshedEnumerator->Release();
+        refreshedEnumerator = nullptr;
+        CoTaskMemFree(refreshedOther);
+        refreshedOther = nullptr;
+        CoTaskMemFree(refreshedChild);
+        refreshedChild = nullptr;
+        root->Release();
+        root = nullptr;
+        CoTaskMemFree(rootFile);
+        rootFile = nullptr;
+        CoTaskMemFree(otherFolder);
+        otherFolder = nullptr;
+        CoTaskMemFree(childFolder);
+        childFolder = nullptr;
+
+        // Recreating the provider must not lose scan snapshots keyed by absolute Shell identity.
+        root = new (std::nothrow) SyntheticSortFolder(snapshotStoreForRecreation);
+        snapshotStoreForRecreation->Release();
+        snapshotStoreForRecreation = nullptr;
+        if (!root) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+        result = root->Initialize(rootPidl);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"other-child"), nullptr, &otherFolder, nullptr);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
+            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_update;
+        }
     }
     result = S_OK;
 
@@ -3583,6 +3660,7 @@ cleanup_recursive_size_update:
     if (otherFolder) CoTaskMemFree(otherFolder);
     if (childFolder) CoTaskMemFree(childFolder);
     if (root) root->Release();
+    if (snapshotStoreForRecreation) snapshotStoreForRecreation->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);
     return result;
 }
