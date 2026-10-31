@@ -27,6 +27,8 @@ internal static class ShellViewDropTargetProbe
 
     internal static int Run() => RunCore(interactiveOleEffect: 0);
 
+    internal static int RunAfterViewWindowRecreation() => RunCore(interactiveOleEffect: 0, recreateTargetViewWindow: true);
+
     internal static int RunInteractiveOleCopy() => RunInteractiveOleTransfer(DropEffectCopy);
 
     internal static int RunInteractiveOleMove() => RunInteractiveOleTransfer(DropEffectMove);
@@ -38,7 +40,7 @@ internal static class ShellViewDropTargetProbe
         return RunCore(requestedEffect);
     }
 
-    private static int RunCore(uint interactiveOleEffect)
+    private static int RunCore(uint interactiveOleEffect, bool recreateTargetViewWindow = false)
     {
         var interactiveOle = interactiveOleEffect != 0;
         if (interactiveOle && Console.IsInputRedirected)
@@ -204,6 +206,15 @@ internal static class ShellViewDropTargetProbe
             Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
             if (targetViewWindow == 0) throw new InvalidOperationException("Target CreateViewWindow returned no HWND.");
             PrivateDesktopShellProbe.ReportStage("drop-target: target-view-created");
+            if (recreateTargetViewWindow)
+            {
+                Marshal.ThrowExceptionForHR(At<DestroyViewWindow>(targetView, 10)(targetView));
+                targetViewWindow = 0;
+                PrivateDesktopShellProbe.ReportStage("drop-target: target-view-destroyed-before-drop");
+                Marshal.ThrowExceptionForHR(At<CreateViewWindow>(targetView, 9)(targetView, 0, ref settings, targetHostPointer, ref bounds, out targetViewWindow));
+                if (targetViewWindow == 0) throw new InvalidOperationException("Recreated target CreateViewWindow returned no HWND.");
+                PrivateDesktopShellProbe.ReportStage("drop-target: target-view-recreated-before-drop");
+            }
             var dropTargetId = DropTargetId;
             Marshal.ThrowExceptionForHR(At<CreateViewObject>(targetFolder, 8)(targetFolder, targetViewWindow, ref dropTargetId, out folderDropTarget));
             targetHost.RegisterDropTarget(targetViewWindow, folderDropTarget);
@@ -270,6 +281,19 @@ internal static class ShellViewDropTargetProbe
             var selectedDataObjectResult = selectedDataObject != 0 && TryTransfer(folderDropTarget, selectedDataObject, point,
                 selectedTargetPath, "selected view IDataObject", "native-shell-selected-view-fixture",
                 expectedEffect: DropEffectCopy, modifierKeyState: KeyStateControl);
+            if (recreateTargetViewWindow)
+            {
+                var sourcePreserved = File.Exists(selectedSourcePath) &&
+                    File.ReadAllText(selectedSourcePath) == "native-shell-selected-view-fixture";
+                var destinationValid = File.Exists(selectedTargetPath) &&
+                    File.ReadAllText(selectedTargetPath) == "native-shell-selected-view-fixture";
+                var foregroundUnchanged = GetForegroundWindow() == foreground;
+                Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated=True; selected-view-data-copy={selectedDataObjectResult}; source-preserved={sourcePreserved}; destination-valid={destinationValid}; foreground-unchanged={foregroundUnchanged}; actual-DoDragDrop=False; cross-volume-and-move-cases=not-run");
+                if (!selectedDataObjectResult || !sourcePreserved || !destinationValid || !foregroundUnchanged)
+                    throw new InvalidOperationException("The recreated Shell view drop target did not copy the selected item or preserve the foreground window.");
+                PrivateDesktopShellProbe.ReportStage("drop-target: recreated-view-transfer-complete");
+                return 0;
+            }
             var crossVolumeCopyResult = false;
             var crossVolumeMoveResult = false;
             if (!interactiveOle && crossVolumeAvailable)
@@ -341,7 +365,7 @@ internal static class ShellViewDropTargetProbe
                 !File.Exists(secondSourcePath);
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The isolated drop-target probe changed the user's foreground window.");
-            Console.WriteLine($"shell-view-drop-target-probe: view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
+            Console.WriteLine($"shell-view-drop-target-probe: target-view-window-recreated={recreateTargetViewWindow}; view-target-copy={viewTargetResult}; selected-view-data-copy={selectedDataObjectResult}; cross-volume-default-copy={crossVolumeAvailable}:{crossVolumeCopyResult}; cross-volume-shift-move={crossVolumeAvailable}:{crossVolumeMoveResult}; same-volume-default-move={defaultMoveResult}; shift-move={folderTargetResult}; source-states-valid={sourceStatesValid}; foreground-unchanged=True; actual-DoDragDrop=False");
             if (!folderTargetResult || !selectedDataObjectResult || !defaultMoveResult ||
                 crossVolumeAvailable && (!crossVolumeCopyResult || !crossVolumeMoveResult) || !sourceStatesValid)
                 throw new InvalidOperationException("An isolated Shell target effect or source/target filesystem state did not match the requested Copy/Move operation.");

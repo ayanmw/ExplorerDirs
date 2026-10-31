@@ -160,6 +160,9 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunDropTarget() => Run("drop-target", ShellViewDropTargetProbe.Run);
 
+    internal static int RunDropTargetAfterViewWindowRecreation() =>
+        Run("drop-target-after-view-window-recreation", ShellViewDropTargetProbe.RunAfterViewWindowRecreation);
+
     internal static int RunSessionRestoreConsumer(string fixture, string stateDirectory, Guid sessionId,
         bool synchronousCleanupProbe = false) =>
         Run(synchronousCleanupProbe ? "session-restore-consumer-sync-cleanup" : "session-restore-consumer",

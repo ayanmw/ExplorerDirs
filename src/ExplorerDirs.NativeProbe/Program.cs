@@ -95,6 +95,8 @@ internal static class Program
             return PrivateDesktopIsolationPolicySmoke.Run();
         if (args.Length == 1 && args[0] == "--shell-view-drop-target-private-desktop")
             return PrivateDesktopShellProbe.RunDropTarget();
+        if (args.Length == 1 && args[0] == "--shell-view-drop-target-after-recreate-private-desktop")
+            return PrivateDesktopShellProbe.RunDropTargetAfterViewWindowRecreation();
         if (args.Length == 2 && args[0] == "--shell-view-ole-drop-copy" && args[1] == "--AllowInteractiveDesktopControl")
             return ShellViewDropTargetProbe.RunInteractiveOleCopy();
         if (args.Length == 2 && args[0] == "--shell-view-ole-drop-move" && args[1] == "--AllowInteractiveDesktopControl")

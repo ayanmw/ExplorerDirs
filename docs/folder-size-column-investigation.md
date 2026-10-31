@@ -804,6 +804,8 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 该结果证明宿主可以把焦点重新交给新的文件列表并继续使用方向键，Shell 背景菜单对象可重建，选中项数据对象可用于原生复制；它不证明 Shell 会自动迁移旧 HWND 焦点，也不证明菜单可见交互、菜单命令路由、剪切/删除/重命名、拖放或通知都正常。仍需覆盖标签/导航命令路由及这些剩余合同。ExplorerBrowser 产品未改；这些 Private Desktop 探针没有可见 UI 验收。
 
+后续专用 drop-target probe 在同一普通 filesystem `IShellView` 上先销毁再重建 view window，然后用新 HWND 注册的 `IShellFolder::CreateViewObject(IID_IDropTarget)` 接收重建后 source view 的选中项 `IDataObject`。`DragEnter/DragOver/Drop` 均返回 `S_OK`，Copy effect 与 source/target 文件状态均正确，前台/输入不变。`IShellView::GetItemObject(SVGIO_BACKGROUND, IID_IDropTarget)` 返回 `E_NOINTERFACE`，所以本次证明的是宿主在新 HWND 重新注册 filesystem folder drop target 后可处理复制；它不是完整 OLE `DoDragDrop` 源端闭环，也不覆盖跨卷操作。第一次包含跨卷复制/移动的宽探针因 `IFileOperation` 的系统 `OperationStatusWindow` 抢到共享前台而被隔离守卫判失败；测试保持失败证据，没有弱化守卫。收窄为单个同卷复制后通过。具体记录见路线图。
+
 ### 2026-10-31：普通文件夹的 Shell 背景菜单来源
 
 新增无窗口 `--filesystem-folder-background-menu` 探针，在带一个文件和一个子目录的临时 filesystem 位置上绑定真实 `IShellFolder`，直接调用 `CreateViewObject(IContextMenu)` 并将菜单构造到内存 `HMENU`。本机返回 `S_OK`，`QueryContextMenu` 也成功，顶层有 21 个菜单项；标签包含第三方扩展、“新建”和“属性”，没有视图级“查看、排序方式、分组依据、刷新”。没有创建 `IShellView`、窗口或可见 popup，也没有执行命令。
