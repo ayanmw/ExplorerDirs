@@ -5471,3 +5471,7 @@ Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `
 在 ZIP `IShellView` 多项复制探针中新增取消分支：`IFileOperation.Advise` 注册 `IFileOperationProgressSink`，第一次 `PreCopyItem` 返回 `E_ABORT`。回调一次、`PerformOperations=E_ABORT`；目标目录保持为空，归档源内容和 view 项数保持。特别记录本机 ZIP provider 此时 `GetAnyOperationsAborted=0`，所以取消结果需结合回调、HRESULT 与真实磁盘/源视图状态判断。随后同一探针的多项 ZIP CopyItems 成功对照继续通过，文件/嵌套目录内容为 `0x41/0x42`。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-054821-a67a83ea.stdout.log`。
 
 这补充了隔离 ZIP Shell 操作的程序化取消路径；不代表可见进度/取消 UI、产品 ExplorerBrowser、其它 provider 或完整 Undo/Redo 已验证。没有调用 Undo 或改变当前用户的 Shell undo stack。
+
+## 2026-11-01：ZIP `CopyItems` 同名目标策略
+
+隔离 ZIP `IShellView` 中，目标目录预置同名文件（哨兵字节 `0x7A`），再复制 ZIP 内同名虚拟文件（内容 `0x41`）。组合 `FOF_RENAMEONCOLLISION | FOF_SILENT | FOF_NOCONFIRMATION | FOFX_NOCOPYHOOKS` 后，`PerformOperations=S_OK`、未 abort，但原目标被覆盖为 `0x41`，没有生成改名副本；源归档/view 和 Private Desktop 守卫保持。移除 `FOF_NOCONFIRMATION` 的自动化尝试等待冲突提示并超时，交互确认结果未验证。迁移时必须明确冲突策略，不得假定静默标志组合会保留目标。NativeProbe Release build 0 警告/错误，复验 watchdog exit 0；日志 `src/.state/native-probe-watchdog/20261101-055142-12521e94.stdout.log`。详情见 [IShellView 原型记录](ishellview-color-spike.md#2026-11-01zip-copyitems-同名目标与静默标志)。

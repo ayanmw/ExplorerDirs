@@ -2597,6 +2597,13 @@ internal static class ShellViewColorSpike
             Marshal.Release(cancelSinkPointer);
             cancelSinkPointer = 0;
 
+            var collisionFileIndex = selectedNames.FindIndex(name =>
+                name.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
+            if (collisionFileIndex < 0)
+                throw new InvalidOperationException("The ZIP collision probe could not find its file source.");
+            ObserveZipCopyCollisionUnderSilentFlags(parent, folder, folderView, selectedChildren[collisionFileIndex],
+                fixture, itemCount, foreground);
+
             Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
             Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
             Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
@@ -2845,6 +2852,59 @@ internal static class ShellViewColorSpike
             if (moveDataObject != 0) Marshal.Release(moveDataObject);
             if (moveChildArray != 0) Marshal.FreeHGlobal(moveChildArray);
             foreach (var child in selectedChildren) Marshal.FreeCoTaskMem(child);
+        }
+    }
+
+    private static void ObserveZipCopyCollisionUnderSilentFlags(nint parent, nint folder, nint folderView, nint sourceChild,
+        string fixture, int sourceCount, nint foreground)
+    {
+        nint childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        try
+        {
+            childArray = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, sourceChild);
+            var dataObjectId = new Guid("0000010E-0000-0000-C000-000000000046");
+            Check(At<GetUIObjectOf>(folder, 10)(folder, parent, 1, childArray,
+                in dataObjectId, 0, out dataObject));
+            if (dataObject == 0)
+                throw new InvalidOperationException("The ZIP collision source did not provide an IDataObject.");
+
+            var destinationPath = Path.Combine(fixture, "shell-copy-collision-target");
+            Directory.CreateDirectory(destinationPath);
+            var originalTargetPath = Path.Combine(destinationPath, "blue-rule-target.txt");
+            File.WriteAllBytes(originalTargetPath, [0x7A]);
+            var shellItemId = new Guid("7E9FB0D3-919F-4307-AB2E-9B1860310C93");
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
+
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400));
+            Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
+            var performResult = At<PerformOperations>(operation, 21)(operation);
+            Check(performResult);
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var originalTargetBytes = File.Exists(originalTargetPath) ? File.ReadAllBytes(originalTargetPath) : [];
+            var originalPreserved = originalTargetBytes.SequenceEqual(new byte[] { 0x7A });
+            var copiedFiles = Directory.GetFiles(destinationPath)
+                .Where(path => !string.Equals(path, originalTargetPath, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var targetOverwritten = originalTargetBytes.SequenceEqual(new byte[] { 0x41 });
+            var sourcePreserved = GetShellViewItemCount(folderView) == sourceCount;
+            var foregroundUnchanged = GetForegroundWindow() == foreground;
+            var destinationSnapshot = string.Join('|', Directory.GetFiles(destinationPath)
+                .Select(path => $"{Path.GetFileName(path)}:{Convert.ToHexString(File.ReadAllBytes(path))}"));
+            Console.WriteLine($"ishellview-zip-iFileOperation-copy-collision-silent-flags: perform-hresult=0x{performResult:X8};aborted={aborted};existing-target-bytes=[{Convert.ToHexString(originalTargetBytes)}];existing-target-preserved={originalPreserved};target-overwritten={targetOverwritten};generated-copy={Path.GetFileName(copiedFiles.FirstOrDefault() ?? string.Empty)};destination=[{destinationSnapshot}];source-view-preserved={sourcePreserved};foreground-unchanged={foregroundUnchanged}");
+            if (aborted != 0 || !targetOverwritten || !sourcePreserved || !foregroundUnchanged)
+                throw new IOException("The silent ZIP CopyItems collision observation did not match the recorded overwrite behavior or disturbed its source/foreground guards.");
+        }
+        finally
+        {
+            if (operation != 0) Marshal.Release(operation);
+            if (destination != 0) Marshal.Release(destination);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeHGlobal(childArray);
         }
     }
 

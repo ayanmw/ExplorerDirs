@@ -167,3 +167,5 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 2026-11-01 ZIP provider 增补：真实隔离 `IShellView` 的单项 `IFileOperation.DeleteItems` 检查到 `SFGAO_CANDELETE` 已广告；删除与执行均成功，未取消，归档条目移除且 view 项数由 3 收敛至 2。NativeProbe Release build 与 Private Desktop watchdog 通过，前台/输入/清理守卫通过。此为当前 ZIP provider 的程序化操作证据；回收站语义、确认/取消、可见操作 UI、ExplorerBrowser 产品通知/焦点接线和其他 provider 仍未覆盖。不得据此通过完整阶段 4/5，也不改变产品宿主。
 
 2026-11-01 ZIP 操作取消增补：在真实隔离 ZIP `IShellView` 上以 `IFileOperationProgressSink.PreCopyItem` 返回 `E_ABORT`，CopyItems 取消后目标为空、源 archive/view 完整，随后无取消的多项复制对照通过。Private Desktop 的前台/输入与清理守卫通过。该 provider 的 `GetAnyOperationsAborted` 返回 0，故不得单独作为取消判据。仅有程序化操作取消证据；用户可见进度/取消 UI、产品菜单/宿主接线及其它 provider 仍开放。
+
+2026-11-01 ZIP CopyItems 冲突观察：现有目标预置为 `0x7A`，源 ZIP 文件为 `0x41`。静默标志组合含 `FOF_RENAMEONCOLLISION` 仍覆盖目标、未生成改名副本；去掉 `FOF_NOCONFIRMATION` 后 Private Desktop 等待确认并超时。因此不以当前静默组合宣称冲突保护通过，且交互确认/自动改名策略仍未验证。迁移门槛需包含明确的冲突/覆盖策略与目标保留验证；不得据 `PerformOperations=S_OK` 判定目标安全。

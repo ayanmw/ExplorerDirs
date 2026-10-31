@@ -1572,3 +1572,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 扩展 `--ishellview-zip-copy-items-private-desktop`：对选中的 ZIP 文件与目录，先通过 `IFileOperation.Advise` 注册现有 `IFileOperationProgressSink`，在第一次 `PreCopyItem` 返回 `E_ABORT`，再运行原有 CopyItems 成功对照。取消轮的回调次数为 1，`PerformOperations` 返回 `E_ABORT`，目标目录为空，ZIP 中源文件/目录内容及 Shell view 项数均保持，前台/输入/隔离清理守卫通过；随后同一 `IDataObject` 的真实多项 CopyItems 仍成功，目录内容分别读回 `0x41` 和 `0x42`。本机 ZIP provider 的 `GetAnyOperationsAborted` 在该取消轮返回 0，因此结果必须联合检查回调、HRESULT 与目标/源数据，不能只依赖该标志。Release NativeProbe build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-054821-a67a83ea.stdout.log`。
 
 该证据只覆盖当前 ZIP provider 的程序化取消与后续成功路径；没有可见进度/取消按钮、物理输入、产品 ExplorerBrowser 接线或其它 provider 验证。没有触碰当前用户的 Shell Undo 栈。
+
+### 2026-11-01：ZIP `CopyItems` 同名目标与静默标志
+
+在同一隔离 ZIP `IShellView` 中，将现有物理目标 `blue-rule-target.txt` 预置为字节 `0x7A`，再复制 ZIP 内同名虚拟文件（内容 `0x41`）。使用 `FOF_RENAMEONCOLLISION` (`0x0008`) 与静默组合 `FOF_SILENT | FOF_NOCONFIRMATION | FOFX_NOCOPYHOOKS` 执行 `IFileOperation.CopyItems` 后，`PerformOperations=S_OK`、未 abort，但原目标变为 `0x41`，没有改名副本；归档源和 Shell view 保持，前台/输入/清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-055142-12521e94.stdout.log`。
+
+尝试省略 `FOF_NOCONFIRMATION` 后，Private Desktop 探针在冲突确认阶段等待并被 watchdog 超时终止；这不能证明交互确认时的最终选择或 ZIP provider 是否自动改名。Microsoft 文档定义 `FOF_NOCONFIRMATION` 为对操作确认提示回答 Yes，并定义 `FOF_RENAMEONCOLLISION` 为目标重名时改名；本地观察说明两者组合下不能假设原目标会被保留。后续迁移必须明确冲突策略，不能把此静默标志组合当作保留目标的证据。产品 ExplorerBrowser 未改；没有触碰用户文件或 Shell Undo 栈。
