@@ -5440,3 +5440,6 @@ NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数�
 ## 2026-11-01：确认列管理器身份在首次窗口创建后立即可见
 
 `CreateViewWindow` 刚返回就能捕获 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，`IColumnManager.GetColumnInfo(CM_MASK_NAME)` 将它正确命名为 `Recursive Size`；700 ms 后键/标题不变，而 `MapColumnToSCID(1)` 返回的仍是另一 GUID。view-state stream 此阶段 5 次读取、0 次写入。故差异是列管理器立即暴露的独立列身份，不是重建后才出现，也不能等同于列缺失；其跨新 view 稳定性仍未知。下一项验证第二个新 view 的键/名称，并将捕获键应用到新 view 核对行值和排序。NativeProbe Release 与隔离 WPF Private Desktop watchdog 通过，产品 ExplorerBrowser 未改。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01首次创建返回时列管理器已暴露不同键)。
+## 2026-11-01：跨新 view 复用捕获的 Synthetic Shell 列布局
+
+新增同进程、同 synthetic filesystem provider 的第二 view 对照。`IColumnManager` 两个 view 的三列键一致；将第一个 view 捕获的列键和宽度应用到新 view 后，布局与 `Recursive Size` 名称保持，逐项值为 `1 / 4`，升降序分别为 `child|small.bin` / `small.bin|child`。跨新 view 复用通过，说明本探针中 provider 映射 GUID 与列管理器 GUID 的差异不是阻碍；未覆盖跨进程、其他 provider、持久化、ExplorerBrowser 或可见交互。NativeProbe Release build 0 警告/错误，Private Desktop WPF watchdog exit 0，前台/输入/清理守卫通过。下一步转向迁移门槛的其它未覆盖项；产品与发布包未变。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01捕获列布局跨同-provider-的新-view-可复用)。

@@ -1091,3 +1091,8 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 在 `IShellView::CreateViewWindow` 刚返回时立即读取 `IColumnManager`，不等首轮 700 ms settle，已得到三列及宽度；`GetColumnInfo(CM_MASK_NAME)` 将两个标准键命名为 `Name`、`Type`，并将 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 命名为 `Recursive Size`。700 ms 后键和名称不变。对应首次 provider 回调仍将列 1 映射到 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此不同键在窗口创建返回时已形成，但列管理器身份仍保留正确标题；它不是“自定义列未出现”的证据。此时 view-state stream 记录 5 次读取、0 次写入，只能说明该阶段没有写入，不能单独证明 Shell 内部采用了何种默认列状态。
 
 该结果进一步将调查目标从“重建是否覆盖列键”收窄为“列管理器列身份是否为同一 view/相同 provider 下稳定且可跨新 view 重用”。日志：`src/.state/native-probe-watchdog/20261101-045810-68c8bb9a.stdout.log`；Windows SDK `CM_MASK_NAME=0x8` 已核对。Release NativeProbe build 0 警告/错误，Private Desktop WPF watchdog exit 0，前台/输入/清理守卫通过。后续应在第二个新建 view 中读回列键/名称，并单独验证将捕获键应用到新 view 后的列值与排序；不能从同 view 重建结果外推跨 view 持久性。
+### 2026-11-01：捕获列布局跨同 provider 的新 view 可复用
+
+在已完成单项通知/同 view 窗口重建路径后，使用相同 synthetic filesystem provider 与 backing folder 创建第二个独立 `IShellView`。第二 view 初始 `IColumnManager` 三列键与来源 view 相同，`GetColumnInfo(CM_MASK_NAME)` 仍读到 `Name / Recursive Size / Type`；provider 映射仍将列 1 返回另一 GUID。把来源 view 捕获的完整列键与宽度应用到第二 view 后，`IColumnManager.Capture` 完全匹配，真实表头保持三个预期名称，行值读回 `1 / 4`，列头升序为 `child|small.bin`、降序为 `small.bin|child`。watchdog exit 0，前台和输入守卫未变，`isolation-clean=True`。
+
+因此 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 与 provider `MapColumnToSCID` 键不同，不妨碍当前同进程、同 provider 下跨新 view 应用列布局、读取值和排序。它是该隔离场景中可复用的列管理器身份。该结论不覆盖其他 namespace/provider、进程重启/view-state 持久化、ExplorerBrowser、Q-Dir `.qdr` 互操作或用户可见行为；不能据此认定产品迁移门槛已通过。日志：`src/.state/native-probe-watchdog/20261101-045954-dbdfa2c1.stdout.log`。后续可转向另一个未通过的 Shell 兼容门槛，不必再重复同一 provider 内的 GUID 映射采样。

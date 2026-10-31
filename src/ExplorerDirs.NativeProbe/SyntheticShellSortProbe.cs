@@ -340,6 +340,8 @@ public static class SyntheticShellSortProbe
                         sizeUpdateStrategy, customSizeColumn, host, hostPointer);
                 if (recursiveDirectorySizeSortOnly && exerciseUpdateNotifications)
                 {
+                    if (sizeUpdateStrategy == "single-item-capture-reapply-recreate-window")
+                        VerifyCapturedColumnsOnFreshView(module, folderView, firstViewRootPidl, foreground);
                     var sentBeforeViewDestroy = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
                     var schedulePendingDirectoryUpdate = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module,
                         "ScheduleSyntheticBackingDirectoryUpdateForProbe"));
@@ -1347,6 +1349,71 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update-column-map: phase=after; before-notification={mapCallsBeforeNotification}; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; final={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}");
         Console.WriteLine($"synthetic-size-update-columns: phase=after; layout-preserved={columnLayoutPreserved}; hr=0x{columnsResult:X8}; columns=[{FormatColumns(columnsAfter)}]");
         Console.WriteLine($"synthetic-size-update-stream: strategy={name}; reads-delta={(host?.Reads ?? 0) - streamReadsBefore}; writes-delta={(host?.Writes ?? 0) - streamWritesBefore}; calls=[{string.Join(" || ", streamTraceAfter)}]");
+    }
+
+    private static void VerifyCapturedColumnsOnFreshView(nint module, nint sourceFolderView, nint rootPidl, nint foreground)
+    {
+        Check(ShellColumnManager.Capture(sourceFolderView, out var sourceColumns));
+        if (sourceColumns is null || sourceColumns.Count != 3)
+            throw new InvalidOperationException("The source Shell view did not expose its expected three-column layout.");
+
+        nint parent = 0, folder = 0, view = 0, folderView = 0, browserPointer = 0;
+        var viewWindowCreated = false;
+        StreamViewHost? host = null;
+        try
+        {
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs fresh-view column identity probe",
+                0x80000000, 25, 25, 900, 600, 0, 0, 0, 0);
+            if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the isolated fresh-view parent.");
+            Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(
+                rootPidl, out folder, out view));
+            host = new StreamViewHost(parent, []) { View = view, BrowserSite = new ShellBrowserSite() };
+            browserPointer = Marshal.GetComInterfaceForObject(host, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = 4 };
+            var bounds = new StreamProbeRect { Right = 900, Bottom = 600 };
+            Marshal.GetDelegateForFunctionPointer<ResetColumnDiagnostics>(
+                NativeLibrary.GetExport(module, "ResetSyntheticColumnDiagnostics"))();
+            Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, browserPointer, ref bounds, out _));
+            viewWindowCreated = true;
+            _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the Private Desktop only.
+            Pump(350);
+            if (!IsWindowVisible(parent) || GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("The fresh synthetic Shell view crossed the Private Desktop/foreground boundary.");
+            Check(Marshal.QueryInterface(view, in FolderView2Id, out folderView));
+
+            var newViewBeforeApplyResult = ShellColumnManager.Capture(folderView, out var newViewBeforeApply);
+            var initialMetadata = CaptureColumnMetadataTrace(module);
+            var initialMappings = CaptureMapColumnTrace(module);
+            Console.WriteLine($"synthetic-size-update-fresh-view: phase=created; hr=0x{newViewBeforeApplyResult:X8}; columns=[{FormatColumns(newViewBeforeApply)}]; info=[{CaptureColumnNames(folderView)}]; metadata=[{FormatColumnMetadataTrace(initialMetadata)}]; mappings=[{FormatMapColumnTrace(initialMappings)}]");
+            if (newViewBeforeApplyResult != 0 || newViewBeforeApply is null)
+                throw new InvalidOperationException("The fresh Shell view could not capture its initial column layout.");
+
+            var applyResult = ShellColumnManager.Apply(folderView, sourceColumns);
+            Check(applyResult);
+            Pump(200);
+            var afterApplyResult = ShellColumnManager.Capture(folderView, out var columnsAfterApply);
+            var listView = FindListView(view);
+            var headerColumns = ReadHeaderColumnTitles(listView);
+            var valueState = WaitForSizeState(listView, module, "1", expectedFirstName: null, expectedSelection: null);
+            var ascending = SortByHeader(module, listView, columnIndex: 1, expectedCount: 2, stage: "fresh-view-header-sort-ascending");
+            var descending = SortByHeader(module, listView, columnIndex: 1, expectedCount: 2, stage: "fresh-view-header-sort-descending");
+            Console.WriteLine($"synthetic-size-update-fresh-view: phase=source-columns-applied; hr=0x{afterApplyResult:X8}; same-layout={sourceColumns.SequenceEqual(columnsAfterApply ?? [])}; columns=[{FormatColumns(columnsAfterApply)}]; info=[{CaptureColumnNames(folderView)}]; headers=[{string.Join('|', headerColumns)}]; value-visible={valueState.ValueUpdated}; sizes=[{FormatProbeRows(valueState.Sizes)}]; ascending=[{FormatProbeRows(ascending)}]; descending=[{FormatProbeRows(descending)}]");
+            if (afterApplyResult != 0 || columnsAfterApply is null || !sourceColumns.SequenceEqual(columnsAfterApply) ||
+                !headerColumns.SequenceEqual(new[] { "Name", "Recursive Size", "Type" }, StringComparer.OrdinalIgnoreCase) ||
+                !valueState.ValueUpdated || !ascending.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
+                !descending.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The captured Shell column identity did not preserve the expected layout, values, and sorting in a fresh view.");
+        }
+        finally
+        {
+            if (viewWindowCreated && view != 0) _ = At<DestroyViewWindow>(view, 10)(view);
+            if (folderView != 0) Marshal.Release(folderView);
+            if (browserPointer != 0) Marshal.Release(browserPointer);
+            if (view != 0) Marshal.Release(view);
+            if (folder != 0) Marshal.Release(folder);
+            if (parent != 0) _ = DestroyWindow(parent);
+            GC.KeepAlive(host);
+        }
     }
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)
