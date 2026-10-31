@@ -39,6 +39,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-11-01 隔离 IShellView 双视图焦点恢复：新的 `--synthetic-shell-focus-recovery-private-desktop` 在已知焦点丢失的同目录双视图 `IFileOperation.MoveItems` 场景中，复用产品 `ShellViewSelectionSnapshot` 保存和恢复 PIDL 选区/焦点。移动后第二视图状态从 `Selected`（`0x1`）恢复为 `Selected|Focused`（`0x3`），两次 Private Desktop 探针均通过前台、输入与清理守卫。该结果仅证明当前 synthetic filesystem provider 的隔离恢复路径可用；不代表所有 Shell provider、ExplorerBrowser 产品接线或可见焦点体验已验证。完整记录见[原生视图迁移门槛](superpowers/specs/2026-10-25-ishellview-host-migration-gates.md)。
+
 2026-10-31 自有行模型跨窗格多选 Shell 移动协调：隐藏双 pane `SysListView32` 探针从源 `IShellFolder` 一次取得两个子项的 `IDataObject`，调用真实 `IFileOperation.MoveItems`，由递归 Shell watcher 收到两组系统事件后分别重枚举、reconcile 两侧行模型。源两行退休、目标两行新增，两个窗格未移动行的 ID、选区及焦点均保留。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` 通过，父/列表窗口隐藏且前台不变。验证的是隔离 Shell 多选操作及自有行模型合同，不是产品 ExplorerBrowser、真实 OLE 拖放或可见 UI。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格移动协调)。
 
 2026-10-31 IShellView 逐项着色新假设复核：曾怀疑 DefView 的通知目标挡住了 `NM_CUSTOMDRAW`，故在隔离 Private Desktop 将 `SysListView32` 通知改投临时 sink 并同步转发给原 DefView。sink 收到并转发 16 条普通通知，但自绘逐项回调仍为 0、目标像素为 0；该轮在原型颜色断言处提前结束，未验证完整通知兼容。临时试验入口已删除，详见[原型记录](ishellview-color-spike.md#2026-10-31-ccm_setnotifywindow-逐项着色通知路由验证未通过)。该分支不再作为颜色方案；自有 ListView 的逐项绘制仍是已验证的原型路线，IShellView 产品迁移门槛与集中可见验收仍未完成。
