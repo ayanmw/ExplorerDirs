@@ -2022,6 +2022,8 @@ internal static class StaticShellFolderAdapterProbe
             for (var index = 0; index < children.Count; index++) Marshal.WriteIntPtr(childArray, index * IntPtr.Size, children[index]);
             Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, (uint)children.Count, childArray, in DataObjectId, 0, out dataObject));
             if (dataObject == 0) throw new Exception($"Wrapped selection [{string.Join(", ", childNames)}] did not return IDataObject for {operationName}.");
+            if (children.Count > 1)
+                VerifyWrappedMultiSelectionContextMenu(adapter, childArray, (uint)children.Count);
             VerifyWrappedShellItemDataObject(dataObject, childNames.Select(name => Path.Combine(fixturePath, name)).ToArray());
 
             var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
@@ -2401,6 +2403,39 @@ internal static class StaticShellFolderAdapterProbe
         if (expectedPaths is null) return true;
         var expected = expectedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return expected.Count == actualPaths.Count && actualPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(expected);
+    }
+
+    private static void VerifyWrappedMultiSelectionContextMenu(nint adapter, nint children, uint childCount)
+    {
+        var foreground = GetForegroundWindow();
+        var contextMenuId = ContextMenuId;
+        nint contextMenu = 0;
+        var menu = CreatePopupMenu();
+        if (menu == 0) throw new Exception("Could not create the in-memory menu used for wrapped multi-selection inspection.");
+        try
+        {
+            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, childCount, children, in contextMenuId, 0, out contextMenu));
+            if (contextMenu == 0) throw new Exception("Wrapped multi-selection did not return an IContextMenu.");
+            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+            Check(queryResult);
+            var commandCount = (uint)(queryResult & 0xffff);
+            var itemCount = GetMenuItemCount(menu);
+            if (commandCount == 0 || itemCount == 0)
+                throw new Exception($"Wrapped multi-selection context menu was empty: commands={commandCount}; items={itemCount}.");
+            var verbs = ReadContextMenuVerbs(contextMenu, commandCount);
+            var expectedVerbs = new[] { "copy", "delete" };
+            if (expectedVerbs.Any(expected => !verbs.Contains(expected, StringComparer.OrdinalIgnoreCase)))
+                throw new Exception("Wrapped multi-selection context menu is missing native verbs: " +
+                    string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Wrapped multi-selection menu construction changed the foreground window.");
+            Console.WriteLine($"wrapped multi-selection native context menu: commands={commandCount}; menu-items={itemCount}; copy/delete=True; displayed=False");
+        }
+        finally
+        {
+            if (contextMenu != 0) Marshal.Release(contextMenu);
+            DestroyMenu(menu);
+        }
     }
 
     private static string GetAbsoluteParsingName(string path)

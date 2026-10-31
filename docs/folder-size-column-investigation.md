@@ -8,7 +8,7 @@ NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL
 
 边界：`SHCreateItemWithParent` 使用包装父项和子 PIDL 可取得预期项目及绝对名称；但把包装子 PIDL 直接与普通文件系统根 PIDL 做原生绝对组合，仍报告 `0x80070057` 未解析。Shell 从底层文件系统 `IDataObject` 构建 item array 会保留普通文件系统路径，但不会保留 adapter 的 COM/PIDL 身份。这些结果彼此不矛盾：前者是显式 parent-bound item，后者是 Shell 标准序列化路径。未注册 synthetic namespace root；合同仅创建并释放一个未激活的 `IShellView` COM 对象，没有创建/激活视图窗口，也没有修改产品 ExplorerBrowser；迁移资格与完整 Shell 兼容性仍未验证。
 
-补充文件操作合同：从包装 adapter 的单项文件子 PIDL 取得 `IDataObject`，真实 `IFileOperation::CopyItems`、`MoveItems`、`RenameItems`、`DeleteItems` 均在 NativeProbe 自有临时夹具中通过，并核对源/目标路径及字节；随后通过 `GetUIObjectOf` 一次取得两项文件的多选 `IDataObject`，确认 `CF_HDROP` 与 CIDA 都含有匹配的两条绝对路径，再执行两项复制、移动、删除并逐项核对文件系统结果。所有操作调用前后前台 HWND 均保持不变。操作静默执行且禁用 copy hooks，没有创建/激活 Shell 视图窗口。由此确认这些数据对象可承载普通文件单选与多选复制、移动、改名和删除，但不证明 undo/redo、Shell 命令菜单、通知、OLE 拖放源端、虚拟项目身份往返或 ExplorerBrowser 产品体验。
+补充文件操作合同：从包装 adapter 的单项文件子 PIDL 取得 `IDataObject`，真实 `IFileOperation::CopyItems`、`MoveItems`、`RenameItems`、`DeleteItems` 均在 NativeProbe 自有临时夹具中通过，并核对源/目标路径及字节；随后通过 `GetUIObjectOf` 一次取得两项文件的多选 `IDataObject`，确认 `CF_HDROP` 与 CIDA 都含有匹配的两条绝对路径，再执行两项复制、移动、删除并逐项核对文件系统结果。多选 `IContextMenu` 在内存菜单中查询到 103 个命令、25 项菜单，含 `copy` 和 `delete` 动词；菜单没有显示或执行。所有操作调用前后前台 HWND 均保持不变。操作静默执行且禁用 copy hooks，没有创建/激活 Shell 视图窗口。由此确认这些数据对象可承载普通文件单选与多选复制、移动、改名和删除，且包装层能构造原生多选菜单对象；但不证明菜单可见行为/命令路由、undo/redo、通知、OLE 拖放源端、虚拟项目身份往返或 ExplorerBrowser 产品体验。
 
 ## 2026-10-31：扫描快照跨 provider 重建
 
