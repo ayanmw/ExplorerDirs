@@ -909,3 +909,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 运行已准备的 slow-column 变体后，初始两行递归列仍显示 `10/4`，自定义列升序与降序均能经 `CompareIDs` 排序。单项目录更新后，读回的列索引仍为 `-1`，没有列值更新、比较器调用或重新枚举；因此 `SHCOLSTATE_SLOW` 没有解决更新后的列丢失。与未设置标志的基线相比，slow 变体在更新阶段多触发两次 `GetDetailsOf` 取值请求，但 DefView 没有保留可更新的列索引。两个样本都保持布局及选区/焦点；这只是合成 provider 的单次 A/B，不能外推到普通 ExplorerBrowser 或其他 provider。
 
 该运行同样卡在 `cleanup-destroy-parent-window-1`，45 秒 watchdog 将探针进程终止；超时前 Private Desktop 前台 HWND 和输入时间戳保持不变，等待链包含 COM activation、`svchost` 与 `ChsIME`。脚本后验确认探针进程、唯一 CLSID/NameSpace 注册项和两处临时夹具均已清理。此次只采纳超时前完成的列更新观测，不将清理超时归因于列或产品故障。日志：`src/.state/native-probe-watchdog/20261031-130931-e15f8442.stdout.log`、`.stderr.log`。这项证据不支持把 `SHCOLSTATE_SLOW` 接入产品；逐行派生列仍需要自有视图/namespace 架构评审与完整 Shell 兼容门槛。
+
+### 2026-10-31：WPF 根宿主清理与更新策略对照
+
+同一递归大小列探针改由 WPF `HwndSource` 作顶层 parent，默认单项 `SHCNE_UPDATEITEM` 连续三轮均正常返回：前台 HWND/输入时间未变、隔离清理通过；三轮更新后都仍读到列索引 `-1`、无行值更新/比较/重枚举，选区与焦点保持。与先前 native `STATIC` 顶层 parent 多轮停在父窗口销毁阶段的结果相比，这三轮表明顶层宿主类型与探针清理结果高度相关；尚不能据此断言 WPF 本身是根因，也不代表产品 ExplorerBrowser 或完整 IShellView 迁移已经通过。日志：`20261031-131149-8fbe9a12.stdout.log`、`20261031-131208-6ca906c2.stdout.log`、`20261031-131215-871e617b.stdout.log`。
+
+在该 WPF 根宿主下，`SHCNE_UPDATEITEM` 后追加父目录 `SHCNE_UPDATEDIR` 的一轮也通过前台/输入及清理守卫，但没有恢复列值或触发行枚举/排序；日志：`20261031-131251-10b7f216.stdout.log`。`IShellView.Refresh()` 对照在超时前观察到两行重新枚举和一次比较/行序变化，但同时前台从 `msrdc` 变为 Explorer、输入时间戳变化，守卫将该轮标为无效，且焦点/选区未保持；这不构成刷新策略有效的证据，也不重跑该场景。唯一 CLSID/NameSpace 注册与临时夹具事后均确认不存在，探针进程已退出。日志：`20261031-131258-4a9de183.stdout.log`。后续如继续架构探针，采用已连续通过清理守卫的 WPF 根宿主；任何带前台/输入变化的轮次均不用于行为结论。

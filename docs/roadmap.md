@@ -299,6 +299,8 @@
 
 2026-10-31：运行 `SHCOLSTATE_SLOW` 递归大小列 A/B。慢列标志未阻止单项目录更新后 DefView 列索引变为 `-1`，也未引发行值更新、比较或重新枚举；更新阶段只多两次 `GetDetailsOf` 请求。该合成样本不能证明普通 ExplorerBrowser/provider 行为。探针在父窗口销毁阶段超时，watchdog 终止进程；超时前前台 HWND 与输入时间戳不变，且 CLSID/NameSpace 注册、临时目录和进程均已清理。结果不支持将该标志接入产品；产品与 release 未改。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31shcolstate_slow-defview-更新-ab)。
 
+2026-10-31：用 WPF `HwndSource` 根宿主复跑递归大小列探针，单项更新场景连续三轮均在前台/输入不变且清理完整的条件下返回；列索引仍为 `-1`，未更新列值。追加父目录更新也没有改善。完整 `IShellView.Refresh()` 轮观察到行重排，但前台与输入守卫变化，故判为无效样本，不采纳其行为结论；临时注册/夹具已核对清理。WPF 根宿主与探针清理成功有强相关性，但根因和产品兼容性仍未证明；产品与 release 未改。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31wpf-根宿主清理与更新策略对照)。
+
 2026-10-30：键盘“在新标签打开所选文件夹”（Shift+Enter/Ctrl+Shift+T）改为读取 Shell 绝对解析名，并要求 Shell folder 属性及当前系统 provider 均确认该位置为文件夹；因此支持可解析的虚拟 Shell 文件夹，同时保留搜索位置、非文件夹及不受支持 namespace 的拒绝行为。文件视图中键新标签仍限普通文件系统目录。定向 resolver smoke、完整 Release SettingsSmoke 均通过；App Release build 0 错误，3 条 NU1900（NuGet 漏洞源不可达）。未启动窗口，真实键盘输入与可见新标签行为仍待集中 GUI 验收；未更新 release。
 
 2026-10-30：文件视图中键开新标签现在除普通路径外，也可解析受支持 Shell 父文件夹内的 UI Automation 命中项：通过父 `IShellFolder::ParseDisplayName` 取得相对 PIDL、组合为绝对 PIDL，并由 Shell 再确认目标是文件夹。定向 smoke 已在临时文件夹及“此电脑”系统盘上通过；非法名称、缺失子项、普通文件目标和过期请求均拒绝。完整 Release SettingsSmoke 通过；App Release build 0 错误、2 条 NU1900（NuGet 漏洞源不可达）。没有运行产品 GUI，虚拟 provider 与真实中键命中仍待集中验收。
