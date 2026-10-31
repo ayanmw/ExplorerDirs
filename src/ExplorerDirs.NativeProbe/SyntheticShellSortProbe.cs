@@ -92,7 +92,7 @@ public static class SyntheticShellSortProbe
 
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
-        bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false)
+        bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false)
     {
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
@@ -110,6 +110,8 @@ public static class SyntheticShellSortProbe
         // so it can proceed without reusing or deleting another run's artifacts.
         var backingFolder = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-{fixtureId}");
         var copyDestination = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-SyntheticShellSort-Copy-{fixtureId}");
+        var firstPaneFolder = Path.Combine(backingFolder, "Pane1");
+        var secondPaneFolder = Path.Combine(backingFolder, "Pane2");
         if (Directory.Exists(backingFolder))
             throw new InvalidOperationException($"Refusing to reuse an existing synthetic Shell sort fixture directory: {backingFolder}");
         if (Directory.Exists(copyDestination))
@@ -118,6 +120,13 @@ public static class SyntheticShellSortProbe
         {
             Directory.CreateDirectory(backingFolder);
             Directory.CreateDirectory(copyDestination);
+            if (twoViewDistinctLocations)
+            {
+                Directory.CreateDirectory(firstPaneFolder);
+                Directory.CreateDirectory(secondPaneFolder);
+                File.WriteAllText(Path.Combine(firstPaneFolder, "pane-1-original.txt"), "pane 1");
+                File.WriteAllText(Path.Combine(secondPaneFolder, "pane-2-original.txt"), "pane 2");
+            }
             if (recursiveDirectorySizeSortOnly)
             {
                 Directory.CreateDirectory(Path.Combine(backingFolder, "child", "nested"));
@@ -178,7 +187,7 @@ public static class SyntheticShellSortProbe
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the Private Desktop probe parent.");
         }
 
-        nint module = 0, rootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
+        nint module = 0, rootPidl = 0, firstViewRootPidl = 0, secondViewRootPidl = 0, folder = 0, view = 0, folderView = 0, hostPointer = 0;
         nint parent2 = 0, folder2 = 0, view2 = 0, folderView2 = 0, hostPointer2 = 0, listView2 = 0;
         var classKeyPath = $@"Software\Classes\CLSID\{{{syntheticFolderClassId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{syntheticFolderClassId:D}}}";
@@ -213,9 +222,17 @@ public static class SyntheticShellSortProbe
             namespaceRegistrationCreated = true;
             Check(SHParseDisplayName($"::{syntheticFolderClassId:B}", 0, out rootPidl, 0, out _));
             if (rootPidl == 0) throw new InvalidOperationException("Shell resolved the synthetic namespace without returning an absolute PIDL.");
+            firstViewRootPidl = rootPidl;
+            secondViewRootPidl = rootPidl;
+            if (twoViewDistinctLocations)
+            {
+                // Same-root twin views cannot prove per-pane notification routing; resolve two child Shell locations instead.
+                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane1", 0, out firstViewRootPidl, 0, out _));
+                Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane2", 0, out secondViewRootPidl, 0, out _));
+            }
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
-            Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(rootPidl, out folder, out view));
+            Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(firstViewRootPidl, out folder, out view));
             var classFactoryCreateCount = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
             Console.WriteLine($"synthetic-shell-size-sort: Shell-bound folder and view returned; registered-class-factory-creates={classFactoryCreateCount}");
 
@@ -334,7 +351,7 @@ public static class SyntheticShellSortProbe
                 0x80000000, 20, 20, 900, 600, 0, 0, 0, 0);
             if (parent2 == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the second Private Desktop probe parent.");
             var createSyntheticView = Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"));
-            Check(createSyntheticView(rootPidl, out folder2, out view2));
+            Check(createSyntheticView(secondViewRootPidl, out folder2, out view2));
             var browserSite2 = new ShellBrowserSite();
             browserSite2.SelectionChanged += shellView =>
                 Console.WriteLine($"synthetic-shell-size-sort: CDBOSC_SELCHANGE view=0x{unchecked((nuint)shellView):X}");
@@ -357,8 +374,21 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-shell-size-sort: view-windows=0x{unchecked((nuint)shellViewWindow1):X}/0x{unchecked((nuint)shellViewWindow2):X}; list-windows=0x{unchecked((nuint)listView):X}/0x{unchecked((nuint)listView2):X}");
             using var selectionObserver1 = new ListViewSelectionObserver(listView, "view1");
             using var selectionObserver2 = new ListViewSelectionObserver(listView2, "view2");
-            var secondInitial = ReadNames(listView2, module);
+            var secondInitial = ReadNames(listView2, module, expectedCount: twoViewDistinctLocations ? -1 : 3);
             Console.WriteLine($"synthetic-shell-size-sort: second-view-initial=[{string.Join('|', secondInitial)}]");
+            if (twoViewDistinctLocations)
+            {
+                var firstInitial = ReadNames(listView, module, expectedCount: -1);
+                var targetIsolationPassed = firstInitial.SequenceEqual(new[] { "pane-1-original.txt" }, StringComparer.OrdinalIgnoreCase) &&
+                    !firstInitial.Contains("pane-2-original.txt", StringComparer.OrdinalIgnoreCase) &&
+                    secondInitial.SequenceEqual(new[] { "pane-2-original.txt" }, StringComparer.OrdinalIgnoreCase);
+                Console.WriteLine($"synthetic-shell-two-view-target-sync: distinct-backing-locations=True; view1=[{string.Join('|', firstInitial)}]; view2=[{string.Join('|', secondInitial)}]; initial-isolation={targetIsolationPassed}");
+                if (!targetIsolationPassed) throw new InvalidOperationException("The two synthetic Shell views did not retain their distinct backing folders.");
+                Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticChildNotificationTranslationForProbe"))(1));
+                VerifyTwoViewTargetNotifications(view, view2, module, firstPaneFolder, secondPaneFolder);
+                return 0;
+            }
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out var backgroundMenu); // SVGIO_BACKGROUND
             var menuQueryHr = unchecked((int)0x80004005);
@@ -774,6 +804,8 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-remove-namespace-registration");
             if (namespaceRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(namespaceKeyPath, throwOnMissingSubKey: false);
             if (classRegistrationCreated) Registry.CurrentUser.DeleteSubKeyTree(classKeyPath, throwOnMissingSubKey: false);
+            if (firstViewRootPidl != 0 && firstViewRootPidl != rootPidl) Marshal.FreeCoTaskMem(firstViewRootPidl);
+            if (secondViewRootPidl != 0 && secondViewRootPidl != rootPidl && secondViewRootPidl != firstViewRootPidl) Marshal.FreeCoTaskMem(secondViewRootPidl);
             if (rootPidl != 0) Marshal.FreeCoTaskMem(rootPidl);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-check-native-library-unload");
             if (module != 0)
@@ -1543,6 +1575,43 @@ public static class SyntheticShellSortProbe
         Console.WriteLine($"synthetic-size-update-notification: event=IFileOperation-DeleteItems-folder(SHCNE_RMDIR=0x{ShcneRemoveDirectory:X}); visible={rmdirVisible}; enum-calls={rmdirEnumCalls}; translated-queued={rmdirQueued}; translated-sent={rmdirSent}");
         if (!rmdirVisible || rmdirQueued < 1 || rmdirSent < 1)
             throw new TimeoutException("A Shell-deleted folder did not disappear from the synthetic view through its translated lifecycle notification.");
+    }
+
+    private static void VerifyTwoViewTargetNotifications(nint view1, nint view2, nint module,
+        string backingFolder1, string backingFolder2)
+    {
+        VerifyOneViewTargetNotification(FindListView(view1), FindListView(view2), module, backingFolder1, "pane-1-created", "pane-2-original.txt", "view1");
+        VerifyOneViewTargetNotification(FindListView(view2), FindListView(view1), module, backingFolder2, "pane-2-created", "pane-1-created", "view2");
+    }
+
+    private static void VerifyOneViewTargetNotification(nint targetListView, nint otherListView, nint module,
+        string backingFolder, string createdName, string otherViewSentinel, string targetLabel)
+    {
+        WaitForChildNotificationTranslationToSettle(module);
+        var enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        var queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        var sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        CreateFolderInFilesystemFolder(backingFolder, createdName);
+        var deadline = Environment.TickCount64 + 3000;
+        string[] targetNames = [];
+        string[] otherNames = [];
+        do
+        {
+            Pump(50);
+            targetNames = ReadNames(targetListView, module, expectedCount: -1);
+            otherNames = ReadNames(otherListView, module, expectedCount: -1);
+            if (targetNames.Contains(createdName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var enumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var queued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var sent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var targetUpdatedOnly = targetNames.Contains(createdName, StringComparer.OrdinalIgnoreCase) &&
+            !otherNames.Contains(createdName, StringComparer.OrdinalIgnoreCase) &&
+            otherNames.Contains(otherViewSentinel, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-shell-two-view-target-sync: operation=IFileOperation-NewItem-folder; target={targetLabel}; target-updated-only={targetUpdatedOnly}; enum-calls={enumCalls}; translated-queued={queued}; translated-sent={sent}");
+        if (!targetUpdatedOnly || enumCalls != 1 || queued != 1 || sent != 1)
+            throw new TimeoutException($"A Shell folder creation did not update exactly its target {targetLabel} view once.");
     }
 
     private static void VerifyAttributeChangeNotification(string itemPath, string itemName, nint itemPidl, nint listView, nint module)
