@@ -242,17 +242,25 @@ public static class SyntheticShellSortProbe
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
             if (factorySnapshotCacheOnly)
             {
-                const ulong sentinelBytes = 997;
+                var childPath = Path.Combine(backingFolder, "child");
+                var scannerResults = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                    backingFolder, [childPath], CancellationToken.None);
+                if (!scannerResults.TryGetValue(Path.GetFullPath(childPath), out var scannedChild) ||
+                    scannedChild.Bytes != 10 || scannedChild.Files != 2 || scannedChild.Directories != 1 || scannedChild.Unreadable != 0)
+                    throw new InvalidOperationException("The production recursive scanner did not report the expected 10-byte child snapshot.");
+                // Change disk after scanning: a provider fallback must now report 7, while the cached scan remains 10.
+                File.WriteAllBytes(Path.Combine(childPath, "nested", "deep.bin"), new byte[1]);
                 var factoriesBefore = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
                 var verifySharedCache = Marshal.GetDelegateForFunctionPointer<VerifySyntheticShellActivatedRecursiveSizeSnapshotCache>(
                     NativeLibrary.GetExport(module, "VerifySyntheticShellActivatedRecursiveSizeSnapshotCache"));
-                Check(verifySharedCache(rootPidl, sentinelBytes));
+                Check(verifySharedCache(rootPidl, checked((ulong)scannedChild.Bytes)));
                 var factoriesAfter = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
                 var factoryCreateDelta = factoriesAfter - factoriesBefore;
                 if (factoryCreateDelta < 2)
                     throw new InvalidOperationException($"Expected two Shell class-factory-created providers; observed create delta {factoryCreateDelta}.");
                 Console.WriteLine($"synthetic-shell-factory-snapshot-cache: class-factory-create-delta={factoryCreateDelta}; " +
-                    $"shell-created-provider-identities=distinct; sentinel={sentinelBytes}; " +
+                    $"production-scanner-bytes={scannedChild.Bytes}; disk-bytes-after-scan=7; " +
+                    $"shell-created-provider-identities=distinct; " +
                     "second-provider-readback=passed; shell-view-window-created=False");
                 if (GetForegroundWindow() != foreground)
                     throw new InvalidOperationException("The Shell activated recursive-size cache probe changed the foreground window.");

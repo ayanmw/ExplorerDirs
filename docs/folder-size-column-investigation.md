@@ -66,6 +66,12 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-
 
 边界：没有创建活动 DefView，未验证显示/排序、活动 view 更新、生产扫描器注入、容量/淘汰、长时间内存占用或 ExplorerBrowser 产品接线。完整 Shell view 探针的 teardown 阻塞仍是单独问题，不因这个无 view 合同而视为修复。
 
+### 2026-11-01：生产递归扫描结果跨 Shell provider 复用
+
+扩展上述无 Shell view 合同：通过项目生产 `RecursiveDirectoryScanner.ScanDirectoryTreeForPaths` 扫描夹具目录，得到 child=10 B、2 files、1 nested directory；扫描完成后把磁盘内容改为 7 B，再将扫描所得 10 B 发布到第一个 Shell 激活的 provider。另一次 class factory 激活得到不同 COM identity 的第二 provider，并从其 `GetDetailsOf` 读回 `10`。因此第二实例读到的是扫描快照，而不是扫描后已变为 7 B 的磁盘回退值。两次 watchdog 运行均观察到 factory create delta=2、读回成功、`DllCanUnloadNow=S_OK`、DLL freed 和 `isolation-clean=True`。
+
+NativeProbe Release 构建 0 警告/错误，未创建 `IShellView` 窗口。该结果将生产扫描器的字节汇总接到自然 Shell 激活的共享快照 provider；扫描结果按路径送入，文件系统身份由 adapter 从 Shell 行重新解析并校验。本轮不测试生产异步调度/取消/重扫发布、活动 DefView 更新、缓存限额/长期内存、ExplorerBrowser 产品接线或可见列。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。
