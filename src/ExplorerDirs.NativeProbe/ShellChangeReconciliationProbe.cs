@@ -20,6 +20,10 @@ internal static class ShellChangeReconciliationProbe
     private const uint RenamedFolder = 0x00020000;
     private const uint UpdatedItem = 0x00002000;
     private const uint UpdatedDirectory = 0x00001000;
+    private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
+    private static readonly Guid FileOperationId = new("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
     private const int LvmInsertItemW = 0x104D;
     private const int LvmSetItemTextW = 0x1074;
     private const int LvmDeleteAllItems = 0x1009;
@@ -324,13 +328,43 @@ internal static class ShellChangeReconciliationProbe
             if (registration == 0)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-pane Shell change registration failed.");
 
+            var sourceRow = sourceCurrent.Rows.Single(row => row.DisplayName == "moving.txt");
+            var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            nint dataObject = 0, operation = 0, destinationItem = 0;
+            try
+            {
+                Marshal.WriteIntPtr(childArray, sourceRow.RelativePidl);
+                var dataObjectId = DataObjectId;
+                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(sourceFolder, 10)(sourceFolder, 0, 1,
+                    childArray, in dataObjectId, 0, out dataObject));
+                if (dataObject == 0) throw new IOException("The source Shell folder returned no IDataObject for the selected move row.");
+
+                var fileOperationClassId = FileOperationClassId;
+                var fileOperationId = FileOperationId;
+                var createOperationHr = CoCreateInstance(ref fileOperationClassId, 0, 1, ref fileOperationId, out operation);
+                Marshal.ThrowExceptionForHR(createOperationHr);
+                Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation,
+                    0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                var shellItemId = ShellItemId;
+                Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(targetPath, 0, ref shellItemId, out destinationItem));
+                Marshal.ThrowExceptionForHR(At<MoveItems>(operation, 15)(operation, dataObject, destinationItem));
+                Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
+                Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                if (aborted != 0) throw new IOException("The isolated cross-pane Shell move was aborted.");
+            }
+            finally
+            {
+                if (destinationItem != 0) Marshal.Release(destinationItem);
+                if (operation != 0) Marshal.Release(operation);
+                if (dataObject != 0) Marshal.Release(dataObject);
+                Marshal.FreeCoTaskMem(childArray);
+            }
+
             var sourceItem = Path.Combine(sourcePath, "moving.txt");
             var targetItem = Path.Combine(targetPath, "moving.txt");
-            File.Move(sourceItem, targetItem);
-            SHChangeNotify(Deleted, PathUnicode, sourceItem, null);
-            SHChangeNotify(Created, PathUnicode, targetItem, null);
-            var deleteNotified = window.WaitFor([Deleted], TimeSpan.FromSeconds(5));
-            var createNotified = window.WaitFor([Created], TimeSpan.FromSeconds(5));
+            if (File.Exists(sourceItem) || !File.Exists(targetItem) || File.ReadAllText(targetItem) != "move me")
+                throw new IOException("IFileOperation.MoveItems did not move the isolated row to the destination pane folder.");
+            var shellMoveNotified = window.WaitForAny([Deleted, Created, RenamedItem], TimeSpan.FromSeconds(5));
 
             pendingSource = WaitForRow(sourcePidl, sourceFolder,
                 row => row.DisplayName == "moving.txt", expectMatch: false);
@@ -366,13 +400,13 @@ internal static class ShellChangeReconciliationProbe
                 HasStableListViewSelection(targetList, targetAnchorId);
             var isolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
                 !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
-            Console.WriteLine($"shell-change-cross-pane-move: delete-notified={deleteNotified};create-notified={createNotified};" +
+            Console.WriteLine($"shell-change-cross-pane-move: operation=IFileOperation.MoveItems;shell-change-notified={shellMoveNotified};events=[{string.Join(',', window.Events.Select(value => $"0x{value:X8}"))}];" +
                 $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
                 $"source-anchor-id-preserved={sourceAnchorPreserved};target-anchor-id-preserved={targetAnchorPreserved};" +
                 $"moved-source-row-retired={movedSourceRowRetired};moved-target-row-added={movedTargetRowAdded};" +
                 $"source-selection-focus-preserved={sourceSelectionPreserved};target-selection-focus-preserved={targetSelectionPreserved};" +
                 $"hidden-windows={isolated};foreground-unchanged={GetForegroundWindow() == foreground}");
-            if (!deleteNotified || !createNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 2 ||
+            if (!shellMoveNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 2 ||
                 !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowRetired || !movedTargetRowAdded ||
                 !sourceSelectionPreserved || !targetSelectionPreserved || !isolated)
                 throw new InvalidOperationException("Cross-pane move did not reconcile both Shell row models while retaining unaffected selection/focus.");
@@ -606,6 +640,9 @@ internal static class ShellChangeReconciliationProbe
 
     private static long NextId(IReadOnlyList<ShellListViewRow> rows) => rows.Count == 0 ? 1 : rows.Max(row => row.Id) + 1;
 
+    private static T At<T>(nint instance, int slot) where T : Delegate =>
+        Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct ListViewItem
     {
         public uint Mask; public int Item; public int SubItem; public uint State; public uint StateMask;
@@ -623,6 +660,7 @@ internal static class ShellChangeReconciliationProbe
     {
         private readonly List<uint> _events = [];
         private readonly Dictionary<string, string> _renamedParsingNames = new(StringComparer.OrdinalIgnoreCase);
+        internal IReadOnlyList<uint> Events => _events;
         internal IReadOnlyDictionary<string, string> RenamedParsingNames => _renamedParsingNames;
 
         internal ChangeWindow()
@@ -640,6 +678,18 @@ internal static class ShellChangeReconciliationProbe
                 Thread.Sleep(10);
             }
             return expected.All(value => _events.Contains(value));
+        }
+
+        internal bool WaitForAny(uint[] expected, TimeSpan timeout)
+        {
+            var until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+            while (Environment.TickCount64 < until)
+            {
+                Application.DoEvents();
+                if (_events.Any(expected.Contains)) return true;
+                Thread.Sleep(10);
+            }
+            return _events.Any(expected.Contains);
         }
 
         protected override void WndProc(ref Message message)
@@ -682,6 +732,14 @@ internal static class ShellChangeReconciliationProbe
 
     [StructLayout(LayoutKind.Sequential)] private struct ShellChangeEntry { public nint Pidl; [MarshalAs(UnmanagedType.Bool)] public bool Recursive; }
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint items, in Guid iid, nint reserved, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+
+    [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, ref Guid interfaceId, out nint item);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint requested, out uint attributes);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint result);
     [DllImport("shell32.dll")] private static extern uint SHChangeNotifyRegister(nint window, uint sources, uint events, int message, int entryCount, ref ShellChangeEntry entry);

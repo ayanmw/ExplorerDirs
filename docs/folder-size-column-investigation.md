@@ -982,6 +982,6 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 
 ## 2026-10-31：自有行模型跨窗格移动协调
 
-`ShellChangeReconciliationProbe` 新增两个独立文件夹 pane 与两份隐藏 `SysListView32` 投影。临时文件从源目录移到目标目录后，探针等待递归 Shell 监听收到 `SHCNE_DELETE` / `SHCNE_CREATE`，分别重新枚举两侧并独立执行 `ShellListViewRowModel.Reconcile`。结果确认源 pane 退休移出行、目标 pane 新增行；两侧未移动的锚点都保留稳定行 ID、选中状态和焦点。Release NativeProbe build 0 警告/错误，`--shell-change-reconciliation` 通过，前台句柄不变且两组列表/宿主窗口均隐藏。
+`ShellChangeReconciliationProbe` 新增两个独立文件夹 pane 与两份隐藏 `SysListView32` 投影。探针从源 `IShellFolder` 行取得 `IDataObject`，调用 `IFileOperation.MoveItems` 移到目标 Shell 文件夹；没有手动发送 `SHChangeNotify`。递归 Shell watcher 收到移动事件后，探针分别重新枚举两侧并独立执行 `ShellListViewRowModel.Reconcile`。结果确认源 pane 退休移出行、目标 pane 新增行；两侧未移动的锚点都保留稳定行 ID、选中状态和焦点。Release NativeProbe build 0 警告/错误，`--shell-change-reconciliation` 通过，前台句柄不变且两组列表/宿主窗口均隐藏。
 
-这覆盖了两份自有行快照对跨窗格移动结果的协调，不覆盖 `IFileOperation` 实际 Shell 进度/Undo、真实 `DoDragDrop`、产品 ExplorerBrowser 或用户可见输入；当前文件移动由隔离 fixture 执行，通知由探针明确发送。产品视图迁移仍未完成。
+这覆盖了 `IFileOperation.MoveItems` 产生的 Shell 通知及两份自有行快照对跨窗格移动结果的协调，不覆盖实际进度/Undo UI、真实 `DoDragDrop`、产品 ExplorerBrowser 或用户可见输入；文件移动仅作用于隔离 fixture。产品视图迁移仍未完成。

@@ -16,7 +16,7 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
-2026-10-31 自有行模型跨窗格移动协调：隐藏双 pane `SysListView32` 探针把真实临时文件从源目录移到目标目录，递归 Shell change watcher 收到 `SHCNE_DELETE`/`SHCNE_CREATE` 后分别重枚举、reconcile 两侧行模型。源行退休、目标行新增，两个窗格未移动的行 ID、选区及焦点均保留。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` 通过，父/列表窗口隐藏且前台不变。验证的是自有行模型合同，不是产品 ExplorerBrowser、`IFileOperation`、真实 OLE 拖放或可见 UI。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格移动协调)。
+2026-10-31 自有行模型跨窗格 Shell 移动协调：隐藏双 pane `SysListView32` 探针从源 `IShellFolder` 取得 `IDataObject`，调用真实 `IFileOperation.MoveItems`，由递归 Shell watcher 接收系统通知，再分别重枚举、reconcile 两侧行模型。源行退休、目标行新增，两个窗格未移动的行 ID、选区及焦点均保留。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` 通过，父/列表窗口隐藏且前台不变。验证的是隔离 Shell 操作及自有行模型合同，不是产品 ExplorerBrowser、真实 OLE 拖放或可见 UI。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格移动协调)。
 
 2026-10-31 IShellView 逐项着色新假设复核：曾怀疑 DefView 的通知目标挡住了 `NM_CUSTOMDRAW`，故在隔离 Private Desktop 将 `SysListView32` 通知改投临时 sink 并同步转发给原 DefView。sink 收到并转发 16 条普通通知，但自绘逐项回调仍为 0、目标像素为 0；该轮在原型颜色断言处提前结束，未验证完整通知兼容。临时试验入口已删除，详见[原型记录](ishellview-color-spike.md#2026-10-31-ccm_setnotifywindow-逐项着色通知路由验证未通过)。该分支不再作为颜色方案；自有 ListView 的逐项绘制仍是已验证的原型路线，IShellView 产品迁移门槛与集中可见验收仍未完成。
 
