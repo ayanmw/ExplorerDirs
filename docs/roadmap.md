@@ -1,5 +1,5 @@
 # 路线图
-2026-11-01 Q-Dir 官方能力清单复核：官方帮助页分别列出 Color Filter、Highlight-Filter 与 File-Filter；其中 Highlight-Filter 只说明“按扩展名高亮文件”，未公开具体视觉、作用域和 `.qdr` 存储语义。已在[功能差距表](shell-parity.md)单列该项，等待集中 Q-Dir 可见验收后再定实现，不以现有快速筛选或颜色规则冒充完成。[Q-Dir Help](https://www.softwareok.com/?seite=Freeware/Q-Dir/Help+file)
+2026-11-01 Q-Dir 官方能力清单复核：帮助页分别列出 Color Filter、Highlight-Filter 与 File-Filter；FAQ 6 又把扩展名颜色规则称为 highlighting，FAQ 97 将 colors/highlighting 共用一个关闭入口。故公开资料不能证明 Highlight-Filter 是独立机制。已在[功能差距表](shell-parity.md)记录此歧义；待集中 Q-Dir 可见验收确认后再定是否需要单独实现。[Q-Dir Help](https://www.softwareok.com/?seite=Freeware/Q-Dir/Help+file) · [FAQ 6](https://www.softwareok.com/?faq=6&seite=faq-Q-DIR) · [FAQ 97](https://www.softwareok.com/?faq=97&seite=faq-Q-DIR)
 
 2026-11-01 全量 SettingsSmoke 复核：之前递归扫描记录中提到的 Soft-Refresh 文案断言不再是当前失败；现有断言匹配菜单名称与“不重枚举/防止自动重排”提示。完整 `dotnet run --project src/ExplorerDirs.SettingsSmoke/ExplorerDirs.SettingsSmoke.csproj -c Release` 本轮退出码 0，包含 Soft-refresh routing smoke；没有启动 Shell view 或 GUI。旧记录保留为当时观察，不代表当前套件仍失败。
 
