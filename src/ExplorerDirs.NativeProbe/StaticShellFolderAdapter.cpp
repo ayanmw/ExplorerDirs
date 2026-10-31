@@ -9,7 +9,9 @@
 #include <strsafe.h>
 #include <algorithm>
 #include <new>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <cstdio>
 
@@ -1260,13 +1262,6 @@ namespace
         return child ? child->size : 0;
     }
 
-    double SyntheticRelativePercent(const SyntheticChild* child)
-    {
-        return child && child->parentBytes != 0
-            ? 100.0 * static_cast<double>(SyntheticSize(child)) / static_cast<double>(child->parentBytes)
-            : 0.0;
-    }
-
     std::wstring SyntheticContentsText(const SyntheticChild* child)
     {
         if (!child) return {};
@@ -1762,6 +1757,18 @@ namespace
             if (!references) delete this;
             return references;
         }
+        HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, ULONGLONG bytes)
+        {
+            const auto* child = SyntheticData(item);
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
+            try
+            {
+                std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
+                _recursiveSizeByRowName[child->name] = bytes;
+            }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            return S_OK;
+        }
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
             if (!value) return E_POINTER;
@@ -2081,14 +2088,14 @@ namespace
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
                 if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeCompareCount);
-                comparison = SyntheticSize(leftChild) < SyntheticSize(rightChild) ? -1 :
-                    SyntheticSize(leftChild) > SyntheticSize(rightChild) ? 1 : 0;
+                comparison = SizeForChild(leftChild) < SizeForChild(rightChild) ? -1 :
+                    SizeForChild(leftChild) > SizeForChild(rightChild) ? 1 : 0;
                 break;
             case 2: comparison = 0; break;
             case 3:
                 if (!InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0)) return E_INVALIDARG;
-                comparison = SyntheticRelativePercent(leftChild) < SyntheticRelativePercent(rightChild) ? -1 :
-                    SyntheticRelativePercent(leftChild) > SyntheticRelativePercent(rightChild) ? 1 : 0;
+                comparison = RelativePercentForChild(leftChild) < RelativePercentForChild(rightChild) ? -1 :
+                    RelativePercentForChild(leftChild) > RelativePercentForChild(rightChild) ? 1 : 0;
                 break;
             default: return E_INVALIDARG;
             }
@@ -2283,12 +2290,12 @@ namespace
                 InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
             {
                 value->vt = VT_R8;
-                value->dblVal = SyntheticRelativePercent(child);
+                value->dblVal = RelativePercentForChild(child);
             }
             else if (*key == kSizeKey || *key == kSyntheticRecursiveSizeKey)
             {
                 value->vt = VT_UI8;
-                value->ullVal = SyntheticSize(child);
+                value->ullVal = SizeForChild(child);
             }
             else return E_INVALIDARG;
             return S_OK;
@@ -2316,11 +2323,11 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
-                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SyntheticSize(child)) :
+                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SizeForChild(child)) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                         ? SyntheticContentsText(child)
                         : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
-                    std::to_wstring(SyntheticRelativePercent(child)) + L"%";
+                    std::to_wstring(RelativePercentForChild(child)) + L"%";
                 details->fmt = column == 1 || column == 3 ? LVCFMT_RIGHT : LVCFMT_LEFT;
                 details->cxChar = 16;
             }
@@ -2365,6 +2372,22 @@ namespace
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
+        ULONGLONG SizeForChild(const SyntheticChild* child) const
+        {
+            if (!child) return 0;
+            {
+                std::lock_guard<std::mutex> lock(_recursiveSizeMutex);
+                const auto found = _recursiveSizeByRowName.find(child->name);
+                if (found != _recursiveSizeByRowName.end()) return found->second;
+            }
+            return SyntheticSize(child);
+        }
+        double RelativePercentForChild(const SyntheticChild* child) const
+        {
+            return child && child->parentBytes != 0
+                ? 100.0 * static_cast<double>(SizeForChild(child)) / static_cast<double>(child->parentBytes)
+                : 0.0;
+        }
         HRESULT DescribeBackingChild(IShellFolder2* backingFolder, const std::wstring& backingPath,
             PCUITEMID_CHILD original, SyntheticChild* child)
         {
@@ -2666,6 +2689,8 @@ namespace
         IShellView* _shellView = nullptr;
         std::wstring _backingPath;
         IShellFolder2* _inner = nullptr;
+        mutable std::mutex _recursiveSizeMutex;
+        std::unordered_map<std::wstring, ULONGLONG> _recursiveSizeByRowName;
         std::vector<SyntheticChild> _pendingSelected;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
@@ -3320,7 +3345,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeP
     PITEMID_CHILD rootFile = nullptr;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
-    InterlockedExchange64(&g_syntheticChildSizeOverride, scannedBytes);
+    InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
 
     result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_projection;
@@ -3331,6 +3356,8 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeP
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_projection;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_projection;
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(scannedBytes));
     if (FAILED(result)) goto cleanup_recursive_size_projection;
 
     {
@@ -3378,20 +3405,21 @@ cleanup_recursive_size_projection:
     return result;
 }
 
-extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeUpdateSmoke(
-    PCWSTR backingPath, LONGLONG initialBytes, LONGLONG updatedBytes)
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeByRowSmoke(
+    PCWSTR backingPath, LONGLONG initialBytes, LONGLONG otherRowBytes, LONGLONG updatedBytes)
 {
-    if (!backingPath || !*backingPath || initialBytes < 0 || updatedBytes < 0) return E_INVALIDARG;
+    if (!backingPath || !*backingPath || initialBytes < 0 || otherRowBytes < 0 || updatedBytes < 0) return E_INVALIDARG;
     auto result = SetSyntheticSortBackingPath(backingPath);
     if (FAILED(result)) return result;
 
     PIDLIST_ABSOLUTE rootPidl = nullptr;
     SyntheticSortFolder* root = nullptr;
     PITEMID_CHILD childFolder = nullptr;
+    PITEMID_CHILD otherFolder = nullptr;
     PITEMID_CHILD rootFile = nullptr;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
-    InterlockedExchange64(&g_syntheticChildSizeOverride, initialBytes);
+    InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
 
     result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_update;
@@ -3401,17 +3429,23 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeU
     if (FAILED(result)) goto cleanup_recursive_size_update;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"other-child"), nullptr, &otherFolder, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(initialBytes));
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = root->SetRecursiveSizeSnapshotForProbe(otherFolder, static_cast<ULONGLONG>(otherRowBytes));
     if (FAILED(result)) goto cleanup_recursive_size_update;
 
     {
-        const auto rowMatchesSnapshot = [&](ULONGLONG expected, bool folderAfterFile)
+        const auto rowMatchesSnapshot = [&](PCUITEMID_CHILD row, ULONGLONG expected, bool folderAfterFile)
         {
             SHCOLUMNID mappedKey{};
             if (FAILED(root->MapColumnToSCID(1, &mappedKey)) || mappedKey != kSyntheticRecursiveSizeKey) return false;
 
             SHELLDETAILS details{};
-            const auto detailsResult = root->GetDetailsOf(childFolder, 1, &details);
+            const auto detailsResult = root->GetDetailsOf(row, 1, &details);
             const auto expectedText = std::to_wstring(expected);
             const bool textMatches = SUCCEEDED(detailsResult) && details.str.uType == STRRET_WSTR &&
                 details.str.pOleStr && expectedText == details.str.pOleStr;
@@ -3420,25 +3454,28 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeU
 
             VARIANT value{};
             VariantInit(&value);
-            const auto propertyResult = root->GetDetailsEx(childFolder, &mappedKey, &value);
+            const auto propertyResult = root->GetDetailsEx(row, &mappedKey, &value);
             const bool propertyMatches = SUCCEEDED(propertyResult) && value.vt == VT_UI8 && value.ullVal == expected;
             VariantClear(&value);
             if (!propertyMatches) return false;
 
             const auto compareResult = folderAfterFile
-                ? root->CompareIDs(1, childFolder, rootFile)
-                : root->CompareIDs(1, rootFile, childFolder);
+                ? root->CompareIDs(1, row, rootFile)
+                : root->CompareIDs(1, rootFile, row);
             return SUCCEEDED(compareResult) && static_cast<SHORT>(HRESULT_CODE(compareResult)) > 0;
         };
 
-        // The same PIDL must observe each scan snapshot in the display, property, and numeric comparison paths.
-        if (!rowMatchesSnapshot(static_cast<ULONGLONG>(initialBytes), true))
+        // Sibling rows own independent snapshots; updating one must not replace the other's value.
+        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(initialBytes), true) ||
+            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
-        InterlockedExchange64(&g_syntheticChildSizeOverride, updatedBytes);
-        if (!rowMatchesSnapshot(static_cast<ULONGLONG>(updatedBytes), false))
+        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, static_cast<ULONGLONG>(updatedBytes));
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
+            !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
@@ -3451,6 +3488,7 @@ cleanup_recursive_size_update:
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
     if (rootFile) CoTaskMemFree(rootFile);
+    if (otherFolder) CoTaskMemFree(otherFolder);
     if (childFolder) CoTaskMemFree(childFolder);
     if (root) root->Release();
     if (rootPidl) CoTaskMemFree(rootPidl);

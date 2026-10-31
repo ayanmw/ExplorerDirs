@@ -1952,9 +1952,11 @@ internal static class StaticShellFolderAdapterProbe
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderTreeContractSmoke"))(shellFixture));
 
             Directory.CreateDirectory(Path.Combine(projectionFixture, "child", "nested-folder"));
+            Directory.CreateDirectory(Path.Combine(projectionFixture, "other-child"));
             var nestedFile = Path.Combine(projectionFixture, "child", "nested-folder", "deep.txt");
             File.WriteAllBytes(Path.Combine(projectionFixture, "child", "direct.txt"), "direct"u8.ToArray());
             File.WriteAllBytes(nestedFile, "deep"u8.ToArray());
+            File.WriteAllBytes(Path.Combine(projectionFixture, "other-child", "other.txt"), "other-value!"u8.ToArray());
             File.WriteAllBytes(Path.Combine(projectionFixture, "root.txt"), "12345678"u8.ToArray());
             var projectionChildPath = Path.Combine(projectionFixture, "child");
             var projectionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
@@ -1967,10 +1969,10 @@ internal static class StaticShellFolderAdapterProbe
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeProjectionSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeProjectionSmoke"))(
                     projectionFixture, checked((long)snapshot.Bytes)));
-            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeUpdateSmoke>(
-                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeUpdateSmoke"))(
-                    projectionFixture, checked((long)snapshot.Bytes), 6));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; same-pidl-update=6B/text/property/sort-passed; window-created=False");
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeByRowSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeByRowSmoke"))(
+                    projectionFixture, checked((long)snapshot.Bytes), 12, 6));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; per-row-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False");
         }
         finally
         {
@@ -2311,7 +2313,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long scannedBytes);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeUpdateSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long initialBytes, long updatedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeByRowSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long initialBytes, long otherRowBytes, long updatedBytes);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

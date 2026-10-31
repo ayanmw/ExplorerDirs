@@ -1,12 +1,12 @@
 # 逐行文件夹大小与子项计数列调查
 
-## 2026-10-31：扫描快照注入原生 Shell 列合同
+## 2026-10-31：扫描快照按行注入原生 Shell 列
 
-NativeProbe 新增无窗口合同，直接把生产 `RecursiveDirectoryScanner` 的目录扫描值传入合成 `IShellFolder2`。夹具扫描时目标目录为 10 B，随后将磁盘文件改动到实际目录总量 7 B；注入 10 B 后，原生 provider 的列文本仍为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将目录排在 8 B 的根文件之后。该断言区分了“消费扫描快照”与“重新读取当前目录大小”。另一个合同在同一个 Shell 项 PIDL 上把 provider 快照从 10 B 改为 6 B，复查列文本、属性值和与 8 B 文件的比较结果都随之翻转。原有 folder-tree Shell 合同仍独立运行。
+NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的目标目录扫描值传入合成 `IShellFolder2` 实例的逐行快照表。夹具扫描时目标目录为 10 B，随后将磁盘内容改成 7 B；传入 10 B 后，原生 provider 的列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。另一个合同给两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 读回的文本、属性及排序均更新，第二行仍保持 12 B 和独立排序。按文件夹实例隔离的逐行缓存已替代这两个合同的全局大小覆盖值。
 
-验证：`build-static-shell-folder-adapter.ps1` 原生 Release DLL 构建成功，NativeProbe Release 构建 0 警告/错误；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --static-shell-column-folder-smoke` 退出码 0，输出 `scanner-bytes=10; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; same-pidl-update=6B/text/property/sort-passed; window-created=False`。探针没有创建 Shell view 窗口。
+验证：`build-static-shell-folder-adapter.ps1` 原生 Release DLL 构建成功，NativeProbe Release 构建 0 警告/错误；`dotnet run --project src/ExplorerDirs.NativeProbe/ExplorerDirs.NativeProbe.csproj -c Release --no-build -- --static-shell-column-folder-smoke` 退出码 0，输出 `scanner-bytes=10; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; per-row-cache=independent; same-pidl-update=6B/text/property/sort-passed; window-created=False`。探针没有创建 Shell view 窗口。
 
-边界：更新合同用 probe-only 全局覆盖值模拟 provider 快照变化，没有实现逐行缓存、扫描器异步回写或 `SHChangeNotify`。这些合同验证扫描值穿过 managed/native 边界，并驱动合成 provider 文本、属性和比较器；不是产品列接线，也没有验证 DefView 是否会重取/保留该属性、通知、文件操作/菜单/焦点/拖放或 Q-Dir 可见显示。Explorer Dirs 产品仍使用 ExplorerBrowser；逐行大小列仍是未实现的 P2 产品功能。
+边界：缓存仅存在于探针的合成 provider 实例，并以当前文件夹内 PIDL 的显示名作为 key；没有接入真实行模型的绝对 Shell 解析身份、跨 provider 实例缓存、扫描调度/异步回写或 `SHChangeNotify`。因此这只验证快照映射与更新逻辑，不是产品列接线，也没有验证 DefView 是否重取/保留列值、菜单/焦点/拖放或 Q-Dir 可见显示。Explorer Dirs 产品仍使用 ExplorerBrowser；逐行大小列仍是未实现的 P2 产品功能。
 
 ## 2026-10-31：隐藏 SysListView32 写回重枚举后的选区/焦点
 
