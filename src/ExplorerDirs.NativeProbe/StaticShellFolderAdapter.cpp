@@ -1308,6 +1308,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI VerifyStaticShellViewFolder(
 
 namespace
 {
+    struct SyntheticFileIdentity
+    {
+        ULONGLONG volumeSerial = 0;
+        BYTE fileId[16]{};
+        bool available = false;
+    };
+
     // Minimal, unregistered namespace used only to ask DefView whether it will
     // call IShellFolder2::CompareIDs for the standard Size column.
     struct SyntheticChild
@@ -1320,7 +1327,40 @@ namespace
         ULONGLONG fileCount;
         ULONGLONG folderCount;
         ULONGLONG parentBytes;
+        SyntheticFileIdentity identity;
     };
+
+    struct SyntheticFileIdentityLess
+    {
+        bool operator()(const SyntheticFileIdentity& left, const SyntheticFileIdentity& right) const noexcept
+        {
+            if (left.volumeSerial != right.volumeSerial) return left.volumeSerial < right.volumeSerial;
+            return memcmp(left.fileId, right.fileId, sizeof(left.fileId)) < 0;
+        }
+    };
+
+    struct SyntheticRecursiveSizeSnapshot
+    {
+        SyntheticFileIdentity identity;
+        ULONGLONG bytes = 0;
+    };
+
+    bool TryGetSyntheticFileIdentity(PCWSTR path, SyntheticFileIdentity* identity)
+    {
+        if (!path || !identity) return false;
+        const auto file = CreateFileW(path, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+        FILE_ID_INFO information{};
+        const bool available = GetFileInformationByHandleEx(file, FileIdInfo, &information, sizeof(information)) != FALSE;
+        CloseHandle(file);
+        if (!available) return false;
+        identity->volumeSerial = information.VolumeSerialNumber;
+        CopyMemory(identity->fileId, information.FileId.Identifier, sizeof(identity->fileId));
+        identity->available = true;
+        return true;
+    }
 
     struct ShellParsingNameLess
     {
@@ -1341,30 +1381,32 @@ namespace
             if (!references) delete this;
             return references;
         }
-        HRESULT Set(PCWSTR parsingName, ULONGLONG bytes)
+        HRESULT Set(PCWSTR parsingName, const SyntheticFileIdentity& identity, ULONGLONG bytes)
         {
-            if (!parsingName || !*parsingName) return E_INVALIDARG;
+            if (!parsingName || !*parsingName || !identity.available) return E_INVALIDARG;
             try
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                _sizes[parsingName] = bytes;
+                _sizes[parsingName] = { identity, bytes };
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
-        bool TryGet(const std::wstring& parsingName, ULONGLONG* bytes) const
+        bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
         {
-            if (!bytes) return false;
+            if (!identity.available || !bytes) return false;
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _sizes.find(parsingName);
             if (found == _sizes.end()) return false;
-            *bytes = found->second;
+            const SyntheticFileIdentityLess less{};
+            if (less(found->second.identity, identity) || less(identity, found->second.identity)) return false;
+            *bytes = found->second.bytes;
             return true;
         }
     private:
         volatile LONG _references = 1;
         mutable std::mutex _mutex;
-        std::map<std::wstring, ULONGLONG, ShellParsingNameLess> _sizes;
+        std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -1560,6 +1602,7 @@ namespace
                     std::wstring childPath;
                     try { childPath = backingPath + L"\\" + entry.cFileName; }
                     catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
+                    TryGetSyntheticFileIdentity(childPath.c_str(), &child.identity);
                     SyntheticDirectoryMetrics metrics{};
                     result = GetSyntheticDirectoryMetrics(childPath, &metrics);
                     if (FAILED(result)) break;
@@ -1937,7 +1980,7 @@ namespace
             auto result = GetAbsoluteParsingName(child, &shellParsingName);
             if (FAILED(result)) return result;
             if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
-            return _recursiveSizeStore->Set(parsingName, bytes);
+            return _recursiveSizeStore->Set(parsingName, child->identity, bytes);
         }
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
@@ -2622,10 +2665,10 @@ namespace
             const auto* child = SyntheticData(item);
             if (!child) return 0;
             std::wstring parsingName;
-            if (SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
+            if (_recursiveSizeStore && SUCCEEDED(GetAbsoluteParsingName(child, &parsingName)))
             {
                 ULONGLONG bytes = 0;
-                if (_recursiveSizeStore && _recursiveSizeStore->TryGet(parsingName, &bytes)) return bytes;
+                if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes)) return bytes;
             }
             return SyntheticSize(child);
         }
@@ -2720,17 +2763,21 @@ namespace
                     return result;
                 }
             }
-            else if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            else
             {
                 std::wstring childPath;
                 try { childPath = backingPath + L"\\" + child->name; }
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
-                SyntheticDirectoryMetrics metrics{};
-                result = GetSyntheticDirectoryMetrics(childPath, &metrics);
-                if (FAILED(result)) return result;
-                child->size = metrics.bytes;
-                child->fileCount = metrics.files;
-                child->folderCount = metrics.folders;
+                TryGetSyntheticFileIdentity(childPath.c_str(), &child->identity);
+                if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    SyntheticDirectoryMetrics metrics{};
+                    result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                    if (FAILED(result)) return result;
+                    child->size = metrics.bytes;
+                    child->fileCount = metrics.files;
+                    child->folderCount = metrics.folders;
+                }
             }
             return S_OK;
         }
@@ -3827,6 +3874,59 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
         {
             result = E_FAIL;
             goto cleanup_recursive_size_update;
+        }
+
+        // A replacement directory at the same path must not inherit the retired folder's scan snapshot.
+        CoTaskMemFree(childFolder);
+        childFolder = nullptr;
+        {
+            std::wstring originalChildPath = backingPath;
+            std::wstring retiredChildPath = backingPath;
+            try
+            {
+                originalChildPath += L"\\child";
+                retiredChildPath += L"\\child.retired";
+            }
+            catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+            if (!MoveFileW(originalChildPath.c_str(), retiredChildPath.c_str()))
+            {
+                result = HRESULT_FROM_WIN32(GetLastError());
+                goto cleanup_recursive_size_update;
+            }
+            if (!CreateDirectoryW(originalChildPath.c_str(), nullptr))
+            {
+                result = HRESULT_FROM_WIN32(GetLastError());
+                goto cleanup_recursive_size_update;
+            }
+            std::wstring replacementFilePath = originalChildPath + L"\\replacement.bin";
+            const auto replacementFile = CreateFileW(replacementFilePath.c_str(), GENERIC_WRITE, 0, nullptr,
+                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (replacementFile == INVALID_HANDLE_VALUE)
+            {
+                result = HRESULT_FROM_WIN32(GetLastError());
+                goto cleanup_recursive_size_update;
+            }
+            constexpr BYTE replacementContents[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 };
+            DWORD bytesWritten = 0;
+            const bool wroteReplacement = WriteFile(replacementFile, replacementContents,
+                static_cast<DWORD>(sizeof(replacementContents)), &bytesWritten, nullptr) != FALSE &&
+                bytesWritten == sizeof(replacementContents);
+            CloseHandle(replacementFile);
+            if (!wroteReplacement)
+            {
+                result = HRESULT_FROM_WIN32(GetLastError());
+                goto cleanup_recursive_size_update;
+            }
+        }
+        result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+        if (FAILED(result)) goto cleanup_recursive_size_update;
+        {
+            SHELLDETAILS details{};
+            result = root->GetDetailsOf(childFolder, 1, &details);
+            const bool textMatches = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
+                details.str.pOleStr && wcscmp(details.str.pOleStr, L"17") == 0;
+            if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+            if (!textMatches) { result = E_FAIL; goto cleanup_recursive_size_update; }
         }
     }
     result = S_OK;
