@@ -2,9 +2,9 @@
 
 ## 2026-11-01：ZIP 虚拟 Shell 项的颜色规则输入验证
 
-新增 `--virtual-zip-color-rules` 隔离探针：建立临时 ZIP Shell 文件夹并通过 `ShellListViewEnumerator` 取出一个虚拟文件和一个虚拟子目录。两项均没有 `FileSystemPath`；Shell 返回的显示名及 `SFGAO_FOLDER` 属性仍可驱动现有名称通配符和 `#DIR` 背景规则，输出分别为 `0xF0E0D0` 与 `0xD0F0E0`。前台窗口保持不变，夹具清理完成。NativeProbe Release 构建 0 警告/错误，探针退出码 0。
+新增 `--virtual-zip-color-rules` 隔离探针：建立临时 ZIP Shell 文件夹并通过 `ShellListViewEnumerator` 取出一个虚拟文件和一个虚拟子目录。两项均没有 `FileSystemPath`；Shell 返回的显示名及 `SFGAO_FOLDER` 属性可驱动名称通配符和 `#DIR` 规则，文件与目录的背景/文本色分别符合预期，文件的粗体规则也命中。为此，通用颜色规则 evaluator 增加基于 Shell 目录/隐藏/只读布尔属性的文本色和字形重载。策略 smoke 和 NativeProbe Release 构建均通过（0 警告/错误），ZIP 探针退出码 0；前台窗口保持不变，夹具清理完成。
 
-本轮先因 ZIP entry stream 未在创建下一项前关闭而失败；缩小 stream 生命周期后复跑通过。另有 `host-filter-virtual-private-desktop` 探针证明 ZIP Shell view 能枚举并查询原生背景菜单，但它不是颜色绘制证据。当前结果只验证虚拟 Shell 元数据可作为规则匹配输入，不创建/绘制自有 `IShellView`，不读取 Q-Dir `.qdr` 颜色配置，不覆盖实际 DefView 像素、其他虚拟 provider 或产品接线，也不代表 `ExplorerBrowser` 产品已支持逐项颜色。
+本轮先因 ZIP entry stream 未在创建下一项前关闭而失败；缩小 stream 生命周期后复跑通过。另有 `host-filter-virtual-private-desktop` 探针证明 ZIP Shell view 能枚举并查询原生背景菜单，但它不是颜色绘制证据。当前结果只验证虚拟 Shell 元数据可作为颜色/字形规则输入，不创建/绘制自有 `IShellView`，不读取 Q-Dir `.qdr` 颜色配置，不覆盖实际 DefView 像素、其他虚拟 provider 或产品接线，也不代表 `ExplorerBrowser` 产品已支持逐项颜色。
 
 ## 2026-10-31 Shell Undo/Redo 原生命令实验（停止）
 

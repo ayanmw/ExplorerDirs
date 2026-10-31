@@ -5314,6 +5314,6 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 ## 2026-11-01：ZIP 虚拟 Shell 项颜色规则输入复核
 
-新增 NativeProbe ZIP 虚拟文件夹夹具，Shell 枚举出的虚拟文件与虚拟目录均没有文件系统路径，但其显示名及 `SFGAO_FOLDER` 属性可匹配现有名称/`#DIR` 规则并返回预期背景色。NativeProbe Release 构建 0 警告/错误，探针通过，前台与夹具清理检查通过。此前独立 ZIP Shell view 探针另验证了枚举及原生背景菜单查询。
+新增 NativeProbe ZIP 虚拟文件夹夹具，Shell 枚举出的虚拟文件与虚拟目录均没有文件系统路径，但其显示名及 `SFGAO_FOLDER` 属性可匹配名称/`#DIR` 背景和文本色规则；文件粗体样式也能由同一元数据解析。基于 Shell 元数据的文本色和字形 resolver smoke、NativeProbe Release 构建 0 警告/错误及 ZIP 探针均通过，前台与夹具清理检查通过。此前独立 ZIP Shell view 探针另验证了枚举及原生背景菜单查询。
 
-这说明逐项颜色规则计算不必依赖磁盘路径，可扩展到 ZIP 一类虚拟 Shell 项；尚未在自有 `IShellView` 中绘制这些行，也未验证其他 provider、Q-Dir `.qdr` 颜色导入或产品 UI。产品架构决策仍须等可见宿主兼容门槛和集中验收，当前不接入 ExplorerBrowser 产品。完整证据与范围见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项的颜色规则输入验证)。
+这说明逐项颜色/字形规则计算不必依赖磁盘路径，可扩展到 ZIP 一类虚拟 Shell 项；尚未在自有 `IShellView` 中绘制这些行，也未验证其他 provider、Q-Dir `.qdr` 颜色导入或产品 UI。下一步仍是把虚拟项目身份映射进真实 DefView 绘制并验证像素，之后再扩展 provider 矩阵。产品架构决策仍须等可见宿主兼容门槛和集中验收，当前不接入 ExplorerBrowser 产品。完整证据与范围见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-zip-虚拟-shell-项的颜色规则输入验证)。

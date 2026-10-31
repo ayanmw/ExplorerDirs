@@ -112,6 +112,11 @@ internal static class ShellViewColorPolicySmoke
               ShellViewColorRuleEvaluator.ResolveFontStyle(independentProperties, "report.txt", FileAttributes.ReadOnly,
                   static rule => rule.Strikeout) is null,
             "bold, italic, underline, and strikeout each have independent continuation states");
+        Check(ShellViewColorRuleEvaluator.ResolveTextColor(independentProperties, "report.txt",
+                  isDirectory: false, isHidden: false, isReadOnly: true) == 0x00010203 &&
+              ShellViewColorRuleEvaluator.ResolveFontStyle(independentProperties, "report.txt",
+                  isDirectory: false, isHidden: false, isReadOnly: true, static rule => rule.Bold) == true,
+            "virtual Shell metadata resolves text color and font style without filesystem attributes");
 
         Check(!ShellViewColorRuleMatcher.Matches("#BG", "report.txt", FileAttributes.Normal) &&
               !ShellViewColorRuleMatcher.Matches("#BG-A", "report.txt", FileAttributes.Normal),

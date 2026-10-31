@@ -39,11 +39,11 @@ internal static class VirtualZipColorRuleProbe
             if (rows.Count != 2)
                 throw new InvalidOperationException($"The ZIP Shell folder should expose one file and one directory, got {rows.Count} rows.");
 
-            var rules = new[]
-            {
-                ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u),
-                ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0u)
-            };
+            var fileRule = ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u)
+                with { TextColor = ShellColorRuleProperty<uint>.Set(0x000000C0u), Bold = ShellColorRuleProperty<bool>.Set(true) };
+            var directoryRule = ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0u)
+                with { TextColor = ShellColorRuleProperty<uint>.Set(0x0000C000u) };
+            var rules = new[] { fileRule, directoryRule };
             var fileRow = rows.Single(row => row.DisplayName.Equals("blue-rule-target.txt", StringComparison.OrdinalIgnoreCase));
             var directoryRow = rows.Single(row => (row.Attributes & SfgaoFolder) != 0);
             if (rows.Any(row => row.FileSystemPath is not null))
@@ -51,13 +51,17 @@ internal static class VirtualZipColorRuleProbe
 
             var fileColor = Evaluate(fileRow, rules);
             var directoryColor = Evaluate(directoryRow, rules);
-            if (fileColor != 0x00F0E0D0u || directoryColor != 0x00D0F0E0u)
-                throw new InvalidOperationException($"Virtual ZIP rows did not resolve expected rules: file={Format(fileColor)}; directory={Format(directoryColor)}.");
+            var fileText = ResolveText(fileRow, rules);
+            var directoryText = ResolveText(directoryRow, rules);
+            var fileBold = ResolveBold(fileRow, rules);
+            if (fileColor != 0x00F0E0D0u || directoryColor != 0x00D0F0E0u ||
+                fileText != 0x000000C0u || directoryText != 0x0000C000u || fileBold != true)
+                throw new InvalidOperationException($"Virtual ZIP rows did not resolve expected rules: file-bg={Format(fileColor)}; file-text={Format(fileText)}; file-bold={fileBold}; directory-bg={Format(directoryColor)}; directory-text={Format(directoryText)}.");
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The virtual ZIP color rule probe changed the foreground window.");
 
             Console.WriteLine($"virtual-zip-color-rules: rows={rows.Count}; file={fileRow.DisplayName}/pathless/color={Format(fileColor)}; " +
-                $"directory={directoryRow.DisplayName}/sfgao-folder={((directoryRow.Attributes & SfgaoFolder) != 0)}/color={Format(directoryColor)}; " +
+                $"file-text={Format(fileText)}/bold={fileBold}; directory={directoryRow.DisplayName}/sfgao-folder={((directoryRow.Attributes & SfgaoFolder) != 0)}/color={Format(directoryColor)}/text={Format(directoryText)}; " +
                 $"all-pathless={rows.All(row => row.FileSystemPath is null)}; foreground-unchanged=True");
             return 0;
         }
@@ -80,6 +84,19 @@ internal static class VirtualZipColorRuleProbe
             (row.Attributes & SfgaoFolder) != 0,
             (row.Attributes & SfgaoHidden) != 0,
             (row.Attributes & SfgaoReadOnly) != 0);
+
+    private static uint? ResolveText(ShellListViewRow row, IReadOnlyList<ShellViewColorRule> rules) =>
+        ShellViewColorRuleEvaluator.ResolveTextColor(rules, row.DisplayName,
+            (row.Attributes & SfgaoFolder) != 0,
+            (row.Attributes & SfgaoHidden) != 0,
+            (row.Attributes & SfgaoReadOnly) != 0);
+
+    private static bool? ResolveBold(ShellListViewRow row, IReadOnlyList<ShellViewColorRule> rules) =>
+        ShellViewColorRuleEvaluator.ResolveFontStyle(rules, row.DisplayName,
+            (row.Attributes & SfgaoFolder) != 0,
+            (row.Attributes & SfgaoHidden) != 0,
+            (row.Attributes & SfgaoReadOnly) != 0,
+            static rule => rule.Bold);
 
     private static string Format(uint? color) => color is null ? "unset" : $"0x{color.Value:X6}";
 
