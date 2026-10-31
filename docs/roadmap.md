@@ -5331,3 +5331,9 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 NativeProbe 增加 `color-this-pc-private-desktop`，并将虚拟 Shell 颜色采样改为按运行时枚举数构造行映射。This PC 当前环境 3/3 行均收到 DefView 自绘回调，背景及文本精确色像素检查通过；ZIP 探针在相同动态采样器下复跑通过。This PC 项目可取得文件系统路径，pathless PIDL 仍由 ZIP provider 覆盖。Release 构建 0 警告/错误，两个 watchdog 均 exit 0，前台和输入未变，隔离清理通过。
 
 证据仅覆盖当前 Windows provider 的隐藏私有桌面 `IShellView` 绘制；不证明其他 provider、Q-Dir `.qdr` 颜色解析、ExplorerBrowser 产品支持或可见 UI。格式不匹配时是否保留预览列表项待 Q-Dir 验收后再决策。产品宿主仍不迁移。详见[This PC provider 颜色采样](ishellview-color-spike.md#2026-11-01-this-pc-虚拟-provider-逐行像素复验)。
+
+## 2026-11-01：Libraries pathless provider 颜色采样
+
+新增 Libraries 虚拟位置逐行颜色采样，当前环境 6/6 个 pathless 文件夹项目均收到绘制回调并命中背景/文本像素；文件夹 parent 的 drop target 注册成功。Control Panel view 也可创建，但 `IFolderView.ItemCount` 返回 `E_FAIL`、没有可用 DefView ListView 项数，且 parent `IDropTarget` 不存在；该 provider 需另行调查，不能纳入当前行索引采样器。Release 构建 0 警告/错误，Libraries watchdog exit 0，前台/输入未变，隔离清理通过。
+
+证据扩展了 pathless Shell 项覆盖至 ZIP 与 Libraries；仍不证明其它 provider、Q-Dir `.qdr` 颜色解析、ExplorerBrowser 产品支持或可见 UI。产品视图不迁移。详见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-libraries-pathless-provider-逐行像素采样)。

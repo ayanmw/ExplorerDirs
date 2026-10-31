@@ -77,6 +77,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunThisPcColorPixels() => Run("this-pc-color-pixels", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, virtualThisPcColorProbe: true), TimeSpan.FromSeconds(60));
 
+    internal static int RunLibrariesColorPixels() => Run("libraries-color-pixels", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, virtualLibrariesColorProbe: true), TimeSpan.FromSeconds(60));
+
     internal static int RunExplorerBrowserColorNotifications() =>
         Run("explorerbrowser-color-notifications", ExplorerBrowserNotifyProbe.Run, TimeSpan.FromSeconds(25));
 

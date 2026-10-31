@@ -1,5 +1,13 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：Libraries pathless provider 逐行像素采样
+
+新增 `color-libraries-private-desktop` 并按 Shell 动态项目数采样。当前 Libraries provider 枚举 6 个项目（Git、Subversion、视频、图片、文档、音乐），均为 pathless PIDL 且均为文件夹；逐项回调 `6/6`，背景像素命中数为 9,200、9,210、9,247、9,269、9,247、9,247；文本色命中数为 16、54、36、57、45、73。普通父 `IDropTarget` 注册成功，Private Desktop 前台/输入未变化并完成清理；Release 构建 0 警告/错误，watchdog exit 0。
+
+同批试探 Control Panel：隔离 view 可创建、背景菜单可查询，但 `IFolderView.ItemCount` 返回 `E_FAIL`，没有可用 `SysListView32` 行数，父 `IDropTarget` 也不可查询。因此现有按 Shell 行索引采样器不适用于该 provider；这不等于其所有绘制路径均不可能，需独立调查其 view/枚举合同。Control Panel 的 view 创建证据见 `host-filter-ControlPanel` 日志 `20261101-020020-b531834c.stdout.log`。完整异常堆栈已加入颜色探针失败输出，便于后续定位 provider 互操作问题。
+
+本轮覆盖 Libraries 的 pathless 行像素，不证明 Control Panel 自定义绘制、Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI。
+
 ### 2026-11-01：This PC 虚拟 provider 逐行像素复验
 
 将 ZIP 颜色像素探针泛化为根据 Shell 当前枚举数构造行映射，并对 This PC provider 执行同一采样。当前环境稳定枚举 3 行：C:、D: 与一个自定义位置；3 行均命中背景颜色，逐项回调 `3/3`，区域像素数为 9,403、9,405、9,209；文本色像素分别为 114、93、147。This PC 的这些行可取得文件系统路径，因此本结果覆盖动态行数和系统 provider 绘制，不作为 pathless PIDL 的证据；pathless 仍由 ZIP 结果覆盖。前台与最后输入时间未变化，隔离清理通过。

@@ -2513,7 +2513,7 @@ internal static class ShellViewColorSpike
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
-        bool virtualThisPcColorProbe = false)
+        bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -2626,6 +2626,11 @@ internal static class ShellViewColorSpike
             else if (virtualThisPcColorProbe)
             {
                 shellLocation = "shell:MyComputerFolder";
+                fixturePaths = [];
+            }
+            else if (virtualLibrariesColorProbe)
+            {
+                shellLocation = "shell:Libraries";
                 fixturePaths = [];
             }
             else
@@ -2768,18 +2773,18 @@ internal static class ShellViewColorSpike
             var folderViewHr = Marshal.QueryInterface(view, in FolderView2Id, out folderView);
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
-            var allItems = virtualThisPcColorProbe
+            var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe
                 ? WaitForStableShellViewItemCount(folderView)
                 : WaitForShellViewItemCount(folderView, expectedCount: 2);
-            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe ? allItems : 3;
+            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe ? allItems : 3;
             if (host.IncludeObjectCalls < minimumFilterCalls || itemFilter.ShouldShowCalls < minimumFilterCalls)
                 throw new Exception($"The color host did not route all fixture items through its Shell filter: " +
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
-            if (virtualZipProviderProbe || virtualThisPcColorProbe)
+            if (virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe)
             {
-                var providerName = virtualZipProviderProbe ? "ZIP" : "ThisPC";
+                var providerName = virtualZipProviderProbe ? "ZIP" : virtualThisPcColorProbe ? "ThisPC" : "Libraries";
                 return CaptureVirtualProviderColorPixels(view, folderView, folder, pidl, foreground, providerName);
             }
             if (probeSessionRestore)
@@ -3126,7 +3131,8 @@ internal static class ShellViewColorSpike
         }
         catch (Exception ex)
         {
-            Console.WriteLine("ishellview-color-spike failure: " + ex.Message);
+            // COM namespace providers can reject optional view interfaces; retain the HRESULT and call site for compatibility diagnosis.
+            Console.WriteLine("ishellview-color-spike failure: " + ex);
             return 1;
         }
         finally
@@ -3198,7 +3204,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !virtualThisPcColorProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
