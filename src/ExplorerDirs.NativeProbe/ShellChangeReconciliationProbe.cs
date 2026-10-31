@@ -9,14 +9,16 @@ namespace ExplorerDirs.NativeProbe;
 internal static class ShellChangeReconciliationProbe
 {
     private const int ChangeMessage = 0x8000 + 0x321;
+    // Keep the distinct folder-rename bit; 0x00002000 is UPDATEITEM, not RENAMEFOLDER.
     private const uint WatchEvents = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 |
-                                    0x00000200 | 0x00001000 | 0x00002000;
+                                    0x00000200 | 0x00001000 | 0x00002000 | 0x00020000;
     private const uint ShellAndInterruptSources = 0x00000003 | 0x00008000;
     private const uint PathUnicode = 0x00000005;
     private const uint Created = 0x00000002;
     private const uint Deleted = 0x00000004;
     private const uint RenamedItem = 0x00000001;
-    private const uint RenamedFolder = 0x00002000;
+    private const uint RenamedFolder = 0x00020000;
+    private const uint UpdatedItem = 0x00002000;
     private const uint UpdatedDirectory = 0x00001000;
     private const int LvmInsertItemW = 0x104D;
     private const int LvmSetItemTextW = 0x1074;
@@ -84,6 +86,30 @@ internal static class ShellChangeReconciliationProbe
             registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
                 ChangeMessage, 1, ref watch);
             if (registration == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "SHChangeNotifyRegister failed.");
+
+            File.WriteAllBytes(sizePayloadPath, new byte[7]);
+            SHChangeNotify(UpdatedItem, PathUnicode, sizeDirectory, null);
+            var updatedItemEvent = window.WaitFor([UpdatedItem], TimeSpan.FromSeconds(5));
+            var itemUpdatedEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+            var itemUpdated = ShellListViewRowModel.Reconcile(current.Rows, itemUpdatedEnumeration.Rows, NextId(current.Rows));
+            ShellListViewEnumerator.FreeRows(itemUpdated.RetiredRows);
+            var itemUpdatedScans = ScanLatestPaths(scanCoordinator, [sizeDirectory], out var itemUpdateScanWorker,
+                out var itemUpdateScanPublishedOnOwner);
+            current = itemUpdatedEnumeration with
+            {
+                Rows = ShellListViewRowModel.ApplyRecursiveScanResults(itemUpdated.Rows, itemUpdatedScans).ToList()
+            };
+            ProjectRows(listView, current.Rows);
+            ApplySelection(listView, current.Rows, selection);
+            var itemUpdatedBytes = current.Rows.Single(row => row.Id == sizeFolderId).RecursiveBytes;
+            var itemUpdatedValue = GetItemText(listView, FindIndexById(listView, sizeFolderId), 1);
+            var itemUpdatedIdentityPreserved = current.Rows.Single(row => row.DisplayName == "stable.txt").Id == stableId &&
+                current.Rows.Single(row => row.Id == sizeFolderId).Id == sizeFolderId;
+            var itemUpdatedSelectionPreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
+            if (itemUpdatedBytes != 7 || itemUpdatedValue != "7 B" || !itemUpdatedIdentityPreserved || !itemUpdatedSelectionPreserved ||
+                itemUpdateScanWorker == Environment.CurrentManagedThreadId || !itemUpdateScanPublishedOnOwner)
+                throw new InvalidOperationException("SHCNE_UPDATEITEM did not refresh the derived folder row while preserving row identity and selection.");
+            Console.WriteLine($"shell-change-reconciliation: event=UPDATEITEM; event-received=True; recursive-size={itemUpdatedBytes}; displayed={itemUpdatedValue}; stable-id-preserved={itemUpdatedIdentityPreserved}; selection-preserved={itemUpdatedSelectionPreserved}; worker-thread={itemUpdateScanWorker}; owner-thread={Environment.CurrentManagedThreadId}");
 
             var createdPath = Path.Combine(fixture, "created.txt");
             File.WriteAllText(createdPath, "created");
@@ -173,9 +199,10 @@ internal static class ShellChangeReconciliationProbe
             var renamedSizeFolder = current.Rows.Single(row => row.DisplayName == "renamed-size-folder");
             var renamedSizeFolderRowIndex = FindIndexById(listView, renamedSizeFolder.Id);
             var folderRenameIdPreserved = renamedSizeFolder.Id == sizeFolderId;
-            var staleFolderScanCleared = renamedSizeFolder.RecursiveBytes is null &&
-                renamedSizeFolder.RecursiveSummary is null &&
-                renamedSizeFolderRowIndex >= 0 && GetItemText(listView, renamedSizeFolderRowIndex, 1) == "";
+            // A same-identity directory rename can keep its last completed summary visible while the fresh scan runs.
+            var folderRenameCachedSummaryPreserved = renamedSizeFolder.RecursiveBytes == 12 &&
+                renamedSizeFolder.RecursiveSummary?.Files == 2 && renamedSizeFolder.RecursiveSummary.Directories == 1 &&
+                renamedSizeFolderRowIndex >= 0 && GetItemText(listView, renamedSizeFolderRowIndex, 1) == "12 B";
 
             var renamedFolderScans = ScanLatestPaths(scanCoordinator, [renamedSizeDirectory],
                 out var folderRenameScanWorker, out var folderRenameScanPublishedOnOwner);
@@ -195,9 +222,9 @@ internal static class ShellChangeReconciliationProbe
             var selectionAfterDeletePreserved = HasStableSelection(current.Rows) && HasStableListViewSelection(listView, stableId);
             var renameIdentityPreserved = renamedId == createdId;
             var addedNewIdentity = createdId != stableId && renamedId != stableId;
-            Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; rename-notified={renameEvent}; rename-folder-notified={renameFolderEvent}; delete-notified={deleteEvent}; " +
+            Console.WriteLine($"shell-change-reconcile: create-notified={createEvent}; update-notified={updateEvent}; update-item-notified={updatedItemEvent}; rename-notified={renameEvent}; rename-folder-notified={renameFolderEvent}; delete-notified={deleteEvent}; " +
                 $"stable-id-preserved={stableIdentityPreserved}; update-id-preserved={updateIdPreserved}; rename-id-preserved={renameIdentityPreserved}; deleted-id-retired={retiredRenamedId}; " +
-                $"folder-rename-id-preserved={folderRenameIdPreserved};folder-rename-stale-cache-cleared={staleFolderScanCleared};folder-rename-rescan-fresh={folderRenameRescanFresh};" +
+                $"folder-rename-id-preserved={folderRenameIdPreserved};folder-rename-cached-summary-preserved={folderRenameCachedSummaryPreserved};folder-rename-rescan-fresh={folderRenameRescanFresh};" +
                 $"recursive-bytes-initial/after-update={initialRecursiveBytes}/{recursiveBytesAfterReconciliation};recursive-value-updated={recursiveValueUpdated};size-folder-id-preserved={sizeFolderIdentityPreserved};" +
                 $"recursive-files-initial/after-update={initialRecursiveSummary.Files}/{recursiveSummaryAfterReconciliation.Files};" +
                 $"recursive-directories-initial/after-update={initialRecursiveSummary.Directories}/{recursiveSummaryAfterReconciliation.Directories};recursive-counts-updated={recursiveCountsUpdated};" +
@@ -207,9 +234,9 @@ internal static class ShellChangeReconciliationProbe
                 $"selection-after-update/reorder/delete={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved}; " +
                 $"listview-row-count={SendMessageW(listView, LvmGetItemCount, 0, 0)};selection-focused-row-preserved={selectionAfterUpdatePreserved}/{selectionAfterReorderPreserved}/{selectionAfterDeletePreserved};" +
                 $"final-row-count={current.Rows.Count}; foreground-unchanged={GetForegroundWindow() == foreground}; hidden-window={IsWindowVisible(window.Handle) == false && !IsWindowVisible(listParent)}");
-            if (!createEvent || !updateEvent || !renameEvent || !renameFolderEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
+            if (!createEvent || !updateEvent || !updatedItemEvent || !renameEvent || !renameFolderEvent || !deleteEvent || !stableIdentityPreserved || !updateIdPreserved ||
                 !renameIdentityPreserved || !addedNewIdentity ||
-                !folderRenameIdPreserved || !staleFolderScanCleared || !folderRenameRescanFresh ||
+                !folderRenameIdPreserved || !folderRenameCachedSummaryPreserved || !folderRenameRescanFresh ||
                 !retiredRenamedId || !recursiveValueUpdated || !recursiveCountsUpdated || !projectedDerivedValuesUpdated || !sizeFolderIdentityPreserved ||
                 initialScanWorker == Environment.CurrentManagedThreadId || updateScanWorker == Environment.CurrentManagedThreadId ||
                 folderRenameScanWorker == Environment.CurrentManagedThreadId ||

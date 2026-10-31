@@ -1,5 +1,7 @@
 # 路线图
 
+2026-10-31 隔离行模型逐项更新通知闭环：`--shell-change-reconciliation` 新增 `SHCNE_UPDATEITEM` 实际通知样例，子目录递归大小从 4 B 更新到 7 B，扫描在线程池运行并回 owner 投影；行身份及选区/焦点保留。复核还修正探针将 `SHCNE_RENAMEFOLDER` 错写为 `0x2000` 的常量及监听掩码（SDK 值为 `0x00020000`）；真实目录重命名事件验证同身份 12 B 摘要在重扫期间持续显示，之后重扫值仍正确。修正前探针按预期因缺少目录重命名事件而失败，修正后定向探针、完整 Release `SettingsSmoke` 与 NativeProbe Release build 通过（0 警告/错误）。这是隔离 `SysListView32` 行模型合同，不是产品 ExplorerBrowser/DefView 逐行列或可见 `IShellView` 迁移证据；详见[隔离原型记录](ishellview-color-spike.md#2026-10-31updateitem-派生值重算与目录重命名事件合同)。
+
 2026-10-31 环境消息 smoke 间歇失败复核：曾在完整 Release SettingsSmoke 中因隐藏消息目标前台句柄不变断言失败；本轮单独运行 `--environment-change-message-smoke` 及完整 Release SettingsSmoke 均通过，未复现。未修改断言或实现，也未将一次通过视为根因已查明；若后续再现，继续检查测试期间前台窗口归属和完整套件时序。
 
 2026-10-31 temp.80 同一 PID 内存复采：仍运行的 PID `47460`（ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`）进行 60.16 秒只读采样 13 点，Working Set `198.00→197.96 MiB`、Private Bytes `119.08→119.00 MiB`，句柄/线程小幅下降。EXE/DLL 哈希与既有 temp.80 记录相符。未记录固定浏览负载，因此仅说明本分钟没有进程级计数增长，不解释运行期间或长期增长，也没有做优化。原始点位、哈希和边界见[内存采样记录](memory-sampling.md#2026-10-31-1529-北京时间temp80-同一-pid-第三次一分钟只读采样)。
