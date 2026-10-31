@@ -80,6 +80,10 @@ public static class SyntheticShellSortProbe
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, exerciseUpdateNotifications: true);
 
+    internal static int RunFactorySnapshotCacheSmoke() =>
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            factorySnapshotCacheOnly: true);
+
     internal static int RunNativeLibraryUnloadContractSmoke()
     {
         var module = NativeLibrary.Load(FindAdapterLibrary());
@@ -97,7 +101,7 @@ public static class SyntheticShellSortProbe
     internal static int Run(bool recursiveDirectorySizeSortOnly = false, bool maskFilesystemAttributes = false,
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
         bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false,
-        bool focusRecoveryExperiment = false)
+        bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false)
     {
         var sizeUpdateStrategy = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_SIZE_UPDATE_STRATEGY") ?? "single-item";
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
@@ -236,6 +240,24 @@ public static class SyntheticShellSortProbe
                 Check(SHParseDisplayName($"::{syntheticFolderClassId:B}\\Pane2", 0, out secondViewRootPidl, 0, out _));
             }
             Console.WriteLine("synthetic-shell-size-sort: Shell parsing name resolved through temporary Desktop\\NameSpace registration");
+            if (factorySnapshotCacheOnly)
+            {
+                const ulong sentinelBytes = 997;
+                var factoriesBefore = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
+                var verifySharedCache = Marshal.GetDelegateForFunctionPointer<VerifySyntheticShellActivatedRecursiveSizeSnapshotCache>(
+                    NativeLibrary.GetExport(module, "VerifySyntheticShellActivatedRecursiveSizeSnapshotCache"));
+                Check(verifySharedCache(rootPidl, sentinelBytes));
+                var factoriesAfter = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
+                var factoryCreateDelta = factoriesAfter - factoriesBefore;
+                if (factoryCreateDelta < 2)
+                    throw new InvalidOperationException($"Expected two Shell class-factory-created providers; observed create delta {factoryCreateDelta}.");
+                Console.WriteLine($"synthetic-shell-factory-snapshot-cache: class-factory-create-delta={factoryCreateDelta}; " +
+                    $"shell-created-provider-identities=distinct; sentinel={sentinelBytes}; " +
+                    "second-provider-readback=passed; shell-view-window-created=False");
+                if (GetForegroundWindow() != foreground)
+                    throw new InvalidOperationException("The Shell activated recursive-size cache probe changed the foreground window.");
+                return 0;
+            }
             Console.WriteLine("synthetic-shell-size-sort: calling CreateSyntheticSortShellView");
             Check(Marshal.GetDelegateForFunctionPointer<CreateSyntheticView>(NativeLibrary.GetExport(module, "CreateSyntheticSortShellView"))(firstViewRootPidl, out folder, out view));
             var classFactoryCreateCount = ReadCounter(module, "GetSyntheticClassFactoryCreateCount");
@@ -2955,6 +2977,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateSyntheticView(nint rootPidl, out nint folder, out nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(nint rootPidl, ulong sentinelBytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();

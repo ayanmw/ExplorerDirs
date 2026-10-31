@@ -3289,6 +3289,53 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CreateSyntheticSortShellView(PCI
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(
+    PCIDLIST_ABSOLUTE rootPidl, ULONGLONG sentinelBytes)
+{
+    if (!rootPidl || sentinelBytes == 0) return E_INVALIDARG;
+
+    IShellFolder* parent = nullptr;
+    PCUITEMID_CHILD relativeRoot = nullptr;
+    IShellFolder2* first = nullptr;
+    IShellFolder2* second = nullptr;
+    IUnknown* firstIdentity = nullptr;
+    IUnknown* secondIdentity = nullptr;
+    PITEMID_CHILD secondChild = nullptr;
+    SHELLDETAILS details{};
+    HRESULT result = SHBindToParent(rootPidl, IID_PPV_ARGS(&parent), &relativeRoot);
+    if (FAILED(result)) goto cleanup;
+    result = parent->BindToObject(relativeRoot, nullptr, IID_PPV_ARGS(&first));
+    if (FAILED(result)) goto cleanup;
+    result = parent->BindToObject(relativeRoot, nullptr, IID_PPV_ARGS(&second));
+    if (FAILED(result)) goto cleanup;
+
+    result = first->QueryInterface(IID_PPV_ARGS(&firstIdentity));
+    if (FAILED(result)) goto cleanup;
+    result = second->QueryInterface(IID_PPV_ARGS(&secondIdentity));
+    if (FAILED(result)) goto cleanup;
+    if (firstIdentity == secondIdentity) { result = HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS); goto cleanup; }
+
+    result = static_cast<SyntheticSortFolder*>(first)->PublishRecursiveSizeSnapshotForChildProbe(L"child", sentinelBytes);
+    if (FAILED(result)) goto cleanup;
+    result = second->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &secondChild, nullptr);
+    if (FAILED(result)) goto cleanup;
+    result = second->GetDetailsOf(secondChild, 1, &details);
+    if (FAILED(result)) goto cleanup;
+    if (details.str.uType != STRRET_WSTR || !details.str.pOleStr ||
+        wcscmp(details.str.pOleStr, std::to_wstring(sentinelBytes).c_str()) != 0)
+        result = E_FAIL;
+
+cleanup:
+    if (details.str.uType == STRRET_WSTR) CoTaskMemFree(details.str.pOleStr);
+    if (secondChild) CoTaskMemFree(secondChild);
+    if (secondIdentity) secondIdentity->Release();
+    if (firstIdentity) firstIdentity->Release();
+    if (second) second->Release();
+    if (first) first->Release();
+    if (parent) parent->Release();
+    return result;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWSTR path)
 {
     if (!path || !*path) return E_INVALIDARG;

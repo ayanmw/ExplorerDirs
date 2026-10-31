@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runTimeoutSeconds = $TimeoutSeconds
-$syntheticShellProbe = $Probe -in @('synthetic-shell-size-sort-private-desktop', 'synthetic-shell-two-view-target-sync-private-desktop', 'synthetic-shell-focus-recovery-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop')
+$syntheticShellProbe = $Probe -in @('synthetic-shell-size-sort-private-desktop', 'synthetic-shell-two-view-target-sync-private-desktop', 'synthetic-shell-focus-recovery-private-desktop', 'synthetic-recursive-directory-size-private-desktop', 'synthetic-recursive-directory-size-slow-column-private-desktop', 'synthetic-recursive-directory-size-wpf-host-private-desktop', 'synthetic-shell-factory-snapshot-cache-private-desktop')
 $timeoutTreeScriptPath = $null
 $timeoutTreePidPath = $null
 if ($TestTimeoutPath) {
@@ -49,6 +49,7 @@ else {
         'synthetic-recursive-directory-size-private-desktop' { '--synthetic-recursive-directory-size-private-desktop' }
         'synthetic-recursive-directory-size-slow-column-private-desktop' { '--synthetic-recursive-directory-size-slow-column-private-desktop' }
         'synthetic-recursive-directory-size-wpf-host-private-desktop' { '--synthetic-recursive-directory-size-wpf-host-private-desktop' }
+        'synthetic-shell-factory-snapshot-cache-private-desktop' { '--synthetic-shell-factory-snapshot-cache-private-desktop' }
         'auto-column-width' { '--auto-column-width' }
         'photo-print-verb' { '--photo-print-verb' }
         'command-state-readonly-private-desktop' { '--ishellview-command-state-readonly-private-desktop' }

@@ -58,6 +58,14 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-
 
 证据边界：自然激活仅创建并观察到一个 Shell provider（计数为 1）；没有在 Shell 创建的两个不同 provider 之间写入并读回同一哨兵快照，因此 DLL 级 store 对自然激活的跨 provider 复用仍待验证。下一步应增加无窗口、独立 provider 的 Shell 激活合同，并单独核对 COM 引用归零与 unload；不要重复依赖会卡在父窗口 teardown 的完整 view 探针。
 
+### 2026-11-01：无 Shell view 窗口的双 provider 快照与卸载合同
+
+新增 `--synthetic-shell-factory-snapshot-cache-private-desktop`：经临时注册的 Shell namespace PIDL 两次分别 `BindToObject`，并要求 class factory 创建计数增加至少 2、两对象的 `IUnknown` identity 不同。第一 provider 将 `child` 的真实文件系统身份对应快照写为 997 B 哨兵，第二 provider 用 `GetDetailsOf` 读回文本 `997`；若两次 Shell 激活各有独立 store，该断言会失败。此命令不创建 `IShellView` 或 Shell view 窗口，避开完整 view 探针此前卡住的父窗口 teardown。
+
+连续两次运行均通过（class factory create delta=2，身份不同，第二 provider 读回哨兵）；COM 引用释放后 `DllCanUnloadNow=S_OK`，原生 DLL 已卸载，Private Desktop 前台/输入未变，watchdog 报告 `isolation-clean=True`。Native adapter `/W4 /WX` 和 NativeProbe Release 构建（0 警告/错误）通过。该合同证明临时注册下 Shell 创建的独立 provider 共享同一 DLL 快照 store，且本场景无 COM 引用时可以卸载。
+
+边界：没有创建活动 DefView，未验证显示/排序、活动 view 更新、生产扫描器注入、容量/淘汰、长时间内存占用或 ExplorerBrowser 产品接线。完整 Shell view 探针的 teardown 阻塞仍是单独问题，不因这个无 view 合同而视为修复。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。
