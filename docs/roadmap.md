@@ -16,6 +16,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 IShellView 逐项着色新假设复核：曾怀疑 DefView 的通知目标挡住了 `NM_CUSTOMDRAW`，故在隔离 Private Desktop 将 `SysListView32` 通知改投临时 sink 并同步转发给原 DefView。sink 收到并转发 16 条普通通知，但自绘逐项回调仍为 0、目标像素为 0；该轮在原型颜色断言处提前结束，未验证完整通知兼容。临时试验入口已删除，详见[原型记录](ishellview-color-spike.md#2026-10-31-ccm_setnotifywindow-逐项着色通知路由验证未通过)。该分支不再作为颜色方案；自有 ListView 的逐项绘制仍是已验证的原型路线，IShellView 产品迁移门槛与集中可见验收仍未完成。
+
 2026-10-31 原生“新建文件夹”子菜单 HRESULT 处理：`IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)` 返回 `S_FALSE` 时，旧逻辑把“成功但未处理”误当成已初始化，未尝试 `IContextMenu2`。现将 `S_OK` 作为唯一已处理结果，`S_FALSE`/`E_NOTIMPL` 回退旧接口，其它失败仍中止。新增 COM 菜单 smoke 先在旧实现上按预期失败，修复后完整 Release SettingsSmoke 通过；未启动 GUI。该修复覆盖懒加载 New 子菜单的状态查询，不代表文件区真实菜单可见验收完成。
 
 2026-10-31 隔离行扫描身份与通知竞态：Shell 文件夹行枚举现在捕获卷序列号及 128 位文件 ID，递归扫描值只有在行快照、实际句柄扫描对象和发布时路径都匹配时才可应用；旧实现因行快照身份始终为空而清空首轮扫描结果，隐藏比例合同会空引用。另在 `FileSystemWatcher` 首个变更回调线程立即废弃当前扫描 ticket，避免已排入 owner dispatcher 的旧结果抢在重扫前发布。新增旧 ticket 已排队时的失效回归、Release SettingsSmoke、NativeProbe/App Release build 通过；`--common-listview-relative-size-contract` 与 `--shell-change-reconciliation` 隐藏探针通过，选区/焦点、后台扫描和 Shell 文件变更结果符合预期。此改动仅在 NativeProbe 行模型原型；未接产品 ExplorerBrowser/IShellView，逐目录身份采集的成本尚未测量。
