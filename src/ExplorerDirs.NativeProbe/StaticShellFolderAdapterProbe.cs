@@ -2325,6 +2325,19 @@ internal static class StaticShellFolderAdapterProbe
                 throw new InvalidOperationException("The production and handle-bound scans did not agree on the 10/12 byte projection.");
             var childParsingName = GetAbsoluteParsingName(projectionChildPath);
             var otherChildParsingName = GetAbsoluteParsingName(projectionOtherChildPath);
+            var managedRows = new[]
+            {
+                new ShellListViewRow(1, 0, 0, "child", childParsingName, projectionChildPath,
+                    0x20000000, null, true, 0) { FileSystemIdentity = handleBoundSnapshot.Identity },
+                new ShellListViewRow(2, 0, 0, "other-child", otherChildParsingName, projectionOtherChildPath,
+                    0x20000000, null, true, 0) { FileSystemIdentity = handleBoundOtherSnapshot.Identity }
+            };
+            var projectedSnapshots = ShellListViewRowModel.ProjectRecursiveSizeSnapshots(
+                ShellListViewRowModel.ApplyRecursiveScanResults(managedRows, projectionScan));
+            var childSnapshot = projectedSnapshots.Single(value => value.ParsingName == childParsingName);
+            var projectedOtherSnapshot = projectedSnapshots.Single(value => value.ParsingName == otherChildParsingName);
+            if (projectedSnapshots.Count != 2 || childSnapshot.Summary != snapshot || projectedOtherSnapshot.Summary != otherSnapshot)
+                throw new InvalidOperationException("The managed Shell row model did not project both identity-verified scan snapshots.");
 
             // Re-scan after the file change so the updated native values come from the production scanner too.
             File.WriteAllBytes(nestedFile, "x"u8.ToArray());
@@ -2340,13 +2353,21 @@ internal static class StaticShellFolderAdapterProbe
                 updatedHandleBoundOtherSnapshot.Summary != updatedOtherSnapshot ||
                 updatedSnapshot.Bytes != 7 || updatedOtherSnapshot.Bytes != 12)
                 throw new InvalidOperationException("The production and handle-bound rescans did not agree on the 7/12 byte projection.");
+            var updatedProjectedSnapshots = ShellListViewRowModel.ProjectRecursiveSizeSnapshots(
+                ShellListViewRowModel.ApplyRecursiveScanResults(managedRows, updatedScan));
+            var updatedChildSnapshot = updatedProjectedSnapshots.Single(value => value.ParsingName == childParsingName);
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke"))(
-                    projectionFixture, childParsingName, checked((long)snapshot.Bytes)));
+                    projectionFixture, childParsingName, childSnapshot.Identity.VolumeSerialNumber,
+                    childSnapshot.Identity.FileIdLow, childSnapshot.Identity.FileIdHigh,
+                    checked((long)childSnapshot.Summary.Bytes)));
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityCacheSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityCacheSmoke"))(
-                    projectionFixture, childParsingName, otherChildParsingName, checked((long)snapshot.Bytes),
-                    checked((long)otherSnapshot.Bytes), checked((long)updatedSnapshot.Bytes)));
+                    projectionFixture, childParsingName, otherChildParsingName,
+                    childSnapshot.Identity.VolumeSerialNumber, childSnapshot.Identity.FileIdLow, childSnapshot.Identity.FileIdHigh,
+                    projectedOtherSnapshot.Identity.VolumeSerialNumber, projectedOtherSnapshot.Identity.FileIdLow, projectedOtherSnapshot.Identity.FileIdHigh,
+                    checked((long)childSnapshot.Summary.Bytes), checked((long)projectedOtherSnapshot.Summary.Bytes),
+                    checked((long)updatedChildSnapshot.Summary.Bytes)));
             Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}/{otherSnapshot.Bytes}; " +
                 $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; disk-child-bytes=7; " +
                 "native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; " +
@@ -2795,8 +2816,8 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string parsingName, long scannedBytes);
-    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityCacheSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string childParsingName, [MarshalAs(UnmanagedType.LPWStr)] string otherParsingName, long initialBytes, long otherRowBytes, long updatedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string parsingName, ulong volumeSerial, ulong fileIdLow, ulong fileIdHigh, long scannedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityCacheSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string childParsingName, [MarshalAs(UnmanagedType.LPWStr)] string otherParsingName, ulong childVolumeSerial, ulong childFileIdLow, ulong childFileIdHigh, ulong otherVolumeSerial, ulong otherFileIdLow, ulong otherFileIdHigh, long initialBytes, long otherRowBytes, long updatedBytes);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

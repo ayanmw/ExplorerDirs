@@ -1974,10 +1974,14 @@ namespace
             if (_recursiveSizeStore) _recursiveSizeStore->AddRef();
             return _recursiveSizeStore;
         }
-        HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName, ULONGLONG bytes)
+        HRESULT SetRecursiveSizeSnapshotForProbe(PCUITEMID_CHILD item, PCWSTR parsingName,
+            const SyntheticFileIdentity& expectedIdentity, ULONGLONG bytes)
         {
             const auto* child = SyntheticData(item);
-            if (!child || !parsingName || !*parsingName || !_recursiveSizeStore || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) return E_INVALIDARG;
+            const SyntheticFileIdentityLess less{};
+            if (!child || !parsingName || !*parsingName || !_recursiveSizeStore ||
+                !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) || !expectedIdentity.available ||
+                less(child->identity, expectedIdentity) || less(expectedIdentity, child->identity)) return E_INVALIDARG;
             std::wstring shellParsingName;
             auto result = GetAbsoluteParsingName(child, &shellParsingName);
             if (FAILED(result)) return result;
@@ -3656,7 +3660,8 @@ cleanup:
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke(
-    PCWSTR backingPath, PCWSTR parsingName, LONGLONG scannedBytes)
+    PCWSTR backingPath, PCWSTR parsingName, ULONGLONG volumeSerial, ULONGLONG fileIdLow,
+    ULONGLONG fileIdHigh, LONGLONG scannedBytes)
 {
     if (!backingPath || !*backingPath || !parsingName || !*parsingName || scannedBytes < 0) return E_INVALIDARG;
     auto result = SetSyntheticSortBackingPath(backingPath);
@@ -3666,6 +3671,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     SyntheticSortFolder* root = nullptr;
     PITEMID_CHILD childFolder = nullptr;
     PITEMID_CHILD rootFile = nullptr;
+    SyntheticFileIdentity expectedIdentity{};
+    SyntheticFileIdentity mismatchedIdentity{};
+    expectedIdentity.volumeSerial = volumeSerial;
+    CopyMemory(expectedIdentity.fileId, &fileIdLow, sizeof(fileIdLow));
+    CopyMemory(expectedIdentity.fileId + sizeof(fileIdLow), &fileIdHigh, sizeof(fileIdHigh));
+    expectedIdentity.available = true;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
     InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
@@ -3680,7 +3691,15 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     if (FAILED(result)) goto cleanup_recursive_size_projection;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_projection;
-    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, parsingName, static_cast<ULONGLONG>(scannedBytes));
+    mismatchedIdentity = expectedIdentity;
+    ++mismatchedIdentity.volumeSerial;
+    if (root->SetRecursiveSizeSnapshotForProbe(childFolder, parsingName, mismatchedIdentity,
+        static_cast<ULONGLONG>(scannedBytes)) != E_INVALIDARG)
+    {
+        result = E_FAIL;
+        goto cleanup_recursive_size_projection;
+    }
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, parsingName, expectedIdentity, static_cast<ULONGLONG>(scannedBytes));
     if (FAILED(result)) goto cleanup_recursive_size_projection;
 
     {
@@ -3730,6 +3749,8 @@ cleanup_recursive_size_projection:
 
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityCacheSmoke(
     PCWSTR backingPath, PCWSTR childParsingName, PCWSTR otherParsingName,
+    ULONGLONG childVolumeSerial, ULONGLONG childFileIdLow, ULONGLONG childFileIdHigh,
+    ULONGLONG otherVolumeSerial, ULONGLONG otherFileIdLow, ULONGLONG otherFileIdHigh,
     LONGLONG initialBytes, LONGLONG otherRowBytes, LONGLONG updatedBytes)
 {
     if (!backingPath || !*backingPath || !childParsingName || !*childParsingName ||
@@ -3746,6 +3767,16 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     PITEMID_CHILD refreshedChild = nullptr;
     PITEMID_CHILD refreshedOther = nullptr;
     IEnumIDList* refreshedEnumerator = nullptr;
+    SyntheticFileIdentity expectedChildIdentity{};
+    expectedChildIdentity.volumeSerial = childVolumeSerial;
+    CopyMemory(expectedChildIdentity.fileId, &childFileIdLow, sizeof(childFileIdLow));
+    CopyMemory(expectedChildIdentity.fileId + sizeof(childFileIdLow), &childFileIdHigh, sizeof(childFileIdHigh));
+    expectedChildIdentity.available = true;
+    SyntheticFileIdentity expectedOtherIdentity{};
+    expectedOtherIdentity.volumeSerial = otherVolumeSerial;
+    CopyMemory(expectedOtherIdentity.fileId, &otherFileIdLow, sizeof(otherFileIdLow));
+    CopyMemory(expectedOtherIdentity.fileId + sizeof(otherFileIdLow), &otherFileIdHigh, sizeof(otherFileIdHigh));
+    expectedOtherIdentity.available = true;
     InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
     InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
@@ -3762,9 +3793,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
     if (FAILED(result)) goto cleanup_recursive_size_update;
     result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
     if (FAILED(result)) goto cleanup_recursive_size_update;
-    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, static_cast<ULONGLONG>(initialBytes));
+    result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, expectedChildIdentity, static_cast<ULONGLONG>(initialBytes));
     if (FAILED(result)) goto cleanup_recursive_size_update;
-    result = root->SetRecursiveSizeSnapshotForProbe(otherFolder, otherParsingName, static_cast<ULONGLONG>(otherRowBytes));
+    result = root->SetRecursiveSizeSnapshotForProbe(otherFolder, otherParsingName, expectedOtherIdentity, static_cast<ULONGLONG>(otherRowBytes));
     if (FAILED(result)) goto cleanup_recursive_size_update;
 
     {
@@ -3801,7 +3832,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeI
             result = E_FAIL;
             goto cleanup_recursive_size_update;
         }
-        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, static_cast<ULONGLONG>(updatedBytes));
+        result = root->SetRecursiveSizeSnapshotForProbe(childFolder, childParsingName, expectedChildIdentity, static_cast<ULONGLONG>(updatedBytes));
         if (FAILED(result)) goto cleanup_recursive_size_update;
         if (!rowMatchesSnapshot(childFolder, static_cast<ULONGLONG>(updatedBytes), false) ||
             !rowMatchesSnapshot(otherFolder, static_cast<ULONGLONG>(otherRowBytes), true))

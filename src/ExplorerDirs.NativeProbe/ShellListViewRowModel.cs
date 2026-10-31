@@ -134,7 +134,29 @@ internal static class ShellListViewRowModel
         }
         return updated;
     }
+
+    internal static IReadOnlyList<ShellListViewRowRecursiveSizeSnapshot> ProjectRecursiveSizeSnapshots(
+        IReadOnlyList<ShellListViewRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var snapshots = new List<ShellListViewRowRecursiveSizeSnapshot>();
+        foreach (var row in rows)
+        {
+            if (!IsFilesystemFolder(row) || row.RecursiveSummary is not { } summary ||
+                row.RecursiveBytes != summary.Bytes || row.FileSystemIdentity is not { } identity ||
+                ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!) != identity)
+                continue;
+
+            snapshots.Add(new ShellListViewRowRecursiveSizeSnapshot(row.ParsingName, identity, summary));
+        }
+        return snapshots;
+    }
 }
+
+internal sealed record ShellListViewRowRecursiveSizeSnapshot(
+    string ParsingName,
+    ShellFileSystemIdentity Identity,
+    RecursiveDirectoryScanResult Summary);
 
 internal sealed record ShellListViewRowReconciliation(
     IReadOnlyList<ShellListViewRow> Rows,

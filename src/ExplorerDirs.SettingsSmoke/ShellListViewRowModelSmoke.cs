@@ -67,6 +67,16 @@ internal static class ShellListViewRowModelSmoke
         Check(target.RecursiveBytes == 4 && target.RecursiveSummary is null,
             "publishing a scan snapshot does not mutate the previous row snapshot");
 
+        var nativeSnapshots = ExplorerDirs.NativeProbe.ShellListViewRowModel.ProjectRecursiveSizeSnapshots(updated);
+        Check(nativeSnapshots.Count == 1 &&
+              nativeSnapshots[0].ParsingName == targetPath &&
+              nativeSnapshots[0].Identity == updated[0].FileSystemIdentity &&
+              nativeSnapshots[0].Summary == scan[targetPath],
+            "only identity-verified filesystem folder summaries project to the native provider boundary");
+        var replacedSnapshotRow = updated[0] with { FileSystemIdentity = new(0, 0, 0) };
+        Check(ExplorerDirs.NativeProbe.ShellListViewRowModel.ProjectRecursiveSizeSnapshots([replacedSnapshotRow]).Count == 0,
+            "a replaced filesystem object cannot publish a stale row summary to the native provider");
+
         var changedTarget = target with
         {
             AbsolutePidl = 0x301,
