@@ -344,6 +344,8 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 ## 本轮代码与下一轮验收
 
+2026-10-31 包装 Shell 文件夹的多选菜单接口：两项目录多选经包装 PIDL 后返回可查询 `IContextMenu3` 的 Shell 菜单对象；内存菜单包含 `copy`/`delete`，未显示或执行。当前只验证接口可取得；所有者绘制和动态菜单消息路由、第三方扩展与产品 ExplorerBrowser 可见菜单仍未验证。详情见[隔离视图评审](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
+
 2026-10-31 原生目录树拖入展开回归复核：此前把 `NSTCS_SPRINGEXPAND` 错当成拖入悬停展开；微软 SDK 实际定义为选中另一个节点时折叠先前展开节点。样式已移除，SettingsSmoke 改为阻止该误用并确认仍禁用树内重排与标签编辑。后续通过 `INameSpaceTreeControlDropHandler` 接入可配置的 0.2/0.5/1/1.5/2/3 秒悬停展开，配置写入 `NavigationTreeDragHoverDelay.ini`，默认 1 秒；真实 Drop 默认处理仍待可见验收。依据：[Microsoft NSTCSTYLE](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/ne-shobjidl_core-_nstcstyle)、[INameSpaceTreeControlDropHandler](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl/nn-shobjidl-inamespacetreecontroldrophandler)、[Q-Dir FAQ 74](https://www.softwareok.com/?faq=74&seite=faq-Q-DIR)、[Q-Dir 官方字符串表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK)
 
 2026-10-30 F5 与查看方式切换重绘调整（历史）：F5 直接调用当前 `IShellView.Refresh()`，不重建 ExplorerBrowser、标签、导航历史或整个窗格。查看方式只调用当前视图的 `SetViewModeAndIconSize`，不重刷新目录；模式切换的重绘租约已移除，完整 Shell 状态读回延后到 Dispatcher 后台阶段，先缓存 setter 接受的模式/图标尺寸，避免绘制前同步读取排序、分组和列配置。后续 F5 一度改为 `SHCNE_UPDATEDIR`，随后又于 2026-10-31 改回直接 `IShellView.Refresh()`；当前实现见下方源码复核。视觉效果仍待集中 UI 验收。

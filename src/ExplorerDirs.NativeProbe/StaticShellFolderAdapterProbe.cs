@@ -21,6 +21,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid ShellViewObjectHandlerId = new("3981E226-F559-11D3-8E3A-00C04F6837D5");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenu3Id = new("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -2416,6 +2417,8 @@ internal static class StaticShellFolderAdapterProbe
         {
             Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, childCount, children, in contextMenuId, 0, out contextMenu));
             if (contextMenu == 0) throw new Exception("Wrapped multi-selection did not return an IContextMenu.");
+            var contextMenu3Result = Marshal.QueryInterface(contextMenu, in ContextMenu3Id, out var contextMenu3);
+            if (contextMenu3 != 0) Marshal.Release(contextMenu3);
             var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
             Check(queryResult);
             var commandCount = (uint)(queryResult & 0xffff);
@@ -2429,7 +2432,7 @@ internal static class StaticShellFolderAdapterProbe
                     string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
             if (GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("Wrapped multi-selection menu construction changed the foreground window.");
-            Console.WriteLine($"wrapped multi-selection native context menu: commands={commandCount}; menu-items={itemCount}; copy/delete=True; displayed=False");
+            Console.WriteLine($"wrapped multi-selection native context menu: commands={commandCount}; menu-items={itemCount}; copy/delete=True; IContextMenu3={(contextMenu3Result >= 0 ? "available" : $"HRESULT=0x{contextMenu3Result:X8}")}; displayed=False");
         }
         finally
         {

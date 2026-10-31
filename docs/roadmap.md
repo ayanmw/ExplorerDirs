@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 包装 Shell 文件夹的多选菜单接口复核：真实临时文件夹的两项目录多选经过包装子 PIDL 后，`IContextMenu3` 可查询，内存菜单含 103 个命令、25 个菜单项及 `copy`/`delete`；菜单未显示、未执行，前台未变。Release NativeProbe build 0 警告/错误，`--static-shell-column-wrapped-folder-smoke` 通过。该结果补上未来自有视图对接 Shell 所有者绘制/动态菜单消息的接口可用性，不证明消息转发或可见菜单体验；产品仍使用 ExplorerBrowser。详情见[文件夹大小列与 Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
+
 2026-10-31 集中 GUI 验收候选已刷新到当前主线 `db639e0e1681ab5dd1054f358189880c61b12953`：四窗格隔离副本 `src/.state/gui-smoke/20261031-053306-917-58e879/`，状态 `prepared-not-run`，47 项待验收。EXE/DLL SHA-256 与 preparation manifest 一致；准备过程只生成隔离应用、profile 和临时夹具，没有启动窗口、创建 ExplorerBrowser 或触碰正式 profile。候选包含 `temp.85` 的查看方式切换重绘租约；实际像素改善仍待可见验收。固定身份与清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 预览发布 `preview-0.6.0-temp.85`：来自干净主线提交 `a17639b69a9fd143c6f862cc5821bea73073c1f7`，隔离 profile 包位于 `releases/preview-0.6.0-temp.85/`。BuildIdentity smoke 通过；EXE/DLL SHA-256 已与包内 `app/SHA256.txt` 核对。未启动 GUI；查看方式切换期间是否减少可见闪烁仍待验收，F5 行为未改变。详情见[预览发布记录](releases/preview-0.6.0-temp.85.md)。

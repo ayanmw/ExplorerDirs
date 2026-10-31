@@ -933,3 +933,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 继续在 WPF `HwndSource` Private Desktop 宿主对照 DefView 单项更新策略。新增 `SHCNE_DELETE` 后紧接同一绝对子 PIDL 的 `SHCNE_CREATE` 变体：初始目录/文件大小列 `10/4` 与排序基线成立；通知后自定义列索引为 `-1`，大小列没有更新、排序比较或行枚举。选区/焦点保持，前台 HWND 与系统输入 tick 不变，watchdog 正常退出且 UUID 注册项与夹具清理完成。日志：`src/.state/native-probe-watchdog/20261031-131600-fa387cce.stdout.log`。
 
 结合此前 WPF 根宿主的 `UPDATEITEM`、`UPDATEITEM+UPDATEDIR`、列重放、Icon→Details 模式切换结果，当前受守卫接受的策略矩阵没有找到能让 DefView 保留并重新取值的办法。`IShellView::Refresh` 样本因前台/输入守卫变化而无效，不据此下结论，也不重复该场景。继续堆叠 DefView 通知、重放列或切换模式已没有证据价值；下一步应在隔离自有行模型中评估视图数据/绘制，同时列出并验证视图级菜单、排序/分组、键盘焦点、导航、Shell 文件操作、通知和 OLE 拖放兼容门槛。产品仍使用 ExplorerBrowser，未接入派生大小列，也未进行架构迁移。
+
+### 2026-10-31：包装多选原生菜单扩展接口
+
+在包装子 PIDL 的两项目录多选场景中，适配器的 `GetUIObjectOf(IContextMenu)` 返回对象成功 `QueryInterface(IContextMenu3)`；内存 `QueryContextMenu` 返回 103 个命令 ID、25 个菜单项，并包含 `copy` 与 `delete` canonical verb。探针只查询并构造内存菜单，没有显示菜单、转发窗口消息或执行命令；前台不变。Release NativeProbe 构建 0 警告/错误，`--static-shell-column-wrapped-folder-smoke` 完整通过。
+
+这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后仍保留 `IContextMenu3` 查询能力，给后续所有者绘制/动态子菜单窗口消息路由提供了可用接口入口；尚未验证真实 `WM_INITMENUPOPUP`、`WM_DRAWITEM`、`WM_MEASUREITEM`/`IContextMenu3::HandleMenuMsg2` 转发，第三方扩展、多 provider、实际菜单显示/命令执行也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
