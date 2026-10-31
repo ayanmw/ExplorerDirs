@@ -7,13 +7,15 @@ internal static class ShellListViewRowModelSmoke
 {
     internal static void Run()
     {
-        var targetPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-model", "small"));
+        using var fixture = new TemporaryDirectory();
+        var targetPath = Path.Combine(fixture.Root, "small");
+        Directory.CreateDirectory(targetPath);
         // The model only scans SFGAO_FOLDER rows; keep this fixture on that production branch.
         var target = new ExplorerDirs.NativeProbe.ShellListViewRow(
             7, 0x101, 0x201, "small", targetPath, targetPath, 0x20000000, 4,
             FromShellEnumeration: true, SystemImageIndex: 12)
         {
-            FileSystemIdentity = new(1, 7, 0)
+            FileSystemIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(targetPath)
         };
         var siblingPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-model", "sibling"));
         var sibling = target with
@@ -140,6 +142,27 @@ internal static class ShellListViewRowModelSmoke
                   staleScan[0].FileSystemIdentity == replacementIdentity,
                 "a scan result for a retired row is rejected after its path now identifies another folder");
 
+            var missingIdentityPath = Path.Combine(identityRoot, "missing-after-scan");
+            var movedAwayPath = Path.Combine(identityRoot, "moved-away");
+            Directory.CreateDirectory(missingIdentityPath);
+            var missingIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(missingIdentityPath);
+            var missingFolder = targetWithSummary with
+            {
+                ParsingName = missingIdentityPath,
+                FileSystemPath = missingIdentityPath,
+                FileSystemIdentity = missingIdentity
+            };
+            Directory.Move(missingIdentityPath, movedAwayPath);
+            var unverifiedScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
+                [missingFolder],
+                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [missingIdentityPath] = new(888, 1, 0, 0)
+                });
+            Check(missingIdentity is not null && unverifiedScan[0].RecursiveBytes is null &&
+                  unverifiedScan[0].RecursiveSummary is null && unverifiedScan[0].FileSystemIdentity is null,
+                "a path whose previous folder identity is no longer readable cannot accept a late scan result");
+
             var identityReconciled = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
                 [retiredFolder], [replacementFolder], nextId: 10);
             Check(identityReconciled.Rows[0].RecursiveBytes is null && identityReconciled.Rows[0].RecursiveSummary is null,
@@ -165,6 +188,18 @@ internal static class ShellListViewRowModelSmoke
         static void Check(bool condition, string behavior)
         {
             if (!condition) throw new InvalidOperationException("Shell ListView row model smoke failed: " + behavior);
+        }
+    }
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        internal string Root { get; } = Path.Combine(Path.GetTempPath(), "ExplorerDirs-row-model-" + Guid.NewGuid().ToString("N"));
+
+        internal TemporaryDirectory() => Directory.CreateDirectory(Root);
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
         }
     }
 }

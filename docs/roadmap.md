@@ -5121,5 +5121,5 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 
 ## 2026-10-31：扫描完成时拒绝已替换目录的迟到值
 
-- 真实文件系统夹具先证明旧逻辑会把同路径新目录的扫描汇总回写到旧行身份；现在发布前重新读取文件 ID，若路径当前身份与行快照不同则丢弃迟到值、清空缓存并记录新身份，等待下一轮扫描。定向 row-model smoke 在旧逻辑上失败、修复后通过；完整 Release SettingsSmoke 与 NativeProbe Release build 通过，0 警告/错误。
+- 真实文件系统夹具先证明旧逻辑会把同路径新目录的扫描汇总回写到旧行身份；又覆盖原目录移走、原路径无法读取的情况。现在发布前重新读取文件 ID，只有已知旧身份与当前身份一致才发布；身份不同或读取失败时丢弃结果、清空缓存，并在有新身份时记录该身份、等待下一轮扫描。两个迟到结果回归均在旧逻辑上失败、修复后通过；完整 Release SettingsSmoke 与 NativeProbe Release build 通过，0 警告/错误。
 - 仅补强隔离 NativeProbe 行模型的路径键扫描竞态，没有接入产品 ExplorerBrowser/IShellView；后台结果仍由路径索引，且回写检查后至更新之间的文件系统竞争无法通过该检查消除。详情见[调查记录](folder-size-column-investigation.md#2026-10-31扫描完成时拒绝已替换目录的迟到值)。
