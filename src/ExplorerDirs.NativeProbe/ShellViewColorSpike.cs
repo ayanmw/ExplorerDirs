@@ -2807,25 +2807,43 @@ internal static class ShellViewColorSpike
                 {
                     if (extractCommand is null)
                         throw new InvalidOperationException("The ZIP view-owned background menu did not expose the extract command.");
-                    var extractVerb = Marshal.StringToHGlobalAnsi("extract");
-                    int invokeResult;
-                    try
+                    var trackedPopup = ShellViewHostFilterProbe.TrackPopupMenuAndCancel(parent, backgroundMenuHandle, contextMenu);
+                    Console.WriteLine($"ishellview-zip-extract-menu-loop: selected-command=0x{trackedPopup.SelectedCommand:X}; init-popup-count={trackedPopup.InitPopupCount}; init-hr=0x{trackedPopup.InitResult:X8}; used-context-menu3={trackedPopup.UsedContextMenu3}; popup-cancelled-before-selection={trackedPopup.SelectedCommand == 0}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                    // InvokeCommand accepts either a canonical verb string or a MAKEINTRESOURCE command offset.
+                    // Compare both paths because the previous ANSI verb call returned S_OK without extracting.
+                    var numericInvoke = new NativeInvokeInfo
                     {
-                        Console.WriteLine($"ishellview-zip-extract: invoke-start; canonical-verb=extract; encoding=ANSI; command-offset={extractCommand.Offset}; show=SW_SHOWNORMAL");
-                        var invoke = new NativeInvokeInfo
-                        {
-                            Size = Marshal.SizeOf<NativeInvokeInfo>(),
-                            Window = parent,
-                            Verb = extractVerb,
-                            Show = 1
-                        };
-                        invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
-                    }
-                    finally { Marshal.FreeHGlobal(extractVerb); }
-                    Console.WriteLine($"ishellview-zip-extract: invoke-returned; hr=0x{invokeResult:X8}");
-                    Pump(3000);
-                    Check(invokeResult);
+                        Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                        Window = parent,
+                        Verb = unchecked((nint)extractCommand.Offset),
+                        Show = 1
+                    };
+                    var numericInvokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref numericInvoke);
+                    Pump(2500);
                     var viewExtractedFiles = ReadExtractedFixtureFiles();
+                    Console.WriteLine($"ishellview-zip-extract: numeric-offset={extractCommand.Offset}; invoke-hr=0x{numericInvokeResult:X8}; files-after-numeric=[{string.Join('|', viewExtractedFiles)}]");
+                    int invokeResult = numericInvokeResult;
+                    if (viewExtractedFiles.Length == 0)
+                    {
+                        var extractVerb = Marshal.StringToHGlobalAnsi("extract");
+                        try
+                        {
+                            Console.WriteLine($"ishellview-zip-extract: invoke-start; canonical-verb=extract; encoding=ANSI; command-offset={extractCommand.Offset}; show=SW_SHOWNORMAL");
+                            var invoke = new NativeInvokeInfo
+                            {
+                                Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                                Window = parent,
+                                Verb = extractVerb,
+                                Show = 1
+                            };
+                            invokeResult = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke);
+                        }
+                        finally { Marshal.FreeHGlobal(extractVerb); }
+                        Console.WriteLine($"ishellview-zip-extract: invoke-returned; hr=0x{invokeResult:X8}");
+                        Pump(3000);
+                        viewExtractedFiles = ReadExtractedFixtureFiles();
+                    }
+                    Check(invokeResult);
                     if (viewExtractedFiles.Length == 0)
                     {
                         var extractFolderContextMenuId = ContextMenuId;

@@ -5443,3 +5443,6 @@ NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数�
 ## 2026-11-01：跨新 view 复用捕获的 Synthetic Shell 列布局
 
 新增同进程、同 synthetic filesystem provider 的第二 view 对照。`IColumnManager` 两个 view 的三列键一致；将第一个 view 捕获的列键和宽度应用到新 view 后，布局与 `Recursive Size` 名称保持，逐项值为 `1 / 4`，升降序分别为 `child|small.bin` / `small.bin|child`。跨新 view 复用通过，说明本探针中 provider 映射 GUID 与列管理器 GUID 的差异不是阻碍；未覆盖跨进程、其他 provider、持久化、ExplorerBrowser 或可见交互。NativeProbe Release build 0 警告/错误，Private Desktop WPF watchdog exit 0，前台/输入/清理守卫通过。下一步转向迁移门槛的其它未覆盖项；产品与发布包未变。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01捕获列布局跨同-provider-的新-view-可复用)。
+## 2026-11-01：ZIP extract 经真实菜单循环的隔离诊断
+
+Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `TrackPopupMenu(TPM_RETURNCMD)`，owner 窗口子类按顺序转发根 `WM_INITMENUPOPUP`，并在初始化后由线程 hook 取消菜单。探针观测一次初始化；`IContextMenu3::HandleMenuMsg2` 返回 `E_FAIL`。之后分别按命令偏移 `38` 与 canonical `extract` 调用，均 `S_OK` 但 fixture 没有解压文件；folder-created menu 的 canonical 调用结果相同。故菜单循环存在且命令 dispatch 返回不代表操作成功，真实选择/确认仍待隔离输入方式或可见验收。本轮使用临时 ZIP，前台/last-input 与清理守卫通过；NativeProbe Release build 0 警告/错误。产品与发布包未改。详情见[原型记录](ishellview-color-spike.md#2026-11-01zip-extract-实际-trackpopupmenu-初始化与命令偏移对照)。

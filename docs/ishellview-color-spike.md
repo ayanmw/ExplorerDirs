@@ -1542,3 +1542,8 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 这补齐的是 ZIP provider 的 view-owned 背景菜单接口及命令名可查询性；菜单没有被显示，首次记录时没有调用 `extract`，也没有验证解压后的文件变化、通知与 view 更新或 ExplorerBrowser 产品行为。命令实现复用 `ShellViewColorSpike` 隔离宿主，不改变产品视图。
 
 随后尝试执行该菜单的命令：view-owned 背景菜单与 folder-created `IContextMenu` 各自都有 enabled 的 `extract`；ANSI canonical verb 调用均返回 `S_OK`，等待 3 秒后夹具中没有解压文件，隔离 Desktop 上也没有除宿主外的可见顶层窗口。Unicode `VerbW` 加 `CMIC_MASK_UNICODE` 返回 `E_INVALIDARG`。当前 watchdog exit 0 只表示诊断过程和前台/输入/清理守卫完成；`operation-observed=False`，不能说解压成功或菜单执行已兼容。该结果缩小了问题范围，但仍需真实初始化/显示 Shell 菜单的交互路径才能判断命令是否依赖当前菜单循环或宿主状态；产品和用户文件未改。
+### 2026-11-01：ZIP `extract` 实际 TrackPopupMenu 初始化与命令偏移对照
+
+扩展 ZIP view-owned 菜单探针，真实调用 `TrackPopupMenu(TPM_RETURNCMD)`，由 owner 子类在窗口过程内转发根 `WM_INITMENUPOPUP`，随后用线程级 `WH_CALLWNDPROCRET` hook 在首次初始化后关闭 Private Desktop 弹出菜单。watchdog exit 0，前台 HWND/last-input 未变，隔离清理通过。确实观察到一次根 popup 初始化；`IContextMenu3::HandleMenuMsg2` 返回 `E_FAIL`，没有返回已选命令。
+
+弹出菜单取消后，分别以菜单偏移 `MAKEINTRESOURCE(38)` 和 canonical ANSI verb `extract` 调用 view-owned `IContextMenu::InvokeCommand`，两者均返回 `S_OK`，但夹具均无解压文件。随后 folder-created 菜单的 canonical `extract` 也返回 `S_OK`，仍无文件或额外顶层窗口。因此，实际进入/初始化/取消菜单循环以及两种命令标识都不能证明解压成功；真实菜单项选择、对话框所属窗口与用户确认仍未覆盖。没有物理输入、用户文件、产品 ExplorerBrowser 或可见 Q-Dir 验收。日志：`src/.state/native-probe-watchdog/20261101-050330-7cd8ca75.stdout.log`。

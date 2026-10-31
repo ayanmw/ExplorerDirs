@@ -1348,6 +1348,71 @@ internal static class ShellViewHostFilterProbe
         Console.WriteLine($"ishellview-column-header-menu: owner=0x{capturedPopupOwner:X}; owner-chain=[{capturedPopupOwnerChain}]; items=[{string.Join('|', capturedItems.Select(item => item.Text))}]; canonical-submenu-verbs=[{string.Join(',', canonicalSubmenuVerbs)}]; canonical-leaf-verbs=[{string.Join(',', mappedVerbs)}]; mapped-submenus=[{string.Join(',', mappedSubmenuRows)}]; popup-command-id-base-offset={strongestOffset.Key}; popup-cancelled=True");
     }
 
+    internal static (uint SelectedCommand, int InitPopupCount, int InitResult, bool UsedContextMenu3) TrackPopupMenuAndCancel(nint owner, nint menu, nint contextMenu)
+    {
+        const uint WmInitMenuPopup = 0x0117;
+        const int ENotImpl = unchecked((int)0x80004001);
+        var contextMenu3Id = new Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
+        var contextMenu2Id = new Guid("000214F4-0000-0000-C000-000000000046");
+        nint context3 = 0, context2 = 0, hook = 0;
+        var initPopupCount = 0;
+        var initResult = ENotImpl;
+        var usedContextMenu3 = false;
+        HookProc? hookCallback = null;
+        SubclassProc? windowCallback = null;
+        var subclassId = (nuint)0xE7D1;
+        try
+        {
+            _ = Marshal.QueryInterface(contextMenu, in contextMenu3Id, out context3);
+            _ = Marshal.QueryInterface(contextMenu, in contextMenu2Id, out context2);
+            windowCallback = (window, messageId, wParam, lParam, id, referenceData) =>
+            {
+                if (messageId == WmInitMenuPopup && wParam == menu)
+                {
+                    initPopupCount++;
+                    if (context3 != 0)
+                    {
+                        initResult = At<MenuMessage2>(context3, 7)(context3, WmInitMenuPopup, menu, lParam, out var handledResult);
+                        usedContextMenu3 = initResult == 0;
+                        if (usedContextMenu3) return handledResult;
+                    }
+                    if (context2 != 0 && (!usedContextMenu3 && initResult is 1 or ENotImpl))
+                    {
+                        initResult = At<MenuMessage>(context2, 6)(context2, WmInitMenuPopup, menu, lParam);
+                        if (initResult == 0) return 0;
+                    }
+                }
+                return DefSubclassProc(window, messageId, wParam, lParam);
+            };
+            if (!SetWindowSubclass(owner, windowCallback, subclassId, 0))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not forward Shell menu initialization on the isolated owner window.");
+            hookCallback = (code, wParam, lParam) =>
+            {
+                if (code >= 0 && lParam != 0)
+                {
+                    var message = Marshal.PtrToStructure<CallWindowProcResult>(lParam);
+                    if (message.Message == WmInitMenuPopup && message.WParam == unchecked((nuint)menu) && message.Window == owner)
+                        _ = EndMenu(); // Close after the owner has forwarded WM_INITMENUPOPUP.
+                }
+                return CallNextHookEx(hook, code, wParam, lParam);
+            };
+            hook = SetWindowsHookExW(12, hookCallback, 0, GetCurrentThreadId()); // WH_CALLWNDPROCRET, this probe thread only.
+            if (hook == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not observe the isolated menu loop.");
+            var selected = TrackPopupMenu(menu, 0x0100, 80, 80, 0, owner, 0); // TPM_RETURNCMD; the hook cancels at first initialization.
+            return (selected, initPopupCount, initResult, usedContextMenu3);
+        }
+        finally
+        {
+            _ = EndMenu();
+            if (hook != 0) _ = UnhookWindowsHookEx(hook);
+            _ = RemoveWindowSubclass(owner, windowCallback!, subclassId);
+            if (context2 != 0) Marshal.Release(context2);
+            if (context3 != 0) Marshal.Release(context3);
+            GC.KeepAlive(windowCallback);
+            GC.KeepAlive(hookCallback);
+        }
+    }
+
     private static void VerifyHeaderMenuSortByType(
         IReadOnlyList<(string Caption, List<(int Id, string Text)> Items)> capturedSubmenus,
         nint popupOwner, nint view, int popupCommandIdBaseOffset)
@@ -1801,6 +1866,8 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MenuMessage(nint self, uint message, nint wParam, nint lParam);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MenuMessage2(nint self, uint message, nint wParam, nint lParam, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
@@ -1812,6 +1879,7 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetShellColumnCount(nint self, uint flags, out uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint HookProc(int code, nuint wParam, nint lParam);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint SubclassProc(nint window, uint message, nint wParam, nint lParam, nuint subclassId, nuint referenceData);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, [Out] NativeSortColumn[] columns, int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint itemPidls, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFocusedItem(nint self, out int index);
@@ -1863,6 +1931,10 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(nint hook);
     [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nuint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern bool EndMenu();
+    [DllImport("user32.dll", SetLastError = true)] private static extern uint TrackPopupMenu(nint menu, uint flags, int x, int y, int reserved, nint owner, nint parameters);
+    [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint window, SubclassProc callback, nuint id, nuint referenceData);
+    [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(nint window, SubclassProc callback, nuint id);
+    [DllImport("comctl32.dll")] private static extern nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
     [DllImport("user32.dll")] private static extern uint GetMenuItemID(nint menu, int position);
