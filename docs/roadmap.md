@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 包装子 PIDL 的绝对身份日志澄清：常规 wrapped-folder smoke 现同时检查 standalone 绝对组合被拒绝，以及 `SHCreateItemWithParent(adapter, wrappedChild)` 后文件系统路径、绝对 parsing name 和 parent/child 身份都正确；Release NativeProbe build 0 警告/错误，完整 wrapped-folder smoke 通过，未创建窗口。原 `E_INVALIDARG` 是缺少解释包装子项的父 adapter 时的预期结果，不是目标文件路径失效。详见[包装 PIDL 调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的父绑定身份复核)。
+
 2026-10-31 隔离多选 Shell 菜单初始化消息：包装 PIDL 的多选 `IContextMenu3` 内存菜单对 5 个子菜单分别收到 `HandleMenuMsg2(WM_INITMENUPOPUP)`；4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，未出现其它失败。NativeProbe Release build 0 警告/错误，完整 `--static-shell-column-wrapped-folder-smoke` 通过，前台不变、菜单未显示。`E_NOTIMPL` 的上层处理以及窗口消息转发/绘制尚未验证；产品仍使用 ExplorerBrowser。详见[Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
 
 2026-10-31 包装 Shell 文件夹的多选菜单接口复核：真实临时文件夹的两项目录多选经过包装子 PIDL 后，`IContextMenu3` 可查询，内存菜单含 103 个命令、25 个菜单项及 `copy`/`delete`；菜单未显示、未执行，前台未变。Release NativeProbe build 0 警告/错误，`--static-shell-column-wrapped-folder-smoke` 通过。该结果补上未来自有视图对接 Shell 所有者绘制/动态菜单消息的接口可用性，不证明消息转发或可见菜单体验；产品仍使用 ExplorerBrowser。详情见[文件夹大小列与 Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。

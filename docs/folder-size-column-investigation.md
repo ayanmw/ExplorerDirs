@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-10-31：包装子 PIDL 的父绑定身份复核
+
+普通包装-folder smoke 现把两种不同使用方式分别断言：普通 backing 绝对 PIDL 可解析为预期文件；将包装的相对 child PIDL 原样与 backing 文件夹 PIDL 组合后，`SHGetNameFromIDList(SIGDN_FILESYSPATH)` 按预期返回 `E_INVALIDARG`，因为包装 envelope 只由其父 adapter 解释。随后通过 `SHCreateItemWithParent(adapter, wrappedChild)` 取得的 Shell item 必须返回正确的文件系统路径和绝对 parsing name，`IParentAndItem` 还需保留 adapter 的 `IUnknown` 与同一 child PIDL。完整 wrapped-folder smoke 通过，窗口未创建。
+
+因此输出字段现在明确写作 `backing=resolved; wrapped-child-as-absolute=expected-reject; parent-bound=resolved`，不再把父对象缺失时的拒绝显示成含义不明的 `unresolved`。Shell `IDataObject` 仍会将文件系统路径序列化为普通文件系统 item；这不保留 adapter 的 COM/PIDL 身份，属于不同合同。
+
 ## 2026-10-31：包装子 PIDL 的枚举器克隆合同
 
 NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL 状态支持；每个包装枚举器保留独立游标，因此 `Clone`、`Reset` 和 `Skip` 不依赖底层文件系统枚举器实现 `Clone`。合同从非零游标克隆后逐项比较 PIDL 身份，并检查 `Reset`、克隆后 `Skip` 与 `Next(count)` 的批量及末尾部分读取语义。另对底层已交出首个 PIDL、包装缓存随后报 `E_OUTOFMEMORY` 的时序做故障注入：首次调用报告错误但不返回项目，重试仍取得与基线相同的首项；缓存改为直接接管 inner 返回的 PIDL，避免复制分配。夹具同时包含文件和子目录，Shell data object/CIDA 检查都接受两类真实文件系统项目。

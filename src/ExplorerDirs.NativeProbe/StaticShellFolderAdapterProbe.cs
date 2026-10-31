@@ -262,7 +262,15 @@ internal static class StaticShellFolderAdapterProbe
                 try
                 {
                     var rawName = DescribeFileSystemPath(rawAbsolute);
-                    absolutePidlBehavior = $"raw={rawName}; wrapped={DescribeFileSystemPath(combined)}";
+                    var combinedWrappedName = DescribeFileSystemPath(combined);
+                    var expectedPath = Path.GetFullPath(Path.Combine(fixture, "two.bin"));
+                    if (!string.Equals(rawName, expectedPath, StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"The backing absolute PIDL did not resolve to its expected path: '{rawName}'.");
+                    // A wrapped child is meaningful relative to its adapter parent; raw ILCombine must not treat its envelope as a filesystem PIDL.
+                    if (!string.Equals(combinedWrappedName, "unresolved-0x80070057", StringComparison.OrdinalIgnoreCase))
+                        throw new Exception($"Unexpected standalone resolution for a parent-relative wrapped PIDL: '{combinedWrappedName}'.");
+                    VerifyShellItemParentIdentity(adapter, items["two.bin"], expectedPath);
+                    absolutePidlBehavior = "backing=resolved; wrapped-child-as-absolute=expected-reject; parent-bound=resolved";
                 }
                 finally
                 {
@@ -271,8 +279,6 @@ internal static class StaticShellFolderAdapterProbe
                 }
                 if (shellItemParentProbe)
                 {
-                    stage = "shell-item-parent-identity";
-                    VerifyShellItemParentIdentity(adapter, items["two.bin"], Path.Combine(fixture, "two.bin"));
                     stage = "shell-item-folder-handlers";
                     VerifyShellItemFolderHandlers(adapter, shellDetailsSize);
                 }

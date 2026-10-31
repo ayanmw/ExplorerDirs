@@ -344,6 +344,8 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 ## 本轮代码与下一轮验收
 
+2026-10-31 包装 PIDL 父绑定语义：隔离文件夹 smoke 现在把“包装子 PIDL 不能单独解析为绝对路径”与“通过父 adapter 创建的 Shell item 返回真实路径”分开验证；后者保持相同 parent/child 身份并正常生成 filesystem IDataObject。该合同防止把预期的 `E_INVALIDARG` 误判为文件路径错误，产品 ExplorerBrowser 不变。详见[Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的父绑定身份复核)。
+
 2026-10-31 原生多选菜单子菜单初始化合同：包装文件夹返回的 `IContextMenu3` 对 5 个内存子菜单 `WM_INITMENUPOPUP` 消息中 4 个返回 `S_OK`、1 个返回 `E_NOTIMPL`，没有其它失败；菜单未显示或执行。只证明 COM 消息处理结果，不证明真实宿主窗口转发、绘制或可见菜单。详情见[隔离视图评审](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
 
 2026-10-31 包装 Shell 文件夹的多选菜单接口：两项目录多选经包装 PIDL 后返回可查询 `IContextMenu3` 的 Shell 菜单对象；内存菜单包含 `copy`/`delete`，未显示或执行。当前只验证接口可取得；所有者绘制和动态菜单消息路由、第三方扩展与产品 ExplorerBrowser 可见菜单仍未验证。详情见[隔离视图评审](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
