@@ -1444,6 +1444,34 @@ public static class SyntheticShellSortProbe
         if (!movedInVisible || movedInEnumCalls != 1 || movedInQueued != 1 || movedInSent != 1)
             throw new TimeoutException("A Shell-moved-in folder did not reach the synthetic view through its translated lifecycle notification.");
 
+        // Copy-in uses the nonfolder SHCNE_CREATE lifecycle path, distinct from MKDIR.
+        var incomingFileName = "notify-copied-in.txt";
+        var incomingFileSourcePath = Path.Combine(copyDestination, incomingFileName);
+        var incomingFileTargetPath = Path.Combine(backingFolder, incomingFileName);
+        File.WriteAllText(incomingFileSourcePath, "copied-in");
+        WaitForChildNotificationTranslationToSettle(module);
+        enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        CopyFilesystemShellItemIntoFolder(incomingFileSourcePath, backingFolder);
+        deadline = Environment.TickCount64 + 3000;
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (names.Contains(incomingFileName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var copiedInEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var copiedInQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var copiedInSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var copiedInVisible = File.Exists(incomingFileSourcePath) && File.Exists(incomingFileTargetPath) &&
+            File.ReadAllText(incomingFileTargetPath) == "copied-in" &&
+            names.Contains(incomingFileName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-CopyItem-file; event=SHCNE_CREATE(0x{ShcneCreate:X}); visible={copiedInVisible}; enum-calls={copiedInEnumCalls}; translated-queued={copiedInQueued}; translated-sent={copiedInSent}");
+        if (!copiedInVisible || copiedInEnumCalls != 1 || copiedInQueued != 1 || copiedInSent != 1)
+            throw new TimeoutException("A Shell-copied-in file did not reach the synthetic view through one translated lifecycle notification.");
+
         SetListViewSelectionAndFocus(listView, folderName, names);
         enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
         queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
@@ -1716,6 +1744,35 @@ public static class SyntheticShellSortProbe
                     Check(At<PerformOperations>(operation, 21)(operation));
                     Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
                     if (aborted != 0) throw new IOException("The isolated Shell move-in operation was aborted.");
+                }
+                finally { Marshal.Release(operation); }
+            }
+            finally { Marshal.Release(destination); }
+        }
+        finally { Marshal.Release(source); }
+    }
+
+    private static void CopyFilesystemShellItemIntoFolder(string sourcePath, string destinationFolder)
+    {
+        var shellItemInterface = ShellItemId;
+        Check(SHCreateItemFromParsingName(sourcePath, 0, ref shellItemInterface, out var source));
+        try
+        {
+            shellItemInterface = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationFolder, 0, ref shellItemInterface, out var destination));
+            try
+            {
+                var classId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+                var interfaceId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+                var createOperationHr = CoCreateInstance(ref classId, 0, 1, ref interfaceId, out var operation);
+                Check(createOperationHr);
+                try
+                {
+                    Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                    Check(At<CopyItem>(operation, 16)(operation, source, destination, null));
+                    Check(At<PerformOperations>(operation, 21)(operation));
+                    Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                    if (aborted != 0) throw new IOException("The isolated Shell copy-in operation was aborted.");
                 }
                 finally { Marshal.Release(operation); }
             }
@@ -2232,6 +2289,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Unadvise(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int CopyItem(nint self, nint item, nint destination, string? name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int MoveItem(nint self, nint item, nint destination, string? name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);

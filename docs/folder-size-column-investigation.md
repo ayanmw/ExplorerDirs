@@ -1035,8 +1035,10 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 在前一批仅完成事件分类和编译后，本批补齐了静态分类合同与真实隔离 view 操作。无 Shell view 的 `--synthetic-child-notification-routing-smoke` 确认 `SHCNE_MKDIR`、`SHCNE_RMDIR`、`SHCNE_RENAMEFOLDER` 均转为父目录更新，带 `SHCNE_INTERRUPT` 的 MKDIR 也能识别，`SHCNE_UPDATEDIR` 和卷空闲空间事件不被递归翻译。WPF 根 Private Desktop 的 `single-item-recreate-shell-window-scroll` 原型中，真实 `IFileOperation::NewItem`、`RenameItems`、`DeleteItems` 依次创建、改名和删除临时文件夹；Shell 分别投递 MKDIR/RENAMEFOLDER/RMDIR，适配器每种操作只排队一次并发送一次父目录更新，DefView 每次只重新枚举一次，行列表准确新增/改名/移除。完整探针退出码 0，Private Desktop 前台 HWND 与输入时间戳不变，isolated cleanup 通过。
 
 该结果证明此 synthetic adapter 的文件夹生命周期通知在当前 Windows 文件系统 provider 和 WPF 根 Shell view 中可闭环。它不覆盖其它 provider、真实产品 ExplorerBrowser、可见 UI、Undo/Redo 或 OLE 拖放；没有产品迁移或 release 变更。
-## 2026-11-01 隔离 IShellView 接收移入文件夹通知
+## 2026-11-01 隔离 IShellView 接收移入及复制文件通知
 
 在已覆盖合成 view 文件夹新建、改名、删除后，补充从旁侧临时目录向当前 backing folder 移入整个文件夹的真实 `IFileOperation::MoveItem`。源夹具含 `child.txt`，移动后检查源路径消失、目标子文件内容一致且目标 view 出现目录行。NativeProbe 输出确认 Windows 对该目标报告 `SHCNE_MKDIR (0x8)`；synthetic adapter 延迟父目录更新各排队/发送一次，provider 只重新枚举一次。Private Desktop watchdog exit 0，前台 HWND、输入 tick 不变，UUID 注册项与临时夹具清理通过。
 
 这个场景证明的是隔离 filesystem provider 中的文件夹移入通知路径；不覆盖真实 OLE `DoDragDrop`、ExplorerBrowser 产品、其它 Shell provider、Undo/Redo 或可见文件列表。产品仍使用 ExplorerBrowser；移入目标的用户交互和跨窗格拖放仍待集中 GUI 验收。
+
+同一 probe 随后从旁侧 fixture 调用真实 `IFileOperation::CopyItem`，将 `notify-copied-in.txt` 复制到当前 backing folder。Shell 报告 `SHCNE_CREATE (0x2)`；一次父目录更新后视图新增文件一行，源文件保留且目标内容匹配。连续 probe 的 `enum-calls=1`、`translated-queued=1`、`translated-sent=1`。这只补充目标 view 文件复制通知合同；不验证剪贴板粘贴、进度/冲突对话框、OLE 拖放或产品 ExplorerBrowser。
