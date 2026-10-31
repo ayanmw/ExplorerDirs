@@ -918,6 +918,8 @@ public static class SyntheticShellSortProbe
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             Pump(250);
             listView = FindListView(view);
+            if (preserveScrollAnchor)
+                ProbeRecreatedViewBackgroundMenu(view);
             var recreatedTopIndex = preserveScrollAnchor ? GetListViewTopIndex(listView) : -1;
             var recreatedNames = preserveScrollAnchor ? ReadNames(listView, module, expectedCount: -1) : [];
             var recreatedTopName = preserveScrollAnchor && recreatedTopIndex >= 0 && recreatedTopIndex < recreatedNames.Length
@@ -1069,6 +1071,33 @@ public static class SyntheticShellSortProbe
             return columns;
         }
         finally { Marshal.FreeCoTaskMem(buffer); }
+    }
+
+    private static void ProbeRecreatedViewBackgroundMenu(nint view)
+    {
+        var menuId = ContextMenuId;
+        Check(At<GetItemObject>(view, 15)(view, 0, ref menuId, out var contextMenu)); // SVGIO_BACKGROUND.
+        if (contextMenu == 0) throw new InvalidOperationException("The recreated Shell view returned no background context menu.");
+        var menu = CreatePopupMenu();
+        if (menu == 0)
+        {
+            Marshal.Release(contextMenu);
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create an in-memory menu for the recreated Shell view.");
+        }
+        try
+        {
+            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+            Check(queryResult);
+            var itemCount = GetMenuItemCount(menu);
+            Console.WriteLine($"synthetic-size-update-menu: background-context-menu=True; query-hr=0x{queryResult:X8}; items={itemCount}; popup-shown=False; command-invoked=False");
+            if (itemCount <= 0)
+                throw new InvalidOperationException("The recreated Shell view returned an empty background context menu.");
+        }
+        finally
+        {
+            DestroyMenu(menu);
+            Marshal.Release(contextMenu);
+        }
     }
 
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
