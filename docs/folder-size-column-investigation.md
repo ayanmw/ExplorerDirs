@@ -1042,3 +1042,5 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 这个场景证明的是隔离 filesystem provider 中的文件夹移入通知路径；不覆盖真实 OLE `DoDragDrop`、ExplorerBrowser 产品、其它 Shell provider、Undo/Redo 或可见文件列表。产品仍使用 ExplorerBrowser；移入目标的用户交互和跨窗格拖放仍待集中 GUI 验收。
 
 同一 probe 随后从旁侧 fixture 调用真实 `IFileOperation::CopyItem`，将 `notify-copied-in.txt` 复制到当前 backing folder。Shell 报告 `SHCNE_CREATE (0x2)`；一次父目录更新后视图新增文件一行，源文件保留且目标内容匹配。连续 probe 的 `enum-calls=1`、`translated-queued=1`、`translated-sent=1`。这只补充目标 view 文件复制通知合同；不验证剪贴板粘贴、进度/冲突对话框、OLE 拖放或产品 ExplorerBrowser。
+
+再以真实 `IFileOperation::MoveItem` 将旁侧临时文件移入同一目标 view。Shell 同样发出 `SHCNE_CREATE (0x2)`；源文件消失、目标内容匹配且目标行出现，队列、通知及 provider 枚举各一次。探针连续执行后 Private Desktop 前台/输入守卫和隔离清理均通过。上述 copy/move 都是单项文件系统操作，不代表多选剪贴板、真实拖动或第三方 Shell namespace。

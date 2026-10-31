@@ -1472,6 +1472,33 @@ public static class SyntheticShellSortProbe
         if (!copiedInVisible || copiedInEnumCalls != 1 || copiedInQueued != 1 || copiedInSent != 1)
             throw new TimeoutException("A Shell-copied-in file did not reach the synthetic view through one translated lifecycle notification.");
 
+        var movedFileName = "notify-moved-in.txt";
+        var movedFileSourcePath = Path.Combine(copyDestination, movedFileName);
+        var movedFileTargetPath = Path.Combine(backingFolder, movedFileName);
+        File.WriteAllText(movedFileSourcePath, "moved-in");
+        WaitForChildNotificationTranslationToSettle(module);
+        enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        sentBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        MoveFilesystemShellItemIntoFolder(movedFileSourcePath, backingFolder);
+        deadline = Environment.TickCount64 + 3000;
+        do
+        {
+            Pump(50);
+            names = ReadNames(listView, module, expectedCount: -1);
+            if (names.Contains(movedFileName, StringComparer.OrdinalIgnoreCase) &&
+                ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBefore) break;
+        } while (Environment.TickCount64 < deadline);
+        var movedFileEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBefore;
+        var movedFileQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBefore;
+        var movedFileSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBefore;
+        var movedFileVisible = !File.Exists(movedFileSourcePath) && File.Exists(movedFileTargetPath) &&
+            File.ReadAllText(movedFileTargetPath) == "moved-in" &&
+            names.Contains(movedFileName, StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-MoveItem-file; event=SHCNE_CREATE(0x{ShcneCreate:X}); visible={movedFileVisible}; enum-calls={movedFileEnumCalls}; translated-queued={movedFileQueued}; translated-sent={movedFileSent}");
+        if (!movedFileVisible || movedFileEnumCalls != 1 || movedFileQueued != 1 || movedFileSent != 1)
+            throw new TimeoutException("A Shell-moved-in file did not reach the synthetic view through one translated lifecycle notification.");
+
         SetListViewSelectionAndFocus(listView, folderName, names);
         enumBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
         queuedBefore = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
