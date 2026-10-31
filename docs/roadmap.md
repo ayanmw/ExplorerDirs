@@ -5502,3 +5502,7 @@ Private Desktop NativeProbe 将源夹具放在 D:、目标放在 C: 系统临时
 ## 2026-11-01：新建文件夹自动重命名探针的交互桌面限制
 
 为避免抢占当前桌面，尝试将生产 `ExplorerBrowserHost.CreateNewFolder()` 放入新建的 Private Desktop STA。Release HostProbe 构建通过；新线程上的 WPF 窗口报告 Active、Shell host 可见且 `FocusView()` 返回成功，但生产命令仍返回 `false`，没有创建目录。故该 Private Desktop 运行无法验证命令执行或原生编辑框焦点，也不能据此判定产品缺陷。守卫确认前台 HWND、最后输入 tick 未变化，唯一临时目录已清理；Windows 返回 `ERROR_BUSY` 拒绝提前关闭该 Private Desktop，HostProbe 进程结束后由系统回收进程句柄。临时探针代码已撤回、未改产品实现。后续需在集中 UI 验收的交互桌面或独立 VM 中验证新建、选中及原生重命名焦点；不要再把 Private Desktop 的 `Window.IsActive` 当作真实 Shell 命令上下文。
+
+## 2026-11-01：派生目录大小列的单行刷新边界
+
+NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归扫描器取得的 `1 B` 目录摘要发布到活动合成 provider 缓存，再对对应 `SysListView32` 行发送 `LVM_UPDATE`。Private Desktop watchdog exit 0，前台 HWND/last-input tick 未变且隔离清理通过；消息返回 0，但 2.5 秒内无 `EnumObjects`、属性读取或比较，列值/排序仍旧、选区焦点保留。相同 WPF 根宿主的整视图 Refresh 对照重新枚举 2 行、大小值读回 `[4|1]` 并排序为 `small.bin|child`，但选择/焦点未保留。NativeProbe Release build 0 警告/错误。结果仅限合成 provider 的隔离 DefView，不代表 ExplorerBrowser 产品刷新或可见闪烁；局部 ListView 更新不能替代派生列重取，迁移原型仍需寻找受支持的更新与状态保留组合。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-listview-单行更新不能刷新派生目录大小)。

@@ -16,6 +16,7 @@ public static class SyntheticShellSortProbe
     private static readonly Guid RecursiveSizeFormatId = new("7E1F84B7-C052-4E51-8A3C-869254A6B910");
     private const int LvmFirst = 0x1000;
     private const int LvmGetItemCount = LvmFirst + 4;
+    private const int LvmUpdate = LvmFirst + 6;
     private const int LvmGetItemRect = LvmFirst + 14;
     private const int LvmEnsureVisible = LvmFirst + 19;
     private const int LvmGetHeader = LvmFirst + 31;
@@ -107,7 +108,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1137,6 +1138,16 @@ public static class SyntheticShellSortProbe
                 RunSizeUpdateStrategy("single-item-live-cache-publish", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, publishLiveSnapshot: true, host: host);
+            if (strategyFilter == "single-item-lvm-update-live-cache-publish")
+                RunSizeUpdateStrategy("single-item-lvm-update-live-cache-publish", 1, () =>
+                {
+                    var listView = FindListView(view);
+                    var names = ReadNames(listView, module, expectedCount: -1);
+                    var childIndex = Array.FindIndex(names, item => string.Equals(item, "child", StringComparison.OrdinalIgnoreCase));
+                    if (childIndex < 0) throw new InvalidOperationException("Could not find the derived-size row for targeted LVM_UPDATE.");
+                    var updateResult = SendMessageW(listView, LvmUpdate, childIndex, 0);
+                    Console.WriteLine($"synthetic-size-update: strategy={strategyFilter}; lvm-update-row={childIndex}; result={updateResult}");
+                }, module, folderView, view, backingFolder, publishLiveSnapshot: true, host: host);
             if (strategyFilter == "item-plus-parent-live-cache-publish")
                 RunSizeUpdateStrategy("item-plus-parent-live-cache-publish", 1, () =>
                 {

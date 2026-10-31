@@ -1158,3 +1158,9 @@ NativeProbe Release 构建 0 警告/错误；三种 WPF Private Desktop 探针�
 扩展 `--shell-change-reconciliation`，将源夹具放在 D: checkout 下的唯一 `.state/native-probe` 目录、目标夹具放在 C: 临时目录，并分别为两个窗格目录注册 Shell change 通知。跨卷 `IFileOperation.MoveItems` 后观察到源 `Deleted` 和目标 `Created`；通过通知后的 Shell 重枚举与行模型对账，源/目标计数由 3/1 收敛为 1/3，两个目标文件字节均与原内容匹配。源/目标未移动锚点行 ID、选区及焦点保留，移动源行退休且目标行新增。后续跨窗格 Copy/Rename/Delete 的既有对账序列也继续通过。
 
 NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退出码 0，隐藏窗口与前台不变。该证据补齐普通 filesystem 跨卷移动后的双视图通知和行数收敛，不代表 ExplorerBrowser 产品接线、可见 Shell 操作 UI、真实 OLE 拖放、ZIP 跨卷移动或其它 provider 已验证。夹具运行后清理。
+
+### 2026-11-01：ListView 单行更新不能刷新派生目录大小
+
+为寻找比完整 `IShellView::Refresh` 更局部的派生列更新方式，增加隔离 `single-item-lvm-update-live-cache-publish` 对照：先用生产递归扫描器重新统计 `child` 为 `1 B` 并发布到当前 provider 身份缓存，再向对应 DefView `SysListView32` 行发送 `LVM_UPDATE`。WPF `HwndSource` Private Desktop watchdog 退出码 0，前台 HWND 与最后输入 tick 未变，`isolation-clean=True`。`LVM_UPDATE` 返回 0；2.5 秒观察内 `EnumObjects=0`、大小属性读取和比较均为 0、视图仍按旧值排序，递归大小列不可读，选区/焦点仍保留。返回值 0 本身不作成功/失败依据，结论来自视图行、排序和 provider 调用计数。
+
+同一源代码、同一隔离宿主的 `full-view-refresh-live-cache-publish` 对照重新枚举 2 行，列值从 `[10|4]` 更新为 `[4|1]`，排序改为 `small.bin|child`，但 `selection-focus-preserved=False`；Private Desktop 前台/输入/清理守卫与 NativeProbe Release build 通过。此结果说明当前合成 DefView 需要完整刷新才能消费已发布的派生大小值，针对 ListView 单行的重绘消息不足。它不是产品 ExplorerBrowser 的刷新表现或可见闪烁测量；下一步应在隔离原型中继续找能让 DefView 重取该 provider 列值且保留视图状态的受支持路径，不把 `LVM_UPDATE` 接入产品，也不据此批准宿主迁移。
