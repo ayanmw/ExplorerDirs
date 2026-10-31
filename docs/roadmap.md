@@ -5498,3 +5498,7 @@ Private Desktop NativeProbe 将源夹具放在 D:、目标放在 C: 系统临时
 
 2026-11-01 ZIP 跨卷文件/目录 MoveItems：NativeProbe 独立 Private Desktop 入口将 D: 归档中的文件和含嵌套文件目录移至 C:。两次 MoveItems 均成功、未取消，目标字节正确，源归档内容移除，ZIP source view 从 2→1→0 项收敛；watchdog 前台/输入/隔离清理守卫通过，Release build 0 警告/错误。证据仅适用于当前 Windows ZIP provider 的程序化操作；未覆盖通知 PIDL/延迟、交互 UI、OLE 拖放、产品 ExplorerBrowser 或其他 provider。日志：`src/.state/native-probe-watchdog/20261101-060302-2c2ea5c7.stdout.log`。
 2026-11-01 ZIP 跨卷通知路径复核：原复合探针先移动文件再移动目录；其目录阶段约 3 秒未观测到事件，但因共享 ZIP provider 状态未受控，该结果不构成“目录无通知”结论。新增全新归档、目录优先的独立对照，两轮均观察并断言归档 `UPDATEITEM`、源归档内嵌套文件 `DELETE`、目标目录 `MKDIR`、目标嵌套文件 `CREATE`；内容与源 view 收敛也通过。当前 ZIP provider 的虚拟目录移动用子项删除和目标目录创建事件，而不是父 ZIP 中的虚拟目录 DELETE。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/清理守卫通过；复验日志：`src/.state/native-probe-watchdog/20261101-folder-first-move.stdout.log`。仅本机 Windows ZIP provider 的程序化跨卷 MoveItems 证据，不外推到其他 provider、可见操作或 ExplorerBrowser 产品接线。详见[探针记录](ishellview-color-spike.md#2026-11-01zip-跨卷移动的-shell-change-pidl)。
+
+## 2026-11-01：新建文件夹自动重命名探针的交互桌面限制
+
+为避免抢占当前桌面，尝试将生产 `ExplorerBrowserHost.CreateNewFolder()` 放入新建的 Private Desktop STA。Release HostProbe 构建通过；新线程上的 WPF 窗口报告 Active、Shell host 可见且 `FocusView()` 返回成功，但生产命令仍返回 `false`，没有创建目录。故该 Private Desktop 运行无法验证命令执行或原生编辑框焦点，也不能据此判定产品缺陷。守卫确认前台 HWND、最后输入 tick 未变化，唯一临时目录已清理；Windows 返回 `ERROR_BUSY` 拒绝提前关闭该 Private Desktop，HostProbe 进程结束后由系统回收进程句柄。临时探针代码已撤回、未改产品实现。后续需在集中 UI 验收的交互桌面或独立 VM 中验证新建、选中及原生重命名焦点；不要再把 Private Desktop 的 `Window.IsActive` 当作真实 Shell 命令上下文。
