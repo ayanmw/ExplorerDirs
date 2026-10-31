@@ -277,6 +277,7 @@ internal static class ShellChangeReconciliationProbe
         Directory.CreateDirectory(targetPath);
         File.WriteAllText(Path.Combine(sourcePath, "anchor-source.txt"), "source anchor");
         File.WriteAllText(Path.Combine(sourcePath, "moving.txt"), "move me");
+        File.WriteAllText(Path.Combine(sourcePath, "moving-second.txt"), "move me too");
         File.WriteAllText(Path.Combine(targetPath, "anchor-target.txt"), "target anchor");
 
         nint fixturePidl = 0, sourcePidl = 0, targetPidl = 0, sourceFolder = 0, targetFolder = 0;
@@ -313,8 +314,12 @@ internal static class ShellChangeReconciliationProbe
             ProjectRows(targetList, targetCurrent.Rows);
 
             var sourceAnchorId = sourceCurrent.Rows.Single(row => row.DisplayName == "anchor-source.txt").Id;
-            var movingId = sourceCurrent.Rows.Single(row => row.DisplayName == "moving.txt").Id;
+            var movedNames = new[] { "moving.txt", "moving-second.txt" };
+            var movingIds = sourceCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal))
+                .ToDictionary(row => row.DisplayName, row => row.Id, StringComparer.Ordinal);
             var targetAnchorId = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id;
+            foreach (var row in sourceCurrent.Rows.Where(row => movingIds.ContainsKey(row.DisplayName)))
+                SetRowState(sourceList, FindIndexById(sourceList, row.Id), LvisSelected, LvisSelected);
             SetRowState(sourceList, FindIndexById(sourceList, sourceAnchorId), LvisSelected | LvisFocused,
                 LvisSelected | LvisFocused);
             SetRowState(targetList, FindIndexById(targetList, targetAnchorId), LvisSelected | LvisFocused,
@@ -328,16 +333,18 @@ internal static class ShellChangeReconciliationProbe
             if (registration == 0)
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-pane Shell change registration failed.");
 
-            var sourceRow = sourceCurrent.Rows.Single(row => row.DisplayName == "moving.txt");
-            var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            var sourceRows = sourceCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
+            if (sourceRows.Length != movedNames.Length) throw new IOException("The source Shell view did not enumerate every selected fixture row.");
+            var childArray = Marshal.AllocCoTaskMem(IntPtr.Size * sourceRows.Length);
             nint dataObject = 0, operation = 0, destinationItem = 0;
             try
             {
-                Marshal.WriteIntPtr(childArray, sourceRow.RelativePidl);
+                for (var index = 0; index < sourceRows.Length; index++)
+                    Marshal.WriteIntPtr(childArray, index * IntPtr.Size, sourceRows[index].RelativePidl);
                 var dataObjectId = DataObjectId;
-                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(sourceFolder, 10)(sourceFolder, 0, 1,
+                Marshal.ThrowExceptionForHR(At<GetUIObjectOf>(sourceFolder, 10)(sourceFolder, 0, (uint)sourceRows.Length,
                     childArray, in dataObjectId, 0, out dataObject));
-                if (dataObject == 0) throw new IOException("The source Shell folder returned no IDataObject for the selected move row.");
+                if (dataObject == 0) throw new IOException("The source Shell folder returned no IDataObject for the selected move rows.");
 
                 var fileOperationClassId = FileOperationClassId;
                 var fileOperationId = FileOperationId;
@@ -360,16 +367,16 @@ internal static class ShellChangeReconciliationProbe
                 Marshal.FreeCoTaskMem(childArray);
             }
 
-            var sourceItem = Path.Combine(sourcePath, "moving.txt");
-            var targetItem = Path.Combine(targetPath, "moving.txt");
-            if (File.Exists(sourceItem) || !File.Exists(targetItem) || File.ReadAllText(targetItem) != "move me")
-                throw new IOException("IFileOperation.MoveItems did not move the isolated row to the destination pane folder.");
+            var filesMoved = movedNames.All(name => !File.Exists(Path.Combine(sourcePath, name)) &&
+                File.Exists(Path.Combine(targetPath, name)) &&
+                File.ReadAllText(Path.Combine(targetPath, name)) == (name == "moving.txt" ? "move me" : "move me too"));
+            if (!filesMoved) throw new IOException("IFileOperation.MoveItems did not move every isolated row to the destination pane folder.");
             var shellMoveNotified = window.WaitForAny([Deleted, Created, RenamedItem], TimeSpan.FromSeconds(5));
 
-            pendingSource = WaitForRow(sourcePidl, sourceFolder,
-                row => row.DisplayName == "moving.txt", expectMatch: false);
-            pendingTarget = WaitForRow(targetPidl, targetFolder,
-                row => row.DisplayName == "moving.txt");
+            pendingSource = WaitForRows(sourcePidl, sourceFolder,
+                rows => movedNames.All(name => rows.All(row => row.DisplayName != name)));
+            pendingTarget = WaitForRows(targetPidl, targetFolder,
+                rows => movedNames.All(name => rows.Any(row => row.DisplayName == name)));
             var sourceReconciliation = ShellListViewRowModel.Reconcile(sourceCurrent.Rows,
                 pendingSource.Rows, NextId(sourceCurrent.Rows));
             var targetReconciliation = ShellListViewRowModel.Reconcile(targetCurrent.Rows,
@@ -387,11 +394,12 @@ internal static class ShellChangeReconciliationProbe
 
             var sourceAnchorPreserved = sourceCurrent.Rows.Single(row => row.DisplayName == "anchor-source.txt").Id == sourceAnchorId;
             var targetAnchorPreserved = targetCurrent.Rows.Single(row => row.DisplayName == "anchor-target.txt").Id == targetAnchorId;
-            var movedSourceRowRetired = sourceReconciliation.RetiredRows.Any(row => row.Id == movingId) &&
-                sourceCurrent.Rows.All(row => row.Id != movingId);
-            var movedTargetRowAdded = targetCurrent.Rows.Single(row => row.DisplayName == "moving.txt") is { } movedTarget &&
+            var movedSourceRowsRetired = movedNames.All(name => sourceReconciliation.RetiredRows.Any(row => row.Id == movingIds[name]) &&
+                sourceCurrent.Rows.All(row => row.Id != movingIds[name]));
+            // Row IDs are pane-local; a new target row may reuse a retired source pane's numeric ID.
+            var movedTargetRowsAdded = movedNames.All(name => targetCurrent.Rows.Single(row => row.DisplayName == name) is { } movedTarget &&
                 movedTarget.Id != targetAnchorId &&
-                !targetReconciliation.RetiredRows.Any(row => row.Id == movedTarget.Id);
+                !targetReconciliation.RetiredRows.Any(row => row.Id == movedTarget.Id));
             var sourceSelectionPreserved = sourceSelection.Resolve(sourceCurrent.Rows)
                     .Any(state => state.RowId == sourceAnchorId && state.Selected && state.Focused) &&
                 HasStableListViewSelection(sourceList, sourceAnchorId);
@@ -403,11 +411,11 @@ internal static class ShellChangeReconciliationProbe
             Console.WriteLine($"shell-change-cross-pane-move: operation=IFileOperation.MoveItems;shell-change-notified={shellMoveNotified};events=[{string.Join(',', window.Events.Select(value => $"0x{value:X8}"))}];" +
                 $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
                 $"source-anchor-id-preserved={sourceAnchorPreserved};target-anchor-id-preserved={targetAnchorPreserved};" +
-                $"moved-source-row-retired={movedSourceRowRetired};moved-target-row-added={movedTargetRowAdded};" +
+                $"moved-source-rows-retired={movedSourceRowsRetired};moved-target-rows-added={movedTargetRowsAdded};" +
                 $"source-selection-focus-preserved={sourceSelectionPreserved};target-selection-focus-preserved={targetSelectionPreserved};" +
                 $"hidden-windows={isolated};foreground-unchanged={GetForegroundWindow() == foreground}");
-            if (!shellMoveNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 2 ||
-                !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowRetired || !movedTargetRowAdded ||
+            if (!shellMoveNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 3 ||
+                !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowsRetired || !movedTargetRowsAdded ||
                 !sourceSelectionPreserved || !targetSelectionPreserved || !isolated)
                 throw new InvalidOperationException("Cross-pane move did not reconcile both Shell row models while retaining unaffected selection/focus.");
         }
@@ -444,6 +452,21 @@ internal static class ShellChangeReconciliationProbe
             Thread.Sleep(30);
         } while (Environment.TickCount64 < until);
         throw new TimeoutException("The Shell folder enumeration did not reflect the notified filesystem change.");
+    }
+
+    private static ShellListViewEnumeration WaitForRows(nint folderPidl, nint shellFolder,
+        Func<IReadOnlyList<ShellListViewRow>, bool> predicate)
+    {
+        var until = Environment.TickCount64 + 5000;
+        do
+        {
+            var enumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
+            if (predicate(enumeration.Rows)) return enumeration;
+            ShellListViewEnumerator.FreeRows(enumeration.Rows);
+            Application.DoEvents();
+            Thread.Sleep(30);
+        } while (Environment.TickCount64 < until);
+        throw new TimeoutException("The Shell folder enumeration did not reflect the complete multi-item move.");
     }
 
     private static void AddColumn(nint listView, string label, int width, int index)
