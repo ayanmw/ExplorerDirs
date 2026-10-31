@@ -1,4 +1,6 @@
 # 路线图
+2026-11-01 四窗格 IShellView 合并菜单命令路由复验：NativeProbe Release 构建 0 警告/错误；`--ishellview-session-restore-private-desktop` 退出码 0。四个真实默认 filesystem `IShellView` 逐 pane 激活后，由 Shell 生成 File/Edit/View 合并菜单；向活动 frame 发送 Shell 运行时 `WM_COMMAND` 后，Details、排序/分组升降序只改变目标 view，Edit→Select All 只选择目标 pane。停用后恢复 frame 基菜单；前台、输入和夹具清理守卫均通过。此为直接消息探针，不代表真实菜单鼠标/键盘交互、ExplorerBrowser 产品菜单或可见 UI parity。修正迁移门槛矩阵中“命令执行路径未知”的过期记录；详情见[IShellView 迁移门槛](superpowers/specs/2026-10-25-ishellview-host-migration-gates.md)。
+
 2026-11-01 隔离 IShellView 接收移入与复制通知：synthetic view 经真实 `IFileOperation::MoveItem` 接收旁侧文件夹（`SHCNE_MKDIR`）、`CopyItem` 接收文件（`SHCNE_CREATE`），以及 `MoveItem` 接收文件（`SHCNE_CREATE`）。三种操作均只排队/发送一次父目录更新、只重枚举一次；目录子项、复制源保留/移动源消失及目标内容均正确。Private Desktop 前台、输入和清理守卫通过。该测试补齐目标视图的三种文件系统项目到达路径，不是用户可见拖放、跨 pane OLE `DoDragDrop` 或 ExplorerBrowser 产品接线。详情见[隔离通知调查](folder-size-column-investigation.md#2026-11-01隔离-ishellview-接收移入及复制文件通知)。
 
 2026-11-01 更新主线集中验收候选：从干净主线 `661c61e6e49ced35e08be11724c324bafb5b0a7a` 执行 GuiSmoke `-PrepareOnly`，生成 `src/.state/gui-smoke/20261031-161150-379-a166ce/`，`prepared-not-run`，47 项待验收。BuildIdentity 与 EXE/App DLL 哈希已和 preparation manifest 独立核对；未启动窗口或创建 ExplorerBrowser。候选特别覆盖 F5 连按/虚拟位置及查看方式切换时的画面与输入命中；这些仍待用户可见验收。详见[当前验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
