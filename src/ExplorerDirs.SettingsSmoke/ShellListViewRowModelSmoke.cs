@@ -222,6 +222,18 @@ internal static class ShellListViewRowModelSmoke
                   nestedScan.Unreadable == 0,
                 "handle enumeration reads ordinary nested directories and combines their summaries");
 
+            var pagedScanRoot = Path.Combine(identityRoot, "paged-scan-root");
+            Directory.CreateDirectory(pagedScanRoot);
+            const int pagedFileCount = 700;
+            var longUnicodeName = new string('x', 80);
+            for (var index = 0; index < pagedFileCount; index++)
+                File.WriteAllBytes(Path.Combine(pagedScanRoot, $"item-{index:D4}-文件-{longUnicodeName}.bin"), [1]);
+            var pagedScan = HandleBoundRecursiveDirectoryScanner.Scan([pagedScanRoot], CancellationToken.None)
+                [pagedScanRoot].Summary;
+            Check(pagedScan.Bytes == pagedFileCount && pagedScan.Files == pagedFileCount &&
+                  pagedScan.Directories == 0 && pagedScan.Unreadable == 0,
+                "handle enumeration paginates large directories and preserves long Unicode file names");
+
             var childRaceRoot = Path.Combine(identityRoot, "child-race-root");
             var childRacePath = Path.Combine(childRaceRoot, "child");
             var childRaceRetiredPath = Path.Combine(childRaceRoot, "child-retired");
