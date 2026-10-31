@@ -2031,6 +2031,21 @@ namespace
             if (CompareStringOrdinal(shellParsingName.c_str(), -1, parsingName, -1, TRUE) != CSTR_EQUAL) return E_INVALIDARG;
             return _recursiveSizeStore->Set(parsingName, child->identity, bytes);
         }
+        HRESULT PublishRecursiveSizeSnapshotForChildProbe(PCWSTR childName, ULONGLONG bytes)
+        {
+            if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return result;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            if (SUCCEEDED(result))
+                result = SetRecursiveSizeSnapshotForProbe(childItem, parsingName.c_str(), child->identity, bytes);
+            CoTaskMemFree(childItem);
+            return result;
+        }
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* value) override
         {
             if (!value) return E_POINTER;
@@ -4235,6 +4250,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI NotifySyntheticSortRefreshForPro
         auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
         if (!folder || !folder->OwnsShellView(view)) continue;
         return folder->NotifyRefreshForProbe();
+    }
+    return E_INVALIDARG;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI PublishSyntheticRecursiveSizeSnapshotForViewProbe(
+    IShellView* view, PCWSTR childName, ULONGLONG bytes)
+{
+    if (!view || !childName || !*childName) return E_INVALIDARG;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->PublishRecursiveSizeSnapshotForChildProbe(childName, bytes);
     }
     return E_INVALIDARG;
 }

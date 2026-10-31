@@ -1096,3 +1096,11 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 在已完成单项通知/同 view 窗口重建路径后，使用相同 synthetic filesystem provider 与 backing folder 创建第二个独立 `IShellView`。第二 view 初始 `IColumnManager` 三列键与来源 view 相同，`GetColumnInfo(CM_MASK_NAME)` 仍读到 `Name / Recursive Size / Type`；provider 映射仍将列 1 返回另一 GUID。把来源 view 捕获的完整列键与宽度应用到第二 view 后，`IColumnManager.Capture` 完全匹配，真实表头保持三个预期名称，行值读回 `1 / 4`，列头升序为 `child|small.bin`、降序为 `small.bin|child`。watchdog exit 0，前台和输入守卫未变，`isolation-clean=True`。
 
 因此 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1` 与 provider `MapColumnToSCID` 键不同，不妨碍当前同进程、同 provider 下跨新 view 应用列布局、读取值和排序。它是该隔离场景中可复用的列管理器身份。该结论不覆盖其他 namespace/provider、进程重启/view-state 持久化、ExplorerBrowser、Q-Dir `.qdr` 互操作或用户可见行为；不能据此认定产品迁移门槛已通过。日志：`src/.state/native-probe-watchdog/20261101-045954-dbdfa2c1.stdout.log`。后续可转向另一个未通过的 Shell 兼容门槛，不必再重复同一 provider 内的 GUID 映射采样。
+
+### 2026-11-01：扫描结果发布到活动 view 缓存后的刷新路径
+
+新增 NativeProbe 专用 `single-item-live-cache-publish` 场景：在不替换目录身份的情况下更新目录内容，把新递归字节数写入活动 `IShellView` provider 的身份键快照缓存，然后分别尝试单项 `SHCNE_UPDATEITEM`、单项加父目录 `SHCNE_UPDATEDIR`、完整 `IShellView::Refresh`。缓存发布使用 provider 实际持有的目录身份与绝对 Shell parsing name；没有用测试全局大小覆盖值。三种方式均由 WPF `HwndSource` Private Desktop 宿主承载。
+
+单项更新和“单项+父目录”没有重枚举（`enum-calls=0`），也未重新读取列值，大小列索引读回 `-1`；行与原选中焦点仍在。完整 `IShellView::Refresh` 重枚举一次（2 行），读到 `4 / 1` 并按新值重排，大小列布局保留。刷新后原选中项/焦点短暂丢失；用现有 `ShellViewSelectionSnapshot` 恢复后，选择与焦点读回均成功。单次隔离探针从发送刷新到稳定读回约 2.7 秒，包含 2.5 秒轮询窗口；这不是产品刷新延迟或可见闪烁测量。
+
+NativeProbe Release 构建 0 警告/错误；三种 WPF Private Desktop 探针均退出 0，前台 HWND、输入 tick 未变，`isolation-clean=True`。日志：`20261101-053922-05b29af5.stdout.log`、`20261101-053927-622e547d.stdout.log`、`20261101-053933-afce6bca.stdout.log`。这证明在当前 synthetic provider 中，扫描结果要可靠呈现在活动 DefView 派生列需完整刷新并显式恢复选择/焦点；仍未验证可见闪烁、实际 ExplorerBrowser 产品、其它 Shell provider，也未接产品扫描器或用户配置。

@@ -103,7 +103,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1103,6 +1103,21 @@ public static class SyntheticShellSortProbe
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, reapplyCapturedColumns: true,
                     recreateShellWindow: true, host: host, hostPointer: hostPointer);
+            if (strategyFilter == "single-item-live-cache-publish")
+                RunSizeUpdateStrategy("single-item-live-cache-publish", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, publishLiveSnapshot: true, host: host);
+            if (strategyFilter == "item-plus-parent-live-cache-publish")
+                RunSizeUpdateStrategy("item-plus-parent-live-cache-publish", 1, () =>
+                {
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0);
+                    SHChangeNotify(ShcneUpdatedir, 0, rootPidl, 0);
+                }, module, folderView, view, backingFolder, publishLiveSnapshot: true, host: host);
+            if (strategyFilter == "full-view-refresh-live-cache-publish")
+                RunSizeUpdateStrategy("full-view-refresh-live-cache-publish", 1, () =>
+                    Check(At<RefreshView>(view, 8)(view)),
+                    module, folderView, view, backingFolder, publishLiveSnapshot: true,
+                    expectLiveRefresh: true, host: host);
             if (strategyFilter == "single-item-recreate-shell-window-multiselect")
                 RunSizeUpdateStrategy("single-item-recreate-shell-window-multiselect", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
@@ -1141,7 +1156,8 @@ public static class SyntheticShellSortProbe
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
         nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
         string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
-        bool reapplyCapturedColumns = false)
+        bool reapplyCapturedColumns = false, bool publishLiveSnapshot = false,
+        bool expectLiveRefresh = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -1177,10 +1193,24 @@ public static class SyntheticShellSortProbe
         using var shellWindowSelection = recreateShellWindow ? ShellViewSelectionSnapshot.Capture(folderView) : null;
         if (recreateShellWindow && shellWindowSelection is null)
             throw new InvalidOperationException("Could not capture the synthetic Shell view selection before recreating its window.");
+        using var liveUpdateSelection = publishLiveSnapshot ? ShellViewSelectionSnapshot.Capture(folderView) : null;
+        if (publishLiveSnapshot && liveUpdateSelection is null)
+            throw new InvalidOperationException("Could not capture the active view selection before publishing a recursive-size update.");
         if (multiSelect && shellWindowSelection?.SelectedCount != 2)
             throw new InvalidOperationException($"Could not capture both selected Shell items; captured={shellWindowSelection?.SelectedCount ?? -1}.");
-        SetBackingChildSize(backingFolder, updatedSize);
-        SetSyntheticSizeOverride(module, updatedSize);
+        if (publishLiveSnapshot) SetBackingChildSizeInPlace(backingFolder, updatedSize);
+        else SetBackingChildSize(backingFolder, updatedSize);
+        if (publishLiveSnapshot)
+        {
+            var publish = Marshal.GetDelegateForFunctionPointer<PublishRecursiveSizeSnapshot>(
+                NativeLibrary.GetExport(module, "PublishSyntheticRecursiveSizeSnapshotForViewProbe"));
+            Check(publish(view, "child", checked((ulong)updatedSize)));
+            SetSyntheticSizeOverride(module, -1);
+        }
+        else
+        {
+            SetSyntheticSizeOverride(module, updatedSize);
+        }
         var enumsBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
         var rowsEnumeratedBefore = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
         var detailsBefore = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
@@ -1284,6 +1314,21 @@ public static class SyntheticShellSortProbe
         }
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: preserveScrollAnchor ? null : "small.bin", expectedSelection: "small.bin");
+        var liveUpdateSelectionRestored = after.SelectionPreserved;
+        if (publishLiveSnapshot && !liveUpdateSelectionRestored)
+        {
+            var restored = liveUpdateSelection!.Restore(view,
+                trace: message => Console.WriteLine($"synthetic-size-update-selection: {message}"));
+            Pump(100);
+            var restoredNames = ReadNames(listView, module, expectedCount: -1);
+            liveUpdateSelectionRestored = restored.SelectionRestored && restored.FocusRestored &&
+                HasSelectionAndFocus(listView, restoredNames, "small.bin");
+            Console.WriteLine($"synthetic-size-update-selection: refresh-restore-selection={restored.SelectionRestored}; refresh-restore-focus={restored.FocusRestored}; readback={liveUpdateSelectionRestored}");
+        }
+        if (expectLiveRefresh && (!after.ValueUpdated || !after.OrderUpdated))
+            throw new InvalidOperationException($"Publishing the recursive-size snapshot to the active view did not refresh its displayed value and sort order after the Shell notification: {FormatSizeState(after)}");
+        if (expectLiveRefresh && !liveUpdateSelectionRestored)
+            throw new InvalidOperationException("The full-view recursive-size refresh did not restore its pre-refresh selection and focus.");
         if (preserveScrollAnchor)
         {
             var restoredNames = ReadNames(listView, module, expectedCount: -1);
@@ -2122,6 +2167,25 @@ public static class SyntheticShellSortProbe
         }
     }
 
+    private static void SetBackingChildSizeInPlace(string backingFolder, long size)
+    {
+        // Keep the directory identity stable so this scenario tests a post-scan size publication, not replacement-folder invalidation.
+        var child = Path.Combine(backingFolder, "child");
+        Directory.CreateDirectory(child);
+        foreach (var file in Directory.GetFiles(child)) File.Delete(file);
+        foreach (var directory in Directory.GetDirectories(child)) Directory.Delete(directory, recursive: true);
+        if (size == 10)
+        {
+            Directory.CreateDirectory(Path.Combine(child, "nested"));
+            File.WriteAllBytes(Path.Combine(child, "direct.bin"), new byte[6]);
+            File.WriteAllBytes(Path.Combine(child, "nested", "deep.bin"), new byte[4]);
+        }
+        else
+        {
+            File.WriteAllBytes(Path.Combine(child, "direct.bin"), new byte[checked((int)size)]);
+        }
+    }
+
     private static string[] SortAndRead(nint module, nint folderView, nint view, nint listView, int direction,
         int expectedCount = 3)
     {
@@ -2876,6 +2940,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CancelViewRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ScheduleSingleRefresh(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NotifySingleRefresh(nint view);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int PublishRecursiveSizeSnapshot(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName, ulong bytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItems(nint self, nint dataObject, [MarshalAs(UnmanagedType.LPWStr)] string newName);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItems(nint self, nint dataObject);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int NewItem(nint self, nint destination, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string name, nint template, nint progressSink);
