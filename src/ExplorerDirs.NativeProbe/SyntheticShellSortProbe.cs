@@ -847,6 +847,11 @@ public static class SyntheticShellSortProbe
             throw new InvalidOperationException($"The new view did not expose the recursive-size column before '{name}'; notification strategy was not run: {FormatSizeState(before)}");
         var baselineColumnCaptureResult = ShellColumnManager.Capture(folderView, out var baselineColumns);
         Console.WriteLine($"synthetic-size-update-columns: phase=before; hr=0x{baselineColumnCaptureResult:X8}; columns=[{FormatColumns(baselineColumns)}]");
+        var baselineSortColumns = preserveScrollAnchor ? CaptureNativeSortColumns(folderView) : null;
+        if (preserveScrollAnchor && (baselineSortColumns is null || baselineSortColumns.Length == 0))
+            throw new InvalidOperationException("The scroll-recreation scenario did not expose a native sort column to verify.");
+        if (preserveScrollAnchor)
+            Console.WriteLine($"synthetic-size-update-sort: phase=before; columns=[{FormatSortColumns(baselineSortColumns)}]");
 
         SetListViewSelectionAndFocus(listView, "small.bin", before.Names);
         if (multiSelect)
@@ -949,6 +954,12 @@ public static class SyntheticShellSortProbe
         }
         var settleMs = Environment.TickCount64 - notificationStarted;
         var columnsResult = ShellColumnManager.Capture(folderView, out var columnsAfter);
+        var sortColumnsAfter = preserveScrollAnchor ? CaptureNativeSortColumns(folderView) : null;
+        var sortPreserved = !preserveScrollAnchor || baselineSortColumns!.SequenceEqual(sortColumnsAfter!);
+        if (preserveScrollAnchor)
+            Console.WriteLine($"synthetic-size-update-sort: phase=after; preserved={sortPreserved}; columns=[{FormatSortColumns(sortColumnsAfter)}]");
+        if (!sortPreserved)
+            throw new InvalidOperationException($"The native Shell sort columns changed during view-window recreation: before=[{FormatSortColumns(baselineSortColumns)}]; after=[{FormatSortColumns(sortColumnsAfter)}].");
         var columnLayoutPreserved = baselineColumnCaptureResult == 0 && baselineColumns is not null &&
             columnsAfter is not null && baselineColumns.SequenceEqual(columnsAfter);
         var systemSizeColumnPresent = columnsAfter?.Any(column =>
@@ -1024,6 +1035,28 @@ public static class SyntheticShellSortProbe
     private static string FormatColumns(IReadOnlyList<DisplayColumnState>? columns) => columns is null
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}@{column.Width}"));
+
+    private static NativeSortColumn[] CaptureNativeSortColumns(nint folderView)
+    {
+        int count = 0;
+        Check(At<GetSortColumnCount>(folderView, 26)(folderView, out count));
+        if (count is < 0 or > 16) throw new InvalidOperationException($"The native Shell returned an invalid sort-column count: {count}.");
+        if (count == 0) return [];
+        var buffer = Marshal.AllocCoTaskMem(checked(count * Marshal.SizeOf<NativeSortColumn>()));
+        try
+        {
+            Check(At<GetSortColumns>(folderView, 28)(folderView, buffer, count));
+            var columns = new NativeSortColumn[count];
+            for (var index = 0; index < count; index++)
+                columns[index] = Marshal.PtrToStructure<NativeSortColumn>(buffer + index * Marshal.SizeOf<NativeSortColumn>());
+            return columns;
+        }
+        finally { Marshal.FreeCoTaskMem(buffer); }
+    }
+
+    private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
+        ? "<unavailable>"
+        : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}/{column.Direction}"));
 
     private static string FormatProbeRows(string[] rows) => rows.Length <= 12
         ? string.Join('|', rows)
@@ -1655,6 +1688,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSortColumnCount(nint self, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
