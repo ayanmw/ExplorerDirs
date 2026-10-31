@@ -3985,6 +3985,8 @@ internal static class ShellViewColorSpike
         var propertyFormatId = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
         var nameKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 10 };
         var sizeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 12 };
+        var typeKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 4 };
+        var dateModifiedKey = new PropertyKey { FormatId = propertyFormatId, PropertyId = 14 };
         var nativeViewMenu = GetSubMenu(GetMenu(menuOwner), 2);
         var nativeViewMenuPaths = DescribeMenuCommandPaths(nativeViewMenu);
         var nativeSizeGroupAvailable = nativeViewMenuPaths.Any(path =>
@@ -4013,7 +4015,7 @@ internal static class ShellViewColorSpike
             var groupSelection = "not-applicable";
             if (transition.Name == "group-desc")
             {
-                groupSelection = InvokeBackgroundGroupBySize(view, shellViewWindow, folderView, sizeKey);
+                groupSelection = InvokeBackgroundGroupByProperty(view, shellViewWindow, folderView, ["大小", "Size"], sizeKey);
                 Pump(180);
             }
             if (!TryInvokeMergedViewMenuCommand(menuHost, transition.CommandId))
@@ -4053,6 +4055,94 @@ internal static class ShellViewColorSpike
             transitions.Add(transitionState + $";draw={drawIdentity};callbacks={capture.CustomDrawItems};pixels={pixels};" +
                 $"color-ok={colorVerified};native-sync={nativeSyncTrace}");
         }
+
+        Check(At<SetGroupBy>(folderView, 17)(folderView, ref noGroup, 0));
+        Check(At<SetSortColumns>(folderView, 27)(folderView, [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+        Pump(180);
+        var typeSelection = InvokeBackgroundGroupByProperty(view, shellViewWindow, folderView, ["类型", "Type"], typeKey);
+        Pump(180);
+        var typeGroupResult = At<GetGroupBy>(folderView, 18)(folderView, out var typeGroup, out _);
+        Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var typeSortCount));
+        var typeSortColumns = new SortColumn[typeSortCount];
+        if (typeSortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, typeSortColumns, typeSortCount));
+        if (typeGroupResult != 0 || typeGroup.PropertyId != typeKey.PropertyId || typeSortCount != 2 ||
+            typeSortColumns[0].Key.PropertyId != typeKey.PropertyId || typeSortColumns[1].Key.PropertyId != nameKey.PropertyId ||
+            typeSortColumns[1].Direction != 1)
+            throw new InvalidOperationException($"Native Group by Type did not select the Type group/sort keys: group={typeGroupResult}/{typeGroup.PropertyId}; sort={typeSortCount}/{(typeSortCount > 0 ? typeSortColumns[0].Key.PropertyId : 0)}.");
+        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var typeShellMode, out var typeIconSize));
+        var typeColorResults = new List<string>();
+        foreach (var transition in new (string Name, uint CommandId, int Direction)[]
+        {
+            ("type-group-desc", groupDescending, -1),
+            ("type-group-asc", groupAscending, 1)
+        })
+        {
+            if (!TryInvokeMergedViewMenuCommand(menuHost, transition.CommandId))
+                throw new InvalidOperationException($"The isolated merged View menu did not route {transition.Name} command 0x{transition.CommandId:X4}.");
+            Pump(180);
+            Check(At<GetGroupBy>(folderView, 18)(folderView, out var actualGroup, out var ascending));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            var sortColumns = new SortColumn[sortCount];
+            if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
+            if (actualGroup.PropertyId != typeKey.PropertyId || ascending != (transition.Direction > 0 ? 1 : 0) ||
+                sortCount != 2 || sortColumns[0].Key.PropertyId != typeKey.PropertyId ||
+                sortColumns[0].Direction != transition.Direction || sortColumns[1].Key.PropertyId != nameKey.PropertyId ||
+                sortColumns[1].Direction != transition.Direction)
+                throw new InvalidOperationException($"Native {transition.Name} menu command did not preserve Type grouping and direction: group={actualGroup.PropertyId}/{ascending}; sort={sortCount}/{string.Join(',', sortColumns.Select(column => $"{column.Key.PropertyId}/{column.Direction}"))}.");
+            SynchronizeListViewAfterNativeViewCommand(menuHost, view, shellViewWindow,
+                (typeShellMode, typeIconSize), force: true);
+            RefreshFixtureColorMap(folderView, fixturePaths);
+            ClearNativeViewMenuColorSelection();
+            var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            var pixels = string.Join('/', capture.RowHits);
+            if (capture.CustomDrawItems < fixturePaths.Length || capture.RowHits.Any(hit => hit <= 0))
+                throw new InvalidOperationException($"Native {transition.Name} did not restore identity-mapped colors: callbacks={capture.CustomDrawItems}; pixels={pixels}.");
+            typeColorResults.Add($"{transition.Name}:key={typeGroup.PropertyId};direction={ascending};sort={sortColumns[0].Direction};callbacks={capture.CustomDrawItems};pixels={pixels};color-ok=True");
+        }
+        transitions.Add($"type-group-selection={typeSelection};" + string.Join('|', typeColorResults));
+
+        Check(At<SetGroupBy>(folderView, 17)(folderView, ref noGroup, 0));
+        Check(At<SetSortColumns>(folderView, 27)(folderView, [new SortColumn { Key = nameKey, Direction = 1 }], 1));
+        Pump(180);
+        var dateSelection = InvokeBackgroundGroupByProperty(view, shellViewWindow, folderView,
+            ["修改日期", "Date modified"], dateModifiedKey);
+        Pump(180);
+        var dateGroupResult = At<GetGroupBy>(folderView, 18)(folderView, out var dateGroup, out _);
+        Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var dateSortCount));
+        var dateSortColumns = new SortColumn[dateSortCount];
+        if (dateSortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, dateSortColumns, dateSortCount));
+        if (dateGroupResult != 0 || dateGroup.PropertyId != dateModifiedKey.PropertyId || dateSortCount < 1 ||
+            dateSortColumns[0].Key.PropertyId != dateModifiedKey.PropertyId)
+            throw new InvalidOperationException($"Native Group by Date modified did not select the expected group/sort key: group={dateGroupResult}/{dateGroup.PropertyId}; sort={dateSortCount}/{(dateSortCount > 0 ? dateSortColumns[0].Key.PropertyId : 0)}.");
+        var dateColorResults = new List<string>();
+        foreach (var transition in new (string Name, uint CommandId, int Direction)[]
+        {
+            ("date-group-desc", groupDescending, -1),
+            ("date-group-asc", groupAscending, 1)
+        })
+        {
+            if (!TryInvokeMergedViewMenuCommand(menuHost, transition.CommandId))
+                throw new InvalidOperationException($"The isolated merged View menu did not route {transition.Name} command 0x{transition.CommandId:X4}.");
+            Pump(180);
+            Check(At<GetGroupBy>(folderView, 18)(folderView, out var actualGroup, out var ascending));
+            Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
+            var sortColumns = new SortColumn[sortCount];
+            if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
+            if (actualGroup.PropertyId != dateModifiedKey.PropertyId || ascending != (transition.Direction > 0 ? 1 : 0) ||
+                sortCount < 1 || sortColumns[0].Key.PropertyId != dateModifiedKey.PropertyId ||
+                sortColumns[0].Direction != transition.Direction)
+                throw new InvalidOperationException($"Native {transition.Name} menu command did not preserve Date modified grouping and direction: group={actualGroup.PropertyId}/{ascending}; sort={sortCount}/{string.Join(',', sortColumns.Select(column => $"{column.Key.PropertyId}/{column.Direction}"))}.");
+            SynchronizeListViewAfterNativeViewCommand(menuHost, view, shellViewWindow,
+                (typeShellMode, typeIconSize), force: true);
+            RefreshFixtureColorMap(folderView, fixturePaths);
+            ClearNativeViewMenuColorSelection();
+            var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            var pixels = string.Join('/', capture.RowHits);
+            if (capture.CustomDrawItems < fixturePaths.Length || capture.RowHits.Any(hit => hit <= 0))
+                throw new InvalidOperationException($"Native {transition.Name} did not restore identity-mapped colors: callbacks={capture.CustomDrawItems}; pixels={pixels}.");
+            dateColorResults.Add($"{transition.Name}:key={dateGroup.PropertyId};direction={ascending};sort={sortColumns[0].Direction};callbacks={capture.CustomDrawItems};pixels={pixels};color-ok=True");
+        }
+        transitions.Add($"date-group-selection={dateSelection};" + string.Join('|', dateColorResults));
         return string.Join("||", transitions);
 
         void ClearNativeViewMenuColorSelection()
@@ -4063,7 +4153,8 @@ internal static class ShellViewColorSpike
         }
     }
 
-    private static string InvokeBackgroundGroupBySize(nint view, nint owner, nint folderView, PropertyKey expectedSizeKey)
+    private static string InvokeBackgroundGroupByProperty(nint view, nint owner, nint folderView,
+        string[] labels, PropertyKey expectedGroupKey)
     {
         const uint firstCommandId = 1;
         const uint WmInitMenuPopup = 0x0117;
@@ -4107,10 +4198,10 @@ internal static class ShellViewColorSpike
                 var caption = new System.Text.StringBuilder(256);
                 _ = GetMenuStringW(groupMenu, (uint)index, caption, caption.Capacity, 0x400);
                 var normalized = NormalizeMenuLabel(caption.ToString());
-                if (normalized is not ("大小" or "Size")) continue;
+                if (!labels.Contains(normalized, StringComparer.OrdinalIgnoreCase)) continue;
                 var commandId = GetMenuItemID(groupMenu, index);
                 if (commandId < firstCommandId)
-                    throw new InvalidOperationException($"The native Group by Size item has no direct command ID: {caption}.");
+                    throw new InvalidOperationException($"The native Group by [{string.Join('/', labels)}] item has no direct command ID: {caption}.");
                 var invoke = new NativeInvokeInfo
                 {
                     Size = Marshal.SizeOf<NativeInvokeInfo>(),
@@ -4120,17 +4211,17 @@ internal static class ShellViewColorSpike
                 };
                 Check(At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invoke));
                 Check(At<GetGroupBy>(folderView, 18)(folderView, out var actualGroup, out var ascending));
-                if (actualGroup.FormatId != expectedSizeKey.FormatId || actualGroup.PropertyId != expectedSizeKey.PropertyId)
-                    throw new InvalidOperationException($"Invoking native Group by Size selected property {actualGroup.PropertyId}, expected {expectedSizeKey.PropertyId}.");
+                if (actualGroup.FormatId != expectedGroupKey.FormatId || actualGroup.PropertyId != expectedGroupKey.PropertyId)
+                    throw new InvalidOperationException($"Invoking native Group by [{string.Join('/', labels)}] selected property {actualGroup.PropertyId}, expected {expectedGroupKey.PropertyId}.");
                 Check(At<GetSortColumnCount>(folderView, 26)(folderView, out var sortCount));
                 var sortColumns = new SortColumn[sortCount];
                 if (sortCount > 0) Check(At<GetSortColumns>(folderView, 28)(folderView, sortColumns, sortCount));
                 var sortState = string.Join(',', sortColumns.Select(column => $"{column.Key.PropertyId}/{column.Direction}"));
-                var result = $"native-context-menu:{caption};command-id={commandId};offset={commandId - firstCommandId};ascending={ascending};sort={sortState}";
-                Console.WriteLine($"native-background-group-by-size={result}");
+                var result = $"native-context-menu:{caption};key={actualGroup.PropertyId};command-id={commandId};offset={commandId - firstCommandId};ascending={ascending};sort={sortState}";
+                Console.WriteLine($"native-background-group-by-{string.Join('-', labels)}={result}");
                 return result;
             }
-            throw new InvalidOperationException("The native background Group by submenu did not expose a Size command.");
+            throw new InvalidOperationException($"The native background Group by submenu did not expose [{string.Join('/', labels)}].");
         }
         finally
         {
