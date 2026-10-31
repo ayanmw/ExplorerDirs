@@ -3164,7 +3164,18 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
             {
-                refreshResult = shellView.Refresh();
+                if (_location.IsFileSystemLocation && ShellChangedItemNotification.TryNotifyDirectoryRefresh(path))
+                {
+                    // Refreshing a filesystem Shell view clears its native rows before repopulating them.
+                    // A directory change notification asks DefView to reconcile in place and keeps the
+                    // existing ExplorerBrowser view and its current presentation alive.
+                    refreshResult = 0;
+                    LastShellRefreshStatus = "SHCNE_UPDATEDIR";
+                }
+                else
+                {
+                    refreshResult = shellView.Refresh();
+                }
             }
             catch when (!IsCurrentRefreshRequest())
             {

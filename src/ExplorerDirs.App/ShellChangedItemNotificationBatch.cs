@@ -87,6 +87,13 @@ internal static class ShellChangedItemNotification
     internal static void NotifyChangedDirectory(string path) =>
         SHChangeNotify(ShellDirectoryUpdated, PathAndFlushNoWait, path, IntPtr.Zero);
 
+    internal static bool TryNotifyDirectoryRefresh(string path)
+    {
+        if (!ShouldNotifyPath(path)) return false;
+        SHChangeNotify(ShellDirectoryUpdated, PathAndFlushNoWait, path, IntPtr.Zero);
+        return true;
+    }
+
     internal static void NotifyChangedDirectory(IntPtr absolutePidl) =>
         SHChangeNotifyPidl(ShellDirectoryUpdated, PidlAndFlushNoWait, absolutePidl, IntPtr.Zero);
 

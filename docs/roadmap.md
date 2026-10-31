@@ -5332,6 +5332,12 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 - 该探针采集的是行数与 HWND，不是呈现像素；不能据此断言 28 ms 就是用户看到的黑屏时长。当前产品 F5 调用现有 Shell view 的 `Refresh()`，没有重建 ExplorerBrowser、标签或导航历史；视图切换只更改现有 `IFolderView2` 的模式。
 - 结论：完整视图宿主并未重建。`Refresh()` 的行清空发生在 Shell 原生刷新中；抑制重绘可暂时留住旧画面，但 Shell 行可能已更新，用户点击旧画面时有命中错位风险。此前试过延长重绘租约的实现已回退；本次不重复接入。若再评估该方案，需集中 UI 验收同时检查旧帧、输入命中、选择/焦点和滚动位置，并确认真实收益后再改产品。
 
+### F5 本地目录刷新改为 Shell 目录更新通知
+
+依据上述同一隔离 lifecycle probe 的结果，产品本地文件系统位置现在通过 `SHCNE_UPDATEDIR` 请求当前 ExplorerBrowser 内的 DefView 原位协调目录，而不直接调用会清空行列表的 `IShellView.Refresh()`；虚拟 Shell 位置或路径无法由 Shell 路径通知表示时，仍走原 `Refresh()` 及现有选区/焦点恢复流程。实现位于 `ExplorerBrowserHost.RefreshWithPresentation` 和 `ShellChangedItemNotification.TryNotifyDirectoryRefresh`。产品 Release build 通过，0 警告/错误。隔离 probe 复跑 exit 0：300 行视图的 Refresh 采样出现 2 个零行样本、同一 view/list HWND；目录更新通知新增一行后始终保持 301 行、view/list HWND 不变。此前完整 synthetic sort probe 在其较早的 rename 双视图断言失败退出，未用于本结论；随后独立 refresh lifecycle probe 正常完成，Private Desktop 前台/输入和隔离清理守卫通过。
+
+该测量仍是隐藏视图的行数/HWND，不是可见像素或真实用户输入；产品改动尚未通过可见 UI 验收。实际 SHChangeNotify 没有返回刷新 HRESULT，现有流程继续用 Shell 行数稳定检测及选区恢复收尾。非本地文件系统位置保留原刷新行为。
+
 ## 2026-11-01：ZIP 虚拟 Shell 项颜色规则输入复核
 
 新增 NativeProbe ZIP 虚拟文件夹夹具，Shell 枚举出的虚拟文件与虚拟目录均没有文件系统路径，但其显示名及 `SFGAO_FOLDER` 属性可匹配名称/`#DIR` 背景和文本色规则；文件粗体样式也能由同一元数据解析。基于 Shell 元数据的文本色和字形 resolver smoke、NativeProbe Release 构建 0 警告/错误及 ZIP 探针均通过，前台与夹具清理检查通过。此前独立 ZIP Shell view 探针另验证了枚举及原生背景菜单查询。
