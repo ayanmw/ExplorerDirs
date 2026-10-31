@@ -5283,3 +5283,5 @@ NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，�
 ## 2026-11-01：隔离 ListView 行颜色规则投影
 
 NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEvaluator` 接入 `NM_CUSTOMDRAW`：`*.bin` 文件规则和 `#DIR` 文件夹规则分别解析为行背景色；六种常见视图样式均验证未选中行着色，选中行继续交给 common control 默认绘制并保留选择状态。Release NativeProbe 构建 0 警告/错误，颜色策略 smoke 与 Private Desktop watchdog 通过，前台、输入和临时资源清理守卫未变化。该证据仅覆盖隔离的 Win32 ListView 绘制回调；未接入产品 ExplorerBrowser、未验证 DefView/真实 Q-Dir `.qdr` 规则导入或可见 UI，不能据此批准迁移产品视图。Q-Dir 规则语法参照 [FAQ 6](https://softwareok.com/?faq=6&seite=faq-Q-DIR) 与 [FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR)。
+
+同日复跑真实默认 `IShellView` 颜色探针：完整 Private Desktop watchdog exit 0，foreground/input 未变化、隔离清理通过。Shell 视图模式循环中八种图标/列表/内容呈现的大多数逐项回调数为 0；将五种标准 `SysListView32` 样式与 Shell 视图同步后，Icon、Details、SmallIcon、List、Tile 的两条规则色像素全部命中，Name 降序与 Size 分组组合也逐项命中，选择仍由原生菜单/状态检查。结论是隔离 IShellView 自绘可行，但模式同步是必要条件，尚未证明通过 Shell 原生模式命令切换后可自动维持。下一步应确认可支持的模式切换/同步时序与排序分组后的重建行为，再评估完整视图兼容门槛；不能接入产品。日志：`src/.state/native-probe-watchdog/20261101-004259-d1b96fc2.stdout.log`。

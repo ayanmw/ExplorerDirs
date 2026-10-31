@@ -2,6 +2,8 @@
 
 2026-11-01 隔离自有行模型颜色绘制：NativeProbe 的 Win32 `SysListView32` 基线把现有颜色规则 evaluator 接到 `NM_CUSTOMDRAW`，文件通配规则和 `#DIR` 文件夹规则在 Icon、Details、SmallIcon、List、Tile、Content 六种样式下均生成预期的未选中行背景色；选中行交由默认绘制以保持系统选择外观。Release 构建、规则 smoke 和 Private Desktop watchdog 通过。此为自绘列表原型证据，不是 ExplorerBrowser/DefView/Q-Dir `.qdr` 导入接线，也没有可见 UI 验收。
 
+2026-11-01 真实默认 `IShellView` 颜色探针复跑：Private Desktop exit 0，前台与输入未变、隔离清理通过。Shell 默认视图模式循环多数没有逐项绘制通知；探针同步 Shell 与底层 ListView 的五种标准模式后，五种样式在普通、Name 降序及 Size 分组状态下都命中对应像素。说明现有颜色策略可用于隔离 DefView，但依赖同步模式的探针路径；Shell 原生命令切换模式的自动同步与 ExplorerBrowser 产品集成都未验证。
+
 2026-10-31 隔离自有行模型 Shell 操作续验：真实文件系统 Shell `IDataObject` 依次经 `IFileOperation.MoveItems`、`CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`；shell change 通知驱动两 pane 重枚举，重命名保持原行 ID，删除正确退休行，锚点选择/焦点及未操作源 pane 保持。`--shell-change-reconciliation` Release 连续三轮通过，窗口隐藏、前台不变。仅为 NativeProbe 自有行投影证据，不表示产品 Shell view 可迁移；可见菜单、剪贴板、Undo/Redo、OLE 拖放和 ExplorerBrowser 接线仍未验证。[调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)
 
 2026-10-31 Shell 新建菜单的懒加载兼容：原生命令状态查询初始化“新建文件夹”子菜单时，现先转发 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；仅 `S_OK` 表示已处理，`S_FALSE`/`E_NOTIMPL` 才回退 `IContextMenu2.HandleMenuMsg`，其它错误停止。真实 COM 回归在旧逻辑上按预期失败，修复后 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。没有显示菜单；第三方 Shell 扩展的可见菜单及命令交互仍需集中 UI 验收。
