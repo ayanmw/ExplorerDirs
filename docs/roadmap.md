@@ -1,5 +1,5 @@
 # 路线图
-2026-11-01 F5 刷新呈现候选（修订）：提交 `be89325` / `cc34dbd` 曾为用户手动 F5 加入有界重绘租约；提交 `5fcc460` 已移除该租约，避免 Shell 异步枚举期间列表长期冻结。当前普通文件系统 F5 发送 `SHCNE_UPDATEDIR`，Soft-Refresh 开启或虚拟位置走 `IShellView.Refresh()`；刷新计时仅用于之后恢复选区/焦点。查看方式切换仍在现有 view 的同步模式 setter 周围暂缓绘制。`bd91452` 的隐藏状态探针在 stock view 观察到直接 `Refresh()` 短暂归零约 10 ms，而目录通知路径保留行数；没有采集像素。故当前源码仍需 F5/查看方式的集中可见验收，不宣称空白或闪动已解决。此前隔离验收副本基于 `cc34dbd`，包含已移除的 F5 重绘租约，须从当前源码重建后才能代表最新代码；身份见[候选记录](gui-acceptance-2026-10-31-main-prepared-latest.md)。`.qdr` 预览格式不匹配的列表处置继续等待 Q-Dir 验收。
+2026-11-01 F5 刷新呈现候选（修订）：提交 `be89325` / `cc34dbd` 曾为用户手动 F5 加入有界重绘租约；提交 `5fcc460` 已移除该租约，避免 Shell 异步枚举期间列表长期冻结。当前普通文件系统 F5 发送 `SHCNE_UPDATEDIR`，Soft-Refresh 开启或虚拟位置走 `IShellView.Refresh()`；刷新计时仅用于之后恢复选区/焦点。查看方式切换仍在现有 view 的同步模式 setter 周围暂缓绘制。`bd91452` 的隐藏状态探针在 stock view 观察到直接 `Refresh()` 短暂归零约 10 ms，而目录通知路径保留行数；没有采集像素。故当前源码仍需 F5/查看方式的集中可见验收，不宣称空白或闪动已解决。此前验收指针 `7abb3a5` 的隔离副本现已由当前候选替换；新候选从干净提交 `166033e` 生成，身份见[候选记录](gui-acceptance-2026-10-31-main-prepared-latest.md)。`.qdr` 预览格式不匹配的列表处置继续等待 Q-Dir 验收。
 
 2026-11-01 隔离派生列重建对照：同一 synthetic `IShellView` 窗口重建策略连续两轮恢复 `Name | Recursive Size | Type`、更新值 `1`、排序及选区/焦点；显式 `IColumnManager.SetColumns` 重放则产生空白列，即使先调 `IShellView.SaveViewState` 也未恢复。只证明 NativeProbe synthetic filesystem provider/DefView，不改 ExplorerBrowser 产品；详见[派生列调查](folder-size-column-investigation.md#2026-11-01shell-view-窗口重建与列重放对照)。
 
