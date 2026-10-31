@@ -5465,3 +5465,9 @@ Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `
 隔离 NativeProbe 检查 ZIP 中的 `delete-target.txt`，Shell 属性包含 `SFGAO_CANDELETE`。`IFileOperation.DeleteItems` 与 `PerformOperations` 均返回 `S_OK`，未取消；归档中目标实际删除，源 view 从 3 项收敛至 2 项。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入及隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-054344-a0ec01d2.stdout.log`。
 
 该结果只覆盖当前 Windows ZIP provider 的程序化单项删除，不代表回收站、确认/撤销 UI、取消与失败流程、ExplorerBrowser 产品接线、可见交互或其它 provider 已验证。产品仍保持 ExplorerBrowser；没有生成 release。该实验补齐了 ZIP Shell 操作矩阵中的删除一项，接下来仍需验证真实 OLE 拖放和产品通知/焦点接线等迁移门槛；`.qdr` 预览过滤行为等 Q-Dir 验收问题继续等待用户实测。
+
+## 2026-11-01：ZIP 虚拟项目 CopyItems 取消
+
+在 ZIP `IShellView` 多项复制探针中新增取消分支：`IFileOperation.Advise` 注册 `IFileOperationProgressSink`，第一次 `PreCopyItem` 返回 `E_ABORT`。回调一次、`PerformOperations=E_ABORT`；目标目录保持为空，归档源内容和 view 项数保持。特别记录本机 ZIP provider 此时 `GetAnyOperationsAborted=0`，所以取消结果需结合回调、HRESULT 与真实磁盘/源视图状态判断。随后同一探针的多项 ZIP CopyItems 成功对照继续通过，文件/嵌套目录内容为 `0x41/0x42`。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-054821-a67a83ea.stdout.log`。
+
+这补充了隔离 ZIP Shell 操作的程序化取消路径；不代表可见进度/取消 UI、产品 ExplorerBrowser、其它 provider 或完整 Undo/Redo 已验证。没有调用 Undo 或改变当前用户的 Shell undo stack。

@@ -1566,3 +1566,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 新增 `--ishellview-zip-delete-items-private-desktop`，在仅含临时 ZIP 的真实隔离 `IShellView` 中选择 `delete-target.txt`，检查 `SFGAO_CANDELETE`，再通过 `IDataObject` 调用 `IFileOperation.DeleteItems`。Windows ZIP provider 广告了可删除属性（`0x00400063`），DeleteItems 与 PerformOperations 均返回 `S_OK`，`GetAnyOperationsAborted=False`；归档条目实际移除，Shell view 从 3 项收敛到 2 项。Private Desktop watchdog exit 0，foreground/input 与隔离清理守卫通过；NativeProbe Release build 0 警告/错误。
 
 这只证明当前 Windows ZIP provider 的程序化单项删除路径；没有覆盖回收站/确认 UI、可见菜单操作、剪贴板、取消与失败提示、ExplorerBrowser 产品接线或其他 provider。产品仍使用 ExplorerBrowser，未生成 release。日志：`src/.state/native-probe-watchdog/20261101-054344-a0ec01d2.stdout.log`。
+
+### 2026-11-01 ZIP 虚拟项目 CopyItems 取消
+
+扩展 `--ishellview-zip-copy-items-private-desktop`：对选中的 ZIP 文件与目录，先通过 `IFileOperation.Advise` 注册现有 `IFileOperationProgressSink`，在第一次 `PreCopyItem` 返回 `E_ABORT`，再运行原有 CopyItems 成功对照。取消轮的回调次数为 1，`PerformOperations` 返回 `E_ABORT`，目标目录为空，ZIP 中源文件/目录内容及 Shell view 项数均保持，前台/输入/隔离清理守卫通过；随后同一 `IDataObject` 的真实多项 CopyItems 仍成功，目录内容分别读回 `0x41` 和 `0x42`。本机 ZIP provider 的 `GetAnyOperationsAborted` 在该取消轮返回 0，因此结果必须联合检查回调、HRESULT 与目标/源数据，不能只依赖该标志。Release NativeProbe build 0 警告/错误。日志：`src/.state/native-probe-watchdog/20261101-054821-a67a83ea.stdout.log`。
+
+该证据只覆盖当前 ZIP provider 的程序化取消与后续成功路径；没有可见进度/取消按钮、物理输入、产品 ExplorerBrowser 接线或其它 provider 验证。没有触碰当前用户的 Shell Undo 栈。

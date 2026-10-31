@@ -2510,6 +2510,9 @@ internal static class ShellViewColorSpike
     {
         var itemCount = WaitForShellViewItemCount(folderView, expectedCount: 2);
         nint childArray = 0, dataObject = 0, destination = 0, operation = 0;
+        nint cancelDestination = 0, cancelOperation = 0, cancelSinkPointer = 0;
+        uint cancelCookie = 0;
+        var cancelSinkAdvised = false;
         nint moveChildArray = 0, moveDataObject = 0, moveDestination = 0, moveOperation = 0;
         var selectedChildren = new List<nint>(itemCount);
         var selectedNames = new List<string>(itemCount);
@@ -2560,6 +2563,40 @@ internal static class ShellViewColorSpike
             Check(SHCreateItemFromParsingName(destinationPath, 0, ref shellItemId, out destination));
             var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
             var operationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+
+            var cancelDestinationPath = Path.Combine(fixture, "shell-copy-cancelled-target");
+            Directory.CreateDirectory(cancelDestinationPath);
+            Check(SHCreateItemFromParsingName(cancelDestinationPath, 0, ref shellItemId, out cancelDestination));
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out cancelOperation));
+            Check(At<SetOperationFlags>(cancelOperation, 5)(cancelOperation, 0x0004 | 0x0010 | 0x0400));
+            var cancelSink = new SyntheticShellSortProbe.CancelFirstCopySink();
+            cancelSinkPointer = Marshal.GetComInterfaceForObject(cancelSink,
+                typeof(SyntheticShellSortProbe.IFileOperationProgressSinkProbe));
+            Check(At<AdviseOperation>(cancelOperation, 3)(cancelOperation, cancelSinkPointer, out cancelCookie));
+            cancelSinkAdvised = true;
+            Check(At<CopyItems>(cancelOperation, 17)(cancelOperation, dataObject, cancelDestination));
+            var cancelPerformResult = At<PerformOperations>(cancelOperation, 21)(cancelOperation);
+            Check(At<GetAnyOperationsAborted>(cancelOperation, 22)(cancelOperation, out var cancelAborted));
+            Check(At<UnadviseOperation>(cancelOperation, 4)(cancelOperation, cancelCookie));
+            cancelSinkAdvised = false;
+            var cancelledDestinationEmpty = !Directory.EnumerateFileSystemEntries(cancelDestinationPath).Any();
+            var cancelSourceIntact = GetShellViewItemCount(folderView) == itemCount;
+            var cancelArchiveIntact = false;
+            using (var archive = ZipFile.OpenRead(Path.Combine(fixture, "virtual-items.zip")))
+                cancelArchiveIntact = archive.GetEntry("blue-rule-target.txt") is { Length: 1 } &&
+                    archive.GetEntry("virtual-folder/nested.txt") is { Length: 1 };
+            Console.WriteLine($"ishellview-zip-iFileOperation-copy-cancel: pre-copy-callbacks={cancelSink.PreCopyCalls};perform-hresult=0x{cancelPerformResult:X8};aborted={cancelAborted};destination-empty={cancelledDestinationEmpty};source-view-preserved={cancelSourceIntact};archive-intact={cancelArchiveIntact};foreground-unchanged={GetForegroundWindow() == foreground}");
+            if (cancelSink.PreCopyCalls != 1 || cancelPerformResult != unchecked((int)0x80004004) ||
+                !cancelledDestinationEmpty || !cancelSourceIntact || !cancelArchiveIntact ||
+                GetForegroundWindow() != foreground)
+                throw new IOException("Cancelling the ZIP CopyItems operation did not preserve its source and leave the destination empty.");
+            Marshal.Release(cancelOperation);
+            cancelOperation = 0;
+            Marshal.Release(cancelDestination);
+            cancelDestination = 0;
+            Marshal.Release(cancelSinkPointer);
+            cancelSinkPointer = 0;
+
             Check(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
             Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0010 | 0x0400));
             Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
@@ -2794,6 +2831,11 @@ internal static class ShellViewColorSpike
         }
         finally
         {
+            if (cancelSinkAdvised && cancelOperation != 0)
+                At<UnadviseOperation>(cancelOperation, 4)(cancelOperation, cancelCookie);
+            if (cancelSinkPointer != 0) Marshal.Release(cancelSinkPointer);
+            if (cancelOperation != 0) Marshal.Release(cancelOperation);
+            if (cancelDestination != 0) Marshal.Release(cancelDestination);
             if (operation != 0) Marshal.Release(operation);
             if (destination != 0) Marshal.Release(destination);
             if (dataObject != 0) Marshal.Release(dataObject);
@@ -6007,6 +6049,8 @@ internal static class ShellViewColorSpike
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ItemCount(nint self, uint flags, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAttributesOf(nint self, uint count, nint childPidls, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int AdviseOperation(nint self, nint sink, out uint cookie);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int UnadviseOperation(nint self, uint cookie);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MoveItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]

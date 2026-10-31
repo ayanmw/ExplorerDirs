@@ -165,3 +165,5 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 2026-11-01：尝试在现有 Private Desktop watchdog 下调用真实 OLE `DoDragDrop`，并让测试 `IDropSource.QueryContinueDrag` 首次回调即返回取消，以避免合成鼠标/键盘输入。真实选中项 `IDataObject` 和目标 `IShellView` 均已建立，但 OLE 循环未在 45 秒 watchdog 时限内返回（退出码 124）；因此即使预置取消回调，也不能把真实 `DoDragDrop` 当作无输入后台探针。watchdog 记录前台 HWND 与 last-input tick 均未变化；超时终止探针后，已核对无残留 NativeProbe 进程并手动清理本轮唯一 GUID 夹具。仅此失败试验的临时代码已撤回。真实 OLE 输入/目标派发仍需独立交互会话或 VM，不将此结果外推为 Shell 拖放本身失败。
 
 2026-11-01 ZIP provider 增补：真实隔离 `IShellView` 的单项 `IFileOperation.DeleteItems` 检查到 `SFGAO_CANDELETE` 已广告；删除与执行均成功，未取消，归档条目移除且 view 项数由 3 收敛至 2。NativeProbe Release build 与 Private Desktop watchdog 通过，前台/输入/清理守卫通过。此为当前 ZIP provider 的程序化操作证据；回收站语义、确认/取消、可见操作 UI、ExplorerBrowser 产品通知/焦点接线和其他 provider 仍未覆盖。不得据此通过完整阶段 4/5，也不改变产品宿主。
+
+2026-11-01 ZIP 操作取消增补：在真实隔离 ZIP `IShellView` 上以 `IFileOperationProgressSink.PreCopyItem` 返回 `E_ABORT`，CopyItems 取消后目标为空、源 archive/view 完整，随后无取消的多项复制对照通过。Private Desktop 的前台/输入与清理守卫通过。该 provider 的 `GetAnyOperationsAborted` 返回 0，故不得单独作为取消判据。仅有程序化操作取消证据；用户可见进度/取消 UI、产品菜单/宿主接线及其它 provider 仍开放。
