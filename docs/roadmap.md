@@ -5141,3 +5141,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ### 2026-10-31：句柄扫描结果进入无窗口原生列合同
 
 `--static-shell-column-folder-smoke` 现在将句柄绑定扫描器与既有产品递归扫描器对照，确认同一夹具的 10/12 B 初值和 7/12 B 更新值相同，再把结果交给 NativeProbe 原生 provider 验证列文本、数值排序、PIDL 重枚举和 provider 重建；退出码 0，`window-created=False`。这扩展的是隔离 scanner → provider 合同，不接入产品 F9 或 ExplorerBrowser，也没有 DefView/可见列验收。
+
+### 2026-10-31：DefView 更新派生列的受干扰复核
+
+WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `10`/文件 `4`；通知后 DefView 重新枚举，却丢失自定义列且没有再次请求行值。前台 HWND 未变，但系统输入 tick 变化，故该轮 exit 1，只作为诊断线索；本轮临时注册和夹具已清理。此前干净探针与 API 核对已指出 DefView 缺少受支持的逐项派生值失效入口，不再增加通知或 ListView 消息变体。该功能仍未接入产品；后续需转向评审自有视图模型及其完整 Shell 兼容门槛。

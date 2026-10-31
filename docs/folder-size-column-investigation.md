@@ -783,3 +783,9 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 ### 2026-10-31：句柄扫描结果进入无窗口原生列合同
 
 无窗口 `--static-shell-column-folder-smoke` 现同时运行句柄绑定扫描器与既有产品递归扫描器，在相同真实夹具上逐目录比较汇总；初值 10/12 B、变更后 7/12 B 两轮结果一致，并继续把这些扫描值交给原生 provider 合同，验证 `UInt64`、属性文本、数值排序、同 PIDL 更新、重枚举及 provider 重建。合同退出码 0，输出 `window-created=False`。这证明更安全的隔离扫描结果能接入既有 provider 数据合同；不代表产品 F9 改用该扫描器，也不证明 ExplorerBrowser/DefView 可见列刷新。
+
+### 2026-10-31：WPF Private Desktop 复核 DefView 派生列更新
+
+重跑 `--synthetic-recursive-directory-size-wpf-host-private-desktop` 的单项目录通知路径。新建视图初始阶段，DefView 通过 `GetDetailsOf` 读取两个行值并显示目录 `10`、文件 `4`；标准/自定义 `GetDetailsEx` 计数均为 0。修改 backing 目录为 1 B 后发布 provider 快照并发送单项目录通知，DefView 重新枚举 2 行、按文件大小调用一次比较，但自定义列消失（读取索引 `-1`），之后没有 `GetDetailsOf`、属性读取或大小比较回调；选区/焦点仍保留。`IColumnManager::Capture` 仅含系统列，不能说明自定义列被恢复。
+
+本轮 Private Desktop 前台 HWND 未变，但系统输入 tick 在运行期间变化，probe 按守卫返回 exit 1，因此只记录为受干扰的诊断，不作为干净通过或最终 Shell 行为结论。探针生成的 GUID 夹具、HKCU CLSID/NameSpace 项均已确认清理。现有干净探针与源码/API 复核未找到受支持的逐行派生值失效入口；不继续追加通知或内部 ListView 消息变体。逐行派生列需留在 ExplorerBrowser 能力边界之外，或评审自有视图模型的总体 Shell 兼容与维护成本，尚未接入产品。
