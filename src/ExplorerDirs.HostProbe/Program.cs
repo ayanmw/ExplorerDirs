@@ -2815,9 +2815,23 @@ internal static class Program
                 var selectionRestorePendingField = hostType.GetField("_directorySelectionRestorePending", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var refreshStatusBefore = (string?)refreshStatusProperty.GetValue(hosts[pane]);
                 var refreshRestoreMillisecondsBefore = (long)refreshRestoreMillisecondsProperty.GetValue(hosts[pane])!;
+                var manualRefresh = args[0] == "--live-shell-refresh"
+                    ? hostType.GetMethod("RefreshFromUser", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    : hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!;
+                var softRefreshF5Status = "not-run";
+                var softRefreshF5Rows = -1;
                 if (deferredNotificationProbe)
                 {
-                    // Keep the fixture change hidden, then let the real F5 route perform its normal Shell update.
+                    // A user F5 must respect Soft-Refresh until the preference is disabled.
+                    manualRefresh.Invoke(hosts[pane], null);
+                    WaitForDelay(TimeSpan.FromMilliseconds(500));
+                    softRefreshF5Rows = Count(hosts[pane]);
+                    softRefreshF5Status = (string?)refreshStatusProperty.GetValue(hosts[pane]) ?? "";
+                    if (softRefreshF5Rows != beforeRefresh[pane] || !softRefreshF5Status.StartsWith("refreshed;", StringComparison.Ordinal))
+                        throw new InvalidOperationException(
+                            $"F5 did not preserve Soft-Refresh: before={beforeRefresh[pane]}, after={softRefreshF5Rows}, status={softRefreshF5Status}.");
+
+                    // Once disabled, the same user F5 must perform a full refresh and reveal the deferred item.
                     var setSoftRefresh = hostType.GetMethod("SetSoftRefresh", BindingFlags.Instance | BindingFlags.NonPublic)!;
                     var softRefreshResult = (int)setSoftRefresh.Invoke(hosts[pane], [false])!;
                     if (softRefreshResult < 0)
@@ -2825,9 +2839,6 @@ internal static class Program
                 }
                 CaptureDiagnosticsBaseline();
                 refreshMessageObserver.CaptureBaseline();
-                var manualRefresh = args[0] == "--live-shell-refresh"
-                    ? hostType.GetMethod("RefreshFromUser", BindingFlags.Instance | BindingFlags.NonPublic)!
-                    : hostType.GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public)!;
                 var rowsImmediatelyBeforeRefresh = Count(hosts[pane]);
                 if (deferredNotificationProbe && rowsImmediatelyBeforeRefresh != beforeRefresh[pane])
                     throw new InvalidOperationException(
@@ -2891,7 +2902,7 @@ internal static class Program
                 var focusPreserved = deleteSelected && !File.Exists(focusBeforeRefresh ?? string.Empty)
                     ? focusAfterRefresh is not null && selectedAfterRefresh.Contains(focusAfterRefresh, StringComparer.OrdinalIgnoreCase)
                     : string.Equals(focusBeforeRefresh, focusAfterRefresh, StringComparison.OrdinalIgnoreCase);
-                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} deferred-notification-probe={deferredNotificationProbe} rows-before-refresh-call={rowsImmediatelyBeforeRefresh} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} completion-count={completionCountAtRefresh} completion-ms={completionAtRefreshMilliseconds} new-rows-ms={newRowsAtMilliseconds} refresh-timeline=[{string.Join(';', deferredRefreshTimeline)}] paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
+                Console.WriteLine($"shell-refresh pane={pane} delete-selected={deleteSelected} deferred-notification-probe={deferredNotificationProbe} soft-refresh-f5={softRefreshF5Rows}/{softRefreshF5Status} rows-before-refresh-call={rowsImmediatelyBeforeRefresh} counts-before-refresh={string.Join(',', beforeRefresh)} counts-after-refresh={string.Join(',', hosts.Select(Count))} selected-count={selectedBeforeRefresh.Length}/{selectedAfterRefresh.Length} selection-restored={selectionPreserved} focused-before={focusBeforeRefresh} focused-after={focusAfterRefresh} focus-restored={focusPreserved} refresh-restoration-settled={restorationSettled} product-selection-restored={selectionRestoredByRefresh} product-focus-restored={focusRestoredByRefresh} refreshed={refreshed} completion-count={completionCountAtRefresh} completion-ms={completionAtRefreshMilliseconds} new-rows-ms={newRowsAtMilliseconds} refresh-timeline=[{string.Join(';', deferredRefreshTimeline)}] paint-transition={paintTransitionSnapshot.GetValue(hosts[pane])} view-message-delta={ViewMessageDelta()} view-message-samples={ViewMessageSamples()} message-only-delta={refreshMessageObserver.Delta} message-only-samples={refreshMessageObserver.SampleDelta}");
                 if (IsWindowVisible(source.Handle)) throw new Exception("Probe parent became visible.");
                 return refreshed && restorationSettled && selectionRestoredByRefresh && focusRestoredByRefresh && selectionPreserved && focusPreserved ? 0 : 1;
             }

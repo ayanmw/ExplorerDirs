@@ -3179,7 +3179,14 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             var nativeRefreshStartedAt = _traceNativeUserMessages ? _directoryNativeRefreshTiming.Start() : 0;
             try
             {
-                if (_location.IsFileSystemLocation && ShellChangedItemNotification.TryNotifyDirectoryRefresh(path))
+                if (_softRefresh)
+                {
+                    // Q-Dir Soft-Refresh suppresses re-enumeration on refresh; avoid the
+                    // SHCNE_UPDATEDIR route, which makes DefView enumerate new filesystem rows.
+                    refreshResult = shellView.Refresh();
+                    LastShellRefreshStatus = "soft-refresh";
+                }
+                else if (_location.IsFileSystemLocation && ShellChangedItemNotification.TryNotifyDirectoryRefresh(path))
                 {
                     // A directory notification lets DefView reconcile filesystem rows without calling
                     // IShellView.Refresh. It is broadcast to Shell listeners and does not guarantee that
