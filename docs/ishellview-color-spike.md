@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：颜色采样要求 Shell 与 DefView 行数一致
+
+Network Places 试探中，`IFolderView.ItemCount` 和 `SysListView32` 的行数无法维持一致；其中一次采样得到 Shell 1 行、DefView 2 行、仅 1 个 Shell 身份映射。该 provider 的父文件夹也不支持通过 `IShellFolder.CreateViewObject(IID_IDropTarget)` 注册 drop target。为避免把颜色映射到错误行，通用虚拟 provider 像素采样现在先等待 Shell 与 DefView 返回相同且稳定的非零行数；ZIP、This PC、Libraries 均通过。Network Places 专用探针未保留为可通过命令，需单独分析其行集合与拖放合同。失败日志：`20261101-020204-98f901b2.stdout.log`；对应原生 host-filter 探针另记录 Network Places `drop-target=0x00000000`。
+
+这一行数门槛是颜色映射的身份正确性前提，不代表所有 Shell provider 都用相同的列表索引模型。
+
 ### 2026-11-01：Libraries pathless provider 逐行像素采样
 
 新增 `color-libraries-private-desktop` 并按 Shell 动态项目数采样。当前 Libraries provider 枚举 6 个项目（Git、Subversion、视频、图片、文档、音乐），均为 pathless PIDL 且均为文件夹；逐项回调 `6/6`，背景像素命中数为 9,200、9,210、9,247、9,269、9,247、9,247；文本色命中数为 16、54、36、57、45、73。普通父 `IDropTarget` 注册成功，Private Desktop 前台/输入未变化并完成清理；Release 构建 0 警告/错误，watchdog exit 0。

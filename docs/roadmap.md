@@ -5337,3 +5337,7 @@ NativeProbe 增加 `color-this-pc-private-desktop`，并将虚拟 Shell 颜色�
 新增 Libraries 虚拟位置逐行颜色采样，当前环境 6/6 个 pathless 文件夹项目均收到绘制回调并命中背景/文本像素；文件夹 parent 的 drop target 注册成功。Control Panel view 也可创建，但 `IFolderView.ItemCount` 返回 `E_FAIL`、没有可用 DefView ListView 项数，且 parent `IDropTarget` 不存在；该 provider 需另行调查，不能纳入当前行索引采样器。Release 构建 0 警告/错误，Libraries watchdog exit 0，前台/输入未变，隔离清理通过。
 
 证据扩展了 pathless Shell 项覆盖至 ZIP 与 Libraries；仍不证明其它 provider、Q-Dir `.qdr` 颜色解析、ExplorerBrowser 产品支持或可见 UI。产品视图不迁移。详见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01-libraries-pathless-provider-逐行像素采样)。
+
+## 2026-11-01：虚拟 provider 颜色映射索引保护
+
+Network Places 试探中，Shell 与 DefView 行数不一致，且 parent `IDropTarget` 不可用，不能安全地按列表索引套用 Shell 项身份。为 ZIP/This PC/Libraries 等逐行映射流程加入 Shell 与 ListView 行数一致且连续稳定的前置条件；三个既有 provider 在该门槛下复跑通过。Network Places 不声明颜色绘制成功，后续需独立建立其 row identity 与拖放行为合同。详见[provider 行数调查](ishellview-color-spike.md#2026-11-01-颜色采样要求-shell-与-defview-行数一致)。

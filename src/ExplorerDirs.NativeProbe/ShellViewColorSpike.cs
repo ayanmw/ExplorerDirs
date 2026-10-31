@@ -3803,9 +3803,8 @@ internal static class ShellViewColorSpike
         if (listView == 0) throw new Exception($"The {providerName} provider view did not expose a SysListView32 DefView.");
         _observedListView = listView;
         Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // Details, 16 px icons.
-        Pump(250);
+        var rowCount = WaitForStableMatchingListViewItemCount(folderView, listView);
         var rows = RefreshVirtualShellColorMap(folderView, parentFolder, folderPidl);
-        var rowCount = GetShellViewItemCount(folderView);
         var deselectItem = At<SelectFolderItem>(folderView, 15);
         for (var index = 0; index < rowCount; index++) Check(deselectItem(folderView, index, 0));
         Check(At<ItemCount>(folderView, 7)(folderView, 1, out var remainingSelection)); // SVGIO_SELECTION.
@@ -5089,6 +5088,31 @@ internal static class ShellViewColorSpike
             previousCount = observedCount;
         }
         throw new Exception($"The virtual Shell view did not reach a stable non-empty enumeration: previous={previousCount}; stable-samples={stableSamples}.");
+    }
+
+    private static int WaitForStableMatchingListViewItemCount(nint folderView, nint listView,
+        int timeoutMilliseconds = 5000, int stableSamplesRequired = 3)
+    {
+        // Some Shell providers expose transient or mismatched row counts; do not color a ListView index without a matching Shell PIDL.
+        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        var previousShellCount = -1;
+        var previousListCount = -1;
+        var stableSamples = 0;
+        while (Environment.TickCount64 < deadline)
+        {
+            Pump(50);
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var shellCount)); // SVGIO_ALLVIEW.
+            var listCount = checked((int)SendMessageW(listView, 0x1004, 0, 0).ToInt64()); // LVM_GETITEMCOUNT.
+            if (shellCount > 0 && shellCount == listCount &&
+                shellCount == previousShellCount && listCount == previousListCount)
+            {
+                if (++stableSamples >= stableSamplesRequired) return shellCount;
+            }
+            else stableSamples = 0;
+            previousShellCount = shellCount;
+            previousListCount = listCount;
+        }
+        throw new Exception($"The virtual Shell and DefView row counts did not stabilize together: shell={previousShellCount}; list-view={previousListCount}; stable-samples={stableSamples}.");
     }
 
     private static nint ObserveCustomDraw(nint window, uint message, nuint wParam, nint lParam, nuint id, nuint data)
