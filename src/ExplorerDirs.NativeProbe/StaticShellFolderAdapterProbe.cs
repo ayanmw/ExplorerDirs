@@ -27,6 +27,7 @@ internal static class StaticShellFolderAdapterProbe
     private const uint ShcneDelete = 0x00000004;
     private const uint ShcneRenameItem = 0x00000001;
     private const uint ShcneUpdateItem = 0x00002000;
+    private const uint ShcneAttributes = 0x00000800;
     private const uint ShcneUpdateDir = 0x00001000;
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
@@ -43,6 +44,7 @@ internal static class StaticShellFolderAdapterProbe
             Expect(classify(ShcneDelete) != 0, "DELETE translates to a parent directory update");
             Expect(classify(ShcneRenameItem) != 0, "RENAMEITEM translates to a parent directory update");
             Expect(classify(ShcneUpdateItem) != 0, "UPDATEITEM translates to a parent directory update");
+            Expect(classify(ShcneAttributes) != 0, "ATTRIBUTES translates to a parent directory update");
             Expect(classify(ShcneUpdateDir) == 0, "UPDATEDIR is not recursively translated");
             Expect(classify(0x00000008) == 0, "unknown child events are not translated");
         }

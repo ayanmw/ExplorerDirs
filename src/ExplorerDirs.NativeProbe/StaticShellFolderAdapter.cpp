@@ -60,8 +60,9 @@ namespace
     {
         // UPDATEITEM carries property changes for an existing child; the custom
         // row model must re-enumerate its parent to observe updated derived values.
+        // ATTRIBUTES can also change row presentation (for example, read-only rules).
         return event == SHCNE_CREATE || event == SHCNE_RENAMEITEM ||
-            event == SHCNE_DELETE || event == SHCNE_UPDATEITEM;
+            event == SHCNE_DELETE || event == SHCNE_UPDATEITEM || event == SHCNE_ATTRIBUTES;
     }
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};

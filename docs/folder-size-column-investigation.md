@@ -1003,3 +1003,9 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 在跨窗格复制后，对接收 pane 中一条复制行取真实 Shell `IDataObject`，调用 `IFileOperation.RenameItems` 将其改名。没有手动发送通知；递归 watcher 依次观察 `SHCNE_RENAMEITEM` 与 `SHCNE_UPDATEITEM`。重新枚举后通过 Shell 提供的新旧绝对 parsing name 映射调用 `ShellListViewRowModel.Reconcile`，重命名行保留原稳定 ID，目标锚点 ID、选择和焦点保持；之后继续对两条副本执行 `DeleteItems`，整体 move/copy/rename/delete 场景 Release NativeProbe 连续三轮通过，隐藏窗及前台守卫通过。
 
 这验证单项重命名的文件系统通知及自有行身份连续性，不覆盖冲突重名、多选同名规则、undo/redo、可见 Shell 菜单、真实键盘/重命名编辑器、OLE 拖放、虚拟 provider 或 ExplorerBrowser 产品接线。`RetiredRows` 是旧快照 PIDL 的释放集合，不能直接解释成行身份已退役；身份连续性应比较 reconcile 后的稳定 ID。
+
+### 2026-10-31：隔离属性变更通知分类
+
+NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELETE 和 UPDATEITEM 转成父目录失效通知；`SHCNE_ATTRIBUTES` 未覆盖。该事件表示 Shell 项目或文件夹属性发生变化，可能影响自有行模型的展示规则，例如只读属性颜色。先在 `--synthetic-child-notification-routing-smoke` 加入 ATTRIBUTES 断言，旧 adapter 按预期失败；随后纳入相同的延迟父目录更新路径。CREATE/RENAMEITEM/DELETE/UPDATEITEM/ATTRIBUTES 分类均通过，UPDATEDIR 和未知事件仍拒绝转换；原生 adapter `/W4 /WX` 与 NativeProbe Release build 通过，0 警告/错误。
+
+本轮没有创建 Shell view，因此只证明事件分类合同与编译，不证明 Windows 实际发出该事件后 DefView 是否重枚举、属性是否更新或颜色是否刷新。该逻辑仅属于隔离 NativeProbe adapter，不接入 ExplorerBrowser 产品。[Microsoft SHChangeNotify](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify) 明确将 `SHCNE_ATTRIBUTES` 定义为项目或文件夹属性变化。

@@ -1,3 +1,5 @@
+2026-10-31 自有行模型属性事件合同补充：NativeProbe 的合成 adapter 事件分类现在包含 `SHCNE_ATTRIBUTES`，以便只读/隐藏等属性变化使行模型重新枚举；仅完成 classifier smoke 与编译，未创建 Shell view 或验证真实通知/绘制。它属于隔离 IShellView 迁移原型，不是当前 ExplorerBrowser 产品功能。详见[隔离调查](folder-size-column-investigation.md#2026-10-31-隔离属性变更通知分类)。
+
 2026-10-31 隔离自有行模型 Shell 操作续验：真实文件系统 Shell `IDataObject` 依次经 `IFileOperation.MoveItems`、`CopyItems`、单项 `RenameItems` 和多项 `DeleteItems`；shell change 通知驱动两 pane 重枚举，重命名保持原行 ID，删除正确退休行，锚点选择/焦点及未操作源 pane 保持。`--shell-change-reconciliation` Release 连续三轮通过，窗口隐藏、前台不变。仅为 NativeProbe 自有行投影证据，不表示产品 Shell view 可迁移；可见菜单、剪贴板、Undo/Redo、OLE 拖放和 ExplorerBrowser 接线仍未验证。[调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格重命名协调)
 
 2026-10-31 Shell 新建菜单的懒加载兼容：原生命令状态查询初始化“新建文件夹”子菜单时，现先转发 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；仅 `S_OK` 表示已处理，`S_FALSE`/`E_NOTIMPL` 才回退 `IContextMenu2.HandleMenuMsg`，其它错误停止。真实 COM 回归在旧逻辑上按预期失败，修复后 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。没有显示菜单；第三方 Shell 扩展的可见菜单及命令交互仍需集中 UI 验收。
