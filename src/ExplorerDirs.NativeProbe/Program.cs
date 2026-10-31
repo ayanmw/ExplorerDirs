@@ -204,6 +204,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunNetworkPlacesRowMap();
         if (args.Length == 1 && args[0] == "--ishellview-network-places-color-pixels-private-desktop")
             return PrivateDesktopShellProbe.RunNetworkPlacesColorPixels();
+        if (args.Length == 1 && args[0] == "--ishellview-network-places-child-drop-targets-private-desktop")
+            return PrivateDesktopShellProbe.RunNetworkPlacesChildDropTargets();
         if (args.Length == 1 && args[0] == "--explorerbrowser-color-notifications-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserColorNotifications();
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
@@ -343,6 +345,7 @@ internal static class Program
             Console.WriteLine("       --ishellview-desktop-color-pixels-private-desktop (Desktop Shell item color pixels on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-network-places-row-map-private-desktop (compare Network Places Shell items with DefView rows; labels are redacted)");
             Console.WriteLine("       --ishellview-network-places-color-pixels-private-desktop (identity-map Network Places Shell rows before isolated color sampling)");
+            Console.WriteLine("       --ishellview-network-places-child-drop-targets-private-desktop (query child IDropTarget availability without invoking Drop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
             Console.WriteLine("       --ishellview-color-directory-private-desktop (same pixel probe with a #DIR folder fixture)");
             Console.WriteLine("       --ishellview-color-hidden-private-desktop (same pixel probe with an explicitly included #Hidden fixture)");

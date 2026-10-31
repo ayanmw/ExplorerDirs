@@ -5399,3 +5399,5 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 这表明当前环境的 Network Places 内容会随 view 实例变化；它没有证明此前 `1 Shell item / 2 DefView rows` 失败的具体根因，也没有验证持续更新期间的稳定性。行数不等时仍拒绝按索引着色；该 namespace 也尚无已确认拖放目标或像素着色证据，不能进入迁移通过项。完整记录见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01network-places-行数瞬态差异诊断)。
 
 后续新增 Network Places 像素探针，以 PIDL 显示名对 DefView 标签唯一映射，首轮两行像素命中；复测包含一行通过、`Shell=2 / DefView=3` 在映射后变化并以行数不等断言失败、再一行通过。失败轮没有足够证据判定是否短暂错色，不计为颜色通过。该 provider 的列表行仍会在枚举与绘制期间变化，故颜色采样门槛保持关闭；详细记录见[隔离原型](ishellview-color-spike.md#2026-11-01network-places-行数瞬态差异诊断)。
+
+补充拖放接口边界：Network Places 根 view 三轮分别枚举 3/1/1 个 pathless 文件夹；逐项 `IShellFolder::GetUIObjectOf(IID_IDropTarget)` 均为 `E_NOINTERFACE`，父文件夹 `CreateViewObject(IID_IDropTarget)` 也不可用。未调用 Drop。该结果仅说明当前 Network Places 根列表没有已确认的父级/项目 drop target；更深层共享目录及其它网络 provider 仍未测，阶段 5 的网络拖放门槛开放。

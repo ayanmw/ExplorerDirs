@@ -20,6 +20,8 @@ Network Places 试探中，`IFolderView.ItemCount` 和 `SysListView32` 的行数
 
 随后新增 `--ishellview-network-places-color-pixels-private-desktop`，在稳定匹配后按 Shell PIDL 显示名与 ListView 标签做唯一映射，再套用隔离颜色规则。首轮两行像素命中；下一组运行观察到 1 行通过、随后 `Shell=2 / DefView=3` 在映射后到像素采样之间变化，探针以 `rows=3; colors=2` 断言失败，之后一行通过。失败轮不计为颜色通过，也没有足够证据判断重排瞬间是否出现错色。该结果把此前不匹配具体到枚举/绘制之间的行数变化，但未确定变化来源或时序；Network Places 仍不满足稳定行身份及 `IDropTarget` 合同，不可据此宣称支持颜色。
 
+随后新增只读 child drop-target 查询，三次独立 view 分别枚举 3、1、1 个根项目；本轮看到的项目均为 pathless folders。每项通过父 `IShellFolder::GetUIObjectOf(IID_IDropTarget)` 查询，三轮全部返回 `E_NOINTERFACE`，没有调用 `DragEnter` 或 `Drop`。结合父文件夹 `CreateViewObject(IID_IDropTarget)` 也返回 `E_NOINTERFACE`，当前证据表明 Network Places 根列表既无父级也无根子项 drop target。该结论不外推到导航进入具体共享文件夹后的目标行为，也不证明所有 network namespace provider 都相同；前台/输入与 Private Desktop 清理守卫三轮均通过。
+
 ### 2026-11-01：Libraries pathless provider 逐行像素采样
 
 新增 `color-libraries-private-desktop` 并按 Shell 动态项目数采样。当前 Libraries provider 枚举 6 个项目（Git、Subversion、视频、图片、文档、音乐），均为 pathless PIDL 且均为文件夹；逐项回调 `6/6`，背景像素命中数为 9,200、9,210、9,247、9,269、9,247、9,247；文本色命中数为 16、54、36、57、45、73。普通父 `IDropTarget` 注册成功，Private Desktop 前台/输入未变化并完成清理；Release 构建 0 警告/错误，watchdog exit 0。
