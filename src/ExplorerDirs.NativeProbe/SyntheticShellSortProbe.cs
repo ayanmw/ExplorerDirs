@@ -102,7 +102,7 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
@@ -1085,6 +1085,11 @@ public static class SyntheticShellSortProbe
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
                     module, folderView, view, backingFolder, recreateShellWindow: true,
                     host: host, hostPointer: hostPointer);
+            if (strategyFilter == "single-item-capture-reapply-recreate-window")
+                RunSizeUpdateStrategy("single-item-capture-reapply-recreate-window", 1, () =>
+                    SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
+                    module, folderView, view, backingFolder, reapplyCapturedColumns: true,
+                    recreateShellWindow: true, host: host, hostPointer: hostPointer);
             if (strategyFilter == "single-item-recreate-shell-window-multiselect")
                 RunSizeUpdateStrategy("single-item-recreate-shell-window-multiselect", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
@@ -1122,7 +1127,8 @@ public static class SyntheticShellSortProbe
         nint module, nint folderView, nint view, string backingFolder, bool reapplyCustomSizeColumn = false,
         bool recreateDetailsView = false, bool recreateShellWindow = false, StreamViewHost? host = null,
         nint hostPointer = 0, bool multiSelect = false, bool preserveScrollAnchor = false,
-        string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false)
+        string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
+        bool reapplyCapturedColumns = false)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
@@ -1135,8 +1141,13 @@ public static class SyntheticShellSortProbe
             throw new TimeoutException($"The new view did not retain the recursive-size baseline order before '{name}': {FormatSizeState(before)}");
         if (!before.ValueUpdated)
             throw new InvalidOperationException($"The new view did not expose the recursive-size column before '{name}'; notification strategy was not run: {FormatSizeState(before)}");
+        var mapCallsBeforeCapture = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
         var baselineColumnCaptureResult = ShellColumnManager.Capture(folderView, out var baselineColumns);
+        var mapCallsAfterCapture = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
         Console.WriteLine($"synthetic-size-update-columns: phase=before; hr=0x{baselineColumnCaptureResult:X8}; columns=[{FormatColumns(baselineColumns)}]");
+        Console.WriteLine($"synthetic-size-update-column-map: phase=before; calls-before-capture={mapCallsBeforeCapture}; after-capture={mapCallsAfterCapture}; by-column=[{FormatMapColumnCounts(module)}]");
+        if (reapplyCapturedColumns && (baselineColumnCaptureResult != 0 || baselineColumns is null))
+            throw new InvalidOperationException("The captured Shell column set was unavailable for the reapply comparison.");
         var baselineSortColumns = preserveScrollAnchor ? CaptureNativeSortColumns(folderView) : null;
         if (preserveScrollAnchor && (baselineSortColumns is null || baselineSortColumns.Length == 0))
             throw new InvalidOperationException("The scroll-recreation scenario did not expose a native sort column to verify.");
@@ -1165,11 +1176,24 @@ public static class SyntheticShellSortProbe
         var streamReadsBefore = host?.Reads ?? 0;
         var streamWritesBefore = host?.Writes ?? 0;
         var streamTraceBefore = host?.ViewStateStreamTrace.Count ?? 0;
+        var mapCallsBeforeNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
         var notificationStarted = Environment.TickCount64;
         notify();
+        var mapCallsAfterNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
 
         var reapplyResult = 0;
-        if (reapplyCustomSizeColumn)
+        var mapCallsAfterReapply = mapCallsAfterNotification;
+        if (reapplyCapturedColumns)
+        {
+            // Reapply the exact keys returned by IColumnManager before the update,
+            // so this comparison does not substitute the provider's MapColumn key.
+            reapplyResult = ShellColumnManager.Apply(folderView, baselineColumns!);
+            Console.WriteLine($"synthetic-size-update: strategy={name}; captured-column-reapply-hr=0x{reapplyResult:X8}");
+            if (reapplyResult != 0)
+                throw new COMException($"Could not reapply the captured Shell columns after '{name}'.", reapplyResult);
+            mapCallsAfterReapply = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
+        }
+        else if (reapplyCustomSizeColumn)
         {
             // The notification path drops the provider-defined column. Reintroduce
             // only Name and its mapped recursive-size key to test whether DefView
@@ -1183,6 +1207,7 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}");
             if (reapplyResult != 0)
                 throw new COMException($"Could not explicitly restore the recursive-size column after '{name}'.", reapplyResult);
+            mapCallsAfterReapply = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
             if (recreateDetailsView)
             {
                 Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 1, 16)); // FVM_ICON.
@@ -1224,6 +1249,7 @@ public static class SyntheticShellSortProbe
             if (preserveScrollAnchor)
                 Console.WriteLine($"synthetic-size-update-scroll: after-recreate-top-index={recreatedTopIndex}; top={recreatedTopName}");
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
+            Console.WriteLine($"synthetic-size-update-column-map: phase=recreated; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; after-window-recreate={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}; by-column=[{FormatMapColumnCounts(module)}]");
             var restored = shellWindowSelection!.Restore(view, trace: message => Console.WriteLine($"synthetic-size-update-selection: {message}"));
             Console.WriteLine($"synthetic-size-update-selection: selected={restored.SelectionRestored}; focused={restored.FocusRestored}; saved-selected={shellWindowSelection.SelectedCount}; saved-focus={shellWindowSelection.HasFocusedItem}");
             if (multiSelect)
@@ -1294,7 +1320,11 @@ public static class SyntheticShellSortProbe
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
         var streamTraceAfter = host?.ViewStateStreamTrace.Skip(streamTraceBefore).ToArray() ?? [];
-        Console.WriteLine($"synthetic-size-update: strategy={name}; explicit-custom-column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; recursive-size-column-present={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; header-columns=[{string.Join('|', afterHeaderColumns)}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
+        var columnReapplySource = reapplyCapturedColumns ? "captured-shell-column-set" :
+            reapplyCustomSizeColumn ? "provider-mapped-key" : "none";
+        Console.WriteLine($"synthetic-size-update: strategy={name}; column-reapply-source={columnReapplySource}; column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; provider-recursive-size-key-exact-match={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; header-columns=[{string.Join('|', afterHeaderColumns)}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
+        if (!recreateShellWindow)
+            Console.WriteLine($"synthetic-size-update-column-map: phase=after; before-notification={mapCallsBeforeNotification}; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; final={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}");
         Console.WriteLine($"synthetic-size-update-columns: phase=after; layout-preserved={columnLayoutPreserved}; hr=0x{columnsResult:X8}; columns=[{FormatColumns(columnsAfter)}]");
         Console.WriteLine($"synthetic-size-update-stream: strategy={name}; reads-delta={(host?.Reads ?? 0) - streamReadsBefore}; writes-delta={(host?.Writes ?? 0) - streamWritesBefore}; calls=[{string.Join(" || ", streamTraceAfter)}]");
     }
@@ -1355,6 +1385,13 @@ public static class SyntheticShellSortProbe
     private static string FormatColumns(IReadOnlyList<DisplayColumnState>? columns) => columns is null
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}@{column.Width}"));
+
+    private static string FormatMapColumnCounts(nint module)
+    {
+        var getCount = Marshal.GetDelegateForFunctionPointer<GetIndexedCounter>(
+            NativeLibrary.GetExport(module, "GetSyntheticMapColumnToScidColumnCount"));
+        return string.Join('|', Enumerable.Range(0, 4).Select(column => $"{column}:{getCount((uint)column)}"));
+    }
 
     private static NativeSortColumn[] CaptureNativeSortColumns(nint folderView)
     {
@@ -2705,6 +2742,7 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetIndexedCounter(uint index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);

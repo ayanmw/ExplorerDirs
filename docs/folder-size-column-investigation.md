@@ -1068,3 +1068,10 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 ### 2026-11-01：列 GUID 差异的时序范围收窄
 
 日志的 `phase=before` 列快照已包含 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`，发生在通知、`IColumnManager.Apply` 和 view-window 重建之前；探针 adapter 的 `MapColumnToSCID(1)` 则返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`。因此差异不是本轮显式重放或重建创建的。当前证据确认 Shell 列管理器呈现的 key 与 provider 映射 key 不同，但尚未定位转换发生于 Shell 的哪一层，也没有证据把任一 key 判为错误。下一步应在同一 view 的列发现和 `SetColumns` 前后分别记录 `MapColumnToSCID`、表头列身份与 `IColumnManager` 读回值，建立逐阶段映射；不通过猜测 GUID 修改产品或原型列实现。
+### 2026-11-01：重放 Shell 捕获列集并跟踪 provider 映射调用
+
+新增 `single-item-capture-reapply-recreate-window` 对照，在 `SHCNE_UPDATEITEM` 后将更新前 `IColumnManager.Capture` 返回的完整三列及原宽度原样 `Apply`，再重建同一 view window。Private Desktop WPF root watchdog exit 0、`isolation-clean=True`；前台仍是同一 `LockApp` HWND，last-input tick 未变。重建后重新枚举 2 行、大小列读回 `[4|1]`、按大小升序为 `small.bin|child`，焦点/选区保持，`Apply` 返回 `S_OK`。日志：`src/.state/native-probe-watchdog/20261101-043355-5428d2ba.stdout.log`。
+
+新增的 provider `MapColumnToSCID` 调用计数表明，通知、捕获列及 `SetColumns` 重放阶段均没有调用该接口；view-window 重建阶段共调用 8 次，对索引 0、1、2、3 各两次。索引 1 的 adapter 源码分支映射至 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`；重建前后的 `IColumnManager` 列快照仍为 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。因此 Shell 确实在重建时咨询 provider 映射，但捕获列 key 与 provider 映射 key 仍保持不同；当前仅计数了回调，没有记录 Shell 内部的转换步骤，不能据此断言哪一个 key 是权威身份。
+
+该对照说明以 `IColumnManager` 实际捕获值重放，在本合成 provider 中可恢复派生列消费/排序；此前使用 adapter 声明 key 重放的成功结果也仍成立。探针日志现将精确 GUID 比较明确标成 `provider-recursive-size-key-exact-match=False`，不再把它写成列不存在。结果限于隔离 `IShellView`，没有改产品 ExplorerBrowser 或发布包；迁移门槛仍开放。

@@ -1452,6 +1452,8 @@ namespace
     volatile LONG g_syntheticEnumObjectsCount = 0;
     volatile LONG g_syntheticEnumeratedItems = 0;
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
+    volatile LONG g_syntheticMapColumnToScidCount = 0;
+    volatile LONG g_syntheticMapColumnToScidByColumn[4] = {};
     std::wstring g_syntheticSortBackingPath;
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
@@ -2585,6 +2587,9 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* key) override
         {
+            InterlockedIncrement(&g_syntheticMapColumnToScidCount);
+            if (column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn))
+                InterlockedIncrement(&g_syntheticMapColumnToScidByColumn[column]);
             if (!key) return E_POINTER;
             if (column == 0) *key = PKEY_ItemNameDisplay;
             else if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0))
@@ -4009,6 +4014,20 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
+    InterlockedExchange(&g_syntheticMapColumnToScidCount, 0);
+    for (size_t column = 0; column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn); ++column)
+        InterlockedExchange(&g_syntheticMapColumnToScidByColumn[column], 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidCount()
+{
+    return InterlockedCompareExchange(&g_syntheticMapColumnToScidCount, 0, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidColumnCount(UINT column)
+{
+    if (column >= ARRAYSIZE(g_syntheticMapColumnToScidByColumn)) return -1;
+    return InterlockedCompareExchange(&g_syntheticMapColumnToScidByColumn[column], 0, 0);
 }
 
 extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
