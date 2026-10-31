@@ -1,5 +1,11 @@
 # Explorer Dirs memory sampling
 
+## 2026-10-31 08:21 北京时间：temp.80 同一 PID 一分钟只读采样
+
+- UTC `2026-10-31T00:21:50Z`–`00:22:50Z`，对 PID `47460` 每 5 秒采样，共 13 点，覆盖 60.20 秒。对象仍为启动于 `2026-10-30T16:13:34.219Z` 的 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`；EXE SHA-256 `C146179AAB2686411D4ED66667DB60A1547A9A6A0A2EE53F3C137F36666EF760`，应用 DLL SHA-256 `8E473D1161266B01202AC1B7B196FA48DE00EDD86865FAB118322C894A3E9EBC`。
+- Working Set 全程 `234,713,088 B`（约 `223.84 MiB`），Private Bytes 全程 `121,180,160 B`（约 `115.57 MiB`），Virtual Bytes 全程 `2,342,053,306,368 B`；句柄 `1,107`、线程 `33`、GDI `95`、USER `104` 均未变化。
+- 这 60 秒进程级计数没有可观察变化。没有固定或记录窗格/标签及文件操作负载，也没有关联托管堆/原生分配；不能排除浏览操作期间增长、判断长期趋势或归因组件。原始 CSV 保存在忽略目录 `src/.state/memory-samples/ExplorerDirs-memory-20261031-082149.csv`，SHA-256 `23E03C781B836BB100F1CEC8D63D763B23FC506CD97CC00A9445200B20418E0A`。采样没有启动、聚焦、重启或操作应用。
+
 ## 2026-10-31 07:20 北京时间：temp.80 同一 PID 一分钟被动复采
 
 - UTC `2026-10-30T23:20:49Z`–`23:21:49Z`，对 PID `47460` 每 5 秒采样，共 13 点，覆盖 60.24 秒。进程仍为启动于 `2026-10-30T16:13:34.219Z` 的 `D:\projects\explorer-dirs\releases\preview-0.6.0-temp.80\app\ExplorerDirs.App.exe`；ProductVersion `0.6.0-preview.temp.80+de5d79847509e018093d36395713c6339e5cfd6c`。EXE SHA-256 `C146179AAB2686411D4ED66667DB60A1547A9A6A0A2EE53F3C137F36666EF760`，应用 DLL SHA-256 `8E473D1161266B01202AC1B7B196FA48DE00EDD86865FAB118322C894A3E9EBC`。
