@@ -171,3 +171,5 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 2026-11-01 ZIP CopyItems 冲突观察：现有目标预置为 `0x7A`，源 ZIP 文件为 `0x41`。静默标志组合含 `FOF_RENAMEONCOLLISION` 仍覆盖目标、未生成改名副本；去掉 `FOF_NOCONFIRMATION` 后 Private Desktop 等待确认并超时。因此不以当前静默组合宣称冲突保护通过，且交互确认/自动改名策略仍未验证。迁移门槛需包含明确的冲突/覆盖策略与目标保留验证；不得据 `PerformOperations=S_OK` 判定目标安全。
 
 2026-11-01 跨卷文件操作增补：实际确认夹具源 D:、目标 C: 后，filesystem 与 ZIP 数据对象各自 CopyItems 成功，目标内容正确且两种源均保留；filesystem MoveItems 成功并移除 D: 源项。只覆盖本机单项程序化操作，不证明 ZIP MoveItems 跨卷、shell OLE 拖放、交互 UI 或产品接线。复验日志 `src/.state/native-probe-watchdog/20261101-055626-be1b14db.stdout.log`。因此阶段 4 的跨卷 Copy/Move 子项有 filesystem 证据，ZIP 仅有跨卷 Copy 证据，完整阶段仍未通过。
+
+2026-11-01 跨卷双视图续验：隐藏 `--shell-change-reconciliation` 将真实 filesystem source/target 分置 D:/C:，分别监听两目录；MoveItems 后收到 Deleted/Created，源/目标行数从 3/1 收敛为 1/3，内容、稳定锚点 ID、选区/焦点与隐藏窗前台守卫通过；随后 Copy/Rename/Delete 对账也通过。Release build 和探针通过。只补足 NativeProbe 自有行模型的 filesystem 跨卷通知收敛；产品 ExplorerBrowser、可见菜单/操作、OLE 拖放、ZIP 跨卷 MoveItems 仍未验证，阶段 4/5 与迁移决策保持开放。

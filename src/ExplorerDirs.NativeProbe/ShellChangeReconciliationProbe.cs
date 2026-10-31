@@ -294,6 +294,7 @@ internal static class ShellChangeReconciliationProbe
                 GetForegroundWindow() != foreground || IsWindowVisible(window.Handle) || IsWindowVisible(listParent))
                 throw new InvalidOperationException("Shell change notification reconciliation contract failed.");
             VerifyCrossPaneMove(foreground);
+            VerifyCrossPaneMove(foreground, crossVolume: true);
             return 0;
 
             bool HasStableSelection(IReadOnlyList<ShellListViewRow> rows) => selection.Resolve(rows)
@@ -315,10 +316,15 @@ internal static class ShellChangeReconciliationProbe
         }
     }
 
-    private static void VerifyCrossPaneMove(nint foreground)
+    private static void VerifyCrossPaneMove(nint foreground, bool crossVolume = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-cross-pane-change-" + Guid.NewGuid().ToString("N"));
-        var sourcePath = Path.Combine(fixture, "pane-source");
+        var sourceFixture = crossVolume
+            ? Path.Combine(Environment.CurrentDirectory, "src", ".state", "native-probe", "cross-volume-" + Guid.NewGuid().ToString("N"))
+            : fixture;
+        if (crossVolume && string.Equals(Path.GetPathRoot(sourceFixture), Path.GetPathRoot(fixture), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The cross-volume Shell move probe requires the checkout and temporary directory to be on different volumes.");
+        var sourcePath = Path.Combine(sourceFixture, "pane-source");
         var targetPath = Path.Combine(fixture, "pane-target");
         Directory.CreateDirectory(sourcePath);
         Directory.CreateDirectory(targetPath);
@@ -330,12 +336,14 @@ internal static class ShellChangeReconciliationProbe
         nint fixturePidl = 0, sourcePidl = 0, targetPidl = 0, sourceFolder = 0, targetFolder = 0;
         nint sourceParent = 0, targetParent = 0, sourceList = 0, targetList = 0;
         uint registration = 0;
+        var additionalRegistrations = new List<uint>();
         ShellListViewEnumeration? sourceCurrent = null, targetCurrent = null;
         ShellListViewEnumeration? pendingSource = null, pendingTarget = null;
         using var window = new ChangeWindow();
         try
         {
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
+            if (!crossVolume)
+                Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(sourcePath, 0, out sourcePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHParseDisplayName(targetPath, 0, out targetPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, sourcePidl, 0, in ShellFolderId, out sourceFolder));
@@ -374,11 +382,28 @@ internal static class ShellChangeReconciliationProbe
             var sourceSelection = CaptureSelection(sourceList, sourceCurrent.Rows);
             var targetSelection = CaptureSelection(targetList, targetCurrent.Rows);
 
-            var watch = new ShellChangeEntry { Pidl = fixturePidl, Recursive = true };
-            registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
-                ChangeMessage, 1, ref watch);
-            if (registration == 0)
-                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-pane Shell change registration failed.");
+            if (crossVolume)
+            {
+                var sourceWatch = new ShellChangeEntry { Pidl = sourcePidl, Recursive = true };
+                var targetWatch = new ShellChangeEntry { Pidl = targetPidl, Recursive = true };
+                registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
+                    ChangeMessage, 1, ref sourceWatch);
+                if (registration == 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-volume source Shell change registration failed.");
+                var targetRegistration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
+                    ChangeMessage, 1, ref targetWatch);
+                if (targetRegistration == 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-volume target Shell change registration failed.");
+                additionalRegistrations.Add(targetRegistration);
+            }
+            else
+            {
+                var watch = new ShellChangeEntry { Pidl = fixturePidl, Recursive = true };
+                registration = SHChangeNotifyRegister(window.Handle, ShellAndInterruptSources, WatchEvents,
+                    ChangeMessage, 1, ref watch);
+                if (registration == 0)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Cross-pane Shell change registration failed.");
+            }
 
             var sourceRows = sourceCurrent.Rows.Where(row => movedNames.Contains(row.DisplayName, StringComparer.Ordinal)).ToArray();
             if (sourceRows.Length != movedNames.Length) throw new IOException("The source Shell view did not enumerate every selected fixture row.");
@@ -419,6 +444,15 @@ internal static class ShellChangeReconciliationProbe
                 File.ReadAllText(Path.Combine(targetPath, name)) == (name == "moving.txt" ? "move me" : "move me too"));
             if (!filesMoved) throw new IOException("IFileOperation.MoveItems did not move every isolated row to the destination pane folder.");
             var shellMoveNotified = window.WaitForAny([Deleted, Created, RenamedItem], TimeSpan.FromSeconds(5));
+            var sourceDeletedNotification = false;
+            var targetCreatedNotification = false;
+            if (crossVolume)
+            {
+                sourceDeletedNotification = window.WaitFor(() => window.ChangeEvents.Any(change => change.EventId == Deleted &&
+                    movedNames.Any(name => PathEquals(change.FirstPath, Path.Combine(sourcePath, name)))), TimeSpan.FromSeconds(5));
+                targetCreatedNotification = window.WaitFor(() => window.ChangeEvents.Any(change => change.EventId == Created &&
+                    movedNames.Any(name => PathEquals(change.FirstPath, Path.Combine(targetPath, name)))), TimeSpan.FromSeconds(5));
+            }
 
             pendingSource = WaitForRows(sourcePidl, sourceFolder,
                 rows => movedNames.All(name => rows.All(row => row.DisplayName != name)));
@@ -455,13 +489,14 @@ internal static class ShellChangeReconciliationProbe
                 HasStableListViewSelection(targetList, targetAnchorId);
             var isolated = GetForegroundWindow() == foreground && !IsWindowVisible(sourceParent) &&
                 !IsWindowVisible(sourceList) && !IsWindowVisible(targetParent) && !IsWindowVisible(targetList);
-            Console.WriteLine($"shell-change-cross-pane-move: operation=IFileOperation.MoveItems;shell-change-notified={shellMoveNotified};events=[{string.Join(',', window.Events.Select(value => $"0x{value:X8}"))}];" +
+            Console.WriteLine($"shell-change-cross-pane-move: cross-volume={crossVolume};operation=IFileOperation.MoveItems;shell-change-notified={shellMoveNotified};source-deleted-notification={sourceDeletedNotification};target-created-notification={targetCreatedNotification};change-events=[{string.Join('|', window.ChangeEvents.Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}];events=[{string.Join(',', window.Events.Select(value => $"0x{value:X8}"))}];" +
                 $"source-count={sourceCurrent.Rows.Count};target-count={targetCurrent.Rows.Count};" +
                 $"source-anchor-id-preserved={sourceAnchorPreserved};target-anchor-id-preserved={targetAnchorPreserved};" +
                 $"moved-source-rows-retired={movedSourceRowsRetired};moved-target-rows-added={movedTargetRowsAdded};" +
                 $"source-selection-focus-preserved={sourceSelectionPreserved};target-selection-focus-preserved={targetSelectionPreserved};" +
                 $"hidden-windows={isolated};foreground-unchanged={GetForegroundWindow() == foreground}");
-            if (!shellMoveNotified || sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 3 ||
+            if (!shellMoveNotified || (crossVolume && (!sourceDeletedNotification || !targetCreatedNotification)) ||
+                sourceCurrent.Rows.Count != 1 || targetCurrent.Rows.Count != 3 ||
                 !sourceAnchorPreserved || !targetAnchorPreserved || !movedSourceRowsRetired || !movedTargetRowsAdded ||
                 !sourceSelectionPreserved || !targetSelectionPreserved || !isolated)
                 throw new InvalidOperationException("Cross-pane move did not reconcile both Shell row models while retaining unaffected selection/focus.");
@@ -678,6 +713,7 @@ internal static class ShellChangeReconciliationProbe
         finally
         {
             if (registration != 0) _ = SHChangeNotifyDeregister(registration);
+            foreach (var extraRegistration in additionalRegistrations) _ = SHChangeNotifyDeregister(extraRegistration);
             if (sourceParent != 0) _ = DestroyWindow(sourceParent);
             if (targetParent != 0) _ = DestroyWindow(targetParent);
             if (pendingSource is not null) ShellListViewEnumerator.FreeRows(pendingSource.Rows);
@@ -692,6 +728,12 @@ internal static class ShellChangeReconciliationProbe
             try { Directory.Delete(fixture, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+            if (crossVolume)
+            {
+                try { Directory.Delete(sourceFixture, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 
@@ -919,6 +961,9 @@ internal static class ShellChangeReconciliationProbe
 
     private static long NextId(IReadOnlyList<ShellListViewRow> rows) => rows.Count == 0 ? 1 : rows.Max(row => row.Id) + 1;
 
+    private static bool PathEquals(string? actual, string expected) =>
+        actual is not null && string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase);
+
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
@@ -938,8 +983,10 @@ internal static class ShellChangeReconciliationProbe
     private sealed class ChangeWindow : NativeWindow, IDisposable
     {
         private readonly List<uint> _events = [];
+        private readonly List<ShellChangeEvent> _changeEvents = [];
         private readonly Dictionary<string, string> _renamedParsingNames = new(StringComparer.OrdinalIgnoreCase);
         internal IReadOnlyList<uint> Events => _events;
+        internal IReadOnlyList<ShellChangeEvent> ChangeEvents => _changeEvents;
         internal IReadOnlyDictionary<string, string> RenamedParsingNames => _renamedParsingNames;
 
         internal ChangeWindow()
@@ -983,6 +1030,18 @@ internal static class ShellChangeReconciliationProbe
             return _events.Skip(eventIndex).Any(expected.Contains);
         }
 
+        internal bool WaitFor(Func<bool> predicate, TimeSpan timeout)
+        {
+            var until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+            while (Environment.TickCount64 < until)
+            {
+                Application.DoEvents();
+                if (predicate()) return true;
+                Thread.Sleep(10);
+            }
+            return predicate();
+        }
+
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == ChangeMessage)
@@ -993,7 +1052,11 @@ internal static class ShellChangeReconciliationProbe
                 {
                     try
                     {
-                        _events.Add(unchecked((uint)eventId));
+                        var id = unchecked((uint)eventId);
+                        _events.Add(id);
+                        var firstPidl = pidls == 0 ? 0 : Marshal.ReadIntPtr(pidls);
+                        var secondPidl = pidls == 0 ? 0 : Marshal.ReadIntPtr(pidls, IntPtr.Size);
+                        _changeEvents.Add(new ShellChangeEvent(id, AbsoluteParsingName(firstPidl), AbsoluteParsingName(secondPidl)));
                         if ((unchecked((uint)eventId) == RenamedItem || unchecked((uint)eventId) == RenamedFolder) &&
                             pidls != 0)
                         {
@@ -1020,6 +1083,8 @@ internal static class ShellChangeReconciliationProbe
 
         public void Dispose() => DestroyHandle();
     }
+
+    private sealed record ShellChangeEvent(uint EventId, string? FirstPath, string? SecondPath);
 
     [StructLayout(LayoutKind.Sequential)] private struct ShellChangeEntry { public nint Pidl; [MarshalAs(UnmanagedType.Bool)] public bool Recursive; }
 

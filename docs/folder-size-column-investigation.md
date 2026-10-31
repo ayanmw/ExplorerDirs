@@ -1104,3 +1104,9 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 单项更新和“单项+父目录”没有重枚举（`enum-calls=0`），也未重新读取列值，大小列索引读回 `-1`；行与原选中焦点仍在。完整 `IShellView::Refresh` 重枚举一次（2 行），读到 `4 / 1` 并按新值重排，大小列布局保留。刷新后原选中项/焦点短暂丢失；用现有 `ShellViewSelectionSnapshot` 恢复后，选择与焦点读回均成功。单次隔离探针从发送刷新到稳定读回约 2.7 秒，包含 2.5 秒轮询窗口；这不是产品刷新延迟或可见闪烁测量。
 
 NativeProbe Release 构建 0 警告/错误；三种 WPF Private Desktop 探针均退出 0，前台 HWND、输入 tick 未变，`isolation-clean=True`。日志：`20261101-053922-05b29af5.stdout.log`、`20261101-053927-622e547d.stdout.log`、`20261101-053933-afce6bca.stdout.log`。这证明在当前 synthetic provider 中，扫描结果要可靠呈现在活动 DefView 派生列需完整刷新并显式恢复选择/焦点；仍未验证可见闪烁、实际 ExplorerBrowser 产品、其它 Shell provider，也未接产品扫描器或用户配置。
+
+## 2026-11-01：跨卷文件操作后的双视图通知对账
+
+扩展 `--shell-change-reconciliation`，将源夹具放在 D: checkout 下的唯一 `.state/native-probe` 目录、目标夹具放在 C: 临时目录，并分别为两个窗格目录注册 Shell change 通知。跨卷 `IFileOperation.MoveItems` 后观察到源 `Deleted` 和目标 `Created`；通过通知后的 Shell 重枚举与行模型对账，源/目标计数由 3/1 收敛为 1/3，两个目标文件字节均与原内容匹配。源/目标未移动锚点行 ID、选区及焦点保留，移动源行退休且目标行新增。后续跨窗格 Copy/Rename/Delete 的既有对账序列也继续通过。
+
+NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退出码 0，隐藏窗口与前台不变。该证据补齐普通 filesystem 跨卷移动后的双视图通知和行数收敛，不代表 ExplorerBrowser 产品接线、可见 Shell 操作 UI、真实 OLE 拖放、ZIP 跨卷移动或其它 provider 已验证。夹具运行后清理。

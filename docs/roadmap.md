@@ -5479,3 +5479,5 @@ Private Desktop ZIP `IShellView` 的 view-owned `IContextMenu` 现经过真实 `
 ## 2026-11-01：跨卷 filesystem / ZIP Shell 复制与移动
 
 Private Desktop NativeProbe 将源夹具放在 D:、目标放在 C: 系统临时目录，逐轮确认盘符根不同。普通 filesystem 与 ZIP `IShellView` 数据对象各执行跨卷 `IFileOperation.CopyItems`：均 `S_OK`、未 abort、目标字节 `0x41` 正确，源保持；filesystem 源另经跨卷 `MoveItems` 成功，目标内容匹配且原源消失。NativeProbe Release build 0 警告/错误，watchdog exit 0，前台/输入与唯一目标目录清理守卫通过。当前未测 ZIP 跨卷 MoveItems、实际 OLE 拖放、交互提示、回滚/失败路径、产品 ExplorerBrowser 或其它 provider；不推断底层 copy/delete 实现。日志 `src/.state/native-probe-watchdog/20261101-055626-be1b14db.stdout.log`。详情见 [IShellView 原型记录](ishellview-color-spike.md#2026-11-01filesystem--zip-跨卷-ifileoperation)。
+
+2026-11-01 跨卷移动双窗格通知续验：NativeProbe `--shell-change-reconciliation` 在 D: 源、C: 目标上分别监听 Shell 通知，跨卷 MoveItems 后验证源 Deleted、目标 Created、两边行数 3/1→1/3、文件内容、锚点行 ID、选区与焦点；后续 Copy/Rename/Delete 对账通过。Release NativeProbe build 及探针退出码 0，隐藏窗体且前台不变。此为自有行模型证据，产品 ExplorerBrowser 与真实可见体验仍待迁移门槛及集中 UI 验收。
