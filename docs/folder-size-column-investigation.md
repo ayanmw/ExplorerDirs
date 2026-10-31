@@ -1009,3 +1009,7 @@ NativeProbe 的递归大小快照此前只按 Shell 绝对解析名匹配。即�
 NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELETE 和 UPDATEITEM 转成父目录失效通知；`SHCNE_ATTRIBUTES` 未覆盖。该事件表示 Shell 项目或文件夹属性发生变化，可能影响自有行模型的展示规则，例如只读属性颜色。先在 `--synthetic-child-notification-routing-smoke` 加入 ATTRIBUTES 断言，旧 adapter 按预期失败；随后纳入相同的延迟父目录更新路径。CREATE/RENAMEITEM/DELETE/UPDATEITEM/ATTRIBUTES 分类均通过，UPDATEDIR 和未知事件仍拒绝转换；原生 adapter `/W4 /WX` 与 NativeProbe Release build 通过，0 警告/错误。
 
 本轮没有创建 Shell view，因此只证明事件分类合同与编译，不证明 Windows 实际发出该事件后 DefView 是否重枚举、属性是否更新或颜色是否刷新。该逻辑仅属于隔离 NativeProbe adapter，不接入 ExplorerBrowser 产品。[Microsoft SHChangeNotify](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify) 明确将 `SHCNE_ATTRIBUTES` 定义为项目或文件夹属性变化。
+
+#### 后续 Private Desktop 验证尝试（未通过）
+
+随后尝试将 `SHCNE_ATTRIBUTES` 从分类推进到真实隔离 Shell view：临时文件由普通项改为 Hidden，发送属性通知，观察合成 view 是否重新枚举并移除该行。旧分类（不含 ATTRIBUTES）和恢复后的分类各运行一次；两次都在 `cleanup-destroy-parent-window-1` 阶段由 watchdog 超时终止，等待链包含 COM/IME 线程，外层前台基线为 `LockApp` 且未变化。由于 watchdog 在父窗口销毁阶段终止进程，现有输出不足以确认属性行断言结果；不能视为通过，也不能据此归因产品 Shell 行为。该临时场景已撤回。无窗口分类合同及 wrapped-folder 合同随后通过，前台未变。探针异常退出留下运行 ID `a8d40fb43d464bd5a749ca388cd0b96d`、`5b210403d73d4f8585c05c3d4087ce2f` 对应的临时 fixture 与 HKCU 注册项；精确清理命令被自动策略拒绝，未尝试绕过。后续需先在允许的运行条件下解决 Private Desktop teardown，再重复视图级验证。
