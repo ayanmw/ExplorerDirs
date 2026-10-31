@@ -72,6 +72,18 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 构建通过；`--static-shell-
 
 NativeProbe Release 构建 0 警告/错误，未创建 `IShellView` 窗口。该结果将生产扫描器的字节汇总接到自然 Shell 激活的共享快照 provider；扫描结果按路径送入，文件系统身份由 adapter 从 Shell 行重新解析并校验。本轮不测试生产异步调度/取消/重扫发布、活动 DefView 更新、缓存限额/长期内存、ExplorerBrowser 产品接线或可见列。
 
+### 2026-11-01：活动 DefView 更新路径对照（生产扫描器输入）
+
+将活动 view 的实时快照发布路径接到生产 `RecursiveDirectoryScanner.ScanDirectoryTreeForPaths`：先修改隔离夹具，再由扫描器得到 child=1 B，并将扫描结果发布到 Shell provider。对照两种活动 view 更新方式：
+
+- 仅发送 `SHCNE_UPDATEITEM + SHCNE_UPDATEDIR` 后，2.5 秒观察窗口内没有触发 `EnumObjects`；自定义大小列没有被重新读取，值和排序均未更新。
+- 调用整 view `IShellView.Refresh()` 后，Shell 触发一次枚举并重读两行；child 大小显示为 1 B，数值排序更新。隐藏探针从 Refresh 到值/顺序读回约 266 ms。
+- 整 view 刷新会清除选区和焦点；紧接着使用 `ShellViewSelectionSnapshot` 恢复，选区、焦点均成功读回。
+
+验证运行于隔离 Private Desktop 的 WPF 根宿主；宿主正常返回，前台/输入未变，watchdog 隔离清理通过。Shell 在宿主存活期间仍持有 DLL COM 引用（`DllCanUnloadNow=S_FALSE`），隔离进程退出后回收。
+
+证据边界：266 ms 是隐藏探针的状态轮询时间，不是像素或感知延迟测量；不能据此判断用户可见的黑屏/闪烁。该探针使用合成 Shell provider，没有改动产品 ExplorerBrowser，也没有证明产品扫描器、焦点恢复及刷新策略已接线或完成可见 UI 验收。当前结论仅是：目录变更通知未更新该自定义列，而整 view Refresh 可更新值与排序，且必须另行恢复选区/焦点。
+
 ## 2026-10-31：扫描快照按绝对 Shell 身份注入原生列
 
 NativeProbe 新增无窗口合同，将生产 `RecursiveDirectoryScanner` 的扫描值与 Shell 返回的 `SIGDN_DESKTOPABSOLUTEPARSING` 名称一起传入合成 `IShellFolder2`。provider 根据 backing folder 和行 PIDL 再解析一次绝对 parsing name，并要求与传入 identity 匹配后才写入实例级逐行快照表。夹具扫描时目标目录为 10 B，随后磁盘内容变为 7 B；注入 10 B 后列文本为 `10`、属性为 `VT_UI8(10)`，且 `CompareIDs` 将它排在 8 B 根文件之后。两个兄弟目录分别存入 10 B 与 12 B，只更新第一行到 6 B；同一 PIDL 的文本、属性及排序随之更新，第二行仍保持 12 B 和独立排序。随后在同一 provider 实例中重新执行 `EnumObjects`，新生成的两个行 PIDL 仍通过 absolute parsing name 命中各自最新快照。

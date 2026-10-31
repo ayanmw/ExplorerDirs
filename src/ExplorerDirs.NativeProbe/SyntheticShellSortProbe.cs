@@ -1232,9 +1232,17 @@ public static class SyntheticShellSortProbe
         else SetBackingChildSize(backingFolder, updatedSize);
         if (publishLiveSnapshot)
         {
+            var childPath = Path.Combine(backingFolder, "child");
+            var scan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                backingFolder, [childPath], CancellationToken.None);
+            if (!scan.TryGetValue(Path.GetFullPath(childPath), out var scannedChild) ||
+                scannedChild.Bytes != checked((ulong)updatedSize))
+                throw new InvalidOperationException($"The production scanner did not produce the expected {updatedSize}-byte live update.");
             var publish = Marshal.GetDelegateForFunctionPointer<PublishRecursiveSizeSnapshot>(
                 NativeLibrary.GetExport(module, "PublishSyntheticRecursiveSizeSnapshotForViewProbe"));
-            Check(publish(view, "child", checked((ulong)updatedSize)));
+            Check(publish(view, "child", scannedChild.Bytes));
+            Console.WriteLine($"synthetic-size-update: snapshot-source=production-recursive-scanner; bytes={scannedChild.Bytes}; " +
+                $"files={scannedChild.Files}; directories={scannedChild.Directories}; unreadable={scannedChild.Unreadable}");
             SetSyntheticSizeOverride(module, -1);
         }
         else
@@ -1343,7 +1351,9 @@ public static class SyntheticShellSortProbe
             }
         }
 
-        var after = WaitForSizeState(listView, module, updatedSize.ToString(), expectedFirstName: preserveScrollAnchor ? null : "small.bin", expectedSelection: "small.bin");
+        var after = WaitForSizeState(listView, module, updatedSize.ToString(),
+            expectedFirstName: preserveScrollAnchor ? null : "small.bin", expectedSelection: "small.bin",
+            waitForSelection: !publishLiveSnapshot);
         var liveUpdateSelectionRestored = after.SelectionPreserved;
         if (publishLiveSnapshot && !liveUpdateSelectionRestored)
         {
@@ -1492,7 +1502,8 @@ public static class SyntheticShellSortProbe
     }
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)
-        WaitForSizeState(nint listView, nint module, string expectedChildSize, string? expectedFirstName, string? expectedSelection)
+        WaitForSizeState(nint listView, nint module, string expectedChildSize, string? expectedFirstName,
+            string? expectedSelection, bool waitForSelection = true)
     {
         var deadline = Environment.TickCount64 + 2500;
         string[] names = [];
@@ -1535,7 +1546,7 @@ public static class SyntheticShellSortProbe
                 string.Equals(sizes[childIndex], expectedChildSize, StringComparison.Ordinal);
             orderUpdated = expectedFirstName is null || names.Length > 0 && string.Equals(names[0], expectedFirstName, StringComparison.OrdinalIgnoreCase);
             selectionPreserved = expectedSelection is null || HasSelectionAndFocus(listView, names, expectedSelection);
-            if ((valueUpdated || sizeColumnIndex < 1) && orderUpdated && selectionPreserved) break;
+            if ((valueUpdated || sizeColumnIndex < 1) && orderUpdated && (!waitForSelection || selectionPreserved)) break;
             Pump(50);
         }
         return (valueUpdated, orderUpdated, selectionPreserved, sizeColumnIndex, names, sizes, sizeColumnProbe);
