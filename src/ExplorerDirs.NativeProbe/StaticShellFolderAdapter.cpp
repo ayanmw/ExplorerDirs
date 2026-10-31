@@ -1893,7 +1893,7 @@ namespace
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
                 }
-                // S_OK consumes this notification. Let DefView apply its default filesystem update.
+                // E_NOTIMPL lets DefView continue its default filesystem update handling.
                 return E_NOTIMPL;
             }
             if (message == SFVM_SETISFV)
