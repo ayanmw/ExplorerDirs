@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 Shell 延迟子菜单接口路由：工具栏/编辑命令查询 Shell canonical verb 时，初始化懒加载的“新建文件夹”子菜单现优先调用 `IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)`；返回 `E_NOTIMPL` 时回退 `IContextMenu2.HandleMenuMsg`。旧实现只查 `IContextMenu2`，无法使用只由现代 handler 正确处理的扩展菜单。SettingsSmoke 先在旧实现上按预期失败，后覆盖现代 handler 优先及 `E_NOTIMPL` 旧接口回退；完整 Release SettingsSmoke 与 App Release build 通过，0 警告/错误。未显示菜单；文件区右键仍由 ExplorerBrowser 原生生成，实际第三方菜单展示仍待集中 GUI 验收。
+
 2026-10-31 包装子 PIDL 的绝对身份日志澄清：常规 wrapped-folder smoke 现同时检查 standalone 绝对组合被拒绝，以及 `SHCreateItemWithParent(adapter, wrappedChild)` 后文件系统路径、绝对 parsing name 和 parent/child 身份都正确；Release NativeProbe build 0 警告/错误，完整 wrapped-folder smoke 通过，未创建窗口。原 `E_INVALIDARG` 是缺少解释包装子项的父 adapter 时的预期结果，不是目标文件路径失效。详见[包装 PIDL 调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的父绑定身份复核)。
 
 2026-10-31 隔离多选 Shell 菜单初始化消息：包装 PIDL 的多选 `IContextMenu3` 内存菜单对 5 个子菜单分别收到 `HandleMenuMsg2(WM_INITMENUPOPUP)`；4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，未出现其它失败。NativeProbe Release build 0 警告/错误，完整 `--static-shell-column-wrapped-folder-smoke` 通过，前台不变、菜单未显示。`E_NOTIMPL` 的上层处理以及窗口消息转发/绘制尚未验证；产品仍使用 ExplorerBrowser。详见[Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。

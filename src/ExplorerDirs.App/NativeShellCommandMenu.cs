@@ -65,8 +65,22 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
             // NewFolder has a canonical verb before its menu item exists. Shell
             // materializes this one submenu on WM_INITMENUPOPUP; querying its
             // state earlier incorrectly disables New Folder in writable folders.
-            var iid = new Guid("000214F4-0000-0000-C000-000000000046");
-            if (Marshal.QueryInterface(_context, in iid, out var context2) < 0) return false;
+            var iid3 = new Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
+            if (Marshal.QueryInterface(_context, in iid3, out var context3) >= 0)
+            {
+                try
+                {
+                    var handle = Marshal.GetDelegateForFunctionPointer<MenuMessage2>(
+                        Marshal.ReadIntPtr(Marshal.ReadIntPtr(context3), 7 * IntPtr.Size));
+                    var result = handle(context3, 0x117, item.Submenu, index, out _); // WM_INITMENUPOPUP
+                    if (result >= 0) return true;
+                    if (result != unchecked((int)0x80004001)) return false; // E_NOTIMPL: try the legacy interface.
+                }
+                finally { Marshal.Release(context3); }
+            }
+
+            var iid2 = new Guid("000214F4-0000-0000-C000-000000000046");
+            if (Marshal.QueryInterface(_context, in iid2, out var context2) < 0) return false;
             try
             {
                 var handle = Marshal.GetDelegateForFunctionPointer<MenuMessage>(
@@ -144,6 +158,8 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
     private delegate int CommandString(nint self, nuint commandId, uint flags, nint reserved, nint name, uint length);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int MenuMessage(nint self, uint message, nint wParam, nint lParam);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int MenuMessage2(nint self, uint message, nint wParam, nint lParam, out nint result);
 
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);

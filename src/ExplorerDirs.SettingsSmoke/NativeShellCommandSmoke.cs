@@ -31,7 +31,8 @@ internal static class NativeShellCommandSmoke
             try
             {
                 using var menu = new NativeShellCommandMenu(Marshal.GetUniqueObjectForIUnknown(lazyUnknown), 42);
-                Check(lazy.Initializations == (parentEnabled ? 1 : 0) && menu.IsEnabled("NewFolder") == (parentEnabled && enabled),
+                Check(lazy.ModernMessageAttempts == (parentEnabled ? 1 : 0) &&
+                    lazy.Initializations == (parentEnabled ? 1 : 0) && menu.IsEnabled("NewFolder") == (parentEnabled && enabled),
                     "lazy New submenu retains parent and child disabled states");
                 Check(lazy.LastOffset == -1, "availability query never invokes NewFolder");
                 if (parentEnabled && enabled)
@@ -40,6 +41,16 @@ internal static class NativeShellCommandSmoke
             }
             finally { Marshal.Release(lazyUnknown); GC.KeepAlive(lazy); }
         }
+
+        var modern = new MenuTestServer3();
+        var modernUnknown = Marshal.GetIUnknownForObject(modern);
+        try
+        {
+            using var menu = new NativeShellCommandMenu(Marshal.GetUniqueObjectForIUnknown(modernUnknown), 42);
+            Check(menu.IsEnabled("NewFolder") && modern.ModernInitializations == 1 && modern.LegacyAttempts == 0,
+                "IContextMenu3 handles lazy New submenus before its legacy interface");
+        }
+        finally { Marshal.Release(modernUnknown); GC.KeepAlive(modern); }
     }
 
     private static void Check(bool value, string label)
@@ -77,13 +88,14 @@ public struct TestMenuInvoke
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-public sealed class MenuTestServer : IMenuTest, IMenuTest2
+public sealed class MenuTestServer : IMenuTest, IMenuTest2, IMenuTest3
 {
     public uint Flags;
     public nint LastOffset = -1, Owner;
     public bool LazyNewMenu, NewFolderEnabled;
     public bool NewMenuEnabled = true;
     public int Initializations;
+    public int ModernMessageAttempts;
     private nint newMenu;
     private uint newFolderId;
     public int QueryContextMenu(nint menu, uint index, uint firstId, uint lastId, uint flags)
@@ -128,6 +140,15 @@ public sealed class MenuTestServer : IMenuTest, IMenuTest2
         return 0;
     }
 
+    public int HandleMenuMsg2(uint message, nint wParam, nint lParam, out nint result)
+    {
+        result = 0;
+        if (!LazyNewMenu || message != 0x117 || wParam != newMenu || lParam != 0)
+            return unchecked((int)0x80070057);
+        ModernMessageAttempts++;
+        return unchecked((int)0x80004001); // E_NOTIMPL lets the legacy handler initialize the submenu.
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct MenuItemInfo
     {
@@ -141,4 +162,63 @@ public sealed class MenuTestServer : IMenuTest, IMenuTest2
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "AppendMenuW")]
     private static extern bool AppendMenu(nint menu, uint flags, nuint id, string text);
+}
+
+[ComVisible(true), Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMenuTest3
+{
+    [PreserveSig] int QueryContextMenu(nint menu, uint index, uint firstId, uint lastId, uint flags);
+    [PreserveSig] int InvokeCommand(ref TestMenuInvoke info);
+    [PreserveSig] int GetCommandString(nuint command, uint flags, nint reserved, nint text, uint count);
+    [PreserveSig] int HandleMenuMsg(uint message, nint wParam, nint lParam);
+    [PreserveSig] int HandleMenuMsg2(uint message, nint wParam, nint lParam, out nint result);
+}
+
+[ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+public sealed class MenuTestServer3 : IMenuTest, IMenuTest2, IMenuTest3
+{
+    public int ModernInitializations, LegacyAttempts;
+    private nint submenu;
+    public int QueryContextMenu(nint menu, uint index, uint firstId, uint lastId, uint flags)
+    {
+        submenu = CreatePopupMenu();
+        if (submenu == 0 || !AppendMenu(menu, 0x10, (nuint)submenu, "Shell new"))
+            return unchecked((int)0x80004005);
+        var info = new MenuItemInfo { Size = (uint)Marshal.SizeOf<MenuItemInfo>(), Mask = 2, Id = firstId };
+        if (!SetMenuItemInfo(menu, index, true, ref info)) return unchecked((int)0x80004005);
+        return 2;
+    }
+    public int InvokeCommand(ref TestMenuInvoke info) => 0;
+    public int GetCommandString(nuint command, uint flags, nint reserved, nint text, uint count)
+    {
+        if (command > 1 || flags != 4 || count < 16) return unchecked((int)0x80070057);
+        var verb = command == 0 ? "New" : "NewFolder";
+        Marshal.Copy((verb + '\0').ToCharArray(), 0, text, verb.Length + 1);
+        return 0;
+    }
+    public int HandleMenuMsg(uint message, nint wParam, nint lParam)
+    {
+        LegacyAttempts++;
+        return unchecked((int)0x80004001);
+    }
+    public int HandleMenuMsg2(uint message, nint wParam, nint lParam, out nint result)
+    {
+        result = 0;
+        if (message != 0x117 || wParam != submenu || lParam != 0 || ModernInitializations != 0)
+            return unchecked((int)0x80070057);
+        ModernInitializations++;
+        return AppendMenu(submenu, 0, 2, "New folder") ? 0 : unchecked((int)0x80004005);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MenuItemInfo
+    {
+        public uint Size, Mask, Type, State, Id;
+        public nint Submenu, Checked, Unchecked, Data, Text;
+        public uint Length;
+        public nint Bitmap;
+    }
+    [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll", EntryPoint = "SetMenuItemInfoW")] private static extern bool SetMenuItemInfo(nint menu, uint item, bool position, ref MenuItemInfo info);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "AppendMenuW")] private static extern bool AppendMenu(nint menu, uint flags, nuint id, string text);
 }
