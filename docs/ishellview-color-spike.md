@@ -12,6 +12,12 @@ Network Places 试探中，`IFolderView.ItemCount` 和 `SysListView32` 的行数
 
 这一行数门槛是颜色映射的身份正确性前提，不代表所有 Shell provider 都用相同的列表索引模型。
 
+### 2026-11-01：Network Places 行数瞬态差异诊断
+
+新增只读 `--ishellview-network-places-row-map-private-desktop`，跳过该 provider 不支持的文件夹 `IDropTarget` 注册，只比较 `IFolderView2::ItemCount`、DefView `SysListView32` 行数及行标签与 Shell 项显示名的对应关系。修正 provider 项数等待后连续三轮 Private Desktop 运行分别观察到 3、1、3 个项目；每轮的六组 40 ms 采样中 Shell/DefView 行数保持相等，所读行标签均与 Shell 项一对一匹配。此前初次运行也曾观察到 2 项。输出只记录标签长度和 Shell 项索引，不记录网络位置名称或路径。Release build 0 警告/错误，最终三轮探针退出码 0，foreground/input/cleanup 守卫通过。
+
+这收窄了先前 `shell-items=1`、`DefView rows=2`、仅 1 个颜色身份的失败：当前初始化完成后的采样未复现持续行集合差异，且该 namespace 的项目数会随独立实例变化；尚不能确定旧失败是两个接口间的瞬时更新还是其它 provider 时序。Network Places 未建立受支持的 parent drop target，未进行逐项颜色像素验证，现有行数门槛继续保留；不把该结果视为颜色支持或迁移门槛通过。
+
 ### 2026-11-01：Libraries pathless provider 逐行像素采样
 
 新增 `color-libraries-private-desktop` 并按 Shell 动态项目数采样。当前 Libraries provider 枚举 6 个项目（Git、Subversion、视频、图片、文档、音乐），均为 pathless PIDL 且均为文件夹；逐项回调 `6/6`，背景像素命中数为 9,200、9,210、9,247、9,269、9,247、9,247；文本色命中数为 16、54、36、57、45、73。普通父 `IDropTarget` 注册成功，Private Desktop 前台/输入未变化并完成清理；Release 构建 0 警告/错误，watchdog exit 0。

@@ -2515,7 +2515,7 @@ internal static class ShellViewColorSpike
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
         bool zipBackgroundMenuProbe = false, bool zipExtractInvokeProbe = false,
         bool virtualThisPcColorProbe = false, bool virtualLibrariesColorProbe = false,
-        bool virtualDesktopColorProbe = false)
+        bool virtualDesktopColorProbe = false, bool networkPlacesRowMapProbe = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -2561,7 +2561,8 @@ internal static class ShellViewColorSpike
                 if (createHr < 0) Marshal.ThrowExceptionForHR(createHr);
                 if (nextWindow == 0)
                     throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
-                RegisterFolderDropTarget(nextFolder, nextWindow, host!);
+                if (!networkPlacesRowMapProbe)
+                    RegisterFolderDropTarget(nextFolder, nextWindow, host!);
                 var nextListView = FindChildByClass(nextWindow, "SysListView32");
                 if (nextListView != 0) _ = ApplyFixtureViewBackground(nextListView, isActiveView: true);
 
@@ -2640,6 +2641,11 @@ internal static class ShellViewColorSpike
                 shellLocation = "shell:Desktop";
                 fixturePaths = [];
             }
+            else if (networkPlacesRowMapProbe)
+            {
+                shellLocation = "shell:NetworkPlacesFolder";
+                fixturePaths = [];
+            }
             else
             {
                 fixturePaths =
@@ -2699,7 +2705,10 @@ internal static class ShellViewColorSpike
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out viewWindow));
             if (viewWindow == 0)
                 throw new InvalidOperationException("CreateViewWindow succeeded without returning a view window.");
-            RegisterFolderDropTarget(folder, viewWindow, host);
+            if (!networkPlacesRowMapProbe)
+                RegisterFolderDropTarget(folder, viewWindow, host);
+            else
+                Console.WriteLine("ishellview-color-spike: Network Places folder IDropTarget registration skipped for read-only row identity diagnosis.");
             var filterSiteHr = Marshal.QueryInterface(view, in FolderFilterSiteId, out var filterSite);
             if (filterSite != 0) Marshal.Release(filterSite);
             Console.WriteLine($"ishellview-color-spike: direct-view-ifolderfiltersite={filterSiteHr:X8}");
@@ -2854,15 +2863,17 @@ internal static class ShellViewColorSpike
                 }
                 return GetForegroundWindow() == foreground ? 0 : 1;
             }
-            var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe
+            var allItems = virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe || networkPlacesRowMapProbe
                 ? WaitForStableShellViewItemCount(folderView)
                 : WaitForShellViewItemCount(folderView, expectedCount: 2);
-            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe ? allItems : 3;
+            var minimumFilterCalls = virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe || networkPlacesRowMapProbe ? allItems : 3;
             if (host.IncludeObjectCalls < minimumFilterCalls || itemFilter.ShouldShowCalls < minimumFilterCalls)
                 throw new Exception($"The color host did not route all fixture items through its Shell filter: " +
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
                 $"include-calls={host.IncludeObjectCalls}; filter-calls={itemFilter.ShouldShowCalls}; filtered-out=True");
+            if (networkPlacesRowMapProbe)
+                return DiagnoseNetworkPlacesRowMap(view, folderView, folder, pidl, foreground);
             if (virtualZipProviderProbe || virtualThisPcColorProbe || virtualLibrariesColorProbe || virtualDesktopColorProbe)
             {
                 var providerName = virtualZipProviderProbe ? "ZIP" : virtualThisPcColorProbe ? "ThisPC" : virtualLibrariesColorProbe ? "Libraries" : "Desktop";
@@ -3285,7 +3296,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3888,6 +3899,85 @@ internal static class ShellViewColorSpike
             }
         }
         return string.Join('|', names);
+    }
+
+    private static int DiagnoseNetworkPlacesRowMap(nint view, nint folderView, nint parentFolder,
+        nint folderPidl, nint foreground)
+    {
+        Check(At<GetWindow>(view, 3)(view, out var viewWindow));
+        var listView = FindChildByClass(viewWindow, "SysListView32");
+        if (listView == 0)
+            throw new InvalidOperationException("Network Places does not expose a DefView SysListView32.");
+
+        var countSamples = new List<string>(6);
+        for (var sample = 0; sample < 6; sample++)
+        {
+            Pump(40);
+            Check(At<ItemCount>(folderView, 7)(folderView, 2, out var sampledShellCount)); // SVGIO_ALLVIEW.
+            var sampledListCount = checked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT.
+            countSamples.Add($"{sampledShellCount}/{sampledListCount}");
+        }
+
+        Check(At<ItemCount>(folderView, 7)(folderView, 2, out var shellItemCount)); // SVGIO_ALLVIEW.
+        var listItemCount = checked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT.
+        var shellNames = new List<string>(shellItemCount);
+        nint imageList = 0;
+        for (var index = 0; index < shellItemCount; index++)
+        {
+            Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var childPidl));
+            nint absolutePidl = 0;
+            try
+            {
+                absolutePidl = ILCombine(folderPidl, childPidl);
+                if (absolutePidl == 0)
+                    throw new InvalidOperationException("Could not combine a Network Places child PIDL.");
+                shellNames.Add(ShellListViewRowIdentity.Capture(parentFolder, childPidl, absolutePidl, ref imageList).DisplayName);
+            }
+            finally
+            {
+                if (absolutePidl != 0) Marshal.FreeCoTaskMem(absolutePidl);
+                Marshal.FreeCoTaskMem(childPidl);
+            }
+        }
+
+        var rows = new List<string>(listItemCount);
+        var matchedShellIndices = new HashSet<int>();
+        for (var index = 0; index < listItemCount; index++)
+        {
+            var label = GetNativeListViewText(listView, index);
+            var matches = Enumerable.Range(0, shellNames.Count)
+                .Where(shellIndex => shellNames[shellIndex].Equals(label, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            matchedShellIndices.UnionWith(matches);
+            rows.Add($"{index}:label-length={label.Length};shell-index-matches=[{string.Join(',', matches)}];empty={label.Length == 0}");
+        }
+
+        var unmatchedShellItems = Enumerable.Range(0, shellNames.Count)
+            .Where(shellIndex => !matchedShellIndices.Contains(shellIndex)).ToArray();
+        Console.WriteLine($"network-places-row-map: shell-items={shellItemCount}; defview-rows={listItemCount}; " +
+            $"count-samples=[{string.Join(',', countSamples)}]; shell-items-without-row=[{string.Join(',', unmatchedShellItems)}]; rows=[{string.Join('|', rows)}]; " +
+            $"labels-redacted=True; foreground-unchanged={GetForegroundWindow() == foreground}");
+        return GetForegroundWindow() == foreground ? 0 : 1;
+    }
+
+    private static string GetNativeListViewText(nint listView, int index)
+    {
+        const int capacity = 512;
+        var buffer = Marshal.AllocHGlobal(capacity * sizeof(char));
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewText>());
+        try
+        {
+            Marshal.WriteInt16(buffer, 0);
+            var item = new NativeListViewText { Item = index, Text = buffer, TextMax = capacity };
+            Marshal.StructureToPtr(item, itemPointer, false);
+            _ = SendMessageW(listView, 0x1073, (nint)index, itemPointer); // LVM_GETITEMTEXTW.
+            return Marshal.PtrToStringUni(buffer) ?? string.Empty;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(itemPointer);
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     private static int CaptureVirtualProviderColorPixels(nint view, nint folderView, nint parentFolder,
@@ -5396,6 +5486,18 @@ internal static class ShellViewColorSpike
         public nint ItemData;
         public uint TextColor;
         public uint TextBackground;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeListViewText
+    {
+        public uint Mask;
+        public int Item;
+        public int SubItem;
+        public uint State;
+        public uint StateMask;
+        public nint Text;
+        public int TextMax;
+        public int Image;
+        public nint Param;
     }
     private static string DescribeSharedMenu(nint menu)
     {

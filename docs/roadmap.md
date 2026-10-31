@@ -5391,3 +5391,9 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 当前隔离探针确认 view-owned ZIP 背景菜单的 `extract` 动词处于 enabled。对该 view 菜单和 ZIP 文件夹 `IShellFolder.CreateViewObject(IContextMenu)` 菜单分别执行 ANSI canonical verb，`InvokeCommand` 均返回 `S_OK`，等待 3 秒后临时夹具仍无解压文件，隔离 Desktop 也没有除宿主外的可见顶层窗口。Unicode `VerbW` + `CMIC_MASK_UNICODE` 返回 `E_INVALIDARG`。Release NativeProbe build 0 警告/错误；最终诊断 watchdog exit 0，前台/输入/清理守卫通过。
 
 `S_OK` 未转化为可观察的解压结果，因此不视为命令功能通过；还未验证真实 `TrackPopupMenu` 交互初始化/选择是否改变结果，也未验证操作后的 Shell 通知与行更新。该操作只指向临时 ZIP fixture，未改用户数据、产品 ExplorerBrowser 或发布包。
+
+## 2026-11-01：Network Places DefView 行身份诊断
+
+只读 Private Desktop 探针跳过不受支持的文件夹 `IDropTarget` 注册，修正 provider 项数等待后连续三次比较 `IFolderView2` 与 `SysListView32`：独立 view 的项目数分别为 3、1、3（此前初次运行也曾为 2），但每个 view 内六组连续采样的 Shell/DefView 行数相同，DefView 标签与 Shell 子项显示名均为一对一映射。探针仅输出标签长度和匹配索引，未记录网络位置名称/路径；Release NativeProbe build 0 警告/错误，三轮 watchdog exit 0，前台/输入/隔离清理守卫通过。
+
+这表明当前环境的 Network Places 内容会随 view 实例变化；它没有证明此前 `1 Shell item / 2 DefView rows` 失败的具体根因，也没有验证持续更新期间的稳定性。行数不等时仍拒绝按索引着色；该 namespace 也尚无已确认拖放目标或像素着色证据，不能进入迁移通过项。完整记录见[IShellView 颜色原型](ishellview-color-spike.md#2026-11-01network-places-行数瞬态差异诊断)。
