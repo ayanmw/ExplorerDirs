@@ -5145,3 +5145,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 ### 2026-10-31：DefView 更新派生列的受干扰复核
 
 WPF Private Desktop 的单项通知探针初始从 `GetDetailsOf` 读出目录 `10`/文件 `4`；通知后 DefView 重新枚举，却丢失自定义列且没有再次请求行值。前台 HWND 未变，但系统输入 tick 变化，故该轮 exit 1，只作为诊断线索；本轮临时注册和夹具已清理。此前干净探针与 API 核对已指出 DefView 缺少受支持的逐项派生值失效入口，不再增加通知或 ListView 消息变体。该功能仍未接入产品；后续需转向评审自有视图模型及其完整 Shell 兼容门槛。
+
+### 2026-10-31：filesystem `IShellFolder` 背景菜单能力边界
+
+无窗口 probe 在真实临时文件夹上通过 `IShellFolder::CreateViewObject(IContextMenu)` 取得并构造 21 项内存菜单，包含第三方扩展、“新建”和“属性”，未包含“查看、排序、分组、刷新”；没有创建 Shell view 或显示菜单。此接口不能替代 Explorer 视图级背景菜单，自有行列表仍缺受支持的原生 View 菜单/命令来源。详见[逐行大小调查](folder-size-column-investigation.md#2026-10-31普通文件夹的-shell-背景菜单来源)。

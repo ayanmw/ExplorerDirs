@@ -201,6 +201,8 @@ internal static class Program
             return CommonListViewColorBaseline.RunDataContract();
         if (args.Length == 1 && args[0] == "--common-listview-virtual-folder-contract")
             return CommonListViewVirtualFolderContract.Run();
+        if (args.Length == 1 && args[0] == "--filesystem-folder-background-menu")
+            return FileSystemFolderBackgroundMenuProbe.Run();
         if (args.Length == 1 && args[0] == "--common-listview-relative-size-contract")
             return CommonListViewColorBaseline.RunRelativeSizeContract();
         if (args.Length == 1 && args[0] == "--common-listview-navigation-contract")
@@ -300,6 +302,7 @@ internal static class Program
             Console.WriteLine("       --common-listview-color-baseline-private-desktop (standard ListView custom-draw control comparison)");
             Console.WriteLine("       --common-listview-data-contract (hidden standard ListView update/sort contract)");
             Console.WriteLine("       --common-listview-virtual-folder-contract (hidden ListView rows from virtual Control Panel Shell items)");
+            Console.WriteLine("       --filesystem-folder-background-menu (filesystem IShellFolder background menu; no Shell view or popup)");
             Console.WriteLine("       --common-listview-relative-size-contract (hidden Shell row relative-size update contract)");
             Console.WriteLine("       --common-listview-navigation-contract (hidden Shell folder PIDL, parent, and history contract)");
         Console.WriteLine("       --ishellview-color-spike-offscreen (same probe with WS_VISIBLE window outside the virtual desktop; no input)");
