@@ -78,7 +78,7 @@ internal static class ShellListViewRowModel
 
     internal static IReadOnlyList<ShellListViewRow> ApplyRecursiveScanResults(
         IReadOnlyList<ShellListViewRow> rows,
-        IReadOnlyDictionary<string, RecursiveDirectoryScanResult> results)
+        IReadOnlyDictionary<string, ShellListViewRowScanResult> results)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(results);
@@ -88,13 +88,13 @@ internal static class ShellListViewRowModel
             var row = rows[index];
             if (IsFilesystemFolder(row))
             {
-                if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var summary))
+                if (results.TryGetValue(Path.GetFullPath(row.FileSystemPath!), out var scanResult))
                 {
                     var currentIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(row.FileSystemPath!);
                     if (row.FileSystemIdentity is not { } previousIdentity ||
-                        currentIdentity is not { } scannedIdentity || previousIdentity != scannedIdentity)
+                        previousIdentity != scanResult.Identity || currentIdentity != scanResult.Identity)
                     {
-                        // A path-only scan is valid only when both the row snapshot and current path identify the same folder.
+                        // The handle scan, row snapshot, and current path must all identify the same folder.
                         row = row with
                         {
                             RecursiveBytes = null,
@@ -106,8 +106,8 @@ internal static class ShellListViewRowModel
                     {
                         row = row with
                         {
-                            RecursiveBytes = summary.Bytes,
-                            RecursiveSummary = summary,
+                            RecursiveBytes = scanResult.Summary.Bytes,
+                            RecursiveSummary = scanResult.Summary,
                             FileSystemIdentity = currentIdentity ?? row.FileSystemIdentity
                         };
                     }

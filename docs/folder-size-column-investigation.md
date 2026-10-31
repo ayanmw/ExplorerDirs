@@ -773,3 +773,9 @@ NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临
 进一步复核发现，发布时再次读取路径身份仍无法证明扫描实际枚举的是哪个目录对象：若路径在扫描期间短暂指向替换目录、随后又恢复为原目录，行快照与发布时的文件 ID 会再次相同，而 `RecursiveDirectoryScanResult` 只有汇总值，未携带扫描所访问对象的身份。真实临时目录重命名/恢复配合合成的路径结果先复现当前模型接受该结果；这证明了路径结果接口的信息不足，但没有运行或声称真实递归扫描必然跨越该短暂替换。
 
 因此不添加第二次路径 ID 检查来冒充修复。要封闭这类窗口，隔离原型下一步必须让扫描结果与扫描实际打开的目录对象绑定，或以可靠的变更代际拒绝扫描结果；仅在扫描前/后按路径采样仍不能识别 ABA。此项尚未修复，产品仍未接入该行模型。
+
+## 2026-10-31：隔离递归扫描绑定到实际目录句柄
+
+NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开并由 `GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)` 枚举；每个子目录只在其打开句柄的卷序列号和 128 位文件 ID 与父目录返回的条目 ID 相同时才递归。扫描摘要携带根目录句柄身份，隔离行模型只在扫描对象、Shell 行快照及当前路径身份一致时写回。真实临时目录回归覆盖扫描器打开根后同路径替换，以及父目录枚举子项后该子项同路径替换；前者仍只汇总旧对象的 6 B，发布端拒绝替换路径；后者跳过身份不匹配的新对象并计入 unreadable。定向 `--shell-listview-row-model-smoke` 通过。
+
+此原型仍只用于 NativeProbe/SettingsSmoke，未接入 ExplorerBrowser、产品 F9 扫描器或用户界面。目录被重命名后，句柄仍能继续枚举原对象；若无法解析当前目录名，子路径回退会受路径可达性限制，相关项会被安全地略过而不是归给不同文件 ID。定向行模型 smoke、完整 Release SettingsSmoke、App/NativeProbe Release 构建（均 0 警告/错误）及 `git diff --check` 均通过；未启动 UI、隐藏 Shell view 或 ExplorerBrowser。

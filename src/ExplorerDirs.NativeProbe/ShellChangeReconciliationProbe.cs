@@ -58,7 +58,7 @@ internal static class ShellChangeReconciliationProbe
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out folderPidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out shellFolder));
             current = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
-            var initialScans = ScanLatestPaths(scanCoordinator, fixture, [sizeDirectory], out var initialScanWorker,
+            var initialScans = ScanLatestPaths(scanCoordinator, [sizeDirectory], out var initialScanWorker,
                 out var initialScanPublishedOnOwner);
             current = current with
             {
@@ -107,7 +107,7 @@ internal static class ShellChangeReconciliationProbe
             var updatedEnumeration = ShellListViewEnumerator.Enumerate(folderPidl, shellFolder);
             var updated = ShellListViewRowModel.Reconcile(current.Rows, updatedEnumeration.Rows, added.NextId);
             ShellListViewEnumerator.FreeRows(updated.RetiredRows);
-            var updatedScans = ScanLatestPaths(scanCoordinator, fixture, [sizeDirectory], out var updateScanWorker,
+            var updatedScans = ScanLatestPaths(scanCoordinator, [sizeDirectory], out var updateScanWorker,
                 out var updateScanPublishedOnOwner);
             current = updatedEnumeration with
             {
@@ -177,7 +177,7 @@ internal static class ShellChangeReconciliationProbe
                 renamedSizeFolder.RecursiveSummary is null &&
                 renamedSizeFolderRowIndex >= 0 && GetItemText(listView, renamedSizeFolderRowIndex, 1) == "";
 
-            var renamedFolderScans = ScanLatestPaths(scanCoordinator, fixture, [renamedSizeDirectory],
+            var renamedFolderScans = ScanLatestPaths(scanCoordinator, [renamedSizeDirectory],
                 out var folderRenameScanWorker, out var folderRenameScanPublishedOnOwner);
             current = current with
             {
@@ -411,8 +411,8 @@ internal static class ShellChangeReconciliationProbe
         return selectedStableRow && focusedStableRow;
     }
 
-    private static IReadOnlyDictionary<string, RecursiveDirectoryScanResult> ScanLatestPaths(
-        DirectoryTreeScanCoordinator coordinator, string root, IReadOnlyList<string> paths,
+    private static IReadOnlyDictionary<string, ShellListViewRowScanResult> ScanLatestPaths(
+        DirectoryTreeScanCoordinator coordinator, IReadOnlyList<string> paths,
         out int workerThreadId, out bool publishedOnOwnerThread)
     {
         var ownerThreadId = Environment.CurrentManagedThreadId;
@@ -420,12 +420,12 @@ internal static class ShellChangeReconciliationProbe
         var publishedOnOwner = false;
         var dispatcher = Dispatcher.CurrentDispatcher;
         var ownerContext = new DispatcherSynchronizationContext(dispatcher);
-        IReadOnlyDictionary<string, RecursiveDirectoryScanResult>? result = null;
+        IReadOnlyDictionary<string, ShellListViewRowScanResult>? result = null;
         var scan = coordinator.RunLatestAsync(
             cancellationToken =>
             {
                 observedWorkerThreadId = Environment.CurrentManagedThreadId;
-                return RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, paths, cancellationToken);
+                return HandleBoundRecursiveDirectoryScanner.Scan(paths, cancellationToken);
             },
             ownerContext, value =>
             {

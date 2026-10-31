@@ -170,16 +170,16 @@ internal static class CommonListViewColorBaseline
     internal static int RunRelativeSizeContract()
         => RunDataContract(relativeSizesOnly: true);
 
-    private static (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int OwnerThreadId, int WorkerThreadId)
-        ScanDirectoryTreeOffOwnerThread(DirectoryTreeScanCoordinator scans, string root,
+    private static (IReadOnlyDictionary<string, ShellListViewRowScanResult> Results, int OwnerThreadId, int WorkerThreadId)
+        ScanDirectoryTreeOffOwnerThread(DirectoryTreeScanCoordinator scans,
             IReadOnlyCollection<string> requestedPaths)
     {
         var ownerThreadId = Environment.CurrentManagedThreadId;
         var dispatcher = Dispatcher.CurrentDispatcher;
         var context = new DispatcherSynchronizationContext(dispatcher);
-        (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int WorkerThreadId) result = (null!, 0);
+        (IReadOnlyDictionary<string, ShellListViewRowScanResult> Results, int WorkerThreadId) result = (null!, 0);
         var scan = scans.RunLatestAsync(ticket => (
-            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(root, requestedPaths, ticket),
+            Results: HandleBoundRecursiveDirectoryScanner.Scan(requestedPaths, ticket),
             WorkerThreadId: Environment.CurrentManagedThreadId), context, value => result = value);
         PumpDispatcherUntil(() => scan.IsCompleted);
         if (!scan.GetAwaiter().GetResult()) throw new OperationCanceledException("The directory scan was retired before publication.");
@@ -218,13 +218,13 @@ internal static class CommonListViewColorBaseline
                 Path.GetFullPath(fixture), Path.GetFullPath(largeFolder), Path.GetFullPath(smallFolder)
             };
             using var scanCoordinator = new DirectoryTreeScanCoordinator();
-            var initialScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
+            var initialScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, requestedScanPaths);
             var initialScans = initialScan.Results;
             var initialScanRanOffOwnerThread = initialScan.WorkerThreadId != initialScan.OwnerThreadId;
             var initialScanReturnedToOwnerThread = Environment.CurrentManagedThreadId == initialScan.OwnerThreadId;
-            var largeScan = initialScans[Path.GetFullPath(largeFolder)];
-            var smallScan = initialScans[Path.GetFullPath(smallFolder)];
-            var fixtureScan = initialScans[Path.GetFullPath(fixture)];
+            var largeScan = initialScans[Path.GetFullPath(largeFolder)].Summary;
+            var smallScan = initialScans[Path.GetFullPath(smallFolder)].Summary;
+            var fixtureScan = initialScans[Path.GetFullPath(fixture)].Summary;
             Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out fixturePidl, 0, out _));
             Marshal.ThrowExceptionForHR(SHBindToObject(0, fixturePidl, 0, in ShellFolderId, out shellFolder));
             var enumeration = EnumerateShellRows(fixturePidl, shellFolder, new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase)
@@ -313,7 +313,7 @@ internal static class CommonListViewColorBaseline
             var fileChangeObserved = true;
             var updateApplied = true;
             var updateOwnerThreadId = Environment.CurrentManagedThreadId;
-            (IReadOnlyDictionary<string, RecursiveDirectoryScanResult> Results, int OwnerThreadId, int WorkerThreadId)? updateScan = null;
+            (IReadOnlyDictionary<string, ShellListViewRowScanResult> Results, int OwnerThreadId, int WorkerThreadId)? updateScan = null;
             if (relativeSizesOnly)
             {
                 using var fileChangeSignal = new ManualResetEventSlim();
@@ -333,8 +333,7 @@ internal static class CommonListViewColorBaseline
                     {
                         var requestOwnerThreadId = Environment.CurrentManagedThreadId;
                         updateRequest = scanCoordinator.RunLatestAsync(ticket => (
-                            Results: RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
-                                fixture, requestedScanPaths, ticket),
+                            Results: HandleBoundRecursiveDirectoryScanner.Scan(requestedScanPaths, ticket),
                             OwnerThreadId: requestOwnerThreadId,
                             WorkerThreadId: Environment.CurrentManagedThreadId), context,
                             value => updateScan = value);
@@ -354,8 +353,8 @@ internal static class CommonListViewColorBaseline
                 File.WriteAllBytes(payloadPath, new byte[checked((int)updatedPayloadBytes)]);
             }
             if (!relativeSizesOnly)
-                updateScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, fixture, requestedScanPaths);
-            var updatedScans = updateScan?.Results ?? new Dictionary<string, RecursiveDirectoryScanResult>();
+                updateScan = ScanDirectoryTreeOffOwnerThread(scanCoordinator, requestedScanPaths);
+            var updatedScans = updateScan?.Results ?? new Dictionary<string, ShellListViewRowScanResult>();
             var updateScanRanOffOwnerThread = updateScan?.WorkerThreadId != updateScan?.OwnerThreadId;
             var updateScanReturnedToOwnerThread = updateScan?.OwnerThreadId == updateOwnerThreadId &&
                 Environment.CurrentManagedThreadId == updateOwnerThreadId;
@@ -363,8 +362,8 @@ internal static class CommonListViewColorBaseline
             for (var index = 0; index < shellRows.Count; index++) shellRows[index] = updatedRows[index];
             _shellRowsById = shellRows.ToDictionary(row => row.Id);
             var updatedSmallRow = _shellRowsById[2];
-            var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)];
-            var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)];
+            var updatedSmallScan = updatedScans[Path.GetFullPath(smallFolder)].Summary;
+            var updatedFixtureScan = updatedScans[Path.GetFullPath(fixture)].Summary;
             var smallRowIndex = FindItemIndexByParam(listView, 2);
             var largeRowIndex = FindItemIndexByParam(listView, 1);
             SetItemText(listView, smallRowIndex, 1,

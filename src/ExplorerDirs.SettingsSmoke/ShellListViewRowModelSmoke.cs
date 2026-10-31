@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using ExplorerDirs.NativeProbe;
 using System.IO;
 
 namespace ExplorerDirs.SettingsSmoke;
@@ -46,7 +47,11 @@ internal static class ShellListViewRowModelSmoke
             [targetPath] = new(20, 3, 1, 0)
         };
 
-        var updated = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(rows, scan);
+        var updated = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(rows,
+            new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                [targetPath] = new(target.FileSystemIdentity!.Value, scan[targetPath])
+            });
 
         Check(updated.Count == rows.Length && updated.Select(row => row.Id).SequenceEqual(rows.Select(row => row.Id)),
             "a scan updates row data without changing native Shell row identity or order");
@@ -134,9 +139,9 @@ internal static class ShellListViewRowModelSmoke
             };
             var staleScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
                 [retiredFolder],
-                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
                 {
-                    [identityPath] = new(777, 1, 0, 0)
+                    [identityPath] = new(originalIdentity!.Value, new(777, 1, 0, 0))
                 });
             Check(staleScan[0].RecursiveBytes is null && staleScan[0].RecursiveSummary is null &&
                   staleScan[0].FileSystemIdentity == replacementIdentity,
@@ -145,9 +150,9 @@ internal static class ShellListViewRowModelSmoke
             var unverifiedFolder = retiredFolder with { FileSystemIdentity = null };
             var unverifiedReplacementScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
                 [unverifiedFolder],
-                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
                 {
-                    [identityPath] = new(666, 1, 0, 0)
+                    [identityPath] = new(originalIdentity!.Value, new(666, 1, 0, 0))
                 });
             Check(unverifiedReplacementScan[0].RecursiveBytes is null &&
                   unverifiedReplacementScan[0].RecursiveSummary is null &&
@@ -167,13 +172,79 @@ internal static class ShellListViewRowModelSmoke
             Directory.Move(missingIdentityPath, movedAwayPath);
             var unverifiedScan = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
                 [missingFolder],
-                new Dictionary<string, RecursiveDirectoryScanResult>(StringComparer.OrdinalIgnoreCase)
+                new Dictionary<string, ShellListViewRowScanResult>(StringComparer.OrdinalIgnoreCase)
                 {
-                    [missingIdentityPath] = new(888, 1, 0, 0)
+                    [missingIdentityPath] = new(missingIdentity!.Value, new(888, 1, 0, 0))
                 });
             Check(missingIdentity is not null && unverifiedScan[0].RecursiveBytes is null &&
                   unverifiedScan[0].RecursiveSummary is null && unverifiedScan[0].FileSystemIdentity is null,
                 "a path whose previous folder identity is no longer readable cannot accept a late scan result");
+
+            var handleBoundPath = Path.Combine(identityRoot, "handle-bound");
+            var handleBoundRetiredPath = Path.Combine(identityRoot, "handle-bound-retired");
+            Directory.CreateDirectory(handleBoundPath);
+            File.WriteAllBytes(Path.Combine(handleBoundPath, "original.bin"), new byte[6]);
+            var handleBoundIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(handleBoundPath);
+            var handleBoundScan = HandleBoundRecursiveDirectoryScanner.Scan(
+                [handleBoundPath], CancellationToken.None,
+                (openedPath, openedIdentity) =>
+                {
+                    Check(openedPath == handleBoundPath && openedIdentity == handleBoundIdentity,
+                        "the test replacement runs after the original directory handle is opened");
+                    Directory.Move(handleBoundPath, handleBoundRetiredPath);
+                    Directory.CreateDirectory(handleBoundPath);
+                    File.WriteAllBytes(Path.Combine(handleBoundPath, "replacement.bin"), new byte[10]);
+                });
+            var boundResult = handleBoundScan[handleBoundPath];
+            var handleBoundRow = target with
+            {
+                ParsingName = handleBoundPath,
+                FileSystemPath = handleBoundPath,
+                FileSystemIdentity = handleBoundIdentity,
+                RecursiveBytes = null,
+                RecursiveSummary = null
+            };
+            var handleBoundApplied = ExplorerDirs.NativeProbe.ShellListViewRowModel.ApplyRecursiveScanResults(
+                [handleBoundRow], handleBoundScan);
+            Check(handleBoundIdentity is not null && boundResult.Identity == handleBoundIdentity &&
+                  boundResult.Summary.Bytes == 6 && handleBoundApplied[0].RecursiveBytes is null &&
+                  handleBoundApplied[0].FileSystemIdentity != handleBoundIdentity,
+                "handle enumeration retains the original object's size and row publication rejects the replacement path");
+
+            var nestedScanRoot = Path.Combine(identityRoot, "nested-scan-root");
+            var nestedScanChild = Path.Combine(nestedScanRoot, "child");
+            Directory.CreateDirectory(nestedScanChild);
+            File.WriteAllBytes(Path.Combine(nestedScanRoot, "root.bin"), new byte[2]);
+            File.WriteAllBytes(Path.Combine(nestedScanChild, "child.bin"), new byte[6]);
+            var nestedScan = HandleBoundRecursiveDirectoryScanner.Scan([nestedScanRoot], CancellationToken.None)
+                [nestedScanRoot].Summary;
+            Check(nestedScan.Bytes == 8 && nestedScan.Files == 2 && nestedScan.Directories == 1 &&
+                  nestedScan.Unreadable == 0,
+                "handle enumeration reads ordinary nested directories and combines their summaries");
+
+            var childRaceRoot = Path.Combine(identityRoot, "child-race-root");
+            var childRacePath = Path.Combine(childRaceRoot, "child");
+            var childRaceRetiredPath = Path.Combine(childRaceRoot, "child-retired");
+            Directory.CreateDirectory(childRacePath);
+            File.WriteAllBytes(Path.Combine(childRacePath, "original.bin"), new byte[6]);
+            var childReplacementApplied = false;
+            var childRaceScan = HandleBoundRecursiveDirectoryScanner.Scan(
+                [childRaceRoot], CancellationToken.None,
+                beforeChildOpen: (parentPath, childPath) =>
+                {
+                    if (!childReplacementApplied && Path.GetFileName(parentPath) == "child-race-root" &&
+                        Path.GetFileName(childPath) == "child")
+                    {
+                        Directory.Move(childRacePath, childRaceRetiredPath);
+                        Directory.CreateDirectory(childRacePath);
+                        File.WriteAllBytes(Path.Combine(childRacePath, "replacement.bin"), new byte[10]);
+                        childReplacementApplied = true;
+                    }
+                });
+            Check(childReplacementApplied && childRaceScan[childRaceRoot].Summary.Bytes == 0 &&
+                  childRaceScan[childRaceRoot].Summary.Files == 0 &&
+                  childRaceScan[childRaceRoot].Summary.Unreadable == 1,
+                "a child replaced after parent enumeration is rejected when its opened ID differs from the enumerated ID");
 
             var identityReconciled = ExplorerDirs.NativeProbe.ShellListViewRowModel.Reconcile(
                 [retiredFolder], [replacementFolder], nextId: 10);

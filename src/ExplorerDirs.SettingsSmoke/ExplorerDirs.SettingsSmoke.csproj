@@ -41,6 +41,7 @@
     <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRow.cs" Link="ShellListViewRow.cs" />
     <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRowIdentity.cs" Link="ShellListViewRowIdentity.cs" />
     <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRowModel.cs" Link="ShellListViewRowModel.cs" />
+    <Compile Include="../ExplorerDirs.NativeProbe/HandleBoundRecursiveDirectoryScanner.cs" Link="HandleBoundRecursiveDirectoryScanner.cs" />
     <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewRowPresentation.cs" Link="ShellListViewRowPresentation.cs" />
     <Compile Include="../ExplorerDirs.NativeProbe/ShellListViewSelectionSnapshot.cs" Link="ShellListViewSelectionSnapshot.cs" />
     <Compile Include="../ExplorerDirs.App/RecursiveSizePercentage.cs" Link="RecursiveSizePercentage.cs" />
