@@ -889,3 +889,9 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 在真实 Private Desktop `IShellView` 中，先写入三个 backing 文件，再连续发送三次物理子项 `SHCNE_CREATE`，中间不泵消息。DefView 随后还向 view callback 发出若干 `SHCNE_UPDATEITEM`，但合成 adapter 的 1 ms 队列将该 burst 合并为一次父目录 `SHCNE_UPDATEDIR`；provider 只重枚举一次，三个新行均出现。完整场景连续三轮通过，队列/发送/枚举计数均为 `1/1/1`，Private Desktop 前台、输入 tick 和隔离清理守卫通过；日志：`20261031-123047-758558ac.stdout.log`、`20261031-123115-f2d20944.stdout.log`、`20261031-123128-6528e808.stdout.log`。
 
 这是同一 STA 上连续发出的三个 CREATE 事件，不代表并发 provider 事件、慢网络目录、不同窗格或任意长 burst。当前逻辑仍只在 NativeProbe 合成 adapter 中且默认关闭。没有产品接线，也没有用户可见的刷新/闪烁结论。下一步继续核对父目录更新通知数组/事件字段和 timer 生命周期在关闭 view 时的取消路径，然后进入完整命令路由与拖放源端验证。
+
+### 2026-10-31：延迟父目录更新计时器的取消生命周期
+
+给隔离 adapter 加入仅供 NativeProbe 使用的按 view 排队/取消接口。同步排队一次 backing-directory update 后，在泵 STA 消息前立即取消，再泵 400 ms；三次连续 Private Desktop watchdog 均观察到队列 `1`、发送 `0`、provider 枚举 `0`，取消返回 `S_OK`。这证明当前 STA 计时器在 owner 关闭 view 前显式取消时不会迟到发送更新，且计时器持有的 folder 引用会由取消路径释放。完整日志：`20261031-123706-16b139a2.stdout.log`、`20261031-123730-3aff15f5.stdout.log`、`20261031-123741-8079b46c.stdout.log`；前台与输入守卫均通过。
+
+首轮取消尝试在立即读取队列计数前调用外部 `SHChangeNotify`，Shell 回调尚未同步到达，故队列为 0；该轮没有触及取消断言，不作为生命周期失败或通过证据。当前三轮使用同步探针接口精确验证已排队计时器的取消，真实 IFileOperation 的 create/move/rename/delete 映射仍由前述独立场景覆盖。adapter 与探针都仅在 NativeProbe；产品没有新增计时器或 Shell 视图行为。下一步检查 view hold 释放与窗口销毁的 owner 调用顺序，再继续完整命令/菜单/导航/OLE 拖放迁移门槛。

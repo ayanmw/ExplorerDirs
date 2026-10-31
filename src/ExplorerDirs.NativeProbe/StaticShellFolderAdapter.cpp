@@ -2443,6 +2443,8 @@ namespace
         bool OwnsShellView(IShellView* view) const { return view && _shellView == view; }
         HRESULT CancelPendingRefreshForProbe() { return CancelPendingRefresh() ? S_OK : S_FALSE; }
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
+        HRESULT ScheduleBackingDirectoryUpdateForProbe() { return ScheduleBackingDirectoryUpdate(); }
+        HRESULT CancelPendingBackingDirectoryUpdateForProbe() { return CancelPendingBackingDirectoryUpdate() ? S_OK : S_FALSE; }
         bool CancelPendingBackingDirectoryUpdate()
         {
             if (InterlockedExchange(&_directoryUpdatePending, 0) == 0) return false;
@@ -3774,6 +3776,30 @@ extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticSortRefreshForPro
         auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
         if (!folder || !folder->OwnsShellView(view)) continue;
         return folder->CancelPendingRefreshForProbe();
+    }
+    return E_INVALIDARG;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI CancelSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
+{
+    if (!view) return E_POINTER;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->CancelPendingBackingDirectoryUpdateForProbe();
+    }
+    return E_INVALIDARG;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI ScheduleSyntheticBackingDirectoryUpdateForProbe(IShellView* view)
+{
+    if (!view) return E_POINTER;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->ScheduleBackingDirectoryUpdateForProbe();
     }
     return E_INVALIDARG;
 }

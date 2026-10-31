@@ -5190,3 +5190,7 @@ NativeProbe 的合成 PIDL adapter 在显式开启的实验开关下，把真实
 ## 2026-10-31：隔离 IShellView 三项 create burst 合并
 
 三次连续 `SHCNE_CREATE` 连同 DefView 随后的 `SHCNE_UPDATEITEM` 在本机 Private Desktop 单 STA 场景中合并为一次父目录 `SHCNE_UPDATEDIR`，provider 仅枚举一次且三行均可见；连续三轮通过，前台/输入/临时资源守卫通过。证据边界仅为三项连续事件，不外推成并发、网络目录或多视图 burst 性能保证。逻辑仍只在 NativeProbe 合成 adapter 中，产品未改。后续检查通知数组和 timer 关闭生命周期，并继续 Shell 路由与完整拖放门槛；见[通知调查](folder-size-column-investigation.md#2026-10-31三项-create-burst-的通知合并)。
+
+## 2026-10-31：隔离 IShellView 父目录更新计时器取消
+
+NativeProbe 新增按 view 同步排队/取消 delayed backing-directory update 的测试入口。先排队再立即取消，并继续泵 STA 消息 400 ms，连续三轮分别确认已排队 1 次、已发送 0 次、provider 枚举 0 次；前台与输入守卫通过。首轮用外部 `SHChangeNotify` 立即读队列时回调尚未到达，该刺激时序不作为通过或失败证据。计时器生命周期验证仍只在隔离 adapter，没有 ExplorerBrowser 产品改动；窗口 owner 在销毁前的真实调用集成还未接线。日志 `20261031-123706-16b139a2.stdout.log`、`20261031-123730-3aff15f5.stdout.log`、`20261031-123741-8079b46c.stdout.log`。详见[隔离通知调查](folder-size-column-investigation.md#2026-10-31延迟父目录更新计时器的取消生命周期)。

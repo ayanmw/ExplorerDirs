@@ -1310,6 +1310,32 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-DeleteItems; delete-visible={shellDeleteVisible}; rows={names.Length}; enum-calls={deleteEnumCalls}; translated-queued={deleteQueued}; translated-sent={deleteSent}");
             if (!shellDeleteVisible || deleteEnumCalls != 1 || deleteQueued != 1 || deleteSent != 1)
                 throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete without a manually supplied parent update.");
+
+            // A real view owner must cancel the adapter's delayed parent update before destroying the view.
+            var queuedBeforeCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            var enumerationsBeforeCancel = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var schedulePendingUpdate = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module,
+                "ScheduleSyntheticBackingDirectoryUpdateForProbe"));
+            var scheduleResult = schedulePendingUpdate(view);
+            if (scheduleResult != 0)
+                throw new InvalidOperationException($"Expected a delayed directory update to schedule with S_OK, got 0x{scheduleResult:X8}.");
+            var queuedAfterSchedule = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            if (queuedAfterSchedule != queuedBeforeCancel + 1)
+                throw new InvalidOperationException($"Expected one delayed parent update before cancellation, got {queuedAfterSchedule - queuedBeforeCancel}.");
+            var cancelPendingUpdate = Marshal.GetDelegateForFunctionPointer<CancelViewRefresh>(NativeLibrary.GetExport(module,
+                "CancelSyntheticBackingDirectoryUpdateForProbe"));
+            var cancelResult = cancelPendingUpdate(view);
+            if (cancelResult != 0)
+                throw new InvalidOperationException($"Expected an active pending directory-update timer to cancel with S_OK, got 0x{cancelResult:X8}.");
+            Pump(400);
+            var sentAfterCancel = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            var enumerationsAfterCancel = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            Console.WriteLine($"synthetic-size-update-notification: pending-directory-update-cancelled=1; queued={queuedAfterSchedule - queuedBeforeCancel}; sent-after-cancel={sentAfterCancel - sentBeforeCancel}; enum-after-cancel={enumerationsAfterCancel - enumerationsBeforeCancel}");
+            if (sentAfterCancel != sentBeforeCancel || enumerationsAfterCancel != enumerationsBeforeCancel)
+            {
+                throw new InvalidOperationException("A cancelled delayed parent update still notified Shell or caused provider enumeration.");
+            }
         }
         finally
         {
