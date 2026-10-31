@@ -1943,10 +1943,14 @@ internal static class StaticShellFolderAdapterProbe
         var projectionFixture = Path.Combine(Path.GetDirectoryName(fixture)!, "recursive-size-projection-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var scan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(shellFixture, [childPath], CancellationToken.None);
-            if (!scan.TryGetValue(Path.GetFullPath(childPath), out var recursive) || recursive.Bytes != 10 ||
+            var scan = HandleBoundRecursiveDirectoryScanner.Scan([childPath], CancellationToken.None);
+            var productionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                shellFixture, [childPath], CancellationToken.None);
+            if (!scan.TryGetValue(Path.GetFullPath(childPath), out var handleBoundRecursive) ||
+                !productionScan.TryGetValue(Path.GetFullPath(childPath), out var recursive) ||
+                handleBoundRecursive.Summary != recursive || recursive.Bytes != 10 ||
                 recursive.Files != 2 || recursive.Directories != 1 || recursive.Unreadable != 0)
-                throw new InvalidOperationException("The recursive-size fixture did not scan to 10 bytes, 2 files, and 1 nested folder.");
+                throw new InvalidOperationException("The recursive-size fixture scanners did not agree on 10 bytes, 2 files, and 1 nested folder.");
 
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderTreeContractSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderTreeContractSmoke"))(shellFixture));
@@ -1960,21 +1964,34 @@ internal static class StaticShellFolderAdapterProbe
             File.WriteAllBytes(Path.Combine(projectionFixture, "root.txt"), "12345678"u8.ToArray());
             var projectionChildPath = Path.Combine(projectionFixture, "child");
             var projectionOtherChildPath = Path.Combine(projectionFixture, "other-child");
-            var projectionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+            var projectionScan = HandleBoundRecursiveDirectoryScanner.Scan(
+                [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
+            var productionProjectionScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
                 projectionFixture, [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
-            if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) || snapshot.Bytes != 10 ||
-                !projectionScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var otherSnapshot) || otherSnapshot.Bytes != 12)
-                throw new InvalidOperationException("The injected recursive-size snapshots did not scan to 10 and 12 bytes.");
+            if (!projectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var handleBoundSnapshot) ||
+                !projectionScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var handleBoundOtherSnapshot) ||
+                !productionProjectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) ||
+                !productionProjectionScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var otherSnapshot) ||
+                handleBoundSnapshot.Summary != snapshot || handleBoundOtherSnapshot.Summary != otherSnapshot ||
+                snapshot.Bytes != 10 || otherSnapshot.Bytes != 12)
+                throw new InvalidOperationException("The production and handle-bound scans did not agree on the 10/12 byte projection.");
             var childParsingName = GetAbsoluteParsingName(projectionChildPath);
             var otherChildParsingName = GetAbsoluteParsingName(projectionOtherChildPath);
 
             // Re-scan after the file change so the updated native values come from the production scanner too.
             File.WriteAllBytes(nestedFile, "x"u8.ToArray());
-            var updatedScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+            var updatedScan = HandleBoundRecursiveDirectoryScanner.Scan(
+                [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
+            var productionUpdatedScan = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
                 projectionFixture, [projectionChildPath, projectionOtherChildPath], CancellationToken.None);
-            if (!updatedScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var updatedSnapshot) || updatedSnapshot.Bytes != 7 ||
-                !updatedScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var updatedOtherSnapshot) || updatedOtherSnapshot.Bytes != 12)
-                throw new InvalidOperationException("The changed recursive-size snapshots did not scan to 7 and 12 bytes.");
+            if (!updatedScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var updatedHandleBoundSnapshot) ||
+                !updatedScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var updatedHandleBoundOtherSnapshot) ||
+                !productionUpdatedScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var updatedSnapshot) ||
+                !productionUpdatedScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var updatedOtherSnapshot) ||
+                updatedHandleBoundSnapshot.Summary != updatedSnapshot ||
+                updatedHandleBoundOtherSnapshot.Summary != updatedOtherSnapshot ||
+                updatedSnapshot.Bytes != 7 || updatedOtherSnapshot.Bytes != 12)
+                throw new InvalidOperationException("The production and handle-bound rescans did not agree on the 7/12 byte projection.");
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke"))(
                     projectionFixture, childParsingName, checked((long)snapshot.Bytes)));

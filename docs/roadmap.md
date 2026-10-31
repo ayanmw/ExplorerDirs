@@ -5137,3 +5137,7 @@ Release HostProbe 的真实 ExplorerBrowser 隐藏宿主场景以 10,000 个并�
 `HandleBoundRecursiveDirectoryScanner` 在 NativeProbe 通过已打开目录句柄枚举，并把结果连同根目录文件 ID 返回；子目录打开后须与父目录条目的 ID 一致才递归。真实临时目录 smoke 覆盖扫描期间根目录和子目录在同一路径被替换：旧根结果不会发布到替换目录，替换后的子目录也不会被旧父快照误计。700 个长 Unicode 文件名确认超过 64 KB 的多页枚举准确汇总，普通嵌套目录汇总也通过。定向行模型 smoke 通过。
 
 这一改进收窄了 NativeProbe 内部递归大小扫描的路径 ABA 风险，不接入产品 ExplorerBrowser 或 F9 扫描。完整 Release SettingsSmoke、App/NativeProbe Release build（0 警告/错误）及 `git diff --check` 均通过；目录句柄无法解析路径时，无法继续解析的后代会计为不可读。
+
+### 2026-10-31：句柄扫描结果进入无窗口原生列合同
+
+`--static-shell-column-folder-smoke` 现在将句柄绑定扫描器与既有产品递归扫描器对照，确认同一夹具的 10/12 B 初值和 7/12 B 更新值相同，再把结果交给 NativeProbe 原生 provider 验证列文本、数值排序、PIDL 重枚举和 provider 重建；退出码 0，`window-created=False`。这扩展的是隔离 scanner → provider 合同，不接入产品 F9 或 ExplorerBrowser，也没有 DefView/可见列验收。

@@ -779,3 +779,7 @@ NativeProbe 的无窗口 `--static-shell-column-folder-smoke` 现在为真实临
 NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开并由 `GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)` 枚举；每个子目录只在其打开句柄的卷序列号和 128 位文件 ID 与父目录返回的条目 ID 相同时才递归。扫描摘要携带根目录句柄身份，隔离行模型只在扫描对象、Shell 行快照及当前路径身份一致时写回。真实临时目录回归覆盖扫描器打开根后同路径替换，以及父目录枚举子项后该子项同路径替换；前者仍只汇总旧对象的 6 B，发布端拒绝替换路径；后者跳过身份不匹配的新对象并计入 unreadable。另以 700 个长 Unicode 文件名覆盖超过 64 KB 的目录枚举分页，核对字节数、文件数、目录数和 unreadable 计数；普通嵌套目录也确认 8 B/2 files/1 folder。定向 `--shell-listview-row-model-smoke` 通过。
 
 此原型仍只用于 NativeProbe/SettingsSmoke，未接入 ExplorerBrowser、产品 F9 扫描器或用户界面。目录被重命名后，句柄仍能继续枚举原对象；若无法解析当前目录名，子路径回退会受路径可达性限制，相关项会被安全地略过而不是归给不同文件 ID。定向行模型 smoke、完整 Release SettingsSmoke、App/NativeProbe Release 构建（均 0 警告/错误）及 `git diff --check` 均通过；未启动 UI、隐藏 Shell view 或 ExplorerBrowser。
+
+### 2026-10-31：句柄扫描结果进入无窗口原生列合同
+
+无窗口 `--static-shell-column-folder-smoke` 现同时运行句柄绑定扫描器与既有产品递归扫描器，在相同真实夹具上逐目录比较汇总；初值 10/12 B、变更后 7/12 B 两轮结果一致，并继续把这些扫描值交给原生 provider 合同，验证 `UInt64`、属性文本、数值排序、同 PIDL 更新、重枚举及 provider 重建。合同退出码 0，输出 `window-created=False`。这证明更安全的隔离扫描结果能接入既有 provider 数据合同；不代表产品 F9 改用该扫描器，也不证明 ExplorerBrowser/DefView 可见列刷新。
