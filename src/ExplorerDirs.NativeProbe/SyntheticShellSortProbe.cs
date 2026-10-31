@@ -1280,6 +1280,7 @@ public static class SyntheticShellSortProbe
         var streamWritesBefore = host?.Writes ?? 0;
         var streamTraceBefore = host?.ViewStateStreamTrace.Count ?? 0;
         var mapCallsBeforeNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
+        var redrawBaselinePixels = holdListViewRedrawUntilSettled ? CaptureListViewPixelSamples(listView) : null;
         using var redrawLease = holdListViewRedrawUntilSettled ? new NativeListViewRedrawLease(listView) : null;
         var notificationStarted = Environment.TickCount64;
         notify();
@@ -1457,6 +1458,38 @@ public static class SyntheticShellSortProbe
             Console.WriteLine($"synthetic-size-update-column-map: phase=after; before-notification={mapCallsBeforeNotification}; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; final={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}");
         Console.WriteLine($"synthetic-size-update-columns: phase=after; layout-preserved={columnLayoutPreserved}; hr=0x{columnsResult:X8}; columns=[{FormatColumns(columnsAfter)}]");
         Console.WriteLine($"synthetic-size-update-stream: strategy={name}; reads-delta={(host?.Reads ?? 0) - streamReadsBefore}; writes-delta={(host?.Writes ?? 0) - streamWritesBefore}; calls=[{string.Join(" || ", streamTraceAfter)}]");
+        if (redrawLease is not null && redrawBaselinePixels is not null)
+        {
+            var frozenPixels = CaptureListViewPixelSamples(listView);
+            redrawLease.Dispose();
+            var repaintedPixels = CaptureListViewPixelSamples(listView);
+            var pixelComparisonAvailable = redrawBaselinePixels.All(pixel => pixel != uint.MaxValue) &&
+                frozenPixels.All(pixel => pixel != uint.MaxValue) && repaintedPixels.All(pixel => pixel != uint.MaxValue);
+            Console.WriteLine($"synthetic-size-update-pixels: comparison-available={pixelComparisonAvailable}; before=[{SummarizePixelSamples(redrawBaselinePixels)}]; frozen=[{SummarizePixelSamples(frozenPixels)}]; repainted=[{SummarizePixelSamples(repaintedPixels)}]");
+        }
+    }
+
+    private static uint[] CaptureListViewPixelSamples(nint listView)
+    {
+        if (!GetClientRect(listView, out var client) || client.Right <= 0 || client.Bottom <= 0)
+            throw new InvalidOperationException("Could not read the DefView ListView client rectangle for pixel sampling.");
+        var dc = GetDC(listView);
+        if (dc == 0) throw new InvalidOperationException("Could not acquire the DefView ListView window DC for pixel sampling.");
+        try
+        {
+            var samples = new List<uint>();
+            for (var y = 3; y < Math.Min(client.Bottom, 36); y += 3)
+                for (var x = 3; x < Math.Min(client.Right, 72); x += 3)
+                    samples.Add(GetPixel(dc, x, y));
+            return samples.ToArray();
+        }
+        finally { _ = ReleaseDC(listView, dc); }
+    }
+
+    private static string SummarizePixelSamples(IReadOnlyList<uint> pixels)
+    {
+        var valid = pixels.Where(pixel => pixel != uint.MaxValue).ToArray();
+        return $"count={pixels.Count}; valid={valid.Length}; invalid={pixels.Count - valid.Length}; distinct-valid-colors={valid.Distinct().Count()}; first-valid=[{string.Join(',', valid.Take(12).Select(pixel => pixel.ToString("X6", System.Globalization.CultureInfo.InvariantCulture)))}]";
     }
 
     private static void VerifyCapturedColumnsOnFreshView(nint module, nint sourceFolderView, nint rootPidl, nint foreground)
@@ -3208,8 +3241,11 @@ public static class SyntheticShellSortProbe
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, nint lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetPropW(nint window, string name);
+    [DllImport("user32.dll")] private static extern nint GetDC(nint window);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(nint window, nint dc);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, int message, nint wParam, ref NativeHeaderItem item);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool RedrawWindow(nint window, nint updateRect, nint updateRegion, uint flags);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(nint dc, int x, int y);
     [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetClientRect(nint window, out NativeRect rect);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);

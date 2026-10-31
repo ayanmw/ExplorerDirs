@@ -1168,3 +1168,5 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 ### 2026-11-01：完整刷新期间暂缓 ListView 绘制
 
 在上述完整刷新策略上增加 `full-view-refresh-redraw-live-cache-publish` 对照：发送 ListView `WM_SETREDRAW(FALSE)`，执行 `IShellView.Refresh()`，等待新大小及排序读回，再恢复绘制并按 Microsoft 文档使用 `RedrawWindow(RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW)`。本机 Private Desktop WPF probe exit 0；刷新后列值 `[4|1]`、排序 `small.bin|child`，快照恢复选择/焦点读回成功。单项绘制属性 `SysSetRedraw` 没有出现在 HWND 属性表中，因此不能由该属性确认控件是否实际暂停绘制；目前也没有采集刷新过程像素。该实验只证明消息调用顺序与刷新/状态恢复可共存，不证明白/黑过渡帧已消失或用户可见体验改善，需另做隔离像素/可见验收。[Microsoft WM_SETREDRAW 文档](https://learn.microsoft.com/windows/win32/gdi/wm-setredraw)
+
+同日追加只读 `GetDC`/`GetPixel` 采样，尝试在禁用绘制前、刷新稳定后以及恢复并强制重绘后三个阶段读取 ListView 客户区像素。两次 Private Desktop 运行中采样均混有 `GetPixel` 的无效哨兵 `0xFFFFFFFF`；复验一轮分别为 253 个样点中的 92、253、92 个有效值。因为同一 HWND 的可读样点数随阶段变化，且宿主不在当前交互桌面，这组数据不能比较帧内容，也不能证明绘制暂停或闪烁消失。探针现在将有效/无效样点数分开记录，遇到无效值时不报告像素相等结论。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入与隔离清理守卫通过；日志：`20261101-070303-2da107d2.stdout.log`。要验证用户实际看到的过渡帧，仍需后续集中可见 UI 验收；本实验没有触碰产品刷新代码。
