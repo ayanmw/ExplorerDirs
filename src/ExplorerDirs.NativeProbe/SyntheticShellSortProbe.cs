@@ -1146,6 +1146,9 @@ public static class SyntheticShellSortProbe
 
     private static void VerifyRecreatedViewDirectoryNotification(nint view, string backingFolder, nint listView, nint module)
     {
+        var translateChildNotifications = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+            "SetSyntheticChildNotificationTranslationForProbe"));
+        var translationEnabled = false;
         const string itemName = "post-recreate-notify.dat";
         const string renamedItemName = "renamed-after-recreate-notify.dat";
         var itemPath = Path.Combine(backingFolder, itemName);
@@ -1174,9 +1177,13 @@ public static class SyntheticShellSortProbe
             if (!itemVisible || deferredCallbacks != 0)
                 throw new TimeoutException("The recreated Shell view did not use default SFVM_FSNOTIFY processing to expose the new file without a host-scheduled refresh.");
 
+            Check(translateChildNotifications(1));
+            translationEnabled = true;
             names = ReadNames(listView, module, expectedCount: -1);
             SetListViewSelectionAndFocus(listView, itemName, names);
             var enumBeforeRename = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var queuedBeforeRename = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeRename = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
             RenameSelectedShellItem(view, listView, module, itemName, "small.bin", renamedItemName);
             if (File.Exists(itemPath) || !File.Exists(renamedItemPath))
                 throw new IOException("The post-recreation IFileOperation rename did not update the backing fixture.");
@@ -1186,32 +1193,22 @@ public static class SyntheticShellSortProbe
                 Pump(50);
                 names = ReadNames(listView, module, expectedCount: -1);
                 if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                    names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1) break;
+                    names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1 &&
+                    ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBeforeRename) break;
             } while (Environment.TickCount64 < deadline);
             var shellRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
                 names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1;
-            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-RenameItems; rename-visible={shellRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeRename}");
-            if (!shellRenameVisible)
-            {
-                enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
-                deadline = Environment.TickCount64 + 3000;
-                do
-                {
-                    Pump(50);
-                    names = ReadNames(listView, module, expectedCount: -1);
-                    if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                        names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1) break;
-                } while (Environment.TickCount64 < deadline);
-                shellRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                    names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1;
-                Console.WriteLine($"synthetic-size-update-notification: operation=parent-UPDATEDIR-after-IFileOperation-RenameItems; rename-normalized={shellRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
-                if (!shellRenameVisible)
-                    throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation rename and parent directory update.");
-            }
+            var renameEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeRename;
+            var renameQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeRename;
+            var renameSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeRename;
+            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-RenameItems; rename-visible={shellRenameVisible}; rows={names.Length}; enum-calls={renameEnumCalls}; translated-queued={renameQueued}; translated-sent={renameSent}");
+            if (!shellRenameVisible || renameEnumCalls != 1 || renameQueued != 1 || renameSent != 1)
+                throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation rename without a manually supplied parent update.");
 
             SetListViewSelectionAndFocus(listView, renamedItemName, names);
             var enumBeforeDelete = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var queuedBeforeDelete = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeDelete = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
             DeleteSelectedShellItem(view, listView, module, renamedItemName, "small.bin");
             if (File.Exists(renamedItemPath))
                 throw new IOException("The post-recreation IFileOperation delete left the backing fixture item present.");
@@ -1220,28 +1217,22 @@ public static class SyntheticShellSortProbe
             {
                 Pump(50);
                 names = ReadNames(listView, module, expectedCount: -1);
-                if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
+                if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase) &&
+                    ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") > sentBeforeDelete) break;
             } while (Environment.TickCount64 < deadline);
             var shellDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
-            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-DeleteItems; delete-visible={shellDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeDelete}");
-            if (!shellDeleteVisible)
-            {
-                enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
-                deadline = Environment.TickCount64 + 3000;
-                do
-                {
-                    Pump(50);
-                    names = ReadNames(listView, module, expectedCount: -1);
-                    if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
-                } while (Environment.TickCount64 < deadline);
-                shellDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
-                Console.WriteLine($"synthetic-size-update-notification: operation=parent-UPDATEDIR-after-IFileOperation-DeleteItems; delete-normalized={shellDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
-                if (!shellDeleteVisible)
-                    throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete and parent directory update.");
-            }
+            var deleteEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeDelete;
+            var deleteQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeDelete;
+            var deleteSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeDelete;
+            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-DeleteItems; delete-visible={shellDeleteVisible}; rows={names.Length}; enum-calls={deleteEnumCalls}; translated-queued={deleteQueued}; translated-sent={deleteSent}");
+            if (!shellDeleteVisible || deleteEnumCalls != 1 || deleteQueued != 1 || deleteSent != 1)
+                throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete without a manually supplied parent update.");
         }
-        finally { ILFree(absolutePidl); }
+        finally
+        {
+            if (translationEnabled) Check(translateChildNotifications(0));
+            ILFree(absolutePidl);
+        }
     }
 
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null

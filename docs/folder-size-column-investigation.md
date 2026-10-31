@@ -867,3 +867,11 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 在“重建 Shell 窗口并保留滚动锚点”的 Private Desktop 场景中，先创建物理 backing 文件并向目录发送 `SHCNE_UPDATEDIR`：新文件显示，provider 重枚举 1 次，host 延迟刷新计数为 0。随后将文件改名并对物理旧/新绝对子 PIDL 发送 `SHCNE_RENAMEITEM`：3 秒内没有替换旧行，列表短暂达到 305 行，provider 重枚举 0 次。对删除后的物理子项 PIDL 发送 `SHCNE_DELETE` 也没有移除旧行，重枚举 0 次。紧接着向合成视图 backing 目录 PIDL 补发 `SHCNE_UPDATEDIR` 后，重命名收敛为唯一的新名称（303 行，枚举 1 次），删除收敛为 302 行（枚举 1 次）。
 
 探针 exit code 0，`foreground-unchanged=True`、`input-change-observed=False`、`isolation-clean=True`；NativeProbe Release 构建 0 警告/错误，`git diff --check` 通过。证据支持的结论仅限当前合成 provider：物理子项 PIDL 的 rename/delete 通知没有对应到已有合成行；父目录更新触发重枚举并归一结果。没有证明真实文件操作后 Shell 是否会自动发出所需父目录通知，也不能外推到普通 ExplorerBrowser。该探针不构成产品功能或 IShellView 迁移准入证据。日志：`src/.state/native-probe-watchdog/20261031-120852-6807f5c2.stdout.log`。此前错误使用默认通知策略的一轮卡在销毁父窗口的 COM 清理阶段，未到新断言，不能算通知结果；其前台/输入未变且本轮 UUID 资源已清理，日志 `src/.state/native-probe-watchdog/20261031-120738-35165b47.stderr.log`。
+
+### 2026-10-31：隔离 adapter 把 rename/delete 转成父目录失效
+
+先将重建视图后的真实 `IFileOperation::RenameItems` / `DeleteItems` 断言改为“不再手动补发目录更新”。RED 轮再次复现 rename 后旧行仍在、provider 枚举增量为 0，watchdog exit 1，前台 HWND 和输入 tick 未变，隔离资源清理完成。随后仅在 NativeProbe 合成 adapter 的显式开关下，对 `SFVM_FSNOTIFY` 的 `SHCNE_RENAMEITEM` 与 `SHCNE_DELETE` 排队 1 ms timer；timer 返回到 Shell 回调后向 backing 目录发送一次 `SHCNE_UPDATEDIR`。仍将原子事件交给 DefView 默认处理；`UPDATEDIR` 不属于翻译事件，因此不会自我触发循环。`wParam` 仍仅记录、不解引用。
+
+同一 Private Desktop 场景连续四轮均通过：rename 与 delete 分别各自只排队 1 次、发送 1 次，provider 每次重枚举恰好 1 次；行数由 302→303→302，名称更新/删除正确。每轮 watchdog exit 0、前台 HWND 与输入 tick 不变、UUID 注册和夹具清理完成。日志：`20261031-122237-3de21bf7.stdout.log`、`20261031-122255-52ee060f.stdout.log`、`20261031-122302-61e77667.stdout.log`、`20261031-122516-4da9373f.stdout.log`（均在 `src/.state/native-probe-watchdog/`）。最终版本 Native adapter `/W4 /WX` 与 NativeProbe Release build 均为 0 警告/错误；DLL unload contract 与无窗口 `--static-shell-column-folder-smoke` 通过。
+
+这只证明在本合成 provider 中，真实文件操作通知可以经延迟父目录失效更新重建后的 DefView，且本覆盖的 rename/delete 不循环、不重复枚举。没有覆盖 create/update/move、多次并发事件合并、剪切/撤销、菜单命令、导航、拖放源端或其他 namespace/provider；产品 ExplorerBrowser 未改，IShellView 架构门槛仍未通过。后续优先在 Private Desktop 补测 create/move 与成组通知合并，再继续 Shell 命令路由、导航和完整拖放闭环；结果只作为迁移门槛证据，不得直接接入产品。

@@ -53,6 +53,9 @@ namespace
     volatile LONG g_syntheticLiveObjects = 0;
     volatile LONG g_syntheticServerLocks = 0;
     volatile LONG g_syntheticDeferredRefreshCount = 0;
+    volatile LONG g_syntheticChildNotificationTranslationQueued = 0;
+    volatile LONG g_syntheticChildNotificationTranslationSent = 0;
+    volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
     constexpr size_t kSyntheticSortViewHoldCount = 8;
     PVOID volatile g_syntheticSortViewHolds[kSyntheticSortViewHoldCount]{};
     CLSID g_syntheticFolderClassId =
@@ -1883,6 +1886,12 @@ namespace
                 sprintf_s(notification, "synthetic-sort: SFVM_FSNOTIFY; wParam=0x%p; lParam=0x%llX",
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
+                if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
+                    (lParam == SHCNE_RENAMEITEM || lParam == SHCNE_DELETE))
+                {
+                    const auto scheduleResult = ScheduleBackingDirectoryUpdate();
+                    if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
+                }
                 // S_OK consumes this notification. Let DefView apply its default filesystem update.
                 return E_NOTIMPL;
             }
@@ -2434,6 +2443,32 @@ namespace
         bool OwnsShellView(IShellView* view) const { return view && _shellView == view; }
         HRESULT CancelPendingRefreshForProbe() { return CancelPendingRefresh() ? S_OK : S_FALSE; }
         HRESULT ScheduleRefreshForProbe() { return ScheduleRefresh(); }
+        bool CancelPendingBackingDirectoryUpdate()
+        {
+            if (InterlockedExchange(&_directoryUpdatePending, 0) == 0) return false;
+            const auto timerId = _directoryUpdateTimerId;
+            _directoryUpdateTimerId = 0;
+            if (timerId) KillTimer(nullptr, timerId);
+            Release();
+            return true;
+        }
+        HRESULT ScheduleBackingDirectoryUpdate()
+        {
+            if (!_backingRoot) return E_UNEXPECTED;
+            if (InterlockedCompareExchange(&_directoryUpdatePending, 1, 0) != 0) return S_FALSE;
+            AddRef();
+            const auto timerId = SetTimer(nullptr, 0, 1, BackingDirectoryUpdateTimerProc);
+            if (!timerId)
+            {
+                InterlockedExchange(&_directoryUpdatePending, 0);
+                Release();
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+            _directoryUpdateTimerId = timerId;
+            InterlockedIncrement(&g_syntheticChildNotificationTranslationQueued);
+            TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-queued");
+            return S_OK;
+        }
         HRESULT NotifyRefreshForProbe() { return MessageSFVCB(SFVM_FSNOTIFY, 0, 0); }
     private:
         HRESULT GetAbsoluteParsingName(const SyntheticChild* child, std::wstring* parsingName) const
@@ -2737,6 +2772,28 @@ namespace
             }
             return nullptr;
         }
+        static SyntheticSortFolder* FindPendingBackingDirectoryUpdate(UINT_PTR timerId)
+        {
+            for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+            {
+                auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+                if (folder && folder->_directoryUpdateTimerId == timerId) return folder;
+            }
+            return nullptr;
+        }
+        static VOID CALLBACK BackingDirectoryUpdateTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
+        {
+            KillTimer(nullptr, timerId);
+            auto* folder = FindPendingBackingDirectoryUpdate(timerId);
+            if (!folder) return;
+            folder->_directoryUpdateTimerId = 0;
+            InterlockedExchange(&folder->_directoryUpdatePending, 0);
+            // Defer until SFVM_FSNOTIFY returns; UPDATEDIR itself is excluded from translation to prevent a loop.
+            SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, folder->_backingRoot, nullptr);
+            InterlockedIncrement(&g_syntheticChildNotificationTranslationSent);
+            TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-sent");
+            folder->Release();
+        }
         static VOID CALLBACK RefreshTimerProc(HWND, UINT, UINT_PTR timerId, DWORD)
         {
             KillTimer(nullptr, timerId);
@@ -2790,6 +2847,8 @@ namespace
         bool _pendingHasFocused = false;
         volatile LONG _refreshPending = 0;
         UINT_PTR _refreshTimerId = 0;
+        volatile LONG _directoryUpdatePending = 0;
+        UINT_PTR _directoryUpdateTimerId = 0;
         ULONGLONG _restoreDeadline = 0;
     };
 
@@ -3701,6 +3760,7 @@ extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()
         auto* folder = static_cast<SyntheticSortFolder*>(InterlockedExchangePointer(&g_syntheticSortViewHolds[index], nullptr));
         if (!folder) continue;
         folder->CancelPendingRefresh();
+        folder->CancelPendingBackingDirectoryUpdate();
         folder->ReleaseViewHold();
         folder->Release();
     }
@@ -3758,6 +3818,18 @@ extern "C" __declspec(dllexport) LONG WINAPI ScheduleSyntheticSortRefreshesForPr
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDeferredRefreshCount()
 { return InterlockedCompareExchange(&g_syntheticDeferredRefreshCount, 0, 0); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticChildNotificationTranslationForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticTranslateChildNotificationsForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTranslationQueuedCount()
+{ return InterlockedCompareExchange(&g_syntheticChildNotificationTranslationQueued, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTranslationSentCount()
+{ return InterlockedCompareExchange(&g_syntheticChildNotificationTranslationSent, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 { return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }
