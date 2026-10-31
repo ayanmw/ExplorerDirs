@@ -938,4 +938,6 @@ BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除�
 
 在包装子 PIDL 的两项目录多选场景中，适配器的 `GetUIObjectOf(IContextMenu)` 返回对象成功 `QueryInterface(IContextMenu3)`；内存 `QueryContextMenu` 返回 103 个命令 ID、25 个菜单项，并包含 `copy` 与 `delete` canonical verb。探针只查询并构造内存菜单，没有显示菜单、转发窗口消息或执行命令；前台不变。Release NativeProbe 构建 0 警告/错误，`--static-shell-column-wrapped-folder-smoke` 完整通过。
 
-这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后仍保留 `IContextMenu3` 查询能力，给后续所有者绘制/动态子菜单窗口消息路由提供了可用接口入口；尚未验证真实 `WM_INITMENUPOPUP`、`WM_DRAWITEM`、`WM_MEASUREITEM`/`IContextMenu3::HandleMenuMsg2` 转发，第三方扩展、多 provider、实际菜单显示/命令执行也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。
+随后对菜单中 5 个子菜单直接调用 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)`：4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，没有其它失败；三轮两项选择（初始、复制后、移动后）结果一致。菜单仍未显示，前台未变。
+
+这补充证明当前 Windows 本机文件 Shell 菜单对象在多选包装 PIDL 后可查询 `IContextMenu3`，并能处理 4/5 个内存子菜单的初始化消息；`E_NOTIMPL` 的那个子菜单需要由实际宿主走未处理消息的默认路径。尚未验证真实窗口消息转发、`WM_DRAWITEM`、`WM_MEASUREITEM`、菜单边界/视觉，第三方扩展与多 provider 也未覆盖。产品仍使用 ExplorerBrowser，未做宿主迁移。

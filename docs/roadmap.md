@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 隔离多选 Shell 菜单初始化消息：包装 PIDL 的多选 `IContextMenu3` 内存菜单对 5 个子菜单分别收到 `HandleMenuMsg2(WM_INITMENUPOPUP)`；4 个返回 `S_OK`，1 个返回 `E_NOTIMPL`，未出现其它失败。NativeProbe Release build 0 警告/错误，完整 `--static-shell-column-wrapped-folder-smoke` 通过，前台不变、菜单未显示。说明宿主消息路由至少需要尊重已处理与未处理结果；仍未验证窗口消息转发和绘制。产品仍使用 ExplorerBrowser。详见[Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
+
 2026-10-31 包装 Shell 文件夹的多选菜单接口复核：真实临时文件夹的两项目录多选经过包装子 PIDL 后，`IContextMenu3` 可查询，内存菜单含 103 个命令、25 个菜单项及 `copy`/`delete`；菜单未显示、未执行，前台未变。Release NativeProbe build 0 警告/错误，`--static-shell-column-wrapped-folder-smoke` 通过。该结果补上未来自有视图对接 Shell 所有者绘制/动态菜单消息的接口可用性，不证明消息转发或可见菜单体验；产品仍使用 ExplorerBrowser。详情见[文件夹大小列与 Shell 视图调查](folder-size-column-investigation.md#2026-10-31包装多选原生菜单扩展接口)。
 
 2026-10-31 集中 GUI 验收候选已刷新到当前主线 `db639e0e1681ab5dd1054f358189880c61b12953`：四窗格隔离副本 `src/.state/gui-smoke/20261031-053306-917-58e879/`，状态 `prepared-not-run`，47 项待验收。EXE/DLL SHA-256 与 preparation manifest 一致；准备过程只生成隔离应用、profile 和临时夹具，没有启动窗口、创建 ExplorerBrowser 或触碰正式 profile。候选包含 `temp.85` 的查看方式切换重绘租约；实际像素改善仍待可见验收。固定身份与清单见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。

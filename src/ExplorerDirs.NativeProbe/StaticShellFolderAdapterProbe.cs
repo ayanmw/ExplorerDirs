@@ -22,6 +22,7 @@ internal static class StaticShellFolderAdapterProbe
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenu3Id = new("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719");
+    private const uint WmInitMenuPopup = 0x0117;
     private static readonly Guid NameKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid SizeKeyFormat = new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid DocumentSummaryFormat = new("D5CDD502-2E9C-101B-9397-08002B2CF9AE");
@@ -2418,21 +2419,43 @@ internal static class StaticShellFolderAdapterProbe
             Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, childCount, children, in contextMenuId, 0, out contextMenu));
             if (contextMenu == 0) throw new Exception("Wrapped multi-selection did not return an IContextMenu.");
             var contextMenu3Result = Marshal.QueryInterface(contextMenu, in ContextMenu3Id, out var contextMenu3);
-            if (contextMenu3 != 0) Marshal.Release(contextMenu3);
-            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
-            Check(queryResult);
-            var commandCount = (uint)(queryResult & 0xffff);
-            var itemCount = GetMenuItemCount(menu);
-            if (commandCount == 0 || itemCount == 0)
-                throw new Exception($"Wrapped multi-selection context menu was empty: commands={commandCount}; items={itemCount}.");
-            var verbs = ReadContextMenuVerbs(contextMenu, commandCount);
-            var expectedVerbs = new[] { "copy", "delete" };
-            if (expectedVerbs.Any(expected => !verbs.Contains(expected, StringComparer.OrdinalIgnoreCase)))
-                throw new Exception("Wrapped multi-selection context menu is missing native verbs: " +
-                    string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
-            if (GetForegroundWindow() != foreground)
-                throw new InvalidOperationException("Wrapped multi-selection menu construction changed the foreground window.");
-            Console.WriteLine($"wrapped multi-selection native context menu: commands={commandCount}; menu-items={itemCount}; copy/delete=True; IContextMenu3={(contextMenu3Result >= 0 ? "available" : $"HRESULT=0x{contextMenu3Result:X8}")}; displayed=False");
+            try
+            {
+                var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7fff, 0x10 | 0x800);
+                Check(queryResult);
+                var commandCount = (uint)(queryResult & 0xffff);
+                var itemCount = GetMenuItemCount(menu);
+                if (commandCount == 0 || itemCount == 0)
+                    throw new Exception($"Wrapped multi-selection context menu was empty: commands={commandCount}; items={itemCount}.");
+                var verbs = ReadContextMenuVerbs(contextMenu, commandCount);
+                var expectedVerbs = new[] { "copy", "delete" };
+                if (expectedVerbs.Any(expected => !verbs.Contains(expected, StringComparer.OrdinalIgnoreCase)))
+                    throw new Exception("Wrapped multi-selection context menu is missing native verbs: " +
+                        string.Join('|', expectedVerbs.Except(verbs, StringComparer.OrdinalIgnoreCase)));
+
+                var initialized = 0;
+                var handled = 0;
+                var notImplemented = 0;
+                var messageFailures = new List<string>();
+                if (contextMenu3 != 0)
+                {
+                    var handleMenuMessage = At<HandleContextMenuMessage2>(contextMenu3, 7);
+                    for (var index = 0; index < itemCount; index++)
+                    {
+                        var submenu = GetSubMenu(menu, index);
+                        if (submenu == 0) continue;
+                        initialized++;
+                        var result = handleMenuMessage(contextMenu3, WmInitMenuPopup, submenu, index, out _);
+                        if (result == 0) handled++;
+                        else if (result == unchecked((int)0x80004001)) notImplemented++;
+                        else if (result < 0) messageFailures.Add($"{index}:0x{result:X8}");
+                    }
+                }
+                if (GetForegroundWindow() != foreground)
+                    throw new InvalidOperationException("Wrapped multi-selection menu construction changed the foreground window.");
+                Console.WriteLine($"wrapped multi-selection native context menu: commands={commandCount}; menu-items={itemCount}; copy/delete=True; IContextMenu3={(contextMenu3Result >= 0 ? "available" : $"HRESULT=0x{contextMenu3Result:X8}")}; init-popup=handled:{handled}/{initialized},not-implemented:{notImplemented},other-failures:{string.Join(',', messageFailures)}; displayed=False");
+            }
+            finally { if (contextMenu3 != 0) Marshal.Release(contextMenu3); }
         }
         finally
         {
@@ -2714,6 +2737,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemObject(nint self, uint item, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int HandleContextMenuMessage2(nint self, uint message, nint wParam, nint lParam, out nint result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeInfo info);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurrentViewMode(nint self, out uint mode);
@@ -2752,6 +2776,7 @@ internal static class StaticShellFolderAdapterProbe
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
+    [DllImport("user32.dll")] private static extern nint GetSubMenu(nint menu, int position);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll", EntryPoint = "GetParent")] private static extern nint GetParentWindow(nint window);
     [DllImport("user32.dll", EntryPoint = "GetDlgCtrlID")] private static extern int GetDlgCtrlID(nint window);
