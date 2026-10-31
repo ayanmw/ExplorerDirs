@@ -211,6 +211,13 @@ internal static class StaticShellFolderAdapterProbe
                     }
                     finally { Marshal.Release(skipClone); }
 
+                    var resetForBatchHr = At<EnumReset>(enumerator, 5)(enumerator);
+                    if (resetForBatchHr < 0) throw new Exception($"Wrapped enumerator Reset before batch reads failed: 0x{resetForBatchHr:X8}.");
+                    VerifyWrappedEnumeratorBatch(enumerator, 3, expectPartial: false);
+                    VerifyWrappedEnumeratorBatch(enumerator, 100, expectPartial: true);
+                    var resetAfterBatchHr = At<EnumReset>(enumerator, 5)(enumerator);
+                    if (resetAfterBatchHr < 0) throw new Exception($"Wrapped enumerator Reset after batch reads failed: 0x{resetAfterBatchHr:X8}.");
+
                     stage = "wrapped-enumerator-next";
                     var nextHr = At<EnumNext>(enumerator, 3)(enumerator, 1, out var child, out var fetched);
                     if (nextHr < 0) throw new Exception($"Wrapped IEnumIDList.Next failed: 0x{nextHr:X8}.");
@@ -1804,6 +1811,35 @@ internal static class StaticShellFolderAdapterProbe
         finally { Marshal.FreeCoTaskMem(text); }
     }
 
+    private static void VerifyWrappedEnumeratorBatch(nint enumerator, uint requested, bool expectPartial)
+    {
+        var buffer = Marshal.AllocCoTaskMem(checked((int)requested * IntPtr.Size));
+        try
+        {
+            for (var index = 0; index < requested; index++) Marshal.WriteIntPtr(buffer, checked((int)index * IntPtr.Size), 0);
+            var hr = At<EnumNextMany>(enumerator, 3)(enumerator, requested, buffer, out var fetched);
+            if (fetched > requested || (expectPartial ? hr != 1 || fetched == 0 : hr != 0 || fetched != requested))
+                throw new Exception($"Wrapped IEnumIDList.Next({requested}) returned unexpected batch semantics: hr=0x{hr:X8}, fetched={fetched}.");
+
+            for (var index = 0; index < fetched; index++)
+            {
+                var item = Marshal.ReadIntPtr(buffer, checked((int)index * IntPtr.Size));
+                if (item == 0) throw new Exception($"Wrapped IEnumIDList.Next({requested}) returned a null item at index {index}.");
+                ILFree(item);
+                Marshal.WriteIntPtr(buffer, checked((int)index * IntPtr.Size), 0);
+            }
+        }
+        finally
+        {
+            for (var index = 0; index < requested; index++)
+            {
+                var item = Marshal.ReadIntPtr(buffer, checked((int)index * IntPtr.Size));
+                if (item != 0) ILFree(item);
+            }
+            Marshal.FreeCoTaskMem(buffer);
+        }
+    }
+
     private static void VerifyWrappedShellItemObjects(nint adapter, nint child)
     {
         var childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
@@ -2354,6 +2390,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumObjects(nint self, nint owner, uint flags, out nint enumerator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindToObject(nint self, nint item, nint bind, in Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumNextMany(nint self, uint count, nint items, out uint fetched);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumSkip(nint self, uint count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumClone(nint self, out nint clone);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int EnumReset(nint self);

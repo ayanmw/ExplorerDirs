@@ -2,7 +2,7 @@
 
 ## 2026-10-31：包装子 PIDL 的枚举器克隆合同
 
-NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL 状态支持；每个包装枚举器保留独立游标，因此 `Clone`、`Reset` 和 `Skip` 不依赖底层文件系统枚举器实现 `Clone`。合同从非零游标克隆后，逐项比较原枚举器与克隆的 PIDL 身份，并检查 `Reset` 回到首项。夹具同时包含文件和子目录，Shell data object/CIDA 检查都接受两类真实文件系统项目。
+NativeProbe 的 `WrappedEnumIdList` 现在由共享、惰性缓存的子项 PIDL 状态支持；每个包装枚举器保留独立游标，因此 `Clone`、`Reset` 和 `Skip` 不依赖底层文件系统枚举器实现 `Clone`。合同从非零游标克隆后逐项比较 PIDL 身份，并检查 `Reset`、克隆后 `Skip` 与 `Next(count)` 的批量及末尾部分读取语义。夹具同时包含文件和子目录，Shell data object/CIDA 检查都接受两类真实文件系统项目。
 
 验证：原生 Release DLL 与 NativeProbe Release 构建通过；`--static-shell-column-wrapped-folder-smoke`、`--static-shell-column-parent-item-smoke` 和 `--wrapped-pidl-contract-smoke` 均退出码 0，输出包含 `enum-clone=supported`、相同 parent/child PIDL 身份以及 `window-created=False`。这些均为无窗口隔离合同。
 
