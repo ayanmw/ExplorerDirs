@@ -222,6 +222,52 @@ internal static class ShellListViewRowModelSmoke
                   nestedScan.Unreadable == 0,
                 "handle enumeration reads ordinary nested directories and combines their summaries");
 
+            var requestedTreeRoot = Path.Combine(identityRoot, "requested-tree-root");
+            var requestedTreeChild = Path.Combine(requestedTreeRoot, "child");
+            var requestedTreeGrandchild = Path.Combine(requestedTreeChild, "grandchild");
+            var requestedTreeSibling = Path.Combine(requestedTreeRoot, "sibling");
+            Directory.CreateDirectory(requestedTreeGrandchild);
+            Directory.CreateDirectory(requestedTreeSibling);
+            File.WriteAllBytes(Path.Combine(requestedTreeRoot, "root.bin"), new byte[2]);
+            File.WriteAllBytes(Path.Combine(requestedTreeChild, "child.bin"), new byte[6]);
+            File.WriteAllBytes(Path.Combine(requestedTreeGrandchild, "grandchild.bin"), new byte[4]);
+            File.WriteAllBytes(Path.Combine(requestedTreeSibling, "sibling.bin"), new byte[8]);
+            var requestedTreePaths = new[] { requestedTreeRoot, requestedTreeChild, requestedTreeSibling };
+            var requestedTree = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                requestedTreeRoot, requestedTreePaths, CancellationToken.None);
+            var expectedRequestedTree = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                requestedTreeRoot, requestedTreePaths, CancellationToken.None);
+            Check(requestedTree.Count == expectedRequestedTree.Count && requestedTree.All(pair =>
+                      expectedRequestedTree.TryGetValue(pair.Key, out var expected) && pair.Value.Summary == expected) &&
+                  requestedTree.Count == 3 &&
+                  requestedTree[requestedTreeRoot].Summary == new RecursiveDirectoryScanResult(20, 4, 3, 0) &&
+                  requestedTree[requestedTreeChild].Summary == new RecursiveDirectoryScanResult(10, 2, 1, 0) &&
+                  requestedTree[requestedTreeSibling].Summary == new RecursiveDirectoryScanResult(8, 1, 0, 0) &&
+                  requestedTree.Values.All(result => result.Identity != default),
+                "one handle traversal returns requested recursive summaries and file identities for multiple visible folders");
+
+            var longPathRoot = Path.Combine(identityRoot, "long-path-root");
+            Directory.CreateDirectory(longPathRoot);
+            var longPathCurrent = longPathRoot;
+            string? longPathFirstChild = null;
+            const int longPathDepth = 28;
+            for (var index = 0; index < longPathDepth; index++)
+            {
+                longPathCurrent = Path.Combine(longPathCurrent, $"depth-{index:D2}-long");
+                if (longPathFirstChild is null) longPathFirstChild = longPathCurrent;
+                Directory.CreateDirectory(longPathCurrent);
+                File.WriteAllBytes(Path.Combine(longPathCurrent, "payload.bin"), [1]);
+            }
+            var longPathExpected = RecursiveDirectoryScanner.ScanDirectoryTreeForPaths(
+                longPathRoot, [longPathFirstChild!], CancellationToken.None);
+            var longPathActual = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                longPathRoot, [longPathFirstChild!], CancellationToken.None);
+            Check(longPathExpected[longPathFirstChild!].Bytes == longPathDepth &&
+                  longPathActual.TryGetValue(longPathFirstChild!, out var longPathResult) &&
+                  longPathResult.Summary == longPathExpected[longPathFirstChild!] &&
+                  longPathResult.Identity != default,
+                "handle traversal preserves requested folder results beyond the legacy MAX_PATH boundary");
+
             var pagedScanRoot = Path.Combine(identityRoot, "paged-scan-root");
             Directory.CreateDirectory(pagedScanRoot);
             const int pagedFileCount = 700;

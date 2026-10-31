@@ -801,3 +801,21 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 为评估句柄绑定扫描能否改善扫描时延，使用临时本机文件夹在同一 .NET 进程中对照产品 `RecursiveDirectoryScanner` 与 NativeProbe 的 `HandleBoundRecursiveDirectoryScanner`。夹具为 350 个分支、700 个目录、2450 个文件、483700 B；每种扫描各运行 5 次，前 2 次不计，取后 3 次平均。两种扫描对字节数、文件/目录数和 unreadable 计数给出相同结果。暖缓存样本中，路径扫描平均 289.63 ms、托管分配约 1,349,224 B；句柄扫描平均 68.97 ms、托管分配约 2,449,645 B（约 4.2 倍速度、约 82% 更多托管分配）。
 
 这是单机、浅层、暖缓存夹具的微基准，不是稳定性能承诺：执行顺序固定，样本少，没有测峰值/保留内存、Private Bytes、真实 F9 取消体验、UNC/网络文件系统或第三方 namespace provider。更快的结果值得进入下一轮跨夹具验证，但更高的托管分配和逐目录打开句柄也需要观察；当前没有证据证明它降低产品运行内存或适合取代 F9 路径。句柄扫描器仍留在 NativeProbe，产品 ExplorerBrowser/F9 行为未改变。临时基准程序位于忽略目录 `src/.state/scanner-ab-probe`，未加入版本控制。
+
+### 2026-10-31：多行递归大小的单遍句柄扫描
+
+上一节只比较一个根目录汇总，不能代表 Q-Dir 的“同一列表中多个文件夹各自显示递归大小”。NativeProbe 现在另有 `ScanDirectoryTree`，打开一个扫描根后只枚举一次，并在每个目录句柄关闭前保存请求行的递归摘要与该目录文件 ID；SettingsSmoke 用真实临时目录把根、子目录和兄弟目录结果逐项对照产品 `ScanDirectoryTreeForPaths`，数量、字节数、文件/目录数及身份均匹配。
+
+本机 C: NTFS 夹具对照三种路径：产品单遍路径扫描、句柄单遍扫描、现有句柄扫描器对每个请求目录独立递归。每轮 7 次、前 2 次不计，顺序轮换；完整矩阵重复 2 轮。宽目录为 350 个可见兄弟目录、每支 4 层、3150 个文件；深链为 24 层并请求第一层子目录；多文件目录为 120 个可见兄弟目录、每个 25 个文件。全部三种路径在三个夹具的请求行摘要一致。两轮时延范围如下：
+
+| 夹具 | 产品路径单遍 | 句柄单遍 | 句柄逐目录独立扫描 |
+| --- | ---: | ---: | ---: |
+| 宽目录，350 行 | 1123–2052 ms | 316–461 ms | 252–508 ms |
+| 深链，1 行 | 24–29 ms | 12–13 ms | 11–12 ms |
+| 多文件目录，120 行 | 647–1008 ms | 19–27 ms | 16–25 ms |
+
+每轮托管分配在同一夹具内重复稳定：宽目录约 2.17 MB / 5.69 MB / 5.15 MB；深链约 0.052 MB / 0.119 MB / 0.115 MB；多文件目录约 1.23 MB / 0.65 MB / 0.46 MB，顺序对应上表三种路径。句柄单遍在这三个 NTFS 夹具上时延较低，但宽目录分配约为产品路径版的 2.6 倍；多文件目录分配更低。逐目录独立扫描在兄弟目录场景与单遍句柄版时延接近，因为这些子树互不重叠，不能笼统宣称单遍会显著减少工作量。绝对时延跨轮波动明显，样本仍是暖缓存、短时、单机托管分配测量，没有包含峰值/保留进程内存、Shell、UNC、第三方 provider 或真实 UI。
+
+深链夹具还先暴露了旧句柄原型的 MAX_PATH 缺口：超过约 260 字符后，句柄打开子目录失败，导致 unreadable 增加、结果少算。现在 `CreateFileW` 对本地盘和 UNC 文件系统路径使用扩展路径前缀，句柄内部保留该前缀，结果字典再归一化为普通解析路径。新增超过 MAX_PATH 的 28 层临时目录回归在旧逻辑上失败，修正后定向 `--shell-listview-row-model-smoke` 与递归扫描 smoke 通过。递归 smoke 还确认列表中的 junction 结果计为 unreadable、不会跟随目标；junction 自身作为扫描根时同样不下钻。
+
+结论：句柄数据通道对本机 NTFS 的逐行汇总有性能潜力，长路径与 junction 边界已在隔离扫描器覆盖；但访问拒绝、UNC 与第三方 Shell provider 仍未实测。Microsoft 文档把 SMB 3.0/TFO/Scale-out、CsvFS 与 ReFS 列入 `GetFileInformationByHandleEx` 的支持技术范围，实际 `FileIdExtdDirectoryInfo` 行为仍需在对应环境验证：[GetFileInformationByHandleEx](https://learn.microsoft.com/en-us/windows/desktop/api/winbase/nf-winbase-getfileinformationbyhandleex)、[FILE_ID_EXTD_DIR_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_extd_dir_info)。NativeProbe 原型没有接入 ExplorerBrowser、IShellView 产品视图或 F9；列展示、排序、焦点、菜单、拖放及逐项后台刷新仍未通过架构验收。

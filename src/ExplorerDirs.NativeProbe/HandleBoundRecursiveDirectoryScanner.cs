@@ -75,13 +75,48 @@ internal static class HandleBoundRecursiveDirectoryScanner
         return results;
     }
 
+    internal static IReadOnlyDictionary<string, ShellListViewRowScanResult> ScanDirectoryTree(
+        string rootPath,
+        IEnumerable<string> requestedPaths,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestedPaths);
+        cancellationToken.ThrowIfCancellationRequested();
+        rootPath = Path.GetFullPath(rootPath);
+        var requested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in requestedPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            requested.Add(Path.GetFullPath(path));
+        }
+
+        var results = new Dictionary<string, ShellListViewRowScanResult>(requested.Count,
+            StringComparer.OrdinalIgnoreCase);
+        var root = OpenDirectory(rootPath);
+        if (root is null) return results;
+        using (root.Handle)
+        {
+            if ((root.Attributes & FileAttributeReparsePoint) != 0)
+            {
+                if (requested.Contains(rootPath))
+                    results[rootPath] = new(root.Identity, new(0, 0, 0, 1));
+                return results;
+            }
+            ScanOpenedDirectory(root.Handle, root.Identity, rootPath, cancellationToken,
+                beforeChildOpen: null, requested, results);
+        }
+        return results;
+    }
+
     private static RecursiveDirectoryScanResult ScanOpenedDirectory(
         SafeFileHandle rootHandle, ShellFileSystemIdentity rootIdentity, string originalPath,
-        CancellationToken cancellationToken, Action<string, string>? beforeChildOpen)
+        CancellationToken cancellationToken, Action<string, string>? beforeChildOpen,
+        HashSet<string>? requestedPaths = null,
+        Dictionary<string, ShellListViewRowScanResult>? requestedResults = null)
     {
         var frames = new Stack<DirectoryFrame>();
         RecursiveDirectoryScanResult? completedRoot = null;
-        frames.Push(new(rootHandle, rootIdentity, TryGetPath(rootHandle) ?? originalPath));
+        frames.Push(new(rootHandle, rootIdentity, ToExtendedPath(TryGetPath(rootHandle) ?? originalPath)));
         try
         {
             while (frames.TryPeek(out var frame))
@@ -106,16 +141,24 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 if (entry.Name is "." or "..") continue;
                 if ((entry.Attributes & FileAttributeDirectory) != 0)
                 {
+                    var currentDirectoryPath = ToExtendedPath(TryGetPath(frame.Handle) ?? frame.Path);
+                    var childPath = Path.Combine(currentDirectoryPath, entry.Name);
+                    var normalizedChildPath = NormalizeHandlePath(childPath);
                     if ((entry.Attributes & FileAttributeReparsePoint) != 0 ||
                         entry.FileIdLow == 0 && entry.FileIdHigh == 0)
                     {
                         frame.Unreadable = checked(frame.Unreadable + 1);
+                        if ((entry.Attributes & FileAttributeReparsePoint) != 0 &&
+                            requestedPaths?.Contains(normalizedChildPath) == true)
+                        {
+                            var identity = new ShellFileSystemIdentity(
+                                frame.Identity.VolumeSerialNumber, entry.FileIdLow, entry.FileIdHigh);
+                            requestedResults![normalizedChildPath] = new(identity, new(0, 0, 0, 1));
+                        }
                         continue;
                     }
 
-                    var currentDirectoryPath = TryGetPath(frame.Handle) ?? frame.Path;
-                    var childPath = Path.Combine(currentDirectoryPath, entry.Name);
-                    beforeChildOpen?.Invoke(currentDirectoryPath, childPath);
+                    beforeChildOpen?.Invoke(NormalizeHandlePath(currentDirectoryPath), normalizedChildPath);
                     var child = OpenDirectory(childPath);
                     if (child is null)
                     {
@@ -133,7 +176,11 @@ internal static class HandleBoundRecursiveDirectoryScanner
                         continue;
                     }
 
-                    try { frames.Push(new(child.Handle, child.Identity, TryGetPath(child.Handle) ?? childPath)); }
+                    try
+                    {
+                        frames.Push(new(child.Handle, child.Identity,
+                            ToExtendedPath(TryGetPath(child.Handle) ?? childPath)));
+                    }
                     catch
                     {
                         child.Handle.Dispose();
@@ -161,6 +208,9 @@ internal static class HandleBoundRecursiveDirectoryScanner
         {
             var completed = frames.Pop();
             var summary = completed.ToSummary();
+            var normalizedPath = NormalizeHandlePath(completed.Path);
+            if (requestedPaths?.Contains(normalizedPath) == true)
+                requestedResults![normalizedPath] = new(completed.Identity, summary);
             completed.Dispose();
             if (frames.TryPeek(out var parent))
             {
@@ -173,9 +223,31 @@ internal static class HandleBoundRecursiveDirectoryScanner
         }
     }
 
+    private static string NormalizeHandlePath(string path)
+    {
+        if (path.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
+            return "\\\\" + path[8..];
+        if (path.Length >= 6 && path.StartsWith("\\\\?\\", StringComparison.Ordinal) &&
+            char.IsAsciiLetter(path[4]) && path[5] == ':')
+            return path[4..];
+        return path;
+    }
+
+    private static string ToExtendedPath(string path)
+    {
+        // Keep recursive CreateFileW opens valid after a fixture or user path exceeds MAX_PATH.
+        if (path.StartsWith("\\\\?\\", StringComparison.Ordinal)) return path;
+        if (path.StartsWith("\\\\", StringComparison.Ordinal))
+            return "\\\\?\\UNC\\" + path.TrimStart('\\');
+        if (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' &&
+            (path[2] == Path.DirectorySeparatorChar || path[2] == Path.AltDirectorySeparatorChar))
+            return "\\\\?\\" + path;
+        return path;
+    }
+
     private static OpenDirectoryResult? OpenDirectory(string path)
     {
-        var handle = CreateFileW(path, FileListDirectory | FileReadAttributes, FileShareAll,
+        var handle = CreateFileW(ToExtendedPath(path), FileListDirectory | FileReadAttributes, FileShareAll,
             0, OpenExisting, FileFlagOpenReparsePoint | FileFlagBackupSemantics, 0);
         if (handle.IsInvalid)
         {

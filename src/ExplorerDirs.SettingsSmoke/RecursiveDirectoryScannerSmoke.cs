@@ -1,4 +1,5 @@
 using ExplorerDirs.App;
+using ExplorerDirs.NativeProbe;
 using System.Diagnostics;
 using System.IO;
 
@@ -276,6 +277,18 @@ internal static class RecursiveDirectoryScannerSmoke
             Check(linkedTreeResults[Path.GetFullPath(root)] == linkedResult &&
                   !linkedTreeResults.ContainsKey(Path.GetFullPath(directoryLink)),
                 "single-pass directory tree scan matches reparse-point totals without descending into the link");
+            var handleLinkedTreeResults = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                root, [root, directoryLink], CancellationToken.None);
+            Check(handleLinkedTreeResults.Count == 2 &&
+                  handleLinkedTreeResults[Path.GetFullPath(root)].Summary == linkedResult &&
+                  handleLinkedTreeResults[Path.GetFullPath(directoryLink)].Summary ==
+                  new RecursiveDirectoryScanResult(0, 0, 0, 1),
+                "handle-bound row scan reports reparse points without traversing their targets");
+            var handleReparseRootResult = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                directoryLink, [directoryLink], CancellationToken.None);
+            Check(handleReparseRootResult[Path.GetFullPath(directoryLink)].Summary ==
+                  new RecursiveDirectoryScanResult(0, 0, 0, 1),
+                "handle-bound scan reports a reparse point selected as the traversal root without following it");
         }
         finally
         {
