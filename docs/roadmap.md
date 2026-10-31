@@ -6,6 +6,8 @@
 
 2026-10-31 逐行文件夹大小快照跨 provider 重建合同：NativeProbe 的扫描快照表现为可共享、引用计数的 store；provider 嵌套绑定复用同一 store，probe 则保留 store、销毁 provider 后用同一 store 构造新 provider。新 provider 重新解析 sibling PIDL 后仍读到独立的 6 B/12 B 值和正确数值排序。原生 DLL 构建及 `--static-shell-column-folder-smoke` 通过，输出 `provider-recreation=retained`，没有创建 Shell view 窗口。证据只证明外部 owner 可以跨 provider 生命周期保留并复用 store；产品 owner 注入、Shell class factory 生命周期、生产 `ShellListViewRowModel`/异步扫描发布、DefView 列更新和可见交互仍未验证。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。详见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31扫描快照跨-provider-重建)。
 
+2026-10-31 temp.80 同 PID 被动内存复采：PID `47460` 持续存活，13 点覆盖 60.20 秒，Working Set 固定 `234,713,088 B`、Private Bytes 固定 `121,180,160 B`，句柄/线程/GDI/USER 计数也不变。没有固定文件浏览负载或托管堆/原生分配采样，因此只说明此分钟无进程计数变化，不能排除操作期间或长期增长。完整身份、原始 CSV 哈希与限制见[内存采样记录](memory-sampling.md#2026-10-31-0821-北京时间temp80-同一-pid-一分钟只读采样)。
+
 2026-10-31 逐行文件夹大小绝对身份与同实例重枚举合同：NativeProbe 从真实 Shell PIDL 获取 `SIGDN_DESKTOPABSOLUTEPARSING`，传入合成 `IShellFolder2` 实例级行快照表；provider 再从 backing folder/行 PIDL 解析并校验同一 identity。夹具扫描时 10 B、磁盘后改为 7 B；列仍读回 10 并排在 8 B 文件后。两个兄弟行独立保存 10 B/12 B，只更新一行为 6 B 后，两行值与排序分别正确；同一 provider 再次 `EnumObjects` 生成新 PIDL 后仍命中更新后的值。原生 DLL/NativeProbe Release 构建及 `--static-shell-column-folder-smoke` 通过，不创建窗口。provider 实例重建后的缓存、生产 `ShellListViewRowModel` 生命周期/异步扫描发布及 Shell 通知还未验证；未证明 DefView 列恢复/通知合同、可见交互或产品接线。ExplorerBrowser 产品不变；逐行大小仍为 P2 隔离原型。
 
 2026-10-31 跨窗格移动标签 HostProbe 复验：修复 `PaneTabTransferProbe` 未传递新增 `softRefresh` 可选构造参数的过期调用。当前 Release HostProbe `--pane-tab-transfer` 通过：原 `TabItem`、`TabState`、`ExplorerBrowserHost` 与原生 HWND 保持同一实例，宿主转移到目标窗格后尺寸更新；当前 B 位置可通过 Shell Back 回到移动前 A 位置。完整探针还通过独立复制、克隆及关闭清理。运行使用隐藏且禁止激活的 `HwndSource`，前台未受影响；真实标签拖放、物理鼠标与焦点体验仍待集中可见验收。
