@@ -1174,67 +1174,58 @@ public static class SyntheticShellSortProbe
             if (!itemVisible || deferredCallbacks != 0)
                 throw new TimeoutException("The recreated Shell view did not use default SFVM_FSNOTIFY processing to expose the new file without a host-scheduled refresh.");
 
-            Check(SHParseDisplayName(itemPath, 0, out var oldItemPidl, 0, out _));
-            try
+            names = ReadNames(listView, module, expectedCount: -1);
+            SetListViewSelectionAndFocus(listView, itemName, names);
+            var enumBeforeRename = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            RenameSelectedShellItem(view, listView, module, itemName, "small.bin", renamedItemName);
+            if (File.Exists(itemPath) || !File.Exists(renamedItemPath))
+                throw new IOException("The post-recreation IFileOperation rename did not update the backing fixture.");
+            deadline = Environment.TickCount64 + 3000;
+            do
             {
-                File.Move(itemPath, renamedItemPath);
-                Check(SHParseDisplayName(renamedItemPath, 0, out var newItemPidl, 0, out _));
-                try
-                {
-                    enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                    callbackCountBefore = ReadCounter(module, "GetSyntheticDeferredRefreshCount");
-                    SHChangeNotify(ShcneRenameItem, 0, oldItemPidl, newItemPidl);
-                    deadline = Environment.TickCount64 + 3000;
-                    do
-                    {
-                        Pump(50);
-                        names = ReadNames(listView, module, expectedCount: -1);
-                        if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                            names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
-                    } while (Environment.TickCount64 < deadline);
-                    var directRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                        names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
-                    deferredCallbacks = ReadCounter(module, "GetSyntheticDeferredRefreshCount") - callbackCountBefore;
-                    Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_RENAMEITEM; direct-rename-visible={directRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}; deferred-callbacks={deferredCallbacks}");
-
-                    enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                    SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
-                    deadline = Environment.TickCount64 + 3000;
-                    do
-                    {
-                        Pump(50);
-                        names = ReadNames(listView, module, expectedCount: -1);
-                        if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                            names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1) break;
-                    } while (Environment.TickCount64 < deadline);
-                    var parentUpdateRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
-                        names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1;
-                    Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR-after-RENAMEITEM; rename-normalized={parentUpdateRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
-                    if (!parentUpdateRenameVisible)
-                        throw new TimeoutException("A parent SHCNE_UPDATEDIR did not normalize the synthetic view after a physical child rename notification.");
-                }
-                finally { ILFree(newItemPidl); }
-            }
-            finally { ILFree(oldItemPidl); }
-
-            Check(SHParseDisplayName(renamedItemPath, 0, out var deletedItemPidl, 0, out _));
-            try
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
+                    names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1) break;
+            } while (Environment.TickCount64 < deadline);
+            var shellRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
+                names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1;
+            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-RenameItems; rename-visible={shellRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeRename}");
+            if (!shellRenameVisible)
             {
-                File.Delete(renamedItemPath);
                 enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
-                callbackCountBefore = ReadCounter(module, "GetSyntheticDeferredRefreshCount");
-                SHChangeNotify(ShcneDelete, 0, deletedItemPidl, 0);
+                SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
                 deadline = Environment.TickCount64 + 3000;
                 do
                 {
                     Pump(50);
                     names = ReadNames(listView, module, expectedCount: -1);
-                    if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
+                    if (!names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
+                        names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1) break;
                 } while (Environment.TickCount64 < deadline);
-                var directDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
-                deferredCallbacks = ReadCounter(module, "GetSyntheticDeferredRefreshCount") - callbackCountBefore;
-                Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_DELETE; direct-delete-visible={directDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}; deferred-callbacks={deferredCallbacks}");
+                shellRenameVisible = !names.Contains(itemName, StringComparer.OrdinalIgnoreCase) &&
+                    names.Count(name => string.Equals(name, renamedItemName, StringComparison.OrdinalIgnoreCase)) == 1;
+                Console.WriteLine($"synthetic-size-update-notification: operation=parent-UPDATEDIR-after-IFileOperation-RenameItems; rename-normalized={shellRenameVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
+                if (!shellRenameVisible)
+                    throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation rename and parent directory update.");
+            }
 
+            SetListViewSelectionAndFocus(listView, renamedItemName, names);
+            var enumBeforeDelete = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            DeleteSelectedShellItem(view, listView, module, renamedItemName, "small.bin");
+            if (File.Exists(renamedItemPath))
+                throw new IOException("The post-recreation IFileOperation delete left the backing fixture item present.");
+            deadline = Environment.TickCount64 + 3000;
+            do
+            {
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
+            } while (Environment.TickCount64 < deadline);
+            var shellDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"synthetic-size-update-notification: operation=IFileOperation-DeleteItems; delete-visible={shellDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeDelete}");
+            if (!shellDeleteVisible)
+            {
                 enumCountBefore = ReadCounter(module, "GetSyntheticEnumObjectsCount");
                 SHChangeNotify(ShcneUpdatedir, 0, absolutePidl, 0);
                 deadline = Environment.TickCount64 + 3000;
@@ -1244,12 +1235,11 @@ public static class SyntheticShellSortProbe
                     names = ReadNames(listView, module, expectedCount: -1);
                     if (!names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase)) break;
                 } while (Environment.TickCount64 < deadline);
-                var parentUpdateDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
-                Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_UPDATEDIR-after-DELETE; delete-normalized={parentUpdateDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
-                if (!parentUpdateDeleteVisible)
-                    throw new TimeoutException("A parent SHCNE_UPDATEDIR did not normalize the synthetic view after a physical child delete notification.");
+                shellDeleteVisible = !names.Contains(renamedItemName, StringComparer.OrdinalIgnoreCase);
+                Console.WriteLine($"synthetic-size-update-notification: operation=parent-UPDATEDIR-after-IFileOperation-DeleteItems; delete-normalized={shellDeleteVisible}; rows={names.Length}; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumCountBefore}");
+                if (!shellDeleteVisible)
+                    throw new TimeoutException("The recreated synthetic view did not normalize after IFileOperation delete and parent directory update.");
             }
-            finally { ILFree(deletedItemPidl); }
         }
         finally { ILFree(absolutePidl); }
     }

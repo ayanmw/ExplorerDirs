@@ -1879,7 +1879,10 @@ namespace
             if (message == SFVM_GETNOTIFY) TraceSyntheticSortStage("synthetic-sort: SFVM_GETNOTIFY");
             if (message == SFVM_FSNOTIFY)
             {
-                TraceSyntheticSortStage("synthetic-sort: SFVM_FSNOTIFY");
+                char notification[160]{};
+                sprintf_s(notification, "synthetic-sort: SFVM_FSNOTIFY; wParam=0x%p; lParam=0x%llX",
+                    reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
+                TraceSyntheticSortStage(notification);
                 // S_OK consumes this notification. Let DefView apply its default filesystem update.
                 return E_NOTIMPL;
             }

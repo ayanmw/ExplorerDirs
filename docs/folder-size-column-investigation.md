@@ -856,6 +856,12 @@ NativeProbe 新增句柄绑定扫描器：目录以 `FILE_SHARE_DELETE` 打开�
 
 BCL 返回的长度和属性是枚举条目快照；文件在枚举后被删除或改变时，本次汇总仍可能使用已枚举的旧元数据。这不提供原子文件系统快照，也没有句柄扫描器的文件 ID 竞态保护。真实目录并发替换、UNC/网络文件系统、第三方 provider 和可见 Shell 列行为未在本批次验收；若要求严格对象身份，仍需使用隔离句柄扫描方案并完成其兼容性评审。此次只接入递归目录树扫描，不能据此声称 Q-Dir 逐行大小列已进入产品视图。
 
+### 2026-10-31：重建视图真实 IFileOperation 通知复验（更新前述手动通知结果）
+
+在重建后的 view 中选中临时 backing 文件并实际调用 `IFileOperation::RenameItems` / `DeleteItems`。`SFVM_FSNOTIFY` 原始 `lParam` 分别观察到 `0x1`（本机 SDK `SHCNE_RENAMEITEM`）与 `0x4`（`SHCNE_DELETE`）；两次操作都成功改变 backing 文件，但 DefView 没有重枚举，旧行仍在。探针补发父目录 `SHCNE_UPDATEDIR` 后，每次重枚举 1 次，重命名归一为唯一新行（303 行），删除归一到 302 行。另观察到 `0x40000`，本机 SDK 定义为 `SHCNE_FREESPACE`；`wParam` 只记录地址，没有解引用。
+
+完整探针 exit code 0，前台/输入守卫不变、隔离资源清理完成；原生 DLL `/W4 /WX` 和 NativeProbe Release build 均 0 警告/错误。此结果补足前文：现在已验证真实 IFileOperation 产生的物理子项事件，但 backing 目录更新仍由探针显式补发；尚未实现 adapter 事件翻译，也未改变产品/迁移结论。日志：`src/.state/native-probe-watchdog/20261031-121600-7acc9070.stdout.log`。
+
 ### 2026-10-31：重建后的合成视图对子项变更通知
 
 在“重建 Shell 窗口并保留滚动锚点”的 Private Desktop 场景中，先创建物理 backing 文件并向目录发送 `SHCNE_UPDATEDIR`：新文件显示，provider 重枚举 1 次，host 延迟刷新计数为 0。随后将文件改名并对物理旧/新绝对子 PIDL 发送 `SHCNE_RENAMEITEM`：3 秒内没有替换旧行，列表短暂达到 305 行，provider 重枚举 0 次。对删除后的物理子项 PIDL 发送 `SHCNE_DELETE` 也没有移除旧行，重枚举 0 次。紧接着向合成视图 backing 目录 PIDL 补发 `SHCNE_UPDATEDIR` 后，重命名收敛为唯一的新名称（303 行，枚举 1 次），删除收敛为 302 行（枚举 1 次）。
