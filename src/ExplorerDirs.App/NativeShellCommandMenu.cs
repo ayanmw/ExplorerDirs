@@ -73,8 +73,9 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
                     var handle = Marshal.GetDelegateForFunctionPointer<MenuMessage2>(
                         Marshal.ReadIntPtr(Marshal.ReadIntPtr(context3), 7 * IntPtr.Size));
                     var result = handle(context3, 0x117, item.Submenu, index, out _); // WM_INITMENUPOPUP
-                    if (result >= 0) return true;
-                    if (result != unchecked((int)0x80004001)) return false; // E_NOTIMPL: try the legacy interface.
+                    // S_FALSE is a successful HRESULT but says the message was not handled.
+                    if (result == 0) return true;
+                    if (result is not (1 or unchecked((int)0x80004001))) return false; // S_FALSE/E_NOTIMPL: try the legacy interface.
                 }
                 finally { Marshal.Release(context3); }
             }
@@ -85,7 +86,7 @@ internal sealed class NativeShellCommandMenu : IShellCommandMenu
             {
                 var handle = Marshal.GetDelegateForFunctionPointer<MenuMessage>(
                     Marshal.ReadIntPtr(Marshal.ReadIntPtr(context2), 6 * IntPtr.Size));
-                return handle(context2, 0x117, item.Submenu, index) >= 0;
+                return handle(context2, 0x117, item.Submenu, index) == 0;
             }
             finally { Marshal.Release(context2); }
         }

@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 原生“新建文件夹”子菜单 HRESULT 处理：`IContextMenu3.HandleMenuMsg2(WM_INITMENUPOPUP)` 返回 `S_FALSE` 时，旧逻辑把“成功但未处理”误当成已初始化，未尝试 `IContextMenu2`。现将 `S_OK` 作为唯一已处理结果，`S_FALSE`/`E_NOTIMPL` 回退旧接口，其它失败仍中止。新增 COM 菜单 smoke 先在旧实现上按预期失败，修复后完整 Release SettingsSmoke 通过；未启动 GUI。该修复覆盖懒加载 New 子菜单的状态查询，不代表文件区真实菜单可见验收完成。
+
 2026-10-31 隔离行扫描身份与通知竞态：Shell 文件夹行枚举现在捕获卷序列号及 128 位文件 ID，递归扫描值只有在行快照、实际句柄扫描对象和发布时路径都匹配时才可应用；旧实现因行快照身份始终为空而清空首轮扫描结果，隐藏比例合同会空引用。另在 `FileSystemWatcher` 首个变更回调线程立即废弃当前扫描 ticket，避免已排入 owner dispatcher 的旧结果抢在重扫前发布。新增旧 ticket 已排队时的失效回归、Release SettingsSmoke、NativeProbe/App Release build 通过；`--common-listview-relative-size-contract` 与 `--shell-change-reconciliation` 隐藏探针通过，选区/焦点、后台扫描和 Shell 文件变更结果符合预期。此改动仅在 NativeProbe 行模型原型；未接产品 ExplorerBrowser/IShellView，逐目录身份采集的成本尚未测量。
 
 2026-10-31 隔离 Shell `UPDATEITEM` 通知路由：NativeProbe 合成文件系统 adapter 现在将子项 `SHCNE_UPDATEITEM` 与 CREATE/RENAMEITEM/DELETE 一样纳入延迟父目录更新队列，供自有派生行模型重新枚举属性；`SHCNE_UPDATEDIR` 与未知事件明确不再递归翻译。无窗口路由 smoke 通过，NativeProbe Release 构建 0 警告/错误，wrapped-folder 合同 smoke 通过。没有创建 Shell view 或运行 Private Desktop，因此仅验证事件分类接线和既有 wrapped-folder 合同，不证明真实文件属性变更后的可见列更新、事件 burst 合并或产品集成；ExplorerBrowser 产品未改。

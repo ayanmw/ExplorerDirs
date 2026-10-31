@@ -51,6 +51,16 @@ internal static class NativeShellCommandSmoke
                 "IContextMenu3 handles lazy New submenus before its legacy interface");
         }
         finally { Marshal.Release(modernUnknown); GC.KeepAlive(modern); }
+
+        var unhandledModern = new MenuTestServer3(modernResult: 1);
+        var unhandledUnknown = Marshal.GetIUnknownForObject(unhandledModern);
+        try
+        {
+            using var menu = new NativeShellCommandMenu(Marshal.GetUniqueObjectForIUnknown(unhandledUnknown), 42);
+            Check(menu.IsEnabled("NewFolder") && unhandledModern.ModernInitializations == 1 && unhandledModern.LegacyInitializations == 1,
+                "IContextMenu3 S_FALSE falls back to IContextMenu2 for a lazy submenu");
+        }
+        finally { Marshal.Release(unhandledUnknown); GC.KeepAlive(unhandledModern); }
     }
 
     private static void Check(bool value, string label)
@@ -175,9 +185,10 @@ public interface IMenuTest3
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
-public sealed class MenuTestServer3 : IMenuTest, IMenuTest2, IMenuTest3
+public sealed class MenuTestServer3(int modernResult = 0) : IMenuTest, IMenuTest2, IMenuTest3
 {
     public int ModernInitializations, LegacyAttempts;
+    public int LegacyInitializations;
     private nint submenu;
     public int QueryContextMenu(nint menu, uint index, uint firstId, uint lastId, uint flags)
     {
@@ -199,6 +210,11 @@ public sealed class MenuTestServer3 : IMenuTest, IMenuTest2, IMenuTest3
     public int HandleMenuMsg(uint message, nint wParam, nint lParam)
     {
         LegacyAttempts++;
+        if (modernResult == 1 && message == 0x117 && wParam == submenu && lParam == 0 && LegacyInitializations == 0)
+        {
+            LegacyInitializations++;
+            return AppendMenu(submenu, 0, 2, "New folder") ? 0 : unchecked((int)0x80004005);
+        }
         return unchecked((int)0x80004001);
     }
     public int HandleMenuMsg2(uint message, nint wParam, nint lParam, out nint result)
@@ -207,7 +223,8 @@ public sealed class MenuTestServer3 : IMenuTest, IMenuTest2, IMenuTest3
         if (message != 0x117 || wParam != submenu || lParam != 0 || ModernInitializations != 0)
             return unchecked((int)0x80070057);
         ModernInitializations++;
-        return AppendMenu(submenu, 0, 2, "New folder") ? 0 : unchecked((int)0x80004005);
+        if (!AppendMenu(submenu, 0, 2, "New folder")) return unchecked((int)0x80004005);
+        return modernResult;
     }
 
     [StructLayout(LayoutKind.Sequential)]
