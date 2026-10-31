@@ -5300,4 +5300,10 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 随后用 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)` 初始化真实背景 GroupBy 子菜单，通过其 Size 项的命令 offset 执行分组并读回 `PKEY_Size`。实测 Shell 同时把主排序键切为 Size，且分组升降序会将该排序方向分别设为升/降序；修正探针断言后，Name 排序升/降序与 Size 分组升/降序都恢复逐项颜色，四种情形均为 2/2 回调及身份匹配像素。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0、前台/输入/清理守卫通过。当前证据仅限默认 filesystem `IShellView` 隔离夹具；尚未验证其他分组键、第三方 provider、产品 ExplorerBrowser 或可见 UI。详见[原型记录](ishellview-color-spike.md#2026-11-01-原生菜单-size-分组入口核查)，日志：`src/.state/native-probe-watchdog/20261101-011144-6842972a.stdout.log`。
 
+
 随后从同一真实背景菜单选择 Type 与 Date modified：Type 对应属性 ID 4，并形成 Type→Name 两级排序，Group Ascending/Descending 同时翻转两列；Date modified 对应属性 ID 14，排序方向随分组方向切换。Size/Type/Date modified 三种菜单选择及方向操作均恢复 2/2 逐项颜色回调和身份映射像素。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0、前台/输入/清理守卫通过。结论仅限默认 filesystem `IShellView` 隔离样本；更多分组键、第三方 provider、产品接线和可见 UI 仍待验证。详见[原型记录](ishellview-color-spike.md#2026-11-01-原生菜单-size-分组入口核查)，日志：`src/.state/native-probe-watchdog/20261101-011604-b2858daf.stdout.log`。
+## 2026-11-01：F5 与查看方式切换的原生生命周期复验
+
+- 重建 NativeProbe Release 后运行现有 Private Desktop 生命周期探针，exit 0，前台 HWND、输入时间戳与隔离清理守卫均通过。普通 `IShellView.Refresh()` 期间 view/ListView HWND 保持不变，但 300 行列表短暂归零 5 个采样点（约 28 ms）；完成后回到 301 行。原生 `SHCNE_UPDATEDIR` 和关闭自动枚举后的显式目录通知均未观察到归零，视图模式切换也未观察到空行或 HWND 重建。
+- 该探针采集的是行数与 HWND，不是呈现像素；不能据此断言 28 ms 就是用户看到的黑屏时长。当前产品 F5 调用现有 Shell view 的 `Refresh()`，没有重建 ExplorerBrowser、标签或导航历史；视图切换只更改现有 `IFolderView2` 的模式。
+- 结论：完整视图宿主并未重建。`Refresh()` 的行清空发生在 Shell 原生刷新中；抑制重绘可暂时留住旧画面，但 Shell 行可能已更新，用户点击旧画面时有命中错位风险。此前试过延长重绘租约的实现已回退；本次不重复接入。若再评估该方案，需集中 UI 验收同时检查旧帧、输入命中、选择/焦点和滚动位置，并确认真实收益后再改产品。
