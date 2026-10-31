@@ -237,6 +237,10 @@ internal static class Program
                 synchronousCleanupProbe: true);
         if (args.Length == 1 && args[0] == "--ishellview-color-readonly-private-desktop")
             return PrivateDesktopShellProbe.RunReadOnlyColorRule();
+        if (args.Length == 1 && args[0] == "--ishellview-color-readonly-notification-diagnostic-private-desktop")
+            return PrivateDesktopShellProbe.RunReadOnlyColorNotificationDiagnostic();
+        if (args.Length == 1 && args[0] == "--ishellview-color-readonly-notification-sync-diagnostic-private-desktop")
+            return PrivateDesktopShellProbe.RunReadOnlyColorSynchronousNotificationDiagnostic();
         if (args.Length == 1 && args[0] == "--ishellview-color-directory-private-desktop")
             return PrivateDesktopShellProbe.RunDirectoryColorRule();
         if (args.Length == 1 && args[0] == "--ishellview-color-hidden-private-desktop")
@@ -363,6 +367,8 @@ internal static class Program
             Console.WriteLine("       --ishellview-network-places-color-pixels-private-desktop (identity-map Network Places Shell rows before isolated color sampling)");
             Console.WriteLine("       --ishellview-network-places-child-drop-targets-private-desktop (query child IDropTarget availability without invoking Drop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
+            Console.WriteLine("       --ishellview-color-readonly-notification-diagnostic-private-desktop (diagnose UPDATEITEM delivery and cleanup stages)");
+            Console.WriteLine("       --ishellview-color-readonly-notification-sync-diagnostic-private-desktop (compare synchronous UPDATEITEM notification delivery)");
             Console.WriteLine("       --ishellview-color-directory-private-desktop (same pixel probe with a #DIR folder fixture)");
             Console.WriteLine("       --ishellview-color-hidden-private-desktop (same pixel probe with an explicitly included #Hidden fixture)");
             Console.WriteLine("       --common-listview-color-baseline-private-desktop (standard ListView custom-draw control comparison)");

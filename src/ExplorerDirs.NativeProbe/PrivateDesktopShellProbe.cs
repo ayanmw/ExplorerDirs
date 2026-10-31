@@ -213,6 +213,16 @@ internal static class PrivateDesktopShellProbe
     internal static int RunReadOnlyColorRule() => Run("color-readonly-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, readOnlyRuleProbe: true));
 
+    internal static int RunReadOnlyColorNotificationDiagnostic() => Run("color-readonly-notification",
+        () => ShellViewColorSpike.Run(visible: true, deferParentCleanup: true, readOnlyRuleProbe: true,
+            readOnlyNotificationDiagnostic: true), TimeSpan.FromSeconds(75));
+
+    internal static int RunReadOnlyColorSynchronousNotificationDiagnostic() => Run(
+        "color-readonly-notification-sync",
+        () => ShellViewColorSpike.Run(visible: true, deferParentCleanup: true, readOnlyRuleProbe: true,
+            readOnlyNotificationDiagnostic: true, readOnlyNotificationSynchronous: true),
+        TimeSpan.FromSeconds(40));
+
     internal static int RunDirectoryColorRule() => Run("color-directory-rule", () => ShellViewColorSpike.Run(
         visible: true, deferParentCleanup: true, directoryRuleProbe: true));
 

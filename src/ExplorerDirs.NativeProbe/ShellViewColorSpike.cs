@@ -3325,6 +3325,8 @@ internal static class ShellViewColorSpike
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool directoryRuleProbe = false,
+        bool readOnlyNotificationDiagnostic = false,
+        bool readOnlyNotificationSynchronous = false,
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false,
@@ -3972,8 +3974,11 @@ internal static class ShellViewColorSpike
             Console.WriteLine($"ishellview-color-spike: view-background-color={(listView == 0 ? "unsupported" : $"0x{unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)):X6}")}");
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
             var readOnlyAttributeTransition = visible && readOnlyRuleProbe && listView != 0
-                ? VerifyReadOnlyAttributeColorTransition(folderView, listView, fixturePaths[0])
+                ? VerifyReadOnlyAttributeColorTransition(folderView, listView, fixturePaths[0],
+                    readOnlyNotificationDiagnostic, readOnlyNotificationSynchronous)
                 : "not-run";
+            if (readOnlyNotificationDiagnostic)
+                PrivateDesktopShellProbe.ReportStage("color-readonly-notification: transition-returned");
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
             if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-start");
@@ -4146,6 +4151,8 @@ internal static class ShellViewColorSpike
         }
         finally
         {
+            if (readOnlyNotificationDiagnostic)
+                PrivateDesktopShellProbe.ReportStage("color-readonly-notification: cleanup-start");
             if (contextMenu != 0) Marshal.Release(contextMenu);
             if (selectionMenu != 0) Marshal.Release(selectionMenu);
             if (folderContextMenu != 0) Marshal.Release(folderContextMenu);
@@ -4172,6 +4179,8 @@ internal static class ShellViewColorSpike
                 catch (Exception ex) { Console.WriteLine("ishellview-color-spike cleanup: " + ex.Message); }
                 view = folder = 0;
             }
+            if (readOnlyNotificationDiagnostic)
+                PrivateDesktopShellProbe.ReportStage("color-readonly-notification: shell-view-retired");
             else if (folder != 0) { Marshal.Release(folder); folder = 0; }
             if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
             if (subclassed && drawNotifyTarget != 0) RemoveWindowSubclass(drawNotifyTarget, DrawObserver, 41);
@@ -4212,6 +4221,8 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
+                    if (readOnlyNotificationDiagnostic)
+                        PrivateDesktopShellProbe.ReportStage("color-readonly-notification: host-state-cleanup-finished");
                     // Early diagnostic/operation branches return before view-state writes by design; do not require a round-trip they intentionally skip.
                     if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !zipBackgroundMenuProbe && !zipExtractInvokeProbe && !zipCopyItemsProbe && !zipCrossVolumeMoveProbe && !zipFolderCrossVolumeMoveProbe && !zipDeleteItemsProbe && !virtualThisPcColorProbe && !virtualLibrariesColorProbe && !virtualDesktopColorProbe && !networkPlacesRowMapProbe && !virtualNetworkPlacesColorProbe && !networkPlacesChildDropTargetProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
@@ -4225,9 +4236,13 @@ internal static class ShellViewColorSpike
             var prefix = fixturesRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (fullFixture.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullFixture))
             {
+                if (readOnlyNotificationDiagnostic)
+                    PrivateDesktopShellProbe.ReportStage("color-readonly-notification: fixture-delete-start");
                 if (readOnlyFixturePath is not null && File.Exists(readOnlyFixturePath))
                     File.SetAttributes(readOnlyFixturePath, File.GetAttributes(readOnlyFixturePath) & ~FileAttributes.ReadOnly);
                 Directory.Delete(fullFixture, recursive: true);
+                if (readOnlyNotificationDiagnostic)
+                    PrivateDesktopShellProbe.ReportStage("color-readonly-notification: fixture-delete-finished");
             }
             if (probeSessionRestore)
             {
@@ -4727,7 +4742,7 @@ internal static class ShellViewColorSpike
     }
 
     private static string VerifyReadOnlyAttributeColorTransition(nint folderView, nint listView,
-        string readOnlyPath)
+        string readOnlyPath, bool sendUpdateDiagnostic, bool synchronousNotification)
     {
         var originalAttributes = File.GetAttributes(readOnlyPath);
         var transitions = new List<string>(2);
@@ -4746,6 +4761,19 @@ internal static class ShellViewColorSpike
                 File.SetAttributes(readOnlyPath, readOnly
                     ? current | FileAttributes.ReadOnly
                     : current & ~FileAttributes.ReadOnly);
+
+                if (sendUpdateDiagnostic)
+                {
+                    var notifyFlags = synchronousNotification ? 0x00001005u : PathAndFlushNoWait; // SHCNF_PATH | FLUSH / FLUSHNOWAIT.
+                    Console.WriteLine($"readonly-notification-probe: updateitem-send-start; readonly={readOnly}; flags=0x{notifyFlags:X4}");
+                    PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: updateitem-send-start-{readOnly}-0x{notifyFlags:X4}");
+                    SHChangeNotify(ShellUpdatedItem, notifyFlags, readOnlyPath, 0);
+                    Console.WriteLine($"readonly-notification-probe: updateitem-send-returned; readonly={readOnly}; flags=0x{notifyFlags:X4}");
+                    PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: updateitem-send-returned-{readOnly}-0x{notifyFlags:X4}");
+                    Pump(250);
+                    Console.WriteLine($"readonly-notification-probe: notification-pump-returned; readonly={readOnly}");
+                    PrivateDesktopShellProbe.ReportStage($"color-readonly-notification: notification-pump-returned-{readOnly}");
+                }
 
                 Check(At<SetViewModeAndIconSize>(folderView, 35)(folderView, 4, 16)); // Details.
                 Pump(150);

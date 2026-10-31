@@ -93,6 +93,8 @@ else {
         'color-libraries-private-desktop' { '--ishellview-libraries-color-pixels-private-desktop' }
         'color-desktop-private-desktop' { '--ishellview-desktop-color-pixels-private-desktop' }
         'color-readonly-rule-private-desktop' { '--ishellview-color-readonly-private-desktop' }
+        'color-readonly-notification-diagnostic-private-desktop' { '--ishellview-color-readonly-notification-diagnostic-private-desktop' }
+        'color-readonly-notification-sync-diagnostic-private-desktop' { '--ishellview-color-readonly-notification-sync-diagnostic-private-desktop' }
         'color-directory-rule-private-desktop' { '--ishellview-color-directory-private-desktop' }
         'color-hidden-rule-private-desktop' { '--ishellview-color-hidden-private-desktop' }
         'zip-background-menu-private-desktop' { '--ishellview-zip-background-menu-private-desktop' }

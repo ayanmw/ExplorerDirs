@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：只读属性通知与超时边界复测
+
+新增独立 Private Desktop 诊断入口，并在两次属性切换与清理边界输出阶段。对每次 `#RO` 属性清除/设置分别发送 `SHCNE_UPDATEITEM`，比较 `SHCNF_PATH | SHCNF_FLUSHNOWAIT` 与 `SHCNF_PATH | SHCNF_FLUSH`：两种模式中两次通知调用和随后的 STA 消息泵均返回，回退色 `0xF0D0E0`、`#RO` 色 `0xC0E0F0` 像素断言通过，watchdog exit 0，前台/输入与夹具清理守卫通过。NativeProbe Release build 0 警告/错误；日志 `20261101-075014-95813054.stdout.log`、`20261101-075139-241f9d9b.stdout.log`。
+
+这使先前的通知相关超时无法在受控复测中重现，不能据此归因于 `SHChangeNotify` 或判定问题已消失。探针仍是在通知后主动重建颜色映射，因此没有证明 Shell 通知自动触发产品缓存重算；既有超时根因仍未知，产品 ExplorerBrowser 未改。
+
 ### 2026-11-01：只读属性变化后的颜色规则重算与重绘
 
 扩展隔离 `#RO` 像素探针：在同一默认 `IShellView` 中，对临时文件交替设置/清除只读属性；每次从当前磁盘属性重建 Shell 行索引颜色映射，清除选区、保持 Details/ListView 模式一致并重绘。`#RO` 颜色 `0xC0E0F0` 与文件名回退颜色 `0xF0D0E0` 各自通过行像素断言，第二个文件的名称规则也保持命中。Release NativeProbe build 0 警告/错误，`color-readonly-rule-private-desktop` watchdog exit 0；前台、输入及隔离清理守卫通过，日志 `20261101-074504-a1f817e1.stdout.log`。
