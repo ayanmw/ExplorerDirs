@@ -1967,7 +1967,10 @@ internal static class StaticShellFolderAdapterProbe
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeProjectionSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeProjectionSmoke"))(
                     projectionFixture, checked((long)snapshot.Bytes)));
-            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; window-created=False");
+            Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderRecursiveSizeUpdateSmoke>(
+                NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderRecursiveSizeUpdateSmoke"))(
+                    projectionFixture, checked((long)snapshot.Bytes), 6));
+            Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}; disk-bytes-after-scan=7; native-column=text/VT_UI8/numeric-sort=passed; same-pidl-update=6B/text/property/sort-passed; window-created=False");
         }
         finally
         {
@@ -2308,6 +2311,7 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long scannedBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeUpdateSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, long initialBytes, long updatedBytes);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHParseDisplayName(string name, nint bind, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);

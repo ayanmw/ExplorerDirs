@@ -3378,6 +3378,85 @@ cleanup_recursive_size_projection:
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeUpdateSmoke(
+    PCWSTR backingPath, LONGLONG initialBytes, LONGLONG updatedBytes)
+{
+    if (!backingPath || !*backingPath || initialBytes < 0 || updatedBytes < 0) return E_INVALIDARG;
+    auto result = SetSyntheticSortBackingPath(backingPath);
+    if (FAILED(result)) return result;
+
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    SyntheticSortFolder* root = nullptr;
+    PITEMID_CHILD childFolder = nullptr;
+    PITEMID_CHILD rootFile = nullptr;
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 1);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+    InterlockedExchange64(&g_syntheticChildSizeOverride, initialBytes);
+
+    result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    root = new (std::nothrow) SyntheticSortFolder();
+    if (!root) { result = E_OUTOFMEMORY; goto cleanup_recursive_size_update; }
+    result = root->Initialize(rootPidl);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"child"), nullptr, &childFolder, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+    result = root->ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(L"root.txt"), nullptr, &rootFile, nullptr);
+    if (FAILED(result)) goto cleanup_recursive_size_update;
+
+    {
+        const auto rowMatchesSnapshot = [&](ULONGLONG expected, bool folderAfterFile)
+        {
+            SHCOLUMNID mappedKey{};
+            if (FAILED(root->MapColumnToSCID(1, &mappedKey)) || mappedKey != kSyntheticRecursiveSizeKey) return false;
+
+            SHELLDETAILS details{};
+            const auto detailsResult = root->GetDetailsOf(childFolder, 1, &details);
+            const auto expectedText = std::to_wstring(expected);
+            const bool textMatches = SUCCEEDED(detailsResult) && details.str.uType == STRRET_WSTR &&
+                details.str.pOleStr && expectedText == details.str.pOleStr;
+            if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+            if (!textMatches) return false;
+
+            VARIANT value{};
+            VariantInit(&value);
+            const auto propertyResult = root->GetDetailsEx(childFolder, &mappedKey, &value);
+            const bool propertyMatches = SUCCEEDED(propertyResult) && value.vt == VT_UI8 && value.ullVal == expected;
+            VariantClear(&value);
+            if (!propertyMatches) return false;
+
+            const auto compareResult = folderAfterFile
+                ? root->CompareIDs(1, childFolder, rootFile)
+                : root->CompareIDs(1, rootFile, childFolder);
+            return SUCCEEDED(compareResult) && static_cast<SHORT>(HRESULT_CODE(compareResult)) > 0;
+        };
+
+        // The same PIDL must observe each scan snapshot in the display, property, and numeric comparison paths.
+        if (!rowMatchesSnapshot(static_cast<ULONGLONG>(initialBytes), true))
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_update;
+        }
+        InterlockedExchange64(&g_syntheticChildSizeOverride, updatedBytes);
+        if (!rowMatchesSnapshot(static_cast<ULONGLONG>(updatedBytes), false))
+        {
+            result = E_FAIL;
+            goto cleanup_recursive_size_update;
+        }
+    }
+    result = S_OK;
+
+cleanup_recursive_size_update:
+    InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+    InterlockedExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0);
+    if (rootFile) CoTaskMemFree(rootFile);
+    if (childFolder) CoTaskMemFree(childFolder);
+    if (root) root->Release();
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    return result;
+}
+
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
