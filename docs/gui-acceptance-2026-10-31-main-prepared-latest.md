@@ -4,14 +4,14 @@
 
 ## 固定身份
 
-- 源提交：`cc34dbd63843a34df917cc3291c4ab76978f33a3`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261031-202046-353-d74156/`。
-- BuildIdentity：`0.6.0-preview.20261031-202046-353-d74156+cc34dbd63843a34df917cc3291c4ab76978f33a3`。
+- 源提交：`7abb3a56787eebdedf1f3d4041f296a6057167ae`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261031-202354-997-6194b7/`。
+- BuildIdentity：`0.6.0-preview.20261031-202354-997-6194b7+7abb3a56787eebdedf1f3d4041f296a6057167ae`。
 - 状态：`prepared-not-run`，47 项待验收，初始四窗格布局。
-- 准备时间：`2026-10-31T20:20:57Z`。
-- EXE SHA-256：`F9227C078C206286E76794AADD1E39E4DAB87BB6543B19463CAD61A4E058FD1B`。
-- App DLL SHA-256：`6AF48792359800B74ED44D8384C267D156268875FBDB77E896D5CA4529A7D783`。
-- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-202046-353-d74156\`；应用文件、profile 与操作夹具均位于副本内。
+- 准备时间：`2026-10-31T20:24:04.6871564Z`。
+- EXE SHA-256：`0A6D9C956445ADDB65E552370AFC96468BA65022B4EA55FF376274F871ED0EF5`。
+- App DLL SHA-256：`A386B54BAE485D35C03A675649DEB93A7BE73CAFB4117373DAC903609159A912`。
+- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-202354-997-6194b7\`；应用文件、profile 与操作夹具均位于副本内。
 
 ## 本轮验收重点
 
@@ -21,4 +21,4 @@
 - Q-Dir `.qdr` 导入/导出互操作、颜色元数据保真与标签组语义；预览格式不匹配时文件的列表处置仍待 Q-Dir 验收后决定。
 - 主题、原生菜单边界、目录树、列值筛选、F9 递归大小摘要、窗口恢复、文件夹入口预览及其余副本 `preparation.json` 中的待验收项。
 
-候选尚未运行，没有可见 UI 通过结论。集中验收应从上述隔离副本启动，不使用 `src` 调试程序或日常 profile。旧副本保留在 `src/.state/gui-smoke/` 供追溯。
+此副本包含截至主线 `7abb3a5` 的 F5 Shell 目录更新通知与有界 redraw lease 候选；准备命令确认未启动窗口。候选尚未运行，没有可见 UI 通过结论。集中验收应从上述隔离副本启动，不使用 `src` 调试程序或日常 profile。旧副本保留在 `src/.state/gui-smoke/` 供追溯。
