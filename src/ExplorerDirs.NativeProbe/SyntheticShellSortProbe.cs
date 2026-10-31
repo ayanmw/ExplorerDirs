@@ -27,6 +27,7 @@ public static class SyntheticShellSortProbe
     private const uint ShcneCreate = 0x00000002;
     private const uint ShcneDelete = 0x00000004;
     private const uint ShcneRenameItem = 0x00000001;
+    private const uint ShcneAttributes = 0x00000800;
     private const uint LvisFocused = 0x0001;
     private const uint LvisSelected = 0x0002;
     private const uint LvifText = 0x0001;
@@ -1361,6 +1362,12 @@ public static class SyntheticShellSortProbe
             {
                 throw new InvalidOperationException("A cancelled delayed parent update still notified Shell or caused provider enumeration.");
             }
+
+            var attributeFixturePath = Path.Combine(backingFolder, "small.bin");
+            Check(SHParseDisplayName(attributeFixturePath, 0, out var attributeFixturePidl, 0, out _));
+            if (attributeFixturePidl == 0) throw new InvalidOperationException("Could not parse the physical attribute-fixture PIDL.");
+            try { VerifyAttributeChangeNotification(attributeFixturePath, "small.bin", attributeFixturePidl, listView, module); }
+            finally { ILFree(attributeFixturePidl); }
         }
         finally
         {
@@ -1372,6 +1379,71 @@ public static class SyntheticShellSortProbe
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
         ? "<unavailable>"
         : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}/{column.Direction}"));
+
+    private static void VerifyAttributeChangeNotification(string itemPath, string itemName, nint itemPidl, nint listView, nint module)
+    {
+        WaitForChildNotificationTranslationToSettle(module);
+        var originalAttributes = File.GetAttributes(itemPath);
+        try
+        {
+            File.SetAttributes(itemPath, originalAttributes | FileAttributes.Hidden);
+            var enumBeforeHide = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            var queuedBeforeHide = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var sentBeforeHide = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            var attributesBeforeHide = ReadCounter(module, "GetSyntheticAttributeNotificationTranslationCount");
+            SHChangeNotify(ShcneAttributes, 0, itemPidl, 0);
+            var deadline = Environment.TickCount64 + 3000;
+            string[] names;
+            do
+            {
+                Pump(50);
+                names = ReadNames(listView, module, expectedCount: -1);
+                if (ReadCounter(module, "GetSyntheticAttributeNotificationTranslationCount") > attributesBeforeHide) break;
+            } while (Environment.TickCount64 < deadline);
+            var hideAttributeTranslations = ReadCounter(module, "GetSyntheticAttributeNotificationTranslationCount") - attributesBeforeHide;
+            var hideEnumCalls = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumBeforeHide;
+            var hideQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount") - queuedBeforeHide;
+            var hideSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount") - sentBeforeHide;
+            var hiddenRowRemainsVisible = names.Contains(itemName, StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"synthetic-size-update-notification: event=SHCNE_ATTRIBUTES-hidden; row-remains-visible={hiddenRowRemainsVisible}; attribute-translations={hideAttributeTranslations}; enum-calls={hideEnumCalls}; translated-queued={hideQueued}; translated-sent={hideSent}");
+            if (!hiddenRowRemainsVisible || hideAttributeTranslations != 1 || hideQueued < 1 || hideSent < 1)
+                throw new TimeoutException("The recreated synthetic view did not reconcile a hidden attribute change through one translated SHCNE_ATTRIBUTES notification.");
+        }
+        finally
+        {
+            // Keep the Shell view and later cleanup checks independent of attribute-probe failures.
+            File.SetAttributes(itemPath, originalAttributes);
+            WaitForChildNotificationTranslationToSettle(module);
+        }
+    }
+
+    private static void WaitForChildNotificationTranslationToSettle(nint module)
+    {
+        var queued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+        var sent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+        var enumerations = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+        var unchangedSince = Environment.TickCount64;
+        var deadline = unchangedSince + 3000;
+        while (Environment.TickCount64 < deadline)
+        {
+            Pump(50);
+            var nextQueued = ReadCounter(module, "GetSyntheticChildNotificationTranslationQueuedCount");
+            var nextSent = ReadCounter(module, "GetSyntheticChildNotificationTranslationSentCount");
+            var nextEnumerations = ReadCounter(module, "GetSyntheticEnumObjectsCount");
+            if (nextQueued != queued || nextSent != sent || nextEnumerations != enumerations)
+            {
+                queued = nextQueued;
+                sent = nextSent;
+                enumerations = nextEnumerations;
+                unchangedSince = Environment.TickCount64;
+            }
+            else if (Environment.TickCount64 - unchangedSince >= 300)
+            {
+                return;
+            }
+        }
+        throw new TimeoutException("Synthetic child notifications did not settle before the attribute-change check.");
+    }
 
     private static string FormatProbeRows(string[] rows) => rows.Length <= 12
         ? string.Join('|', rows)

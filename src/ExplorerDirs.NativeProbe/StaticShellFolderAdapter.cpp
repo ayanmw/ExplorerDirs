@@ -56,6 +56,7 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationQueued = 0;
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
+    volatile LONG g_syntheticAttributeNotificationTranslationCount = 0;
     bool ShouldTranslateSyntheticChildNotification(LONG event)
     {
         // UPDATEITEM carries property changes for an existing child; the custom
@@ -2047,6 +2048,8 @@ namespace
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
                     ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
                 {
+                    if (lParam == SHCNE_ATTRIBUTES)
+                        InterlockedIncrement(&g_syntheticAttributeNotificationTranslationCount);
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
                 }
@@ -4079,6 +4082,9 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTransl
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticChildNotificationTranslationSentCount()
 { return InterlockedCompareExchange(&g_syntheticChildNotificationTranslationSent, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAttributeNotificationTranslationCount()
+{ return InterlockedCompareExchange(&g_syntheticAttributeNotificationTranslationCount, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 { return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }

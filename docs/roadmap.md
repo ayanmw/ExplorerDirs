@@ -5264,3 +5264,7 @@ WPF Private Desktop 宿主上的单项通知、追加父目录更新、重放 `I
 NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，隔离验证 `Clone`、`Reset`、`Skip`、`Next(count)` 完整/部分读取，以及缓存插入失败后保留首个 PIDL 并可重试；缓存直接接管 inner 返回的 PIDL，避免额外复制分配。无窗口 wrapped-folder、parent-item 和 PIDL 合同均通过。父项绑定能返回正确绝对文件系统路径和 parsing name；转成 Shell item array 后普通目标路径保留，但 adapter parent/PIDL 身份不再保留。普通文件系统根 PIDL 与包装子 PIDL 的直接绝对组合仍未解析。产品仍使用 ExplorerBrowser，未做 IShellView 迁移。证据与边界见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31包装子-pidl-的枚举器克隆合同)。
 
 同日补充：包装 adapter 返回的单项文件选择 `IDataObject` 经真实 `IFileOperation::CopyItems`、`MoveItems`、`RenameItems`、`DeleteItems` 执行后，四项隔离夹具文件系统结果均符合预期；此外，多项 `IDataObject` 的 `CF_HDROP` 与 CIDA 均包含两条匹配路径，多选 Copy/Move/Delete 各逐项核对路径与内容。多选 `IContextMenu` 查询出 103 个命令、25 个内存菜单项，并包含 `copy`/`delete` 动词；菜单未显示或执行。调用前后前台 HWND 不变；文件操作静默执行且禁用 copy hooks，未创建/激活 Shell 视图窗口。仍未覆盖可见菜单行为/命令路由、undo/redo、通知、OLE 拖放源端、虚拟项目身份往返或产品 ExplorerBrowser 行为。
+
+### 2026-10-31：合成 IShellView 的属性通知转发复核
+
+用 WPF `HwndSource` Private Desktop 宿主补齐此前超时的合成 view 通知验证。RED 轮临时关闭 ATTRIBUTES 分类后，`SHCNE_ATTRIBUTES` 专属计数为 0；恢复分类后该事件命中 1 次，adapter 父目录更新队列/发送各 1 次。隐藏属性切换期间 Shell 仍保留列表行，`EnumObjects` 增量为 0，因此证据只表明事件路由到 adapter，不能声称发生重枚举或行被过滤。完整滚动锚点重建场景 exit 0，move/rename/delete、待处理更新取消、前台/输入与隔离清理合同均通过。NativeProbe Release、native `/W4 /WX` 和通知分类 smoke 通过。产品 ExplorerBrowser 未改；只读属性视觉、可见 UI、其它 Shell provider 与 IShellView 产品迁移仍待验证。详细结果见[属性通知调查](folder-size-column-investigation.md#2026-10-31合成-ishellview-接收属性通知)。

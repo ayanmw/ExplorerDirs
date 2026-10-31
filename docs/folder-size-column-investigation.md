@@ -1016,4 +1016,10 @@ NativeProbe 的 synthetic folder adapter 此前只把 CREATE、RENAMEITEM、DELE
 
 #### 2026-10-31：Shell 属性通知到隔离行模型的闭环
 
-无 `IShellView` 的 `--shell-change-reconciliation` 现监听 `SHCNE_ATTRIBUTES`。真实临时文件从普通属性切为只读后，通知到达，重新枚举取得 `SFGAO_READONLY`（行属性 `0x40440177`）；恢复原属性后第二次通知也到达，标志清除。两轮 reconcile 均保留属性行 ID、稳定锚点的选中/焦点及隐藏 `SysListView32` 投影；完整跨窗格移动/复制/改名/删除合同继续通过，前台未变化。只验证 Windows Shell 通知、`IShellFolder` 重枚举及 NativeProbe 行模型，不验证 synthetic adapter 到 DefView 的消息转发、可见列着色或 ExplorerBrowser 产品接线；上节 Private Desktop teardown 超时仍是独立未解项。
+无 `IShellView` 的 `--shell-change-reconciliation` 现监听 `SHCNE_ATTRIBUTES`。真实临时文件从普通属性切为只读后，通知到达，重新枚举取得 `SFGAO_READONLY`（行属性 `0x40440177`）；恢复原属性后第二次通知也到达，标志清除。两轮 reconcile 均保留属性行 ID、稳定锚点的选中/焦点及隐藏 `SysListView32` 投影；完整跨窗格移动/复制/改名/删除合同继续通过，前台未变化。只验证 Windows Shell 通知、`IShellFolder` 重枚举及 NativeProbe 行模型，不验证 synthetic adapter 到 DefView 的消息转发、可见列着色或 ExplorerBrowser 产品接线。
+
+#### 2026-10-31：合成 IShellView 接收属性通知
+
+此前静态父窗口宿主在 teardown 阶段超时；本轮使用已能稳定销毁的 WPF `HwndSource` 根宿主和 Private Desktop 重跑隔离 view。先临时移除 adapter 对 `SHCNE_ATTRIBUTES` 的分类：事件专属命中数保持 0，后续 Shell 单独投递的 `SHCNE_UPDATEITEM` 不能冒充属性事件。恢复分类后，隐藏属性变化的 `SHCNE_ATTRIBUTES` 命中数为 1，adapter 延迟父目录更新队列/发送各增加 1；隐藏项仍留在行中，DefView 的 `EnumObjects` 增量为 0。view 包含隐藏项且 DefView 可直接更新项目，因此本轮只证明属性事件通过 adapter 转发，不证明重枚举行或隐藏项过滤行为。
+
+完整 `single-item-recreate-shell-window-scroll` Private Desktop 探针 exit 0：此前已有的 move、rename、delete、取消待处理计时器检查继续通过；前台 HWND 与输入 tick 不变，UUID 注册和临时夹具清理通过。Native adapter `/W4 /WX`、NativeProbe Release build 及 `--synthetic-child-notification-routing-smoke` 通过，0 警告/错误。日志：`src/.state/native-probe-watchdog/20261031-234029-1a879d22.stdout.log`。这没有修改产品 ExplorerBrowser，也没有证明只读属性文字/颜色更新、DefView 视图重枚举或可见 UI 体验。先前的 Private Desktop teardown 超时限制已由 WPF 根宿主路线解决，静态父窗口路径仍不作为此类探针的首选。
