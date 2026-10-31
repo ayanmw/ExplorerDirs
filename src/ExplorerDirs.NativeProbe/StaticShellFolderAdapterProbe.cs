@@ -52,6 +52,16 @@ internal static class StaticShellFolderAdapterProbe
             if (requireIdentity) VerifyForwardedIdentity(adapter, strictInterfaces);
             if (wrappedPidls)
             {
+                stage = "wrapped-data-object-file-operation-copy";
+                var copyTargetPath = Path.Combine(fixture, "copy-target");
+                Directory.CreateDirectory(copyTargetPath);
+                var copySource = ParseChild(adapter, "two.bin");
+                try
+                {
+                    VerifyWrappedDataObjectCopy(adapter, copySource, Path.Combine(fixture, "two.bin"), copyTargetPath);
+                }
+                finally { ILFree(copySource); }
+
                 stage = "wrapped-folder-shell-view-object";
                 Check(At<CreateViewObject>(adapter, 8)(adapter, 0, in ShellViewId, out var unopenedView));
                 try
@@ -1883,6 +1893,44 @@ internal static class StaticShellFolderAdapterProbe
             if (baselineChild != 0) ILFree(baselineChild);
             if (retryEnumerator != 0) Marshal.Release(retryEnumerator);
             if (baselineEnumerator != 0) Marshal.Release(baselineEnumerator);
+        }
+    }
+
+    private static void VerifyWrappedDataObjectCopy(nint adapter, nint child, string sourcePath, string destinationPath)
+    {
+        var foreground = GetForegroundWindow();
+        nint childArray = 0, dataObject = 0, operation = 0, destination = 0;
+        try
+        {
+            childArray = Marshal.AllocCoTaskMem(IntPtr.Size);
+            Marshal.WriteIntPtr(childArray, child);
+            Check(At<GetUIObjectOf>(adapter, 10)(adapter, 0, 1, childArray, in DataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new Exception("Wrapped file selection did not return IDataObject for IFileOperation.");
+
+            var operationClassId = new Guid("3AD05575-8857-4850-9277-11B85BDB8E09");
+            var fileOperationId = new Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
+            Check(CoCreateInstance(ref operationClassId, 0, 1, ref fileOperationId, out operation));
+            Check(At<SetOperationFlags>(operation, 5)(operation, 0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+            var itemId = ShellItemId;
+            Check(SHCreateItemFromParsingName(destinationPath, 0, ref itemId, out destination));
+            Check(At<CopyItems>(operation, 17)(operation, dataObject, destination));
+            Check(At<PerformOperations>(operation, 21)(operation));
+            Check(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+
+            var copiedPath = Path.Combine(destinationPath, Path.GetFileName(sourcePath));
+            if (aborted != 0 || !File.Exists(sourcePath) || !File.Exists(copiedPath) ||
+                !File.ReadAllBytes(sourcePath).SequenceEqual(File.ReadAllBytes(copiedPath)))
+                throw new IOException("IFileOperation did not copy the wrapped IDataObject target without altering the source.");
+            if (GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Wrapped IDataObject IFileOperation changed the foreground window.");
+            Console.WriteLine("wrapped IDataObject IFileOperation.CopyItems: source-preserved=True; target-content-matched=True; foreground-unchanged=True; view-window-created=False");
+        }
+        finally
+        {
+            if (destination != 0) Marshal.Release(destination);
+            if (operation != 0) Marshal.Release(operation);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (childArray != 0) Marshal.FreeCoTaskMem(childArray);
         }
     }
 
