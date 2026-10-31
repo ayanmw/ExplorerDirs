@@ -71,6 +71,9 @@ internal static class PrivateDesktopShellProbe
     internal static int RunColor() => Run("color", () => ShellViewColorSpike.Run(visible: true,
         deferParentCleanup: true), TimeSpan.FromSeconds(60));
 
+    internal static int RunZipColorPixels() => Run("zip-color-pixels", () => ShellViewColorSpike.Run(
+        visible: true, deferParentCleanup: true, virtualZipProviderProbe: true), TimeSpan.FromSeconds(60));
+
     internal static int RunExplorerBrowserColorNotifications() =>
         Run("explorerbrowser-color-notifications", ExplorerBrowserNotifyProbe.Run, TimeSpan.FromSeconds(25));
 

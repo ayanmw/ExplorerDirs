@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.IO.Compression;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
@@ -2509,7 +2510,7 @@ internal static class ShellViewColorSpike
         bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool directoryRuleProbe = false,
         bool hiddenRuleProbe = false, bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
-        bool probeWindowDestroyWithShellView = false)
+        bool probeWindowDestroyWithShellView = false, bool virtualZipProviderProbe = false)
     {
         if (offscreen && !visible) throw new ArgumentException("Offscreen sampling requires a visible Shell view.", nameof(offscreen));
         var foreground = GetForegroundWindow();
@@ -2607,15 +2608,30 @@ internal static class ShellViewColorSpike
             _directoryRuleProbe = directoryRuleProbe;
             _hiddenRuleProbe = hiddenRuleProbe;
             Directory.CreateDirectory(fixture);
-            var fixturePaths = new[]
+            string[] fixturePaths;
+            var shellLocation = fixture;
+            if (virtualZipProviderProbe)
             {
-                Path.Combine(fixture, "blue-rule-target.txt"),
-                Path.Combine(fixture, directoryRuleProbe ? "dir" : hiddenRuleProbe ? "hidden-rule-target.txt" : "green-rule-target.txt")
-            };
-            File.WriteAllText(fixturePaths[0], "blue");
-            if (directoryRuleProbe) Directory.CreateDirectory(fixturePaths[1]);
-            else File.WriteAllText(fixturePaths[1], new string('g', 128));
-            File.WriteAllText(Path.Combine(fixture, "filtered-out-target.bin"), "excluded");
+                shellLocation = Path.Combine(fixture, "virtual-items.zip");
+                using (var archive = ZipFile.Open(shellLocation, ZipArchiveMode.Create))
+                {
+                    using (var file = archive.CreateEntry("blue-rule-target.txt").Open()) file.WriteByte(0x41);
+                    using (var nestedFile = archive.CreateEntry("virtual-folder/nested.txt").Open()) nestedFile.WriteByte(0x42);
+                }
+                fixturePaths = ["blue-rule-target.txt", "virtual-folder"];
+            }
+            else
+            {
+                fixturePaths =
+                [
+                    Path.Combine(fixture, "blue-rule-target.txt"),
+                    Path.Combine(fixture, directoryRuleProbe ? "dir" : hiddenRuleProbe ? "hidden-rule-target.txt" : "green-rule-target.txt")
+                ];
+                File.WriteAllText(fixturePaths[0], "blue");
+                if (directoryRuleProbe) Directory.CreateDirectory(fixturePaths[1]);
+                else File.WriteAllText(fixturePaths[1], new string('g', 128));
+                File.WriteAllText(Path.Combine(fixture, "filtered-out-target.bin"), "excluded");
+            }
             if (hiddenRuleProbe)
             {
                 hiddenFixturePath = fixturePaths[1];
@@ -2631,6 +2647,7 @@ internal static class ShellViewColorSpike
             var extendedStyle = visible ? 0x08000000u | 0x00000080u : 0u; // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
             var parentX = 100;
             var parentY = 100;
+            string? virtualZipRows = null;
             if (offscreen)
             {
                 parentX = GetSystemMetrics(76) - 761; // SM_XVIRTUALSCREEN; place the whole 760 px window to its left.
@@ -2643,7 +2660,7 @@ internal static class ShellViewColorSpike
             if (parent == 0) throw new Exception("Sampling parent creation failed.");
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
-            Check(SHParseDisplayName(fixture, 0, out pidl, 0, out _));
+            Check(SHParseDisplayName(shellLocation, 0, out pidl, 0, out _));
             var shellFolderId = ShellFolderId;
             var shellViewId = ShellViewId;
             Check(SHBindToObject(0, pidl, 0, in shellFolderId, out folder));
@@ -2745,7 +2762,8 @@ internal static class ShellViewColorSpike
             var contextMenuId = ContextMenuId;
             var contextMenuHr = At<GetItemObject>(view, 15)(view, 0, ref contextMenuId, out contextMenu);
             var allItems = WaitForShellViewItemCount(folderView, expectedCount: 2);
-            if (host.IncludeObjectCalls < 3 || itemFilter.ShouldShowCalls < 3)
+            var minimumFilterCalls = virtualZipProviderProbe ? 2 : 3;
+            if (host.IncludeObjectCalls < minimumFilterCalls || itemFilter.ShouldShowCalls < minimumFilterCalls)
                 throw new Exception($"The color host did not route all fixture items through its Shell filter: " +
                     $"include={host.IncludeObjectCalls}; filter={itemFilter.ShouldShowCalls}.");
             Console.WriteLine($"ishellview-color-spike: filtered-items={allItems}; " +
@@ -2926,11 +2944,38 @@ internal static class ShellViewColorSpike
                     throw new Exception("Custom-draw observer setup failed on ListView parent.");
                 subclassed = true;
             }
-            if (listView != 0) RefreshFixtureColorMap(folderView, fixturePaths);
+            if (listView != 0)
+            {
+                if (virtualZipProviderProbe) virtualZipRows = RefreshVirtualShellColorMap(folderView, folder, pidl);
+                else RefreshFixtureColorMap(folderView, fixturePaths);
+            }
             Console.WriteLine($"ishellview-color-spike: view-background-color={(listView == 0 ? "unsupported" : $"0x{unchecked((uint)SendMessageW(listView, 0x1000, 0, 0)):X6}")}");
             var syntheticColorContract = listView != 0 && VerifyCustomDrawContract(drawNotifyTarget, listView);
             _customDrawPrepaint = 0;
             _customDrawItems = 0;
+            if (virtualZipProviderProbe)
+            {
+                if (listView == 0) throw new Exception("The ZIP provider view did not expose a SysListView32 DefView.");
+                var deselectItem = At<SelectFolderItem>(folderView, 15);
+                Check(deselectItem(folderView, 0, 0));
+                Check(deselectItem(folderView, 1, 0));
+                Check(At<ItemCount>(folderView, 7)(folderView, 1, out var remainingSelection));
+                if (remainingSelection != 0)
+                    throw new Exception($"Could not clear the startup selection before ZIP color capture: {remainingSelection} items remain selected.");
+                InvalidateRect(listView, 0, true);
+                UpdateWindow(listView);
+                Pump(500);
+                var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+                var zipItemCount = unchecked((int)SendMessageW(listView, 0x1004, 0, 0));
+                var expected = CustomDrawBackgrounds.OrderBy(pair => pair.Key)
+                    .Select(pair => ColorrefToDib(pair.Value)).ToArray();
+                var sampled = CustomDrawPostPaintPixels.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToArray();
+                if (zipItemCount != 2 || capture.CustomDrawItems < 2 || capture.RowHits.Length != 2 ||
+                    capture.RowHits.Any(hitCount => hitCount == 0))
+                    throw new Exception($"ZIP DefView item colors did not match the Shell row identities: items={zipItemCount}; callbacks={capture.CustomDrawItems}; expected={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; sampled={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; row-hits={string.Join(',', capture.RowHits)}; bitmap-hits={string.Join(',', capture.BitmapHits)}; print-window={capture.PrintWindowRendered}; applied={string.Join('|', CustomDrawColors.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}"))}; item-state={string.Join('|', CustomDrawItemStates.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:0x{pair.Value:X}"))}; labels={string.Join('|', CustomDrawLabelBounds.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{FormatRect(pair.Value)}"))}; callbacks-detail={capture.CustomDrawDetails}.");
+                Console.WriteLine($"ishellview-zip-color-pixels: provider=ZIP; rows={virtualZipRows}; callbacks={capture.CustomDrawItems}; expected-colors={string.Join(',', expected.Select(value => $"0x{value:X6}"))}; per-row-pixel-hits={string.Join(',', capture.RowHits)}; label-center-samples={string.Join(',', sampled.Select(value => $"0x{value:X6}"))}; foreground-unchanged={GetForegroundWindow() == foreground}");
+                return GetForegroundWindow() == foreground ? 0 : 1;
+            }
             if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-start");
             var drawByViewMode = listView == 0 ? "<no-list-view>" : ObserveCustomDrawByViewMode(folderView, listView, fixturePaths);
             if (hiddenRuleProbe) Console.WriteLine("hidden-rule-stage: observe-view-modes-finished");
@@ -3166,7 +3211,7 @@ internal static class ShellViewColorSpike
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
                     // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !probeMenuActivation &&
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !hiddenRuleProbe && !virtualZipProviderProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3705,6 +3750,56 @@ internal static class ShellViewColorSpike
                 ShellViewColorRuleEvaluator.ResolveFontStyle(rules, orderedNames[index], attributes, static rule => rule.Strikeout));
             if (fontStyle.HasOverrides) CustomDrawFontStyles[(nuint)index] = fontStyle;
         }
+    }
+
+    private static string RefreshVirtualShellColorMap(nint folderView, nint parentFolder, nint folderPidl)
+    {
+        Check(At<ItemCount>(folderView, 7)(folderView, 2, out var count)); // SVGIO_ALLVIEW.
+        if (count != 2) throw new Exception($"Expected two ZIP Shell rows before drawing, got {count}.");
+        var rules = new[]
+        {
+            WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u), 0x000000C0u),
+                new ShellItemDrawFontStyle(true, null, null, null)),
+            WithTextColor(ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0u), 0x0000C000u)
+        };
+        CustomDrawBackgrounds.Clear();
+        CustomDrawTextColors.Clear();
+        CustomDrawFontStyles.Clear();
+        var names = new List<string>(count);
+        nint systemImageList = 0;
+        for (var index = 0; index < count; index++)
+        {
+            Check(At<GetFolderItem>(folderView, 6)(folderView, index, out var childPidl));
+            nint absolutePidl = 0;
+            try
+            {
+                absolutePidl = ILCombine(folderPidl, childPidl);
+                if (absolutePidl == 0) throw new Exception("Could not combine a ZIP row PIDL with its parent.");
+                var row = ShellListViewRowIdentity.Capture(parentFolder, childPidl, absolutePidl, ref systemImageList);
+                var isDirectory = (row.Attributes & 0x20000000u) != 0;
+                var isHidden = (row.Attributes & 0x00080000u) != 0;
+                var isReadOnly = (row.Attributes & 0x00040000u) != 0;
+                var background = ShellViewColorRuleEvaluator.ResolveBackground(rules, row.DisplayName,
+                    isDirectory, isHidden, isReadOnly);
+                if (background is null)
+                    throw new Exception($"No Q-Dir color rule matched ZIP Shell row '{row.DisplayName}'.");
+                CustomDrawBackgrounds[(nuint)index] = background.Value;
+                if (ShellViewColorRuleEvaluator.ResolveTextColor(rules, row.DisplayName,
+                        isDirectory, isHidden, isReadOnly) is { } textColor)
+                    CustomDrawTextColors[(nuint)index] = textColor;
+                var bold = ShellViewColorRuleEvaluator.ResolveFontStyle(rules, row.DisplayName,
+                    isDirectory, isHidden, isReadOnly, static rule => rule.Bold);
+                if (bold is { } boldValue)
+                    CustomDrawFontStyles[(nuint)index] = new ShellItemDrawFontStyle(boldValue, null, null, null);
+                names.Add($"{index}:{row.DisplayName}:pathless={row.FileSystemPath is null}:folder={isDirectory}");
+            }
+            finally
+            {
+                if (absolutePidl != 0) Marshal.FreeCoTaskMem(absolutePidl);
+                Marshal.FreeCoTaskMem(childPidl);
+            }
+        }
+        return string.Join('|', names);
     }
 
     private static uint? ApplyFixtureViewBackground(nint listView, bool isActiveView)

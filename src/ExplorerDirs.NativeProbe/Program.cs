@@ -188,6 +188,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunHostFilterVirtualScope(args[1]);
         if (args.Length == 1 && args[0] == "--ishellview-color-spike-private-desktop")
             return PrivateDesktopShellProbe.RunColor();
+        if (args.Length == 1 && args[0] == "--ishellview-zip-color-pixels-private-desktop")
+            return PrivateDesktopShellProbe.RunZipColorPixels();
         if (args.Length == 1 && args[0] == "--explorerbrowser-color-notifications-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserColorNotifications();
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
@@ -315,6 +317,7 @@ internal static class Program
             Console.WriteLine("       --private-desktop-four-pane-wpf-host-directory-isolation (Shell file updates reach three WPF panes while an isolated fourth pane remains unchanged)");
             Console.WriteLine("       --ishellview-host-filter-virtual-private-desktop <scope> (one virtual Shell scope on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-spike-private-desktop (visible color-pixel probe on a separate Windows Desktop)");
+            Console.WriteLine("       --ishellview-zip-color-pixels-private-desktop (ZIP virtual-item color pixels on a separate Windows Desktop)");
             Console.WriteLine("       --ishellview-color-readonly-private-desktop (same pixel probe with a temporary read-only #RO fixture)");
             Console.WriteLine("       --ishellview-color-directory-private-desktop (same pixel probe with a #DIR folder fixture)");
             Console.WriteLine("       --ishellview-color-hidden-private-desktop (same pixel probe with an explicitly included #Hidden fixture)");

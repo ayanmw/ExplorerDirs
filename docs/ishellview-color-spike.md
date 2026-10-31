@@ -1,5 +1,11 @@
 # 隔离 IShellView 逐项颜色原型
 
+### 2026-11-01：ZIP 虚拟 Shell 项 DefView 像素绘制
+
+将先前规则输入探针推进到真实 ZIP `IShellView`/DefView：在独立 Private Desktop 中创建含一个虚拟文件和一个虚拟目录的 ZIP 文件夹，按 `IFolderView2.GetItemAt` 当前行 PIDL 读取 Shell 显示名与属性，给当前行索引投影 `*.txt` 与 `#DIR` 规则，再从 DefView `NM_CUSTOMDRAW` 绘制回调采样行区域。两个条目均为 pathless；两行各自命中预期背景像素（转换到 DIB RGB 后为 `0xE0F0D0`、`0xD0E0F0`，每行命中 7,123 / 6,981 像素），逐项回调 `2/2`。前台 HWND 与最后输入时间未变，隔离策略通过。NativeProbe Release 构建 0 警告/错误，`color-zip-private-desktop` watchdog exit 0；随后默认文件系统颜色探针也 exit 0。
+
+探针的标签中心采样点读回白色，因此没有把它用于成功断言；成功依据是按 Shell 行索引分别检查完整行矩形内的精确背景色像素。文本色和粗体值在规则映射与回调参数中核对，但本轮没有测量字形像素。结果证明 Windows ZIP provider 的 pathless Shell 行在隔离默认 `IShellView` 中可以按逐项背景规则绘制；不证明其它虚拟 provider、Q-Dir `.qdr` 颜色字段映射、产品 ExplorerBrowser 或可见产品 UI，也不构成宿主迁移批准。
+
 ## 2026-11-01：ZIP 虚拟 Shell 项的颜色规则输入验证
 
 新增 `--virtual-zip-color-rules` 隔离探针：建立临时 ZIP Shell 文件夹并通过 `ShellListViewEnumerator` 取出一个虚拟文件和一个虚拟子目录。两项均没有 `FileSystemPath`；Shell 返回的显示名及 `SFGAO_FOLDER` 属性可驱动名称通配符和 `#DIR` 规则，文件与目录的背景/文本色分别符合预期，文件的粗体规则也命中。为此，通用颜色规则 evaluator 增加基于 Shell 目录/隐藏/只读布尔属性的文本色和字形重载。策略 smoke 和 NativeProbe Release 构建均通过（0 警告/错误），ZIP 探针退出码 0；前台窗口保持不变，夹具清理完成。
