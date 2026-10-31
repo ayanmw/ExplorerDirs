@@ -1458,3 +1458,9 @@ Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sin
 随后改从真实 view 背景 `IContextMenu` 读取 GroupBy 子菜单，并通过 `IContextMenu3::HandleMenuMsg2(WM_INITMENUPOPUP)` 初始化惰性子菜单，再按本地化标签找到 Size 命令并通过该菜单对象的命令 offset 执行。Shell 读回分组键 `PKEY_Size`（属性 ID 12）；同时主排序键也切换为 Size，降序分组对应 Size 降序，升序分组对应 Size 升序。根据这一实测副作用修正原先错误假定排序仍为 Name 的断言。Sort Name 升/降序、Group Size 升/降序四种状态均读回正确，四种情形的逐项绘制回调都是 2/2，文件身份颜色像素均命中。NativeProbe Release build 0 警告/错误，完整 Private Desktop watchdog exit 0，前台、输入及隔离清理守卫通过。颜色主测试日志：`src/.state/native-probe-watchdog/20261101-011144-6842972a.stdout.log`。这只验证默认 filesystem `IShellView` 的隔离夹具；尚未验证其他分组属性、第三方 provider、产品 ExplorerBrowser 或可见 UI。
 
 同一菜单命令探针又覆盖 Type 和 Date modified：Type 读回 `PKEY_ItemTypeText`（属性 ID 4），并建立 Type→Name 两级升序排序；Group Descending/Ascending 会同时翻转两级排序方向。Date modified 读回 `PKEY_DateModified`（属性 ID 14），并以该键排序，两个方向命令同步改变日期排序方向。Size、Type、Date modified 三种实际 GroupBy 菜单选择及其升降方向下，颜色回调均为 2/2、两个目标颜色像素均命中。NativeProbe Release build 0 警告/错误，完整 Private Desktop watchdog exit 0，前台、输入和隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-011604-b2858daf.stdout.log`。这些仍是默认 filesystem `IShellView` 夹具结果，未覆盖更多属性键、第三方 provider、ExplorerBrowser 产品接线或可见 UI。
+
+### 2026-11-01 目录项 `#DIR` 逐项颜色
+
+扩展只读颜色探针为两项 fixture：一份普通文件和一个目录；普通文件按文件名着色，目录按 `FileAttributes.Directory` 命中 `#DIR`。真实 Content 视图对两项各得到 2 次 custom-draw 回调，post-paint 样本分别精确读回 `0xD0F0E0` 与 `0xF0E0D0`。完整 Private Desktop 路径中的视图模式、排序、Size/Type/Date modified 分组颜色合同均通过，NativeProbe Release 0 警告/错误，watchdog exit 0、前台/输入/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-012634-0957ca27.stdout.log`。
+
+该次测试只证明默认文件系统 `IShellView` 原型对普通文件和目录行的规则投影；没有测试其他 Shell provider，也没有修改 ExplorerBrowser 产品视图或可见产品入口。目录 fixture 使用短名称以避开中心像素采样点落在文字字形上的干扰；颜色规则本身仍通过实际 custom-draw 后像素验证。

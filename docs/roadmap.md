@@ -5302,6 +5302,8 @@ NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEval
 
 
 随后从同一真实背景菜单选择 Type 与 Date modified：Type 对应属性 ID 4，并形成 Type→Name 两级排序，Group Ascending/Descending 同时翻转两列；Date modified 对应属性 ID 14，排序方向随分组方向切换。Size/Type/Date modified 三种菜单选择及方向操作均恢复 2/2 逐项颜色回调和身份映射像素。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0、前台/输入/清理守卫通过。结论仅限默认 filesystem `IShellView` 隔离样本；更多分组键、第三方 provider、产品接线和可见 UI 仍待验证。详见[原型记录](ishellview-color-spike.md#2026-11-01-原生菜单-size-分组入口核查)，日志：`src/.state/native-probe-watchdog/20261101-011604-b2858daf.stdout.log`。
+
+2026-11-01 `#DIR` 文件夹着色：普通文件名规则和目录属性规则各命中一行；Content 视图 post-paint 像素分别精确命中两条背景色。标准视图模式、排序与 Size/Type/Date modified 分组颜色合同继续通过。NativeProbe Release build 0 警告/错误、Private Desktop watchdog exit 0、前台/输入/清理守卫通过。只覆盖默认文件系统 `IShellView` 隔离原型，不代表第三方 provider 或产品 ExplorerBrowser。详见[原型记录](ishellview-color-spike.md#2026-11-01-目录项-dir-逐项颜色)，日志：`src/.state/native-probe-watchdog/20261101-012634-0957ca27.stdout.log`。
 ## 2026-11-01：F5 与查看方式切换的原生生命周期复验
 
 - 重建 NativeProbe Release 后运行现有 Private Desktop 生命周期探针，exit 0，前台 HWND、输入时间戳与隔离清理守卫均通过。普通 `IShellView.Refresh()` 期间 view/ListView HWND 保持不变，但 300 行列表短暂归零 5 个采样点（约 28 ms）；完成后回到 301 行。原生 `SHCNE_UPDATEDIR` 和关闭自动枚举后的显式目录通知均未观察到归零，视图模式切换也未观察到空行或 HWND 重建。

@@ -45,6 +45,7 @@ internal static class ShellViewColorSpike
     private static readonly Dictionary<nuint, ShellItemDrawFontStyle> CustomDrawFontStyles = [];
     private static readonly Dictionary<nuint, ShellViewFontSelection> CustomDrawFontSelections = [];
     private static bool _readOnlyRuleProbe;
+    private static bool _directoryRuleProbe;
     private static readonly List<string> CustomDrawEventDetails = [];
     private static nint _observedListView;
     private static int _customDrawPrepaint;
@@ -2504,7 +2505,8 @@ internal static class ShellViewColorSpike
         nint HostPointer, ShellViewColorBrowserHost Host, nint FolderView, Guid SessionId);
 
     internal static int Run(bool visible = false, bool offscreen = false, bool deferParentCleanup = false,
-        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool probeMenuActivation = false,
+        bool queryCommandStatesOnly = false, bool readOnlyRuleProbe = false, bool directoryRuleProbe = false,
+        bool probeMenuActivation = false,
         bool probeSessionRestore = false, bool synchronousCleanupProbe = false,
         bool probeWindowDestroyWithShellView = false)
     {
@@ -2601,14 +2603,16 @@ internal static class ShellViewColorSpike
         try
         {
             _readOnlyRuleProbe = readOnlyRuleProbe;
+            _directoryRuleProbe = directoryRuleProbe;
             Directory.CreateDirectory(fixture);
             var fixturePaths = new[]
             {
                 Path.Combine(fixture, "blue-rule-target.txt"),
-                Path.Combine(fixture, "green-rule-target.txt")
+                Path.Combine(fixture, directoryRuleProbe ? "dir" : "green-rule-target.txt")
             };
             File.WriteAllText(fixturePaths[0], "blue");
-            File.WriteAllText(fixturePaths[1], new string('g', 128));
+            if (directoryRuleProbe) Directory.CreateDirectory(fixturePaths[1]);
+            else File.WriteAllText(fixturePaths[1], new string('g', 128));
             File.WriteAllText(Path.Combine(fixture, "filtered-out-target.bin"), "excluded");
             if (readOnlyRuleProbe)
             {
@@ -2967,10 +2971,10 @@ internal static class ShellViewColorSpike
                 $"native-view-menu-color-transition={nativeViewMenuColorTransition}");
             Console.WriteLine($"ishellview-color-spike: native-menu-hit-test={nativeMenuHitTest}");
 
-            if (readOnlyRuleProbe)
+            if (readOnlyRuleProbe || directoryRuleProbe)
             {
-                // Keep this diagnostic read-only after pixel capture; later Shell copy/rename/delete checks use a writable fixture.
-                Console.WriteLine("ishellview-color-spike: readonly-rule-probe=True; post-capture-file-operations=skipped");
+                // End the color-only fixture before later Shell file-operation checks can mutate its paths.
+                Console.WriteLine($"ishellview-color-spike: readonly-rule-probe={readOnlyRuleProbe}; directory-rule-probe={directoryRuleProbe}; post-capture-file-operations=skipped");
                 return 0;
             }
 
@@ -3141,8 +3145,8 @@ internal static class ShellViewColorSpike
                         }
                     }
                     Console.WriteLine($"ishellview-color-spike: session-state-writeback={persisted}; shell-write-callbacks={shellWrites}; bytes={(persisted ? savedState.Length : 0)}; recreated-host-restore={restored}");
-                    // Read-only branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
-                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !probeMenuActivation &&
+                    // Diagnostic color branches return before view-state writes by design; do not require a round-trip they intentionally skipped.
+                    if (!queryCommandStatesOnly && !readOnlyRuleProbe && !directoryRuleProbe && !probeMenuActivation &&
                         !probeSessionRestore && !probeWindowDestroyWithShellView &&
                         (shellWrites == 0 || !persisted || !restored))
                         throw new Exception("The real Shell view did not complete its per-session state-stream round-trip.");
@@ -3170,6 +3174,7 @@ internal static class ShellViewColorSpike
             if (fullStateDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullStateDirectory))
                 Directory.Delete(fullStateDirectory, recursive: true);
             _readOnlyRuleProbe = false;
+            _directoryRuleProbe = false;
             if (GetForegroundWindow() != foreground)
                 Console.WriteLine("ishellview-color-spike cleanup: foreground changed.");
         }
@@ -3363,14 +3368,19 @@ internal static class ShellViewColorSpike
                 {
                     Header = new NotifyHeader { Window = listView, Code = -12 },
                     Stage = 0x00010001, // CDDS_ITEMPREPAINT
-                    Item = index
+                    Item = index,
+                    // Seed the native value so background-only rules can prove they leave text color untouched.
+                    TextColor = 0x00202020
                 };
                 Marshal.StructureToPtr(itemDraw, memory, false);
                 var itemResult = SendMessageW(notifyTarget, 0x004E, 0, memory);
                 var colored = Marshal.PtrToStructure<CustomDraw>(memory);
+                var expectedText = CustomDrawTextColors.GetValueOrDefault(index, 0x00202020u);
                 if (itemResult != 0x00000012 || colored.TextBackground != expectedBackground ||
-                    colored.TextColor != CustomDrawTextColors.GetValueOrDefault(index, 0x00202020u))
-                    throw new Exception($"NM_CUSTOMDRAW returned the wrong text/background colors for item index {index}.");
+                    colored.TextColor != expectedText)
+                    throw new Exception($"NM_CUSTOMDRAW returned wrong colors for item index {index}: " +
+                        $"result=0x{itemResult:X}; text=0x{colored.TextColor:X6}/0x{expectedText:X6}; " +
+                        $"background=0x{colored.TextBackground:X6}/0x{expectedBackground:X6}.");
             }
 
             var selectedItem = new CustomDraw
@@ -3499,7 +3509,8 @@ internal static class ShellViewColorSpike
             RefreshFixtureColorMap(folderView, fixturePaths);
             var capture = CaptureOffscreenRowColors(listView);
             var itemIdentityMap = capture.DrawItems.Length == 0
-                ? "none" : MapCustomDrawItemsToFixtureFiles(folderView, fixturePaths, capture.DrawItems);
+                ? "none" : MapCustomDrawItemsToFixtureFiles(folderView, fixturePaths, capture.DrawItems,
+                    requireEveryFixture: false);
             results.Add($"{style.Name}:{capture.Prepaint}/{capture.CustomDrawItems};row-pixels={string.Join('/', capture.RowHits)};" +
                 $"bitmap-pixels={string.Join('/', capture.BitmapHits)};item-rects={capture.ItemRects};" +
                 $"item-identity={itemIdentityMap};custom-draw={capture.CustomDrawDetails}");
@@ -3636,7 +3647,10 @@ internal static class ShellViewColorSpike
     {
         // Resolve item identity before painting. Do not call IFolderView from inside NM_CUSTOMDRAW.
         var orderedNames = MapCurrentFolderItems(folderView, fixturePaths).Split(',');
-        ShellViewColorRule[] rules = _readOnlyRuleProbe
+        ShellViewColorRule[] rules = _directoryRuleProbe
+            ? [WithTextColor(ShellViewColorRule.BackgroundOnly("blue-rule-*.txt", ShellColorRuleDecision.Set, 0x00F0E0D0u), 0x00C00000u),
+                ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0u)]
+            : _readOnlyRuleProbe
             ? [WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("#RO", ShellColorRuleDecision.Set, 0x00C0E0F0u), 0x000000C0u),
                     new ShellItemDrawFontStyle(true, null, true, null)),
                 WithFontStyle(WithTextColor(ShellViewColorRule.BackgroundOnly("green-rule-*.txt", ShellColorRuleDecision.Set, 0x00D0F0E0u), 0x0000C000u),
