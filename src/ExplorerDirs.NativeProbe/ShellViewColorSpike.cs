@@ -3900,31 +3900,46 @@ internal static class ShellViewColorSpike
         Pump(100);
         Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var startMode, out var startSize));
         if (startMode != 2) throw new InvalidOperationException($"Could not establish the SmallIcon baseline for native menu dispatch: {startMode}/{startSize}.");
-        var commandId = FindShellMenuCommandId(menuOwner, "详细信息", "Details");
         var shellViewWindowHr = At<GetWindow>(view, 3)(view, out var shellViewWindow);
         if (shellViewWindowHr < 0 || shellViewWindow == 0 || !IsWindow(shellViewWindow))
             throw new InvalidOperationException($"The native view menu transition has no live Shell view window: hr=0x{shellViewWindowHr:X8}; hwnd=0x{shellViewWindow:X}.");
 
-        if (!TryInvokeMergedViewMenuCommand(menuHost, commandId))
-            throw new InvalidOperationException($"The isolated merged View menu did not route Details command 0x{commandId:X4}.");
-        Pump(180);
-        Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var shellMode, out var shellSize));
-        var listMode = SendMessageW(listView, LvmGetView, 0, 0).ToInt32();
-        if (shellMode != 4 || listMode != 1)
-            throw new InvalidOperationException($"The native Details command did not synchronize Shell/ListView modes: shell={shellMode}/{shellSize}; list={listMode}; id=0x{commandId:X4}.");
+        var transitions = new List<string>();
+        foreach (var mode in new (string[] Labels, uint ShellMode, int ListMode)[]
+        {
+            (["详细信息", "Details"], 4, 1),
+            (["列表", "List"], 3, 3),
+            (["小图标", "Small icons", "SmallIcon"], 2, 2),
+            (["平铺", "Tiles", "Tile"], 6, 4),
+            (["内容", "Content"], 8, 4)
+        })
+        {
+            uint commandId;
+            try { commandId = FindShellMenuCommandId(menuOwner, mode.Labels); }
+            catch (InvalidOperationException)
+            {
+                transitions.Add($"{string.Join('/', mode.Labels)}=menu-item-unavailable");
+                continue;
+            }
 
-        RefreshFixtureColorMap(folderView, fixturePaths);
-        ClearNativeViewMenuColorSelection();
-        var synchronizedCapture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
-        var synchronizedPixels = string.Join('/', synchronizedCapture.RowHits);
-        var syncVerified = synchronizedCapture.CustomDrawItems >= fixturePaths.Length &&
-            synchronizedCapture.RowHits.All(hit => hit > 0);
-        var commandTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
-            line.Contains("shell-view-mode-sync", StringComparison.Ordinal) ||
-            line.Contains($"id=0x{commandId:X4}", StringComparison.Ordinal)));
-        return $"id=0x{commandId:X4};shell={shellMode}/{shellSize};list={listMode};" +
-            $"routed-native-command-sync=callbacks:{synchronizedCapture.CustomDrawItems},pixels:{synchronizedPixels},verified:{syncVerified};" +
-            $"trace={commandTrace}";
+            if (!TryInvokeMergedViewMenuCommand(menuHost, commandId))
+                throw new InvalidOperationException($"The isolated merged View menu did not route [{string.Join('/', mode.Labels)}] command 0x{commandId:X4}.");
+            Pump(180);
+            Check(At<GetViewModeAndIconSize>(folderView, 36)(folderView, out var shellMode, out var shellSize));
+            var listMode = SendMessageW(listView, LvmGetView, 0, 0).ToInt32();
+            RefreshFixtureColorMap(folderView, fixturePaths);
+            ClearNativeViewMenuColorSelection();
+            var capture = CaptureOffscreenRowColors(listView, captureVisiblePixels: true);
+            var pixels = string.Join('/', capture.RowHits);
+            var colorVerified = capture.CustomDrawItems >= fixturePaths.Length && capture.RowHits.All(hit => hit > 0);
+            var modeVerified = shellMode == mode.ShellMode && listMode == mode.ListMode;
+            var commandTrace = string.Join('|', menuHost.MenuTrace.Where(line =>
+                line.Contains("shell-view-mode-sync", StringComparison.Ordinal) ||
+                line.Contains($"id=0x{commandId:X4}", StringComparison.Ordinal)));
+            transitions.Add($"{string.Join('/', mode.Labels)}:id=0x{commandId:X4};shell={shellMode}/{shellSize};list={listMode};" +
+                $"callbacks={capture.CustomDrawItems};pixels={pixels};mode-ok={modeVerified};color-ok={colorVerified};trace={commandTrace}");
+        }
+        return string.Join("||", transitions);
 
         void ClearNativeViewMenuColorSelection()
         {

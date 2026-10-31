@@ -1441,6 +1441,6 @@ NativeProbe Release build 0 警告/错误。该证据只验证目标端 Shell �
 
 Release 构建通过（0 警告、0 错误）。Private Desktop 运行期间 sink 收到并同步转发 16 条通知，但图标视图依旧没有 `NM_CUSTOMDRAW`（逐项回调 0，目标行颜色像素 0）；原有逐项颜色门槛失败。该结果说明改路由没有打开新的逐行绘制回调，且这次提前退出没有覆盖转发后所有 Shell 行为，不能据此声称通知转发完整或适合产品使用。临时路由入口和代码已移除；产品 ExplorerBrowser 与正式 `IShellView` 宿主均未修改。相关 API 说明：[WM_NOTIFY](https://learn.microsoft.com/windows/win32/controls/wm-notify)、本机 SDK `CommCtrl.h` 中的 `CCM_SETNOTIFYWINDOW` 定义。
 
-### 2026-11-01 原生 Details 菜单切换后的逐项颜色同步
+### 2026-11-01 原生 View 菜单切换后的逐项颜色同步
 
-对真实合并 View 菜单的 Details 命令 `0x704B` 做隔离 A/B：命令后 `IFolderView2` 与 ListView 均报告 Details，但立即同步 `LVM_SETVIEW` 后的下一次像素采样仍没有 `NM_CUSTOMDRAW`。把同步动作延后到原生视图已完成一轮绘制之后，再读取 ListView 当前 `LV_VIEW_*` 并以相同值调用 `LVM_SETVIEW`，后续绘制恢复 2/2 个逐项回调，两条合成颜色规则的目标像素均通过。原型只对 `IShellView` 菜单分派中实际改变模式的命令执行该同步，并记录列表模式和结果；该路由随后在 Details 菜单场景验证 `verified=True`。完整 Private Desktop watchdog exit 0、foreground/input 未变化、隔离清理通过；NativeProbe Release 构建 0 警告/错误。此处的 100 ms 消息泵仅用于隔离原型顺序验证，尚未证明适合产品 UI 消息调度；只测 Details 单项命令，其他模式、排序/分组切换、provider 和 ExplorerBrowser 产品行为仍待验证。日志：`src/.state/native-probe-watchdog/20261101-004841-5e6b6505.stdout.log`。
+对真实合并 View 菜单执行 Details `0x704B`、List `0x7051`、Small icons `0x7050`、Tiles `0x704C`、Content `0x7052` 五个入口。每次命令后 `IFolderView2` 与 ListView 均读到对应模式；在 Shell 完成模式绘制后同步当前 `LV_VIEW_*`，每种样式都恢复 2/2 个逐项回调，两条合成颜色规则的目标像素均命中。同步前后的 A/B 显示，立即同步不会恢复回调。完整 Private Desktop watchdog exit 0、foreground/input 未变化、隔离清理通过；NativeProbe Release 构建 0 警告/错误。100 ms 消息泵仅用于隔离原型时序验证，尚未证明适合产品 UI 调度；超大/大/中图标命令、排序/分组切换、第三方 provider 和 ExplorerBrowser 产品行为仍待验证。日志：`src/.state/native-probe-watchdog/20261101-005217-904583cd.stdout.log`。
