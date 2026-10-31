@@ -268,6 +268,26 @@ internal static class ShellListViewRowModelSmoke
                   longPathResult.Identity != default,
                 "handle traversal preserves requested folder results beyond the legacy MAX_PATH boundary");
 
+            var movedDuringScanRoot = Path.Combine(identityRoot, "moved-during-tree-scan");
+            var movedDuringScanRootNow = movedDuringScanRoot + "-renamed";
+            var movedDuringScanChild = Path.Combine(movedDuringScanRoot, "child");
+            Directory.CreateDirectory(movedDuringScanChild);
+            File.WriteAllBytes(Path.Combine(movedDuringScanChild, "original.bin"), new byte[6]);
+            var movedDuringScanIdentity = ShellListViewRowIdentity.GetFileSystemIdentity(movedDuringScanRoot);
+            var movedDuringScan = false;
+            var movedTreeResults = HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
+                movedDuringScanRoot, [movedDuringScanRootNow], CancellationToken.None,
+                (parentPath, childPath) =>
+                {
+                    if (movedDuringScan || parentPath != movedDuringScanRoot) return;
+                    Directory.Move(movedDuringScanRoot, movedDuringScanRootNow);
+                    movedDuringScan = true;
+                });
+            Check(movedDuringScan && movedTreeResults.TryGetValue(movedDuringScanRootNow, out var movedTreeResult) &&
+                  movedTreeResult.Identity == movedDuringScanIdentity && movedTreeResult.Summary.Bytes == 6 &&
+                  movedTreeResult.Summary.Files == 1 && movedTreeResult.Summary.Unreadable == 0,
+                "handle traversal resolves a directory move during enumeration and continues through the original object");
+
             var pagedScanRoot = Path.Combine(identityRoot, "paged-scan-root");
             Directory.CreateDirectory(pagedScanRoot);
             const int pagedFileCount = 700;

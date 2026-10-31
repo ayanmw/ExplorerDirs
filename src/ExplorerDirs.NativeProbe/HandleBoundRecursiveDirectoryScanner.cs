@@ -78,7 +78,8 @@ internal static class HandleBoundRecursiveDirectoryScanner
     internal static IReadOnlyDictionary<string, ShellListViewRowScanResult> ScanDirectoryTree(
         string rootPath,
         IEnumerable<string> requestedPaths,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string, string>? beforeChildOpen = null)
     {
         ArgumentNullException.ThrowIfNull(requestedPaths);
         cancellationToken.ThrowIfCancellationRequested();
@@ -103,7 +104,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 return results;
             }
             ScanOpenedDirectory(root.Handle, root.Identity, rootPath, cancellationToken,
-                beforeChildOpen: null, requested, results);
+                beforeChildOpen, requested, results);
         }
         return results;
     }
@@ -141,7 +142,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 if (entry.Name is "." or "..") continue;
                 if ((entry.Attributes & FileAttributeDirectory) != 0)
                 {
-                    var currentDirectoryPath = ToExtendedPath(TryGetPath(frame.Handle) ?? frame.Path);
+                    var currentDirectoryPath = frame.Path;
                     var childPath = Path.Combine(currentDirectoryPath, entry.Name);
                     var normalizedChildPath = NormalizeHandlePath(childPath);
                     if ((entry.Attributes & FileAttributeReparsePoint) != 0 ||
@@ -160,14 +161,30 @@ internal static class HandleBoundRecursiveDirectoryScanner
 
                     beforeChildOpen?.Invoke(NormalizeHandlePath(currentDirectoryPath), normalizedChildPath);
                     var child = OpenDirectory(childPath);
+                    var expectedChildIdentity = new ShellFileSystemIdentity(
+                        frame.Identity.VolumeSerialNumber, entry.FileIdLow, entry.FileIdHigh);
+                    // Re-resolve the parent path only when its cached path no longer opens the enumerated child.
+                    if ((child is null || child.Identity != expectedChildIdentity ||
+                         (child.Attributes & FileAttributeReparsePoint) != 0))
+                    {
+                        var currentParentPath = ToExtendedPath(TryGetPath(frame.Handle) ?? frame.Path);
+                        if (!string.Equals(NormalizeHandlePath(currentParentPath),
+                                NormalizeHandlePath(frame.Path), StringComparison.OrdinalIgnoreCase))
+                        {
+                            child?.Handle.Dispose();
+                            frame.Path = currentParentPath;
+                            currentDirectoryPath = currentParentPath;
+                            childPath = Path.Combine(currentDirectoryPath, entry.Name);
+                            normalizedChildPath = NormalizeHandlePath(childPath);
+                            child = OpenDirectory(childPath);
+                        }
+                    }
+
                     if (child is null)
                     {
                         frame.Unreadable = checked(frame.Unreadable + 1);
                         continue;
                     }
-
-                    var expectedChildIdentity = new ShellFileSystemIdentity(
-                        frame.Identity.VolumeSerialNumber, entry.FileIdLow, entry.FileIdHigh);
                     if (child.Identity != expectedChildIdentity ||
                         (child.Attributes & FileAttributeReparsePoint) != 0)
                     {
@@ -307,7 +324,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
 
         internal SafeFileHandle Handle { get; }
         internal ShellFileSystemIdentity Identity { get; }
-        internal string Path { get; }
+        internal string Path { get; set; }
         internal ulong Bytes;
         internal long Files;
         internal long Directories;
