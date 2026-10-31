@@ -2310,8 +2310,25 @@ internal static class StaticShellFolderAdapterProbe
                 recursive.Files != 2 || recursive.Directories != 1 || recursive.Unreadable != 0)
                 throw new InvalidOperationException("The recursive-size fixture scanners did not agree on 10 bytes, 2 files, and 1 nested folder.");
 
+            Marshal.GetDelegateForFunctionPointer<ResetMapColumnTrace>(
+                NativeLibrary.GetExport(nativeLibrary, "ResetSyntheticMapColumnTrace"))();
             Check(Marshal.GetDelegateForFunctionPointer<RunSyntheticFolderTreeContractSmoke>(
                 NativeLibrary.GetExport(nativeLibrary, "RunSyntheticFolderTreeContractSmoke"))(shellFixture));
+            var mapTraceCount = Marshal.GetDelegateForFunctionPointer<GetMapColumnTraceCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticMapColumnTraceCount"))();
+            var readMapTrace = Marshal.GetDelegateForFunctionPointer<ReadMapColumnTrace>(
+                NativeLibrary.GetExport(nativeLibrary, "ReadSyntheticMapColumnTrace"));
+            var recursiveMapObserved = false;
+            for (var index = 0; index < mapTraceCount; index++)
+            {
+                Check(readMapTrace((uint)index, out var mappedColumn, out var mappedKey, out var mapResult));
+                if (mapResult >= 0 && mappedColumn == 1 &&
+                    mappedKey.FormatId == new Guid("7E1F84B7-C052-4E51-8A3C-869254A6B910") &&
+                    mappedKey.PropertyId == 1)
+                    recursiveMapObserved = true;
+            }
+            if (!recursiveMapObserved)
+                throw new InvalidOperationException("The MapColumnToSCID trace did not capture the recursive-size property key returned for column 1.");
 
             Directory.CreateDirectory(Path.Combine(projectionFixture, "child", "nested-folder"));
             Directory.CreateDirectory(Path.Combine(projectionFixture, "other-child"));
@@ -2826,6 +2843,9 @@ internal static class StaticShellFolderAdapterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetPropertyStoreValue(nint self, in ShellColumnManager.NativeKey key, nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetPropertyStoreFactoryProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetMapColumnTrace();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetMapColumnTraceCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadMapColumnTrace(uint index, out uint column, out ShellColumnManager.NativeKey key, out int result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string parsingName, ulong volumeSerial, ulong fileIdLow, ulong fileIdHigh, long scannedBytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RunSyntheticFolderRecursiveSizeIdentityCacheSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingPath, [MarshalAs(UnmanagedType.LPWStr)] string childParsingName, [MarshalAs(UnmanagedType.LPWStr)] string otherParsingName, ulong childVolumeSerial, ulong childFileIdLow, ulong childFileIdHigh, ulong otherVolumeSerial, ulong otherFileIdLow, ulong otherFileIdHigh, long initialBytes, long otherRowBytes, long updatedBytes);
 

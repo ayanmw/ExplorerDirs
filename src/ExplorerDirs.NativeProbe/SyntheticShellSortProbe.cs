@@ -1249,7 +1249,12 @@ public static class SyntheticShellSortProbe
             if (preserveScrollAnchor)
                 Console.WriteLine($"synthetic-size-update-scroll: after-recreate-top-index={recreatedTopIndex}; top={recreatedTopName}");
             Check(At<ActivateView>(view, 7)(view, 2)); // SVUIA_ACTIVATE_NOFOCUS.
-            Console.WriteLine($"synthetic-size-update-column-map: phase=recreated; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; after-window-recreate={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}; by-column=[{FormatMapColumnCounts(module)}]");
+            var mapColumnTrace = CaptureMapColumnTrace(module);
+            if (name == "single-item-capture-reapply-recreate-window" &&
+                mapColumnTrace.Count(entry => entry.Result >= 0 && entry.Column == 1 &&
+                    entry.Key.FormatId == RecursiveSizeFormatId && entry.Key.PropertyId == 1) != 2)
+                throw new InvalidOperationException($"Shell did not receive the recursive-size key twice while rebuilding the view window: [{FormatMapColumnTrace(mapColumnTrace)}].");
+            Console.WriteLine($"synthetic-size-update-column-map: phase=recreated; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; after-window-recreate={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}; by-column=[{FormatMapColumnCounts(module)}]; trace=[{FormatMapColumnTrace(mapColumnTrace)}]");
             var restored = shellWindowSelection!.Restore(view, trace: message => Console.WriteLine($"synthetic-size-update-selection: {message}"));
             Console.WriteLine($"synthetic-size-update-selection: selected={restored.SelectionRestored}; focused={restored.FocusRestored}; saved-selected={shellWindowSelection.SelectedCount}; saved-focus={shellWindowSelection.HasFocusedItem}");
             if (multiSelect)
@@ -1392,6 +1397,24 @@ public static class SyntheticShellSortProbe
             NativeLibrary.GetExport(module, "GetSyntheticMapColumnToScidColumnCount"));
         return string.Join('|', Enumerable.Range(0, 4).Select(column => $"{column}:{getCount((uint)column)}"));
     }
+
+    private static IReadOnlyList<(uint Column, ShellColumnManager.NativeKey Key, int Result)> CaptureMapColumnTrace(nint module)
+    {
+        var count = Marshal.GetDelegateForFunctionPointer<GetMapColumnTraceCount>(
+            NativeLibrary.GetExport(module, "GetSyntheticMapColumnTraceCount"))();
+        var read = Marshal.GetDelegateForFunctionPointer<ReadMapColumnTrace>(
+            NativeLibrary.GetExport(module, "ReadSyntheticMapColumnTrace"));
+        var entries = new List<(uint Column, ShellColumnManager.NativeKey Key, int Result)>(count);
+        for (var index = 0; index < count; index++)
+        {
+            Check(read((uint)index, out var column, out var key, out var result));
+            entries.Add((column, key, result));
+        }
+        return entries;
+    }
+
+    private static string FormatMapColumnTrace(IReadOnlyList<(uint Column, ShellColumnManager.NativeKey Key, int Result)> entries) =>
+        string.Join('|', entries.Select((entry, index) => $"{index}:col{entry.Column}={entry.Key.FormatId:B}:{entry.Key.PropertyId}/hr=0x{entry.Result:X8}"));
 
     private static NativeSortColumn[] CaptureNativeSortColumns(nint folderView)
     {
@@ -2743,6 +2766,8 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetIndexedCounter(uint index);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetMapColumnTraceCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ReadMapColumnTrace(uint index, out uint column, out ShellColumnManager.NativeKey key, out int result);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewWindow(nint self, nint previous, ref StreamProbeSettings settings, nint browser, ref StreamProbeRect bounds, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DestroyViewWindow(nint self);

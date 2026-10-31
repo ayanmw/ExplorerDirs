@@ -15,6 +15,8 @@
 #include <vector>
 #include <cstdio>
 
+extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters();
+
 namespace
 {
     void TraceSyntheticSortStage(const char* stage)
@@ -1454,6 +1456,16 @@ namespace
     volatile LONG g_syntheticClassFactoryCreateCount = 0;
     volatile LONG g_syntheticMapColumnToScidCount = 0;
     volatile LONG g_syntheticMapColumnToScidByColumn[4] = {};
+    constexpr LONG kSyntheticMapColumnTraceCapacity = 256;
+    struct SyntheticMapColumnTraceEntry
+    {
+        volatile LONG sequence = 0;
+        UINT column = 0;
+        SHCOLUMNID key{};
+        HRESULT result = E_PENDING;
+    };
+    SyntheticMapColumnTraceEntry g_syntheticMapColumnTrace[kSyntheticMapColumnTraceCapacity]{};
+    volatile LONG g_syntheticMapColumnTraceCount = 0;
     std::wstring g_syntheticSortBackingPath;
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
@@ -2590,16 +2602,28 @@ namespace
             InterlockedIncrement(&g_syntheticMapColumnToScidCount);
             if (column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn))
                 InterlockedIncrement(&g_syntheticMapColumnToScidByColumn[column]);
-            if (!key) return E_POINTER;
-            if (column == 0) *key = PKEY_ItemNameDisplay;
+            HRESULT result = S_OK;
+            SHCOLUMNID mapped{};
+            if (!key) result = E_POINTER;
+            else if (column == 0) mapped = PKEY_ItemNameDisplay;
             else if (column == 1 && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0))
-                *key = kSyntheticRecursiveSizeKey;
-            else if (column == 1) *key = PKEY_Size;
-            else if (column == 2) *key = PKEY_ItemTypeText;
+                mapped = kSyntheticRecursiveSizeKey;
+            else if (column == 1) mapped = PKEY_Size;
+            else if (column == 2) mapped = PKEY_ItemTypeText;
             else if (column == 3 && InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0))
-                *key = kSyntheticRelativeSizeKey;
-            else return E_INVALIDARG;
-            return S_OK;
+                mapped = kSyntheticRelativeSizeKey;
+            else result = E_INVALIDARG;
+            if (SUCCEEDED(result)) *key = mapped;
+            const auto traceIndex = InterlockedIncrement(&g_syntheticMapColumnTraceCount) - 1;
+            if (traceIndex < kSyntheticMapColumnTraceCapacity)
+            {
+                auto& trace = g_syntheticMapColumnTrace[traceIndex];
+                trace.column = column;
+                trace.key = mapped;
+                trace.result = result;
+                InterlockedExchange(&trace.sequence, traceIndex + 1);
+            }
+            return result;
         }
         void ReleaseViewHold()
         {
@@ -3258,6 +3282,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         if (!relativeSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
         InterlockedExchange64(&g_syntheticChildSizeOverride, 1);
+        ResetSyntheticSortCounters();
         SHCOLUMNID mappedRecursiveSizeKey{};
         result = root->MapColumnToSCID(1, &mappedRecursiveSizeKey);
         const bool recursiveSizeKeyMapped = SUCCEEDED(result) &&
@@ -4008,15 +4033,16 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticOtherUiObjectRequests, 0);
     InterlockedExchange(&g_syntheticGetAttributesOfCount, 0);
     InterlockedExchange(&g_syntheticFilesystemAttributeCount, 0);
-    InterlockedExchange(&g_syntheticMaskFilesystemAttributes, 0);
-    InterlockedExchange(&g_syntheticOwnAttributesForProbe, 0);
-    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+    // Counter resets occur between Shell operations; keep the caller-selected provider behavior stable.
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
     InterlockedExchange(&g_syntheticClassFactoryCreateCount, 0);
     InterlockedExchange(&g_syntheticMapColumnToScidCount, 0);
     for (size_t column = 0; column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn); ++column)
         InterlockedExchange(&g_syntheticMapColumnToScidByColumn[column], 0);
+    InterlockedExchange(&g_syntheticMapColumnTraceCount, 0);
+    for (auto& entry : g_syntheticMapColumnTrace)
+        InterlockedExchange(&entry.sequence, 0);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidCount()
@@ -4028,6 +4054,33 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnToScidColumnCo
 {
     if (column >= ARRAYSIZE(g_syntheticMapColumnToScidByColumn)) return -1;
     return InterlockedCompareExchange(&g_syntheticMapColumnToScidByColumn[column], 0, 0);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ResetSyntheticMapColumnTrace()
+{
+    InterlockedExchange(&g_syntheticMapColumnTraceCount, 0);
+    for (auto& entry : g_syntheticMapColumnTrace)
+        InterlockedExchange(&entry.sequence, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticMapColumnTraceCount()
+{
+    const auto count = InterlockedCompareExchange(&g_syntheticMapColumnTraceCount, 0, 0);
+    return count < kSyntheticMapColumnTraceCapacity ? count : kSyntheticMapColumnTraceCapacity;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI ReadSyntheticMapColumnTrace(
+    UINT index, UINT* column, SHCOLUMNID* key, HRESULT* result)
+{
+    if (!column || !key || !result) return E_POINTER;
+    if (index >= kSyntheticMapColumnTraceCapacity ||
+        InterlockedCompareExchange(&g_syntheticMapColumnTrace[index].sequence, 0, 0) != static_cast<LONG>(index + 1))
+        return E_INVALIDARG;
+    const auto& entry = g_syntheticMapColumnTrace[index];
+    *column = entry.column;
+    *key = entry.key;
+    *result = entry.result;
+    return S_OK;
 }
 
 extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticSortViewHold()

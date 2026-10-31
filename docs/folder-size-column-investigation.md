@@ -1075,3 +1075,9 @@ Native adapter 通过 `/W4 /WX` 编译。按当前后台优先边界，本批未
 新增的 provider `MapColumnToSCID` 调用计数表明，通知、捕获列及 `SetColumns` 重放阶段均没有调用该接口；view-window 重建阶段共调用 8 次，对索引 0、1、2、3 各两次。索引 1 的 adapter 源码分支映射至 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`；重建前后的 `IColumnManager` 列快照仍为 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。因此 Shell 确实在重建时咨询 provider 映射，但捕获列 key 与 provider 映射 key 仍保持不同；当前仅计数了回调，没有记录 Shell 内部的转换步骤，不能据此断言哪一个 key 是权威身份。
 
 该对照说明以 `IColumnManager` 实际捕获值重放，在本合成 provider 中可恢复派生列消费/排序；此前使用 adapter 声明 key 重放的成功结果也仍成立。探针日志现将精确 GUID 比较明确标成 `provider-recursive-size-key-exact-match=False`，不再把它写成列不存在。结果限于隔离 `IShellView`，没有改产品 ExplorerBrowser 或发布包；迁移门槛仍开放。
+
+### 2026-11-01：记录 provider 的列映射返回值
+
+为区分 Shell 是否在窗口重建时继续询问 provider、以及回调实际返回了什么，NativeProbe 新增有界线程安全映射轨迹，记录列号、完整 SHCOLUMNID 和 HRESULT。静态合同先因新导出尚不存在而失败，接线后通过；Private Desktop WPF 根宿主复跑 exit 0，隔离清理通过。窗口重建时列 0–3 各映射两次；列 1 两次均返回 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`，名称与类型列分别返回标准键，列 3 返回 `E_INVALIDARG`。同一轮 `IColumnManager.GetColumns` 前后仍读到 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。这确认 provider 在重建中持续返回其声明键，但没有解释 Shell 为何捕获到不同键；不能据此判定任一 GUID 错误。
+
+诊断同时发现 `ResetSyntheticSortCounters()` 会重置 provider 语义选项。排序探针在分阶段重置计数器后，窗口重建因此可能走到不同映射分支。现已将计数重置与语义选项分开，并加入静态回归合同，避免诊断辅助函数改变 provider 行为。Native adapter `/W4 /WX`、NativeProbe Release 构建及无窗口静态合同通过；WPF Private Desktop 日志：`src/.state/native-probe-watchdog/20261101-045224-c4d69d7e.stdout.log`。仅为隔离原型探针和文档修改，产品仍使用 ExplorerBrowser，未做 UI 验收或发布。

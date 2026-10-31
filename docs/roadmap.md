@@ -5430,3 +5430,7 @@ NativeProbe 新增 `--zip-background-menu-commands`：针对临时 ZIP fixture �
 ## 2026-11-01：捕获列集重放及 provider 列映射调用计数
 
 在通知后原样重放更新前捕获的 `IColumnManager` 三列并重建 view window，合成 provider 重新读取派生值、排序正确且保留焦点/选区。provider 映射回调在通知/捕获/列重放阶段为 0 次；重建时列 0–3 各被调用两次，重建前后列快照的递归列 key 仍与 `MapColumnToSCID(1)` 返回 key 不同。当前证据确认 view 重建会重新咨询 provider，但尚未解释 Shell 内部列身份转换。NativeProbe Release 和原生 adapter `/W4 /WX` 构建通过；WPF Private Desktop watchdog exit 0，前台/输入/清理守卫通过。产品仍使用 ExplorerBrowser。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01重放-shell-捕获列集并跟踪-provider-映射调用)。
+
+## 2026-11-01：provider 列映射返回值追踪
+
+NativeProbe 已在 `MapColumnToSCID` 记录有界逐次轨迹，并修复计数器重置误改 provider 语义选项的问题。静态合同与 Private Desktop WPF 探针通过；列 1 每次都返回 adapter 声明键 `{7E1F84B7-C052-4E51-8A3C-869254A6B910}:1`，而 `IColumnManager.GetColumns` 仍返回 `{9E5E05AC-1936-4A75-94F7-4704B8B01923}:1`。Shell 内部列身份转换层尚未查明，避免猜测修 GUID；下一步需继续限定列发现、应用和读回各阶段。无产品宿主变更、无 UI 验收、无发布。详见[逐行文件夹大小列调查](folder-size-column-investigation.md#2026-11-01记录-provider-的列映射返回值)。
