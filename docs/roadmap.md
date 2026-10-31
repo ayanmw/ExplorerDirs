@@ -5279,3 +5279,7 @@ NativeProbe 的包装枚举器新增共享惰性 PIDL 缓存和独立游标，�
 ### 2026-10-31：合成 IShellView 的属性通知转发复核
 
 用 WPF `HwndSource` Private Desktop 宿主补齐此前超时的合成 view 通知验证。RED 轮临时关闭 ATTRIBUTES 分类后，`SHCNE_ATTRIBUTES` 专属计数为 0；恢复分类后该事件命中 1 次，adapter 父目录更新队列/发送各 1 次。隐藏属性切换期间 Shell 仍保留列表行，`EnumObjects` 增量为 0，因此证据只表明事件路由到 adapter，不能声称发生重枚举或行被过滤。完整滚动锚点重建场景 exit 0，move/rename/delete、待处理更新取消、前台/输入与隔离清理合同均通过。NativeProbe Release、native `/W4 /WX` 和通知分类 smoke 通过。产品 ExplorerBrowser 未改；只读属性视觉、可见 UI、其它 Shell provider 与 IShellView 产品迁移仍待验证。详细结果见[属性通知调查](folder-size-column-investigation.md#2026-10-31合成-ishellview-接收属性通知)。
+
+## 2026-11-01：隔离 ListView 行颜色规则投影
+
+NativeProbe 的独立 `SysListView32` 颜色基线现将 `ShellViewColorRuleEvaluator` 接入 `NM_CUSTOMDRAW`：`*.bin` 文件规则和 `#DIR` 文件夹规则分别解析为行背景色；六种常见视图样式均验证未选中行着色，选中行继续交给 common control 默认绘制并保留选择状态。Release NativeProbe 构建 0 警告/错误，颜色策略 smoke 与 Private Desktop watchdog 通过，前台、输入和临时资源清理守卫未变化。该证据仅覆盖隔离的 Win32 ListView 绘制回调；未接入产品 ExplorerBrowser、未验证 DefView/真实 Q-Dir `.qdr` 规则导入或可见 UI，不能据此批准迁移产品视图。Q-Dir 规则语法参照 [FAQ 6](https://softwareok.com/?faq=6&seite=faq-Q-DIR) 与 [FAQ 47](https://softwareok.com/?faq=47&seite=faq-Q-DIR)。

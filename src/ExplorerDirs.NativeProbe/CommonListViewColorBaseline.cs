@@ -31,6 +31,7 @@ internal static class CommonListViewColorBaseline
     private const uint LvisSelected = 0x0002;
     private const uint CdrfNotifyItemDraw = 0x20;
     private const uint CdrfNewFontAndPostPaint = 0x12;
+    private const uint CdrfDoDefault = 0x00;
     private static readonly DrawProc Callback = OnDraw;
     private static readonly ListViewCompareProc SizeCompare = CompareBySize;
     // App-owned ListView sort identity; this key is serialized in the prototype session only.
@@ -41,7 +42,9 @@ internal static class CommonListViewColorBaseline
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
-    private static readonly Dictionary<nuint, uint> Colors = new() { [0] = 0x00F0E0D0, [1] = 0x00D0F0E0 };
+    private static readonly Dictionary<nuint, uint> RuleTextColors = new() { [0] = 0x00202020 };
+    private static readonly Dictionary<nuint, uint> RuleBackgroundColors = [];
+    private static ShellListSelectionSnapshot _drawSelection = ShellListSelectionSnapshot.Empty();
     private static readonly Dictionary<nuint, uint> Samples = [];
     private static readonly Dictionary<nuint, string> Writes = [];
     private static readonly Dictionary<nuint, Rect> LabelBounds = [];
@@ -49,6 +52,7 @@ internal static class CommonListViewColorBaseline
     private static int _prepaint;
     private static int _itemPrepaint;
     private static int _itemPostpaint;
+    private static int _nativeSelectionDelegations;
 
     internal static int Run()
     {
@@ -77,11 +81,15 @@ internal static class CommonListViewColorBaseline
 
             AddColumn(listView, "Name", 340);
             AddColumn(listView, "Recursive size", 140);
-            InsertItem(listView, 0, "large-folder", 10, -1, "10 B");
+            InsertItem(listView, 0, "large.bin", 10, -1, "10 B");
             InsertItem(listView, 1, "small-folder", 4, -1, "4 B");
+            SetItemState(listView, 1, LvisSelected, LvisSelected);
+            ConfigureFixtureColorRules();
             if (!IsWindowVisible(parent) || !IsWindowVisible(listView))
                 Console.WriteLine($"common-listview-color-baseline: initial-visible-state=parent:{IsWindowVisible(parent)},list:{IsWindowVisible(listView)}");
 
+            var colorProjectionPassed = true;
+            var selectedRuleDelegationCount = 0;
             foreach (var style in new[]
             {
                 (Name: "Icon", View: 0), (Name: "Details", View: 1), (Name: "SmallIcon", View: 2),
@@ -91,9 +99,12 @@ internal static class CommonListViewColorBaseline
                 _prepaint = 0;
                 _itemPrepaint = 0;
                 _itemPostpaint = 0;
+                _nativeSelectionDelegations = 0;
                 Samples.Clear();
                 Writes.Clear();
                 LabelBounds.Clear();
+                _drawSelection = ShellListSelectionSnapshot.Capture(
+                    SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32(), index => GetItemState(listView, index));
                 SendMessageW(listView, LvmSetView, style.View, 0);
                 for (var index = 0; index < 2; index++)
                     if (TryGetItemRect(listView, index, 2, out var labelBounds))
@@ -108,8 +119,14 @@ internal static class CommonListViewColorBaseline
                     .Select(pair => $"{pair.Key}:{pair.Value}"));
                 var rects = string.Join(',', LabelBounds.OrderBy(pair => pair.Key)
                     .Select(pair => $"{pair.Key}={pair.Value.Left},{pair.Value.Top},{pair.Value.Right},{pair.Value.Bottom}"));
+                var stylePolicyPassed = Writes.ContainsKey(0) && !Writes.ContainsKey(1) && _nativeSelectionDelegations > 0 &&
+                    (GetItemState(listView, 1) & LvisSelected) != 0;
+                colorProjectionPassed &= stylePolicyPassed;
+                if (stylePolicyPassed) selectedRuleDelegationCount++;
                 report.Add($"{style.Name}:view={style.View};prepaint={_prepaint};item-prepaint={_itemPrepaint};item-postpaint={_itemPostpaint};" +
-                    $"pixels={pixels};fields={fields};label-rects={rects};visible={IsWindowVisible(listView)}");
+                    $"pixels={pixels};fields={fields};selected-native={((GetItemState(listView, 1) & LvisSelected) != 0)};" +
+                    $"native-selection-delegations={_nativeSelectionDelegations};" +
+                    $"rule-projection={stylePolicyPassed};label-rects={rects};visible={IsWindowVisible(listView)}");
             }
 
             var initialRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
@@ -121,8 +138,8 @@ internal static class CommonListViewColorBaseline
                 Marshal.GetFunctionPointerForDelegate(SizeCompare));
             var sortedRows = $"{GetItemText(listView, 0, 0)}:{GetItemParam(listView, 0)}," +
                 $"{GetItemText(listView, 1, 0)}:{GetItemParam(listView, 1)}";
-            var derivedValueUpdatedAndSorted = initialRows == "large-folder:10,small-folder:4" &&
-                liveValue == "16 B" && sortResult != 0 && sortedRows == "large-folder:10,small-folder:16";
+            var derivedValueUpdatedAndSorted = initialRows == "large.bin:10,small-folder:4" &&
+                liveValue == "16 B" && sortResult != 0 && sortedRows == "large.bin:10,small-folder:16";
             InvalidateRect(listView, 0, true);
             UpdateWindow(listView);
             PumpMessages();
@@ -130,8 +147,10 @@ internal static class CommonListViewColorBaseline
 
             var foregroundUnchanged = GetForegroundWindow() == desktopBefore;
             Console.WriteLine($"common-listview-color-baseline: views={string.Join('|', report)}; " +
+                $"q-dir-rules=wildcard-and-#DIR; selected-row-native-delegations={selectedRuleDelegationCount};" +
+                $"selected-item-native-colors={colorProjectionPassed}; rule-item-colored={colorProjectionPassed}; " +
                 $"visible-test=True; foreground-unchanged={foregroundUnchanged}; shell-view=False");
-            return foregroundUnchanged && derivedValueUpdatedAndSorted ? 0 : 1;
+            return foregroundUnchanged && derivedValueUpdatedAndSorted && colorProjectionPassed ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -162,6 +181,28 @@ internal static class CommonListViewColorBaseline
             Marshal.FreeHGlobal(textPointer);
             Marshal.FreeHGlobal(memory);
         }
+    }
+
+    private static void ConfigureFixtureColorRules()
+    {
+        var rules = new[]
+        {
+            ShellViewColorRule.BackgroundOnly("*.bin", ShellColorRuleDecision.Set, 0x00F0E0D0),
+            ShellViewColorRule.BackgroundOnly("#DIR", ShellColorRuleDecision.Set, 0x00D0F0E0)
+        };
+        RuleBackgroundColors.Clear();
+        foreach (var (index, name, attributes) in new[]
+        {
+            (0u, "large.bin", FileAttributes.Normal),
+            (1u, "small-folder", FileAttributes.Directory)
+        })
+        {
+            var background = ShellViewColorRuleEvaluator.ResolveBackground(rules, name, attributes);
+            if (background is { } color) RuleBackgroundColors[(nuint)index] = color;
+        }
+        if (RuleBackgroundColors.Count != 2 || RuleBackgroundColors[(nuint)0] != 0x00F0E0D0 ||
+            RuleBackgroundColors[(nuint)1] != 0x00D0F0E0)
+            throw new InvalidOperationException("The Q-Dir-style file wildcard and #DIR rules did not resolve the expected row colors.");
     }
 
     internal static int RunDataContract()
@@ -1133,10 +1174,19 @@ internal static class CommonListViewColorBaseline
                 if (draw.Stage == CddsItemPrePaint)
                 {
                     _itemPrepaint++;
-                    var color = Colors.GetValueOrDefault(draw.Item, 0x00E0E0E0u);
-                    Marshal.WriteInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextColor)).ToInt32(), 0x00202020);
-                    Marshal.WriteInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextBackground)).ToInt32(), unchecked((int)color));
-                    Writes[draw.Item] = $"text=0x{Marshal.ReadInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextColor)).ToInt32()):X6},background=0x{Marshal.ReadInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextBackground)).ToInt32()):X6}";
+                    if (!ShellViewColorPolicy.TryGetColors(draw.Item, _drawSelection,
+                            RuleTextColors, RuleBackgroundColors, out var colors))
+                    {
+                        if (_drawSelection.Contains(draw.Item) &&
+                            (RuleTextColors.ContainsKey(draw.Item) || RuleBackgroundColors.ContainsKey(draw.Item)))
+                            _nativeSelectionDelegations++;
+                        return (nint)CdrfDoDefault;
+                    }
+                    if (colors.Text is { } text)
+                        Marshal.WriteInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextColor)).ToInt32(), unchecked((int)text));
+                    if (colors.Background is { } background)
+                        Marshal.WriteInt32(lParam, Marshal.OffsetOf<CustomDraw>(nameof(CustomDraw.TextBackground)).ToInt32(), unchecked((int)background));
+                    Writes[draw.Item] = $"text={(colors.Text is { } rowText ? $"0x{rowText:X6}" : "native")},background={(colors.Background is { } rowBackground ? $"0x{rowBackground:X6}" : "native")}";
                     return (nint)CdrfNewFontAndPostPaint;
                 }
                 if (draw.Stage == CddsItemPostPaint)
