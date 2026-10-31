@@ -350,6 +350,8 @@ Windows 属性直读及无扩展读回通过；Q-Dir GUI 互操作仍未完成�
 
 2026-10-31 当前源码复核：F5 入口调用 `RefreshFromUser()`，直接执行当前 `IShellView.Refresh()`，不重建 ExplorerBrowser、窗格、标签或导航历史；不广播 `SHCNE_UPDATEDIR`，不关闭原生重绘。此前 F5 期间的 `IFolderView2.SetRedraw(FALSE)` 租约已移除，让 Shell 自行绘制列表更新；行数等待只服务于选区与焦点恢复。查看方式只调用当前 `IFolderView2.SetViewModeAndIconSize`，不刷新目录或重建视图；Shell 需要原地重排/重绘项目，完整状态读回延后到 Dispatcher `ContextIdle`。隔离计时中直接 `IShellView.Refresh()` 约 48 ms 出现新行，`SHCNE_UPDATEDIR` 约 544 ms；仅是行数可见时间，不是像素测量。Q-Dir 语言表另列“不重新枚举视图”和“重命名或复制时禁用自动排序”两个选项；两者不能作为解决 F5 空白的同一功能。[Q-Dir 官方语言表](https://www.softwareok.com/?seite=Freeware%2FQ-Dir%2Flanguage%2FEnglish-UK) 源码与隐藏探针不能确认实际像素空白时长；可见闪烁仍待集中 UI 验收。
 
+2026-10-31 Q-Dir 筛选期间多选跳转差异：[FAQ 80](https://www.softwareok.com/?faq=80&seite=faq-Q-DIR)说明筛选时可用 Up/Down 跳到下一/上一已选对象，并避免再次点中已选项时丢失其它选择。当前 Explorer Dirs 的快速名称筛选和列值筛选均由 `IFolderFilterSite` 过滤，但箭头键仍交给原生 Shell 常规焦点/选择导航；没有“在筛选命中项中遍历既有多选”的专门路由。是否同时覆盖名称筛选与列值筛选、焦点不在已选项时的起点，以及首尾是否循环，需在集中 Q-Dir 可见验收后确定；在语义确认前不覆盖原生箭头行为。
+
 2026-10-31 诊断补充：当 `EXPLORER_DIRS_SHELL_CALLBACK_TRACE=1` 时，F5 和实际模式变更会各自记录随后 2 秒内原生视图子窗口的 `WM_PAINT` / `WM_ERASEBKGND` 时间线、Shell 处理耗时和返回值，最多 256 条；其余运行不采集这组消息，也不改绘制或输入。该数据用于后续区分 Shell 背景擦除与列表绘制时序，不能单独证明画面颜色、空白持续时间或命中目标安全。
 
 2026-10-30 刷新后焦点恢复：`ShellViewSelectionSnapshot.Restore` 在写入 focused-item 状态前先读取当前焦点 PIDL 身份；刷新后 Shell 已保留原项目焦点时跳过冗余 `SelectItem(SVSI_FOCUSED)`，焦点丢失时沿用原恢复/回退路径。App Release 构建通过，0 警告/错误；没有运行测试或 ExplorerBrowser。该项是减少不必要的列表状态变更，不证明刷新期间的空白已消除。
