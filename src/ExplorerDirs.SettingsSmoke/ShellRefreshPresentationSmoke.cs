@@ -15,9 +15,12 @@ internal static class ShellRefreshPresentationSmoke
         var refreshEnd = host.IndexOf("private (bool SelectionRestored", refreshStart, StringComparison.Ordinal);
         var refreshPath = refreshStart >= 0 && refreshEnd > refreshStart ? host[refreshStart..refreshEnd] : string.Empty;
 
-        Check(modePath.Contains("ApplyMode(", StringComparison.Ordinal) &&
+        Check(modePath.Contains("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) &&
+            modePath.IndexOf("ShellViewRedrawLease.TrySuppress(view)", StringComparison.Ordinal) <
+                modePath.IndexOf("ApplyMode(", StringComparison.Ordinal) &&
+            modePath.Contains("ApplyMode(", StringComparison.Ordinal) &&
             !modePath.Contains("Refresh(", StringComparison.Ordinal) && !modePath.Contains("Navigate(", StringComparison.Ordinal),
-            "view-style changes stay in the existing Shell view without refreshing or navigating the folder");
+            "view-style changes suppress native redraw only around the existing-view mode setter");
         Check(refreshPath.Contains("shellView.Refresh()", StringComparison.Ordinal) &&
             !refreshPath.Contains("SetRedraw", StringComparison.Ordinal) &&
             !refreshPath.Contains("TrySuppressCurrentViewRedraw", StringComparison.Ordinal),

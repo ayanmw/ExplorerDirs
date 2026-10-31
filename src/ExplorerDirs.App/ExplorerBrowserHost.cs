@@ -2558,12 +2558,16 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             // an identical layout, which can otherwise trigger an unnecessary list reflow.
             if (currentModeResult < 0 || currentMode != style.Mode || currentIconSize != requestedIconSize)
             {
-                // Let the native view paint a real mode transition. This changes presentation only;
-                // it must not refresh or navigate the folder.
+                // A mode setter synchronously relayouts this existing view. Suppress redraw only
+                // for that call so DefView can paint the resulting layout once, without the
+                // asynchronous stale-frame/input tradeoff that makes this unsafe for F5 refresh.
                 BeginNativePaintTransitionTrace("view-mode");
-                if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
-                        new NativeViewStateTarget(view, Current),
-                        result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+                using (ShellViewRedrawLease.TrySuppress(view))
+                {
+                    if (!ShellViewStateRestore.ApplyMode(style.Mode, requestedIconSize,
+                            new NativeViewStateTarget(view, Current),
+                            result => MenuError?.Invoke(this, $"无法切换查看方式：0x{result:X8}"), Current)) return false;
+                }
             }
         }
         catch (COMException ex)

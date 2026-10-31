@@ -2,6 +2,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-10-31 查看方式切换局部重绘租约：真实视图模式变更现在只在同步 `IFolderView2.SetViewModeAndIconSize` 周围短暂关闭 DefView 重绘，租约在返回或异常时立即释放；F5 刷新仍让 Shell 自行绘制，避免异步枚举期间旧帧与实际命中目标不一致。针对性源码合同先按预期失败，再通过；完整 Release SettingsSmoke 与 App Release 构建通过（0 警告、0 错误）。没有创建 Shell view 或启动 GUI；此项只证明代码接线，实际黑帧/闪烁是否减少仍待集中验收。
+
 2026-10-31 当前主线集中验收副本以干净提交 `eff0a65654b44c0a7d8b1de41d967e2071130891` 准备：四窗格副本位于 `src/.state/gui-smoke/20261031-050655-754-4b72da/`，状态 `prepared-not-run`，47 项待验收。包含 F5/查看方式切换、键盘焦点、标签/克隆、主题、Q-Dir Tab Group、`.qdr`、Soft-Refresh 等项目；构建和副本准备成功，EXE/DLL SHA-256 已与 `preparation.json` 核对。后续主线提交仅更新了调查/路线图文档，未改变该候选对应的产品源码。没有启动应用窗口、创建 ExplorerBrowser 或操作文件。BuildIdentity、哈希和验收边界见[最新集中验收候选](gui-acceptance-2026-10-31-main-prepared-latest.md)。
 
 2026-10-31 派生目录大小列：DefView 的单项通知、慢速列状态、父目录更新、列重放、查看模式切换与 DELETE+CREATE A/B 均未使更新后的派生列保留/重取；其中无效的 `IShellView.Refresh()` 轮因桌面前台/输入变化不采纳。有效轮次保持选区/焦点并通过隔离清理，产品仍使用 ExplorerBrowser，未接入派生列。停止追加同类 DefView 通知补丁，后续评估自有行视图与完整 Explorer 兼容门槛。详情见[派生大小列调查](folder-size-column-investigation.md#2026-10-31wpf-根宿主下的通知列重放策略收敛)。
