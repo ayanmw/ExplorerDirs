@@ -5748,3 +5748,7 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 2026-11-01 无窗口验证 `SHCNE_RENAMEFOLDER` 双 PIDL 失效路径：旧、新文件夹 PIDL 各命中一条在途 reservation，两个旧提交均被拒绝；NativeProbe Release 和原生 adapter `/W4 /WX` 通过。此合同没有创建视图，不代表外部移动/重命名的真实通知时序或产品接线。下一个高价值验证是获准后在 Private Desktop 中对真实临时目录执行外部移动/重命名，并核对双路径失效及列回填。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01文件夹重命名通知双-pidl-失效合同)。
 
 2026-11-01 同一无窗口 callback 合同通过 `SHCNE_RENAMEITEM` 双 PIDL：旧、新文件路径分别使其父目录的在途递归摘要失效，两个旧提交均遭拒；adapter `/W4 /WX` 与 NativeProbe Release build 通过。它不覆盖真实广播、view 重枚举或 ExplorerBrowser 产品。真实跨目录文件重命名与文件夹移动通知仍是可见宿主门槛；递归列保持 NativeProbe 隔离。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01文件重命名通知双-pidl-失效合同)。
+
+### 2026-11-01：可控原生列表接入真实 Shell 行导航合同
+
+`--common-listview-navigation-contract` 现在把真实 `IShellFolder` 枚举行填入隐藏 `SysListView32`，通过被选目录行的 Shell identity 浏览子目录、返回、前进和改走分支，并检查行模型对应当前目录且前进历史正确清空。NativeProbe Release 以及导航、递归大小数据/文件操作、相对大小排序合同均通过；无可见窗口、未建实际 `IShellView`，产品与 release 未变。下一个原型门槛是让自控列表的 View/Sort/Group/Refresh/New 命令使用正确 Shell view 服务并与行模型一致；背景 `IShellFolder` 菜单检查当前未发现默认 View/Sort/Group/Refresh 项，不能把它算作已兼容。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01将真实-shell-枚举行接入可控列表导航原型)。

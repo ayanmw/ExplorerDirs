@@ -1734,3 +1734,9 @@ NativeProbe Release 构建 0 警告/错误；`--explorerbrowser-registered-names
 在当前 NativeProbe Release 二进制上重跑 `--static-shell-column-wrapped-adapter-private-desktop`，确认隔离 `IShellView` 使用包装 adapter（`view-uses-adapter=1`），但列表中自定义列各行仍为空；读完列表后计数为 `GetDetailsOf(custom header/item)=1/0`、`GetDetailsEx=0`、`CompareIDs=0`。自定义列和 `System.Document.ByteCount` 的升降序均没有按 2/10/100 数值重排，四项排序合同全部失败，进程退出码 1。标准列标题仍显示，前台 HWND、last-input 与 Private Desktop 清理守卫通过。输出日志在临时目录 `explorer-dirs-wrapped-column.stdout.log`，SHA-256 `DD17FB313BC9607ACA9645192929C3019DB5CD48D0BABE57977D5C545271CBAA`。
 
 这是对 2026-10-28 包装 PIDL 结果在当前源码上的复验，不是新的成功路径：单纯改变项目 PIDL 身份仍不足以让 DefView 请求逐项属性或比较键。当前默认 DefView adapter 方案不满足“逐行显示且可排序”的门槛；不应重复相同包装方式或接入产品。若继续追逐此功能，下一条有意义的原型应改为可控制行值读取/排序的数据视图，并先用隔离视图比较其 Shell 菜单、文件操作、焦点、拖放、通知和刷新成本；在这些行为门槛有结果前，递归列继续留在 NativeProbe，产品保留 F9/状态栏扫描。
+
+### 2026-11-01：将真实 Shell 枚举行接入可控列表导航原型
+
+`--common-listview-navigation-contract` 之前只分别枚举每个测试目录并验证纯位置历史。本轮将这些 Shell 行实际填入隐藏原生 `SysListView32`，用行 `LPARAM` 指向保留的 Shell row identity：从根列表选中 `child` 后打开其目录、读回子列表、后退/前进，再从根列表选中 `branch` 并确认前进历史被清除。每个导航位置的项目名均与真实 `IShellFolder` 枚举一致，Shell parent PIDL 与预期根目录匹配，探针结束时前台未变化。运行初版曾暴露探针自身重复释放重映射行的 PIDL；修正所有权登记后，进程正常退出。
+
+NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-contract`、`--common-listview-data-contract` 和 `--common-listview-relative-size-contract` 均退出码 0。现有数据合同同时复验了递归列排序、系统图标、多选 Shell data object、Shell item/background menu 对象查询及 Copy/Move/Rename/Delete。所有 ListView 都未显示，未建立实际 `IShellView`，也未验证鼠标/键盘输入、菜单显示与命令路由或可见重绘。下一步对照该自控列表与默认 `IShellView` 的 view/background 命令来源，验证 View/Sort/Group/Refresh/New 能否在列表身份和行顺序上形成一致结果；这仍是 NativeProbe 架构原型，不接入产品 ExplorerBrowser 或 release。

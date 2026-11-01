@@ -13,6 +13,7 @@ internal static class CommonListViewColorBaseline
     private const uint CddsItemPrePaint = 0x00010001;
     private const uint CddsItemPostPaint = 0x00010002;
     private const int LvmInsertItemW = 0x104D;
+    private const int LvmDeleteAllItems = 0x1009;
     private const int LvmInsertColumnW = 0x1061;
     private const int LvmSetImageList = 0x1003;
     private const int LvmGetImageList = 0x1002;
@@ -633,6 +634,8 @@ internal static class CommonListViewColorBaseline
         var folderPidls = new List<nint>();
         var enumeratedRows = new List<ShellListViewRow>();
         var boundFolders = new List<nint>();
+        var rowsByLocation = new Dictionary<string, List<ShellListViewRow>>(StringComparer.OrdinalIgnoreCase);
+        nint parent = 0, listView = 0, systemImageList = 0;
         try
         {
             var child = Path.Combine(fixture, "child");
@@ -664,6 +667,7 @@ internal static class CommonListViewColorBaseline
             };
 
             var enumeratedByLocation = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+            var nextRowId = 1L;
             foreach (var location in expectedChildren.Keys)
             {
                 Marshal.ThrowExceptionForHR(SHParseDisplayName(location, 0, out var pidl, 0, out _));
@@ -675,14 +679,57 @@ internal static class CommonListViewColorBaseline
                     name => recursiveSizes[Path.GetFullPath(Path.Combine(location, name))],
                     StringComparer.OrdinalIgnoreCase);
                 var shellRows = EnumerateShellRows(pidl, shellFolder, expectedAtLocation);
-                enumeratedRows.AddRange(shellRows.Rows);
                 var actualNames = shellRows.Rows.Select(row => row.DisplayName).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
                 var expectedNames = expectedChildren[location].OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
                 if (!actualNames.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase) ||
                     shellRows.Rows.Any(row => !row.FromShellEnumeration || row.AbsolutePidl == 0 || row.RelativePidl == 0))
                     throw new InvalidOperationException($"Shell row enumeration did not match the fixture at {location}.");
                 enumeratedByLocation[location] = actualNames;
+                var locationRows = shellRows.Rows.Select(row => row with { Id = nextRowId++ }).ToList();
+                rowsByLocation.Add(location, locationRows);
+                enumeratedRows.AddRange(locationRows);
+                if (systemImageList == 0) systemImageList = shellRows.SystemImageList;
             }
+
+            var init = new InitCommonControls { Size = (uint)Marshal.SizeOf<InitCommonControls>(), Classes = 1 };
+            if (!InitCommonControlsEx(ref init))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "ListView common controls initialization failed.");
+            parent = CreateWindowExW(0, "STATIC", "ExplorerDirs navigable Shell rows prototype",
+                0x00CF0000, 0, 0, 480, 260, 0, 0, GetModuleHandleW(null), 0);
+            if (parent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Navigation probe parent creation failed.");
+            listView = CreateWindowExW(0, "SysListView32", "",
+                0x40000000 | 0x00000001 | 0x00000008,
+                0, 0, 460, 230, parent, 0, GetModuleHandleW(null), 0);
+            if (listView == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Navigation probe ListView creation failed.");
+            SendMessageW(listView, LvmSetImageList, LvsilSmall, systemImageList);
+            AddColumn(listView, "Name", 260);
+            AddColumn(listView, "Recursive size", 140);
+
+            var history = new ShellTabNavigationHistory(fixture);
+            PopulateNavigationRows(listView, rowsByLocation[fixture]);
+            var rootRowsRendered = ReadListViewNames(listView).SequenceEqual(enumeratedByLocation[fixture], StringComparer.OrdinalIgnoreCase);
+            var childRow = rowsByLocation[fixture].Single(row => row.DisplayName == "child");
+            var childRowIndex = FindItemIndexByParam(listView, childRow.Id);
+            SetItemState(listView, -1, 0, LvisSelected | LvisFocused);
+            SetItemState(listView, childRowIndex, LvisSelected | LvisFocused, LvisSelected | LvisFocused);
+            var selectedRowId = GetItemParam(listView, childRowIndex);
+            var selectedDirectoryOpened = rowsByLocation[fixture].Single(row => row.Id == selectedRowId).ParsingName == child;
+            if (selectedDirectoryOpened) history.Record(child);
+            PopulateNavigationRows(listView, rowsByLocation[child]);
+            var childRowsRendered = ReadListViewNames(listView).SequenceEqual(enumeratedByLocation[child], StringComparer.OrdinalIgnoreCase);
+            var listBackToRoot = history.TryBeginMove(back: true, out var listBack) && listBack == fixture &&
+                PopulateAndCommitNavigationRows(listView, rowsByLocation[fixture], history, listBack);
+            var listForwardToChild = history.TryBeginMove(back: false, out var listForward) && listForward == child &&
+                PopulateAndCommitNavigationRows(listView, rowsByLocation[child], history, listForward);
+            var listBackToRootBeforeBranch = history.TryBeginMove(back: true, out listBack) && listBack == fixture &&
+                PopulateAndCommitNavigationRows(listView, rowsByLocation[fixture], history, listBack);
+            var branchRow = rowsByLocation[fixture].Single(row => row.DisplayName == "branch");
+            var branchOpenedFromList = (branchRow.Attributes & 0x20000000) != 0 &&
+                FindItemIndexByParam(listView, branchRow.Id) >= 0;
+            if (branchOpenedFromList) history.Record(branchRow.ParsingName);
+            PopulateNavigationRows(listView, rowsByLocation[branch]);
+            var branchRowsRendered = ReadListViewNames(listView).SequenceEqual(enumeratedByLocation[branch], StringComparer.OrdinalIgnoreCase);
+            var branchClearedListForwardHistory = !history.CanGoForward && history.Current == branch;
 
             Marshal.ThrowExceptionForHR(SHParseDisplayName(child, 0, out var childPidl, 0, out _));
             folderPidls.Add(childPidl);
@@ -697,32 +744,21 @@ internal static class CommonListViewColorBaseline
             }
             finally { ILFree(parentPidl); }
 
-            var history = new ShellTabNavigationHistory(fixture);
-            history.Record(child);
-            history.Record(grandchild);
-            var backToChild = history.TryBeginMove(back: true, out var backChild) && backChild == child &&
-                history.CommitLocation(child);
-            var backToRoot = history.TryBeginMove(back: true, out var backRoot) && backRoot == fixture &&
-                history.CommitLocation(fixture);
-            var forwardToChild = history.TryBeginMove(back: false, out var forwardChild) && forwardChild == child &&
-                history.CommitLocation(child);
-            var returnedToRootBeforeBranch = history.TryBeginMove(back: true, out backRoot) && backRoot == fixture &&
-                history.CommitLocation(fixture);
-            history.Record(branch);
-            var branchReplacedForwardHistory = returnedToRootBeforeBranch &&
-                history.Snapshot().Select(stop => stop.Location).SequenceEqual(new[] { fixture, branch }, StringComparer.OrdinalIgnoreCase);
-            var forwardUnavailableAfterBranch = !history.CanGoForward;
-            var passed = shellParentMatches && backToChild && backToRoot && forwardToChild &&
-                branchReplacedForwardHistory && forwardUnavailableAfterBranch &&
+            var passed = shellParentMatches && rootRowsRendered && selectedDirectoryOpened && childRowsRendered &&
+                listBackToRoot && listForwardToChild && listBackToRootBeforeBranch && branchOpenedFromList &&
+                branchRowsRendered && branchClearedListForwardHistory &&
                 enumeratedByLocation.Count == expectedChildren.Count && GetForegroundWindow() == foregroundBefore;
             Console.WriteLine($"common-listview-navigation-contract: shell-rows-by-location={enumeratedByLocation.Count};" +
                 $"root-rows={string.Join('|', enumeratedByLocation[fixture])};" +
                 $"child-rows={string.Join('|', enumeratedByLocation[child])};" +
                 $"grandchild-rows={string.Join('|', enumeratedByLocation[grandchild])};" +
                 $"branch-rows={string.Join('|', enumeratedByLocation[branch])};" +
-                $"shell-parent-pidl-matches={shellParentMatches};back-child={backToChild};back-root={backToRoot};" +
-                $"forward-child={forwardToChild};branch-clears-forward-history={branchReplacedForwardHistory};" +
-                $"forward-unavailable-after-branch={forwardUnavailableAfterBranch};foreground-unchanged={GetForegroundWindow() == foregroundBefore};passed={passed}");
+                $"shell-parent-pidl-matches={shellParentMatches};root-list-populated={rootRowsRendered};" +
+                $"selected-folder-opens-from-row-identity={selectedDirectoryOpened};child-list-populated={childRowsRendered};" +
+                $"list-back-root={listBackToRoot};list-forward-child={listForwardToChild};" +
+                $"list-branch-opens={branchOpenedFromList};branch-list-populated={branchRowsRendered};" +
+                $"branch-clears-forward-history={branchClearedListForwardHistory};" +
+                $"foreground-unchanged={GetForegroundWindow() == foregroundBefore};visible=False;passed={passed}");
             return passed ? 0 : 1;
         }
         catch (Exception ex)
@@ -732,6 +768,7 @@ internal static class CommonListViewColorBaseline
         }
         finally
         {
+            if (parent != 0 && IsWindow(parent)) DestroyWindow(parent);
             foreach (var row in enumeratedRows)
             {
                 if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
@@ -773,6 +810,30 @@ internal static class CommonListViewColorBaseline
             ShellListViewEnumerator.FreeRows(enumeration.Rows);
             throw;
         }
+    }
+
+    private static void PopulateNavigationRows(nint listView, IReadOnlyList<ShellListViewRow> rows)
+    {
+        _ = SendMessageW(listView, LvmDeleteAllItems, 0, 0);
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            InsertItem(listView, index, row.DisplayName, row.Id, row.SystemImageIndex,
+                ShellListViewRowPresentation.FormatRecursiveSize(row, ByteSizeFormatter.Options));
+        }
+    }
+
+    private static string[] ReadListViewNames(nint listView) =>
+        Enumerable.Range(0, SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32())
+            .Select(index => GetItemText(listView, index, 0)).ToArray();
+
+    private static bool PopulateAndCommitNavigationRows(nint listView, IReadOnlyList<ShellListViewRow> rows,
+        ShellTabNavigationHistory history, string location)
+    {
+        PopulateNavigationRows(listView, rows);
+        return history.CommitLocation(location) && ReadListViewNames(listView).SequenceEqual(
+            rows.Select(row => row.DisplayName).OrderBy(name => name, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private static ContextMenuQuery QueryItemContextMenu(nint shellFolder, nint relativePidl)
