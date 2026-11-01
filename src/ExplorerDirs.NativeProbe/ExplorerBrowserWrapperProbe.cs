@@ -652,7 +652,7 @@ internal static class ExplorerBrowserWrapperProbe
                 VerifyNamespaceOwnerExitFromChildProcess(classId, folderView, viewFolder);
             else
                 VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
-                    rootPidl, fixture, ref initialized);
+                    rootPidl, fixture, peerFixture, classId, ref initialized);
             return 0;
         }
         finally
@@ -837,7 +837,8 @@ internal static class ExplorerBrowserWrapperProbe
     }
 
     private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, nint shellView,
-        nint viewFolder, nint nativeLibrary, nint rootPidl, string fixture, ref uint initialized)
+        nint viewFolder, nint nativeLibrary, nint rootPidl, string fixture, string peerFixture,
+        Guid classId, ref uint initialized)
     {
         var setOnDemand = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
             NativeLibrary.GetExport(nativeLibrary, "SetSyntheticRecursiveSizeScanOnDemandForProbe"));
@@ -869,7 +870,7 @@ internal static class ExplorerBrowserWrapperProbe
         var completedBefore = getCompleted();
         var scansBefore = getScanCount();
         var snapshotsBefore = getSnapshotCount();
-        nint peerBrowser = 0, peerParent = 0, peerShellView = 0, peerFolderView = 0, peerViewFolder = 0, peerPersist = 0;
+        nint peerBrowser = 0, peerParent = 0, peerPidl = 0, peerShellView = 0, peerFolderView = 0, peerViewFolder = 0, peerPersist = 0;
         uint peerInitialized = 0;
         var destroyedBrowser = false;
         var scheduledScans = 0;
@@ -887,16 +888,25 @@ internal static class ExplorerBrowserWrapperProbe
             var peerSettings = new ProbeFolderSettings { Mode = 4 };
             Marshal.ThrowExceptionForHR(At<Initialize>(peerBrowser, 3)(peerBrowser, peerParent, ref peerBounds, ref peerSettings));
             peerInitialized = 1;
-            Marshal.ThrowExceptionForHR(At<BrowseToIdList>(peerBrowser, 13)(peerBrowser, rootPidl, 0));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(CreatePathIdentityParsingName(classId, peerFixture),
+                0, out peerPidl, 0, out _));
+            Marshal.ThrowExceptionForHR(At<BrowseToIdList>(peerBrowser, 13)(peerBrowser, peerPidl, 0));
             Application.DoEvents();
             Thread.Sleep(250);
             Application.DoEvents();
             ReadActiveFolder(peerBrowser, ref peerShellView, ref peerFolderView, ref peerViewFolder, ref peerPersist);
+            var firstLocation = ReadShellViewFolderIdentity(shellView).Location;
+            var peerLocation = ReadShellViewFolderIdentity(peerShellView).Location;
+            if (string.Equals(firstLocation, peerLocation, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The multi-root scan lifecycle probe requires distinct Shell roots; both views opened '{firstLocation}'.");
 
             const string scanChildName = "lifecycle-scan";
             var scanChildPath = Path.Combine(fixture, scanChildName);
             Directory.CreateDirectory(Path.Combine(scanChildPath, "nested"));
             File.WriteAllBytes(Path.Combine(scanChildPath, "nested", "payload.bin"), [1, 2, 3]);
+            var peerScanChildPath = Path.Combine(peerFixture, scanChildName);
+            Directory.CreateDirectory(Path.Combine(peerScanChildPath, "nested"));
+            File.WriteAllBytes(Path.Combine(peerScanChildPath, "nested", "payload.bin"), [1, 2, 3, 4, 5, 6, 7]);
             Marshal.ThrowExceptionForHR(setOnDemand(1));
             Marshal.ThrowExceptionForHR(setAsyncScan(1));
             Marshal.ThrowExceptionForHR(beginGate());
@@ -947,9 +957,9 @@ internal static class ExplorerBrowserWrapperProbe
             var peerValueAfterRetirement = ReadParsedItemDetailsByName(peerViewFolder, scanChildName, 1);
             var survivingViewHasSnapshot = hasSnapshot(peerShellView, scanChildName) != 0;
             if (finishedCount != 2 || completedCount != 1 || scansAfterRetire != scansBefore + 1 ||
-                snapshotsAfterRetire < snapshotsBefore + 1 || !survivingViewHasSnapshot || peerValueAfterRetirement != "3")
-                throw new InvalidOperationException($"Retiring one of two same-root views did not isolate cancellation: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; surviving-view-value='{peerValueAfterRetirement}'.");
-            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: same-root-provider-requests=2; first-browser-destroyed=True; retired-view-request-canceled=True; surviving-view-request-completed=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; surviving-view-has-target-snapshot={survivingViewHasSnapshot}; surviving-view-value={peerValueAfterRetirement}");
+                snapshotsAfterRetire < snapshotsBefore + 1 || !survivingViewHasSnapshot || peerValueAfterRetirement != "7")
+                throw new InvalidOperationException($"Retiring the view for root A did not isolate its pending scan from root B: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; surviving-root-B-value='{peerValueAfterRetirement}'.");
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: distinct-root-requests=2; same-relative-child={scanChildName}; expected-root-values=3/7; first-browser-destroyed=True; root-A-request-canceled=True; root-B-request-completed=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; root-B-has-target-snapshot={survivingViewHasSnapshot}; root-B-value={peerValueAfterRetirement}");
         }
         finally
         {
@@ -982,6 +992,7 @@ internal static class ExplorerBrowserWrapperProbe
             if (peerFolderView != 0) Marshal.Release(peerFolderView);
             if (peerShellView != 0) Marshal.Release(peerShellView);
             if (peerBrowser != 0) Marshal.Release(peerBrowser);
+            if (peerPidl != 0) Marshal.FreeCoTaskMem(peerPidl);
         }
     }
 

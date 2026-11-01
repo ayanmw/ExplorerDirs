@@ -2417,3 +2417,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 通过 Private Desktop watchdog 运行 `host-multiview-recursive-size-projection`，两个真实 Shell view 浏览同一个临时根目录。四个递归目录的初始扫描由两个 view 共享；真实 `IFileOperation` 的文件创建、删除、文件改名、目录改名与同路径目录替换通知均使正确的根缓存失效。目录改名和同路径替换期间暂停的旧扫描在释放后被身份/代次检查拒绝；两个 view 收敛到新值，递归数值顺序、稳定行 ID、选择与焦点保持。watchdog exit 0，父窗口不可见，前台 HWND 与 last-input tick 未改变，临时夹具清理完成。日志：`src/.state/native-probe-watchdog/20261102-031423-2aa0e979.stdout.log` 与 `.stderr.log`。
 
 这是隐藏的自有行投影配合真实 Shell view/通知的原型，不是产品 ExplorerBrowser 接线或可见 UI。它验证的是共享根目录的双 view；不同 pane 各自浏览不同物理根目录的视图隔离、滚动时可见行更新和实际绘制仍未覆盖。
+
+### 2026-11-02：不同物理根目录的异步递归扫描隔离
+
+先在现有注册 namespace Private Desktop 探针中加入“两个 Shell view 必须有不同位置”的断言，首轮按预期失败：第二个 ExplorerBrowser 仍被导航到 namespace 根 A。随后让它通过同一 provider CLSID 的 path-bearing PIDL 打开独立根 B，并在 A、B 下创建同名 `lifecycle-scan` 子目录，分别包含 3 B 和 7 B 文件。两次列值读取都先返回未就绪，并分别登记根 A/B 的异步请求；销毁 A 的浏览器后只取消 A 的扫描，释放队列闸门后 B 的扫描完成。最终计数为 `finished=2, completed=1, scans=0→1, cache=6→7`，幸存根 B 的列值为 7 B，没有读到 A 的 3 B。
+
+NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop watchdog exit 0，前台/last-input 未变、临时 CLSID 与 Desktop NameSpace 清理完成。日志：`src/.state/native-probe-watchdog/20261102-031719-4ef7541f.stdout.log` 与 `.stderr.log`。本证据覆盖同一 app/provider CLSID 下两个 ExplorerBrowser 的不同根路径身份与递归扫描退役；不代表产品 MainWindow 多窗格接线、产品缓存/通知代码、滚动可见回填或用户可见 UI 已验证。
