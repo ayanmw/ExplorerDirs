@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ExplorerDirs.NativeProbe;
@@ -66,7 +67,12 @@ internal static class RegisteredMultiRootPidlProbe
             Check(SHBindToObject(rootFolder, childPidl, 0, in ShellFolderId, out childFolder));
             Check(verifyFolder(childFolder, "second-only.txt", "first-only.txt", 29));
 
-            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, simultaneous root/child bindings A=13 B=29, no Shell view window)");
+            var absoluteParsingName = Marshal.PtrToStringUni(parsingName)!;
+            var childExitCode = RunCrossProcessPathIdentityCheck(classId, absoluteParsingName, firstPath, secondPath);
+            if (childExitCode != 0)
+                throw new InvalidOperationException($"A fresh process could not resolve the saved namespace path identity; exit code={childExitCode}.");
+
+            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, fresh-process path/content recovery, simultaneous root/child bindings A=13 B=29, no Shell view window)");
             return 0;
         }
         finally
@@ -84,6 +90,75 @@ internal static class RegisteredMultiRootPidlProbe
             if (oleInitialized) OleUninitialize();
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
         }
+    }
+
+    internal static int RunChild(string classIdText, string parsingName, string fallbackPath, string expectedPath)
+    {
+        nint module = 0, pidl = 0, folder = 0;
+        var oleInitialized = false;
+        try
+        {
+            var classId = Guid.Parse(classIdText);
+            Check(OleInitialize(0));
+            oleInitialized = true;
+            module = NativeLibrary.Load(FindAdapterLibrary());
+            Check(GetExport<SetClassId>(module, "SetSyntheticFolderClassIdForProbe")(ref classId));
+            // A different fallback makes this process prove that the saved parsing name carries its own root identity.
+            Check(GetExport<SetPath>(module, "SetSyntheticSortBackingPath")(fallbackPath));
+            Check(GetExport<SetFlag>(module, "SetSyntheticCustomSizeColumnForProbe")(1));
+            Check(GetExport<SetFlag>(module, "SetSyntheticRecursiveSizeScanOnDemandForProbe")(1));
+            Check(SHParseDisplayName(parsingName, 0, out pidl, 0, out _));
+            Check(SHBindToObject(0, pidl, 0, in ShellFolderId, out folder));
+            Check(GetExport<VerifyFolder>(module, "VerifySyntheticFolderContentsForProbe")(
+                folder, "second-only.txt", "first-only.txt", 29));
+            Check(SHGetNameFromIDList(pidl, 0x80028000, out var actualParsingName));
+            try
+            {
+                if (!string.Equals(Marshal.PtrToStringUni(actualParsingName), parsingName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The fresh process resolved a different absolute namespace parsing name.");
+            }
+            finally { Marshal.FreeCoTaskMem(actualParsingName); }
+            Console.WriteLine($"registered path PIDL child: PASS (path='{expectedPath}'; pidl-and-content-restored=True)");
+            return 0;
+        }
+        finally
+        {
+            if (folder != 0) Marshal.Release(folder);
+            if (pidl != 0) Marshal.FreeCoTaskMem(pidl);
+            if (module != 0) NativeLibrary.Free(module);
+            if (oleInitialized) OleUninitialize();
+        }
+    }
+
+    private static int RunCrossProcessPathIdentityCheck(Guid classId, string parsingName, string fallbackPath, string expectedPath)
+    {
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(typeof(RegisteredMultiRootPidlProbe).Assembly.Location);
+        start.ArgumentList.Add("--registered-path-pidl-child");
+        start.ArgumentList.Add(classId.ToString("D"));
+        start.ArgumentList.Add(parsingName);
+        start.ArgumentList.Add(fallbackPath);
+        start.ArgumentList.Add(expectedPath);
+        using var child = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the fresh-process path identity probe.");
+        if (!child.WaitForExit(15_000))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            throw new TimeoutException("The fresh-process path identity probe did not exit within 15 seconds.");
+        }
+        var output = child.StandardOutput.ReadToEnd();
+        var error = child.StandardError.ReadToEnd();
+        if (!string.IsNullOrWhiteSpace(output)) Console.Write(output);
+        if (!string.IsNullOrWhiteSpace(error)) Console.Error.Write(error);
+        return child.ExitCode;
     }
 
     private static void RegisterClass(string path, string modulePath)

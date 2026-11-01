@@ -24,6 +24,8 @@ internal static class Program
             return MultiRootProviderProbe.Run();
         if (args.Length == 1 && args[0] == "--registered-multi-root-pidl-smoke")
             return RegisteredMultiRootPidlProbe.Run();
+        if (args.Length == 5 && args[0] == "--registered-path-pidl-child")
+            return RegisteredMultiRootPidlProbe.RunChild(args[1], args[2], args[3], args[4]);
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")
             return SearchFolderProbe.ProbeVirtualScopes();
         if (args.Length == 2 && args[0] == "--search-enumerate-uri")

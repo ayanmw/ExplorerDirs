@@ -2253,3 +2253,9 @@ Release NativeProbe build 0 警告/错误，完整 `--explorerbrowser-registered
 四个不同路径根的隔离 WPF 宿主中，直接失效注入已通过：目标 `folder-000` 在扫描中改变 38 B，旧结果未发布，重试读回递归总值 47 B（其余 9 个文件各 1 B）；4 视图选区/焦点保持，36 次基线扫描加 1 次目标重试，无队列拒绝。首次失败来自断言算术错误（期待 38 B，实际应为 47 B），修正后该直接失效场景通过。
 
 增加 NativeProbe 专用的提交闸门后，真实 Shell 通知竞态现可确定性验证：闸门只暂停指定 Pane1 `folder-000` 在扫描和身份检查完成之后、写入快照之前的工作线程；随后修改一个文件并由同一 Private Desktop 发送 `SHCNE_UPDATEITEM`/`SHCNE_UPDATEDIR`。`SFVM_FSNOTIFY` 收到的 PIDL 精确解析为目标文件夹，两类通知命中同一个活动 reservation；释放闸门后，旧值的缓存提交被拒绝，刷新重扫读回 47 B。四个不同根的视图全部收敛，选区/焦点保持，无队列拒绝；扫描总数 37（36 个完整结果加目标旧扫描），view 枚举增量为 5。Release C++ adapter `/W4 /WX` 与 NativeProbe 构建均通过，Private Desktop 前台/输入及清理守卫通过。此闸门仅是 NativeProbe 的时序控制，不进入产品；已证明隔离 provider 的通知失效与旧结果拒绝链，不代表产品 ExplorerBrowser 已接线，也不证明任意文件系统/第三方 Shell provider 的通知覆盖面。
+
+### 2026-11-02：注册路径 PIDL 跨进程恢复
+
+扩展 `--registered-multi-root-pidl-smoke`，在父进程从临时注册 namespace 取得绝对 parsing name 并完成 A/B 根绑定后，另起全新 NativeProbe 进程重新加载 adapter、设置同一 CLSID，并将默认 backing fallback 指向 A；随后仅凭保存的 B parsing name 调用 `SHParseDisplayName`、绑定文件夹、读回 B 独有行及 29 B 递归值，且重新生成相同的 absolute parsing name。结果通过。首次子进程试跑因未初始化它自己的 adapter class/path 状态而在 Shell parse 阶段返回 `E_UNEXPECTED`；补足子进程启动所需类注册上下文后，通过把 fallback 设为不同根 A，排除了“默认路径碰巧就是目标 B”的假阳性。
+
+NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` 通过；未创建 Shell view/window，临时类和 NameSpace 注册在父探针结束时清理。本结果证明绝对 parsing name 中的 path marker 能跨进程恢复到正确文件夹，即使新进程默认路径不同；不证明 ExplorerDirs 产品会自动初始化 Shell provider、产品 CLSID/注册生命周期、portable 无注册表部署、ExplorerBrowser 多窗格/标签 SessionStore 接线、可见菜单/操作/拖放或重启 UI 验收。产品与 release 未改。
