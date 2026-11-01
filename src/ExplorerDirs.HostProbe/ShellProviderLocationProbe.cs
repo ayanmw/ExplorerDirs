@@ -253,6 +253,8 @@ internal static class ShellProviderLocationProbe
             else if (sortStrategy == "header-click")
             {
                 stage = "native-header-click-sort";
+                WaitUntil(() => expectedItemPaths.SetEquals(filesystemUpdateObserver!.UpdatedItemPaths),
+                    TimeSpan.FromSeconds(5), "the hidden Shell observer did not receive both completed-folder updates before header sorting");
                 var sortHeaderViewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var header = FindSortHeader((nint)sortHeaderViewWindowField.GetValue(host)!);
                 var headerTexts = ReadNativeHeaderTexts(header, 2);

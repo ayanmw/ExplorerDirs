@@ -2597,11 +2597,13 @@ App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 
 
 此处属于 App 源码接线，尚未在真实 App 进程启动/退出；未做可见 ExplorerBrowser、递归列逐行绘制/排序、会话重启或 GUI 验收，未修改 `releases`。现阶段 owner 只建立 provider 激活基础，未把所有普通文件夹标签自动重定向到 namespace，也没有给用户提供“递归大小”列选择入口。后续仍须先集中验收菜单/文件操作/导航和关闭顺序，再决定该 adapter 进入预览 release。
 
-### 2026-11-02：原生列标题排序候选观察器（待运行）
+### 2026-11-02：原生列标题排序候选观察器复验
 
-HostProbe 新增 `--shell-provider-product-async-header-click` 诊断参数：使用真实产品 adapter、生产 ExplorerBrowserHost 与临时两个目录；等待 5/29 B 异步值完成后，向原生递归大小列标题发送两次点击，再同时观察 `IFolderView.ItemCount` 和导出快照行数，要求最终恢复 5→29 B 升序且采样期间不出现 0 行。此路径只在隐藏测试宿主内运行，不接产品排序回调。
+HostProbe 的 `--shell-provider-product-async-header-click` 使用真实产品 adapter、生产 ExplorerBrowserHost 和临时两个目录；等待 5/29 B 异步值完成后，向原生递归大小列标题发送两次点击，并同时观察 `IFolderView.ItemCount` 与导出快照行数，要求最终恢复 5→29 B 升序且采样期间不出现 0 行。探针现在还会等两条逐项 `SHCNE_UPDATEITEM` 都送达后才点击，避免把通知合并窗口与排序行为混在一起；这只改变诊断时序，不改变产品排序回调。
 
-HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过；本轮未运行该 Shell-hosted 参数，因为当前没有本轮空闲桌面确认。它目前只是待运行的诊断工具，没有证明标题点击能重排、行数稳定、焦点/选区保持或可见像素不闪。运行后需按实测修正或删除该候选，再更新排序结论；产品代码与 release 未改。
+首次运行到达点击阶段，但 Shell 行数和导出行数都出现 `0→2`，最终仍为 `folder-large→folder-small`，探针失败。加上通知到达门槛后，两次复验分别在初始枚举阶段超时，以及观察到 Shell 行数为 4（预期 2）、导出持续遇到 `E_INVALIDARG` 而超时；说明产品 HostProbe 的异步 view 目前存在比表头排序更早的枚举/读回不稳定，不能将失败简单归结为“点击排序不工作”。三次执行的前台守卫均未报告变化，失败路径清理了临时 volatile 注册、夹具目录和进程。
+
+HostProbe Release build 通过，0 警告/错误，`git diff --check` 通过。结论：不能把该自动表头点击候选接入产品，它会遇到空列表观察窗口，也尚不能稳定得到正确最终顺序。下一步先增强异步通知后的 PIDL/枚举身份观测，查明行数为何从 2 暂增至 4 及相应的 `E_INVALIDARG`；在此之前保留实验标签的原生手动排序，不接自动重排，也不发布该实验功能。
 ## 2026-11-02：App 中的逐行递归大小原型入口
 
 增加一个明确 opt-in 的菜单入口：在“开发者”菜单选择“在新标签打开逐行递归大小实验视图”，将当前确认的文件系统目录编码为 profile-owned Shell parsing name，再以 `Name → Recursive Size → Type` 的详细视图状态创建独立标签。原始标签与其列、排序和浏览状态不变；关闭实验标签即可回到原目录。会话保存的是 provider parsing name，启动时由既有 profile owner 重建 volatile 注册；Q-Dir 导出使用现有 codec 将该身份转回物理目录路径。
