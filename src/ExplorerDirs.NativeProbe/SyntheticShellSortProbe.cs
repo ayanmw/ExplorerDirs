@@ -314,11 +314,16 @@ public static class SyntheticShellSortProbe
             int.TryParse(asyncSharedViewCountText, out var parsedAsyncSharedViewCount) ? parsedAsyncSharedViewCount : -1;
         var asyncSharedViewRootMode = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SHARED_VIEW_ROOTS") ?? "same";
         var asyncSharedViewDistinctRoots = asyncSharedViewProbe && asyncSharedViewRootMode == "distinct";
+        var asyncQueueSaturationRequested = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION") == "1";
+        // Diagnostic only: hold both workers to expose queue rejection under distinct per-pane roots.
+        var asyncQueueSaturationProbe = asyncSharedViewDistinctRoots && asyncQueueSaturationRequested;
         if (asyncSharedViewProbe && asyncSharedViewCount is not (2 or 4))
             throw new ArgumentOutOfRangeException(nameof(asyncSharedViewCountText), "The shared recursive-size view probe accepts two or four active views.");
         if (asyncSharedViewRootMode is not ("same" or "distinct") ||
             (asyncSharedViewRootMode == "distinct" && (!asyncSharedViewProbe || asyncSharedViewCount != 4)))
             throw new ArgumentException("Distinct recursive-size roots require the four-view shared-store probe.", nameof(asyncSharedViewRootMode));
+        if (asyncQueueSaturationRequested && !asyncQueueSaturationProbe)
+            throw new ArgumentException("Forced queue saturation requires four active views on distinct roots.", nameof(asyncQueueSaturationRequested));
         if (asyncSharedViewProbe && (!recursiveDirectorySizeSortOnly || largeViewSortProbe || twoViewDistinctLocations || onDemandFolderCount < 2))
             throw new ArgumentException("The async shared-view probe requires the recursive-size view fixture, a single shared root, and no separate large-view sort strategy.");
         if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
@@ -456,6 +461,7 @@ public static class SyntheticShellSortProbe
         var additionalHosts = new StreamViewHost?[additionalParents.Length];
         var additionalViewWindowsCreated = new bool[additionalParents.Length];
         var additionalRootPidls = asyncSharedViewDistinctRoots ? new nint[asyncSharedViewCount - 2] : [];
+        var asyncQueueGateCreated = false;
         var classKeyPath = $@"Software\Classes\CLSID\{{{syntheticFolderClassId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{syntheticFolderClassId:D}}}";
         Console.WriteLine($"synthetic-shell-size-sort: run-id={fixtureId}; clsid={syntheticFolderClassId:B}; backing-fixture={Path.GetFileName(backingFolder)}; copy-fixture={Path.GetFileName(copyDestination)}");
@@ -569,6 +575,12 @@ public static class SyntheticShellSortProbe
             if (onDemandRecursiveSize)
                 Marshal.GetDelegateForFunctionPointer<ResetCounters>(
                     NativeLibrary.GetExport(module, "ResetSyntheticOnDemandSizeMetricsForProbe"))();
+            if (asyncQueueSaturationProbe)
+            {
+                Check(Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                    NativeLibrary.GetExport(module, "BeginSyntheticAsyncRecursiveSizeQueueGateForProbe"))());
+                asyncQueueGateCreated = true;
+            }
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             Console.WriteLine("synthetic-shell-size-sort: IShellView.CreateViewWindow returned");
             var initialColumnMetadataTrace = CaptureColumnMetadataTrace(module);
@@ -722,6 +734,17 @@ public static class SyntheticShellSortProbe
                             if (!AllAsyncColumnValuesReady(additionalInitialNames[index], additionalInitialSizes[index])) return false;
                         return true;
                     }
+                    string AsyncColumnSummary(string[] names, string[] sizes)
+                    {
+                        var ready = 0;
+                        var blank = 0;
+                        for (var index = 0; index < Math.Min(names.Length, sizes.Length); index++)
+                        {
+                            if (string.Equals(sizes[index], ExpectedAsyncColumnSize(names[index]), StringComparison.Ordinal)) ready++;
+                            if (string.IsNullOrEmpty(sizes[index])) blank++;
+                        }
+                        return $"ready={ready}/{names.Length};blank={blank}";
+                    }
                     void ReadSharedViewColumns()
                     {
                         sharedInitialNames = ReadNames(sharedSizeListView, module, expectedCount: expectedInitialCount);
@@ -732,12 +755,23 @@ public static class SyntheticShellSortProbe
                             additionalInitialSizes[index] = ReadColumnTexts(additionalListViews[index], module, 1, expectedCount: expectedInitialCount);
                         }
                     }
+                    var expectedAsyncScanCount = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
                     initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                     initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
                     if (asyncSharedViewProbe) ReadSharedViewColumns();
+                    if (asyncQueueSaturationProbe)
+                    {
+                        var rejectedBeforeRelease = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe");
+                        if (rejectedBeforeRelease == 0)
+                            throw new IOException("The gated four-root workload did not fill the 256-task recursive-size queue before releasing its workers.");
+                        Console.WriteLine($"synthetic-async-recursive-size-queue-gate: rejected-before-release={rejectedBeforeRelease}; queue-capacity=256; distinct-roots=4");
+                        Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                            NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                    }
                     var allAsyncColumnValuesReady = AllAsyncColumnValuesReady(initialNames, initialSizes);
                     var allSharedAsyncColumnValuesReady = AllSharedAsyncColumnValuesReady();
-                    while ((!allAsyncColumnValuesReady || !allSharedAsyncColumnValuesReady) && Environment.TickCount64 < deadline)
+                    var convergenceDeadline = asyncQueueSaturationProbe ? Math.Min(deadline, Environment.TickCount64 + 10_000) : deadline;
+                    while ((!allAsyncColumnValuesReady || !allSharedAsyncColumnValuesReady) && Environment.TickCount64 < convergenceDeadline)
                     {
                         Pump(25);
                         initialNames = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
@@ -774,10 +808,21 @@ public static class SyntheticShellSortProbe
                     var asyncNotificationCount = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
                     var asyncQueueRejectedScans = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe");
                     var asyncPeakWorkers = ReadCounter(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe");
-                    var expectedAsyncScanCount = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
-                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; folders={onDemandFolderCount}; scans={asyncScans}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
+                    var asyncSharedColumnSummaries = asyncSharedViewProbe
+                        ? string.Join('/', new[] { AsyncColumnSummary(sharedInitialNames, sharedInitialSizes) }
+                            .Concat(additionalInitialNames.Select((names, index) => AsyncColumnSummary(names, additionalInitialSizes[index]))))
+                        : "none";
+                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; shared-columns=[{asyncSharedColumnSummaries}]; folders={onDemandFolderCount}; scans={asyncScans}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
                     if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != expectedAsyncScanCount || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
                         throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}/{expectedAsyncScanCount}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
+                    if (asyncQueueSaturationProbe && asyncQueueRejectedScans == 0)
+                        throw new IOException("The gated four-root workload completed without recording any queue rejections.");
+                    if (asyncQueueGateCreated)
+                    {
+                        Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                            NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                        asyncQueueGateCreated = false;
+                    }
                     if (asyncSharedViewProbe)
                     {
                         var sharedChildIndex = Array.FindIndex(sharedInitialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
@@ -1605,6 +1650,22 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
+            if (module != 0 && asyncQueueGateCreated)
+            {
+                Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                    NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                var expectedAsyncQueueScans = (onDemandFolderCount + 1) * (asyncSharedViewDistinctRoots ? asyncSharedViewCount : 1);
+                var acceptedAsyncQueueScans = expectedAsyncQueueScans - ReadCounter(module,
+                    "GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe");
+                var drainDeadline = Environment.TickCount64 + 15_000;
+                var getFinished = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(NativeLibrary.GetExport(module,
+                    "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+                while (getFinished() < acceptedAsyncQueueScans && Environment.TickCount64 < drainDeadline)
+                    Thread.Sleep(25);
+                Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
+                    NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
+                asyncQueueGateCreated = false;
+            }
             if (module != 0 && asyncOnDemandRecursiveSize)
                 Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module,
                     "ReleaseSyntheticSortViewHold"))();
@@ -4277,6 +4338,7 @@ public static class SyntheticShellSortProbe
         nint window, uint message, nuint wParam, nint lParam, nuint subclassId, nint referenceData);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CanUnloadNativeLibrary();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeLibraryUnloadContractSmoke();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void NativeVoidCall();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);

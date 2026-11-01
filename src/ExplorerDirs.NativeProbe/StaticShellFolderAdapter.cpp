@@ -5720,6 +5720,31 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotif
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0, 0); }
 
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeQueueGateForProbe()
+{
+    if (g_syntheticAsyncRecursiveSizeScanGateForProbe) return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
+    const auto gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!gate) return HRESULT_FROM_WIN32(GetLastError());
+    g_syntheticAsyncRecursiveSizeScanGateForProbe = gate;
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe()
+{
+    const auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
+    if (gate) SetEvent(gate);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeQueueGateForProbe()
+{
+    const auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
+    g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
+    if (gate) CloseHandle(gate);
+}
+
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }
 

@@ -1424,3 +1424,9 @@ Shell 通知现由有界队列合并：首个待发送更新后等待最多 200m
 首次把 `WaitForNames` 的稳定窗口设为 2.5 秒时，50–100 目录的不同根场景曾间歇超时并读到空列表；回看失败轮次的底层 `EnumObjects` 已成功枚举 102 项，但列表尚未稳定。将探针等待上限扩到 10 秒后，50、100、500 目录场景均通过。因此该现象属于探针等待门槛不足，不能归因于目录枚举失败或通知根路径错配。
 
 需要区分：500 目录四根场景总共提交 2,004 个独立扫描请求，但实际队列拒绝数为 0；这没有验证不同根目录下的队列饱和/拒绝后重试。既有单视图压力合同覆盖过 256 项队列拒绝与重试，不同根并发饱和仍待显式压测。本探针依旧只证明同进程 synthetic provider 和隐藏 DefView，不代表 ExplorerBrowser 产品、多进程、慢网络路径或可见刷新观感。日志：`src/.state/native-probe-watchdog/20261101-125102-354991af.stdout.log`、`src/.state/native-probe-watchdog/20261101-125131-94eec217.stdout.log`、`src/.state/native-probe-watchdog/20261101-125251-8ca33e73.stdout.log`。
+
+### 2026-11-01：四个不同根目录强制队列饱和
+
+增加仅供 NativeProbe 使用的队列闸门：`EXPLORER_DIRS_NATIVEPROBE_ASYNC_FORCE_QUEUE_SATURATION=1` 会在四个不同根目录的 view 启动前暂停两个 worker，让调用方确定性填满 256 项队列；正常 probe 默认不启用。80 个目录/根、512 条缓存容量时，共需 324 个目录扫描任务；闸门释放前有 66 个入队请求被拒，实际完成 258 个（256 个排队任务与两个正在等待的 worker）。Shell 发送 4 次合并更新并使四个 view 各重枚举一次，但列值未完全恢复：主 view 和第二 view 为 82/82，另外两 view 分别为 73/82、25/82；扫描保持 258/324，峰值 worker 为 2。该压力实验按预期以未收敛退出，说明此原型在队列拒绝后没有可靠的逐行重试保证；仅有目录更新/重枚举不足以证明缺失列值会重新请求。
+
+本结论只适用于闸门强制制造的背压，不代表普通负载必现，也不证明 ExplorerBrowser 产品存在相同队列行为。随后两次无闸门四根复测未能形成有效基线：一轮读取时某 view 行数暂为 0（`EnumObjects=10`、累计枚举 820 项），另一轮同样为 0（`EnumObjects=9`、累计 918 项）；失败不足以判断是通知时序还是隔离 Shell view 生命周期竞争。故本批没有改产品代码，也没有把队列容量简单放大；下一步应定位重枚举时行数短暂归零的原因，再设计可取消且可恢复的被拒请求处理。NativeProbe Release 和原生 adapter `/W4 /WX` 构建成功；强制饱和日志：`src/.state/native-probe-watchdog/20261101-130623-74c0faab.stdout.log`；无闸门失败日志：`src/.state/native-probe-watchdog/20261101-130709-027b57c3.stdout.log`、`src/.state/native-probe-watchdog/20261101-130736-70fce9ed.stdout.log`。
