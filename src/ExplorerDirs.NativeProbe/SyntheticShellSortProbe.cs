@@ -962,7 +962,7 @@ public static class SyntheticShellSortProbe
                         {
                             var expectedSize = (asyncExactInvalidationProbe || asyncShellNotificationInvalidationProbe) &&
                                 !sharedRootView && names[index] == "folder-000"
-                                ? "38" : ExpectedAsyncColumnSize(names[index]);
+                                ? "47" : ExpectedAsyncColumnSize(names[index]);
                             if (!string.Equals(sizes[index], expectedSize, StringComparison.Ordinal)) return false;
                         }
                         return true;
@@ -1079,10 +1079,9 @@ public static class SyntheticShellSortProbe
                             {
                                 var invalidatedBefore = ReadCounter(module,
                                     "GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe");
-                                var notificationExit = ExplorerDirs.NativeProbe.ExplorerBrowserWrapperProbe.RunExternalShellNotificationChild(
-                                    Path.Combine(firstPaneFolder, "folder-000", "item-00.bin"), Convert.ToBase64String(new byte[38]));
-                                if (notificationExit != 0)
-                                    throw new IOException($"The external process failed to send a file change notification; exit={notificationExit}.");
+                                // Emit the real Shell notification on the same Private Desktop as the listening views.
+                                NotifyChangedFileOnCurrentShellDesktop(
+                                    Path.Combine(firstPaneFolder, "folder-000", "item-00.bin"), new byte[38]);
                                 var notificationDeadline = Environment.TickCount64 + 10_000;
                                 while (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe") == invalidatedBefore &&
                                     Environment.TickCount64 < notificationDeadline)
@@ -3579,6 +3578,27 @@ public static class SyntheticShellSortProbe
             if (translationEnabled) Check(translateChildNotifications(0));
             ILFree(absolutePidl);
         }
+    }
+
+    private static void NotifyChangedFileOnCurrentShellDesktop(string path, byte[] contents)
+    {
+        File.WriteAllBytes(path, contents);
+        Check(SHParseDisplayName(path, 0, out var itemPidl, 0, out _));
+        try { SHChangeNotify(ShcneUpdateitem, 0, itemPidl, 0); }
+        finally { Marshal.FreeCoTaskMem(itemPidl); }
+
+        var parentPath = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException("The changed file did not have a parent directory.");
+        Check(SHParseDisplayName(parentPath, 0, out var parentPidl, 0, out _));
+        try
+        {
+            // The parent listing needs an item update for the child directory whose derived size changed;
+            // UPDATEDIR alone addresses that child view, not necessarily the view listing the directory row.
+            SHChangeNotify(ShcneUpdateitem, 0, parentPidl, 0);
+            SHChangeNotify(ShcneUpdatedir, 0, parentPidl, 0);
+        }
+        finally { Marshal.FreeCoTaskMem(parentPidl); }
+        Console.WriteLine("probe-shell-notification: same-private-desktop=True; changed-file-and-parent-item/directory-notified=True");
     }
 
     private static string FormatSortColumns(IReadOnlyList<NativeSortColumn>? columns) => columns is null
