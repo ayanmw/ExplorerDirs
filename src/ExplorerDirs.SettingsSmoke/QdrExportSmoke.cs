@@ -184,6 +184,14 @@ internal static class QdrExportSmoke
             customColumnImport.ExtendedState.Panes[0][0].View.GroupKey == recursiveSizeKey &&
             customColumnImport.ExtendedState.Panes[0][0].View.DisplayColumns!.SequenceEqual(expectedRecursiveColumns),
             "Q-Dir base-only ColsAndSort import and the app extension preserve separate recursive sort/data keys and reordered columns");
+        var baseOnlyReexportText = QdrExporter.Render(
+            state with { Panes = customColumnBaseImport.Panes.Select(pane => pane.ToList()).ToList() }, pins);
+        var baseOnlyReexport = QdrImporter.Parse(string.Join('\n', baseOnlyReexportText.Split('\n').Where(line =>
+            !line.StartsWith(QdrExporter.Prefix, StringComparison.OrdinalIgnoreCase))), (value, _) => value);
+        Check(baseOnlyReexport.Panes[0][0].View.SortColumns.SequenceEqual(customColumnView.SortColumns) &&
+            baseOnlyReexport.Panes[0][0].View.GroupKey == recursiveSizeKey &&
+            baseOnlyReexport.Panes[0][0].View.DisplayColumns!.SequenceEqual(expectedRecursiveColumns),
+            "recursive column sort/data keys and order survive Q-Dir base-only import-export-import without the app extension");
         var contentModePanes = state.Panes.Select(pane => pane.ToList()).ToList();
         contentModePanes[0][0] = contentModePanes[0][0] with { View = view with { Mode = 8 } };
         var contentModeState = state with { Panes = contentModePanes };

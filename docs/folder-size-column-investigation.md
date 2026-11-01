@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：递归列 Q-Dir 基础字段闭环
+
+在前一轮验证 Q-Dir 基础 `ColsAndSort` 导入与应用扩展导入后，增加一次基础字段往返：先导出包含递归列的三列状态，剥离 `ExplorerDirs.*` 扩展导入，再用导入结果重新导出，第二次仍剥离扩展并导入。排序/显示键 `{9e5e…}:1`、递归数据/分组键 `{7e1f…}:1`、`Type → Name → Recursive Size` 顺序、各列宽度和排序/分组方向均保持一致。定向 `--qdr-location-roundtrip-only` SettingsSmoke 通过。
+
+这加强的是项目自己的 Q-Dir 基础字段读写合同；Q-Dir 实际 GUI 读取/显示递归列、产品 provider 映射与可见排序仍未验证。产品继续使用 ExplorerBrowser，未改产品代码或 release。
+
 ## 2026-11-01：列重排后的可见标题与 Shell 排序键映射
 
 扩展已注册 synthetic namespace 的 `IShellView` 探针，对 `IColumnManager.Apply` 应用两种三列排列，再从 native Header 读取 `HDM_GETORDERARRAY`，按视觉位置逐列点击并回读 `IFolderView2::GetSortColumns`。两种排列下，“Recursive Size”标题点击均返回 Shell sort/display key `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`；“Name”和“Type”也分别返回其自身的 Shell 排序键。排序方向随标题点击变化，探针结束前恢复了原列与原视图状态。
