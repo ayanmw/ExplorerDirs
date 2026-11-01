@@ -2039,8 +2039,8 @@ SettingsSmoke 的红测在实现前因增量入口缺失而编译失败；实现
 
 新增 STA Dispatcher 检查 owner 线程及“单项在最终结果前”的顺序；queued context 检查已排队结果在代次退休后不可发布。SettingsSmoke Release build 0 警告/错误，包含 coordinator、行模型与递归扫描的 smoke 通过。该协调器并未接入 peer ListView，也没有可见增量绘制结果；这是 owner 派发/背压原型，不是产品功能。
 
-### 2026-11-01：peer ListView 增量递归值回写接线（运行待集中验收）
+### 2026-11-01：peer ListView 增量递归值回写接线
 
 为句柄扫描器的逐根 `Scan` 增加完成回调；每个请求目录扫描后先关闭根句柄、写入结果表，再发布身份化摘要。无窗口 smoke 确认 8 个独立扫描回调与返回字典逐项一致。随后将 peer `SysListView32` 原型剩余目录阶段改为使用 `DirectoryTreeScanCoordinator.RunLatestIncrementalAsync`：worker 的每条结果在 owner Dispatcher 验证 Shell 行身份后，按实时 ListView 稳定 row ID 更新递归大小子项；检查行序与选中/焦点不变，全部结果到齐后再与最终字典对账并计算百分比/执行数值排序。
 
-NativeProbe 和 SettingsSmoke Release build 均为 0 警告/错误；增量扫描探针与递归扫描器 smoke 通过。按当前避免窗口操作的约束，本轮没有运行 Private Desktop `IShellView`/peer ListView 宿主探针，故尚无这段接线的运行证据；行重绘/闪烁、真实 Shell 列表异步时序及焦点保持仍待集中验收。产品 ExplorerBrowser 与发布版未改。
+NativeProbe 和 SettingsSmoke Release build 均为 0 警告/错误；增量扫描探针与递归扫描器 smoke 通过。随后 Private Desktop `--host-recursive-size-projection-private-desktop` 首轮 watchdog exit 0：peer ListView 实际收到并增量写入 3 条剩余递归值，最终映射对账通过，选择/焦点不变，前台、last-input 与清理守卫通过（日志 `src/.state/native-probe-watchdog/20261101-212614-cc233652.stdout.log`）。第二轮相同功能断言也通过，但 watchdog 观察到 last-input tick 从 84680437 变为 84687812，故以 `isolation-clean=False` / exit 1 结束（日志 `src/.state/native-probe-watchdog/20261101-212630-9824c1e9.stdout.log`）；原因未确定，未继续重跑。由此确认隔离 peer ListView 的逐项回写路径可运行，但重复运行的桌面隔离守卫尚未稳定通过。实际绘制闪烁、滚动/排序期间异步时序及可见 Shell 体验仍待集中验收。产品 ExplorerBrowser 与发布版未改。
