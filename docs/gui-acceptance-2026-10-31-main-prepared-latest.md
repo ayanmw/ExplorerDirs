@@ -4,14 +4,14 @@
 
 ## 固定身份
 
-- 源提交：`166033ea6d3f82a3d7a2cd2da90708cda3f7db1a`；准备时主线工作区干净。
-- 副本：`src/.state/gui-smoke/20261031-213411-465-0c89e6/`。
-- BuildIdentity：`0.6.0-preview.20261031-213411-465-0c89e6+166033ea6d3f82a3d7a2cd2da90708cda3f7db1a`。
+- 源提交：`c1bb533d75fad8450348dad3967f4ec9e3de2353`；准备时主线工作区干净。
+- 副本：`src/.state/gui-smoke/20261101-034730-095-8c8959/`。
+- BuildIdentity：`0.6.0-preview.20261101-034730-095-8c8959+c1bb533d75fad8450348dad3967f4ec9e3de2353`。
 - 状态：`prepared-not-run`，47 项待验收，初始四窗格布局。
-- 准备时间：`2026-10-31T21:34:22.2546539Z`。
-- EXE SHA-256：`08E9D5C12CDA1104867DAF0958F6820539464775EE0025E956137AE21D911F5C`。
-- App DLL SHA-256：`F049484D847A20BB858804C4A7C3E6D40E05221241D3280EA21A1C738D3F42A9`。
-- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261031-213411-465-0c89e6\`；应用文件、profile 与操作夹具均位于副本内。
+- 准备时间：`2026-11-01T03:47:45.4868260Z`。
+- EXE SHA-256：`1BC415316E8398ACFDD6CD8D78070B30AE16BED8B058B462B6726EB2CBAF3479`。
+- App DLL SHA-256：`143C36D84CD36D78E787124DCCF51AA2C16136F09969F2A32E528D3ADB1C1886`。
+- 隔离目录：`D:\projects\explorer-dirs\src\.state\gui-smoke\20261101-034730-095-8c8959\`；四窗格应用、独立 profile 与操作夹具均位于副本内。
 
 ## 本轮验收重点
 
@@ -21,4 +21,4 @@
 - Q-Dir `.qdr` 导入/导出互操作、颜色元数据保真与标签组语义；预览格式不匹配时文件的列表处置仍待 Q-Dir 验收后决定。
 - 主题、原生菜单边界、目录树、列值筛选、F9 递归大小摘要、窗口恢复、文件夹入口预览及其余副本 `preparation.json` 中的待验收项。
 
-候选尚未运行，没有可见 UI 通过结论。集中验收应从上述隔离副本启动，不使用 `src` 调试程序或日常 profile。此前基于 `7abb3a5` 的副本保留在 `src/.state/gui-smoke/` 供追溯；本候选包含 `5fcc460` 移除 F5 redraw lease 后的源码状态。
+候选状态仍为 `prepared-not-run`，共 47 项待验收，没有可见 UI 通过结论。集中验收应从上述隔离副本启动，不使用 `src` 调试程序或日常 profile。此副本来自干净提交 `c1bb533`；准备流程未加载 UI Automation、启动应用窗口或创建 ExplorerBrowser。EXE 与 App DLL 的 SHA-256 均与 `preparation.json` 一致。副本含递归大小扫描进度夹具，便于检查逐行大小原型相关行为；产品暂未接入该列。
