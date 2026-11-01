@@ -148,6 +148,22 @@ internal static class QdrExportSmoke
         var ordinaryPrepared = QdrExporter.Prepare(state, pins);
         Check(ordinaryPrepared.Text == text && ordinaryPrepared.UnencodedLocationCount == 0,
             "ordinary and offline paths without percent signs retain the original export without Shell binding");
+        var recursiveSizeKey = new PropertyKeyState(Guid.Parse("7E1F84B7-C052-4E51-8A3C-869254A6B910"), 1);
+        var customColumnView = new ViewState(4, 16, [new(recursiveSizeKey, -1)], recursiveSizeKey, false,
+            [new(recursiveSizeKey, 176), new(typeKey, 120)]);
+        var customColumnPanes = state.Panes.Select(pane => pane.ToList()).ToList();
+        customColumnPanes[0][0] = customColumnPanes[0][0] with { View = customColumnView };
+        var customColumnText = QdrExporter.Render(state with { Panes = customColumnPanes }, pins);
+        var customColumnImport = QdrImporter.Parse(customColumnText, (value, _) => value);
+        var customColumnBlob = customColumnText.Split("\r\n").Single(line => line.StartsWith("ColsAndSort1_0="))["ColsAndSort1_0=".Length..];
+        var nativeCustomColumnRoundTrip = QdrViewSettings.TryRead(customColumnBlob, out var nativeCustomView) &&
+            nativeCustomView.SortColumns.SequenceEqual(customColumnView.SortColumns) &&
+            nativeCustomView.GroupKey == recursiveSizeKey && !nativeCustomView.GroupAscending &&
+            nativeCustomView.DisplayColumns!.SequenceEqual(customColumnView.DisplayColumns!);
+        Check(nativeCustomColumnRoundTrip &&
+            customColumnImport.Panes[0][0].View.DisplayColumns!.SequenceEqual(customColumnView.DisplayColumns!) &&
+            customColumnImport.ExtendedState?.Panes[0][0].View.DisplayColumns!.SequenceEqual(customColumnView.DisplayColumns!) == true,
+            "Q-Dir ColsAndSort and the app extension preserve a custom recursive-size column key, width, sort and group state");
         var contentModePanes = state.Panes.Select(pane => pane.ToList()).ToList();
         contentModePanes[0][0] = contentModePanes[0][0] with { View = view with { Mode = 8 } };
         var contentModeState = state with { Panes = contentModePanes };

@@ -5558,3 +5558,7 @@ NativeProbe 的递归大小快照改为最多保留 256 项并按最近访问顺
 ### 2026-11-01：自定义列键通过独立进程会话 INI 往返
 
 SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototype key 的列布局、排序、分组与标签位置；独立 `dotnet` 子进程用产品 `SessionStore.ParseComplete` 读回并逐字段校验。定向进程场景及完整 SettingsSmoke 通过，Release build 0 警告/错误。此证据仅确认应用 INI 的跨进程序列化稳定，不代表 Shell/IColumnManager 跨进程列恢复或不同 provider 兼容；详见[调查记录](folder-size-column-investigation.md#2026-11-01应用会话跨进程保留递归大小列键)。
+
+### 2026-11-01：递归大小自定义列键导出为 Q-Dir 原生视图流
+
+`QdrExportSmoke` 以非标准 GUID 作为 prototype Recursive Size 的显示列、排序与分组键，验证 `CODEMODE1` `ColsAndSort` 的本项目导出/导入以及 Explorer Dirs 扩展往返；完整 SettingsSmoke 通过，0 警告/错误。该结果证明本项目的格式链路保留该键，不证明第三方 Q-Dir 能应用未知列键；实际 Q-Dir 互操作仍待验收，详见[Q-Dir 导入与导出调查](qdr-import.md#2026-11-01-递归大小自定义列的-q-dir-视图流往返)。
