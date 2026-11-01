@@ -1696,3 +1696,11 @@ NativeProbe 新增只供隔离试验使用的精确 reservation 检查/失效入
 RED 阶段因预期缺少原生 probe 导出失败；接入后曾发现 `RefreshView` 会暂时清空 ListView，探针现等待行数恢复才检查。刷新会丢掉首视图原选择，因此最终检查是在重扫后重新设置选择/焦点；此结果不证明刷新本身保留 selection。日志：`src/.state/native-probe-watchdog/20261101-171503-08c9db85.stdout.log`。原生 adapter `/W4 /WX` 和 NativeProbe Release（0 警告/错误）构建通过，Private Desktop watchdog exit 0。
 
 边界：此精确入口由探针直接指定缓存键，不证明 Windows Shell 通知可从其 PIDL/事件可靠解析成同一个键；也不覆盖真实文件系统 provider、ExplorerBrowser 产品接线、可见刷新体验或菜单/文件操作。递归大小列仍仅为 NativeProbe 原型，不进入产品或 release。下一步根据通知的变化类型和 PIDL 精确追踪路径映射；若通知仍无法给出稳定 key，则评估以目录身份与 generation token 代替路径键的失效合同，再继续高负载 view-batch 回归。
+
+### 2026-11-01：真实 Shell 通知命中在途递归扫描
+
+NativeProbe 的 `SFVM_FSNOTIFY` 现在可报告通知 PIDL 解析名称、文件系统路径，以及本次通知实际标记为过期的在途 reservation 数。测试夹具由独立子进程写入 `Pane1\folder-000\item-00.bin` 并发出 Shell 文件变更通知；Shell 将文件项事件交给视图时表现为 `SHCNE_UPDATEDIR`，回调 PIDL 解析为该子目录的绝对物理路径，和递归大小缓存键完全一致。原子失效计数确认该通知命中了 1 个正在扫描的 reservation；旧扫描结果未发布，批次结束后显式刷新重扫，目标值读回 38 B。
+
+四个不同根的隐藏 Shell view 场景完成：扫描 21 次（基线 20 次，多一次目标重试）、拒绝 0、峰值 worker 2、四视图列值齐备，隔离刷新后选择与焦点均重新设置通过。无窗口 folder contract、异步队列 smoke、原生 adapter `/W4 /WX` 和 NativeProbe Release 构建通过；Private Desktop 前台/输入守卫与临时资源清理通过。日志：`src/.state/native-probe-watchdog/shell-notification-invalidation-final.log`。此前精确键直调场景仍保留，作为通知路径的对照。
+
+边界：这证明当前合成 namespace 的文件系统路径缓存键可由一次真实跨进程 Shell 通知精确命中；不证明所有通知类型、网络/虚拟 Shell 项、通知风暴、真实产品 ExplorerBrowser 接线或可见刷新期间的选区行为。探针需要在验证后显式 `RefreshView` 才触发重扫，并会重新设置选区/焦点；因此不是无闪刷新或产品体验证据。递归大小列仍仅为 NativeProbe 原型，不进入产品或 release。后续应继续跑四视图高行数 view-batch 回归，并单独评估目录身份变化、移动/重命名及多种 Shell 通知与缓存键的覆盖关系。

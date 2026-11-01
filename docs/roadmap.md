@@ -5740,3 +5740,7 @@ NativeProbe 隐藏 Shell 异步按需扫描现默认按 view 合并，显式 `EX
 NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell 视图中，指定正在扫描的 `folder-000` 被标记为过期后，旧 worker 提交遭拒；reservation 释放后通过显式刷新重扫，目标值由 1 B 更新为 38 B。总扫描 21 次（基线 20 次）、通知 5 次、峰值 worker 2，四视图列值齐备；前台/输入守卫和隔离清理通过。刷新会短暂清空列表并移除首视图当前选区，探针在重扫后重新设置该选区，因此不能据此声称刷新保留选区。
 
 这只验证探针直接指定精确缓存键时的原子失效和重试；真实 Shell 通知的 PIDL 尚未证明能稳定映射到该键。递归大小列仍是 NativeProbe 原型，未接入产品或 release。下一步追踪通知类型和 PIDL 到物理路径/目录 identity 的对应关系。详见[调查记录](folder-size-column-investigation.md#2026-11-01精确缓存键失效与在途结果拒绝验证)。
+
+### 2026-11-01：Shell 通知与递归缓存键精确匹配
+
+真实跨进程 Shell 文件通知已在隐藏四视图 NativeProbe 中命中 `folder-000` 的在途 reservation：`SFVM_FSNOTIFY` 收到 `SHCNE_UPDATEDIR`，绝对 PIDL 解析到与缓存键相同的物理子目录；旧扫描提交被丢弃，显式刷新后值由 1 B 更新为 38 B。四视图列值、隔离选择/焦点、Private Desktop 输入守卫通过；基线 20 次扫描加一次重试，零队列拒绝。该证据覆盖当前合成 filesystem namespace 的此通知路径，不覆盖真实产品、所有事件类型或可见刷新体验。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01真实-shell-通知命中在途递归扫描)。

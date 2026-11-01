@@ -36,6 +36,35 @@ namespace
         WriteFile(output, "\r\n", 2, &written, nullptr);
     }
 
+    void TraceSyntheticNotificationPidl(LONG event, unsigned index, PCIDLIST_ABSOLUTE pidl)
+    {
+        if (!pidl)
+        {
+            char message[128]{};
+            sprintf_s(message, "synthetic-sort: SFVM_FSNOTIFY pidl[%u]=null; event=0x%08X", index, static_cast<unsigned>(event));
+            TraceSyntheticSortStage(message);
+            return;
+        }
+        LPWSTR parsingName = nullptr;
+        LPWSTR fileSystemPath = nullptr;
+        const auto parsingResult = SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName);
+        const auto fileSystemResult = SHGetNameFromIDList(pidl, SIGDN_FILESYSPATH, &fileSystemPath);
+        char parsingUtf8[900]{};
+        char fileSystemUtf8[900]{};
+        if (SUCCEEDED(parsingResult) && parsingName)
+            WideCharToMultiByte(CP_UTF8, 0, parsingName, -1, parsingUtf8, static_cast<int>(ARRAYSIZE(parsingUtf8)), nullptr, nullptr);
+        if (SUCCEEDED(fileSystemResult) && fileSystemPath)
+            WideCharToMultiByte(CP_UTF8, 0, fileSystemPath, -1, fileSystemUtf8, static_cast<int>(ARRAYSIZE(fileSystemUtf8)), nullptr, nullptr);
+        char message[2048]{};
+        sprintf_s(message,
+            "synthetic-sort: SFVM_FSNOTIFY pidl[%u]; event=0x%08X; parsing-hr=0x%08X; parsing=%s; filesystem-hr=0x%08X; filesystem=%s",
+            index, static_cast<unsigned>(event), static_cast<unsigned>(parsingResult), parsingUtf8,
+            static_cast<unsigned>(fileSystemResult), fileSystemUtf8);
+        TraceSyntheticSortStage(message);
+        if (parsingName) CoTaskMemFree(parsingName);
+        if (fileSystemPath) CoTaskMemFree(fileSystemPath);
+    }
+
     struct SyntheticListViewSearch
     {
         HWND window = nullptr;
@@ -1488,7 +1517,7 @@ namespace
             }
             return removed;
         }
-        size_t InvalidatePath(PCWSTR changedParsingName, bool includeSubtree)
+        size_t InvalidatePath(PCWSTR changedParsingName, bool includeSubtree, size_t* invalidatedReservations = nullptr)
         {
             if (!changedParsingName || !*changedParsingName) return 0;
             std::wstring changed;
@@ -1524,8 +1553,14 @@ namespace
                 }
                 else ++entry;
             }
+            size_t invalidated = 0;
             for (auto& entry : _scansInProgress)
-                if (matchesChangedPath(entry.first)) entry.second = true;
+            {
+                if (!matchesChangedPath(entry.first)) continue;
+                entry.second = true;
+                ++invalidated;
+            }
+            if (invalidatedReservations) *invalidatedReservations = invalidated;
             return removed;
         }
         bool InvalidateReservedPathExact(PCWSTR parsingName)
@@ -1684,6 +1719,8 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizePeakWorkersForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe = 0;
+    volatile LONG g_syntheticTraceNotificationPidlsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe = 0;
     HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
@@ -2595,6 +2632,13 @@ namespace
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
                 const auto event = static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT;
+                if (wParam && InterlockedCompareExchange(&g_syntheticTraceNotificationPidlsForProbe, 0, 0))
+                {
+                    auto* notifiedPidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
+                    TraceSyntheticNotificationPidl(event, 0, notifiedPidls[0]);
+                    if (event == SHCNE_RENAMEITEM || event == SHCNE_RENAMEFOLDER)
+                        TraceSyntheticNotificationPidl(event, 1, notifiedPidls[1]);
+                }
                 const bool affectsRecursiveSize = event == SHCNE_CREATE || event == SHCNE_DELETE ||
                     event == SHCNE_MKDIR || event == SHCNE_RMDIR || event == SHCNE_RENAMEITEM ||
                     event == SHCNE_RENAMEFOLDER || event == SHCNE_UPDATEITEM || event == SHCNE_UPDATEDIR;
@@ -2608,7 +2652,18 @@ namespace
                         LPWSTR parsingName = nullptr;
                         if (SUCCEEDED(SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) && parsingName)
                         {
-                            (void)_recursiveSizeStore->InvalidatePath(parsingName, removesFolderSubtree);
+                            size_t invalidatedReservations = 0;
+                            const auto removedSnapshots = _recursiveSizeStore->InvalidatePath(
+                                parsingName, removesFolderSubtree, &invalidatedReservations);
+                            if (invalidatedReservations)
+                                InterlockedAdd(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe,
+                                    static_cast<LONG>(invalidatedReservations));
+                            char invalidationTrace[256]{};
+                            sprintf_s(invalidationTrace,
+                                "synthetic-sort: SFVM_FSNOTIFY cache-invalidation; removed-snapshots=%llu; invalidated-reservations=%llu",
+                                static_cast<unsigned long long>(removedSnapshots),
+                                static_cast<unsigned long long>(invalidatedReservations));
+                            TraceSyntheticSortStage(invalidationTrace);
                             CoTaskMemFree(parsingName);
                         }
                     };
@@ -6039,6 +6094,11 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
     InterlockedExchange(&g_syntheticOtherUiObjectRequests, 0);
     InterlockedExchange(&g_syntheticGetAttributesOfCount, 0);
     InterlockedExchange(&g_syntheticFilesystemAttributeCount, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0);
+    WCHAR notificationTraceSetting[2]{};
+    InterlockedExchange(&g_syntheticTraceNotificationPidlsForProbe,
+        GetEnvironmentVariableW(L"EXPLORER_DIRS_NATIVEPROBE_TRACE_NOTIFICATION_PIDLS", notificationTraceSetting,
+            ARRAYSIZE(notificationTraceSetting)) == 1 && notificationTraceSetting[0] == L'1' ? 1 : 0);
     // Counter resets occur between Shell operations; keep the caller-selected provider behavior stable.
     InterlockedExchange(&g_syntheticEnumObjectsCount, 0);
     InterlockedExchange(&g_syntheticEnumeratedItems, 0);
@@ -6391,6 +6451,7 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
     InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanStartedForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0);
@@ -6414,6 +6475,9 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizePeakW
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe()
+{ return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe()
 { return InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0, 0); }
