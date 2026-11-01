@@ -148,15 +148,34 @@ internal static class ShellProviderLocationProbe
             if (sortStrategy is "scheduled" or "notification-burst")
             {
                 stage = "item-update-delivery";
-                try
+                var notificationDeliverySamples = new List<string>();
+                if (notificationBurst)
                 {
-                    WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemPaths),
-                        TimeSpan.FromSeconds(15), "the Desktop-scope Shell observer did not receive one item update for every completed folder");
+                    var deliveryClock = Stopwatch.StartNew();
+                    var nextSample = 5;
+                    while (deliveryClock.Elapsed < TimeSpan.FromSeconds(30) &&
+                           !expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
+                    {
+                        PumpDispatcher(TimeSpan.FromMilliseconds(20));
+                        if (deliveryClock.Elapsed.TotalSeconds >= nextSample)
+                        {
+                            notificationDeliverySamples.Add($"{nextSample}s={desktopUpdateObserver.UpdatedItemNames.Length}");
+                            nextSample += 5;
+                        }
+                    }
                 }
-                catch (TimeoutException) { }
-                Console.WriteLine($"shell-provider-product-async-notifications: expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-paths=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemPaths)}]; desktop-events=[{desktopUpdateObserver.EventSummary}]");
-                if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemPaths))
-                    throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemPaths)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
+                else
+                {
+                    try
+                    {
+                        WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames),
+                            TimeSpan.FromSeconds(15), "the Desktop-scope Shell observer did not receive one item update for every completed folder");
+                    }
+                    catch (TimeoutException) { }
+                }
+                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
+                if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
+                    throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
@@ -274,7 +293,7 @@ internal static class ShellProviderLocationProbe
             else if (sortStrategy == "header-click")
             {
                 stage = "native-header-click-sort";
-                WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver!.UpdatedItemPaths),
+                WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver!.UpdatedItemNames),
                     TimeSpan.FromSeconds(5), "the hidden Shell observer did not receive both completed-folder updates before header sorting");
                 var sortHeaderViewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var header = FindSortHeader((nint)sortHeaderViewWindowField.GetValue(host)!);
@@ -1123,12 +1142,20 @@ internal static class ShellProviderLocationProbe
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
+            var diagnosticPath = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-diagnostics-x64",
+                "ExplorerDirs.ShellNamespace.Diagnostics.dll");
+            if (File.Exists(diagnosticPath)) return diagnosticPath;
             var path = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-x64",
                 "ExplorerDirs.ShellNamespace.dll");
             if (File.Exists(path)) return path;
         }
         throw new FileNotFoundException("Build ExplorerDirs.NativeProbe's product Shell folder adapter first.");
     }
+
+    private static string ReadProductDiagnosticCounter(nint adapter, string exportName) =>
+        NativeLibrary.TryGetExport(adapter, exportName, out var address)
+            ? Marshal.GetDelegateForFunctionPointer<GetCounter>(address)().ToString(CultureInfo.InvariantCulture)
+            : "unavailable";
 
     private static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
     {

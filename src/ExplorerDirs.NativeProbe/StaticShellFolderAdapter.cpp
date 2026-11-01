@@ -1853,6 +1853,10 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeNotificationsSentForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe = 0;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+    volatile LONG g_productAsyncItemNotificationAttempts = 0;
+    volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
+#endif
     // Product notifications target the completed folder row so Shell can refresh that value directly.
 #if defined(EXPLORERDIRS_NATIVEPROBE)
     // NativeProbe-only A/B default preserves the parent-directory baseline unless explicitly enabled.
@@ -4465,6 +4469,9 @@ namespace
                         {
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                            InterlockedIncrement(&g_productAsyncDirectoryNotificationAttempts);
+#endif
                             SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
                         }
                         else
@@ -4473,6 +4480,9 @@ namespace
                             {
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                                 ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                                InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
+#endif
                                 SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, notification.second, nullptr);
                                 CoTaskMemFree(notification.second);
                             }
@@ -5030,6 +5040,14 @@ extern "C" HRESULT WINAPI ConfigureShellNamespaceRoot(
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
     return S_OK;
 }
+
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+extern "C" LONG WINAPI GetProductAsyncItemNotificationAttempts()
+{ return InterlockedCompareExchange(&g_productAsyncItemNotificationAttempts, 0, 0); }
+
+extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
+{ return InterlockedCompareExchange(&g_productAsyncDirectoryNotificationAttempts, 0, 0); }
+#endif
 
 #if defined(EXPLORERDIRS_NATIVEPROBE)
 extern "C" ED_PROBE_EXPORT HRESULT WINAPI ConfigureSyntheticNamespaceRootForProbe(

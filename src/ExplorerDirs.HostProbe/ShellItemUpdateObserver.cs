@@ -4,21 +4,22 @@ using System.Windows.Interop;
 // Counts Shell item IDs delivered to a hidden registration for one temporary namespace root.
 internal sealed class ShellItemUpdateObserver : IDisposable
 {
-    private const int Message = 0x8023;
+    private static int _nextMessage = 0x8023;
     private const int UpdateItem = 0x00002000;
     private readonly HwndSource _source;
     private readonly uint _registration;
+    private readonly int _message;
     private readonly object _sync = new();
     private int _updatedItemPidls;
     private readonly Dictionary<int, int> _eventCounts = new();
-    private readonly HashSet<string> _updatedItemPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _updatedItemNames = new(StringComparer.OrdinalIgnoreCase);
 
     internal int UpdatedItemPidls
     {
         get { lock (_sync) return _updatedItemPidls; }
     }
     internal int TotalEvents { get { lock (_sync) return _eventCounts.Values.Sum(); } }
-    internal string[] UpdatedItemPaths { get { lock (_sync) return _updatedItemPaths.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
+    internal string[] UpdatedItemNames { get { lock (_sync) return _updatedItemNames.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
     internal string EventSummary
     {
         get { lock (_sync) return string.Join(',', _eventCounts.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key:X}:{pair.Value}")); }
@@ -27,13 +28,14 @@ internal sealed class ShellItemUpdateObserver : IDisposable
     internal ShellItemUpdateObserver(HwndSource source, string parsingName)
     {
         _source = source;
+        _message = Interlocked.Increment(ref _nextMessage);
         Marshal.ThrowExceptionForHR(SHParseDisplayName(parsingName, 0, out var rootPidl, 0, out _));
         try
         {
             _source.AddHook(OnMessage);
             var entry = new Entry { Pidl = rootPidl, Recursive = 1 };
             _registration = SHChangeNotifyRegister(_source.Handle, 0x8000 | 0x1000 | 0x0003,
-                0x7FFFFFFF, Message, 1, ref entry);
+                0x7FFFFFFF, _message, 1, ref entry);
             if (_registration == 0)
             {
                 _source.RemoveHook(OnMessage);
@@ -53,10 +55,11 @@ internal sealed class ShellItemUpdateObserver : IDisposable
     private ShellItemUpdateObserver(HwndSource source, nint rootPidl)
     {
         _source = source;
+        _message = Interlocked.Increment(ref _nextMessage);
         _source.AddHook(OnMessage);
         var entry = new Entry { Pidl = rootPidl, Recursive = 1 };
         _registration = SHChangeNotifyRegister(_source.Handle, 0x8000 | 0x1000 | 0x0003,
-            0x7FFFFFFF, Message, 1, ref entry);
+            0x7FFFFFFF, _message, 1, ref entry);
         if (_registration == 0)
         {
             _source.RemoveHook(OnMessage);
@@ -66,7 +69,7 @@ internal sealed class ShellItemUpdateObserver : IDisposable
 
     private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
-        if (message != Message) return 0;
+        if (message != _message) return 0;
         var locked = SHChangeNotificationLock(wParam, unchecked((uint)lParam), out var pidls, out var eventId);
         if (locked == 0) return 0;
         try
@@ -79,13 +82,13 @@ internal sealed class ShellItemUpdateObserver : IDisposable
                     var pidl = Marshal.ReadIntPtr(pidls, index * IntPtr.Size);
                     if (pidl == 0) continue;
                     lock (_sync) _updatedItemPidls++;
-                    if (SHGetNameFromIDList(pidl, 0x80028000, out var name) >= 0 && name != 0)
+                    if (SHGetNameFromIDList(pidl, 0, out var name) >= 0 && name != 0)
                     {
                         try
                         {
                             var path = Marshal.PtrToStringUni(name);
                             if (!string.IsNullOrWhiteSpace(path))
-                                lock (_sync) _updatedItemPaths.Add(path);
+                                lock (_sync) _updatedItemNames.Add(path);
                         }
                         finally { Marshal.FreeCoTaskMem(name); }
                     }

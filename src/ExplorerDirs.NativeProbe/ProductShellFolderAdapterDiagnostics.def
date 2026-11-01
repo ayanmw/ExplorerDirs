@@ -1,0 +1,7 @@
+LIBRARY ExplorerDirs.ShellNamespace.Diagnostics.dll
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
+    ConfigureShellNamespaceRoot
+    GetProductAsyncItemNotificationAttempts
+    GetProductAsyncDirectoryNotificationAttempts

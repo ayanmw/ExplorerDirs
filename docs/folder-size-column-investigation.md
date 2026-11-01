@@ -2631,3 +2631,11 @@ HostProbe Release build 0 警告/错误。没有可见窗口、没有产品行�
 16 项夹具现要求所有逐行递归值精确等于 5、29、101–114 B，避免将可解析的 `0 B` 占位误当作扫描完成。该门槛通过，但 Desktop 观察器在 15 秒内只收到 11 条事件（`folder-extra-00` 至 `folder-extra-10`）；`folder-small`、`folder-large` 与 `folder-extra-11` 至 `13` 未见对应事件。此前同路径产品 HostProbe 记录过 16/16，因此当前结果显示事件送达/观测仍有运行间差异，不能只靠视图读取到缓存值推断事件数，也不能据此认定 Shell 稳定丢弃 5 条。下一步需对照 adapter 发送计数和 Desktop 接收计数。
 
 2 项表头排序复验中，独立 provider 枚举数保持 2；两次原生递归列标题点击最终得到正确升序，但采样期间 `IFolderView.ItemCount`、`SysListView32` 与导出行数均出现 `0→2`。这再次验证自动重排会短暂清空 Shell 列表。完整 HostProbe 该场景按预期以失败码拒绝通过，不接产品排序。HostProbe Release build 0 警告/错误；没有可见 UI、产品代码或 release 修改。
+
+### 2026-11-02：adapter 实发计数与 Shell 接收计数对照
+
+新增仅供 HostProbe 的 native diagnostic adapter 构建脚本与独立输出目录，产品 DLL 和 App/release 构建仍使用原 product adapter；诊断导出只计数每次 `SHChangeNotify` 调用前的 `SHCNE_UPDATEITEM` 尝试。HostProbe 分别对两项与 16 项夹具验证：小夹具 adapter 尝试 2 次、Desktop 观察器收到 2 次；16 项夹具 adapter 尝试 16 次，而 Desktop 观察器在 30 秒内稳定只收到 11 次（`folder-extra-00` 至 `folder-extra-10`）。16 个递归字节值均精确正确，跨进程 provider 枚举数也是 16。
+
+为了排除观察器 hook 互相截断消息，每个 `SHChangeNotifyRegister` 现在使用各自的窗口消息号；结果仍为 11/16，因此共用消息号不是当前差额的根因。之前在 15 秒后对缺项直接重发时，Shell 通知数增长 10，观察到缺项相关事件；该操作会污染原始送达计数，已从正式探针路径移除，不能用它断定原始事件是延迟还是被 Shell 合并。当前边界已经收窄到 adapter 已调用 16 次，但 Shell 注册观察器只在 30 秒内收到 11 个 distinct item event；下一步要检查未收到事件对应的原始 PIDL 身份，并以独立窗口监听复验，确定差异发生在 PIDL构造、Shell 通知投递或同 HWND 的多注册语义。
+
+两项表头点击仍能最终排序正确，但 `IFolderView`、原生 ListView 与导出均观测到暂时 0 行，完整 HostProbe 按保护门槛以失败码退出。两项默认场景在 2/2 通知到达后保持 2 行并通过。HostProbe Release build 0 警告/错误；diagnostic adapter 位于 `bin/native-product-diagnostics-x64`，不进入产品发布。
