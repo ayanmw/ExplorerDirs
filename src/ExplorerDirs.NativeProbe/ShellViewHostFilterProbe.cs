@@ -2012,6 +2012,7 @@ internal static class ShellViewHostFilterProbe
         var targetPath = Path.Combine(fixtureRoot, "peer-copy-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(targetPath);
         nint children = 0, dataObject = 0, operation = 0, destinationItem = 0;
+        nint dropTargetPidl = 0, dropTargetFolder = 0, dropTarget = 0;
         try
         {
             children = Marshal.AllocHGlobal(IntPtr.Size * relativePidls.Count);
@@ -2044,6 +2045,35 @@ internal static class ShellViewHostFilterProbe
                     throw new IOException($"The selected Shell IDataObject did not copy the complete directory '{name}'.");
             }
 
+            var dropPath = Path.Combine(targetPath, "drop-target");
+            Directory.CreateDirectory(dropPath);
+            Check(SHParseDisplayName(dropPath, 0, out dropTargetPidl, 0, out _));
+            var shellFolderId = ShellFolderId;
+            Check(SHBindToObject(0, dropTargetPidl, 0, in shellFolderId, out dropTargetFolder));
+            var dropTargetId = DropTargetId;
+            Check(At<CreateViewObject>(dropTargetFolder, 8)(dropTargetFolder, owner, ref dropTargetId, out dropTarget));
+            var requestedEffect = 1u; // DROPEFFECT_COPY; exercise target callbacks without OLE DoDragDrop/input.
+            var point = new NativePoint { X = 1, Y = 1 };
+            var enterHr = At<DropTargetDragEnter>(dropTarget, 3)(dropTarget, dataObject, 1, point, ref requestedEffect);
+            var entered = enterHr >= 0 && (requestedEffect & 1u) != 0;
+            var dropHr = unchecked((int)0x80004005);
+            var dropEffect = 1u;
+            if (entered)
+                dropHr = At<DropTargetDrop>(dropTarget, 6)(dropTarget, dataObject, 1, point, ref dropEffect);
+            else
+                _ = At<DropTargetDragLeave>(dropTarget, 5)(dropTarget);
+            if (!entered || dropHr < 0 || (dropEffect & 1u) == 0)
+                throw new IOException($"The selected peer IDataObject was rejected by the Shell drop target: enter=0x{enterHr:X8}; drop=0x{dropHr:X8}; effect={dropEffect}.");
+            foreach (var sourcePath in sourcePaths)
+            {
+                var name = Path.GetFileName(sourcePath);
+                var sourcePayload = Path.Combine(sourcePath, "payload.bin");
+                var dropPayload = Path.Combine(dropPath, name, "payload.bin");
+                if (!Directory.Exists(sourcePath) || !File.Exists(dropPayload) ||
+                    !File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(dropPayload)))
+                    throw new IOException($"The Shell drop target did not copy the selected directory '{name}' intact.");
+            }
+
             Application.DoEvents();
             var selectedIndex = Array.IndexOf(initialIds.ToArray(), selectedRowId);
             var secondaryIndex = Array.IndexOf(initialIds.ToArray(), secondarySelectedRowId);
@@ -2053,9 +2083,13 @@ internal static class ShellViewHostFilterProbe
             if (!ReadPeerListRowIds(listView).SequenceEqual(initialIds) || !selectionFocusPreserved)
                 throw new InvalidOperationException("The peer copy changed source row identities, multi-selection, or the independent focus anchor.");
             Console.WriteLine($"ishellview-peer-selected-copy: selected-count={relativePidls.Count}; source=selected-peer-row-IDataObject; operation=IFileOperation.CopyItems; copied-directories=[{string.Join(',', sourcePaths.Select(Path.GetFileName))}]; sources-retained=True; source-row-ids-retained=True; selection-focus-preserved={selectionFocusPreserved}; clipboard-touched=False; aborted=False");
+            Console.WriteLine($"ishellview-peer-selected-drop: selected-count={relativePidls.Count}; target=Shell-folder-IDropTarget; drag-enter-hr=0x{enterHr:X8}; drop-hr=0x{dropHr:X8}; effect={dropEffect}; copied-directories=[{string.Join(',', sourcePaths.Select(Path.GetFileName))}]; sources-retained=True; clipboard-touched=False; DoDragDrop=False");
         }
         finally
         {
+            if (dropTarget != 0) Marshal.Release(dropTarget);
+            if (dropTargetFolder != 0) Marshal.Release(dropTargetFolder);
+            if (dropTargetPidl != 0) ILFree(dropTargetPidl);
             if (destinationItem != 0) Marshal.Release(destinationItem);
             if (operation != 0) Marshal.Release(operation);
             if (dataObject != 0) Marshal.Release(dataObject);
@@ -3022,6 +3056,9 @@ internal static class ShellViewHostFilterProbe
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeShellDetails { public int Format, Width; public NativeStrRet Text; }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
+
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
@@ -3029,6 +3066,9 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDragEnter(nint self, nint dataObject, uint keyState, NativePoint point, ref uint effect);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDragLeave(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDrop(nint self, nint dataObject, uint keyState, NativePoint point, ref uint effect);
     private sealed record PeerShellRow(int Id, nint AbsolutePidl, nint RelativePidl, string Name, string ParsingName, string? FileSystemPath, string TypeName, int SystemImageIndex,
         string[] DetailTitles, string[] DetailValues)
     {

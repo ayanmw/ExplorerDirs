@@ -1850,3 +1850,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在真实隐藏 `IShellView` 行投影中，保持 `size-10` 与 `size-2` 两行的多选状态，从父 `IShellFolder.GetUIObjectOf(IDataObject)` 取得对应两项的真实 Shell 数据对象，并调用 `IFileOperation.CopyItems` 复制到探针唯一临时目录。复制后逐项比较目录载荷、确认源仍存在；peer 行 ID、两项选择及独立焦点锚点保持，系统剪贴板未触碰，操作未中止。NativeProbe Release build 0 警告/错误，`--ishellview-recursive-size-projection-private-desktop` exit 0；Private Desktop 前台、输入与临时夹具清理守卫通过。
 
 该切片把真实所选 PIDL、`IDataObject` 与 Shell 文件操作接在同一条隐藏 peer 流程中；没有显示或执行原生上下文菜单动词，也未验证粘贴、撤销/重做、OLE 拖放、冲突提示/错误 UI、第三方扩展、可见刷新、产品 ExplorerBrowser 接线或用户数据。仍属于 NativeProbe 原型，未接入产品与 release。
+
+### 2026-11-01：peer 多选 Shell 拖放目标回调
+
+沿用前一切片由真实 peer 选中行取得的多项 `IDataObject`，将它交给独立临时目标文件夹的 Shell `IDropTarget`，直接调用 `DragEnter` 与 `Drop`，以 `DROPEFFECT_COPY` 完成两个目录复制。两项目标 payload 均与源逐字节相同，源目录保留；前述 `IFileOperation.CopyItems`、源 peer 行 ID/多选/焦点断言继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台、last-input 与清理守卫通过；没有使用系统剪贴板或输入。
+
+这是 Shell 目标的直接回调测试，没有运行 OLE `DoDragDrop`，也没有模拟鼠标拖动、拖动源完成回调、屏幕命中测试、滚动/自动激活、Move effect、可见光标/提示或 ExplorerBrowser 产品接线。此前 `DoDragDrop` 在无输入环境无法及时返回，因此不能把本结果写作真实拖放验收；产品与 release 未修改。
