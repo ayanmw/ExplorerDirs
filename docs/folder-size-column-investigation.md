@@ -1790,3 +1790,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 初次运行同时发现空的隐藏 Report ListView 尚未 materialize header；`RemovePeerColumns` 现将无 header 视为尚无列可删。Common Controls 6 分组依赖 NativeProbe apphost manifest；watchdog 对 peer 菜单和递归投影两场景改为启动 apphost，避免以 `dotnet.exe` 清单运行导致分组 API 不可用。
 
 边界：递归值是探针显式请求后计算，不接入产品 F9/导航/刷新；列和排序只存在于 peer ListView，未改变或重绘 Shell 自身 DefView，也没有完成 Shell 通知后的重新扫描、可见像素/闪烁、真实慢盘/网络、用户多窗格压力或 ExplorerBrowser 产品接线验收。产品继续使用 ExplorerBrowser，不能据此宣称逐行递归大小列已交付。下一步在 peer 行变更通知闭环上验证递归缓存失效及值更新，同时继续通过菜单、分组和刷新回归门槛。
+
+### 2026-11-01：递归大小对 Shell 更新通知的按需失效原型
+
+隔离 `--ishellview-recursive-size-projection-private-desktop` 在初始后台扫描后修改 `size-10\payload.bin`，向 Shell 发布 `SHCNE_UPDATEITEM` 与 `SHCNE_UPDATEDIR`，确认监听器收到了通知；随后仅移除 `size-10` 的缓存并在 worker 线程重扫，得到 20 B。第一次重枚举发现 DefView 保留了更新前的目录 PIDL，而 `IShellFolder` 已返回相同文件系统路径、不同元数据 PIDL；按 PIDL 字节匹配会误报行缺失。原型现允许文件系统路径配对，并以卷序列号和文件 ID保留同一目录行身份，避免仅凭复用路径继承状态。更新后的数值排序、选中/焦点行和前台窗口均保持；Private Desktop 前台、输入、夹具清理守卫通过，NativeProbe Release build 0 警告/错误。
+
+这只证明隐藏 `IShellView` 旁的独立 peer `SysListView32` 可以接收通知、局部失效和 worker 重扫。没有接入 ExplorerBrowser、产品窗格或可见 UI，也没有覆盖真实慢盘/网络项目、Shell 通知合并、通知丢失与批量目录变更；不能据此宣称产品逐行列已实现。后续需先把异步刷新与通知合并纳入隔离原型，再评估迁移门槛。

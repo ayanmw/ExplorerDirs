@@ -5788,3 +5788,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 新增独立 Private Desktop 原型，从隐藏 `IShellView` 的 5 个真实 filesystem Shell 行投影 PIDL 身份、4 个标准 Details 字段及一个按需递归大小列。显式扫描运行在线程池，等待期间 peer 原行和 ID 不变；写回 2/10/100 B 后在原生 ListView 中按数值排序，且选中/焦点行 ID=3 保持。NativeProbe Release 构建 0 警告/错误，apphost Private Desktop 探针 exit 0，前台、last-input 与临时夹具清理守卫通过。相关实现及边界见[递归大小列调查](folder-size-column-investigation.md#2026-11-01真实-ishellview-行的按需递归值-peer-列)。
 
 这只把异步递归值接到了 IShellView 的 peer 行列表，不改变 Shell 自身 DefView 或 ExplorerBrowser 产品；未验证通知后递归值重扫、可见重绘/闪烁、慢盘/网络及真实多窗格负载。后续继续把 Shell 行增删改通知与递归缓存失效、peer 列回填接成闭环，并保留菜单/分组/刷新回归。产品仍使用 ExplorerBrowser，递归列不进入发布版。
+2026-11-01 隔离逐行递归大小列通知原型通过：更新 `size-10` 子文件后，至少一种真实 Shell 更新通知被收到，局部缓存失效并在 worker 重扫为 20 B；发现 DefView 视图 PIDL 可落后于同路径重枚举 PIDL，按路径配对、文件 ID保留行身份后，数值排序与选中焦点保持。NativeProbe Release build 和 Private Desktop watchdog 通过。仅隐藏 `IShellView` + peer ListView，不含产品接线、可见 UI、慢盘/网络及通知合并/丢失场景。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归大小对-shell-更新通知的按需失效原型)。
