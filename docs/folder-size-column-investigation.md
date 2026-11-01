@@ -1345,4 +1345,10 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 
 在 500 目录、全列主动读取后，NativeProbe 直接统计缓存条目及条目载荷：256 个快照包含 77,312 字节，501 个包含 151,292 字节，差 73,980 字节（约 72.2 KiB）。该值按每个 map 项的 `std::wstring` 对象、快照结构和路径 UTF-16 字符数计算；不含红黑树节点链接、分配器管理开销与分配余量，所以是可核验的载荷下限，不是完整堆占用。
 
-同时采样同一探针进程的 Private Bytes/Working Set。每种容量三轮中，Private Bytes 的“整列读取前后差值”分别跨越约 -7.66 MiB 到 +0.08 MiB（256）及 -7.71 MiB 到 +0.14 MiB（501），两组高度重叠；前后绝对值还受探针运行时回收影响。因此进程级采样无法分辨约 72 KiB 的缓存载荷差，也不能据此推断实际常驻内存增加量。容量 501 消除该夹具刷新期的 500 次重扫有证据，但真实缓存总成本尚未量清，不调整产品默认容量。NativeProbe Release build、原生 `/W4 /WX` adapter build 与三轮 `--synthetic-recursive-directory-size-large-background-refresh-wpf-host-private-desktop`/容量探针通过；前台、输入、清理守卫均通过。下一步转向建立明确的 500 行大小排序键并验证更新时是否需要整视图重排，再看 DefView 受支持的单行刷新路径。
+同时采样同一探针进程的 Private Bytes/Working Set。每种容量三轮中，Private Bytes 的“整列读取前后差值”分别跨越约 -7.66 MiB 到 +0.08 MiB（256）及 -7.71 MiB 到 +0.14 MiB（501），两组高度重叠；前后绝对值还受探针运行时回收影响。因此进程级采样无法分辨约 72 KiB 的缓存载荷差，也不能据此推断实际常驻内存增加量。容量 501 消除该夹具刷新期的 500 次重扫有证据，但真实缓存总成本尚未量清，不调整产品默认容量。NativeProbe Release build、原生 `/W4 /WX` adapter build 与三轮 `--synthetic-recursive-directory-size-large-background-refresh-wpf-host-private-desktop`/容量探针通过；前台、输入、清理守卫均通过。
+
+### 2026-11-01：500 行递归大小排序刷新重排
+
+加入 NativeProbe 专用 `large-view-sort-refresh` 策略。为了证明更新确实改变相对次序，夹具将 `child` 初始大小设为 30 B、`folder-000` 设为 20 B；列头建立升序后，刷新前 `folder-000` 位于 `child` 前。后台扫描发布 `child=1 B` 快照并完整刷新后，Shell 再比较 1,451 次，502 行保持，`child` 移到 `folder-000` 前，刷新过程未触发递归目录重扫；选区和焦点经现有快照恢复成功，稳定读回约 1,172 ms。Private Desktop 探针退出码 0，前台、输入与隔离清理守卫通过，NativeProbe Release build 0 警告/错误。
+
+这次同时纠正此前的排序判据：Shell 将文件夹和文件按其自身规则分组，不能用目录 `child` 与普通文件 `small.bin` 的相对位置断定递归大小排序是否生效。Shell 的 `IFolderView2` 还报告映射后的排序属性键，而非 provider 显示列的私有键；探针因此结合实际列头操作、比较器调用、升序方向和两个目录的相对位置确认行为。约 1.17 秒包含 502 行重枚举和状态恢复，不是纯排序耗时；这是隐藏合成 `IShellView` 原型证据，不代表可见 UI 刷新观感或 ExplorerBrowser 产品已接入。下一步仍需独立评估只更新单行的 Shell 支持路径，并确认它能否在排序下触发正确重排。

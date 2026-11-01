@@ -264,8 +264,11 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "large-view-sort-refresh" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
+        var largeViewSortRefreshProbe = sizeUpdateStrategy == "large-view-sort-refresh";
+        if (largeViewSortRefreshProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
+            throw new ArgumentException("The large-view sort refresh probe requires on-demand recursive sizing and at least one synthetic sibling folder.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
         if (runIdText is not null && !Guid.TryParseExact(runIdText, "N", out _))
@@ -296,7 +299,7 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly)
             {
                 Directory.CreateDirectory(Path.Combine(backingFolder, "child", "nested"));
-                File.WriteAllBytes(Path.Combine(backingFolder, "child", "direct.bin"), new byte[6]);
+                File.WriteAllBytes(Path.Combine(backingFolder, "child", "direct.bin"), new byte[largeViewSortRefreshProbe ? 26 : 6]);
                 File.WriteAllBytes(Path.Combine(backingFolder, "child", "nested", "deep.bin"), new byte[4]);
                 File.WriteAllBytes(Path.Combine(backingFolder, "small.bin"), new byte[4]);
                 if (onDemandFolderCount > 0)
@@ -306,7 +309,8 @@ public static class SyntheticShellSortProbe
                         var loadProbeFolder = Path.Combine(backingFolder, $"folder-{folderIndex:D3}");
                         Directory.CreateDirectory(loadProbeFolder);
                         for (var fileIndex = 0; fileIndex < 10; fileIndex++)
-                            File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"), [0x01]);
+                            File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
+                                largeViewSortRefreshProbe && folderIndex == 0 && fileIndex == 0 ? new byte[11] : [0x01]);
                     }
                 }
                 if (shellWindowScrollProbe)
@@ -633,7 +637,8 @@ public static class SyntheticShellSortProbe
                 Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; recursive-size-cache-misses-during-compare={recursiveSizeCacheMissesDuringCompare}; recursive-metric-scans-during-compare={directoryMetricScansDuringCompare}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
-                var expectedDirectoryText = expectedDirectorySizeText ?? (humanSizeText ? "10 B" : "10");
+                var expectedDirectoryText = expectedDirectorySizeText ??
+                    (largeViewSortRefreshProbe ? "30" : humanSizeText ? "10 B" : "10");
                 var fileIndex = Array.FindIndex(initialNames, name => string.Equals(name, "small.bin", StringComparison.OrdinalIgnoreCase));
                 var displayedDirectorySize = childIndex >= 0 && string.Equals(initialSizes[childIndex], expectedDirectoryText, StringComparison.Ordinal);
                 var displayedFileSize = expectedFileSizeText is null ||
@@ -1423,6 +1428,31 @@ public static class SyntheticShellSortProbe
         try
         {
             Console.WriteLine($"synthetic-size-update: selected-strategy={strategyFilter}");
+            if (strategyFilter == "large-view-sort-refresh")
+            {
+                var listView = FindListView(view);
+                var namesBeforeSort = WaitForNames(listView, module, "child", loadFolderCount + 2);
+                if (!namesBeforeSort.Contains("folder-000", StringComparer.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The large recursive-size sort probe fixture is missing folder-000.");
+                var ascendingNames = SortByHeader(module, listView, columnIndex: 1, expectedCount: loadFolderCount + 2,
+                    stage: "large-view-recursive-size-sort-ascending");
+                var sortColumns = CaptureNativeSortColumns(folderView);
+                var sortComparisons = ReadCounter(module, "GetSyntheticSizeCompareCount");
+                Console.WriteLine($"synthetic-large-view-size-sort: phase=before-refresh; columns=[{FormatSortColumns(sortColumns)}]; compare-count={sortComparisons}; rows={ReadNames(listView, module, expectedCount: loadFolderCount + 2).Length}");
+                // The Shell reports its mapped sort property key, which is not the
+                // provider's private display-column key; the clicked header and
+                // comparator activity establish which custom column was exercised.
+                if (sortColumns.Length != 1 || sortColumns[0].Direction != 1 || sortComparisons == 0 ||
+                    !IsNameBefore(ascendingNames, "folder-000", "child"))
+                    throw new InvalidOperationException("The large-view probe did not establish an ascending recursive-size Shell sort before refresh.");
+
+                RunSizeUpdateStrategy("large-view-sort-refresh", 1,
+                    () => Check(At<RefreshView>(view, 8)(view)), module, folderView, view, backingFolder,
+                    publishLiveSnapshot: true, expectLiveRefresh: true, largeViewLoad: true,
+                    expectedRowCount: loadFolderCount + 2, expectedFolderSortPair: ("child", "folder-000"),
+                    expectedInitialChildSize: "30", host: host);
+                return;
+            }
             if (strategyFilter == "single-item")
                 RunSizeUpdateStrategy("single-item", 1, () =>
                     SHChangeNotify(ShcneUpdateitem, 0, absoluteChildPidl, 0),
@@ -1570,13 +1600,14 @@ public static class SyntheticShellSortProbe
         string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
         bool reapplyCapturedColumns = false, bool publishLiveSnapshot = false,
         bool expectLiveRefresh = false, bool holdListViewRedrawUntilSettled = false,
-        bool scanInBackground = false, bool largeViewLoad = false, int expectedRowCount = 2)
+        bool scanInBackground = false, bool largeViewLoad = false, int expectedRowCount = 2,
+        (string First, string Second)? expectedFolderSortPair = null, string expectedInitialChildSize = "10")
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
         // would erase the baseline before the notification under investigation.
         var listView = FindListView(view);
-        var before = WaitForSizeState(listView, module, "10",
+        var before = WaitForSizeState(listView, module, expectedInitialChildSize,
             expectedFirstName: largeViewLoad || preserveScrollAnchor ? null : "child", expectedSelection: null,
             expectedRowCount: largeViewLoad ? expectedRowCount : -1);
         var beforeHeaderColumns = ReadHeaderColumnTitles(listView);
@@ -1778,6 +1809,13 @@ public static class SyntheticShellSortProbe
             throw new InvalidOperationException($"Publishing the recursive-size snapshot to the active view did not refresh its displayed value and sort order after the Shell notification: {FormatSizeState(after)}");
         if (largeViewLoad && after.Names.Length != expectedRowCount)
             throw new InvalidOperationException($"The large view refresh did not restore the expected row count: rows={after.Names.Length}/{expectedRowCount}.");
+        if (expectedFolderSortPair is { } sortPair)
+        {
+            var foldersRemainSorted = IsNameBefore(after.Names, sortPair.First, sortPair.Second);
+            Console.WriteLine($"synthetic-large-view-size-sort: phase=after-refresh; ascending={foldersRemainSorted}; pair={sortPair.First}|{sortPair.Second}; names=[{FormatProbeRows(after.Names)}]");
+            if (!foldersRemainSorted)
+                throw new InvalidOperationException($"The full-view refresh did not re-sort the recursive-size column: expected '{sortPair.First}' before '{sortPair.Second}'.");
+        }
         if (expectLiveRefresh && !liveUpdateSelectionRestored)
             throw new InvalidOperationException("The full-view recursive-size refresh did not restore its pre-refresh selection and focus.");
         if (preserveScrollAnchor)

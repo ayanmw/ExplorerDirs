@@ -5583,3 +5583,7 @@ SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototy
 ### 2026-11-01：完整 SettingsSmoke 当前状态复核
 
 本日运行 `dotnet run --project src/ExplorerDirs.SettingsSmoke -c Release`，完整套件退出码 0，输出 `Settings smoke: PASS`。2026-10-31 多行句柄扫描记录中提到的 Soft-Refresh 文案断言失败，已由 `001b2c1 Align soft refresh smoke with menu copy` 修正；该失败只保留为当日历史，不再是当前主线验证阻塞。该套件通过不等同于可见 UI 或 Shell 互操作验收。
+
+### 2026-11-01：递归大小列原型排序刷新推进
+
+500 行隐藏 Shell view 已验证递归大小列升序排序与后台值更新后的正确重排：刷新前 `child=30 B` 排在 `folder-000=20 B` 后，刷新后 `child=1 B` 排到其前，502 行完整重枚举，扫描缓存命中且选区/焦点恢复。验证依据及旧判据修正记录见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-500-行递归大小排序刷新重排)。这仍是 NativeProbe 的隐藏 `IShellView` 原型，不代表 ExplorerBrowser 产品接入或可见刷新效果。近期下一步是单独验证 DefView 可支持的单行更新路径，以及单行值变更能否在当前排序下触发行位置重排；只有该机制可靠后才评估是否纳入产品路线。
