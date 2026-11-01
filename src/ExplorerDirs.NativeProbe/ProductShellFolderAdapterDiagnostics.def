@@ -5,6 +5,7 @@ EXPORTS
     ConfigureShellNamespaceRoot
     GetProductAsyncItemNotificationAttempts
     GetProductAsyncItemNotificationUnderSyntheticRootCount
+    ConfigureProductNotificationDeliveryForProbe
     GetProductAsyncDirectoryNotificationAttempts
     GetProductAsyncItemNotificationIdentityCount
     GetProductAsyncItemNotificationIdentity

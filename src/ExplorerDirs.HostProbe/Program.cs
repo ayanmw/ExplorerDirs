@@ -46,6 +46,10 @@ internal static class Program
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("header-click");
         if (args is ["--shell-provider-product-async-notification-burst"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst");
+        if (args is ["--shell-provider-product-async-notification-burst-flush"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst-flush");
+        if (args is ["--shell-provider-product-async-notification-burst-spaced"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst-spaced");
         if (args is ["--shell-provider-location-no-desktop-namespace"])
             return ShellProviderLocationProbe.Run(registerDesktopNamespace: false);
         if (args is ["--shell-provider-location-descending"]) return ShellProviderLocationProbe.Run(descending: true);

@@ -2595,7 +2595,15 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 
 随后只在诊断 DLL/HostProbe 中把 `SFVM_GETNOTIFY` 返回根从物理 backing directory 临时切换到 synthetic namespace root，再运行同一 16 项 burst。诊断记录确认 ExplorerBrowser view 调用了 `SFVM_GETNOTIFY` 两次；最后返回的根 parsing name 是该测试 synthetic namespace view root，事件掩码为 `SHCNE_ALLEVENTS`。同一进程对 16 个实际发送 PIDL 逐一调用 `ILIsParent(registeredRoot, itemPidl, TRUE)`，全部为 true；但通知后仍是 `SFVM_FSNOTIFY` 回调 0、Desktop observer 11/16。官方接口契约说明 GETNOTIFY 的 PIDL 与事件掩码用于注册变更通知，匹配事件应通过 FSNOTIFY 回调，因此现已排除 view 未查询 GETNOTIFY、仅监听物理 backing root，以及严格 PIDL 祖先层级不匹配这几种简单解释。parsing name 与祖先判定仍不能证明 Shell change service 对合成 namespace 的具体二进制/注册行为完全符合视图预期。此次 burst 按现有完整投递门槛预期失败，不能算通过。
 
-实验切换与计数只存在于 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 构建及 HostProbe，不进入正式产品 DLL；没有改 App、发布版本或可见 UI。后续若继续，先用单项、同步刷新和分散时序对照确认是否为 Shell 通知队列/投递节奏，再决定是否需要更低层跟踪通知注册与回调 HWND；在确认 Shell view 能接收并正确刷新目标行前，不把逐行递归大小列接入普通浏览器视图。
+实验切换与计数只存在于 `EXPLORERDIRS_PRODUCT_DIAGNOSTICS` 构建及 HostProbe，不进入正式产品 DLL；没有改 App、发布版本或可见 UI。后续需验证同步 flush 下目标 view 的实际行/单元格是否刷新；若 `SFVM_FSNOTIFY` 仍未进入，则跟踪系统通知注册 HWND/事件投递，并避免把 flush 的广播观察器结果误当作 view 更新证据。在确认 Shell view 能接收并正确刷新目标行前，不把逐行递归大小列接入普通浏览器视图。
+
+### 2026-11-02：逐项通知同步投递与间隔对照
+
+在上一节诊断开关基础上增加两种仅 HostProbe/诊断 DLL 使用的投递方式：每个 `SHCNE_UPDATEITEM` 使用 `SHCNF_FLUSH`，以及每项间隔 150 ms。Microsoft 将 `SHCNF_FLUSH` 定义为函数返回前把通知送达所有受影响组件；它是同步广播，不代表某个具体 view callback 已成功处理。
+
+16 项 burst 使用 `SHCNF_FLUSH` 连续 3 次均由 Desktop scope observer 收齐 16 个 PIDL，Shell ItemCount 与导出行数均保持 16，递归大小最终升序正确；整个隐藏 HostProbe exit 0。相同数据用每项 150 ms 间隔仍只收到 `folder-extra-00..10` 共 11 项，30 秒内没有后续事件。两种投递模式的 `SFVM_FSNOTIFY` 回调仍均为 0。因此完整 Shell 广播丢项与同步 flush 明显相关；单纯拉开 150 ms 间隔不足以修复。该结果支持继续验证 `SHCNF_FLUSH` 是否能让目标 DefView 实际重绘单元格，但暂不把同步广播接入产品：尚无可见行更新/焦点/选区证据，且 flush 会阻塞通知 worker 等待所有受影响组件。
+
+诊断参数为 `--shell-provider-product-async-notification-burst-flush` 和 `--shell-provider-product-async-notification-burst-spaced`；正式产品 DLL、App、默认通知策略和 release 均未修改。
 
 ### 2026-11-02：App profile namespace owner 与 native 载荷
 

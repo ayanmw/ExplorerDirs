@@ -21,7 +21,9 @@ internal static class ShellProviderLocationProbe
         var viewRoot = Path.Combine(root, "view-root");
         var smallFolder = Path.Combine(viewRoot, "folder-small");
         var largeFolder = Path.Combine(viewRoot, "folder-large");
-        var notificationBurst = sortStrategy == "notification-burst";
+        var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
+        var flushNotifications = sortStrategy == "notification-burst-flush";
+        var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 : 0;
         var expectedFolderCount = notificationBurst ? 16 : 2;
         var expectedRecursiveValues = notificationBurst
             ? Enumerable.Range(101, 14).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
@@ -66,6 +68,8 @@ internal static class ShellProviderLocationProbe
             Check(configure(ref classId, fallbackRoot));
             if (notificationBurst && NativeLibrary.TryGetExport(adapter, "SetProductViewNotificationsUseSyntheticRoot", out var notificationRootAddress))
                 Marshal.GetDelegateForFunctionPointer<SetProductViewNotificationsUseSyntheticRoot>(notificationRootAddress)(1);
+            if (notificationBurst && NativeLibrary.TryGetExport(adapter, "ConfigureProductNotificationDeliveryForProbe", out var notificationDeliveryAddress))
+                Marshal.GetDelegateForFunctionPointer<ConfigureProductNotificationDeliveryForProbe>(notificationDeliveryAddress)(flushNotifications ? 1 : 0, (uint)notificationDelayMilliseconds);
             RegisterVolatileClass(classKeyPath, adapterPath);
             classRegistered = true;
             RegisterVolatileNamespace(namespaceKeyPath);
@@ -155,7 +159,7 @@ internal static class ShellProviderLocationProbe
                     .Order().SequenceEqual(expectedRecursiveValues);
             }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
 
-            if (sortStrategy is "scheduled" or "notification-burst")
+            if (sortStrategy == "scheduled" || notificationBurst)
             {
                 stage = "item-update-delivery";
                 var notificationDeliverySamples = new List<string>();
@@ -189,7 +193,7 @@ internal static class ShellProviderLocationProbe
                 var sentNotificationNames = sentNotificationIdentities.Select(GetProviderItemName).ToArray();
                 var viewCallbackNames = viewCallbackIdentities.Select(GetProviderItemName).ToArray();
                 var receivedNotificationNames = desktopUpdateObserver.UpdatedItemParsingNames.Select(GetProviderItemName).ToArray();
-                Console.WriteLine($"shell-provider-product-async-notifications: adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; item-pidls-under-provider-root={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationUnderSyntheticRootCount")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; view-getnotify-calls={ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyCallCount")}; view-getnotify-root={ReadProductDiagnosticString(adapter, "GetProductViewGetNotifyRootIdentity")}; view-getnotify-event-mask=0x{ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyEventMask")}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; view-callback-pidl-identities=[{string.Join('|', viewCallbackNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
+                Console.WriteLine($"shell-provider-product-async-notifications: mode={sortStrategy}; adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; item-pidls-under-provider-root={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationUnderSyntheticRootCount")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; view-getnotify-calls={ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyCallCount")}; view-getnotify-root={ReadProductDiagnosticString(adapter, "GetProductViewGetNotifyRootIdentity")}; view-getnotify-event-mask=0x{ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyEventMask")}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; view-callback-pidl-identities=[{string.Join('|', viewCallbackNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
                 if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
                     throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
@@ -1899,6 +1903,7 @@ internal static class ShellProviderLocationProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetDiagnosticString([MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductViewNotificationsUseSyntheticRoot(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ConfigureProductNotificationDeliveryForProbe(int flush, uint delayMilliseconds);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetProductAsyncItemNotificationIdentity(int index,
         [MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);

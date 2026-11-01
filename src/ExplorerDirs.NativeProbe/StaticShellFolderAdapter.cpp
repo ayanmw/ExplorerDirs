@@ -1857,6 +1857,8 @@ namespace
     volatile LONG g_productAsyncItemNotificationAttempts = 0;
     volatile LONG g_productAsyncItemNotificationUnderSyntheticRoot = 0;
     volatile LONG g_productAsyncDirectoryNotificationAttempts = 0;
+    volatile LONG g_productNotificationFlushForProbe = 0;
+    volatile LONG g_productNotificationDelayMsForProbe = 0;
     std::mutex g_productAsyncItemNotificationIdentityMutex;
     std::vector<std::wstring> g_productAsyncItemNotificationIdentities;
     volatile LONG g_productViewItemNotificationCallbacks = 0;
@@ -4559,7 +4561,16 @@ namespace
                                     InterlockedIncrement(&g_productAsyncItemNotificationUnderSyntheticRoot);
                                 InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
 #endif
-                                SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, notification.second, nullptr);
+                                UINT notifyFlags = SHCNF_IDLIST;
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                                if (InterlockedCompareExchange(&g_productNotificationFlushForProbe, 0, 0))
+                                    notifyFlags |= SHCNF_FLUSH;
+#endif
+                                SHChangeNotify(SHCNE_UPDATEITEM, notifyFlags, notification.second, nullptr);
+#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                                const auto delay = InterlockedCompareExchange(&g_productNotificationDelayMsForProbe, 0, 0);
+                                if (delay > 0) Sleep(static_cast<DWORD>(delay));
+#endif
                                 CoTaskMemFree(notification.second);
                             }
                         }
@@ -5123,6 +5134,12 @@ extern "C" LONG WINAPI GetProductAsyncItemNotificationAttempts()
 
 extern "C" LONG WINAPI GetProductAsyncItemNotificationUnderSyntheticRootCount()
 { return InterlockedCompareExchange(&g_productAsyncItemNotificationUnderSyntheticRoot, 0, 0); }
+
+extern "C" void WINAPI ConfigureProductNotificationDeliveryForProbe(BOOL flush, DWORD delayMilliseconds)
+{
+    InterlockedExchange(&g_productNotificationFlushForProbe, flush ? 1 : 0);
+    InterlockedExchange(&g_productNotificationDelayMsForProbe, static_cast<LONG>(delayMilliseconds));
+}
 
 extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncDirectoryNotificationAttempts, 0, 0); }
