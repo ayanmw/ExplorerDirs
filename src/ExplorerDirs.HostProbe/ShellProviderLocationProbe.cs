@@ -70,7 +70,12 @@ internal static class ShellProviderLocationProbe
             displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [nameKey, 240]), 1);
             var viewStateConstructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                 .Single(constructor => constructor.GetParameters().Length == 6);
-            var viewState = viewStateConstructor.Invoke([4u, 16, sortColumns, null, true, displayColumns]);
+            var initialViewState = viewStateConstructor.Invoke([4u, 16, sortColumns, null, true, displayColumns]);
+            var restoredTab = RoundTripSessionTab(appAssembly, Path.Combine(root, "ExplorerDirs.ini"),
+                targetIdentity, initialViewState, initialDirection);
+            targetIdentity = (string)restoredTab.GetType().GetProperty("Path")!.GetValue(restoredTab)!;
+            var viewState = restoredTab.GetType().GetProperty("View")!.GetValue(restoredTab)!;
+            Console.WriteLine("shell-provider-session-ini: path-preserved=True; recursive-column-and-sort-preserved=True");
             var hostType = appAssembly.GetType("ExplorerDirs.App.ExplorerBrowserHost", throwOnError: true)!;
             host = (HwndHost)Activator.CreateInstance(hostType, targetIdentity, viewState)!;
             var grid = new Grid { Width = 800, Height = 500 };
@@ -275,7 +280,7 @@ internal static class ShellProviderLocationProbe
 
             var headerCompareDeltas = Enumerable.Range(0, columnCompareCountsBefore.Length)
                 .Select(index => getCompareCountForColumn((uint)index) - headerColumnCountsBefore[index]).ToArray();
-            Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; saved-visible-columns=[{string.Join('|', displayColumnsBeforeHeaderOrder)}]; visible-columns-after-header-action=[{string.Join('|', CaptureDisplayColumns(hostType, host))}]; logical-header-texts=[{string.Join('|', logicalHeaderTexts)}]; initial-visual-header-order=[{string.Join('|', initialVisualHeaderOrder)}]; visual-header-order=[{string.Join('|', nativeHeaderOrder)}]; recursive-header-index={recursiveHeaderIndex}; getdetailsof-headers=[{string.Join('|', mappedShellExport.ShellHeaders)}]; mapped-export-columns=[{string.Join('|', mappedShellExport.Columns)}]; mapped-export-ordinals=[{string.Join('|', mappedShellExport.Ordinals)}]; mapped-export-rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}]; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-columns=[{string.Join('|', columnNames)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
+            Console.WriteLine($"shell-provider-location: session-ini-roundtrip=True; product-host-navigation=True; is-filesystem=False; rows={total}; saved-visible-columns=[{string.Join('|', displayColumnsBeforeHeaderOrder)}]; visible-columns-after-header-action=[{string.Join('|', CaptureDisplayColumns(hostType, host))}]; logical-header-texts=[{string.Join('|', logicalHeaderTexts)}]; initial-visual-header-order=[{string.Join('|', initialVisualHeaderOrder)}]; visual-header-order=[{string.Join('|', nativeHeaderOrder)}]; recursive-header-index={recursiveHeaderIndex}; getdetailsof-headers=[{string.Join('|', mappedShellExport.ShellHeaders)}]; mapped-export-columns=[{string.Join('|', mappedShellExport.Columns)}]; mapped-export-ordinals=[{string.Join('|', mappedShellExport.Ordinals)}]; mapped-export-rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}]; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-columns=[{string.Join('|', columnNames)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
             if (IsWindowVisible(source.Handle)) throw new InvalidOperationException("The hidden Shell provider HostProbe parent became visible.");
             var parentColumnsBeforeNestedNavigation = CaptureDisplayColumns(hostType, host);
             var nestedPath = Path.Combine(pathB, "folder-small");
@@ -356,6 +361,67 @@ internal static class ShellProviderLocationProbe
             .Order(StringComparer.OrdinalIgnoreCase);
         return fileIndex == (descending ? 0 : actual.Length - 1) &&
             folders.SequenceEqual(["folder-large", "folder-small"], StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static object RoundTripSessionTab(Assembly appAssembly, string profilePath, string path, object viewState,
+        int expectedSortDirection)
+    {
+        var tabSettingsType = appAssembly.GetType("ExplorerDirs.App.TabSettings", throwOnError: true)!;
+        var sessionStateType = appAssembly.GetType("ExplorerDirs.App.SessionState", throwOnError: true)!;
+        var sessionStoreType = appAssembly.GetType("ExplorerDirs.App.SessionStore", throwOnError: true)!;
+        var paneType = typeof(List<>).MakeGenericType(tabSettingsType);
+        var panesType = typeof(List<>).MakeGenericType(paneType);
+        var panes = (IList)Activator.CreateInstance(panesType)!;
+        for (var paneIndex = 0; paneIndex < 4; paneIndex++)
+        {
+            var tabs = (IList)Activator.CreateInstance(paneType)!;
+            if (paneIndex == 0)
+                tabs.Add(Activator.CreateInstance(tabSettingsType, [path, viewState, null, false, false]));
+            panes.Add(tabs);
+        }
+
+        var stateConstructor = sessionStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .Single(constructor => constructor.GetParameters().Length == 11);
+        var state = stateConstructor.Invoke([4, 4u, panes, 0, new[] { 0, 0, 0, 0 }, 16,
+            new[] { false, false, false, false }, null, null, null, null]);
+        var store = Activator.CreateInstance(sessionStoreType, [profilePath, profilePath + ".legacy"])!;
+        sessionStoreType.GetMethod("Save")!.Invoke(store, [state]);
+        var reloaded = Activator.CreateInstance(sessionStoreType, [profilePath, profilePath + ".legacy"])!;
+        var loadedState = sessionStoreType.GetMethod("Load")!.Invoke(reloaded, null)
+            ?? throw new InvalidOperationException("The production SessionStore could not reload its written INI profile.");
+        var loadedPanes = ((IEnumerable)loadedState.GetType().GetProperty("Panes")!.GetValue(loadedState)!).Cast<object>().ToArray();
+        var loadedFirstPane = ((IEnumerable)loadedPanes[0]).Cast<object>().ToArray();
+        if (loadedFirstPane.Length != 1) throw new InvalidOperationException("The INI round trip did not preserve the probe tab.");
+        var loadedTab = loadedFirstPane[0];
+        if (!string.Equals((string)loadedTab.GetType().GetProperty("Path")!.GetValue(loadedTab)!, path,
+                StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The INI round trip changed the registered Shell path identity.");
+
+        var loadedView = loadedTab.GetType().GetProperty("View")!.GetValue(loadedTab)!;
+        var sortColumns = ((IEnumerable)loadedView.GetType().GetProperty("SortColumns")!.GetValue(loadedView)!).Cast<object>().ToArray();
+        var displayColumns = ((IEnumerable)loadedView.GetType().GetProperty("DisplayColumns")!.GetValue(loadedView)!).Cast<object>().ToArray();
+        if ((uint)loadedView.GetType().GetProperty("Mode")!.GetValue(loadedView)! != 4 ||
+            (int)loadedView.GetType().GetProperty("IconSize")!.GetValue(loadedView)! != 16 ||
+            sortColumns.Length != 1 || displayColumns.Length != 2)
+            throw new InvalidOperationException("The INI round trip changed the custom recursive view shape.");
+        var sort = sortColumns[0];
+        var sortKey = sort.GetType().GetProperty("Key")!.GetValue(sort)!;
+        var sortFormat = (Guid)sortKey.GetType().GetProperty("FormatId")!.GetValue(sortKey)!;
+        var sortId = (uint)sortKey.GetType().GetProperty("PropertyId")!.GetValue(sortKey)!;
+        var sortDirection = (int)sort.GetType().GetProperty("Direction")!.GetValue(sort)!;
+        if (sortFormat != Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923") || sortId != 1 || sortDirection != expectedSortDirection)
+            throw new InvalidOperationException("The INI round trip changed the recursive sort key or direction.");
+        var restoredDisplayKeys = displayColumns.Select(column =>
+        {
+            var key = column.GetType().GetProperty("Key")!.GetValue(column)!;
+            return ((Guid)key.GetType().GetProperty("FormatId")!.GetValue(key)!,
+                (uint)key.GetType().GetProperty("PropertyId")!.GetValue(key)!,
+                (int)column.GetType().GetProperty("Width")!.GetValue(column)!);
+        }).ToArray();
+        if (restoredDisplayKeys[0] != (Guid.Parse("9E5E05AC-1936-4A75-94F7-4704B8B01923"), 1u, 180) ||
+            restoredDisplayKeys[1] != (Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10u, 240))
+            throw new InvalidOperationException("The INI round trip changed recursive/name column keys or widths.");
+        return loadedTab;
     }
 
     private static int RunFilesystemSortRestoreProbe()
