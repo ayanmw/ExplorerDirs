@@ -100,6 +100,16 @@ internal static class RecursiveDirectoryScannerSmoke
                     !finalResults.TryGetValue(row.FileSystemPath!, out var result) || summary != result.Summary))
                 throw new InvalidOperationException("Incremental directory callbacks did not reconcile with the final handle-bound scan results.");
 
+            var independentCallbacks = new ConcurrentQueue<(string Path, ShellListViewRowScanResult Result)>();
+            var independentResults = HandleBoundRecursiveDirectoryScanner.Scan(folderPaths, CancellationToken.None,
+                completedDirectory: (path, result) => independentCallbacks.Enqueue((path, result)));
+            var independentCompletions = independentCallbacks.ToArray();
+            if (independentCompletions.Length != folderCount ||
+                independentCompletions.Any(item => independentResults[item.Path] != item.Result) ||
+                !independentResults.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    .SetEquals(folderPaths))
+                throw new InvalidOperationException("Independent directory scan callbacks did not reconcile with the returned result map.");
+
             using var cancellation = new CancellationTokenSource();
             var cancelledCallbacks = new ConcurrentQueue<string>();
             var cancelledTask = Task.Run(() => HandleBoundRecursiveDirectoryScanner.ScanDirectoryTree(
@@ -153,6 +163,7 @@ internal static class RecursiveDirectoryScannerSmoke
                 $"first-folder-published-before-root-completion=True; owner-thread={ownerThread}; " +
                 $"worker-thread={firstPublished.WorkerThread}; completed-callbacks={completions.Length}; " +
                 "owner-row-model-applied-incrementally=True; " +
+                $"independent-directory-callbacks={independentCompletions.Length}; " +
                 $"root-published-last={completions[^1].Path == rootPath}; cancellation-after-one-folder=True; " +
                 "missing-child-publishes-unreadable-row=True; " +
                 $"root-published-after-cancel=False; handles-released-after-cancel=True");

@@ -41,7 +41,8 @@ internal static class HandleBoundRecursiveDirectoryScanner
         CancellationToken cancellationToken,
         Action<string, ShellFileSystemIdentity>? afterRootOpened = null,
         Action<string, string>? beforeChildOpen = null,
-        Action<string, ShellFileSystemIdentity, RecursiveDirectoryScanResult>? afterRootScannedBeforeReturn = null)
+        Action<string, ShellFileSystemIdentity, RecursiveDirectoryScanResult>? afterRootScannedBeforeReturn = null,
+        Action<string, ShellListViewRowScanResult>? completedDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(requestedPaths);
         cancellationToken.ThrowIfCancellationRequested();
@@ -60,6 +61,7 @@ internal static class HandleBoundRecursiveDirectoryScanner
             cancellationToken.ThrowIfCancellationRequested();
             var root = OpenDirectory(path);
             if (root is null) continue;
+            ShellListViewRowScanResult completed;
             using (root.Handle)
             {
                 afterRootOpened?.Invoke(path, root.Identity);
@@ -67,14 +69,17 @@ internal static class HandleBoundRecursiveDirectoryScanner
                 {
                     var skipped = new RecursiveDirectoryScanResult(0, 0, 0, 1);
                     afterRootScannedBeforeReturn?.Invoke(path, root.Identity, skipped);
-                    results.Add(path, new(root.Identity, skipped));
-                    continue;
+                    completed = new(root.Identity, skipped);
                 }
-
-                var summary = ScanOpenedDirectory(root.Handle, root.Identity, path, cancellationToken, beforeChildOpen);
-                afterRootScannedBeforeReturn?.Invoke(path, root.Identity, summary);
-                results.Add(path, new(root.Identity, summary));
+                else
+                {
+                    var summary = ScanOpenedDirectory(root.Handle, root.Identity, path, cancellationToken, beforeChildOpen);
+                    afterRootScannedBeforeReturn?.Invoke(path, root.Identity, summary);
+                    completed = new(root.Identity, summary);
+                }
             }
+            results.Add(path, completed);
+            completedDirectory?.Invoke(path, completed);
         }
         return results;
     }

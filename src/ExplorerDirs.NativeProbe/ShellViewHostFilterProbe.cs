@@ -2301,30 +2301,75 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException("The viewport on-demand scan populated a non-visible recursive-size row or showed percentages before the sibling total was known.");
 
             var remainingPaths = scanPaths.Where(path => !requestedPaths.Contains(path, StringComparer.OrdinalIgnoreCase)).ToArray();
-            var rowIndexByPath = projection.Rows.Select((row, index) => (row, index))
-                .Where(item => item.row.FileSystemPath is not null)
-                .ToDictionary(item => Path.GetFullPath(item.row.FileSystemPath!), item => item.index,
+            var rowByPath = projection.Rows
+                .Where(row => row.FileSystemPath is not null)
+                .ToDictionary(row => Path.GetFullPath(row.FileSystemPath!), row => row,
                     StringComparer.OrdinalIgnoreCase);
-            var remainingScan = Task.Run(() =>
-                HandleBoundRecursiveDirectoryScanner.Scan(remainingPaths, cancellation.Token), cancellation.Token);
-            while (!remainingScan.IsCompleted)
+            var ownerDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            var ownerContext = new System.Windows.Threading.DispatcherSynchronizationContext(ownerDispatcher);
+            using var remainingScanCoordinator = new DirectoryTreeScanCoordinator();
+            using var cancelRemainingScanRegistration = cancellation.Token.Register(remainingScanCoordinator.CancelCurrent);
+            var incrementalUpdatesApplied = 0;
+            var firstIncrementalValueArrived = false;
+            IReadOnlyDictionary<string, ShellListViewRowScanResult>? remainingResults = null;
+            var remainingScan = remainingScanCoordinator.RunLatestIncrementalAsync<
+                (string Path, ShellListViewRowScanResult Result),
+                IReadOnlyDictionary<string, ShellListViewRowScanResult>>(
+                (scanToken, publish) => HandleBoundRecursiveDirectoryScanner.Scan(remainingPaths, scanToken,
+                    completedDirectory: (path, result) => publish((path, result))),
+                ownerContext,
+                update =>
+                {
+                    var fullPath = Path.GetFullPath(update.Path);
+                    if (!rowByPath.TryGetValue(fullPath, out var row) || row.FileSystemIdentity != update.Result.Identity ||
+                        ShellListViewRowIdentity.GetFileSystemIdentity(fullPath) != update.Result.Identity)
+                        throw new InvalidOperationException("An incremental recursive-size result no longer matches its captured Shell row identity.");
+                    // Shell sorting can move ListView rows; resolve the stable row ID for every owner-thread update.
+                    var liveIndexById = ReadPeerListRowIds(listView).Select((id, index) => (id, index))
+                        .ToDictionary(item => item.id, item => item.index);
+                    if (!liveIndexById.TryGetValue(row.Id, out var liveIndex))
+                        throw new InvalidOperationException("An incremental recursive-size result no longer maps to a live peer row ID.");
+                    var liveIds = liveIndexById.OrderBy(item => item.Value).Select(item => item.Key);
+                    if (!liveIds.SequenceEqual(initialIds) ||
+                        GetPeerListItemState(listView, liveIndexById[selectedRow.Id], 0x0003) != 0x0003)
+                        throw new InvalidOperationException("Incremental cell updates changed the peer row order or selected/focused Shell row.");
+
+                    sizes[fullPath] = update.Result.Summary.Bytes;
+                    recursiveSizeCache[fullPath] = update.Result.Summary.Bytes;
+                    bytesById[row.Id] = update.Result.Summary.Bytes;
+                    SetPeerListCell(listView, liveIndex, row.DetailTitles.Length,
+                        update.Result.Summary.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
+                    incrementalUpdatesApplied++;
+                    firstIncrementalValueArrived = true;
+                },
+                results =>
+                {
+                    if (!results.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(remainingPaths))
+                        throw new InvalidOperationException("The final recursive-size scan map did not include every independently requested directory.");
+                    remainingResults = results;
+                });
+            var remainingFrame = new System.Windows.Threading.DispatcherFrame();
+            var remainingPoll = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background)
             {
-                Application.DoEvents();
-                if (!ReadPeerListRowIds(listView).SequenceEqual(initialIds))
-                    throw new InvalidOperationException("The peer row identities changed while additional recursive values were loading.");
-                Thread.Sleep(10);
-            }
-            foreach (var pair in remainingScan.GetAwaiter().GetResult())
+                Interval = TimeSpan.FromMilliseconds(10)
+            };
+            remainingPoll.Tick += (_, _) =>
+            {
+                if (remainingScan.IsCompleted) remainingFrame.Continue = false;
+            };
+            remainingPoll.Start();
+            try { System.Windows.Threading.Dispatcher.PushFrame(remainingFrame); }
+            finally { remainingPoll.Stop(); }
+            if (!remainingScan.GetAwaiter().GetResult() || remainingResults is null || !firstIncrementalValueArrived ||
+                incrementalUpdatesApplied != remainingPaths.Length)
+                throw new InvalidOperationException("The latest remaining-directory scan did not incrementally publish every row on its owner dispatcher.");
+
+            foreach (var pair in remainingResults)
             {
                 var fullPath = Path.GetFullPath(pair.Key);
-                sizes[fullPath] = pair.Value.Summary.Bytes;
-                recursiveSizeCache[fullPath] = pair.Value.Summary.Bytes;
-                if (!rowIndexByPath.TryGetValue(fullPath, out var rowIndex))
-                    throw new InvalidOperationException("A requested recursive-size result no longer maps to a Shell row.");
-                var row = projection.Rows[rowIndex];
-                bytesById[row.Id] = pair.Value.Summary.Bytes;
-                SetPeerListCell(listView, rowIndex, row.DetailTitles.Length,
-                    pair.Value.Summary.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
+                if (sizes.GetValueOrDefault(fullPath) != pair.Value.Summary.Bytes)
+                    throw new InvalidOperationException("An incrementally rendered row differed from the final handle-bound scan result.");
             }
             if (bytesById[selectedRow.Id] != 10 || bytesById[projection.Rows.Single(row => row.Name == "size-2").Id] != 2 ||
                 bytesById[projection.Rows.Single(row => row.Name == "size-100").Id] != 100)
@@ -2354,7 +2399,7 @@ internal static class ShellViewHostFilterProbe
             if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
                 throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
             pendingViewportRequest?.Dispose();
-            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; wm-vscroll-moved-viewport={lineScrollMovedViewport}; wm-mousewheel-moved-viewport={wheelMovedViewport}; native-viewport-events={viewportChangeEvents}; obsolete-inflight-scan-canceled={supersededViewportRequest!.IsCanceled}; scans-started={startedViewportScans}; scans-completed={completedViewportScans}; viewport-updates-coalesced={viewportChangeEvents - completedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-published=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; wm-vscroll-moved-viewport={lineScrollMovedViewport}; wm-mousewheel-moved-viewport={wheelMovedViewport}; native-viewport-events={viewportChangeEvents}; obsolete-inflight-scan-canceled={supersededViewportRequest!.IsCanceled}; scans-started={startedViewportScans}; scans-completed={completedViewportScans}; viewport-updates-coalesced={viewportChangeEvents - completedViewportScans}; visible-folder-rows-requested={completed.Paths.Length}; remaining-row-values-published-incrementally={incrementalUpdatesApplied}; final-map-reconciled=True; viewport-top-index={GetPeerListTopIndex(listView)}; viewport-count-per-page={GetPeerListCountPerPage(listView)}; only-final-visible-rows-published=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
 
             var changedDirectory = Path.GetFullPath(projection.Rows.Single(row => row.Name == "size-10").FileSystemPath!);
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
