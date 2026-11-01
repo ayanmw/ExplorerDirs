@@ -5550,3 +5550,7 @@ NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归
 此前直接调用 provider 回调只能证明缓存失效逻辑，不能证明 Shell 会把事件投递给 view。NativeProbe 现通过活动的 synthetic `IShellView` 与 `WPF HwndSource` 隐藏宿主验证完整投递：先为 `child` 行发布哨兵快照，再将绝对 PIDL 的 `SHCNE_UPDATEITEM` 与 `SHCNE_UPDATEDIR` 分别交给 Shell 通知系统；第二项前在 `child` 中创建临时文件。两事件到达活动 view 后，provider 中 `child` 快照均变为 miss。既有目录更新检查同时看到根列表一轮重枚举、303 行可见，view 没有安排自有延迟刷新。Private Desktop probe exit 0，前台 HWND/最后输入 tick 未变，`isolation-clean=True`。
 
 该实验确认本机 Windows Shell 的显式 `SHChangeNotify` 经活动 view 注册路径可触发递归大小缓存失效；没有验证不显式发送 Shell 通知的任意第三方写入、跨进程事件生成时序、ExplorerBrowser 产品接线、可见列刷新或长期缓存容量。
+
+### 2026-11-01：递归大小原型缓存有界化
+
+NativeProbe 的递归大小快照改为最多保留 256 项并按最近访问顺序淘汰。静态回归在旧实现上失败，修复后验证容量、LRU 命中和淘汰行为；原生 adapter `/W4 /WX`、NativeProbe Release 与 `--static-shell-column-folder-smoke` 通过。只约束隔离原型缓存，不等于产品内存优化或用户可见列已完成；详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归大小原型缓存设定-lru-上限)。

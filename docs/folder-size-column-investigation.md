@@ -1206,3 +1206,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 此前直接调用 provider 回调只能证明缓存失效逻辑，不能证明 Shell 会把事件投递给 view。NativeProbe 现通过活动的 synthetic `IShellView` 与 `WPF HwndSource` 隐藏宿主验证完整投递：先为 `child` 行发布哨兵快照，再将绝对 PIDL 的 `SHCNE_UPDATEITEM` 与 `SHCNE_UPDATEDIR` 分别交给 Shell 通知系统；第二项前在 `child` 中创建临时文件。两事件到达活动 view 后，provider 中 `child` 快照均变为 miss。既有目录更新检查同时看到根列表一轮重枚举、303 行可见，view 没有安排自有延迟刷新。Private Desktop probe exit 0，前台 HWND/最后输入 tick 未变，`isolation-clean=True`。
 
 该实验确认本机 Windows Shell 的显式 `SHChangeNotify` 经活动 view 注册路径可触发递归大小缓存失效；没有验证不显式发送 Shell 通知的任意第三方写入、跨进程事件生成时序、ExplorerBrowser 产品接线、可见列刷新或长期缓存容量。
+
+### 2026-11-01：递归大小原型缓存设定 LRU 上限
+
+此前 NativeProbe 的递归大小快照会一直保留到身份失效或 store 释放，访问过的路径数量增加时没有数量上限。原型 store 现在最多保留 256 个快照；命中会更新最近访问顺序，超限插入时淘汰最久未使用项。静态合同先在旧实现上按预期失败，再验证触碰最旧项后插入新项会淘汰第二旧项，快照数量保持 256，最新项和值均可读。淘汰只丢弃缓存结果，后续 Shell 读取可回退原生大小或由扫描重新填充。
+
+验证：Native adapter `/W4 /WX`、NativeProbe Release build 0 警告/错误，`--static-shell-column-folder-smoke` 退出码 0 并输出 `recursive-size-cache-lru-bound-passed`；此探针 `window-created=False`。该上限仅适用于隔离 NativeProbe 原型，未接入产品、未测进程内存变化，也不证明逐行大小列可见或 ExplorerBrowser 兼容性。

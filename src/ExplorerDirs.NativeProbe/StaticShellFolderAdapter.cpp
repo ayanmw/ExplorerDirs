@@ -1351,6 +1351,7 @@ namespace
     {
         SyntheticFileIdentity identity;
         ULONGLONG bytes = 0;
+        ULONGLONG lastAccess = 0;
     };
 
     bool TryGetSyntheticFileIdentity(PCWSTR path, SyntheticFileIdentity* identity)
@@ -1395,7 +1396,8 @@ namespace
             try
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                _sizes[parsingName] = { identity, bytes };
+                _sizes[parsingName] = { identity, bytes, NextAccessSequence() };
+                TrimToCapacity();
             }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
@@ -1501,6 +1503,7 @@ namespace
                 _sizes.erase(found);
                 return false;
             }
+            found->second.lastAccess = NextAccessSequence();
             *bytes = found->second.bytes;
             return true;
         }
@@ -1510,9 +1513,24 @@ namespace
             return _sizes.size();
         }
     private:
+        static constexpr size_t kMaximumSnapshots = 256;
+        ULONGLONG NextAccessSequence() const noexcept { return ++_accessSequence; }
+        void TrimToCapacity() const noexcept
+        {
+            while (_sizes.size() > kMaximumSnapshots)
+            {
+                auto oldest = _sizes.begin();
+                for (auto entry = std::next(oldest); entry != _sizes.end(); ++entry)
+                {
+                    if (entry->second.lastAccess < oldest->second.lastAccess) oldest = entry;
+                }
+                _sizes.erase(oldest);
+            }
+        }
         volatile LONG _references = 1;
         mutable std::mutex _mutex;
         mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
+        mutable ULONGLONG _accessSequence = 0;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -4006,6 +4024,40 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         }
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-ancestor-invalidation-passed");
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-invalidation-passed");
+
+        SyntheticRecursiveSizeSnapshotStore boundedStore;
+        std::wstring oldestPath;
+        std::wstring secondPath;
+        std::wstring newestPath;
+        try
+        {
+            for (size_t index = 0; index < 256; ++index)
+            {
+                const auto path = std::wstring(backingPath) + L"\\cache-entry-" + std::to_wstring(index);
+                if (index == 0) oldestPath = path;
+                if (index == 1) secondPath = path;
+                if (FAILED(boundedStore.Set(path.c_str(), child->identity, index)))
+                {
+                    result = E_FAIL;
+                    goto cleanup;
+                }
+            }
+            newestPath = std::wstring(backingPath) + L"\\cache-entry-newest";
+        }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        ULONGLONG cachedBytes = 0;
+        if (!boundedStore.TryGet(oldestPath, child->identity, &cachedBytes) || cachedBytes != 0 ||
+            FAILED(boundedStore.Set(newestPath.c_str(), child->identity, 999)) ||
+            boundedStore.Count() != 256 ||
+            !boundedStore.TryGet(oldestPath, child->identity, &cachedBytes) || cachedBytes != 0 ||
+            boundedStore.TryGet(secondPath, child->identity, &cachedBytes) ||
+            !boundedStore.TryGet(newestPath, child->identity, &cachedBytes) || cachedBytes != 999)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-cache-lru-bound-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-cache-lru-bound-passed");
     }
     nested->Release();
     nested = nullptr;
