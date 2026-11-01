@@ -3342,6 +3342,25 @@ namespace
             if (!attributes) return E_POINTER;
             if (count == 0) { *attributes = SFGAO_FOLDER | SFGAO_HASSUBFOLDER; return S_OK; }
             if (!_inner) return E_UNEXPECTED;
+            // IShellItem asks the namespace parent to classify path-marker PIDLs during session restore.
+            if (count == 1)
+            {
+                std::wstring path;
+                const auto pathResult = ReadSyntheticRootPathFromPidl(
+                    reinterpret_cast<PCIDLIST_ABSOLUTE>(items[0]), &path);
+                if (pathResult == S_OK)
+                {
+                    PIDLIST_ABSOLUTE pathPidl = nullptr;
+                    SFGAOF pathAttributes = 0;
+                    const auto parseResult = SHParseDisplayName(path.c_str(), nullptr, &pathPidl,
+                        *attributes & (SFGAO_FOLDER | SFGAO_FILESYSTEM), &pathAttributes);
+                    if (pathPidl) CoTaskMemFree(pathPidl);
+                    if (FAILED(parseResult)) return parseResult;
+                    *attributes &= pathAttributes;
+                    return S_OK;
+                }
+                if (FAILED(pathResult)) return pathResult;
+            }
             if (InterlockedCompareExchange(&g_syntheticOwnAttributesForProbe, 0, 0))
             {
                 const SFGAOF requested = *attributes;

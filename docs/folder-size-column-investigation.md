@@ -2259,3 +2259,9 @@ Release NativeProbe build 0 警告/错误，完整 `--explorerbrowser-registered
 扩展 `--registered-multi-root-pidl-smoke`，在父进程从临时注册 namespace 取得绝对 parsing name 并完成 A/B 根绑定后，另起全新 NativeProbe 进程重新加载 adapter、设置同一 CLSID，并将默认 backing fallback 指向 A；随后仅凭保存的 B parsing name 调用 `SHParseDisplayName`、绑定文件夹、读回 B 独有行及 29 B 递归值，且重新生成相同的 absolute parsing name。结果通过。首次子进程试跑因未初始化它自己的 adapter class/path 状态而在 Shell parse 阶段返回 `E_UNEXPECTED`；补足子进程启动所需类注册上下文后，通过把 fallback 设为不同根 A，排除了“默认路径碰巧就是目标 B”的假阳性。
 
 NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` 通过；未创建 Shell view/window，临时类和 NameSpace 注册在父探针结束时清理。本结果证明绝对 parsing name 中的 path marker 能跨进程恢复到正确文件夹，即使新进程默认路径不同；不证明 ExplorerDirs 产品会自动初始化 Shell provider、产品 CLSID/注册生命周期、portable 无注册表部署、ExplorerBrowser 多窗格/标签 SessionStore 接线、可见菜单/操作/拖放或重启 UI 验收。产品与 release 未改。
+
+本轮将注册路径探针再接到应用共用的 `SessionStore` 与 `ShellLocationIdentity`。首次失败不是 session 解析：`SessionStore.Render/ParseComplete` 能原样保留 parsing name，`SHParseDisplayName` 也成功，但 `ShellLocationIdentity.TryGetFolderPidl` 通过 `IShellItem.GetAttributes` 拒绝 provider 路径，返回 `E_INVALIDARG`。分项查询确认 folder/filesystem 两种属性请求都失败。根因是测试 adapter 的 `GetAttributesOf` 只识别普通合成文件行，没有识别路径身份 `DPRT` PIDL；因此 ShellItem 无法判断该项是文件系统文件夹。
+
+修复 NativeProbe adapter：当 `GetAttributesOf` 收到单个有效路径身份 PIDL 时，从 marker 解出路径并向 Windows Shell 解析该物理目录，再按请求掩码返回文件夹/文件系统属性。之后应用的 `ShellLocationIdentity.TryGetFolderPidl` 和 `TryGetPersistedIdentity` 均通过；session INI round-trip 保持同一 parsing name，跨进程测试把 fallback 置为 A 后仍读回 B 的专属文件及 29 B。注册路径探针、双根 PIDL、folder-tree 文件操作/缓存失效合同、按需列 smoke 均通过；NativeProbe Release 0 警告/错误，C++ adapter `/W4 /WX` 构建通过。
+
+该属性补充仅在 NativeProbe synthetic adapter 中，未更改 Explorer Dirs 产品代码。它补强了“会话路径可保存且通用身份帮助类能解析该原型 provider”的证据；仍未接入产品 CLSID/启动注册生命周期、ExplorerBrowserHost 多标签 session 恢复、可见 UI 或 portable 部署。

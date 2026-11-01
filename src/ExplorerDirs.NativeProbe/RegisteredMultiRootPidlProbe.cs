@@ -1,6 +1,7 @@
-using Microsoft.Win32;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using ExplorerDirs.App;
+using Microsoft.Win32;
 
 namespace ExplorerDirs.NativeProbe;
 
@@ -68,11 +69,32 @@ internal static class RegisteredMultiRootPidlProbe
             Check(verifyFolder(childFolder, "second-only.txt", "first-only.txt", 29));
 
             var absoluteParsingName = Marshal.PtrToStringUni(parsingName)!;
+            var fallbackTab = new TabSettings(firstPath, ViewState.Default());
+            var appSession = new SessionState(4, 4,
+                [[new TabSettings(absoluteParsingName, ViewState.Default())], [fallbackTab], [fallbackTab], [fallbackTab]],
+                0, [0, 0, 0, 0]);
+            var restoredSession = SessionStore.ParseComplete(SessionStore.Render(appSession))
+                ?? throw new InvalidOperationException("The app session INI parser rejected the Shell path identity.");
+            var restoredPath = restoredSession.Panes[0][0].Path;
+            if (!string.Equals(restoredPath, absoluteParsingName, StringComparison.Ordinal))
+                throw new InvalidOperationException("The app session INI round-trip changed the absolute Shell parsing name.");
+            if (!ShellLocationIdentity.TryGetFolderPidl(restoredPath, out var restoredPidl))
+            {
+                var diagnostic = DescribeShellItemAttributes(absoluteChildPidl);
+                throw new InvalidOperationException($"The app Shell identity helper could not resolve the restored custom folder; diagnostic={diagnostic}.");
+            }
+            try
+            {
+                if (!ShellLocationIdentity.TryGetPersistedIdentity(restoredPidl, out var persistedIdentity, out var isFilesystem) ||
+                    isFilesystem || !string.Equals(persistedIdentity, absoluteParsingName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The app Shell identity helper did not preserve the custom parsing name as a virtual Shell folder.");
+            }
+            finally { Marshal.FreeCoTaskMem(restoredPidl); }
             var childExitCode = RunCrossProcessPathIdentityCheck(classId, absoluteParsingName, firstPath, secondPath);
             if (childExitCode != 0)
                 throw new InvalidOperationException($"A fresh process could not resolve the saved namespace path identity; exit code={childExitCode}.");
 
-            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, fresh-process path/content recovery, simultaneous root/child bindings A=13 B=29, no Shell view window)");
+            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, app SessionStore and ShellLocationIdentity round-trip, fresh-process path/content recovery, simultaneous root/child bindings A=13 B=29, no Shell view window)");
             return 0;
         }
         finally
@@ -207,6 +229,23 @@ internal static class RegisteredMultiRootPidlProbe
     private static T GetExport<T>(nint module, string name) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(module, name));
 
+    private static string DescribeShellItemAttributes(nint pidl)
+    {
+        var shellItemId = new Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+        var createResult = SHCreateItemFromIDList(pidl, in shellItemId, out var shellItem);
+        if (createResult < 0 || shellItem == 0) return $"SHCreateItemFromIDList=0x{createResult:X8}";
+        try
+        {
+            var getAttributes = Marshal.GetDelegateForFunctionPointer<GetAttributes>(
+                Marshal.ReadIntPtr(Marshal.ReadIntPtr(shellItem), 6 * IntPtr.Size));
+            var folderResult = getAttributes(shellItem, 0x20000000, out var folderAttributes);
+            var filesystemResult = getAttributes(shellItem, 0x40000000, out var filesystemAttributes);
+            var combinedResult = getAttributes(shellItem, 0x20000000 | 0x40000000, out var combinedAttributes);
+            return $"SHCreateItemFromIDList=0x{createResult:X8}; folder=0x{folderResult:X8}/0x{folderAttributes:X8}; filesystem=0x{filesystemResult:X8}/0x{filesystemAttributes:X8}; combined=0x{combinedResult:X8}/0x{combinedAttributes:X8}";
+        }
+        finally { Marshal.Release(shellItem); }
+    }
+
     private static bool PidlBytesEqual(nint first, nint second, int length)
     {
         var firstBytes = new byte[length];
@@ -247,6 +286,8 @@ internal static class RegisteredMultiRootPidlProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int VerifyFolder(nint folder, [MarshalAs(UnmanagedType.LPWStr)] string expectedName,
         [MarshalAs(UnmanagedType.LPWStr)] string forbiddenName, ulong recursiveBytes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetAttributes(nint self, uint mask, out uint attributes);
 
     [DllImport("ole32.dll", ExactSpelling = true)] private static extern int OleInitialize(nint reserved);
     [DllImport("ole32.dll", ExactSpelling = true)] private static extern void OleUninitialize();
@@ -254,6 +295,8 @@ internal static class RegisteredMultiRootPidlProbe
     private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, in Guid iid, out nint value);
+    [DllImport("shell32.dll", PreserveSig = true)]
+    private static extern int SHCreateItemFromIDList(nint pidl, in Guid iid, out nint value);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll", PreserveSig = true)] private static extern uint ILGetSize(nint pidl);
     [DllImport("shell32.dll", PreserveSig = true)]
