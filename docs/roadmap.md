@@ -5834,4 +5834,6 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-01 双 IShellView 同路径目录替换竞态：旧 `nested` 目录扫描得到 4 B 后，在仍持有旧目录句柄时暂停；Shell 删除并在同一路径重建 6 B 新目录，旧/新文件 ID 不同。两视图共享新路径缓存，父级由 20 B 更新到 26 B；释放旧扫描后其旧代次结果被拒绝，三轮 Private Desktop 通过。代次发布仅为 NativeProbe 模型，产品列未接入。详见 `docs/folder-size-column-investigation.md#2026-11-01同路径目录替换时拒绝旧扫描结果`。
 2026-11-01 Shell 多项文件通知合并失效：一次 `IFileOperation` 批量创建/删除各 3 个文件，等待三条不同路径 CREATE/DELETE 事件后整批失效一次；两视图各共享一轮重扫，字节数 20→26→20 B，三轮 Private Desktop 通过。只验证探针通知批处理，无生产 watcher 去抖/丢失补偿或产品接线。详见 `docs/folder-size-column-investigation.md#2026-11-01shell-多项文件通知合并失效`。
 
+2026-11-01 逐行递归大小百分比原型：隐藏 peer ListView 在同级递归值未齐时保持百分比为空，齐备后按当前目录总量回填；Shell 内容更新后同级分母与比例重算（size-10: 10/122→30/142）。NativeProbe Release 与 Private Desktop watchdog 通过。精准比例因此依赖同级文件夹大小全部可用；产品接线前需评估一次性目录树扫描与逐目录扫描的成本差异，并集中可见验收格式。未接入产品 ExplorerBrowser。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01按需递归大小的同目录百分比更新)。
+
 2026-11-01 ExplorerBrowser 注册 namespace 递归列排序：`IFolderView2.SetSortColumns` 拒绝 provider 自定义递归 Size key，标准 `PKEY_Size` 不调用递归比较器；隔离视图 `IShellView` 表头真实鼠标点击及背景排序菜单均已验证升降序正确，递归比较各 1 次、比较期间无递归扫描。WPF `HwndSource` 根宿主的 Private Desktop 全流程 exit 0、前台/last-input/临时注册及夹具清理守卫通过；NativeProbe 模块由隔离进程退出时回收。原生 `STATIC` 根宿主仍会在父窗口销毁阶段挂起，根因未明。该路径仅证明注册 namespace 原型排序可行；产品仍使用 ExplorerBrowser，递归列、菜单、操作及 UI 均未接入。详见 `docs/folder-size-column-investigation.md`。

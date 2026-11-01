@@ -2143,8 +2143,14 @@ internal static class ShellViewHostFilterProbe
             if (!MoveWindow(listView, 0, 0, 320, 58, true))
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not size the hidden peer ListView for viewport-trigger validation.");
             InsertPeerColumn(listView, projection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
+            var recursiveSizeColumn = projection.Rows[0].DetailTitles.Length;
+            var relativePercentageColumn = recursiveSizeColumn + 1;
+            InsertPeerColumn(listView, relativePercentageColumn, "Relative percentage");
             for (var index = 0; index < projection.Rows.Count; index++)
+            {
                 SetPeerListCell(listView, index, projection.Rows[index].DetailTitles.Length, "");
+                SetPeerListCell(listView, index, relativePercentageColumn, "");
+            }
 
             var scanPaths = projection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
                 .Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
@@ -2286,9 +2292,13 @@ internal static class ShellViewHostFilterProbe
             var otherFolderRowsRemainPending = projection.Rows.Where(row => !requestedIds.Contains(row.Id) &&
                     row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
                 .All(row => string.IsNullOrEmpty(GetPeerListCell(listView, initialIndexById[row.Id], row.DetailTitles.Length)));
+            var percentagesBlankWhileFolderSizesPending = projection.Rows.Select((row, index) =>
+                    string.IsNullOrEmpty(GetPeerListCell(listView, index, relativePercentageColumn)))
+                .All(isBlank => isBlank);
             if (bytesById.GetValueOrDefault(finalVisibleRows.Single(row => row.Name == "size-100").Id) != 100 ||
-                !otherFolderRowsRemainPending || !string.IsNullOrEmpty(GetPeerListCell(listView, initialIndexById[selectedRow.Id], selectedRow.DetailTitles.Length)))
-                throw new InvalidOperationException("The viewport on-demand scan populated a non-visible recursive-size row.");
+                !otherFolderRowsRemainPending || !percentagesBlankWhileFolderSizesPending ||
+                !string.IsNullOrEmpty(GetPeerListCell(listView, initialIndexById[selectedRow.Id], selectedRow.DetailTitles.Length)))
+                throw new InvalidOperationException("The viewport on-demand scan populated a non-visible recursive-size row or showed percentages before the sibling total was known.");
 
             var remainingPaths = scanPaths.Where(path => !requestedPaths.Contains(path, StringComparer.OrdinalIgnoreCase)).ToArray();
             var rowIndexByPath = projection.Rows.Select((row, index) => (row, index))
@@ -2319,6 +2329,18 @@ internal static class ShellViewHostFilterProbe
             if (bytesById[selectedRow.Id] != 10 || bytesById[projection.Rows.Single(row => row.Name == "size-2").Id] != 2 ||
                 bytesById[projection.Rows.Single(row => row.Name == "size-100").Id] != 100)
                 throw new InvalidOperationException("The recursive-size peer values did not match the fixture bytes.");
+
+            var denominatorBeforeNotification = CalculatePeerDirectoryTotalBytes(projection.Rows, bytesById);
+            PopulatePeerRelativePercentages(listView, projection.Rows, bytesById, relativePercentageColumn, denominatorBeforeNotification);
+            var relativePercentagesBeforeNotification = projection.Rows.Select((row, index) =>
+                (row.Name, Value: GetPeerListCell(listView, index, relativePercentageColumn)))
+                .ToDictionary(item => item.Name, item => item.Value, StringComparer.OrdinalIgnoreCase);
+            if (denominatorBeforeNotification == 0)
+                throw new InvalidOperationException("The recursive-size fixture unexpectedly has a zero directory total.");
+            var expectedSize10Percent = (100m * bytesById[selectedRow.Id] / denominatorBeforeNotification)
+                .ToString("G", System.Globalization.CultureInfo.InvariantCulture) + "%";
+            if (!string.Equals(relativePercentagesBeforeNotification[selectedRow.Name], expectedSize10Percent, StringComparison.Ordinal))
+                throw new InvalidOperationException("The completed sibling scan did not produce the expected relative-size percentage.");
 
             SortPeerListByRecursiveSize(listView, bytesById);
 
@@ -2509,6 +2531,7 @@ internal static class ShellViewHostFilterProbe
 
             PopulatePeerList(listView, projection.Rows);
             InsertPeerColumn(listView, projection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
+            InsertPeerColumn(listView, relativePercentageColumn, "Relative percentage");
             var updatedBytesById = new Dictionary<int, ulong>();
             for (var index = 0; index < projection.Rows.Count; index++)
             {
@@ -2520,6 +2543,18 @@ internal static class ShellViewHostFilterProbe
                         bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
                 }
             }
+            var denominatorAfterNotification = CalculatePeerDirectoryTotalBytes(projection.Rows, updatedBytesById);
+            PopulatePeerRelativePercentages(listView, projection.Rows, updatedBytesById, relativePercentageColumn, denominatorAfterNotification);
+            var updatedSize10RowIndex = projection.Rows.FindIndex(row => row.Id == selectedRow.Id);
+            var updatedSize10Percent = GetPeerListCell(listView, updatedSize10RowIndex, relativePercentageColumn);
+            var size100Row = projection.Rows.Single(row => row.Name == "size-100");
+            var updatedSize100RowIndex = projection.Rows.FindIndex(row => row.Id == size100Row.Id);
+            var updatedSize100Percent = GetPeerListCell(listView, updatedSize100RowIndex, relativePercentageColumn);
+            if (updatedBytesById[selectedRow.Id] != 30 || denominatorAfterNotification == denominatorBeforeNotification ||
+                string.Equals(updatedSize10Percent, relativePercentagesBeforeNotification[selectedRow.Name], StringComparison.Ordinal) ||
+                string.Equals(updatedSize100Percent, relativePercentagesBeforeNotification[size100Row.Name], StringComparison.Ordinal))
+                throw new InvalidOperationException("The recursive-size notification did not update the sibling percentage denominator and row values.");
+            Console.WriteLine($"ishellview-peer-relative-percentage: blank-while-sibling-sizes-pending={percentagesBlankWhileFolderSizesPending}; row={selectedRow.Name}; initial-bytes={bytesById[selectedRow.Id]}; initial-directory-total={denominatorBeforeNotification}; initial-percent={relativePercentagesBeforeNotification[selectedRow.Name]}; updated-bytes={updatedBytesById[selectedRow.Id]}; updated-directory-total={denominatorAfterNotification}; updated-percent={updatedSize10Percent}; sibling-values-recomputed=True");
             var refreshedSelectedRow = projection.Rows.Single(row => row.Id == selectedRow.Id);
             SetPeerListItemState(listView, projection.Rows.IndexOf(refreshedSelectedRow), 0x0003, 0x0003);
             SortPeerListByRecursiveSize(listView, updatedBytesById);
@@ -2554,6 +2589,41 @@ internal static class ShellViewHostFilterProbe
 
     private static uint GetPeerListItemState(nint listView, int index, uint mask) =>
         unchecked((uint)SendMessageW(listView, LvmGetItemState, index, (nint)mask));
+
+    private static ulong CalculatePeerDirectoryTotalBytes(IReadOnlyList<PeerShellRow> rows,
+        IReadOnlyDictionary<int, ulong> directoryBytesById)
+    {
+        ulong total = 0;
+        foreach (var row in rows)
+        {
+            if (row.FileSystemPath is null) continue;
+            var bytes = Directory.Exists(row.FileSystemPath)
+                ? directoryBytesById.TryGetValue(row.Id, out var directoryBytes)
+                    ? directoryBytes
+                    : throw new InvalidOperationException($"The directory '{row.Name}' has no completed recursive size for the percentage denominator.")
+                : checked((ulong)new FileInfo(row.FileSystemPath).Length);
+            total = checked(total + bytes);
+        }
+        return total;
+    }
+
+    private static void PopulatePeerRelativePercentages(nint listView, IReadOnlyList<PeerShellRow> rows,
+        IReadOnlyDictionary<int, ulong> directoryBytesById, int column, ulong directoryBytes)
+    {
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (row.FileSystemPath is null) continue;
+            var itemBytes = Directory.Exists(row.FileSystemPath)
+                ? directoryBytesById.GetValueOrDefault(row.Id)
+                : checked((ulong)new FileInfo(row.FileSystemPath).Length);
+            var percent = RecursiveSizePercentage.Calculate(itemBytes, directoryBytes);
+            var text = percent is { } value
+                ? value.ToString("G", System.Globalization.CultureInfo.InvariantCulture) + "%"
+                : string.Empty;
+            SetPeerListCell(listView, index, column, text);
+        }
+    }
 
     private static void SortPeerListByRecursiveSize(nint listView, Dictionary<int, ulong> bytesById)
     {

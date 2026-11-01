@@ -1996,3 +1996,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 与此前原生 `STATIC` 宿主在 `DestroyWindow(parent)` 阶段超时的运行对照，本次 WPF 根宿主完整退出，watchdog exit 0，Private Desktop 前台 HWND 与 last-input tick 均未变化；watchdog 确认隔离进程、临时 CLSID/NameSpace 注册和两个夹具目录均已清理。`DllCanUnloadNow` 返回 `S_FALSE`，NativeProbe 将原生模块留到隔离进程退出时回收。该对照说明 WPF 宿主分支可完成原型生命周期，但尚未解析 STATIC 宿主挂起的根因，也不能据此认定 WPF 是唯一可用的产品宿主。
 
 日志：`src/.state/native-probe-watchdog/20261101-204535-42696297.stdout.log`、`.stderr.log`。该结论仅覆盖隔离 `IShellView`/ExplorerBrowser 注册 namespace 原型；产品仍使用 ExplorerBrowser，逐行递归大小列未接入产品，未验证产品菜单、操作、拖放、通知、焦点或可见 UI。
+
+### 2026-11-01：按需递归大小的同目录百分比更新
+
+在隐藏 `IShellView` 的 peer `SysListView32` 原型增加相对百分比列。百分比分母取当前目录直接文件大小与直接子文件夹递归大小之和；在任一同级目录大小仍未完成时，整列保持空白，避免用部分分母给出错误比例。首轮按视口只扫描一个文件夹，其他行仍待计算；所有同级目录值完成后才回填比例。夹具中 `size-10` 为 `10/122 = 8.19672131147540983606557377%`；自然 Shell 更新令该目录从 10 B 变为 30 B 后，分母随之从 122 B 变为 142 B，比例重算为 `21.12676056338028169014084507%`。
+
+NativeProbe Release 构建 0 警告/错误；Private Desktop `--ishellview-recursive-size-projection-private-desktop` exit 0，前台、输入和隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-210628-5db8401e.stdout.log`。这验证的是隐藏 peer 列的数据合同，不是 Q-Dir 的显示舍入/下划线样式，也未接 ExplorerBrowser 产品或可见 UI。
+
+该切片暴露了一个真实取舍：只显示可见行递归大小时可保持按需扫描，但准确的同目录百分比要等全部同级文件夹的递归大小已知后才能计算；本原型在此之前留空。产品接线前还需比较“同级逐目录请求”与“单次遍历当前目录并累计全部行值”的扫描成本，并由可见验收决定空白阶段和比例格式；没有把本轮策略提升为产品默认值。
