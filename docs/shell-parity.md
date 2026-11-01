@@ -575,4 +575,4 @@ Q-Dir 官方 FAQ 38 将名称通配符过滤和列值过滤分别介绍，并说
 2026-11-02 按需递归列合同：关闭列时 synthetic provider 对宽/多行/深层目录均不递归；开启列对 100 个直接项遍历 1,000 个合成子项约 20 ms。异步首次读不等待扫描、最多 2 workers、重复读缓存、释放视图取消队列。未创建 Shell view，仅是 provider 生命周期证据；可见大目录和网络目录表现待验。
 2026-11-02 产品 ExplorerBrowserHost 按需递归列复验：真实产品 adapter / host 读取 5/29 B 并保留升序键，但值完成后不自动重排；显式排序使行序正确却短暂 0→2。此为隐藏宿主结果，无可见绘制证据；递归列仍限实验标签。
 2026-11-02 递归大小列异步排序门控：定位固定延迟早于值回填的竞态；改为当前 Shell 自定义排序列全部有值后再触发排序。生产 ExplorerBrowserHost 隐藏 HostProbe 无手动补排 6/6 正确升序，Shell/ListView/export 行数稳定 2。可见 UI、大目录和慢存储仍待验。
-2026-11-02 递归列大列表门控改为 8 行分批并在 Dispatcher 批次间让步；1,002 行隐藏 HostProbe 单批最慢约 8.8 ms，升序正确且列表行数稳定。可见交互与慢 provider 待验，见[递归大小调查](folder-size-column-investigation.md)。
+2026-11-02 递归列大列表门控改为 8 行分批并在 Dispatcher 批次间让步；1,002 行隐藏 HostProbe 单批约 5.8–8.6 ms，升序正确。曾有一轮采样到 1002→0→1002，随后复跑未重现，仍按间歇性空列表风险处理；真实可见帧与慢 provider 待验，见[递归大小调查](folder-size-column-investigation.md)。

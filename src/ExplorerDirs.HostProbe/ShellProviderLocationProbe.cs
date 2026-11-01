@@ -74,6 +74,8 @@ internal static class ShellProviderLocationProbe
             }
 
             var adapterPath = FindProductAdapterLibrary();
+            if (largeSortReadiness)
+                Console.WriteLine($"shell-provider-product-async-large-readiness-adapter: path={adapterPath}");
             stage = "load-product-adapter";
             adapter = NativeLibrary.Load(adapterPath);
             var configure = GetExport<ConfigureShellNamespaceRoot>(adapter, "ConfigureShellNamespaceRoot");
@@ -1373,11 +1375,13 @@ internal static class ShellProviderLocationProbe
 
     private static string FindProductAdapterLibrary()
     {
+        var forceProductAdapter = string.Equals(
+            Environment.GetEnvironmentVariable("EXPLORERDIRS_HOSTPROBE_USE_PRODUCT_ADAPTER"), "1", StringComparison.Ordinal);
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
             var diagnosticPath = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-diagnostics-x64",
                 "ExplorerDirs.ShellNamespace.Diagnostics.dll");
-            if (File.Exists(diagnosticPath)) return diagnosticPath;
+            if (!forceProductAdapter && File.Exists(diagnosticPath)) return diagnosticPath;
             var path = Path.Combine(directory.FullName, "ExplorerDirs.NativeProbe", "bin", "native-product-x64",
                 "ExplorerDirs.ShellNamespace.dll");
             if (File.Exists(path)) return path;

@@ -2713,8 +2713,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
 
     private void ScheduleInitialVirtualSort(SortColumnState sort, Func<bool> isCurrent)
     {
-        var attempts = 0;
         var oppositeApplied = false;
+        var readinessWait = Stopwatch.StartNew();
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
         var readinessRow = 0;
         int? readinessItemCount = null;
@@ -2728,7 +2728,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         timer.Tick += async (_, _) =>
         {
             timer.Stop();
-            if (!IsCurrent() || ++attempts > 120)
+            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12))
             {
                 return;
             }
@@ -2739,7 +2739,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
 
-            while (IsCurrent())
+            while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(12))
             {
                 bool batchPending;
                 int shellItemCount;
@@ -2771,7 +2771,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 await Dispatcher.Yield(DispatcherPriority.Background);
             }
 
-            if (!IsCurrent()) return;
+            if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12)) return;
             if (readinessFoundPendingValue)
             {
                 readinessItemCount = null;
