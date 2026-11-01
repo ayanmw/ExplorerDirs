@@ -396,6 +396,24 @@ internal static class ExplorerBrowserWrapperProbe
             if (!dropCopyResults.TargetAvailable || !dropCopyResults.DragEnter || !dropCopyResults.Drop ||
                 !dropCopyResults.TransferVerified || !dropCopyResults.SourcePreserved)
                 throw new InvalidOperationException("The wrapped child folder could not accept a native Shell copy drop operation.");
+
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: invoke-native-background-new-folder");
+            Marshal.ThrowExceptionForHR(At<GetWindow>(shellView, 3)(shellView, out var nativeShellViewWindow));
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var backingRootPidl, 0, out _));
+            var backingFolderId = ShellFolder2Id;
+            Marshal.ThrowExceptionForHR(SHBindToObject(0, backingRootPidl, 0, ref backingFolderId, out var backingRootFolder));
+            string backingNewFolderResult;
+            try
+            {
+                backingNewFolderResult = TryInvokeNativeBackgroundVerbWithoutUi(backingRootFolder, nativeShellViewWindow, fixture, "newfolder");
+            }
+            finally
+            {
+                Marshal.Release(backingRootFolder);
+                Marshal.FreeCoTaskMem(backingRootPidl);
+            }
+            var wrappedNewFolderResult = TryInvokeNativeBackgroundVerbWithoutUi(viewFolder, nativeShellViewWindow, fixture, "newfolder");
+            Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-direct-filesystem={backingNewFolderResult}; wrapped-namespace={wrappedNewFolderResult}; diagnostic-only=True");
             return 0;
         }
         finally
@@ -608,6 +626,61 @@ internal static class ExplorerBrowserWrapperProbe
             if (menu != 0) DestroyMenu(menu);
             if (contextMenu != 0) Marshal.Release(contextMenu);
             Marshal.FreeCoTaskMem(item);
+        }
+    }
+
+    private static string TryInvokeNativeBackgroundVerbWithoutUi(nint folder, nint ownerWindow, string backingPath, string expectedVerb)
+    {
+        var existingDirectories = Directory.EnumerateDirectories(backingPath)
+            .Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        nint contextMenu = 0, menu = 0, verbBuffer = 0;
+        try
+        {
+            var iid = ContextMenuId;
+            Marshal.ThrowExceptionForHR(CreateViewObject(folder, iid, out contextMenu));
+            menu = CreatePopupMenu();
+            if (menu == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var queryResult = At<QueryContextMenu>(contextMenu, 3)(contextMenu, menu, 0, 1, 0x7FFF, 0);
+            Marshal.ThrowExceptionForHR(queryResult);
+            var commandCount = queryResult & 0xFFFF;
+            verbBuffer = Marshal.AllocHGlobal(512);
+            for (uint commandOffset = 0; commandOffset < commandCount; commandOffset++)
+            {
+                Marshal.WriteInt16(verbBuffer, 0);
+                if (At<GetCommandString>(contextMenu, 5)(contextMenu, commandOffset, 4, 0, verbBuffer, 256) != 0)
+                    continue;
+                var verb = Marshal.PtrToStringUni(verbBuffer);
+                if (!string.Equals(verb, expectedVerb, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var invokeInfo = new NativeInvokeInfo
+                {
+                    Size = Marshal.SizeOf<NativeInvokeInfo>(),
+                    Mask = 0x00004400, // CMIC_MASK_FLAG_NO_UI | CMIC_MASK_UNICODE.
+                    Window = ownerWindow,
+                    Verb = (nint)commandOffset,
+                    VerbW = (nint)commandOffset,
+                    Show = 0
+                };
+                var invokeHr = At<InvokeCommand>(contextMenu, 4)(contextMenu, ref invokeInfo);
+                if (invokeHr < 0) return $"invoke-hr=0x{invokeHr:X8}";
+                var createdDirectories = Directory.EnumerateDirectories(backingPath)
+                    .Select(Path.GetFullPath)
+                    .Where(path => !existingDirectories.Contains(path))
+                    .ToArray();
+                if (createdDirectories.Length != 1)
+                    return $"invoke-hr=0x{invokeHr:X8}; created-directories={createdDirectories.Length}";
+                var createdPath = createdDirectories[0];
+                var createdName = Path.GetFileName(createdPath);
+                Directory.Delete(createdPath);
+                return $"invoke-hr=0x{invokeHr:X8}; created={createdName}; cleanup=True";
+            }
+            return $"canonical-verb-missing:{expectedVerb}";
+        }
+        finally
+        {
+            if (verbBuffer != 0) Marshal.FreeHGlobal(verbBuffer);
+            if (menu != 0) DestroyMenu(menu);
+            if (contextMenu != 0) Marshal.Release(contextMenu);
         }
     }
 

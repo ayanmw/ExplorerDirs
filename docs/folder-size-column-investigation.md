@@ -1716,3 +1716,9 @@ NativeProbe 的 `SFVM_FSNOTIFY` 现在可报告通知 PIDL 解析名称、文件
 无窗口 `--static-shell-column-folder-smoke` 再覆盖 `SHCNE_RENAMEITEM`：为旧文件所在根目录和新文件所在子目录分别建立在途摘要扫描 reservation，构造两个真实文件系统绝对 PIDL 并直接调用隔离 folder provider 的 `IShellFolderViewCB::MessageSFVCB`。回调解析旧、新路径并分别使对应父目录扫描过期；两个旧提交都返回 `S_FALSE`。日志出现 `recursive-size-file-rename-pair-inflight-invalidation-passed`。原生 adapter `/W4 /WX`、NativeProbe Release build 和完整无窗口 folder contract 通过，输出 `window-created=False`。
 
 边界：这是合成 callback 中的文件重命名双 PIDL/父目录缓存合同；没有执行实际文件移动、广播 `SHChangeNotify` 或创建 Shell view，不能代表外部通知时序、视图重枚举/选区/排序、产品 ExplorerBrowser 或可见体验。递归大小列仍未接产品。
+
+### 2026-11-01：注册 namespace 的背景 New Folder 命令调用对照
+
+隔离 ExplorerBrowser 注册 namespace 探针已能取得背景 `IContextMenu` 并成功查询 21 个菜单项，但 QueryContextMenu 成功不代表命令可执行。新增隐藏 Private Desktop 对照，分别对真实 filesystem `IShellFolder` 和包装 namespace folder 查询规范 `newfolder` 动词并调用 `IContextMenu::InvokeCommand`；两条路径均返回 `E_FAIL`，没有创建夹具目录。相同探针中的包装文件项 Delete 动词仍成功执行，且重命名、复制、通知、导航等既有断言通过。
+
+这次负向结果不能归因于 wrapper：未显示/路由菜单的直接 `InvokeCommand` 对照同样失败，说明当前无交互调用不足以验证背景新建命令的完整宿主路由。后续需经实际 Shell view 菜单消息路由做独立验证；在此之前不将背景菜单命令执行计为已通过迁移门槛。Private Desktop 前台/输入守卫和临时注册清理通过；产品与 release 未修改。
