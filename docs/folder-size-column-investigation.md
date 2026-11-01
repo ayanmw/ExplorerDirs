@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：列重排后的可见标题与 Shell 排序键映射
+
+扩展已注册 synthetic namespace 的 `IShellView` 探针，对 `IColumnManager.Apply` 应用两种三列排列，再从 native Header 读取 `HDM_GETORDERARRAY`，按视觉位置逐列点击并回读 `IFolderView2::GetSortColumns`。两种排列下，“Recursive Size”标题点击均返回 Shell sort/display key `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`；“Name”和“Type”也分别返回其自身的 Shell 排序键。排序方向随标题点击变化，探针结束前恢复了原列与原视图状态。
+
+此项修正先前探针对“列标题索引”的假设：Header 的 item index 与屏幕显示顺序是不同索引域；必须用 `HDM_GETORDERARRAY` 映射视觉列位置，不能直接拿 `IColumnManager` 快照索引模拟用户点击。NativeProbe Release 构建通过（0 警告/错误），注册 namespace Private Desktop 探针返回并通过前台、输入、隔离清理守卫。日志：`src/.state/native-probe-watchdog/20261101-233440-382b5b77.stdout.log`。这仍是合成 `IShellView` 原型证据，未接入产品 ExplorerBrowser，也未验证用户可见列重排、产品排序状态捕获或 Q-Dir 导入后的列键映射。
+
 ## 2026-11-01：Shell 多项文件通知合并失效
 
 将多项 `IFileOperation.NewItem`/`DeleteItem` 排入单个 Shell 操作，在 `size-10` 中分别创建三个文件（1/2/3 B）和删除这三个文件。探针先等到三个不同路径的 `SHCNE_CREATE`/`SHCNE_DELETE` 都抵达，再将整批通知送入一次缓存失效处理：两组都只失效一个递归根；两视图各请求一次并共享单次重扫，结果由 20 B 到 26 B 再回到 20 B。每批通知没有造成三次重复扫描；行 ID、排序、选择和焦点保持。
