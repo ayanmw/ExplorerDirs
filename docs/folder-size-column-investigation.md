@@ -1843,6 +1843,12 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 这只验证“视口范围可读，并可作为按需请求过滤条件”；探针显式将选中目录滚入视口并调用该策略，没有把滚动/重排消息自动接成调度，也未验证真实可见绘制、用户快速滚动时的取消/节流、慢盘/网络并发或产品 ExplorerBrowser。产品及 release 未改变。
 
+### 2026-11-01：视口请求去抖与过期请求取消
+
+在上述视口切片加入 120 ms 的待调度窗口：先将 `size-10` 行设为可见并排队请求，再在窗口内把 peer ListView 滚到 `size-100`，第二个视口请求取消前一个；只有最终视口内的目录开始 worker 扫描，开始扫描次数为 1。三次 Release apphost Private Desktop 运行均通过，扫描期间 peer 行/ID 不变，非最终视口目录仍为空，后续通知失效、重扫、数值排序及选区焦点合同继续通过；前台、last-input 与 fixture 清理守卫通过。
+
+本轮只验证 NativeProbe 的视口请求调度策略与取消令牌，不是实际 `WM_VSCROLL`、鼠标滚轮、滚动条或键盘滚动消息的事件接线；视口变化仍由探针显式模拟。未测试慢盘/网络中的已开始扫描取消、并发上限、可见绘制、产品 UI 或 ExplorerBrowser 接线。
+
 ### 2026-11-01：自控 Shell 行复用产品所选项命令适配器
 
 在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。
