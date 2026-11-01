@@ -145,6 +145,10 @@ internal static class PrivateDesktopShellProbe
                 volatileRegistryRegistration: true, nonEnumeratedNamespaceRoot: true, probeNamespaceOwnerExit: true),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunShellNamespaceProfileOwners() =>
+        Run("shell-namespace-profile-owners", ShellNamespaceOwnerProbe.Run,
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunColumnFilterCapability() =>
         Run("column-filter-capability", ColumnFilterCapabilityProbe.Run, TimeSpan.FromSeconds(35));
 

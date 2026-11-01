@@ -2441,3 +2441,9 @@ NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop wa
 在上述目标项通知场景读取真实 ExplorerBrowser `DirectUIHWND` 的 UI Automation 树。它提供 `ListItem` 行名及选择状态，但没有暴露递归大小的行内单元格文本；因此 UIA 不能证明屏幕上“11”已绘制。异步通知前后，`shared-folder` 都保持选中；通过 `IFolderView.GetFocusedItem` 解析出的焦点行名前后均为 `shared-folder`。扫描完成时另有一个新行加入，故该行索引从 1 变为 2，但焦点身份未变。Shell provider 在通知后再次请求 item details 并读回 11，`EnumObjects` 仍只增加一次。
 
 NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台/last-input 未变，临时注册清理通过。最终证据：`src/.state/native-probe-watchdog/20261102-033553-2acb7426.stdout.log` 与 `.stderr.log`。这是隐藏桌面下 Shell 行状态、选区/焦点身份及 provider 回调的证据，不是可见像素验收，也没有证明当前产品异步扫描已接入或屏幕列值刷新无闪烁。下一步需要在产品可见验收时确认自定义列绘制；本轮不改变刷新策略。
+
+### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
+
+新增隐藏 Private Desktop HostProbe，使用生产 `ShellNamespaceProfileStore` 为两个临时便携 profile 创建不同且稳定的 CLSID；A、B 各自在独立进程注册 volatile `HKCU\Software\Classes\CLSID` 和 Desktop `NameSpace` key，并用绝对 path-marker parsing name 绑定各自物理根。A、B 根含不同专属文件和同名 `shared-folder`，递归值分别为 13 B/29 B。B 注册完成后，A 删除自己的两棵注册；B 随即重新解析并读到自己的专属文件/29 B。随后重新加载 A 的 INI、确认 CLSID 未变、重建注册并解析 A；B 退出并只删除 B 的 key 后，A 仍能读取 13 B。两个 owner 的最终 key 均清理。
+
+NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台与 last-input 未变。最终日志：`src/.state/native-probe-watchdog/20261102-033946-e2847ad4.stdout.log` 与 `.stderr.log`。这证明每 profile 稳定 CLSID 可隔离两个并行注册 owner 的正常关闭/重开边界；仍没有真实 ExplorerBrowser view、同 profile 多进程、app 崩溃后复用/清理、发布目录迁移或可见 Desktop DefView 证据。volatile namespace 注册尚未接入产品。本原型不授权将 Shell namespace 路径列作为正式用户功能启用。

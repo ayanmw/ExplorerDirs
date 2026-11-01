@@ -62,6 +62,7 @@ else {
         'host-recursive-size-projection-private-desktop' { '--ishellview-recursive-size-projection-private-desktop' }
         'host-multiview-recursive-size-projection-private-desktop' { '--ishellview-recursive-size-multiview-private-desktop' }
         'explorerbrowser-registered-namespace-private-desktop' { '--explorerbrowser-registered-namespace-private-desktop' }
+        'shell-namespace-profile-owners-private-desktop' { '--shell-namespace-profile-owners-private-desktop' }
         'menu-activation-private-desktop' { '--ishellview-menu-activation-private-desktop' }
         'session-restore-private-desktop' { '--ishellview-session-restore-private-desktop' }
         'session-restore-sync-cleanup-private-desktop' { '--ishellview-session-restore-sync-cleanup-private-desktop' }

@@ -26,6 +26,10 @@ internal static class Program
             return RegisteredMultiRootPidlProbe.Run();
         if (args.Length == 1 && args[0] == "--registered-multi-root-pidl-volatile-smoke")
             return RegisteredMultiRootPidlProbe.Run(volatileRegistration: true);
+        if (args.Length == 1 && args[0] == "--shell-namespace-profile-owners-private-desktop")
+            return PrivateDesktopShellProbe.RunShellNamespaceProfileOwners();
+        if (args.Length == 7 && args[0] == "--shell-namespace-owner-profile-child")
+            return ShellNamespaceOwnerProbe.RunChild(args[1], args[2], args[3], args[4], args[5], args[6]);
         if (args.Length == 5 && args[0] == "--registered-path-pidl-child")
             return RegisteredMultiRootPidlProbe.RunChild(args[1], args[2], args[3], args[4]);
         if (args.Length == 1 && args[0] == "--search-virtual-scopes")
