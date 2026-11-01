@@ -1268,3 +1268,9 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 在 NativeProbe 的 synthetic `IShellFolder2::GetDetailsOf` 列路径增加隔离开关，允许把大小文本显示为自动单位；数据属性仍由 `GetDetailsEx` 以 `VT_UI8` 返回原始字节值，`CompareIDs` 仍按整数快照比较。无窗口原生合同用 1,536 B 样本验证文本为 `1.5 KB` 且属性仍为 1,536；WPF Private Desktop synthetic `IShellView` 则读到 `child=10 B`、`small.bin=4 B`，列头升/降序与背景菜单升/降序仍按数值正确排序。关闭开关时既有原始 `10`/`4` 文本合同通过。Release NativeProbe build 0 警告/错误；隔离 view probe exit 0，前台/输入/清理守卫通过。
 
 这是显示字符串与 Shell 属性/排序值分离的可行性证明，不是产品 ExplorerBrowser 集成、可见 UI 或 Q-Dir 格式等价验收。千位分隔、多位/自动小数、本地化格式、文件/文件夹计数列、百分比、失焦暂停和忽略大小排序仍未实现；格式开关不保存配置，用户界面与产品默认值未定。
+
+### 2026-11-01：隔离原生大小列的单位、精度与分组格式
+
+继续扩展 NativeProbe 显示路径的隔离格式参数：自动或固定 B/KB/MB/GB/TB/PB/EB 单位、0–3 位小数、去掉无意义的末尾零、按当前 Windows 区域格式使用小数点和千位分隔。静态 provider 合同以 1,234,567 B 验证固定 KB 的 0/1/3 位结果 `1206 KB`、`1205.6 KB`、`1205.632 KB`，固定 MB 为 `1.177 MB`，字节分组按系统分隔符读回；同时确认 `GetDetailsEx` 仍返回原始 `VT_UI8=1234567`。此前自动单位 WPF Private Desktop view 继续显示 `10 B` / `4 B`，列标题与原生背景菜单升降序仍按原始数值比较。Native adapter `/W4 /WX`、NativeProbe Release build、`--synthetic-shell-folder-tree-smoke` 与格式化列 Private Desktop probe 均通过；前台、输入与隔离清理守卫通过。
+
+本轮格式选项只由 NativeProbe 静态合同设置，自动格式仍是唯一接入隐藏 Shell view 的模式；固定单位/精度/分组没有经真实用户可见视图绘制。它们未接入 ExplorerBrowser 产品、没有 INI/UI 配置，也没有决定 Q-Dir 对应选项的产品默认值。列计数、百分比及失焦暂停/忽略大小排序仍未实现。

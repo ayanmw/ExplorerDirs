@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <cstdio>
+#include <iomanip>
+#include <sstream>
 
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters();
 
@@ -1558,6 +1560,9 @@ namespace
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticHumanSizeTextForProbe = 0;
+    volatile LONG g_syntheticSizeDisplayUnitForProbe = 0;
+    volatile LONG g_syntheticSizeDisplayDecimalsForProbe = 2;
+    volatile LONG g_syntheticSizeDisplayThousandsForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
@@ -1567,28 +1572,60 @@ namespace
     {
         constexpr ULONGLONG unit = 1024;
         constexpr const wchar_t* units[] = { L"B", L"KB", L"MB", L"GB", L"TB", L"PB", L"EB" };
-        ULONGLONG divisor = 1;
+        const auto displayUnit = InterlockedCompareExchange(&g_syntheticSizeDisplayUnitForProbe, 0, 0);
+        const auto configuredDecimalPlaces = InterlockedCompareExchange(&g_syntheticSizeDisplayDecimalsForProbe, 2, 2);
+        const auto decimalPlaces = configuredDecimalPlaces < 0 ? 0L : configuredDecimalPlaces > 3 ? 3L : configuredDecimalPlaces;
+        const bool useThousandsSeparator = InterlockedCompareExchange(&g_syntheticSizeDisplayThousandsForProbe, 0, 0) != 0;
         size_t unitIndex = 0;
-        while (unitIndex + 1 < ARRAYSIZE(units) && bytes / divisor >= unit)
+        ULONGLONG divisor = 1;
+        if (displayUnit == 0)
         {
-            divisor *= unit;
-            ++unitIndex;
+            while (unitIndex + 1 < ARRAYSIZE(units) && bytes / divisor >= unit)
+            {
+                divisor *= unit;
+                ++unitIndex;
+            }
         }
-        if (unitIndex == 0) return std::to_wstring(bytes) + L" B";
+        else
+        {
+            const auto fixedUnit = displayUnit < 1 ? 1L : displayUnit > static_cast<LONG>(ARRAYSIZE(units))
+                ? static_cast<LONG>(ARRAYSIZE(units)) : displayUnit;
+            unitIndex = static_cast<size_t>(fixedUnit - 1);
+            for (size_t i = 0; i < unitIndex; ++i) divisor *= unit;
+        }
 
-        auto whole = bytes / divisor;
-        auto fraction = static_cast<ULONGLONG>(
-            (static_cast<double>(bytes % divisor) / static_cast<double>(divisor)) * 100.0 + 0.5);
-        if (fraction == 100) { ++whole; fraction = 0; }
-        auto text = std::to_wstring(whole);
-        if (fraction != 0)
+        std::wostringstream formatted;
+        if (unitIndex == 0)
         {
-            text += L".";
-            if (fraction < 10) text += L"0";
-            text += std::to_wstring(fraction);
-            if (text.back() == L'0') text.pop_back();
+            formatted << bytes;
         }
-        return text + L" " + units[unitIndex];
+        else
+        {
+            formatted << std::fixed << std::setprecision(decimalPlaces)
+                << (static_cast<double>(bytes) / static_cast<double>(divisor));
+        }
+        auto number = formatted.str();
+        const auto decimalPoint = number.find(L'.');
+        if (decimalPoint != std::wstring::npos)
+        {
+            while (!number.empty() && number.back() == L'0') number.pop_back();
+            if (!number.empty() && number.back() == L'.') number.pop_back();
+        }
+
+        WCHAR decimalSeparator[8] = L".";
+        WCHAR thousandsSeparator[8] = L",";
+        GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SDECIMAL, decimalSeparator, ARRAYSIZE(decimalSeparator));
+        GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_STHOUSAND, thousandsSeparator, ARRAYSIZE(thousandsSeparator));
+        if (decimalPoint != std::wstring::npos && wcscmp(decimalSeparator, L".") != 0)
+            number.replace(number.find(L'.'), 1, decimalSeparator);
+        if (useThousandsSeparator && thousandsSeparator[0] != L'\0')
+        {
+            const auto integerEnd = number.find(decimalSeparator);
+            const auto digitsEnd = integerEnd == std::wstring::npos ? number.size() : integerEnd;
+            for (auto position = static_cast<std::ptrdiff_t>(digitsEnd) - 3; position > 0; position -= 3)
+                number.insert(static_cast<size_t>(position), thousandsSeparator);
+        }
+        return number + L" " + units[unitIndex];
     }
     // Exclude synchronous property callbacks caused by the probe's own
     // ListView text reads from notification-strategy counters.
@@ -3625,6 +3662,62 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         if (formattedDetails.str.uType == STRRET_WSTR && formattedDetails.str.pOleStr) CoTaskMemFree(formattedDetails.str.pOleStr);
         InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 0);
         if (!humanSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 1234567);
+        InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, 2); // Fixed KB.
+        InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 1);
+        InterlockedExchange(&g_syntheticSizeDisplayThousandsForProbe, 0);
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 1);
+        WCHAR expectedDecimalSeparator[8] = L".";
+        GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SDECIMAL, expectedDecimalSeparator, ARRAYSIZE(expectedDecimalSeparator));
+        const auto localizedExpected = [&](PCWSTR invariant)
+        {
+            auto expected = std::wstring(invariant);
+            if (wcscmp(expectedDecimalSeparator, L".") != 0)
+            {
+                const auto point = expected.find(L'.');
+                if (point != std::wstring::npos) expected.replace(point, 1, expectedDecimalSeparator);
+            }
+            return expected;
+        };
+        const auto displaysSizeText = [&](PCWSTR expected)
+        {
+            SHELLDETAILS formatted{};
+            const auto detailsResult = root->GetDetailsOf(item, 1, &formatted);
+            const bool matches = SUCCEEDED(detailsResult) && formatted.str.uType == STRRET_WSTR &&
+                formatted.str.pOleStr && _wcsicmp(formatted.str.pOleStr, expected) == 0;
+            if (formatted.str.uType == STRRET_WSTR && formatted.str.pOleStr) CoTaskMemFree(formatted.str.pOleStr);
+            return matches;
+        };
+        const auto fixedKilobytesExpected = localizedExpected(L"1205.6 KB");
+        const bool fixedKilobytesDisplayed = displaysSizeText(fixedKilobytesExpected.c_str());
+        InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 0);
+        const bool wholeKilobytesDisplayed = displaysSizeText(L"1206 KB");
+        InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 3);
+        const auto preciseKilobytesExpected = localizedExpected(L"1205.632 KB");
+        const bool preciseKilobytesDisplayed = displaysSizeText(preciseKilobytesExpected.c_str());
+        InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, 3); // Fixed MB.
+        const auto fixedMegabytesExpected = localizedExpected(L"1.177 MB");
+        const bool fixedMegabytesDisplayed = displaysSizeText(fixedMegabytesExpected.c_str());
+        InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, 1); // Fixed bytes.
+        InterlockedExchange(&g_syntheticSizeDisplayThousandsForProbe, 1);
+        WCHAR expectedThousandsSeparator[8] = L",";
+        GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_STHOUSAND, expectedThousandsSeparator, ARRAYSIZE(expectedThousandsSeparator));
+        const auto groupedBytesExpected = std::wstring(L"1") + expectedThousandsSeparator + L"234" + expectedThousandsSeparator + L"567 B";
+        const bool groupedBytesDisplayed = displaysSizeText(groupedBytesExpected.c_str());
+        VARIANT formattedSizeValue{};
+        result = root->GetDetailsEx(item, &kSizeKey, &formattedSizeValue);
+        const bool formattedSizePropertyRemainsRaw = SUCCEEDED(result) && formattedSizeValue.vt == VT_UI8 && formattedSizeValue.ullVal == 1234567;
+        VariantClear(&formattedSizeValue);
+        InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, 0);
+        InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, 2);
+        InterlockedExchange(&g_syntheticSizeDisplayThousandsForProbe, 0);
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 0);
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+        if (!fixedKilobytesDisplayed || !wholeKilobytesDisplayed || !preciseKilobytesDisplayed ||
+            !fixedMegabytesDisplayed || !groupedBytesDisplayed || !formattedSizePropertyRemainsRaw)
+        { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         VARIANT sizeValue{};
         result = root->GetDetailsEx(item, &kSizeKey, &sizeValue);
         const bool recursiveSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 10;
