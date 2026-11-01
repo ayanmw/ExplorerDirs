@@ -1570,3 +1570,11 @@ NativeProbe Release 构建 0 警告/错误，隔离 Private Desktop 探针退出
 Shell view 子控件为 `CtrlNotifySink|DirectUIHWND|ScrollBar`，没有经典 `SysListView32/SysHeader32`，所以本探针没有读到像素或原生 header caption；证据只证明 namespace 身份、行枚举和 Shell/IColumnManager 的可见列状态。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入守卫通过；随机 CLSID 和 Desktop NameSpace 两处临时注册确认已删除。`DllCanUnloadNow` 返回 `S_FALSE`，native DLL 留到隔离进程退出回收，不能据此宣称 COM 生命周期无泄漏。
 
 边界：folder provider 仍是以真实临时目录作 backing 的合成 namespace；没有包装真实目录 PIDL，没有验证物理子项 PIDL 身份、菜单/操作/拖放/通知或用户可见列绘制。ExplorerBrowser 产品和 release 未修改。下一步应把 namespace child identity 与真实文件系统 PIDL/操作转发连接起来，并保持注册完全临时。
+
+### 2026-11-01：注册 namespace 的菜单、重命名与层级导航切片
+
+扩展同一隔离 ExplorerBrowser 探针：活动根 folder 可从自身 `IShellFolder2` 取得文件原生 `IContextMenu`，`QueryContextMenu` 构造 33 项菜单；调用该 folder 的 `SetNameOf` 后，重命名结果出现在真实临时 backing 目录。根的 `child` 相对 PIDL 与根 PIDL 合并后导航成功；活动子 view 的 `IPersistFolder2.GetClassID` 仍为临时 namespace CLSID，`GetCurFolder` 与合成绝对子 PIDL 字节一致，子目录枚举到 1 项；再导航回根后 CLSID/PIDL 恢复且行数为 3。
+
+NativeProbe Release 构建 0 警告/错误；Private Desktop 探针通过，前台 HWND/last-input tick 未变化，临时注册与夹具清理完成。导航后读取前等待 250 ms 并泵送消息；第一次未等待的检查读到了旧根 view，按异步 Shell 导航时序修正后通过。
+
+该切片证明注册 namespace 中可经现有 Shell folder 对象取得菜单、转发重命名，并往返一层子目录的 namespace 身份；菜单没有展示或执行命令，未验证背景菜单、文件操作菜单命令路由、递归列重新计算/通知、地址栏显示、拖放、可见绘制或产品宿主。底层仍用合成 child PIDL 映射临时文件系统 backing，而非包装真实 child PIDL；产品和 release 未变。下一步验证外部文件变更通知是否使 Browser 行数和递归列值重新收敛，再评估真实 child PIDL 与当前合成映射的取舍。

@@ -5694,3 +5694,9 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 随机 CLSID 的临时 Shell-folder/桌面 NameSpace 注册可经 ExplorerBrowser `BrowseToIDList` 激活合成自定义 folder：活动 view 的 `IPersistFolder2` CLSID 与根 PIDL 均匹配，枚举 2 行；产品 `ShellColumnManager.Apply` 让 `PKEY_Size` 进入 4 个可见列，provider 列元数据为 `Recursive Size`。子控件为 `DirectUIHWND`，没有经典 ListView/Header，因此未取得像素或屏幕标题证据。Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入不变；临时注册确认清理，native DLL 因 `DllCanUnloadNow=S_FALSE` 留至隔离进程退出。
 
 这验证了注册的自定义 Shell namespace 与递归列可进入 ExplorerBrowser 的逻辑列状态，但 backing provider 仍是合成 namespace，未包装真实文件系统 PIDL/对象身份，亦未验证文件操作、菜单、拖放、通知或可见绘制。下一步连接真实文件系统 child PIDL 与 namespace 身份；产品及 release 未变。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-激活注册-namespace-并启用递归列)。
+
+### 2026-11-01：注册 namespace 的文件菜单、重命名及层级导航
+
+扩展 Private Desktop ExplorerBrowser 切片后，根 folder 的 `IContextMenu` 可生成 33 个原生菜单项，`SetNameOf` 将文件重命名到临时 backing 目录；Browser 可进入一级子目录并保留 namespace CLSID/完整子 PIDL，再返回根且读到重命名后的 3 行。Release 构建 0 警告/错误，前台与输入守卫通过，临时资源清理完成。
+
+该证据尚不覆盖实际显示/执行菜单命令、背景菜单、通知后递归列重算、可见地址/绘制、拖放或产品宿主；当前 child identity 仍为合成 PIDL 映射物理文件系统。下一步测外部变更通知与列值回填，再继续真实 child PIDL 集成评估。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01注册-namespace-的菜单重命名与层级导航切片)。

@@ -13,6 +13,7 @@ internal static class ExplorerBrowserWrapperProbe
     private static readonly Guid BrowserInterfaceId = new("DFD3B6B5-C10C-4BE9-85F6-A66969F402F6");
     private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
+    private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid FolderView2Id = new("1AF3A467-214F-4298-908E-06B03E0B39F9");
     private static readonly Guid UnknownId = new("00000000-0000-0000-C000-000000000046");
     private static readonly Guid PersistFolder2Id = new("1AC3D9F0-175C-11D1-95BE-00609797EA4F");
@@ -132,6 +133,7 @@ internal static class ExplorerBrowserWrapperProbe
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             Directory.CreateDirectory(Path.Combine(fixture, "child", "nested"));
             File.WriteAllBytes(Path.Combine(fixture, "root.txt"), [1, 2, 3, 4]);
+            File.WriteAllText(Path.Combine(fixture, "rename-source.txt"), "namespace rename contract");
             File.WriteAllBytes(Path.Combine(fixture, "child", "nested", "deep.bin"), Enumerable.Repeat((byte)7, 10).ToArray());
 
             nativeLibrary = NativeLibrary.Load(FindAdapterLibrary());
@@ -199,9 +201,81 @@ internal static class ExplorerBrowserWrapperProbe
             var header = listView == 0 ? 0 : SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER
             var headerTitles = header == 0 ? [] : ReadNativeHeaderTitles(header);
             var viewChildClasses = ReadChildClasses(shellViewWindow);
-            Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-idlist=0x{browseHr:X8}; class-id-matches={classIdMatches}; root-pidl-matches={rootPidlMatches}; recursive-column-metadata={recursiveColumn}; recursive-size-visible-in-shell={recursiveSizeVisible}; visible-shell-column-count={visibleColumnsAfterApply.Count}; native-header=[{string.Join('|', headerTitles)}]; view-child-classes=[{string.Join('|', viewChildClasses)}]; row-count={itemCount}; fixture={fixture}; visible-to-user=False");
-            if (!classIdMatches || !rootPidlMatches || !recursiveColumnPresent || !recursiveSizeVisible || itemCount != 2)
+            if (!classIdMatches || !rootPidlMatches || !recursiveColumnPresent || !recursiveSizeVisible || itemCount != 3)
                 throw new InvalidOperationException("ExplorerBrowser did not preserve the registered custom namespace view contract.");
+            Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-idlist=0x{browseHr:X8}; class-id-matches={classIdMatches}; root-pidl-matches={rootPidlMatches}; recursive-column-metadata={recursiveColumn}; recursive-size-visible-in-shell={recursiveSizeVisible}; visible-shell-column-count={visibleColumnsAfterApply.Count}; native-header=[{string.Join('|', headerTitles)}]; view-child-classes=[{string.Join('|', viewChildClasses)}]; row-count={itemCount}; fixture={fixture}; visible-to-user=False");
+
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: native-item-menu-and-rename");
+            Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "rename-source.txt", out var renameSource));
+            nint contextMenu = 0, popup = 0;
+            int shellMenuItemCount;
+            try
+            {
+                Marshal.ThrowExceptionForHR(GetUiObjectOf(viewFolder, renameSource, ContextMenuId, out contextMenu));
+                popup = CreatePopupMenu();
+                if (popup == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                Marshal.ThrowExceptionForHR(At<QueryContextMenu>(contextMenu, 3)(contextMenu, popup, 0, 1, 0x7FFF, 0));
+                shellMenuItemCount = GetMenuItemCount(popup);
+                if (shellMenuItemCount <= 0) throw new InvalidOperationException("The active namespace did not provide native file commands.");
+            }
+            finally
+            {
+                if (popup != 0) DestroyMenu(popup);
+                if (contextMenu != 0) Marshal.Release(contextMenu);
+                Marshal.FreeCoTaskMem(renameSource);
+            }
+
+            Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "rename-source.txt", out var renameSourceAgain));
+            nint renamedItem = 0;
+            try
+            {
+                Marshal.ThrowExceptionForHR(SetNameOf(viewFolder, renameSourceAgain, "rename-complete.txt", out renamedItem));
+                if (File.Exists(Path.Combine(fixture, "rename-source.txt")) ||
+                    !File.Exists(Path.Combine(fixture, "rename-complete.txt")))
+                    throw new InvalidOperationException("The registered namespace rename did not reach the backing filesystem.");
+            }
+            finally
+            {
+                if (renamedItem != 0) Marshal.FreeCoTaskMem(renamedItem);
+                Marshal.FreeCoTaskMem(renameSourceAgain);
+            }
+            Console.WriteLine($"explorerbrowser-registered-namespace: native-item-menu-items={shellMenuItemCount}; backing-filesystem-rename=True");
+
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: child-and-parent-navigation");
+            Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "child", out var childItem));
+            var expectedChildRoot = ILCombine(rootPidl, childItem);
+            Marshal.FreeCoTaskMem(childItem);
+            if (expectedChildRoot == 0) throw new InvalidOperationException("Could not compose a child namespace PIDL.");
+            try
+            {
+                ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                Marshal.ThrowExceptionForHR(At<BrowseToIdList>(browser, 13)(browser, expectedChildRoot, 0));
+                Application.DoEvents();
+                Thread.Sleep(250);
+                Application.DoEvents();
+                ReadActiveFolder(browser, ref shellView, ref folderView, ref viewFolder, ref persist);
+                Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out var childClassId));
+                Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
+                var childIdentityMatches = childClassId == classId && PidlBytesEqual(expectedChildRoot, currentPidl);
+                Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var childRowCount));
+                if (!childIdentityMatches || childRowCount != 1)
+                    throw new InvalidOperationException("Child navigation did not preserve the namespace PIDL or enumerate its backing folder.");
+
+                ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                Marshal.ThrowExceptionForHR(At<BrowseToIdList>(browser, 13)(browser, rootPidl, 0));
+                Application.DoEvents();
+                Thread.Sleep(250);
+                Application.DoEvents();
+                ReadActiveFolder(browser, ref shellView, ref folderView, ref viewFolder, ref persist);
+                Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out var returnedClassId));
+                Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
+                var rootReturnMatches = returnedClassId == classId && PidlBytesEqual(rootPidl, currentPidl);
+                Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var rootRowCountAfterRename));
+                if (!rootReturnMatches || rootRowCountAfterRename != 3)
+                    throw new InvalidOperationException("Parent navigation did not return to the registered namespace root.");
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-pidl-matches={childIdentityMatches}; child-row-count={childRowCount}; return-to-root={rootReturnMatches}; root-row-count-after-rename={rootRowCountAfterRename}");
+            }
+            finally { Marshal.FreeCoTaskMem(expectedChildRoot); }
             return 0;
         }
         finally
@@ -291,6 +365,49 @@ internal static class ExplorerBrowserWrapperProbe
         Marshal.Copy(right, rightBytes, 0, rightBytes.Length);
         return leftBytes.AsSpan().SequenceEqual(rightBytes);
     }
+
+    private static int ParseDisplayName(nint folder, string name, out nint item)
+    {
+        uint eaten = 0, attributes = 0;
+        return At<ParseDisplayNameNative>(folder, 3)(folder, 0, 0, name, out eaten, out item, ref attributes);
+    }
+
+    private static int GetUiObjectOf(nint folder, nint item, Guid iid, out nint value)
+    {
+        var items = Marshal.AllocHGlobal(IntPtr.Size);
+        try
+        {
+            Marshal.WriteIntPtr(items, item);
+            uint reserved = 0;
+            return At<GetUiObjectOfNative>(folder, 10)(folder, 0, 1, items, ref iid, ref reserved, out value);
+        }
+        finally { Marshal.FreeHGlobal(items); }
+    }
+
+    private static void ReadActiveFolder(nint browser, ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist)
+    {
+        var shellViewId = ShellViewId;
+        Marshal.ThrowExceptionForHR(At<GetCurrentView>(browser, 17)(browser, ref shellViewId, out shellView));
+        var folderView2Id = FolderView2Id;
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(shellView, in folderView2Id, out folderView));
+        var viewFolderId = ShellFolder2Id;
+        Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref viewFolderId, out viewFolder));
+        var persistId = PersistFolder2Id;
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(viewFolder, in persistId, out persist));
+    }
+
+    private static void ReleaseActiveFolder(ref nint shellView, ref nint folderView, ref nint viewFolder,
+        ref nint persist, ref nint currentPidl)
+    {
+        if (currentPidl != 0) { Marshal.FreeCoTaskMem(currentPidl); currentPidl = 0; }
+        if (persist != 0) { Marshal.Release(persist); persist = 0; }
+        if (viewFolder != 0) { Marshal.Release(viewFolder); viewFolder = 0; }
+        if (folderView != 0) { Marshal.Release(folderView); folderView = 0; }
+        if (shellView != 0) { Marshal.Release(shellView); shellView = 0; }
+    }
+
+    private static int SetNameOf(nint folder, nint item, string name, out nint renamed)
+        => At<SetNameOfNative>(folder, 12)(folder, 0, item, name, 0, out renamed);
 
     private static string ReadHeader(nint folder, uint column)
     {
@@ -401,6 +518,10 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToIdList(nint self, nint pidl, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayNameNative(nint self, nint owner, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string name, out uint eaten, out nint item, ref uint attributes);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOfNative(nint self, nint owner, uint count, nint items, ref Guid iid, ref uint reserved, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetNameOfNative(nint self, nint owner, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, uint flags, out nint renamed);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint first, uint last, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
@@ -412,8 +533,12 @@ internal static class ExplorerBrowserWrapperProbe
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, ref Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("shell32.dll")] private static extern uint ILGetSize(nint pidl);
+    [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint exStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll", SetLastError = true)] private static extern nint CreatePopupMenu();
+    [DllImport("user32.dll")] private static extern bool DestroyMenu(nint menu);
+    [DllImport("user32.dll")] private static extern int GetMenuItemCount(nint menu);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate bool EnumChildProc(nint window, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder className, int maximum);
