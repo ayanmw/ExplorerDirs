@@ -525,6 +525,48 @@ internal static class ShellViewHostFilterProbe
                         host.HistoryIndex != historyIndexBeforeInvalidTarget || !ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"Rejecting a file target after {label} navigation changed the active virtual view or history.");
                     Console.WriteLine($"ishellview-host-filter: virtual-nonfolder-target-rejected=True; target={label}; hr=0x{invalidTargetHr:X8}; active-view-preserved=True; history-index={host.HistoryIndex}; pidl-identity-preserved=True");
+
+                    var historyCountBeforeSamePath = host.NavigationHistory!.Count;
+                    Check(host.BrowseObject(virtualFolderPidl, 0));
+                    var samePathItemCount = AdoptPendingView(expectedItemCount: null,
+                        allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                    if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl) || host.HistoryIndex != historyIndexBeforeInvalidTarget ||
+                        host.NavigationHistory.Count != historyCountBeforeSamePath)
+                        throw new Exception($"Same-path navigation to {label} changed its PIDL or duplicated the travel-history entry.");
+                    Console.WriteLine($"ishellview-host-filter: virtual-same-path-navigation=True; target={label}; view-created=True; view-items={samePathItemCount}; view-items-hr=0x{itemCountLastHResult:X8}; history-index={host.HistoryIndex}; history-count={host.NavigationHistory.Count}; history-unchanged=True");
+
+                    if (label == "ThisPC")
+                    {
+                        var thisPcPidl = ILClone(host.CurrentPidl);
+                        try
+                        {
+                            Check(host.BrowseObject(volumeRootPidl, 0));
+                            AdoptPendingView(expectedItemCount: null,
+                                allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                            if (!ILIsEqual(host.CurrentPidl, volumeRootPidl))
+                                throw new Exception("The This PC view could not navigate into the system volume root.");
+
+                            Check(host.BrowseObject(0, SbspParent));
+                            AdoptPendingView(expectedItemCount: null,
+                                allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                            if (!ILIsEqual(host.CurrentPidl, thisPcPidl))
+                                throw new Exception("SBSP_PARENT from the system volume root did not return to This PC.");
+
+                            Check(host.BrowseObject(0, SbspNavigateBack));
+                            AdoptPendingView(expectedItemCount: null,
+                                allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                            if (!ILIsEqual(host.CurrentPidl, volumeRootPidl))
+                                throw new Exception("Back from This PC did not restore the system volume root.");
+
+                            Check(host.BrowseObject(0, SbspNavigateForward));
+                            AdoptPendingView(expectedItemCount: null,
+                                allowItemCountFailure: true, returnOnFirstSuccessfulCount: true);
+                            if (!ILIsEqual(host.CurrentPidl, thisPcPidl))
+                                throw new Exception("Forward from the system volume root did not restore This PC.");
+                            Console.WriteLine($"ishellview-host-filter: virtual-filesystem-parent-history=True; target=ThisPC; drive-root-parent=True; back-forward=True; history-index={host.HistoryIndex}; pidl-identity-preserved=True");
+                        }
+                        finally { Marshal.FreeCoTaskMem(thisPcPidl); }
+                    }
                     TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
