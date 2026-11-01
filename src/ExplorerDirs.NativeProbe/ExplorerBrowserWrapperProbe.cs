@@ -419,15 +419,20 @@ internal static class ExplorerBrowserWrapperProbe
                 var requestedChildColumns = recursiveColumnInitiallyVisibleInChild
                     ? childColumns
                     : childColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
-                var childColumnApplyHr = ShellColumnManager.Apply(folderView, requestedChildColumns);
-                var childVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var childColumnsAfterApply);
-                if (childColumnApplyHr != 0 || childVerifyCaptureHr != 0 || childColumnsAfterApply is null)
-                    throw new InvalidOperationException($"Could not apply/read child-folder recursive Size column: apply={childColumnApplyHr}; capture={childVerifyCaptureHr}.");
-                var recursiveColumnVisibleInChild = childColumnsAfterApply.Any(column => column.Key == sizeKey);
+                var childState = new ViewState(4, -1, [], null, true, requestedChildColumns);
+                var childRestoreFailures = new List<string>();
+                var childStateRestored = ShellViewStateRestore.Restore(childState,
+                    new ProbeViewStateTarget(folderView),
+                    (step, result) => childRestoreFailures.Add($"{step}=0x{result:X8}"),
+                    () => true);
+                var childVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var childColumnsAfterRestore);
+                if (!childStateRestored || childVerifyCaptureHr != 0 || childColumnsAfterRestore is null)
+                    throw new InvalidOperationException($"Could not restore/read child-folder Shell view state: restored={childStateRestored}; failures={string.Join(',', childRestoreFailures)}; capture={childVerifyCaptureHr}.");
+                var recursiveColumnVisibleInChild = childColumnsAfterRestore.Any(column => column.Key == sizeKey);
                 var childNestedSizeBeforeTravel = recursiveColumnVisibleInChild
                     ? ReadViewItemDetailsByName(folderView, viewFolder, "nested", 1)
                     : "<column-hidden>";
-                Console.WriteLine($"explorerbrowser-registered-namespace: child-recursive-column-initially-visible={recursiveColumnInitiallyVisibleInChild}; apply-hr=0x{childColumnApplyHr:X8}; visible-after-apply={recursiveColumnVisibleInChild}; nested-size={childNestedSizeBeforeTravel}");
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-recursive-column-initially-visible={recursiveColumnInitiallyVisibleInChild}; shared-state-restore={childStateRestored}; visible-after-restore={recursiveColumnVisibleInChild}; nested-size={childNestedSizeBeforeTravel}");
                 if (!recursiveColumnVisibleInChild || childNestedSizeBeforeTravel != "10")
                     throw new InvalidOperationException($"Could not display the recursive Size column in the wrapped child folder; visible={recursiveColumnVisibleInChild}; value={childNestedSizeBeforeTravel}.");
 
@@ -538,17 +543,22 @@ internal static class ExplorerBrowserWrapperProbe
                     var requestedForwardColumns = recursiveColumnInitiallyVisibleAfterForward
                         ? forwardColumns
                         : forwardColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
-                    var forwardColumnApplyHr = ShellColumnManager.Apply(folderView, requestedForwardColumns);
-                    var forwardVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumnsAfterApply);
-                    if (forwardColumnApplyHr != 0 || forwardVerifyCaptureHr != 0 || forwardColumnsAfterApply is null)
-                        throw new InvalidOperationException($"Could not reapply the recursive Size column after Shell TravelLog forward: apply={forwardColumnApplyHr}; capture={forwardVerifyCaptureHr}.");
-                    var recursiveColumnVisibleAfterForward = forwardColumnsAfterApply.Any(column => column.Key == sizeKey);
+                    var forwardState = childState with { DisplayColumns = requestedForwardColumns };
+                    var forwardRestoreFailures = new List<string>();
+                    var forwardStateRestored = ShellViewStateRestore.Restore(forwardState,
+                        new ProbeViewStateTarget(folderView),
+                        (step, result) => forwardRestoreFailures.Add($"{step}=0x{result:X8}"),
+                        () => true);
+                    var forwardVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumnsAfterRestore);
+                    if (!forwardStateRestored || forwardVerifyCaptureHr != 0 || forwardColumnsAfterRestore is null)
+                        throw new InvalidOperationException($"Could not restore/read Shell view state after TravelLog forward: restored={forwardStateRestored}; failures={string.Join(',', forwardRestoreFailures)}; capture={forwardVerifyCaptureHr}.");
+                    var recursiveColumnVisibleAfterForward = forwardColumnsAfterRestore.Any(column => column.Key == sizeKey);
                     var nestedRecursiveSizeAfterForward = recursiveColumnVisibleAfterForward
                         ? ReadViewItemDetailsByName(folderView, viewFolder, "nested", 1)
                         : "<column-hidden>";
                     var recursiveColumnAndValueAfterReapply = recursiveColumnVisibleInChild &&
                         recursiveColumnVisibleAfterForward && nestedRecursiveSizeAfterForward == "10";
-                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; child-column-visible-after-apply={recursiveColumnVisibleInChild}; forward-column-initially-visible={recursiveColumnInitiallyVisibleAfterForward}; forward-column-visible-after-apply={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-after-reapply={recursiveColumnAndValueAfterReapply}");
+                    Console.WriteLine($"explorerbrowser-registered-namespace: nested-pidl-matches=True; nested-row-count={nestedRowCount}; parent-pidl-matches=True; travel-log-back=True; travel-log-forward=True; child-column-visible-after-restore={recursiveColumnVisibleInChild}; forward-column-initially-visible={recursiveColumnInitiallyVisibleAfterForward}; shared-state-restore-after-forward={forwardStateRestored}; forward-column-visible-after-restore={recursiveColumnVisibleAfterForward}; nested-size-after-forward={nestedRecursiveSizeAfterForward}; recursive-column-and-value-after-restore={recursiveColumnAndValueAfterReapply}");
                     if (!recursiveColumnAndValueAfterReapply)
                         throw new InvalidOperationException("The recursive Size column and value were not restored after host reapplication following Shell TravelLog navigation.");
                 }
@@ -1497,6 +1507,46 @@ internal static class ExplorerBrowserWrapperProbe
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * nint.Size));
 
+    private sealed class ProbeViewStateTarget(nint view) : IShellViewStateTarget
+    {
+        public int SetMode(uint mode, int iconSize) =>
+            At<SetViewModeAndIconSize>(view, 35)(view, mode, iconSize);
+
+        public int SetColumns(IReadOnlyList<DisplayColumnState> columns) =>
+            ShellColumnManager.Apply(view, columns);
+
+        public int SetSorting(IReadOnlyList<SortColumnState> columns)
+        {
+            var native = columns.Select(column => new NativeSortColumn
+            {
+                Key = new ShellColumnManager.NativeKey
+                {
+                    FormatId = column.Key.FormatId,
+                    PropertyId = column.Key.PropertyId
+                },
+                Direction = column.Direction
+            }).ToArray();
+            var pointer = Marshal.AllocCoTaskMem(checked(native.Length * Marshal.SizeOf<NativeSortColumn>()));
+            try
+            {
+                for (var index = 0; index < native.Length; index++)
+                    Marshal.StructureToPtr(native[index], pointer + index * Marshal.SizeOf<NativeSortColumn>(), false);
+                return At<SetSortColumns>(view, 27)(view, pointer, native.Length);
+            }
+            finally { Marshal.FreeCoTaskMem(pointer); }
+        }
+
+        public int SetGrouping(PropertyKeyState? key, bool ascending)
+        {
+            var native = key is null ? default : new ShellColumnManager.NativeKey
+            {
+                FormatId = key.FormatId,
+                PropertyId = key.PropertyId
+            };
+            return At<SetGroupBy>(view, 17)(view, ref native, ascending ? 1 : 0);
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)] private struct ProbeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct ProbeFolderSettings { public uint Mode, Flags; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeSortColumn
@@ -1541,6 +1591,8 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetClassId(nint self, out Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSortColumns(nint self, nint columns, int count);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetGroupBy(nint self, ref ShellColumnManager.NativeKey key, int ascending);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int MapColumnToScid(nint self, uint column, out ShellColumnManager.NativeKey key);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Rearrange(nint self, nint sortColumn);

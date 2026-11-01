@@ -2098,3 +2098,7 @@ NativeProbe synthetic provider 的 `IShellFolder2::CompareIDs` 原先只比较�
 Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager.Apply` 后，列可见且 nested 值为 `10`。TravelLog Back/Forward 返回时 Shell view 会创建默认列集；再应用 pane 的列快照后，列及值 `10` 恢复。因此原型要求宿主在每个新 Shell view 建立后恢复 pane 的列快照，不能依赖 Shell 自动跨 folder/history 携带应用自定义列。
 
 双 provider 按需扫描超时的根因也已确认：NativeProbe 用固定 8 槽数组保留 Shell view/folder 配对，先前 root→child→nested、parent 与 TravelLog 往返累计占满槽位，创建 peer view 时记录 `view-hold-capacity-exhausted`，导致 pending 查询无法找到第二视图。扩至 32 槽后，同目录两个视图都建立 pending；销毁第一个 Browser 后其请求被取消，peer 请求正常完成并读到大小 `3`，总扫描计数只增加 1，缓存快照计数增加 2。说明同路径工作共享，但取消生命周期按视图区分。日志：`src/.state/native-probe-watchdog/20261101-222727-d71be987.stdout.log`；NativeProbe C# Release 与独立 C++ `/W4 /WX` 构建通过，Private Desktop 前台/last-input/隔离守卫通过。该槽位修正只属于隔离探针，不代表产品迁移或完成 UI/菜单/文件操作验收。
+
+### 2026-11-01：ExplorerBrowser 使用共享视图状态协调器恢复递归大小列
+
+把 NativeProbe 链接到产品共用的 `ShellViewStateRestore`，并用隔离 `IFolderView2` 目标实现模式、列、排序与分组写入。Child 新建 view 默认不含递归大小列；同一 `ViewState` 经共享恢复协调器应用后，列可见且 `nested` 行读回 `10`。Shell TravelLog Forward 同样新建无该列的 view，再调用相同协调器后列和值恢复。NativeProbe Release build 0 警告/错误；Private Desktop watchdog exit 0，前台/last-input/清理隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-223215-980068ed.stdout.log`。这证明产品已有恢复协调器能够承载自定义列恢复，并验证了本机 ExplorerBrowser 下导航/TravelLog 的列快照需求；没有证明生产 `ExplorerBrowserHost` 对此注册 namespace 或物理目录的真实运行，递归扫描 provider、列标题交互、排序状态、刷新闪烁及用户可见 UI 仍不在本切片范围。产品架构与 releases 未修改。

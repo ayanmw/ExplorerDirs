@@ -58,6 +58,8 @@
     <Compile Include="../ExplorerDirs.App/PortableIniWriter.cs" Link="PortableIniWriter.cs" />
     <Compile Include="../ExplorerDirs.App/ColumnLayout.cs" Link="ColumnLayout.cs" />
     <Compile Include="../ExplorerDirs.App/ShellColumnManager.cs" Link="ShellColumnManager.cs" />
+    <Compile Include="../ExplorerDirs.App/ShellViewStateRestore.cs" Link="ShellViewStateRestore.cs" />
+    <Compile Include="../ExplorerDirs.App/ViewPresetStore.cs" Link="ViewPresetStore.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewExport.cs" Link="FileViewExport.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewPrintLayout.cs" Link="FileViewPrintLayout.cs" />
     <Compile Include="../ExplorerDirs.App/FileViewPrintDocument.cs" Link="FileViewPrintDocument.cs" />
