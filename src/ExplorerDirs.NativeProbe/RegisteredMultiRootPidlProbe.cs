@@ -10,7 +10,7 @@ internal static class RegisteredMultiRootPidlProbe
 {
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
 
-    internal static int Run()
+    internal static int Run(bool volatileRegistration = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), "ExplorerDirs-RegisteredRoot-" + Guid.NewGuid().ToString("N"));
         var firstPath = Path.Combine(fixture, "first");
@@ -41,9 +41,9 @@ internal static class RegisteredMultiRootPidlProbe
             Check(GetExport<SetPath>(module, "SetSyntheticSortBackingPath")(firstPath));
             Check(GetExport<SetFlag>(module, "SetSyntheticCustomSizeColumnForProbe")(1));
             Check(GetExport<SetFlag>(module, "SetSyntheticRecursiveSizeScanOnDemandForProbe")(1));
-            RegisterClass(classKeyPath, FindAdapterLibrary());
+            RegisterClass(classKeyPath, FindAdapterLibrary(), volatileRegistration);
             classRegistered = true;
-            RegisterNamespace(namespaceKeyPath);
+            RegisterNamespace(namespaceKeyPath, volatileRegistration);
             namespaceRegistered = true;
 
             Check(SHParseDisplayName($"::{{{classId:D}}}", 0, out rootPidl, 0, out _));
@@ -94,7 +94,7 @@ internal static class RegisteredMultiRootPidlProbe
             if (childExitCode != 0)
                 throw new InvalidOperationException($"A fresh process could not resolve the saved namespace path identity; exit code={childExitCode}.");
 
-            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, app SessionStore and ShellLocationIdentity round-trip, fresh-process path/content recovery, simultaneous root/child bindings A=13 B=29, no Shell view window)");
+            Console.WriteLine($"registered multi-root PIDL smoke: PASS (volatile-registration={volatileRegistration}; natural root activation, absolute parsing-name PIDL round-trip, app SessionStore and ShellLocationIdentity round-trip, fresh-process path/content recovery, simultaneous root/child bindings A=13 B=29, no Shell view window)");
             return 0;
         }
         finally
@@ -111,6 +111,13 @@ internal static class RegisteredMultiRootPidlProbe
             if (module != 0) NativeLibrary.Free(module);
             if (oleInitialized) OleUninitialize();
             if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            if (volatileRegistration)
+            {
+                using var remainingClassKey = Registry.CurrentUser.OpenSubKey(classKeyPath);
+                using var remainingNamespaceKey = Registry.CurrentUser.OpenSubKey(namespaceKeyPath);
+                if (remainingClassKey is not null || remainingNamespaceKey is not null)
+                    throw new InvalidOperationException("The volatile registered path probe left a CLSID or Desktop NameSpace key behind.");
+            }
         }
     }
 
@@ -183,7 +190,7 @@ internal static class RegisteredMultiRootPidlProbe
         return child.ExitCode;
     }
 
-    private static void RegisterClass(string path, string modulePath)
+    private static void RegisterClass(string path, string modulePath, bool volatileRegistration)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
@@ -191,14 +198,20 @@ internal static class RegisteredMultiRootPidlProbe
         if (existing is not null) throw new InvalidOperationException("The generated CLSID unexpectedly already exists.");
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(path, writable: true)
+            using var key = volatileRegistration
+                ? Registry.CurrentUser.CreateSubKey(path, RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : Registry.CurrentUser.CreateSubKey(path, writable: true)
                 ?? throw new InvalidOperationException("Could not register temporary CLSID.");
             key.SetValue(null, "ExplorerDirs isolated registered multi-root probe", RegistryValueKind.String);
-            using var inproc = key.CreateSubKey("InprocServer32", writable: true)
+            using var inproc = volatileRegistration
+                ? key.CreateSubKey("InprocServer32", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : key.CreateSubKey("InprocServer32", writable: true)
                 ?? throw new InvalidOperationException("Could not register InprocServer32.");
             inproc.SetValue(null, modulePath, RegistryValueKind.String);
             inproc.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
-            using var shellFolder = key.CreateSubKey("ShellFolder", writable: true)
+            using var shellFolder = volatileRegistration
+                ? key.CreateSubKey("ShellFolder", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : key.CreateSubKey("ShellFolder", writable: true)
                 ?? throw new InvalidOperationException("Could not register ShellFolder attributes.");
             shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
         }
@@ -209,13 +222,15 @@ internal static class RegisteredMultiRootPidlProbe
         }
     }
 
-    private static void RegisterNamespace(string path)
+    private static void RegisterNamespace(string path, bool volatileRegistration)
     {
         using var existing = Registry.CurrentUser.OpenSubKey(path);
         if (existing is not null) throw new InvalidOperationException("The generated namespace key unexpectedly already exists.");
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(path, writable: true)
+            using var key = volatileRegistration
+                ? Registry.CurrentUser.CreateSubKey(path, RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : Registry.CurrentUser.CreateSubKey(path, writable: true)
                 ?? throw new InvalidOperationException("Could not register temporary Desktop namespace entry.");
             key.SetValue(null, "ExplorerDirs isolated registered multi-root probe", RegistryValueKind.String);
         }

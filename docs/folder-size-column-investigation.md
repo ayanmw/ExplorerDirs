@@ -2358,7 +2358,13 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 将既有完整 ExplorerBrowser namespace 合同探针改为同时使用 volatile `HKCU\Software\Classes\CLSID`、`InprocServer32`、`ShellFolder` 与 Desktop `NameSpace\{CLSID}` keys。临时 namespace 根成功解析，生产 `ExplorerBrowser` host 创建并保留正确根 PIDL/provider，递归大小列元数据与可见列存在，背景菜单查询成功并读到 21 项；原生删除、重命名、Shell 通知、子目录/嵌套导航、第二浏览器隔离及递归扫描 view 生命周期合同均完成，探针 exit 0。退出时 `temporary-registrations-removed=True`；Private Desktop 前台、输入及隔离清理守卫通过。
 
-这说明对当前 ExplorerBrowser 路线来说，volatile CLSID + volatile Desktop `NameSpace` 可以在当前登录会话内提供完整的 Shell parsing-name 激活，而无需写跨系统重启保留的注册项。它仍会在运行期间写 HKCU，Desktop NameSpace 也可能被其它 Shell 进程看见；本探针没有验证注册与产品多窗口启动/退出竞态、外部 Explorer 同时导航、崩溃后重启恢复或用户可见桌面副作用。用户会话的 `.ini` parsing name 只有在产品启动、重建两类 volatile key 后才能恢复；关闭时主动移除注册则会让其它进程保存的路径在该会话内暂时不可解析。产品及 release 未变，递归扫描仍只允许显式触发。下一步先验证跨进程同会话恢复和注册 owner 生命周期，再决定是否值得进入产品实现。
+这说明对当前 ExplorerBrowser 路线来说，volatile CLSID + volatile Desktop `NameSpace` 可以在当前登录会话内提供完整的 Shell parsing-name 激活，而无需写跨系统重启保留的注册项。它仍会在运行期间写 HKCU，Desktop NameSpace 也可能被其它 Shell 进程看见；volatile namespace 的产品 owner、异常退出清理和用户可见桌面副作用仍未验证。产品及 release 未变，递归扫描仍只允许显式触发。
+
+### 2026-11-02：volatile namespace 的跨进程 SessionStore 路径恢复
+
+将既有注册多根 PIDL 探针加上 volatile CLSID/COM class 子键与 Desktop NameSpace 模式。父进程用生产 `SessionStore` 保存由 Shell parsing name 标识的目录；子进程在不同 fallback 根下读取该路径，重新通过 Shell 解析、绑定并校验唯一内容与递归值，成功恢复到预期目录。父进程随后清理 volatile 注册，并断言 CLSID 与 Desktop NameSpace 两棵键均不存在。NativeProbe Release 0 警告/错误，探针 exit 0。
+
+这证明同一登录会话里，app 进程可先重建 volatile namespace，再让新进程从现有 INI 恢复相同路径身份；它没有测试“owner 已清理注册后，再由全新进程启动并重新注册”的完整应用入口，也没有跨注销/重启验证 volatile key 的系统生命周期。与上一节 ExplorerBrowser 隐藏宿主合同合并看，直接产品风险已收敛到注册 owner 的多窗口/并发/异常退出管理和 Namespace 桌面可见性；仍没有产品接线或 GUI 验收。
 
 ### 2026-11-02：免注册直接 IShellView 原型门槛
 
