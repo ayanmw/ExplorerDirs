@@ -143,6 +143,8 @@ internal static class ExplorerBrowserWrapperProbe
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticSortBackingPath"))(fixture));
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticCustomSizeColumnForProbe"))(1));
+            Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+                NativeLibrary.GetExport(nativeLibrary, "SetSyntheticChildNotificationTranslationForProbe"))(1));
             RegisterSyntheticFolder(classKeyPath);
             classRegistrationCreated = true;
             RegisterSyntheticNamespace(namespaceKeyPath);
@@ -264,6 +266,83 @@ internal static class ExplorerBrowserWrapperProbe
             }
             Console.WriteLine($"explorerbrowser-registered-namespace: native-item-menu-items={shellMenuItemCount}; backing-filesystem-rename=True");
 
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: shell-updatedir-refresh");
+            File.WriteAllBytes(Path.Combine(fixture, "notification-created.txt"), [9, 8, 7]);
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var backingRootPidl, 0, out _));
+            int countAfterNotification = -1;
+            try
+            {
+                SHChangeNotify(0x00001000, 0, backingRootPidl, 0); // SHCNE_UPDATEDIR / SHCNF_IDLIST
+                for (var attempt = 0; attempt < 50; attempt++)
+                {
+                    Application.DoEvents();
+                    Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out countAfterNotification));
+                    if (countAfterNotification == 4) break;
+                    Thread.Sleep(100);
+                }
+                if (countAfterNotification != 4)
+                    throw new InvalidOperationException($"The registered namespace view did not enumerate the externally created file after SHCNE_UPDATEDIR; count={countAfterNotification}.");
+                Console.WriteLine($"explorerbrowser-registered-namespace: updatedir-row-count={countAfterNotification}; external-create-visible=True");
+            }
+            finally { Marshal.FreeCoTaskMem(backingRootPidl); }
+
+            var childSizeBeforeNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
+            if (childSizeBeforeNotification != "10")
+                throw new InvalidOperationException($"The recursive Size row value was unexpected before its child update; value={childSizeBeforeNotification}.");
+            File.WriteAllBytes(Path.Combine(fixture, "child", "notification-size.bin"), [1, 2, 3, 4, 5, 6, 7]);
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(fixture, "child"), 0, out var physicalChildPidl, 0, out _));
+            string childSizeAfterNotification = "";
+            var getQueuedNotifications = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticChildNotificationTranslationQueuedCount"));
+            var getSentNotifications = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticChildNotificationTranslationSentCount"));
+            var getEnumerationCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+                NativeLibrary.GetExport(nativeLibrary, "GetSyntheticEnumObjectsCount"));
+            var queuedBeforeChildChange = getQueuedNotifications();
+            var sentBeforeChildChange = getSentNotifications();
+            var enumerationsBeforeChildChange = getEnumerationCount();
+            string providerSizeAfterNotification = "";
+            try
+            {
+                SHChangeNotify(0x00002000, 0, physicalChildPidl, 0); // SHCNE_UPDATEITEM / SHCNF_IDLIST
+                for (var attempt = 0; attempt < 50; attempt++)
+                {
+                    Application.DoEvents();
+                    childSizeAfterNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
+                    providerSizeAfterNotification = ReadParsedItemDetailsByName(viewFolder, "child", 1);
+                    if (childSizeAfterNotification == "17") break;
+                    Thread.Sleep(100);
+                }
+                if (childSizeAfterNotification != "17")
+                {
+                    Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "child", out var refreshedChildPidl));
+                    var refreshedAbsoluteChildPidl = ILCombine(rootPidl, refreshedChildPidl);
+                    try
+                    {
+                        SHChangeNotify(0x00002000, 0, refreshedAbsoluteChildPidl, 0); // SHCNE_UPDATEITEM for the namespace item.
+                        for (var attempt = 0; attempt < 20; attempt++)
+                        {
+                            Application.DoEvents();
+                            childSizeAfterNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
+                            if (childSizeAfterNotification == "17") break;
+                            Thread.Sleep(100);
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeCoTaskMem(refreshedAbsoluteChildPidl);
+                        Marshal.FreeCoTaskMem(refreshedChildPidl);
+                    }
+                }
+                var enumerationsAfterChildChange = getEnumerationCount();
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-updateitem-queued={getQueuedNotifications() - queuedBeforeChildChange}; sent={getSentNotifications() - sentBeforeChildChange}; enumerations={enumerationsBeforeChildChange}->{enumerationsAfterChildChange}; view-size={childSizeBeforeNotification}->{childSizeAfterNotification}; provider-size={providerSizeAfterNotification}; row-refreshed={childSizeAfterNotification == "17"}");
+                if (providerSizeAfterNotification != "17" || enumerationsAfterChildChange <= enumerationsBeforeChildChange)
+                    throw new InvalidOperationException("The backing namespace provider did not rescan the changed child directory after its Shell notification.");
+                if (childSizeAfterNotification != "17")
+                    Console.WriteLine("explorerbrowser-registered-namespace: limitation=provider-and-enumeration-updated; existing-view-row-retains-old-PIDL-metadata");
+            }
+            finally { Marshal.FreeCoTaskMem(physicalChildPidl); }
+
             PrivateDesktopShellProbe.ReportStage("namespace-probe: child-and-parent-navigation");
             Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "child", out var childItem));
             var expectedChildRoot = ILCombine(rootPidl, childItem);
@@ -281,7 +360,7 @@ internal static class ExplorerBrowserWrapperProbe
                 Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
                 var childIdentityMatches = childClassId == classId && PidlBytesEqual(expectedChildRoot, currentPidl);
                 Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var childRowCount));
-                if (!childIdentityMatches || childRowCount != 1)
+                if (!childIdentityMatches || childRowCount != 2)
                     throw new InvalidOperationException("Child navigation did not preserve the namespace PIDL or enumerate its backing folder.");
 
                 ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
@@ -294,9 +373,9 @@ internal static class ExplorerBrowserWrapperProbe
                 Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
                 var rootReturnMatches = returnedClassId == classId && PidlBytesEqual(rootPidl, currentPidl);
                 Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var rootRowCountAfterRename));
-                if (!rootReturnMatches || rootRowCountAfterRename != 3)
+                if (!rootReturnMatches || rootRowCountAfterRename != 4)
                     throw new InvalidOperationException("Parent navigation did not return to the registered namespace root.");
-                Console.WriteLine($"explorerbrowser-registered-namespace: child-pidl-matches={childIdentityMatches}; child-row-count={childRowCount}; return-to-root={rootReturnMatches}; root-row-count-after-rename={rootRowCountAfterRename}");
+                Console.WriteLine($"explorerbrowser-registered-namespace: child-pidl-matches={childIdentityMatches}; child-row-count={childRowCount}; return-to-root={rootReturnMatches}; root-row-count-after-notification={rootRowCountAfterRename}");
             }
             finally { Marshal.FreeCoTaskMem(expectedChildRoot); }
             return 0;
@@ -323,6 +402,8 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: temporary-registrations-removed={registrationsRemoved}");
             if (nativeLibrary != 0)
             {
+                _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+                    NativeLibrary.GetExport(nativeLibrary, "SetSyntheticChildNotificationTranslationForProbe"))(0);
                 var canUnload = Marshal.GetDelegateForFunctionPointer<CanUnload>(NativeLibrary.GetExport(nativeLibrary, "DllCanUnloadNow"))();
                 if (canUnload == 0) NativeLibrary.Free(nativeLibrary);
                 else Console.WriteLine($"explorerbrowser-registered-namespace: native-library-retained-until-process-exit=0x{canUnload:X8}");
@@ -397,6 +478,46 @@ internal static class ExplorerBrowserWrapperProbe
 
     private static int CreateViewObject(nint folder, Guid iid, out nint value)
         => At<CreateViewObjectNative>(folder, 8)(folder, 0, ref iid, out value);
+
+    private static string ReadViewItemDetailsByName(nint folderView, nint folder, string expectedName, uint column)
+    {
+        Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out var count));
+        for (var index = 0; index < count; index++)
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemPidl>(folderView, 6)(folderView, index, out var item));
+            try
+            {
+                var itemName = ReadShellDetailsText(folder, item, 0);
+                if (string.Equals(itemName, expectedName, StringComparison.OrdinalIgnoreCase))
+                    return ReadShellDetailsText(folder, item, column);
+            }
+            finally { Marshal.FreeCoTaskMem(item); }
+        }
+        return "<missing>";
+    }
+
+    private static string ReadParsedItemDetailsByName(nint folder, string name, uint column)
+    {
+        Marshal.ThrowExceptionForHR(ParseDisplayName(folder, name, out var item));
+        try { return ReadShellDetailsText(folder, item, column); }
+        finally { Marshal.FreeCoTaskMem(item); }
+    }
+
+    private static string ReadShellDetailsText(nint folder, nint item, uint column)
+    {
+        var details = Marshal.AllocCoTaskMem(Marshal.SizeOf<NativeShellDetails>());
+        try
+        {
+            Marshal.StructureToPtr(default(NativeShellDetails), details, false);
+            Marshal.ThrowExceptionForHR(At<GetDetailsOf>(folder, 18)(folder, item, column, details));
+            var value = Marshal.PtrToStructure<NativeShellDetails>(details);
+            if (value.Text.Type != 0 || value.Text.Pointer == 0) return "<non-WSTR>";
+            var text = Marshal.PtrToStringUni(value.Text.Pointer) ?? "";
+            Marshal.FreeCoTaskMem(value.Text.Pointer);
+            return text;
+        }
+        finally { Marshal.FreeCoTaskMem(details); }
+    }
 
     private static int GetUiObjectOf(nint folder, nint item, Guid iid, out nint value)
     {
@@ -538,6 +659,7 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BrowseToObject(nint self, nint value, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurrentView(nint self, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemPidl(nint self, int index, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCurFolder(nint self, out nint pidl);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetClassId(nint self, out Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemCount(nint self, uint scope, out int count);
@@ -552,6 +674,7 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetProbeCount();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CanUnload();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Destroy(nint self);
 
@@ -559,6 +682,7 @@ internal static class ExplorerBrowserWrapperProbe
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, ref Guid iid, out nint value);
     [DllImport("shell32.dll")] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
+    [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);
     [DllImport("shell32.dll")] private static extern uint ILGetSize(nint pidl);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint exStyle, string className, string windowName, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint parameter);

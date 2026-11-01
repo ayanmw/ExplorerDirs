@@ -1584,3 +1584,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop 探针通过，前�
 活动 Browser 的合成 folder 原先只接受 `IShellView` 的 `CreateViewObject` 请求；查询背景 `IContextMenu` 返回 `E_NOINTERFACE`，探针按预期失败并确认临时注册清理。现在仅将背景 `IID_IContextMenu` 请求转发给真实 backing filesystem folder，视图创建路径保持原样。复验背景 `CreateViewObject`/`QueryContextMenu` 返回成功并构造 21 项原生菜单；文件项菜单仍为 33 项，隔离 backing 文件重命名与一层子目录 PIDL 往返仍通过。原生 adapter `/W4 /WX` 与 NativeProbe Release 构建通过，Private Desktop 前台/输入守卫通过，临时注册及夹具已清理。
 
 该结果证明的是背景菜单对象及命令项能创建，不是菜单实际显示/点击路由或命令执行；也未验证 `New`、刷新、排序、分组命令在 ExplorerBrowser 中的实际效果。产品宿主和 release 未修改。下一步验证外部 Shell 变更通知能否更新根列表及递归大小缓存。
+
+### 2026-11-01：ExplorerBrowser 子目录通知刷新递归大小原型
+
+Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文件并发出物理文件系统 `SHCNE_UPDATEITEM`。Shell 将通知送到 `SFVM_FSNOTIFY`；adapter 转发父目录 `SHCNE_UPDATEDIR`，Shell 的枚举计数从 2 增至 3，provider 新解析的 `child` 行大小从 10 B 变为 17 B。可是 Browser 当前视图仍保留原行的合成 PIDL 元数据，显示值维持 10 B。再对新解析的合成绝对子项发送 `SHCNE_UPDATEITEM` 也没有让该行更新。
+
+这证明 backing 目录通知、递归快照失效、provider 重枚举已连通，但通知没有映射成 DefView 能更新现存 namespace 行的身份/数据变化。需继续研究 namespace PIDL 更新/比较合同与视图行刷新路由；不能把重新枚举或缓存更新当作可见行刷新成功。隔离探针以“provider 重算成功、当前行仍旧值”作为已知限制通过，Private Desktop 前台/输入守卫和临时注册清理通过。产品及 release 未修改。
