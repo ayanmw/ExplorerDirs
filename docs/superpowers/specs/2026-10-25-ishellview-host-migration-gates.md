@@ -177,6 +177,8 @@ Private Desktop 宿主 teardown 和前台守卫问题已在 WPF 根宿主路径�
 2026-11-01 跨卷双视图续验：隐藏 `--shell-change-reconciliation` 将真实 filesystem source/target 分置 D:/C:，分别监听两目录；MoveItems 后收到 Deleted/Created，源/目标行数从 3/1 收敛为 1/3，内容、稳定锚点 ID、选区/焦点与隐藏窗前台守卫通过；随后 Copy/Rename/Delete 对账也通过。Release build 和探针通过。只补足 NativeProbe 自有行模型的 filesystem 跨卷通知收敛；产品 ExplorerBrowser、可见菜单/操作、OLE 拖放、ZIP 跨卷 MoveItems 仍未验证，阶段 4/5 与迁移决策保持开放。
 
 2026-11-01 ZIP 跨卷 MoveItems 续验：隔离 `IShellView` 从 D: ZIP provider 将虚拟文件与含嵌套文件的目录分别移动到 C:；两项操作均 S_OK、未取消、内容正确且归档源移除，源 view 分别由 2→1 项、再收敛至 0。Private Desktop 前台/输入/清理守卫及 Release build 通过。当前 Windows ZIP provider 的程序化跨卷 MoveItems 子门槛有证据；通知 PIDL 与延迟、交互 UI、真实拖放、ExplorerBrowser 产品接线和其它 provider 仍开放，不关闭完整阶段 4/5。
+
+2026-11-01 虚拟 Shell 失败导航续验：在 Desktop、This PC、Recycle Bin、Libraries、Network Places、Control Panel、Search Folder、ZIP 各自完成一次 Back/Forward 后，将已存在的 filesystem 文件 PIDL 交给 `BrowseObject`。八类目标均以 `E_FAIL` 拒绝，活动 view COM 身份、当前绝对 PIDL、历史索引保持不变，且没有 pending view；每个独立 Private Desktop watchdog 均 exit 0，前台/输入及隔离清理守卫通过。Control Panel 的 `IFolderView2.ItemCount` 仍返回 `E_FAIL`，但本门槛只依赖 view 指针与 NavigationHistory 状态，未将项目数读回纳入结论。NativeProbe Release build 0 警告/错误。证据仅适用于当前 Windows 的这八类 provider 与隔离宿主；不证明任意 Shell namespace 扩展、产品 ExplorerBrowser 或真实可见 UI。
 2026-11-01 ZIP 跨卷通知 PIDL：在 ZIP 源 view 与 C: 目标分别注册 Shell 监听。文件 MoveItems 的 `UPDATEITEM`（归档）、`DELETE`（虚拟文件）及 `CREATE`（目标文件）均收到并解析为预期 parsing name，作为成功断言。目录单独移动也收到虚拟子项删除及目标文件夹/嵌套文件创建。先移动 ZIP 文件再移动目录的组合中，NativeProbe 初版把第一步观察结果留作可变列表引用，导致第二步按增长后的计数跳过通知；冻结事件快照后连续两次复跑均收到归档 `UPDATEITEM` 与嵌套文件 `DELETE`，但没有文件夹 `DELETE` 或目标创建事件；第二步改为从当前 view 重新枚举目录 PIDL 后仍复现。修正的是探针诊断；仅当前 Windows ZIP provider 的隔离结果，产品通知接线、其它 provider、可见 UI 仍开放。
 
 ### 2026-11-01：七类虚拟 Shell 位置的历史往返

@@ -516,6 +516,15 @@ internal static class ShellViewHostFilterProbe
                     if (!ILIsEqual(host.CurrentPidl, virtualFolderPidl))
                         throw new Exception($"Forward to {label} did not restore its absolute PIDL identity.");
                     Console.WriteLine($"ishellview-host-filter: virtual-history-roundtrip=True; target={label}; back-items={backItemCount}; back-hr=0x{backItemCountHResult:X8}; forward-items={forwardItemCount}; forward-hr=0x{forwardItemCountHResult:X8}; view-counts-readable={backItemCount >= 0 && forwardItemCount >= 0}; pidl-identity-preserved=True");
+
+                    // Match the filesystem failure gate: a rejected file target must not replace a virtual view or advance its travel history.
+                    var activeVirtualView = host.View;
+                    var historyIndexBeforeInvalidTarget = host.HistoryIndex;
+                    var invalidTargetHr = host.BrowseObject(filePidl, 0);
+                    if (invalidTargetHr >= 0 || host.PendingView != 0 || host.View != activeVirtualView ||
+                        host.HistoryIndex != historyIndexBeforeInvalidTarget || !ILIsEqual(host.CurrentPidl, virtualFolderPidl))
+                        throw new Exception($"Rejecting a file target after {label} navigation changed the active virtual view or history.");
+                    Console.WriteLine($"ishellview-host-filter: virtual-nonfolder-target-rejected=True; target={label}; hr=0x{invalidTargetHr:X8}; active-view-preserved=True; history-index={host.HistoryIndex}; pidl-identity-preserved=True");
                     TraceVirtualScope($"{label}-complete", foreground);
                 }
                 finally
