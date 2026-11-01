@@ -123,7 +123,11 @@ internal static class PrivateDesktopShellProbe
         Run("explorerbrowser-wrapper-object", ExplorerBrowserWrapperProbe.Run, TimeSpan.FromSeconds(30), initializeOle: true);
 
     internal static int RunExplorerBrowserRegisteredNamespace() =>
-        Run("explorerbrowser-registered-namespace", ExplorerBrowserWrapperProbe.RunNamespace,
+        Run("explorerbrowser-registered-namespace", () => ExplorerBrowserWrapperProbe.RunNamespace(),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
+    internal static int RunExplorerBrowserVolatileRegisteredNamespace() =>
+        Run("explorerbrowser-volatile-registered-namespace", () => ExplorerBrowserWrapperProbe.RunNamespace(volatileRegistryRegistration: true),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
     internal static int RunColumnFilterCapability() =>
@@ -273,6 +277,12 @@ internal static class PrivateDesktopShellProbe
     internal static int RunDirectIshellViewVolatileClassPrototype() =>
         Run("synthetic-direct-ishellview-volatile-class",
             () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(volatileClassRegistration: true),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
+    internal static int RunDirectIshellViewNamespaceRootParsePrototype() =>
+        Run("synthetic-direct-ishellview-namespace-root-parse",
+            () => SyntheticShellSortProbe.RunDirectIshellViewNoRegistrationPrototype(
+                volatileClassRegistration: true, parseNamespaceRootWithoutDesktopNamespace: true),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
     internal static int RunSyntheticShellTwoViewTargetSync() =>

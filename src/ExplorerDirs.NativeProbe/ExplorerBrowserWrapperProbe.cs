@@ -128,7 +128,7 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    internal static int RunNamespace()
+    internal static int RunNamespace(bool volatileRegistryRegistration = false)
     {
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
@@ -168,10 +168,11 @@ internal static class ExplorerBrowserWrapperProbe
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticCustomSizeColumnForProbe"))(1));
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticChildNotificationTranslationForProbe"))(1));
-            RegisterSyntheticFolder(classKeyPath);
+            RegisterSyntheticFolder(classKeyPath, volatileRegistryRegistration);
             classRegistrationCreated = true;
-            RegisterSyntheticNamespace(namespaceKeyPath);
+            RegisterSyntheticNamespace(namespaceKeyPath, volatileRegistryRegistration);
             namespaceRegistrationCreated = true;
+            Console.WriteLine($"explorerbrowser-registered-namespace: volatile-registry-registration={volatileRegistryRegistration}");
             Marshal.ThrowExceptionForHR(SHParseDisplayName($"::{{{classId:D}}}", 0, out rootPidl, 0, out _));
             if (rootPidl == 0) throw new InvalidOperationException("The temporary namespace did not resolve to an absolute root PIDL.");
 
@@ -971,7 +972,7 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    private static void RegisterSyntheticFolder(string classKeyPath)
+    private static void RegisterSyntheticFolder(string classKeyPath, bool volatileRegistration = false)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
@@ -979,14 +980,20 @@ internal static class ExplorerBrowserWrapperProbe
         if (existing is not null) throw new InvalidOperationException("The random probe CLSID already exists; refusing to overwrite it.");
         try
         {
-            using var classKey = Registry.CurrentUser.CreateSubKey(classKeyPath, writable: true)
+            using var classKey = volatileRegistration
+                ? Registry.CurrentUser.CreateSubKey(classKeyPath, RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : Registry.CurrentUser.CreateSubKey(classKeyPath, writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary Shell-folder CLSID key.");
             classKey.SetValue(null, "ExplorerDirs isolated ExplorerBrowser namespace probe", RegistryValueKind.String);
-            using var inproc = classKey.CreateSubKey("InprocServer32", writable: true)
+            using var inproc = volatileRegistration
+                ? classKey.CreateSubKey("InprocServer32", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : classKey.CreateSubKey("InprocServer32", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary InprocServer32 key.");
             inproc.SetValue(null, FindAdapterLibrary(), RegistryValueKind.String);
             inproc.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
-            using var shellFolder = classKey.CreateSubKey("ShellFolder", writable: true)
+            using var shellFolder = volatileRegistration
+                ? classKey.CreateSubKey("ShellFolder", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : classKey.CreateSubKey("ShellFolder", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary ShellFolder key.");
             shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
         }
@@ -997,13 +1004,15 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    private static void RegisterSyntheticNamespace(string namespaceKeyPath)
+    private static void RegisterSyntheticNamespace(string namespaceKeyPath, bool volatileRegistration = false)
     {
         if (Registry.CurrentUser.OpenSubKey(namespaceKeyPath) is not null)
             throw new InvalidOperationException("The random probe namespace key already exists; refusing to overwrite it.");
         try
         {
-            using var namespaceKey = Registry.CurrentUser.CreateSubKey(namespaceKeyPath, writable: true)
+            using var namespaceKey = volatileRegistration
+                ? Registry.CurrentUser.CreateSubKey(namespaceKeyPath, RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
+                : Registry.CurrentUser.CreateSubKey(namespaceKeyPath, writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary Desktop\\NameSpace key.");
             namespaceKey.SetValue(null, "ExplorerDirs isolated ExplorerBrowser namespace probe", RegistryValueKind.String);
         }

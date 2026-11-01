@@ -2352,6 +2352,14 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 这证明上一节“必须有持久 CLSID 注册”的结论过宽：当前用户会话内的 volatile CLSID 注册即可支持直接 IShellView 创建；COM `CoRegisterClassObject` 单独不能替代该 Shell 类键。volatile key 仍是运行时 HKCU 注册，只是不会写成跨系统重启保留的持久项；本探针没有验证崩溃残留、同会话重启恢复、ExplorerBrowser parsing-name 恢复或产品生命周期。应用若要采用它，需要明确稳定 CLSID、启动前注册与可靠退出清理，并设计异常退出后重建；本结果不等同于无注册表运行。逐行递归扫描仍只允许按用户显式动作触发，产品 ExplorerBrowser 未改。
 
+随后保留 volatile CLSID、完全不创建 Desktop `NameSpace` 项，并单独调用 `SHParseDisplayName("::{CLSID}")`。Shell 返回 `E_INVALIDARG (0x80070057)`，说明 volatile COM 类键可供 `SHCreateShellFolderView` 的直接创建路径使用，却不足以让 Shell 的 parsing-name 路由识别该 namespace 根。此前直接把 path-marker PIDL 当绝对根交给 DefView 的试验创建了 view HWND 后卡在激活/枚举阶段并被 45 秒 Private Desktop watchdog 截止；这不是成功结果，也说明自有 PIDL 必须带正确的 Shell namespace 根身份。Private Desktop 前台和输入守卫未变化。
+
+### 2026-11-02：volatile CLSID 与 Desktop NameSpace 的 ExplorerBrowser 对照
+
+将既有完整 ExplorerBrowser namespace 合同探针改为同时使用 volatile `HKCU\Software\Classes\CLSID`、`InprocServer32`、`ShellFolder` 与 Desktop `NameSpace\{CLSID}` keys。临时 namespace 根成功解析，生产 `ExplorerBrowser` host 创建并保留正确根 PIDL/provider，递归大小列元数据与可见列存在，背景菜单查询成功并读到 21 项；原生删除、重命名、Shell 通知、子目录/嵌套导航、第二浏览器隔离及递归扫描 view 生命周期合同均完成，探针 exit 0。退出时 `temporary-registrations-removed=True`；Private Desktop 前台、输入及隔离清理守卫通过。
+
+这说明对当前 ExplorerBrowser 路线来说，volatile CLSID + volatile Desktop `NameSpace` 可以在当前登录会话内提供完整的 Shell parsing-name 激活，而无需写跨系统重启保留的注册项。它仍会在运行期间写 HKCU，Desktop NameSpace 也可能被其它 Shell 进程看见；本探针没有验证注册与产品多窗口启动/退出竞态、外部 Explorer 同时导航、崩溃后重启恢复或用户可见桌面副作用。用户会话的 `.ini` parsing name 只有在产品启动、重建两类 volatile key 后才能恢复；关闭时主动移除注册则会让其它进程保存的路径在该会话内暂时不可解析。产品及 release 未变，递归扫描仍只允许显式触发。下一步先验证跨进程同会话恢复和注册 owner 生命周期，再决定是否值得进入产品实现。
+
 ### 2026-11-02：免注册直接 IShellView 原型门槛
 
 新增隔离 NativeProbe：先在随机 HKCU CLSID/Desktop NameSpace 下解析应用路径 PIDL，随后立即删除这两项注册，再由进程内 NativeAdapter 直接构造 `SyntheticSortFolder`，并将已取得的 PIDL 传给 folder 初始化。Shell folder 对象本身创建成功，但其 `CreateViewObject(IID_IShellView)` 调用 `SHCreateShellFolderView` 返回 `REGDB_E_CLASSNOTREG (0x80040154)`；探针验证两项注册均已删除后才调用，并将此 HRESULT 作为可重复的预期门槛通过。Private Desktop 前台/输入守卫及退出隔离清理通过。

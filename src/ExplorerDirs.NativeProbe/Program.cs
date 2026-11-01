@@ -139,6 +139,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunDirectIshellViewRunningFactoryPrototype();
         if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-volatile-class-private-desktop")
             return PrivateDesktopShellProbe.RunDirectIshellViewVolatileClassPrototype();
+        if (args.Length == 1 && args[0] == "--synthetic-direct-ishellview-namespace-root-parse-private-desktop")
+            return PrivateDesktopShellProbe.RunDirectIshellViewNamespaceRootParsePrototype();
         if (args.Length == 1 && args[0] == "--synthetic-shell-folder-tree-smoke")
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-on-demand-recursive-size-column-smoke")
@@ -284,6 +286,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunExplorerBrowserWrapperObject();
         if (args.Length == 1 && args[0] == "--explorerbrowser-registered-namespace-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserRegisteredNamespace();
+        if (args.Length == 1 && args[0] == "--explorerbrowser-volatile-registered-namespace-private-desktop")
+            return PrivateDesktopShellProbe.RunExplorerBrowserVolatileRegisteredNamespace();
         if (args.Length == 3 && args[0] == "--shell-change-create-file-child")
             return ExplorerBrowserWrapperProbe.RunExternalShellNotificationChild(args[1], args[2]);
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")

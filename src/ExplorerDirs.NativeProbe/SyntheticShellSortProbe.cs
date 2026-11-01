@@ -30,7 +30,8 @@ public static class SyntheticShellSortProbe
     private const int LvmGetItemTextW = LvmFirst + 115;
 
     internal static int RunDirectIshellViewNoRegistrationPrototype(bool retainClassRegistration = false,
-        bool registerRunningClassFactory = false, bool volatileClassRegistration = false)
+        bool registerRunningClassFactory = false, bool volatileClassRegistration = false,
+        bool parseNamespaceRootWithoutDesktopNamespace = false)
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-DirectShellView-{Guid.NewGuid():N}");
         var smallFolder = Path.Combine(fixture, "folder-small");
@@ -64,9 +65,34 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticRecursiveSizeScanOnDemandForProbe"))(1));
             RegisterSyntheticFolder(classKeyPath, classId, volatileRegistration: volatileClassRegistration);
             classRegistered = true;
-            RegisterSyntheticNamespace(namespaceKeyPath);
-            namespaceRegistered = true;
-            Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture), 0, out rootPidl, 0, out _));
+            if (parseNamespaceRootWithoutDesktopNamespace)
+            {
+                if (!volatileClassRegistration)
+                    throw new InvalidOperationException("The no-Desktop-NameSpace path probe requires the volatile Shell class registration gate.");
+                var rootParseResult = SHParseDisplayName($"::{{{classId:D}}}", 0, out var namespaceRootPidl, 0, out _);
+                if (rootParseResult < 0)
+                {
+                    if (namespaceRootPidl != 0) Marshal.FreeCoTaskMem(namespaceRootPidl);
+                    if (rootParseResult == unchecked((int)0x80070057))
+                    {
+                        Console.WriteLine($"synthetic-direct-ishellview-namespace-root-parse: clsid-volatile=True; desktop-namespace-registered=False; hr=0x{rootParseResult:X8}; expected-shell-parse-gate=True");
+                        return 0;
+                    }
+                    Check(rootParseResult);
+                }
+                try
+                {
+                    rootPidl = namespaceRootPidl;
+                    namespaceRootPidl = 0;
+                }
+                finally { if (namespaceRootPidl != 0) Marshal.FreeCoTaskMem(namespaceRootPidl); }
+            }
+            else
+            {
+                RegisterSyntheticNamespace(namespaceKeyPath);
+                namespaceRegistered = true;
+                Check(SHParseDisplayName(CreatePathIdentityParsingName(classId, fixture), 0, out rootPidl, 0, out _));
+            }
             if (registerRunningClassFactory)
             {
                 var registerFactory = Marshal.GetDelegateForFunctionPointer<RegisterClassFactoryForProbe>(
@@ -144,7 +170,7 @@ public static class SyntheticShellSortProbe
                 }
                 throw new InvalidOperationException($"The directly hosted Shell view returned unexpected rows: provider-retained={providerRetained}; count={rowCount}; names=[{string.Join('|', names)}]; enum-calls={ReadCounter(module, "GetSyntheticEnumObjectsCount")}; enumerated={ReadCounter(module, "GetSyntheticEnumeratedItemCount")}.");
             }
-            Console.WriteLine($"synthetic-direct-ishellview: clsid-registered={retainClassRegistration || volatileClassRegistration}; clsid-volatile={volatileClassRegistration}; desktop-namespace-registered=False; running-factory={registerRunningClassFactory}; view-window-created=True; provider-retained={providerRetained}; row-count={rowCount}; rows=[{string.Join('|', names)}]; parent-visible={IsWindowVisible(parent)}");
+            Console.WriteLine($"synthetic-direct-ishellview: clsid-registered={retainClassRegistration || volatileClassRegistration}; clsid-volatile={volatileClassRegistration}; namespace-root-only={parseNamespaceRootWithoutDesktopNamespace}; desktop-namespace-registered=False; running-factory={registerRunningClassFactory}; view-window-created=True; provider-retained={providerRetained}; row-count={rowCount}; rows=[{string.Join('|', names)}]; parent-visible={IsWindowVisible(parent)}");
             return 0;
         }
         finally
