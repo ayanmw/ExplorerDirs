@@ -1618,3 +1618,9 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 将原先由宿主进程直接写文件并调用 `SHChangeNotify` 的检查改为独立 NativeProbe 子进程：子进程创建测试文件，再以绝对 PIDL 分别发送 `SHCNE_CREATE` 和父目录 `SHCNE_UPDATEDIR`；父进程中的私有 Desktop ExplorerBrowser 保持打开并等待更新。根目录新增文件最终出现在视图中，行数为 4。对子目录新增文件，包装通知转发队列增加 1，provider 枚举次数从 2 到 3，已存在的子目录行 `GetDetailsOf` 从 10 B 更新为 17 B；行 PIDL 中保存的旧值仍为 10 B，验证了行值读取依赖共享快照而不是重建旧 PIDL。
 
 NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探针退出码 0，临时 namespace 与夹具清理、前台及输入守卫通过。此验证覆盖独立进程发起的 Shell 广播，但没有覆盖真实 Explorer/第三方程序的通知种类、通知风暴、删除/重命名/移动事件、多窗格或产品接线，也不是用户可见刷新验收。
+
+### 2026-11-01：共享递归大小缓存的空闲卸载生命周期
+
+新增无窗口原生合同，先在共享 `SyntheticRecursiveSizeSnapshotStore` 写入一条带 file identity 的快照，确认缓存计数为 1；随后调用 `DllCanUnloadNow`，验证模块空闲时释放 DLL 持有的共享 store；再次获取 store 后确认从空缓存开始，再次空闲检查成功。这个检查覆盖 store 的显式 DLL 卸载清理分支，不要求真正从进程地址空间卸载 DLL，因 NativeProbe 仍持有本地模块句柄。该命令先因导出缺失按预期失败，添加合同后连续三轮通过。
+
+原生 adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、`--static-shell-column-folder-smoke` 与 `--synthetic-async-on-demand-recursive-size-column-smoke` 均通过。它证明快照不会因 DLL 的共享引用跨过成功的 `DllCanUnloadNow` 空闲门槛；不证明仍被 Shell 持有的 provider/cache 会提前释放，也不取代注册 namespace Private Desktop 运行期间的 store 容量或多窗格压力测量。产品与 release 未改。

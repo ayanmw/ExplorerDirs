@@ -4270,6 +4270,37 @@ STDAPI DllCanUnloadNow()
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticRecursiveSizeCacheUnloadLifecycleSmoke()
+{
+    if (DllCanUnloadNow() != S_OK) return E_UNEXPECTED;
+
+    auto* firstStore = AcquireSharedRecursiveSizeStore();
+    if (!firstStore) return E_OUTOFMEMORY;
+    SyntheticFileIdentity identity{};
+    identity.volumeSerial = 0x1234;
+    identity.fileId[0] = 0x5A;
+    identity.available = true;
+    const auto setResult = firstStore->Set(L"cache-lifecycle-probe", identity, 42);
+    const auto firstStoreCount = firstStore->Count();
+    firstStore->Release();
+    if (FAILED(setResult)) return setResult;
+    if (firstStoreCount != 1) return E_FAIL;
+
+    // DllCanUnloadNow drops the DLL-owned cache reference once all Shell COM objects are gone.
+    if (DllCanUnloadNow() != S_OK) return E_UNEXPECTED;
+    AcquireSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    const bool oldStoreReleased = g_sharedRecursiveSizeStore == nullptr;
+    ReleaseSRWLockShared(&g_sharedRecursiveSizeStoreLock);
+    if (!oldStoreReleased) return E_FAIL;
+
+    auto* reopenedStore = AcquireSharedRecursiveSizeStore();
+    if (!reopenedStore) return E_OUTOFMEMORY;
+    const bool reopenedEmpty = reopenedStore->Count() == 0;
+    reopenedStore->Release();
+    const auto finalUnload = DllCanUnloadNow();
+    return reopenedEmpty && finalUnload == S_OK ? S_OK : E_FAIL;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticDllUnloadContractSmoke()
 {
     const auto before = DllCanUnloadNow();

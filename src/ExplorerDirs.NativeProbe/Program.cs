@@ -63,6 +63,8 @@ internal static class Program
             return StaticShellFolderAdapterProbe.RunFolderContract(requireIdentity: true);
         if (args.Length == 1 && args[0] == "--static-shell-column-folder-smoke")
             return StaticShellFolderAdapterProbe.RunFolderContract();
+        if (args.Length == 1 && args[0] == "--synthetic-recursive-size-cache-unload-smoke")
+            return RecursiveSizeCacheLifecycleProbe.Run();
         if (args.Length == 1 && args[0] == "--synthetic-child-notification-routing-smoke")
             return StaticShellFolderAdapterProbe.RunChildNotificationRoutingContractSmoke();
         if (args.Length == 1 && args[0] == "--static-shell-column-wrapped-folder-smoke")
