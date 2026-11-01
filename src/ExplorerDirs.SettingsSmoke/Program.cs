@@ -9,6 +9,18 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 
+if (args is ["--column-layout-process-roundtrip"])
+{
+    ExplorerDirs.SettingsSmoke.ColumnLayoutProcessSmoke.Run();
+    return;
+}
+
+if (args is ["--column-layout-process-reader", var columnStatePath])
+{
+    ExplorerDirs.SettingsSmoke.ColumnLayoutProcessSmoke.ReadInChildProcess(columnStatePath);
+    return;
+}
+
 if (args is ["--shell-middle-click-target-smoke"])
 {
     ShellMiddleClickTargetSmoke.Run();

@@ -1212,3 +1212,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 此前 NativeProbe 的递归大小快照会一直保留到身份失效或 store 释放，访问过的路径数量增加时没有数量上限。原型 store 现在最多保留 256 个快照；命中会更新最近访问顺序，超限插入时淘汰最久未使用项。静态合同先在旧实现上按预期失败，再验证触碰最旧项后插入新项会淘汰第二旧项，快照数量保持 256，最新项和值均可读。淘汰只丢弃缓存结果，后续 Shell 读取可回退原生大小或由扫描重新填充。
 
 验证：Native adapter `/W4 /WX`、NativeProbe Release build 0 警告/错误，`--static-shell-column-folder-smoke` 退出码 0 并输出 `recursive-size-cache-lru-bound-passed`；此探针 `window-created=False`。该上限仅适用于隔离 NativeProbe 原型，未接入产品、未测进程内存变化，也不证明逐行大小列可见或 ExplorerBrowser 兼容性。
+
+### 2026-11-01：应用会话跨进程保留递归大小列键
+
+新增 `--column-layout-process-roundtrip` SettingsSmoke：父进程将 prototype Recursive Size 的自定义 property key、列宽、排序方向、分组方向和标签路径序列化到临时 INI，启动独立 `dotnet` 子进程调用产品 `SessionStore.ParseComplete` 读取，再核对字段完全一致。定向场景与完整 SettingsSmoke 均通过，SettingsSmoke Release build 0 警告/错误。
+
+该合同只证明应用 INI 对未知/自定义 property key 的跨进程保存和解析稳定；没有创建 Shell view，也没有证明 `IColumnManager`/DefView 能在另一进程或另一 Shell provider 中恢复、显示或排序该列。产品 ExplorerBrowser 未改，逐行大小仍未接入。

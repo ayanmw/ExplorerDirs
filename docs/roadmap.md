@@ -5554,3 +5554,7 @@ NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归
 ### 2026-11-01：递归大小原型缓存有界化
 
 NativeProbe 的递归大小快照改为最多保留 256 项并按最近访问顺序淘汰。静态回归在旧实现上失败，修复后验证容量、LRU 命中和淘汰行为；原生 adapter `/W4 /WX`、NativeProbe Release 与 `--static-shell-column-folder-smoke` 通过。只约束隔离原型缓存，不等于产品内存优化或用户可见列已完成；详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01递归大小原型缓存设定-lru-上限)。
+
+### 2026-11-01：自定义列键通过独立进程会话 INI 往返
+
+SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototype key 的列布局、排序、分组与标签位置；独立 `dotnet` 子进程用产品 `SessionStore.ParseComplete` 读回并逐字段校验。定向进程场景及完整 SettingsSmoke 通过，Release build 0 警告/错误。此证据仅确认应用 INI 的跨进程序列化稳定，不代表 Shell/IColumnManager 跨进程列恢复或不同 provider 兼容；详见[调查记录](folder-size-column-investigation.md#2026-11-01应用会话跨进程保留递归大小列键)。
