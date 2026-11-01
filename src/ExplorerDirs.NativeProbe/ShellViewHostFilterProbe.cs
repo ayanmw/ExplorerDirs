@@ -311,6 +311,9 @@ internal static class ShellViewHostFilterProbe
         }
         var names = ReadVisibleItemNames(view, itemCount);
         var values = ReadRecursiveSizeValues(folder, view, itemCount);
+        var directSizeCompare = stage == "initial-root"
+            ? ReadDirectSizeComparison(folder, view, "child-small", "child")
+            : "not-run";
         var sortMatches = sortReadbackResult >= 0 && sorts.Length == 1 &&
             sorts[0].Key.FormatId == saved.SortColumns[0].Key.FormatId &&
             sorts[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
@@ -333,33 +336,46 @@ internal static class ShellViewHostFilterProbe
         string[] namesAfterShellMenuSort = names;
         string[] valuesAfterShellMenuSort = values;
         var shellMenuSortReadback = "not-run";
+        string[] namesAfterProgrammaticSortState = names;
+        var sortAfterProgrammaticSortState = "not-run";
+        var shellMenuVerbOrders = new List<string>();
         if (stage == "initial-root")
         {
             try
             {
-                var opposite = saved.SortColumns.Select(column => column with { Direction = -column.Direction }).ToArray();
                 var target = new NativeShellViewStateTarget(view);
-                Check(target.SetSorting(opposite));
-                InvokeBackgroundVerb(shellView, GetParent(viewWindow),
-                    saved.SortColumns[0].Direction > 0 ? "sortascending" : "sortdescending");
-                var settleDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(350);
-                do
+                Check(target.SetSorting(saved.SortColumns));
+                namesAfterProgrammaticSortState = ReadVisibleItemNames(view, itemCount);
+                sortAfterProgrammaticSortState = ReadSortColumnsSummary(view);
+                // SetSortColumns changes the reported state without forcing an immediate row reorder; verify the native menu verbs themselves.
+                foreach (var verb in new[] { "sortascending", "sortdescending", "sortascending" })
                 {
-                    Application.DoEvents();
-                    Thread.Sleep(10);
-                } while (DateTime.UtcNow < settleDeadline);
-                namesAfterShellMenuSort = ReadVisibleItemNames(view, itemCount);
-                valuesAfterShellMenuSort = ReadRecursiveSizeValues(folder, view, itemCount);
-                var afterMenuCountHr = At<GetSortColumnCount>(view, 26)(view, out var afterMenuCount);
-                if (afterMenuCountHr >= 0 && afterMenuCount > 0)
-                {
-                    var afterMenuSorts = new NativeSortColumn[afterMenuCount];
-                    var afterMenuReadHr = At<GetSortColumns>(view, 28)(view, afterMenuSorts, afterMenuCount);
-                    shellMenuSortReadback = afterMenuReadHr < 0
-                        ? $"hr=0x{afterMenuReadHr:X8}"
-                        : string.Join('|', afterMenuSorts.Select(sort => $"{sort.Key.FormatId:B}:{sort.Key.PropertyId}:{sort.Direction}"));
+                    InvokeBackgroundVerb(shellView, GetParent(viewWindow), verb);
+                    var settleDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(350);
+                    do
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(10);
+                    } while (DateTime.UtcNow < settleDeadline);
+                    var menuNames = ReadVisibleItemNames(view, itemCount);
+                    var menuValues = ReadRecursiveSizeValues(folder, view, itemCount);
+                    var afterMenuCountHr = At<GetSortColumnCount>(view, 26)(view, out var afterMenuCount);
+                    if (afterMenuCountHr >= 0 && afterMenuCount > 0)
+                    {
+                        var afterMenuSorts = new NativeSortColumn[afterMenuCount];
+                        var afterMenuReadHr = At<GetSortColumns>(view, 28)(view, afterMenuSorts, afterMenuCount);
+                        shellMenuSortReadback = afterMenuReadHr < 0
+                            ? $"hr=0x{afterMenuReadHr:X8}"
+                            : string.Join('|', afterMenuSorts.Select(sort => $"{sort.Key.FormatId:B}:{sort.Key.PropertyId}:{sort.Direction}"));
+                    }
+                    else shellMenuSortReadback = $"count-hr=0x{afterMenuCountHr:X8};count={afterMenuCount}";
+                    shellMenuVerbOrders.Add($"{verb};sort=[{shellMenuSortReadback}];order=[{string.Join('|', menuNames)}];values=[{string.Join('|', menuValues)}]");
+                    if (verb == "sortascending")
+                    {
+                        namesAfterShellMenuSort = menuNames;
+                        valuesAfterShellMenuSort = menuValues;
+                    }
                 }
-                else shellMenuSortReadback = $"count-hr=0x{afterMenuCountHr:X8};count={afterMenuCount}";
             }
             catch (Exception ex) { shellMenuSortFailure = $"{ex.GetType().Name}: {ex.Message}"; }
         }
@@ -423,9 +439,30 @@ internal static class ShellViewHostFilterProbe
                 sortAfterHeader[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
                 sortAfterHeader[0].Direction == saved.SortColumns[0].Direction;
         }
-        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; header-slot-probes=[{string.Join(" || ", headerSlotProbes)}]; order-after-native-column-one-first-click=[{string.Join('|', namesAfterNativeColumnOneFirstClick)}]; sort-after-native-column-one-first-click=[{sortAfterNativeColumnOneFirstClick}]; order-after-native-column-one=[{string.Join('|', namesAfterNativeColumnOne)}]; order-after-snapshot-column-first-click=[{string.Join('|', namesAfterSnapshotColumnFirstClick)}]; sort-after-snapshot-column-first-click=[{sortAfterSnapshotColumnFirstClick}]; order-after-snapshot-column=[{string.Join('|', namesAfterSnapshotColumn)}]; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; direct-size-compare={directSizeCompare}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{string.Join('|', valuesBeforeRestoreRetry)}]; order-matches-saved-sort={orderMatchesSavedSort}; programmatic-sort-state=[{sortAfterProgrammaticSortState}]/[{string.Join('|', namesAfterProgrammaticSortState)}]; shell-menu-sort-failure={shellMenuSortFailure ?? "none"}; shell-menu-verb-orders=[{string.Join(" || ", shellMenuVerbOrders)}]; sort-after-shell-menu=[{shellMenuSortReadback}]; order-after-shell-menu-sort=[{string.Join('|', namesAfterShellMenuSort)}]; values-after-shell-menu-sort=[{string.Join('|', valuesAfterShellMenuSort)}]; header-sort-failure={headerSortFailure ?? "none"}; header-slot-probes=[{string.Join(" || ", headerSlotProbes)}]; order-after-native-column-one-first-click=[{string.Join('|', namesAfterNativeColumnOneFirstClick)}]; sort-after-native-column-one-first-click=[{sortAfterNativeColumnOneFirstClick}]; order-after-native-column-one=[{string.Join('|', namesAfterNativeColumnOne)}]; order-after-snapshot-column-first-click=[{string.Join('|', namesAfterSnapshotColumnFirstClick)}]; sort-after-snapshot-column-first-click=[{sortAfterSnapshotColumnFirstClick}]; order-after-snapshot-column=[{string.Join('|', namesAfterSnapshotColumn)}]; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
         Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
         return result;
+    }
+
+    private static string ReadDirectSizeComparison(nint folder, nint view, string leftName, string rightName)
+    {
+        var leftIndex = FindItemIndexByName(view, leftName);
+        var rightIndex = FindItemIndexByName(view, rightName);
+        if (leftIndex < 0 || rightIndex < 0) return $"items-missing:{leftName}/{rightName}";
+        Check(At<GetItem>(view, 6)(view, leftIndex, out var leftPidl));
+        Check(At<GetItem>(view, 6)(view, rightIndex, out var rightPidl));
+        try
+        {
+            var compare = At<CompareIds>(folder, 7);
+            var forward = compare(folder, 1, leftPidl, rightPidl);
+            var reverse = compare(folder, 1, rightPidl, leftPidl);
+            return $"{leftName}<{rightName}:forward=0x{forward:X8}/signed-low={(short)(forward & 0xffff)};reverse=0x{reverse:X8}/signed-low={(short)(reverse & 0xffff)}";
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(leftPidl);
+            Marshal.FreeCoTaskMem(rightPidl);
+        }
     }
 
     private static string ReadSortColumnsSummary(nint view)
@@ -4829,6 +4866,7 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetFolder(nint self, ref Guid iid, out nint folder);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItem(nint self, int index, out nint itemPidl);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CompareIds(nint self, nint column, nint left, nint right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetDetailsOf(nint self, nint item, uint column, nint details);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetItemDisplayName(nint self, uint nameKind, out nint name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetGroupBy(nint self, ref ShellColumnManager.NativeKey key, int ascending);
