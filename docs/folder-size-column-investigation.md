@@ -2102,3 +2102,6 @@ Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager
 ### 2026-11-01：ExplorerBrowser 使用共享视图状态协调器恢复递归大小列
 
 把 NativeProbe 链接到产品共用的 `ShellViewStateRestore`，并用隔离 `IFolderView2` 目标实现模式、列、排序与分组写入。Child 新建 view 默认不含递归大小列；同一 `ViewState` 经共享恢复协调器应用后，列可见且 `nested` 行读回 `10`。Shell TravelLog Forward 同样新建无该列的 view，再调用相同协调器后列和值恢复。NativeProbe Release build 0 警告/错误；Private Desktop watchdog exit 0，前台/last-input/清理隔离守卫通过。日志：`src/.state/native-probe-watchdog/20261101-223215-980068ed.stdout.log`。这证明产品已有恢复协调器能够承载自定义列恢复，并验证了本机 ExplorerBrowser 下导航/TravelLog 的列快照需求；没有证明生产 `ExplorerBrowserHost` 对此注册 namespace 或物理目录的真实运行，递归扫描 provider、列标题交互、排序状态、刷新闪烁及用户可见 UI 仍不在本切片范围。产品架构与 releases 未修改。
+### 2026-11-01：以生产 Loaded 优先级运行 ExplorerBrowser 列状态恢复
+
+将上面的 child 与 TravelLog Forward 状态恢复调用排入 WPF `DispatcherPriority.Loaded`，由 DispatcherFrame 泵送执行，以对齐 `ExplorerBrowserHost.PublishNavigationLocation` 在 `OnNavigationComplete` 后调用 `ApplyViewState` 的调度优先级。两处均恢复成功：新 view 初始无递归列，恢复后列可见，nested 值为 `10`。NativeProbe Release build 0 警告/错误；Private Desktop watchdog exit 0，前台、last-input 与清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-223408-7e6b70d7.stdout.log`。本验证只复现 Loaded 调度等级，不加载 `ExplorerBrowserHost`，也没有真实标签快照捕获、导航代次退休门控或生产 UI 的重入/布局时序；仍属隔离 Shell 原型。

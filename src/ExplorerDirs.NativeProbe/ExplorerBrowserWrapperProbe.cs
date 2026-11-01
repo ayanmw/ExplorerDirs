@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using ExplorerDirs.App;
 using Microsoft.Win32;
 
@@ -421,10 +422,7 @@ internal static class ExplorerBrowserWrapperProbe
                     : childColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
                 var childState = new ViewState(4, -1, [], null, true, requestedChildColumns);
                 var childRestoreFailures = new List<string>();
-                var childStateRestored = ShellViewStateRestore.Restore(childState,
-                    new ProbeViewStateTarget(folderView),
-                    (step, result) => childRestoreFailures.Add($"{step}=0x{result:X8}"),
-                    () => true);
+                var childStateRestored = RestoreAtLoadedPriority(childState, folderView, childRestoreFailures);
                 var childVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var childColumnsAfterRestore);
                 if (!childStateRestored || childVerifyCaptureHr != 0 || childColumnsAfterRestore is null)
                     throw new InvalidOperationException($"Could not restore/read child-folder Shell view state: restored={childStateRestored}; failures={string.Join(',', childRestoreFailures)}; capture={childVerifyCaptureHr}.");
@@ -545,10 +543,7 @@ internal static class ExplorerBrowserWrapperProbe
                         : forwardColumns.Append(new DisplayColumnState(sizeKey, 160)).ToArray();
                     var forwardState = childState with { DisplayColumns = requestedForwardColumns };
                     var forwardRestoreFailures = new List<string>();
-                    var forwardStateRestored = ShellViewStateRestore.Restore(forwardState,
-                        new ProbeViewStateTarget(folderView),
-                        (step, result) => forwardRestoreFailures.Add($"{step}=0x{result:X8}"),
-                        () => true);
+                    var forwardStateRestored = RestoreAtLoadedPriority(forwardState, folderView, forwardRestoreFailures);
                     var forwardVerifyCaptureHr = ShellColumnManager.Capture(folderView, out var forwardColumnsAfterRestore);
                     if (!forwardStateRestored || forwardVerifyCaptureHr != 0 || forwardColumnsAfterRestore is null)
                         throw new InvalidOperationException($"Could not restore/read Shell view state after TravelLog forward: restored={forwardStateRestored}; failures={string.Join(',', forwardRestoreFailures)}; capture={forwardVerifyCaptureHr}.");
@@ -1506,6 +1501,27 @@ internal static class ExplorerBrowserWrapperProbe
 
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * nint.Size));
+
+    private static bool RestoreAtLoadedPriority(ViewState state, nint view, List<string> failures)
+    {
+        var restored = false;
+        Exception? failure = null;
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            try
+            {
+                restored = ShellViewStateRestore.Restore(state, new ProbeViewStateTarget(view),
+                    (step, result) => failures.Add($"{step}=0x{result:X8}"),
+                    () => true);
+            }
+            catch (Exception ex) { failure = ex; }
+            finally { frame.Continue = false; }
+        }));
+        Dispatcher.PushFrame(frame);
+        if (failure is not null) throw new InvalidOperationException("Loaded-priority Shell view restoration failed.", failure);
+        return restored;
+    }
 
     private sealed class ProbeViewStateTarget(nint view) : IShellViewStateTarget
     {
