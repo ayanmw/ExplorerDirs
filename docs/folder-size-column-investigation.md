@@ -2402,4 +2402,6 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 新增 `ShellNamespaceProfileStore` 原型，以独立 `ShellNamespace.ini` 的 `[ShellNamespace]` `FormatVersion=1` / `ClassId={D}` 保存一个非空 GUID。隔离 SettingsSmoke 覆盖首次创建、并发首次读取收敛到同一 ID、重载保持 ID，以及损坏/未来格式返回警告且原文件逐字保留。App 与 SettingsSmoke Release build 0 警告/错误；profile store smoke 及 Q-Dir Shell-location export/import smoke 通过。
 
-此 store 尚未从应用启动调用，也没有注册/回收 Shell namespace；发布脚本尚未复制并重映射 `ShellNamespace.ini` 或会话、收藏和 `.qdr` 扩展中的 provider identity。只有这两部分接好后，才能声称 profile 移动保持 identity、预览 profile 隔离或产品导出可用。
+隔离发布脚本现在复制有效的 `ShellNamespace.ini`，为预览 profile 生成新 CLSID，并在副本的 `.ini` 状态文件与 `.qdr` 的 `ExplorerDirs.State` Base64 JSON payload 中重映射旧 GUID；测试确认 source profile 逐文件 hash 不变、QDR base 物理路径不变。无该文件的旧 profile 保持原复制行为；无效 GUID 与未来格式会在构建及创建 release 前被拒绝。`publish-smoke.ps1` 通过 fixture 真实执行打包脚本，没有真实 release 或 GUI。
+
+store 尚未从应用启动调用，也没有创建/回收 volatile Shell namespace；应用 QDR 调用点也还没有把 profile CLSID 传给 `QdrExporter`。QuickLinks 下的 `.lnk` 内部 PIDL 未做重写验证。故已证实的是隔离文本状态与 QDR 扩展重映射，不代表产品 Shell 位置恢复、Q-Dir GUI 互操作或 Quick Link 的自定义 namespace 往返已完成。

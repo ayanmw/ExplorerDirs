@@ -48,14 +48,24 @@ foreach ($name in $settings) {
     [IO.File]::WriteAllText((Join-Path $fixtureProfile $name), ('fixture-' + $name))
 }
 $extraWindowName = 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.ini'
+[Guid]$sourceProviderClassId = 'b0f47a2f-1690-4888-a0d6-cfe4a4abf92f'
+$sourceProviderIdentity = "::{$($sourceProviderClassId.ToString('D'))}\edpath:0043003A005C0070"
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'ShellNamespace.ini'),
+    "; fixture Shell namespace identity`r`n[ShellNamespace]`r`nFormatVersion=1`r`nClassId=$($sourceProviderClassId.ToString('D'))`r`n")
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.ini'), "Path=$sourceProviderIdentity`r`n")
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'Favorites.ini'), "Item0=$sourceProviderIdentity`r`n")
+[IO.File]::WriteAllText((Join-Path $fixtureProfile 'PinnedTabs.ini'), "Path0=$sourceProviderIdentity`r`n")
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'WindowSessions.ini'), "[WindowSessions]`nFormatVersion=1`nCount=2`nSession0=ExplorerDirs.ini`nSession1=$extraWindowName`n")
-[IO.File]::WriteAllText((Join-Path $fixtureProfile $extraWindowName), 'fixture extra window session')
+[IO.File]::WriteAllText((Join-Path $fixtureProfile $extraWindowName), "Path=$sourceProviderIdentity`r`n")
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.PinnedTabs.ini'), 'fixture extra window pins')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-0123456789abcdef0123456789abcdef.WindowPlacement.ini'), 'fixture extra window placement')
 [IO.File]::WriteAllText((Join-Path $fixtureProfile 'ExplorerDirs.window-fedcba9876543210fedcba9876543210.ini'), 'unregistered window session')
 $workspaces = Join-Path $fixtureProfile 'Workspaces'
 New-Item -ItemType Directory -Path $workspaces, (Join-Path $workspaces 'nested') | Out-Null
-[IO.File]::WriteAllText((Join-Path $workspaces '工作区.QDR'), 'workspace fixture')
+$workspaceExtension = @{ Session = "Path=$sourceProviderIdentity`r`n"; Pins = @(@{ Path = $sourceProviderIdentity }) } |
+    ConvertTo-Json -Depth 8 -Compress
+$workspaceState = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($workspaceExtension))
+[IO.File]::WriteAllText((Join-Path $workspaces '工作区.QDR'), "Dir1=C:\preview-fixture`r`nExplorerDirs.State=$workspaceState`r`n")
 [IO.File]::WriteAllText((Join-Path $workspaces 'notes.txt'), 'not a workspace')
 [IO.File]::WriteAllText((Join-Path $workspaces 'nested/ignored.qdr'), 'not listed by WorkspaceCatalog')
 $quickLinks = Join-Path $fixtureProfile 'QuickLinks'
@@ -97,10 +107,35 @@ if ($folderStatusJson.Count -ne 2 -or
     throw 'Packaged folder-entry manager emitted invalid machine-readable status.'
 }
 $copied = Join-Path $release 'app/profile'
+$copiedProviderClassId = [Guid]::Empty
+$classIdLine = [IO.File]::ReadAllLines((Join-Path $copied 'ShellNamespace.ini')) |
+    Where-Object { $_ -match '^ClassId=' } | Select-Object -First 1
+if ($null -eq $classIdLine -or
+    -not [Guid]::TryParseExact($classIdLine.Substring('ClassId='.Length), 'D', [ref]$copiedProviderClassId) -or
+    $copiedProviderClassId -eq $sourceProviderClassId) {
+    throw 'Isolated preview did not assign a separate Shell namespace CLSID.'
+}
+$secondIdentityRelease = & $script -Version 'fixture-v1-identity-copy' -IsolatedProfile
+$secondIdentityClassId = [Guid]::Empty
+$secondClassIdLine = [IO.File]::ReadAllLines((Join-Path $secondIdentityRelease 'app/profile/ShellNamespace.ini')) |
+    Where-Object { $_ -match '^ClassId=' } | Select-Object -First 1
+if ($null -eq $secondClassIdLine -or
+    -not [Guid]::TryParseExact($secondClassIdLine.Substring('ClassId='.Length), 'D', [ref]$secondIdentityClassId) -or
+    $secondIdentityClassId -eq $copiedProviderClassId) {
+    throw 'Two isolated previews copied from one profile reused the same Shell namespace CLSID.'
+}
+foreach ($name in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini', $extraWindowName)) {
+    $rewritten = [IO.File]::ReadAllText((Join-Path $copied $name))
+    if (-not $rewritten.Contains($copiedProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase) -or
+        $rewritten.Contains($sourceProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Isolated preview did not remap provider identity in $name."
+    }
+}
 foreach ($name in $settings) {
     $path = Join-Path $copied $name
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
-        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $before[(Join-Path $fixtureProfile $name)]) {
+    $remappedSessionFile = $name -in @('ExplorerDirs.ini', 'Favorites.ini', 'PinnedTabs.ini')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (-not $remappedSessionFile -and
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $before[(Join-Path $fixtureProfile $name)])) {
         throw "Isolated preview did not preserve $name."
     }
 }
@@ -111,8 +146,15 @@ foreach ($name in @($extraWindowName, 'ExplorerDirs.window-0123456789abcdef01234
 }
 $workspaceCopy = Join-Path $copied 'Workspaces/工作区.QDR'
 if (-not (Test-Path -LiteralPath $workspaceCopy -PathType Leaf) -or
-    (Get-FileHash -LiteralPath $workspaceCopy -Algorithm SHA256).Hash -ne $before[(Join-Path $workspaces '工作区.QDR')]) {
+    (Get-Content -LiteralPath $workspaceCopy -Raw) -notmatch 'Dir1=C:\\preview-fixture') {
     throw 'Isolated preview did not preserve the saved workspace.'
+}
+$copiedWorkspaceLines = [IO.File]::ReadAllLines($workspaceCopy)
+$copiedWorkspaceState = ($copiedWorkspaceLines | Where-Object { $_ -like 'ExplorerDirs.State=*' } | Select-Object -First 1).Substring('ExplorerDirs.State='.Length)
+$copiedWorkspaceExtension = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($copiedWorkspaceState))
+if (-not $copiedWorkspaceExtension.Contains($copiedProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase) -or
+    $copiedWorkspaceExtension.Contains($sourceProviderClassId.ToString('D'), [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Isolated preview did not remap provider identities in the Q-Dir workspace extension.'
 }
 $quickLinkCopy = Join-Path $copied 'QuickLinks/我的目录.lnk'
 if (-not (Test-Path -LiteralPath $quickLinkCopy -PathType Leaf) -or
@@ -159,6 +201,25 @@ catch {
 }
 if (-not $missingProfileRejected -or (Test-Path -LiteralPath (Join-Path $fixture 'releases/fixture-missing-profile'))) {
     throw 'Publishing with an explicitly missing profile root was not rejected before creating a release.'
+}
+
+foreach ($invalidIdentityCase in @(
+    @{ Name = 'invalid-guid'; Content = "[ShellNamespace]`r`nFormatVersion=1`r`nClassId=not-a-guid`r`n" },
+    @{ Name = 'future-format'; Content = "[ShellNamespace]`r`nFormatVersion=2`r`nClassId=$($sourceProviderClassId.ToString('D'))`r`n" }
+)) {
+    $invalidShellProfile = Join-Path $fixture ('invalid-shell-' + $invalidIdentityCase.Name)
+    New-Item -ItemType Directory -Path $invalidShellProfile | Out-Null
+    [IO.File]::WriteAllText((Join-Path $invalidShellProfile 'ShellNamespace.ini'), $invalidIdentityCase.Content)
+    $invalidShellRejected = $false
+    try { & $script -Version ('fixture-' + $invalidIdentityCase.Name) -IsolatedProfile -ProfileRoot $invalidShellProfile | Out-Null }
+    catch {
+        if ($_.Exception.Message -notlike 'Shell namespace profile identity is invalid or unsupported:*') { throw }
+        $invalidShellRejected = $true
+    }
+    if (-not $invalidShellRejected -or
+        (Test-Path -LiteralPath (Join-Path $fixture ('releases/fixture-' + $invalidIdentityCase.Name)))) {
+        throw "Publishing did not reject the $($invalidIdentityCase.Name) Shell namespace identity before creating a release."
+    }
 }
 
 $rejectedExisting = $false
