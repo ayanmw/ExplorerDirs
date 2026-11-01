@@ -43,7 +43,12 @@ internal static class MultiRootProviderProbe
             Marshal.ThrowExceptionForHR(runSmoke(
                 ref firstClassId, "first-root-only.txt", "second-root-only.txt", 13,
                 ref secondClassId, "second-root-only.txt", "first-root-only.txt", 29));
-            Console.WriteLine("synthetic multi-root provider smoke: PASS (distinct root rows and recursive sizes 13/29 B; no Shell view window)");
+            var runSingleClassPidlSmoke = Marshal.GetDelegateForFunctionPointer<RunSingleClassPidlSmoke>(
+                NativeLibrary.GetExport(module, "RunSyntheticSingleClassMultiRootPidlSmoke"));
+            Marshal.ThrowExceptionForHR(runSingleClassPidlSmoke(
+                firstPath, "first-root-only.txt", "second-root-only.txt", 13,
+                secondPath, "second-root-only.txt", "first-root-only.txt", 29));
+            Console.WriteLine("synthetic multi-root provider smoke: PASS (distinct CLSID roots and one CLSID with path-bearing PIDLs; recursive sizes 13/29 B; no Shell view window)");
             return 0;
         }
         finally
@@ -76,6 +81,17 @@ internal static class MultiRootProviderProbe
         [MarshalAs(UnmanagedType.LPWStr)] string firstForbiddenName,
         ulong firstRecursiveBytes,
         ref Guid secondClassId,
+        [MarshalAs(UnmanagedType.LPWStr)] string secondExpectedName,
+        [MarshalAs(UnmanagedType.LPWStr)] string secondForbiddenName,
+        ulong secondRecursiveBytes);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int RunSingleClassPidlSmoke(
+        [MarshalAs(UnmanagedType.LPWStr)] string firstPath,
+        [MarshalAs(UnmanagedType.LPWStr)] string firstExpectedName,
+        [MarshalAs(UnmanagedType.LPWStr)] string firstForbiddenName,
+        ulong firstRecursiveBytes,
+        [MarshalAs(UnmanagedType.LPWStr)] string secondPath,
         [MarshalAs(UnmanagedType.LPWStr)] string secondExpectedName,
         [MarshalAs(UnmanagedType.LPWStr)] string secondForbiddenName,
         ulong secondRecursiveBytes);

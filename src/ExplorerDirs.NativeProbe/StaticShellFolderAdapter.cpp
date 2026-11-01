@@ -2015,6 +2015,95 @@ namespace
         return child->id != 0 ? child : nullptr;
     }
 
+    constexpr DWORD kSyntheticRootPathPidlMagic = 0x54525044; // "DPRT"; isolated root-path identity marker.
+    constexpr size_t kSyntheticRootPathChunkCharacters = 1024;
+#pragma pack(push, 1)
+    struct SyntheticRootPathPidlItem
+    {
+        USHORT cb;
+        DWORD magic;
+        UINT segmentIndex;
+        UINT segmentCount;
+        WCHAR text[1];
+    };
+#pragma pack(pop)
+    constexpr size_t kSyntheticRootPathPidlHeaderSize = offsetof(SyntheticRootPathPidlItem, text);
+
+    HRESULT CreateSyntheticRootPathPidl(PCWSTR path, PIDLIST_ABSOLUTE* value)
+    {
+        if (!path || !*path || !value) return E_INVALIDARG;
+        *value = nullptr;
+        const auto pathLength = wcslen(path);
+        const auto segmentCount = (pathLength + kSyntheticRootPathChunkCharacters - 1) /
+            kSyntheticRootPathChunkCharacters;
+        if (!segmentCount || segmentCount > 64) return HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+        size_t byteCount = sizeof(USHORT);
+        for (size_t index = 0; index < segmentCount; ++index)
+        {
+            const auto start = index * kSyntheticRootPathChunkCharacters;
+            const auto characters = (std::min)(kSyntheticRootPathChunkCharacters, pathLength - start);
+            const auto itemBytes = kSyntheticRootPathPidlHeaderSize + characters * sizeof(WCHAR);
+            if (itemBytes > USHRT_MAX || byteCount > SIZE_MAX - itemBytes)
+                return HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+            byteCount += itemBytes;
+        }
+        auto* bytes = static_cast<BYTE*>(CoTaskMemAlloc(byteCount));
+        if (!bytes) return E_OUTOFMEMORY;
+        auto* cursor = bytes;
+        for (size_t index = 0; index < segmentCount; ++index)
+        {
+            const auto start = index * kSyntheticRootPathChunkCharacters;
+            const auto characters = (std::min)(kSyntheticRootPathChunkCharacters, pathLength - start);
+            const auto itemBytes = kSyntheticRootPathPidlHeaderSize + characters * sizeof(WCHAR);
+            SyntheticRootPathPidlItem item{};
+            item.cb = static_cast<USHORT>(itemBytes);
+            item.magic = kSyntheticRootPathPidlMagic;
+            item.segmentIndex = static_cast<UINT>(index);
+            item.segmentCount = static_cast<UINT>(segmentCount);
+            CopyMemory(cursor, &item, kSyntheticRootPathPidlHeaderSize);
+            CopyMemory(cursor + kSyntheticRootPathPidlHeaderSize, path + start, characters * sizeof(WCHAR));
+            cursor += itemBytes;
+        }
+        ZeroMemory(cursor, sizeof(USHORT));
+        *value = reinterpret_cast<PIDLIST_ABSOLUTE>(bytes);
+        return S_OK;
+    }
+
+    HRESULT ReadSyntheticRootPathFromPidl(PCIDLIST_ABSOLUTE value, std::wstring* path)
+    {
+        if (!value || !path) return E_POINTER;
+        path->clear();
+        for (auto* current = reinterpret_cast<PCUIDLIST_RELATIVE>(value); current->mkid.cb != 0; current = ILNext(current))
+        {
+            if (current->mkid.cb < kSyntheticRootPathPidlHeaderSize) continue;
+            const auto* first = reinterpret_cast<const SyntheticRootPathPidlItem*>(current);
+            if (first->magic != kSyntheticRootPathPidlMagic) continue;
+            if (first->segmentIndex != 0 || first->segmentCount == 0 || first->segmentCount > 64)
+                return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+            try
+            {
+                auto* segment = current;
+                for (UINT index = 0; index < first->segmentCount; ++index)
+                {
+                    if (segment->mkid.cb < kSyntheticRootPathPidlHeaderSize)
+                        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    const auto* header = reinterpret_cast<const SyntheticRootPathPidlItem*>(segment);
+                    const auto textBytes = segment->mkid.cb - kSyntheticRootPathPidlHeaderSize;
+                    if (header->magic != kSyntheticRootPathPidlMagic || header->segmentIndex != index ||
+                        header->segmentCount != first->segmentCount || textBytes == 0 || textBytes % sizeof(WCHAR) != 0)
+                        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+                    const auto characters = textBytes / sizeof(WCHAR);
+                    path->append(header->text, characters);
+                    segment = ILNext(segment);
+                }
+            }
+            catch (const std::bad_alloc&) { path->clear(); return E_OUTOFMEMORY; }
+            return path->empty() || path->find(L'\0') != std::wstring::npos
+                ? HRESULT_FROM_WIN32(ERROR_INVALID_DATA) : S_OK;
+        }
+        return S_FALSE;
+    }
+
     ULONGLONG SyntheticSize(const SyntheticChild* child)
     {
         if (child && InterlockedCompareExchange(&g_syntheticCustomSizeColumnForProbe, 0, 0) &&
@@ -2673,12 +2762,18 @@ namespace
             if (!_recursiveSizeStore) return E_OUTOFMEMORY;
             auto* copy = ILCloneFull(value);
             if (!copy) return E_OUTOFMEMORY;
-            const auto& configuredBackingPath = _configuredBackingPath.empty()
-                ? g_syntheticSortBackingPath : _configuredBackingPath;
-            if (configuredBackingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
+            std::wstring backingPath;
+            auto result = ReadSyntheticRootPathFromPidl(value, &backingPath);
+            if (result == S_FALSE)
+            {
+                try { backingPath = _configuredBackingPath.empty() ? g_syntheticSortBackingPath : _configuredBackingPath; }
+                catch (const std::bad_alloc&) { CoTaskMemFree(copy); return E_OUTOFMEMORY; }
+                if (backingPath.empty()) { CoTaskMemFree(copy); return E_UNEXPECTED; }
+            }
+            else if (FAILED(result)) { CoTaskMemFree(copy); return result; }
             PIDLIST_ABSOLUTE backingPidl = nullptr;
             TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-enter");
-            auto result = SHParseDisplayName(configuredBackingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
+            result = SHParseDisplayName(backingPath.c_str(), nullptr, &backingPidl, 0, nullptr);
             TraceSyntheticSortStage("synthetic-sort: backing-SHParseDisplayName-return");
             if (FAILED(result)) { CoTaskMemFree(copy); return result; }
             auto* backingRoot = ILCloneFull(backingPidl);
@@ -2702,7 +2797,7 @@ namespace
             _backingRoot = backingRoot;
             if (_inner) _inner->Release();
             _inner = backingFolder;
-            try { _backingPath = configuredBackingPath; }
+            try { _backingPath = std::move(backingPath); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
@@ -4495,13 +4590,17 @@ STDAPI DllGetClassObject(REFCLSID classId, REFIID iid, void** value)
     {
         std::wstring configuredBackingPath;
         const bool configuredRoot = TryGetSyntheticRootBackingPath(classId, &configuredBackingPath);
-        const bool legacyRoot = classId == g_syntheticFolderClassId && !g_syntheticSortBackingPath.empty();
+        const bool legacyRoot = classId == g_syntheticFolderClassId;
         if (!configuredRoot && !legacyRoot)
         {
             InterlockedDecrement(&g_syntheticClassObjectCalls);
             return CLASS_E_CLASSNOTAVAILABLE;
         }
-        if (legacyRoot && !configuredRoot) configuredBackingPath = g_syntheticSortBackingPath;
+        if (legacyRoot && !configuredRoot && !g_syntheticSortBackingPath.empty())
+        {
+            try { configuredBackingPath = g_syntheticSortBackingPath; }
+            catch (const std::bad_alloc&) { InterlockedDecrement(&g_syntheticClassObjectCalls); return E_OUTOFMEMORY; }
+        }
         auto* store = AcquireSharedRecursiveSizeStore();
         if (!store) result = E_OUTOFMEMORY;
         else
@@ -4644,6 +4743,87 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticMultiRootProviderSmo
     {
         char message[192]{};
         sprintf_s(message, "synthetic-multi-root-provider: independent-roots=True; first=%ls:%lluB; second=%ls:%lluB",
+            firstExpectedName, firstRecursiveBytes, secondExpectedName, secondRecursiveBytes);
+        TraceSyntheticSortStage(message);
+    }
+    return result;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRootPidlSmoke(
+    PCWSTR firstPath, PCWSTR firstExpectedName, PCWSTR firstForbiddenName, ULONGLONG firstRecursiveBytes,
+    PCWSTR secondPath, PCWSTR secondExpectedName, PCWSTR secondForbiddenName, ULONGLONG secondRecursiveBytes)
+{
+    if (!firstPath || !*firstPath || !secondPath || !*secondPath || !firstExpectedName || !firstForbiddenName ||
+        !secondExpectedName || !secondForbiddenName) return E_INVALIDARG;
+
+    // Keep path chunks independent of the USHORT SHITEMID size limit and verify the multi-segment encoding.
+    std::wstring longPathRoundTrip(1100, L'x');
+    PIDLIST_ABSOLUTE longPathPidl = nullptr;
+    auto result = CreateSyntheticRootPathPidl(longPathRoundTrip.c_str(), &longPathPidl);
+    if (FAILED(result)) return result;
+    std::wstring decodedLongPath;
+    result = ReadSyntheticRootPathFromPidl(longPathPidl, &decodedLongPath);
+    CoTaskMemFree(longPathPidl);
+    if (FAILED(result) || decodedLongPath != longPathRoundTrip)
+        return FAILED(result) ? result : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+
+    PIDLIST_ABSOLUTE firstRoot = nullptr;
+    PIDLIST_ABSOLUTE secondRoot = nullptr;
+    result = CreateSyntheticRootPathPidl(firstPath, &firstRoot);
+    if (SUCCEEDED(result)) result = CreateSyntheticRootPathPidl(secondPath, &secondRoot);
+    IShellFolder2* first = nullptr;
+    IShellFolder2* second = nullptr;
+    const auto classId = g_syntheticFolderClassId;
+    IClassFactory* factory = nullptr;
+    if (SUCCEEDED(result)) result = DllGetClassObject(classId, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(result)) result = factory->CreateInstance(nullptr, IID_PPV_ARGS(&first));
+    if (factory) { factory->Release(); factory = nullptr; }
+    if (SUCCEEDED(result)) result = DllGetClassObject(classId, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(result)) result = factory->CreateInstance(nullptr, IID_PPV_ARGS(&second));
+    if (factory) factory->Release();
+    IPersistFolder2* firstPersist = nullptr;
+    IPersistFolder2* secondPersist = nullptr;
+    if (SUCCEEDED(result)) result = first->QueryInterface(IID_PPV_ARGS(&firstPersist));
+    if (SUCCEEDED(result)) result = second->QueryInterface(IID_PPV_ARGS(&secondPersist));
+    if (SUCCEEDED(result)) result = firstPersist->Initialize(firstRoot);
+    if (SUCCEEDED(result)) result = secondPersist->Initialize(secondRoot);
+    if (secondPersist) secondPersist->Release();
+    if (firstPersist) firstPersist->Release();
+
+    if (SUCCEEDED(result))
+    {
+        PIDLIST_ABSOLUTE firstCurrent = nullptr;
+        PIDLIST_ABSOLUTE secondCurrent = nullptr;
+        IPersistFolder2* firstIdentity = nullptr;
+        IPersistFolder2* secondIdentity = nullptr;
+        result = first->QueryInterface(IID_PPV_ARGS(&firstIdentity));
+        if (SUCCEEDED(result)) result = second->QueryInterface(IID_PPV_ARGS(&secondIdentity));
+        if (SUCCEEDED(result)) result = firstIdentity->GetCurFolder(&firstCurrent);
+        if (SUCCEEDED(result)) result = secondIdentity->GetCurFolder(&secondCurrent);
+        if (SUCCEEDED(result) &&
+            (ILGetSize(firstCurrent) != ILGetSize(firstRoot) ||
+             memcmp(firstCurrent, firstRoot, ILGetSize(firstRoot)) != 0 ||
+             ILGetSize(secondCurrent) != ILGetSize(secondRoot) ||
+             memcmp(secondCurrent, secondRoot, ILGetSize(secondRoot)) != 0))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        if (secondIdentity) secondIdentity->Release();
+        if (firstIdentity) firstIdentity->Release();
+        if (firstCurrent) CoTaskMemFree(firstCurrent);
+        if (secondCurrent) CoTaskMemFree(secondCurrent);
+    }
+    if (SUCCEEDED(result))
+        result = VerifyConfiguredRootForProbe(first, firstExpectedName, firstForbiddenName, firstRecursiveBytes);
+    if (SUCCEEDED(result))
+        result = VerifyConfiguredRootForProbe(second, secondExpectedName, secondForbiddenName, secondRecursiveBytes);
+
+    if (second) second->Release();
+    if (first) first->Release();
+    if (secondRoot) CoTaskMemFree(secondRoot);
+    if (firstRoot) CoTaskMemFree(firstRoot);
+    if (SUCCEEDED(result))
+    {
+        char message[192]{};
+        sprintf_s(message, "synthetic-single-class-root-pidl: same-clsid=True; first=%ls:%lluB; second=%ls:%lluB",
             firstExpectedName, firstRecursiveBytes, secondExpectedName, secondRecursiveBytes);
         TraceSyntheticSortStage(message);
     }

@@ -2195,3 +2195,9 @@ NativeProbe 现在直接链接生产 `QdrViewWriter` 与 `QdrImporter` 源码，
 为验证 per-root provider 实例是否可独立承载数据，在 NativeProbe 增加按 CLSID 配置 backing path 的隔离入口。一个无窗口 smoke 同时创建并保留两个 `IShellFolder2` 根实例，再依次枚举它们；夹具在两根中都放置同名 `shared-folder`，其内容分别为 13 B 和 29 B，并各自有独有文件名。两根只枚举到自己的独有文件，递归大小列也分别读回 13 B/29 B，没有共享路径或缓存串值。NativeProbe Release 与 C++ adapter Release 构建均为 0 警告/错误；双根 smoke、原有 Shell-folder-tree smoke、按需递归大小列 smoke 均通过。
 
 该切片证明 provider 可在同进程同时持有不同路径的根对象，但根身份目前由不同 CLSID 指定；未创建 ExplorerBrowser/IShellView 窗口，未验证 Shell 类注册、两窗格实际导航、Back/Forward、跨重建状态、文件操作或绿色部署。因此它不是可直接采用的产品身份设计。下一步应验证单一稳定 provider CLSID 下，是否能把物理根路径编码进 Shell 绝对 PIDL/解析名，并保留多标签路径身份；再决定是否进入 ExplorerBrowser 双窗格宿主验证。
+
+### 2026-11-02：单 CLSID 的路径分段 PIDL 根身份原型
+
+新增 NativeProbe 的 `DPRT` 路径身份 PIDL 编码：物理根路径分成每段最多 1,024 个 UTF-16 字符的多个 SHITEMID，`SyntheticSortFolder.Initialize` 优先从绝对 PIDL 解码该根路径；旧探针不带该 marker 时继续走既有 backing path。无窗口探针创建两个相同 CLSID 的 Shell 文件夹对象，各自以不同路径 PIDL 初始化，并在两个对象同时存活时核对 `GetCurFolder` 保留各自 PIDL、独有文件不串、同名目录递归大小分别为 13 B/29 B。另验证 1,100 字符路径跨多个 PIDL 段编码/解码一致。NativeProbe 与 C++ adapter Release 构建均为 0 警告/错误；单 CLSID 双根、双 CLSID 双根、Shell-folder-tree、按需递归列和 DLL unload 合同 smoke 均通过。
+
+这只证明 provider 的 `IPersistFolder2.Initialize` 可从路径 marker PIDL 取得互相独立的物理根。测试直接构造 PIDL 并创建 COM 文件夹对象，没有把 PIDL 挂在已注册 namespace 的根之后，未实现 `ParseDisplayName`/`BindToObject` 将产品路径转换成该 marker，也未验证 Shell 解析名、ExplorerBrowser 导航/历史、跨进程恢复、可见列或系统操作菜单。下一步先在无窗口探针验证一个已注册稳定 CLSID 的 root → path-marker `ParseDisplayName`/`BindToObject`/parsing-name 往返，再考虑 ExplorerBrowser 双窗格宿主。
