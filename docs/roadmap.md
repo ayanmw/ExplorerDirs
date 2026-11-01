@@ -5825,3 +5825,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 
 2026-11-02 四视图 × 1,000 目录近容量压力复验：4096 容量保留 4,004 个唯一结果快照，驱逐/重复扫描/队列拒绝为 0，四视图列值与选中/焦点保持，Private Desktop 守卫和 watchdog 通过。缓存 payload 估算 1,321,280 B；101,068,800 B Private Bytes 是完整 NativeProbe 进程观测，不能归因于缓存。此负载只留 92 个缓存槽余量，产品缓存仍未调整。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02最小夹具验证缓存容量阈值)。
 2026-11-01 双真实 IShellView 递归列多视图切片：两份同目录 Shell 视图并发请求共享按路径 Lazy 扫描；初次四个目录只扫描四次，Shell 更新通知后两边保留 PIDL 行 ID 并共享一次 20 B 重扫，数值排序与选择/焦点保持。Private Desktop watchdog 与 Release 构建通过。仅 NativeProbe shared-cache/peer-list 合同，产品仍为 ExplorerBrowser，未验证可见逐行列或产品生命周期。详见 `docs/folder-size-column-investigation.md`。
+2026-11-01 双真实 IShellView 递归缓存通知失效范围：双 view 同根共享扫描基础上接入探针的 Shell 更新事件归并；三次 Private Desktop 复验均只失效具体 `UPDATEDIR` 范围内的 `size-10`，同级无关目录不重扫，两视图共享 20 B 重扫且行 ID/排序/选区焦点保持。当前仅覆盖 UPDATEITEM/UPDATEDIR 的探针事件组合，未接产品 watcher/batch，也未测新增/删除/改名、溢出或网络目录。详见 `docs/folder-size-column-investigation.md`。

@@ -1556,6 +1556,28 @@ internal static class ShellViewHostFilterProbe
 
             var scanStarts = 0;
             var cache = new ConcurrentDictionary<string, Lazy<Task<RecursiveDirectoryScanResult>>>(StringComparer.OrdinalIgnoreCase);
+            using var watcher = new ShellChangeReconciliationProbe.ChangeWindow();
+            watcher.Register(folderPidl);
+            string[] InvalidateFromShellChanges(int eventIndex)
+            {
+                var updates = watcher.ChangeEvents.Skip(eventIndex)
+                    .Where(change => change.EventId is ShellChangeUpdatedItem or ShellChangeUpdatedDirectory)
+                    .SelectMany(change => new[] { (change.EventId, Path: change.FirstPath), (change.EventId, Path: change.SecondPath) })
+                    .Where(update => !string.IsNullOrWhiteSpace(update.Path) && Path.IsPathRooted(update.Path))
+                    .Select(update => (update.EventId, Path: Path.GetFullPath(update.Path!))).ToArray();
+                var updatedDirectories = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory)
+                    .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var changedPaths = updates.Where(update => update.EventId == ShellChangeUpdatedDirectory ||
+                        updatedDirectories.Length == 0 || updatedDirectories.Any(directory => IsSameOrDescendantPath(update.Path, directory)))
+                    .Select(update => update.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var invalidated = cache.Keys.Where(cachedRoot => changedPaths.Any(changedPath =>
+                        IsSameOrDescendantPath(changedPath, cachedRoot)))
+                    .ToArray();
+                foreach (var cachedRoot in invalidated)
+                    _ = cache.TryRemove(cachedRoot, out _);
+                return invalidated;
+            }
+
             Task<RecursiveDirectoryScanResult> Request(string path)
             {
                 var fullPath = Path.GetFullPath(path);
@@ -1593,8 +1615,6 @@ internal static class ShellViewHostFilterProbe
 
             var changedDirectory = Path.GetFullPath(Path.Combine(fixture, "size-10"));
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
-            using var watcher = new ShellChangeReconciliationProbe.ChangeWindow();
-            watcher.Register(folderPidl);
             var eventIndex = watcher.Events.Count;
             File.WriteAllBytes(changedPayload, new byte[20]);
             SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
@@ -1612,8 +1632,9 @@ internal static class ShellViewHostFilterProbe
             firstProjection = refreshedFirst;
             secondProjection = refreshedSecond;
 
-            if (!cache.TryRemove(changedDirectory, out _))
-                throw new InvalidOperationException("The changed directory was absent from the shared recursive-size cache.");
+            var invalidatedRoots = InvalidateFromShellChanges(eventIndex);
+            if (invalidatedRoots.Length != 1 || !string.Equals(invalidatedRoots[0], changedDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Shell update notifications did not invalidate exactly the affected recursive directory: invalidated=[{string.Join('|', invalidatedRoots)}]; events=[{string.Join('|', watcher.ChangeEvents.Skip(eventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}].");
             var invalidatedFirst = Request(changedDirectory);
             var invalidatedSecond = Request(changedDirectory);
             if (!Task.WaitAll([invalidatedFirst, invalidatedSecond], TimeSpan.FromSeconds(10)))
@@ -1630,7 +1651,7 @@ internal static class ShellViewHostFilterProbe
             VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
-            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shared-scan-starts-after-invalidation={scanStarts}; updated-bytes=20; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shell-notification-invalidated-roots={invalidatedRoots.Length}; shared-scan-starts-after-invalidation={scanStarts}; updated-bytes=20; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
         }
         finally
         {
@@ -1670,6 +1691,13 @@ internal static class ShellViewHostFilterProbe
         if (!actual.SequenceEqual(expected) || selectedIndex < 0 || GetPeerListItemState(listView, selectedIndex, 0x0003) != 0x0003 ||
             !oldIds.ToHashSet().SetEquals(actual))
             throw new InvalidOperationException("Peer recursive-size sort did not retain the original row IDs and selected/focused Shell row.");
+    }
+
+    private static bool IsSameOrDescendantPath(string path, string root)
+    {
+        if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase)) return true;
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void VerifyRecursiveSizePeerProjection(nint shellView, nint folderView, nint folderPidl, nint shellFolder,

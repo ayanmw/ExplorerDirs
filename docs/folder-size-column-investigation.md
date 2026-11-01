@@ -1922,3 +1922,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 修改 `size-10\payload.bin` 并发送 Shell 更新通知后，两视图均完成行重枚举，PIDL 行身份保持；删除该目录缓存条目后，两视图并发请求只启动一次新扫描，均得到 20 B，并再次排序、保留选中焦点。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0；前台窗口、last-input 与隐藏父窗口守卫通过。调试时发现 `CapturePeerShellRows` 会转移匹配行的绝对 PIDL 并自行释放旧相对 PIDL，调用者不能再整体释放旧快照；修正了探针所有权处理。
 
 这只验证两个真实 Shell view 与探针自建共享缓存/peer list 的扫描和通知合同；产品目前仍使用 ExplorerBrowser，产品 Pane 订阅生命周期、取消/退役、真正逐行列消费、滚动触发和可见交互均未接入或验证。探针未改变产品或 release。
+
+### 2026-11-01：多视图递归快照按 Shell 更新目录范围失效
+
+在双真实 `IShellView` 共享缓存切片上继续接入 `SHChangeNotifyRegister` 事件到缓存失效的探针逻辑。对 `size-10\payload.bin` 写入 20 B 并发送 `UPDATEITEM`/`UPDATEDIR` 后，本机这次事件突发还包含同级其它目录的 `UPDATEITEM`。若把事件路径逐个直接映射为失效，四个已缓存目录都会被重扫；将 `UPDATEDIR` 当作范围边界、仅合并其目录内的项目更新后，三次 Private Desktop 运行均只失效 `size-10`，两视图共享一次新扫描，扫描总数从 4 增至 5，读回 20 B，PIDL 行 ID、排序、选区和焦点保持。
+
+这只是探针针对该事件形态验证的失效策略；其它通知类型（新增/删除/改名）、重叠目录更新、通知丢失/溢出、网络路径和产品 watcher/batch 接线尚未覆盖。产品仍使用 ExplorerBrowser，未改产品或 release。
