@@ -6,6 +6,8 @@
 
 主线在 temp.79 之后新增了“编辑 → 复制所选项目完整路径”及文件视图快捷键 `Ctrl+Shift+C`，并用隐藏生产 Shell 宿主验证单选/多选路径读取。该功能尚未发布；最新 GUI 集中验收候选基于主线 `41c1a60`，位于 `src/.state/gui-smoke/20261029-212632-525-ee20a3/`，35 项可见验收仍待运行。候选记录与哈希见[最新主线验收候选](docs/gui-acceptance-2026-10-30-main-prepared-latest.md)。
 
+2026-11-02 主线已将 profile 级 volatile Shell namespace owner 和原生 adapter build/publish 载荷接入源码：它使用便携 `ShellNamespace.ini` 的稳定身份，并在当前用户 HKCU 会话中创建临时 Shell 激活项，App 退出时按 ownership marker 清理。该接线尚未进 release，也没有可见 UI 的递归大小列入口；启动/退出顺序、ExplorerBrowser 绘制和自动排序仍待集中验收。
+
 产品仍使用 ExplorerBrowser；隔离 IShellView 原型没有替换产品宿主。真实鼠标/键盘、Shell 菜单、Q-Dir `.qdr` 互操作与内存固定负载采样仍有待完成项，状态和证据范围见[路线图](docs/roadmap.md)及[Q-Dir / Explorer 功能对照](docs/shell-parity.md)。
 
 ### 2026-10-27 此前预览版本：`preview-0.6.0-temp.74`
@@ -114,7 +116,7 @@ temp.74 的完整 Release `SettingsSmoke`、App Release 构建通过，包内版
 
 源码已新增“收藏夹 → 保存当前工作区…”及“追加已保存工作区”，将整组布局、标签和视图保存为当前配置旁 `Workspaces` 目录中的 `.qdr`。恢复前仍预览并备份，再追加到对应窗格；保存到其他目录只作为普通导出。此功能已通过构建和无窗口检查，已包含在 temp16，真实菜单操作待验收。见[工作区收藏](docs/workspace-favorites.md)。
 
-需要 .NET 10 SDK。以下命令只用于源码开发，调试版配置写到 `src/.state/ExplorerDirs.ini`，与发布版隔离；若旧调试版有 `session.json`，首次运行会迁移：
+需要 .NET 10 SDK，以及可由 `vswhere` 定位的 Visual Studio 2022 x64 C++ 工具（用于构建 Shell namespace adapter）。以下命令只用于源码开发，调试版配置写到 `src/.state/ExplorerDirs.ini`，与发布版隔离；若旧调试版有 `session.json`，首次运行会迁移：
 
 ```powershell
 dotnet run --project .\src\ExplorerDirs.App\ExplorerDirs.App.csproj

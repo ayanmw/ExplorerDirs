@@ -2588,3 +2588,11 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 修正后 16 项 burst 连续 5/5 轮均收到全部更新，Shell ItemCount 与导出快照持续为 16，最终顺序稳定为 5、29、101…114 B 升序。重建当前 Native adapter 后另复跑两目录默认排序场景：3 轮中 2 轮通知路径完整但排序采样持续报 ItemCount=4 且导出读值为瞬态错误；1 轮调度排序后恢复 2 行，但观测到 0→2 行。故普通排序路径依旧不稳定，不能并入逐项通知成功结论；这与前文已知的异步重排会短暂清空/扰动 Shell 行数一致。Native adapter `/W4 /WX` 与 NativeProbe Release 均构建通过；异步按需扫描及子项变更映射合同 smoke 通过。PIDL 分配失败路径也会移除待扫描身份，避免同一行永久被认为已有扫描在途。
 
 这仍是隐藏 HostProbe/NativeProbe 证据：未接 App、未进行可见窗口像素/焦点/选区验收，也未改 release。异步值完成后的可靠自动排序仍未解决；本结果只证明正确的行身份通知没有导致重复扩行，并且 burst 后视图稳定。
+
+### 2026-11-02：App profile namespace owner 与 native 载荷
+
+App 现复用 `FolderOpenRouter` profile 锁作为注册互斥边界：确认拿到锁后、创建/恢复任何 MainWindow 前，读取 profile `ShellNamespace.ini` 中稳定 CLSID，加载产品 `ExplorerDirs.ShellNamespace.dll`，配置该 profile 的 provider 根，并创建 volatile HKCU CLSID、`InprocServer32`、`ShellFolder` 和 Desktop NameSpace 项。正常退出/启动建窗失败时先按 ownership marker 与 adapter 路径校验并回收，再释放 profile 单实例锁；同 CLSID 的已归属残留会在锁内删除重建，外部/不匹配注册拒绝覆盖。偏好和身份仍由 INI 保存；HKCU 项仅用于当前用户会话的 Shell 激活。进程强杀后的恢复前提已有独立 Private Desktop 原型支持，产品实际窗口关闭和进程强杀尚未运行验收。
+
+App Release build 现在在构建阶段编译产品 native adapter，并将 DLL 复制到 build 与 publish 输出；`publish.ps1` 必须带出该 DLL 并把它纳入 SHA256 manifest。`publish-smoke.ps1` 的 fixture payload 检查已覆盖 DLL 及哈希。验证：App Release build、NativeProbe Release build、临时 `dotnet publish` 检查、publish isolation smoke、产品 DLL 无 Shell view 激活 smoke 和 profile owner registration smoke 均通过；owner smoke 覆盖 volatile 注册字段、同身份残留重建、清理和外部注册保留。
+
+此处属于 App 源码接线，尚未在真实 App 进程启动/退出；未做可见 ExplorerBrowser、递归列逐行绘制/排序、会话重启或 GUI 验收，未修改 `releases`。现阶段 owner 只建立 provider 激活基础，未把所有普通文件夹标签自动重定向到 namespace，也没有给用户提供“递归大小”列选择入口。后续仍须先集中验收菜单/文件操作/导航和关闭顺序，再决定该 adapter 进入预览 release。

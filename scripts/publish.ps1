@@ -173,8 +173,13 @@ if (-not (Test-Path -LiteralPath $exe)) {
 # A same-volume move makes a complete release visible under its final name.
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 $dllHash = (Get-FileHash -LiteralPath (Join-Path $payload 'ExplorerDirs.App.dll') -Algorithm SHA256).Hash
+$shellAdapter = Join-Path $payload 'ExplorerDirs.ShellNamespace.dll'
+if (-not (Test-Path -LiteralPath $shellAdapter -PathType Leaf)) {
+    throw "Publish output is missing the native Shell namespace adapter: $shellAdapter"
+}
+$shellAdapterHash = (Get-FileHash -LiteralPath $shellAdapter -Algorithm SHA256).Hash
 [IO.File]::WriteAllLines((Join-Path $payload 'SHA256.txt'), [string[]]@(
-    "ExplorerDirs.App.exe  $hash", "ExplorerDirs.App.dll  $dllHash"
+    "ExplorerDirs.App.exe  $hash", "ExplorerDirs.App.dll  $dllHash", "ExplorerDirs.ShellNamespace.dll  $shellAdapterHash"
 ), [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllLines((Join-Path $payload 'FolderRoutingCapability.ini'), [string[]]@(
     'FormatVersion=1',

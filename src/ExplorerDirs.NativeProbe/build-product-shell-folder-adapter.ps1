@@ -3,10 +3,19 @@ $ErrorActionPreference = 'Stop'
 $outputDirectory = Join-Path $PSScriptRoot 'bin\native-product-x64'
 $source = Join-Path $PSScriptRoot 'StaticShellFolderAdapter.cpp'
 $definition = Join-Path $PSScriptRoot 'ProductShellFolderAdapter.def'
-$vcvars = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$vcvarsCandidates = @()
+if (Test-Path -LiteralPath $vswhere) {
+    $installations = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $vcvarsCandidates += $installations | ForEach-Object {
+        Join-Path $_ 'VC\Auxiliary\Build\vcvars64.bat'
+    }
+}
+$vcvarsCandidates += 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+$vcvars = $vcvarsCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 $output = Join-Path $outputDirectory 'ExplorerDirs.ShellNamespace.dll'
 
-if (-not (Test-Path -LiteralPath $vcvars)) { throw "Visual Studio x64 C++ tools were not found: $vcvars" }
+if (-not $vcvars) { throw 'Visual Studio 2022 x64 C++ tools were not found. Install the Desktop development with C++ workload.' }
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $objectFile = Join-Path $outputDirectory 'StaticShellFolderAdapter.obj'
 $importLibrary = Join-Path $outputDirectory 'ExplorerDirs.ShellNamespace.lib'

@@ -12,6 +12,7 @@ public partial class App : Application
     private CrashLog? _crashLog;
     private RunMarkerTracker? _runMarkerTracker;
     private FolderOpenRouter? _folderOpenRouter;
+    private ProfileShellNamespaceOwner? _shellNamespaceOwner;
     private WindowSessionRegistry? _windowSessions;
     private ApplicationThemeController? _themeController;
     private readonly List<MainWindow> _openWindows = [];
@@ -151,6 +152,23 @@ public partial class App : Application
             return;
         }
 
+        var shellNamespaceProfileStore = new ShellNamespaceProfileStore(Path.Combine(profileDirectory, "ShellNamespace.ini"));
+        var shellNamespaceClassId = shellNamespaceProfileStore.LoadOrCreate();
+        if (shellNamespaceProfileStore.LoadWarning is { } identityWarning)
+            warnings.Add(identityWarning);
+        if (shellNamespaceClassId is { } classId)
+        {
+            try
+            {
+                _shellNamespaceOwner = ProfileShellNamespaceOwner.Start(classId, profileDirectory,
+                    Path.Combine(AppContext.BaseDirectory, "ExplorerDirs.ShellNamespace.dll"));
+            }
+            catch (Exception exception)
+            {
+                warnings.Add($"Shell 递归大小列组件未能启动：{exception.Message}");
+            }
+        }
+
         try
         {
             for (var index = 0; index < sessionPaths.Count; index++)
@@ -185,6 +203,7 @@ public partial class App : Application
         }
         catch (Exception)
         {
+            ReleaseShellNamespaceOwner();
             _folderOpenRouter?.Dispose();
             throw;
         }
@@ -332,6 +351,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        ReleaseShellNamespaceOwner();
         _folderOpenRouter?.Dispose();
         _folderOpenRouter = null;
         _themeController?.Dispose();
@@ -357,5 +377,12 @@ public partial class App : Application
             }
         }
         base.OnExit(e);
+    }
+
+    private void ReleaseShellNamespaceOwner()
+    {
+        try { _shellNamespaceOwner?.Dispose(); }
+        catch (Exception exception) { Debug.WriteLine($"Shell namespace registration cleanup failed: {exception}"); }
+        finally { _shellNamespaceOwner = null; }
     }
 }

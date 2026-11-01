@@ -54,6 +54,14 @@
   </Target>
   <ItemGroup>
     <PackageReference Include="OfficeIMO.Excel" Version="3.5.1" />
+    <None Include="..\ExplorerDirs.NativeProbe\bin\native-product-x64\ExplorerDirs.ShellNamespace.dll"
+          Link="ExplorerDirs.ShellNamespace.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="BuildExplorerDirsShellNamespaceAdapter" BeforeTargets="PrepareForBuild"
+          Inputs="$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\StaticShellFolderAdapter.cpp;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\ProductShellFolderAdapter.def;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\build-product-shell-folder-adapter.ps1"
+          Outputs="$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\bin\native-product-x64\ExplorerDirs.ShellNamespace.dll">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\ExplorerDirs.NativeProbe\build-product-shell-folder-adapter.ps1&quot;" />
+  </Target>
 
 </Project>

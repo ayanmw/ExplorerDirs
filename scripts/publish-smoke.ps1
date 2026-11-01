@@ -21,6 +21,7 @@ function dotnet {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $outputDirectory 'ExplorerDirs.App.exe'), 'fixture executable - do not run')
     [IO.File]::WriteAllText((Join-Path $outputDirectory 'ExplorerDirs.App.dll'), 'fixture assembly - do not run')
+    [IO.File]::WriteAllText((Join-Path $outputDirectory 'ExplorerDirs.ShellNamespace.dll'), 'fixture native adapter - do not load')
     $global:LASTEXITCODE = 0
 }
 
@@ -108,6 +109,15 @@ if ($folderStatusJson.Count -ne 2 -or
     throw 'Packaged folder-entry manager emitted invalid machine-readable status.'
 }
 $copied = Join-Path $release 'app/profile'
+$adapterPath = Join-Path $release 'app/ExplorerDirs.ShellNamespace.dll'
+if (-not (Test-Path -LiteralPath $adapterPath -PathType Leaf)) {
+    throw 'The published app payload omitted its native Shell namespace adapter.'
+}
+$adapterHash = (Get-FileHash -LiteralPath $adapterPath -Algorithm SHA256).Hash
+$checksumLines = [IO.File]::ReadAllLines((Join-Path $release 'app/SHA256.txt'))
+if (-not ($checksumLines -contains "ExplorerDirs.ShellNamespace.dll  $adapterHash")) {
+    throw 'The published SHA256 manifest omitted or misidentified the native Shell namespace adapter.'
+}
 $copiedProviderClassId = [Guid]::Empty
 $classIdLine = [IO.File]::ReadAllLines((Join-Path $copied 'ShellNamespace.ini')) |
     Where-Object { $_ -match '^ClassId=' } | Select-Object -First 1
