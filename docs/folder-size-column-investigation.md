@@ -2538,3 +2538,9 @@ SettingsSmoke 完整运行通过，包含 profile CLSID 重写后读取 sidecar 
 新增 `--shell-namespace-owner-crash-recovery-private-desktop`，隔离子进程先读取 profile INI 的稳定 CLSID、取得生产 `FolderOpenRouter` 单实例锁、建立 volatile CLSID/COM/NameSpace 注册，再打开 ExplorerBrowser 并验证 profile 专属根内容。协调进程确认第二个同 profile owner 被锁拒绝后强杀子进程；两棵 volatile key 仍然存在，随后协调进程取得释放的 profile 锁，按稳定 CLSID删除并重建本 profile 的 volatile 注册，重新打开 ExplorerBrowser，验证根项目和递归大小列后清理注册。NativeProbe Release 构建 0 警告/错误，watchdog exit 0；Private Desktop 前台、last-input 与隔离清理守卫均通过。
 
 这补上了“强杀遗留键 + 单实例锁释放 + 同身份 owner 重启恢复”的隔离证据，并在真实 ExplorerBrowser 中验证恢复目标。它仍不证明 App 已调用 owner、窗口正常退出时的全部 WPF/COM 顺序、Explorer 进程缓存或 Desktop 默认枚举像素，也不启用产品列或修改 release。首次夹具曾留下一处仅含 profile lock 文件的临时目录；执行策略拒绝删除操作，目录仍留在用户 Temp。后续接 App 前仍要把注册 owner 放在正确的 App 生命周期位置，并验证复制 profile 的身份重映射与构建产物载荷。
+
+### 2026-11-02：Native adapter 接产品前的构建与 API 门槛
+
+复核 `ExplorerDirs.App.csproj`、`scripts/publish.ps1` 与原生 adapter 源码后确认：App 的 `dotnet publish` 目前不会编译或复制 NativeProbe DLL；release checksum 只记录 `ExplorerDirs.App.exe` 与 `ExplorerDirs.App.dll`。现有 DLL 由 `src/ExplorerDirs.NativeProbe/build-static-shell-folder-adapter.ps1` 从 NativeProbe 源码单独构建。adapter 的激活路径 `DllGetClassObject` 会从 per-CLSID backing-path map 创建 provider，但当前配置入口名为 `ConfigureSyntheticNamespaceRootForProbe`，同时源码还包含大量 NativeProbe 专用扫描闸门、计数器与诊断导出，不能直接作为产品 DLL 接入。
+
+App 生命周期接线位置已经明确：在 `FolderOpenRouter.TryStart` 成功后、恢复任一 `MainWindow` 前初始化稳定 profile CLSID、adapter 配置和 volatile CLSID/COM/NameSpace keys；正常退出时所有 `MainWindow` 关闭后清理 owner，再由 Router 停止路由并释放 profile 锁。下一批应先把通用 provider 配置接口与 probe-only 控制面分开，并建立 App Release 构建/发布载荷校验；再通过 HostProbe 验证真实 profile path wrapping、会话恢复与多窗口列行为。当前产品与 release 仍未更改，不能称递归列已经接入。
