@@ -1518,6 +1518,14 @@ namespace
             std::lock_guard<std::mutex> lock(_mutex);
             return _sizes.size();
         }
+        size_t PayloadBytes() const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            size_t bytes = 0;
+            for (const auto& entry : _sizes)
+                bytes += sizeof(entry.first) + sizeof(entry.second) + (entry.first.size() + 1) * sizeof(wchar_t);
+            return bytes;
+        }
     private:
         ULONGLONG NextAccessSequence() const noexcept { return ++_accessSequence; }
         void TrimToCapacity() const noexcept
@@ -5222,6 +5230,30 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeCacheCa
     InterlockedExchange(&g_syntheticRecursiveSizeCacheCapacityForProbe, capacity);
     ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     return S_OK;
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheSnapshotCountForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto count = store->Count();
+    store->Release();
+    return static_cast<LONG>(count);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCachePayloadBytesForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto bytes = store->PayloadBytes();
+    store->Release();
+    return static_cast<LONG>(bytes);
 }
 
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()

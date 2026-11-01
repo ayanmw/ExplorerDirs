@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Win32;
 using System.Windows.Threading;
@@ -509,7 +510,15 @@ public static class SyntheticShellSortProbe
                 var onDemandMetricEntries = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount") : 0;
                 var onDemandElapsedMicroseconds = onDemandRecursiveSize ? ReadCounter64(module, "GetSyntheticOnDemandSizeScanMicroseconds") : 0;
                 var shellRequestedSizeRows = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount") : 0;
+                var cacheSnapshotsBeforeFullRead = onDemandRecursiveSize
+                    ? ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe") : 0;
+                var processMemoryBeforeFullRead = ReadCurrentProcessMemory();
                 var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                var processMemoryAfterFullRead = ReadCurrentProcessMemory();
+                var cacheSnapshotsAfterFullRead = onDemandRecursiveSize
+                    ? ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe") : 0;
+                var cachePayloadBytes = onDemandRecursiveSize
+                    ? ReadCounter(module, "GetSyntheticRecursiveSizeCachePayloadBytesForProbe") : 0;
                 var afterReadOnDemandScanCount = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticOnDemandSizeScanCount") : 0;
                 var afterReadOnDemandMetricCalls = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticDirectoryMetricsCallCount") : 0;
                 var afterReadOnDemandMetricEntries = onDemandRecursiveSize ? ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount") : 0;
@@ -561,7 +570,7 @@ public static class SyntheticShellSortProbe
                 var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
                 var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; cache-capacity={(onDemandRecursiveSize ? GetRecursiveSizeCacheCapacity() : 256)}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; cache-capacity={(onDemandRecursiveSize ? GetRecursiveSizeCacheCapacity() : 256)}; cache-snapshots={cacheSnapshotsBeforeFullRead}->{cacheSnapshotsAfterFullRead}; cache-payload-bytes={cachePayloadBytes}; private-bytes-before-full-read={processMemoryBeforeFullRead.PrivateBytes}; private-bytes-after-full-read={processMemoryAfterFullRead.PrivateBytes}; private-bytes-delta={processMemoryAfterFullRead.PrivateBytes - processMemoryBeforeFullRead.PrivateBytes}; working-set-before-full-read={processMemoryBeforeFullRead.WorkingSetBytes}; working-set-after-full-read={processMemoryAfterFullRead.WorkingSetBytes}; working-set-delta={processMemoryAfterFullRead.WorkingSetBytes - processMemoryBeforeFullRead.WorkingSetBytes}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
                 string[] ascendingNames;
                 var skipSortingForOnDemandLoadProbe = onDemandRecursiveSize && onDemandFolderCount > 0 &&
                     (!exerciseUpdateNotifications || onDemandFolderCount > 100);
@@ -3306,6 +3315,13 @@ public static class SyntheticShellSortProbe
 
     private static int ReadCounter(nint module, string name) =>
         Marshal.GetDelegateForFunctionPointer<GetCounter>(NativeLibrary.GetExport(module, name))();
+
+    private static (long PrivateBytes, long WorkingSetBytes) ReadCurrentProcessMemory()
+    {
+        using var process = Process.GetCurrentProcess();
+        process.Refresh();
+        return (process.PrivateMemorySize64, process.WorkingSet64);
+    }
 
     private static long ReadCounter64(nint module, string name) =>
         Marshal.GetDelegateForFunctionPointer<GetCounter64>(NativeLibrary.GetExport(module, name))();
