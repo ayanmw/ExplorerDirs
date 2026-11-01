@@ -101,6 +101,28 @@ public static class SyntheticShellSortProbe
         finally { Directory.Delete(fixture, recursive: true); }
     }
 
+    internal static int RunAsyncOnDemandRecursiveSizeColumnSmoke()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-AsyncOnDemandRecursiveSize-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(fixture, "child", "nested-folder"));
+            File.WriteAllBytes(Path.Combine(fixture, "child", "direct.bin"), [1, 2, 3, 4, 5, 6]);
+            File.WriteAllBytes(Path.Combine(fixture, "child", "nested-folder", "nested.bin"), [1, 2, 3, 4]);
+            var module = NativeLibrary.Load(FindAdapterLibrary());
+            try
+            {
+                var check = Marshal.GetDelegateForFunctionPointer<FolderTreeContractSmoke>(
+                    NativeLibrary.GetExport(module, "RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke"));
+                Check(check(fixture));
+            }
+            finally { NativeLibrary.Free(module); }
+            Console.WriteLine("synthetic-async-on-demand-recursive-size-column-smoke: first-value-read-returns-before-scan=True; worker-publishes-10-bytes=True; repeated-value-read-uses-cache=True; shell-view-created=False");
+            return 0;
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
+    }
+
     internal static int RunFolderEnumerationScanCostProbe()
     {
         var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-FolderEnumerationCost-{Guid.NewGuid():N}");
@@ -176,6 +198,10 @@ public static class SyntheticShellSortProbe
         return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, onDemandRecursiveSize: true, onDemandFolderCount: GetOnDemandFolderCount());
     }
+
+    internal static int RunRecursiveDirectorySizeSortWithAsyncOnDemandColumnWpfHost() =>
+        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, onDemandRecursiveSize: true, asyncOnDemandRecursiveSize: true, onDemandFolderCount: 1);
 
     internal static int RunRecursiveDirectorySizeLargeBackgroundRefreshWpfHost()
         => Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
@@ -257,7 +283,8 @@ public static class SyntheticShellSortProbe
         uint? relativePercentColumnType = null, bool humanSizeText = false,
         int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
         string? expectedDirectorySizeText = null, string? expectedFileSizeText = null,
-        long? syntheticChildSizeOverride = null, bool onDemandRecursiveSize = false, int onDemandFolderCount = 0)
+        long? syntheticChildSizeOverride = null, bool onDemandRecursiveSize = false, int onDemandFolderCount = 0,
+        bool asyncOnDemandRecursiveSize = false)
     {
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
@@ -410,6 +437,8 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticSlowCustomSizeColumnForProbe"))(slowCustomSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticRecursiveSizeScanOnDemandForProbe"))(onDemandRecursiveSize ? 1 : 0));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticAsyncRecursiveSizeScanForProbe"))(asyncOnDemandRecursiveSize ? 1 : 0));
             if (relativePercentColumnType is { } percentColumnType)
                 Check(Marshal.GetDelegateForFunctionPointer<SetRelativePercentColumnType>(NativeLibrary.GetExport(module,
                     "SetSyntheticRelativePercentColumnTypeForProbe"))(1, percentColumnType));
@@ -521,6 +550,23 @@ public static class SyntheticShellSortProbe
                     ? ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe") : 0;
                 var processMemoryBeforeFullRead = ReadCurrentProcessMemory();
                 var initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                if (asyncOnDemandRecursiveSize)
+                {
+                    // Prove the directory-change notification makes the real Shell view re-query its row value.
+                    var deadline = Environment.TickCount64 + 10_000;
+                    var childIndexForAsync = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
+                    while (childIndexForAsync >= 0 && Environment.TickCount64 < deadline &&
+                        !string.Equals(initialSizes[childIndexForAsync], "10", StringComparison.Ordinal))
+                    {
+                        Pump(25);
+                        initialSizes = ReadColumnTexts(sizeListView, module, 1, expectedCount: expectedInitialCount);
+                    }
+                    var asyncViewRequeryObserved = childIndexForAsync >= 0 &&
+                        string.Equals(initialSizes[childIndexForAsync], "10", StringComparison.Ordinal);
+                    Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; scans={ReadCounter(module, "GetSyntheticOnDemandSizeScanCount")}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
+                    if (!asyncViewRequeryObserved)
+                        throw new IOException("The hidden Shell view did not re-query the recursive-size value after the worker published its snapshot.");
+                }
                 var processMemoryAfterFullRead = ReadCurrentProcessMemory();
                 var cacheSnapshotsAfterFullRead = onDemandRecursiveSize
                     ? ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe") : 0;
@@ -1344,6 +1390,9 @@ public static class SyntheticShellSortProbe
             if (module != 0 && onDemandRecursiveSize)
                 _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                     "SetSyntheticRecursiveSizeScanOnDemandForProbe"))(0);
+            if (module != 0 && asyncOnDemandRecursiveSize)
+                _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticAsyncRecursiveSizeScanForProbe"))(0);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");

@@ -89,6 +89,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-on-demand-column-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithOnDemandColumnWpfHost();
+        if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-async-on-demand-column-wpf-host-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithAsyncOnDemandColumnWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-large-background-refresh-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeLargeBackgroundRefreshWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-formatted-column-wpf-host-private-desktop")
@@ -109,6 +111,8 @@ internal static class Program
             return SyntheticShellSortProbe.RunFolderTreeContractSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-on-demand-recursive-size-column-smoke")
             return SyntheticShellSortProbe.RunOnDemandRecursiveSizeColumnSmoke();
+        if (args.Length == 1 && args[0] == "--synthetic-async-on-demand-recursive-size-column-smoke")
+            return SyntheticShellSortProbe.RunAsyncOnDemandRecursiveSizeColumnSmoke();
         if (args.Length == 1 && args[0] == "--synthetic-folder-enumeration-scan-cost-probe")
             return SyntheticShellSortProbe.RunFolderEnumerationScanCostProbe();
         if (args.Length == 1 && args[0] == "--synthetic-dll-unload-contract-smoke")

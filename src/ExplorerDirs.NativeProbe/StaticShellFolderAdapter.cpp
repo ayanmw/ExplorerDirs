@@ -11,7 +11,9 @@
 #include <map>
 #include <new>
 #include <mutex>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 #include <cstdio>
 #include <iomanip>
@@ -1584,6 +1586,10 @@ namespace
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticRecursiveSizeScanEnabledForProbe = 1;
     volatile LONG g_syntheticRecursiveSizeScanOnDemandForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeScanForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeScanCompletedForProbe = 0;
+    volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
+    HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
@@ -2885,8 +2891,13 @@ namespace
                     sizeChild && (sizeChild->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !(sizeChild->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
                 {
-                    const auto scanResult = EnsureRecursiveSizeSnapshot(sizeChild);
-                    if (FAILED(scanResult)) return scanResult;
+                    if (InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0))
+                        ScheduleRecursiveSizeSnapshot(sizeChild);
+                    else
+                    {
+                        const auto scanResult = EnsureRecursiveSizeSnapshot(sizeChild);
+                        if (FAILED(scanResult)) return scanResult;
+                    }
                 }
                 value->vt = VT_UI8;
                 value->ullVal = SizeForItem(item);
@@ -2926,11 +2937,25 @@ namespace
                     (child->attributes & FILE_ATTRIBUTE_DIRECTORY) &&
                     !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
                 {
-                    const auto scanResult = EnsureRecursiveSizeSnapshot(child);
-                    if (FAILED(scanResult)) return scanResult;
+                    if (InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0))
+                        ScheduleRecursiveSizeSnapshot(child);
+                    else
+                    {
+                        const auto scanResult = EnsureRecursiveSizeSnapshot(child);
+                        if (FAILED(scanResult)) return scanResult;
+                    }
+                }
+                bool asyncValuePending = false;
+                if (column == 1 && InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 0, 0) &&
+                    (child->attributes & FILE_ATTRIBUTE_DIRECTORY) && !(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                {
+                    std::wstring parsingName;
+                    ULONGLONG cachedBytes = 0;
+                    asyncValuePending = FAILED(GetAbsoluteParsingName(child, &parsingName)) || !_recursiveSizeStore ||
+                        !_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes);
                 }
                 text = column == 0 ? child->name : column == 1 ?
-                    (InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
+                    (asyncValuePending ? L"" : InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
                         ? FormatSyntheticSizeText(SizeForItem(item)) : std::to_wstring(SizeForItem(item))) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                         ? SyntheticContentsText(child)
@@ -3097,6 +3122,99 @@ namespace
             if (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan))
                 return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
             return _recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+        }
+        HRESULT ScheduleRecursiveSizeSnapshot(const SyntheticChild* child) const
+        {
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                (child->attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return E_INVALIDARG;
+            if (!_recursiveSizeStore) return E_OUTOFMEMORY;
+
+            std::wstring parsingName;
+            auto result = GetAbsoluteParsingName(child, &parsingName);
+            if (FAILED(result)) return result;
+            ULONGLONG cachedBytes = 0;
+            if (_recursiveSizeStore->TryGet(parsingName, child->identity, &cachedBytes)) return S_OK;
+
+            std::wstring childPath;
+            try { childPath = _backingPath + L"\\" + child->name; }
+            catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            const auto identity = child->identity;
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                try
+                {
+                    if (!_asyncSizeScansPending.insert(parsingName).second) return S_FALSE;
+                }
+                catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+            }
+
+            auto* self = const_cast<SyntheticSortFolder*>(this);
+            self->AddRef();
+            try
+            {
+                std::thread([self, childPath = std::move(childPath), parsingName = std::move(parsingName), identity]()
+                {
+                    const auto comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                    HRESULT scanResult = SUCCEEDED(comResult) ? S_OK : comResult;
+                    auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
+                    if (SUCCEEDED(scanResult) && gate && WaitForSingleObject(static_cast<HANDLE>(gate), 10000) != WAIT_OBJECT_0)
+                        scanResult = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+
+                    const SyntheticFileIdentityLess less{};
+                    SyntheticFileIdentity beforeScan{};
+                    SyntheticDirectoryMetrics metrics{};
+                    if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &beforeScan))
+                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                    if (SUCCEEDED(scanResult) && (!beforeScan.available || less(beforeScan, identity) || less(identity, beforeScan)))
+                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                    if (SUCCEEDED(scanResult))
+                    {
+                        LARGE_INTEGER frequency{}, scanStart{}, scanEnd{};
+                        QueryPerformanceFrequency(&frequency);
+                        QueryPerformanceCounter(&scanStart);
+                        scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                        QueryPerformanceCounter(&scanEnd);
+                        InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+                        if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
+                        {
+                            const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
+                            const auto elapsedMicroseconds = static_cast<LONG64>(
+                                static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
+                            InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+                        }
+                    }
+                    SyntheticFileIdentity afterScan{};
+                    if (SUCCEEDED(scanResult) && !TryGetSyntheticFileIdentity(childPath.c_str(), &afterScan))
+                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                    if (SUCCEEDED(scanResult) && (!afterScan.available || less(beforeScan, afterScan) || less(afterScan, beforeScan)))
+                        scanResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
+                    if (SUCCEEDED(scanResult))
+                        scanResult = self->_recursiveSizeStore->Set(parsingName.c_str(), afterScan, metrics.bytes);
+
+                    {
+                        std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
+                        self->_asyncSizeScansPending.erase(parsingName);
+                    }
+                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
+                    if (SUCCEEDED(scanResult))
+                    {
+                        InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
+                        if (self->_shellView && self->_backingRoot)
+                            SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                    }
+                    else TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-failed");
+                    if (SUCCEEDED(comResult)) CoUninitialize();
+                    self->Release();
+                }).detach();
+            }
+            catch (const std::system_error&)
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                _asyncSizeScansPending.erase(parsingName);
+                self->Release();
+                return E_FAIL;
+            }
+            return S_OK;
         }
         ULONGLONG SizeForItem(PCUITEMID_CHILD item) const
         {
@@ -3451,6 +3569,8 @@ namespace
         IShellFolder2* _inner = nullptr;
         SyntheticRecursiveSizeSnapshotStore* _recursiveSizeStore = nullptr;
         std::vector<SyntheticChild> _pendingSelected;
+        mutable std::mutex _asyncSizeScanMutex;
+        mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
         volatile LONG _refreshPending = 0;
@@ -4590,6 +4710,85 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticOnDemandRecursiveSiz
     return result;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticAsyncOnDemandRecursiveSizeColumnSmoke(PCWSTR backingPath)
+{
+    if (!backingPath || !*backingPath) return E_INVALIDARG;
+    const auto previousDemandSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, 1);
+    const auto previousAsyncSetting = InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, 1);
+    const auto previousCustomColumnSetting = InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 1);
+    auto gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!gate)
+    {
+        InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
+        InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
+        InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    g_syntheticAsyncRecursiveSizeScanGateForProbe = gate;
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0);
+    InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
+
+    HRESULT result = SetSyntheticSortBackingPath(backingPath);
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    SyntheticSortFolder* root = nullptr;
+    IEnumIDList* enumerator = nullptr;
+    PITEMID_CHILD item = nullptr;
+    if (SUCCEEDED(result)) result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+    if (SUCCEEDED(result))
+    {
+        root = new (std::nothrow) SyntheticSortFolder();
+        if (!root) result = E_OUTOFMEMORY;
+    }
+    if (SUCCEEDED(result)) result = root->Initialize(rootPidl);
+    if (SUCCEEDED(result)) result = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &enumerator);
+    ULONG fetched = 0;
+    if (SUCCEEDED(result)) result = enumerator->Next(1, &item, &fetched);
+    const auto* child = SyntheticData(item);
+    if (SUCCEEDED(result) && (result != S_OK || fetched != 1 || !child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)))
+        result = E_FAIL;
+
+    SHELLDETAILS pendingDetails{};
+    if (SUCCEEDED(result)) result = root->GetDetailsOf(item, 1, &pendingDetails);
+    const bool returnedPending = SUCCEEDED(result) && pendingDetails.str.uType == STRRET_WSTR &&
+        pendingDetails.str.pOleStr && !*pendingDetails.str.pOleStr &&
+        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 0 &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0;
+    if (pendingDetails.str.uType == STRRET_WSTR && pendingDetails.str.pOleStr) CoTaskMemFree(pendingDetails.str.pOleStr);
+    if (SUCCEEDED(result) && !returnedPending) result = E_FAIL;
+
+    SetEvent(g_syntheticAsyncRecursiveSizeScanGateForProbe);
+    const auto deadline = GetTickCount64() + 10000;
+    while (SUCCEEDED(result) &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 0 &&
+        GetTickCount64() < deadline) Sleep(1);
+    const bool workerCompleted = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe, 0, 0) == 1 &&
+        InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe, 0, 0) == 1 &&
+        InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0) == 1;
+    if (SUCCEEDED(result) && !workerCompleted) result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+
+    SHELLDETAILS completedDetails{};
+    if (SUCCEEDED(result)) result = root->GetDetailsOf(item, 1, &completedDetails);
+    const bool completedValueMatches = SUCCEEDED(result) && completedDetails.str.uType == STRRET_WSTR &&
+        completedDetails.str.pOleStr && _wcsicmp(completedDetails.str.pOleStr, L"10") == 0;
+    if (completedDetails.str.uType == STRRET_WSTR && completedDetails.str.pOleStr) CoTaskMemFree(completedDetails.str.pOleStr);
+    if (SUCCEEDED(result) && !completedValueMatches) result = E_FAIL;
+
+    if (item) CoTaskMemFree(item);
+    if (enumerator) enumerator->Release();
+    if (root) root->Release();
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
+    CloseHandle(gate);
+    InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, previousDemandSetting);
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, previousAsyncSetting);
+    InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, previousCustomColumnSetting);
+    if (SUCCEEDED(result)) TraceSyntheticSortStage("synthetic-async-on-demand-size: callback-returned-empty; worker-published-10-bytes; repeated-read-cached");
+    return result;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderRecursiveSizeIdentityProjectionSmoke(
     PCWSTR backingPath, PCWSTR parsingName, ULONGLONG volumeSerial, ULONGLONG fileIdLow,
     ULONGLONG fileIdHigh, LONGLONG scannedBytes)
@@ -5215,6 +5414,12 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsDuringC
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeScanOnDemandForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 

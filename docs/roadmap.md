@@ -5599,3 +5599,7 @@ SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototy
 ### 2026-11-01：按需递归大小列原型可由统一 watchdog 重跑
 
 NativeProbe 已有按需列值扫描，但统一 watchdog 缺少该场景的启动映射；补齐映射、唯一临时 Shell 注册/夹具清理及超时 dump 配置后，Release 构建与 WPF Private Desktop 复跑通过。100 目录 view 初始仅请求/扫描 22 行；读完整列后累计 101 次目录扫描、1,003 个条目，排序比较阶段无递归扫描。扫描仍发生在列值请求线程上，不是后台首屏加载；该原型未接 ExplorerBrowser 产品，未测可见 UI 或真实文件系统性能。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01为按需递归大小列补齐隔离-watchdog-入口)。
+
+### 2026-11-01：异步按需递归大小列原型闭合 Shell 通知回读
+
+隔离 NativeProbe 已验证列值回调立即返回空值、后台 worker 完成扫描并写缓存、`SHCNE_UPDATEDIR` 使活动隐藏 `IShellView` 再次请求列值并读到 10 B。静态 smoke 与 Private Desktop view 探针通过；原同步按需模式的 100 目录回归也通过。下一步先审查并替换每目录 detached thread 的原型实现，设计有界队列、取消和宿主关闭生命周期，再测试排序中的异步回填及目录通知重枚举范围。未接入产品 ExplorerBrowser，也未验证可见刷新、真实磁盘/网络路径、多窗格压力或内存成本；细节见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-按需递归大小值的后台扫描与-shell-回读)。

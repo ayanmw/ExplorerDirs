@@ -1372,3 +1372,9 @@ Microsoft API 页面说明 `RefreshObject` 是重绘指定项目，`UpdateObject
 复核发现上述按需列值探针已有 NativeProbe 命令，但 `scripts/native-probe-watchdog.ps1` 没有对应映射；直接用统一 watchdog 调用时会在启动前以“不支持的 probe”退出。将该场景加入 synthetic Shell 的唯一 CLSID/夹具生命周期、CLI 映射和超时 dump 保护，再从 Release 构建产物经 watchdog 重跑。100 目录、102 行的 WPF Private Desktop view 初始请求 22 行并同步扫描 22 个目录、访问 213 个后代条目；主动读取全部行后累计 101 次扫描、1,003 个条目，比较阶段扫描为 0。该轮扫描计时为 8.635 ms / 24.333 ms，随机器缓存和负载变化，不作为性能承诺；缓存载荷统计由 22 项增至 101 项、30,492 字节，不含分配器开销。探针退出码 0，前台 HWND 与 last-input tick 未变化，临时注册和夹具清理通过。日志：`src/.state/native-probe-watchdog/20261101-114438-21280a4f.stdout.log`。
 
 本次只修复隔离测试入口并复验现有原型，没有改产品宿主或发布版本。结果再次表明“按需”是列值被 Shell 请求时同步递归扫描，不等同于后台扫描；刷新原型虽已验证后台扫描后通过完整 view refresh 更新和重排，但单行派生值刷新仍未找到可靠方案。没有测可见 UI 阻塞/闪烁、真实磁盘或网络路径、多窗格并发、ExplorerBrowser 列请求及产品接线。
+
+### 2026-11-01：按需递归大小值的后台扫描与 Shell 回读
+
+在隔离 provider 中增加异步按需模式：首次 `GetDetailsOf` 对未缓存的目录列值立即返回空字符串，并把扫描放到 worker；扫描前后校验目录文件身份，成功后写入有界快照，再发送 `SHCNE_UPDATEDIR`。静态 smoke 用门闩证明回调在 worker 开始前已返回空值、worker 发布 10 B、重复读取命中缓存。WPF Private Desktop `IShellView` 探针进一步证实实际 Shell 通知闭环：初始请求后 worker 完成两项目录扫描，活动 view 收到 `SFVM_FSNOTIFY`，随后再次请求列值并读到 `child=10`；列请求计数从 3 增至 6。原同步按需对照仍通过，100 个目录、102 行显示值为目录 10 / 文件 4，排序比较阶段递归扫描为 0。Native adapter `/W4 /WX`、NativeProbe Release（0 警告/错误）、异步无窗口 smoke、异步 Private Desktop watchdog 和同步按需 Private Desktop watchdog 均通过；隔离前台、输入和临时 Shell 注册清理守卫通过。
+
+这是 NativeProbe 的异步行为原型，不是产品功能。当前样例仅验证一个 10 B 目录在隐藏合成 DefView 中从空值回填；worker 采用每目录一个 detached thread，尚未做有界线程池、取消/关闭生命周期、并发多窗格压力或失败后重试策略评审，不能直接移植为产品实现。`SHCNE_UPDATEDIR` 会让 Shell 重新请求并可能重枚举目录；本探针没有量化可见闪烁、排序状态下的异步回填重排或真实目录 I/O。下一步先评审受控后台队列与关闭/失效生命周期，并在隔离 view 中测量通知造成的重枚举范围；产品 ExplorerBrowser 仍未接线。
