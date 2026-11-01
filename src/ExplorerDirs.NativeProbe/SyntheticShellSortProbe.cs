@@ -1193,10 +1193,14 @@ public static class SyntheticShellSortProbe
                     throw new IOException($"Recursive directory metrics were scanned inside Shell CompareIDs ({directoryMetricScansDuringCompare} calls).");
                 if (customSizeColumn && !onDemandRecursiveSize && recursiveSizeCacheMissesDuringCompare == 0)
                     throw new IOException("The isolated sort did not exercise the recursive-size cache-miss fallback.");
+                var onDemandCountersConsistent = asyncOnDemandRecursiveSize
+                    ? onDemandMetricCalls >= onDemandScanCount + 1 &&
+                        onDemandMetricEntries >= 3 + (onDemandScanCount - 1) * 10
+                    : onDemandMetricCalls == onDemandScanCount + 1 &&
+                        onDemandMetricEntries == 3 + (onDemandScanCount - 1) * 10;
                 if (onDemandRecursiveSize &&
                     (shellRequestedSizeRows == 0 || onDemandScanCount < 1 || onDemandScanCount > onDemandFolderCount + 1 ||
-                        onDemandMetricCalls != onDemandScanCount + 1 || onDemandMetricEntries != 3 + (onDemandScanCount - 1) * 10 ||
-                        onDemandElapsedMicroseconds == 0))
+                        !onDemandCountersConsistent || onDemandElapsedMicroseconds == 0))
                     throw new IOException($"The hidden Shell view did not request and compute the recursive-size row on demand: row-requests={shellRequestedSizeRows}; scans={onDemandScanCount}; metric-calls={onDemandMetricCalls}; entries={onDemandMetricEntries}; scan-us={onDemandElapsedMicroseconds}.");
                 if (onDemandRecursiveSize &&
                     (afterReadOnDemandScanCount < onDemandScanCount || afterReadOnDemandScanCount > onDemandFolderCount + 1 ||

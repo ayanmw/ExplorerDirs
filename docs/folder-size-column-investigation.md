@@ -1496,3 +1496,11 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 无窗口 8 项批次 smoke 在 10 ms/目录延迟下注入后峰值 worker 为 2，8/8 个目录值正确回读，重复读取命中缓存，关闭 provider 后第二批任务被取消；扫描累计 100.944 ms，探针墙钟 437.284 ms。NativeProbe C# 同时断言批次和逐项模式都达到两个 worker；原生日志中的固定峰值描述已同步改为 2。500 项、2 ms 延迟的一轮也完成 500/500 扫描与缓存回读，扫描累计 1,858.328 ms、探针墙钟 2,826.218 ms；该大批次运行通过双 worker 峰值断言。静态 Shell folder contract、原生 adapter `/W4 /WX` 和 NativeProbe Release build 均通过，构建 0 警告/错误。
 
 这证明无窗口 Synthetic provider 批次可利用现有两 worker，同时每 view 仍只需一个外层队列 task；没有验证并行扫描在真实慢盘/网络上的吞吐、四个不同根目录同时批次时的队列拒绝重试，也未复跑隐藏 DefView 的排序/焦点状态或测量可见刷新。仅 NativeProbe 原型，没有 ExplorerBrowser 产品接线；后续仍先在隔离隐藏 Shell view 验证多 view 背压及取消竞态，再决定是否进入产品架构评审。
+
+### 2026-11-01：双 worker view-batch 的隐藏 Shell view 回读与排序
+
+将 `EXPLORER_DIRS_NATIVEPROBE_ASYNC_BATCH_BY_VIEW=1` 接入现有 Private Desktop/WPF 隐藏 `IShellView` 场景。80 个目录、默认 256 缓存下，完整回读 82 行，81 次唯一扫描、队列拒绝 0、峰值 worker 2、通知 1、重枚举 1；所有列值就绪，隔离桌面清理与前台/输入守卫通过。该轮中途计数曾失败，定位为计数器分别读取时两个 worker 可能已有正在运行的扫描；只对异步中途快照放宽“指标计数必须与已完成扫描数精确相等”的断言，最终全值读取阶段仍保留精确计数关系。
+
+500 个目录按递归大小排序时，默认 256 项 LRU 无法容纳 501 个唯一目录，实际重复扫描 7,224 次且未收敛；显式设为 512 后通过：501 次扫描、零队列拒绝、峰值 worker 2、通知 2、整视图重枚举 1。完整列表含 502 行，回填后 `folder-401` 排在 `folder-400` 前，`folder-400` 排在 30 B 的 `child` 前，选中/焦点保持。缓存 501 项载荷为 151,292 B；此轮进程 Private Bytes 变化为 -348,160 B，无法据此分离 Shell/运行时波动或推算缓存净内存。
+
+这验证了该调度在当前 Windows 隐藏 DefView 下的排序重排及状态保持，但仅限合成 filesystem provider、单 view 和隔离桌面；没有测可见帧、真实慢磁盘/网络、多根四 view 背压与拒绝重试，也没有接入 ExplorerBrowser 产品。后续补测双 worker 批次在四个不同根目录的队列竞争、关闭/取消竞态，再评估产品迁移门槛。

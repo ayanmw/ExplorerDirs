@@ -5650,3 +5650,9 @@ NativeProbe 的 300 目录压力夹具验证 2-worker/256-排队任务队列溢�
 NativeProbe 已将每个 view 的合并批次拆为至多两个并行半批，外层仍只有一个 view 协调 task。8 项延迟 smoke 与 500 项缓存回读均通过双 worker 峰值断言；取消路径和静态 Shell folder contract 通过。详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01按视图合并后使用两个-worker-并行扫描)。
 
 该结果只闭合无窗口原型的队列调度与缓存回读。近期仍需在隐藏 DefView 中复验排序、焦点/选区、关闭取消及多根队列背压；这些结果通过后再评估产品架构接线，不据此宣称递归大小列已进入产品或达到 Q-Dir 体验。
+
+### 2026-11-01：双 worker 批次通过单 view 隐藏 DefView 排序
+
+80 目录和 500 目录的隔离隐藏 Shell view 均读回正确列值；500 目录在 512 项缓存下完成 501 次唯一扫描，通知后重枚举一次，按大小重排并保留选中/焦点。详情见[递归大小列调查](folder-size-column-investigation.md#2026-11-01双-worker-view-batch-的隐藏-shell-view-回读与排序)。
+
+这补足了批次原型的单 view DefView 排序和状态证据；默认 256 项缓存面对 501 个唯一目录会反复淘汰并无法收敛，512 项场景只测得 151,292 B 快照载荷，进程级内存采样未能分离实际缓存成本。下一步测试四个不同根目录的批次竞争和关闭取消，再决定是否进入产品架构评审。仍未接入 ExplorerBrowser，也没有可见 UI 验收。
