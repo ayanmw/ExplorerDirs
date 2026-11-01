@@ -7,6 +7,7 @@ internal static class QdrExportSmoke
 {
     internal static void Run(string root)
     {
+        QdrProviderPathSmoke.Run();
         var key = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 10);
         var typeKey = new PropertyKeyState(Guid.Parse("B725F130-47EF-101A-A5F1-02608C9EEBAC"), 4);
         var view = new ViewState(1, 96, [new(key, -1)], key, false, [new(key, 240)]);

@@ -18,7 +18,8 @@ internal static class QdrExporter
     // Call only on a state-only background worker: Shell binding may wait for remote providers.
     internal static QdrExportDocument Prepare(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
         IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
-        NavigationTreeWidths? treeWidths = null)
+        NavigationTreeWidths? treeWidths = null,
+        Guid? profileProviderClassId = null)
     {
         Validate(state, pins);
         var encoded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -40,7 +41,7 @@ internal static class QdrExporter
             }
             finally { Marshal.FreeCoTaskMem(pidl); }
         }
-        return new(Render(state, pins, proportions, treeWidths, encoded), unresolved);
+        return new(Render(state, pins, proportions, treeWidths, encoded, profileProviderClassId), unresolved);
     }
 
     [DllImport("shell32.dll")]
@@ -49,7 +50,8 @@ internal static class QdrExporter
     internal static string Render(SessionState state, IReadOnlyList<PinnedTabEntry> pins,
         IReadOnlyDictionary<int, LayoutProportions>? proportions = null,
         NavigationTreeWidths? treeWidths = null,
-        IReadOnlyDictionary<string, string>? encodedLocations = null)
+        IReadOnlyDictionary<string, string>? encodedLocations = null,
+        Guid? profileProviderClassId = null)
     {
         Validate(state, pins);
         if (proportions is not null) ValidateProportions(state.Layout, proportions);
@@ -106,7 +108,7 @@ internal static class QdrExporter
                     QdrImporter.DecodePidl(encoded);
                     values["Folder" + suffix] = encoded;
                 }
-                else values["Dir" + suffix] = ToQdrTextPath(location);
+                else values["Dir" + suffix] = QdrShellPathCodec.ToQdrTextPath(location, profileProviderClassId);
                 values["CurPos" + suffix] = tab.ToString();
                 var mode = state.Panes[pane][tab].View.Mode;
                 // Q-Dir's published view list omits Content; map it to Details in the interoperable base fields.
@@ -248,9 +250,6 @@ internal static class QdrExporter
         var canonical = string.Join("\n", baseFields);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
-
-    private static string ToQdrTextPath(string identity) =>
-        identity.StartsWith("::", StringComparison.Ordinal) ? "shell:" + identity : identity;
 
     private static void Validate(SessionState state, IReadOnlyList<PinnedTabEntry> pins)
     {

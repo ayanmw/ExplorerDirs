@@ -80,6 +80,7 @@
     <Compile Include="../ExplorerDirs.App/QdrLayoutMap.cs" Link="QdrLayoutMap.cs" />
     <Compile Include="../ExplorerDirs.App/QdrProportions.cs" Link="QdrProportions.cs" />
     <Compile Include="../ExplorerDirs.App/QdrExporter.cs" Link="QdrExporter.cs" />
+    <Compile Include="../ExplorerDirs.App/QdrShellPathCodec.cs" Link="QdrShellPathCodec.cs" />
     <Compile Include="../ExplorerDirs.App/WorkspaceCatalog.cs" Link="WorkspaceCatalog.cs" />
     <Compile Include="../ExplorerDirs.App/QdrViewSettings.cs" Link="QdrViewSettings.cs" />
     <Compile Include="../ExplorerDirs.App/QdrViewWriter.cs" Link="QdrViewWriter.cs" />
