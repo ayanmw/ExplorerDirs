@@ -94,11 +94,15 @@ internal static class ShellViewHostFilterProbe
                 Check(SHBindToObject(0, targetPidl, 0, in ShellFolderId, out childFolder));
                 var shellViewId = ShellViewId;
                 Check(At<CreateViewObject>(childFolder, 8)(childFolder, parent, ref shellViewId, out childView));
+                Check(Marshal.QueryInterface(childView, in FolderView2Id, out var precreateFolderView));
+                try { Check(At<SetViewModeAndIconSize>(precreateFolderView, 35)(precreateFolderView, 4, 16)); }
+                finally { Marshal.Release(precreateFolderView); }
                 host!.View = childView;
                 var settings = new StreamProbeSettings { Mode = uint.MaxValue };
                 var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
                 Check(At<CreateViewWindow>(childView, 9)(childView, previousView, ref settings,
                     viewPointer, ref bounds, out childWindow));
+                Check(At<ActivateView>(childView, 7)(childView, 2)); // SVUIA_ACTIVATE_NOFOCUS establishes DefView interaction routing.
                 host.SetPendingView(childFolder, childView, childWindow);
                 return 0;
             }
@@ -158,6 +162,8 @@ internal static class ShellViewHostFilterProbe
             var initialBounds = new StreamProbeRect { Right = 640, Bottom = 480 };
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, viewPointer, ref initialBounds, out viewWindow));
             created = true;
+            _ = ShowWindow(parent, 4); // SW_SHOWNOACTIVATE on the isolated Private Desktop enables native header interaction.
+            Application.DoEvents();
             Check(host.BrowseObject(childPidl, 0));
             var childCount = AdoptPendingView(expectedItemCount: 2);
             var childLocationMatches = ILIsEqual(host.CurrentPidl, childPidl);
@@ -184,7 +190,7 @@ internal static class ShellViewHostFilterProbe
             Console.WriteLine($"ishellview-host-filter: registered-namespace-recursive-size={nestedRecursiveSize}; expected=10");
             var savedRecursiveViewState = CaptureRecursiveSizeViewState(folder, folderView);
             var initialRecursiveRestore = RestoreAndReadRecursiveSizeViewState(
-                folder, folderView, childCount, savedRecursiveViewState, "initial-child");
+                folder, view, viewWindow, folderView, childCount, savedRecursiveViewState, "initial-child");
             Check(host.BrowseObject(nestedPidl, 0));
             var nestedCount = AdoptPendingView(expectedItemCount: 1);
             var currentPidlMatches = PidlExactlyEquals(host.CurrentPidl, nestedPidl);
@@ -201,7 +207,7 @@ internal static class ShellViewHostFilterProbe
             var backRestoredChild = host.HistoryIndex == 1 &&
                 PidlExactlyEquals(host.CurrentPidl, childPidl) && backCount == 2;
             var backRecursiveRestore = RestoreAndReadRecursiveSizeViewState(
-                folder, folderView, backCount, savedRecursiveViewState, "travel-log-back-child");
+                folder, view, viewWindow, folderView, backCount, savedRecursiveViewState, "travel-log-back-child");
             Check(host.BrowseObject(0, SbspNavigateForward));
             var forwardCount = AdoptPendingView(expectedItemCount: 1);
             var forwardRestoredNested = host.HistoryIndex == 2 &&
@@ -241,15 +247,34 @@ internal static class ShellViewHostFilterProbe
             null, true, stateColumns);
     }
 
-    private static string RestoreAndReadRecursiveSizeViewState(nint folder, nint view, int itemCount,
-        ViewState saved, string stage)
+    private static string RestoreAndReadRecursiveSizeViewState(nint folder, nint shellView, nint viewWindow,
+        nint view, int itemCount, ViewState saved, string stage)
     {
         var failures = new List<string>();
         var restored = ShellViewStateRestore.Restore(saved, new NativeShellViewStateTarget(view),
             (step, result) => failures.Add($"{step}=0x{result:X8}"), () => true);
+        // Probe whether applying columns/sort after mode leaves the live DefView style stale.
+        var modeReapplyResult = At<SetViewModeAndIconSize>(view, 35)(view, saved.Mode, saved.IconSize);
+        var currentModeReapplyResult = At<SetCurrentViewMode>(view, 4)(view, saved.Mode);
+        var refreshResult = At<RefreshView>(shellView, 8)(shellView);
+        var modeReapplyDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(150);
+        do
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        } while (DateTime.UtcNow < modeReapplyDeadline);
         var columnCaptureResult = ShellColumnManager.Capture(view, out var columns);
         var recursiveColumnVisible = columnCaptureResult >= 0 && columns is not null &&
             columns.Any(column => column.Key == saved.SortColumns[0].Key);
+        var recursiveColumnIndex = columns is null
+            ? -1
+            : Enumerable.Range(0, columns.Count).FirstOrDefault(index => columns[index].Key == saved.SortColumns[0].Key, -1);
+        var listViewForHeader = FindChildByClass(viewWindow, "SysListView32");
+        var headerForDiagnostics = listViewForHeader == 0 ? 0 : SendMessageW(listViewForHeader, 0x101F, 0, 0);
+        var headerCount = headerForDiagnostics == 0 ? -1 : SendMessageW(headerForDiagnostics, 0x1200, 0, 0).ToInt32();
+        var modeResult = At<GetViewModeAndIconSize>(view, 36)(view, out var currentMode, out var currentIconSize);
+        var listViewStyle = listViewForHeader == 0 ? 0 : GetWindowLongPtrW(listViewForHeader, GwlStyle).ToInt64();
+        var headerDiagnostics = $"view-mode-hr=0x{modeResult:X8}; mode={currentMode}; icon-size={currentIconSize}; list-style=0x{listViewStyle:X}; list-visible={(listViewForHeader != 0 && IsWindowVisible(listViewForHeader))}; header-visible={(headerForDiagnostics != 0 && IsWindowVisible(headerForDiagnostics))}; header-count={headerCount}; recursive-column-index={recursiveColumnIndex}; column-keys=[{(columns is null ? "" : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}")))}]";
         var countResult = At<GetSortColumnCount>(view, 26)(view, out var sortCount);
         var sortReadbackResult = countResult;
         NativeSortColumn[] sorts = [];
@@ -264,8 +289,8 @@ internal static class ShellViewHostFilterProbe
             sorts[0].Key.FormatId == saved.SortColumns[0].Key.FormatId &&
             sorts[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
             sorts[0].Direction == saved.SortColumns[0].Direction;
-        var orderBeforeShellCommand = string.Join('|', names);
-        var valuesBeforeShellCommand = string.Join('|', values);
+        var orderBeforeRestoreRetry = string.Join('|', names);
+        var valuesBeforeRestoreRetry = string.Join('|', values);
         var valueOrder = values.Select(entry =>
         {
             var separator = entry.LastIndexOf('=');
@@ -278,9 +303,60 @@ internal static class ShellViewHostFilterProbe
             : valueOrder.OrderByDescending(entry => entry.Bytes).Select(entry => entry.Name).ToArray();
         var orderMatchesSavedSort = names.SequenceEqual(expectedNames,
             StringComparer.OrdinalIgnoreCase);
-        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; order=[{orderBeforeShellCommand}]; recursive-values=[{valuesBeforeShellCommand}]; order-matches-saved-sort={orderMatchesSavedSort}";
+        string? headerSortFailure = null;
+        try
+        {
+            if (recursiveColumnIndex < 0)
+                throw new InvalidOperationException("The saved recursive-size column is not present in the native header.");
+            // The shared setter restores metadata but may not establish the DefView's comparator for provider columns.
+            ClickHeaderItem(viewWindow, recursiveColumnIndex);
+            ClickHeaderItem(viewWindow, recursiveColumnIndex);
+        }
+        catch (Exception ex) { headerSortFailure = $"{ex.GetType().Name}: {ex.Message}"; }
+        var namesAfterHeaderSort = ReadVisibleItemNames(view, itemCount);
+        var valuesAfterHeaderSort = ReadRecursiveSizeValues(folder, view, itemCount);
+        var headerSortMatchesSavedSort = namesAfterHeaderSort.SequenceEqual(expectedNames,
+            StringComparer.OrdinalIgnoreCase);
+        var sortAfterHeaderCountResult = At<GetSortColumnCount>(view, 26)(view, out var sortAfterHeaderCount);
+        var sortAfterHeaderMatches = false;
+        if (sortAfterHeaderCountResult >= 0 && sortAfterHeaderCount == 1)
+        {
+            var sortAfterHeader = new NativeSortColumn[1];
+            sortAfterHeaderMatches = At<GetSortColumns>(view, 28)(view, sortAfterHeader, 1) >= 0 &&
+                sortAfterHeader[0].Key.FormatId == saved.SortColumns[0].Key.FormatId &&
+                sortAfterHeader[0].Key.PropertyId == saved.SortColumns[0].Key.PropertyId &&
+                sortAfterHeader[0].Direction == saved.SortColumns[0].Direction;
+        }
+        var result = $"restored={restored}; failures=[{string.Join(',', failures)}]; mode-reapply-hr=0x{modeReapplyResult:X8}; current-mode-reapply-hr=0x{currentModeReapplyResult:X8}; refresh-hr=0x{refreshResult:X8}; columns-hr=0x{columnCaptureResult:X8}; recursive-column-visible={recursiveColumnVisible}; sort-count-hr=0x{countResult:X8}; sort-readback-hr=0x{sortReadbackResult:X8}; sort-matches={sortMatches}; header-diagnostics={headerDiagnostics}; order=[{orderBeforeRestoreRetry}]; recursive-values=[{valuesBeforeRestoreRetry}]; order-matches-saved-sort={orderMatchesSavedSort}; header-sort-failure={headerSortFailure ?? "none"}; order-after-header-sort=[{string.Join('|', namesAfterHeaderSort)}]; values-after-header-sort=[{string.Join('|', valuesAfterHeaderSort)}]; header-sort-matches-saved-sort={headerSortMatchesSavedSort}; sort-after-header-matches={sortAfterHeaderMatches}";
         Console.WriteLine($"ishellview-state-restore: stage={stage}; {result}");
         return result;
+    }
+
+    private static void ClickHeaderItem(nint viewWindow, int itemIndex)
+    {
+        var listView = FindChildByClass(viewWindow, "SysListView32");
+        var header = listView == 0 ? 0 : SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER.
+        if (header == 0) throw new InvalidOperationException("The restored Shell view has no native header control.");
+        var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            if (SendMessageW(header, 0x1207, itemIndex, rectanglePointer) == 0) // HDM_GETITEMRECT.
+                throw new InvalidOperationException($"The native header has no item at column {itemIndex}.");
+            var rectangle = Marshal.PtrToStructure<NativeRect>(rectanglePointer);
+            var x = (rectangle.Left + rectangle.Right) / 2;
+            var y = (rectangle.Top + rectangle.Bottom) / 2;
+            var point = unchecked((nint)((y << 16) | (x & 0xffff)));
+            _ = SendMessageW(header, 0x0200, 0, point); // WM_MOUSEMOVE.
+            _ = SendMessageW(header, 0x0201, 1, point); // WM_LBUTTONDOWN.
+            _ = SendMessageW(header, 0x0202, 0, point); // WM_LBUTTONUP.
+        }
+        finally { Marshal.FreeHGlobal(rectanglePointer); }
+        var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(350);
+        do
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        } while (DateTime.UtcNow < deadline);
     }
 
     private static string[] ReadRecursiveSizeValues(nint folder, nint view, int count)
@@ -4577,7 +4653,9 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SelectItem(nint self, int index, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TranslateAccelerator(nint self, ref NativeMessage message);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ActivateView(nint self, uint state);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RefreshView(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetViewModeAndIconSize(nint self, uint mode, int iconSize);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetCurrentViewMode(nint self, uint mode);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetViewModeAndIconSize(nint self, out uint mode, out int iconSize);
     private delegate bool EnumChildProc(nint window, nint parameter);
 

@@ -2111,6 +2111,12 @@ Child view 初始也不含 Recursive Size 列；测试调用 `ShellColumnManager
 把递归大小列和升序排序键保存为 `ViewState`，分别在新建的 child `IShellView` 与 TravelLog Back 重建的 child view 上调用共享 `ShellViewStateRestore`。两处均返回成功、失败列表为空，列可见，`IFolderView2::GetSortColumns` 也读回了预期递归列键与升序方向；但实际行序仍是 `nested(10)|notification-size.bin(7)`，与升序应有的 `notification-size.bin|nested` 相反。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、last-input 和隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-224247-6d432982.stdout.log`。
 
 因此，状态恢复协调器成功及排序键读回，只能证明 Shell 接收/保留了排序状态，不能证明自定义递归值已触发行重排。原生菜单排序命令此前在“先由实际列标题建立排序上下文”的探针中能够排序；本次状态恢复路径没有建立该上下文。后续原型需要单独验证受支持的排序重应用方式，并以最终行序为判据。该缺口尚未进入产品，产品仍为 ExplorerBrowser。
+
+### 2026-11-01：恢复后的 Shell 模式与实际列表样式核验
+
+为解释标题排序为何未生效，探针同时读取 `IFolderView2::GetViewModeAndIconSize` 与真实 `SysListView32` 窗口。恢复器和随后重复调用 `SetViewModeAndIconSize` 均报告 Details（mode 4、16 px）；`SetCurrentViewMode(Details)` 返回成功，但 `LVS_TYPEMASK` 仍为 `LVS_ICON`，列表可见而 `SysHeader32` 隐藏。`IShellView::Refresh` 返回 `S_FALSE`，没有改变窗口样式；对隐藏标题发点击消息也没有改变排序键之外的状态或实际行序。因此本轮还不能判断排序重应用本身是否可行：恢复视图的接口模式与 live ListView 样式尚未同步，排序交互前置条件未建立。
+
+Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台/last-input/隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261101-225207-2a0e5a8d.stdout.log`。后续先对齐新建 `IShellView` 的真实 Details 子控件状态，再继续测自定义列升降序；本结果不应被解释成产品模式切换失败，ExplorerBrowser 产品未修改。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。
