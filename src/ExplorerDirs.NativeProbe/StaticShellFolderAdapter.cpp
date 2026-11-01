@@ -61,6 +61,7 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
     volatile LONG g_syntheticAttributeNotificationTranslationCount = 0;
+    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 256;
     bool ShouldTranslateSyntheticChildNotification(LONG event)
     {
         // UPDATEITEM carries property changes for an existing child; the custom
@@ -1385,6 +1386,9 @@ namespace
     class SyntheticRecursiveSizeSnapshotStore final
     {
     public:
+        explicit SyntheticRecursiveSizeSnapshotStore(size_t maximumSnapshots = 256) noexcept
+            : _maximumSnapshots(maximumSnapshots) {}
+
         ULONG AddRef() { return InterlockedIncrement(&_references); }
         ULONG Release()
         {
@@ -1515,11 +1519,10 @@ namespace
             return _sizes.size();
         }
     private:
-        static constexpr size_t kMaximumSnapshots = 256;
         ULONGLONG NextAccessSequence() const noexcept { return ++_accessSequence; }
         void TrimToCapacity() const noexcept
         {
-            while (_sizes.size() > kMaximumSnapshots)
+            while (_sizes.size() > _maximumSnapshots)
             {
                 auto oldest = _sizes.begin();
                 for (auto entry = std::next(oldest); entry != _sizes.end(); ++entry)
@@ -1530,6 +1533,7 @@ namespace
             }
         }
         volatile LONG _references = 1;
+        const size_t _maximumSnapshots;
         mutable std::mutex _mutex;
         mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
         mutable ULONGLONG _accessSequence = 0;
@@ -3513,7 +3517,8 @@ namespace
     {
         AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
         if (!g_sharedRecursiveSizeStore)
-            g_sharedRecursiveSizeStore = new (std::nothrow) SyntheticRecursiveSizeSnapshotStore();
+            g_sharedRecursiveSizeStore = new (std::nothrow) SyntheticRecursiveSizeSnapshotStore(
+                static_cast<size_t>(InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheCapacityForProbe, 0, 0)));
         auto* store = g_sharedRecursiveSizeStore;
         if (store) store->AddRef();
         ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
@@ -5202,6 +5207,20 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsDuringC
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeScanOnDemandForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeCacheCapacityForProbe(LONG capacity)
+{
+    if (capacity < 1 || capacity > 4096) return E_INVALIDARG;
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (g_sharedRecursiveSizeStore)
+    {
+        ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+        return E_UNEXPECTED;
+    }
+    InterlockedExchange(&g_syntheticRecursiveSizeCacheCapacityForProbe, capacity);
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
     return S_OK;
 }
 

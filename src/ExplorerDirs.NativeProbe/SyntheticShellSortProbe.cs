@@ -190,6 +190,16 @@ public static class SyntheticShellSortProbe
         return folderCount;
     }
 
+    private static int GetRecursiveSizeCacheCapacity()
+    {
+        var capacityText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RECURSIVE_SIZE_CACHE_CAPACITY");
+        var capacity = string.IsNullOrWhiteSpace(capacityText) ? 256 :
+            int.TryParse(capacityText, out var parsedCapacity) ? parsedCapacity : -1;
+        if (capacity is < 1 or > 4096)
+            throw new ArgumentOutOfRangeException(nameof(capacityText), "The recursive-size cache probe accepts capacities from 1 to 4096.");
+        return capacity;
+    }
+
     internal static int RunRecursiveDirectorySizeSortWithFormattedColumnWpfHost() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, humanSizeText: true);
@@ -369,6 +379,9 @@ public static class SyntheticShellSortProbe
         try
         {
             module = NativeLibrary.Load(FindAdapterLibrary());
+            if (onDemandRecursiveSize)
+                Check(Marshal.GetDelegateForFunctionPointer<SetCacheCapacity>(NativeLibrary.GetExport(module,
+                    "SetSyntheticRecursiveSizeCacheCapacityForProbe"))(GetRecursiveSizeCacheCapacity()));
             Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticFolderClassId>(NativeLibrary.GetExport(module,
                 "SetSyntheticFolderClassIdForProbe"))(ref syntheticFolderClassId));
             Marshal.GetDelegateForFunctionPointer<ResetCounters>(NativeLibrary.GetExport(module, "ResetSyntheticSortCounters"))();
@@ -548,7 +561,7 @@ public static class SyntheticShellSortProbe
                 var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
                 var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; cache-capacity={(onDemandRecursiveSize ? GetRecursiveSizeCacheCapacity() : 256)}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
                 string[] ascendingNames;
                 var skipSortingForOnDemandLoadProbe = onDemandRecursiveSize && onDemandFolderCount > 0 &&
                     (!exerciseUpdateNotifications || onDemandFolderCount > 100);
@@ -3533,6 +3546,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetCacheCapacity(int capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSizeDisplayOptions(int unit, int decimalPlaces, int thousandsSeparator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetRelativePercentColumnType(int enabled, uint type);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
