@@ -1608,6 +1608,34 @@ internal static class ShellViewHostFilterProbe
                     new Lazy<Task<RecursiveDirectoryScanResult>>(() => Task.FromResult(result)));
             }
 
+            void PerformShellFileOperation(Action<nint> enqueueOperation)
+            {
+                nint operation = 0;
+                try
+                {
+                    var operationClassId = FileOperationClassId;
+                    var operationId = FileOperationId;
+                    Marshal.ThrowExceptionForHR(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+                    Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation,
+                        0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                    enqueueOperation(operation);
+                    Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
+                    Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+                    if (aborted != 0) throw new IOException("The isolated Shell file operation was aborted.");
+                }
+                finally
+                {
+                    if (operation != 0) Marshal.Release(operation);
+                }
+            }
+
+            nint GetShellItem(string path)
+            {
+                var itemId = ShellItemId;
+                Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(path, 0, ref itemId, out var item));
+                return item;
+            }
+
             var firstPaths = firstProjection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
                 .Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
             var secondPaths = secondProjection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
@@ -1692,27 +1720,39 @@ internal static class ShellViewHostFilterProbe
                 SortPeerListByRecursiveSize(secondList, secondBytesById);
                 VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
                 VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
-                Console.WriteLine($"ishellview-peer-recursive-size-change: kind={description}; invalidated-roots={invalidated.Length}; shared-scans={scanStarts}; bytes={expectedBytes}; row-ids-stable=True; selection-focus-preserved=True");
+                Console.WriteLine($"ishellview-peer-recursive-size-change: kind={description}; operation=IFileOperation; natural-shell-notification=True; events=[{string.Join('|', watcher.ChangeEvents.Skip(eventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}]; invalidated-roots={invalidated.Length}; shared-scans={scanStarts}; bytes={expectedBytes}; row-ids-stable=True; selection-focus-preserved=True");
             }
 
             var addedPayload = Path.Combine(changedDirectory, "added.bin");
             var createEventIndex = watcher.Events.Count;
+            var createParentItem = GetShellItem(changedDirectory);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<NewItem>(operation, 20)(operation,
+                    createParentItem, 0x00000080, "added.bin", null, 0)));
+            }
+            finally { Marshal.Release(createParentItem); }
             File.WriteAllBytes(addedPayload, new byte[3]);
-            SHChangeNotify(ShellChangeCreated, ShellChangePathUnicode, addedPayload, null);
-            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
             RescanAfterNotification(createEventIndex, [ShellChangeCreated, ShellChangeUpdatedDirectory], 23, 6, "create");
 
             var deleteEventIndex = watcher.Events.Count;
-            File.Delete(addedPayload);
-            SHChangeNotify(ShellChangeDeleted, ShellChangePathUnicode, addedPayload, null);
-            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            var deleteShellItem = GetShellItem(addedPayload);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<DeleteItem>(operation, 18)(operation, deleteShellItem, 0)));
+            }
+            finally { Marshal.Release(deleteShellItem); }
             RescanAfterNotification(deleteEventIndex, [ShellChangeDeleted, ShellChangeUpdatedDirectory], 20, 7, "delete");
 
             var renamedPayload = Path.Combine(changedDirectory, "renamed.bin");
             var renameEventIndex = watcher.Events.Count;
-            File.Move(changedPayload, renamedPayload);
-            SHChangeNotify(ShellChangeRenamedItem, ShellChangePathUnicode, changedPayload, renamedPayload);
-            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            var renameItem = GetShellItem(changedPayload);
+            try
+            {
+                PerformShellFileOperation(operation => Marshal.ThrowExceptionForHR(At<RenameItem>(operation, 12)(operation,
+                    renameItem, "renamed.bin", 0)));
+            }
+            finally { Marshal.Release(renameItem); }
             RescanAfterNotification(renameEventIndex, [ShellChangeRenamedItem, ShellChangeUpdatedDirectory], 20, 8, "rename");
 
             var renamedDirectory = Path.GetFullPath(Path.Combine(fixture, "size-10-renamed"));
@@ -3670,6 +3710,8 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int NewItem(nint self, nint destinationFolder, uint attributes, [MarshalAs(UnmanagedType.LPWStr)] string name, [MarshalAs(UnmanagedType.LPWStr)] string? templateName, nint sink);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DeleteItem(nint self, nint item, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);

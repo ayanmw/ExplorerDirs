@@ -1,5 +1,11 @@
 # 逐行文件夹大小与子项计数列调查
 
+## 2026-11-01：Shell 文件创建、删除、改名的自然通知
+
+将双视图递归列探针中的测试文件创建、删除和改名改由 `IFileOperation.NewItem/DeleteItem/RenameItem` 执行，移除这些操作后的手动 `SHChangeNotify`。`SHChangeNotifyRegister` 连续三轮自然收到 `SHCNE_CREATE (0x2)`、`SHCNE_DELETE (0x4)`、`SHCNE_RENAMEITEM (0x1)`，其中改名还观察到父目录 `SHCNE_UPDATEDIR (0x2000)`。每次都只失效 `size-10` 的递归摘要，两视图共享一次重扫，结果依次为 23/20/20 B，行 ID、排序、选区/焦点不变。Release NativeProbe build 0 警告/错误，Private Desktop watchdog 三轮 exit 0。
+
+目录内容直接写入导致的 `UPDATEITEM/UPDATEDIR` 仍由探针显式通知；普通文件写入不是 `IFileOperation` 操作，本轮没有证明其自然 Shell 通知。探针事件只在临时本地夹具复验，未测网络路径、通知合并/丢失、用户级文件操作或产品 watcher 接线。日志：`20261101-202619-4e8f14d0`、`20261101-202624-664af1c5`、`20261101-202629-0815dd14`。
+
 ## 2026-11-01：目录改名期间旧路径在途扫描退休
 
 在双真实 `IShellView` 递归列 NativeProbe 中，让 `HandleBoundRecursiveDirectoryScanner` 打开 `size-10` 的真实目录句柄后暂停；随后由 `IFileOperation.RenameItem` 执行真实夹具目录改名，不再从探针手动调用 `SHChangeNotify`。注册在父目录的 `SHChangeNotifyRegister` 窗口收到自然 `SHCNE_RENAMEFOLDER` 事件后，改名通知使旧路径缓存代次失效，两个 peer view 在新路径只共享一次新扫描。释放旧 worker 后，它仍通过已打开句柄读回 20 B，但旧路径已不存在且代次不匹配，因此该结果不能发布或重建旧缓存；新路径缓存仍保持两 view 共用同一个结果。
