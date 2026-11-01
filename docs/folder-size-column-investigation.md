@@ -1322,3 +1322,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 在既有 `full-view-refresh-live-cache-publish` 隔离策略上增加 `full-view-refresh-background-scan-live-cache-publish`：先于 view STA 修改夹具目录，再用项目的 `RecursiveDirectoryScanner` 和 `DirectoryTreeScanCoordinator` 在 worker 扫描；扫描结果经 WPF `DispatcherSynchronizationContext` 回到 view 所属线程后写入当前 provider 快照，最后调用 `IShellView::Refresh()`。三次独立 Private Desktop WPF view 运行都确认 owner/worker/publish 线程为 `5/7/5`，新大小值 `1 B` 被显示，排序为 `small.bin|child`，选区与焦点保持，DefView 重枚举 2 行并执行一次大小比较；刷新读回分别为 140、172、157 ms。既有 `--common-listview-relative-size-contract` 亦通过，确认自有 ListView 的后台扫描、owner 线程发布、排序及选择/焦点合同仍通过。
 
 此结果将真实扫描工作从 Shell STA 移走，并证明结果可在 STA 安全发布后被当前合成 DefView 消费；派生值仍需完整 view refresh 才更新，因此尚未实现单行更新。140–172 ms 是两行夹具的刷新到稳定读回时间，不是纯扫描延迟，也不能外推大目录耗时。未采集像素，不能判断刷新白闪；未验证真实 ExplorerBrowser、可见 UI、多窗格负载或网络路径。后台扫描策略只存在于 NativeProbe，产品仍未接入逐行递归大小列。
+
+### 2026-11-01：500 个目录时按需列请求范围与成本
+
+把 Private Desktop 隐藏 view 负载从 100 扩大到 500 个同级目录（每目录 10 个小文件，共 502 行），通过 `EXPLORER_DIRS_NATIVEPROBE_ONDEMAND_FOLDER_COUNT` 控制夹具目录数（1–500，默认 100）。两轮 500 目录运行均在探针主动读取全列前收到 22 个大小行请求，扫描 22 个目录、访问 213 项；随后探针主动读完全部行，累计 502 次大小行请求、501 次目录扫描、访问 5,003 项。两轮的初始阶段扫描耗时为 9.303/12.297 ms，整列读取后累计为 71.085/81.577 ms；Private Desktop 前台、输入和清理守卫均通过。默认 100 目录模式随后复跑通过；Release build 0 警告/错误。
+
+这表明在该固定隐藏窗口尺寸下，DefView 初始大小请求数没有随总目录数从 100 增至 500 而增加；因此按需模式把初始同步扫描量限制在当前请求行附近，而完整列读取仍随目录总数线性增长。22 行是本机合成 view 的实测值，不是所有屏幕尺寸、分组/排序状态或 Shell provider 的固定可视行数。扫描耗时受缓存与本机负载影响，也不代表实际用户可见卡顿。此负载实验未加入后台刷新链路，未采集像素、未验证产品 ExplorerBrowser、网络目录或多窗格并发；下一步应将 worker 扫描与刷新合同扩展到多行/500 目录负载，验证大视图排序、选区/焦点及整次刷新成本。

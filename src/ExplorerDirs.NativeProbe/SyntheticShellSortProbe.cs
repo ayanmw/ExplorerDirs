@@ -169,9 +169,16 @@ public static class SyntheticShellSortProbe
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, exerciseUpdateNotifications: true);
 
-    internal static int RunRecursiveDirectorySizeSortWithOnDemandColumnWpfHost() =>
-        Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
-            useWpfParent: true, onDemandRecursiveSize: true, onDemandFolderCount: 100);
+    internal static int RunRecursiveDirectorySizeSortWithOnDemandColumnWpfHost()
+    {
+        var folderCountText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ONDEMAND_FOLDER_COUNT");
+        var folderCount = string.IsNullOrWhiteSpace(folderCountText) ? 100 :
+            int.TryParse(folderCountText, out var parsedFolderCount) ? parsedFolderCount : -1;
+        if (folderCount is < 1 or > 500)
+            throw new ArgumentOutOfRangeException(nameof(folderCountText), "The on-demand Shell load probe accepts 1–500 sibling folders.");
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, onDemandRecursiveSize: true, onDemandFolderCount: folderCount);
+    }
 
     internal static int RunRecursiveDirectorySizeSortWithFormattedColumnWpfHost() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
@@ -531,7 +538,7 @@ public static class SyntheticShellSortProbe
                 var propertyStoreRequests = ReadCounter(module, "GetSyntheticPropertyStoreRequestCount");
                 var attributeRequests = ReadCounter(module, "GetSyntheticGetAttributesOfCount");
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
-                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
+                Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
                 string[] ascendingNames;
                 var skipSortingForOnDemandLoadProbe = onDemandRecursiveSize && onDemandFolderCount > 0;
                 if (shellWindowScrollProbe || skipSortingForOnDemandLoadProbe)
