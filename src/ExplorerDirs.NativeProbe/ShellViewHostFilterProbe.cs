@@ -1505,18 +1505,19 @@ internal static class ShellViewHostFilterProbe
             var initialIds = ReadPeerListRowIds(listView);
             var ownerThread = Environment.CurrentManagedThreadId;
             using var cancellation = new CancellationTokenSource();
+            var requestedPath = Path.GetFullPath(selectedRow.FileSystemPath!);
             var scan = Task.Run(() =>
             {
                 var workerThread = Environment.CurrentManagedThreadId;
-                Thread.Sleep(100); // Keep the user-requested scan pending while the old rows remain visible.
-                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan(scanPaths, cancellation.Token), WorkerThread: workerThread);
+                Thread.Sleep(100); // Keep the one-row on-demand request pending while the old rows remain visible.
+                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan([requestedPath], cancellation.Token), WorkerThread: workerThread);
             }, cancellation.Token);
             while (!scan.IsCompleted)
             {
                 Application.DoEvents();
                 if (!ReadPeerListNames(listView).SequenceEqual(initialNames, StringComparer.OrdinalIgnoreCase) ||
                     !ReadPeerListRowIds(listView).SequenceEqual(initialIds))
-                    throw new InvalidOperationException("The peer list changed while recursive values were loading.");
+                    throw new InvalidOperationException("The peer list changed while the requested recursive value was loading.");
                 Thread.Sleep(10);
             }
             var completed = scan.GetAwaiter().GetResult();
@@ -1525,6 +1526,8 @@ internal static class ShellViewHostFilterProbe
 
             var sizes = completed.Rows.ToDictionary(pair => Path.GetFullPath(pair.Key), pair => pair.Value.Summary.Bytes,
                 StringComparer.OrdinalIgnoreCase);
+            if (sizes.Count != 1 || !sizes.ContainsKey(requestedPath))
+                throw new InvalidOperationException("The on-demand request scanned folders that were not requested.");
             var recursiveSizeCache = new Dictionary<string, ulong>(sizes, StringComparer.OrdinalIgnoreCase);
             var bytesById = new Dictionary<int, ulong>();
             for (var index = 0; index < projection.Rows.Count; index++)
@@ -1536,6 +1539,39 @@ internal static class ShellViewHostFilterProbe
                     SetPeerListCell(listView, index, row.DetailTitles.Length,
                         bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
                 }
+            }
+            var initialIndexById = initialIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+            var otherFolderRowsRemainPending = projection.Rows.Where(row => row.Id != selectedRow.Id &&
+                    row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
+                .All(row => string.IsNullOrEmpty(GetPeerListCell(listView, initialIndexById[row.Id], row.DetailTitles.Length)));
+            if (bytesById[selectedRow.Id] != 10 || !otherFolderRowsRemainPending)
+                throw new InvalidOperationException("The on-demand scan populated an unrequested recursive-size row.");
+
+            var remainingPaths = scanPaths.Where(path => !string.Equals(path, requestedPath, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var rowIndexByPath = projection.Rows.Select((row, index) => (row, index))
+                .Where(item => item.row.FileSystemPath is not null)
+                .ToDictionary(item => Path.GetFullPath(item.row.FileSystemPath!), item => item.index,
+                    StringComparer.OrdinalIgnoreCase);
+            var remainingScan = Task.Run(() =>
+                HandleBoundRecursiveDirectoryScanner.Scan(remainingPaths, cancellation.Token), cancellation.Token);
+            while (!remainingScan.IsCompleted)
+            {
+                Application.DoEvents();
+                if (!ReadPeerListRowIds(listView).SequenceEqual(initialIds))
+                    throw new InvalidOperationException("The peer row identities changed while additional recursive values were loading.");
+                Thread.Sleep(10);
+            }
+            foreach (var pair in remainingScan.GetAwaiter().GetResult())
+            {
+                var fullPath = Path.GetFullPath(pair.Key);
+                sizes[fullPath] = pair.Value.Summary.Bytes;
+                recursiveSizeCache[fullPath] = pair.Value.Summary.Bytes;
+                if (!rowIndexByPath.TryGetValue(fullPath, out var rowIndex))
+                    throw new InvalidOperationException("A requested recursive-size result no longer maps to a Shell row.");
+                var row = projection.Rows[rowIndex];
+                bytesById[row.Id] = pair.Value.Summary.Bytes;
+                SetPeerListCell(listView, rowIndex, row.DetailTitles.Length,
+                    pair.Value.Summary.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
             }
             if (bytesById[selectedRow.Id] != 10 || bytesById[projection.Rows.Single(row => row.Name == "size-2").Id] != 2 ||
                 bytesById[projection.Rows.Single(row => row.Name == "size-100").Id] != 100)
@@ -1552,7 +1588,7 @@ internal static class ShellViewHostFilterProbe
             var selectedState = selectedAfterSort < 0 ? 0 : GetPeerListItemState(listView, selectedAfterSort, 0x0003);
             if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
                 throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
-            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; requested-only-first=True; other-rows-pending={otherFolderRowsRemainPending}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
 
             var changedDirectory = Path.GetFullPath(projection.Rows.Single(row => row.Name == "size-10").FileSystemPath!);
             var changedPayload = Path.Combine(changedDirectory, "payload.bin");
@@ -1900,6 +1936,20 @@ internal static class ShellViewHostFilterProbe
                 throw new InvalidOperationException($"Could not populate peer ListView cell ({row}, {column}).");
         }
         finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(text); }
+    }
+
+    private static string GetPeerListCell(nint listView, int row, int column)
+    {
+        var buffer = Marshal.AllocHGlobal(1024);
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            var item = new NativeListViewItem { Item = row, SubItem = column, Text = buffer, TextCapacity = 512 };
+            Marshal.StructureToPtr(item, itemPointer, false);
+            _ = SendMessageW(listView, LvmGetItemTextW, row, itemPointer);
+            return Marshal.PtrToStringUni(buffer) ?? string.Empty;
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
     }
 
     private static void VerifyPeerListDetails(nint listView, IReadOnlyList<PeerShellRow> rows)

@@ -1830,3 +1830,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 扩展 `--shell-change-reconciliation` 隐藏集成合同：初始 ListView 同时选择 `stable.txt` 与 `attribute.txt`，只将 `stable.txt` 设为 focused item。Shell `UPDATEITEM` 后后台扫描并回到 owner thread 发布，递归列从 `4 B` 更新至 `7 B`；之后的属性切换/恢复、create/update、名称重排、删除和递归目录改名/重扫，都重新投影行并恢复相同两项选择及 `stable.txt` 焦点。断言同时检查行模型 snapshot 和真实 `SysListView32` 的选中 ID 集合恰好为这两项，避免只检查单一焦点行而漏掉多选丢失。
 
 同一命令继续通过双窗格 `IFileOperation` Copy/Move/Rename/Delete 与跨卷 Move 对账；所有窗口隐藏，前台未变化。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` exit 0。该合同把多选保持接入真实 Shell 通知、递归值回填和行重排，但仍是隐藏自有 ListView 行模型，不是产品视图、真实鼠标输入、菜单或 OLE `DoDragDrop` 证据；ExplorerBrowser 产品和 release 未修改。
+
+### 2026-11-01：真实 Shell 行的递归列逐项按需读取
+
+扩展 `--ishellview-recursive-size-projection-private-desktop`：递归值先全部为空，首次请求只扫描选中的 `size-10` 目录；后台任务期间原 Shell 行名称与稳定 ID 不变，扫描结果只填充该目录单元格，其余文件系统目录仍显示未计算状态。探针随后显式请求剩余目录，确认各自结果映射到原 PIDL 行，再按 `ulong` 数值排序；原选中行身份仍保留。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台、last-input 和夹具清理守卫通过。
+
+这验证的是自控 peer ListView 的逐项按需扫描路径，不是 viewport 可见性检测、自动后台触发策略或 ExplorerBrowser 产品列；探针通过显式行请求模拟“需要该值”，并在同一轮内请求其余目录。Shell 通知突发/失效、取消和过期结果合同仍由前述独立探针覆盖。未接产品、未使用用户目录、未做可见 UI/性能基准或慢盘网络验证；产品和 release 未改变。
