@@ -264,11 +264,13 @@ public static class SyntheticShellSortProbe
         var shellWindowScrollProbe = sizeUpdateStrategy == "single-item-recreate-shell-window-scroll";
         if (exerciseUpdateNotifications && sizeUpdateStrategy == "all")
             throw new ArgumentException("Run each recursive-size update strategy in its own fresh probe process; 'all' cannot share a view baseline.");
-        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "large-view-sort-refresh" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
+        if (exerciseUpdateNotifications && sizeUpdateStrategy is not ("single-item" or "single-item-reapply-column" or "single-item-reapply-column-recreate-view" or "single-item-reapply-column-save-state-recreate-window" or "single-item-recreate-shell-window" or "single-item-recreate-shell-window-multiselect" or "single-item-recreate-shell-window-scroll" or "single-item-capture-reapply-recreate-window" or "single-item-live-cache-publish" or "single-item-lvm-update-live-cache-publish" or "item-plus-parent-live-cache-publish" or "full-view-refresh-live-cache-publish" or "full-view-refresh-background-scan-live-cache-publish" or "full-view-refresh-redraw-live-cache-publish" or "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute" or "item-plus-parent" or "delete-create" or "full-view-refresh"))
             throw new ArgumentException($"Unknown recursive-size update strategy '{sizeUpdateStrategy}'.");
         var largeViewSortRefreshProbe = sizeUpdateStrategy == "large-view-sort-refresh";
-        if (largeViewSortRefreshProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
-            throw new ArgumentException("The large-view sort refresh probe requires on-demand recursive sizing and at least one synthetic sibling folder.");
+        var largeViewSortUpdateObjectProbe = sizeUpdateStrategy is "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute";
+        var largeViewSortProbe = largeViewSortRefreshProbe || largeViewSortUpdateObjectProbe;
+        if (largeViewSortProbe && (!onDemandRecursiveSize || onDemandFolderCount == 0))
+            throw new ArgumentException("The large-view sort probe requires on-demand recursive sizing and at least one synthetic sibling folder.");
         var foreground = GetForegroundWindow();
         var runIdText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RUN_ID");
         if (runIdText is not null && !Guid.TryParseExact(runIdText, "N", out _))
@@ -299,7 +301,7 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly)
             {
                 Directory.CreateDirectory(Path.Combine(backingFolder, "child", "nested"));
-                File.WriteAllBytes(Path.Combine(backingFolder, "child", "direct.bin"), new byte[largeViewSortRefreshProbe ? 26 : 6]);
+                File.WriteAllBytes(Path.Combine(backingFolder, "child", "direct.bin"), new byte[largeViewSortProbe ? 26 : 6]);
                 File.WriteAllBytes(Path.Combine(backingFolder, "child", "nested", "deep.bin"), new byte[4]);
                 File.WriteAllBytes(Path.Combine(backingFolder, "small.bin"), new byte[4]);
                 if (onDemandFolderCount > 0)
@@ -310,7 +312,7 @@ public static class SyntheticShellSortProbe
                         Directory.CreateDirectory(loadProbeFolder);
                         for (var fileIndex = 0; fileIndex < 10; fileIndex++)
                             File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
-                                largeViewSortRefreshProbe && folderIndex == 0 && fileIndex == 0 ? new byte[11] : [0x01]);
+                                largeViewSortProbe && folderIndex == 0 && fileIndex == 0 ? new byte[11] : [0x01]);
                     }
                 }
                 if (shellWindowScrollProbe)
@@ -638,7 +640,7 @@ public static class SyntheticShellSortProbe
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
                 var expectedDirectoryText = expectedDirectorySizeText ??
-                    (largeViewSortRefreshProbe ? "30" : humanSizeText ? "10 B" : "10");
+                    (largeViewSortProbe ? "30" : humanSizeText ? "10 B" : "10");
                 var fileIndex = Array.FindIndex(initialNames, name => string.Equals(name, "small.bin", StringComparison.OrdinalIgnoreCase));
                 var displayedDirectorySize = childIndex >= 0 && string.Equals(initialSizes[childIndex], expectedDirectoryText, StringComparison.Ordinal);
                 var displayedFileSize = expectedFileSizeText is null ||
@@ -1428,7 +1430,7 @@ public static class SyntheticShellSortProbe
         try
         {
             Console.WriteLine($"synthetic-size-update: selected-strategy={strategyFilter}");
-            if (strategyFilter == "large-view-sort-refresh")
+            if (strategyFilter is "large-view-sort-refresh" or "large-view-sort-updateobject" or "large-view-sort-updateobject-absolute")
             {
                 var listView = FindListView(view);
                 var namesBeforeSort = WaitForNames(listView, module, "child", loadFolderCount + 2);
@@ -1446,8 +1448,18 @@ public static class SyntheticShellSortProbe
                     !IsNameBefore(ascendingNames, "folder-000", "child"))
                     throw new InvalidOperationException("The large-view probe did not establish an ascending recursive-size Shell sort before refresh.");
 
-                RunSizeUpdateStrategy("large-view-sort-refresh", 1,
-                    () => Check(At<RefreshView>(view, 8)(view)), module, folderView, view, backingFolder,
+                var updateViaRefresh = strategyFilter == "large-view-sort-refresh";
+                RunSizeUpdateStrategy(strategyFilter, 1,
+                    () =>
+                    {
+                        if (updateViaRefresh) Check(At<RefreshView>(view, 8)(view));
+                        else
+                        {
+                            Check(At<GetWindow>(view, 3)(view, out var shellViewWindow));
+                            UpdateShellViewObject(shellViewWindow, folder, rootPidl, "child",
+                                absolutePidls: strategyFilter == "large-view-sort-updateobject-absolute");
+                        }
+                    }, module, folderView, view, backingFolder,
                     publishLiveSnapshot: true, expectLiveRefresh: true, largeViewLoad: true,
                     expectedRowCount: loadFolderCount + 2, expectedFolderSortPair: ("child", "folder-000"),
                     expectedInitialChildSize: "30", host: host);
@@ -1580,6 +1592,75 @@ public static class SyntheticShellSortProbe
         return result.Results;
     }
 
+    private static void UpdateShellViewObject(nint hostWindow, nint folder, nint rootPidl, string itemName, bool absolutePidls)
+    {
+        Check(At<ParseDisplayName>(folder, 3)(folder, 0, 0, itemName, 0, out var oldChildPidl, 0));
+        if (oldChildPidl == 0) throw new InvalidOperationException($"The synthetic namespace did not parse '{itemName}' for SFVM_UPDATEOBJECT.");
+        var oldItemPidl = absolutePidls ? ILCombine(rootPidl, oldChildPidl) : oldChildPidl;
+        if (oldItemPidl == 0)
+        {
+            ILFree(oldChildPidl);
+            throw new InvalidOperationException($"Could not combine '{itemName}' with the synthetic root for SFVM_UPDATEOBJECT.");
+        }
+        if (absolutePidls) ILFree(oldChildPidl);
+        var replacementPidl = CloneItemIdList(oldItemPidl);
+        if (replacementPidl == 0)
+        {
+            ILFree(oldItemPidl);
+            throw new InvalidOperationException($"Could not clone '{itemName}' for SFVM_UPDATEOBJECT.");
+        }
+
+        var pidlPair = Marshal.AllocHGlobal(IntPtr.Size * 2);
+        var replacementOwnershipTransferred = false;
+        try
+        {
+            Marshal.WriteIntPtr(pidlPair, 0, oldItemPidl);
+            Marshal.WriteIntPtr(pidlPair, IntPtr.Size, replacementPidl);
+            // The Windows SDK documents SFVM_UPDATEOBJECT as the default-view
+            // targeted update path; a successful call transfers the replacement PIDL.
+            var result = SHShellFolderView_Message(hostWindow, 0x0007, pidlPair);
+            Console.WriteLine($"synthetic-size-update: sfvm-updateobject-result={result}; host=0x{hostWindow:X}; item={itemName}");
+            if (result == -1)
+                throw new InvalidOperationException("SHShellFolderView_Message(SFVM_UPDATEOBJECT) reported failure.");
+            replacementOwnershipTransferred = true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pidlPair);
+            ILFree(oldItemPidl);
+            if (!replacementOwnershipTransferred) ILFree(replacementPidl);
+        }
+    }
+
+    private static nint CloneItemIdList(nint pidl)
+    {
+        var size = 0;
+        while (size <= 65534)
+        {
+            var itemSize = unchecked((ushort)Marshal.ReadInt16(pidl, size));
+            if (itemSize == 0)
+            {
+                size = checked(size + sizeof(ushort));
+                var clone = Marshal.AllocCoTaskMem(size);
+                try
+                {
+                    var bytes = new byte[size];
+                    Marshal.Copy(pidl, bytes, 0, size);
+                    Marshal.Copy(bytes, 0, clone, size);
+                    return clone;
+                }
+                catch
+                {
+                    Marshal.FreeCoTaskMem(clone);
+                    throw;
+                }
+            }
+            if (itemSize < sizeof(ushort)) throw new InvalidOperationException("The synthetic child PIDL contains an invalid item size.");
+            size = checked(size + itemSize);
+        }
+        throw new InvalidOperationException("The synthetic child PIDL exceeded the supported length while cloning it.");
+    }
+
     private static void PumpDispatcherUntil(Func<bool> completed)
     {
         var frame = new DispatcherFrame();
@@ -1701,6 +1782,47 @@ public static class SyntheticShellSortProbe
         var notificationStarted = Environment.TickCount64;
         notify();
         var mapCallsAfterNotification = ReadCounter(module, "GetSyntheticMapColumnToScidCount");
+        if (name.StartsWith("large-view-sort-updateobject", StringComparison.Ordinal))
+        {
+            Pump(2500);
+            var immediateNames = ReadNames(listView, module, expectedCount: -1);
+            var immediateHeaders = ReadHeaderColumnTitles(listView);
+            var immediateColumnResult = ShellColumnManager.Capture(folderView, out var immediateColumns);
+            var immediateSort = CaptureNativeSortColumns(folderView);
+            var childIndex = Array.FindIndex(immediateNames, item => string.Equals(item, "child", StringComparison.OrdinalIgnoreCase));
+            var folderIndex = Array.FindIndex(immediateNames, item => string.Equals(item, "folder-000", StringComparison.OrdinalIgnoreCase));
+            var fileIndex = Array.FindIndex(immediateNames, item => string.Equals(item, "small.bin", StringComparison.OrdinalIgnoreCase));
+            var immediateSizeTexts = ReadColumnTexts(listView, module, subItem: 1, expectedCount: -1);
+            var enumDelta = ReadCounter(module, "GetSyntheticEnumObjectsCount") - enumsBefore;
+            var detailsDelta = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount") - detailsBefore;
+            var compareDelta = ReadCounter(module, "GetSyntheticSizeCompareCount") - comparesBefore;
+            var immediateChildSize = childIndex >= 0 && childIndex < immediateSizeTexts.Length
+                ? immediateSizeTexts[childIndex]
+                : "<unavailable>";
+            var immediateChildBeforeFolder = IsNameBefore(immediateNames, "child", "folder-000");
+            var immediateChildCount = immediateNames.Count(item => string.Equals(item, "child", StringComparison.OrdinalIgnoreCase));
+            var blankNameCount = immediateNames.Count(string.IsNullOrWhiteSpace);
+            var duplicateNames = immediateNames.GroupBy(item => item, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1).Select(group => group.Key).ToArray();
+            var expectedNames = Enumerable.Range(0, Math.Max(0, expectedRowCount - 2))
+                .Select(index => $"folder-{index:D3}").Append("child").Append("small.bin").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var unexpectedNames = immediateNames.Where(item => !expectedNames.Contains(item)).ToArray();
+            var missingNames = expectedNames.Where(item => !immediateNames.Contains(item, StringComparer.OrdinalIgnoreCase)).ToArray();
+            var immediateSelection = HasSelectionAndFocus(listView, immediateNames, "small.bin");
+            Console.WriteLine($"synthetic-size-update: strategy={name}; immediate-rows={immediateNames.Length}; child-count={immediateChildCount}; blank-name-count={blankNameCount}; duplicate-names=[{string.Join('|', duplicateNames)}]; unexpected-names=[{string.Join('|', unexpectedNames)}]; missing-names=[{string.Join('|', missingNames)}]; child-index={childIndex}; folder-000-index={folderIndex}; small-bin-index={fileIndex}; child-size={immediateChildSize}; child-before-folder-000={immediateChildBeforeFolder}; selection-focus={immediateSelection}; headers=[{string.Join('|', immediateHeaders)}]; columns-hr=0x{immediateColumnResult:X8}; columns=[{FormatColumns(immediateColumns)}]; sort=[{FormatSortColumns(immediateSort)}]; enum-delta={enumDelta}; size-detail-delta={detailsDelta}; compare-delta={compareDelta}");
+            var targetedUpdateObserved = immediateChildSize == updatedSize.ToString() && immediateChildBeforeFolder;
+            var onlyBlankUnexpectedRows = unexpectedNames.Length == blankNameCount && unexpectedNames.All(string.IsNullOrWhiteSpace);
+            var targetedUpdateWasNoOp = immediateChildSize == expectedInitialChildSize && !immediateChildBeforeFolder &&
+                (immediateChildCount == 1 || immediateChildCount == 2) &&
+                (immediateNames.Length == expectedRowCount || immediateNames.Length == expectedRowCount + 1) &&
+                onlyBlankUnexpectedRows && missingNames.Length == 0 && duplicateNames.Length == 0 &&
+                enumDelta == 0 && detailsDelta <= 1 && compareDelta == 0;
+            if (!immediateSelection ||
+                (!targetedUpdateObserved && !targetedUpdateWasNoOp))
+                throw new InvalidOperationException($"SFVM_UPDATEOBJECT produced an unexpected large-view state: rows={immediateNames.Length}/{expectedRowCount}; child-count={immediateChildCount}; child-size={immediateChildSize}; child-before-folder-000={immediateChildBeforeFolder}; selection-focus={immediateSelection}; enum-delta={enumDelta}; details-delta={detailsDelta}; compare-delta={compareDelta}.");
+            Console.WriteLine($"synthetic-size-update: strategy={name}; targeted-property-refresh={(targetedUpdateObserved ? "observed" : "not-observed")}; row-count={immediateNames.Length}; duplicate-child={immediateChildCount > 1}; selection-focus-preserved=True");
+            return;
+        }
 
         var reapplyResult = 0;
         var mapCallsAfterReapply = mapCallsAfterNotification;
@@ -3879,6 +4001,7 @@ public static class SyntheticShellSortProbe
     [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref StorageMedium medium);
     [DllImport("shell32.dll")] private static extern nint ILCombine(nint parent, nint child);
     [DllImport("shell32.dll")] private static extern void ILFree(nint pidl);
+    [DllImport("shell32.dll")] private static extern nint SHShellFolderView_Message(nint mainWindow, uint message, nint parameter);
     [DllImport("shell32.dll")] private static extern void SHChangeNotify(uint eventId, uint flags, nint item1, nint item2);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool SHGetPathFromIDListW(nint pidl, StringBuilder path);
     [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer, uint context, ref Guid interfaceId, out nint instance);

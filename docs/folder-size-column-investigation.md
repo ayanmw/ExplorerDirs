@@ -1352,3 +1352,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 加入 NativeProbe 专用 `large-view-sort-refresh` 策略。为了证明更新确实改变相对次序，夹具将 `child` 初始大小设为 30 B、`folder-000` 设为 20 B；列头建立升序后，刷新前 `folder-000` 位于 `child` 前。后台扫描发布 `child=1 B` 快照并完整刷新后，Shell 再比较 1,451 次，502 行保持，`child` 移到 `folder-000` 前，刷新过程未触发递归目录重扫；选区和焦点经现有快照恢复成功，稳定读回约 1,172 ms。Private Desktop 探针退出码 0，前台、输入与隔离清理守卫通过，NativeProbe Release build 0 警告/错误。
 
 这次同时纠正此前的排序判据：Shell 将文件夹和文件按其自身规则分组，不能用目录 `child` 与普通文件 `small.bin` 的相对位置断定递归大小排序是否生效。Shell 的 `IFolderView2` 还报告映射后的排序属性键，而非 provider 显示列的私有键；探针因此结合实际列头操作、比较器调用、升序方向和两个目录的相对位置确认行为。约 1.17 秒包含 502 行重枚举和状态恢复，不是纯排序耗时；这是隐藏合成 `IShellView` 原型证据，不代表可见 UI 刷新观感或 ExplorerBrowser 产品已接入。下一步仍需独立评估只更新单行的 Shell 支持路径，并确认它能否在排序下触发正确重排。
+
+### 2026-11-01：`SFVM_UPDATEOBJECT` 单行刷新探针
+
+为 100 个同级目录（102 行视图）建立递归大小升序，初始 `child=30 B` 排在 `folder-000=20 B` 之后；生产扫描器将活动 provider 快照更新为 `child=1 B` 后，分别调用 `SHShellFolderView_Message(SFVM_UPDATEOBJECT)` 并传入相对 PIDL、绝对 PIDL 对。两种调用都返回 `0`，但等待 2.5 秒后大小仍是 `30`、排序位置未变；行数从 102 变为 103，多出一个空名称行。没有触发重新枚举或比较回调，选择/焦点保持，列与排序设置未变。NativeProbe Release 构建无警告/错误，两个隐藏 Private Desktop 探针退出码为 0，前台、输入和隔离清理守卫通过。
+
+在此宿主上，返回 `0` 不代表派生属性已刷新；相对和绝对 PIDL 两条形式都没有达到更新目的，还引入额外空行。因此不把 `SFVM_UPDATEOBJECT` 接入产品。Microsoft 文档描述了传入旧/新 PIDL 对的默认视图更新消息，但同时提示该函数可能变化或不可用，见 [SHShellFolderView_Message 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-shshellfolderview_message)。当前只有完整 `IShellView::Refresh()` 被验证能重取递归大小值并在排序下重排；其限制仍是全视图重枚举和未验证用户可见闪烁，见 [IShellView::Refresh 文档](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellview-refresh)。以上证据仅来自合成隐藏 Shell view，不证明所有系统版本或第三方 namespace 的行为，也未接入 ExplorerBrowser 产品。
