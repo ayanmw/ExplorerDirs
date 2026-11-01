@@ -1604,3 +1604,11 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 在注册 namespace 的 ExplorerBrowser 探针中，对包装 provider 的 `GetUIObjectOf` 请求 `IDataObject`，分别为临时 `copy-source.txt` 与 `move-source.txt` 创建数据对象；将该对象直接传给 Windows `IFileOperation::CopyItems`/`MoveItems`，并调用 `PerformOperations` 与 `GetAnyOperationsAborted`。两项均报告未取消；目标文件内容逐字节/文本读回一致，复制源保留，移动源消失。`IFileOperation` 使用 STA 和 `FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI`，目标目录位于随机临时夹具，未使用剪贴板或显示 UI。
 
 这证明包装 namespace 的文件项 `IDataObject` 可供标准 Shell 文件操作接口完成复制与移动；不验证 ExplorerBrowser 菜单中的复制/粘贴命令、拖放、冲突处理、多选或真实文件夹 PIDL/对象身份。Private Desktop 前台/输入守卫与临时注册清理通过，产品及 release 未修改。
+
+### 2026-11-01：包装 namespace 原生文件夹拖放目标
+
+基线探针确认合成 namespace 的 `CreateViewObject(IID_IDropTarget)` 返回 `E_NOINTERFACE`，同一 backing filesystem folder 则返回 `S_OK`。因此文件项可提供 `IDataObject` 并不意味着目录已具备拖放目标。`SyntheticSortFolder::CreateViewObject` 现将 `IID_IDropTarget` 与背景 `IContextMenu` 一样转发给 backing folder，`IShellView` 仍由包装层自己创建。
+
+更新后的 Private Desktop 探针通过包装根文件夹绑定子目录，取得其原生 `IDropTarget`；将包装根中的 `copy-source.txt` 数据对象依次交给 `DragEnter`、`Drop`，复制到子目录后逐字节比较源/目标，确认源保留、目标创建。Release NativeProbe 构建和原生 adapter `/W4 /WX` 构建通过；探针退出码 0，临时注册/文件夹清理、前台与输入守卫通过。
+
+边界：这是隔离临时 namespace 中对 Shell COM 拖放接口的直接调用，不是 `DoDragDrop` 鼠标交互；没有验证跨窗格/跨进程 OLE 拖放、移动效果、拖动反馈、取消/拒绝效果、Shell 通知及产品接线。ExplorerBrowser 产品及 release 未修改。后续应在隔离架构评审中验证真实 OLE 循环与通知，再评估接入递归列原型。

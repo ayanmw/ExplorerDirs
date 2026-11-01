@@ -15,6 +15,7 @@ internal static class ExplorerBrowserWrapperProbe
     private static readonly Guid ShellViewId = new("000214E3-0000-0000-C000-000000000046");
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid DropTargetId = new("00000122-0000-0000-C000-000000000046");
     private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
     private static readonly Guid FileOperationInterfaceId = new("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
     private static readonly Guid ShellItemId = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
@@ -376,6 +377,28 @@ internal static class ExplorerBrowserWrapperProbe
                 !fileOperationResults.CopySourcePreserved || !fileOperationResults.MoveSourceRemoved ||
                 !fileOperationResults.DestinationsVerified)
                 throw new InvalidOperationException("IFileOperation could not copy and move files supplied by the wrapped namespace IDataObject.");
+
+            var wrappedDropTargetHr = CreateViewObject(viewFolder, DropTargetId, out var wrappedDropTarget);
+            if (wrappedDropTarget != 0) Marshal.Release(wrappedDropTarget);
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var dragBackingRootPidl, 0, out _));
+            try
+            {
+                var shellFolderId = ShellFolder2Id;
+                Marshal.ThrowExceptionForHR(SHBindToObject(0, dragBackingRootPidl, 0, ref shellFolderId, out var backingFolder));
+                try
+                {
+                    var backingDropTargetHr = CreateViewObject(backingFolder, DropTargetId, out var backingDropTarget);
+                    if (backingDropTarget != 0) Marshal.Release(backingDropTarget);
+                    Console.WriteLine($"explorerbrowser-registered-namespace: wrapped-drop-target-hr=0x{wrappedDropTargetHr:X8}; backing-filesystem-drop-target-hr=0x{backingDropTargetHr:X8}");
+                }
+                finally { Marshal.Release(backingFolder); }
+            }
+            finally { Marshal.FreeCoTaskMem(dragBackingRootPidl); }
+
+            var dropResults = ExerciseWrappedFolderDropTarget(viewFolder, "child", "copy-source.txt", fixture);
+            Console.WriteLine($"explorerbrowser-registered-namespace: child-drop-target={dropResults.TargetAvailable}; drag-enter={dropResults.DragEnter}; drop={dropResults.Drop}; copy-verified={dropResults.CopyVerified}");
+            if (!dropResults.TargetAvailable || !dropResults.DragEnter || !dropResults.Drop || !dropResults.CopyVerified)
+                throw new InvalidOperationException("The wrapped child folder could not accept a native Shell drop operation.");
             return 0;
         }
         finally
@@ -640,6 +663,51 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeCoTaskMem(item); }
     }
 
+    private static (bool TargetAvailable, bool DragEnter, bool Drop, bool CopyVerified) ExerciseWrappedFolderDropTarget(
+        nint parentFolder, string destinationName, string sourceName, string fixture)
+    {
+        Marshal.ThrowExceptionForHR(ParseDisplayName(parentFolder, destinationName, out var childPidl));
+        try
+        {
+            var shellFolderId = ShellFolder2Id;
+            Marshal.ThrowExceptionForHR(At<BindToObjectNative>(parentFolder, 5)(parentFolder, childPidl, 0, ref shellFolderId, out var childFolder));
+            try
+            {
+                var targetHr = CreateViewObject(childFolder, DropTargetId, out var dropTarget);
+                if (targetHr < 0 || dropTarget == 0) return (false, false, false, false);
+                try
+                {
+                    var dataObject = GetDataObjectForItem(parentFolder, sourceName);
+                    try
+                    {
+                        const uint copyEffect = 1;
+                        var effect = copyEffect;
+                        var point = new ProbePoint();
+                        var dragEnterHr = At<DropDragEnter>(dropTarget, 3)(dropTarget, dataObject, 1, point, ref effect);
+                        var dragEnter = dragEnterHr >= 0 && (effect & copyEffect) != 0;
+                        var drop = false;
+                        if (dragEnter)
+                        {
+                            effect = copyEffect;
+                            drop = At<DropTargetDrop>(dropTarget, 6)(dropTarget, dataObject, 1, point, ref effect) >= 0 &&
+                                (effect & copyEffect) != 0;
+                        }
+                        else _ = At<DropTargetDragLeave>(dropTarget, 5)(dropTarget);
+                        var sourcePath = Path.Combine(fixture, sourceName);
+                        var destinationPath = Path.Combine(fixture, destinationName, sourceName);
+                        var copyVerified = drop && File.Exists(sourcePath) && File.Exists(destinationPath) &&
+                            File.ReadAllBytes(sourcePath).AsSpan().SequenceEqual(File.ReadAllBytes(destinationPath));
+                        return (true, dragEnter, drop, copyVerified);
+                    }
+                    finally { Marshal.Release(dataObject); }
+                }
+                finally { Marshal.Release(dropTarget); }
+            }
+            finally { Marshal.Release(childFolder); }
+        }
+        finally { Marshal.FreeCoTaskMem(childPidl); }
+    }
+
     private static bool RunFileOperation(nint dataObject, nint destination, bool move)
     {
         var operationClass = FileOperationClassId;
@@ -808,6 +876,10 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayNameNative(nint self, nint owner, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string name, out uint eaten, out nint item, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOfNative(nint self, nint owner, uint count, nint items, ref Guid iid, ref uint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObjectNative(nint self, nint owner, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int BindToObjectNative(nint self, nint item, nint bindContext, ref Guid iid, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropDragEnter(nint self, nint dataObject, uint keyState, ProbePoint point, ref uint effect);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDrop(nint self, nint dataObject, uint keyState, ProbePoint point, ref uint effect);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DropTargetDragLeave(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetNameOfNative(nint self, nint owner, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, uint flags, out nint renamed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint first, uint last, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint flags, nint reserved, nint buffer, uint bufferLength);

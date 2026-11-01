@@ -2867,8 +2867,8 @@ namespace
             *value = nullptr;
             if (iid != IID_IShellView)
             {
-                // The custom view owns row presentation; background commands still belong to the real backing folder.
-                return iid == IID_IContextMenu && _inner
+                // The custom view owns row presentation; background commands and folder drop handling belong to the backing folder.
+                return (iid == IID_IContextMenu || iid == IID_IDropTarget) && _inner
                     ? _inner->CreateViewObject(owner, iid, value)
                     : E_NOINTERFACE;
             }
