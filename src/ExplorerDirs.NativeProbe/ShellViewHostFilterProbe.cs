@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.IO.Compression;
+using System.Collections.Concurrent;
 using ExplorerDirs.App;
 using ExplorerDirs.NativeProbe;
 
@@ -68,11 +69,15 @@ internal static class ShellViewHostFilterProbe
     internal static int RunRecursiveSizeProjectionForPrivateDesktop() => Run(stopAfterGroupedExport: false,
         leaveParentForThreadExit: true, recursiveSizeProjectionOnly: true);
 
+    internal static int RunMultiViewRecursiveSizeProjectionForPrivateDesktop() => Run(stopAfterGroupedExport: false,
+        leaveParentForThreadExit: true, recursiveSizeMultiViewProjectionOnly: true);
+
     internal static int RunVirtualScopeForPrivateDesktop(string scope) =>
         Run(stopAfterGroupedExport: false, leaveParentForThreadExit: true, virtualScopeOnly: scope);
 
     private static int Run(bool stopAfterGroupedExport, bool leaveParentForThreadExit, string? virtualScopeOnly = null,
-        bool menuCommandsOnly = false, bool newFolderOnly = false, bool recursiveSizeProjectionOnly = false)
+        bool menuCommandsOnly = false, bool newFolderOnly = false, bool recursiveSizeProjectionOnly = false,
+        bool recursiveSizeMultiViewProjectionOnly = false)
     {
         var foreground = GetForegroundWindow();
         var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -131,7 +136,7 @@ internal static class ShellViewHostFilterProbe
         {
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             File.WriteAllText(Path.Combine(fixture, "child", "inside.txt"), "inside");
-            if (recursiveSizeProjectionOnly)
+            if (recursiveSizeProjectionOnly || recursiveSizeMultiViewProjectionOnly)
             {
                 foreach (var (name, size) in new[] { ("size-2", 2), ("size-10", 10), ("size-100", 100) })
                 {
@@ -181,7 +186,7 @@ internal static class ShellViewHostFilterProbe
             Check(Marshal.QueryInterface(view, in folderViewId, out folderView));
 
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-            var expectedVisibleCount = recursiveSizeProjectionOnly ? 5 : menuCommandsOnly ? 3 : 2;
+            var expectedVisibleCount = recursiveSizeProjectionOnly || recursiveSizeMultiViewProjectionOnly ? 5 : menuCommandsOnly ? 3 : 2;
             int count;
             do
             {
@@ -204,6 +209,11 @@ internal static class ShellViewHostFilterProbe
                     Check(At<DestroyViewWindow>(view, 10)(view));
                     created = false; // The projection probe destroys the real Shell view while a scan is pending.
                 });
+                return 0;
+            }
+            if (recursiveSizeMultiViewProjectionOnly)
+            {
+                VerifyMultiViewRecursiveSizeProjection(view, folderView, folderPidl, folder, parent, count, fixture, childFolderPidl);
                 return 0;
             }
             if (virtualScopeOnly is not null)
@@ -1480,6 +1490,186 @@ internal static class ShellViewHostFilterProbe
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the independent peer ListView.");
         _ = SendMessageW(listView, LvmSetImageList, 1, systemImageList); // LVSIL_SMALL; Shell-owned system image list.
         return listView;
+    }
+
+    private static void VerifyMultiViewRecursiveSizeProjection(nint firstShellView, nint firstFolderView,
+        nint folderPidl, nint shellFolder, nint parent, int expectedCount, string fixture, nint childFolderPidl)
+    {
+        var foreground = GetForegroundWindow();
+        nint secondFolder = 0, secondShellView = 0, secondViewPointer = 0, secondViewWindow = 0, secondFolderView = 0;
+        FilteredHost? secondHost = null;
+        var secondCreated = false;
+        var nextFirstId = 0;
+        var nextSecondId = 0;
+        var firstProjection = CapturePeerShellRows(firstFolderView, folderPidl, shellFolder, [], ref nextFirstId);
+        (List<PeerShellRow> Rows, nint SystemImageList) secondProjection = ([], 0);
+        try
+        {
+            Check(SHBindToObject(0, folderPidl, 0, in ShellFolderId, out secondFolder));
+            var viewId = ShellViewId;
+            Check(At<CreateViewObject>(secondFolder, 8)(secondFolder, parent, ref viewId, out secondShellView));
+            secondHost = new FilteredHost(parent,
+                new ShellFolderFilter(new QuickFilterSettings("*.txt", false, false)), folderPidl, childFolderPidl,
+                (_, _) => Marshal.GetHRForException(new InvalidOperationException("Unexpected navigation in multi-view probe.")));
+            secondHost.View = secondShellView;
+            secondViewPointer = Marshal.GetComInterfaceForObject(secondHost, typeof(IStreamProbeBrowser));
+            var settings = new StreamProbeSettings { Mode = uint.MaxValue };
+            var bounds = new StreamProbeRect { Right = 640, Bottom = 480 };
+            Check(At<CreateViewWindow>(secondShellView, 9)(secondShellView, 0, ref settings, secondViewPointer, ref bounds, out secondViewWindow));
+            secondCreated = true;
+            var folderViewId = FolderViewId;
+            Check(Marshal.QueryInterface(secondShellView, in folderViewId, out secondFolderView));
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            int secondCount;
+            do
+            {
+                Application.DoEvents();
+                Check(At<ItemCount>(secondFolderView, 7)(secondFolderView, 2, out secondCount));
+                if (secondCount == expectedCount && secondHost.IncludeObjectCalls >= 3) break;
+                Thread.Sleep(10);
+            } while (DateTime.UtcNow < deadline);
+            Check(At<ItemCount>(secondFolderView, 7)(secondFolderView, 2, out secondCount));
+            if (secondCount != expectedCount)
+                throw new TimeoutException($"Second real Shell view did not enumerate the shared fixture: expected={expectedCount}, actual={secondCount}.");
+
+            secondProjection = CapturePeerShellRows(secondFolderView, folderPidl, secondFolder, [], ref nextSecondId);
+            var firstList = CreatePeerListView(parent, firstProjection.SystemImageList);
+            var secondList = CreatePeerListView(parent, secondProjection.SystemImageList);
+            PopulatePeerList(firstList, firstProjection.Rows);
+            PopulatePeerList(secondList, secondProjection.Rows);
+            SetPeerListMode(firstList, LvsReport);
+            SetPeerListMode(secondList, LvsReport);
+            InsertPeerColumn(firstList, firstProjection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
+            InsertPeerColumn(secondList, secondProjection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
+            for (var index = 0; index < firstProjection.Rows.Count; index++)
+                SetPeerListCell(firstList, index, firstProjection.Rows[index].DetailTitles.Length, "");
+            for (var index = 0; index < secondProjection.Rows.Count; index++)
+                SetPeerListCell(secondList, index, secondProjection.Rows[index].DetailTitles.Length, "");
+
+            var firstIds = ReadPeerListRowIds(firstList);
+            var secondIds = ReadPeerListRowIds(secondList);
+            var firstSelected = firstProjection.Rows.Single(row => row.Name == "size-10");
+            var secondSelected = secondProjection.Rows.Single(row => row.Name == "size-10");
+            SetPeerListItemState(firstList, firstProjection.Rows.IndexOf(firstSelected), 0x0003, 0x0003);
+            SetPeerListItemState(secondList, secondProjection.Rows.IndexOf(secondSelected), 0x0003, 0x0003);
+
+            var scanStarts = 0;
+            var cache = new ConcurrentDictionary<string, Lazy<Task<RecursiveDirectoryScanResult>>>(StringComparer.OrdinalIgnoreCase);
+            Task<RecursiveDirectoryScanResult> Request(string path)
+            {
+                var fullPath = Path.GetFullPath(path);
+                return cache.GetOrAdd(fullPath, key => new Lazy<Task<RecursiveDirectoryScanResult>>(() => Task.Run(() =>
+                {
+                    Interlocked.Increment(ref scanStarts);
+                    return RecursiveDirectoryScanner.Scan(key, CancellationToken.None);
+                }))).Value;
+            }
+
+            var firstPaths = firstProjection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
+                .Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
+            var secondPaths = secondProjection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
+                .Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
+            if (firstPaths.Length != 4 || !firstPaths.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(secondPaths))
+                throw new InvalidOperationException($"The two real Shell views did not expose the same recursive-size directory rows: first=[{string.Join('|', firstProjection.Rows.Select(row => $"{row.Name}:{row.FileSystemPath}"))}], second=[{string.Join('|', secondProjection.Rows.Select(row => $"{row.Name}:{row.FileSystemPath}"))}].");
+            var firstRequests = firstPaths.Select(path => Request(path)).ToArray();
+            var secondRequests = secondPaths.Select(path => Request(path)).ToArray();
+            if (!Task.WaitAll(firstRequests.Concat(secondRequests).ToArray(), TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("The shared recursive scans did not complete within ten seconds.");
+            var firstResults = firstRequests.Select((task, index) => (Path: firstPaths[index], Result: task.GetAwaiter().GetResult()))
+                .ToDictionary(item => item.Path, item => item.Result, StringComparer.OrdinalIgnoreCase);
+            var secondResults = secondRequests.Select((task, index) => (Path: secondPaths[index], Result: task.GetAwaiter().GetResult()))
+                .ToDictionary(item => item.Path, item => item.Result, StringComparer.OrdinalIgnoreCase);
+            if (scanStarts != 4 || firstResults.Values.Aggregate(0UL, (total, result) => total + result.Bytes) != 118UL ||
+                !firstResults.All(pair => secondResults.TryGetValue(pair.Key, out var result) && ReferenceEquals(result, pair.Value)))
+                throw new InvalidOperationException($"Concurrent views did not share four in-flight recursive scans: starts={scanStarts}.");
+
+            var firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            var secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+
+            var changedDirectory = Path.GetFullPath(Path.Combine(fixture, "size-10"));
+            var changedPayload = Path.Combine(changedDirectory, "payload.bin");
+            using var watcher = new ShellChangeReconciliationProbe.ChangeWindow();
+            watcher.Register(folderPidl);
+            var eventIndex = watcher.Events.Count;
+            File.WriteAllBytes(changedPayload, new byte[20]);
+            SHChangeNotify(ShellChangeUpdatedItem, ShellChangePathUnicode, changedPayload, null);
+            SHChangeNotify(ShellChangeUpdatedDirectory, ShellChangePathUnicode, changedDirectory, null);
+            if (!watcher.WaitForAnySince(eventIndex, [ShellChangeUpdatedItem, ShellChangeUpdatedDirectory], TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("The shared Shell change observer did not receive the modified-directory notification.");
+            WaitForPeerShellItem(firstFolderView, changedDirectory, shouldExist: true, expectedCount);
+            WaitForPeerShellItem(secondFolderView, changedDirectory, shouldExist: true, expectedCount);
+            var refreshedFirst = CapturePeerShellRows(firstFolderView, folderPidl, shellFolder, firstProjection.Rows, ref nextFirstId);
+            var refreshedSecond = CapturePeerShellRows(secondFolderView, folderPidl, secondFolder, secondProjection.Rows, ref nextSecondId);
+            if (!refreshedFirst.Rows.Select(row => row.Id).ToHashSet().SetEquals(firstIds) ||
+                !refreshedSecond.Rows.Select(row => row.Id).ToHashSet().SetEquals(secondIds))
+                throw new InvalidOperationException("Shell notifications changed stable row identities in one of the peer views.");
+            // CapturePeerShellRows transfers matching absolute PIDLs and releases old relative PIDLs itself.
+            firstProjection = refreshedFirst;
+            secondProjection = refreshedSecond;
+
+            if (!cache.TryRemove(changedDirectory, out _))
+                throw new InvalidOperationException("The changed directory was absent from the shared recursive-size cache.");
+            var invalidatedFirst = Request(changedDirectory);
+            var invalidatedSecond = Request(changedDirectory);
+            if (!Task.WaitAll([invalidatedFirst, invalidatedSecond], TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("The post-notification recursive scan did not complete within ten seconds.");
+            if (scanStarts != 5 || invalidatedFirst.Result.Bytes != 20 || !ReferenceEquals(invalidatedFirst.Result, invalidatedSecond.Result))
+                throw new InvalidOperationException($"The two views did not share one fresh scan after Shell notification invalidation: scans={scanStarts}; first-bytes={invalidatedFirst.Result.Bytes}; second-bytes={invalidatedSecond.Result.Bytes}; shared-result={ReferenceEquals(invalidatedFirst.Result, invalidatedSecond.Result)}.");
+            firstResults[changedDirectory] = invalidatedFirst.Result;
+            secondResults[changedDirectory] = invalidatedSecond.Result;
+            firstBytesById = ApplyRecursiveValues(firstList, firstProjection.Rows, firstResults);
+            secondBytesById = ApplyRecursiveValues(secondList, secondProjection.Rows, secondResults);
+            SortPeerListByRecursiveSize(firstList, firstBytesById);
+            SortPeerListByRecursiveSize(secondList, secondBytesById);
+            VerifySortedSelection(firstList, firstProjection.Rows, firstBytesById, firstIds, firstSelected.Id);
+            VerifySortedSelection(secondList, secondProjection.Rows, secondBytesById, secondIds, secondSelected.Id);
+            if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
+                throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
+            Console.WriteLine($"ishellview-peer-recursive-size-multiview: real-shell-views=2; shared-root=True; unique-directories={firstPaths.Length}; shared-scan-starts-initial=4; shared-scan-starts-after-invalidation={scanStarts}; updated-bytes=20; peer-row-ids-stable=True; numeric-sort=True; selection-focus-preserved=True; production-scanner=True; product-integration=False; foreground-unchanged=True; parent-visible=False");
+        }
+        finally
+        {
+            FreePeerShellRows(firstProjection.Rows);
+            FreePeerShellRows(secondProjection.Rows);
+            if (secondFolderView != 0) Marshal.Release(secondFolderView);
+            if (secondCreated && secondShellView != 0) _ = At<DestroyViewWindow>(secondShellView, 10)(secondShellView);
+            if (secondShellView != 0) Marshal.Release(secondShellView);
+            if (secondFolder != 0) Marshal.Release(secondFolder);
+            if (secondViewPointer != 0) Marshal.Release(secondViewPointer);
+            secondHost?.Dispose();
+        }
+    }
+
+    private static Dictionary<int, ulong> ApplyRecursiveValues(nint listView, IReadOnlyList<PeerShellRow> rows,
+        IReadOnlyDictionary<string, RecursiveDirectoryScanResult> results)
+    {
+        var bytesById = new Dictionary<int, ulong>();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            if (row.FileSystemPath is null || !results.TryGetValue(Path.GetFullPath(row.FileSystemPath), out var result)) continue;
+            bytesById[row.Id] = result.Bytes;
+            SetPeerListCell(listView, index, row.DetailTitles.Length, result.Bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
+        }
+        return bytesById;
+    }
+
+    private static void VerifySortedSelection(nint listView, IReadOnlyList<PeerShellRow> rows,
+        IReadOnlyDictionary<int, ulong> bytesById, IReadOnlyList<int> oldIds, int selectedId)
+    {
+        var expected = rows.OrderBy(row => bytesById.ContainsKey(row.Id) ? 0 : 1)
+            .ThenBy(row => bytesById.TryGetValue(row.Id, out var bytes) ? bytes : ulong.MaxValue)
+            .ThenBy(row => row.Id).Select(row => row.Id).ToArray();
+        var actual = ReadPeerListRowIds(listView);
+        var selectedIndex = Array.IndexOf(actual, selectedId);
+        if (!actual.SequenceEqual(expected) || selectedIndex < 0 || GetPeerListItemState(listView, selectedIndex, 0x0003) != 0x0003 ||
+            !oldIds.ToHashSet().SetEquals(actual))
+            throw new InvalidOperationException("Peer recursive-size sort did not retain the original row IDs and selected/focused Shell row.");
     }
 
     private static void VerifyRecursiveSizePeerProjection(nint shellView, nint folderView, nint folderPidl, nint shellFolder,

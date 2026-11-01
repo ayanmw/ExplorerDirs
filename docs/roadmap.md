@@ -5824,3 +5824,4 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-02 NativeProbe 默认缓存容量改为 4,096 后，四视图 × 600 目录最小夹具完成 2,404 次唯一扫描，重复/驱逐/队列拒绝均为 0，列值、选择、焦点及 Private Desktop 守卫通过，exit 0。该默认仅用于 NativeProbe，产品配置未变；98,312,192 B Private Bytes 是完整探针进程值，不代表缓存本身。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02最小夹具验证缓存容量阈值)。
 
 2026-11-02 四视图 × 1,000 目录近容量压力复验：4096 容量保留 4,004 个唯一结果快照，驱逐/重复扫描/队列拒绝为 0，四视图列值与选中/焦点保持，Private Desktop 守卫和 watchdog 通过。缓存 payload 估算 1,321,280 B；101,068,800 B Private Bytes 是完整 NativeProbe 进程观测，不能归因于缓存。此负载只留 92 个缓存槽余量，产品缓存仍未调整。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-02最小夹具验证缓存容量阈值)。
+2026-11-01 双真实 IShellView 递归列多视图切片：两份同目录 Shell 视图并发请求共享按路径 Lazy 扫描；初次四个目录只扫描四次，Shell 更新通知后两边保留 PIDL 行 ID 并共享一次 20 B 重扫，数值排序与选择/焦点保持。Private Desktop watchdog 与 Release 构建通过。仅 NativeProbe shared-cache/peer-list 合同，产品仍为 ExplorerBrowser，未验证可见逐行列或产品生命周期。详见 `docs/folder-size-column-investigation.md`。

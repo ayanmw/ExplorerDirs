@@ -1914,3 +1914,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 随后把 NativeProbe 的默认递归缓存容量从 2,048 调到 4,096，并用四个不同根目录、每视图 600 个目录的最小夹具（每目录一个载荷文件）验证默认值。探针扫描 2,404 个唯一目录，重复扫描 0、容量驱逐 0、队列拒绝 0；四个视图各 602/602 列值就绪，通知与枚举增量各 4，选中/焦点保持，Private Desktop 前台/输入/清理守卫通过，退出码 0。结果缓存 payload 估算为 793,280 B；探针进程记录的 Private Bytes 为 98,312,192 B，但这包含整个 NativeProbe/Shell 运行时，不能归因于递归缓存。这里的默认值仅属于 NativeProbe 验证配置，不是产品缓存容量，也不构成将产品容量改为 4,096 的依据。
 
 为核对 4,096 容量附近的四视图工作集，将 NativeProbe view-batch 最小夹具上限扩至每视图 1,000 个目录；四个不同根共 4,004 个唯一目录快照，4096 容量下驱逐、重复扫描及队列拒绝均为 0。每个 Shell view 的 1,002/1,002 列值就绪，通知/枚举增量各 4，峰值 worker 2，选中/焦点保持；Private Desktop 前台、输入及清理守卫通过，watchdog exit 0。payload 估算为 1,321,280 B，进程 Private Bytes 为 101,068,800 B；后者涵盖整个探针进程，不能当作缓存成本或与上一轮之间的缓存内存差。结果说明 4,096 能覆盖这组约 4,000 行的四视图负载，但只剩 92 个快照余量；更多活动标签/视图、真实产品缓存复用和实际内存仍需单独评估。产品及 release 未修改。
+
+### 2026-11-01：双真实 IShellView 共用递归大小扫描与通知更新
+
+在同一隔离文件夹创建两个真实 `IShellView`，各自捕获 Shell PIDL 行并投影到独立 peer `SysListView32`。两视图同时请求相同四个目录（含基础夹具子目录）时，测试用 `ConcurrentDictionary<string, Lazy<Task<...>>>` 按规范化路径合并在途任务；两侧均读到同一结果对象，实际调用产品 `RecursiveDirectoryScanner` 恰好启动四次扫描。两边分别按数值排序后，行 ID、选中和焦点状态保持。
+
+修改 `size-10\payload.bin` 并发送 Shell 更新通知后，两视图均完成行重枚举，PIDL 行身份保持；删除该目录缓存条目后，两视图并发请求只启动一次新扫描，均得到 20 B，并再次排序、保留选中焦点。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0；前台窗口、last-input 与隐藏父窗口守卫通过。调试时发现 `CapturePeerShellRows` 会转移匹配行的绝对 PIDL 并自行释放旧相对 PIDL，调用者不能再整体释放旧快照；修正了探针所有权处理。
+
+这只验证两个真实 Shell view 与探针自建共享缓存/peer list 的扫描和通知合同；产品目前仍使用 ExplorerBrowser，产品 Pane 订阅生命周期、取消/退役、真正逐行列消费、滚动触发和可见交互均未接入或验证。探针未改变产品或 release。
