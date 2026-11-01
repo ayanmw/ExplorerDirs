@@ -261,6 +261,11 @@ internal static class PrivateDesktopShellProbe
         Run("synthetic-recursive-directory-size-sort-wpf-host", () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSortWithWpfHost(),
             TimeSpan.FromSeconds(30), initializeOle: true);
 
+    internal static int RunSyntheticRecursiveDirectorySizeSortWithOnDemandColumnWpfHost() =>
+        Run("synthetic-recursive-directory-size-on-demand-column-wpf-host",
+            () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSortWithOnDemandColumnWpfHost(),
+            TimeSpan.FromSeconds(30), initializeOle: true);
+
     internal static int RunSyntheticRecursiveDirectorySizeSortWithFormattedColumnWpfHost() =>
         Run("synthetic-recursive-directory-size-formatted-column-wpf-host",
             () => SyntheticShellSortProbe.RunRecursiveDirectorySizeSortWithFormattedColumnWpfHost(),

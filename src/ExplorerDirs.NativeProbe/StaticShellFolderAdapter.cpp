@@ -1547,6 +1547,8 @@ namespace
     volatile LONG g_syntheticRecursiveSizeCacheMissesDuringCompareCount = 0;
     volatile LONG g_syntheticDirectoryMetricsCallCount = 0;
     volatile LONG g_syntheticDirectoryMetricsEntryCount = 0;
+    volatile LONG g_syntheticOnDemandSizeScanCount = 0;
+    volatile LONG64 g_syntheticOnDemandSizeScanMicroseconds = 0;
     volatile LONG g_syntheticItemDetailsOfCount = 0;
     volatile LONG g_syntheticSizeDetailsExCount = 0;
     volatile LONG g_syntheticSizeDetailsExFolderCount = 0;
@@ -3063,7 +3065,19 @@ namespace
                 return HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
 
             SyntheticDirectoryMetrics metrics{};
+            LARGE_INTEGER frequency{}, scanStart{}, scanEnd{};
+            QueryPerformanceFrequency(&frequency);
+            QueryPerformanceCounter(&scanStart);
             result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+            QueryPerformanceCounter(&scanEnd);
+            InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+            if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
+            {
+                const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
+                const auto elapsedMicroseconds = static_cast<LONG64>(
+                    static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
+                InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+            }
             if (FAILED(result)) return result;
             SyntheticFileIdentity afterScan{};
             if (!TryGetSyntheticFileIdentity(childPath.c_str(), &afterScan))
@@ -5184,6 +5198,32 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticDirectoryMetricsDuringCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticRecursiveSizeScanOnDemandForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticRecursiveSizeScanOnDemandForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()
+{
+    InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
+    InterlockedExchange(&g_syntheticOnDemandSizeScanCount, 0);
+    InterlockedExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0);
+}
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
+{ return InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsEntryCount()
+{ return InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticOnDemandSizeScanCount()
+{ return InterlockedCompareExchange(&g_syntheticOnDemandSizeScanCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticOnDemandSizeScanMicroseconds()
+{ return InterlockedCompareExchange64(&g_syntheticOnDemandSizeScanMicroseconds, 0, 0); }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
 { return InterlockedCompareExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0, 0); }
