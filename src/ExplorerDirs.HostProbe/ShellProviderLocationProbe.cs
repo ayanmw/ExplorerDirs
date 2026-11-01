@@ -205,22 +205,49 @@ internal static class ShellProviderLocationProbe
             readinessClock.Stop();
             if (largeSortReadiness && pendingValues)
                 throw new InvalidOperationException("The production readiness check still reported pending values after all recursive values were observed.");
-            var batchReadinessCheck = hostType.GetMethod("HasPendingUnresolvedColumnValues", BindingFlags.Instance | BindingFlags.NonPublic,
-                binder: null, [sorts.GetValue(0)!.GetType(), typeof(int), typeof(int), typeof(int).MakeByRefType()], modifiers: null)!;
+            var readinessCapture = appAssembly.GetType("ExplorerDirs.App.ShellFileViewExportCapture", throwOnError: true)!
+                .GetMethod("CreateReadinessSession", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var folderViewPointer = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(host, null)!;
+            object? readinessSession;
+            int capturedReadinessItemCount;
+            try
+            {
+                var captureArguments = new object?[]
+                {
+                    folderViewPointer,
+                    (nint)viewWindowField.GetValue(host)!,
+                    sorts.GetValue(0)!.GetType().GetProperty("Key")!.GetValue(sorts.GetValue(0)),
+                    0
+                };
+                readinessSession = readinessCapture.Invoke(null, captureArguments);
+                capturedReadinessItemCount = (int)captureArguments[3]!;
+            }
+            finally { Marshal.Release(folderViewPointer); }
+            if (readinessSession is not IDisposable disposableReadinessSession || capturedReadinessItemCount != expectedFolderCount)
+                throw new InvalidOperationException("The large-view readiness session did not capture the current Shell row context once.");
+            var sessionReadinessCheck = readinessSession.GetType().GetMethod("HasPendingUnresolvedValues",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
             var batchReadinessClock = Stopwatch.StartNew();
             var maximumBatchMilliseconds = 0d;
             var readinessBatchCount = 0;
             var readinessBatchSize = (int)appAssembly.GetType("ExplorerDirs.App.ShellFileViewExportCapture", throwOnError: true)!
                 .GetField("ReadinessBatchSize", BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
-            for (var startIndex = 0; startIndex < expectedFolderCount; startIndex += readinessBatchSize)
+            try
             {
-                var batchClock = Stopwatch.StartNew();
-                var arguments = new object?[] { sorts.GetValue(0), startIndex, readinessBatchSize, 0 };
-                _ = (bool)batchReadinessCheck.Invoke(host, arguments)!;
-                batchClock.Stop();
-                maximumBatchMilliseconds = Math.Max(maximumBatchMilliseconds, batchClock.Elapsed.TotalMilliseconds);
-                readinessBatchCount++;
+                for (var startIndex = 0; startIndex < expectedFolderCount; startIndex += readinessBatchSize)
+                {
+                    var batchClock = Stopwatch.StartNew();
+                    var arguments = new object?[] { startIndex, readinessBatchSize, 0 };
+                    _ = (bool)sessionReadinessCheck.Invoke(disposableReadinessSession, arguments)!;
+                    if ((int)arguments[2]! != capturedReadinessItemCount)
+                        throw new InvalidOperationException("The Shell item count changed during the captured readiness pass.");
+                    batchClock.Stop();
+                    maximumBatchMilliseconds = Math.Max(maximumBatchMilliseconds, batchClock.Elapsed.TotalMilliseconds);
+                    readinessBatchCount++;
+                }
             }
+            finally { disposableReadinessSession.Dispose(); }
             batchReadinessClock.Stop();
 
             var nativeCellsBeforeNotification = notificationDirectory || notificationItems

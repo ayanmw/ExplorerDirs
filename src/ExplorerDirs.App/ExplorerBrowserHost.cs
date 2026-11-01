@@ -2739,36 +2739,68 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 return;
             }
 
-            while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(12))
+            var view = GetFolderView2Pointer();
+            if (view == IntPtr.Zero)
             {
-                bool batchPending;
-                int shellItemCount;
-                try
+                timer.Start();
+                return;
+            }
+            ShellFileViewExportCapture.ReadinessSession? readinessSession = null;
+            try
+            {
+                if (!IsCurrent()) return;
+                readinessSession = ShellFileViewExportCapture.CreateReadinessSession(
+                    view, _viewWindow, sort.Key, out var capturedItemCount);
+                if (capturedItemCount < 0)
                 {
-                    batchPending = HasPendingUnresolvedColumnValues(sort, readinessRow,
-                        ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
-                }
-                catch (Exception exception) when (exception is COMException or InvalidDataException)
-                {
-                    batchPending = true;
-                    shellItemCount = -1;
-                }
-
-                if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount)
-                {
-                    // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
-                    readinessItemCount = null;
-                    readinessRow = 0;
-                    readinessFoundPendingValue = false;
                     timer.Start();
                     return;
                 }
-                readinessItemCount ??= shellItemCount;
-                readinessFoundPendingValue |= batchPending;
-                readinessRow = Math.Min(readinessItemCount.Value,
-                    readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
-                if (readinessRow >= readinessItemCount.Value) break;
-                await Dispatcher.Yield(DispatcherPriority.Background);
+                if (readinessSession is null) return;
+
+                while (IsCurrent() && readinessWait.Elapsed < TimeSpan.FromSeconds(12))
+                {
+                    bool batchPending;
+                    int shellItemCount;
+                    try
+                    {
+                        batchPending = readinessSession.HasPendingUnresolvedValues(readinessRow,
+                            ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
+                    }
+                    catch (Exception exception) when (exception is COMException or InvalidDataException)
+                    {
+                        batchPending = true;
+                        shellItemCount = -1;
+                    }
+
+                    if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount ||
+                        shellItemCount != capturedItemCount)
+                    {
+                        // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
+                        readinessItemCount = null;
+                        readinessRow = 0;
+                        readinessFoundPendingValue = false;
+                        timer.Start();
+                        return;
+                    }
+                    readinessItemCount ??= shellItemCount;
+                    readinessFoundPendingValue |= batchPending;
+                    readinessRow = Math.Min(readinessItemCount.Value,
+                        readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
+                    if (readinessRow >= readinessItemCount.Value) break;
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                }
+            }
+            catch (Exception exception) when (exception is COMException or InvalidDataException)
+            {
+                // A failed Shell context read is retried on the next background turn.
+                timer.Start();
+                return;
+            }
+            finally
+            {
+                readinessSession?.Dispose();
+                Marshal.Release(view);
             }
 
             if (!IsCurrent() || readinessWait.Elapsed >= TimeSpan.FromSeconds(12)) return;

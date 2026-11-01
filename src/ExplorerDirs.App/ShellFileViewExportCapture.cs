@@ -77,30 +77,64 @@ internal static class ShellFileViewExportCapture
 
     internal static bool HasPendingUnresolvedColumnValues(nint folderView, nint viewWindow, PropertyKeyState key)
     {
-        if (!TryCaptureReadinessContext(folderView, viewWindow, key, out var folder, out var ordinal, out var count))
-            return count < 0;
-        try
-        {
-            for (var start = 0; start < count; start += ReadinessBatchSize)
-                if (HasPendingUnresolvedColumnValues(folderView, folder, ordinal, start, Math.Min(ReadinessBatchSize, count - start)))
-                    return true;
-            return false;
-        }
-        finally { Marshal.Release(folder); }
+        using var session = CreateReadinessSession(folderView, viewWindow, key, out var itemCount);
+        if (session is null) return itemCount < 0;
+        for (var start = 0; start < itemCount; start += ReadinessBatchSize)
+            if (session.HasPendingUnresolvedValues(start, ReadinessBatchSize, out var currentItemCount) ||
+                currentItemCount != itemCount)
+                return true;
+        return false;
     }
 
     internal static bool HasPendingUnresolvedColumnValues(nint folderView, nint viewWindow, PropertyKeyState key,
         int startIndex, int maximumRows, out int itemCount)
     {
         itemCount = 0;
-        if (!TryCaptureReadinessContext(folderView, viewWindow, key, out var folder, out var ordinal, out itemCount))
+        using var session = CreateReadinessSession(folderView, viewWindow, key, out itemCount);
+        if (session is null)
             return itemCount < 0;
-        try
+        return session.HasPendingUnresolvedValues(startIndex, maximumRows, out itemCount);
+    }
+
+    internal static ReadinessSession? CreateReadinessSession(nint folderView, nint viewWindow,
+        PropertyKeyState key, out int itemCount)
+    {
+        if (!TryCaptureReadinessContext(folderView, viewWindow, key, out var folder, out var ordinal, out itemCount))
+            return null;
+        return new ReadinessSession(folderView, folder, ordinal);
+    }
+
+    internal sealed class ReadinessSession : IDisposable
+    {
+        private nint _folderView;
+        private nint _folder;
+        private readonly uint _detailsOrdinal;
+
+        internal ReadinessSession(nint folderView, nint folder, uint detailsOrdinal)
         {
-            var endIndex = Math.Min(itemCount, startIndex + maximumRows);
-            return HasPendingUnresolvedColumnValues(folderView, folder, ordinal, startIndex, endIndex - startIndex);
+            _folderView = folderView;
+            Marshal.AddRef(_folderView);
+            _folder = folder;
+            _detailsOrdinal = detailsOrdinal;
         }
-        finally { Marshal.Release(folder); }
+
+        internal bool HasPendingUnresolvedValues(int startIndex, int maximumRows, out int itemCount)
+        {
+            var folderView = _folderView;
+            var folder = _folder;
+            ObjectDisposedException.ThrowIf(folderView == 0 || folder == 0, this);
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, AllViewItems, out itemCount));
+            var endIndex = Math.Min(itemCount, startIndex + maximumRows);
+            return HasPendingUnresolvedColumnValues(folderView, folder, _detailsOrdinal, startIndex, endIndex - startIndex);
+        }
+
+        public void Dispose()
+        {
+            var folder = Interlocked.Exchange(ref _folder, 0);
+            if (folder != 0) Marshal.Release(folder);
+            var folderView = Interlocked.Exchange(ref _folderView, 0);
+            if (folderView != 0) Marshal.Release(folderView);
+        }
     }
 
     private static bool TryCaptureReadinessContext(nint folderView, nint viewWindow, PropertyKeyState key,
