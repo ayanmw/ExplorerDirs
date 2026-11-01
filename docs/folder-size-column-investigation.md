@@ -1530,3 +1530,11 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 NativeProbe 新增 `--shell-view-real-pidl-navigation-smoke`，使用临时真实目录经 `SHParseDisplayName` 生成 Shell PIDL，在不创建 `IShellView` 窗口的条件下验证绝对目录导航、相对子项合并、父级解析、Back/Forward 历史身份，以及文件 PIDL 被导航回调拒绝时历史保持不变。另经 `StreamViewHost` 的 COM `IShellBrowser::BrowseObject` vtable 回调验证绝对和相对真实目录 PIDL 的路由。
 
 命令退出码 0，7 项断言通过，输出 `shell-view-created=False`。这将导航历史验证从纯合成 PIDL 推进到真实 Windows filesystem PIDL 和 COM 回调边界，但没有创建或导航真实 `IShellView`/ExplorerBrowser，也未验证 Shell 菜单、父级 UI、通知、拖放或列回填。ExplorerBrowser 包装目录的最小宿主切片仍是下一道迁移门槛；产品 ExplorerBrowser 与发布包均未更改。
+
+### 2026-11-01：递归大小扫描期间 Shell 通知的失效竞态
+
+复核递归快照缓存后发现：`SFVM_FSNOTIFY` 可在目录扫描进行时使路径及祖先快照失效，但旧 worker 完成后仍可能把通知前的递归大小重新写回缓存。新增无窗口合同先在旧逻辑上复现失败，再验证通知会标记匹配的 in-flight 路径；旧扫描提交返回 `S_FALSE` 且不进入缓存，释放 reservation 后新扫描可以成功写入新值。`RemoveSubtree` 也会失效对应子树中正在运行的扫描。
+
+异步批次现在只把 `S_OK` 作为已发布结果：被通知丢弃的 `S_FALSE` 不会计为成功，也不会触发多余的 view 更新。原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建、`--static-shell-column-folder-smoke` 与 `--synthetic-async-on-demand-recursive-size-column-smoke` 均通过；静态输出含 `recursive-size-inflight-invalidation-passed`，两命令均为无 Shell view 窗口合同。未启动 GUI。
+
+边界：这是隔离 NativeProbe 的缓存与异步提交正确性修复，不证明真实 `IShellView` 通知时序或 ExplorerBrowser 产品接线。递归大小列仍是 P2 原型；ExplorerBrowser 包装真实目录的宿主切片仍是接入门槛。

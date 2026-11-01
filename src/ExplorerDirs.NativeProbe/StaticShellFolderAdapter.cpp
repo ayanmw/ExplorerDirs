@@ -1410,6 +1410,10 @@ namespace
             try
             {
                 std::lock_guard<std::mutex> lock(_mutex);
+                const auto inProgress = _scansInProgress.find(parsingName);
+                // An item-change notification can arrive after a worker starts scanning;
+                // never let that pre-notification result repopulate the invalidated cache.
+                if (inProgress != _scansInProgress.end() && inProgress->second) return S_FALSE;
                 _sizes[parsingName] = { identity, bytes, NextAccessSequence() };
                 TrimToCapacity();
             }
@@ -1467,6 +1471,18 @@ namespace
                 }
                 else ++entry;
             }
+            for (auto& entry : _scansInProgress)
+            {
+                const auto& candidate = entry.first;
+                const auto rootLength = static_cast<int>(root.size());
+                const bool prefixMatches = candidate.size() >= root.size() &&
+                    CompareStringOrdinal(candidate.data(), rootLength, root.data(), rootLength, TRUE) == CSTR_EQUAL;
+                const bool rootHasSeparator = !root.empty() && (root.back() == L'\\' || root.back() == L'/');
+                const bool samePath = prefixMatches && candidate.size() == root.size();
+                const bool descendant = prefixMatches && candidate.size() > root.size() &&
+                    (rootHasSeparator || candidate[root.size()] == L'\\' || candidate[root.size()] == L'/');
+                if (samePath || descendant) entry.second = true;
+            }
             return removed;
         }
         size_t InvalidatePath(PCWSTR changedParsingName, bool includeSubtree)
@@ -1476,10 +1492,8 @@ namespace
             try { changed.assign(changedParsingName); }
             catch (const std::bad_alloc&) { return 0; }
             std::lock_guard<std::mutex> lock(_mutex);
-            size_t removed = 0;
-            for (auto entry = _sizes.begin(); entry != _sizes.end();)
+            const auto matchesChangedPath = [&](const std::wstring& candidate)
             {
-                const auto& candidate = entry->first;
                 const auto prefixMatches = [](const std::wstring& left, const std::wstring& right, size_t length)
                 {
                     return CompareStringOrdinal(left.data(), static_cast<int>(length),
@@ -1495,13 +1509,20 @@ namespace
                     prefixMatches(candidate, changed, changed.size()) &&
                     (changed.back() == L'\\' || changed.back() == L'/' ||
                         candidate[changed.size()] == L'\\' || candidate[changed.size()] == L'/');
-                if (samePath || candidateIsAncestor || candidateIsDescendant)
+                return samePath || candidateIsAncestor || candidateIsDescendant;
+            };
+            size_t removed = 0;
+            for (auto entry = _sizes.begin(); entry != _sizes.end();)
+            {
+                if (matchesChangedPath(entry->first))
                 {
                     entry = _sizes.erase(entry);
                     ++removed;
                 }
                 else ++entry;
             }
+            for (auto& entry : _scansInProgress)
+                if (matchesChangedPath(entry.first)) entry.second = true;
             return removed;
         }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
@@ -1543,7 +1564,7 @@ namespace
                 if (_scansInProgress.find(parsingName) != _scansInProgress.end())
                     return ScanReservation::InProgress;
                 // This store is shared across folder wrappers, so the reservation coalesces same-path scans across views.
-                _scansInProgress.insert(parsingName);
+                _scansInProgress.emplace(parsingName, false);
                 return ScanReservation::Acquired;
             }
             catch (const std::bad_alloc&) { return ScanReservation::Failed; }
@@ -1584,7 +1605,7 @@ namespace
         const size_t _maximumSnapshots;
         mutable std::mutex _mutex;
         mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
-        std::set<std::wstring, ShellParsingNameLess> _scansInProgress;
+        std::map<std::wstring, bool, ShellParsingNameLess> _scansInProgress;
         mutable ULONGLONG _accessSequence = 0;
     };
 
@@ -3469,7 +3490,9 @@ namespace
                     itemResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
                 if (SUCCEEDED(itemResult)) itemResult = self->_recursiveSizeStore->Set(entry.key.c_str(), after, metrics.bytes);
                 if (scanReserved) self->_recursiveSizeStore->ReleaseScan(entry.key);
-                if (SUCCEEDED(itemResult))
+                // S_FALSE means a notification invalidated this in-flight scan before commit;
+                // do not advertise it as a fresh value or trigger a redundant view update.
+                if (itemResult == S_OK)
                 {
                     InterlockedExchange(&completion->anySucceeded, 1);
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
@@ -4961,6 +4984,59 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         }
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-ancestor-invalidation-passed");
         TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-invalidation-passed");
+
+        SyntheticRecursiveSizeSnapshotStore inFlightInvalidationStore;
+        ULONGLONG inFlightCachedBytes = 0;
+        const auto reservation = inFlightInvalidationStore.TryReserveScan(
+            nestedPath, child->identity, &inFlightCachedBytes);
+        std::wstring changedDescendant;
+        try { changedDescendant = nestedPath + L"\\new-file.txt"; }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        const auto inFlightInvalidation = inFlightInvalidationStore.InvalidatePath(
+            changedDescendant.c_str(), false);
+        const auto staleScanCommit = inFlightInvalidationStore.Set(
+            nestedPath.c_str(), child->identity, 99);
+        ULONGLONG unexpectedStaleBytes = 0;
+        if (reservation != SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired ||
+            inFlightInvalidation != 0 || staleScanCommit != S_FALSE ||
+            inFlightInvalidationStore.TryGet(nestedPath, child->identity, &unexpectedStaleBytes))
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-inflight-invalidation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        inFlightInvalidationStore.ReleaseScan(nestedPath);
+
+        SyntheticRecursiveSizeSnapshotStore subtreeInvalidationStore;
+        if (subtreeInvalidationStore.TryReserveScan(nestedPath, child->identity, &inFlightCachedBytes) !=
+                SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-inflight-reservation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        subtreeInvalidationStore.RemoveSubtree(nestedPath.c_str());
+        if (subtreeInvalidationStore.Set(nestedPath.c_str(), child->identity, 31) != S_FALSE)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-inflight-invalidation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        subtreeInvalidationStore.ReleaseScan(nestedPath);
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-inflight-invalidation-passed");
+
+        if (inFlightInvalidationStore.TryReserveScan(nestedPath, child->identity, &inFlightCachedBytes) !=
+                SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired ||
+            FAILED(inFlightInvalidationStore.Set(nestedPath.c_str(), child->identity, 23)) ||
+            !inFlightInvalidationStore.TryGet(nestedPath, child->identity, &inFlightCachedBytes) ||
+            inFlightCachedBytes != 23)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-inflight-retry-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        inFlightInvalidationStore.ReleaseScan(nestedPath);
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-inflight-invalidation-passed");
 
         SyntheticRecursiveSizeSnapshotStore boundedStore;
         std::wstring oldestPath;
