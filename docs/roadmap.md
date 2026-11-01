@@ -5562,3 +5562,7 @@ SettingsSmoke 新增父/子进程合同：父进程写入含递归大小 prototy
 ### 2026-11-01：递归大小自定义列键导出为 Q-Dir 原生视图流
 
 `QdrExportSmoke` 以非标准 GUID 作为 prototype Recursive Size 的显示列、排序与分组键，验证 `CODEMODE1` `ColsAndSort` 的本项目导出/导入以及 Explorer Dirs 扩展往返；完整 SettingsSmoke 通过，0 警告/错误。该结果证明本项目的格式链路保留该键，不证明第三方 Q-Dir 能应用未知列键；实际 Q-Dir 互操作仍待验收，详见[Q-Dir 导入与导出调查](qdr-import.md#2026-11-01-递归大小自定义列的-q-dir-视图流往返)。
+
+### 2026-11-01：完整 SettingsSmoke 当前状态复核
+
+本日运行 `dotnet run --project src/ExplorerDirs.SettingsSmoke -c Release`，完整套件退出码 0，输出 `Settings smoke: PASS`。2026-10-31 多行句柄扫描记录中提到的 Soft-Refresh 文案断言失败，已由 `001b2c1 Align soft refresh smoke with menu copy` 修正；该失败只保留为当日历史，不再是当前主线验证阻塞。该套件通过不等同于可见 UI 或 Shell 互操作验收。
