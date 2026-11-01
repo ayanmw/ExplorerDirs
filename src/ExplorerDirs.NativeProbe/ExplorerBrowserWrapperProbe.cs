@@ -404,7 +404,7 @@ internal static class ExplorerBrowserWrapperProbe
             if (createdFolder.After != createdFolder.Before + 1)
                 throw new InvalidOperationException("The native New Folder command created the backing directory but the active Shell view did not add exactly one row.");
             VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
-                fixture, ref initialized);
+                rootPidl, fixture, ref initialized);
             return 0;
         }
         finally
@@ -442,7 +442,7 @@ internal static class ExplorerBrowserWrapperProbe
     }
 
     private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, nint shellView,
-        nint viewFolder, nint nativeLibrary, string fixture, ref uint initialized)
+        nint viewFolder, nint nativeLibrary, nint rootPidl, string fixture, ref uint initialized)
     {
         var setOnDemand = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
             NativeLibrary.GetExport(nativeLibrary, "SetSyntheticRecursiveSizeScanOnDemandForProbe"));
@@ -466,15 +466,36 @@ internal static class ExplorerBrowserWrapperProbe
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticOnDemandSizeScanCount"));
         var getSnapshotCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
             NativeLibrary.GetExport(nativeLibrary, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"));
+        var hasSnapshot = Marshal.GetDelegateForFunctionPointer<HasChildScanReservation>(
+            NativeLibrary.GetExport(nativeLibrary, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
         var finishedBefore = getFinished();
         var completedBefore = getCompleted();
         var scansBefore = getScanCount();
         var snapshotsBefore = getSnapshotCount();
+        nint peerBrowser = 0, peerParent = 0, peerShellView = 0, peerFolderView = 0, peerViewFolder = 0, peerPersist = 0;
+        uint peerInitialized = 0;
         var destroyedBrowser = false;
-        var scanScheduled = false;
+        var scheduledScans = 0;
 
         try
         {
+            // Open both views before creating the target so startup enumeration cannot warm its snapshot.
+            var browserClass = BrowserClassId;
+            var browserId = BrowserInterfaceId;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref browserClass, 0, 1, ref browserId, out peerBrowser));
+            peerParent = CreateWindowExW(0, "STATIC", "ExplorerDirs second registered namespace browser probe",
+                0x90000000, 40, 40, 820, 620, 0, 0, 0, 0); // Visible only on the isolated probe Desktop.
+            if (peerParent == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            var peerBounds = new ProbeRect { Right = 820, Bottom = 620 };
+            var peerSettings = new ProbeFolderSettings { Mode = 4 };
+            Marshal.ThrowExceptionForHR(At<Initialize>(peerBrowser, 3)(peerBrowser, peerParent, ref peerBounds, ref peerSettings));
+            peerInitialized = 1;
+            Marshal.ThrowExceptionForHR(At<BrowseToIdList>(peerBrowser, 13)(peerBrowser, rootPidl, 0));
+            Application.DoEvents();
+            Thread.Sleep(250);
+            Application.DoEvents();
+            ReadActiveFolder(peerBrowser, ref peerShellView, ref peerFolderView, ref peerViewFolder, ref peerPersist);
+
             const string scanChildName = "lifecycle-scan";
             var scanChildPath = Path.Combine(fixture, scanChildName);
             Directory.CreateDirectory(Path.Combine(scanChildPath, "nested"));
@@ -485,7 +506,6 @@ internal static class ExplorerBrowserWrapperProbe
             var pendingValue = ReadParsedItemDetailsByName(viewFolder, scanChildName, 1);
             if (pendingValue.Length != 0)
                 throw new InvalidOperationException($"The recursive-size value should be pending behind the scan gate, got '{pendingValue}'.");
-
             var deadline = Environment.TickCount64 + 5000;
             while (hasReservation(shellView, scanChildName) == 0 && Environment.TickCount64 < deadline)
             {
@@ -494,7 +514,20 @@ internal static class ExplorerBrowserWrapperProbe
             }
             if (hasReservation(shellView, scanChildName) == 0)
                 throw new TimeoutException("The registered Shell provider did not queue the requested recursive-size scan.");
-            scanScheduled = true;
+            scheduledScans++;
+
+            var peerPendingValue = ReadParsedItemDetailsByName(peerViewFolder, scanChildName, 1);
+            if (peerPendingValue.Length != 0)
+                throw new InvalidOperationException($"The second view should also be waiting for the uncached recursive-size value, got '{peerPendingValue}'.");
+            deadline = Environment.TickCount64 + 5000;
+            while (hasReservation(peerShellView, scanChildName) == 0 && Environment.TickCount64 < deadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (hasReservation(peerShellView, scanChildName) == 0)
+                throw new TimeoutException("The second Shell provider did not queue its same-directory recursive-size request.");
+            scheduledScans++;
 
             PrivateDesktopShellProbe.ReportStage("namespace-probe: destroy-browser-with-recursive-scan-pending");
             Marshal.ThrowExceptionForHR(At<Destroy>(browser, 4)(browser));
@@ -503,18 +536,21 @@ internal static class ExplorerBrowserWrapperProbe
             Marshal.ThrowExceptionForHR(retireView(shellView));
             releaseGate();
             var finishDeadline = Environment.TickCount64 + 5000;
-            while (getFinished() == finishedBefore && Environment.TickCount64 < finishDeadline)
+            while (getFinished() < finishedBefore + scheduledScans && Environment.TickCount64 < finishDeadline)
             {
                 Application.DoEvents();
                 Thread.Sleep(10);
             }
-            var finished = getFinished() > finishedBefore;
-            var completedAfterRetire = getCompleted() > completedBefore;
+            var finishedCount = getFinished() - finishedBefore;
+            var completedCount = getCompleted() - completedBefore;
             var scansAfterRetire = getScanCount();
             var snapshotsAfterRetire = getSnapshotCount();
-            if (!finished || completedAfterRetire || scansAfterRetire != scansBefore || snapshotsAfterRetire != snapshotsBefore)
-                throw new InvalidOperationException($"Retiring the registered Shell view did not cancel its pending provider scan: finished={finished}; completed-after-retire={completedAfterRetire}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}.");
-            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: browser-destroyed-with-provider-worker-pending=True; view-retirement-canceled-worker={finished && !completedAfterRetire}; scan-count-unchanged={scansAfterRetire == scansBefore}; cache-count-unchanged={snapshotsAfterRetire == snapshotsBefore}; fixture-path=True");
+            var peerValueAfterRetirement = ReadParsedItemDetailsByName(peerViewFolder, scanChildName, 1);
+            var survivingViewHasSnapshot = hasSnapshot(peerShellView, scanChildName) != 0;
+            if (finishedCount != 2 || completedCount != 1 || scansAfterRetire != scansBefore + 1 ||
+                snapshotsAfterRetire < snapshotsBefore + 1 || !survivingViewHasSnapshot || peerValueAfterRetirement != "3")
+                throw new InvalidOperationException($"Retiring one of two same-root views did not isolate cancellation: finished={finishedCount}/2; completed={completedCount}/1; scans={scansBefore}->{scansAfterRetire}; snapshots={snapshotsBefore}->{snapshotsAfterRetire}; surviving-view-value='{peerValueAfterRetirement}'.");
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: same-root-provider-requests=2; first-browser-destroyed=True; retired-view-request-canceled=True; surviving-view-request-completed=True; finished={finishedCount}; completed={completedCount}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}; surviving-view-has-target-snapshot={survivingViewHasSnapshot}; surviving-view-value={peerValueAfterRetirement}");
         }
         finally
         {
@@ -525,17 +561,28 @@ internal static class ExplorerBrowserWrapperProbe
                 destroyedBrowser = true;
             }
             if (destroyedBrowser) _ = retireView(shellView);
+            if (peerInitialized != 0 && peerBrowser != 0)
+            {
+                _ = At<Destroy>(peerBrowser, 4)(peerBrowser);
+                peerInitialized = 0;
+            }
+            if (peerShellView != 0) _ = retireView(peerShellView);
             releaseGate();
             var cleanupDeadline = Environment.TickCount64 + 10000;
-            while (scanScheduled && getFinished() == finishedBefore && Environment.TickCount64 < cleanupDeadline)
+            while (getFinished() < finishedBefore + scheduledScans && Environment.TickCount64 < cleanupDeadline)
             {
                 Application.DoEvents();
                 Thread.Sleep(10);
             }
-            if (!scanScheduled || getFinished() > finishedBefore) clearGate();
+            if (getFinished() >= finishedBefore + scheduledScans) clearGate();
             else Console.WriteLine("explorerbrowser-registered-namespace-scan-lifecycle: scan-gate-retained-until-process-exit=True");
             _ = setOnDemand(0);
             _ = setAsyncScan(0);
+            if (peerPersist != 0) Marshal.Release(peerPersist);
+            if (peerViewFolder != 0) Marshal.Release(peerViewFolder);
+            if (peerFolderView != 0) Marshal.Release(peerFolderView);
+            if (peerShellView != 0) Marshal.Release(peerShellView);
+            if (peerBrowser != 0) Marshal.Release(peerBrowser);
         }
     }
 
