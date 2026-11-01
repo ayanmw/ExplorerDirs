@@ -1172,3 +1172,7 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 同日追加只读 `GetDC`/`GetPixel` 采样，尝试在禁用绘制前、刷新稳定后以及恢复并强制重绘后三个阶段读取 ListView 客户区像素。两次 Private Desktop 运行中采样均混有 `GetPixel` 的无效哨兵 `0xFFFFFFFF`；复验一轮分别为 253 个样点中的 92、253、92 个有效值。因为同一 HWND 的可读样点数随阶段变化，且宿主不在当前交互桌面，这组数据不能比较帧内容，也不能证明绘制暂停或闪烁消失。探针现在将有效/无效样点数分开记录，遇到无效值时不报告像素相等结论。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入与隔离清理守卫通过；日志：`20261101-070303-2da107d2.stdout.log`。要验证用户实际看到的过渡帧，仍需后续集中可见 UI 验收；本实验没有触碰产品刷新代码。
 
 随后在相同 synthetic WPF Private Desktop view 的独立进程中对子类观测 `SysListView32` 的 `WM_PAINT`。未发送 `WM_SETREDRAW` 的完整刷新收到 2 次；发送 `WM_SETREDRAW(FALSE)` 后刷新仍收到 2 次，恢复绘制并强制 `RedrawWindow` 时另收到 1 次。两次 watchdog 均 exit 0，前台、输入和隔离清理守卫通过；日志分别为 `20261101-070535-51cd2645.stdout.log`、`20261101-070542-7e52a22a.stdout.log`。这仅证明该两轮中窗口过程仍收到相同数量级的绘制消息，不证明消息对应的客户区内容已画出或用户能看到它；样本各一轮，像素又无法在非活动桌面可靠读取。因此没有足够证据将 `WM_SETREDRAW`/强制重绘用于产品 F5 或查看方式切换。
+
+### 2026-11-01：无窗口递归大小合同扩展到 4 GiB 以上
+
+将自有行模型/原生 provider 的无窗口投影 fixture 改为稀疏文件：同级目录初始递归大小为 `5,368,709,130` 与 `5,368,709,129` 字节，更新后变为 `5,368,709,127` 与 `5,368,709,129` 字节。生产 `RecursiveDirectoryScanner` 与句柄绑定扫描器逐项汇总一致；native `IShellFolder2` provider 通过 `VT_UI8`、十进制文本读取、数值比较和扫描值更新后的排序翻转合同。根文件也使用稀疏长度，令排序断言仍覆盖更新后跨过同一参考值的情况，而不实际分配数 GiB 磁盘空间。`--static-shell-column-folder-smoke` Release 运行通过并明确输出 `window-created=False`；SettingsSmoke 增加大于 4 GiB 的递归大小显示合同，全量通过。这里证明的是当前隔离数据/adapter 64 位值链路，不是 IShellView/ExplorerBrowser 可见列、实际 UI 列排序或产品接线。

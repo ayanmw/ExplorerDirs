@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using ExplorerDirs.App;
 
 namespace ExplorerDirs.NativeProbe;
@@ -2341,10 +2342,10 @@ internal static class StaticShellFolderAdapterProbe
             Directory.CreateDirectory(Path.Combine(projectionFixture, "child", "nested-folder"));
             Directory.CreateDirectory(Path.Combine(projectionFixture, "other-child"));
             var nestedFile = Path.Combine(projectionFixture, "child", "nested-folder", "deep.txt");
-            File.WriteAllBytes(Path.Combine(projectionFixture, "child", "direct.txt"), "direct"u8.ToArray());
+            WriteSparseFile(Path.Combine(projectionFixture, "child", "direct.txt"), (5UL << 30) + 6);
             File.WriteAllBytes(nestedFile, "deep"u8.ToArray());
-            File.WriteAllBytes(Path.Combine(projectionFixture, "other-child", "other.txt"), "other-value!"u8.ToArray());
-            File.WriteAllBytes(Path.Combine(projectionFixture, "root.txt"), "12345678"u8.ToArray());
+            WriteSparseFile(Path.Combine(projectionFixture, "other-child", "other.txt"), (5UL << 30) + 9);
+            WriteSparseFile(Path.Combine(projectionFixture, "root.txt"), (5UL << 30) + 8);
             var projectionChildPath = Path.Combine(projectionFixture, "child");
             var projectionOtherChildPath = Path.Combine(projectionFixture, "other-child");
             var projectionScan = HandleBoundRecursiveDirectoryScanner.Scan(
@@ -2356,8 +2357,8 @@ internal static class StaticShellFolderAdapterProbe
                 !productionProjectionScan.TryGetValue(Path.GetFullPath(projectionChildPath), out var snapshot) ||
                 !productionProjectionScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var otherSnapshot) ||
                 handleBoundSnapshot.Summary != snapshot || handleBoundOtherSnapshot.Summary != otherSnapshot ||
-                snapshot.Bytes != 10 || otherSnapshot.Bytes != 12)
-                throw new InvalidOperationException("The production and handle-bound scans did not agree on the 10/12 byte projection.");
+                snapshot.Bytes != (5UL << 30) + 10 || otherSnapshot.Bytes != (5UL << 30) + 9)
+                throw new InvalidOperationException("The production and handle-bound scans did not preserve sparse-file recursive totals above 4 GiB.");
             var childParsingName = GetAbsoluteParsingName(projectionChildPath);
             var otherChildParsingName = GetAbsoluteParsingName(projectionOtherChildPath);
             var managedRows = new[]
@@ -2386,8 +2387,8 @@ internal static class StaticShellFolderAdapterProbe
                 !productionUpdatedScan.TryGetValue(Path.GetFullPath(projectionOtherChildPath), out var updatedOtherSnapshot) ||
                 updatedHandleBoundSnapshot.Summary != updatedSnapshot ||
                 updatedHandleBoundOtherSnapshot.Summary != updatedOtherSnapshot ||
-                updatedSnapshot.Bytes != 7 || updatedOtherSnapshot.Bytes != 12)
-                throw new InvalidOperationException("The production and handle-bound rescans did not agree on the 7/12 byte projection.");
+                updatedSnapshot.Bytes != (5UL << 30) + 7 || updatedOtherSnapshot.Bytes != (5UL << 30) + 9)
+                throw new InvalidOperationException("The production and handle-bound rescans did not preserve sparse-file totals above 4 GiB.");
             var updatedProjectedSnapshots = ShellListViewRowModel.ProjectRecursiveSizeSnapshots(
                 ShellListViewRowModel.ApplyRecursiveScanResults(managedRows, updatedScan));
             var updatedChildSnapshot = updatedProjectedSnapshots.Single(value => value.ParsingName == childParsingName);
@@ -2404,7 +2405,7 @@ internal static class StaticShellFolderAdapterProbe
                     checked((long)childSnapshot.Summary.Bytes), checked((long)projectedOtherSnapshot.Summary.Bytes),
                     checked((long)updatedChildSnapshot.Summary.Bytes)));
             Console.WriteLine($"recursive-folder-size-projection: scanner-bytes={snapshot.Bytes}/{otherSnapshot.Bytes}; " +
-                $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; disk-child-bytes=7; " +
+                $"rescanned-bytes={updatedSnapshot.Bytes}/{updatedOtherSnapshot.Bytes}; sparse-file-64-bit=True; " +
                 "native-column=text/VT_UI8/numeric-sort=passed; absolute-parsing-name-cache=independent; " +
                 "same-pidl-update=rescan-value/text/property/sort-passed; re-enumerated-pidl-retained=passed; " +
                 "cross-dllgetclassobject-shared-cache=passed; same-path-folder-replacement=stale-snapshot-rejected; window-created=False");
@@ -2415,6 +2416,20 @@ internal static class StaticShellFolderAdapterProbe
             Directory.Delete(shellFixture, recursive: true);
         }
     }
+
+    private static void WriteSparseFile(string path, ulong length)
+    {
+        const uint fsctlSetSparse = 0x000900C4;
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read);
+        if (!DeviceIoControl(stream.SafeFileHandle, fsctlSetSparse, 0, 0, 0, 0, out _, 0))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
+                "Could not create a sparse file for the 64-bit recursive-size contract.");
+        stream.SetLength(checked((long)length));
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode,
+        nint input, uint inputSize, nint output, uint outputSize, out uint bytesReturned, nint overlapped);
 
     private static void VerifyWrappedShellItemDataObject(nint dataObject, IReadOnlyList<string>? expectedPaths = null)
     {

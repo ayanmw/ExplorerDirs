@@ -27,6 +27,12 @@ internal static class ShellListViewRowPresentationSmoke
         Check(ShellListViewRowPresentation.FormatRecursiveSize(row, compact) == "1.5 MB" &&
               ShellListViewRowPresentation.FormatRecursiveSize(row, exactBytes) == "1,572,864 B",
             "recursive size rows honor the selected unit, precision, and thousands separator");
+        var largeRecursiveBytes = (5UL << 30) + 10;
+        Check(ShellListViewRowPresentation.FormatRecursiveSize(
+                  row with { RecursiveBytes = largeRecursiveBytes },
+                  new SizeDisplayOptions(SizeDisplayUnit.Bytes, 0, UseThousandsSeparator: false)) ==
+              "5368709130 B",
+            "recursive size presentation preserves values above 4 GiB without 32-bit truncation");
         Check(ShellListViewRowPresentation.FormatRecursiveSize(row with { RecursiveBytes = null }, compact) == string.Empty,
             "unscanned recursive size rows stay blank instead of displaying a fabricated zero");
         Check(ShellListViewRowPresentation.FormatRecursiveContents(row) == "files: 3, folders: 2" &&

@@ -93,6 +93,8 @@
 
 ## 当前执行入口（2026-10-31 后台复核）
 
+2026-11-01 递归大小原型 64 位无窗口合同：NativeProbe 使用稀疏文件驱动生产 `RecursiveDirectoryScanner` 与句柄绑定扫描器，生成 5 GiB 级同级目录值；两者重扫前后完全一致。Native `IShellFolder2` 列以 `VT_UI8` 和十进制文本读回，并在扫描值更新后完成数值排序翻转；`--static-shell-column-folder-smoke` 通过且输出 `window-created=False`。SettingsSmoke 覆盖大于 4 GiB 的行格式化，全量退出码 0。此批仅加固隔离原型数据宽度，不接入 ExplorerBrowser、未做可见列或产品迁移验收。详情见[逐行大小调查](folder-size-column-investigation.md#2026-11-01无窗口递归大小合同扩展到-4-gib-以上)。
+
 2026-11-01 隔离 IShellView 双视图焦点恢复：新的 `--synthetic-shell-focus-recovery-private-desktop` 在已知焦点丢失的同目录双视图 `IFileOperation.MoveItems` 场景中，复用产品 `ShellViewSelectionSnapshot` 保存和恢复 PIDL 选区/焦点。移动后第二视图状态从 `Selected`（`0x1`）恢复为 `Selected|Focused`（`0x3`），两次 Private Desktop 探针均通过前台、输入与清理守卫。该结果仅证明当前 synthetic filesystem provider 的隔离恢复路径可用；不代表所有 Shell provider、ExplorerBrowser 产品接线或可见焦点体验已验证。完整记录见[原生视图迁移门槛](superpowers/specs/2026-10-25-ishellview-host-migration-gates.md)。
 
 2026-10-31 自有行模型跨窗格多选 Shell 移动协调：隐藏双 pane `SysListView32` 探针从源 `IShellFolder` 一次取得两个子项的 `IDataObject`，调用真实 `IFileOperation.MoveItems`，由递归 Shell watcher 收到两组系统事件后分别重枚举、reconcile 两侧行模型。源两行退休、目标两行新增，两个窗格未移动行的 ID、选区及焦点均保留。NativeProbe Release build 0 警告/错误，`--shell-change-reconciliation` 通过，父/列表窗口隐藏且前台不变。验证的是隔离 Shell 多选操作及自有行模型合同，不是产品 ExplorerBrowser、真实 OLE 拖放或可见 UI。详情见[逐行大小列调查](folder-size-column-investigation.md#2026-10-31自有行模型跨窗格移动协调)。
