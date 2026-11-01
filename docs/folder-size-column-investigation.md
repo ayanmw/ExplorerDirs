@@ -1451,6 +1451,14 @@ NativeProbe Release build 成功，0 警告/错误；原生 adapter `/W4 /WX` �
 
 在 NativeProbe 的共享快照存储内增加按解析路径的扫描占位：缓存未命中时只有一个 view 扫描该路径，其它 view 等待该快照写入或宿主取消后再尝试。修正后，同一个 500 目录、四同根 view 场景扫描恰为 501 次，重复扫描 0、队列拒绝 0、四 view 全部 502/502、通知 2、峰值 worker 1，四份选区与焦点保留；日志：`src/.state/native-probe-watchdog/20261101-async-same-root-500-after-dedupe.stdout.log`。在相同 Shell 自动请求负载下复跑部分行观察，仍请求 1,525 个按 view 去重条目，但扫描保持 501 次；日志：`src/.state/native-probe-watchdog/20261101-async-partial-after-dedupe.stdout.log`。四个不同根目录、每根 80 项的回归场景仍为 324/324 唯一扫描、拒绝 0、峰值 worker 2、四 view 均 82/82 且选区/焦点保留；日志：`src/.state/native-probe-watchdog/20261101-async-distinct-root-after-dedupe.stdout.log`。
 
+### 2026-11-01：四视图队列与缓存压力闭环
+
+先改造强制队列压力合同，让四个不同根 view 在两个 worker 暂停期间，必须把所有请求排入有界队列且不得拒绝；原 256 项队列在 500 目录/根负载下按预期 RED，2,004 个扫描需求中拒绝 1,746 个。随后将 NativeProbe 队列容量提高到 2,048，刚好覆盖探针允许的四 view ×（500 个同级目录 + child）最大 2,004 个扫描请求，仍保留固定容量。原队列溢出时为了补请求而执行的手动 `LVM_UPDATE`/全 view `IShellView.Refresh` 已移除：新合同验证自然通知回填，不再人为触发额外重枚举。
+
+默认递归大小缓存容量也从 256 提高到 2,048。四个不同根、每根 500 个目录、2,048 缓存的 Private Desktop 运行通过：2,004 次唯一扫描、重复 0、队列拒绝 0、两个 worker、四次通知、四次聚合 `EnumObjects`，四份 502/502 大小值正确，四视图选区/焦点均保留。缓存记录载荷与路径字符统计为 661,280 字节；它不含 `std::map` 节点和分配器开销。该次进程 Private Bytes 为 95,588,352 字节，但没有同进程基线差值，不能把它归因于缓存。容量 256 的 80 目录/根对照仍读到全部值，但扫描升至 915/324、通知 12 次，确认 LRU 淘汰会在 Shell 后续读取中引起重复扫描；缓存 2,048 的同一场景收敛为唯一扫描、每个 view 一次通知。
+
+Release NativeProbe 与原生 adapter `/W4 /WX` 构建通过（0 警告/错误）；两次强制压力运行的队列/缓存/值合同均完成，前台和最后输入守卫不变，Private Desktop/夹具清理通过。最新一次将通知断言收紧为“恰好每 view 一次”后，扫描、缓存、通知和列值仍达标，但第四 view 的选区/焦点丢失，watchdog 以失败退出；之前两轮上限压力运行保留了四份状态，表明高负载选区保持仍有间歇性，尚不能算稳定合同。日志：`src/.state/native-probe-watchdog/20261101-155130-d9d3f545.stdout.log`（RED，旧队列拒绝）、`src/.state/native-probe-watchdog/20261101-155458-f3733d60.stdout.log`（首轮 GREEN，缓存 4,096）、`src/.state/native-probe-watchdog/20261101-155617-d1a715fa.stdout.log`（缓存 256 的重复扫描对照）、`src/.state/native-probe-watchdog/20261101-155756-2eee9d60.stdout.log`（GREEN，默认缓存 2,048）、`src/.state/native-probe-watchdog/20261101-160121-0f8362f1.stdout.log`（队列/缓存/通知通过，第四 view 状态间歇失败）。这仍是 NativeProbe 合成 provider 与隐藏 DefView 证据，不代表 ExplorerBrowser 产品接线、真实磁盘/网络延迟、可见刷新体验或真实应用的内存增量；产品缓存容量需在产品接线前以真实负载和内存差值再评审。
+
 关闭竞争有两种场景。闸门关闭期间排入四个 view 批次后退休全部 view，再放行 worker；四批均结束，扫描数 0、Shell 通知数 0，日志：`src/.state/native-probe-watchdog/20261101-async-same-root-cancel-after-dedupe.stdout.log`。再单独关闭扫描任务所属 view，保持另外三个同根 view 存活并等待；四批均结束，只扫描 81 个唯一目录、发出一次合并通知，存活 view 均读到正确列值并各自重新枚举（`EnumObjects` 增量 3），日志：`src/.state/native-probe-watchdog/20261101-async-single-view-retire-same-root.stdout.log`。首次单 view 探针只等待固定 350ms 就采样，曾在通知已经发出但 Shell 尚未完成重枚举时误判；改为按列值和枚举增量等待后复测通过。
 
 Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错误。以上仍是隐藏 synthetic `IShellView` 原型，不是 ExplorerBrowser 产品接线或可见 UI 验收；慢磁盘/网络延迟、队列背压及可见交互体验仍待验证。

@@ -255,7 +255,7 @@ public static class SyntheticShellSortProbe
     private static int GetRecursiveSizeCacheCapacity()
     {
         var capacityText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_RECURSIVE_SIZE_CACHE_CAPACITY");
-        var capacity = string.IsNullOrWhiteSpace(capacityText) ? 256 :
+        var capacity = string.IsNullOrWhiteSpace(capacityText) ? 2048 :
             int.TryParse(capacityText, out var parsedCapacity) ? parsedCapacity : -1;
         if (capacity is < 1 or > 4096)
             throw new ArgumentOutOfRangeException(nameof(capacityText), "The recursive-size cache probe accepts capacities from 1 to 4096.");
@@ -817,11 +817,11 @@ public static class SyntheticShellSortProbe
                     if (asyncQueueGateProbe)
                     {
                         var rejectedBeforeRelease = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe");
-                        if (asyncQueueSaturationProbe && rejectedBeforeRelease == 0)
-                            throw new IOException("The gated four-root workload did not fill the 256-task recursive-size queue before releasing its workers.");
+                        if (asyncQueueSaturationProbe && rejectedBeforeRelease != 0)
+                            throw new IOException($"The bounded four-root workload rejected {rejectedBeforeRelease} recursive-size tasks before releasing its workers.");
                         if (asyncParentBatchProbe && rejectedBeforeRelease != 0)
                             throw new IOException($"The four view batches rejected {rejectedBeforeRelease} recursive-size tasks; expected no queue rejections.");
-                        Console.WriteLine($"synthetic-async-recursive-size-queue-gate: rejected-before-release={rejectedBeforeRelease}; queue-capacity=256; distinct-roots=4");
+                        Console.WriteLine($"synthetic-async-recursive-size-queue-gate: rejected-before-release={rejectedBeforeRelease}; queue-capacity=2048; distinct-roots=4");
                         if (asyncPartialRequestProbe)
                         {
                             var requestedRows = Math.Min(3, checked((int)SendMessageW(sizeListView, LvmGetItemCount, 0, 0)));
@@ -915,24 +915,6 @@ public static class SyntheticShellSortProbe
                             NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
                         while (getFinishedScans() < finishedTaskTarget && Environment.TickCount64 < acceptedDrainDeadline)
                             Pump(25);
-                        if (asyncQueueSaturationProbe)
-                        {
-                            var updatedRows = 0;
-                            foreach (var targetListView in new[] { sizeListView, sharedSizeListView }.Concat(additionalListViews))
-                            {
-                                var rowCount = checked((int)SendMessageW(targetListView, LvmGetItemCount, 0, 0));
-                                for (var rowIndex = 0; rowIndex < rowCount; rowIndex++)
-                                {
-                                    _ = SendMessageW(targetListView, LvmUpdate, rowIndex, 0);
-                                    updatedRows++;
-                                }
-                            }
-                            var scansAfterRowUpdate = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
-                            foreach (var targetView in new[] { view, view2 }.Concat(additionalViews))
-                                Check(At<RefreshView>(targetView, 8)(targetView));
-                            Pump(500);
-                            Console.WriteLine($"synthetic-async-recursive-size-overflow-retry: stage=after-accepted-queue-drain; accepted-scans={acceptedScanTarget}; scans-after-LVM_UPDATE={scansAfterRowUpdate}; scans-after-IShellView.Refresh={ReadCounter(module, "GetSyntheticOnDemandSizeScanCount")}; listview-update-rows={updatedRows}; refreshed-views={1 + (view2 != 0 ? 1 : 0) + additionalViews.Length}");
-                        }
                     }
                     var allAsyncColumnValuesReady = AllAsyncColumnValuesReady(initialNames, initialSizes);
                     var allSharedAsyncColumnValuesReady = AllSharedAsyncColumnValuesReady();
@@ -1002,8 +984,8 @@ public static class SyntheticShellSortProbe
                     Console.WriteLine($"synthetic-async-recursive-size-shell-view: shell-notification-requery={asyncViewRequeryObserved}; all-column-values-ready={allAsyncColumnValuesReady}; child-size={(childIndexForAsync >= 0 ? initialSizes[childIndexForAsync] : "<missing>")}; shared-columns=[{asyncSharedColumnSummaries}]; folders={onDemandFolderCount}; scans={asyncScans}; scan-delay-ms={asyncScanDelayMs}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; enum-delta={asyncEnumDelta}; details-of-size={ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount")}");
                     if (!asyncViewRequeryObserved || !allAsyncColumnValuesReady || asyncScans != expectedAsyncScanCount || asyncNotificationCount > (asyncSharedViewProbe ? 64 : 16) || asyncPeakWorkers > 2)
                         throw new IOException($"The hidden Shell view did not converge bounded asynchronous size rows: all-values-ready={allAsyncColumnValuesReady}; shared-values-ready={allSharedAsyncColumnValuesReady}; scans={asyncScans}/{expectedAsyncScanCount}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; peak-workers={asyncPeakWorkers}; folders={onDemandFolderCount}.");
-                    if (asyncQueueSaturationProbe && asyncQueueRejectedScans == 0)
-                        throw new IOException("The gated four-root workload completed without recording any queue rejections.");
+                    if (asyncQueueSaturationProbe && asyncNotificationCount != asyncSharedViewCount)
+                        throw new IOException($"The four-root pressure run did not coalesce to exactly one update per view: notifications={asyncNotificationCount}/{asyncSharedViewCount}.");
                     if (asyncQueueGateCreated)
                     {
                         Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
@@ -1036,6 +1018,10 @@ public static class SyntheticShellSortProbe
                             }
                         }
                         var allSelectionsPreserved = firstSelectionPreserved && sharedSelectionPreserved.All(preserved => preserved);
+                        var sharedCacheSnapshots = ReadCounter(module, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe");
+                        var sharedCachePayloadBytes = ReadCounter(module, "GetSyntheticRecursiveSizeCachePayloadBytesForProbe");
+                        var sharedProcessMemory = ReadCurrentProcessMemory();
+                        Console.WriteLine($"synthetic-async-recursive-size-cache-pressure: capacity={GetRecursiveSizeCacheCapacity()}; snapshots={sharedCacheSnapshots}; payload-bytes={sharedCachePayloadBytes}; private-bytes={sharedProcessMemory.PrivateBytes}");
                         Console.WriteLine($"synthetic-async-recursive-size-shared-view: roots={(asyncSharedViewDistinctRoots ? "distinct" : "same")}; views={asyncSharedViewCount}; all-values-ready={allAsyncColumnValuesReady && allSharedAsyncColumnValuesReady}; shared-child-size={(sharedChildIndex >= 0 ? sharedInitialSizes[sharedChildIndex] : "<missing>")}; scans={asyncScans}; expected-unique-scans={expectedAsyncScanCount}; duplicate-scans={Math.Max(0, asyncScans - expectedAsyncScanCount)}; queue-rejected-scans={asyncQueueRejectedScans}; notifications={asyncNotificationCount}; enum-delta={asyncEnumDelta}; selected-focused-preserved={string.Join('/', new[] { firstSelectionPreserved }.Concat(sharedSelectionPreserved))}; row-order-changed={string.Join('/', new[] { !initialNames.SequenceEqual(finalMainNames) }.Concat(sharedNamesByView.Select((names, index) => !names.SequenceEqual(finalSharedNamesByView[index]))))}; rows={finalMainNames.Length}/{string.Join('/', finalSharedNamesByView.Select(names => names.Length))}");
                         if (!allSharedAsyncColumnValuesReady || !sharedValuesCorrect || !allSelectionsPreserved || asyncEnumDelta == 0)
                             throw new IOException($"The {asyncSharedViewCount} active {asyncSharedViewRootMode}-root Shell views did not all refresh recursive-size rows while preserving independent selection/focus.");

@@ -67,7 +67,7 @@ namespace
     volatile LONG g_syntheticChildNotificationTranslationSent = 0;
     volatile LONG g_syntheticTranslateChildNotificationsForProbe = 0;
     volatile LONG g_syntheticAttributeNotificationTranslationCount = 0;
-    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 256;
+    volatile LONG g_syntheticRecursiveSizeCacheCapacityForProbe = 2048;
     bool ShouldTranslateSyntheticChildNotification(LONG event)
     {
         // UPDATEITEM carries property changes for an existing child; the custom
@@ -1673,7 +1673,9 @@ namespace
     {
     public:
         static constexpr size_t kWorkerCount = 2;
-        static constexpr size_t kMaximumQueuedTasks = 256;
+        // The synthetic view probe permits 500 sibling folders in each of four panes.
+        // Keep the queue bounded while allowing its complete 4 * (500 + child) demand.
+        static constexpr size_t kMaximumQueuedTasks = 2048;
         static constexpr DWORD kShellUpdateCoalesceMilliseconds = 200;
 
         SyntheticAsyncRecursiveSizeQueue()
