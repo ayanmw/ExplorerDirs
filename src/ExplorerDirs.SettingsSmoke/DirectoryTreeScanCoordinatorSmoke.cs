@@ -154,13 +154,13 @@ internal static class DirectoryTreeScanCoordinatorSmoke
         if (!context.WaitForPost(TimeSpan.FromSeconds(5)))
             throw new TimeoutException("The incremental result did not reach its owner context before retirement.");
 
-        owner.CancelCurrent();
+        owner.Dispose();
         var retiredWorkerReleased = request.Wait(TimeSpan.FromSeconds(2));
         context.RunPostedCallback();
         var publishedAfterRetirement = itemPublished || finalPublished;
         var requestPublished = request.GetAwaiter().GetResult();
         Check(retiredWorkerReleased && !requestPublished && !publishedAfterRetirement,
-            "retiring an incremental scan releases its worker without dispatching the queued owner callback");
+            "disposing an incremental scan owner releases its worker without dispatching the queued owner callback");
     }
 
     private static void VerifyLatestAsyncPublication()
