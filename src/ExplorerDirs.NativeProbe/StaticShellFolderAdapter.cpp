@@ -1557,10 +1557,39 @@ namespace
     volatile LONG g_syntheticMaskFilesystemAttributes = 0;
     volatile LONG g_syntheticOwnAttributesForProbe = 0;
     volatile LONG g_syntheticCustomSizeColumnForProbe = 0;
+    volatile LONG g_syntheticHumanSizeTextForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
+
+    std::wstring FormatSyntheticSizeText(ULONGLONG bytes)
+    {
+        constexpr ULONGLONG unit = 1024;
+        constexpr const wchar_t* units[] = { L"B", L"KB", L"MB", L"GB", L"TB", L"PB", L"EB" };
+        ULONGLONG divisor = 1;
+        size_t unitIndex = 0;
+        while (unitIndex + 1 < ARRAYSIZE(units) && bytes / divisor >= unit)
+        {
+            divisor *= unit;
+            ++unitIndex;
+        }
+        if (unitIndex == 0) return std::to_wstring(bytes) + L" B";
+
+        auto whole = bytes / divisor;
+        auto fraction = static_cast<ULONGLONG>(
+            (static_cast<double>(bytes % divisor) / static_cast<double>(divisor)) * 100.0 + 0.5);
+        if (fraction == 100) { ++whole; fraction = 0; }
+        auto text = std::to_wstring(whole);
+        if (fraction != 0)
+        {
+            text += L".";
+            if (fraction < 10) text += L"0";
+            text += std::to_wstring(fraction);
+            if (text.back() == L'0') text.pop_back();
+        }
+        return text + L" " + units[unitIndex];
+    }
     // Exclude synchronous property callbacks caused by the probe's own
     // ListView text reads from notification-strategy counters.
     thread_local BOOL g_syntheticSizeMetricsObservation = FALSE;
@@ -2806,7 +2835,9 @@ namespace
             else
             {
                 if (!child) return E_INVALIDARG;
-                text = column == 0 ? child->name : column == 1 ? std::to_wstring(SizeForItem(item)) :
+                text = column == 0 ? child->name : column == 1 ?
+                    (InterlockedCompareExchange(&g_syntheticHumanSizeTextForProbe, 0, 0)
+                        ? FormatSyntheticSizeText(SizeForItem(item)) : std::to_wstring(SizeForItem(item))) :
                     column == 2 ? ((extended && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                         ? SyntheticContentsText(child)
                         : ((child->attributes & FILE_ATTRIBUTE_DIRECTORY) ? L"File folder" : L"File")) :
@@ -3586,6 +3617,14 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"10") == 0;
         if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
         if (!recursiveSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 1);
+        SHELLDETAILS formattedDetails{};
+        result = root->GetDetailsOf(item, 1, &formattedDetails);
+        const bool humanSizeDisplayed = SUCCEEDED(result) && formattedDetails.str.uType == STRRET_WSTR &&
+            formattedDetails.str.pOleStr && _wcsicmp(formattedDetails.str.pOleStr, L"10 B") == 0;
+        if (formattedDetails.str.uType == STRRET_WSTR && formattedDetails.str.pOleStr) CoTaskMemFree(formattedDetails.str.pOleStr);
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 0);
+        if (!humanSizeDisplayed) { CoTaskMemFree(item); result = E_FAIL; goto cleanup; }
         VARIANT sizeValue{};
         result = root->GetDetailsEx(item, &kSizeKey, &sizeValue);
         const bool recursiveSizeProperty = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 10;
@@ -3626,6 +3665,27 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         const bool recursiveSizeKeyMapped = SUCCEEDED(result) &&
             mappedRecursiveSizeKey == kSyntheticRecursiveSizeKey;
         if (!recursiveSizeKeyMapped)
+        {
+            InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
+            InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
+            CoTaskMemFree(item);
+            result = E_FAIL;
+            goto cleanup;
+        }
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 1);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 1536);
+        details = {};
+        result = root->GetDetailsOf(item, 1, &details);
+        const bool automaticUnitDisplayed = SUCCEEDED(result) && details.str.uType == STRRET_WSTR &&
+            details.str.pOleStr && _wcsicmp(details.str.pOleStr, L"1.5 KB") == 0;
+        if (details.str.uType == STRRET_WSTR && details.str.pOleStr) CoTaskMemFree(details.str.pOleStr);
+        VariantInit(&sizeValue);
+        result = root->GetDetailsEx(item, &mappedRecursiveSizeKey, &sizeValue);
+        const bool numericValueUnaffected = SUCCEEDED(result) && sizeValue.vt == VT_UI8 && sizeValue.ullVal == 1536;
+        VariantClear(&sizeValue);
+        InterlockedExchange(&g_syntheticHumanSizeTextForProbe, 0);
+        InterlockedExchange64(&g_syntheticChildSizeOverride, 1);
+        if (!automaticUnitDisplayed || !numericValueUnaffected)
         {
             InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, 0);
             InterlockedExchange64(&g_syntheticChildSizeOverride, -1);
@@ -4818,6 +4878,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticOwnAttributesForProb
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticCustomSizeColumnForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticHumanSizeTextForProbe(BOOL enabled)
+{
+    InterlockedExchange(&g_syntheticHumanSizeTextForProbe, enabled ? 1 : 0);
     return S_OK;
 }
 
