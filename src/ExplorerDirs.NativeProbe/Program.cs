@@ -89,6 +89,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-on-demand-column-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithOnDemandColumnWpfHost();
+        if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-large-background-refresh-wpf-host-private-desktop")
+            return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeLargeBackgroundRefreshWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-formatted-column-wpf-host-private-desktop")
             return PrivateDesktopShellProbe.RunSyntheticRecursiveDirectorySizeSortWithFormattedColumnWpfHost();
         if (args.Length == 1 && args[0] == "--synthetic-recursive-directory-size-fixed-kilobyte-column-wpf-host-private-desktop")

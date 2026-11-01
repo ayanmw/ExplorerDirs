@@ -171,13 +171,23 @@ public static class SyntheticShellSortProbe
 
     internal static int RunRecursiveDirectorySizeSortWithOnDemandColumnWpfHost()
     {
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, onDemandRecursiveSize: true, onDemandFolderCount: GetOnDemandFolderCount());
+    }
+
+    internal static int RunRecursiveDirectorySizeLargeBackgroundRefreshWpfHost()
+        => Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, exerciseUpdateNotifications: true, onDemandRecursiveSize: true,
+            onDemandFolderCount: GetOnDemandFolderCount());
+
+    private static int GetOnDemandFolderCount()
+    {
         var folderCountText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ONDEMAND_FOLDER_COUNT");
         var folderCount = string.IsNullOrWhiteSpace(folderCountText) ? 100 :
             int.TryParse(folderCountText, out var parsedFolderCount) ? parsedFolderCount : -1;
         if (folderCount is < 1 or > 500)
             throw new ArgumentOutOfRangeException(nameof(folderCountText), "The on-demand Shell load probe accepts 1–500 sibling folders.");
-        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
-            useWpfParent: true, onDemandRecursiveSize: true, onDemandFolderCount: folderCount);
+        return folderCount;
     }
 
     internal static int RunRecursiveDirectorySizeSortWithFormattedColumnWpfHost() =>
@@ -540,7 +550,8 @@ public static class SyntheticShellSortProbe
                 var filesystemAttributeRequests = ReadCounter(module, "GetSyntheticFilesystemAttributeCount");
                 Console.WriteLine($"synthetic-recursive-directory-size-view: phase=initial; filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; on-demand={onDemandRecursiveSize}; load-folders={onDemandFolderCount}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; shell-size-row-requests-before-list-read={shellRequestedSizeRows}; scans-before-list-read={onDemandScanCount}; metric-calls-before-list-read={onDemandMetricCalls}; entries-before-list-read={onDemandMetricEntries}; scan-us-before-list-read={onDemandElapsedMicroseconds}; shell-size-row-requests-after-list-read={afterReadShellRequestedSizeRows}; scans-after-list-read={afterReadOnDemandScanCount}; metric-calls-after-list-read={afterReadOnDemandMetricCalls}; entries-after-list-read={afterReadOnDemandMetricEntries}; scan-us-after-list-read={afterReadOnDemandElapsedMicroseconds}; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests})");
                 string[] ascendingNames;
-                var skipSortingForOnDemandLoadProbe = onDemandRecursiveSize && onDemandFolderCount > 0;
+                var skipSortingForOnDemandLoadProbe = onDemandRecursiveSize && onDemandFolderCount > 0 &&
+                    (!exerciseUpdateNotifications || onDemandFolderCount > 100);
                 if (shellWindowScrollProbe || skipSortingForOnDemandLoadProbe)
                 {
                     ascendingNames = initialNames;
@@ -569,17 +580,34 @@ public static class SyntheticShellSortProbe
                 var menuDescendingSortState = Array.Empty<NativeSortColumn>();
                 int? menuAscendingHr = null;
                 int? menuDescendingHr = null;
+                var multiRowBackgroundRefreshProbe = onDemandRecursiveSize && onDemandFolderCount > 0 && exerciseUpdateNotifications;
                 if (customSizeColumn && !skipSortingForOnDemandLoadProbe)
                 {
                     menuAscendingHr = InvokeBackgroundMenuVerb(view, parent, "sortascending");
                     Pump(250);
-                    menuSortAscending = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                    menuSortAscending = onDemandFolderCount > 0
+                        ? WaitForNames(sizeListView, module, "small.bin", expectedInitialCount)
+                        : ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                     menuAscendingSortState = CaptureNativeSortColumns(folderView);
                     menuDescendingHr = InvokeBackgroundMenuVerb(view, parent, "sortdescending");
                     Pump(250);
-                    menuSortDescending = ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
+                    menuSortDescending = onDemandFolderCount > 0
+                        ? WaitForNames(sizeListView, module, "child", expectedInitialCount)
+                        : ReadNames(sizeListView, module, expectedCount: expectedInitialCount);
                     menuDescendingSortState = CaptureNativeSortColumns(folderView);
                 }
+                var ascendingOrderValid = multiRowBackgroundRefreshProbe
+                    ? IsNameBefore(ascendingNames, "small.bin", "child")
+                    : ascendingNames.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase);
+                var descendingOrderValid = multiRowBackgroundRefreshProbe
+                    ? IsNameBefore(descendingNames, "child", "small.bin")
+                    : descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase);
+                var menuAscendingOrderValid = multiRowBackgroundRefreshProbe
+                    ? IsNameBefore(menuSortAscending, "small.bin", "child")
+                    : menuSortAscending.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase);
+                var menuDescendingOrderValid = multiRowBackgroundRefreshProbe
+                    ? IsNameBefore(menuSortDescending, "child", "small.bin")
+                    : menuSortDescending.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase);
                 Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; recursive-size-cache-misses-during-compare={recursiveSizeCacheMissesDuringCompare}; recursive-metric-scans-during-compare={directoryMetricScansDuringCompare}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
@@ -589,11 +617,10 @@ public static class SyntheticShellSortProbe
                 var displayedFileSize = expectedFileSizeText is null ||
                     fileIndex >= 0 && string.Equals(initialSizes[fileIndex], expectedFileSizeText, StringComparison.Ordinal);
                 if (!displayedDirectorySize || !displayedFileSize ||
-                    (!shellWindowScrollProbe && !skipSortingForOnDemandLoadProbe && !ascendingNames.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase)) ||
-                    (!shellWindowScrollProbe && !skipSortingForOnDemandLoadProbe && !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase)) ||
+                    (!shellWindowScrollProbe && !skipSortingForOnDemandLoadProbe && !ascendingOrderValid) ||
+                    (!shellWindowScrollProbe && !skipSortingForOnDemandLoadProbe && !descendingOrderValid) ||
                     (customSizeColumn && !skipSortingForOnDemandLoadProbe &&
-                        (!menuSortAscending.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase) ||
-                        !menuSortDescending.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase) ||
+                        (!menuAscendingOrderValid || !menuDescendingOrderValid ||
                         menuAscendingSortState.Length != 1 || menuDescendingSortState.Length != 1 ||
                         menuAscendingSortState[0].Key.FormatId != menuDescendingSortState[0].Key.FormatId ||
                         menuAscendingSortState[0].Key.PropertyId != menuDescendingSortState[0].Key.PropertyId ||
@@ -621,7 +648,7 @@ public static class SyntheticShellSortProbe
                     Console.WriteLine($"synthetic-recursive-size-background-menu-sort: ascending-hr=0x{menuAscendingHr:X8}; ascending=[{FormatProbeRows(menuSortAscending)}]; ascending-state=[{FormatSortColumns(menuAscendingSortState)}]; descending-hr=0x{menuDescendingHr:X8}; descending=[{FormatProbeRows(menuSortDescending)}]; descending-state=[{FormatSortColumns(menuDescendingSortState)}]; passed=True");
                 if (exerciseUpdateNotifications)
                     ProbeSizeUpdateNotifications(module, folder, folderView, view, rootPidl, backingFolder, copyDestination,
-                        sizeUpdateStrategy, customSizeColumn, host, hostPointer);
+                        sizeUpdateStrategy, customSizeColumn, host, hostPointer, onDemandFolderCount);
                 if (recursiveDirectorySizeSortOnly && exerciseUpdateNotifications)
                 {
                     if (sizeUpdateStrategy == "single-item-capture-reapply-recreate-window")
@@ -1361,7 +1388,7 @@ public static class SyntheticShellSortProbe
 
     private static void ProbeSizeUpdateNotifications(nint module, nint folder, nint folderView, nint view,
         nint rootPidl, string backingFolder, string copyDestination, string strategyFilter, bool customSizeColumn,
-        StreamViewHost host, nint hostPointer)
+        StreamViewHost host, nint hostPointer, int loadFolderCount)
     {
         if (!customSizeColumn)
             throw new InvalidOperationException("Recursive-size notifications require the synthetic custom size column.");
@@ -1432,7 +1459,8 @@ public static class SyntheticShellSortProbe
                 RunSizeUpdateStrategy("full-view-refresh-background-scan-live-cache-publish", 1, () =>
                     Check(At<RefreshView>(view, 8)(view)),
                     module, folderView, view, backingFolder, publishLiveSnapshot: true,
-                    scanInBackground: true, expectLiveRefresh: true, host: host);
+                    scanInBackground: true, expectLiveRefresh: true, largeViewLoad: loadFolderCount > 0,
+                    expectedRowCount: loadFolderCount > 0 ? loadFolderCount + 2 : 2, host: host);
             if (strategyFilter == "full-view-refresh-redraw-live-cache-publish")
                 RunSizeUpdateStrategy("full-view-refresh-redraw-live-cache-publish", 1, () =>
                     Check(At<RefreshView>(view, 8)(view)),
@@ -1520,15 +1548,21 @@ public static class SyntheticShellSortProbe
         string? copyDestination = null, bool saveViewStateBeforeRecreateWindow = false,
         bool reapplyCapturedColumns = false, bool publishLiveSnapshot = false,
         bool expectLiveRefresh = false, bool holdListViewRedrawUntilSettled = false,
-        bool scanInBackground = false)
+        bool scanInBackground = false, bool largeViewLoad = false, int expectedRowCount = 2)
     {
         // Start from the new view's actual custom-column state. IColumnManager does not
         // capture this provider-defined key, so refreshing and replaying its snapshot
         // would erase the baseline before the notification under investigation.
         var listView = FindListView(view);
-        var before = WaitForSizeState(listView, module, "10", expectedFirstName: preserveScrollAnchor ? null : "child", expectedSelection: null);
+        var before = WaitForSizeState(listView, module, "10",
+            expectedFirstName: largeViewLoad || preserveScrollAnchor ? null : "child", expectedSelection: null,
+            expectedRowCount: largeViewLoad ? expectedRowCount : -1);
         var beforeHeaderColumns = ReadHeaderColumnTitles(listView);
-        Console.WriteLine($"synthetic-size-update: strategy={name}; baseline=initial-custom-view; value-visible={before.ValueUpdated}; column-1=[{string.Join('|', before.Sizes)}]; header-columns=[{string.Join('|', beforeHeaderColumns)}]");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; baseline=initial-custom-view; rows={before.Names.Length}; value-visible={before.ValueUpdated}; column-1=[{string.Join('|', before.Sizes)}]; header-columns=[{string.Join('|', beforeHeaderColumns)}]");
+        if (largeViewLoad && (before.Names.Length != expectedRowCount ||
+            !before.Names.Contains("child", StringComparer.OrdinalIgnoreCase) ||
+            !before.Names.Contains("small.bin", StringComparer.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"The large view did not begin with the expected rows: rows={before.Names.Length}/{expectedRowCount}; child-present={before.Names.Contains("child", StringComparer.OrdinalIgnoreCase)}; file-present={before.Names.Contains("small.bin", StringComparer.OrdinalIgnoreCase)}.");
         if (!before.OrderUpdated)
             throw new TimeoutException($"The new view did not retain the recursive-size baseline order before '{name}': {FormatSizeState(before)}");
         if (!before.ValueUpdated)
@@ -1596,6 +1630,8 @@ public static class SyntheticShellSortProbe
         var rowsEnumeratedBefore = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
         var detailsBefore = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesBefore = ReadCounter(module, "GetSyntheticSizeCompareCount");
+        var recursiveScansBefore = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+        var recursiveEntriesBefore = ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount");
         var propertiesBefore = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
         var streamReadsBefore = host?.Reads ?? 0;
         var streamWritesBefore = host?.Writes ?? 0;
@@ -1703,8 +1739,8 @@ public static class SyntheticShellSortProbe
         }
 
         var after = WaitForSizeState(listView, module, updatedSize.ToString(),
-            expectedFirstName: preserveScrollAnchor ? null : "small.bin", expectedSelection: "small.bin",
-            waitForSelection: !publishLiveSnapshot);
+            expectedFirstName: preserveScrollAnchor || largeViewLoad ? null : "small.bin", expectedSelection: "small.bin",
+            waitForSelection: !publishLiveSnapshot, expectedRowCount: largeViewLoad ? expectedRowCount : -1);
         var liveUpdateSelectionRestored = after.SelectionPreserved;
         if (publishLiveSnapshot && !liveUpdateSelectionRestored)
         {
@@ -1718,6 +1754,8 @@ public static class SyntheticShellSortProbe
         }
         if (expectLiveRefresh && (!after.ValueUpdated || !after.OrderUpdated))
             throw new InvalidOperationException($"Publishing the recursive-size snapshot to the active view did not refresh its displayed value and sort order after the Shell notification: {FormatSizeState(after)}");
+        if (largeViewLoad && after.Names.Length != expectedRowCount)
+            throw new InvalidOperationException($"The large view refresh did not restore the expected row count: rows={after.Names.Length}/{expectedRowCount}.");
         if (expectLiveRefresh && !liveUpdateSelectionRestored)
             throw new InvalidOperationException("The full-view recursive-size refresh did not restore its pre-refresh selection and focus.");
         if (preserveScrollAnchor)
@@ -1776,11 +1814,13 @@ public static class SyntheticShellSortProbe
         var rowsEnumeratedAfter = ReadCounter(module, "GetSyntheticEnumeratedItemCount");
         var detailsAfter = ReadCounter(module, "GetSyntheticSizeDetailsOfItemCount");
         var comparesAfter = ReadCounter(module, "GetSyntheticSizeCompareCount");
+        var recursiveScansAfter = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+        var recursiveEntriesAfter = ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount");
         var propertiesAfter = ReadCounter(module, "GetSyntheticCustomSizeDetailsExCount");
         var streamTraceAfter = host?.ViewStateStreamTrace.Skip(streamTraceBefore).ToArray() ?? [];
         var columnReapplySource = reapplyCapturedColumns ? "captured-shell-column-set" :
             reapplyCustomSizeColumn ? "provider-mapped-key" : "none";
-        Console.WriteLine($"synthetic-size-update: strategy={name}; column-reapply-source={columnReapplySource}; column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; provider-recursive-size-key-exact-match={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; header-columns=[{string.Join('|', afterHeaderColumns)}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
+        Console.WriteLine($"synthetic-size-update: strategy={name}; large-view={largeViewLoad}; expected-rows={expectedRowCount}; column-reapply-source={columnReapplySource}; column-reapply-hr=0x{reapplyResult:X8}; settle-ms={settleMs}; value-column-index={after.SizeColumnIndex}; value-updated={after.ValueUpdated}; shell-column-capture-hr=0x{columnsResult:X8}; system-size-column-present={systemSizeColumnPresent}; provider-recursive-size-key-exact-match={recursiveSizeColumnPresent}; column-keys=[{columnKeys}]; header-columns=[{string.Join('|', afterHeaderColumns)}]; order-updated={after.OrderUpdated}; selection-focus-preserved={after.SelectionPreserved}; enum-calls={enumsAfter - enumsBefore}; rows-enumerated={rowsEnumeratedAfter - rowsEnumeratedBefore}; size-details={detailsAfter - detailsBefore}; size-properties={propertiesAfter - propertiesBefore}; size-compares={comparesAfter - comparesBefore}; recursive-scans={recursiveScansAfter - recursiveScansBefore}; recursive-entries={recursiveEntriesAfter - recursiveEntriesBefore}; names=[{FormatProbeRows(after.Names)}]; sizes=[{FormatProbeRows(after.Sizes)}]");
         if (!recreateShellWindow)
             Console.WriteLine($"synthetic-size-update-column-map: phase=after; before-notification={mapCallsBeforeNotification}; after-notification={mapCallsAfterNotification}; after-reapply={mapCallsAfterReapply}; final={ReadCounter(module, "GetSyntheticMapColumnToScidCount")}");
         Console.WriteLine($"synthetic-size-update-columns: phase=after; layout-preserved={columnLayoutPreserved}; hr=0x{columnsResult:X8}; columns=[{FormatColumns(columnsAfter)}]");
@@ -1892,9 +1932,9 @@ public static class SyntheticShellSortProbe
 
     private static (bool ValueUpdated, bool OrderUpdated, bool SelectionPreserved, int SizeColumnIndex, string[] Names, string[] Sizes, string SizeColumnProbe)
         WaitForSizeState(nint listView, nint module, string expectedChildSize, string? expectedFirstName,
-            string? expectedSelection, bool waitForSelection = true)
+            string? expectedSelection, bool waitForSelection = true, int expectedRowCount = -1)
     {
-        var deadline = Environment.TickCount64 + 2500;
+        var deadline = Environment.TickCount64 + (expectedRowCount >= 0 ? 20000 : 2500);
         string[] names = [];
         string[] sizes = [];
         var sizeColumnProbe = string.Empty;
@@ -1906,6 +1946,11 @@ public static class SyntheticShellSortProbe
             try
             {
                 names = ReadNames(listView, module, expectedCount: -1);
+                if (expectedRowCount >= 0 && names.Length != expectedRowCount)
+                {
+                    Pump(50);
+                    continue;
+                }
                 sizeColumnIndex = -1;
                 sizes = [];
                 var observedColumns = new List<string>();
@@ -2614,6 +2659,13 @@ public static class SyntheticShellSortProbe
         ? string.Join('|', rows)
         : $"{string.Join('|', rows.Take(4))}|...|{string.Join('|', rows.TakeLast(4))} (count={rows.Length})";
 
+    private static bool IsNameBefore(string[] names, string first, string second)
+    {
+        var firstIndex = Array.FindIndex(names, item => string.Equals(item, first, StringComparison.OrdinalIgnoreCase));
+        var secondIndex = Array.FindIndex(names, item => string.Equals(item, second, StringComparison.OrdinalIgnoreCase));
+        return firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex;
+    }
+
     private static void SetSyntheticSizeOverride(nint module, long size) =>
         Check(Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
             NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(size));
@@ -2742,6 +2794,10 @@ public static class SyntheticShellSortProbe
         finally { Marshal.FreeHGlobal(rectanglePointer); }
         Pump(350);
         ReportProbeStage(stage + "-complete");
+        // A large virtual view can temporarily expose an empty DefView during header sorting.
+        // Wait for its enumerated rows before treating that transient state as a sort failure.
+        if (expectedCount > 100)
+            WaitForNames(listView, module, "child", expectedCount);
         return ReadNames(listView, module, expectedCount);
     }
 
