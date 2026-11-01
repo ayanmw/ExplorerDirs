@@ -5782,3 +5782,9 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 ### 2026-11-01：Shell 重命名通知保留 peer 行身份
 
 通过复用 `ChangeWindow` 捕获 `SHCNE_RENAMEITEM` 的旧/新 parsing name，peer 重投影以新名映射旧 row ID。`keep.txt` 改名后仍保留 ID=3，Name 详情更新为新名，其它行身份及四列逐项读回正常；NativeProbe Release 与 Private Desktop 菜单/视图探针通过，前台、输入和隔离清理守卫通过。仅覆盖本地单文件改名，未测文件夹/跨目录移动、重名冲突、选择焦点、可见更新或产品接线。下一步在 NativeProbe 将按需递归值接入现有 Shell 详情桥，并验证数值排序；产品仍使用 ExplorerBrowser。详见[调查记录](folder-size-column-investigation.md#2026-11-01shell-重命名通知保留-peer-行身份)。
+
+### 2026-11-01：IShellView peer 列表按需递归大小值与数值排序
+
+新增独立 Private Desktop 原型，从隐藏 `IShellView` 的 5 个真实 filesystem Shell 行投影 PIDL 身份、4 个标准 Details 字段及一个按需递归大小列。显式扫描运行在线程池，等待期间 peer 原行和 ID 不变；写回 2/10/100 B 后在原生 ListView 中按数值排序，且选中/焦点行 ID=3 保持。NativeProbe Release 构建 0 警告/错误，apphost Private Desktop 探针 exit 0，前台、last-input 与临时夹具清理守卫通过。相关实现及边界见[递归大小列调查](folder-size-column-investigation.md#2026-11-01真实-ishellview-行的按需递归值-peer-列)。
+
+这只把异步递归值接到了 IShellView 的 peer 行列表，不改变 Shell 自身 DefView 或 ExplorerBrowser 产品；未验证通知后递归值重扫、可见重绘/闪烁、慢盘/网络及真实多窗格负载。后续继续把 Shell 行增删改通知与递归缓存失效、peer 列回填接成闭环，并保留菜单/分组/刷新回归。产品仍使用 ExplorerBrowser，递归列不进入发布版。

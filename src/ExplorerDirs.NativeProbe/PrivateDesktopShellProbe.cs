@@ -52,6 +52,9 @@ internal static class PrivateDesktopShellProbe
 
     internal static int RunHostNewFolder() => Run("host-newfolder", ShellViewHostFilterProbe.RunNewFolderForPrivateDesktop);
 
+    internal static int RunHostRecursiveSizeProjection() => Run("host-recursive-size-projection",
+        ShellViewHostFilterProbe.RunRecursiveSizeProjectionForPrivateDesktop);
+
     internal static int RunNativeViewLifetime(bool reuseBrowserHost = false) => Run(
         reuseBrowserHost ? "native-view-lifetime-reuse-host" : "native-view-lifetime",
         () => ShellViewNativeLifetimeProbe.Run(reuseBrowserHost), TimeSpan.FromMinutes(2));

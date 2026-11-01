@@ -59,6 +59,7 @@ else {
         'host-filter-private-desktop' { '--ishellview-host-filter-private-desktop' }
         'host-menu-commands-private-desktop' { '--ishellview-menu-command-private-desktop' }
         'host-newfolder-private-desktop' { '--ishellview-newfolder-private-desktop' }
+        'host-recursive-size-projection-private-desktop' { '--ishellview-recursive-size-projection-private-desktop' }
         'menu-activation-private-desktop' { '--ishellview-menu-activation-private-desktop' }
         'session-restore-private-desktop' { '--ishellview-session-restore-private-desktop' }
         'session-restore-sync-cleanup-private-desktop' { '--ishellview-session-restore-sync-cleanup-private-desktop' }
@@ -114,7 +115,17 @@ else {
         'common-listview-color-baseline-private-desktop' { '--common-listview-color-baseline-private-desktop' }
         default { throw "Unsupported NativeProbe watchdog probe: $Probe" }
     }
-    $arguments = '"{0}" {1}' -f $probeAssembly, $probeArgument
+    if ($Probe -in @('host-menu-commands-private-desktop', 'host-recursive-size-projection-private-desktop')) {
+        # These peer ListViews use group APIs which require NativeProbe's Common Controls v6 manifest.
+        $executable = Join-Path (Split-Path -Parent $probeAssembly) 'ExplorerDirs.NativeProbe.exe'
+        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "Build the NativeProbe apphost before running the Common Controls probe: $executable"
+        }
+        $arguments = $probeArgument
+    }
+    else {
+        $arguments = '"{0}" {1}' -f $probeAssembly, $probeArgument
+    }
 }
 $logDirectory = Join-Path $repoRoot 'src/.state/native-probe-watchdog'
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null

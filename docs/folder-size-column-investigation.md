@@ -1782,3 +1782,11 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在同一隔离 filesystem `IShellView` fixture 中，将 `keep.txt` 改名为 `keep-renamed.txt`，通过专用 `ChangeWindow` 收取 `SHCNE_RENAMEITEM` 并解析通知携带的旧/新绝对 Shell parsing name。peer reconcile 用“新 parsing name → 旧 parsing name”映射旧 row identity；重投影后原 row ID 仍为 3，名称详情已更新为新文件名，其余两行 ID 也保留。逐列读回、创建/删除通知合同、NativeProbe Release 构建通过；`--ishellview-menu-command-private-desktop` exit 0，前台/last-input 与隔离清理守卫通过。
 
 该验证证明本地单文件改名通知映射与 peer 行/详情更新。它没有覆盖文件夹改名或跨目录移动、重名冲突、连续通知合并、选区/焦点恢复、第三方 Shell provider、可见 UI 或产品 ExplorerBrowser；重命名项是固定 fixture 文件，实验没有触碰用户文件。接下来才适合在 peer 的 Details 模型中加入显式按需递归值，并单独验证数值排序与扫描期间更新策略。
+
+### 2026-11-01：真实 IShellView 行的按需递归值 peer 列
+
+新增独立 Private Desktop 探针 `--ishellview-recursive-size-projection-private-desktop`，避免把递归大小夹具混入菜单/分组合同。它从真实隐藏 filesystem `IShellView` 捕获 5 行 Shell PIDL、路径、标准 Details 字段与行 ID，在独立 peer `SysListView32` 增加“Recursive size (on demand)”列；显式触发后台扫描期间，peer 原行和 ID 保持不变。worker 线程 ID 与 STA/owner 不同；结果 2/10/100 B 写入对应行后，peer 原生 `LVM_SORTITEMS` 按 `ulong` 数值排序为 `size-2, child, size-10, size-100, keep.txt`，10 B 同值行由稳定 ID 决定次序。选中并聚焦的 `size-10` 行（ID=3）在排序后仍保持；NativeProbe apphost、Private Desktop 前台/last-input 与夹具清理守卫通过。
+
+初次运行同时发现空的隐藏 Report ListView 尚未 materialize header；`RemovePeerColumns` 现将无 header 视为尚无列可删。Common Controls 6 分组依赖 NativeProbe apphost manifest；watchdog 对 peer 菜单和递归投影两场景改为启动 apphost，避免以 `dotnet.exe` 清单运行导致分组 API 不可用。
+
+边界：递归值是探针显式请求后计算，不接入产品 F9/导航/刷新；列和排序只存在于 peer ListView，未改变或重绘 Shell 自身 DefView，也没有完成 Shell 通知后的重新扫描、可见像素/闪烁、真实慢盘/网络、用户多窗格压力或 ExplorerBrowser 产品接线验收。产品继续使用 ExplorerBrowser，不能据此宣称逐行递归大小列已交付。下一步在 peer 行变更通知闭环上验证递归缓存失效及值更新，同时继续通过菜单、分组和刷新回归门槛。

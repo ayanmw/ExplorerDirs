@@ -30,6 +30,9 @@ internal static class ShellViewHostFilterProbe
     private const uint LvmGetItemCount = 0x1004;
     private const uint LvmGetItemTextW = 0x1073;
     private const uint LvmGetItemW = 0x104B;
+    private const uint LvmGetItemState = 0x102C;
+    private const uint LvmSetItemState = 0x102B;
+    private const uint LvmSortItems = 0x1030;
     private const uint LvmSetImageList = 0x1003;
     private const uint LvmInsertGroup = 0x1091;
     private const uint LvmGetGroupCount = 0x1098;
@@ -54,11 +57,14 @@ internal static class ShellViewHostFilterProbe
     internal static int RunNewFolderForPrivateDesktop() => Run(stopAfterGroupedExport: false,
         leaveParentForThreadExit: true, newFolderOnly: true);
 
+    internal static int RunRecursiveSizeProjectionForPrivateDesktop() => Run(stopAfterGroupedExport: false,
+        leaveParentForThreadExit: true, recursiveSizeProjectionOnly: true);
+
     internal static int RunVirtualScopeForPrivateDesktop(string scope) =>
         Run(stopAfterGroupedExport: false, leaveParentForThreadExit: true, virtualScopeOnly: scope);
 
     private static int Run(bool stopAfterGroupedExport, bool leaveParentForThreadExit, string? virtualScopeOnly = null,
-        bool menuCommandsOnly = false, bool newFolderOnly = false)
+        bool menuCommandsOnly = false, bool newFolderOnly = false, bool recursiveSizeProjectionOnly = false)
     {
         var foreground = GetForegroundWindow();
         var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
@@ -117,6 +123,15 @@ internal static class ShellViewHostFilterProbe
         {
             Directory.CreateDirectory(Path.Combine(fixture, "child"));
             File.WriteAllText(Path.Combine(fixture, "child", "inside.txt"), "inside");
+            if (recursiveSizeProjectionOnly)
+            {
+                foreach (var (name, size) in new[] { ("size-2", 2), ("size-10", 10), ("size-100", 100) })
+                {
+                    var directory = Path.Combine(fixture, name);
+                    Directory.CreateDirectory(directory);
+                    File.WriteAllBytes(Path.Combine(directory, "payload.bin"), new byte[size]);
+                }
+            }
             if (menuCommandsOnly)
                 Directory.CreateDirectory(Path.Combine(fixture, "aardvark"));
             Check(SHParseDisplayName(Path.Combine(fixture, "child"), 0, out childFolderPidl, 0, out _));
@@ -158,7 +173,7 @@ internal static class ShellViewHostFilterProbe
             Check(Marshal.QueryInterface(view, in folderViewId, out folderView));
 
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
-            var expectedVisibleCount = menuCommandsOnly ? 3 : 2;
+            var expectedVisibleCount = recursiveSizeProjectionOnly ? 5 : menuCommandsOnly ? 3 : 2;
             int count;
             do
             {
@@ -174,6 +189,11 @@ internal static class ShellViewHostFilterProbe
                 !IsWindowVisible(parent) && GetForegroundWindow() == foreground;
             if (!passed)
                 throw new Exception("Direct IShellView did not apply the ICommDlgBrowser3 filter to the isolated fixture.");
+            if (recursiveSizeProjectionOnly)
+            {
+                VerifyRecursiveSizePeerProjection(folderView, folderPidl, folder, parent, count);
+                return 0;
+            }
             if (virtualScopeOnly is not null)
             {
                 var scope = virtualScopeOnly switch
@@ -1450,6 +1470,121 @@ internal static class ShellViewHostFilterProbe
         return listView;
     }
 
+    private static void VerifyRecursiveSizePeerProjection(nint folderView, nint folderPidl, nint shellFolder,
+        nint parent, int expectedCount)
+    {
+        var foreground = GetForegroundWindow();
+        var nextId = 0;
+        var projection = CapturePeerShellRows(folderView, folderPidl, shellFolder, [], ref nextId);
+        try
+        {
+            if (projection.Rows.Count != expectedCount)
+                throw new InvalidOperationException($"Recursive-size peer row count mismatch: expected={expectedCount}, actual={projection.Rows.Count}.");
+            var listView = CreatePeerListView(parent, projection.SystemImageList);
+            PopulatePeerList(listView, projection.Rows);
+            InsertPeerColumn(listView, projection.Rows[0].DetailTitles.Length, "Recursive size (on demand)");
+            for (var index = 0; index < projection.Rows.Count; index++)
+                SetPeerListCell(listView, index, projection.Rows[index].DetailTitles.Length, "");
+
+            var scanPaths = projection.Rows.Where(row => row.FileSystemPath is not null && Directory.Exists(row.FileSystemPath))
+                .Select(row => Path.GetFullPath(row.FileSystemPath!)).ToArray();
+            foreach (var expected in new[] { "size-2", "size-10", "size-100" })
+                if (!scanPaths.Any(path => string.Equals(Path.GetFileName(path), expected, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"The Shell rows did not contain the recursive-size fixture '{expected}'.");
+
+            var selectedRow = projection.Rows.Single(row => row.Name == "size-10");
+            var selectedIndex = projection.Rows.IndexOf(selectedRow);
+            SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
+            var initialNames = ReadPeerListNames(listView);
+            var initialIds = ReadPeerListRowIds(listView);
+            var ownerThread = Environment.CurrentManagedThreadId;
+            using var cancellation = new CancellationTokenSource();
+            var scan = Task.Run(() =>
+            {
+                var workerThread = Environment.CurrentManagedThreadId;
+                Thread.Sleep(100); // Keep the user-requested scan pending while the old rows remain visible.
+                return (Rows: HandleBoundRecursiveDirectoryScanner.Scan(scanPaths, cancellation.Token), WorkerThread: workerThread);
+            }, cancellation.Token);
+            while (!scan.IsCompleted)
+            {
+                Application.DoEvents();
+                if (!ReadPeerListNames(listView).SequenceEqual(initialNames, StringComparer.OrdinalIgnoreCase) ||
+                    !ReadPeerListRowIds(listView).SequenceEqual(initialIds))
+                    throw new InvalidOperationException("The peer list changed while recursive values were loading.");
+                Thread.Sleep(10);
+            }
+            var completed = scan.GetAwaiter().GetResult();
+            if (completed.WorkerThread == ownerThread || Environment.CurrentManagedThreadId != ownerThread)
+                throw new InvalidOperationException("Recursive sizes were not calculated off the Shell owner thread.");
+
+            var sizes = completed.Rows.ToDictionary(pair => Path.GetFullPath(pair.Key), pair => pair.Value.Summary.Bytes,
+                StringComparer.OrdinalIgnoreCase);
+            var bytesById = new Dictionary<int, ulong>();
+            for (var index = 0; index < projection.Rows.Count; index++)
+            {
+                var row = projection.Rows[index];
+                if (row.FileSystemPath is not null && sizes.TryGetValue(Path.GetFullPath(row.FileSystemPath), out var bytes))
+                {
+                    bytesById[row.Id] = bytes;
+                    SetPeerListCell(listView, index, row.DetailTitles.Length,
+                        bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + " B");
+                }
+            }
+            if (bytesById[selectedRow.Id] != 10 || bytesById[projection.Rows.Single(row => row.Name == "size-2").Id] != 2 ||
+                bytesById[projection.Rows.Single(row => row.Name == "size-100").Id] != 100)
+                throw new InvalidOperationException("The recursive-size peer values did not match the fixture bytes.");
+
+            var sortState = GCHandle.Alloc(bytesById);
+            NativeListViewCompare compare = (first, second, data) =>
+            {
+                var values = (Dictionary<int, ulong>)GCHandle.FromIntPtr(data).Target!;
+                var firstId = unchecked((int)first);
+                var secondId = unchecked((int)second);
+                var hasFirst = values.TryGetValue(firstId, out var firstBytes);
+                var hasSecond = values.TryGetValue(secondId, out var secondBytes);
+                if (hasFirst != hasSecond) return hasFirst ? -1 : 1;
+                var sizeOrder = hasFirst ? firstBytes.CompareTo(secondBytes) : 0;
+                return sizeOrder != 0 ? sizeOrder : firstId.CompareTo(secondId);
+            };
+            try
+            {
+                if (SendMessageW(listView, LvmSortItems, GCHandle.ToIntPtr(sortState),
+                    Marshal.GetFunctionPointerForDelegate(compare)).ToInt32() == 0)
+                    throw new InvalidOperationException("The peer ListView rejected recursive-size sorting.");
+            }
+            finally { sortState.Free(); GC.KeepAlive(compare); }
+
+            var sortedRows = ReadPeerListNames(listView);
+            var sortedIds = ReadPeerListRowIds(listView);
+            var expectedOrder = projection.Rows.OrderBy(row => bytesById.ContainsKey(row.Id) ? 0 : 1)
+                .ThenBy(row => bytesById.TryGetValue(row.Id, out var bytes) ? bytes : ulong.MaxValue)
+                .ThenBy(row => row.Id).ToArray();
+            var selectedAfterSort = Array.IndexOf(sortedIds, selectedRow.Id);
+            var selectedState = selectedAfterSort < 0 ? 0 : GetPeerListItemState(listView, selectedAfterSort, 0x0003);
+            if (!sortedIds.SequenceEqual(expectedOrder.Select(row => row.Id)) || selectedState != 0x0003)
+                throw new InvalidOperationException($"Recursive-size sort order or selected row identity was lost: ids=[{string.Join(',', sortedIds)}], expected=[{string.Join(',', expectedOrder.Select(row => row.Id))}], selected-state=0x{selectedState:X}.");
+            Console.WriteLine($"ishellview-peer-recursive-size: shell-rows={projection.Rows.Count}; worker-thread={completed.WorkerThread}; owner-thread={ownerThread}; rows-retained-during-scan=True; bytes=[size-2:2,size-10:10,size-100:100]; numeric-order=[{string.Join(',', sortedRows)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}; product-view-changed=False");
+        }
+        finally
+        {
+            FreePeerShellRows(projection.Rows);
+        }
+    }
+
+    private static void SetPeerListItemState(nint listView, int index, uint state, uint mask)
+    {
+        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            Marshal.StructureToPtr(new NativeListViewItem { Item = index, State = state, StateMask = mask }, pointer, false);
+            _ = SendMessageW(listView, LvmSetItemState, index, pointer);
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    private static uint GetPeerListItemState(nint listView, int index, uint mask) =>
+        unchecked((uint)SendMessageW(listView, LvmGetItemState, index, (nint)mask));
+
     private static void SetPeerListMode(nint listView, long mode)
     {
         var style = GetWindowLongPtrW(listView, GwlStyle).ToInt64();
@@ -1520,7 +1655,8 @@ internal static class ShellViewHostFilterProbe
     private static void RemovePeerColumns(nint listView)
     {
         var header = SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER
-        if (header == 0) throw new InvalidOperationException("The peer ListView has no column header.");
+        // Hidden empty report controls may materialize their header only after the first column is inserted.
+        if (header == 0) return;
         while (SendMessageW(header, 0x1200, 0, 0).ToInt32() > 0) // HDM_GETITEMCOUNT
             if (SendMessageW(listView, 0x101C, 0, 0) == 0) // LVM_DELETECOLUMN
                 throw new InvalidOperationException("Could not reset peer ListView columns.");
@@ -1656,7 +1792,7 @@ internal static class ShellViewHostFilterProbe
                                 ? "File"
                                 : Path.GetExtension(row.FileSystemPath).TrimStart('.').ToUpperInvariant() + " file";
                     var detailValues = ReadShellDetailValues(shellFolder2, row.RelativePidl, detailTitles.Length);
-                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, row.ParsingName, groupTitle,
+                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, row.ParsingName, row.FileSystemPath, groupTitle,
                         row.SystemImageIndex, detailTitles, detailValues));
                     retainedPidl = 0;
                 }
@@ -2459,7 +2595,8 @@ internal static class ShellViewHostFilterProbe
     private struct NativeShellDetails { public int Format, Width; public NativeStrRet Text; }
 
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
-    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string ParsingName, string TypeName, int SystemImageIndex,
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
+    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string ParsingName, string? FileSystemPath, string TypeName, int SystemImageIndex,
         string[] DetailTitles, string[] DetailValues);
 
     [StructLayout(LayoutKind.Sequential)]
