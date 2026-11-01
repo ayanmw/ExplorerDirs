@@ -156,12 +156,13 @@ internal static class QdrExporter
     }
 
     internal static int SaveBackup(string backupPath, SessionState state, IReadOnlyList<PinnedTabEntry> pins,
-        IReadOnlyDictionary<int, LayoutProportions> proportions, NavigationTreeWidths treeWidths)
+        IReadOnlyDictionary<int, LayoutProportions> proportions, NavigationTreeWidths treeWidths,
+        Guid? profileProviderClassId = null)
     {
         // Keep the exact portable session even if later Shell binding or QDR output fails.
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(backupPath))!);
         File.WriteAllText(backupPath, SessionStore.Render(state));
-        var document = Prepare(state, pins, proportions, treeWidths);
+        var document = Prepare(state, pins, proportions, treeWidths, profileProviderClassId);
         File.WriteAllText(backupPath + ".qdr", document.Text, Encoding.Unicode);
         return document.UnencodedLocationCount;
     }

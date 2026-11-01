@@ -2404,4 +2404,4 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 隔离发布脚本现在复制有效的 `ShellNamespace.ini`，为预览 profile 生成新 CLSID，并在副本的 `.ini` 状态文件与 `.qdr` 的 `ExplorerDirs.State` Base64 JSON payload 中重映射旧 GUID；测试确认 source profile 逐文件 hash 不变、QDR base 物理路径不变。无该文件的旧 profile 保持原复制行为；无效 GUID 与未来格式会在构建及创建 release 前被拒绝。`publish-smoke.ps1` 通过 fixture 真实执行打包脚本，没有真实 release 或 GUI。
 
-store 尚未从应用启动调用，也没有创建/回收 volatile Shell namespace；应用 QDR 调用点也还没有把 profile CLSID 传给 `QdrExporter`。QuickLinks 下的 `.lnk` 内部 PIDL 未做重写验证。故已证实的是隔离文本状态与 QDR 扩展重映射，不代表产品 Shell 位置恢复、Q-Dir GUI 互操作或 Quick Link 的自定义 namespace 往返已完成。
+应用 `MainWindow` 现在从共享 profile 目录加载/首次创建该 CLSID，并将它传给 Q-Dir 导出、桌面工作区导出及导入前备份的 `QdrExporter.Prepare/Render/SaveBackup` 路径；App 与 SettingsSmoke Release build 0 警告/错误，profile-store 和 QDR location smoke 通过。应用尚未创建/回收 volatile Shell namespace，因此当前没有产品 view 会使用这个 CLSID；QuickLinks 下 `.lnk` 内部 PIDL 也未验证。以上只证明配置身份持久化、QDR 编码规则和隔离复制转换已接线，未证明产品 Shell 位置恢复、Q-Dir GUI 互操作或 Quick Link 的自定义 namespace 往返。

@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private bool _lastNonMinimizedMaximized;
     private readonly ApplicationThemeController? _themeController;
     private readonly string _profileDirectory;
+    private readonly Guid? _shellNamespaceProfileClassId;
     private readonly Func<MainWindow, MainWindow?>? _createWindow;
     private readonly Action? _restartApplication;
     private FullScreenPresentation? _fullScreenRestoreState;
@@ -181,6 +182,12 @@ public partial class MainWindow : Window
         _lastNonMinimizedMaximized = _savedWindowPlacement?.Maximized == true;
         if (HasSavedWindowPlacement) WindowStartupLocation = WindowStartupLocation.Manual;
         _profileDirectory = Path.GetFullPath(profileDirectory ?? Path.GetDirectoryName(primarySessionPath)!);
+        var shellNamespaceProfileStore = new ShellNamespaceProfileStore(
+            Path.Combine(_profileDirectory, "ShellNamespace.ini"));
+        _shellNamespaceProfileClassId = shellNamespaceProfileStore.LoadOrCreate();
+        if (shellNamespaceProfileStore.LoadWarning is { } shellNamespaceWarning)
+            EnvironmentStatus.Text = string.IsNullOrEmpty(EnvironmentStatus.Text)
+                ? shellNamespaceWarning : $"{EnvironmentStatus.Text} {shellNamespaceWarning}";
         _sizeDisplayPreferenceStore = new SizeDisplayPreferenceStore(Path.Combine(_profileDirectory, "SizeDisplay.ini"));
         ByteSizeFormatter.SetOptions(_sizeDisplayPreferenceStore.Load());
         if (_sizeDisplayPreferenceStore.LoadWarning is { } sizeDisplayWarning)
@@ -2966,11 +2973,13 @@ public partial class MainWindow : Window
             var backupPins = _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray();
             var backupProportions = SnapshotLayoutProportions();
             var backupWidths = _treeWidths;
-            var baseline = QdrExporter.Render(snapshot, backupPins, backupProportions, backupWidths);
+            var baseline = QdrExporter.Render(snapshot, backupPins, backupProportions, backupWidths,
+                profileProviderClassId: _shellNamespaceProfileClassId);
             var unresolvedBackupPaths = await WindowBackgroundOperation.RunAsync((Path: backup, Session: snapshot,
-                Pins: backupPins, Proportions: backupProportions, Widths: backupWidths),
+                Pins: backupPins, Proportions: backupProportions, Widths: backupWidths,
+                ProviderClassId: _shellNamespaceProfileClassId),
                 static state => QdrExporter.SaveBackup(state.Path, state.Session, state.Pins,
-                    state.Proportions, state.Widths), _windowOperationStop.Token);
+                    state.Proportions, state.Widths, state.ProviderClassId), _windowOperationStop.Token);
             if (_closed) return;
             backupPath = backup;
             if (!IsVisible || !IsActive)
@@ -2982,7 +2991,8 @@ public partial class MainWindow : Window
             // Append only if the completed backup still describes the state we are about to modify.
             var current = QdrExporter.Render(SnapshotSession(),
                 _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
-                SnapshotLayoutProportions(), _treeWidths);
+                SnapshotLayoutProportions(), _treeWidths,
+                profileProviderClassId: _shellNamespaceProfileClassId);
             if (!string.Equals(baseline, current, StringComparison.Ordinal))
                 throw new InvalidOperationException("备份期间工作区状态已变化，未追加标签；请重新导入。旧快照备份已保留。");
             appending = true;
@@ -3079,8 +3089,10 @@ public partial class MainWindow : Window
                     MessageBoxResult.Cancel) != MessageBoxResult.OK)) return;
             var document = await WindowBackgroundOperation.RunAsync((Session: SnapshotSession(),
                 Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
-                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
-                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths,
+                ProviderClassId: _shellNamespaceProfileClassId),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths,
+                    state.ProviderClassId),
                 _windowOperationStop.Token);
             if (!ConfirmQdrCompatibility(document)) return;
             var qdrPath = Path.Combine(WorkspaceCatalog.DirectoryFor(_sessionStore.Path), $"Desktop-{Guid.NewGuid():N}.qdr");
@@ -3290,8 +3302,10 @@ public partial class MainWindow : Window
             var snapshot = SnapshotSession();
             var document = await WindowBackgroundOperation.RunAsync((Session: snapshot,
                 Pins: _panes.SelectMany((pane, index) => pane.SnapshotPins(index)).ToArray(),
-                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths),
-                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths),
+                Proportions: SnapshotLayoutProportions(), Widths: _treeWidths,
+                ProviderClassId: _shellNamespaceProfileClassId),
+                static state => QdrExporter.Prepare(state.Session, state.Pins, state.Proportions, state.Widths,
+                    state.ProviderClassId),
                 _windowOperationStop.Token);
             if (_closed) return;
             if (!ConfirmQdrCompatibility(document)) return;
