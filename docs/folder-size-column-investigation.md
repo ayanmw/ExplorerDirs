@@ -2444,9 +2444,9 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 
 ### 2026-11-02：四视图按需递归列的部分行请求
 
-复跑已有 WPF Private Desktop Shell 行探针：同一根目录含 100 个同级文件夹，建立四个共享根的 Shell view，并暂停异步扫描队列。探针读取前三行之前，Shell 已排入 325 条“view × folder”行请求；显式读取前三行得到空值（扫描仍被门闩暂停），新增排队请求为 0。放行后，四个 view batch 完成并发送 2 次合并通知；共享缓存将 325 条行请求合并为 101 次真实目录扫描（100 个同级目录加 `child`），无同一路径扫描重叠。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台、last-input 与清理守卫通过；日志：`src/.state/native-probe-watchdog/20261102-035616-6b3acc3c.stdout.log` 与 `.stderr.log`。
+复跑已有 WPF Private Desktop Shell 行探针：同一根目录含 100 个同级文件夹，建立四个共享根的 Shell view，并暂停异步扫描队列。探针读取前三行之前，Shell 已排入 325 条“view × folder”行请求；显式读取前三行得到空值（扫描仍被门闩暂停），新增排队请求为 0。随后对原生列表发送 `LVM_ENSUREVISIBLE` 滚到末行，顶部索引从 0 变为 78，并新增 22 条行请求（总数 347）。放行后，四个 view batch 完成并合并为 1 次通知；共享缓存将这些跨视图请求合并为 101 次真实目录扫描（100 个同级目录加 `child`），无同一路径扫描重叠。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台、last-input 与清理守卫通过；日志：`src/.state/native-probe-watchdog/20261102-035716-79956179.stdout.log` 与 `.stderr.log`。
 
-这说明按需行值请求可以让首次读取立即返回、跨 view 合并相同目录扫描，并在完成后通知回填；但 Shell 在探针显式读前三行前已经请求了大量行，不能据此承诺只扫描屏幕 viewport 内的文件夹。该场景窗口不可见，也没有模拟滚动，所以请求来源是 Shell view 初始化/列物化的混合行为；尚未单独量出滚动到新行时的增量请求。要做到“只扫屏幕上可见行”，仍需专门的原生列表可见区验证，或由产品维护自身可见行模型。产品 ExplorerBrowser、发布版和刷新策略未改。
+这说明按需行值请求可以让首次读取立即返回、滚动时补入新行、跨 view 合并相同目录扫描，并在完成后通知回填；但 Shell 在探针显式读前三行前已经请求了大量行，不能据此承诺只扫描屏幕 viewport 内的文件夹。滚动增量已通过隐藏列表的顶部索引变化验证；窗口不可见，未验证用户实际滚轮输入、屏幕可见绘制/时序或真实 ExplorerBrowser 的滚动请求范围。当前数据说明共享根的多视图仍可能在初次加载时排入大部分目录，所以后台化能改善阻塞体验，但不能保证只扫描可见项。产品 ExplorerBrowser、发布版和刷新策略未改。
 
 ### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
 
