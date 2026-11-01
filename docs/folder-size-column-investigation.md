@@ -2711,3 +2711,11 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 ### 2026-11-02：生产 ExplorerBrowserHost 按需列排序复验
 
 重新运行产品 adapter + 生产 `ExplorerBrowserHost` 隐藏 HostProbe：volatile profile namespace 注册和跨进程 provider 枚举成功，真实 Shell view 读取到 `folder-small=5 B`、`folder-large=29 B`，递归列排序键保持升序，前台 HWND 未变化。异步值到达后 Shell 没有自动重排，实际初始顺序仍为 `29→5 B`；手动 Shell `sortascending` 后顺序变为 `5→29 B`，但 Shell `IFolderView`、原生 ListView 与导出观察均出现 `0→2` 暂时空列表。该运行确认底层扫描值链已进入产品宿主，但异步排序刷新仍是原型启用前的阻断项；隐藏窗口无绘制证据，不据此断言用户可见闪烁时长或可由 redraw suppression 消除。
+
+### 2026-11-02：异步递归列排序等待值就绪（更正固定延迟结论）
+
+上一条报告的“值到达后没有自动排序”来自把第一次行快照采样当成最终状态；随后生产 HostProbe 证明导航恢复中的 100 ms 固定延迟调度有时会抢在值回填前执行。先将 HostProbe 改为不手动补发排序、只要求真实导航恢复流程完成大小升序；改动前连续对照出现一次通过、一次失败，确认有时序竞争。
+
+`ScheduleInitialVirtualSort` 现在在两条 Shell 排序命令前，按 100 ms Dispatcher 轮询当前已显示的未解析排序列：通过当前 ListView 列顺序映射到 provider `GetDetailsOf`，只读排序列文本；任一行仍为空时继续等，列映射/读取无法确认时也不抢先排序。该门控读取 Shell 已产生的值，不启动递归磁盘扫描。HostProbe 回归门槛移除了异步值完成后的手动排序调用。
+
+生产 adapter + `ExplorerBrowserHost` 隐藏运行连续 6/6 轮通过：递归值 5/29 B，自动最终顺序 5→29 B；每轮 Shell、ListView 和导出行数保持 2，没有观测到 `0→2`；foreground 未变化。该结果修正此前 3/6 轮观察到空列表的固定延迟对照，表明等待列值后再调度在本小夹具中同时改善了排序稳定性和行数稳定性。仍未证明可见帧、较大目录的轮询成本、超过当前 12 秒调度窗口的慢扫描、列值永久不可读时的行为；需要可见 UI 及更大/慢 I/O 目录验收。

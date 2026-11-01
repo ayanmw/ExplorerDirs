@@ -2731,6 +2731,7 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             }
             var itemCount = ReadDirectoryMonitorItemCount();
             if (_viewReadiness.Pending || itemCount is not > 0) return;
+            if (HasPendingUnresolvedColumnValues(sort, IsCurrent)) return;
             // SetSortColumns restores state but does not always execute a provider's
             // comparator on the first view fill. A direction transition asks Shell to
             // run its own sort callback without a full IShellView.Refresh. Separate the
@@ -2749,6 +2750,24 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
             _ = InvokeVirtualSortVerb(savedVerb, IsCurrent);
         };
         timer.Start();
+    }
+
+    private bool HasPendingUnresolvedColumnValues(SortColumnState sort, Func<bool> isCurrent)
+    {
+        if (!isCurrent()) return true;
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return true;
+        try
+        {
+            if (!isCurrent()) return true;
+            return ShellFileViewExportCapture.HasPendingUnresolvedColumnValues(view, _viewWindow, sort.Key);
+        }
+        catch (Exception exception) when (exception is COMException or InvalidDataException)
+        {
+            // An unreadable custom value is not evidence that all rows are ready to sort.
+            return true;
+        }
+        finally { Marshal.Release(view); }
     }
 
     private bool InvokeVirtualSortVerb(string verb, Func<bool> isCurrent)

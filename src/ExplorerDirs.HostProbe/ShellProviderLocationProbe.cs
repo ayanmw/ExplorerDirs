@@ -476,17 +476,14 @@ internal static class ShellProviderLocationProbe
             }
             else if (sortStrategy == "scheduled")
             {
-                stage = "production-delayed-sort";
-                var scheduleSort = hostType.GetMethod("ScheduleInitialVirtualSort", BindingFlags.Instance | BindingFlags.NonPublic)!;
-                var restoredSort = sorts.GetValue(0)!;
+                stage = "production-initial-sort-after-async-fill";
                 ResetProductCompareDiagnostics(adapter);
-                scheduleSort.Invoke(host, [restoredSort, new Func<bool>(() => true)]);
                 var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
                     nameColumn, TimeSpan.FromSeconds(10), ["folder-small", "folder-large"]);
                 var compareDiagnosticsAfterScheduledSort = ReadProductCompareDiagnostics(adapter);
                 if (!observation.Names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
-                    throw new TimeoutException("The production delayed virtual-sort scheduler did not restore ascending recursive-size order.");
-                ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
+                    throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
+                ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
                 Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");
             }
             else if (sortStrategy == "header-click")

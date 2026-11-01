@@ -74,6 +74,52 @@ internal static class ShellFileViewExportCapture
             column.Name.Contains("}:", StringComparison.Ordinal));
     }
 
+    internal static bool HasPendingUnresolvedColumnValues(nint folderView, nint viewWindow, PropertyKeyState key)
+    {
+        var result = ShellColumnManager.CaptureForExport(folderView, out var visibleColumns);
+        Marshal.ThrowExceptionForHR(result);
+        if (visibleColumns is null) throw new InvalidDataException("当前文件视图的列信息不可读取。");
+
+        var columnIndex = -1;
+        for (var index = 0; index < visibleColumns.Count; index++)
+        {
+            var column = visibleColumns[index];
+            if (column.Key != key || !column.Name.StartsWith('{') ||
+                !column.Name.Contains("}:", StringComparison.Ordinal)) continue;
+            columnIndex = index;
+            break;
+        }
+        if (columnIndex < 0) return false;
+
+        var visualHeaders = CaptureVisualHeaderTexts(viewWindow);
+        if (visualHeaders.Length != visibleColumns.Count) return true;
+        var unresolvedColumn = new[] { (visibleColumns[columnIndex], columnIndex) };
+        var detailsOrdinals = CaptureDetailsOrdinals(folderView, visualHeaders, unresolvedColumn);
+        if (detailsOrdinals is null) return true;
+
+        var folderId = ShellFolder2Id;
+        Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out var folder));
+        if (folder == 0) throw new COMException("Shell view returned no IShellFolder2 for custom sort readiness.");
+        try
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, AllViewItems, out var count));
+            if (count < 0) throw new InvalidDataException("当前文件视图返回了无效项目数。");
+            for (var rowIndex = 0; rowIndex < count; rowIndex++)
+            {
+                Marshal.ThrowExceptionForHR(At<GetItem>(folderView, 6)(folderView, rowIndex, out var childPidl));
+                if (childPidl == 0) throw new COMException("Shell view returned no item PIDL for custom sort readiness.");
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(ReadShellDetailsValue(folder, childPidl,
+                            (uint)detailsOrdinals[columnIndex]))) return true;
+                }
+                finally { Marshal.FreeCoTaskMem(childPidl); }
+            }
+            return false;
+        }
+        finally { Marshal.Release(folder); }
+    }
+
     private static FileViewPrintSnapshot? CaptureFromShellDetails(nint folderView, nint viewWindow,
         IReadOnlyList<ShellExportColumn> visibleColumns,
         IReadOnlyList<(ShellExportColumn column, int index)> unresolvedColumns)
