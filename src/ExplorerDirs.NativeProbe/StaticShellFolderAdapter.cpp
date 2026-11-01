@@ -5321,6 +5321,46 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
                     TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-rename-pair-inflight-invalidation-passed");
                 renameStore->ReleaseScan(subtree);
                 renameStore->ReleaseScan(renameDestination);
+
+                if (SUCCEEDED(result))
+                {
+                    std::wstring oldFilePath = backingPath;
+                    std::wstring newFilePath = subtree;
+                    try
+                    {
+                        oldFilePath += L"\\root.txt";
+                        newFilePath += L"\\nested.txt";
+                    }
+                    catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; }
+                    PIDLIST_ABSOLUTE oldFilePidl = nullptr;
+                    PIDLIST_ABSOLUTE newFilePidl = nullptr;
+                    if (SUCCEEDED(result)) result = SHParseDisplayName(oldFilePath.c_str(), nullptr, &oldFilePidl, 0, nullptr);
+                    if (SUCCEEDED(result)) result = SHParseDisplayName(newFilePath.c_str(), nullptr, &newFilePidl, 0, nullptr);
+                    if (SUCCEEDED(result))
+                    {
+                        const auto oldParentReservation = renameStore->TryReserveScan(backingPath, child->identity, &ignoredBytes);
+                        const auto newParentReservation = renameStore->TryReserveScan(subtree, child->identity, &ignoredBytes);
+                        if (oldParentReservation != SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired ||
+                            newParentReservation != SyntheticRecursiveSizeSnapshotStore::ScanReservation::Acquired)
+                            result = E_FAIL;
+                        else
+                        {
+                            PCIDLIST_ABSOLUTE renameFilePidls[] = { oldFilePidl, newFilePidl };
+                            const auto fileNotificationResult = renameFolder->MessageSFVCB(SFVM_FSNOTIFY,
+                                reinterpret_cast<WPARAM>(renameFilePidls), SHCNE_RENAMEITEM);
+                            const auto oldParentCommit = renameStore->Set(backingPath, child->identity, 51);
+                            const auto newParentCommit = renameStore->Set(subtree.c_str(), child->identity, 52);
+                            if (fileNotificationResult != E_NOTIMPL || oldParentCommit != S_FALSE || newParentCommit != S_FALSE)
+                                result = E_FAIL;
+                            else
+                                TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-file-rename-pair-inflight-invalidation-passed");
+                            renameStore->ReleaseScan(backingPath);
+                            renameStore->ReleaseScan(subtree);
+                        }
+                    }
+                    if (oldFilePidl) CoTaskMemFree(oldFilePidl);
+                    if (newFilePidl) CoTaskMemFree(newFilePidl);
+                }
             }
         }
         if (oldRenamePidl) CoTaskMemFree(oldRenamePidl);

@@ -1710,3 +1710,9 @@ NativeProbe 的 `SFVM_FSNOTIFY` 现在可报告通知 PIDL 解析名称、文件
 扩展无窗口 `--static-shell-column-folder-smoke`：构造真实旧/新文件夹绝对 PIDL 和各自的在途扫描 reservation，直接调用隔离 folder provider 的 `IShellFolderViewCB::MessageSFVCB(SFVM_FSNOTIFY, ..., SHCNE_RENAMEFOLDER)`。回调分别解析两个 PIDL 路径，并各将一个 reservation 标为失效；对旧、新路径提交的扫描值均返回 `S_FALSE`。日志确认两次 `invalidated-reservations=1`，新增合同 `recursive-size-rename-pair-inflight-invalidation-passed`。原生 adapter `/W4 /WX`、NativeProbe Release build 与无窗口完整 folder smoke 均通过，fixture 目录已清理。
 
 边界：这是对真实 Shell folder callback 处理双 PIDL 与缓存 reservation 的无窗口合同，不是外部进程实际移动目录后的通知时序，不验证 view 枚举/选区/排序、网络或虚拟 namespace，也未接产品 ExplorerBrowser。现有代码通过该路径测试，本轮没有改变通知失效算法或默认策略。下一步可在明确桌面空闲授权后用 Private Desktop 验证外部进程真实目录移动/重命名通知；在此之前继续保持 NativeProbe 隔离。
+
+### 2026-11-01：文件重命名通知双 PIDL 失效合同
+
+无窗口 `--static-shell-column-folder-smoke` 再覆盖 `SHCNE_RENAMEITEM`：为旧文件所在根目录和新文件所在子目录分别建立在途摘要扫描 reservation，构造两个真实文件系统绝对 PIDL 并直接调用隔离 folder provider 的 `IShellFolderViewCB::MessageSFVCB`。回调解析旧、新路径并分别使对应父目录扫描过期；两个旧提交都返回 `S_FALSE`。日志出现 `recursive-size-file-rename-pair-inflight-invalidation-passed`。原生 adapter `/W4 /WX`、NativeProbe Release build 和完整无窗口 folder contract 通过，输出 `window-created=False`。
+
+边界：这是合成 callback 中的文件重命名双 PIDL/父目录缓存合同；没有执行实际文件移动、广播 `SHChangeNotify` 或创建 Shell view，不能代表外部通知时序、视图重枚举/选区/排序、产品 ExplorerBrowser 或可见体验。递归大小列仍未接产品。
