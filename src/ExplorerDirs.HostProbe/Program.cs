@@ -38,6 +38,8 @@ internal static class Program
         if (args is ["--profile-owner-shell-host"]) return ProfileOwnerShellHostProbe.Run();
         if (args is ["--shell-provider-product-async"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync();
+        if (args is ["--shell-provider-product-async-large-sort-readiness"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("large-readiness");
         if (args is ["--shell-provider-product-async-single-sort"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("single-sort-verb");
         if (args is ["--shell-provider-product-async-set-sort-columns"])

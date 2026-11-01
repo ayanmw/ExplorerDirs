@@ -2716,22 +2716,70 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         var attempts = 0;
         var oppositeApplied = false;
         var expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+        var readinessRow = 0;
+        int? readinessItemCount = null;
+        var readinessFoundPendingValue = false;
         bool IsCurrent() => isCurrent() &&
             expectedInputVersion == Interlocked.Read(ref _nativeUserInputVersion);
         var timer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(100)
         };
-        timer.Tick += (_, _) =>
+        timer.Tick += async (_, _) =>
         {
+            timer.Stop();
             if (!IsCurrent() || ++attempts > 120)
             {
-                timer.Stop();
                 return;
             }
             var itemCount = ReadDirectoryMonitorItemCount();
-            if (_viewReadiness.Pending || itemCount is not > 0) return;
-            if (HasPendingUnresolvedColumnValues(sort, IsCurrent)) return;
+            if (_viewReadiness.Pending || itemCount is not > 0)
+            {
+                timer.Start();
+                return;
+            }
+
+            while (IsCurrent())
+            {
+                bool batchPending;
+                int shellItemCount;
+                try
+                {
+                    batchPending = HasPendingUnresolvedColumnValues(sort, readinessRow,
+                        ShellFileViewExportCapture.ReadinessBatchSize, out shellItemCount);
+                }
+                catch (Exception exception) when (exception is COMException or InvalidDataException)
+                {
+                    batchPending = true;
+                    shellItemCount = -1;
+                }
+
+                if (shellItemCount < 0 || readinessItemCount is not null && readinessItemCount.Value != shellItemCount)
+                {
+                    // A changing Shell row count invalidates the current scan; retry from row zero next timer turn.
+                    readinessItemCount = null;
+                    readinessRow = 0;
+                    readinessFoundPendingValue = false;
+                    timer.Start();
+                    return;
+                }
+                readinessItemCount ??= shellItemCount;
+                readinessFoundPendingValue |= batchPending;
+                readinessRow = Math.Min(readinessItemCount.Value,
+                    readinessRow + ShellFileViewExportCapture.ReadinessBatchSize);
+                if (readinessRow >= readinessItemCount.Value) break;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+            }
+
+            if (!IsCurrent()) return;
+            if (readinessFoundPendingValue)
+            {
+                readinessItemCount = null;
+                readinessRow = 0;
+                readinessFoundPendingValue = false;
+                timer.Start();
+                return;
+            }
             // SetSortColumns restores state but does not always execute a provider's
             // comparator on the first view fill. A direction transition asks Shell to
             // run its own sort callback without a full IShellView.Refresh. Separate the
@@ -2743,10 +2791,10 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
                 oppositeApplied = InvokeVirtualSortVerb(oppositeVerb, IsCurrent);
                 if (!oppositeApplied) timer.Stop();
                 else expectedInputVersion = Interlocked.Read(ref _nativeUserInputVersion);
+                if (oppositeApplied) timer.Start();
                 return;
             }
 
-            timer.Stop();
             _ = InvokeVirtualSortVerb(savedVerb, IsCurrent);
         };
         timer.Start();
@@ -2765,6 +2813,25 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
         catch (Exception exception) when (exception is COMException or InvalidDataException)
         {
             // An unreadable custom value is not evidence that all rows are ready to sort.
+            return true;
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private bool HasPendingUnresolvedColumnValues(SortColumnState sort, int startIndex, int maximumRows,
+        out int itemCount)
+    {
+        itemCount = -1;
+        var view = GetFolderView2Pointer();
+        if (view == IntPtr.Zero) return true;
+        try
+        {
+            return ShellFileViewExportCapture.HasPendingUnresolvedColumnValues(view, _viewWindow, sort.Key,
+                startIndex, maximumRows, out itemCount);
+        }
+        catch (Exception exception) when (exception is COMException or InvalidDataException)
+        {
+            // A failed partial Shell read is retried as an incomplete batch on the next timer turn.
             return true;
         }
         finally { Marshal.Release(view); }

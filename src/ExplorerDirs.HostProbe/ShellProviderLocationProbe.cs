@@ -23,6 +23,7 @@ internal static class ShellProviderLocationProbe
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
         var notificationDirectoryLarge = sortStrategy == "notification-updatedir-large";
+        var largeSortReadiness = sortStrategy == "large-readiness";
         var notificationRedrawSuppressedSort = sortStrategy == "notification-updatedir-paired-sort-redraw";
         var notificationPairedSort = sortStrategy is "notification-updatedir-paired-sort" or "notification-updatedir-paired-sort-redraw";
         var notificationFollowupSort = sortStrategy is "notification-updatedir-sort" or "notification-updatedir-paired-sort" or "notification-updatedir-paired-sort-redraw";
@@ -31,8 +32,11 @@ internal static class ShellProviderLocationProbe
         var flushNotifications = sortStrategy is "notification-burst-flush" or "notification-items-flush";
         var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 :
             notificationDirectory || notificationItems ? 5000 : 0;
-        var extraFolderCount = notificationBurst ? 14 : notificationDirectoryLarge ? 100 : 0;
+        var extraFolderCount = notificationBurst ? 14 : notificationDirectoryLarge ? 100 : largeSortReadiness ? 1000 : 0;
         var expectedFolderCount = 2 + extraFolderCount;
+        var expectedSizeSortedNames = new[] { "folder-small", "folder-large" }
+            .Concat(Enumerable.Range(0, extraFolderCount).Select(index => $"folder-extra-{index:D2}"))
+            .ToArray();
         var expectedRecursiveValues = extraFolderCount > 0
             ? Enumerable.Range(101, extraFolderCount).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
             : new[] { 5UL, 29UL };
@@ -186,9 +190,34 @@ internal static class ShellProviderLocationProbe
                     TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
                     .Order().SequenceEqual(expectedRecursiveValues);
             }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
-            var compareDiagnosticsAfterAsyncFill = ReadProductCompareDiagnostics(adapter);
+            var compareDiagnosticsAfterAsyncFill = largeSortReadiness ? [] : ReadProductCompareDiagnostics(adapter);
             if (compareDiagnosticsAfterAsyncFill.Length > 0)
                 Console.WriteLine($"shell-provider-product-async-compare-trace: phase=async-fill; count={compareDiagnosticsAfterAsyncFill.Length}; records=[{string.Join(" || ", compareDiagnosticsAfterAsyncFill)}]");
+
+            var readinessCheck = hostType.GetMethod("HasPendingUnresolvedColumnValues", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, [sorts.GetValue(0)!.GetType(), typeof(Func<bool>)], modifiers: null)!;
+            var readinessClock = Stopwatch.StartNew();
+            var pendingValues = (bool)readinessCheck.Invoke(host, [sorts.GetValue(0), new Func<bool>(() => true)])!;
+            readinessClock.Stop();
+            if (largeSortReadiness && pendingValues)
+                throw new InvalidOperationException("The production readiness check still reported pending values after all recursive values were observed.");
+            var batchReadinessCheck = hostType.GetMethod("HasPendingUnresolvedColumnValues", BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null, [sorts.GetValue(0)!.GetType(), typeof(int), typeof(int), typeof(int).MakeByRefType()], modifiers: null)!;
+            var batchReadinessClock = Stopwatch.StartNew();
+            var maximumBatchMilliseconds = 0d;
+            var readinessBatchCount = 0;
+            var readinessBatchSize = (int)appAssembly.GetType("ExplorerDirs.App.ShellFileViewExportCapture", throwOnError: true)!
+                .GetField("ReadinessBatchSize", BindingFlags.Static | BindingFlags.NonPublic)!.GetRawConstantValue()!;
+            for (var startIndex = 0; startIndex < expectedFolderCount; startIndex += readinessBatchSize)
+            {
+                var batchClock = Stopwatch.StartNew();
+                var arguments = new object?[] { sorts.GetValue(0), startIndex, readinessBatchSize, 0 };
+                _ = (bool)batchReadinessCheck.Invoke(host, arguments)!;
+                batchClock.Stop();
+                maximumBatchMilliseconds = Math.Max(maximumBatchMilliseconds, batchClock.Elapsed.TotalMilliseconds);
+                readinessBatchCount++;
+            }
+            batchReadinessClock.Stop();
 
             var nativeCellsBeforeNotification = notificationDirectory || notificationItems
                 ? ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3)
@@ -438,7 +467,7 @@ internal static class ShellProviderLocationProbe
                         orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
                         columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
                         captureExportRowCounts.Add(orderedRows.Length);
-                        return orderedRows.Length == 2;
+                        return orderedRows.Length == expectedFolderCount;
                     }
                     catch (TargetInvocationException exception) when (IsTransientShellReadError(exception))
                     {
@@ -455,7 +484,7 @@ internal static class ShellProviderLocationProbe
             if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
             names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
             var orderAfterAsyncFill = names;
-            var autoResorted = names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
+            var autoResorted = names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase);
             if (sortStrategy == "single-sort-verb")
             {
                 stage = "single-sort-command";
@@ -474,16 +503,23 @@ internal static class ShellProviderLocationProbe
                     nameColumn, TimeSpan.FromMilliseconds(400));
                 ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, result, observation, classId);
             }
-            else if (sortStrategy == "scheduled")
+            else if (sortStrategy is "scheduled" or "large-readiness")
             {
                 stage = "production-initial-sort-after-async-fill";
                 ResetProductCompareDiagnostics(adapter);
+                var largeReadinessCountTrace = largeSortReadiness ? new List<string>() : null;
                 var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
-                    nameColumn, TimeSpan.FromSeconds(10), ["folder-small", "folder-large"]);
-                var compareDiagnosticsAfterScheduledSort = ReadProductCompareDiagnostics(adapter);
-                if (!observation.Names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
+                    nameColumn, TimeSpan.FromSeconds(20), expectedSizeSortedNames,
+                    sampleIntervalMilliseconds: largeSortReadiness ? 100 : 20,
+                    orderedCountTrace: largeReadinessCountTrace);
+                var compareDiagnosticsAfterScheduledSort = largeSortReadiness ? [] : ReadProductCompareDiagnostics(adapter);
+                if (!observation.Names.SequenceEqual(expectedSizeSortedNames, StringComparer.OrdinalIgnoreCase))
                     throw new TimeoutException("The production navigation restore did not sort by recursive size after asynchronous values completed.");
-                ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
+                if (largeSortReadiness)
+                {
+                    Console.WriteLine($"shell-provider-product-async-large-readiness: rows={expectedFolderCount}; complete-readiness-scan-ms={readinessClock.Elapsed.TotalMilliseconds:F2}; batched-scan-ms={batchReadinessClock.Elapsed.TotalMilliseconds:F2}; batches={readinessBatchCount}; max-batch-ms={maximumBatchMilliseconds:F2}; auto-resorted-before-observation={autoResorted}; final-order-valid=True; first={observation.Names[0]}; last={observation.Names[^1]}; shell-counts=[{string.Join('|', observation.ShellItemCounts)}]; listview-counts=[{string.Join('|', observation.NativeListViewCounts)}]; export-counts=[{string.Join('|', observation.ExportRowCounts)}]; count-transitions=[{string.Join('|', largeReadinessCountTrace ?? [])}]; foreground-unchanged=True");
+                }
+                else ReportSortExperiment("automatic-after-fill", orderAfterAsyncFill, autoResorted, 0, observation, classId);
                 Console.WriteLine($"shell-provider-product-async-scheduled-sort-state: sort-columns=[{string.Join('|', CaptureSortColumns(hostType, host))}]; compare-trace=[{string.Join(" || ", compareDiagnosticsAfterScheduledSort)}]");
             }
             else if (sortStrategy == "header-click")
@@ -1441,7 +1477,8 @@ internal static class ShellProviderLocationProbe
 
     private static (string[] Names, int[] ShellItemCounts, int[] NativeListViewCounts, string[] NativeListViewRowSnapshots, int[] ExportRowCounts, int TransientReadErrors) ObserveProductSort(
         Type hostType, HwndHost host, MethodInfo capture, MethodInfo readRows, MethodInfo readItemCounts,
-        int nameColumn, TimeSpan duration, string[]? expectedNames = null)
+        int nameColumn, TimeSpan duration, string[]? expectedNames = null, int sampleIntervalMilliseconds = 20,
+        List<string>? orderedCountTrace = null)
     {
         var shellItemCounts = new HashSet<int>();
         var nativeListViewCounts = new HashSet<int>();
@@ -1449,6 +1486,7 @@ internal static class ShellProviderLocationProbe
         var exportRowCounts = new HashSet<int>();
         var transientReadErrors = 0;
         string[] names = [];
+        var lastCountTuple = "";
         var viewWindowField = hostType.GetField("_viewWindow", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var clock = Stopwatch.StartNew();
         do
@@ -1459,20 +1497,30 @@ internal static class ShellProviderLocationProbe
                 var listSnapshot = ReadNativeListViewSnapshot(viewWindow);
                 nativeListViewCounts.Add(listSnapshot.Count);
                 nativeListViewRowSnapshots.Add($"{listSnapshot.Count}:{string.Join('|', listSnapshot.Names)}");
+                var shellCount = -1;
                 var liveCounts = readItemCounts.Invoke(host, [false, false]);
                 if (liveCounts is not null)
-                    shellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
+                {
+                    shellCount = (int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!;
+                    shellItemCounts.Add(shellCount);
+                }
                 var snapshot = capture.Invoke(host, null)!;
                 var rows = readRows.Invoke(null, [snapshot])!;
                 var orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
                 names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
                 exportRowCounts.Add(names.Length);
+                var countTuple = $"{shellCount}:{listSnapshot.Count}:{names.Length}";
+                if (countTuple != lastCountTuple)
+                {
+                    orderedCountTrace?.Add($"{clock.ElapsedMilliseconds}ms={countTuple}");
+                    lastCountTuple = countTuple;
+                }
             }
             catch (TargetInvocationException exception) when (IsTransientShellReadError(exception))
             {
                 transientReadErrors++;
             }
-            PumpDispatcher(TimeSpan.FromMilliseconds(20));
+            PumpDispatcher(TimeSpan.FromMilliseconds(sampleIntervalMilliseconds));
         } while (clock.Elapsed < duration && (expectedNames is null ||
             !names.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)));
         return (names, shellItemCounts.Order().ToArray(), nativeListViewCounts.Order().ToArray(),
@@ -1565,14 +1613,30 @@ internal static class ShellProviderLocationProbe
                 var values = new string[count];
                 for (var index = 0; index < count; index++)
                 {
-                    Check(getItem(view, index, out var pidl));
+                    var itemResult = getItem(view, index, out var pidl);
+                    if (itemResult == unchecked((int)0x80004005) ||
+                        itemResult == unchecked((int)0x80070057) ||
+                        itemResult == unchecked((int)0x8000000B))
+                    {
+                        // Shell item indexes can transiently change while a large async view is filling.
+                        values[index] = string.Empty;
+                        continue;
+                    }
+                    Check(itemResult);
                     try
                     {
                         var variant = Marshal.AllocCoTaskMem(IntPtr.Size == 8 ? 24 : 16);
                         try
                         {
                             Marshal.WriteInt16(variant, 0);
-                            Check(getDetailsEx(folder, pidl, ref key, variant));
+                            var result = getDetailsEx(folder, pidl, ref key, variant);
+                            if (result == unchecked((int)0x80004005) || result == unchecked((int)0x8000000B))
+                            {
+                                // The product provider uses E_FAIL to mark an async size row not cached yet.
+                                values[index] = string.Empty;
+                                continue;
+                            }
+                            Check(result);
                             values[index] = Marshal.GetObjectForNativeVariant(variant)?.ToString() ?? string.Empty;
                         }
                         finally

@@ -2719,3 +2719,7 @@ HostProbe 在同一 STA 调度流程内先发相反方向 Shell 排序，再发�
 `ScheduleInitialVirtualSort` 现在在两条 Shell 排序命令前，按 100 ms Dispatcher 轮询当前已显示的未解析排序列：通过当前 ListView 列顺序映射到 provider `GetDetailsOf`，只读排序列文本；任一行仍为空时继续等，列映射/读取无法确认时也不抢先排序。该门控读取 Shell 已产生的值，不启动递归磁盘扫描。HostProbe 回归门槛移除了异步值完成后的手动排序调用。
 
 生产 adapter + `ExplorerBrowserHost` 隐藏运行连续 6/6 轮通过：递归值 5/29 B，自动最终顺序 5→29 B；每轮 Shell、ListView 和导出行数保持 2，没有观测到 `0→2`；foreground 未变化。该结果修正此前 3/6 轮观察到空列表的固定延迟对照，表明等待列值后再调度在本小夹具中同时改善了排序稳定性和行数稳定性。仍未证明可见帧、较大目录的轮询成本、超过当前 12 秒调度窗口的慢扫描、列值永久不可读时的行为；需要可见 UI 及更大/慢 I/O 目录验收。
+
+### 2026-11-02：大列表就绪扫描按批让出 Dispatcher
+
+新增 1,002 目录的生产 adapter + `ExplorerBrowserHost` 隐藏场景，逐项大小为 5、29、101–1100 B。完整就绪读一次约 407 ms，确认原全量同步检查可能长时间占用 UI Dispatcher。将产品检查拆为 8 行一批，并在批次间 `Dispatcher.Yield(Background)`；复测最大单批约 8–12 ms。两次定时序复跑均最终升序正确，Shell/ListView/export 在最终排序观测期间保持 1,002 行，前台 HWND 未变化；此前一次较早采样收集到 0 和 1,002 两种行数，但未记录到转变时序，不能归因于排序或扫描。Release App / HostProbe 构建 0 警告/错误；该隐藏探针不采集可见帧，不能证明真实磁盘、慢盘/网络 provider 的帧时间，也不代表产品逐行列已完成。下一步仍需在集中 UI 验收中观察大目录滚动和交互响应，并对慢值回填/目录行数变化做实机确认。
