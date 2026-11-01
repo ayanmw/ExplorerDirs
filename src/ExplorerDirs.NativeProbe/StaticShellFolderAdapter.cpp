@@ -1583,15 +1583,21 @@ namespace
             if (!identity.available || !bytes) return false;
             std::lock_guard<std::mutex> lock(_mutex);
             const auto found = _sizes.find(parsingName);
-            if (found == _sizes.end()) return false;
+            if (found == _sizes.end())
+            {
+                ++_lookupMisses;
+                return false;
+            }
             const SyntheticFileIdentityLess less{};
             if (less(found->second.identity, identity) || less(identity, found->second.identity))
             {
                 // A reused parsing name now identifies another directory; discard the unreachable old snapshot.
                 _sizes.erase(found);
+                ++_lookupMisses;
                 return false;
             }
             found->second.lastAccess = NextAccessSequence();
+            ++_lookupHits;
             *bytes = found->second.bytes;
             if (files) *files = found->second.files;
             if (folders) *folders = found->second.folders;
@@ -1611,11 +1617,13 @@ namespace
                     if (!less(cached->second.identity, identity) && !less(identity, cached->second.identity))
                     {
                         cached->second.lastAccess = NextAccessSequence();
+                        ++_lookupHits;
                         *cachedBytes = cached->second.bytes;
                         return ScanReservation::Cached;
                     }
                     _sizes.erase(cached);
                 }
+                ++_lookupMisses;
                 if (_scansInProgress.find(parsingName) != _scansInProgress.end())
                     return ScanReservation::InProgress;
                 // This store is shared across folder wrappers, so the reservation coalesces same-path scans across views.
@@ -1647,6 +1655,16 @@ namespace
                 bytes += sizeof(entry.first) + sizeof(entry.second) + (entry.first.size() + 1) * sizeof(wchar_t);
             return bytes;
         }
+        void ResetLookupMetrics() const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            _lookupHits = 0;
+            _lookupMisses = 0;
+            _evictions = 0;
+        }
+        ULONGLONG LookupHits() const { std::lock_guard<std::mutex> lock(_mutex); return _lookupHits; }
+        ULONGLONG LookupMisses() const { std::lock_guard<std::mutex> lock(_mutex); return _lookupMisses; }
+        ULONGLONG Evictions() const { std::lock_guard<std::mutex> lock(_mutex); return _evictions; }
     private:
         ULONGLONG NextAccessSequence() const noexcept { return ++_accessSequence; }
         void TrimToCapacity() const noexcept
@@ -1659,6 +1677,7 @@ namespace
                     if (entry->second.lastAccess < oldest->second.lastAccess) oldest = entry;
                 }
                 _sizes.erase(oldest);
+                ++_evictions;
             }
         }
         volatile LONG _references = 1;
@@ -1667,6 +1686,9 @@ namespace
         mutable std::map<std::wstring, SyntheticRecursiveSizeSnapshot, ShellParsingNameLess> _sizes;
         std::map<std::wstring, bool, ShellParsingNameLess> _scansInProgress;
         mutable ULONGLONG _accessSequence = 0;
+        mutable ULONGLONG _lookupHits = 0;
+        mutable ULONGLONG _lookupMisses = 0;
+        mutable ULONGLONG _evictions = 0;
     };
 
     constexpr SyntheticChild kSyntheticChildren[] =
@@ -6565,6 +6587,42 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCachePaylo
     return static_cast<LONG>(bytes);
 }
 
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupHitsForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto count = store->LookupHits();
+    store->Release();
+    return static_cast<LONG64>(count);
+}
+
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheLookupMissesForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto count = store->LookupMisses();
+    store->Release();
+    return static_cast<LONG64>(count);
+}
+
+extern "C" __declspec(dllexport) LONG64 WINAPI GetSyntheticRecursiveSizeCacheEvictionsForProbe()
+{
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (!store) return 0;
+    const auto count = store->Evictions();
+    store->Release();
+    return static_cast<LONG64>(count);
+}
+
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsForProbe()
 {
     InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
@@ -6577,6 +6635,15 @@ extern "C" __declspec(dllexport) void WINAPI ResetSyntheticOnDemandSizeMetricsFo
     InterlockedExchange(&g_syntheticAsyncRecursiveSizePeakWorkersForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe, 0);
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe, 0);
+    AcquireSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    auto* store = g_sharedRecursiveSizeStore;
+    if (store) store->AddRef();
+    ReleaseSRWLockExclusive(&g_sharedRecursiveSizeStoreLock);
+    if (store)
+    {
+        store->ResetLookupMetrics();
+        store->Release();
+    }
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticDirectoryMetricsCallCount()
