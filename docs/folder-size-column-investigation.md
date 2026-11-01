@@ -2489,3 +2489,14 @@ NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，�
 复用四个不同根目录、每根四个目标目录的在途退役场景，把每个文件项的隔离延迟从 10 ms 提高到 50 ms。放行后等待两个 worker 已启动且累计访问 32 个条目，再同时销毁四个 view。Private Desktop watchdog exit 0；`initial-scans=2`、`scan-attempts=2`、`entries-before=32`、`entries-after=32`、发布结果 `0→0`、通知 `0→0`、四个 batch 均结束。相较 10 ms 场景额外完成 2 项，50 ms 场景在销毁时没有额外推进；没有在途目录结果写回或 Shell 更新通知。stderr 为 0 B，前台、输入及隔离清理守卫通过。日志：`src/.state/native-probe-watchdog/20261102-042047-7a1cf1b6.stdout.log`、`.stderr.log`。
 
 这个受控延迟只验证 NativeProbe 的取消检查点和退休后的发布抑制；它不是实际磁盘 I/O 时延，也未接入产品 ExplorerBrowser。结果支持把扫描留在后台并在 view 退役时取消，但对真实慢盘取消粒度、UI 更新、产品内存和视觉闪烁仍无结论。产品代码与发布版未改变。
+
+### 2026-11-02：递归大小列的产品接线架构门槛
+
+源码与既有隔离结果给出的路线是：保留产品 `ExplorerBrowserHost`，以原生 `IShellFolder2` namespace adapter 包装真实文件系统目录并提供递归大小列；无需为此功能整体迁移到自绘行列表或直接托管自定义 `IShellView`。证据边界如下：
+
+- `src/ExplorerDirs.App/ExplorerBrowserHost.cs` 已通过 `IExplorerBrowser.GetCurrentView` 取得当前 Shell view，并承载现有导航、会话列状态、刷新和文件命令路径；`PaneControl` 现有递归扫描只针对用户显式请求的状态栏汇总，不会逐行提供列值。
+- `src/ExplorerDirs.NativeProbe/StaticShellFolderAdapter.cpp` 是目前唯一实现自定义递归列值的原生 provider，位于 NativeProbe 源码及构建路径；App 项目没有把这个 DLL 纳入载荷或注册其 Shell 类。
+- 已有注册 namespace 的 ExplorerBrowser 隔离合同覆盖自定义列、原生菜单、复制/移动/重命名/删除、Shell 通知、子目录与 Back/Forward、多浏览器并行及关闭扫描退役；产品 HostProbe 另已验证应用 host 能导航到 provider 路径、读取递归值/排序并经过生产 SessionStore 同进程恢复。这些不是可见产品或发布证据。
+- 应用启动时已从便携 profile 的 `ShellNamespace.ini` 读取稳定 CLSID，但当前用途是识别和序列化 provider 路径；应用尚未注册原生 adapter。隔离 owner 测试证明不同 profile 可独立注册、重开时复用 CLSID；也证明进程崩溃后 volatile HKCU 注册仍会留到登录会话结束，不能把注册所有权简单绑定到一次进程退出清理。
+
+因此下阶段若继续推进产品接线，应先在独立 NativeProbe/HostProbe 完成可复用的 profile namespace owner 生命周期：启动检查、并发窗口/进程的所有权、异常退出后 stale volatile key 恢复、正常关机的 COM/view 释放顺序和 profile 克隆身份重映射；然后才将 adapter 纳入 App build/package。仍需通过可见验收确认列绘制、滚动/排序、复制标签、外部文件变更和菜单行为。当前保持产品与 release 不变，也不把这个架构结论当作功能已完成。
