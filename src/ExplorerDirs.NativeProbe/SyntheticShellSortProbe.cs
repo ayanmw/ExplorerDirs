@@ -344,9 +344,14 @@ public static class SyntheticShellSortProbe
         var asyncScanDelayText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_SCAN_DELAY_MS");
         var asyncScanDelayMs = string.IsNullOrWhiteSpace(asyncScanDelayText) ? 0 :
             int.TryParse(asyncScanDelayText, out var parsedAsyncScanDelayMs) ? parsedAsyncScanDelayMs : -1;
+        var asyncEntryDelayText = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_ENTRY_DELAY_MS");
+        var asyncEntryDelayMs = string.IsNullOrWhiteSpace(asyncEntryDelayText) ? 0 :
+            int.TryParse(asyncEntryDelayText, out var parsedAsyncEntryDelayMs) ? parsedAsyncEntryDelayMs : -1;
         var asyncMinimalFixture = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_MINIMAL_FIXTURE") == "1";
         if (asyncScanDelayMs is < 0 or > 1000)
             throw new ArgumentOutOfRangeException(nameof(asyncScanDelayText), "Async scan latency injection must be between 0 and 1000 milliseconds.");
+        if (asyncEntryDelayMs is < 0 or > 1000)
+            throw new ArgumentOutOfRangeException(nameof(asyncEntryDelayText), "Async per-entry latency injection must be between 0 and 1000 milliseconds.");
         var asyncBatchViewCount = asyncSharedViewProbe ? asyncSharedViewCount : 1;
         var asyncCancelAfterQueueProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_AFTER_QUEUE") == "1";
         var asyncCancelSingleViewProbe = Environment.GetEnvironmentVariable("EXPLORER_DIRS_NATIVEPROBE_ASYNC_CANCEL_SINGLE_VIEW") == "1";
@@ -369,8 +374,8 @@ public static class SyntheticShellSortProbe
             throw new ArgumentException("Batch cancellation requires four active view batches.", nameof(asyncCancelAfterQueueProbe));
         if (asyncCancelSingleViewProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 || asyncSharedViewDistinctRoots))
             throw new ArgumentException("Single-view cancellation requires four batches sharing one root.", nameof(asyncCancelSingleViewProbe));
-        if (asyncCancelInFlightProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 || !asyncSharedViewDistinctRoots || asyncScanDelayMs == 0))
-            throw new ArgumentException("In-flight cancellation requires four distinct-root batches and an injected scan delay.", nameof(asyncCancelInFlightProbe));
+        if (asyncCancelInFlightProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4 || !asyncSharedViewDistinctRoots || asyncEntryDelayMs == 0))
+            throw new ArgumentException("In-flight cancellation requires four distinct-root batches and an injected per-entry delay.", nameof(asyncCancelInFlightProbe));
         if (asyncPartialRequestProbe && (!asyncParentBatchProbe || !asyncSharedViewProbe || asyncSharedViewCount != 4))
             throw new ArgumentException("Partial-row demand requires the four-view batch probe.", nameof(asyncPartialRequestProbe));
         if ((asyncCancelAfterQueueProbe ? 1 : 0) + (asyncCancelSingleViewProbe ? 1 : 0) +
@@ -426,7 +431,8 @@ public static class SyntheticShellSortProbe
                     {
                         var loadProbeFolder = Path.Combine(backingFolder, $"folder-{folderIndex:D3}");
                         Directory.CreateDirectory(loadProbeFolder);
-                        for (var fileIndex = 0; fileIndex < (asyncMinimalFixture ? 1 : 10); fileIndex++)
+                        var fileCount = asyncCancelInFlightProbe && folderIndex < 32 ? 200 : (asyncMinimalFixture ? 1 : 10);
+                        for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)
                             File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"),
                                 largeViewSortProbe && (folderIndex == 0 || folderIndex == 400) && fileIndex == 0 ? new byte[11] : [0x01]);
                     }
@@ -444,7 +450,8 @@ public static class SyntheticShellSortProbe
                         {
                             var loadProbeFolder = Path.Combine(panePath, $"folder-{folderIndex:D3}");
                             Directory.CreateDirectory(loadProbeFolder);
-                            for (var fileIndex = 0; fileIndex < (asyncMinimalFixture ? 1 : 10); fileIndex++)
+                            var fileCount = asyncCancelInFlightProbe && folderIndex < 32 ? 200 : (asyncMinimalFixture ? 1 : 10);
+                            for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)
                                 File.WriteAllBytes(Path.Combine(loadProbeFolder, $"item-{fileIndex:D2}.bin"), [0x01]);
                         }
                     }
@@ -558,6 +565,8 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticAsyncRecursiveSizeBatchByViewForProbe"))(asyncParentBatchProbe ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(asyncScanDelayMs));
+            Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                "SetSyntheticAsyncRecursiveSizeEntryDelayForProbe"))(asyncEntryDelayMs));
             if (relativePercentColumnType is { } percentColumnType)
                 Check(Marshal.GetDelegateForFunctionPointer<SetRelativePercentColumnType>(NativeLibrary.GetExport(module,
                     "SetSyntheticRelativePercentColumnTypeForProbe"))(1, percentColumnType));
@@ -904,12 +913,16 @@ public static class SyntheticShellSortProbe
                             Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                                 NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                             var scanStartedDeadline = Environment.TickCount64 + 10_000;
-                            while (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe") < 2 &&
+                            while ((ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe") < 2 ||
+                                ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount") < 32) &&
                                 Environment.TickCount64 < scanStartedDeadline)
                                 Pump(10);
                             var scansStartedBeforeRetirement = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe");
-                            if (scansStartedBeforeRetirement < 2)
-                                throw new TimeoutException("The delayed recursive-size workers did not enter two scans before view retirement.");
+                            var entriesBeforeRetirement = ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount");
+                            var scansPublishedBeforeRetirement = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe");
+                            var notificationsBeforeRetirement = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
+                            if (scansStartedBeforeRetirement < 2 || entriesBeforeRetirement < 32)
+                                throw new TimeoutException("The delayed recursive-size workers did not enter large-directory traversal before view retirement.");
 
                             Check(At<DestroyViewWindow>(view, 10)(view));
                             viewWindowCreated = false;
@@ -935,13 +948,15 @@ public static class SyntheticShellSortProbe
                                 Pump(25);
                             var scansStarted = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanStartedCountForProbe");
                             var scansPerformed = ReadCounter(module, "GetSyntheticOnDemandSizeScanCount");
+                            var entriesAfterRetirement = ReadCounter(module, "GetSyntheticDirectoryMetricsEntryCount");
                             var scansPublished = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe");
                             var notifications = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
-                            Console.WriteLine($"synthetic-async-recursive-size-inflight-retirement: initial-scans={scansStartedBeforeRetirement}; started={scansStarted}; scans-performed={scansPerformed}; published={scansPublished}; notifications={notifications}; finished-batches={getFinishedAfterCancellation()}");
+                            Console.WriteLine($"synthetic-async-recursive-size-inflight-retirement: initial-scans={scansStartedBeforeRetirement}; scan-attempts={scansPerformed}; entries-before={entriesBeforeRetirement}; entries-after={entriesAfterRetirement}; published-before-after={scansPublishedBeforeRetirement}/{scansPublished}; notifications-before-after={notificationsBeforeRetirement}/{notifications}; finished-batches={getFinishedAfterCancellation()}");
                             if (getFinishedAfterCancellation() < asyncSharedViewCount ||
-                                scansPerformed != scansStartedBeforeRetirement ||
-                                scansPublished != 0 || notifications != 0 || scansStarted != scansStartedBeforeRetirement)
-                                throw new IOException("Retiring all views during active scans either published stale values, notified Shell, or continued starting scans.");
+                                entriesAfterRetirement - entriesBeforeRetirement > 4 ||
+                                scansPublished != scansPublishedBeforeRetirement || notifications != notificationsBeforeRetirement ||
+                                scansStarted != scansStartedBeforeRetirement)
+                                throw new IOException("Retiring all views during recursive enumeration either published stale values, notified Shell, or failed to stop item traversal promptly.");
                             Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                                 NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                             asyncQueueGateCreated = false;
@@ -2003,6 +2018,9 @@ public static class SyntheticShellSortProbe
             if (module != 0)
                 _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                     "SetSyntheticAsyncRecursiveSizeScanDelayForProbe"))(0);
+            if (module != 0)
+                _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
+                    "SetSyntheticAsyncRecursiveSizeEntryDelayForProbe"))(0);
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-native-release-view-holds");
             if (module != 0) Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module, "ReleaseSyntheticSortViewHold"))();
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-release-folder-view-1");

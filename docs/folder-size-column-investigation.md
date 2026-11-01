@@ -1647,6 +1647,14 @@ NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探
 
 两次 Private Desktop watchdog 均 exit 0，前台与最后输入守卫不变，测试夹具及隔离窗口清理通过。结果只覆盖 NativeProbe 隐藏 DefView、按 view 批次与这两种受控关闭时序；不代表产品 ExplorerBrowser、逐项模式、慢磁盘/网络取消延迟或可见窗口交互。日志：`src/.state/native-probe-watchdog/20261101-161401-54f597cb.stdout.log`（四个不同根全部关闭）、`src/.state/native-probe-watchdog/20261101-161429-cc2804f3.stdout.log`（单 view 退休、同根接管）。
 
-源码边界复核：`ProcessRecursiveSizeBatchChunk` 在每个目录扫描开始前检查 view 取消标记，并在递归扫描完成后再次检查，取消后不会将该次扫描发布到共享缓存，也不会因此发送 Shell 更新；但 `GetSyntheticDirectoryMetrics` 的递归遍历内部没有取消检查。故关闭 view 不会中断已经开始的目录递归遍历；它会运行至该目录完成，再抑制结果发布。
+最初的源码复核发现：批次只在进入目录指标扫描前、以及递归扫描返回后检查 view 取消标记，递归遍历本身没有取消检查。因此当时关闭 view 会等当前目录扫描完成，再抑制结果发布。后续条目边界取消检查的实现与验证见下节。
 
 在途退休探针使用四个独立根、每根 500 个目录、750 ms 延迟；连续两轮都等到两项扫描开始后销毁四个 view。两项扫描均实际完成，但成功发布数为 0、Shell 通知为 0、取消后没有启动额外扫描，4 个批次全部结束。Private Desktop 前台/输入守卫、夹具及隔离清理通过。日志：`src/.state/native-probe-watchdog/20261101-162044-a01ade83.stdout.log`、`src/.state/native-probe-watchdog/20261101-162117-8b8c7753.stdout.log` 与最终加强断言后的 `src/.state/native-probe-watchdog/20261101-162228-d9ef6759.stdout.log`。NativeProbe Release 0 警告/错误；无窗口异步按需列、Shell 文件夹合同及缓存失效 smoke 通过。这证明取消会阻止在途结果发布并停止后续扫描，但不证明递归中的单目录任务可中断；若实际关闭延迟不可接受，再评估递归遍历中的取消点。
+
+### 2026-11-01：递归大小扫描在枚举途中响应 view 关闭
+
+把 view 取消标记传入递归目录指标扫描器，并在打开目录、处理每个条目前及 NativeProbe 延迟注入后检查。父目录向下递归时沿用同一取消标记；异步逐项和按 view 批处理 worker 都传入各自 view 的标记，普通同步合同使用默认空标记。为确保不是在扫描开始前取消，Private Desktop 探针让四个独立根各有 20 个大目录，每个含 200 个文件，以 20 ms/条目延迟等待至少 32 条目后退休 view。
+
+RED 基线仅在递归函数内部无取消检查时失败：关闭前累计 32 项，关闭后升至 400 项。加入检查后连续三轮均维持 32 项不增，2 个已开始扫描没有发布值或发 Shell 通知，4 个 view 批次全部结束；Private Desktop 前台、最后输入和隔离清理守卫通过。证据日志：RED `src/.state/native-probe-watchdog/20261101-162832-390999ae.stdout.log`；GREEN `src/.state/native-probe-watchdog/20261101-163006-e0757d4b.stdout.log`、`src/.state/native-probe-watchdog/20261101-163059-deb89a14.stdout.log`、`src/.state/native-probe-watchdog/20261101-163141-d27bc352.stdout.log`。NativeProbe Release 与原生 adapter `/W4 /WX` 构建通过；无窗口异步按需列和 Shell 文件夹/缓存失效 smoke 通过。
+
+该改进仅在隔离 NativeProbe 适配器中验证，尚未接入产品 ExplorerBrowser；注入延迟模拟慢目录条目处理，不是网络盘真实时延测量，也不代表用户可见列表刷新体验。原生文件系统枚举仍只能在条目边界观察取消；单次 `FindFirstFileW`/`FindNextFileW` 调用和当前条目注入延迟不会被强制中断。

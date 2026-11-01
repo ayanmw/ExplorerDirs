@@ -1657,6 +1657,8 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeBatchByViewForProbe = 0;
     // NativeProbe-only latency injection for comparing async scan scheduling under slow storage.
     volatile LONG g_syntheticAsyncRecursiveSizeScanDelayMsForProbe = 0;
+    // NativeProbe-only per-entry delay makes mid-enumeration cancellation deterministic.
+    volatile LONG g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanCompletedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanStartedForProbe = 0;
@@ -1919,13 +1921,16 @@ namespace
         ULONGLONG folders;
     };
 
-    HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics)
+    HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics,
+        volatile LONG* cancellationFlag = nullptr)
     {
         InterlockedIncrement(&g_syntheticDirectoryMetricsCallCount);
         if (g_syntheticCompareCallbackActive)
             InterlockedIncrement(&g_syntheticDirectoryMetricsDuringCompareCount);
         if (!metrics) return E_POINTER;
         *metrics = {};
+        if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+            return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         std::wstring pattern;
         try { pattern = directory + L"\\*"; }
         catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -1937,9 +1942,21 @@ namespace
         bool hasEntry = true;
         while (hasEntry)
         {
+            if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+            {
+                result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                break;
+            }
             if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0)
             {
                 InterlockedIncrement(&g_syntheticDirectoryMetricsEntryCount);
+                const auto entryDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe, 0, 0);
+                if (entryDelayMs > 0) Sleep(static_cast<DWORD>(entryDelayMs));
+                if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
+                {
+                    result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                    break;
+                }
                 ULONGLONG entrySize = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
                 if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 {
@@ -1958,7 +1975,7 @@ namespace
                         try { childPath = directory + L"\\" + entry.cFileName; }
                         catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
                         SyntheticDirectoryMetrics nested{};
-                        result = GetSyntheticDirectoryMetrics(childPath, &nested);
+                        result = GetSyntheticDirectoryMetrics(childPath, &nested, cancellationFlag);
                         if (FAILED(result)) break;
                         entrySize = nested.bytes;
                         if (~static_cast<ULONGLONG>(0) - metrics->files < nested.files ||
@@ -3397,7 +3414,7 @@ namespace
                                 QueryPerformanceCounter(&scanStart);
                                 const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                                 if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
-                                scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                                scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics, &self->_asyncScansCancelled);
                                 QueryPerformanceCounter(&scanEnd);
                                 InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
                                 if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
@@ -3524,7 +3541,7 @@ namespace
                     InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanStartedForProbe);
                     const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                     if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
-                    itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics);
+                    itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics, &self->_asyncScansCancelled);
                     QueryPerformanceCounter(&end);
                     InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
                     if (frequency.QuadPart > 0 && end.QuadPart >= start.QuadPart)
@@ -6246,6 +6263,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeSc
 {
     if (delayMilliseconds < 0 || delayMilliseconds > 1000) return E_INVALIDARG;
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, delayMilliseconds);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeEntryDelayForProbe(LONG delayMilliseconds)
+{
+    if (delayMilliseconds < 0 || delayMilliseconds > 1000) return E_INVALIDARG;
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe, delayMilliseconds);
     return S_OK;
 }
 
