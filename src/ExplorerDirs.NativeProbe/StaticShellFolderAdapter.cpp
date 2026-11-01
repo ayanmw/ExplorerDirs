@@ -4980,6 +4980,15 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticHumanSizeTextForProb
     return S_OK;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSizeDisplayOptionsForProbe(LONG unit, LONG decimalPlaces, BOOL thousandsSeparator)
+{
+    if (unit < 0 || unit > 7 || decimalPlaces < 0 || decimalPlaces > 3) return E_INVALIDARG;
+    InterlockedExchange(&g_syntheticSizeDisplayUnitForProbe, unit);
+    InterlockedExchange(&g_syntheticSizeDisplayDecimalsForProbe, decimalPlaces);
+    InterlockedExchange(&g_syntheticSizeDisplayThousandsForProbe, thousandsSeparator ? 1 : 0);
+    return S_OK;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSlowCustomSizeColumnForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticSlowCustomSizeColumnForProbe, enabled ? 1 : 0);

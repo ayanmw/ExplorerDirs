@@ -1274,3 +1274,9 @@ NativeProbe 增加三种状态模式，仅对隔离合成 view 的列 3（Relati
 继续扩展 NativeProbe 显示路径的隔离格式参数：自动或固定 B/KB/MB/GB/TB/PB/EB 单位、0–3 位小数、去掉无意义的末尾零、按当前 Windows 区域格式使用小数点和千位分隔。静态 provider 合同以 1,234,567 B 验证固定 KB 的 0/1/3 位结果 `1206 KB`、`1205.6 KB`、`1205.632 KB`，固定 MB 为 `1.177 MB`，字节分组按系统分隔符读回；同时确认 `GetDetailsEx` 仍返回原始 `VT_UI8=1234567`。此前自动单位 WPF Private Desktop view 继续显示 `10 B` / `4 B`，列标题与原生背景菜单升降序仍按原始数值比较。Native adapter `/W4 /WX`、NativeProbe Release build、`--synthetic-shell-folder-tree-smoke` 与格式化列 Private Desktop probe 均通过；前台、输入与隔离清理守卫通过。
 
 本轮格式选项只由 NativeProbe 静态合同设置，自动格式仍是唯一接入隐藏 Shell view 的模式；固定单位/精度/分组没有经真实用户可见视图绘制。它们未接入 ExplorerBrowser 产品、没有 INI/UI 配置，也没有决定 Q-Dir 对应选项的产品默认值。列计数、百分比及失焦暂停/忽略大小排序仍未实现。
+
+### 2026-11-01：固定单位格式通过隐藏 `IShellView` 列文本读取
+
+继续将单位/精度参数从 NativeProbe 传入 WPF Private Desktop synthetic `IShellView`。独立隐藏 view 采用固定 KB、最多 3 位小数，在 `GetDetailsOf` 列文本中读到 `child=0.01 KB`、`small.bin=0.004 KB`；读取同一份原始整数快照后，列头及背景菜单升序仍为 `small.bin|child`、降序为 `child|small.bin`，比较回调各运行一次。NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，前台、输入与隔离清理守卫通过。
+
+这补足固定单位/精度在隐藏 DefView 读取路径的证据，但不采集像素、不显示窗口，也没有核验千位格式在用户可见控件中的绘制。仍未接入 ExplorerBrowser 产品或 INI/UI 配置；Q-Dir 实际显示习惯和偏好默认值需由用户验收决定。

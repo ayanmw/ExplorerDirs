@@ -91,6 +91,15 @@ public static class SyntheticShellSortProbe
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
             useWpfParent: true, humanSizeText: true);
 
+    internal static int RunRecursiveDirectorySizeSortWithFixedKilobyteColumnWpfHost()
+    {
+        var decimalSeparator = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberDecimalSeparator;
+        return Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true,
+            useWpfParent: true, humanSizeText: true, sizeDisplayUnit: 2, sizeDisplayDecimals: 3,
+            expectedDirectorySizeText: "0" + decimalSeparator + "01 KB",
+            expectedFileSizeText: "0" + decimalSeparator + "004 KB");
+    }
+
     internal static int RunRelativePercentColumnMetadata(uint type)
     {
         if (type is not (0u or 1u or 2u)) throw new ArgumentOutOfRangeException(nameof(type));
@@ -120,7 +129,9 @@ public static class SyntheticShellSortProbe
         bool selfOwnedAttributes = false, bool customSizeColumn = false, bool useWpfParent = false,
         bool exerciseUpdateNotifications = false, bool slowCustomSizeColumn = false, bool twoViewDistinctLocations = false,
         bool focusRecoveryExperiment = false, bool factorySnapshotCacheOnly = false,
-        uint? relativePercentColumnType = null, bool humanSizeText = false)
+        uint? relativePercentColumnType = null, bool humanSizeText = false,
+        int sizeDisplayUnit = 0, int sizeDisplayDecimals = 2, bool sizeDisplayThousands = false,
+        string? expectedDirectorySizeText = null, string? expectedFileSizeText = null)
     {
         if (relativePercentColumnType is not null && !recursiveDirectorySizeSortOnly)
             throw new ArgumentException("The relative-percent metadata probe requires the isolated recursive-size view.", nameof(relativePercentColumnType));
@@ -245,6 +256,8 @@ public static class SyntheticShellSortProbe
                 "SetSyntheticCustomSizeColumnForProbe"))(customSizeColumn ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticHumanSizeTextForProbe"))(humanSizeText ? 1 : 0));
+            Check(Marshal.GetDelegateForFunctionPointer<SetSizeDisplayOptions>(NativeLibrary.GetExport(module,
+                "SetSyntheticSizeDisplayOptionsForProbe"))(sizeDisplayUnit, sizeDisplayDecimals, sizeDisplayThousands ? 1 : 0));
             Check(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                 "SetSyntheticSlowCustomSizeColumnForProbe"))(slowCustomSizeColumn ? 1 : 0));
             if (relativePercentColumnType is { } percentColumnType)
@@ -435,9 +448,12 @@ public static class SyntheticShellSortProbe
                 Console.WriteLine($"synthetic-recursive-directory-size-view: filesystem-attributes-masked={maskFilesystemAttributes}; self-owned-attributes={selfOwnedAttributes}; custom-size-column={customSizeColumn}; custom-size-column-slow={slowCustomSizeColumn}; initial=[{FormatProbeRows(initialNames)}]; size-text=[{FormatProbeRows(initialSizes)}]; standard-details-ex={detailsExRequests}(folder={detailsExFolderRequests},file={detailsExFileRequests}); custom-details-ex={customDetailsExRequests}(folder={customDetailsExFolderRequests},file={customDetailsExFileRequests}); details-of-items={detailsOfItemRequests}; details-of-size={detailsOfSizeRequests}; property-store-factory-requests={propertyStoreFactoryRequests}; property-store-requests={propertyStoreRequests}; get-attributes-of={attributeRequests}(filesystem-flags={filesystemAttributeRequests}); ascending=[{FormatProbeRows(ascendingNames)}]; descending=[{FormatProbeRows(descendingNames)}]; compare-counts={ascendingComparisons}/{descendingComparisons}; foreground-unchanged={GetForegroundWindow() == foreground}");
                 var childIndex = Array.FindIndex(initialNames, name => string.Equals(name, "child", StringComparison.OrdinalIgnoreCase));
                 // Require the full value; substring matching would accept unrelated values such as "1200".
-                var expectedDirectorySizeText = humanSizeText ? "10 B" : "10";
-                var displayedDirectorySize = childIndex >= 0 && string.Equals(initialSizes[childIndex], expectedDirectorySizeText, StringComparison.Ordinal);
-                if (!displayedDirectorySize ||
+                var expectedDirectoryText = expectedDirectorySizeText ?? (humanSizeText ? "10 B" : "10");
+                var fileIndex = Array.FindIndex(initialNames, name => string.Equals(name, "small.bin", StringComparison.OrdinalIgnoreCase));
+                var displayedDirectorySize = childIndex >= 0 && string.Equals(initialSizes[childIndex], expectedDirectoryText, StringComparison.Ordinal);
+                var displayedFileSize = expectedFileSizeText is null ||
+                    fileIndex >= 0 && string.Equals(initialSizes[fileIndex], expectedFileSizeText, StringComparison.Ordinal);
+                if (!displayedDirectorySize || !displayedFileSize ||
                     (!shellWindowScrollProbe && !ascendingNames.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase)) ||
                     (!shellWindowScrollProbe && !descendingNames.SequenceEqual(new[] { "child", "small.bin" }, StringComparer.OrdinalIgnoreCase)) ||
                     (customSizeColumn && (!menuSortAscending.SequenceEqual(new[] { "small.bin", "child" }, StringComparer.OrdinalIgnoreCase) ||
@@ -1101,8 +1117,12 @@ public static class SyntheticShellSortProbe
             if (recursiveDirectorySizeSortOnly) ReportProbeStage("cleanup-destroy-view-window-2");
             if (viewWindowCreated2 && view2 != 0) _ = At<DestroyViewWindow>(view2, 10)(view2);
             if (module != 0 && humanSizeText)
+            {
                 _ = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(NativeLibrary.GetExport(module,
                     "SetSyntheticHumanSizeTextForProbe"))(0);
+                _ = Marshal.GetDelegateForFunctionPointer<SetSizeDisplayOptions>(NativeLibrary.GetExport(module,
+                    "SetSyntheticSizeDisplayOptionsForProbe"))(0, 2, 0);
+            }
             if (module != 0 && exerciseUpdateNotifications)
                 _ = Marshal.GetDelegateForFunctionPointer<SetSyntheticSizeOverrideDelegate>(
                     NativeLibrary.GetExport(module, "SetSyntheticChildSizeOverrideForProbe"))(-1);
@@ -3238,6 +3258,7 @@ public static class SyntheticShellSortProbe
     }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ResetCounters();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSizeDisplayOptions(int unit, int decimalPlaces, int thousandsSeparator);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetRelativePercentColumnType(int enabled, uint type);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetSyntheticSizeOverrideDelegate(long size);
