@@ -2,9 +2,9 @@
 
 ## 2026-11-01：目录改名期间旧路径在途扫描退休
 
-在双真实 `IShellView` 递归列 NativeProbe 中，让 `HandleBoundRecursiveDirectoryScanner` 打开 `size-10` 的真实目录句柄后暂停；随后将目录改名并广播 `SHCNE_RENAMEFOLDER`。改名通知使旧路径缓存代次失效，两个 peer view 在新路径只共享一次新扫描。释放旧 worker 后，它仍通过已打开句柄读回 20 B，但旧路径已不存在且代次不匹配，因此该结果不能发布或重建旧缓存；新路径缓存仍保持两 view 共用同一个结果。
+在双真实 `IShellView` 递归列 NativeProbe 中，让 `HandleBoundRecursiveDirectoryScanner` 打开 `size-10` 的真实目录句柄后暂停；随后由 `IFileOperation.RenameItem` 执行真实夹具目录改名，不再从探针手动调用 `SHChangeNotify`。注册在父目录的 `SHChangeNotifyRegister` 窗口收到自然 `SHCNE_RENAMEFOLDER` 事件后，改名通知使旧路径缓存代次失效，两个 peer view 在新路径只共享一次新扫描。释放旧 worker 后，它仍通过已打开句柄读回 20 B，但旧路径已不存在且代次不匹配，因此该结果不能发布或重建旧缓存；新路径缓存仍保持两 view 共用同一个结果。
 
-Release NativeProbe build 0 警告/错误；加入拒绝发布断言后，Private Desktop watchdog 连续三轮 exit 0。三轮均读回稳定 row ID=3、排序与选区/焦点，前台、输入和夹具清理守卫通过。此处“代次”仅为探针模拟的缓存发布票据；产品逐行列仍未接入，不能据此声称产品的多视图生命周期已解决，也未覆盖网络/慢盘句柄行为或自然通知时序。日志：`20261101-202236-a98819c1`、`20261101-202242-00954da0`、`20261101-202247-cf89847b`。
+Release NativeProbe build 0 警告/错误；自然 Shell 通知版本的 Private Desktop watchdog 连续三轮 exit 0。三轮均读回稳定 row ID=3、排序与选区/焦点，前台、输入和夹具清理守卫通过。此处“代次”仅为探针模拟的缓存发布票据；产品逐行列仍未接入，不能据此声称产品的多视图生命周期已解决，也未覆盖网络/慢盘句柄行为或通知风暴/丢失时序。日志：`20261101-202418-ef5463eb`、`20261101-202423-9670e5d2`、`20261101-202428-0dc01979`。
 
 ## 2026-10-31：过期重命名映射不转移行身份
 

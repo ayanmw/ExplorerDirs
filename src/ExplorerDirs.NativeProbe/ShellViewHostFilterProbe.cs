@@ -1744,8 +1744,31 @@ internal static class ShellViewHostFilterProbe
             }
 
             var folderRenameEventIndex = watcher.Events.Count;
-            Directory.Move(changedDirectory, renamedDirectory);
-            SHChangeNotify(ShellChangeRenamedFolder, ShellChangePathUnicode, changedDirectory, renamedDirectory);
+            nint folderItem = 0, renameOperation = 0;
+            try
+            {
+                var shellItemId = ShellItemId;
+                Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(changedDirectory, 0, ref shellItemId, out folderItem));
+                var operationClassId = FileOperationClassId;
+                var operationId = FileOperationId;
+                Marshal.ThrowExceptionForHR(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out renameOperation));
+                Marshal.ThrowExceptionForHR(At<SetOperationFlags>(renameOperation, 5)(renameOperation,
+                    0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000));
+                Marshal.ThrowExceptionForHR(At<RenameItem>(renameOperation, 12)(renameOperation, folderItem,
+                    Path.GetFileName(renamedDirectory), 0));
+                Marshal.ThrowExceptionForHR(At<PerformOperations>(renameOperation, 21)(renameOperation));
+                Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(renameOperation, 22)(renameOperation, out var renameAborted));
+                if (renameAborted != 0) throw new IOException("The isolated Shell folder rename was aborted.");
+            }
+            finally
+            {
+                if (renameOperation != 0) Marshal.Release(renameOperation);
+                if (folderItem != 0) Marshal.Release(folderItem);
+            }
+            if (Directory.Exists(changedDirectory) || !Directory.Exists(renamedDirectory))
+                throw new IOException("IFileOperation did not rename the isolated recursive-size folder.");
+            if (!watcher.WaitForAnySince(folderRenameEventIndex, [ShellChangeRenamedFolder], TimeSpan.FromSeconds(5)))
+                throw new TimeoutException($"IFileOperation did not produce a natural Shell folder-rename notification: events=[{string.Join('|', watcher.ChangeEvents.Skip(folderRenameEventIndex).Select(change => $"0x{change.EventId:X8}:{change.FirstPath}->{change.SecondPath}"))}].");
             WaitForPeerShellRename(firstFolderView, changedDirectory, renamedDirectory, expectedCount);
             WaitForPeerShellRename(secondFolderView, changedDirectory, renamedDirectory, expectedCount);
             var folderRenamedFirst = CapturePeerShellRows(firstFolderView, folderPidl, shellFolder, firstProjection.Rows, ref nextFirstId);
@@ -1767,8 +1790,6 @@ internal static class ShellViewHostFilterProbe
             firstProjection = folderRenamedFirst;
             secondProjection = folderRenamedSecond;
 
-            if (!watcher.WaitForAnySince(folderRenameEventIndex, [ShellChangeRenamedFolder], TimeSpan.FromSeconds(5)))
-                throw new TimeoutException("The recursive-folder rename notification was not observed.");
             var folderInvalidatedRoots = InvalidateFromShellChanges(folderRenameEventIndex);
             if (folderInvalidatedRoots.Length != 1 || !string.Equals(folderInvalidatedRoots[0], changedDirectory, StringComparison.OrdinalIgnoreCase) ||
                 cache.ContainsKey(changedDirectory) || cache.ContainsKey(renamedDirectory))
@@ -1809,7 +1830,7 @@ internal static class ShellViewHostFilterProbe
             if (!ReadPeerListNames(firstList).Contains("size-10-renamed", StringComparer.OrdinalIgnoreCase) ||
                 !ReadPeerListNames(secondList).Contains("size-10-renamed", StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The peer projections did not publish the renamed directory caption.");
-            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=folder-rename; invalidated-roots={folderInvalidatedRoots.Length}; old-cache-retired=True; in-flight-old-path-scan-completed=True; stale-result-rejected=True; new-path-shared-scan=True; bytes={renamedDirectoryFirst.Result.Bytes}; row-id={firstSelected.Id}; selection-focus-preserved=True");
+            Console.WriteLine($"ishellview-peer-recursive-size-change: kind=folder-rename; operation=IFileOperation.RenameItem; natural-shell-notification=True; invalidated-roots={folderInvalidatedRoots.Length}; old-cache-retired=True; in-flight-old-path-scan-completed=True; stale-result-rejected=True; new-path-shared-scan=True; bytes={renamedDirectoryFirst.Result.Bytes}; row-id={firstSelected.Id}; selection-focus-preserved=True");
 
             if (GetForegroundWindow() != foreground || IsWindowVisible(parent))
                 throw new InvalidOperationException("The multi-view Shell probe changed foreground ownership or exposed its hidden parent.");
@@ -3648,6 +3669,7 @@ internal static class ShellViewHostFilterProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint sink);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
