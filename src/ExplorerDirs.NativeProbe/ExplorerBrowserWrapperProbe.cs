@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ExplorerDirs.App;
@@ -279,30 +280,29 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: native-item-menu-items={shellMenuItemCount}; backing-filesystem-rename=True");
 
             PrivateDesktopShellProbe.ReportStage("namespace-probe: shell-updatedir-refresh");
-            File.WriteAllBytes(Path.Combine(fixture, "notification-created.txt"), [9, 8, 7]);
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(fixture, 0, out var backingRootPidl, 0, out _));
+            var rootNotificationPath = Path.Combine(fixture, "notification-created.txt");
+            var rootNotifyExitCode = RunExternalShellNotificationChild(rootNotificationPath, [9, 8, 7]);
+            if (rootNotifyExitCode != 0)
+                throw new InvalidOperationException($"The external process failed to create and notify the root item; exit={rootNotifyExitCode}.");
             int countAfterNotification = -1;
-            try
+            for (var attempt = 0; attempt < 50; attempt++)
             {
-                SHChangeNotify(0x00001000, 0, backingRootPidl, 0); // SHCNE_UPDATEDIR / SHCNF_IDLIST
-                for (var attempt = 0; attempt < 50; attempt++)
-                {
-                    Application.DoEvents();
-                    Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out countAfterNotification));
-                    if (countAfterNotification == 4) break;
-                    Thread.Sleep(100);
-                }
-                if (countAfterNotification != 4)
-                    throw new InvalidOperationException($"The registered namespace view did not enumerate the externally created file after SHCNE_UPDATEDIR; count={countAfterNotification}.");
-                Console.WriteLine($"explorerbrowser-registered-namespace: updatedir-row-count={countAfterNotification}; external-create-visible=True");
+                Application.DoEvents();
+                Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, 2, out countAfterNotification));
+                if (countAfterNotification == 4) break;
+                Thread.Sleep(100);
             }
-            finally { Marshal.FreeCoTaskMem(backingRootPidl); }
+            if (countAfterNotification != 4)
+                throw new InvalidOperationException($"The registered namespace view did not enumerate the externally created file after SHCNE_UPDATEDIR; count={countAfterNotification}.");
+            Console.WriteLine($"explorerbrowser-registered-namespace: external-process-root-create-exit={rootNotifyExitCode}; updatedir-row-count={countAfterNotification}; external-create-visible=True");
 
             var childSizeBeforeNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
             if (childSizeBeforeNotification != "10")
                 throw new InvalidOperationException($"The recursive Size row value was unexpected before its child update; value={childSizeBeforeNotification}.");
-            File.WriteAllBytes(Path.Combine(fixture, "child", "notification-size.bin"), [1, 2, 3, 4, 5, 6, 7]);
-            Marshal.ThrowExceptionForHR(SHParseDisplayName(Path.Combine(fixture, "child", "notification-size.bin"), 0, out var physicalChildPidl, 0, out _));
+            var childNotificationPath = Path.Combine(fixture, "child", "notification-size.bin");
+            var childNotifyExitCode = RunExternalShellNotificationChild(childNotificationPath, [1, 2, 3, 4, 5, 6, 7]);
+            if (childNotifyExitCode != 0)
+                throw new InvalidOperationException($"The external process failed to create and notify the nested item; exit={childNotifyExitCode}.");
             string childSizeAfterNotification = "";
             var getQueuedNotifications = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
                 NativeLibrary.GetExport(nativeLibrary, "GetSyntheticChildNotificationTranslationQueuedCount"));
@@ -314,26 +314,21 @@ internal static class ExplorerBrowserWrapperProbe
             var sentBeforeChildChange = getSentNotifications();
             var enumerationsBeforeChildChange = getEnumerationCount();
             string providerSizeAfterNotification = "";
-            try
+            for (var attempt = 0; attempt < 50; attempt++)
             {
-                SHChangeNotify(0x00000002, 0, physicalChildPidl, 0); // SHCNE_CREATE for a file below the displayed child folder.
-                for (var attempt = 0; attempt < 50; attempt++)
-                {
-                    Application.DoEvents();
-                    childSizeAfterNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
-                    providerSizeAfterNotification = ReadParsedItemDetailsByName(viewFolder, "child", 1);
-                    if (childSizeAfterNotification == "17") break;
-                    Thread.Sleep(100);
-                }
-                var enumerationsAfterChildChange = getEnumerationCount();
-                var viewItemSize = ReadViewItemPidlSizeByName(folderView, viewFolder, "child");
-                Console.WriteLine($"explorerbrowser-registered-namespace: child-updateitem-queued={getQueuedNotifications() - queuedBeforeChildChange}; sent={getSentNotifications() - sentBeforeChildChange}; enumerations={enumerationsBeforeChildChange}->{enumerationsAfterChildChange}; view-size={childSizeBeforeNotification}->{childSizeAfterNotification}; provider-size={providerSizeAfterNotification}; view-pidl-size={viewItemSize}; row-refreshed={childSizeAfterNotification == "17"}");
-                if (providerSizeAfterNotification != "17" || enumerationsAfterChildChange <= enumerationsBeforeChildChange)
-                    throw new InvalidOperationException("The backing namespace provider did not rescan the changed child directory after its Shell notification.");
-                if (childSizeAfterNotification != "17")
-                    throw new InvalidOperationException($"The existing Shell row did not read the updated recursive Size snapshot; value={childSizeAfterNotification}.");
+                Application.DoEvents();
+                childSizeAfterNotification = ReadViewItemDetailsByName(folderView, viewFolder, "child", 1);
+                providerSizeAfterNotification = ReadParsedItemDetailsByName(viewFolder, "child", 1);
+                if (childSizeAfterNotification == "17") break;
+                Thread.Sleep(100);
             }
-            finally { Marshal.FreeCoTaskMem(physicalChildPidl); }
+            var enumerationsAfterChildChange = getEnumerationCount();
+            var viewItemSize = ReadViewItemPidlSizeByName(folderView, viewFolder, "child");
+            Console.WriteLine($"explorerbrowser-registered-namespace: external-process-child-create-exit={childNotifyExitCode}; child-updateitem-queued={getQueuedNotifications() - queuedBeforeChildChange}; sent={getSentNotifications() - sentBeforeChildChange}; enumerations={enumerationsBeforeChildChange}->{enumerationsAfterChildChange}; view-size={childSizeBeforeNotification}->{childSizeAfterNotification}; provider-size={providerSizeAfterNotification}; view-pidl-size={viewItemSize}; row-refreshed={childSizeAfterNotification == "17"}");
+            if (providerSizeAfterNotification != "17" || enumerationsAfterChildChange <= enumerationsBeforeChildChange)
+                throw new InvalidOperationException("The backing namespace provider did not rescan the changed child directory after its Shell notification.");
+            if (childSizeAfterNotification != "17")
+                throw new InvalidOperationException($"The existing Shell row did not read the updated recursive Size snapshot; value={childSizeAfterNotification}.");
 
             PrivateDesktopShellProbe.ReportStage("namespace-probe: child-and-parent-navigation");
             Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "child", out var childItem));
@@ -653,6 +648,52 @@ internal static class ExplorerBrowserWrapperProbe
             return (copy, move, copySourcePreserved, moveSourceRemoved, destinationsVerified);
         }
         finally { Marshal.Release(destination); }
+    }
+
+    internal static int RunExternalShellNotificationChild(string path, string base64Contents)
+    {
+        var contents = Convert.FromBase64String(base64Contents);
+        File.WriteAllBytes(path, contents);
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(path, 0, out var itemPidl, 0, out _));
+        try { SHChangeNotify(0x00000002, 0, itemPidl, 0); } // SHCNE_CREATE / SHCNF_IDLIST
+        finally { Marshal.FreeCoTaskMem(itemPidl); }
+
+        var parentPath = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException("The created file did not have a parent directory.");
+        Marshal.ThrowExceptionForHR(SHParseDisplayName(parentPath, 0, out var parentPidl, 0, out _));
+        try { SHChangeNotify(0x00001000, 0, parentPidl, 0); } // SHCNE_UPDATEDIR / SHCNF_IDLIST
+        finally { Marshal.FreeCoTaskMem(parentPidl); }
+        Console.WriteLine($"external-shell-notification-child: created=True; item-and-parent-notified=True; pid={Environment.ProcessId}");
+        return 0;
+    }
+
+    private static int RunExternalShellNotificationChild(string path, byte[] contents)
+    {
+        var start = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        start.ArgumentList.Add(typeof(ExplorerBrowserWrapperProbe).Assembly.Location);
+        start.ArgumentList.Add("--shell-change-create-file-child");
+        start.ArgumentList.Add(path);
+        start.ArgumentList.Add(Convert.ToBase64String(contents));
+        using var child = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the external Shell-notification process.");
+        if (!child.WaitForExit(15_000))
+        {
+            child.Kill(entireProcessTree: true);
+            child.WaitForExit();
+            throw new TimeoutException("The external Shell-notification process did not exit within 15 seconds.");
+        }
+        var output = child.StandardOutput.ReadToEnd();
+        var error = child.StandardError.ReadToEnd();
+        if (!string.IsNullOrWhiteSpace(output)) Console.Write(output);
+        if (!string.IsNullOrWhiteSpace(error)) Console.Error.Write(error);
+        return child.ExitCode;
     }
 
     private static nint GetDataObjectForItem(nint folder, string name)

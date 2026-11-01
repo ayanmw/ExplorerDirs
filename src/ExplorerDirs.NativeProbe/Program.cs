@@ -250,6 +250,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunExplorerBrowserWrapperObject();
         if (args.Length == 1 && args[0] == "--explorerbrowser-registered-namespace-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserRegisteredNamespace();
+        if (args.Length == 3 && args[0] == "--shell-change-create-file-child")
+            return ExplorerBrowserWrapperProbe.RunExternalShellNotificationChild(args[1], args[2]);
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
             return PrivateDesktopShellProbe.RunColumnFilterCapability();
         if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")

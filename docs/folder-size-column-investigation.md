@@ -1612,3 +1612,9 @@ Private Desktop 探针在已注册 namespace 的 `child` 目录下新增 7 B 文
 更新后的 Private Desktop 探针通过包装根文件夹绑定子目录，取得其原生 `IDropTarget`；将包装根中的 `copy-source.txt` 数据对象依次交给 `DragEnter`、`Drop`，复制到子目录后逐字节比较源/目标，确认源保留、目标创建。另以 MOVE effect 直接调用相同回调时，`DragEnter` 接受 MOVE，但 `Drop` 返回无 effect；这个直接回调省略了 `DoDragDrop` 的 source-side 完成过程，因此仅记录现象，不据此判断用户实际拖放时的移动行为。Release NativeProbe 构建和原生 adapter `/W4 /WX` 构建通过；探针退出码 0，临时注册/文件夹清理、前台与输入守卫通过。
 
 边界：这是隔离临时 namespace 中对 Shell COM 拖放接口的直接调用，不是 `DoDragDrop` 鼠标交互；没有验证跨窗格/跨进程 OLE 拖放、完整移动效果、拖动反馈、取消/拒绝效果、Shell 通知及产品接线。ExplorerBrowser 产品及 release 未修改。后续应在隔离架构评审中验证真实 OLE 循环与通知，再评估接入递归列原型。
+
+### 2026-11-01：注册 namespace 接收外部进程 Shell 变更通知
+
+将原先由宿主进程直接写文件并调用 `SHChangeNotify` 的检查改为独立 NativeProbe 子进程：子进程创建测试文件，再以绝对 PIDL 分别发送 `SHCNE_CREATE` 和父目录 `SHCNE_UPDATEDIR`；父进程中的私有 Desktop ExplorerBrowser 保持打开并等待更新。根目录新增文件最终出现在视图中，行数为 4。对子目录新增文件，包装通知转发队列增加 1，provider 枚举次数从 2 到 3，已存在的子目录行 `GetDetailsOf` 从 10 B 更新为 17 B；行 PIDL 中保存的旧值仍为 10 B，验证了行值读取依赖共享快照而不是重建旧 PIDL。
+
+NativeProbe Release 构建通过，子进程均退出码 0；Private Desktop 探针退出码 0，临时 namespace 与夹具清理、前台及输入守卫通过。此验证覆盖独立进程发起的 Shell 广播，但没有覆盖真实 Explorer/第三方程序的通知种类、通知风暴、删除/重命名/移动事件、多窗格或产品接线，也不是用户可见刷新验收。
