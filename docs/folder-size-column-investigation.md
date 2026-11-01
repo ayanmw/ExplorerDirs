@@ -1292,3 +1292,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 在 synthetic provider 中加入 NativeProbe 专用计数器，区分递归大小缓存未命中与 `GetSyntheticDirectoryMetrics` 扫描调用，并在 Shell `CompareIDs` 调用栈期间记录扫描。固定 KB 与分组字节两种隐藏 view 排序都实际触发 1 次目录大小缓存未命中，比较期间递归扫描计数为 0；`SizeForItem` 使用行枚举阶段携带的大小回退值，列头和背景菜单升降序仍正确。普通 synthetic folder-tree 合同通过；Native adapter `/W4 /WX`、NativeProbe Release 构建无警告/错误，Private Desktop 前台、输入和隔离清理守卫通过。
 
 此证据限定于该 synthetic `IShellFolder2`：它证明 Shell 比较回调没有递归遍历，但不证明枚举阶段扫描成本可接受，也不解决快照过期后在下一次枚举前显示旧值的问题。真实 Shell provider、ExplorerBrowser 产品、后台扫描策略和用户可见排序刷新仍需分别评估。
+
+### 2026-11-01：目录递归总量在 `EnumObjects` 返回前同步计算
+
+在静态 synthetic folder-tree 合同中单独清零并采样 `GetSyntheticDirectoryMetrics` 的调用数与访问项数。枚举包含 `child` 与其 `nested-folder` 的两层夹具时，`EnumObjects` 返回前发生 2 次递归指标调用、访问 3 个后代条目；数值即用于目录行，之后才返回 Shell enumerator。源码路径是 `SyntheticSortFolder::EnumObjects` → `EnumerateBackingChildren` → 每个文件夹行的 `GetSyntheticDirectoryMetrics`，并在该函数内递归下降。Native adapter `/W4 /WX`、NativeProbe Release 与 `--synthetic-shell-folder-tree-smoke` 通过，合同校验了该夹具的计数。
+
+这确定了当前隔离 provider 的成本入口：列值缓存未命中不会在比较回调里扫描，但首次列举文件夹时会先同步遍历其后代。两层夹具只有 3 个条目，不能据此估算大型目录耗时、磁盘访问或产品 ExplorerBrowser 行为；后续需用可扩展负载测量不同宽度/深度，并验证列关闭时能否完全跳过扫描，再设计按需/后台计算策略。

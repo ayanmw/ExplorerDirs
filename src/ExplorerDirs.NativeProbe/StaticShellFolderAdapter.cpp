@@ -1545,6 +1545,8 @@ namespace
     volatile LONG g_syntheticSizeCompareCount = 0;
     volatile LONG g_syntheticDirectoryMetricsDuringCompareCount = 0;
     volatile LONG g_syntheticRecursiveSizeCacheMissesDuringCompareCount = 0;
+    volatile LONG g_syntheticDirectoryMetricsCallCount = 0;
+    volatile LONG g_syntheticDirectoryMetricsEntryCount = 0;
     volatile LONG g_syntheticItemDetailsOfCount = 0;
     volatile LONG g_syntheticSizeDetailsExCount = 0;
     volatile LONG g_syntheticSizeDetailsExFolderCount = 0;
@@ -1722,6 +1724,7 @@ namespace
 
     HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics)
     {
+        InterlockedIncrement(&g_syntheticDirectoryMetricsCallCount);
         if (g_syntheticCompareCallbackActive)
             InterlockedIncrement(&g_syntheticDirectoryMetricsDuringCompareCount);
         if (!metrics) return E_POINTER;
@@ -1739,6 +1742,7 @@ namespace
         {
             if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0)
             {
+                InterlockedIncrement(&g_syntheticDirectoryMetricsEntryCount);
                 ULONGLONG entrySize = (static_cast<ULONGLONG>(entry.nFileSizeHigh) << 32) | entry.nFileSizeLow;
                 if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 {
@@ -3647,8 +3651,19 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
     result = root->Initialize(rootPidl);
     if (FAILED(result)) goto cleanup;
 
+    InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
     result = root->EnumObjects(nullptr, SHCONTF_FOLDERS, &enumerator);
     if (FAILED(result) || !enumerator) { if (SUCCEEDED(result)) result = E_UNEXPECTED; goto cleanup; }
+    const auto enumerationMetricCalls = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
+    const auto enumerationMetricEntries = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
+    char enumerationMetricsTrace[192]{};
+    StringCchPrintfA(enumerationMetricsTrace, ARRAYSIZE(enumerationMetricsTrace),
+        "synthetic-folder-tree: root-enumeration-recursive-scan-calls=%ld; subtree-entries-visited=%ld",
+        enumerationMetricCalls, enumerationMetricEntries);
+    TraceSyntheticSortStage(enumerationMetricsTrace);
+    if (enumerationMetricCalls != 2 || enumerationMetricEntries != 3)
+    { result = E_FAIL; goto cleanup; }
     {
         PITEMID_CHILD item = nullptr;
         ULONG fetched = 0;
