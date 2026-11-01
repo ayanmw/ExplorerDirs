@@ -1764,3 +1764,9 @@ NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-
 隔离 peer `SysListView32` 从仅有 Name 扩展为 Name + Type 两列。Type 子项取自同一 Shell 行的类型元数据；在 Details、刷新、升降序、按类型分组投影之后，逐行读回 Type 值，并与稳定 PIDL 行身份对应的元数据逐项比较。`--ishellview-menu-command-private-desktop` 通过，输出 `peer-type-column=True`；NativeProbe Release 构建 0 警告/错误，Private Desktop 前台、last-input 与清理守卫通过。
 
 该切片只证明原生 ListView 的附加文本列能与当前 Shell 行顺序、PIDL 身份、图标和分组共同工作。Type 仍使用当前 `SHGetFileInfo` 值和已有扩展名/文件夹回退；不是 Shell 正式本地化类型文本，也没有直接复制 Explorer 的日期、大小等全部 Details 列。未创建可见窗口、未测用户交互或重绘，也未接产品/release。下一步应从 Shell 的列接口投影真实标准 Details 列，再验证行增删/重命名通知下的子项和 ID 对齐。
+
+### 2026-11-01：通过 IShellFolder2 投影标准详情字段
+
+peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称、大小、项目类型和修改日期四列的标题与每行值，并逐单元格读回比对；列值随 Shell 行顺序重投影，PIDL 行 ID、系统图标和分组合同继续通过。Private Desktop `--ishellview-menu-command-private-desktop` 退出码 0，输出 `peer-shell-details-columns=[名称|大小|项目类型|修改日期]`；NativeProbe Release 构建 0 警告/错误，前台、last-input 和隔离清理守卫通过。
+
+列标题来自 Shell 文件夹的前四个 `GetDetailsOf` 索引，不是当前 DefView 用户列顺序/宽度/隐藏状态的完整镜像；这里只读文本，不验证点击列头后由 peer 自身排序。大小仍是 Shell 默认直接属性，尚未投影逐行递归大小。样本仅为三个本地 fixture 条目，view 隐藏，未测可见 UI、增删通知、拖放或产品 ExplorerBrowser。后续继续验证 PIDL 行增删/重命名 reconciliation，再单独接入按需递归值与数值排序。
