@@ -2283,3 +2283,9 @@ NativeProbe Release build 0 警告/错误，探针 exit 0、`git diff --check` �
 递归列 provider 的 `IShellFolder2.GetDetailsOf` 直接返回标题 `Recursive Size` 和行文本 `29|5`，`GetDetailsEx` 也返回对应数值；这证明 Shell 列显示所需的 provider 文本/属性回调合同可读，但不代替用户可见像素验收。与此同时，应用 `CaptureFileViewExportSnapshot` 的 `IPropertyStore` 快速属性路径仍为空值。列回调显示、属性存储读取和应用导出是独立数据消费路径；导出空值不能用来推断屏幕列为空。
 
 因此前一条“排序命令没有进入 provider 比较器”的归因需更正：provider 列身份映射和排序命令路由都可工作；相同方向的命令是无操作。当前原型缺口是 synthetic namespace Host 的初始排序恢复：`SetSortColumns` 状态读回成功，但它本身没有把初始枚举行序重排；该 Host 的 `IShellView.Refresh` 可以完成重排。是否在未来产品接入时为虚拟位置使用一次受限刷新，仍需评估可见闪烁和执行时机。`ExplorerDirs.HostProbe` Release 构建 0 警告/错误；包含 synthetic 与物理目录对照的 `--shell-provider-location` 连续两次 exit 0，父窗口不可见，临时 CLSID/NameSpace 与夹具由 finally 清理。产品代码及 release 未改。
+
+### 2026-11-02：产品导出回读 Shell 自定义列文本
+
+将前述 HostProbe 的失败断言保留为回归门槛：产品 `CaptureFileViewExportSnapshot` 原先导出递归大小列为空字符串，而当前 Shell 视图的 `IShellFolder2.GetDetailsOf` 能提供可见表头与每行文本。导出现在只对没有 `PROPERTYKEY` 显示描述的列启用受限回退：读取当前 SysListView32 表头及列视觉顺序，将可见自定义表头唯一映射到 `GetDetailsOf(NULL, ordinal)`，再依 `IFolderView2` 当前行序逐项读取对应 STRRET 文本。普通有属性描述的列仍由既有快速 `IPropertyStore` 路径读取；快速筛选打开时仍走原捕获路径，避免把视图背后的未过滤条目当成可见行。
+
+HostProbe Release build 0 警告/错误；`--shell-provider-location` exit 0，产品导出列为 `Recursive Size|名称`、值为 `5|29`，与 Shell 行序 `folder-small|folder-large` 对应；普通文件系统 `PKEY_Size` 刷新前排序对照通过。此证据覆盖隐藏 ExplorerBrowserHost 与合成 provider，不包含可见 UI 导出验收、打印、快速筛选下的派生列值、普通第三方 Shell provider 或大目录耗时。若 Shell 视图没有对应原生详细列表表头、可见列与 Shell ordinal 不能唯一匹配，捕获退回既有属性导出路径，不猜测列位置。此改动仅补齐导出消费路径，并不代表逐行递归大小列已在产品普通物理目录中启用。

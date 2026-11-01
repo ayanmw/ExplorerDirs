@@ -200,7 +200,8 @@ internal sealed class ExplorerBrowserHost : HwndHost, ExplorerBrowserHost.IExplo
     {
         var view = GetFolderView2Pointer();
         if (view == IntPtr.Zero) throw new InvalidOperationException("当前文件视图尚未准备完成。");
-        try { return ShellFileViewExportCapture.Capture(view, quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter); }
+        try { return ShellFileViewExportCapture.Capture(view, _viewWindow,
+            quickFilterActive: !_location.IsSearchActive && _quickFilterSettings.HasAnyFilter); }
         finally { Marshal.Release(view); }
     }
 

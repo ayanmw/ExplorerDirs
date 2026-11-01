@@ -61,8 +61,8 @@ internal static class ShellProviderLocationProbe
             sortColumns.SetValue(Activator.CreateInstance(sortColumnType, [recursiveSortKey, 1]), 0);
             var displayColumns = Array.CreateInstance(displayColumnType, 2);
             var nameKey = Activator.CreateInstance(propertyKeyType, basicFormat, 10u)!;
-            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [nameKey, 240]), 0);
-            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [recursiveSortKey, 180]), 1);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [recursiveSortKey, 180]), 0);
+            displayColumns.SetValue(Activator.CreateInstance(displayColumnType, [nameKey, 240]), 1);
             var viewStateConstructor = viewStateType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                 .Single(constructor => constructor.GetParameters().Length == 6);
             var viewState = viewStateConstructor.Invoke([4u, 16, sortColumns, null, true, displayColumns]);
@@ -185,19 +185,55 @@ internal static class ShellProviderLocationProbe
             var ascendingAgainCommandSorts = CaptureSortColumns(hostType, host);
             var ascendingAgainCommandCompareCount = getCompareCount();
             var sortHeaderWindow = FindSortHeader((nint)viewWindowField.GetValue(host)!);
+            var logicalHeaderTexts = ReadNativeHeaderTexts(sortHeaderWindow, 2);
+            var displayColumnsBeforeHeaderOrder = CaptureDisplayColumns(hostType, host);
+            var initialVisualHeaderOrder = ReadNativeHeaderVisualTexts(sortHeaderWindow, logicalHeaderTexts);
+            var nativeHeaderOrder = initialVisualHeaderOrder;
+            var requestedHeaderOrder = new[] { "Recursive Size", "Name" };
+            if (!nativeHeaderOrder.SequenceEqual(requestedHeaderOrder, StringComparer.Ordinal))
+            {
+                _ = SetNativeHeaderOrder(sortHeaderWindow, [1, 0]);
+                PumpDispatcher(TimeSpan.FromMilliseconds(100));
+                nativeHeaderOrder = ReadNativeHeaderVisualTexts(sortHeaderWindow, logicalHeaderTexts);
+                if (!nativeHeaderOrder.SequenceEqual(requestedHeaderOrder, StringComparer.Ordinal))
+                {
+                    DragHeaderColumnRight(sortHeaderWindow);
+                    PumpDispatcher(TimeSpan.FromMilliseconds(100));
+                    nativeHeaderOrder = ReadNativeHeaderVisualTexts(sortHeaderWindow, logicalHeaderTexts);
+                }
+                (columnNames, rows) = ReadExportRows(capture.Invoke(host, null)!);
+                sizeColumnIndex = Array.FindIndex(columnNames, name =>
+                    name.Contains("Recursive Size", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("9e5e05ac-1936-4a75-94f7-4704b8b01923", StringComparison.OrdinalIgnoreCase));
+                nameColumnIndex = Array.FindIndex(columnNames, name =>
+                    name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name.Equals("名称", StringComparison.Ordinal));
+                if (sizeColumnIndex < 0 || nameColumnIndex < 0)
+                    throw new InvalidOperationException($"Reordered product export omitted a visible column: [{string.Join('|', columnNames)}].");
+            }
+            var recursiveHeaderIndex = Array.FindIndex(logicalHeaderTexts, name => name == recursiveDisplay.Header);
+            if (recursiveHeaderIndex < 0)
+                throw new InvalidOperationException($"The native header omitted the recursive column after reorder: logical=[{string.Join('|', logicalHeaderTexts)}], visual=[{string.Join('|', nativeHeaderOrder)}].");
             var headerCompareCountBefore = getCompareCount();
             var headerColumnCountsBefore = Enumerable.Range(0, 8).Select(index => getCompareCountForColumn((uint)index)).ToArray();
-            ClickHeaderColumn(sortHeaderWindow, 1);
+            ClickHeaderColumn(sortHeaderWindow, recursiveHeaderIndex);
             PumpDispatcher(TimeSpan.FromMilliseconds(500));
             (columnNames, rows) = ReadExportRows(capture.Invoke(host, null)!);
             var headerFirstOrder = rows.Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
             var headerFirstSorts = CaptureSortColumns(hostType, host);
             var headerFirstCompareCount = getCompareCount();
-            ClickHeaderColumn(sortHeaderWindow, 1);
+            ClickHeaderColumn(sortHeaderWindow, recursiveHeaderIndex);
             PumpDispatcher(TimeSpan.FromMilliseconds(500));
             directRecursiveValues = ReadRecursiveValues(hostType, host, 2);
             (columnNames, rows) = ReadExportRows(capture.Invoke(host, null)!);
             namesInShellOrder = rows.Select(row => Path.GetFileName(row[nameColumnIndex]) ?? row[nameColumnIndex]).ToArray();
+            var exportedRecursiveValues = rows.Select(row => row[sizeColumnIndex]).ToArray();
+            if (exportedRecursiveValues.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                    .SequenceEqual([5UL, 29UL]) is false)
+                throw new InvalidOperationException($"The product export snapshot did not consume recursive display values in Shell row order: columns=[{string.Join('|', columnNames)}], values=[{string.Join('|', exportedRecursiveValues)}].");
+            var mappedShellExport = ReadVisibleShellDetailsSnapshot(adapter, hostType, host, nativeHeaderOrder, total);
+            if (!mappedShellExport.Columns.SequenceEqual(["Recursive Size", "Name"], StringComparer.Ordinal) ||
+                !mappedShellExport.Rows.Select(row => string.Join('|', row)).SequenceEqual(["5|folder-small", "29|folder-large"], StringComparer.Ordinal))
+                throw new InvalidOperationException($"The visible Shell details-to-column mapping produced unexpected export data: columns=[{string.Join('|', mappedShellExport.Columns)}], rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}], ordinals=[{string.Join('|', mappedShellExport.Ordinals)}].");
             var valuesByName = rows.Select((row, index) =>
                     (Name: namesInShellOrder[index], Bytes: TryReadBytes(directRecursiveValues[index], out var bytes) ? bytes : ulong.MaxValue))
                 .ToDictionary(item => item.Name, item => item.Bytes, StringComparer.OrdinalIgnoreCase);
@@ -212,7 +248,7 @@ internal static class ShellProviderLocationProbe
 
             var headerCompareDeltas = Enumerable.Range(0, columnCompareCountsBefore.Length)
                 .Select(index => getCompareCountForColumn((uint)index) - headerColumnCountsBefore[index]).ToArray();
-            Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; recursive-column=True; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
+            Console.WriteLine($"shell-provider-location: product-host-navigation=True; is-filesystem=False; rows={total}; saved-visible-columns=[{string.Join('|', displayColumnsBeforeHeaderOrder)}]; visible-columns-after-header-action=[{string.Join('|', CaptureDisplayColumns(hostType, host))}]; logical-header-texts=[{string.Join('|', logicalHeaderTexts)}]; initial-visual-header-order=[{string.Join('|', initialVisualHeaderOrder)}]; visual-header-order=[{string.Join('|', nativeHeaderOrder)}]; recursive-header-index={recursiveHeaderIndex}; getdetailsof-headers=[{string.Join('|', mappedShellExport.ShellHeaders)}]; mapped-export-columns=[{string.Join('|', mappedShellExport.Columns)}]; mapped-export-ordinals=[{string.Join('|', mappedShellExport.Ordinals)}]; mapped-export-rows=[{string.Join('|', mappedShellExport.Rows.Select(row => string.Join('|', row)))}]; getdetailsof-header='{recursiveDisplay.Header}'; getdetailsof-values=[{string.Join('|', recursiveDisplay.Values)}]; export-columns=[{string.Join('|', columnNames)}]; export-values=[{string.Join('|', rows.Select(row => row[sizeColumnIndex]))}]; order-before-shell-refresh=[{string.Join('|', orderBeforeRefresh)}]; order-after-shell-refresh=[{string.Join('|', orderAfterRefresh)}]; shell-refresh-hr=0x{shellRefreshResult:X8}; refresh-compare-delta={refreshCompareCountAfter - refreshCompareCountBefore}; displayed-order-after-two-header-clicks=[{string.Join('|', namesInShellOrder)}]; order-after-first-header-click=[{string.Join('|', headerFirstOrder)}]; header-sort-state-after-first-click=[{string.Join('|', headerFirstSorts)}]; order-after-sortascending=[{string.Join('|', orderAfterAscendingCommand)}]; order-after-sortdescending=[{string.Join('|', orderAfterDescendingCommand)}]; sort-state-after-sortdescending=[{string.Join('|', descendingCommandSorts)}]; order-after-next-sortascending=[{string.Join('|', orderAfterAscendingAgainCommand)}]; sort-state-after-next-sortascending=[{string.Join('|', ascendingAgainCommandSorts)}]; direct-recursive-values=[{string.Join('|', directRecursiveValues)}]; fixture-values-correct={recursiveValuesMatchFixture}; provider-map-column-to-scid={providerColumnContract.DataKey.FormatId:B}:{providerColumnContract.DataKey.PropertyId}; direct-provider-compare={providerColumnContract.CompareResult}; restored-sort-state=[{string.Join('|', actualSorts)}]; shell-sort-command-hr=0x{sortCommandResult:X8}; shell-command-compare-delta={commandCompareCount - ascendingCommandCompareCountBefore}; descending-command-hr=0x{descendingCommandResult:X8}; descending-command-compare-delta={descendingCommandCompareCount - commandCompareCount}; ascending-again-command-hr=0x{ascendingAgainCommandResult:X8}; ascending-again-command-compare-delta={ascendingAgainCommandCompareCount - descendingCommandCompareCount}; header-window={sortHeaderWindow}; first-header-compare-delta={headerFirstCompareCount - headerCompareCountBefore}; second-header-compare-delta={compareCountAfterSort - headerFirstCompareCount}; compare-delta-by-column=[{string.Join('|', columnCompareDeltas)}]; header-compare-delta-by-column=[{string.Join('|', headerCompareDeltas)}]; shell-sort-applied={sortApplied}; target=session-root; fallback=default-root; parent-visible={IsWindowVisible(source.Handle)}");
             if (IsWindowVisible(source.Handle)) throw new InvalidOperationException("The hidden Shell provider HostProbe parent became visible.");
             return RunFilesystemSortRestoreProbe();
         }
@@ -513,6 +549,101 @@ internal static class ShellProviderLocationProbe
             }).ToArray();
     }
 
+    private static string[] CaptureDisplayColumns(Type hostType, HwndHost host)
+    {
+        var state = hostType.GetMethod("CaptureViewState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .Invoke(host, null)!;
+        return ((IEnumerable)state.GetType().GetProperty("DisplayColumns")!.GetValue(state)!)
+            .Cast<object>().Select(column =>
+            {
+                var key = column.GetType().GetProperty("Key")!.GetValue(column)!;
+                return $"{key.GetType().GetProperty("FormatId")!.GetValue(key)}:{key.GetType().GetProperty("PropertyId")!.GetValue(key)}";
+            }).ToArray();
+    }
+
+    private static string[] ReadNativeHeaderTexts(nint header, int count)
+    {
+        var textBuffer = Marshal.AllocHGlobal(512);
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeHeaderItem>());
+        try
+        {
+            var names = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                Marshal.WriteInt16(textBuffer, 0);
+                Marshal.StructureToPtr(new NativeHeaderItem
+                {
+                    Mask = 2, // HDI_TEXT.
+                    Text = textBuffer,
+                    TextLength = 256
+                }, itemPointer, false);
+                if (SendMessageW(header, 0x120B, index, itemPointer) == 0) // HDM_GETITEMW.
+                    throw new InvalidOperationException($"Could not read native header item {index}.");
+                names[index] = Marshal.PtrToStringUni(textBuffer) ?? string.Empty;
+            }
+            return names;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(itemPointer);
+            Marshal.FreeHGlobal(textBuffer);
+        }
+    }
+
+    private static string[] ReadNativeHeaderVisualTexts(nint header, string[] logicalTexts)
+    {
+        var pointer = Marshal.AllocHGlobal(sizeof(int) * logicalTexts.Length);
+        try
+        {
+            var listView = GetParent(header);
+            if (listView == 0 || SendMessageW(listView, 0x103B, logicalTexts.Length, pointer) == 0) // LVM_GETCOLUMNORDERARRAY.
+                throw new InvalidOperationException("Could not read the native header's visual column order.");
+            var order = new int[logicalTexts.Length];
+            Marshal.Copy(pointer, order, 0, order.Length);
+            if (order.Any(index => index < 0 || index >= logicalTexts.Length) || order.Distinct().Count() != order.Length)
+                throw new InvalidOperationException($"The native header returned an invalid order array: [{string.Join('|', order)}].");
+            return order.Select(index => logicalTexts[index]).ToArray();
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    private static bool SetNativeHeaderOrder(nint header, int[] order)
+    {
+        var pointer = Marshal.AllocHGlobal(sizeof(int) * order.Length);
+        try
+        {
+            Marshal.Copy(order, 0, pointer, order.Length);
+            var headerResult = SendMessageW(header, 0x1203, order.Length, pointer); // HDM_SETORDERARRAY.
+            var listView = GetParent(header);
+            var listViewResult = listView == 0 ? 0 : SendMessageW(listView, 0x103A, order.Length, pointer); // LVM_SETCOLUMNORDERARRAY.
+            return headerResult != 0 || listViewResult != 0;
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    }
+
+    private static void DragHeaderColumnRight(nint header)
+    {
+        var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            if (SendMessageW(header, 0x1207, 0, rectanglePointer) == 0) throw new InvalidOperationException("Could not read first header rectangle.");
+            var first = Marshal.PtrToStructure<NativeRect>(rectanglePointer);
+            if (SendMessageW(header, 0x1207, 1, rectanglePointer) == 0) throw new InvalidOperationException("Could not read second header rectangle.");
+            var second = Marshal.PtrToStructure<NativeRect>(rectanglePointer);
+            var startX = (first.Left + first.Right) / 2;
+            var y = (first.Top + first.Bottom) / 2;
+            var endX = Math.Min(second.Right - 1, second.Left + 4);
+            var start = unchecked((nint)((y << 16) | (startX & 0xffff)));
+            var end = unchecked((nint)((y << 16) | (endX & 0xffff)));
+            _ = SendMessageW(header, 0x0200, 0, start);
+            _ = SendMessageW(header, 0x0201, 1, start);
+            _ = SendMessageW(header, 0x0200, 1, end);
+            _ = SendMessageW(header, 0x0200, 1, end);
+            _ = SendMessageW(header, 0x0202, 0, end);
+        }
+        finally { Marshal.FreeHGlobal(rectanglePointer); }
+    }
+
     private static (string Header, string[] Values) ReadRecursiveDisplayText(nint adapter, Type hostType, HwndHost host, int count)
     {
         var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -547,6 +678,71 @@ internal static class ShellProviderLocationProbe
                         finally { Marshal.FreeCoTaskMem(pidl); }
                     }
                     return (header, values);
+                }
+                finally { Marshal.FreeCoTaskMem(details); }
+            }
+            finally { Marshal.Release(folder); }
+        }
+        finally { Marshal.Release(view); }
+    }
+
+    private static (string[] Columns, int[] Ordinals, string[] ShellHeaders, string[][] Rows) ReadVisibleShellDetailsSnapshot(
+        nint adapter, Type hostType, HwndHost host, string[] visibleHeaders, int rowCount)
+    {
+        var view = (nint)hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(host, null)!;
+        if (view == 0) throw new InvalidOperationException("The product host returned no view for visible Shell details export.");
+        try
+        {
+            var folderId = new Guid("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
+            Check(GetMethod<GetFolder>(view, 5)(view, ref folderId, out var folder));
+            if (folder == 0) throw new InvalidOperationException("The product view returned no IShellFolder2 for visible Shell details export.");
+            try
+            {
+                var detailsSize = checked((int)GetExport<GetShellDetailsSizeNative>(adapter, "GetStaticShellDetailsSize")());
+                var details = Marshal.AllocCoTaskMem(detailsSize);
+                try
+                {
+                    var getDetails = GetMethod<GetDetailsOf>(folder, 18);
+                    var shellHeaders = new List<string>();
+                    for (uint ordinal = 0; ordinal < 16; ordinal++)
+                    {
+                        Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+                        var result = getDetails(folder, 0, ordinal, details);
+                        if (result < 0) break;
+                        shellHeaders.Add(ReadShellDetailsText(details));
+                    }
+                    if (shellHeaders.Count == 0) throw new InvalidOperationException("The provider exposed no Shell details columns.");
+                    var ordinals = new int[visibleHeaders.Length];
+                    for (var index = 0; index < visibleHeaders.Length; index++)
+                    {
+                        var matches = shellHeaders.Select((header, ordinal) => (header, ordinal))
+                            .Where(pair => string.Equals(pair.header, visibleHeaders[index], StringComparison.Ordinal))
+                            .Select(pair => pair.ordinal).ToArray();
+                        if (matches.Length != 1)
+                            throw new InvalidOperationException($"Visible header '{visibleHeaders[index]}' maps to {matches.Length} GetDetailsOf columns: [{string.Join('|', shellHeaders)}].");
+                        ordinals[index] = matches[0];
+                    }
+
+                    var rows = new string[rowCount][];
+                    var getItem = GetMethod<GetItem>(view, 6);
+                    for (var row = 0; row < rowCount; row++)
+                    {
+                        Check(getItem(view, row, out var pidl));
+                        try
+                        {
+                            var values = new string[ordinals.Length];
+                            for (var column = 0; column < ordinals.Length; column++)
+                            {
+                                Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+                                Check(getDetails(folder, pidl, (uint)ordinals[column], details));
+                                values[column] = ReadShellDetailsText(details);
+                            }
+                            rows[row] = values;
+                        }
+                        finally { Marshal.FreeCoTaskMem(pidl); }
+                    }
+                    return (visibleHeaders, ordinals, shellHeaders.ToArray(), rows);
                 }
                 finally { Marshal.FreeCoTaskMem(details); }
             }
@@ -744,12 +940,25 @@ internal static class ShellProviderLocationProbe
     {
         public int Left, Top, Right, Bottom;
     }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeHeaderItem
+    {
+        public uint Mask;
+        public int Width;
+        public nint Text, Bitmap;
+        public int TextLength, Format;
+        public nint Parameter;
+        public int Image, Order;
+        public uint Type;
+        public nint Filter;
+        public uint State;
+    }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint firstId, uint lastId, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCommandString(nint self, uint command, uint type, nint reserved, nint name, uint maxCount);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int InvokeCommand(nint self, ref NativeInvokeCommand info);
 
     [DllImport("user32.dll", EntryPoint = "IsWindowVisible")]
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisibleNative(nint window);
+    [DllImport("user32.dll", EntryPoint = "GetParent")] private static extern nint GetParent(nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] [return: MarshalAs(UnmanagedType.Bool)] private delegate bool EnumChildProc(nint window, nint parameter);
     [DllImport("user32.dll", EntryPoint = "EnumChildWindows")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder className, int maxCount);

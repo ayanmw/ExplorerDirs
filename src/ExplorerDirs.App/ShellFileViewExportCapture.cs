@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
@@ -20,16 +21,218 @@ internal static class ShellFileViewExportCapture
     private static readonly Guid ShellFolderId = new("000214E6-0000-0000-C000-000000000046");
     private static readonly Guid PropertyStoreId = new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     private static readonly Guid ShellItemImageFactoryId = new("BCC18B79-BA16-442F-80C4-8A59C30C463B");
+    private static readonly Guid ShellFolder2Id = new("93F2F68C-1D1B-11D3-A30E-00C04F79ABD1");
     private const uint AllViewInViewOrder = 0x80000002;
     private const uint AllViewItems = 2;
     private const uint FastPropertiesOnly = 8;
     private const int InvalidArgument = unchecked((int)0x80070057);
     private const int NotFound = unchecked((int)0x80070490);
+    private const uint HeaderItemText = 0x0002;
 
+    internal static FileViewExportSnapshot Capture(nint folderView, nint viewWindow, bool quickFilterActive = false)
+    {
+        var visibleColumnsResult = ShellColumnManager.CaptureForExport(folderView, out var visibleColumns);
+        Marshal.ThrowExceptionForHR(visibleColumnsResult);
+        if (visibleColumns is null || visibleColumns.Count == 0)
+            throw new InvalidDataException("当前文件视图没有可导出的可见列。");
+
+        // Custom Shell columns may have no registered PROPERTYKEY description or fast
+        // IPropertyStore value. Use the displayed Shell view contract only for those columns.
+        var unresolvedColumns = visibleColumns.Select((column, index) => (column, index))
+            .Where(item => item.column.Name.StartsWith('{') && item.column.Name.Contains("}:", StringComparison.Ordinal))
+            .ToArray();
+        if (unresolvedColumns.Length == 0)
+        {
+            var ordinarySnapshot = CaptureCore(folderView, quickFilterActive, null);
+            return new FileViewExportSnapshot(ordinarySnapshot.Columns, ordinarySnapshot.Rows);
+        }
+
+        if (quickFilterActive)
+        {
+            // The native folder view can expose backing rows outside the quick-filtered list.
+            // Keep the established filtered snapshot until Shell offers a filtered PIDL sequence.
+            var filteredSnapshot = CaptureCore(folderView, quickFilterActive, null);
+            return new FileViewExportSnapshot(filteredSnapshot.Columns, filteredSnapshot.Rows);
+        }
+        var snapshot = CaptureFromShellDetails(folderView, viewWindow, visibleColumns, unresolvedColumns) ??
+            CaptureCore(folderView, quickFilterActive, null);
+        return new FileViewExportSnapshot(snapshot.Columns, snapshot.Rows);
+    }
+
+    // Keep hidden probes and filtered-view callers on the established capture behavior
+    // unless they have a live native view window for the custom-column mapping.
     internal static FileViewExportSnapshot Capture(nint folderView, bool quickFilterActive = false)
     {
         var snapshot = CaptureCore(folderView, quickFilterActive, null);
         return new FileViewExportSnapshot(snapshot.Columns, snapshot.Rows);
+    }
+
+    private static FileViewPrintSnapshot? CaptureFromShellDetails(nint folderView, nint viewWindow,
+        IReadOnlyList<ShellExportColumn> visibleColumns,
+        IReadOnlyList<(ShellExportColumn column, int index)> unresolvedColumns)
+    {
+        var visualHeaders = CaptureVisualHeaderTexts(viewWindow);
+        if (visualHeaders.Length != visibleColumns.Count)
+            return null;
+
+        var detailsOrdinals = CaptureDetailsOrdinals(folderView, visualHeaders, unresolvedColumns);
+        if (detailsOrdinals is null) return null;
+        var folderId = ShellFolder2Id;
+        Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out var folder));
+        if (folder == 0) throw new COMException("Shell view returned no IShellFolder2 for displayed column values.");
+        try
+        {
+            Marshal.ThrowExceptionForHR(At<GetItemCount>(folderView, 7)(folderView, AllViewItems, out var count));
+            if (count < 0) throw new InvalidDataException("当前文件视图返回了无效项目数。");
+            var rows = new List<IReadOnlyList<string>>(count);
+            for (var rowIndex = 0; rowIndex < count; rowIndex++)
+            {
+                Marshal.ThrowExceptionForHR(At<GetItem>(folderView, 6)(folderView, rowIndex, out var childPidl));
+                if (childPidl == 0) throw new COMException("Shell view returned no item PIDL.");
+                try
+                {
+                    var itemId = ShellItem2Id;
+                    Marshal.ThrowExceptionForHR(SHCreateItemWithParent(IntPtr.Zero, folder, childPidl,
+                        ref itemId, out var shellItem));
+                    if (shellItem == 0) throw new COMException("Shell returned no item for the current view index.");
+                    try
+                    {
+                        var values = ReadRow(shellItem, visibleColumns).ToArray();
+                        foreach (var (column, index) in unresolvedColumns)
+                            values[index] = ReadShellDetailsValue(folder, childPidl, (uint)detailsOrdinals[index]);
+                        rows.Add(values);
+                    }
+                    finally { Marshal.Release(shellItem); }
+                }
+                finally { Marshal.FreeCoTaskMem(childPidl); }
+            }
+            var columns = visibleColumns.Select((column, index) => unresolvedColumns.Any(item => item.index == index)
+                ? visualHeaders[index]
+                : column.Name).ToArray();
+            return new FileViewPrintSnapshot(columns, rows, FileViewPrintKind.DetailsTable, []);
+        }
+        finally { Marshal.Release(folder); }
+    }
+
+    private static int[]? CaptureDetailsOrdinals(nint folderView, string[] visualHeaders,
+        IReadOnlyList<(ShellExportColumn column, int index)> unresolvedColumns)
+    {
+        var folderId = ShellFolder2Id;
+        Marshal.ThrowExceptionForHR(At<GetFolder>(folderView, 5)(folderView, ref folderId, out var folder));
+        if (folder == 0) throw new COMException("Shell view returned no IShellFolder2 for column mapping.");
+        try
+        {
+            var detailsSize = ShellDetailsBufferSize;
+            var details = Marshal.AllocCoTaskMem(detailsSize);
+            try
+            {
+                var headers = new List<string>();
+                var getDetails = At<GetDetailsOf>(folder, 18);
+                for (uint ordinal = 0; ordinal < 128; ordinal++)
+                {
+                    Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+                    if (getDetails(folder, 0, ordinal, details) < 0) break;
+                    headers.Add(ReadShellDetailsText(details, 0));
+                }
+
+                var ordinals = Enumerable.Repeat(-1, visualHeaders.Length).ToArray();
+                foreach (var (_, index) in unresolvedColumns)
+                {
+                    var matches = headers.Select((header, ordinal) => (header, ordinal))
+                        .Where(pair => string.Equals(pair.header, visualHeaders[index], StringComparison.OrdinalIgnoreCase))
+                        .Select(pair => pair.ordinal).ToArray();
+                    if (matches.Length != 1)
+                        return null;
+                    ordinals[index] = matches[0];
+                }
+                return ordinals;
+            }
+            finally { Marshal.FreeCoTaskMem(details); }
+        }
+        finally { Marshal.Release(folder); }
+    }
+
+    private static string[] CaptureVisualHeaderTexts(nint viewWindow)
+    {
+        var listView = FindChildWindow(viewWindow, "SysListView32");
+        if (listView == 0) return [];
+        var header = SendMessageW(listView, 0x101F, 0, 0); // LVM_GETHEADER
+        if (header == 0) return [];
+        var count = checked((int)SendMessageW(header, 0x1200, 0, 0)); // HDM_GETITEMCOUNT
+        if (count <= 0 || count > ColumnLayout.MaximumColumns) return [];
+        var orderPointer = Marshal.AllocHGlobal(sizeof(int) * count);
+        try
+        {
+            if (SendMessageW(listView, 0x103B, count, orderPointer) == 0) return [];
+            var order = new int[count];
+            Marshal.Copy(orderPointer, order, 0, count);
+            if (order.Any(index => index < 0 || index >= count) || order.Distinct().Count() != count) return [];
+            var logicalHeaders = new string[count];
+            for (var index = 0; index < count; index++)
+            {
+                var text = new StringBuilder(1024);
+                var textPointer = Marshal.AllocHGlobal(text.Capacity * sizeof(char));
+                var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeHeaderItem>());
+                try
+                {
+                    var item = new NativeHeaderItem
+                    {
+                        Mask = HeaderItemText,
+                        Text = textPointer,
+                        TextCapacity = text.Capacity
+                    };
+                    Marshal.StructureToPtr(item, itemPointer, false);
+                    if (SendMessageW(header, 0x120B, index, itemPointer) == 0) return [];
+                    logicalHeaders[index] = Marshal.PtrToStringUni(textPointer) ?? string.Empty;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(itemPointer);
+                    Marshal.FreeHGlobal(textPointer);
+                }
+            }
+            return order.Select(index => logicalHeaders[index]).ToArray();
+        }
+        finally { Marshal.FreeHGlobal(orderPointer); }
+    }
+
+    private static nint FindChildWindow(nint parent, string className)
+    {
+        if (parent == 0) return 0;
+        nint found = 0;
+        EnumChildWindows(parent, (window, _) =>
+        {
+            var name = new StringBuilder(128);
+            _ = GetClassNameW(window, name, name.Capacity);
+            if (string.Equals(name.ToString(), className, StringComparison.Ordinal))
+            {
+                found = window;
+                return false;
+            }
+            return true;
+        }, 0);
+        return found;
+    }
+
+    private static string ReadShellDetailsValue(nint folder, nint childPidl, uint ordinal)
+    {
+        var detailsSize = ShellDetailsBufferSize;
+        var details = Marshal.AllocCoTaskMem(detailsSize);
+        try
+        {
+            Marshal.Copy(new byte[detailsSize], 0, details, detailsSize);
+            Marshal.ThrowExceptionForHR(At<GetDetailsOf>(folder, 18)(folder, childPidl, ordinal, details));
+            return ReadShellDetailsText(details, childPidl);
+        }
+        finally { Marshal.FreeCoTaskMem(details); }
+    }
+
+    private static string ReadShellDetailsText(nint details, nint childPidl)
+    {
+        var strret = details + sizeof(int) * 2;
+        var text = new StringBuilder(32768);
+        Marshal.ThrowExceptionForHR(StrRetToBufW(strret, childPidl, text, (uint)text.Capacity));
+        return text.ToString();
     }
 
     internal static FileViewExportSnapshot CaptureIndexedView(nint folderView)
@@ -339,10 +542,28 @@ internal static class ShellFileViewExportCapture
     private static T At<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * nint.Size));
 
+    private static int ShellDetailsBufferSize => sizeof(int) * 2 + (nint.Size == 8 ? 272 : 264);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePropertyKey { public Guid FormatId; public uint PropertyId; }
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeSize { public int Width; public int Height; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeHeaderItem
+    {
+        public uint Mask;
+        public int Width;
+        public nint Text;
+        public nint Bitmap;
+        public int TextCapacity;
+        public int Format;
+        public nint Param;
+        public int Image;
+        public int Order;
+        public uint Type;
+        public nint Filter;
+        public uint State;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PropVariant
@@ -373,6 +594,10 @@ internal static class ShellFileViewExportCapture
     private delegate int GetValue(nint self, ref NativePropertyKey key, out PropVariant value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int GetImage(nint self, NativeSize size, uint flags, out nint bitmap);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int GetDetailsOf(nint self, nint childPidl, uint column, nint details);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate bool EnumChildProc(nint window, nint parameter);
 
     [DllImport("propsys.dll", PreserveSig = true)]
     private static extern int PSFormatForDisplayAlloc(in NativePropertyKey key, ref PropVariant value,
@@ -384,4 +609,12 @@ internal static class ShellFileViewExportCapture
     private static extern int PropVariantClear(ref PropVariant value);
     [DllImport("gdi32.dll")]
     private static extern bool DeleteObject(nint handle);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll", EntryPoint = "EnumChildWindows")]
+    private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint parameter);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassNameW(nint window, StringBuilder className, int maximumCount);
+    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, EntryPoint = "StrRetToBufW", ExactSpelling = true)]
+    private static extern int StrRetToBufW(nint strret, nint childPidl, StringBuilder buffer, uint bufferLength);
 }
