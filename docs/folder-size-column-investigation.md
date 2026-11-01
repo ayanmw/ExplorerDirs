@@ -2252,4 +2252,4 @@ Release NativeProbe build 0 警告/错误，完整 `--explorerbrowser-registered
 
 四个不同路径根的隔离 WPF 宿主中，直接失效注入已通过：目标 `folder-000` 在扫描中改变 38 B，旧结果未发布，重试读回递归总值 47 B（其余 9 个文件各 1 B）；4 视图选区/焦点保持，36 次基线扫描加 1 次目标重试，无队列拒绝。首次失败来自断言算术错误（期待 38 B，实际应为 47 B），修正后该直接失效场景通过。
 
-真实 `SHChangeNotify` 对照尚未证明“回调抵达时 reservation 仍在执行”。探针确认当前 Private Desktop 收到了 Pane1 的 `SHCNE_UPDATEITEM` 和 `SHCNE_UPDATEDIR`，通知 PIDL 精确解析为 `...\Pane1\folder-000`，并清除该目录已完成的缓存快照；但通知回调统计 `invalidated-reservations=0`，之后要求 in-flight reservation 的场景超时。把注入延迟提到 1 秒时，探针又未能取得目标 reservation。故目前只能证明通知可使已有快照失效，不能证明真实通知能中止/标记正在扫描的任务；相关扫描/通知竞态仍是产品接线前的门槛。所有失败运行的 Private Desktop 前台/输入与隔离清理守卫均通过，未留下产品/release 修改。
+增加 NativeProbe 专用的提交闸门后，真实 Shell 通知竞态现可确定性验证：闸门只暂停指定 Pane1 `folder-000` 在扫描和身份检查完成之后、写入快照之前的工作线程；随后修改一个文件并由同一 Private Desktop 发送 `SHCNE_UPDATEITEM`/`SHCNE_UPDATEDIR`。`SFVM_FSNOTIFY` 收到的 PIDL 精确解析为目标文件夹，两类通知命中同一个活动 reservation；释放闸门后，旧值的缓存提交被拒绝，刷新重扫读回 47 B。四个不同根的视图全部收敛，选区/焦点保持，无队列拒绝；扫描总数 37（36 个完整结果加目标旧扫描），view 枚举增量为 5。Release C++ adapter `/W4 /WX` 与 NativeProbe 构建均通过，Private Desktop 前台/输入及清理守卫通过。此闸门仅是 NativeProbe 的时序控制，不进入产品；已证明隔离 provider 的通知失效与旧结果拒绝链，不代表产品 ExplorerBrowser 已接线，也不证明任意文件系统/第三方 Shell provider 的通知覆盖面。

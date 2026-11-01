@@ -580,6 +580,7 @@ public static class SyntheticShellSortProbe
         var additionalViewWindowsCreated = new bool[additionalParents.Length];
         var additionalRootPidls = asyncSharedViewDistinctRoots ? new nint[asyncSharedViewCount - 2] : [];
         var asyncQueueGateCreated = false;
+        var asyncCommitGateCreated = false;
         var classKeyPath = $@"Software\Classes\CLSID\{{{syntheticFolderClassId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{syntheticFolderClassId:D}}}";
         Console.WriteLine($"synthetic-shell-size-sort: run-id={fixtureId}; clsid={syntheticFolderClassId:B}; backing-fixture={Path.GetFileName(backingFolder)}; copy-fixture={Path.GetFileName(copyDestination)}");
@@ -710,6 +711,15 @@ public static class SyntheticShellSortProbe
                 Check(Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
                     NativeLibrary.GetExport(module, "BeginSyntheticAsyncRecursiveSizeQueueGateForProbe"))());
                 asyncQueueGateCreated = true;
+            }
+            if (asyncShellNotificationInvalidationProbe)
+            {
+                Check(Marshal.GetDelegateForFunctionPointer<SetBackingPath>(NativeLibrary.GetExport(module,
+                    "SetSyntheticAsyncRecursiveSizeCommitGatePathForProbe"))(
+                    Path.Combine(firstPaneFolder, "folder-000")));
+                Check(Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(NativeLibrary.GetExport(module,
+                    "BeginSyntheticAsyncRecursiveSizeCommitGateForProbe"))());
+                asyncCommitGateCreated = true;
             }
             Check(At<CreateViewWindow>(view, 9)(view, 0, ref settings, hostPointer, ref bounds, out _));
             Console.WriteLine("synthetic-shell-size-sort: IShellView.CreateViewWindow returned");
@@ -1067,11 +1077,23 @@ public static class SyntheticShellSortProbe
                                 NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeScanReservationForChildProbe"));
                             var hasRecursiveSnapshot = Marshal.GetDelegateForFunctionPointer<HasRecursiveSizeSnapshot>(
                                 NativeLibrary.GetExport(module, "HasSyntheticRecursiveSizeSnapshotForViewProbe"));
-                            var reservationDeadline = Environment.TickCount64 + 10_000;
-                            while (!hasReservation(view, "folder-000") && Environment.TickCount64 < reservationDeadline)
-                                Pump(10);
-                            if (!hasReservation(view, "folder-000"))
-                                throw new TimeoutException("The main view never reserved the targeted folder-000 recursive-size scan.");
+                            if (asyncShellNotificationInvalidationProbe)
+                            {
+                                var commitGateReached = Marshal.GetDelegateForFunctionPointer<NativeLibraryUnloadContractSmoke>(
+                                    NativeLibrary.GetExport(module, "HasSyntheticAsyncRecursiveSizeCommitGateReachedForProbe"));
+                                var commitDeadline = Environment.TickCount64 + 15_000;
+                                while (commitGateReached() == 0 && Environment.TickCount64 < commitDeadline) Pump(10);
+                                if (commitGateReached() == 0 || !hasReservation(view, "folder-000"))
+                                    throw new TimeoutException("The target recursive-size scan did not pause after computing its value and before cache commit.");
+                            }
+                            else
+                            {
+                                var reservationDeadline = Environment.TickCount64 + 10_000;
+                                while (!hasReservation(view, "folder-000") && Environment.TickCount64 < reservationDeadline)
+                                    Pump(10);
+                                if (!hasReservation(view, "folder-000"))
+                                    throw new TimeoutException("The main view never reserved the targeted folder-000 recursive-size scan.");
+                            }
 
                             var completedBeforeInvalidation = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe");
                             File.WriteAllBytes(Path.Combine(firstPaneFolder, "folder-000", "item-00.bin"), new byte[38]);
@@ -1088,7 +1110,9 @@ public static class SyntheticShellSortProbe
                                     Pump(10);
                                 if (ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe") == invalidatedBefore)
                                     throw new IOException("The real Shell notification did not match and invalidate the targeted in-flight folder reservation.");
-                                Console.WriteLine($"synthetic-async-recursive-size-shell-notification-invalidation: target=folder-000; external-notification=True; matching-reservations={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe") - invalidatedBefore}");
+                                Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(NativeLibrary.GetExport(module,
+                                    "ReleaseSyntheticAsyncRecursiveSizeCommitGateForProbe"))();
+                                Console.WriteLine($"synthetic-async-recursive-size-shell-notification-invalidation: target=folder-000; stale-scan-held-before-commit=True; matching-invalidation-callbacks={ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationInvalidatedReservationCountForProbe") - invalidatedBefore}");
                             }
                             else
                             {
@@ -2194,6 +2218,9 @@ public static class SyntheticShellSortProbe
         }
         finally
         {
+            if (module != 0 && asyncCommitGateCreated)
+                Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(NativeLibrary.GetExport(module,
+                    "ReleaseSyntheticAsyncRecursiveSizeCommitGateForProbe"))();
             if (module != 0 && asyncQueueGateCreated)
             {
                 Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
@@ -2209,6 +2236,12 @@ public static class SyntheticShellSortProbe
                 Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                     NativeLibrary.GetExport(module, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                 asyncQueueGateCreated = false;
+            }
+            if (module != 0 && asyncCommitGateCreated)
+            {
+                Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(NativeLibrary.GetExport(module,
+                    "ClearSyntheticAsyncRecursiveSizeCommitGateForProbe"))();
+                asyncCommitGateCreated = false;
             }
             if (module != 0 && asyncOnDemandRecursiveSize)
                 Marshal.GetDelegateForFunctionPointer<ReleaseViewHold>(NativeLibrary.GetExport(module,

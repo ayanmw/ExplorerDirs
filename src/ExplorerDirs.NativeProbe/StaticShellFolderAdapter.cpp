@@ -1781,6 +1781,10 @@ namespace
     volatile LONG g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe = 0;
     HANDLE g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
+    std::mutex g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe;
+    HANDLE g_syntheticAsyncRecursiveSizeCommitGateForProbe = nullptr;
+    HANDLE g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe = nullptr;
+    std::wstring g_syntheticAsyncRecursiveSizeCommitGatePathForProbe;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
@@ -4014,6 +4018,27 @@ namespace
                     itemResult = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
                 if (SUCCEEDED(itemResult) && InterlockedCompareExchange(&self->_asyncScansCancelled, 0, 0))
                     itemResult = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+                if (SUCCEEDED(itemResult))
+                {
+                    HANDLE commitGate = nullptr;
+                    HANDLE commitGateReached = nullptr;
+                    bool isCommitGateTarget = false;
+                    {
+                        std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+                        commitGate = g_syntheticAsyncRecursiveSizeCommitGateForProbe;
+                        commitGateReached = g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe;
+                        const auto& target = g_syntheticAsyncRecursiveSizeCommitGatePathForProbe;
+                        isCommitGateTarget = !target.empty() && entry.path.size() == target.size() &&
+                            CompareStringOrdinal(entry.path.data(), static_cast<int>(entry.path.size()),
+                                target.data(), static_cast<int>(target.size()), TRUE) == CSTR_EQUAL;
+                    }
+                    if (commitGate && commitGateReached && isCommitGateTarget)
+                    {
+                        SetEvent(commitGateReached);
+                        if (WaitForSingleObject(commitGate, 10000) != WAIT_OBJECT_0)
+                            itemResult = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+                    }
+                }
                 if (SUCCEEDED(itemResult)) itemResult = self->_recursiveSizeStore->Set(
                     entry.key.c_str(), after, metrics.bytes, metrics.files, metrics.folders);
                 if (scanReserved) self->_recursiveSizeStore->ReleaseScan(entry.key);
@@ -7319,6 +7344,74 @@ extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeQue
     const auto gate = g_syntheticAsyncRecursiveSizeScanGateForProbe;
     g_syntheticAsyncRecursiveSizeScanGateForProbe = nullptr;
     if (gate) CloseHandle(gate);
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeCommitGatePathForProbe(PCWSTR path)
+{
+    if (!path || !*path) return E_INVALIDARG;
+    try
+    {
+        std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+        if (g_syntheticAsyncRecursiveSizeCommitGateForProbe) return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
+        g_syntheticAsyncRecursiveSizeCommitGatePathForProbe.assign(path);
+    }
+    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI BeginSyntheticAsyncRecursiveSizeCommitGateForProbe()
+{
+    std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+    if (g_syntheticAsyncRecursiveSizeCommitGateForProbe || g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe ||
+        g_syntheticAsyncRecursiveSizeCommitGatePathForProbe.empty())
+        return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
+    const auto gate = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!gate) return HRESULT_FROM_WIN32(GetLastError());
+    const auto reached = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!reached)
+    {
+        const auto error = GetLastError();
+        CloseHandle(gate);
+        return HRESULT_FROM_WIN32(error);
+    }
+    g_syntheticAsyncRecursiveSizeCommitGateForProbe = gate;
+    g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe = reached;
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeCommitGateReachedForProbe()
+{
+    HANDLE reached = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+        reached = g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe;
+    }
+    return reached && WaitForSingleObject(reached, 0) == WAIT_OBJECT_0;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ReleaseSyntheticAsyncRecursiveSizeCommitGateForProbe()
+{
+    HANDLE gate = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+        gate = g_syntheticAsyncRecursiveSizeCommitGateForProbe;
+    }
+    if (gate) SetEvent(gate);
+}
+
+extern "C" __declspec(dllexport) void WINAPI ClearSyntheticAsyncRecursiveSizeCommitGateForProbe()
+{
+    HANDLE gate = nullptr, reached = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_syntheticAsyncRecursiveSizeCommitGateMutexForProbe);
+        gate = g_syntheticAsyncRecursiveSizeCommitGateForProbe;
+        reached = g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe;
+        g_syntheticAsyncRecursiveSizeCommitGateForProbe = nullptr;
+        g_syntheticAsyncRecursiveSizeCommitGateReachedForProbe = nullptr;
+        g_syntheticAsyncRecursiveSizeCommitGatePathForProbe.clear();
+    }
+    if (gate) CloseHandle(gate);
+    if (reached) CloseHandle(reached);
 }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticRecursiveSizeCacheMissesDuringCompareCount()
