@@ -1187,4 +1187,10 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 
 在合成 filesystem provider 的真实目录重命名路径上，`SetNameOf` 同时取得重命名前的 Shell parsing name、成功后的新子 PIDL 与文件身份。若旧快照身份仍匹配，store 在同一锁区内先写入新 parsing name，再删除旧键；值随同一目录身份迁移，不需要重新扫描。静态 NativeProbe fixture 先发布 `1,234 B`，真实调用 `SetNameOf(child → renamed-child)` 后读回新键仍为 `1,234 B`、旧键 miss、快照数仍为 1。该回归在旧 adapter 上按预期输出 `folder-rename-cache-migration-failed`，修复后输出 `folder-rename-and-cache-migration-passed`；原生 adapter `/W4 /WX` 与 `--static-shell-column-folder-smoke` 通过，探针明确 `window-created=False`。
 
-这仅覆盖该原型自身接收到的 `SetNameOf` 文件夹重命名。外部进程改名、Shell 通知触发的缓存失效、父目录删除/移动后的整棵子树清理，以及产品 ExplorerBrowser/可见派生列仍未接线或验证；缓存仍无整体容量上限，不能据此声称解决了长期内存增长。
+这仅覆盖该原型自身接收到的 `SetNameOf` 文件夹重命名。Shell 删除/移出通知的子树失效后来已补入隔离回调探针；外部进程真实通知时序、父目录移动后的完整事件序列，以及产品 ExplorerBrowser/可见派生列仍未验证。缓存仍无整体容量上限，不能据此声称解决了长期内存增长。
+
+### 2026-11-01：Shell 删除/移出通知清理递归大小子树快照
+
+缓存新增按 parsing name 子树失效：精确清除目录本身及其后代，并以分隔符边界阻止 `child` 误命中 `child-sibling`。合成 `IShellFolderViewCB::MessageSFVCB(SFVM_FSNOTIFY)` 收到 `SHCNE_DELETE`、`SHCNE_RMDIR` 或 `SHCNE_RENAMEFOLDER` 时，从通知中的第一个绝对 PIDL 取得 parsing name 并清理旧子树；带 `SHCNE_INTERRUPT` 的事件按基础事件处理。新合同覆盖子树与同前缀兄弟区分，另经 `SHCNE_RMDIR` 回调验证缓存项归零，回调仍返回 `E_NOTIMPL` 让 DefView 继续默认更新。
+
+原生 adapter `/W4 /WX` 构建、NativeProbe Release 构建和 `--static-shell-column-folder-smoke` 均通过，输出 `recursive-size-subtree-invalidation-passed` 与 `recursive-size-shell-delete-invalidation-passed`，且 `window-created=False`。仅为隔离原型的 callback/cache 路径证据；没有验证 ExplorerBrowser 产品接线、外部应用真实通知的时序、父目录移动事件覆盖、全局缓存容量或用户可见列体验。该缓存仍无容量上限。

@@ -1426,6 +1426,33 @@ namespace
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
             return S_OK;
         }
+        size_t RemoveSubtree(PCWSTR parsingName)
+        {
+            if (!parsingName || !*parsingName) return 0;
+            std::wstring root;
+            try { root.assign(parsingName); }
+            catch (const std::bad_alloc&) { return 0; }
+            std::lock_guard<std::mutex> lock(_mutex);
+            size_t removed = 0;
+            for (auto entry = _sizes.begin(); entry != _sizes.end();)
+            {
+                const auto& candidate = entry->first;
+                const auto rootLength = static_cast<int>(root.size());
+                const bool prefixMatches = candidate.size() >= root.size() &&
+                    CompareStringOrdinal(candidate.data(), rootLength, root.data(), rootLength, TRUE) == CSTR_EQUAL;
+                const bool rootHasSeparator = !root.empty() && (root.back() == L'\\' || root.back() == L'/');
+                const bool samePath = prefixMatches && candidate.size() == root.size();
+                const bool descendant = prefixMatches && candidate.size() > root.size() &&
+                    (rootHasSeparator || candidate[root.size()] == L'\\' || candidate[root.size()] == L'/');
+                if (samePath || descendant)
+                {
+                    entry = _sizes.erase(entry);
+                    ++removed;
+                }
+                else ++entry;
+            }
+            return removed;
+        }
         bool TryGet(const std::wstring& parsingName, const SyntheticFileIdentity& identity, ULONGLONG* bytes) const
         {
             if (!identity.available || !bytes) return false;
@@ -2148,6 +2175,21 @@ namespace
                 sprintf_s(notification, "synthetic-sort: SFVM_FSNOTIFY; wParam=0x%p; lParam=0x%llX",
                     reinterpret_cast<void*>(wParam), static_cast<unsigned long long>(static_cast<UINT_PTR>(lParam)));
                 TraceSyntheticSortStage(notification);
+                const auto event = static_cast<LONG>(lParam) & ~SHCNE_INTERRUPT;
+                if (_recursiveSizeStore && wParam &&
+                    (event == SHCNE_DELETE || event == SHCNE_RMDIR || event == SHCNE_RENAMEFOLDER))
+                {
+                    auto* pidls = reinterpret_cast<PCIDLIST_ABSOLUTE*>(wParam);
+                    if (pidls[0])
+                    {
+                        LPWSTR parsingName = nullptr;
+                        if (SUCCEEDED(SHGetNameFromIDList(pidls[0], SIGDN_DESKTOPABSOLUTEPARSING, &parsingName)) && parsingName)
+                        {
+                            (void)_recursiveSizeStore->RemoveSubtree(parsingName);
+                            CoTaskMemFree(parsingName);
+                        }
+                    }
+                }
                 if (InterlockedCompareExchange(&g_syntheticTranslateChildNotificationsForProbe, 0, 0) &&
                     ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
                 {
@@ -3862,6 +3904,37 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
         }
     }
     TraceSyntheticSortStage("synthetic-folder-tree: nested-storage-passed");
+    {
+        const auto* child = SyntheticData(childFolder);
+        if (!child) { result = E_FAIL; goto cleanup; }
+        SyntheticFileIdentity siblingIdentity{};
+        siblingIdentity.volumeSerial = child->identity.volumeSerial;
+        siblingIdentity.fileId[0] = static_cast<BYTE>(child->identity.fileId[0] ^ 0x5A);
+        siblingIdentity.available = child->identity.available;
+        SyntheticRecursiveSizeSnapshotStore invalidationStore;
+        std::wstring subtree = backingPath;
+        std::wstring nestedPath;
+        std::wstring siblingPath;
+        try
+        {
+            subtree += L"\\child";
+            nestedPath = subtree + L"\\nested";
+            siblingPath = backingPath;
+            siblingPath += L"\\child-sibling";
+        }
+        catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; goto cleanup; }
+        if (FAILED(invalidationStore.Set(subtree.c_str(), child->identity, 11)) ||
+            FAILED(invalidationStore.Set(nestedPath.c_str(), child->identity, 12)) ||
+            FAILED(invalidationStore.Set(siblingPath.c_str(), siblingIdentity, 22)) ||
+            invalidationStore.RemoveSubtree(subtree.c_str()) != 2 ||
+            invalidationStore.Count() != 1)
+        {
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-invalidation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-subtree-invalidation-passed");
+    }
     nested->Release();
     nested = nullptr;
     result = S_OK;
@@ -3899,6 +3972,27 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticFolderTreeContractSm
             result = E_FAIL;
             goto cleanup;
         }
+        PIDLIST_ABSOLUTE renamedFolderPidl = nullptr;
+        result = SHParseDisplayName(newParsingName.c_str(), nullptr, &renamedFolderPidl, 0, nullptr);
+        if (FAILED(result) || !renamedFolderPidl)
+        {
+            if (renamedFolderPidl) CoTaskMemFree(renamedFolderPidl);
+            CoTaskMemFree(renamedFolder);
+            if (SUCCEEDED(result)) result = E_UNEXPECTED;
+            goto cleanup;
+        }
+        PCIDLIST_ABSOLUTE notificationPidls[2] = { renamedFolderPidl, nullptr };
+        const auto notificationResult = root->MessageSFVCB(SFVM_FSNOTIFY,
+            reinterpret_cast<WPARAM>(notificationPidls), SHCNE_RMDIR);
+        CoTaskMemFree(renamedFolderPidl);
+        if (notificationResult != E_NOTIMPL || root->RecursiveSizeSnapshotCountForProbe() != 0)
+        {
+            CoTaskMemFree(renamedFolder);
+            TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-shell-delete-invalidation-failed");
+            result = E_FAIL;
+            goto cleanup;
+        }
+        TraceSyntheticSortStage("synthetic-folder-tree: recursive-size-shell-delete-invalidation-passed");
         CoTaskMemFree(renamedFolder);
     }
     TraceSyntheticSortStage("synthetic-folder-tree: folder-rename-and-cache-migration-passed");

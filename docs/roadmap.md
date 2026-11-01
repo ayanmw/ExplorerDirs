@@ -5536,3 +5536,5 @@ NativeProbe 新增 `single-item-lvm-update-live-cache-publish`，把生产递归
 ## 2026-11-01：watcher 目录暂失后的恢复重试
 
 将 `--shell-watcher-recovery-contract` 扩展为替换失败恢复：注入 overflow 后先删除探针监视目录，确认第一次 watcher 替换失败；重建该目录后，恢复状态机经过退避重试并成功创建新 watcher，随后接收新文件事件。连续三轮通过；NativeProbe Release build 0 警告/错误。该用例隔离验证共享恢复 helper 的退避/重试及 watcher 生命周期，不是产品 WPF Dispatcher 计时器全路径、真实 OS overflow、ExplorerBrowser 或第三方 provider 的证据。
+
+2026-11-01 递归大小原型继续补上 Shell 删除/移出事件的子树缓存失效。绝对 PIDL 转 parsing name 后按路径边界删除自身及后代；回归也证明相邻 `child-sibling` 不被误删。无窗口合同探针直接调用 `MessageSFVCB(SFVM_FSNOTIFY)` 验证 `SHCNE_RMDIR` 后缓存归零，默认 Shell 更新仍由 `E_NOTIMPL` 继续。Native adapter `/W4 /WX`、NativeProbe Release、`--static-shell-column-folder-smoke` 通过。仍限 NativeProbe 隔离原型；产品 ExplorerBrowser/可见 UI、外部通知真实时序及缓存全局容量尚未验证。详见 [递归大小列调查](folder-size-column-investigation.md#2026-11-01shell-删除移出通知清理递归大小子树快照)。
