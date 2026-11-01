@@ -2391,3 +2391,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 这证明“已创建的 view 在进程间注册被删除后仍暂时可读”不代表新窗格/新进程还能解析该位置；注册 owner 至少要覆盖所有仍需创建 namespace view 的 app 进程。当前 `FolderOpenRouter` 的单实例边界按 profile，而非全局，因此可并行 profile 不应共用一个会被任一进程删除的 CLSID。随后验证了 profile 级 owner 的崩溃恢复前提：NativeProbe 子进程创建 volatile CLSID/NameSpace 键后被直接 `Kill`（exit code -1，不执行注册清理），父进程仍能读到两棵键；父进程 finally 删除随机测试键。结果符合 Microsoft `RegistryOptions.Volatile` 说明：数据仅在对应 registry hive 卸载时不再保留，并不随创建进程退出消失。[RegistryOptions](https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.registryoptions)
 
 后续优先评估把稳定 CLSID 放入每个 portable profile 的 INI，不同 profile 独立命名、同 profile 由现有单实例进程负责，并验证 profile 移动/复制及已有 INI 升级；这样可避免并行 profile 删除彼此的注册。当前仍未接入产品。两项生命周期探针不证明不同用户、提升权限或 Explorer 长期持有 view 的场景。
+
+### 2026-11-02：profile provider identity 的 `.qdr` 导出门槛
+
+在生产 `ExplorerBrowserHost` 的注册 provider HostProbe 中，分别对根目录和嵌套子目录 parsing name 调用 `SHParseDisplayName` 与 `SHGetNameFromIDList(SIGDN_FILESYSPATH)`。两次 API 都返回 `S_OK`，但返回值仍是 `::{CLSID}\edpath:<UTF-16 hex>` provider identity，不是 Shell 能直接给出的文件系统路径；该 identity 的 `edpath` token 可按原型格式解码为对应根/子目录的物理路径。HostProbe Release 构建 0 警告/错误，完整根目录、子目录导航/返回、递归大小排序和普通文件系统排序合同 exit 0。
+
+因此 `.qdr` 兼容可通过应用识别自有 provider identity 并解码其 `edpath` token 导出物理 `DirN` 路径；不能依赖 `SIGDN_FILESYSPATH` 自动去包装。该候选尚未接入 `QdrExporter`，也未覆盖路径 token 格式演进、损坏输入或跨机器不可达路径。隔离预览脚本会复制主 profile 的 ExplorerDirs、窗口 session、收藏/固定标签和导航树状态等明列文件；若稳定 CLSID 保存在 profile INI，预览克隆需在复制时分配新 CLSID，并重写这些 session/收藏状态中引用的 app provider identity。发布脚本当前没有此身份重映射步骤，故在其实现前不能安全地让带 provider identity 的主 profile 直接进入 `-IsolatedProfile` 预览副本。产品启动、profile ID 持久化、QDR 导入导出映射及发布克隆重写仍未实现。

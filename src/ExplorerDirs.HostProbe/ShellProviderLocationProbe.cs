@@ -58,6 +58,7 @@ internal static class ShellProviderLocationProbe
             }
 
             var targetIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(pathB)}";
+            ProbeFilesystemPathRoundTrip(targetIdentity, pathB);
             var appAssembly = Assembly.Load("ExplorerDirs.App");
             var viewStateType = appAssembly.GetType("ExplorerDirs.App.ViewState", throwOnError: true)!;
             var propertyKeyType = appAssembly.GetType("ExplorerDirs.App.PropertyKeyState", throwOnError: true)!;
@@ -294,6 +295,7 @@ internal static class ShellProviderLocationProbe
             var parentColumnsBeforeNestedNavigation = CaptureDisplayColumns(hostType, host);
             var nestedPath = Path.Combine(pathB, "folder-small");
             var nestedIdentity = $"::{{{classId:D}}}\\edpath:{EncodePath(nestedPath)}";
+            ProbeFilesystemPathRoundTrip(nestedIdentity, nestedPath);
             hostType.GetMethod("Navigate")!.Invoke(host, [nestedIdentity]);
             var navigatedState = hostType.GetProperty("CurrentPath")!;
             var hasNavigated = hostType.GetField("_hasNavigated", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -1199,6 +1201,53 @@ internal static class ShellProviderLocationProbe
     private static T GetMethod<T>(nint instance, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
 
+    private static void ProbeFilesystemPathRoundTrip(string parsingName, string expectedBackingPath)
+    {
+        // Profile-specific provider IDs are useful only if portable exports can avoid persisting them.
+        var parseResult = SHParseDisplayName(parsingName, 0, out var pidl, 0, out _);
+        if (parseResult < 0 || pidl == 0)
+            throw new InvalidOperationException($"Could not parse the probe provider path: 0x{parseResult:X8}.");
+        try
+        {
+            var pathResult = SHGetNameFromIDList(pidl, 0x80058000, out var pathPointer);
+            try
+            {
+                var path = pathResult >= 0 && pathPointer != 0 ? Marshal.PtrToStringUni(pathPointer) : null;
+                var isProviderIdentity = path?.StartsWith("::{", StringComparison.Ordinal) == true;
+                var hasEncodedPath = TryDecodeProviderBackingPath(path, out var encodedBackingPath);
+                var backingPathMatches = hasEncodedPath && string.Equals(encodedBackingPath, expectedBackingPath, StringComparison.OrdinalIgnoreCase);
+                Console.WriteLine($"shell-provider-filesystem-name: hr=0x{pathResult:X8}; returned-provider-identity={isProviderIdentity}; encoded-backing-path-matches={backingPathMatches}");
+                if (pathResult < 0 || !isProviderIdentity || !backingPathMatches)
+                    throw new InvalidOperationException("The provider identity did not round-trip to its expected backing filesystem path.");
+            }
+            finally
+            {
+                if (pathPointer != 0) Marshal.FreeCoTaskMem(pathPointer);
+            }
+        }
+        finally { Marshal.FreeCoTaskMem(pidl); }
+    }
+
+    private static bool TryDecodeProviderBackingPath(string? identity, out string path)
+    {
+        path = string.Empty;
+        const string marker = "\\edpath:";
+        var markerIndex = identity?.IndexOf(marker, StringComparison.OrdinalIgnoreCase) ?? -1;
+        if (markerIndex < 0) return false;
+        var token = identity![(markerIndex + marker.Length)..];
+        if (token.Length == 0 || token.Length % 4 != 0) return false;
+        var decoded = new StringBuilder(token.Length / 4);
+        for (var index = 0; index < token.Length; index += 4)
+        {
+            if (!ushort.TryParse(token.AsSpan(index, 4), NumberStyles.AllowHexSpecifier,
+                    CultureInfo.InvariantCulture, out var character))
+                return false;
+            decoded.Append((char)character);
+        }
+        path = decoded.ToString();
+        return Path.IsPathFullyQualified(path);
+    }
+
     private static bool TryReadBytes(string value, out ulong bytes)
     {
         var digits = new string(value.Where(char.IsDigit).ToArray());
@@ -1265,6 +1314,8 @@ internal static class ShellProviderLocationProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder className, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
     [DllImport("ole32.dll")] private static extern int PropVariantClear(nint variant);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributes, out uint attributesOut);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHGetNameFromIDList(nint pidl, uint nameType, out nint name);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool DestroyMenu(nint menu);
 }
