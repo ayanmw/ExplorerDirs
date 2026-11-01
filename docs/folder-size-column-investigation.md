@@ -1408,3 +1408,11 @@ Shell 通知现由有界队列合并：首个待发送更新后等待最多 200m
 结果说明在该同进程 synthetic provider 中，两 view 的 provider 对象复用同一个有界快照 store；重叠读取没有重复递归扫描。通知会送达共享根下的多个 view；四次复测记录 5–6 次合并通知与 2–3 次聚合枚举增量，均高于单 view 对照的 2 次通知与 1 次枚举。该探针是两个同进程隐藏 view 的合成 filesystem 证据，不能外推到四窗格产品、多窗口独立进程、网络路径、第三方 namespace、真实用户可见闪烁或 ExplorerBrowser。下一步把同一压力扩展到四个活动 view，并观察每个 view 的状态恢复和枚举量；仍不因此接入产品列。
 
 日志：`src/.state/native-probe-watchdog/20261101-122213-7b0225b8.stdout.log`、`src/.state/native-probe-watchdog/20261101-122240-d97f55f2.stdout.log`、`src/.state/native-probe-watchdog/20261101-122434-05b9957c.stdout.log`、`src/.state/native-probe-watchdog/20261101-122525-965e7b93.stdout.log`；单 view 对照：`src/.state/native-probe-watchdog/20261101-122308-e547e558.stdout.log`。
+
+### 2026-11-01：四活动 Shell view 共享异步递归大小队列
+
+将共享根目录模式扩展到四个同时活动的隐藏 WPF `IShellView`，每个 view 选中/聚焦不同的同级目录。500 个同级目录、512 条缓存容量下两轮均回填四份 502 行列值，只执行 501 次唯一目录扫描（重复 0），峰值 worker 2，每轮 5 次合并 `SHCNE_UPDATEDIR`，聚合 `EnumObjects` 增量 4；四份选中/焦点状态均保留。100 目录/256 缓存的小规模对照为 101 次扫描、2 次通知、4 次枚举增量。旧的双视图环境变量入口以 500 目录复测通过：501 次扫描、6 次通知、3 次聚合枚举，两个 view 状态均保留。所有 watchdog exit 0，前台 HWND/最后输入 tick 不变，Private Desktop 及 fixture 清理通过；Release build 0 警告/错误，静态 Shell 合同 smoke 通过。
+
+四视图结果说明同进程 synthetic provider 的有界快照 store 能在四个共享根 view 之间避免重复扫描；五次合并变更通知使四个活动 view 各产生一次聚合重枚举。当前仍未覆盖四个不同/部分重叠根目录、真实磁盘和网络慢 I/O、取消/关闭竞争、ExplorerBrowser 产品接线或可见刷新。下一步验证四个不同根目录共享 worker 时的队列饱和、取消与逐 view 回填，再决定产品列集成门槛。
+
+日志：`src/.state/native-probe-watchdog/20261101-122747-98b51977.stdout.log`、`src/.state/native-probe-watchdog/20261101-122850-1e74e1e1.stdout.log`；100 目录对照：`src/.state/native-probe-watchdog/20261101-122817-16b85b79.stdout.log`；双视图兼容复测：`src/.state/native-probe-watchdog/20261101-122830-385bfe76.stdout.log`。
