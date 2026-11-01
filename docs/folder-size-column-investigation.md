@@ -1218,3 +1218,9 @@ NativeProbe Release 构建 0 警告/错误；`--shell-change-reconciliation` 退
 新增 `--column-layout-process-roundtrip` SettingsSmoke：父进程将 prototype Recursive Size 的自定义 property key、列宽、排序方向、分组方向和标签路径序列化到临时 INI，启动独立 `dotnet` 子进程调用产品 `SessionStore.ParseComplete` 读取，再核对字段完全一致。定向场景与完整 SettingsSmoke 均通过，SettingsSmoke Release build 0 警告/错误。
 
 该合同只证明应用 INI 对未知/自定义 property key 的跨进程保存和解析稳定；没有创建 Shell view，也没有证明 `IColumnManager`/DefView 能在另一进程或另一 Shell provider 中恢复、显示或排序该列。产品 ExplorerBrowser 未改，逐行大小仍未接入。
+
+### 2026-11-01：多行递归扫描的托管分配基准复跑
+
+运行 `dotnet run --project src/ExplorerDirs.SettingsSmoke -c Release -- --recursive-directory-scan-allocation-probe`。5,000 个空子目录夹具中，完整树扫描保留 5,001 条结果，请求路径扫描只保留 4 条结果；本次测得托管分配分别为 3,892,000 / 3,201,448 bytes（减少 690,552 bytes，17.7%），强制 GC 采样的近似峰值存活堆为 1,821,992 / 68,664 bytes（差约 1.75 MB），测得耗时 267 / 196 ms；该计时路径每 256 项强制采样一次完整 GC，不能当作实际扫描耗时对比。120 个目录、每目录 25 个小文件的第二夹具，请求 120 条结果分配 261,232 bytes，低于 1,175,000-byte 回归预算。完整扫描器保留正确的逐目录递归摘要；指定结果路径版本只保留视图需要的摘要。
+
+随后运行 `dotnet run --project src/ExplorerDirs.NativeProbe -c Release -- --static-shell-column-folder-smoke`，退出码 0；逐行 64-bit 数值列合同、缓存 256 项 LRU、目录身份替换失效和数值排序通过，输出明确 `window-created=False`。这些数据是当前开发机的托管分配/近似堆和隔离 provider 合同；不代表真实磁盘耗时、产品进程内存收益、ExplorerBrowser 接线或可见 UI。已存在的 `ScanDirectoryTreeForPaths` 已避免逐行重复遍历，本轮没有另造扫描器。下一步应等集中 Q-Dir/产品 UI 验收提供格式与刷新反馈，再决定是否接入产品视图。
