@@ -128,7 +128,8 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    internal static int RunNamespace(bool volatileRegistryRegistration = false, bool hideNamespaceRootFromDesktop = false)
+    internal static int RunNamespace(bool volatileRegistryRegistration = false, bool hideNamespaceRootFromDesktop = false,
+        bool nonEnumeratedNamespaceRoot = false)
     {
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
@@ -168,7 +169,8 @@ internal static class ExplorerBrowserWrapperProbe
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticCustomSizeColumnForProbe"))(1));
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticChildNotificationTranslationForProbe"))(1));
-            RegisterSyntheticFolder(classKeyPath, volatileRegistryRegistration, hideNamespaceRootFromDesktop);
+            RegisterSyntheticFolder(classKeyPath, volatileRegistryRegistration, hideNamespaceRootFromDesktop,
+                nonEnumeratedNamespaceRoot);
             classRegistrationCreated = true;
             RegisterSyntheticNamespace(namespaceKeyPath, volatileRegistryRegistration);
             namespaceRegistrationCreated = true;
@@ -177,7 +179,9 @@ internal static class ExplorerBrowserWrapperProbe
             {
                 var defaultDesktopEnumeration = ReadDesktopNamespaceRoot(classId, includeHidden: false);
                 var hiddenDesktopEnumeration = ReadDesktopNamespaceRoot(classId, includeHidden: true);
-                Console.WriteLine($"explorerbrowser-registered-namespace: hide-root-from-desktop={hideNamespaceRootFromDesktop}; default-enumeration={defaultDesktopEnumeration.Found}; default-hidden-attribute={defaultDesktopEnumeration.Hidden}; default-attribute-hr=0x{defaultDesktopEnumeration.AttributeHresult:X8}; include-hidden-enumeration={hiddenDesktopEnumeration.Found}");
+                Console.WriteLine($"explorerbrowser-registered-namespace: hide-root-from-desktop={hideNamespaceRootFromDesktop}; nonenumerated-root={nonEnumeratedNamespaceRoot}; default-enumeration={defaultDesktopEnumeration.Found}; default-hidden-attribute={defaultDesktopEnumeration.Hidden}; default-attribute-hr=0x{defaultDesktopEnumeration.AttributeHresult:X8}; include-hidden-enumeration={hiddenDesktopEnumeration.Found}");
+                if (nonEnumeratedNamespaceRoot && (defaultDesktopEnumeration.Found || hiddenDesktopEnumeration.Found))
+                    throw new InvalidOperationException("SFGAO_NONENUMERATED namespace root was returned by Desktop EnumObjects.");
             }
             Marshal.ThrowExceptionForHR(SHParseDisplayName($"::{{{classId:D}}}", 0, out rootPidl, 0, out _));
             if (rootPidl == 0) throw new InvalidOperationException("The temporary namespace did not resolve to an absolute root PIDL.");
@@ -979,7 +983,7 @@ internal static class ExplorerBrowserWrapperProbe
     }
 
     private static void RegisterSyntheticFolder(string classKeyPath, bool volatileRegistration = false,
-        bool hideNamespaceRootFromDesktop = false)
+        bool hideNamespaceRootFromDesktop = false, bool nonEnumeratedNamespaceRoot = false)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
@@ -1002,7 +1006,9 @@ internal static class ExplorerBrowserWrapperProbe
                 ? classKey.CreateSubKey("ShellFolder", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
                 : classKey.CreateSubKey("ShellFolder", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary ShellFolder key.");
-            var shellFolderAttributes = unchecked((int)0xA0000000) | (hideNamespaceRootFromDesktop ? 0x00080000 : 0);
+            var shellFolderAttributes = unchecked((int)0xA0000000) |
+                (hideNamespaceRootFromDesktop ? 0x00080000 : 0) |
+                (nonEnumeratedNamespaceRoot ? 0x00100000 : 0);
             shellFolder.SetValue("Attributes", shellFolderAttributes, RegistryValueKind.DWord);
         }
         catch

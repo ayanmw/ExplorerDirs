@@ -2377,3 +2377,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 在随机 CLSID 的 volatile `HKCU\Software\Classes\CLSID` 和 Desktop `NameSpace` 探针中，额外读取 Desktop Shell folder 的默认 `SHCONTF_FOLDERS` 枚举，并查询该 PIDL 的 `SFGAO_HIDDEN`。普通属性下默认枚举找到该 namespace 根。设置 `ShellFolder\Attributes` 的 hidden 位后，`GetAttributesOf` 成功返回 `SFGAO_HIDDEN`，但默认 `EnumObjects` 仍返回该项；加 `SHCONTF_INCLUDEHIDDEN` 的枚举也返回该项。随后 ExplorerBrowser Host 合同仍通过，递归列、文件操作与导航探针完成，临时注册清理和 Private Desktop 守卫通过。
 
 该结果只能说明 Desktop Shell folder 的枚举 API 仍提供 hidden PIDL，不能证明实际桌面 DefView 会显示或隐藏图标；本探针未创建可见 Desktop DefView，也未做像素/图标验收。故 `SFGAO_HIDDEN` 不能作为“无桌面副作用”的证明。产品 CLSID 尚不存在；若进入产品化评审，须先决定是否允许桌面 namespace 注册以及如何由进程级 owner 管理。`FolderOpenRouter` 只按 profile 限制一个应用进程；不同 profile 仍可并行运行，单纯在任一进程退出时删除同一固定 CLSID 注册可能影响仍运行的另一进程。该生命周期竞态尚未通过双进程实测，本轮不改产品注册行为。
+
+### 2026-11-02：SFGAO_NONENUMERATED 隐藏 volatile namespace 根
+
+在同一隔离 Private Desktop 环境做 paired baseline：不设置特殊位时，Desktop 默认 `EnumObjects(SHCONTF_FOLDERS)` 与加 `SHCONTF_INCLUDEHIDDEN` 的枚举都找到随机 namespace 根；只设置根的 `ShellFolder\Attributes` `SFGAO_NONENUMERATED` 位后，两种枚举都不再返回它。后一轮仍成功通过完整 ExplorerBrowser Host 合同，包括 parsing-name 激活、递归列、文件操作和嵌套导航；临时 CLSID/NameSpace 清理、前台和输入守卫通过，exit 0。该行为符合 Microsoft 对 `SFGAO_NONENUMERATED` 的文档定义：该项不由 `IShellFolder::EnumObjects` 返回；`SFGAO_HIDDEN` 仅表示依据 Folder Settings 决定是否显示，不能替代此标志。[SFGAO 标志](https://learn.microsoft.com/en-us/windows/win32/shell/sfgao) · [GetAttributesOf 对 NONENUMERATED 的说明](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ishellfolder-getattributesof)
+
+这使“Namespace 注册必然进入 Desktop 默认项目枚举”的顾虑在原型中有了可行规避方式，但仍不等同于实际 Desktop DefView 像素验收，也不证明产品固定 CLSID 的并行进程所有权、崩溃清理或便携发布。`FolderOpenRouter` 仍显示同 profile 单实例、不同 profile 可并行；后续要么按 profile 生成隔离 CLSID 并验证跨会话恢复，要么为共享 CLSID 设计进程间 owner 生命周期。当前仅 NativeProbe 使用该标志，产品未接入。
