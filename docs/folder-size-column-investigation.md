@@ -1815,8 +1815,10 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 
 这是行模型外的探针局部取消合同；没有实际关闭 `IShellView` 或 Pane，没有验证应用 UI 线程错误报告、共享 worker 生命周期或多窗格并发。产品接线仍需用真实 scan identity/generation 验证，不能以此切片代替关闭生命周期验收。
 
-### 2026-11-01：Shell 宿主销毁时递归扫描仍在途
+### 2026-11-01：Browser 关闭时退役原生递归列 worker
 
-将关闭时序扩展到两个真实隔离宿主。隐藏文件系统 `IShellView` 探针在扫描 worker 已打开目录并被门闩暂停时调用 `DestroyViewWindow`；随后取消旧扫描，确认它以 `OperationCanceledException` 结束，且较新的 30 B 缓存、peer 行身份及选区/焦点保留。注册临时 namespace 的 `IExplorerBrowser` 探针也在扫描 `fixture\\child` 时调用 `Destroy`；随后由探针显式取消 token 并等待 worker 结束。两个 ExplorerBrowser Private Desktop watchdog 运行均 exit 0，临时注册移除、前台和 last-input 守卫通过；NativeProbe Release build 0 警告/错误。
+注册 namespace 的 ExplorerBrowser 隔离探针现在在验证尾部创建一个全新 `lifecycle-scan` 目录，启用按需异步递归大小 provider 并打开 worker 队列门闩。通过包装 Shell folder 的 `GetDetailsOf` 请求该目录后，读到 pending 空值，并用 provider 的 pending-set 检查确认任务确实已排入。随后销毁 `IExplorerBrowser`，按当前 view 调用 NativeProbe 宿主退役入口 `RetireSyntheticSortViewHoldForProbe`，再放开队列。worker 完成退出计数增加，但递归遍历数、成功完成数及共享缓存条目数均不增加，证明这个注册 namespace view 的退役取消了它自己的排队 provider 任务。
 
-这证明宿主销毁与在途递归扫描的先后次序可在隔离环境中稳定执行，并验证探针清理不会让旧扫描覆盖新缓存；它没有证明 `DestroyViewWindow`/`IExplorerBrowser::Destroy` 会自动取消扫描。当前取消仍由探针显式触发，NativeProbe 也没有产品 Pane、缓存服务或 UI dispatcher 生命周期接线。下一步应在产品设计评审中定义宿主拥有的 cancellation/generation 生命周期与多窗格共享扫描策略，再决定是否进入迁移实现；本证据不构成产品功能或可见 UI 验收。
+初轮测试误用已被前面的菜单/通知检查预热的 `child` 目录，读到缓存值 88，未形成待取消任务；改用全新夹具目录后，两次连续 Private Desktop watchdog 均 exit 0，输出 `browser-destroyed-with-provider-worker-pending=True`、`view-retirement-canceled-worker=True`、扫描数/缓存数不变。原生 adapter `/W4 /WX`、NativeProbe Release build 0 警告/错误，临时注册/夹具清理及前台、last-input 守卫通过。
+
+这比独立 C# 扫描器的关闭时序探针更接近 NativeProbe provider 实际工作链，但仍是合成 namespace + ExplorerBrowser 隔离实验。它由探针在 `Destroy` 后显式调用 view-retire 入口；不证明 Browser 自动触发产品取消、不验证多个视图共享同一扫描时的订阅保留，也不验证真实 child PIDL/产品 Pane/UI dispatcher。后续需在两 view 同根共享队列实验中证明关闭一个 view 不会取消另一个仍订阅的请求，再继续真实物理 Shell PIDL 包装与可见兼容门槛；产品和 release 未修改。

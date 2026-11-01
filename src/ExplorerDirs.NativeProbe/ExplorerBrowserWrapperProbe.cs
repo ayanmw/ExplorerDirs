@@ -403,7 +403,8 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-view-route=True; created={createdFolder.Name}; filesystem-created=True; shell-row-count={createdFolder.Before}->{createdFolder.After}; row-updated={createdFolder.After == createdFolder.Before + 1}");
             if (createdFolder.After != createdFolder.Before + 1)
                 throw new InvalidOperationException("The native New Folder command created the backing directory but the active Shell view did not add exactly one row.");
-            VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, fixture, ref initialized);
+            VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, shellView, viewFolder, nativeLibrary,
+                fixture, ref initialized);
             return 0;
         }
         finally
@@ -440,53 +441,101 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, string fixture,
-        ref uint initialized)
+    private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, nint shellView,
+        nint viewFolder, nint nativeLibrary, string fixture, ref uint initialized)
     {
-        var scanPath = Path.Combine(fixture, "child");
-        using var cancellation = new CancellationTokenSource();
-        using var scanOpened = new ManualResetEventSlim();
-        using var releaseScan = new ManualResetEventSlim();
-        var scan = Task.Run(() => HandleBoundRecursiveDirectoryScanner.Scan([scanPath], cancellation.Token,
-            (_, _) =>
-            {
-                scanOpened.Set();
-                if (!releaseScan.Wait(TimeSpan.FromSeconds(5)))
-                    throw new TimeoutException("ExplorerBrowser was not destroyed while the recursive scan was gated.");
-            }));
+        var setOnDemand = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+            NativeLibrary.GetExport(nativeLibrary, "SetSyntheticRecursiveSizeScanOnDemandForProbe"));
+        var setAsyncScan = Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
+            NativeLibrary.GetExport(nativeLibrary, "SetSyntheticAsyncRecursiveSizeScanForProbe"));
+        var beginGate = Marshal.GetDelegateForFunctionPointer<ProbeActionResult>(
+            NativeLibrary.GetExport(nativeLibrary, "BeginSyntheticAsyncRecursiveSizeQueueGateForProbe"));
+        var releaseGate = Marshal.GetDelegateForFunctionPointer<ProbeAction>(
+            NativeLibrary.GetExport(nativeLibrary, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"));
+        var clearGate = Marshal.GetDelegateForFunctionPointer<ProbeAction>(
+            NativeLibrary.GetExport(nativeLibrary, "ClearSyntheticAsyncRecursiveSizeQueueGateForProbe"));
+        var hasReservation = Marshal.GetDelegateForFunctionPointer<HasChildScanReservation>(
+            NativeLibrary.GetExport(nativeLibrary, "HasSyntheticAsyncRecursiveSizeScanPendingForViewProbe"));
+        var retireView = Marshal.GetDelegateForFunctionPointer<RetireShellView>(
+            NativeLibrary.GetExport(nativeLibrary, "RetireSyntheticSortViewHoldForProbe"));
+        var getFinished = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe"));
+        var getCompleted = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticAsyncRecursiveSizeScanCompletedCountForProbe"));
+        var getScanCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticOnDemandSizeScanCount"));
+        var getSnapshotCount = Marshal.GetDelegateForFunctionPointer<GetProbeCount>(
+            NativeLibrary.GetExport(nativeLibrary, "GetSyntheticRecursiveSizeCacheSnapshotCountForProbe"));
+        var finishedBefore = getFinished();
+        var completedBefore = getCompleted();
+        var scansBefore = getScanCount();
+        var snapshotsBefore = getSnapshotCount();
+        var destroyedBrowser = false;
+        var scanScheduled = false;
 
         try
         {
+            const string scanChildName = "lifecycle-scan";
+            var scanChildPath = Path.Combine(fixture, scanChildName);
+            Directory.CreateDirectory(Path.Combine(scanChildPath, "nested"));
+            File.WriteAllBytes(Path.Combine(scanChildPath, "nested", "payload.bin"), [1, 2, 3]);
+            Marshal.ThrowExceptionForHR(setOnDemand(1));
+            Marshal.ThrowExceptionForHR(setAsyncScan(1));
+            Marshal.ThrowExceptionForHR(beginGate());
+            var pendingValue = ReadParsedItemDetailsByName(viewFolder, scanChildName, 1);
+            if (pendingValue.Length != 0)
+                throw new InvalidOperationException($"The recursive-size value should be pending behind the scan gate, got '{pendingValue}'.");
+
             var deadline = Environment.TickCount64 + 5000;
-            while (!scanOpened.IsSet && Environment.TickCount64 < deadline)
+            while (hasReservation(shellView, scanChildName) == 0 && Environment.TickCount64 < deadline)
             {
                 Application.DoEvents();
                 Thread.Sleep(10);
             }
-            if (!scanOpened.IsSet)
-                throw new TimeoutException("The worker did not open its recursive-size directory before ExplorerBrowser teardown.");
+            if (hasReservation(shellView, scanChildName) == 0)
+                throw new TimeoutException("The registered Shell provider did not queue the requested recursive-size scan.");
+            scanScheduled = true;
 
             PrivateDesktopShellProbe.ReportStage("namespace-probe: destroy-browser-with-recursive-scan-pending");
             Marshal.ThrowExceptionForHR(At<Destroy>(browser, 4)(browser));
             initialized = 0;
-            cancellation.Cancel();
-            releaseScan.Set();
-            var canceled = false;
-            try { _ = scan.GetAwaiter().GetResult(); }
-            catch (OperationCanceledException) { canceled = true; }
-            if (!canceled)
-                throw new InvalidOperationException("Destroying ExplorerBrowser did not cancel its in-flight recursive-size worker.");
-            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: browser-destroyed-with-worker-pending=True; probe-canceled-worker-after-host-destroy={canceled}; scan-path-is-fixture=True");
+            destroyedBrowser = true;
+            Marshal.ThrowExceptionForHR(retireView(shellView));
+            releaseGate();
+            var finishDeadline = Environment.TickCount64 + 5000;
+            while (getFinished() == finishedBefore && Environment.TickCount64 < finishDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            var finished = getFinished() > finishedBefore;
+            var completedAfterRetire = getCompleted() > completedBefore;
+            var scansAfterRetire = getScanCount();
+            var snapshotsAfterRetire = getSnapshotCount();
+            if (!finished || completedAfterRetire || scansAfterRetire != scansBefore || snapshotsAfterRetire != snapshotsBefore)
+                throw new InvalidOperationException($"Retiring the registered Shell view did not cancel its pending provider scan: finished={finished}; completed-after-retire={completedAfterRetire}; scan-count={scansBefore}->{scansAfterRetire}; cache-count={snapshotsBefore}->{snapshotsAfterRetire}.");
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: browser-destroyed-with-provider-worker-pending=True; view-retirement-canceled-worker={finished && !completedAfterRetire}; scan-count-unchanged={scansAfterRetire == scansBefore}; cache-count-unchanged={snapshotsAfterRetire == snapshotsBefore}; fixture-path=True");
         }
         finally
         {
-            cancellation.Cancel();
-            releaseScan.Set();
-            if (scan.IsCompleted)
+            if (initialized != 0 && browser != 0)
             {
-                try { _ = scan.GetAwaiter().GetResult(); }
-                catch (OperationCanceledException) { }
+                _ = At<Destroy>(browser, 4)(browser);
+                initialized = 0;
+                destroyedBrowser = true;
             }
+            if (destroyedBrowser) _ = retireView(shellView);
+            releaseGate();
+            var cleanupDeadline = Environment.TickCount64 + 10000;
+            while (scanScheduled && getFinished() == finishedBefore && Environment.TickCount64 < cleanupDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (!scanScheduled || getFinished() > finishedBefore) clearGate();
+            else Console.WriteLine("explorerbrowser-registered-namespace-scan-lifecycle: scan-gate-retained-until-process-exit=True");
+            _ = setOnDemand(0);
+            _ = setAsyncScan(0);
         }
     }
 
@@ -1072,6 +1121,10 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetProbeCount();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int ProbeActionResult();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ProbeAction();
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int HasChildScanReservation(nint view, [MarshalAs(UnmanagedType.LPWStr)] string childName);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int RetireShellView(nint view);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CanUnload();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int Destroy(nint self);
 

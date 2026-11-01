@@ -2556,6 +2556,26 @@ namespace
             CoTaskMemFree(childItem);
             return reserved ? TRUE : FALSE;
         }
+        // Expose queue ownership so the teardown probe can distinguish a gated scan from a cache hit.
+        BOOL HasAsyncRecursiveSizeScanPendingForChildProbe(PCWSTR childName)
+        {
+            if (!childName || !*childName) return FALSE;
+            PITEMID_CHILD childItem = nullptr;
+            auto result = ParseDisplayName(nullptr, nullptr, const_cast<LPWSTR>(childName), nullptr, &childItem, nullptr);
+            if (FAILED(result)) return FALSE;
+            const auto* child = SyntheticData(childItem);
+            std::wstring parsingName;
+            if (!child || !(child->attributes & FILE_ATTRIBUTE_DIRECTORY)) result = E_INVALIDARG;
+            else result = GetAbsoluteParsingName(child, &parsingName);
+            bool pending = false;
+            if (SUCCEEDED(result))
+            {
+                std::lock_guard<std::mutex> lock(_asyncSizeScanMutex);
+                pending = _asyncSizeScansPending.find(parsingName) != _asyncSizeScansPending.end();
+            }
+            CoTaskMemFree(childItem);
+            return pending ? TRUE : FALSE;
+        }
         HRESULT InvalidateRecursiveSizeScanForChildProbe(PCWSTR childName)
         {
             if (!childName || !*childName || !_recursiveSizeStore) return E_INVALIDARG;
@@ -6404,6 +6424,19 @@ extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticRecursiveSizeScanReserv
         auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
         if (!folder || !folder->OwnsShellView(view)) continue;
         return folder->HasRecursiveSizeScanReservationForChildProbe(childName);
+    }
+    return FALSE;
+}
+
+extern "C" __declspec(dllexport) BOOL WINAPI HasSyntheticAsyncRecursiveSizeScanPendingForViewProbe(
+    IShellView* view, PCWSTR childName)
+{
+    if (!view || !childName || !*childName) return FALSE;
+    for (size_t index = 0; index < kSyntheticSortViewHoldCount; ++index)
+    {
+        auto* folder = static_cast<SyntheticSortFolder*>(InterlockedCompareExchangePointer(&g_syntheticSortViewHolds[index], nullptr, nullptr));
+        if (!folder || !folder->OwnsShellView(view)) continue;
+        return folder->HasAsyncRecursiveSizeScanPendingForChildProbe(childName);
     }
     return FALSE;
 }
