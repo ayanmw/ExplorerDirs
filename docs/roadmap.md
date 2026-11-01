@@ -5756,3 +5756,7 @@ NativeProbe 已完成受控精确失效合同：四个不同根的异步 Shell �
 ### 2026-11-01：确认 view-owned Shell 菜单及命令的状态边界
 
 窄化 Private Desktop `--ishellview-menu-command-private-desktop` 退出码 0：默认 `IShellView` 的 view-owned 背景菜单可执行 Details、刷新、升降序、分组升降序，模式/排序/分组状态及行顺序读回正确；前台、last-input 与隔离清理守卫通过。刷新会先将 Shell 行模型变为 0 行再恢复，降序样本需要生产选择/焦点快照恢复。view-owned 菜单命令只更新所属原生 view，不会自动更新独立 `SysListView32`；自控列表若要接这类菜单，仍需显式投影视图模式、排序/分组及行身份。此前完整 host-filter 虚拟位置序列在 ZIP 阶段超时并退出 1，不作为全量通过；当时前台/输入守卫未变化且未发现残留进程。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01核对默认-shell-view-菜单命令作为自控列表的同步来源)。
+
+### 2026-11-01：并行受控列表保持刷新旧行并投影 Shell 排序
+
+在隔离菜单命令探针旁创建隐藏标准 `SysListView32`：Details 命令映射为 Report 模式且不清空行；Shell 刷新约 150 ms 的空行阶段，受控列表仍持有原 3 行，Shell 行恢复后再批量同步；升降序结果也能投影到一致的受控列表顺序。Private Desktop 探针 exit 0，Release 构建无警告/错误，前台与输入守卫通过。分组只验证了 Shell 状态，未进入受控 ListView；也未验证绘制时是否闪烁、稳定 PIDL 更新、选区焦点投影或真实用户目录负载。继续留在 NativeProbe；产品未接入。后续验证原生行身份、分组和列投影，再评估是否值得推进完整视图宿主迁移。详见[调查记录](folder-size-column-investigation.md#2026-11-01受控-listview-的-shell-状态投影切片)。

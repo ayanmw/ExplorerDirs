@@ -1746,3 +1746,9 @@ NativeProbe Release 构建（0 警告/错误）、`--common-listview-navigation-
 窄化复跑 `--ishellview-menu-command-private-desktop`，避免跨虚拟位置的长序列影响普通文件夹命令判断。通过 `IShellView::GetItemObject(SVGIO_BACKGROUND)` 取得 view-owned `IContextMenu` 后，使用菜单 canonical verb 依次执行 `viewlogicaldetails`、`refresh`、`sortdescending`、`sortascending`、`groupdescending`、`groupascending`；Shell 的当前模式、排序方向、分组方向及文件顺序均按预期读回。Private Desktop watchdog exit 0，前台 HWND 与 last-input tick 未变，隔离 fixture 清理通过。
 
 该命令仍只控制它所属的默认 `IShellView`。刷新时 Shell 行模型从 3 行短暂归零再恢复；降序排序在本轮样本中使选择/焦点短暂丢失，需使用生产 `ShellViewSelectionSnapshot` 最终恢复。因此不能把 view-owned 菜单对象直接挂给另一个 `SysListView32` 并假设它会同步；后续桥接原型必须在每项命令后显式把 view mode、排序/分组状态和稳定 Shell item 身份投影到自控列表，并检查刷新空窗与焦点恢复成本。此前全量 host-filter 虚拟位置序列已在 ZIP 阶段超过 watchdog 时限，退出码 1；该次不是全量通过证据，也没有残留探针进程。
+
+### 2026-11-01：受控 ListView 的 Shell 状态投影切片
+
+在同一个隔离 Private Desktop 夹具旁新增独立隐藏 `SysListView32`：初始从 Shell 行模型投影 3 个条目；执行原生 Details 命令后将其样式切为 Report 且行不变；执行刷新时，Shell 视图自身在 0/50/100 ms 采样为空、约 150 ms 恢复 3 行，而并行 ListView 在等待期间始终保有旧 3 行；待 Shell 行模型稳定后再投影新顺序。Shell 升降序菜单命令后，独立列表批量重建为与 Shell 完全相同的行顺序。探针 exit 0，NativeProbe Release 构建 0 警告/错误；Private Desktop 前台 HWND、last-input tick 与隔离清理守卫通过。
+
+这证明受控列表可以将 Shell 原生命令作为状态来源，并把旧行保留到刷新行模型就绪后再同步；不证明画面无闪、稳定 PIDL 的跨刷新更新、图标/列/选择完整投影或分组视觉行为。分组命令仍仅验证 Shell `IFolderView2` 状态读回，没有投影到 SysListView 分组。该夹具只是 3 行隐藏样本，产品 ExplorerBrowser、可见 UI、真实大目录及交互验收均未涉及。下一步应验证稳定 Shell item 身份和元数据如何在原生列表中增量更新，再单独完成列表分组与多列投影门槛；尚不足以批准架构迁移或接入产品。

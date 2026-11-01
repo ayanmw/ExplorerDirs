@@ -19,6 +19,14 @@ internal static class ShellViewHostFilterProbe
     private const uint SbspParent = 0x2000;
     private const uint SbspNavigateBack = 0x4000;
     private const uint SbspNavigateForward = 0x8000;
+    private const int GwlStyle = -16;
+    private const long LvsTypeMask = 0x3;
+    private const long LvsReport = 0x1;
+    private const uint LvmDeleteAllItems = 0x1009;
+    private const uint LvmInsertColumnW = 0x101B;
+    private const uint LvmInsertItemW = 0x104D;
+    private const uint LvmGetItemCount = 0x1004;
+    private const uint LvmGetItemTextW = 0x1073;
 
     internal static int Run() => Run(stopAfterGroupedExport: false, leaveParentForThreadExit: false);
 
@@ -1119,6 +1127,11 @@ internal static class ShellViewHostFilterProbe
         if (listView == 0) throw new Exception("The menu-command fixture has no native file list window.");
         if (At<ItemCount>(folderView, 7)(folderView, 2, out var initialCount) < 0 || initialCount == 0)
             throw new Exception("The menu-command fixture has no visible item to focus.");
+        var peerList = CreatePeerListView(owner);
+        PopulatePeerList(peerList, ReadVisibleItemNames(folderView, initialCount));
+        var peerRowsBeforeRefresh = ReadPeerListNames(peerList);
+        if (peerRowsBeforeRefresh.Length != initialCount)
+            throw new Exception("The independent ListView projection did not receive the initial Shell rows.");
         Check(At<GetItem>(folderView, 6)(folderView, 0, out var expectedFocusedPidl));
         var expectedFocusedName = ReadVisibleItemNames(folderView, initialCount)[0];
         List<string> menuCommandFocusRecovery = [];
@@ -1207,6 +1220,10 @@ internal static class ShellViewHostFilterProbe
             Check(getMode(folderView, out modeAfterMenu, out iconSizeAfterMenu));
             if (modeAfterMenu != 4 || iconSizeAfterMenu != 16)
                 throw new Exception($"The Shell background menu did not switch the isolated view to Details: mode={modeAfterMenu}, size={iconSizeAfterMenu}.");
+            SetPeerListMode(peerList, LvsReport);
+            if ((GetWindowLongPtrW(peerList, GwlStyle).ToInt64() & LvsTypeMask) != LvsReport ||
+                !ReadPeerListNames(peerList).SequenceEqual(peerRowsBeforeRefresh, StringComparer.OrdinalIgnoreCase))
+                throw new Exception("Projecting Shell Details mode changed or dropped the independent ListView rows.");
             VerifyColumnHeaderControl(view, owner);
             if (GetFocus() != listView || !FocusedItemMatches(folderView, expectedFocusedPidl))
                 throw new Exception("Switching view mode through the Shell menu lost the fixture list or focused item.");
@@ -1224,6 +1241,8 @@ internal static class ShellViewHostFilterProbe
                 Application.DoEvents();
                 Check(At<ItemCount>(folderView, 7)(folderView, 2, out visibleCount));
                 Check(At<ItemCount>(folderView, 7)(folderView, 1, out selectedCount));
+                if (!ReadPeerListNames(peerList).SequenceEqual(peerRowsBeforeRefresh, StringComparer.OrdinalIgnoreCase))
+                    throw new Exception("The independent ListView lost its old rows while the native Shell view was refreshing.");
                 listFocusPreserved = GetFocus() == listView;
                 rawRefreshPreservedItem = FocusedItemMatches(folderView, expectedFocusedPidl) && selectedCount == 1;
                 // Wait for Shell's item model to settle; selection recovery is performed below
@@ -1235,6 +1254,7 @@ internal static class ShellViewHostFilterProbe
             } while (stableRefreshSamples < 3 && DateTime.UtcNow < deadline);
             if (visibleCount != initialCount || IsWindowVisible(owner) || GetForegroundWindow() != foreground)
                 throw new Exception($"The Shell background Refresh command changed the fixture or desktop boundary: items={visibleCount}, parent-visible={IsWindowVisible(owner)}, foreground-unchanged={GetForegroundWindow() == foreground}.");
+            ProjectPeerShellOrder(peerList, folderView, visibleCount);
             rawRefreshPreservedItem &= stableRefreshSamples == 3;
             (bool SelectionRestored, bool FocusRestored) recovery = default;
             var recoveryDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
@@ -1266,6 +1286,7 @@ internal static class ShellViewHostFilterProbe
             Check(At<SetSortColumns>(view2, 27)(view2, [sort], 1));
             InvokeBackgroundVerb(view, owner, "sortdescending");
             RestoreFocusedSelectionAfterMenuCommand("sortdescending");
+            ProjectPeerShellOrder(peerList, folderView, initialCount);
             Check(At<GetSortColumnCount>(view2, 26)(view2, out var sortCount));
             if (sortCount != 1) throw new Exception($"The Shell Sort menu changed the column count unexpectedly: {sortCount}.");
             var sorts = new NativeSortColumn[sortCount];
@@ -1275,6 +1296,7 @@ internal static class ShellViewHostFilterProbe
             VerifyFolderSortOrder(ascending: false, "sortdescending");
             InvokeBackgroundVerb(view, owner, "sortascending");
             RestoreFocusedSelectionAfterMenuCommand("sortascending");
+            ProjectPeerShellOrder(peerList, folderView, initialCount);
             Check(At<GetSortColumns>(view2, 28)(view2, sorts, sortCount));
             if (sorts[0].Direction != 1) throw new Exception($"The Shell Sort Ascending command did not restore ascending order: direction={sorts[0].Direction}.");
             VerifyFolderSortOrder(ascending: true, "sortascending");
@@ -1303,7 +1325,78 @@ internal static class ShellViewHostFilterProbe
             Marshal.Release(view2);
         }
 
-        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
+        Console.WriteLine($"ishellview-menu-command: viewlogicaldetails=True; peer-view-mode=details; peer-rows-stable-during-refresh=True; peer-refresh-projection=True; peer-sort-projection=True; mode={modeAfterMenu}/{iconSizeAfterMenu}; refresh=True; sortdescending=True; sortascending=True; native-sort-order=[{string.Join(';', nativeSortOrders)}]; groupdescending=True; groupascending=True; focus-recovery=[{string.Join(',', menuCommandFocusRecovery)}]; visible-items={visibleCount}; parent-visible=False; foreground-unchanged=True");
+    }
+
+    private static nint CreatePeerListView(nint parent)
+    {
+        var listView = CreateWindowExW(0, "SysListView32", "",
+            0x40000000u | 0x00000001u | 0x00000008u, 0, 0, 320, 240, parent, 0, 0, 0);
+        if (listView == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not create the independent peer ListView.");
+        var title = Marshal.StringToHGlobalUni("Name");
+        var columnPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewColumn>());
+        try
+        {
+            var column = new NativeListViewColumn { Mask = 0x0001 | 0x0002 | 0x0004, Width = 280, Text = title, TextCapacity = 32 };
+            Marshal.StructureToPtr(column, columnPointer, false);
+            if (SendMessageW(listView, LvmInsertColumnW, 0, columnPointer).ToInt32() < 0)
+                throw new InvalidOperationException("Could not add the peer ListView name column.");
+        }
+        finally { Marshal.FreeHGlobal(columnPointer); Marshal.FreeHGlobal(title); }
+        return listView;
+    }
+
+    private static void SetPeerListMode(nint listView, long mode)
+    {
+        var style = GetWindowLongPtrW(listView, GwlStyle).ToInt64();
+        _ = SetWindowLongPtrW(listView, GwlStyle, (nint)((style & ~LvsTypeMask) | mode));
+    }
+
+    private static void PopulatePeerList(nint listView, IReadOnlyList<string> names)
+    {
+        _ = SendMessageW(listView, LvmDeleteAllItems, 0, 0);
+        for (var index = 0; index < names.Count; index++)
+        {
+            var text = Marshal.StringToHGlobalUni(names[index]);
+            var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+            try
+            {
+                var item = new NativeListViewItem { Mask = 0x0001 | 0x0004, Item = index, SubItem = 0, Text = text, TextCapacity = names[index].Length + 1, Parameter = index + 1 };
+                Marshal.StructureToPtr(item, itemPointer, false);
+                if (SendMessageW(listView, LvmInsertItemW, 0, itemPointer).ToInt32() != index)
+                    throw new InvalidOperationException($"Could not populate peer ListView row {index}.");
+            }
+            finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(text); }
+        }
+    }
+
+    private static string[] ReadPeerListNames(nint listView)
+    {
+        var count = SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32();
+        var rows = new string[count];
+        var buffer = Marshal.AllocHGlobal(1024);
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                var item = new NativeListViewItem { Item = index, SubItem = 0, Text = buffer, TextCapacity = 512 };
+                Marshal.StructureToPtr(item, itemPointer, false);
+                _ = SendMessageW(listView, LvmGetItemTextW, index, itemPointer);
+                rows[index] = Marshal.PtrToStringUni(buffer) ?? string.Empty;
+            }
+            return rows;
+        }
+        finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static void ProjectPeerShellOrder(nint listView, nint folderView, int expectedCount)
+    {
+        var names = ReadVisibleItemNames(folderView, expectedCount);
+        PopulatePeerList(listView, names);
+        if (!ReadPeerListNames(listView).SequenceEqual(names, StringComparer.OrdinalIgnoreCase))
+            throw new Exception("The independent ListView did not match the Shell's projected row order after a batched row-model update.");
     }
 
     private static bool FocusedItemMatches(nint folderView, nint expectedPidl)
@@ -1859,6 +1952,42 @@ internal static class ShellViewHostFilterProbe
         public int Direction;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeListViewItem
+    {
+        public uint Mask;
+        public int Item;
+        public int SubItem;
+        public uint State;
+        public uint StateMask;
+        public nint Text;
+        public int TextCapacity;
+        public int Image;
+        public nint Parameter;
+        public int Indent;
+        public int GroupId;
+        public uint ColumnCount;
+        public nint Columns;
+        public nint ColumnFormats;
+        public int Group;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeListViewColumn
+    {
+        public uint Mask;
+        public int Format;
+        public int Width;
+        public nint Text;
+        public int TextCapacity;
+        public int SubItem;
+        public int Image;
+        public int Order;
+        public int MinWidth;
+        public int DefaultWidth;
+        public int IdealWidth;
+    }
+
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -2049,6 +2178,8 @@ internal static class ShellViewHostFilterProbe
     [DllImport("user32.dll")] private static extern nint GetFocus();
     [DllImport("user32.dll")] private static extern nint SetFocus(nint window);
     [DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtrW(nint window, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtrW(nint window, int index, nint value);
     [DllImport("user32.dll")] private static extern bool GetKeyboardState([Out] byte[] state);
     [DllImport("user32.dll")] private static extern bool SetKeyboardState([In] byte[] state);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(nint window, System.Text.StringBuilder name, int capacity);
