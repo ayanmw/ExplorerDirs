@@ -403,6 +403,7 @@ internal static class ExplorerBrowserWrapperProbe
             Console.WriteLine($"explorerbrowser-registered-namespace: background-newfolder-view-route=True; created={createdFolder.Name}; filesystem-created=True; shell-row-count={createdFolder.Before}->{createdFolder.After}; row-updated={createdFolder.After == createdFolder.Before + 1}");
             if (createdFolder.After != createdFolder.Before + 1)
                 throw new InvalidOperationException("The native New Folder command created the backing directory but the active Shell view did not add exactly one row.");
+            VerifyExplorerBrowserDestroyDuringRecursiveScan(browser, fixture, ref initialized);
             return 0;
         }
         finally
@@ -436,6 +437,56 @@ internal static class ExplorerBrowserWrapperProbe
             try { if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void VerifyExplorerBrowserDestroyDuringRecursiveScan(nint browser, string fixture,
+        ref uint initialized)
+    {
+        var scanPath = Path.Combine(fixture, "child");
+        using var cancellation = new CancellationTokenSource();
+        using var scanOpened = new ManualResetEventSlim();
+        using var releaseScan = new ManualResetEventSlim();
+        var scan = Task.Run(() => HandleBoundRecursiveDirectoryScanner.Scan([scanPath], cancellation.Token,
+            (_, _) =>
+            {
+                scanOpened.Set();
+                if (!releaseScan.Wait(TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException("ExplorerBrowser was not destroyed while the recursive scan was gated.");
+            }));
+
+        try
+        {
+            var deadline = Environment.TickCount64 + 5000;
+            while (!scanOpened.IsSet && Environment.TickCount64 < deadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(10);
+            }
+            if (!scanOpened.IsSet)
+                throw new TimeoutException("The worker did not open its recursive-size directory before ExplorerBrowser teardown.");
+
+            PrivateDesktopShellProbe.ReportStage("namespace-probe: destroy-browser-with-recursive-scan-pending");
+            Marshal.ThrowExceptionForHR(At<Destroy>(browser, 4)(browser));
+            initialized = 0;
+            cancellation.Cancel();
+            releaseScan.Set();
+            var canceled = false;
+            try { _ = scan.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { canceled = true; }
+            if (!canceled)
+                throw new InvalidOperationException("Destroying ExplorerBrowser did not cancel its in-flight recursive-size worker.");
+            Console.WriteLine($"explorerbrowser-registered-namespace-scan-lifecycle: browser-destroyed-with-worker-pending=True; probe-canceled-worker-after-host-destroy={canceled}; scan-path-is-fixture=True");
+        }
+        finally
+        {
+            cancellation.Cancel();
+            releaseScan.Set();
+            if (scan.IsCompleted)
+            {
+                try { _ = scan.GetAwaiter().GetResult(); }
+                catch (OperationCanceledException) { }
+            }
         }
     }
 

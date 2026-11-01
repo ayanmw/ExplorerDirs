@@ -1814,3 +1814,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 在扫描代次切片后，探针再次将 worker 暂停于目录句柄打开点，先建立 30 B 的较新缓存，再递增代次、取消旧扫描并释放 worker。捕获到 `OperationCanceledException` 后，30 B 缓存、peer 行 ID 和选中/焦点仍保留。两次 Private Desktop 运行均通过，NativeProbe Release build 0 警告/错误，watchdog exit 0，前台/输入/临时目录清理守卫通过。
 
 这是行模型外的探针局部取消合同；没有实际关闭 `IShellView` 或 Pane，没有验证应用 UI 线程错误报告、共享 worker 生命周期或多窗格并发。产品接线仍需用真实 scan identity/generation 验证，不能以此切片代替关闭生命周期验收。
+
+### 2026-11-01：Shell 宿主销毁时递归扫描仍在途
+
+将关闭时序扩展到两个真实隔离宿主。隐藏文件系统 `IShellView` 探针在扫描 worker 已打开目录并被门闩暂停时调用 `DestroyViewWindow`；随后取消旧扫描，确认它以 `OperationCanceledException` 结束，且较新的 30 B 缓存、peer 行身份及选区/焦点保留。注册临时 namespace 的 `IExplorerBrowser` 探针也在扫描 `fixture\\child` 时调用 `Destroy`；随后由探针显式取消 token 并等待 worker 结束。两个 ExplorerBrowser Private Desktop watchdog 运行均 exit 0，临时注册移除、前台和 last-input 守卫通过；NativeProbe Release build 0 警告/错误。
+
+这证明宿主销毁与在途递归扫描的先后次序可在隔离环境中稳定执行，并验证探针清理不会让旧扫描覆盖新缓存；它没有证明 `DestroyViewWindow`/`IExplorerBrowser::Destroy` 会自动取消扫描。当前取消仍由探针显式触发，NativeProbe 也没有产品 Pane、缓存服务或 UI dispatcher 生命周期接线。下一步应在产品设计评审中定义宿主拥有的 cancellation/generation 生命周期与多窗格共享扫描策略，再决定是否进入迁移实现；本证据不构成产品功能或可见 UI 验收。

@@ -193,7 +193,11 @@ internal static class ShellViewHostFilterProbe
                 throw new Exception("Direct IShellView did not apply the ICommDlgBrowser3 filter to the isolated fixture.");
             if (recursiveSizeProjectionOnly)
             {
-                VerifyRecursiveSizePeerProjection(folderView, folderPidl, folder, parent, count);
+                VerifyRecursiveSizePeerProjection(folderView, folderPidl, folder, parent, count, () =>
+                {
+                    Check(At<DestroyViewWindow>(view, 10)(view));
+                    created = false; // The projection probe destroys the real Shell view while a scan is pending.
+                });
                 return 0;
             }
             if (virtualScopeOnly is not null)
@@ -1473,7 +1477,7 @@ internal static class ShellViewHostFilterProbe
     }
 
     private static void VerifyRecursiveSizePeerProjection(nint folderView, nint folderPidl, nint shellFolder,
-        nint parent, int expectedCount)
+        nint parent, int expectedCount, Action destroyShellView)
     {
         var foreground = GetForegroundWindow();
         var nextId = 0;
@@ -1709,6 +1713,7 @@ internal static class ShellViewHostFilterProbe
                 throw new TimeoutException("The worker did not open the directory before the retirement cancellation.");
             }
             _ = Interlocked.Increment(ref scanGeneration);
+            destroyShellView();
             retiredScanCancellation.Cancel();
             retireScan.Set();
             var retiredFailurePreservedValue = false;
@@ -1748,7 +1753,7 @@ internal static class ShellViewHostFilterProbe
                 refreshedSelectedIndex < 0 || GetPeerListItemState(listView, refreshedSelectedIndex, 0x0003) != 0x0003 ||
                 !refreshedNames.SequenceEqual(expectedRefreshedOrder.Select(row => row.Name), StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"The updated recursive-size value did not flow through peer sort/reselection: names=[{string.Join(',', refreshedNames)}], value={updatedBytesById.GetValueOrDefault(selectedRow.Id)}.");
-            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-update-events={updateEvents.Length}; changed-directories-coalesced={dirtyDirectories.Count}; peer-rows-retained-during-worker-rescan=True; superseded-inflight-result-discarded={supersededValueDiscarded}; retired-scan-canceled=True; newer-cache-preserved={retiredFailurePreservedValue}; follow-up-bytes={updatedBytesById[selectedRow.Id]}; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
+            Console.WriteLine($"ishellview-peer-recursive-size-notification: shell-update-events={updateEvents.Length}; changed-directories-coalesced={dirtyDirectories.Count}; peer-rows-retained-during-worker-rescan=True; superseded-inflight-result-discarded={supersededValueDiscarded}; shell-view-destroyed-during-scan=True; retired-scan-canceled=True; newer-cache-preserved={retiredFailurePreservedValue}; follow-up-bytes={updatedBytesById[selectedRow.Id]}; peer-rows-reenumerated=True; row-ids-preserved=True; stale-cache-invalidated={cacheEntryInvalidated}; rescan-worker={refreshedScan.WorkerThread}; numeric-order=[{string.Join(',', refreshedNames)}]; selected-focused-id={selectedRow.Id}; selection-focus-preserved=True; foreground-unchanged={GetForegroundWindow() == foreground}");
         }
         finally
         {
