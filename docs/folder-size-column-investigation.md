@@ -1892,3 +1892,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 普通目标 view 和先销毁/重建 HWND 两种路径均通过 Private Desktop 探针。重建后初始行集合为 0；两次后续复跑中，Drop 产生的文件均在 800 ms 内自然进入目标 view 行集合，逐路径与磁盘一致；无需显式 `IShellView.Refresh` 或 `SHChangeNotify` 回退。重建路径投影后的 3 个目标行 PIDL 身份唯一，显式 Refresh 后 PIDL 身份保持；源端两项选择和焦点锚点保留。普通路径仍通过单选/多选复制、同卷移动和跨卷 Copy/Shift-Move 矩阵。NativeProbe build 0 警告/错误，Private Desktop 前台、last-input、清理守卫通过。
 
 该探针直接调用 `IDropTarget.DragEnter/Drop`，没有运行 OLE `DoDragDrop` 或模拟鼠标，也没有验证屏幕命中、拖放提示、Move 后目标/源 view 同步、可见 Shell/产品 ExplorerBrowser 或释放版行为。哨兵只证明探针开始拖放前目标 view 曾完成过一次枚举；不能据此认定真实窗口重建时产品会自动复用相同初始化时序。
+
+### 2026-11-01：四视图 600 目录队列压力复验
+
+使用 Private Desktop 合成 Shell view，以四个不同根目录、每视图 600 个同级目录复验 2,048 项队列的边界。逐行队列模式在两个 worker 暂停时拒绝 354 个请求，并在探针的“不得拒绝”断言处退出；前台与 last-input 未变化。切换到现有 view-batch 模式后，闸门前拒绝数为 0，四个视图最后均读回 602/602 个值，队列拒绝 0，峰值 worker 2，通知及 view 枚举增量各 12。
+
+该高负载探针在清理 2,400 个目录夹具时到达 120 秒 watchdog，故整体进程退出不是通过；回填指标是在清理前记录的。累计扫描数为 6,054，显著高于 4 × 602 个请求，当前尚不能把 view-batch 结论概括为无重复扫描。本轮没有改产品或调度代码，也没有可见 UI/ExplorerBrowser 产品接线证据。后续先拆解多余扫描来自通知回填还是 Shell 重复请求，再优化探针夹具清理耗时；不要仅因列值最终齐全就扩大队列容量。

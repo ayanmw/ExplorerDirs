@@ -5812,3 +5812,7 @@ peer SysListView32 现读取 Shell 文件夹的名称、大小、项目类型、
 2026-11-01 原生滚动消息驱动递归列请求：peer ListView 子类观察首行变化，三次 Private Desktop 运行中 `WM_VSCROLL/SB_LINEDOWN` 改变视口并取消旧的待执行目录请求，仅扫描新可见目录；隐藏控件上的 `WM_MOUSEWHEEL` 未改变视口，因此滚轮路径未证实。Release 构建、后续通知重扫、选择焦点与隔离守卫通过。仍未验证物理输入、可见滚动条/滚轮、已启动慢扫描取消/并发及产品 ExplorerBrowser 接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-原生列表滚动消息驱动递归值请求)。
 
 2026-11-01 递归视口切换取消在途扫描：将旧 worker 暂停在打开目录后的回调，发送 `WM_VSCROLL` 切换视口后取消该 worker；三次 Release apphost Private Desktop 运行均为两次启动、一次完成，旧结果未发布，仅新可见目录值写入 peer 列。通知失效、行身份、选择/焦点及隔离清理继续通过。此为 NativeProbe 合成受控 worker，不证明慢盘/网络取消延迟、全局并发限制、物理输入或产品 ExplorerBrowser 接线。详见[调查记录](folder-size-column-investigation.md#2026-11-01-原生滚动消息驱动递归值请求)。
+
+### 2026-11-01：递归大小按需原型队列容量与多视图负载
+
+四个不同根视图、每视图 600 个目录的 Private Desktop 压力复验显示：逐行模式在两个 worker 被门闩暂停时拒绝 354 项；view-batch 模式队列拒绝为 0，四个视图清单均回填 602/602，峰值 worker 2。但累计扫描达到 6,054，重复扫描/通知回填开销待定位；探针还在清理 2,400 项临时夹具时触发 120 秒 watchdog，因此整体运行不是通过。产品继续使用 ExplorerBrowser，原型未接产品。下一步分析重复扫描计数来源，改善大夹具清理/拆小压力轮，再决定队列和重试策略；详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01四视图-600-目录队列压力复验)。
