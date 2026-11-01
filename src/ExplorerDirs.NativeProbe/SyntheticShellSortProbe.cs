@@ -1221,9 +1221,11 @@ public static class SyntheticShellSortProbe
                         if (asyncPartialRequestProbe)
                         {
                             var requestedRows = Math.Min(3, checked((int)SendMessageW(sizeListView, LvmGetItemCount, 0, 0)));
+                            var queuedBeforeExplicitRows = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe");
                             var requestedValues = ReadColumnTextsForRows(sizeListView, 1, requestedRows);
                             Pump(250);
-                            var queuedEntries = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe");
+                            var queuedAfterExplicitRows = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe");
+                            var newlyQueuedByExplicitRows = queuedAfterExplicitRows - queuedBeforeExplicitRows;
                             Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(
                                 NativeLibrary.GetExport(module, "ReleaseSyntheticAsyncRecursiveSizeQueueGateForProbe"))();
                             Pump(1500);
@@ -1231,8 +1233,8 @@ public static class SyntheticShellSortProbe
                             var partialFinishedBatches = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeScanFinishedCountForProbe");
                             var partialNotifications = ReadCounter(module, "GetSyntheticAsyncRecursiveSizeNotificationCountForProbe");
                             var sharedRootScanOverlap = partialScans > onDemandFolderCount + 1;
-                            Console.WriteLine($"synthetic-async-recursive-size-demand-observation: explicit-row-requests={requestedRows}; requested-values=[{string.Join('|', requestedValues)}]; queued-entries-per-view={queuedEntries}; scan-operations={partialScans}; same-root-scan-overlap={sharedRootScanOverlap}; completed-view-batches={partialFinishedBatches}; notifications={partialNotifications}; sibling-folders={onDemandFolderCount}");
-                            if (queuedEntries == 0 || partialScans == 0 || partialScans > queuedEntries ||
+                            Console.WriteLine($"synthetic-async-recursive-size-demand-observation: queued-before-explicit-rows={queuedBeforeExplicitRows}; explicit-row-requests={requestedRows}; requested-values=[{string.Join('|', requestedValues)}]; queued-after-explicit-rows-total={queuedAfterExplicitRows}; newly-queued-by-explicit-rows={newlyQueuedByExplicitRows}; scan-operations={partialScans}; same-root-scan-overlap={sharedRootScanOverlap}; completed-view-batches={partialFinishedBatches}; notifications={partialNotifications}; sibling-folders={onDemandFolderCount}");
+                            if (queuedAfterExplicitRows == 0 || partialScans == 0 || partialScans > queuedAfterExplicitRows ||
                                 partialFinishedBatches == 0 || partialNotifications == 0 || rejectedBeforeRelease != 0)
                                 throw new IOException("The demand-observation probe failed to queue, complete, or notify for the Shell-requested recursive-size rows.");
                             Marshal.GetDelegateForFunctionPointer<NativeVoidCall>(

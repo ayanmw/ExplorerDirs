@@ -2442,6 +2442,12 @@ NativeProbe Release 构建 0 警告/错误；注册 namespace Private Desktop wa
 
 NativeProbe Release 构建 0 警告/错误；Private Desktop watchdog exit 0，前台/last-input 未变，临时注册清理通过。最终证据：`src/.state/native-probe-watchdog/20261102-033553-2acb7426.stdout.log` 与 `.stderr.log`。这是隐藏桌面下 Shell 行状态、选区/焦点身份及 provider 回调的证据，不是可见像素验收，也没有证明当前产品异步扫描已接入或屏幕列值刷新无闪烁。下一步需要在产品可见验收时确认自定义列绘制；本轮不改变刷新策略。
 
+### 2026-11-02：四视图按需递归列的部分行请求
+
+复跑已有 WPF Private Desktop Shell 行探针：同一根目录含 100 个同级文件夹，建立四个共享根的 Shell view，并暂停异步扫描队列。探针读取前三行之前，Shell 已排入 325 条“view × folder”行请求；显式读取前三行得到空值（扫描仍被门闩暂停），新增排队请求为 0。放行后，四个 view batch 完成并发送 2 次合并通知；共享缓存将 325 条行请求合并为 101 次真实目录扫描（100 个同级目录加 `child`），无同一路径扫描重叠。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台、last-input 与清理守卫通过；日志：`src/.state/native-probe-watchdog/20261102-035616-6b3acc3c.stdout.log` 与 `.stderr.log`。
+
+这说明按需行值请求可以让首次读取立即返回、跨 view 合并相同目录扫描，并在完成后通知回填；但 Shell 在探针显式读前三行前已经请求了大量行，不能据此承诺只扫描屏幕 viewport 内的文件夹。该场景窗口不可见，也没有模拟滚动，所以请求来源是 Shell view 初始化/列物化的混合行为；尚未单独量出滚动到新行时的增量请求。要做到“只扫屏幕上可见行”，仍需专门的原生列表可见区验证，或由产品维护自身可见行模型。产品 ExplorerBrowser、发布版和刷新策略未改。
+
 ### 2026-11-02：profile Shell namespace 注册 owner 并行与重启原型
 
 此前的 owner-only 探针验证了 B 在 A 注销后重新解析仍读到专属文件/29 B；本次把 profile B 的首个真实 ExplorerBrowser 留在 B owner 子进程中。A 注销后，B 通过已打开 view 的 `IFolderView2` 重新读取行数和 provider 内容；A 使用原 INI 中的 CLSID 重建注册并打开自己的 view 后，B 再复验一次；最后 B owner 退出，A 的 view 仍读到 13 B。A、B 各自的两棵 volatile key 在协调进程中清理并验证。
