@@ -1578,3 +1578,9 @@ Shell view 子控件为 `CtrlNotifySink|DirectUIHWND|ScrollBar`，没有经典 `
 NativeProbe Release 构建 0 警告/错误；Private Desktop 探针通过，前台 HWND/last-input tick 未变化，临时注册与夹具清理完成。导航后读取前等待 250 ms 并泵送消息；第一次未等待的检查读到了旧根 view，按异步 Shell 导航时序修正后通过。
 
 该切片证明注册 namespace 中可经现有 Shell folder 对象取得菜单、转发重命名，并往返一层子目录的 namespace 身份；菜单没有展示或执行命令，未验证背景菜单、文件操作菜单命令路由、递归列重新计算/通知、地址栏显示、拖放、可见绘制或产品宿主。底层仍用合成 child PIDL 映射临时文件系统 backing，而非包装真实 child PIDL；产品和 release 未变。下一步验证外部文件变更通知是否使 Browser 行数和递归列值重新收敛，再评估真实 child PIDL 与当前合成映射的取舍。
+
+### 2026-11-01：注册 namespace 背景菜单转发
+
+活动 Browser 的合成 folder 原先只接受 `IShellView` 的 `CreateViewObject` 请求；查询背景 `IContextMenu` 返回 `E_NOINTERFACE`，探针按预期失败并确认临时注册清理。现在仅将背景 `IID_IContextMenu` 请求转发给真实 backing filesystem folder，视图创建路径保持原样。复验背景 `CreateViewObject`/`QueryContextMenu` 返回成功并构造 21 项原生菜单；文件项菜单仍为 33 项，隔离 backing 文件重命名与一层子目录 PIDL 往返仍通过。原生 adapter `/W4 /WX` 与 NativeProbe Release 构建通过，Private Desktop 前台/输入守卫通过，临时注册及夹具已清理。
+
+该结果证明的是背景菜单对象及命令项能创建，不是菜单实际显示/点击路由或命令执行；也未验证 `New`、刷新、排序、分组命令在 ExplorerBrowser 中的实际效果。产品宿主和 release 未修改。下一步验证外部 Shell 变更通知能否更新根列表及递归大小缓存。

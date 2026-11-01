@@ -2845,11 +2845,17 @@ namespace
             }
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, static_cast<USHORT>(comparison));
         }
-        HRESULT STDMETHODCALLTYPE CreateViewObject(HWND, REFIID iid, void** value) override
+        HRESULT STDMETHODCALLTYPE CreateViewObject(HWND owner, REFIID iid, void** value) override
         {
             if (!value) return E_POINTER;
             *value = nullptr;
-            if (iid != IID_IShellView) return E_NOINTERFACE;
+            if (iid != IID_IShellView)
+            {
+                // The custom view owns row presentation; background commands still belong to the real backing folder.
+                return iid == IID_IContextMenu && _inner
+                    ? _inner->CreateViewObject(owner, iid, value)
+                    : E_NOINTERFACE;
+            }
             SFV_CREATE create{};
             create.cbSize = sizeof(create);
             create.pshf = this;

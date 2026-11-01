@@ -5700,3 +5700,9 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 扩展 Private Desktop ExplorerBrowser 切片后，根 folder 的 `IContextMenu` 可生成 33 个原生菜单项，`SetNameOf` 将文件重命名到临时 backing 目录；Browser 可进入一级子目录并保留 namespace CLSID/完整子 PIDL，再返回根且读到重命名后的 3 行。Release 构建 0 警告/错误，前台与输入守卫通过，临时资源清理完成。
 
 该证据尚不覆盖实际显示/执行菜单命令、背景菜单、通知后递归列重算、可见地址/绘制、拖放或产品宿主；当前 child identity 仍为合成 PIDL 映射物理文件系统。下一步测外部变更通知与列值回填，再继续真实 child PIDL 集成评估。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01注册-namespace-的菜单重命名与层级导航切片)。
+
+### 2026-11-01：注册 namespace 背景菜单接线
+
+修复隔离 provider 缺少的背景 `IContextMenu` 接口：只有该 IID 转发到 backing filesystem folder，`IShellView` 仍由合成 folder 创建。Private Desktop 探针先确认旧路径以 `E_NOINTERFACE` 失败，修复后背景菜单 `QueryContextMenu` 得到 21 项；文件菜单、backing 重命名、子目录导航/返回及身份检查仍通过。Release 构建 0 警告/错误，前台/输入守卫与临时注册清理通过。
+
+只证明菜单对象和命令项可构造，未显示或执行菜单命令。下一步验证外部 Shell 变更通知与递归大小回填；产品/release 未变。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01注册-namespace-背景菜单转发)。

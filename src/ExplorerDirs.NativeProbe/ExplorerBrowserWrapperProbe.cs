@@ -205,6 +205,29 @@ internal static class ExplorerBrowserWrapperProbe
                 throw new InvalidOperationException("ExplorerBrowser did not preserve the registered custom namespace view contract.");
             Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-idlist=0x{browseHr:X8}; class-id-matches={classIdMatches}; root-pidl-matches={rootPidlMatches}; recursive-column-metadata={recursiveColumn}; recursive-size-visible-in-shell={recursiveSizeVisible}; visible-shell-column-count={visibleColumnsAfterApply.Count}; native-header=[{string.Join('|', headerTitles)}]; view-child-classes=[{string.Join('|', viewChildClasses)}]; row-count={itemCount}; fixture={fixture}; visible-to-user=False");
 
+            nint backgroundMenu = 0, backgroundPopup = 0;
+            var backgroundMenuHr = CreateViewObject(viewFolder, ContextMenuId, out backgroundMenu);
+            var backgroundMenuQueryHr = unchecked((int)0x80004005);
+            var backgroundMenuItemCount = -1;
+            try
+            {
+                if (backgroundMenuHr >= 0 && backgroundMenu != 0)
+                {
+                    backgroundPopup = CreatePopupMenu();
+                    if (backgroundPopup == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                    backgroundMenuQueryHr = At<QueryContextMenu>(backgroundMenu, 3)(backgroundMenu, backgroundPopup, 0, 1, 0x7FFF, 0);
+                    if (backgroundMenuQueryHr >= 0) backgroundMenuItemCount = GetMenuItemCount(backgroundPopup);
+                }
+            }
+            finally
+            {
+                if (backgroundPopup != 0) DestroyMenu(backgroundPopup);
+                if (backgroundMenu != 0) Marshal.Release(backgroundMenu);
+            }
+            Console.WriteLine($"explorerbrowser-registered-namespace: background-context-menu-hr=0x{backgroundMenuHr:X8}; query-hr=0x{backgroundMenuQueryHr:X8}; menu-items={backgroundMenuItemCount}");
+            if (backgroundMenuHr < 0 || backgroundMenu == 0 || backgroundMenuQueryHr < 0 || backgroundMenuItemCount <= 0)
+                throw new InvalidOperationException("The registered namespace did not expose native background-folder commands.");
+
             PrivateDesktopShellProbe.ReportStage("namespace-probe: native-item-menu-and-rename");
             Marshal.ThrowExceptionForHR(ParseDisplayName(viewFolder, "rename-source.txt", out var renameSource));
             nint contextMenu = 0, popup = 0;
@@ -372,6 +395,9 @@ internal static class ExplorerBrowserWrapperProbe
         return At<ParseDisplayNameNative>(folder, 3)(folder, 0, 0, name, out eaten, out item, ref attributes);
     }
 
+    private static int CreateViewObject(nint folder, Guid iid, out nint value)
+        => At<CreateViewObjectNative>(folder, 8)(folder, 0, ref iid, out value);
+
     private static int GetUiObjectOf(nint folder, nint item, Guid iid, out nint value)
     {
         var items = Marshal.AllocHGlobal(IntPtr.Size);
@@ -520,6 +546,7 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetWindow(nint self, out nint window);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayNameNative(nint self, nint owner, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string name, out uint eaten, out nint item, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUiObjectOfNative(nint self, nint owner, uint count, nint items, ref Guid iid, ref uint reserved, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CreateViewObjectNative(nint self, nint owner, ref Guid iid, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetNameOfNative(nint self, nint owner, nint item, [MarshalAs(UnmanagedType.LPWStr)] string name, uint flags, out nint renamed);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int QueryContextMenu(nint self, nint menu, uint index, uint first, uint last, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
