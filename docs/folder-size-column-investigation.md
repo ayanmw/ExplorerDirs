@@ -1562,3 +1562,11 @@ Q-Dir 官方 FAQ 提供“排序时忽略文件夹大小”的选项，并说明
 NativeProbe Release 构建 0 警告/错误，隔离 Private Desktop 探针退出码 0，前台与 last-input tick 均未变化。首次尝试暴露父 STATIC 窗口同步销毁会在 Shell/COM 路径挂起；按既有 Private Desktop 生命周期处理改为让隔离进程退出回收父 HWND 后复跑通过。窗口只在单独 Desktop 创建，对用户不可见。
 
 该结果只排除“直接 BrowseToObject 传 adapter”这一捷径，不验证注册 namespace PIDL、包装子 PIDL 的真实物理操作转发或递归大小列在 ExplorerBrowser 中的显示/排序；后续接线原型必须让 Shell 通过可解析的包装 namespace PIDL 重新进入 adapter。产品及 release 未修改。
+
+### 2026-11-01：ExplorerBrowser 激活注册 namespace 并启用递归列
+
+在上一轮身份检查之后，新增随机 CLSID 的临时 HKCU Shell-folder/桌面 NameSpace 注册，将合成自定义 folder 的绝对 namespace PIDL 交给 ExplorerBrowser `BrowseToIDList`。Browser 当前 view 的 `IPersistFolder2.GetClassID` 返回随机 CLSID，`GetCurFolder` 的 PIDL 与导航根逐字节相同；`IFolderView2.GetFolder` 提供 2 行夹具。provider 的 Size 列标题为 `Recursive Size`；用产品 `ShellColumnManager.Apply` 将标准 `PKEY_Size` 列设为可见后，`Capture` 读回 4 列并确认包含该 key。
+
+Shell view 子控件为 `CtrlNotifySink|DirectUIHWND|ScrollBar`，没有经典 `SysListView32/SysHeader32`，所以本探针没有读到像素或原生 header caption；证据只证明 namespace 身份、行枚举和 Shell/IColumnManager 的可见列状态。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入守卫通过；随机 CLSID 和 Desktop NameSpace 两处临时注册确认已删除。`DllCanUnloadNow` 返回 `S_FALSE`，native DLL 留到隔离进程退出回收，不能据此宣称 COM 生命周期无泄漏。
+
+边界：folder provider 仍是以真实临时目录作 backing 的合成 namespace；没有包装真实目录 PIDL，没有验证物理子项 PIDL 身份、菜单/操作/拖放/通知或用户可见列绘制。ExplorerBrowser 产品和 release 未修改。下一步应把 namespace child identity 与真实文件系统 PIDL/操作转发连接起来，并保持注册完全临时。

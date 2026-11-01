@@ -5688,3 +5688,9 @@ Q-Dir 对照确认 Type 列的递归 counts 也需要复用后台扫描值。Nat
 隔离 NativeProbe 将真实临时目录绑定的 `IShellFolder2` 包装为 adapter 后传入 `IExplorerBrowser.BrowseToObject`。调用返回 `S_OK`，但从活动 `IFolderView2.GetFolder` 读回的 folder identity 不等于 adapter，当前路径仍为物理目录；因此 ExplorerBrowser 重新绑定了 adapter 暴露的 PIDL，直接传对象不能保留自定义列 provider。NativeProbe Release 构建 0 警告/错误，Private Desktop watchdog 退出码 0，前台/输入守卫通过。
 
 这排除了直接传 adapter 的捷径，不证明注册 namespace PIDL 与真实物理 Shell 操作可用；下一步仍需在隔离注册/退出清理下验证包装 namespace PIDL 的 ExplorerBrowser 导航。产品和 release 未改。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-直接浏览-adapter-对象的身份保留检查)。
+
+### 2026-11-01：ExplorerBrowser 注册 namespace 的递归列接线
+
+随机 CLSID 的临时 Shell-folder/桌面 NameSpace 注册可经 ExplorerBrowser `BrowseToIDList` 激活合成自定义 folder：活动 view 的 `IPersistFolder2` CLSID 与根 PIDL 均匹配，枚举 2 行；产品 `ShellColumnManager.Apply` 让 `PKEY_Size` 进入 4 个可见列，provider 列元数据为 `Recursive Size`。子控件为 `DirectUIHWND`，没有经典 ListView/Header，因此未取得像素或屏幕标题证据。Release 构建 0 警告/错误，Private Desktop watchdog exit 0，前台/输入不变；临时注册确认清理，native DLL 因 `DllCanUnloadNow=S_FALSE` 留至隔离进程退出。
+
+这验证了注册的自定义 Shell namespace 与递归列可进入 ExplorerBrowser 的逻辑列状态，但 backing provider 仍是合成 namespace，未包装真实文件系统 PIDL/对象身份，亦未验证文件操作、菜单、拖放、通知或可见绘制。下一步连接真实文件系统 child PIDL 与 namespace 身份；产品及 release 未变。详见[递归大小列调查](folder-size-column-investigation.md#2026-11-01-explorerbrowser-激活注册-namespace-并启用递归列)。

@@ -116,6 +116,10 @@ internal static class PrivateDesktopShellProbe
     internal static int RunExplorerBrowserWrapperObject() =>
         Run("explorerbrowser-wrapper-object", ExplorerBrowserWrapperProbe.Run, TimeSpan.FromSeconds(30), initializeOle: true);
 
+    internal static int RunExplorerBrowserRegisteredNamespace() =>
+        Run("explorerbrowser-registered-namespace", ExplorerBrowserWrapperProbe.RunNamespace,
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunColumnFilterCapability() =>
         Run("column-filter-capability", ColumnFilterCapabilityProbe.Run, TimeSpan.FromSeconds(35));
 
