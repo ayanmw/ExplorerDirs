@@ -2601,9 +2601,19 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 
 在上一节诊断开关基础上增加两种仅 HostProbe/诊断 DLL 使用的投递方式：每个 `SHCNE_UPDATEITEM` 使用 `SHCNF_FLUSH`，以及每项间隔 150 ms。Microsoft 将 `SHCNF_FLUSH` 定义为函数返回前把通知送达所有受影响组件；它是同步广播，不代表某个具体 view callback 已成功处理。
 
-16 项 burst 使用 `SHCNF_FLUSH` 连续 3 次均由 Desktop scope observer 收齐 16 个 PIDL，Shell ItemCount 与导出行数均保持 16，递归大小最终升序正确；整个隐藏 HostProbe exit 0。相同数据用每项 150 ms 间隔仍只收到 `folder-extra-00..10` 共 11 项，30 秒内没有后续事件。两种投递模式的 `SFVM_FSNOTIFY` 回调仍均为 0。因此完整 Shell 广播丢项与同步 flush 明显相关；单纯拉开 150 ms 间隔不足以修复。该结果支持继续验证 `SHCNF_FLUSH` 是否能让目标 DefView 实际重绘单元格，但暂不把同步广播接入产品：尚无可见行更新/焦点/选区证据，且 flush 会阻塞通知 worker 等待所有受影响组件。
+16 项 burst 使用 `SHCNF_FLUSH` 连续 3 次均由 Desktop scope observer 收齐 16 个 PIDL，Shell ItemCount 与导出行数均保持 16，递归大小最终升序正确；整个隐藏 HostProbe exit 0。相同数据用每项 150 ms 间隔仍只收到 `folder-extra-00..10` 共 11 项，30 秒内没有后续事件。两种投递模式的 `SFVM_FSNOTIFY` 回调仍均为 0。因此完整 Shell 广播丢项与同步 flush 明显相关；单纯拉开 150 ms 间隔不足以修复。
 
 诊断参数为 `--shell-provider-product-async-notification-burst-flush` 和 `--shell-provider-product-async-notification-burst-spaced`；正式产品 DLL、App、默认通知策略和 release 均未修改。
+
+### 2026-11-02：逐项 UPDATEITEM 与目录 UPDATEDIR 的视图行变化对照
+
+增加两个目录的隐藏 ExplorerBrowser 探针，先捕获 native ListView 的名称/递归大小单元格，再等待 Shell 通知并持续采样 `IFolderView.ItemCount` 与 `SysListView32` 行数。通知根固定为 synthetic namespace 根，视图返回 `SHCNE_ALLEVENTS`；通知投递使用同步 `SHCNF_FLUSH`。5 秒诊断延迟为通知前采样留出窗口。第一版计数器在延迟前递增，导致把通知前的 0 行误标为投递期间；已将计数器移到 `SHChangeNotify` 紧前，并据校正后的探针结果取代前一版时序归因。
+
+校正后 `SHCNE_UPDATEITEM` 运行 3 轮：Desktop observer 均收到两项通知；通知调用期间每轮 `IFolderView.ItemCount` 与 native ListView 行数均保持 2。2/3 轮在通知前采样到 0→2 行（发送计数为 0 时），所以空行来自通知前的异步阶段，而不是本次通知调用；有值的通知前快照中目录为大到小。通知后 2/3 轮按 5 B、29 B 升序，1/3 轮仍为 29 B、5 B，说明逐项通知本身不能可靠触发自定义异步大小列重排。`SHCNE_UPDATEDIR` 运行 3 轮：Desktop observer 每轮都收到根目录事件；通知调用前后行数持续为 2，单元格均在通知后变成 5 B、29 B 升序。所有轮次 `SFVM_FSNOTIFY` callback 均为 0。
+
+这证明隐藏 view 在当前小型夹具中能经 Shell change service 更新/重排，且经 20 ms 采样没有在通知调用期间清空行；但它不能证明可见像素无闪烁、焦点/选区保持，也不能排除小于采样间隔的空窗。`UPDATEITEM` 的自动重排不稳定；`UPDATEDIR` 稳定重排但具有整目录更新语义。正式产品仍不接入；后续要在更大目录和选择/焦点夹具中比较整目录更新的重枚举与状态保持，再决定逐行递归值采用何种策略。
+
+对应探针参数：`--shell-provider-product-async-notification-items-flush`、`--shell-provider-product-async-notification-updatedir`。所有开关只在诊断 DLL/HostProbe 生效。
 
 ### 2026-11-02：App profile namespace owner 与 native 载荷
 

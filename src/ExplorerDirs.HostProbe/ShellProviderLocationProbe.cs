@@ -22,8 +22,11 @@ internal static class ShellProviderLocationProbe
         var smallFolder = Path.Combine(viewRoot, "folder-small");
         var largeFolder = Path.Combine(viewRoot, "folder-large");
         var notificationBurst = sortStrategy.StartsWith("notification-burst", StringComparison.Ordinal);
-        var flushNotifications = sortStrategy == "notification-burst-flush";
-        var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 : 0;
+        var notificationDirectory = sortStrategy == "notification-updatedir";
+        var notificationItems = sortStrategy == "notification-items-flush";
+        var flushNotifications = sortStrategy is "notification-burst-flush" or "notification-items-flush";
+        var notificationDelayMilliseconds = sortStrategy == "notification-burst-spaced" ? 150 :
+            notificationDirectory || notificationItems ? 5000 : 0;
         var expectedFolderCount = notificationBurst ? 16 : 2;
         var expectedRecursiveValues = notificationBurst
             ? Enumerable.Range(101, 14).Select(value => (ulong)value).Append(5UL).Append(29UL).Order().ToArray()
@@ -66,10 +69,12 @@ internal static class ShellProviderLocationProbe
             adapter = NativeLibrary.Load(adapterPath);
             var configure = GetExport<ConfigureShellNamespaceRoot>(adapter, "ConfigureShellNamespaceRoot");
             Check(configure(ref classId, fallbackRoot));
-            if (notificationBurst && NativeLibrary.TryGetExport(adapter, "SetProductViewNotificationsUseSyntheticRoot", out var notificationRootAddress))
+            if ((notificationBurst || notificationDirectory || notificationItems) && NativeLibrary.TryGetExport(adapter, "SetProductViewNotificationsUseSyntheticRoot", out var notificationRootAddress))
                 Marshal.GetDelegateForFunctionPointer<SetProductViewNotificationsUseSyntheticRoot>(notificationRootAddress)(1);
-            if (notificationBurst && NativeLibrary.TryGetExport(adapter, "ConfigureProductNotificationDeliveryForProbe", out var notificationDeliveryAddress))
-                Marshal.GetDelegateForFunctionPointer<ConfigureProductNotificationDeliveryForProbe>(notificationDeliveryAddress)(flushNotifications ? 1 : 0, (uint)notificationDelayMilliseconds);
+            if ((notificationBurst || notificationDirectory || notificationItems) && NativeLibrary.TryGetExport(adapter, "ConfigureProductNotificationDeliveryForProbe", out var notificationDeliveryAddress))
+                Marshal.GetDelegateForFunctionPointer<ConfigureProductNotificationDeliveryForProbe>(notificationDeliveryAddress)(flushNotifications || notificationDirectory ? 1 : 0, (uint)notificationDelayMilliseconds);
+            if (notificationDirectory && NativeLibrary.TryGetExport(adapter, "SetProductAsyncItemNotificationEnabledForProbe", out var itemNotificationModeAddress))
+                Marshal.GetDelegateForFunctionPointer<SetProductAsyncItemNotificationEnabledForProbe>(itemNotificationModeAddress)(0);
             RegisterVolatileClass(classKeyPath, adapterPath);
             classRegistered = true;
             RegisterVolatileNamespace(namespaceKeyPath);
@@ -159,10 +164,17 @@ internal static class ShellProviderLocationProbe
                     .Order().SequenceEqual(expectedRecursiveValues);
             }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
 
-            if (sortStrategy == "scheduled" || notificationBurst)
+            var nativeCellsBeforeNotification = notificationDirectory || notificationItems
+                ? ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3)
+                : [];
+
+            if (sortStrategy == "scheduled" || notificationBurst || notificationDirectory || notificationItems)
             {
                 stage = "item-update-delivery";
                 var notificationDeliverySamples = new List<string>();
+                var notificationShellItemCounts = new HashSet<int>();
+                var notificationNativeListViewCounts = new HashSet<int>();
+                var notificationStateSamples = new Dictionary<int, HashSet<string>>();
                 if (notificationBurst)
                 {
                     var deliveryClock = Stopwatch.StartNew();
@@ -182,7 +194,30 @@ internal static class ShellProviderLocationProbe
                 {
                     try
                     {
-                        WaitUntil(() => expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames),
+                        WaitUntil(() =>
+                        {
+                            if (notificationDirectory || notificationItems)
+                            {
+                                var counts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!
+                                    .Invoke(host, [false, false]);
+                                if (counts is not null)
+                                    notificationShellItemCounts.Add((int)counts.GetType().GetProperty("Total")!.GetValue(counts)!);
+                                var shellCount = counts is null ? -1 : (int)counts.GetType().GetProperty("Total")!.GetValue(counts)!;
+                                var nativeCount = ReadNativeListViewItemCount((nint)viewWindowField.GetValue(host)!);
+                                notificationNativeListViewCounts.Add(nativeCount);
+                                var attemptCounter = notificationDirectory
+                                    ? "GetProductAsyncDirectoryNotificationAttempts"
+                                    : "GetProductAsyncItemNotificationAttempts";
+                                var sendsStarted = int.TryParse(ReadProductDiagnosticCounter(adapter, attemptCounter), out var attempts)
+                                    ? attempts : -1;
+                                if (!notificationStateSamples.TryGetValue(sendsStarted, out var samples))
+                                    notificationStateSamples[sendsStarted] = samples = [];
+                                samples.Add($"{shellCount}/{nativeCount}");
+                            }
+                            return notificationDirectory
+                                ? desktopUpdateObserver.EventCount(0x00001000) > 0
+                                : expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames);
+                        },
                             TimeSpan.FromSeconds(15), "the Desktop-scope Shell observer did not receive one item update for every completed folder");
                     }
                     catch (TimeoutException) { }
@@ -194,8 +229,10 @@ internal static class ShellProviderLocationProbe
                 var viewCallbackNames = viewCallbackIdentities.Select(GetProviderItemName).ToArray();
                 var receivedNotificationNames = desktopUpdateObserver.UpdatedItemParsingNames.Select(GetProviderItemName).ToArray();
                 Console.WriteLine($"shell-provider-product-async-notifications: mode={sortStrategy}; adapter-item-send-attempts={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationAttempts")}; item-pidls-under-provider-root={ReadProductDiagnosticCounter(adapter, "GetProductAsyncItemNotificationUnderSyntheticRootCount")}; adapter-pidl-identities=[{string.Join('|', sentNotificationNames)}]; view-getnotify-calls={ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyCallCount")}; view-getnotify-root={ReadProductDiagnosticString(adapter, "GetProductViewGetNotifyRootIdentity")}; view-getnotify-event-mask=0x{ReadProductDiagnosticCounter(adapter, "GetProductViewGetNotifyEventMask")}; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; view-callback-pidl-identities=[{string.Join('|', viewCallbackNames)}]; expected-item-names=[{string.Join('|', expectedUpdatedNames)}]; provider-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-item-names=[{string.Join('|', filesystemUpdateObserver.UpdatedItemNames)}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-item-names=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; desktop-pidl-identities=[{string.Join('|', receivedNotificationNames)}]; identities-match={sentNotificationIdentities.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(desktopUpdateObserver.UpdatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)}; desktop-events=[{desktopUpdateObserver.EventSummary}]; burst-delivery-samples=[{string.Join('|', notificationDeliverySamples)}]");
-                if (!expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
+                if (!notificationDirectory && !expectedUpdatedNames.SetEquals(desktopUpdateObserver.UpdatedItemNames))
                     throw new InvalidOperationException($"The Desktop-scope observer did not receive every changed row: expected=[{string.Join('|', expectedUpdatedNames)}]; received=[{string.Join('|', desktopUpdateObserver.UpdatedItemNames)}]; provider-root-events=[{itemUpdateObserver.EventSummary}]; physical-root-events=[{filesystemUpdateObserver.EventSummary}]; desktop-events=[{desktopUpdateObserver.EventSummary}].");
+                if (notificationDirectory && desktopUpdateObserver.EventCount(0x00001000) == 0)
+                    throw new InvalidOperationException($"The Desktop-scope observer did not receive SHCNE_UPDATEDIR; desktop-events=[{desktopUpdateObserver.EventSummary}].");
                 if (notificationBurst)
                 {
                     var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
@@ -230,6 +267,17 @@ internal static class ShellProviderLocationProbe
                     var sizeSorted = burstSortValues.Length == expectedFolderCount && burstSortValues.Zip(
                         burstSortValues.Skip(1), (left, right) => left.Bytes <= right.Bytes).All(sorted => sorted);
                     Console.WriteLine($"shell-provider-product-async-sort-order: columns=[{string.Join('|', burstColumns)}]; size-column={sizeColumn}; ascending={sizeSorted}; rows=[{string.Join('|', burstSortValues.Select(row => $"{row.Name}:{row.Value}"))}]");
+                    return 0;
+                }
+                if (notificationDirectory || notificationItems)
+                {
+                    var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
+                    var nativeCellsAfterDirectoryNotify = ReadNativeListViewCells((nint)viewWindowField.GetValue(host)!, 3);
+                    var notificationTransitions = notificationStateSamples.OrderBy(pair => pair.Key)
+                        .Select(pair => $"{pair.Key}:[{string.Join(',', pair.Value.Order(StringComparer.Ordinal))}]");
+                    Console.WriteLine($"shell-provider-product-async-view-after-{(notificationDirectory ? "updatedir" : "item-update")}: samples-by-send-attempts=[{string.Join('|', notificationTransitions)}]; during-shell-item-counts=[{string.Join('|', notificationShellItemCounts.Order())}]; during-native-listview-counts=[{string.Join('|', notificationNativeListViewCounts.Order())}]; shell-item-counts-after=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts-after=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}; native-cells-before=[{string.Join(" || ", nativeCellsBeforeNotification.Select(row => string.Join('|', row)))}]; native-cells-after=[{string.Join(" || ", nativeCellsAfterDirectoryNotify.Select(row => string.Join('|', row)))}]; view-callback-count={ReadProductDiagnosticCounter(adapter, "GetProductViewItemNotificationCallbackCount")}; desktop-events=[{desktopUpdateObserver.EventSummary}]");
+                    if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
+                        throw new InvalidOperationException($"The Shell view did not retain its {expectedFolderCount} rows after SHCNE_UPDATEDIR.");
                     return 0;
                 }
             }
@@ -1814,6 +1862,37 @@ internal static class ShellProviderLocationProbe
         }
     }
 
+    private static string[][] ReadNativeListViewCells(nint viewWindow, int subItemCount)
+    {
+        var listView = FindNativeListView(viewWindow);
+        var count = checked((int)SendMessageW(listView, 0x1004, 0, 0)); // LVM_GETITEMCOUNT.
+        var itemPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeListViewItem>());
+        var textPointer = Marshal.AllocHGlobal(1024);
+        try
+        {
+            var rows = new string[count][];
+            for (var itemIndex = 0; itemIndex < count; itemIndex++)
+            {
+                var cells = new string[subItemCount];
+                for (var subItem = 0; subItem < subItemCount; subItem++)
+                {
+                    Marshal.WriteInt32(textPointer, 0);
+                    var item = new NativeListViewItem { Item = itemIndex, SubItem = subItem, Text = textPointer, TextCapacity = 512 };
+                    Marshal.StructureToPtr(item, itemPointer, false);
+                    _ = SendMessageW(listView, 0x1073, itemIndex, itemPointer); // LVM_GETITEMTEXTW.
+                    cells[subItem] = Marshal.PtrToStringUni(textPointer) ?? string.Empty;
+                }
+                rows[itemIndex] = cells;
+            }
+            return rows;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(textPointer);
+            Marshal.FreeHGlobal(itemPointer);
+        }
+    }
+
     private static void ClickHeaderColumn(nint header, int columnIndex)
     {
         var rectanglePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
@@ -1904,6 +1983,7 @@ internal static class ShellProviderLocationProbe
     private delegate int GetDiagnosticString([MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductViewNotificationsUseSyntheticRoot(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void ConfigureProductNotificationDeliveryForProbe(int flush, uint delayMilliseconds);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void SetProductAsyncItemNotificationEnabledForProbe(int enabled);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
     private delegate int GetProductAsyncItemNotificationIdentity(int index,
         [MarshalAs(UnmanagedType.LPWStr)] StringBuilder buffer, uint capacity);

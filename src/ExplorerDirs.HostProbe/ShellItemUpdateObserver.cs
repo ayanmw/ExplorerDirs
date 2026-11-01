@@ -20,6 +20,7 @@ internal sealed class ShellItemUpdateObserver : IDisposable
         get { lock (_sync) return _updatedItemPidls; }
     }
     internal int TotalEvents { get { lock (_sync) return _eventCounts.Values.Sum(); } }
+    internal int EventCount(int eventId) { lock (_sync) return _eventCounts.GetValueOrDefault(eventId); }
     internal string[] UpdatedItemNames { get { lock (_sync) return _updatedItemNames.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
     internal string[] UpdatedItemParsingNames { get { lock (_sync) return _updatedItemParsingNames.Order(StringComparer.OrdinalIgnoreCase).ToArray(); } }
     internal string EventSummary

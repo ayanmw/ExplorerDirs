@@ -4543,9 +4543,20 @@ namespace
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
+                            auto* directoryRoot =
+                                InterlockedCompareExchange(&g_productViewNotificationsUseSyntheticRoot, 0, 0) && self->_root
+                                    ? self->_root : self->_backingRoot;
+                            UINT notifyFlags = SHCNF_IDLIST;
+                            if (InterlockedCompareExchange(&g_productNotificationFlushForProbe, 0, 0))
+                                notifyFlags |= SHCNF_FLUSH;
+                            const auto delay = InterlockedCompareExchange(&g_productNotificationDelayMsForProbe, 0, 0);
+                            if (delay > 0) Sleep(static_cast<DWORD>(delay));
+                            // The HostProbe correlates row-count samples with the actual notification call, not its artificial delay.
                             InterlockedIncrement(&g_productAsyncDirectoryNotificationAttempts);
-#endif
+                            SHChangeNotify(SHCNE_UPDATEDIR, notifyFlags, directoryRoot, nullptr);
+#else
                             SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+#endif
                         }
                         else
                         {
@@ -4559,18 +4570,17 @@ namespace
                                 if (self->_root && ILIsParent(self->_root,
                                     reinterpret_cast<PCIDLIST_ABSOLUTE>(notification.second), TRUE))
                                     InterlockedIncrement(&g_productAsyncItemNotificationUnderSyntheticRoot);
-                                InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
 #endif
                                 UINT notifyFlags = SHCNF_IDLIST;
 #if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                                 if (InterlockedCompareExchange(&g_productNotificationFlushForProbe, 0, 0))
                                     notifyFlags |= SHCNF_FLUSH;
-#endif
-                                SHChangeNotify(SHCNE_UPDATEITEM, notifyFlags, notification.second, nullptr);
-#if defined(EXPLORERDIRS_PRODUCT_DIAGNOSTICS)
                                 const auto delay = InterlockedCompareExchange(&g_productNotificationDelayMsForProbe, 0, 0);
                                 if (delay > 0) Sleep(static_cast<DWORD>(delay));
+                                // Keep the diagnostic counter aligned with entry to SHChangeNotify for time-correlated sampling.
+                                InterlockedIncrement(&g_productAsyncItemNotificationAttempts);
 #endif
+                                SHChangeNotify(SHCNE_UPDATEITEM, notifyFlags, notification.second, nullptr);
                                 CoTaskMemFree(notification.second);
                             }
                         }
@@ -5140,6 +5150,9 @@ extern "C" void WINAPI ConfigureProductNotificationDeliveryForProbe(BOOL flush, 
     InterlockedExchange(&g_productNotificationFlushForProbe, flush ? 1 : 0);
     InterlockedExchange(&g_productNotificationDelayMsForProbe, static_cast<LONG>(delayMilliseconds));
 }
+
+extern "C" void WINAPI SetProductAsyncItemNotificationEnabledForProbe(BOOL enabled)
+{ InterlockedExchange(&g_syntheticAsyncRecursiveSizeItemNotificationForProbe, enabled ? 1 : 0); }
 
 extern "C" LONG WINAPI GetProductAsyncDirectoryNotificationAttempts()
 { return InterlockedCompareExchange(&g_productAsyncDirectoryNotificationAttempts, 0, 0); }
