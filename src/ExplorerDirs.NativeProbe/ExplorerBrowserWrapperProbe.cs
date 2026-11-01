@@ -425,8 +425,6 @@ internal static class ExplorerBrowserWrapperProbe
                         }
                         finally { Marshal.Release(directlyBoundPersist); }
                     }
-                    Marshal.Release(directlyBoundNestedFolder);
-                    directlyBoundNestedFolder = 0;
                 }
                 var absoluteNestedNameMatches = absoluteNestedNameHr >= 0 &&
                     PidlBytesEqual(expectedNestedRoot, absoluteNestedNamePidl);
@@ -434,8 +432,19 @@ internal static class ExplorerBrowserWrapperProbe
                 var nestedNavigationPidl = absoluteNestedNameHr >= 0 ? absoluteNestedNamePidl : expectedNestedRoot;
                 try
                 {
-                    NavigateAndWaitForFolder(browser, nestedNavigationPidl, 0, classId,
-                        nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    try
+                    {
+                        NavigateAndWaitForFolder(browser, nestedNavigationPidl, 0, classId,
+                            nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                    }
+                    catch (TimeoutException)
+                    {
+                        var objectNavigation = ProbeBrowseToObject(browser, directlyBoundNestedFolder, classId,
+                            nestedNavigationPidl, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+                        Console.WriteLine($"explorerbrowser-registered-namespace: browse-to-object-hr=0x{objectNavigation.HResult:X8}; object-class-matches={objectNavigation.ClassMatches}; object-pidl-matches={objectNavigation.PidlMatches}; object-location={objectNavigation.Location}; filesystem-path={objectNavigation.FileSystemPath}");
+                        if (!objectNavigation.ClassMatches || !objectNavigation.PidlMatches)
+                            throw new InvalidOperationException("BrowseToIDList did not reach nested and BrowseToObject did not preserve the wrapped nested folder.");
+                    }
                     var nestedRowCount = WaitForViewItemCount(folderView, 1);
                     NavigateAndWaitForFolder(browser, 0, SbspParent, classId,
                         expectedChildRoot, ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
@@ -461,6 +470,7 @@ internal static class ExplorerBrowserWrapperProbe
                 }
                 finally
                 {
+                    if (directlyBoundNestedFolder != 0) Marshal.Release(directlyBoundNestedFolder);
                     if (absoluteNestedNamePidl != 0) Marshal.FreeCoTaskMem(absoluteNestedNamePidl);
                     Marshal.FreeCoTaskMem(expectedNestedRoot);
                 }
@@ -1163,11 +1173,46 @@ internal static class ExplorerBrowserWrapperProbe
     }
 
     private static string ReadAbsoluteParsingName(nint pidl)
+        => ReadShellName(pidl, SigdnDesktopAbsoluteParsing);
+
+    private static string ReadShellName(nint pidl, uint nameType)
     {
-        if (pidl == 0 || SHGetNameFromIDList(pidl, SigdnDesktopAbsoluteParsing, out var pointer) < 0)
+        if (pidl == 0 || SHGetNameFromIDList(pidl, nameType, out var pointer) < 0)
             return "<unavailable>";
         try { return Marshal.PtrToStringUni(pointer) ?? "<empty>"; }
         finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
+    private static (int HResult, bool ClassMatches, bool PidlMatches, string Location, string FileSystemPath)
+        ProbeBrowseToObject(nint browser, nint targetFolder, Guid expectedClassId, nint expectedPidl,
+            ref nint shellView, ref nint folderView, ref nint viewFolder, ref nint persist, ref nint currentPidl)
+    {
+        ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+        var browseHr = At<BrowseToObject>(browser, 14)(browser, targetFolder, 0);
+        if (browseHr < 0) return (browseHr, false, false, "<browse-failed>", "<browse-failed>");
+
+        var classMatches = false;
+        var pidlMatches = false;
+        var location = "<unavailable>";
+        var fileSystemPath = "<unavailable>";
+        var stopwatch = Stopwatch.StartNew();
+        do
+        {
+            Application.DoEvents();
+            ReadActiveFolder(browser, ref shellView, ref folderView, ref viewFolder, ref persist);
+            Marshal.ThrowExceptionForHR(At<GetClassId>(persist, 3)(persist, out var actualClassId));
+            Marshal.ThrowExceptionForHR(At<GetCurFolder>(persist, 5)(persist, out currentPidl));
+            classMatches = actualClassId == expectedClassId;
+            pidlMatches = PidlBytesEqual(expectedPidl, currentPidl);
+            location = ReadAbsoluteParsingName(currentPidl);
+            fileSystemPath = ReadShellName(currentPidl, SigdnFileSystemPath);
+            if (classMatches && pidlMatches) break;
+            ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+            Thread.Sleep(20);
+        } while (stopwatch.Elapsed < TimeSpan.FromSeconds(5));
+
+        ReleaseActiveFolder(ref shellView, ref folderView, ref viewFolder, ref persist, ref currentPidl);
+        return (browseHr, classMatches, pidlMatches, location, fileSystemPath);
     }
 
     private static int WaitForViewItemCount(nint folderView, int expectedCount)
