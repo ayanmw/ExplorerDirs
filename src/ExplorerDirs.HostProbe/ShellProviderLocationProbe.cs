@@ -14,13 +14,16 @@ using System.Windows.Threading;
 // Exercises the production ExplorerBrowserHost against a disposable Shell folder provider.
 internal static class ShellProviderLocationProbe
 {
-    internal static int RunProductAdapterOnDemandAsync()
+    internal static int RunProductAdapterOnDemandAsync(string sortStrategy = "scheduled")
     {
         var root = Path.Combine(Path.GetTempPath(), "ExplorerDirs-ProductAsyncHost-" + Guid.NewGuid().ToString("N"));
         var fallbackRoot = Path.Combine(root, "fallback-root");
         var viewRoot = Path.Combine(root, "view-root");
         var smallFolder = Path.Combine(viewRoot, "folder-small");
         var largeFolder = Path.Combine(viewRoot, "folder-large");
+        var notificationBurst = sortStrategy == "notification-burst";
+        var expectedFolderCount = notificationBurst ? 16 : 2;
+        var expectedItemPaths = new HashSet<string>([smallFolder, largeFolder], StringComparer.OrdinalIgnoreCase);
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
         var namespaceKeyPath = $@"Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{{{classId:D}}}";
@@ -29,6 +32,8 @@ internal static class ShellProviderLocationProbe
         var namespaceRegistered = false;
         var stage = "fixture";
         HwndSource? source = null;
+        ShellItemUpdateObserver? itemUpdateObserver = null;
+        ShellItemUpdateObserver? filesystemUpdateObserver = null;
         HwndHost? host = null;
         var foregroundBefore = GetForegroundWindow();
         try
@@ -38,6 +43,16 @@ internal static class ShellProviderLocationProbe
             Directory.CreateDirectory(largeFolder);
             File.WriteAllBytes(Path.Combine(smallFolder, "payload.bin"), new byte[5]);
             File.WriteAllBytes(Path.Combine(largeFolder, "payload.bin"), new byte[29]);
+            if (notificationBurst)
+            {
+                for (var index = 0; index < 14; index++)
+                {
+                    var path = Path.Combine(viewRoot, $"folder-extra-{index:D2}");
+                    Directory.CreateDirectory(path);
+                    File.WriteAllBytes(Path.Combine(path, "payload.bin"), new byte[index + 1]);
+                    expectedItemPaths.Add(path);
+                }
+            }
 
             var adapterPath = FindProductAdapterLibrary();
             stage = "load-product-adapter";
@@ -76,6 +91,8 @@ internal static class ShellProviderLocationProbe
             {
                 WindowStyle = unchecked((int)0x80000000), Width = 640, Height = 360
             });
+            itemUpdateObserver = new ShellItemUpdateObserver(source, targetIdentity);
+            filesystemUpdateObserver = new ShellItemUpdateObserver(source, viewRoot);
             source.RootVisual = grid;
             grid.Measure(new Size(640, 360));
             grid.Arrange(new Rect(0, 0, 640, 360));
@@ -93,8 +110,8 @@ internal static class ShellProviderLocationProbe
             {
                 var counts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(host, [false, false]);
-                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == 2;
-            }, TimeSpan.FromSeconds(15), "the product Shell view did not enumerate the two test folders");
+                return counts is not null && (int)counts.GetType().GetProperty("Total")!.GetValue(counts)! == expectedFolderCount;
+            }, TimeSpan.FromSeconds(15), $"the product Shell view did not enumerate all {expectedFolderCount} test folders");
 
             stage = "async-values";
             var readValues = typeof(ShellProviderLocationProbe).GetMethod("ReadRecursiveValues",
@@ -102,48 +119,94 @@ internal static class ShellProviderLocationProbe
             string[] values = [];
             WaitUntil(() =>
             {
-                values = (string[])readValues.Invoke(null, [hostType, host, 2])!;
-                return values.Length == 2 && values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
-                    .Order().SequenceEqual([5UL, 29UL]);
-            }, TimeSpan.FromSeconds(20), "the product Shell view did not fill both recursive values asynchronously");
+                values = (string[])readValues.Invoke(null, [hostType, host, expectedFolderCount])!;
+                return values.Length == expectedFolderCount && (!notificationBurst ||
+                    values.All(value => TryReadBytes(value, out _))) && (notificationBurst ||
+                    values.Select(value => TryReadBytes(value, out var bytes) ? bytes : ulong.MaxValue)
+                        .Order().SequenceEqual([5UL, 29UL]));
+            }, TimeSpan.FromSeconds(20), $"the product Shell view did not fill all {expectedFolderCount} recursive values asynchronously");
+
+            if (sortStrategy is "scheduled" or "notification-burst")
+            {
+                stage = "item-update-delivery";
+                try
+                {
+                    WaitUntil(() => expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths),
+                        TimeSpan.FromSeconds(5), "the hidden Shell observer did not receive one item update for every completed folder");
+                }
+                catch (TimeoutException) { }
+                Console.WriteLine($"shell-provider-product-async-notifications: expected-item-paths=[{string.Join('|', expectedItemPaths)}]; virtual-root-item-pidls={itemUpdateObserver.UpdatedItemPidls}; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-item-paths=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}]");
+                if (!expectedItemPaths.SetEquals(filesystemUpdateObserver.UpdatedItemPaths) ||
+                    filesystemUpdateObserver.UpdatedItemPidls != expectedItemPaths.Count)
+                    throw new InvalidOperationException($"The product adapter did not notify each completed row exactly once: expected=[{string.Join('|', expectedItemPaths)}]; received=[{string.Join('|', filesystemUpdateObserver.UpdatedItemPaths)}]; virtual-root-events=[{itemUpdateObserver.EventSummary}]; filesystem-events=[{filesystemUpdateObserver.EventSummary}].");
+                if (notificationBurst)
+                {
+                    var rowObservation = ObserveProductRowCounts(hostType, host, TimeSpan.FromSeconds(2));
+                    Console.WriteLine($"shell-provider-product-async-view-after-burst: shell-item-counts=[{string.Join('|', rowObservation.ShellItemCounts)}]; export-row-counts=[{string.Join('|', rowObservation.ExportRowCounts)}]; final-shell-items={rowObservation.FinalShellItems}; final-export-rows={rowObservation.FinalExportRows}");
+                    if (rowObservation.FinalShellItems != expectedFolderCount || rowObservation.FinalExportRows != expectedFolderCount)
+                        throw new InvalidOperationException($"The Shell view did not settle back to all {expectedFolderCount} rows after item updates.");
+                    return 0;
+                }
+            }
 
             stage = "capture-sort";
             var capture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
             var readRows = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
             var readItemCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var snapshot = capture.Invoke(host, null)!;
-            var rows = readRows.Invoke(null, [snapshot])!;
-            var orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
-            var columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
-            var nameColumn = Array.FindIndex(columns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
-            if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
-            var names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
-            var orderAfterAsyncFill = names;
-            var autoResorted = names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
-            stage = "production-delayed-sort";
-            var scheduleSort = hostType.GetMethod("ScheduleInitialVirtualSort", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            var restoredSort = sorts.GetValue(0)!;
-            scheduleSort.Invoke(host, [restoredSort, new Func<bool>(() => true)]);
-            var scheduledSortRowCounts = new HashSet<int>();
-            var scheduledSortShellItemCounts = new HashSet<int>();
-            var scheduledSortStarted = Stopwatch.GetTimestamp();
+            object? snapshot = null;
+            object? rows = null;
+            string[][] orderedRows = [];
+            string[] columns = [];
+            string[] names = [];
             WaitUntil(() =>
             {
-                var liveCounts = readItemCounts.Invoke(host, [false, false]);
-                if (liveCounts is not null)
-                    scheduledSortShellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
-                snapshot = capture.Invoke(host, null)!;
-                rows = readRows.Invoke(null, [snapshot])!;
-                orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
-                names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
-                scheduledSortRowCounts.Add(names.Length);
-                return names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
-            }, TimeSpan.FromSeconds(10), "the production delayed virtual-sort scheduler did not restore ascending recursive-size order");
-            var scheduledSortElapsedMs = Stopwatch.GetElapsedTime(scheduledSortStarted).TotalMilliseconds;
-            var transientEmptySnapshot = scheduledSortRowCounts.Contains(0);
-            var transientEmptyShellView = scheduledSortShellItemCounts.Contains(0);
+                try
+                {
+                    snapshot = capture.Invoke(host, null)!;
+                    rows = readRows.Invoke(null, [snapshot])!;
+                    orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                    columns = (string[])rows.GetType().GetField("Item1")!.GetValue(rows)!;
+                    return orderedRows.Length == 2;
+                }
+                catch (TargetInvocationException exception) when (IsTransientShellReadError(exception)) { return false; }
+            }, TimeSpan.FromSeconds(10), "the product Shell view did not expose both rows after asynchronous values completed");
+            var nameColumn = Array.FindIndex(columns, name => name.Equals("Name", StringComparison.OrdinalIgnoreCase) || name == "名称");
+            if (nameColumn < 0) throw new InvalidOperationException("The product Shell view export did not expose the Name column.");
+            names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+            var orderAfterAsyncFill = names;
+            var autoResorted = names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase);
+            if (sortStrategy == "single-sort-verb")
+            {
+                stage = "single-sort-command";
+                var result = InvokeBackgroundShellVerb(hostType, host, "sortascending");
+                Check(result);
+                var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                    nameColumn, TimeSpan.FromMilliseconds(400));
+                ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, result, observation, classId);
+            }
+            else if (sortStrategy == "set-sort-columns")
+            {
+                stage = "set-sort-columns";
+                var result = InvokeProductSetSorting(hostType, host, sorts);
+                Check(result);
+                var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                    nameColumn, TimeSpan.FromMilliseconds(400));
+                ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, result, observation, classId);
+            }
+            else if (sortStrategy == "scheduled")
+            {
+                stage = "production-delayed-sort";
+                var scheduleSort = hostType.GetMethod("ScheduleInitialVirtualSort", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var restoredSort = sorts.GetValue(0)!;
+                scheduleSort.Invoke(host, [restoredSort, new Func<bool>(() => true)]);
+                var observation = ObserveProductSort(hostType, host, capture, readRows, readItemCounts,
+                    nameColumn, TimeSpan.FromSeconds(10), ["folder-small", "folder-large"]);
+                if (!observation.Names.SequenceEqual(["folder-small", "folder-large"], StringComparer.OrdinalIgnoreCase))
+                    throw new TimeoutException("The production delayed virtual-sort scheduler did not restore ascending recursive-size order.");
+                ReportSortExperiment(sortStrategy, orderAfterAsyncFill, autoResorted, 0, observation, classId);
+            }
+            else throw new ArgumentOutOfRangeException(nameof(sortStrategy), sortStrategy, "Unknown product sort experiment.");
 
-            Console.WriteLine($"shell-provider-product-async: product-dll=True; volatile-registration=True; hidden-shell-view=True; rows=2; recursive-values=[{string.Join('|', values)}]; order-after-async-fill=[{string.Join('|', orderAfterAsyncFill)}]; shell-auto-resorted={autoResorted}; production-delayed-sort=passed; production-sort-ms={scheduledSortElapsedMs:F0}; export-row-counts-during-sort=[{string.Join('|', scheduledSortRowCounts)}]; shell-item-counts-during-sort=[{string.Join('|', scheduledSortShellItemCounts)}]; transient-empty-export-snapshot={transientEmptySnapshot}; transient-empty-shell-view={transientEmptyShellView}; ascending-size-order=[{string.Join('|', names)}]; class={classId:D}; foreground-unchanged=True");
             return 0;
         }
         catch (Exception exception)
@@ -153,6 +216,8 @@ internal static class ShellProviderLocationProbe
         }
         finally
         {
+            itemUpdateObserver?.Dispose();
+            filesystemUpdateObserver?.Dispose();
             if (source is not null)
             {
                 source.RootVisual = null;
@@ -953,6 +1018,98 @@ internal static class ShellProviderLocationProbe
         timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
         timer.Start();
         Dispatcher.PushFrame(frame);
+    }
+
+    private static (string[] Names, int[] ShellItemCounts, int[] ExportRowCounts, int TransientReadErrors) ObserveProductSort(
+        Type hostType, HwndHost host, MethodInfo capture, MethodInfo readRows, MethodInfo readItemCounts,
+        int nameColumn, TimeSpan duration, string[]? expectedNames = null)
+    {
+        var shellItemCounts = new HashSet<int>();
+        var exportRowCounts = new HashSet<int>();
+        var transientReadErrors = 0;
+        string[] names = [];
+        var clock = Stopwatch.StartNew();
+        do
+        {
+            try
+            {
+                var liveCounts = readItemCounts.Invoke(host, [false, false]);
+                if (liveCounts is not null)
+                    shellItemCounts.Add((int)liveCounts.GetType().GetProperty("Total")!.GetValue(liveCounts)!);
+                var snapshot = capture.Invoke(host, null)!;
+                var rows = readRows.Invoke(null, [snapshot])!;
+                var orderedRows = (string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!;
+                names = orderedRows.Select(row => Path.GetFileName(row[nameColumn]) ?? row[nameColumn]).ToArray();
+                exportRowCounts.Add(names.Length);
+            }
+            catch (TargetInvocationException exception) when (IsTransientShellReadError(exception))
+            {
+                transientReadErrors++;
+            }
+            PumpDispatcher(TimeSpan.FromMilliseconds(20));
+        } while (clock.Elapsed < duration && (expectedNames is null ||
+            !names.SequenceEqual(expectedNames, StringComparer.OrdinalIgnoreCase)));
+        return (names, shellItemCounts.Order().ToArray(), exportRowCounts.Order().ToArray(), transientReadErrors);
+    }
+
+    private static (int[] ShellItemCounts, int[] ExportRowCounts, int FinalShellItems, int FinalExportRows) ObserveProductRowCounts(
+        Type hostType, HwndHost host, TimeSpan duration)
+    {
+        var readItemCounts = hostType.GetMethod("ReadItemCounts", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var capture = hostType.GetMethod("CaptureFileViewExportSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var readRows = typeof(ShellProviderLocationProbe).GetMethod("ReadExportRows", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var shellItemCounts = new HashSet<int>();
+        var exportRowCounts = new HashSet<int>();
+        var clock = Stopwatch.StartNew();
+        var finalShellItems = -1;
+        var finalExportRows = -1;
+        do
+        {
+            var counts = readItemCounts.Invoke(host, [false, false]);
+            if (counts is not null)
+            {
+                finalShellItems = (int)counts.GetType().GetProperty("Total")!.GetValue(counts)!;
+                shellItemCounts.Add(finalShellItems);
+            }
+            try
+            {
+                var snapshot = capture.Invoke(host, null)!;
+                var rows = readRows.Invoke(null, [snapshot])!;
+                finalExportRows = ((string[][])rows.GetType().GetField("Item2")!.GetValue(rows)!).Length;
+                exportRowCounts.Add(finalExportRows);
+            }
+            catch (TargetInvocationException exception) when (IsTransientShellReadError(exception)) { }
+            PumpDispatcher(TimeSpan.FromMilliseconds(20));
+        } while (clock.Elapsed < duration);
+        return (shellItemCounts.Order().ToArray(), exportRowCounts.Order().ToArray(), finalShellItems, finalExportRows);
+    }
+
+    private static bool IsTransientShellReadError(TargetInvocationException exception) =>
+        exception.InnerException?.HResult == unchecked((int)0x80070057);
+
+    private static void ReportSortExperiment(string strategy, string[] initialOrder, bool shellAutoResorted,
+        int actionResult, (string[] Names, int[] ShellItemCounts, int[] ExportRowCounts, int TransientReadErrors) observation,
+        Guid classId)
+    {
+        var expectedAscending = new[] { "folder-small", "folder-large" };
+        Console.WriteLine($"shell-provider-product-async-sort: strategy={strategy}; product-dll=True; volatile-registration=True; hidden-shell-view=True; recursive-values=[29|5]; initial-order=[{string.Join('|', initialOrder)}]; shell-auto-resorted={shellAutoResorted}; action-hr=0x{actionResult:X8}; final-order=[{string.Join('|', observation.Names)}]; candidate-ordered={observation.Names.SequenceEqual(expectedAscending, StringComparer.OrdinalIgnoreCase)}; shell-item-counts=[{string.Join('|', observation.ShellItemCounts)}]; export-row-counts=[{string.Join('|', observation.ExportRowCounts)}]; transient-empty-shell-view={observation.ShellItemCounts.Contains(0)}; transient-empty-export={observation.ExportRowCounts.Contains(0)}; transient-read-errors={observation.TransientReadErrors}; class={classId:D}; foreground-unchanged=True");
+    }
+
+    private static int InvokeProductSetSorting(Type hostType, HwndHost host, Array sortColumns)
+    {
+        var getView = hostType.GetMethod("GetFolderView2Pointer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var view = (nint)getView.Invoke(host, null)!;
+        if (view == 0) throw new InvalidOperationException("The product host returned no IFolderView2 for the SetSortColumns probe.");
+        try
+        {
+            var targetType = hostType.GetNestedType("NativeViewStateTarget", BindingFlags.NonPublic)!;
+            var constructor = targetType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Single(candidate => candidate.GetParameters().Length == 2);
+            var target = constructor.Invoke([view, new Func<bool>(() => true)]);
+            var setSorting = targetType.GetMethod("SetSorting", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+            return (int)setSorting.Invoke(target, [sortColumns])!;
+        }
+        finally { Marshal.Release(view); }
     }
 
     private static T GetExport<T>(nint module, string name) where T : Delegate =>

@@ -34,6 +34,12 @@ internal static class Program
         if (args is ["--shell-provider-location"]) return ShellProviderLocationProbe.Run();
         if (args is ["--shell-provider-product-async"])
             return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync();
+        if (args is ["--shell-provider-product-async-single-sort"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("single-sort-verb");
+        if (args is ["--shell-provider-product-async-set-sort-columns"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("set-sort-columns");
+        if (args is ["--shell-provider-product-async-notification-burst"])
+            return ShellProviderLocationProbe.RunProductAdapterOnDemandAsync("notification-burst");
         if (args is ["--shell-provider-location-no-desktop-namespace"])
             return ShellProviderLocationProbe.Run(registerDesktopNamespace: false);
         if (args is ["--shell-provider-location-descending"]) return ShellProviderLocationProbe.Run(descending: true);

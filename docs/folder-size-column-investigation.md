@@ -2566,3 +2566,17 @@ App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后�
 将产品 adapter 的隐藏 ExplorerBrowser HostProbe 改为直接调用 `ExplorerBrowserHost.ScheduleInitialVirtualSort`，而不是手动发出两条排序命令。六次运行中，生产调度器均在约 161–768 ms 内把两行恢复为 5→29 B 的大小升序，隐藏父窗口未显示，foreground 未变化，临时注册与目录均由探针清理。为区分行快照采样和 Shell 实际行数，同时轮询 `CaptureFileViewExportSnapshot` 与 `IFolderView.ItemCount`：三次运行二者都观察到 2→0→2 行，另三次一直为 2 行。
 
 因此生产调度器可在同一 Shell view 最终恢复顺序，但排序方向来回切换会间歇性地令 Shell 暂时报出零行。当前仅为隐藏视图证据，不能断定可见窗口一定出现黑屏；不过这条路径有潜在空列表窗口，不应直接接到产品异步完成回调上。逐行 SHCNE_UPDATEITEM 仍只在此前六次运行中的一次自然触发大小排序。下一步应寻找单次原生重排或排序状态重申方案，并在无需 `IShellView.Refresh` 的前提下同时证明行数稳定、焦点/选区保持；没有满足这些条件前，产品/release 不接线。
+
+### 2026-11-02：单次 Shell 排序与 SetSortColumns 候选
+
+把候选分别放进独立 HostProbe 运行，避免排序方法之间共享已改变的方向状态。单次 `sortascending` 命令 6 轮中，有 5 轮采到 `IFolderView.ItemCount=0` 后恢复为 2 行；最终顺序 5/6 次是 5→29 B，1 次仍为错序。单次 `IFolderView2.SetSortColumns` 也独立运行 6 轮：其中 1 轮异步自然重排已先完成，另外 5 轮均在调用期间观察到 0→2 行；五个原本错序的样本最终都变成 5→29 B。两类单次调用都没有提供稳定的“重排且行数不清空”路径。探针同时观察 Shell ItemCount 与按行导出快照；空列表并非只由导出层造成。HostProbe Release build 0 警告/错误、临时注册和目录清理、foreground 守卫均通过。
+
+因此暂停把自动排序接入产品；当前没有证明无空行窗口的原生重排方法，且这组隐藏测试未采集真实用户选区/焦点或屏幕像素。下一步保留逐行值异步填充与 Shell 原生用户排序；研究更低层的 provider 行更新/排序合约时仍须以无零行、焦点与选区身份保持为门槛。若做不到，应明确接受异步值可能暂时不按大小自动归位，而不能借完整视图刷新掩盖差异。
+
+### 2026-11-02：异步逐行通知合并窗口回归
+
+隐藏产品 HostProbe 扩为 16 个临时文件夹，并逐个核对 Shell 收到的 `SHCNE_UPDATEITEM` 绝对路径。原实现中 16 个目录的递归大小都已完成，但仅收到 11 个不同目录通知。根因是每个 200 ms 合并窗口只保留首个路径；后续行完成时 `_asyncViewUpdatePending` 已置位，便直接返回。此前一次观察器监听了虚拟 namespace 根，因产品逐项通知实际使用物理文件夹 PIDL而未收到事件；修正为监听物理夹具根后，常见两目录负载 8/8 轮各自收到两项通知。
+
+实现改为合并窗口内用 Shell parsing name 去重累计更新行，窗口到期后逐行发送 `SHCNE_UPDATEITEM`；若期间出现目录级失效则以一个 `SHCNE_UPDATEDIR` 覆盖逐项通知。产品 native adapter `/W4 /WX` 与 NativeProbe Release build 均成功；异步 burst 回归修改后 4/4 轮收到全部 16 个不同项，两目录产品 HostProbe 对照的通知路径 2/2 轮各收到两项，另外一轮在通知齐全后卡在后续排序快照阶段；单次排序命令探针仍观察到 Shell 项数 `0→2→4`，说明不能把通知修复解释为排序稳定。16 项 burst 结束后 Shell ItemCount 与导出快照均稳定为 16。现有 NativeProbe 按需扫描 smoke 与子项通知映射合同通过。延迟排序的稳定性仍按前文记录，未因逐项通知修复而宣告解决。
+
+证据范围：这是加载产品 DLL 的隐藏 ExplorerBrowser HostProbe，父窗口不可见、前台不变、注册和临时夹具自动清理；未覆盖可见列表闪烁、真实多窗格/焦点/选区或大规模磁盘扫描，也没有接入产品 UI 功能开关或发布版本。NativeProbe Private Desktop 复跑在 `cleanup-destroy-parent-window-1` 超时，watch chain 为 COM → svchost → ChsIME，超时前前台/输入未变；不把该清理超时视作功能通过，也未观察到本次通知改动导致的前台副作用。该修复只确保并发完成的行更新都通知 Shell，不承诺 DefView 一定重排，也不改变此前“重排不得造成空列表”的门槛。

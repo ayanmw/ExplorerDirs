@@ -4357,37 +4357,88 @@ namespace
         void ScheduleAsyncViewUpdateNotification(PCWSTR itemParsingName = nullptr) const
         {
             auto* self = const_cast<SyntheticSortFolder*>(this);
-            if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot ||
-                InterlockedCompareExchange(&self->_asyncViewUpdatePending, 1, 0)) return;
-            self->AddRef();
+            if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot) return;
+            const bool itemNotificationMode = InterlockedCompareExchange(
+                &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) && itemParsingName && *itemParsingName;
+            bool enqueueTask = false;
+            {
+                std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
+                if (itemNotificationMode)
+                {
+                    // Keep every changed row in the coalescing window; the prior single-pending flag dropped later rows.
+                    self->_asyncPendingItemNotifications.emplace(itemParsingName);
+                }
+                else
+                {
+                    self->_asyncPendingDirectoryNotification = true;
+                    self->_asyncPendingItemNotifications.clear();
+                }
+                if (!self->_asyncViewUpdatePending)
+                {
+                    self->_asyncViewUpdatePending = true;
+                    self->AddRef();
+                    enqueueTask = true;
+                }
+            }
+            if (!enqueueTask) return;
             HRESULT enqueueResult = E_FAIL;
             try
             {
-                std::wstring parsingName = itemParsingName ? itemParsingName : L"";
-                std::function<void()> task = [self, parsingName = std::move(parsingName)]
+                std::function<void()> task = [self]
                 {
                     Sleep(SyntheticAsyncRecursiveSizeQueue::kShellUpdateCoalesceMilliseconds);
-                    if (InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) && self->_backingRoot)
+                    for (;;)
                     {
-                        PIDLIST_ABSOLUTE itemPidl = nullptr;
-                        const bool targetItem = InterlockedCompareExchange(
-                            &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) &&
-                            !parsingName.empty() && SUCCEEDED(SHParseDisplayName(
-                                parsingName.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl;
-                        ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
-                        if (targetItem)
+                        bool notifyDirectory = false;
+                        std::set<std::wstring, ShellParsingNameLess> itemParsingNames;
                         {
-                            ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
-                            SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, itemPidl, nullptr);
+                            std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
+                            if (!InterlockedCompareExchange(&self->_asyncNotificationsEnabled, 0, 0) || !self->_backingRoot)
+                            {
+                                self->_asyncPendingDirectoryNotification = false;
+                                self->_asyncPendingItemNotifications.clear();
+                                self->_asyncViewUpdatePending = false;
+                                break;
+                            }
+                            notifyDirectory = self->_asyncPendingDirectoryNotification;
+                            self->_asyncPendingDirectoryNotification = false;
+                            itemParsingNames.swap(self->_asyncPendingItemNotifications);
+                            if (!notifyDirectory && itemParsingNames.empty())
+                            {
+                                self->_asyncViewUpdatePending = false;
+                                break;
+                            }
                         }
-                        else
+
+                        if (notifyDirectory)
                         {
+                            ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                             ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
                             SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
                         }
-                        if (itemPidl) CoTaskMemFree(itemPidl);
+                        else
+                        {
+                            bool directoryFallbackNeeded = false;
+                            for (const auto& parsingName : itemParsingNames)
+                            {
+                                PIDLIST_ABSOLUTE itemPidl = nullptr;
+                                if (SUCCEEDED(SHParseDisplayName(parsingName.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl)
+                                {
+                                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
+                                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
+                                    SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, itemPidl, nullptr);
+                                    CoTaskMemFree(itemPidl);
+                                }
+                                else directoryFallbackNeeded = true;
+                            }
+                            if (directoryFallbackNeeded)
+                            {
+                                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
+                                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
+                                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
+                            }
+                        }
                     }
-                    InterlockedExchange(&self->_asyncViewUpdatePending, 0);
                     self->Release();
                 };
                 enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task));
@@ -4396,7 +4447,10 @@ namespace
             catch (const std::system_error&) { enqueueResult = E_FAIL; }
             if (FAILED(enqueueResult))
             {
-                InterlockedExchange(&self->_asyncViewUpdatePending, 0);
+                std::lock_guard<std::mutex> lock(self->_asyncViewUpdateMutex);
+                self->_asyncPendingDirectoryNotification = false;
+                self->_asyncPendingItemNotifications.clear();
+                self->_asyncViewUpdatePending = false;
                 self->Release();
             }
         }
@@ -4771,11 +4825,14 @@ namespace
         mutable std::mutex _asyncSizeScanMutex;
         mutable std::set<std::wstring, ShellParsingNameLess> _asyncSizeScansPending;
         mutable std::vector<AsyncRecursiveSizeBatchEntry> _asyncSizeScanBatch;
+        mutable std::mutex _asyncViewUpdateMutex;
+        mutable std::set<std::wstring, ShellParsingNameLess> _asyncPendingItemNotifications;
+        mutable bool _asyncPendingDirectoryNotification = false;
+        mutable bool _asyncViewUpdatePending = false;
         volatile LONG _asyncParentBatchPending = 0;
         volatile LONG _asyncChildBatchPending = 0;
         volatile LONG _asyncScansCancelled = 0;
         volatile LONG _asyncNotificationsEnabled = 0;
-        volatile LONG _asyncViewUpdatePending = 0;
         SyntheticChild _pendingFocused{};
         bool _pendingHasFocused = false;
         volatile LONG _refreshPending = 0;
