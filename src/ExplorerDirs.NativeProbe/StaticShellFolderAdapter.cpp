@@ -1723,6 +1723,7 @@ namespace
         { sizeof(SyntheticChild), 3, 10, 0, L"z-ten.bin" }
     };
     volatile LONG g_syntheticCompareCount = 0;
+    volatile LONG g_syntheticCompareByColumn[8]{};
     volatile LONG g_syntheticSizeCompareCount = 0;
     volatile LONG g_syntheticDirectoryMetricsDuringCompareCount = 0;
     volatile LONG g_syntheticRecursiveSizeCacheMissesDuringCompareCount = 0;
@@ -3023,6 +3024,9 @@ namespace
             const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
             if (!leftChild || !rightChild) return E_INVALIDARG;
             InterlockedIncrement(&g_syntheticCompareCount);
+            const auto compareColumn = LOWORD(column);
+            if (compareColumn < ARRAYSIZE(g_syntheticCompareByColumn))
+                InterlockedIncrement(&g_syntheticCompareByColumn[compareColumn]);
             short comparison = 0;
             switch (LOWORD(column))
             {
@@ -6269,6 +6273,7 @@ cleanup_recursive_size_update:
 extern "C" __declspec(dllexport) void WINAPI ResetSyntheticSortCounters()
 {
     InterlockedExchange(&g_syntheticCompareCount, 0);
+    for (auto& count : g_syntheticCompareByColumn) InterlockedExchange(&count, 0);
     InterlockedExchange(&g_syntheticSizeCompareCount, 0);
     InterlockedExchange(&g_syntheticDirectoryMetricsDuringCompareCount, 0);
     InterlockedExchange(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount, 0);
@@ -6579,6 +6584,9 @@ extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticAttributeNotificationTr
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCount()
 { return InterlockedCompareExchange(&g_syntheticCompareCount, 0, 0); }
+
+extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSortCompareCountForColumn(UINT column)
+{ return column < ARRAYSIZE(g_syntheticCompareByColumn) ? InterlockedCompareExchange(&g_syntheticCompareByColumn[column], 0, 0) : -1; }
 
 extern "C" __declspec(dllexport) LONG WINAPI GetSyntheticSizeCompareCount()
 { return InterlockedCompareExchange(&g_syntheticSizeCompareCount, 0, 0); }

@@ -2125,6 +2125,12 @@ NativeProbe Release build 0 警告/错误，Private Desktop watchdog exit 0，�
 在相同 root view 逐一点击真实 header 槽 0–3，每次点击前重置递归 PropertyKey 并读取 `IFolderView2::GetSortColumns` 与项目行序。`IColumnManager::GetColumns` 的快照数组把递归列列在索引 3，但点击原生槽 1 后 Shell 读回排序键变成 `{9e5e05ac-1936-4a75-94f7-4704b8b01923}:1`；点击槽 3 后才读回递归键 `{7e1f84b7-c052-4e51-8a3c-869254a6b910}:1`，方向为 `-1`。因此两个 API 的索引域不能直接互换，之前把快照索引传给 header 模拟点击并不能验证同一个列。当前 `IShellFolder2::GetDetailsOf(nullptr, ordinal)` 在该已包装的 folder 上返回 `E_INVALIDARG`，所以没有把槽 3 的显示标题猜成某个具体名称。
 
 关键行为缺口仍存在：递归排序键读回正确时，同级 folder `child=17`、`child-small=2` 和同级 file `notification-created=3`、`root=4`、`rename-complete=25` 的行序仍未按递归值变化。普通 Shell `sortascending` 读回递归键方向 `+1`，但值顺序仍为 25、4、3；点击 header 槽 3 后方向变为 `-1`，行序仍保持原先名称顺序。槽 0/1/2 分别读回 Name、`{9e5e…}:1` 及 Type+Name 组合键。故目前已排除“误点快照索引即可解释排序失败”，但尚未证明该隔离适配器实际向 DefView 提供了用于排序的递归比较值；下一步应检查 header 的 `IShellFolder2::MapColumnToSCID`/`CompareIDs` 路径与排序键方向，并用 native Name/Size 作有效标题交互基线。Release NativeProbe build 0 警告/错误，Private Desktop watchdog exit 0，前台/输入/清理隔离守卫通过；结果日志：`src/.state/native-probe-watchdog/20261101-230454-6ad6363e.stdout.log`。运行后段仍有独立 self-hosted restore probe 的 COM 异常诊断，不影响本段 root view 的槽位记录，但该异常未调查。产品与 release 未改。
+
+### 2026-11-01：追加递归列没有进入 Shell 比较器
+
+NativeProbe 给 `SyntheticFolder::CompareIDs` 增加仅用于观测的逐列调用计数。在最后的原样复验中，Name 槽 0 的比较调用由 42 增至 48；Type 相关槽 2 由 0 增至 5；递归 PropertyKey 所在标题槽 3 虽让 `GetSortColumns` 读回该 key 与方向 `-1`，比较调用仍为 `0→0`，实际行序不变。一次临时原型把第 3 个 provider detail 也声明成递归大小，意外令 Shell 多出一个重复列（header 4→5、快照递归列索引 3→4），已撤回该显示变更；它说明必须区分 provider 原生 detail ordinal 与 `IColumnManager` 后加列索引，不能把重复标题当作修复。
+
+与既有已通过的合成 `IShellView` 直接 provider 探针相比，当前失败路径使用 view-state 恢复后追加到 `IColumnManager` 的自定义列；Shell 接受排序状态，但不把该列点击路由进 provider `CompareIDs`。这把问题收敛到自定义列注册/列身份与 Shell comparator 的连接，而不是递归扫描值本身。下一步对照成功探针的原生列定义与当前追加列快照，验证能否在不重复列、不更换 ExplorerBrowser 产品架构的隔离 provider 中让递归 PropertyKey 对应到原生 detail ordinal，并要求比较器计数和实际行序同时通过。Release NativeProbe/C++ adapter build 通过，Private Desktop watchdog exit 0、输入/前台/清理守卫通过；日志：`src/.state/native-probe-watchdog/20261101-231123-8721fa6e.stdout.log`。产品与 release 未改。
 ### 2026-11-01：递归列身份的标签快照与 INI 往返核对
 
 生产 `OnNavigationPending` 在当前已导航标签上调用 `CaptureViewState`；捕获流程使用同一 Browser 与 view generation 读取模式、列布局、排序和分组，只有完整且仍当前的结果才替换缓存。`PaneControl`/`SessionStore` 以每标签 `ViewState` 保存这些字段。现有跨进程 `ColumnLayoutProcessSmoke` 使用与 NativeProbe provider 完全相同的递归列 PropertyKey（`7E1F84B7-C052-4E51-8A3C-869254A6B910:1`），核对列宽、排序方向、分组方向和路径从 INI 子进程读回；SettingsSmoke 全量运行 exit 0，view-state restore smoke 通过。此项是既有通用快照/INI代码对该 key 的持久化证据，不代表产品物理目录能生成此属性，或该 key 已在用户配置中提供列菜单入口。

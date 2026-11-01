@@ -375,10 +375,12 @@ internal static class ShellViewHostFilterProbe
                 for (var slot = 0; slot < headerCount; slot++)
                 {
                     Check(target.SetSorting(saved.SortColumns));
+                    var compareCountBefore = ReadSyntheticCompareCount(slot);
                     ClickHeaderItem(viewWindow, slot);
                     var slotNames = ReadVisibleItemNames(view, itemCount);
                     var slotSort = ReadSortColumnsSummary(view);
-                    headerSlotProbes.Add($"slot={slot};sort=[{slotSort}];order=[{string.Join('|', slotNames)}]");
+                    var compareCountAfter = ReadSyntheticCompareCount(slot);
+                    headerSlotProbes.Add($"slot={slot};sort=[{slotSort}];compare-calls={compareCountBefore}->{compareCountAfter};order=[{string.Join('|', slotNames)}]");
                     if (slot == 1)
                     {
                         namesAfterNativeColumnOneFirstClick = slotNames;
@@ -428,6 +430,28 @@ internal static class ShellViewHostFilterProbe
         return readHr < 0
             ? $"read-hr=0x{readHr:X8}"
             : string.Join('|', columns.Select(column => $"{column.Key.FormatId:B}:{column.Key.PropertyId}:{column.Direction}"));
+    }
+
+    private static int ReadSyntheticCompareCount(int column)
+    {
+        var module = NativeLibrary.Load(FindAdapterLibrary());
+        try
+        {
+            var read = Marshal.GetDelegateForFunctionPointer<GetSyntheticSortCompareCountForColumn>(
+                NativeLibrary.GetExport(module, "GetSyntheticSortCompareCountForColumn"));
+            return read((uint)column);
+        }
+        finally { NativeLibrary.Free(module); }
+    }
+
+    private static string FindAdapterLibrary()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var path = Path.Combine(directory.FullName, "bin", "native-x64", "ExplorerDirs.StaticShellFolderAdapter.dll");
+            if (File.Exists(path)) return path;
+        }
+        throw new FileNotFoundException("Run build-static-shell-folder-adapter.ps1 before this probe.");
     }
 
     private static void ClickHeaderItem(nint viewWindow, int itemIndex)
@@ -4579,6 +4603,7 @@ internal static class ShellViewHostFilterProbe
 
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetSyntheticSortCompareCountForColumn(uint column);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int RenameItem(nint self, nint item, [MarshalAs(UnmanagedType.LPWStr)] string newName, nint sink);
