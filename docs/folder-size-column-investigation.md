@@ -2318,6 +2318,6 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 ### 2026-11-02：产品 Host 的注册路径根进入子目录并回退
 
-在递归列 HostProbe 完成根目录列/排序断言后，调用生产 `ExplorerBrowserHost.Navigate` 进入同一 provider 下的物理子目录，再调用生产 `GoBack` 返回父级。正常递归排序与“文件夹大小忽略排序”的反向场景均通过：子目录视图读到 `payload.bin` 1 行、5 B；Back 回到父目录后恢复 3 行，递归值集合仍为 5/12/29 B。普通 filesystem `PKEY_Size` 排序对照也通过；两个测试父 HWND 均不可见，未启动产品窗口。
+在递归列 HostProbe 完成根目录列/排序断言后，记录父级可见列，调用生产 `ExplorerBrowserHost.Navigate` 进入同一 provider 下的物理子目录，再调用生产 `GoBack` 返回父级。正常递归排序与“文件夹大小忽略排序”的反向场景均通过：子目录视图读到 `payload.bin` 1 行、5 B；Back 回到父目录后恢复 3 行、5/12/29 B 递归值集合及导航前的可见列集合。普通 filesystem `PKEY_Size` 排序对照也通过；两个测试父 HWND 均不可见，未启动产品窗口。
 
 首次运行的超时是 HostProbe 的大小写敏感字符串断言：Shell 将 CLSID 规范化成大写，但 `CurrentPath`、新 view HWND 和 1 行子目录枚举均已成功。将路径身份比较改为 `OrdinalIgnoreCase` 后，两次隐藏 HostProbe 通过。结果证明产品 Host 可通过已注册路径身份进入一个物理子目录并用 TravelLog 回到父级；不代表鼠标双击输入、所有层级/特殊目录、父子目录各自独立视图设置、普通文件夹直接使用派生列、便携注册生命周期或可见 UI 已通过。产品与 release 未修改。
