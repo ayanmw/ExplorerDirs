@@ -34,7 +34,7 @@ Explorer Dirs 已有独立颜色规则隔离原型，但未接入产品 Explorer
 
 ## 2026-10-28 官方大小信息行为复核
 
-Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字可带同一目录中文件与文件夹大小的相对百分比。官方说明没有定义百分比的精确分母、隐藏项/失败扫描的处理及舍入策略，因此这些规则仍需可见行为确认。
+Q-Dir [FAQ 82](https://www.softwareok.com/?faq=82&seite=faq-Q-DIR) 将“Size information”描述为可切换的逐行文件/文件夹大小显示，入口为 Extras 菜单或 F9；文件夹递归大小复用 Size 列，大小文字带相对于同目录文件和文件夹总量的百分比。官方说明仍未定义隐藏项、失败扫描项目和舍入策略，因此这些细节仍需可见行为确认。
 
 Explorer Dirs 当前 F9 按此前确认用于显式递归汇总整个目录树到状态栏，和 Q-Dir 的“切换逐行大小信息”不是同一行为；继续保留用户选定的 F9 语义。逐行列仍受 [Shell 视图架构门槛](folder-size-column-investigation.md)限制，本轮没有引入猜测公式或代码实现。
 
