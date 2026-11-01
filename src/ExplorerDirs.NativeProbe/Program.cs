@@ -290,6 +290,8 @@ internal static class Program
             return PrivateDesktopShellProbe.RunExplorerBrowserRegisteredNamespace();
         if (args.Length == 1 && args[0] == "--explorerbrowser-volatile-registered-namespace-private-desktop")
             return PrivateDesktopShellProbe.RunExplorerBrowserVolatileRegisteredNamespace();
+        if (args.Length == 1 && args[0] == "--explorerbrowser-volatile-hidden-namespace-private-desktop")
+            return PrivateDesktopShellProbe.RunExplorerBrowserVolatileHiddenNamespace();
         if (args.Length == 3 && args[0] == "--shell-change-create-file-child")
             return ExplorerBrowserWrapperProbe.RunExternalShellNotificationChild(args[1], args[2]);
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")

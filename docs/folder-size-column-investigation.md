@@ -2371,3 +2371,9 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 新增隔离 NativeProbe：先在随机 HKCU CLSID/Desktop NameSpace 下解析应用路径 PIDL，随后立即删除这两项注册，再由进程内 NativeAdapter 直接构造 `SyntheticSortFolder`，并将已取得的 PIDL 传给 folder 初始化。Shell folder 对象本身创建成功，但其 `CreateViewObject(IID_IShellView)` 调用 `SHCreateShellFolderView` 返回 `REGDB_E_CLASSNOTREG (0x80040154)`；探针验证两项注册均已删除后才调用，并将此 HRESULT 作为可重复的预期门槛通过。Private Desktop 前台/输入守卫及退出隔离清理通过。
 
 另一个使用物理文件系统 PIDL 的尝试可以创建 DefView 窗口，且 `IFolderView2.GetFolder` 仍返回直接创建的 provider 对象；但视图有 3 个空行，provider `EnumObjects` 计数为 0。该路由不能显示文件系统内容或派生列。两条结果合起来说明：现有 synthetic provider + Windows DefView 无法靠进程内直接 `IShellFolder` 创建同时避开 Shell 注册并正常呈现行。若免注册仍是硬要求，后续需评估不依赖 `SHCreateShellFolderView` 的自有 `IShellView` 实现及其排序、键盘、菜单、文件操作、拖放和通知成本；这属于宿主/视图架构迁移，尚无产品接线或用户体验验收。
+
+### 2026-11-02：volatile Desktop NameSpace 隐藏属性与枚举
+
+在随机 CLSID 的 volatile `HKCU\Software\Classes\CLSID` 和 Desktop `NameSpace` 探针中，额外读取 Desktop Shell folder 的默认 `SHCONTF_FOLDERS` 枚举，并查询该 PIDL 的 `SFGAO_HIDDEN`。普通属性下默认枚举找到该 namespace 根。设置 `ShellFolder\Attributes` 的 hidden 位后，`GetAttributesOf` 成功返回 `SFGAO_HIDDEN`，但默认 `EnumObjects` 仍返回该项；加 `SHCONTF_INCLUDEHIDDEN` 的枚举也返回该项。随后 ExplorerBrowser Host 合同仍通过，递归列、文件操作与导航探针完成，临时注册清理和 Private Desktop 守卫通过。
+
+该结果只能说明 Desktop Shell folder 的枚举 API 仍提供 hidden PIDL，不能证明实际桌面 DefView 会显示或隐藏图标；本探针未创建可见 Desktop DefView，也未做像素/图标验收。故 `SFGAO_HIDDEN` 不能作为“无桌面副作用”的证明。产品 CLSID 尚不存在；若进入产品化评审，须先决定是否允许桌面 namespace 注册以及如何由进程级 owner 管理。`FolderOpenRouter` 只按 profile 限制一个应用进程；不同 profile 仍可并行运行，单纯在任一进程退出时删除同一固定 CLSID 注册可能影响仍运行的另一进程。该生命周期竞态尚未通过双进程实测，本轮不改产品注册行为。

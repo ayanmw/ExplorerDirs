@@ -128,7 +128,7 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    internal static int RunNamespace(bool volatileRegistryRegistration = false)
+    internal static int RunNamespace(bool volatileRegistryRegistration = false, bool hideNamespaceRootFromDesktop = false)
     {
         var classId = Guid.NewGuid();
         var classKeyPath = $@"Software\Classes\CLSID\{{{classId:D}}}";
@@ -168,11 +168,17 @@ internal static class ExplorerBrowserWrapperProbe
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticCustomSizeColumnForProbe"))(1));
             Marshal.ThrowExceptionForHR(Marshal.GetDelegateForFunctionPointer<SetProbeFlag>(
                 NativeLibrary.GetExport(nativeLibrary, "SetSyntheticChildNotificationTranslationForProbe"))(1));
-            RegisterSyntheticFolder(classKeyPath, volatileRegistryRegistration);
+            RegisterSyntheticFolder(classKeyPath, volatileRegistryRegistration, hideNamespaceRootFromDesktop);
             classRegistrationCreated = true;
             RegisterSyntheticNamespace(namespaceKeyPath, volatileRegistryRegistration);
             namespaceRegistrationCreated = true;
             Console.WriteLine($"explorerbrowser-registered-namespace: volatile-registry-registration={volatileRegistryRegistration}");
+            if (volatileRegistryRegistration)
+            {
+                var defaultDesktopEnumeration = ReadDesktopNamespaceRoot(classId, includeHidden: false);
+                var hiddenDesktopEnumeration = ReadDesktopNamespaceRoot(classId, includeHidden: true);
+                Console.WriteLine($"explorerbrowser-registered-namespace: hide-root-from-desktop={hideNamespaceRootFromDesktop}; default-enumeration={defaultDesktopEnumeration.Found}; default-hidden-attribute={defaultDesktopEnumeration.Hidden}; default-attribute-hr=0x{defaultDesktopEnumeration.AttributeHresult:X8}; include-hidden-enumeration={hiddenDesktopEnumeration.Found}");
+            }
             Marshal.ThrowExceptionForHR(SHParseDisplayName($"::{{{classId:D}}}", 0, out rootPidl, 0, out _));
             if (rootPidl == 0) throw new InvalidOperationException("The temporary namespace did not resolve to an absolute root PIDL.");
 
@@ -972,7 +978,8 @@ internal static class ExplorerBrowserWrapperProbe
         }
     }
 
-    private static void RegisterSyntheticFolder(string classKeyPath, bool volatileRegistration = false)
+    private static void RegisterSyntheticFolder(string classKeyPath, bool volatileRegistration = false,
+        bool hideNamespaceRootFromDesktop = false)
     {
         using var classes = Registry.CurrentUser.OpenSubKey("Software\\Classes", writable: true)
             ?? throw new InvalidOperationException("HKCU\\Software\\Classes is unavailable.");
@@ -995,7 +1002,8 @@ internal static class ExplorerBrowserWrapperProbe
                 ? classKey.CreateSubKey("ShellFolder", RegistryKeyPermissionCheck.ReadWriteSubTree, RegistryOptions.Volatile)
                 : classKey.CreateSubKey("ShellFolder", writable: true)
                 ?? throw new InvalidOperationException("Could not create the temporary ShellFolder key.");
-            shellFolder.SetValue("Attributes", unchecked((int)0xA0000000), RegistryValueKind.DWord);
+            var shellFolderAttributes = unchecked((int)0xA0000000) | (hideNamespaceRootFromDesktop ? 0x00080000 : 0);
+            shellFolder.SetValue("Attributes", shellFolderAttributes, RegistryValueKind.DWord);
         }
         catch
         {
@@ -1472,6 +1480,47 @@ internal static class ExplorerBrowserWrapperProbe
         finally { Marshal.FreeCoTaskMem(pointer); }
     }
 
+    private static (bool Found, bool Hidden, int AttributeHresult) ReadDesktopNamespaceRoot(Guid classId, bool includeHidden)
+    {
+        Marshal.ThrowExceptionForHR(SHGetDesktopFolder(out var desktopFolder));
+        try
+        {
+            var flags = 0x20u | (includeHidden ? 0x80u : 0u); // SHCONTF_FOLDERS | optional SHCONTF_INCLUDEHIDDEN.
+            Marshal.ThrowExceptionForHR(At<DesktopEnumObjects>(desktopFolder, 4)(desktopFolder, 0, flags, out var enumerator));
+            try
+            {
+                var expected = $"::{{{classId:D}}}";
+                while (true)
+                {
+                    var nextResult = At<DesktopEnumNext>(enumerator, 3)(enumerator, 1, out var item, out var fetched);
+                    if (item != 0)
+                    {
+                        try
+                        {
+                            if (string.Equals(ReadAbsoluteParsingName(item), expected, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var itemArray = Marshal.AllocHGlobal(IntPtr.Size);
+                                try
+                                {
+                                    Marshal.WriteIntPtr(itemArray, item);
+                                    var attributes = 0x00080000u; // SFGAO_HIDDEN
+                                    var attributesHresult = At<DesktopGetAttributes>(desktopFolder, 9)(desktopFolder, 1, itemArray, ref attributes);
+                                    return (true, attributesHresult >= 0 && (attributes & 0x00080000u) != 0, attributesHresult);
+                                }
+                                finally { Marshal.FreeHGlobal(itemArray); }
+                            }
+                        }
+                        finally { Marshal.FreeCoTaskMem(item); }
+                    }
+                    if (nextResult < 0) Marshal.ThrowExceptionForHR(nextResult);
+                    if (fetched == 0) return (false, false, 0);
+                }
+            }
+            finally { Marshal.Release(enumerator); }
+        }
+        finally { Marshal.Release(desktopFolder); }
+    }
+
     private static (Guid ClassId, string Location) ReadShellViewFolderIdentity(nint shellView)
     {
         var folderViewId = FolderView2Id;
@@ -1812,6 +1861,9 @@ internal static class ExplorerBrowserWrapperProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int TransferItems(nint self, nint items, nint destination);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DesktopEnumObjects(nint self, nint owner, uint flags, out nint enumerator);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DesktopEnumNext(nint self, uint count, out nint item, out uint fetched);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int DesktopGetAttributes(nint self, uint count, nint items, ref uint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetFolderClassId(ref Guid classId);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int SetBackingPath([MarshalAs(UnmanagedType.LPWStr)] string path);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetProbeFlag(int enabled);
@@ -1825,6 +1877,7 @@ internal static class ExplorerBrowserWrapperProbe
 
     [DllImport("ole32.dll")] private static extern int CoCreateInstance(ref Guid clsid, nint outer, uint context, ref Guid iid, out nint instance);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string name, nint bindContext, out nint pidl, uint attributesIn, out uint attributesOut);
+    [DllImport("shell32.dll")] private static extern int SHGetDesktopFolder(out nint folder);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHCreateItemFromParsingName(string name, nint bindContext, in Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern int SHCreateItemFromIDList(nint pidl, ref Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint parent, nint pidl, nint bindContext, ref Guid iid, out nint value);

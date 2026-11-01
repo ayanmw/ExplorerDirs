@@ -130,6 +130,11 @@ internal static class PrivateDesktopShellProbe
         Run("explorerbrowser-volatile-registered-namespace", () => ExplorerBrowserWrapperProbe.RunNamespace(volatileRegistryRegistration: true),
             TimeSpan.FromSeconds(45), initializeOle: true);
 
+    internal static int RunExplorerBrowserVolatileHiddenNamespace() =>
+        Run("explorerbrowser-volatile-hidden-namespace", () => ExplorerBrowserWrapperProbe.RunNamespace(
+                volatileRegistryRegistration: true, hideNamespaceRootFromDesktop: true),
+            TimeSpan.FromSeconds(45), initializeOle: true);
+
     internal static int RunColumnFilterCapability() =>
         Run("column-filter-capability", ColumnFilterCapabilityProbe.Run, TimeSpan.FromSeconds(35));
 
