@@ -1844,3 +1844,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 此切片证明自控列表可按真实所选 PIDL取得 Shell 原生命令状态，并复用产品命令适配器；不证明菜单可见外观、owner-draw/第三方扩展消息、实际命令执行、剪贴板、撤销重做、OLE 拖放或产品窗格接线。相对 PIDL 只在当前 peer 行快照生命周期内持有，随行快照替换释放；产品和 release 未改变。
 
 同一命令矩阵现扩展到真实 peer ListView 单选与双选：所选项菜单从一个或两个相对 PIDL 构建，`ShellFileCommands.Query` 同时读取所选项和 view-owned 背景菜单。单选时 Copy/Delete/Rename/Properties 与 Cut 可用；双选时 Copy/Delete/Cut 仍可用；两种情况下背景 New Folder 均可用。Release build 与 Private Desktop 探针重复通过，菜单未显示且未执行命令。该矩阵只核对命令可用状态，不验证剪贴板/删除等动词的多选执行效果。
+
+### 2026-11-01：peer 多选 Shell IDataObject 复制集成
+
+在真实隐藏 `IShellView` 行投影中，保持 `size-10` 与 `size-2` 两行的多选状态，从父 `IShellFolder.GetUIObjectOf(IDataObject)` 取得对应两项的真实 Shell 数据对象，并调用 `IFileOperation.CopyItems` 复制到探针唯一临时目录。复制后逐项比较目录载荷、确认源仍存在；peer 行 ID、两项选择及独立焦点锚点保持，系统剪贴板未触碰，操作未中止。NativeProbe Release build 0 警告/错误，`--ishellview-recursive-size-projection-private-desktop` exit 0；Private Desktop 前台、输入与临时夹具清理守卫通过。
+
+该切片把真实所选 PIDL、`IDataObject` 与 Shell 文件操作接在同一条隐藏 peer 流程中；没有显示或执行原生上下文菜单动词，也未验证粘贴、撤销/重做、OLE 拖放、冲突提示/错误 UI、第三方扩展、可见刷新、产品 ExplorerBrowser 接线或用户数据。仍属于 NativeProbe 原型，未接入产品与 release。

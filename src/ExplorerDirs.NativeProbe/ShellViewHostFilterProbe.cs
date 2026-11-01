@@ -17,6 +17,9 @@ internal static class ShellViewHostFilterProbe
     private static readonly Guid ContextMenuId = new("000214E4-0000-0000-C000-000000000046");
     private static readonly Guid DropTargetId = new("00000122-0000-0000-C000-000000000046");
     private static readonly Guid ColumnManagerId = new("D8EC27BB-3F3B-4042-B10A-4ACFD924D453");
+    private static readonly Guid DataObjectId = new("0000010E-0000-0000-C000-000000000046");
+    private static readonly Guid FileOperationClassId = new("3AD05575-8857-4850-9277-11B85BDB8E09");
+    private static readonly Guid FileOperationId = new("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8");
     private const uint SbspParent = 0x2000;
     private const uint SbspNavigateBack = 0x4000;
     private const uint SbspNavigateForward = 0x8000;
@@ -1506,6 +1509,10 @@ internal static class ShellViewHostFilterProbe
             SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0x0002, 0x0002);
             VerifyPeerShellCommandMenu(shellView, shellFolder, parent,
                 [selectedRow.RelativePidl, secondarySelectedRow.RelativePidl], ["cut", "copy", "delete"]);
+            VerifyPeerMultiSelectionCopy(shellFolder, parent, listView, initialIds: ReadPeerListRowIds(listView),
+                selectedRowId: selectedRow.Id, secondarySelectedRowId: secondarySelectedRow.Id,
+                relativePidls: [selectedRow.RelativePidl, secondarySelectedRow.RelativePidl],
+                sourcePaths: [selectedRow.FileSystemPath!, secondarySelectedRow.FileSystemPath!]);
             SetPeerListItemState(listView, projection.Rows.IndexOf(secondarySelectedRow), 0, 0x0002);
             var initialNames = ReadPeerListNames(listView);
             var initialIds = ReadPeerListRowIds(listView);
@@ -1993,6 +2000,68 @@ internal static class ShellViewHostFilterProbe
             !commandStates.GetValueOrDefault(ShellFileCommand.NewFolder))
             throw new InvalidOperationException($"The product ShellFileCommands query did not combine selected and background verbs correctly: {string.Join(',', commandStates.Select(pair => $"{pair.Key}={pair.Value}"))}.");
         Console.WriteLine($"ishellview-peer-command-matrix: selected-count={relativePidls.Count}; copy={commandStates[ShellFileCommand.Copy]}; delete={commandStates[ShellFileCommand.Delete]}; new-folder={commandStates[ShellFileCommand.NewFolder]}; query=ShellFileCommands.Query; popup-shown=False");
+    }
+
+    private static void VerifyPeerMultiSelectionCopy(nint shellFolder, nint owner, nint listView,
+        IReadOnlyList<int> initialIds, int selectedRowId, int secondarySelectedRowId,
+        IReadOnlyList<nint> relativePidls, IReadOnlyList<string> sourcePaths)
+    {
+        if (relativePidls.Count != 2 || sourcePaths.Count != 2)
+            throw new ArgumentException("The peer copy integration contract requires exactly two selected rows.");
+        var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "fixtures"));
+        var targetPath = Path.Combine(fixtureRoot, "peer-copy-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(targetPath);
+        nint children = 0, dataObject = 0, operation = 0, destinationItem = 0;
+        try
+        {
+            children = Marshal.AllocHGlobal(IntPtr.Size * relativePidls.Count);
+            for (var index = 0; index < relativePidls.Count; index++)
+                Marshal.WriteIntPtr(children, index * IntPtr.Size, relativePidls[index]);
+            var dataObjectId = DataObjectId;
+            Check(At<GetUIObjectOf>(shellFolder, 10)(shellFolder, owner, (uint)relativePidls.Count,
+                children, in dataObjectId, 0, out dataObject));
+            if (dataObject == 0) throw new InvalidOperationException("The selected peer rows did not provide a Shell IDataObject.");
+
+            var operationClassId = FileOperationClassId;
+            var operationId = FileOperationId;
+            Marshal.ThrowExceptionForHR(CoCreateInstance(ref operationClassId, 0, 1, ref operationId, out operation));
+            Marshal.ThrowExceptionForHR(At<SetOperationFlags>(operation, 5)(operation,
+                0x0004 | 0x0008 | 0x0010 | 0x0400 | 0x00800000)); // Silent, no prompts/errors, no copy hooks.
+            var shellItemId = ShellItemId;
+            Marshal.ThrowExceptionForHR(SHCreateItemFromParsingName(targetPath, 0, ref shellItemId, out destinationItem));
+            Marshal.ThrowExceptionForHR(At<CopyItems>(operation, 17)(operation, dataObject, destinationItem));
+            Marshal.ThrowExceptionForHR(At<PerformOperations>(operation, 21)(operation));
+            Marshal.ThrowExceptionForHR(At<GetAnyOperationsAborted>(operation, 22)(operation, out var aborted));
+            if (aborted != 0) throw new IOException("The peer multi-selection Shell copy was aborted.");
+
+            for (var index = 0; index < sourcePaths.Count; index++)
+            {
+                var name = Path.GetFileName(sourcePaths[index]);
+                var sourcePayload = Path.Combine(sourcePaths[index], "payload.bin");
+                var targetPayload = Path.Combine(targetPath, name, "payload.bin");
+                if (!Directory.Exists(sourcePaths[index]) || !Directory.Exists(Path.Combine(targetPath, name)) || !File.Exists(targetPayload) ||
+                    !File.ReadAllBytes(sourcePayload).SequenceEqual(File.ReadAllBytes(targetPayload)))
+                    throw new IOException($"The selected Shell IDataObject did not copy the complete directory '{name}'.");
+            }
+
+            Application.DoEvents();
+            var selectedIndex = Array.IndexOf(initialIds.ToArray(), selectedRowId);
+            var secondaryIndex = Array.IndexOf(initialIds.ToArray(), secondarySelectedRowId);
+            var selectionFocusPreserved = selectedIndex >= 0 && secondaryIndex >= 0 &&
+                GetPeerListItemState(listView, selectedIndex, 0x0003) == 0x0003 &&
+                GetPeerListItemState(listView, secondaryIndex, 0x0002) == 0x0002;
+            if (!ReadPeerListRowIds(listView).SequenceEqual(initialIds) || !selectionFocusPreserved)
+                throw new InvalidOperationException("The peer copy changed source row identities, multi-selection, or the independent focus anchor.");
+            Console.WriteLine($"ishellview-peer-selected-copy: selected-count={relativePidls.Count}; source=selected-peer-row-IDataObject; operation=IFileOperation.CopyItems; copied-directories=[{string.Join(',', sourcePaths.Select(Path.GetFileName))}]; sources-retained=True; source-row-ids-retained=True; selection-focus-preserved={selectionFocusPreserved}; clipboard-touched=False; aborted=False");
+        }
+        finally
+        {
+            if (destinationItem != 0) Marshal.Release(destinationItem);
+            if (operation != 0) Marshal.Release(operation);
+            if (dataObject != 0) Marshal.Release(dataObject);
+            if (children != 0) Marshal.FreeHGlobal(children);
+            if (Directory.Exists(targetPath)) Directory.Delete(targetPath, recursive: true);
+        }
     }
 
     private static IShellCommandMenu? OpenPeerShellCommandMenu(bool background, nint shellView,
@@ -2956,6 +3025,10 @@ internal static class ShellViewHostFilterProbe
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int SetOperationFlags(nint self, uint flags);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int CopyItems(nint self, nint dataObject, nint destination);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int PerformOperations(nint self);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetAnyOperationsAborted(nint self, out int aborted);
     private sealed record PeerShellRow(int Id, nint AbsolutePidl, nint RelativePidl, string Name, string ParsingName, string? FileSystemPath, string TypeName, int SystemImageIndex,
         string[] DetailTitles, string[] DetailValues)
     {
@@ -3121,6 +3194,10 @@ internal static class ShellViewHostFilterProbe
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern int SHParseDisplayName(string path,
         nint bind, out nint pidl, uint attributes, out uint result);
+    [DllImport("ole32.dll", PreserveSig = true)] private static extern int CoCreateInstance(ref Guid classId, nint outer,
+        uint context, ref Guid interfaceId, out nint instance);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)] private static extern int SHCreateItemFromParsingName(
+        string path, nint bind, ref Guid interfaceId, out nint item);
     [DllImport("shell32.dll")] private static extern int SHCreateItemWithParent(nint parentPidl, nint parentFolder,
         nint childPidl, ref Guid iid, out nint item);
     [DllImport("shell32.dll")] private static extern int SHBindToObject(nint folder, nint pidl, nint bind,
