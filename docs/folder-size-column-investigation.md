@@ -1488,3 +1488,11 @@ Native adapter `/W4 /WX` 与 NativeProbe Release 均构建成功，0 警告/错�
 扩展 `--synthetic-async-on-demand-recursive-size-column-smoke`，可在 view-batch 模式请求 500 个目录大小项，并对全数验证回读、对另 500 项验证 provider 释放后的取消；同时打印请求数和扫描计时。首轮探针按 500 项读取后值为空，定位到 smoke 直接构造的 `SyntheticSortFolder` 没有应用 `SetSyntheticRecursiveSizeCacheCapacityForProbe` 配置，仍沿用 256 项默认缓存。修正构造路径后，两轮 500 项缓存容量 smoke 通过：500/500 扫描及值回读成功，第二批取消且未启动扫描，view-batch 峰值 worker 1；扫描累计 324.623/328.490 ms，完整 smoke 墙钟 1,932.757/2,247.827 ms（含夹具、门闩、全值校验与取消）。同轮 8 项 view-batch 与逐项模式分别通过，峰值 worker 为 1 与 2。
 
 该结果证明一个 provider 的 500 项按需批次不会因 256 个队列槽位而拒绝请求，但全批串行工作约 328 ms；墙钟不等于用户等待时间或实际磁盘性能。它没有解决 50/200 ms 注入下 view-batch 比逐项双 worker 更慢的已知结果，也没有验证慢磁盘、Private Desktop DefView、多窗格、排序回填或可见体验。因此尚无证据将单 worker batch 作为最终调度策略；有限并行 chunk 仍需单独修正并完成缓存回读合同后才可继续。没有产品接线或 UI 窗口。
+
+### 2026-11-01：按视图合并后使用两个 worker 并行扫描
+
+为解决批次调度保留队列容量却把所有扫描串行压在一个 worker 的问题，仍保持“一个 view 一个协调 task”，每次取出的请求至多再切成两个半批：其中一半交给共享队列的第二 worker，另一半由协调 worker 扫描。两部分共享完成计数，确保 view 关闭取消、快照发布和最终 Shell 更新通知仍按整批收敛；额外队列项最多一个，不按行扩展。
+
+无窗口 8 项批次 smoke 在 10 ms/目录延迟下注入后峰值 worker 为 2，8/8 个目录值正确回读，重复读取命中缓存，关闭 provider 后第二批任务被取消；扫描累计 100.944 ms，探针墙钟 437.284 ms。NativeProbe C# 同时断言批次和逐项模式都达到两个 worker；原生日志中的固定峰值描述已同步改为 2。500 项、2 ms 延迟的一轮也完成 500/500 扫描与缓存回读，扫描累计 1,858.328 ms、探针墙钟 2,826.218 ms；该大批次运行通过双 worker 峰值断言。静态 Shell folder contract、原生 adapter `/W4 /WX` 和 NativeProbe Release build 均通过，构建 0 警告/错误。
+
+这证明无窗口 Synthetic provider 批次可利用现有两 worker，同时每 view 仍只需一个外层队列 task；没有验证并行扫描在真实慢盘/网络上的吞吐、四个不同根目录同时批次时的队列拒绝重试，也未复跑隐藏 DefView 的排序/焦点状态或测量可见刷新。仅 NativeProbe 原型，没有 ExplorerBrowser 产品接线；后续仍先在隔离隐藏 Shell view 验证多 view 背压及取消竞态，再决定是否进入产品架构评审。

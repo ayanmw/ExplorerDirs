@@ -136,7 +136,7 @@ public static class SyntheticShellSortProbe
                 wallClock.Stop();
                 var peakWorkers = Marshal.GetDelegateForFunctionPointer<GetCounter>(
                     NativeLibrary.GetExport(module, "GetSyntheticAsyncRecursiveSizePeakWorkerCountForProbe"))();
-                var expectedWorkerCount = batchByView ? 1 : 2;
+                var expectedWorkerCount = 2;
                 if (peakWorkers != expectedWorkerCount)
                     throw new InvalidOperationException($"Expected the async scanner to use {expectedWorkerCount} worker slot(s), got {peakWorkers}.");
                 var scanElapsedMicroseconds = ReadCounter64(module, "GetSyntheticOnDemandSizeScanMicroseconds");
