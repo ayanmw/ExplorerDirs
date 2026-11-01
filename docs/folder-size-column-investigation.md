@@ -1836,3 +1836,9 @@ peer 列表现在从真实 filesystem `IShellFolder2::GetDetailsOf` 读取名称
 扩展 `--ishellview-recursive-size-projection-private-desktop`：递归值先全部为空，首次请求只扫描选中的 `size-10` 目录；后台任务期间原 Shell 行名称与稳定 ID 不变，扫描结果只填充该目录单元格，其余文件系统目录仍显示未计算状态。探针随后显式请求剩余目录，确认各自结果映射到原 PIDL 行，再按 `ulong` 数值排序；原选中行身份仍保留。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台、last-input 和夹具清理守卫通过。
 
 这验证的是自控 peer ListView 的逐项按需扫描路径，不是 viewport 可见性检测、自动后台触发策略或 ExplorerBrowser 产品列；探针通过显式行请求模拟“需要该值”，并在同一轮内请求其余目录。Shell 通知突发/失效、取消和过期结果合同仍由前述独立探针覆盖。未接产品、未使用用户目录、未做可见 UI/性能基准或慢盘网络验证；产品和 release 未改变。
+
+### 2026-11-01：自控 Shell 行复用产品所选项命令适配器
+
+在同一隐藏真实 `IShellView` 行投影中保留每行相对 PIDL；从选中 `size-10` 行的相对 PIDL 调用真实父 `IShellFolder.GetUIObjectOf(IContextMenu)`，再将 COM 菜单交给产品 `NativeShellCommandMenu`。产品适配器识别并确认 `cut/copy/delete/rename/properties` 均启用；未显示 popup、未调用动词，也未接触系统剪贴板。此前已通过的按需递归扫描、排序、通知失效和焦点合同继续通过。NativeProbe Release build 0 警告/错误，Private Desktop 探针 exit 0，前台/last-input 与隔离清理守卫通过。
+
+此切片证明自控列表可按真实所选 PIDL取得 Shell 原生命令状态，并复用产品命令适配器；不证明菜单可见外观、owner-draw/第三方扩展消息、实际命令执行、剪贴板、撤销重做、OLE 拖放或产品窗格接线。相对 PIDL 只在当前 peer 行快照生命周期内持有，随行快照替换释放；产品和 release 未改变。

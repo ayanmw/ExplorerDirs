@@ -1499,6 +1499,7 @@ internal static class ShellViewHostFilterProbe
                     throw new InvalidOperationException($"The Shell rows did not contain the recursive-size fixture '{expected}'.");
 
             var selectedRow = projection.Rows.Single(row => row.Name == "size-10");
+            VerifyPeerShellCommandMenu(shellFolder, parent, selectedRow.RelativePidl);
             var selectedIndex = projection.Rows.IndexOf(selectedRow);
             SetPeerListItemState(listView, selectedIndex, 0x0003, 0x0003);
             var initialNames = ReadPeerListNames(listView);
@@ -1952,6 +1953,33 @@ internal static class ShellViewHostFilterProbe
         finally { Marshal.FreeHGlobal(itemPointer); Marshal.FreeHGlobal(buffer); }
     }
 
+    private static void VerifyPeerShellCommandMenu(nint shellFolder, nint owner, nint relativePidl)
+    {
+        var children = Marshal.AllocHGlobal(IntPtr.Size);
+        nint contextMenu = 0;
+        object? contextObject = null;
+        try
+        {
+            Marshal.WriteIntPtr(children, relativePidl);
+            var menuId = ContextMenuId;
+            Check(At<GetUIObjectOf>(shellFolder, 10)(shellFolder, owner, 1, children, in menuId, 0, out contextMenu));
+            if (contextMenu == 0) throw new InvalidOperationException("The selected Shell row did not provide an IContextMenu.");
+            contextObject = Marshal.GetObjectForIUnknown(contextMenu);
+        }
+        finally
+        {
+            if (contextMenu != 0) Marshal.Release(contextMenu);
+            Marshal.FreeHGlobal(children);
+        }
+
+        using var commands = new NativeShellCommandMenu(contextObject!, owner);
+        var requiredVerbs = new[] { "cut", "copy", "delete", "rename", "properties" };
+        var enabledVerbs = requiredVerbs.Where(commands.IsEnabled).ToArray();
+        if (enabledVerbs.Length != requiredVerbs.Length)
+            throw new InvalidOperationException($"The product Shell command adapter did not expose all selected-row verbs: enabled=[{string.Join(',', enabledVerbs)}].");
+        Console.WriteLine($"ishellview-peer-selected-context-menu: source=IShellFolder.GetUIObjectOf; adapter=NativeShellCommandMenu; enabled=[{string.Join(',', enabledVerbs)}]; popup-shown=False; command-invoked=False");
+    }
+
     private static void VerifyPeerListDetails(nint listView, IReadOnlyList<PeerShellRow> rows)
     {
         if (SendMessageW(listView, LvmGetItemCount, 0, 0).ToInt32() != rows.Count)
@@ -2067,8 +2095,11 @@ internal static class ShellViewHostFilterProbe
                                 ? "File"
                                 : Path.GetExtension(row.FileSystemPath).TrimStart('.').ToUpperInvariant() + " file";
                     var detailValues = ReadShellDetailValues(shellFolder2, row.RelativePidl, detailTitles.Length);
-                    current.Add(new PeerShellRow(0, retainedPidl, row.DisplayName, row.ParsingName, row.FileSystemPath, groupTitle,
-                        row.SystemImageIndex, detailTitles, detailValues) { FileSystemIdentity = row.FileSystemIdentity });
+                    var retainedRelativePidl = ILClone(row.RelativePidl);
+                    if (retainedRelativePidl == 0) throw new InvalidOperationException("Could not retain a projected Shell child PIDL.");
+                    current.Add(new PeerShellRow(0, retainedPidl, retainedRelativePidl, row.DisplayName, row.ParsingName,
+                        row.FileSystemPath, groupTitle, row.SystemImageIndex, detailTitles, detailValues)
+                    { FileSystemIdentity = row.FileSystemIdentity });
                     retainedPidl = 0;
                 }
                 finally
@@ -2097,10 +2128,15 @@ internal static class ShellViewHostFilterProbe
                     usedPreviousIds.Add(old.Id);
                     ILFree(row.AbsolutePidl);
                     assigned.Add(row with { Id = old.Id, AbsolutePidl = old.AbsolutePidl });
+                    if (old.RelativePidl != 0) ILFree(old.RelativePidl);
                 }
             }
             foreach (var old in previous)
-                if (!usedPreviousIds.Contains(old.Id)) ILFree(old.AbsolutePidl);
+                if (!usedPreviousIds.Contains(old.Id))
+                {
+                    if (old.AbsolutePidl != 0) ILFree(old.AbsolutePidl);
+                    if (old.RelativePidl != 0) ILFree(old.RelativePidl);
+                }
             return (assigned, enumeration.SystemImageList);
         }
         finally
@@ -2244,7 +2280,10 @@ internal static class ShellViewHostFilterProbe
     private static void FreePeerShellRows(IEnumerable<PeerShellRow> rows)
     {
         foreach (var row in rows)
+        {
             if (row.AbsolutePidl != 0) ILFree(row.AbsolutePidl);
+            if (row.RelativePidl != 0) ILFree(row.RelativePidl);
+        }
     }
 
     private static bool FocusedItemMatches(nint folderView, nint expectedPidl)
@@ -2873,7 +2912,8 @@ internal static class ShellViewHostFilterProbe
 
     private sealed record NativeMenuCommandDescriptor(int Id, string Verb, string Caption);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int NativeListViewCompare(nint first, nint second, nint data);
-    private sealed record PeerShellRow(int Id, nint AbsolutePidl, string Name, string ParsingName, string? FileSystemPath, string TypeName, int SystemImageIndex,
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetUIObjectOf(nint self, nint owner, uint count, nint childPidls, in Guid interfaceId, nint reserved, out nint value);
+    private sealed record PeerShellRow(int Id, nint AbsolutePidl, nint RelativePidl, string Name, string ParsingName, string? FileSystemPath, string TypeName, int SystemImageIndex,
         string[] DetailTitles, string[] DetailValues)
     {
         internal ShellFileSystemIdentity? FileSystemIdentity { get; init; }
