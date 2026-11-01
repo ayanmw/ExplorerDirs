@@ -76,6 +76,65 @@ public static class SyntheticShellSortProbe
         finally { Directory.Delete(fixture, recursive: true); }
     }
 
+    internal static int RunFolderEnumerationScanCostProbe()
+    {
+        var fixture = Path.Combine(Path.GetTempPath(), $"ExplorerDirs-FolderEnumerationCost-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(fixture);
+        try
+        {
+            var wide = Path.Combine(fixture, "wide", "payload");
+            Directory.CreateDirectory(wide);
+            for (var index = 0; index < 1000; index++)
+                File.WriteAllBytes(Path.Combine(wide, $"item-{index:D4}.bin"), [0x01]);
+
+            var many = Path.Combine(fixture, "many");
+            Directory.CreateDirectory(many);
+            for (var folderIndex = 0; folderIndex < 100; folderIndex++)
+            {
+                var folder = Path.Combine(many, $"folder-{folderIndex:D3}");
+                Directory.CreateDirectory(folder);
+                for (var fileIndex = 0; fileIndex < 10; fileIndex++)
+                    File.WriteAllBytes(Path.Combine(folder, $"item-{fileIndex:D2}.bin"), [0x01]);
+            }
+
+            var deep = Path.Combine(fixture, "deep");
+            Directory.CreateDirectory(deep);
+            var current = deep;
+            for (var level = 0; level < 32; level++)
+            {
+                // Keep the nested fixture below legacy MAX_PATH so the probe measures traversal, not long-path support.
+                File.WriteAllBytes(Path.Combine(current, $"f{level:D2}.bin"), [0x01]);
+                current = Path.Combine(current, $"d{level:D2}");
+                Directory.CreateDirectory(current);
+            }
+
+            var module = NativeLibrary.Load(FindAdapterLibrary());
+            try
+            {
+                var measure = Marshal.GetDelegateForFunctionPointer<FolderEnumerationScanMetrics>(
+                    NativeLibrary.GetExport(module, "MeasureSyntheticFolderEnumerationScanCostForProbe"));
+                Measure("wide-disabled", Path.Combine(fixture, "wide"), false, 1, 0, 0);
+                Measure("wide-enabled", Path.Combine(fixture, "wide"), true, 1, 1, 1000);
+                Measure("many-disabled", many, false, 100, 0, 0);
+                Measure("many-enabled", many, true, 100, 100, 1000);
+                Measure("deep-disabled", deep, false, 2, 0, 0);
+                Measure("deep-enabled", deep, true, 2, 32, 62);
+
+                void Measure(string scenario, string path, bool recursiveSizeEnabled,
+                    int expectedRows, int expectedMetricCalls, int expectedEntries)
+                {
+                    Check(measure(path, recursiveSizeEnabled ? 1 : 0, out var rows, out var metricCalls, out var entries, out var elapsedMicroseconds));
+                    Console.WriteLine($"folder-enumeration-scan-cost: scenario={scenario}; direct-rows={rows}; recursive-metric-calls={metricCalls}; subtree-entries={entries}; elapsed-ms={elapsedMicroseconds / 1000.0:F3}");
+                    if (rows != expectedRows || metricCalls != expectedMetricCalls || entries != expectedEntries)
+                        throw new InvalidOperationException($"The {scenario} fixture did not produce the expected synchronous scan counts.");
+                }
+            }
+            finally { NativeLibrary.Free(module); }
+            return 0;
+        }
+        finally { Directory.Delete(fixture, recursive: true); }
+    }
+
     internal static int RunRecursiveDirectorySizeSort() =>
         Run(recursiveDirectorySizeSortOnly: true, selfOwnedAttributes: true, customSizeColumn: true, exerciseUpdateNotifications: true);
 
@@ -3289,6 +3348,9 @@ public static class SyntheticShellSortProbe
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int VerifySyntheticShellActivatedRecursiveSizeSnapshotCache(nint rootPidl, ulong sentinelBytes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int ParseDisplayName(nint self, nint hwnd, nint bindContext, [MarshalAs(UnmanagedType.LPWStr)] string displayName, nint eaten, out nint childPidl, nint attributes);
     [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderTreeContractSmoke([MarshalAs(UnmanagedType.LPWStr)] string backingRoot);
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)] private delegate int FolderEnumerationScanMetrics(
+        [MarshalAs(UnmanagedType.LPWStr)] string backingRoot, int recursiveSizeEnabled, out int directRows, out int metricCalls,
+        out int entriesVisited, out ulong elapsedMicroseconds);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetCounter();
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetIndexedCounter(uint index);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate int GetMapColumnTraceCount();

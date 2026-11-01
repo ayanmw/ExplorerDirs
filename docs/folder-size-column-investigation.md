@@ -1298,3 +1298,9 @@ Private Desktop 隐藏 view 探针将 `child` 的递归大小快照覆盖为 1,2
 在静态 synthetic folder-tree 合同中单独清零并采样 `GetSyntheticDirectoryMetrics` 的调用数与访问项数。枚举包含 `child` 与其 `nested-folder` 的两层夹具时，`EnumObjects` 返回前发生 2 次递归指标调用、访问 3 个后代条目；数值即用于目录行，之后才返回 Shell enumerator。源码路径是 `SyntheticSortFolder::EnumObjects` → `EnumerateBackingChildren` → 每个文件夹行的 `GetSyntheticDirectoryMetrics`，并在该函数内递归下降。Native adapter `/W4 /WX`、NativeProbe Release 与 `--synthetic-shell-folder-tree-smoke` 通过，合同校验了该夹具的计数。
 
 这确定了当前隔离 provider 的成本入口：列值缓存未命中不会在比较回调里扫描，但首次列举文件夹时会先同步遍历其后代。两层夹具只有 3 个条目，不能据此估算大型目录耗时、磁盘访问或产品 ExplorerBrowser 行为；后续需用可扩展负载测量不同宽度/深度，并验证列关闭时能否完全跳过扫描，再设计按需/后台计算策略。
+
+### 2026-11-01：可扩展目录夹具的递归扫描 A/B
+
+增加无窗口 NativeProbe 负载探针，分别枚举单个宽目录（一个目录下 1,000 个文件）、100 个小目录（每个 10 个文件）及 32 层目录链。探针只切换 NativeProbe 专用“需要递归大小”开关，记录 `EnumObjects` 与完整取出行的耗时、直系行数、递归指标调用数和访问条目数。关闭开关时三个场景的递归指标调用/后代访问均为 0；开启时分别为 `1/1000`、`100/1000`、`32/62`。这些对照说明总条目数之外，目录数量和递归深度也会影响成本。
+
+这次记录的单次合成夹具耗时为：宽目录关闭/开启 `0.855/2.283 ms`，100 个小目录 `21.433/53.282 ms`，深链 `0.809/10.995 ms`。耗时受 Windows 文件缓存、文件系统、杀毒软件和本机负载影响；其中关闭扫描后仍有直系目录行枚举与身份读取成本，不能将差值当作产品收益或真实磁盘性能承诺。开关仅属于 NativeProbe，没有接入 Shell 的列可见性判断、ExplorerBrowser、后台队列、INI 或 UI；下一步应验证列请求时机能否触发按需计算，并保证刷新/通知和排序期间不会把扫描工作压回 `CompareIDs`。

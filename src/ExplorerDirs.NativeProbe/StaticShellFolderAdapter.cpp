@@ -1568,6 +1568,7 @@ namespace
     volatile LONG g_syntheticSizeDisplayDecimalsForProbe = 2;
     volatile LONG g_syntheticSizeDisplayThousandsForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
+    volatile LONG g_syntheticRecursiveSizeScanEnabledForProbe = 1;
     volatile LONG g_syntheticExtendedMetadataColumnsForProbe = 0;
     volatile LONG g_syntheticRelativePercentColumnTypeForProbe = SHCOLSTATE_TYPE_INT;
     volatile LONG64 g_syntheticChildSizeOverride = -1;
@@ -1849,12 +1850,15 @@ namespace
                     try { childPath = backingPath + L"\\" + entry.cFileName; }
                     catch (const std::bad_alloc&) { result = E_OUTOFMEMORY; break; }
                     TryGetSyntheticFileIdentity(childPath.c_str(), &child.identity);
-                    SyntheticDirectoryMetrics metrics{};
-                    result = GetSyntheticDirectoryMetrics(childPath, &metrics);
-                    if (FAILED(result)) break;
-                    child.size = metrics.bytes;
-                    child.fileCount = metrics.files;
-                    child.folderCount = metrics.folders;
+                    if (InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0))
+                    {
+                        SyntheticDirectoryMetrics metrics{};
+                        result = GetSyntheticDirectoryMetrics(childPath, &metrics);
+                        if (FAILED(result)) break;
+                        child.size = metrics.bytes;
+                        child.fileCount = metrics.files;
+                        child.folderCount = metrics.folders;
+                    }
                 }
                 child.attributes = entry.dwFileAttributes;
                 wcscpy_s(child.name, entry.cFileName);
@@ -3129,7 +3133,8 @@ namespace
                 try { childPath = backingPath + L"\\" + child->name; }
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
                 TryGetSyntheticFileIdentity(childPath.c_str(), &child->identity);
-                if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                if (!(child->attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+                    InterlockedCompareExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, 0, 0))
                 {
                     SyntheticDirectoryMetrics metrics{};
                     result = GetSyntheticDirectoryMetrics(childPath, &metrics);
@@ -3608,6 +3613,75 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticSortBackingPath(PCWS
     try { g_syntheticSortBackingPath.assign(path); }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
     return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI MeasureSyntheticFolderEnumerationScanCostForProbe(
+    PCWSTR backingPath, LONG recursiveSizeEnabled, LONG* directRows, LONG* metricCalls,
+    LONG* entriesVisited, ULONGLONG* elapsedMicroseconds)
+{
+    if (!backingPath || !*backingPath || !directRows || !metricCalls || !entriesVisited || !elapsedMicroseconds)
+        return E_INVALIDARG;
+    *directRows = 0;
+    *metricCalls = 0;
+    *entriesVisited = 0;
+    *elapsedMicroseconds = 0;
+    auto result = SetSyntheticSortBackingPath(backingPath);
+    if (FAILED(result)) return result;
+
+    PIDLIST_ABSOLUTE rootPidl = nullptr;
+    SyntheticSortFolder* root = nullptr;
+    IEnumIDList* enumerator = nullptr;
+    LARGE_INTEGER frequency{}, start{}, end{};
+    LONG previousScanSetting = -1;
+    result = SHParseDisplayName(backingPath, nullptr, &rootPidl, 0, nullptr);
+    if (FAILED(result)) goto cleanup;
+    root = new (std::nothrow) SyntheticSortFolder();
+    if (!root) { result = E_OUTOFMEMORY; goto cleanup; }
+    result = root->Initialize(rootPidl);
+    if (FAILED(result)) goto cleanup;
+
+    InterlockedExchange(&g_syntheticDirectoryMetricsCallCount, 0);
+    InterlockedExchange(&g_syntheticDirectoryMetricsEntryCount, 0);
+    previousScanSetting = InterlockedExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, recursiveSizeEnabled ? 1 : 0);
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start);
+    result = root->EnumObjects(nullptr, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &enumerator);
+    if (SUCCEEDED(result) && !enumerator) result = E_UNEXPECTED;
+    if (SUCCEEDED(result))
+    {
+        while (true)
+        {
+            PITEMID_CHILD item = nullptr;
+            ULONG fetched = 0;
+            const auto nextResult = enumerator->Next(1, &item, &fetched);
+            if (nextResult == S_FALSE) break;
+            if (FAILED(nextResult) || fetched != 1)
+            {
+                if (item) CoTaskMemFree(item);
+                result = FAILED(nextResult) ? nextResult : E_UNEXPECTED;
+                break;
+            }
+            CoTaskMemFree(item);
+            ++*directRows;
+        }
+    }
+    QueryPerformanceCounter(&end);
+    *metricCalls = InterlockedCompareExchange(&g_syntheticDirectoryMetricsCallCount, 0, 0);
+    *entriesVisited = InterlockedCompareExchange(&g_syntheticDirectoryMetricsEntryCount, 0, 0);
+    if (frequency.QuadPart > 0 && end.QuadPart >= start.QuadPart)
+    {
+        const auto elapsedTicks = end.QuadPart - start.QuadPart;
+        *elapsedMicroseconds = static_cast<ULONGLONG>(
+            static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
+    }
+
+cleanup:
+    if (previousScanSetting >= 0)
+        InterlockedExchange(&g_syntheticRecursiveSizeScanEnabledForProbe, previousScanSetting);
+    if (enumerator) enumerator->Release();
+    if (root) root->Release();
+    if (rootPidl) CoTaskMemFree(rootPidl);
+    return result;
 }
 
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticFolderClassIdForProbe(const CLSID* classId)
