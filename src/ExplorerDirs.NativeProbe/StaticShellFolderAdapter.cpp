@@ -3435,6 +3435,12 @@ namespace
                             displayText += token;
                         }
                     }
+                    else if (flags & SHGDN_INFOLDER)
+                    {
+                        const auto separator = rootPath.find_last_of(L"\\/");
+                        displayText = separator == std::wstring::npos ? rootPath : rootPath.substr(separator + 1);
+                        if (displayText.empty()) displayText = rootPath;
+                    }
                     else displayText = rootPath;
                 }
                 catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -4974,6 +4980,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRoot
         if (SUCCEEDED(result) && (displayName.uType != STRRET_WSTR || !displayName.pOleStr ||
             _wcsnicmp(displayName.pOleStr, L"edpath:", 7) != 0))
             result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        STRRET friendlyName{};
+        if (SUCCEEDED(result)) result = parsingRoot->GetDisplayNameOf(
+            reinterpret_cast<PCUITEMID_CHILD>(pathItem), SHGDN_INFOLDER, &friendlyName);
+        if (SUCCEEDED(result) && (friendlyName.uType != STRRET_WSTR || !friendlyName.pOleStr ||
+            _wcsicmp(friendlyName.pOleStr, L"second") != 0))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
         PIDLIST_RELATIVE reparsedItem = nullptr;
         if (SUCCEEDED(result)) result = parsingRoot->ParseDisplayName(nullptr, nullptr,
             displayName.pOleStr, nullptr, &reparsedItem, nullptr);
@@ -4989,6 +5001,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI RunSyntheticSingleClassMultiRoot
         if (parsingRoot) parsingRoot->Release();
         if (reparsedItem) CoTaskMemFree(reparsedItem);
         if (displayName.uType == STRRET_WSTR && displayName.pOleStr) CoTaskMemFree(displayName.pOleStr);
+        if (friendlyName.uType == STRRET_WSTR && friendlyName.pOleStr) CoTaskMemFree(friendlyName.pOleStr);
         if (pathItem) CoTaskMemFree(pathItem);
     }
 

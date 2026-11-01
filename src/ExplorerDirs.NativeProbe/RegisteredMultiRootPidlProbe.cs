@@ -47,6 +47,8 @@ internal static class RegisteredMultiRootPidlProbe
             Check(SHParseDisplayName($"::{{{classId:D}}}", 0, out rootPidl, 0, out _));
             Check(SHBindToObject(0, rootPidl, 0, in ShellFolderId, out rootFolder));
             if (rootFolder == 0) throw new InvalidOperationException("The registered namespace root did not bind to IShellFolder.");
+            var verifyFolder = GetExport<VerifyFolder>(module, "VerifySyntheticFolderContentsForProbe");
+            Check(verifyFolder(rootFolder, "first-only.txt", "second-only.txt", 13));
 
             var parse = GetVTableMethod<ParseDisplayName>(rootFolder, 3);
             Check(parse(rootFolder, 0, 0, secondPath, 0, out childPidl, 0));
@@ -62,10 +64,9 @@ internal static class RegisteredMultiRootPidlProbe
                 !PidlBytesEqual(absoluteChildPidl, reparsedAbsolutePidl, checked((int)expectedPidlSize)))
                 throw new InvalidOperationException($"Shell absolute parsing-name round-trip changed the path PIDL: name='{Marshal.PtrToStringUni(parsingName)}'; expected={expectedPidlSize} bytes; actual={actualPidlSize} bytes.");
             Check(SHBindToObject(rootFolder, childPidl, 0, in ShellFolderId, out childFolder));
-            Check(GetExport<VerifyFolder>(module, "VerifySyntheticFolderContentsForProbe")(
-                childFolder, "second-only.txt", "first-only.txt", 29));
+            Check(verifyFolder(childFolder, "second-only.txt", "first-only.txt", 29));
 
-            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, path ParseDisplayName/BindToObject, second-root rows/29 B; no Shell view window)");
+            Console.WriteLine("registered multi-root PIDL smoke: PASS (natural root activation, absolute parsing-name PIDL round-trip, simultaneous root/child bindings A=13 B=29, no Shell view window)");
             return 0;
         }
         finally
