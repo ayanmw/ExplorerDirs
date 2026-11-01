@@ -2543,6 +2543,12 @@ SettingsSmoke 完整运行通过，包含 profile CLSID 重写后读取 sidecar 
 
 复核 `ExplorerDirs.App.csproj`、`scripts/publish.ps1` 与原生 adapter 源码后确认：App 的 `dotnet publish` 目前不会编译或复制 Native adapter；release checksum 只记录 `ExplorerDirs.App.exe` 与 `ExplorerDirs.App.dll`。原生源码现在能生成两种 x64 构建：NativeProbe 版本用 `EXPLORERDIRS_NATIVEPROBE` 保留探针导出；新增的独立产品变体只导出 `DllGetClassObject`、`DllCanUnloadNow` 与通用 `ConfigureShellNamespaceRoot`，并默认把 Recursive Size 映射为 Shell 大小列。
 
-验证包括两种原生 DLL 的 `/W4 /WX` 构建、NativeProbe Release 构建、`dumpbin /exports` 导出表检查、产品变体无 view 的 COM 加载 smoke（配置 profile root、创建 class factory 与 `IShellFolder2`、读回 `Recursive Size` 标题、`DllCanUnloadNow=S_OK`），以及 NativeProbe 原有递归列合同复验。smoke 没有写注册表或创建 Shell view。产品 DLL 仍编译了部分内部诊断计数逻辑；因此目前只验证了导出面与 provider class 激活，不应将其当成最终发布二进制。App 项目和 release 仍未接入该 DLL。
+验证包括两种原生 DLL 的 `/W4 /WX` 构建、NativeProbe Release 构建、`dumpbin /exports` 导出表检查、产品变体无 view 的 COM 加载 smoke（配置 profile root、创建 class factory 与 `IShellFolder2`、读回 `Recursive Size` 标题、`DllCanUnloadNow=S_OK`），以及 NativeProbe 原有递归列合同复验。smoke 没有写注册表或创建 Shell view。产品变体已将纯诊断计数编译为空操作；生命周期与异步并发计数仍保留。当前 smoke 只验证导出面与 provider class 激活，不应将其当成最终发布二进制。App 项目和 release 仍未接入该 DLL。
 
-App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后、恢复任一 `MainWindow` 前初始化稳定 profile CLSID、adapter 配置和 volatile CLSID/COM/NameSpace keys；正常退出时所有 `MainWindow` 关闭后清理 owner，再让 Router 停止路由并释放 profile 锁。下一步收敛产品变体中的探针计数开销，接入 App Release 构建/发布载荷校验，再通过 HostProbe 验证真实 profile path wrapping、会话恢复与多窗口列行为。当前产品与 release 未更改，不能称递归列已接入。
+App 生命周期接线位置仍是：在 `FolderOpenRouter.TryStart` 成功后、恢复任一 `MainWindow` 前初始化稳定 profile CLSID、adapter 配置和 volatile CLSID/COM/NameSpace keys；正常退出时所有 `MainWindow` 关闭后清理 owner，再让 Router 停止路由并释放 profile 锁。下一步先将 adapter 接入 HostProbe 验证真实 profile path wrapping、会话恢复与多窗口列行为，再评审 App Release 构建/发布载荷和 owner 生命周期接线。当前产品与 release 未更改，不能称递归列已接入。
+
+### 2026-11-02：产品变体改为按需异步递归大小
+
+此前产品 DLL 虽将 Recursive Size 作为默认大小列，但扫描默认值仍为立即递归；EnumObjects 因此可能在首次枚举目录时逐个扫描子目录，造成目录打开延迟。本次将产品变体默认设为按列值请求后异步扫描，并启用人类可读大小文本；NativeProbe 的同步、按需及 A/B 默认值保持不变。
+
+产品构建的纯诊断 InterlockedIncrement/Add 现在编译为空操作，列元数据跟踪也仅保留在 NativeProbe。COM 引用/对象存活、服务器锁、`DllGetClassObject` 在途调用标记及异步 worker 活跃数仍保留，因为这些计数参与卸载安全或并发上限。当前 product build smoke 仍验证 DLL 加载、Shell folder 激活及默认列标题；该 smoke 不创建 Shell view，也不验证可见的异步行回填。产品 DLL 尚未接入 App 或 release。

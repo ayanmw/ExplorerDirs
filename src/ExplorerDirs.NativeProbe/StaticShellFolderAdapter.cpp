@@ -3,8 +3,14 @@
 
 #if defined(EXPLORERDIRS_NATIVEPROBE)
 #define ED_PROBE_EXPORT __declspec(dllexport)
+#define ED_PROBE_METRIC_INCREMENT(counter) InterlockedIncrement(&(counter))
+#define ED_PROBE_METRIC_ADD(counter, value) InterlockedAdd(&(counter), (value))
+#define ED_PROBE_METRIC_ADD64(counter, value) InterlockedAdd64(&(counter), (value))
 #else
 #define ED_PROBE_EXPORT
+#define ED_PROBE_METRIC_INCREMENT(counter) ((void)0)
+#define ED_PROBE_METRIC_ADD(counter, value) ((void)sizeof(value))
+#define ED_PROBE_METRIC_ADD64(counter, value) ((void)sizeof(value))
 #endif
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -242,7 +248,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key, PROPVARIANT* value) override
         {
-            InterlockedIncrement(&g_propertyStoreValueRequests);
+            ED_PROBE_METRIC_INCREMENT(g_propertyStoreValueRequests);
             if (!value) return E_POINTER;
             PropVariantInit(value);
             if (key == kSizeKey)
@@ -286,12 +292,12 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetPropertyStore(GETPROPERTYSTOREFLAGS, IUnknown*, REFIID iid, void** value) override
         {
-            InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
+            ED_PROBE_METRIC_INCREMENT(g_propertyStoreFactoryCreateRequests);
             return CreateStore(_byteCount, _size, iid, value);
         }
         HRESULT STDMETHODCALLTYPE GetPropertyStoreForKeys(const PROPERTYKEY*, UINT, GETPROPERTYSTOREFLAGS, REFIID iid, void** value) override
         {
-            InterlockedIncrement(&g_propertyStoreFactoryCreateRequests);
+            ED_PROBE_METRIC_INCREMENT(g_propertyStoreFactoryCreateRequests);
             return CreateStore(_byteCount, _size, iid, value);
         }
     private:
@@ -334,13 +340,13 @@ namespace
         {
             if (message == SFVM_COLUMNCLICK)
             {
-                InterlockedIncrement(&g_sortCallbackColumnClickRequests);
+                ED_PROBE_METRIC_INCREMENT(g_sortCallbackColumnClickRequests);
                 InterlockedExchange(&g_sortCallbackLastColumn, static_cast<LONG>(column));
                 return E_NOTIMPL;
             }
             if (message == SFVM_GETSORTDEFAULTS)
             {
-                InterlockedIncrement(&g_sortCallbackGetDefaultsRequests);
+                ED_PROBE_METRIC_INCREMENT(g_sortCallbackGetDefaultsRequests);
                 if (InterlockedCompareExchange(&g_sortCallbackProbeEnabled, 0, 0) && column && data)
                 {
                     *reinterpret_cast<int*>(column) = 1; // Ascending.
@@ -351,10 +357,10 @@ namespace
             }
             if (message != SFVM_GETDETAILSOF || !data) return E_NOTIMPL;
             auto* details = reinterpret_cast<DETAILSINFO*>(data);
-            InterlockedIncrement(&g_legacyDetailsCallbackRequests);
+            ED_PROBE_METRIC_INCREMENT(g_legacyDetailsCallbackRequests);
             InterlockedExchange(&g_legacyDetailsCallbackLastColumn, static_cast<LONG>(column));
-            if (details->pidl) InterlockedIncrement(&g_legacyDetailsCallbackItemRequests);
-            else InterlockedIncrement(&g_legacyDetailsCallbackHeaderRequests);
+            if (details->pidl) ED_PROBE_METRIC_INCREMENT(g_legacyDetailsCallbackItemRequests);
+            else ED_PROBE_METRIC_INCREMENT(g_legacyDetailsCallbackHeaderRequests);
             details->fmt = LVCFMT_RIGHT;
             details->cxChar = 16;
             details->str.uType = STRRET_WSTR;
@@ -699,7 +705,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override
         {
-            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreQueryInterfaceRequests);
+            if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_propertyStoreQueryInterfaceRequests);
             if (!object) return E_POINTER;
             *object = nullptr;
             if (iid == IID_IUnknown || iid == IID_IShellFolder || iid == IID_IShellFolder2)
@@ -727,7 +733,7 @@ namespace
 
         HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id) override
         {
-            InterlockedIncrement(&g_persistClassIdRequests);
+            ED_PROBE_METRIC_INCREMENT(g_persistClassIdRequests);
             if (!id) return E_POINTER;
             if (_prototypeClass)
             {
@@ -753,7 +759,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetCurFolder(PIDLIST_ABSOLUTE* pidl) override
         {
-            InterlockedIncrement(&g_persistRootRequests);
+            ED_PROBE_METRIC_INCREMENT(g_persistRootRequests);
             if (!pidl) return E_POINTER;
             *pidl = nullptr;
             IPersistFolder2* persist = nullptr;
@@ -792,7 +798,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE BindToObject(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {
-            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToObjectRequests);
+            if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_propertyStoreBindToObjectRequests);
             if (!value) return E_POINTER;
             *value = nullptr;
             PCUIDLIST_RELATIVE original = nullptr;
@@ -800,7 +806,7 @@ namespace
             if (FAILED(result)) return result;
             if (iid == IID_IPropertyStoreFactory && InterlockedCompareExchange(&g_propertyStoreFactoryProbeEnabled, 0, 0))
             {
-                InterlockedIncrement(&g_propertyStoreFactoryBindRequests);
+                ED_PROBE_METRIC_INCREMENT(g_propertyStoreFactoryBindRequests);
                 VARIANT size{};
                 VariantInit(&size);
                 result = _inner->GetDetailsEx(reinterpret_cast<PCUITEMID_CHILD>(original), &kSizeKey, &size);
@@ -839,7 +845,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE BindToStorage(PCUIDLIST_RELATIVE item, IBindCtx* bind, REFIID iid, void** value) override
         {
-            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreBindToStorageRequests);
+            if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_propertyStoreBindToStorageRequests);
             PCUIDLIST_RELATIVE original = nullptr;
             auto result = UnwrapChildPidlView(item, &original);
             return FAILED(result) ? result : _inner->BindToStorage(original, bind, iid, value);
@@ -853,15 +859,15 @@ namespace
             if (FAILED(unwrapResult)) return unwrapResult;
             left = originalLeft;
             right = originalRight;
-            InterlockedIncrement(&g_allComparisons);
+            ED_PROBE_METRIC_INCREMENT(g_allComparisons);
             InterlockedExchange(&g_lastCompareColumn, LOWORD(column));
             const auto columnIndex = LOWORD(column);
             if (columnIndex == _columnCount + 1) return _inner->CompareIDs(15, left, right);
             const bool isStaticNumeric = columnIndex == _columnCount || columnIndex == _columnCount + 2;
             if (!isStaticNumeric && columnIndex != 1) return _inner->CompareIDs(column, left, right);
-            if (columnIndex == 1) InterlockedIncrement(&g_standardSizeComparisons);
-            else if (columnIndex == _columnCount + 2) InterlockedIncrement(&g_documentByteCountComparisons);
-            else InterlockedIncrement(&g_staticColumnComparisons);
+            if (columnIndex == 1) ED_PROBE_METRIC_INCREMENT(g_standardSizeComparisons);
+            else if (columnIndex == _columnCount + 2) ED_PROBE_METRIC_INCREMENT(g_documentByteCountComparisons);
+            else ED_PROBE_METRIC_INCREMENT(g_staticColumnComparisons);
             std::wstring leftName, rightName;
             if (!NameFromPidl(_inner, left, leftName) || !NameFromPidl(_inner, right, rightName)) return E_FAIL;
             bool leftFound = false, rightFound = false;
@@ -909,7 +915,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
         {
-            if (iid == IID_IPropertyStore) InterlockedIncrement(&g_propertyStoreUiObjectRequests);
+            if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_propertyStoreUiObjectRequests);
             std::vector<PCUITEMID_CHILD> original;
             try { original.resize(count); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
@@ -943,7 +949,7 @@ namespace
         HRESULT STDMETHODCALLTYPE EnumSearches(IEnumExtraSearch** enumerator) override { return _inner->EnumSearches(enumerator); }
         HRESULT STDMETHODCALLTYPE GetDefaultColumn(DWORD reserved, ULONG* sort, ULONG* display) override
         {
-            InterlockedIncrement(&g_defaultColumnRequests);
+            ED_PROBE_METRIC_INCREMENT(g_defaultColumnRequests);
             if (InterlockedCompareExchange(&g_defaultColumnSortProbeEnabled, 0, 0))
             {
                 if (!sort || !display) return E_POINTER;
@@ -967,9 +973,9 @@ namespace
             if (FAILED(unwrapResult)) return unwrapResult;
             item = original;
             if (!column || (*column != kStaticSizeKey && *column != kSizeKey && *column != kDocumentByteCountKey)) return _inner->GetDetailsEx(item, column, value);
-            if (*column == kSizeKey) InterlockedIncrement(&g_standardSizeDetailsEx);
-            else if (*column == kDocumentByteCountKey) InterlockedIncrement(&g_documentByteCountDetailsEx);
-            else InterlockedIncrement(&g_customDetailsEx);
+            if (*column == kSizeKey) ED_PROBE_METRIC_INCREMENT(g_standardSizeDetailsEx);
+            else if (*column == kDocumentByteCountKey) ED_PROBE_METRIC_INCREMENT(g_documentByteCountDetailsEx);
+            else ED_PROBE_METRIC_INCREMENT(g_customDetailsEx);
             if (!item) return E_INVALIDARG;
             std::wstring name;
             if (!NameFromPidl(_inner, item, name)) return E_FAIL;
@@ -1012,7 +1018,7 @@ namespace
             }
             if (column == _columnCount + 2)
             {
-                if (item) InterlockedIncrement(&g_documentByteCountDetailsOf);
+                if (item) ED_PROBE_METRIC_INCREMENT(g_documentByteCountDetailsOf);
                 details->fmt = LVCFMT_RIGHT;
                 details->cxChar = 18;
                 details->str.uType = STRRET_WSTR;
@@ -1033,7 +1039,7 @@ namespace
                 StringCchCopyW(details->str.pOleStr, length, text);
                 return S_OK;
             }
-            if (column == 1 && item) InterlockedIncrement(&g_standardSizeDetailsOf);
+            if (column == 1 && item) ED_PROBE_METRIC_INCREMENT(g_standardSizeDetailsOf);
             if (column == 1 && item)
             {
                 std::wstring name;
@@ -1055,9 +1061,9 @@ namespace
             if (column != _columnCount) return E_INVALIDARG;
             // Isolated A/B only: make the native view try its documented legacy callback fallback.
             if (InterlockedCompareExchange(&g_legacyDetailsCallbackEnabled, 0, 0)) return E_NOTIMPL;
-            InterlockedIncrement(&g_customDetailsOf);
-            if (item) InterlockedIncrement(&g_customItemDetailsOf);
-            else InterlockedIncrement(&g_customHeaderDetailsOf);
+            ED_PROBE_METRIC_INCREMENT(g_customDetailsOf);
+            if (item) ED_PROBE_METRIC_INCREMENT(g_customItemDetailsOf);
+            else ED_PROBE_METRIC_INCREMENT(g_customHeaderDetailsOf);
             details->fmt = LVCFMT_RIGHT;
             details->cxChar = 16;
             details->str.uType = STRRET_WSTR;
@@ -1080,7 +1086,7 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* id) override
         {
-            InterlockedIncrement(&g_mapColumnToScidRequests);
+            ED_PROBE_METRIC_INCREMENT(g_mapColumnToScidRequests);
             if (!id) return E_POINTER;
             if (column < _columnCount) return _inner->MapColumnToSCID(column, id);
             if (column == _columnCount) *id = kStaticSizeKey;
@@ -1811,14 +1817,25 @@ namespace
     volatile LONG g_syntheticCustomSizeColumnForProbe = 1;
 #endif
     volatile LONG g_syntheticIgnoreRecursiveFolderSizeSortForProbe = 0;
+#if defined(EXPLORERDIRS_NATIVEPROBE)
     volatile LONG g_syntheticHumanSizeTextForProbe = 0;
+#else
+    volatile LONG g_syntheticHumanSizeTextForProbe = 1;
+#endif
     volatile LONG g_syntheticSizeDisplayUnitForProbe = 0;
     volatile LONG g_syntheticSizeDisplayDecimalsForProbe = 2;
     volatile LONG g_syntheticSizeDisplayThousandsForProbe = 0;
     volatile LONG g_syntheticSlowCustomSizeColumnForProbe = 0;
     volatile LONG g_syntheticRecursiveSizeScanEnabledForProbe = 1;
+#if defined(EXPLORERDIRS_NATIVEPROBE)
     volatile LONG g_syntheticRecursiveSizeScanOnDemandForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanForProbe = 0;
+#else
+    // Product views must never recurse through every folder while enumerating a directory.
+    // Request values on demand and let the bounded worker queue fill them asynchronously.
+    volatile LONG g_syntheticRecursiveSizeScanOnDemandForProbe = 1;
+    volatile LONG g_syntheticAsyncRecursiveSizeScanForProbe = 1;
+#endif
     volatile LONG g_syntheticAsyncRecursiveSizeBatchByViewForProbe = 0;
     // NativeProbe-only latency injection for comparing async scan scheduling under slow storage.
     volatile LONG g_syntheticAsyncRecursiveSizeScanDelayMsForProbe = 0;
@@ -1892,7 +1909,7 @@ namespace
             if (_stopping) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
             if (_tasks.size() >= kMaximumQueuedTasks)
             {
-                if (recursiveSizeScan) InterlockedIncrement(&g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe);
+                if (recursiveSizeScan) ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeQueueRejectedScanCountForProbe);
                 return HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_QUOTA);
             }
             try { _tasks.push(std::move(task)); }
@@ -2059,6 +2076,7 @@ namespace
 
     void RecordSyntheticColumnMetadata(UINT kind, UINT column, SHCOLSTATEF state, HRESULT result, const WCHAR* text)
     {
+#if defined(EXPLORERDIRS_NATIVEPROBE)
         const auto traceIndex = InterlockedIncrement(&g_syntheticColumnMetadataTraceCount) - 1;
         if (traceIndex >= kSyntheticColumnMetadataTraceCapacity) return;
         auto& trace = g_syntheticColumnMetadataTrace[traceIndex];
@@ -2068,6 +2086,13 @@ namespace
         trace.result = result;
         if (text) StringCchCopyW(trace.text, ARRAYSIZE(trace.text), text);
         InterlockedExchange(&trace.sequence, traceIndex + 1);
+#else
+        (void)kind;
+        (void)column;
+        (void)state;
+        (void)result;
+        (void)text;
+#endif
     }
 
     const SyntheticChild* SyntheticData(PCUITEMID_CHILD item)
@@ -2251,9 +2276,9 @@ namespace
     HRESULT GetSyntheticDirectoryMetrics(const std::wstring& directory, SyntheticDirectoryMetrics* metrics,
         volatile LONG* cancellationFlag = nullptr)
     {
-        InterlockedIncrement(&g_syntheticDirectoryMetricsCallCount);
+        ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsCallCount);
         if (g_syntheticCompareCallbackActive)
-            InterlockedIncrement(&g_syntheticDirectoryMetricsDuringCompareCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsDuringCompareCount);
         if (!metrics) return E_POINTER;
         *metrics = {};
         if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
@@ -2276,7 +2301,7 @@ namespace
             }
             if (wcscmp(entry.cFileName, L".") != 0 && wcscmp(entry.cFileName, L"..") != 0)
             {
-                InterlockedIncrement(&g_syntheticDirectoryMetricsEntryCount);
+                ED_PROBE_METRIC_INCREMENT(g_syntheticDirectoryMetricsEntryCount);
                 const auto entryDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeEntryDelayMsForProbe, 0, 0);
                 if (entryDelayMs > 0) Sleep(static_cast<DWORD>(entryDelayMs));
                 if (cancellationFlag && InterlockedCompareExchange(cancellationFlag, 0, 0))
@@ -2703,7 +2728,7 @@ namespace
             }
             if (fetched) *fetched = made;
             if (!g_syntheticSizeMetricsObservation)
-                InterlockedAdd(&g_syntheticEnumeratedItems, static_cast<LONG>(made));
+                ED_PROBE_METRIC_ADD(g_syntheticEnumeratedItems, static_cast<LONG>(made));
             return made == count ? S_OK : S_FALSE;
         }
         HRESULT STDMETHODCALLTYPE Skip(ULONG count) override
@@ -2971,8 +2996,7 @@ namespace
                             const auto removedSnapshots = _recursiveSizeStore->InvalidatePath(
                                 parsingName, removesFolderSubtree, &invalidatedReservations);
                             if (invalidatedReservations)
-                                InterlockedAdd(&g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe,
-                                    static_cast<LONG>(invalidatedReservations));
+                                ED_PROBE_METRIC_ADD(g_syntheticAsyncRecursiveSizeNotificationInvalidatedReservationsForProbe, static_cast<LONG>(invalidatedReservations));
                             char invalidationTrace[256]{};
                             sprintf_s(invalidationTrace,
                                 "synthetic-sort: SFVM_FSNOTIFY cache-invalidation; removed-snapshots=%llu; invalidated-reservations=%llu",
@@ -2989,7 +3013,7 @@ namespace
                     ShouldTranslateSyntheticChildNotification(static_cast<LONG>(lParam)))
                 {
                     if (lParam == SHCNE_ATTRIBUTES)
-                        InterlockedIncrement(&g_syntheticAttributeNotificationTranslationCount);
+                        ED_PROBE_METRIC_INCREMENT(g_syntheticAttributeNotificationTranslationCount);
                     const auto scheduleResult = ScheduleBackingDirectoryUpdate();
                     if (FAILED(scheduleResult)) TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-schedule-failed");
                 }
@@ -3165,7 +3189,7 @@ namespace
         {
             if (!value) return E_POINTER;
             *value = nullptr;
-            if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticEnumObjectsCount);
+            if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticEnumObjectsCount);
             if (!_inner) return E_UNEXPECTED;
             std::vector<SyntheticChild> children;
             HRESULT result = S_OK;
@@ -3312,16 +3336,16 @@ namespace
             const auto* leftChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(left));
             const auto* rightChild = SyntheticData(reinterpret_cast<PCUITEMID_CHILD>(right));
             if (!leftChild || !rightChild) return E_INVALIDARG;
-            InterlockedIncrement(&g_syntheticCompareCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticCompareCount);
             const auto compareColumn = LOWORD(column);
             if (compareColumn < ARRAYSIZE(g_syntheticCompareByColumn))
-                InterlockedIncrement(&g_syntheticCompareByColumn[compareColumn]);
+                ED_PROBE_METRIC_INCREMENT(g_syntheticCompareByColumn[compareColumn]);
             short comparison = 0;
             switch (LOWORD(column))
             {
             case 0: comparison = static_cast<short>(_wcsicmp(leftChild->name, rightChild->name)); break;
             case 1:
-                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeCompareCount);
+                if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeCompareCount);
             {
                 const bool ignoreFolderSize =
                     InterlockedCompareExchange(&g_syntheticIgnoreRecursiveFolderSizeSortForProbe, 0, 0) != 0;
@@ -3447,7 +3471,7 @@ namespace
                     supported &= itemAttributes;
                 }
                 *attributes = requested & supported;
-                InterlockedIncrement(&g_syntheticGetAttributesOfCount);
+                ED_PROBE_METRIC_INCREMENT(g_syntheticGetAttributesOfCount);
                 return S_OK;
             }
             std::vector<PITEMID_CHILD> original;
@@ -3470,9 +3494,9 @@ namespace
                 result = _inner->GetAttributesOf(count, const_cast<PCUITEMID_CHILD_ARRAY>(original.data()), attributes);
                 if (SUCCEEDED(result))
                 {
-                    InterlockedIncrement(&g_syntheticGetAttributesOfCount);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticGetAttributesOfCount);
                     if (*attributes & (SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR))
-                        InterlockedIncrement(&g_syntheticFilesystemAttributeCount);
+                        ED_PROBE_METRIC_INCREMENT(g_syntheticFilesystemAttributeCount);
                     if (InterlockedCompareExchange(&g_syntheticMaskFilesystemAttributes, 0, 0))
                         *attributes &= ~(SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR);
                 }
@@ -3483,9 +3507,9 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND owner, UINT count, PCUITEMID_CHILD_ARRAY items, REFIID iid, UINT* reserved, void** value) override
         {
-            if (iid == IID_IPropertyStoreFactory) InterlockedIncrement(&g_syntheticPropertyStoreFactoryRequests);
-            else if (iid == IID_IPropertyStore) InterlockedIncrement(&g_syntheticPropertyStoreRequests);
-            else InterlockedIncrement(&g_syntheticOtherUiObjectRequests);
+            if (iid == IID_IPropertyStoreFactory) ED_PROBE_METRIC_INCREMENT(g_syntheticPropertyStoreFactoryRequests);
+            else if (iid == IID_IPropertyStore) ED_PROBE_METRIC_INCREMENT(g_syntheticPropertyStoreRequests);
+            else ED_PROBE_METRIC_INCREMENT(g_syntheticOtherUiObjectRequests);
             if (!value) return E_POINTER;
             *value = nullptr;
             if (!_inner || count == 0 || !items) return E_NOINTERFACE;
@@ -3627,28 +3651,28 @@ namespace
         {
             if (key && *key == kSizeKey)
             {
-                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExCount);
+                if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsExCount);
                 const auto* child = SyntheticData(item);
                 if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                 {
-                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExFolderCount);
+                    if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsExFolderCount);
                 }
                 else if (child)
                 {
-                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticSizeDetailsExFileCount);
+                    if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsExFileCount);
                 }
             }
             if (key && *key == kSyntheticRecursiveSizeKey)
             {
-                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExCount);
+                if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticCustomSizeDetailsExCount);
                 const auto* child = SyntheticData(item);
                 if (child && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
                 {
-                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExFolderCount);
+                    if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticCustomSizeDetailsExFolderCount);
                 }
                 else if (child)
                 {
-                    if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticCustomSizeDetailsExFileCount);
+                    if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticCustomSizeDetailsExFileCount);
                 }
             }
             if (!key || !value) return E_INVALIDARG;
@@ -3687,9 +3711,9 @@ namespace
         {
             if (item)
             {
-                if (!g_syntheticSizeMetricsObservation) InterlockedIncrement(&g_syntheticItemDetailsOfCount);
+                if (!g_syntheticSizeMetricsObservation) ED_PROBE_METRIC_INCREMENT(g_syntheticItemDetailsOfCount);
                 if (column == 1 && !g_syntheticSizeMetricsObservation)
-                    InterlockedIncrement(&g_syntheticSizeDetailsOfItemCount);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticSizeDetailsOfItemCount);
             }
             const bool extended = InterlockedCompareExchange(&g_syntheticExtendedMetadataColumnsForProbe, 0, 0) != 0;
             if (!details || column > (extended ? 3u : 2u))
@@ -3760,9 +3784,9 @@ namespace
         }
         HRESULT STDMETHODCALLTYPE MapColumnToSCID(UINT column, SHCOLUMNID* key) override
         {
-            InterlockedIncrement(&g_syntheticMapColumnToScidCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticMapColumnToScidCount);
             if (column < ARRAYSIZE(g_syntheticMapColumnToScidByColumn))
-                InterlockedIncrement(&g_syntheticMapColumnToScidByColumn[column]);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticMapColumnToScidByColumn[column]);
             HRESULT result = S_OK;
             SHCOLUMNID mapped{};
             if (!key) result = E_POINTER;
@@ -3831,7 +3855,7 @@ namespace
                 return HRESULT_FROM_WIN32(GetLastError());
             }
             _directoryUpdateTimerId = timerId;
-            InterlockedIncrement(&g_syntheticChildNotificationTranslationQueued);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticChildNotificationTranslationQueued);
             TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-queued");
             return S_OK;
         }
@@ -3891,13 +3915,13 @@ namespace
             QueryPerformanceCounter(&scanStart);
             result = GetSyntheticDirectoryMetrics(childPath, &metrics);
             QueryPerformanceCounter(&scanEnd);
-            InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticOnDemandSizeScanCount);
             if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
             {
                 const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
                 const auto elapsedMicroseconds = static_cast<LONG64>(
                     static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
-                InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+                ED_PROBE_METRIC_ADD64(g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
             }
             if (FAILED(result)) return result;
             SyntheticFileIdentity afterScan{};
@@ -3972,13 +3996,13 @@ namespace
                                 if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
                                 scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics, &self->_asyncScansCancelled);
                                 QueryPerformanceCounter(&scanEnd);
-                                InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+                                ED_PROBE_METRIC_INCREMENT(g_syntheticOnDemandSizeScanCount);
                                 if (frequency.QuadPart > 0 && scanEnd.QuadPart >= scanStart.QuadPart)
                                 {
                                     const auto elapsedTicks = scanEnd.QuadPart - scanStart.QuadPart;
                                     const auto elapsedMicroseconds = static_cast<LONG64>(
                                         static_cast<long double>(elapsedTicks) * 1000000.0L / static_cast<long double>(frequency.QuadPart));
-                                    InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
+                                    ED_PROBE_METRIC_ADD64(g_syntheticOnDemandSizeScanMicroseconds, elapsedMicroseconds);
                                 }
                             }
                             SyntheticFileIdentity afterScan{};
@@ -3992,7 +4016,7 @@ namespace
                                 scanResult = self->_recursiveSizeStore->Set(
                                     parsingName.c_str(), afterScan, metrics.bytes, metrics.files, metrics.folders);
                             if (SUCCEEDED(scanResult))
-                                InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
+                                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
                             else if (scanResult != HRESULT_FROM_WIN32(ERROR_CANCELLED))
                                 TraceSyntheticSortStage("synthetic-on-demand-size: asynchronous-scan-failed");
                         }
@@ -4010,7 +4034,7 @@ namespace
                         self->_asyncSizeScansPending.erase(parsingName);
                     }
                     if (SUCCEEDED(scanResult)) self->ScheduleAsyncViewUpdateNotification(parsingName.c_str());
-                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
                 enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task), true);
@@ -4094,14 +4118,14 @@ namespace
                     LARGE_INTEGER frequency{}, start{}, end{};
                     QueryPerformanceFrequency(&frequency);
                     QueryPerformanceCounter(&start);
-                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanStartedForProbe);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanStartedForProbe);
                     const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
                     if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
                     itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics, &self->_asyncScansCancelled);
                     QueryPerformanceCounter(&end);
-                    InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticOnDemandSizeScanCount);
                     if (frequency.QuadPart > 0 && end.QuadPart >= start.QuadPart)
-                        InterlockedAdd64(&g_syntheticOnDemandSizeScanMicroseconds, static_cast<LONG64>(
+                        ED_PROBE_METRIC_ADD64(g_syntheticOnDemandSizeScanMicroseconds, static_cast<LONG64>(
                             static_cast<long double>(end.QuadPart - start.QuadPart) * 1000000.0L / frequency.QuadPart));
                 }
                 if (SUCCEEDED(itemResult) && (!TryGetSyntheticFileIdentity(entry.path.c_str(), &after) ||
@@ -4138,7 +4162,7 @@ namespace
                 if (itemResult == S_OK)
                 {
                     InterlockedExchange(&completion->anySucceeded, 1);
-                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanCompletedForProbe);
                 }
                 std::lock_guard<std::mutex> lock(self->_asyncSizeScanMutex);
                 self->_asyncSizeScansPending.erase(entry.key);
@@ -4149,7 +4173,7 @@ namespace
             if (InterlockedDecrement(&completion->outstanding) == 0)
             {
                 if (InterlockedCompareExchange(&completion->anySucceeded, 0, 0)) ScheduleAsyncViewUpdateNotification();
-                InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
+                ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
             }
         }
         HRESULT ScheduleRecursiveSizeBatchForView(const SyntheticChild* child) const
@@ -4173,7 +4197,7 @@ namespace
                 {
                     if (!self->_asyncSizeScansPending.insert(entry.key).second) return S_FALSE;
                     self->_asyncSizeScanBatch.push_back(std::move(entry));
-                    InterlockedIncrement(&g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeBatchRequestedEntriesForProbe);
                 }
                 catch (const std::bad_alloc&)
                 {
@@ -4302,7 +4326,7 @@ namespace
                     }
                     InterlockedExchange(&self->_asyncParentBatchPending, 0);
                     if (completion) self->CompleteRecursiveSizeBatchChunk(completion);
-                    else InterlockedIncrement(&g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
+                    else ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeScanFinishedForProbe);
                     self->Release();
                 };
                 enqueueResult = GetSyntheticAsyncRecursiveSizeQueue().Enqueue(std::move(task), true);
@@ -4341,15 +4365,15 @@ namespace
                             &g_syntheticAsyncRecursiveSizeItemNotificationForProbe, 0, 0) &&
                             !parsingName.empty() && SUCCEEDED(SHParseDisplayName(
                                 parsingName.c_str(), nullptr, &itemPidl, 0, nullptr)) && itemPidl;
-                        InterlockedIncrement(&g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
+                        ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeNotificationsSentForProbe);
                         if (targetItem)
                         {
-                            InterlockedIncrement(&g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
+                            ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeItemNotificationsSentForProbe);
                             SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_IDLIST, itemPidl, nullptr);
                         }
                         else
                         {
-                            InterlockedIncrement(&g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
+                            ED_PROBE_METRIC_INCREMENT(g_syntheticAsyncRecursiveSizeDirectoryNotificationsSentForProbe);
                             SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, self->_backingRoot, nullptr);
                         }
                         if (itemPidl) CoTaskMemFree(itemPidl);
@@ -4377,7 +4401,7 @@ namespace
                 ULONGLONG bytes = 0;
                 if (_recursiveSizeStore->TryGet(parsingName, child->identity, &bytes)) return bytes;
                 if (g_syntheticCompareCallbackActive && (child->attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    InterlockedIncrement(&g_syntheticRecursiveSizeCacheMissesDuringCompareCount);
+                    ED_PROBE_METRIC_INCREMENT(g_syntheticRecursiveSizeCacheMissesDuringCompareCount);
             }
             return SyntheticSize(child);
         }
@@ -4680,7 +4704,7 @@ namespace
             InterlockedExchange(&folder->_directoryUpdatePending, 0);
             // Defer until SFVM_FSNOTIFY returns; UPDATEDIR itself is excluded from translation to prevent a loop.
             SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_IDLIST, folder->_backingRoot, nullptr);
-            InterlockedIncrement(&g_syntheticChildNotificationTranslationSent);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticChildNotificationTranslationSent);
             TraceSyntheticSortStage("synthetic-sort: child-notification-parent-update-sent");
             folder->Release();
         }
@@ -4689,7 +4713,7 @@ namespace
             KillTimer(nullptr, timerId);
             auto* folder = FindPendingRefresh(timerId);
             if (!folder) return;
-            InterlockedIncrement(&g_syntheticDeferredRefreshCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticDeferredRefreshCount);
             folder->_refreshTimerId = 0;
             auto result = folder->CaptureSelection();
             if (SUCCEEDED(result)) result = folder->RefreshView();
@@ -4787,7 +4811,7 @@ namespace
         HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer, REFIID iid, void** value) override
         {
             if (outer) return CLASS_E_NOAGGREGATION;
-            InterlockedIncrement(&g_syntheticClassFactoryCreateCount);
+            ED_PROBE_METRIC_INCREMENT(g_syntheticClassFactoryCreateCount);
             SyntheticSortFolder* folder = nullptr;
             try { folder = new (std::nothrow) SyntheticSortFolder(_recursiveSizeStore, _classId, _configuredBackingPath); }
             catch (const std::bad_alloc&) { return E_OUTOFMEMORY; }
