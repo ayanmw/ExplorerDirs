@@ -300,6 +300,10 @@ internal static class Program
             return ExplorerBrowserWrapperProbe.RunExternalShellNotificationChild(args[1], args[2]);
         if (args.Length == 2 && args[0] == "--shell-namespace-owner-exit-child")
             return ExplorerBrowserWrapperProbe.RunNamespaceOwnerExitChild(args[1]);
+        if (args.Length == 1 && args[0] == "--volatile-registry-owner-crash")
+            return VolatileRegistryLifetimeProbe.Run();
+        if (args.Length == 3 && args[0] == "--volatile-registry-owner-crash-child")
+            return VolatileRegistryLifetimeProbe.RunChild(args[1], args[2]);
         if (args.Length == 1 && args[0] == "--column-filter-capability-private-desktop")
             return PrivateDesktopShellProbe.RunColumnFilterCapability();
         if (args.Length == 1 && args[0] == "--ishellview-menu-activation-private-desktop")

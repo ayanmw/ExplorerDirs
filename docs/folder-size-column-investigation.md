@@ -2388,4 +2388,6 @@ HostProbe Release 构建通过，四种隐藏合成视图场景（正常/忽略�
 
 隔离 HostProbe 完成所有常规 namespace 操作后，另起 NativeProbe 子进程删除随机 CLSID 与 Desktop NameSpace 两棵 volatile 注册。删除后子进程立即尝试新路径解析，`SHParseDisplayName` 返回 `E_INVALIDARG (0x80070057)`，没有获得 PIDL，也未激活新 Shell folder。原父进程持有的 ExplorerBrowser view 仍可查询：Shell 行数保持 8，`root.txt` 的递归列值仍为 4。子进程、父 view 与注册清理断言均通过，前台/输入守卫未变化，Private Desktop probe exit 0。
 
-这证明“已创建的 view 在进程间注册被删除后仍暂时可读”不代表新窗格/新进程还能解析该位置；注册 owner 至少要覆盖所有仍需创建 namespace view 的 app 进程。当前 `FolderOpenRouter` 的单实例边界按 profile，而非全局，因此可并行 profile 不应共用一个会被任一进程删除的 CLSID。下一步优先评估把稳定 CLSID 放进每个 portable profile 的 INI（不同 profile 独立命名、同 profile 由现有单实例进程负责），并验证 profile 迁移、异常退出后同会话残留 volatile key 的恢复；尚未接入产品。该实验仅模拟 sibling owner 删除注册，不证明不同用户、提升权限或 Explorer 长期持有 view 的场景。
+这证明“已创建的 view 在进程间注册被删除后仍暂时可读”不代表新窗格/新进程还能解析该位置；注册 owner 至少要覆盖所有仍需创建 namespace view 的 app 进程。当前 `FolderOpenRouter` 的单实例边界按 profile，而非全局，因此可并行 profile 不应共用一个会被任一进程删除的 CLSID。随后验证了 profile 级 owner 的崩溃恢复前提：NativeProbe 子进程创建 volatile CLSID/NameSpace 键后被直接 `Kill`（exit code -1，不执行注册清理），父进程仍能读到两棵键；父进程 finally 删除随机测试键。结果符合 Microsoft `RegistryOptions.Volatile` 说明：数据仅在对应 registry hive 卸载时不再保留，并不随创建进程退出消失。[RegistryOptions](https://learn.microsoft.com/en-us/dotnet/api/microsoft.win32.registryoptions)
+
+后续优先评估把稳定 CLSID 放入每个 portable profile 的 INI，不同 profile 独立命名、同 profile 由现有单实例进程负责，并验证 profile 移动/复制及已有 INI 升级；这样可避免并行 profile 删除彼此的注册。当前仍未接入产品。两项生命周期探针不证明不同用户、提升权限或 Explorer 长期持有 view 的场景。
