@@ -1626,6 +1626,8 @@ namespace
     volatile LONG g_syntheticRecursiveSizeScanOnDemandForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeBatchByViewForProbe = 0;
+    // NativeProbe-only latency injection for comparing async scan scheduling under slow storage.
+    volatile LONG g_syntheticAsyncRecursiveSizeScanDelayMsForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanCompletedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeScanFinishedForProbe = 0;
     volatile LONG g_syntheticAsyncRecursiveSizeActiveWorkersForProbe = 0;
@@ -3324,6 +3326,8 @@ namespace
                                 LARGE_INTEGER frequency{}, scanStart{}, scanEnd{};
                                 QueryPerformanceFrequency(&frequency);
                                 QueryPerformanceCounter(&scanStart);
+                                const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
+                                if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
                                 scanResult = GetSyntheticDirectoryMetrics(childPath, &metrics);
                                 QueryPerformanceCounter(&scanEnd);
                                 InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
@@ -3505,6 +3509,8 @@ namespace
                                     LARGE_INTEGER frequency{}, start{}, end{};
                                     QueryPerformanceFrequency(&frequency);
                                     QueryPerformanceCounter(&start);
+                                    const auto scanDelayMs = InterlockedCompareExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, 0, 0);
+                                    if (scanDelayMs > 0) Sleep(static_cast<DWORD>(scanDelayMs));
                                     itemResult = GetSyntheticDirectoryMetrics(entry.path, &metrics);
                                     QueryPerformanceCounter(&end);
                                     InterlockedIncrement(&g_syntheticOnDemandSizeScanCount);
@@ -5904,6 +5910,13 @@ extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeSc
 extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeBatchByViewForProbe(BOOL enabled)
 {
     InterlockedExchange(&g_syntheticAsyncRecursiveSizeBatchByViewForProbe, enabled ? 1 : 0);
+    return S_OK;
+}
+
+extern "C" __declspec(dllexport) HRESULT WINAPI SetSyntheticAsyncRecursiveSizeScanDelayForProbe(LONG delayMilliseconds)
+{
+    if (delayMilliseconds < 0 || delayMilliseconds > 1000) return E_INVALIDARG;
+    InterlockedExchange(&g_syntheticAsyncRecursiveSizeScanDelayMsForProbe, delayMilliseconds);
     return S_OK;
 }
 
